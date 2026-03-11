@@ -6,6 +6,7 @@
 
 import torch
 import torch.nn as nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointWrapper
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import Replicate, Shard
 from torch.distributed.tensor.parallel import (
@@ -56,6 +57,60 @@ _op_sac_save_list = {
     torch._higher_order_ops.flex_attention,
     torch._higher_order_ops.inductor_compiled_code,
 }
+
+
+def apply_compile_feed_forward_only(
+    model: DeepSeekV3Model, compile_config: CompileConfig
+) -> None:
+    """Compile feed-forward modules while leaving attention in eager mode.
+
+    This compiles:
+    - dense `feed_forward` blocks (for non-MoE transformer blocks)
+    - MoE `shared_experts` feed-forward blocks (when present)
+
+    It intentionally does not compile token-routing / expert-dispatch paths.
+    """
+    dense_ffn_count = 0
+    shared_ffn_count = 0
+
+    # pyrefly: ignore [missing-attribute]
+    for layer_id, transformer_block in model.layers.named_children():
+        block = (
+            transformer_block._checkpoint_wrapped_module
+            if isinstance(transformer_block, CheckpointWrapper)
+            else transformer_block
+        )
+
+        # pyrefly: ignore [missing-attribute]
+        if block.moe_enabled:
+            # pyrefly: ignore [missing-attribute]
+            shared_experts = block.moe.shared_experts
+            if shared_experts is not None:
+                # pyrefly: ignore [missing-attribute]
+                block.moe.shared_experts = torch.compile(
+                    shared_experts,
+                    backend=compile_config.backend,
+                    fullgraph=True,
+                )
+                shared_ffn_count += 1
+        else:
+            # pyrefly: ignore [missing-attribute]
+            block.feed_forward = torch.compile(
+                # pyrefly: ignore [missing-attribute]
+                block.feed_forward,
+                backend=compile_config.backend,
+                fullgraph=True,
+            )
+            dense_ffn_count += 1
+
+        # keep this assignment pattern consistent with other compile paths
+        # pyrefly: ignore [missing-attribute]
+        model.layers.register_module(layer_id, transformer_block)
+
+    logger.info(
+        "Compiling feed-forward modules only with torch.compile "
+        f"(dense_ffn={dense_ffn_count}, shared_ffn={shared_ffn_count})"
+    )
 
 
 # Adapted from llama4/infra/parallelize.py
@@ -163,6 +218,9 @@ def parallelize_deepseekv3(
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components
     )
+    feed_forward_compile_enabled = (
+        compile_config.enable and "feed_forward" in compile_config.components
+    )
 
     if ac_config.mode != "none":
         apply_ac(
@@ -176,6 +234,8 @@ def parallelize_deepseekv3(
 
     if model_compile_enabled:
         apply_compile(model, compile_config, parallel_dims.ep_enabled)
+    elif feed_forward_compile_enabled:
+        apply_compile_feed_forward_only(model, compile_config)
 
     dp_mesh: DeviceMesh | None = None
     if parallel_dims.fsdp_enabled or parallel_dims.ep_enabled:

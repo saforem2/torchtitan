@@ -9,7 +9,6 @@
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
@@ -294,9 +293,31 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     Args:
         model: The model containing FSDP-wrapped modules
     """
+    force_sum_reduction = False
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        backend = str(torch.distributed.get_backend()).lower()
+        if "nccl" not in backend:
+            force_sum_reduction = True
+
+    fsdp_modules_updated = 0
     for module in model.modules():
-        if isinstance(module, FSDPModule):
-            module.set_gradient_divide_factor(1.0)
+        # Be resilient to FSDPModule class location changes across PyTorch releases.
+        set_divide_factor = getattr(module, "set_gradient_divide_factor", None)
+        if callable(set_divide_factor):
+            set_divide_factor(1.0)
+            fsdp_modules_updated += 1
+            if force_sum_reduction:
+                set_force_sum = getattr(
+                    module, "set_force_sum_reduction_for_comms", None
+                )
+                if callable(set_force_sum):
+                    set_force_sum(True)
+
+    logger.info(
+        "Configured FSDP gradient division for %d modules (force_sum_reduction=%s)",
+        fsdp_modules_updated,
+        force_sum_reduction,
+    )
 
 
 def apply_fsdp(

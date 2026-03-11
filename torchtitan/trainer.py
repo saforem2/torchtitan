@@ -242,6 +242,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful, Configurable):
             tokenizer=self.tokenizer,
             seq_len=config.training.seq_len,
             local_batch_size=config.training.local_batch_size,
+            global_batch_size=config.training.global_batch_size,
+            training_steps=config.training.steps,
+            parallel_dims=parallel_dims,
         )
 
         # build model (using meta init)
