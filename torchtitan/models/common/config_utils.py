@@ -23,7 +23,12 @@ from torchtitan.models.common.attention import (
 )
 from torchtitan.models.common.feed_forward import FeedForward
 from torchtitan.models.common.linear import Linear
-from torchtitan.models.common.moe import GroupedExperts, MoE, TokenChoiceTopKRouter
+from torchtitan.models.common.moe import (
+    ExpertComputeBackend,
+    GroupedExperts,
+    MoE,
+    TokenChoiceTopKRouter,
+)
 from torchtitan.models.common.rmsnorm import RMSNorm
 from torchtitan.models.common.token_dispatcher import (
     AllToAllTokenDispatcher,
@@ -247,6 +252,7 @@ def make_experts_config(
     param_init: dict[str, Callable],
     score_before_experts: bool = True,
     use_grouped_mm: bool = True,
+    compute_backend: ExpertComputeBackend | None = None,
     comm_backend: str,
     non_blocking_capacity_factor: float | None = None,
 ) -> GroupedExperts.Config:
@@ -256,6 +262,7 @@ def make_experts_config(
         hidden_dim=hidden_dim,
         num_experts=num_experts,
         use_grouped_mm=use_grouped_mm,
+        compute_backend=compute_backend,
         param_init=param_init,
         token_dispatcher=make_token_dispatcher_config(
             num_experts=num_experts,
