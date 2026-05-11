@@ -945,7 +945,6 @@ def _10b_2b_sdpa_batched_mm_padded() -> moeModel.Config:
         if layer_cfg.moe is None:
             continue
         layer_cfg.moe.experts.compute_backend = "batched_mm_padded"
-        layer_cfg.moe.experts.use_grouped_mm = False
     return cfg
 
 
