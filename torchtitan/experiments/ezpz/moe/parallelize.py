@@ -320,12 +320,51 @@ def apply_fsdp(
                 # PyTorch API path that may not exist in older releases.
                 from torch.distributed.fsdp._fully_shard._fsdp_common import (
                     FSDPMeshInfo,
+                    HSDPMeshInfo,
                     ShardPlacementResult,
                 )
 
+                def _mesh_dim(mesh: DeviceMesh, dim_name: str) -> int:
+                    mesh_dim_names = mesh.mesh_dim_names
+                    if mesh_dim_names is None:
+                        if mesh.ndim == 1:
+                            return 0
+                        raise ValueError(
+                            f"Mesh {mesh} must have dim names for 2D HSDP."
+                        )
+                    try:
+                        return tuple(mesh_dim_names).index(dim_name)
+                    except ValueError:
+                        raise ValueError(
+                            f"Mesh {mesh} does not contain dim {dim_name!r}; "
+                            f"names={mesh_dim_names!r}"
+                        ) from None
+
+                def _dp_mesh_info(
+                    mesh: DeviceMesh,
+                    *,
+                    shard_dim_name: str,
+                ) -> FSDPMeshInfo:
+                    if mesh.ndim == 1:
+                        return FSDPMeshInfo(
+                            mesh=mesh,
+                            shard_mesh_dim=_mesh_dim(mesh, shard_dim_name),
+                        )
+                    if mesh.ndim == 2:
+                        return HSDPMeshInfo(
+                            mesh=mesh,
+                            shard_mesh_dim=_mesh_dim(mesh, shard_dim_name),
+                            replicate_mesh_dim=_mesh_dim(mesh, "dp_replicate"),
+                        )
+                    raise ValueError(f"Expected 1D/2D FSDP mesh, got {mesh}")
+
                 assert edp_mesh is not None
-                edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
-                dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+                # Match fully_shard()'s normal 2D behavior: 2D meshes must use
+                # HSDPMeshInfo so DTensor placements include both replicate and
+                # shard axes. Returning FSDPMeshInfo for a 2D mesh creates specs
+                # like a 2D DeviceMesh with only one placement.
+                edp_mesh_info = _dp_mesh_info(edp_mesh, shard_dim_name="efsdp")
+                dp_mesh_info = _dp_mesh_info(dp_mesh, shard_dim_name="fsdp")
 
                 def _shard_placement_fn(
                     param: nn.Parameter,
