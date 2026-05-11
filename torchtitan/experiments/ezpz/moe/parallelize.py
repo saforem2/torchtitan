@@ -340,11 +340,12 @@ def apply_fsdp(
                             f"names={mesh_dim_names!r}"
                         ) from None
 
-                def _dp_mesh_info(
+                def _fsdp_mesh_info(
                     mesh: DeviceMesh,
                     *,
                     shard_dim_name: str,
-                ) -> FSDPMeshInfo:
+                ) -> FSDPMeshInfo | HSDPMeshInfo:
+                    """Build the correct FSDP mesh metadata for 1D or 2D meshes."""
                     if mesh.ndim == 1:
                         return FSDPMeshInfo(
                             mesh=mesh,
@@ -363,15 +364,15 @@ def apply_fsdp(
                 # HSDPMeshInfo so DTensor placements include both replicate and
                 # shard axes. Returning FSDPMeshInfo for a 2D mesh creates specs
                 # like a 2D DeviceMesh with only one placement.
-                edp_mesh_info = _dp_mesh_info(edp_mesh, shard_dim_name="efsdp")
-                dp_mesh_info = _dp_mesh_info(dp_mesh, shard_dim_name="fsdp")
+                edp_mesh_info = _fsdp_mesh_info(edp_mesh, shard_dim_name="efsdp")
+                dp_mesh_info = _fsdp_mesh_info(dp_mesh, shard_dim_name="fsdp")
 
                 def _shard_placement_fn(
                     param: nn.Parameter,
                     _expert_params: set = expert_params,
                     _expert_placement: Shard = expert_shard_placement,
-                    _edp_mesh_info: FSDPMeshInfo = edp_mesh_info,
-                    _dp_mesh_info: FSDPMeshInfo = dp_mesh_info,
+                    _edp_mesh_info: FSDPMeshInfo | HSDPMeshInfo = edp_mesh_info,
+                    _dp_mesh_info: FSDPMeshInfo | HSDPMeshInfo = dp_mesh_info,
                 ) -> ShardPlacementResult:
                     if param in _expert_params:
                         return ShardPlacementResult(
