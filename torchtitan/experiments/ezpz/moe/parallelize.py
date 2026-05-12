@@ -315,39 +315,116 @@ def apply_fsdp(
                     shard_placement_fn=_experts_shard_placement_fn,
                 )
             else:
-                # ep_degree > 1: per-param mesh with ShardPlacementResult.
-                # Imported lazily to avoid hard dependency on a private
-                # PyTorch API path that may not exist in older releases.
-                from torch.distributed.fsdp._fully_shard._fsdp_common import (
-                    FSDPMeshInfo,
-                    ShardPlacementResult,
-                )
-
+                # ep_degree > 1: prefer per-param mesh with ShardPlacementResult
+                # when this PyTorch build exposes the private FSDP common API.
+                # Some XPU wheels only accept a Shard return from
+                # shard_placement_fn; for those, fall back to a two-phase
+                # fully_shard (experts on edp_mesh, the rest on dp_mesh).
                 assert edp_mesh is not None
-                edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
-                dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
 
-                def _shard_placement_fn(
-                    param: nn.Parameter,
-                    _expert_params: set = expert_params,
-                    _expert_placement: Shard = expert_shard_placement,
-                    _edp_mesh_info: FSDPMeshInfo = edp_mesh_info,
-                    _dp_mesh_info: FSDPMeshInfo = dp_mesh_info,
-                ) -> ShardPlacementResult:
-                    if param in _expert_params:
-                        return ShardPlacementResult(
-                            placement=_expert_placement, mesh_info=_edp_mesh_info
+                try:
+                    from torch.distributed.fsdp._fully_shard._fsdp_common import (
+                        FSDPMeshInfo,
+                        HSDPMeshInfo,
+                        ShardPlacementResult,
+                    )
+                except ImportError:
+                    def _expert_only_shard_placement_fn(
+                        param: nn.Parameter,
+                        _expert_placement: Shard = expert_shard_placement,
+                    ) -> Shard:
+                        return _expert_placement
+
+                    expert_fsdp_config = {**fsdp_config, "mesh": edp_mesh}
+                    fully_shard(
+                        transformer_block.moe.experts,
+                        **expert_fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                        shard_placement_fn=_expert_only_shard_placement_fn,
+                    )
+                    fully_shard(
+                        transformer_block,
+                        **fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                    )
+                else:
+                    def _mesh_axis(
+                        mesh: DeviceMesh, axis_name: str
+                    ) -> int:
+                        mesh_axis_names = mesh.mesh_dim_names
+                        if mesh_axis_names is None:
+                            if mesh.ndim == 1:
+                                return 0
+                            raise ValueError(
+                                f"Mesh {mesh} must have axis names for 2D HSDP."
+                            )
+                        try:
+                            return tuple(mesh_axis_names).index(axis_name)
+                        except ValueError:
+                            raise ValueError(
+                                f"Mesh {mesh} does not contain axis "
+                                f"{axis_name!r}; names={mesh_axis_names!r}"
+                            ) from None
+
+                    def _fsdp_mesh_info(
+                        mesh: DeviceMesh,
+                        *,
+                        shard_axis_name: str,
+                    ) -> FSDPMeshInfo | HSDPMeshInfo:
+                        """Build the right FSDP mesh metadata for 1D or 2D
+                        meshes. 2D meshes need HSDPMeshInfo so DTensor
+                        placements describe both shard and replicate axes —
+                        plain FSDPMeshInfo on a 2D mesh produces specs that
+                        reference only one axis of a multi-axis mesh.
+                        """
+                        if mesh.ndim == 1:
+                            return FSDPMeshInfo(
+                                mesh=mesh,
+                                shard_mesh_dim=_mesh_axis(mesh, shard_axis_name),
+                            )
+                        if mesh.ndim == 2:
+                            return HSDPMeshInfo(
+                                mesh=mesh,
+                                shard_mesh_dim=_mesh_axis(mesh, shard_axis_name),
+                                replicate_mesh_dim=_mesh_axis(
+                                    mesh, "dp_replicate"
+                                ),
+                            )
+                        raise ValueError(
+                            f"Expected 1D/2D FSDP mesh, got {mesh}"
                         )
-                    return ShardPlacementResult(
-                        placement=Shard(0), mesh_info=_dp_mesh_info
+
+                    edp_mesh_info = _fsdp_mesh_info(
+                        edp_mesh, shard_axis_name="efsdp"
+                    )
+                    dp_mesh_info = _fsdp_mesh_info(
+                        dp_mesh, shard_axis_name="fsdp"
                     )
 
-                fully_shard(
-                    transformer_block,
-                    **fsdp_config,
-                    reshard_after_forward=reshard_after_forward,
-                    shard_placement_fn=_shard_placement_fn,
-                )
+                    def _shard_placement_fn(
+                        param: nn.Parameter,
+                        _expert_params: set = expert_params,
+                        _expert_placement: Shard = expert_shard_placement,
+                        _edp_mesh_info: FSDPMeshInfo
+                        | HSDPMeshInfo = edp_mesh_info,
+                        _dp_mesh_info: FSDPMeshInfo
+                        | HSDPMeshInfo = dp_mesh_info,
+                    ) -> ShardPlacementResult:
+                        if param in _expert_params:
+                            return ShardPlacementResult(
+                                placement=_expert_placement,
+                                mesh_info=_edp_mesh_info,
+                            )
+                        return ShardPlacementResult(
+                            placement=Shard(0), mesh_info=_dp_mesh_info
+                        )
+
+                    fully_shard(
+                        transformer_block,
+                        **fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                        shard_placement_fn=_shard_placement_fn,
+                    )
         else:
             fully_shard(
                 transformer_block,
