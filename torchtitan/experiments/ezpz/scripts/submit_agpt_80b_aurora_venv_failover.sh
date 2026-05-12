@@ -48,19 +48,20 @@ export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
 export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov}"
 
 # Source ezpz-utils + failover lib
-EZPZ_UTILS="$(dirname "$(realpath "$0")")/../../../.ezpz-utils-cache/ezpz-utils.sh"
-EZPZ_UTILS="$(realpath "$EZPZ_UTILS" 2>/dev/null || echo "")"
-if [[ -z "$EZPZ_UTILS" || ! -f "$EZPZ_UTILS" ]]; then
-    EZPZ_UTILS="${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh"
-fi
+# NOTE: PBS copies the submit script into /var/spool/pbs/mom_priv/jobs/, so
+# `$(dirname "$(realpath "$0")")` is NOT the original scripts dir. Use
+# $PBS_O_WORKDIR (the dir from which qsub was run) + the canonical relative
+# path under the repo to find sibling files.
+SCRIPTS_DIR="${PBS_O_WORKDIR:-$PWD}/torchtitan/experiments/ezpz/scripts"
+EZPZ_UTILS="${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh"
 if [[ -f "$EZPZ_UTILS" ]]; then
     source "$EZPZ_UTILS"
 else
     source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
 fi
 
-FAILOVER_LIB="$(dirname "$(realpath "$0")")/failover_lib.sh"
-[[ -f "$FAILOVER_LIB" ]] || { echo "ERROR: failover_lib.sh not found at $FAILOVER_LIB"; exit 1; }
+FAILOVER_LIB="$SCRIPTS_DIR/failover_lib.sh"
+[[ -f "$FAILOVER_LIB" ]] || { echo "ERROR: failover_lib.sh not found at $FAILOVER_LIB (PBS_O_WORKDIR=$PBS_O_WORKDIR, PWD=$PWD)"; exit 1; }
 source "$FAILOVER_LIB"
 
 cd "${PBS_O_WORKDIR:-$(pwd)}"
