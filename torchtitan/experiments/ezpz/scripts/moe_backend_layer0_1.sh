@@ -12,6 +12,8 @@ ezpz_setup_xpu >/dev/null 2>&1
 source .venv/bin/activate
 
 echo "=== LAYER 0: CPU unit tests ==="
+# Covers MoEExpertBackendsTest (parity, edge cases) and
+# ForLoopFastPathTest (equal-counts no-grad bmm + cache hit/miss).
 python3 -m unittest torchtitan.experiments.ezpz.tests.test_moe_expert_backends -v 2>&1 | tail -30
 
 echo
@@ -47,4 +49,39 @@ out_b = _run_experts_batched_mm_padded(w1, w2, w3, x, counts)
 diff = (out_l - out_b).abs().max().item()
 print("max abs diff:", diff)
 print("match (atol=1e-4):", torch.allclose(out_l, out_b, atol=1e-4))
+PYEOF
+
+echo
+echo "=== LAYER 1c: EP=2 + AC=full config build sanity ==="
+# Cheap pre-flight — catches config-graph regressions before the sweep
+# spends ~5 min per backend launching only to crash at build time.
+python3 - <<'PYEOF'
+from torchtitan.experiments.ezpz.moe.experts import EzpzGroupedExperts
+from torchtitan.experiments.ezpz.moe.config_registry import (
+    moe_10b_2b_sdpa_ep_ac,
+    moe_10b_2b_sdpa_for_loop_ep,
+    moe_10b_2b_sdpa_batched_mm_padded_ep,
+)
+expected = {
+    "moe_10b_2b_sdpa_ep_ac":               "grouped_mm",
+    "moe_10b_2b_sdpa_for_loop_ep":         "for_loop",
+    "moe_10b_2b_sdpa_batched_mm_padded_ep":"batched_mm_padded",
+}
+for name, fn in [
+    ("moe_10b_2b_sdpa_ep_ac",                moe_10b_2b_sdpa_ep_ac),
+    ("moe_10b_2b_sdpa_for_loop_ep",          moe_10b_2b_sdpa_for_loop_ep),
+    ("moe_10b_2b_sdpa_batched_mm_padded_ep", moe_10b_2b_sdpa_batched_mm_padded_ep),
+]:
+    cfg = fn()
+    layer = next(l for l in cfg.model_spec.model.layers if l.moe is not None)
+    backend = getattr(layer.moe.experts, "compute_backend", None)
+    assert isinstance(layer.moe.experts, EzpzGroupedExperts.Config), \
+        f"{name}: experts is {type(layer.moe.experts).__name__}, expected EzpzGroupedExperts.Config"
+    assert backend == expected[name], \
+        f"{name}: compute_backend={backend!r}, expected {expected[name]!r}"
+    assert cfg.parallelism.expert_parallel_degree == 2, \
+        f"{name}: EP={cfg.parallelism.expert_parallel_degree}, expected 2"
+    assert cfg.activation_checkpoint.mode == "full", \
+        f"{name}: AC={cfg.activation_checkpoint.mode!r}, expected 'full'"
+    print(f"  {name}: EP=2 AC=full backend={backend} OK")
 PYEOF

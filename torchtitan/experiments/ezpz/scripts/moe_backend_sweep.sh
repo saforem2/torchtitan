@@ -15,10 +15,16 @@ LOG_DIR=logs/moe-backend-bench
 mkdir -p "$LOG_DIR"
 TS=$(date +%Y%m%d-%H%M%S)
 
+# Use the EP=2 + AC=full variants. The EP=1 / AC=none flavors all OOM
+# in FSDP all-gather copy-in during the first forward pass on a 10B
+# model — see logs/moe-backend-bench/*20260512-102301.log. With EP=2
+# + AC=full all three configs share the same parallelism / memory
+# shape so any TPS/MFU delta reflects the expert backend, not the
+# parallelism config.
 CONFIGS=(
-    moe_10b_2b_sdpa                    # grouped_mm (default)
-    moe_10b_2b_sdpa_for_loop           # for_loop
-    moe_10b_2b_sdpa_batched_mm_padded  # batched_mm_padded
+    moe_10b_2b_sdpa_ep_ac                  # grouped_mm  (baseline)
+    moe_10b_2b_sdpa_for_loop_ep            # for_loop
+    moe_10b_2b_sdpa_batched_mm_padded_ep   # batched_mm_padded
 )
 
 for cfg in "${CONFIGS[@]}"; do
