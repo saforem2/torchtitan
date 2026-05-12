@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import unittest
 
 import torch
@@ -13,6 +14,8 @@ from torchtitan.experiments.ezpz.moe.experts import (
     EzpzGroupedExperts,
     _run_experts_batched_mm_padded,
     _run_experts_for_loop,
+    get_moe_fastpath_counters,
+    reset_moe_fastpath_counters,
 )
 from torchtitan.models.common.token_dispatcher import LocalTokenDispatcher
 
@@ -171,6 +174,78 @@ class MoEExpertBackendsTest(unittest.TestCase):
                     assert_close(
                         test_param.grad, ref_param.grad, rtol=rtol, atol=atol
                     )
+
+
+class ForLoopFastPathTest(unittest.TestCase):
+    """Cover the equal-counts no-grad fast path inside the for-loop backend."""
+
+    def setUp(self) -> None:
+        os.environ["EZPZ_MOE_FASTPATH_COUNTERS"] = "1"
+        reset_moe_fastpath_counters()
+
+    def tearDown(self) -> None:
+        os.environ.pop("EZPZ_MOE_FASTPATH_COUNTERS", None)
+        reset_moe_fastpath_counters()
+
+    def test_equal_counts_no_grad_matches_loop(self) -> None:
+        torch.manual_seed(2026)
+        num_experts, dim, hidden_dim = 4, 8, 16
+        tokens_per_expert = 5
+        counts = torch.full(
+            (num_experts,), tokens_per_expert, dtype=torch.int64
+        )
+        total_tokens = num_experts * tokens_per_expert
+
+        w1, w2, w3 = _init_weights(num_experts, dim, hidden_dim)
+        x = torch.randn(total_tokens, dim)
+
+        with torch.no_grad():
+            fast = _run_experts_for_loop(w1, w2, w3, x, counts)
+
+        # Reference: same input through the per-expert loop with grad on
+        # (which never takes the fast path).
+        with torch.enable_grad():
+            ref = _run_experts_for_loop(w1, w2, w3, x, counts)
+
+        assert_close(fast, ref, rtol=1e-5, atol=1e-5)
+        counters = get_moe_fastpath_counters()
+        self.assertEqual(counters.get("batched_no_grad_experts", 0), 1)
+
+    def test_cache_hit_on_repeat_no_grad_call(self) -> None:
+        torch.manual_seed(7)
+        num_experts, dim, hidden_dim, top_k = 4, 8, 16, 2
+        tokens_per_expert = 3
+        counts = torch.full(
+            (num_experts,), tokens_per_expert, dtype=torch.int64
+        )
+        total_tokens = num_experts * tokens_per_expert
+
+        cfg = EzpzGroupedExperts.Config(
+            dim=dim,
+            hidden_dim=hidden_dim,
+            num_experts=num_experts,
+            token_dispatcher=LocalTokenDispatcher.Config(
+                num_experts=num_experts,
+                top_k=top_k,
+                score_before_experts=True,
+            ),
+            compute_backend="for_loop",
+        )
+        experts = cfg.build()
+        x = torch.randn(total_tokens, dim)
+
+        with torch.no_grad():
+            experts._experts_forward(x, counts)
+            experts._experts_forward(x, counts)
+            experts._experts_forward(x, counts)
+
+        counters = get_moe_fastpath_counters()
+        # First call misses both caches; subsequent calls hit them.
+        self.assertEqual(counters.get("cached_w13_miss", 0), 1)
+        self.assertEqual(counters.get("cached_w13_hit", 0), 2)
+        self.assertEqual(counters.get("cached_w2_t_miss", 0), 1)
+        self.assertEqual(counters.get("cached_w2_t_hit", 0), 2)
+        self.assertEqual(counters.get("batched_no_grad_experts", 0), 3)
 
 
 if __name__ == "__main__":
