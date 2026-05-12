@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import dataclasses
 from collections.abc import Callable
 from functools import partial
 from typing import Literal
@@ -31,10 +32,49 @@ from torchtitan.models.common.config_utils import (
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.protocols.model_spec import ModelSpec
 
+from .experts import EzpzGroupedExperts, ExpertComputeBackend
 from .model import Attention, moeModel, moeTransformerBlock
 
 from .parallelize import parallelize_moe
 from .state_dict_adapter import moeStateDictAdapter
+
+
+def make_ezpz_experts_config(
+    *,
+    dim: int,
+    hidden_dim: int,
+    num_experts: int,
+    top_k: int,
+    param_init: dict[str, Callable],
+    score_before_experts: bool = True,
+    comm_backend: str = "standard",
+    non_blocking_capacity_factor: float | None = None,
+    compute_backend: ExpertComputeBackend = "grouped_mm",
+) -> EzpzGroupedExperts.Config:
+    """Build an EzpzGroupedExperts.Config from the same args as upstream
+    `make_experts_config`, plus a `compute_backend` selector.
+    """
+    base = make_experts_config(
+        dim=dim,
+        hidden_dim=hidden_dim,
+        num_experts=num_experts,
+        top_k=top_k,
+        param_init=param_init,
+        score_before_experts=score_before_experts,
+        comm_backend=comm_backend,
+        non_blocking_capacity_factor=non_blocking_capacity_factor,
+    )
+    # Re-wrap as the ezpz subclass Config so the runtime build instantiates
+    # EzpzGroupedExperts (which understands `compute_backend`).
+    field_values = {
+        f.name: getattr(base, f.name)
+        for f in dataclasses.fields(base)
+        if f.init
+    }
+    return EzpzGroupedExperts.Config(
+        **field_values,
+        compute_backend=compute_backend,
+    )
 
 __all__ = [
     "parallelize_moe",
@@ -180,6 +220,7 @@ def _build_moe_layers(
     score_before_experts: bool = False,
     attn_backend: str = "sdpa",
     moe_comm_backend: str = "standard",
+    compute_backend: ExpertComputeBackend = "grouped_mm",
 ) -> list[TransformerBlock.Config]:
     """Build the list of per-layer TransformerBlock configs.
 
@@ -227,7 +268,7 @@ def _build_moe_layers(
                     route_scale=router_route_scale,
                     route_norm=router_route_norm,
                 ),
-                experts=make_experts_config(
+                experts=make_ezpz_experts_config(
                     dim=dim,
                     hidden_dim=moe_hidden_dim,
                     num_experts=num_experts,
@@ -235,6 +276,7 @@ def _build_moe_layers(
                     score_before_experts=score_before_experts,
                     comm_backend=moe_comm_backend,
                     param_init=_depth_experts_init(layer_id),
+                    compute_backend=compute_backend,
                 ),
                 shared_experts=make_ffn_config(
                     dim=dim,
@@ -938,6 +980,35 @@ def _10b_2b_sdpa() -> moeModel.Config:
     return cfg
 
 
+def _set_compute_backend(
+    cfg: moeModel.Config, backend: ExpertComputeBackend
+) -> moeModel.Config:
+    """Mutate every MoE layer's experts config to use the given backend."""
+    for layer_cfg in cfg.layers:
+        if layer_cfg.moe is not None:
+            assert isinstance(layer_cfg.moe.experts, EzpzGroupedExperts.Config)
+            layer_cfg.moe.experts.compute_backend = backend
+    return cfg
+
+
+def _10b_2b_sdpa_batched_mm_padded() -> moeModel.Config:
+    """10B_2B SDPA using the padded batched-mm expert backend.
+
+    The bmm path avoids both the for-loop's per-expert dispatch overhead
+    and ``torch._grouped_mm``'s SM90 / CUDA-only fallback constraint.
+    """
+    return _set_compute_backend(_10b_2b_sdpa(), "batched_mm_padded")
+
+
+def _10b_2b_sdpa_for_loop() -> moeModel.Config:
+    """10B_2B SDPA using the per-expert for-loop.
+
+    Compatible with devices that lack ``torch._grouped_mm`` (e.g. XPU,
+    pre-SM90 CUDA). Slower than ``grouped_mm`` but always works.
+    """
+    return _set_compute_backend(_10b_2b_sdpa(), "for_loop")
+
+
 moe_configs = {
     "debugmodel": _debugmodel,
     "debugmodel_flex_attn": _debugmodel_flex_attn,
@@ -951,6 +1022,8 @@ moe_configs = {
     "671B": _671b,
     "10B_2B": _10b_2b,
     "10B_2B_sdpa": _10b_2b_sdpa,
+    "10B_2B_sdpa_batched_mm_padded": _10b_2b_sdpa_batched_mm_padded,
+    "10B_2B_sdpa_for_loop": _10b_2b_sdpa_for_loop,
 }
 
 moe_configs["debugmodel_hf"] = moe_configs["debugmodel"]
