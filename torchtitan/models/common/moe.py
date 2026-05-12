@@ -17,7 +17,7 @@ from torchtitan.models.common.linear import Linear
 
 from torchtitan.protocols.module import Module
 
-from .token_dispatcher import LocalTokenDispatcher
+from .token_dispatcher import _record_moe_fastpath, LocalTokenDispatcher
 
 
 # NOTE: keeping this for-loop implementation for comparison
@@ -27,30 +27,55 @@ def _run_experts_for_loop(
     w2: torch.Tensor,
     w3: torch.Tensor,
     x: torch.Tensor,
-    num_tokens_per_expert: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor | list[int],
+    w13: torch.Tensor | None = None,
+    w2_t: torch.Tensor | None = None,
 ) -> torch.Tensor:
     # NOTE: this would incur a synchronization between device and host
-    num_tokens_per_expert_list = num_tokens_per_expert.tolist()
-
-    # a tuple of tensors indexed by experts
-    # each with shape (tokens_per_expert(varying), dim)
-    # NOTE: x is not sliced because padding was removed in #2774, so
-    # sum(num_tokens_per_expert) == x.shape[0] always holds.
-    x_splits = torch.split(
-        x,
-        split_size_or_sections=num_tokens_per_expert_list,
-        dim=0,
+    num_tokens_per_expert_list = (
+        num_tokens_per_expert
+        if isinstance(num_tokens_per_expert, list)
+        else num_tokens_per_expert.tolist()
     )
+
+    if (
+        len(num_tokens_per_expert_list) > 0
+        and all(
+            count == num_tokens_per_expert_list[0]
+            for count in num_tokens_per_expert_list
+        )
+        and num_tokens_per_expert_list[0] > 0
+        and not torch.is_grad_enabled()
+    ):
+        _record_moe_fastpath("batched_no_grad_experts")
+        tokens_per_expert = num_tokens_per_expert_list[0]
+        expected_numel = (
+            len(num_tokens_per_expert_list) * tokens_per_expert * x.shape[-1]
+        )
+        assert x.numel() == expected_numel
+        x_grouped = x.reshape(
+            len(num_tokens_per_expert_list), tokens_per_expert, x.shape[-1]
+        )
+        if w13 is None:
+            w13 = torch.cat((w1, w3), dim=1)
+        h13 = torch.bmm(x_grouped, w13.transpose(-2, -1))
+        h1, h3 = h13.chunk(2, dim=-1)
+        h = F.silu(h1) * h3
+        if w2_t is None:
+            w2_t = w2.transpose(-2, -1)
+        return torch.bmm(h, w2_t).reshape(x.shape[0], -1)
+
     out_experts_splits = []
-    for expert_idx, x_expert in enumerate(x_splits):
+    offset = 0
+    for expert_idx, count in enumerate(num_tokens_per_expert_list):
+        x_expert = x[offset : offset + count]
         h = F.silu(torch.matmul(x_expert, w1[expert_idx].transpose(-2, -1)))
         h = h * torch.matmul(x_expert, w3[expert_idx].transpose(-2, -1))
         h = torch.matmul(h, w2[expert_idx].transpose(-2, -1))
         # h shape (tokens_per_expert(varying), dim)
         out_experts_splits.append(h)
-    out = torch.cat(out_experts_splits, dim=0)
-
-    return out
+        offset += count
+    return torch.cat(out_experts_splits, dim=0)
 
 
 def _run_experts_grouped_mm(
@@ -96,11 +121,60 @@ class GroupedExperts(Module):
         )
         self.use_grouped_mm = config.use_grouped_mm
         self.token_dispatcher = config.token_dispatcher.build()
+        self._w13_cache: torch.Tensor | None = None
+        self._w13_cache_key: tuple | None = None
+        self._w2_t_cache: torch.Tensor | None = None
+        self._w2_t_cache_key: tuple | None = None
+
+    def _get_cached_w13(
+        self,
+        w1: torch.Tensor,
+        w3: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if torch.is_grad_enabled():
+            return None
+        cache_key = (
+            w1.untyped_storage().data_ptr(),
+            w3.untyped_storage().data_ptr(),
+            w1._version,
+            w3._version,
+            w1.shape,
+            w3.shape,
+            w1.dtype,
+            w3.dtype,
+            w1.device,
+            w3.device,
+        )
+        if self._w13_cache is None or self._w13_cache_key != cache_key:
+            _record_moe_fastpath("cached_w13_miss")
+            self._w13_cache = torch.cat((w1, w3), dim=1)
+            self._w13_cache_key = cache_key
+        else:
+            _record_moe_fastpath("cached_w13_hit")
+        return self._w13_cache
+
+    def _get_cached_w2_t(self, w2: torch.Tensor) -> torch.Tensor | None:
+        if torch.is_grad_enabled():
+            return None
+        cache_key = (
+            w2.untyped_storage().data_ptr(),
+            w2._version,
+            w2.shape,
+            w2.dtype,
+            w2.device,
+        )
+        if self._w2_t_cache is None or self._w2_t_cache_key != cache_key:
+            _record_moe_fastpath("cached_w2_t_miss")
+            self._w2_t_cache = w2.transpose(-2, -1).contiguous()
+            self._w2_t_cache_key = cache_key
+        else:
+            _record_moe_fastpath("cached_w2_t_hit")
+        return self._w2_t_cache
 
     def _experts_forward(
         self,
         x: torch.Tensor,
-        num_tokens_per_expert: torch.Tensor,
+        num_tokens_per_expert: torch.Tensor | list[int],
     ) -> torch.Tensor:
         """Raw expert computation without dispatch/combine."""
         if isinstance(self.w1, DTensor):
@@ -117,15 +191,25 @@ class GroupedExperts(Module):
             w3 = self.w3
 
         if self.use_grouped_mm:
+            assert isinstance(num_tokens_per_expert, torch.Tensor)
             return _run_experts_grouped_mm(w1, w2, w3, x, num_tokens_per_expert)
         else:
-            return _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
+            return _run_experts_for_loop(
+                w1,
+                w2,
+                w3,
+                x,
+                num_tokens_per_expert,
+                self._get_cached_w13(w1, w3),
+                self._get_cached_w2_t(w2),
+            )
 
     def forward(
         self,
         x: torch.Tensor,
         top_scores: torch.Tensor,
         selected_experts_indices: torch.Tensor,
+        num_tokens_per_expert: torch.Tensor | None = None,
         shared_experts: nn.Module | None = None,
     ) -> torch.Tensor:
         """Dispatch tokens to experts, compute, combine, and scatter_add.
@@ -134,9 +218,16 @@ class GroupedExperts(Module):
         combine all-to-all (NCCL stream) or async DeepEP combine.
         """
         routed_input, num_tokens_local, metadata = self.token_dispatcher.dispatch(
-            x, top_scores, selected_experts_indices
+            x, top_scores, selected_experts_indices, num_tokens_per_expert
         )
-        routed_output = self._experts_forward(routed_input, num_tokens_local)
+        num_tokens_per_expert_list = getattr(
+            metadata, "num_tokens_per_expert_list", None
+        )
+        if not self.use_grouped_mm and num_tokens_per_expert_list is not None:
+            num_tokens_for_experts = num_tokens_per_expert_list
+        else:
+            num_tokens_for_experts = num_tokens_local
+        routed_output = self._experts_forward(routed_input, num_tokens_for_experts)
         return self.token_dispatcher.combine(routed_output, metadata, x, shared_experts)
 
 
@@ -175,20 +266,35 @@ class TokenChoiceTopKRouter(Module):
 
     def _debug_force_load_balance_routing(
         self, scores: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Balanced round-robin expert assignment.
-        Returns (selected_experts_indices [N, K] LongTensor, top_scores [N, K] FloatTensor).
+        Returns (
+            selected_experts_indices [N, K] LongTensor,
+            top_scores [N, K] FloatTensor,
+            num_tokens_per_expert [num_experts] LongTensor,
+        ).
         """
         n_tokens = scores.size(0)
-        # Round-robin indices with exact balance
+        n_assignments = n_tokens * self.top_k
+        # Round-robin indices with exact balance.
         selected_experts_indices = (
             torch.arange(
-                n_tokens * self.top_k, device=scores.device, dtype=torch.int64
+                n_assignments, device=scores.device, dtype=torch.int64
             ).reshape(n_tokens, self.top_k)
             % self.num_experts
         )
         top_scores = scores.gather(dim=1, index=selected_experts_indices)  # [N,K]
-        return selected_experts_indices, top_scores
+        base_count = n_assignments // self.num_experts
+        remainder = n_assignments % self.num_experts
+        num_tokens_per_expert = torch.full(
+            (self.num_experts,),
+            base_count,
+            device=scores.device,
+            dtype=torch.int64,
+        )
+        if remainder > 0:
+            num_tokens_per_expert[:remainder] += 1
+        return selected_experts_indices, top_scores, num_tokens_per_expert
 
     def _get_node_limited_routing_scores(
         self,
@@ -264,38 +370,40 @@ class TokenChoiceTopKRouter(Module):
         else:
             raise NotImplementedError(f"Unknown score function {self.score_func}")
 
-        scores_for_choice = scores if expert_bias is None else scores + expert_bias
-        # Apply node-limited routing if configured
-        if self.num_expert_groups is not None:
-            scores_for_choice = self._get_node_limited_routing_scores(scores_for_choice)
-        _, selected_experts_indices = torch.topk(
-            scores_for_choice, k=self.top_k, dim=-1, sorted=False
-        )
-
-        # top scores shape (bs*slen, top_k)
-        # NOTE: The expert_bias is only used for routing. The gating value
-        #       top_scores is still derived from the original scores.
-        top_scores = scores.gather(dim=1, index=selected_experts_indices)
-
-        # debug override: balanced round-robin routing
         if self._debug_force_load_balance:
             (
                 selected_experts_indices,
                 top_scores,
+                num_tokens_per_expert,
             ) = self._debug_force_load_balance_routing(scores)
+        else:
+            scores_for_choice = scores if expert_bias is None else scores + expert_bias
+            # Apply node-limited routing if configured
+            if self.num_expert_groups is not None:
+                scores_for_choice = self._get_node_limited_routing_scores(
+                    scores_for_choice
+                )
+            _, selected_experts_indices = torch.topk(
+                scores_for_choice, k=self.top_k, dim=-1, sorted=False
+            )
+
+            # top scores shape (bs*slen, top_k)
+            # NOTE: The expert_bias is only used for routing. The gating value
+            #       top_scores is still derived from the original scores.
+            top_scores = scores.gather(dim=1, index=selected_experts_indices)
+
+            # group tokens together by expert indices from 0 to num_experts and pass that to experts forward
+            num_tokens_per_expert = torch.histc(
+                selected_experts_indices.view(-1),
+                bins=self.num_experts,
+                min=0,
+                max=self.num_experts,
+            )
 
         if self.route_norm:
             denominator = top_scores.sum(dim=-1, keepdim=True) + 1e-20
             top_scores = top_scores / denominator
         top_scores = top_scores * self.route_scale
-
-        # group tokens together by expert indices from 0 to num_experts and pass that to experts forward
-        num_tokens_per_expert = torch.histc(
-            selected_experts_indices.view(-1),
-            bins=self.num_experts,
-            min=0,
-            max=self.num_experts,
-        )
 
         return top_scores, selected_experts_indices, num_tokens_per_expert
 
@@ -411,6 +519,7 @@ class MoE(Module):
             x,
             top_scores,
             selected_experts_indices,
+            num_tokens_per_expert,
             shared_experts=self.shared_experts,
         )
 

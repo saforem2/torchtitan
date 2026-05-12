@@ -57,10 +57,7 @@ from torchtitan.config import (
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed.activation_checkpoint import apply_ac
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
-from torchtitan.distributed.expert_parallel import (
-    ExpertParallel,
-    TensorParallel,
-)
+from torchtitan.distributed.expert_parallel import ExpertParallel, TensorParallel
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.distributed.tensor_parallel import (
     ColwiseParallelWithGradPlacement,
@@ -300,6 +297,7 @@ def apply_fsdp(
                     reshard_after_forward=reshard_after_forward,
                 )
             elif ep_degree == 1:
+
                 def _experts_shard_placement_fn(
                     param: nn.Parameter,
                     _expert_params: set = expert_params,
@@ -315,39 +313,63 @@ def apply_fsdp(
                     shard_placement_fn=_experts_shard_placement_fn,
                 )
             else:
-                # ep_degree > 1: per-param mesh with ShardPlacementResult.
-                # Imported lazily to avoid hard dependency on a private
-                # PyTorch API path that may not exist in older releases.
-                from torch.distributed.fsdp._fully_shard._fsdp_common import (
-                    FSDPMeshInfo,
-                    ShardPlacementResult,
-                )
-
+                # ep_degree > 1: prefer the per-param mesh API when this
+                # PyTorch build provides it. Some XPU wheels only accept a
+                # Shard return from shard_placement_fn; for those, shard the
+                # experts bottom-up on edp_mesh, then shard the remaining
+                # block parameters on dp_mesh.
                 assert edp_mesh is not None
-                edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
-                dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
 
-                def _shard_placement_fn(
-                    param: nn.Parameter,
-                    _expert_params: set = expert_params,
-                    _expert_placement: Shard = expert_shard_placement,
-                    _edp_mesh_info: FSDPMeshInfo = edp_mesh_info,
-                    _dp_mesh_info: FSDPMeshInfo = dp_mesh_info,
-                ) -> ShardPlacementResult:
-                    if param in _expert_params:
-                        return ShardPlacementResult(
-                            placement=_expert_placement, mesh_info=_edp_mesh_info
-                        )
-                    return ShardPlacementResult(
-                        placement=Shard(0), mesh_info=_dp_mesh_info
+                try:
+                    from torch.distributed.fsdp._fully_shard._fsdp_common import (
+                        FSDPMeshInfo,
+                        ShardPlacementResult,
                     )
+                except ImportError:
 
-                fully_shard(
-                    transformer_block,
-                    **fsdp_config,
-                    reshard_after_forward=reshard_after_forward,
-                    shard_placement_fn=_shard_placement_fn,
-                )
+                    def _expert_shard_placement_fn(
+                        param: nn.Parameter,
+                        _expert_placement: Shard = expert_shard_placement,
+                    ) -> Shard:
+                        return _expert_placement
+
+                    expert_fsdp_config = {**fsdp_config, "mesh": edp_mesh}
+                    fully_shard(
+                        transformer_block.moe.experts,
+                        **expert_fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                        shard_placement_fn=_expert_shard_placement_fn,
+                    )
+                    fully_shard(
+                        transformer_block,
+                        **fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                    )
+                else:
+                    edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
+                    dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+
+                    def _shard_placement_fn(
+                        param: nn.Parameter,
+                        _expert_params: set = expert_params,
+                        _expert_placement: Shard = expert_shard_placement,
+                        _edp_mesh_info: FSDPMeshInfo = edp_mesh_info,
+                        _dp_mesh_info: FSDPMeshInfo = dp_mesh_info,
+                    ) -> ShardPlacementResult:
+                        if param in _expert_params:
+                            return ShardPlacementResult(
+                                placement=_expert_placement, mesh_info=_edp_mesh_info
+                            )
+                        return ShardPlacementResult(
+                            placement=Shard(0), mesh_info=_dp_mesh_info
+                        )
+
+                    fully_shard(
+                        transformer_block,
+                        **fsdp_config,
+                        reshard_after_forward=reshard_after_forward,
+                        shard_placement_fn=_shard_placement_fn,
+                    )
         else:
             fully_shard(
                 transformer_block,

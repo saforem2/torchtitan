@@ -20,6 +20,19 @@ def deterministic_scatter_add(
         torch.use_deterministic_algorithms(prev, warn_only=prev_warn_only)
 
 
+def deterministic_scatter_add_(
+    out: torch.Tensor, index: torch.Tensor, src: torch.Tensor
+) -> torch.Tensor:
+    """Deterministic in-place scatter_add for forward-only/no-grad paths."""
+    prev = torch.are_deterministic_algorithms_enabled()
+    prev_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    torch.use_deterministic_algorithms(True, warn_only=False)
+    try:
+        return out.scatter_add_(dim=0, index=index, src=src)
+    finally:
+        torch.use_deterministic_algorithms(prev, warn_only=prev_warn_only)
+
+
 @deterministic_scatter_add.register_fake
 def _(out: torch.Tensor, index: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(out)

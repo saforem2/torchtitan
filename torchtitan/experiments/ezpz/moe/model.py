@@ -17,12 +17,12 @@ from torchtitan.models.common.attention import (
     BaseAttention,
     ScaledDotProductAttention,
 )
-from torchtitan.protocols.module import Module
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.rmsnorm import RMSNorm
 from torchtitan.models.common.rope import apply_rotary_emb_single_complex
 from torchtitan.models.utils import get_moe_model_nparams_and_flops
+from torchtitan.protocols.module import Module
 from torchtitan.tools.logging import logger
 from torchtitan.tools.utils import has_cuda_capability
 
@@ -149,7 +149,7 @@ class Attention(BaseAttention):
         return self.wo(output)
 
 
-class moeTransformerBlock(TransformerBlock):
+class moeTransformerBlock(TransformerBlock):  # noqa: N801
     """
     moe Transformer block with attention and feed-forward layers.
     """
@@ -189,7 +189,7 @@ class moeTransformerBlock(TransformerBlock):
         return x
 
 
-class moeModel(Decoder):
+class moeModel(Decoder):  # noqa: N801
     """
     moe Transformer model with attention and feed-forward layers.
     """
@@ -236,6 +236,9 @@ class moeModel(Decoder):
                     layer_cfg.moe.router._debug_force_load_balance = (
                         debug.moe_force_load_balance
                     )
+                    layer_cfg.moe.experts.token_dispatcher.force_load_balance = (
+                        debug.moe_force_load_balance
+                    )
                     # ETP was deprecated upstream (#3167); the comm_backend now
                     # lives on the token_dispatcher, not on parallelism config.
                     comm_backend = getattr(
@@ -272,9 +275,7 @@ class moeModel(Decoder):
             # Module.parallelize(tp_mesh) can distribute params/activations.
             # MoE blocks are intentionally skipped — apply_moe_ep_tp handles
             # them at parallelize-time, mirroring upstream deepseek_v3.
-            from torchtitan.experiments.ezpz.moe.sharding import (
-                set_moe_sharding_config,
-            )
+            from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 
             set_moe_sharding_config(
                 self,
