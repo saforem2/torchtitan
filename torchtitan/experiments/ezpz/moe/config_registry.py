@@ -268,6 +268,18 @@ def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def moe_10b_2b_sdpa_ep_ac() -> FaultTolerantTrainer.Config:
+    """10B_2B SDPA + grouped_mm backend, EP=2 + AC=full.
+
+    Apples-to-apples baseline for the new
+    `moe_10b_2b_sdpa_{for_loop,batched_mm_padded}_ep` variants, which
+    also use AC=full to fit the larger compute graph at EP=2.
+    """
+    cfg = moe_10b_2b_sdpa_ep()
+    cfg.activation_checkpoint.mode = "full"
+    return cfg
+
+
 def moe_2b_ep() -> FaultTolerantTrainer.Config:
     cfg = moe("2B", local_batch_size=16)
     cfg.model_spec = model_registry("2B", moe_comm_backend="standard")
@@ -307,6 +319,22 @@ def moe_10b_2b_sdpa_batched_mm_padded() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def moe_10b_2b_sdpa_batched_mm_padded_ep() -> FaultTolerantTrainer.Config:
+    """10B_2B SDPA + batched_mm_padded backend, EP=2 + AC=full.
+
+    Matches the parallelism shape of `moe_10b_2b_sdpa_ep` so the new
+    backend can be benchmarked at the same memory footprint as the
+    existing production-style EP path.
+    """
+    cfg = moe_10b_2b_sdpa_batched_mm_padded()
+    cfg.activation_checkpoint.mode = "full"
+    cfg.model_spec = model_registry(
+        "10B_2B_sdpa_batched_mm_padded", moe_comm_backend="standard",
+    )
+    cfg.parallelism.expert_parallel_degree = 2
+    return cfg
+
+
 def moe_10b_2b_sdpa_for_loop() -> FaultTolerantTrainer.Config:
     cfg = moe("10B_2B_sdpa_for_loop", local_batch_size=2,
               activation_checkpoint_mode="none")
@@ -315,6 +343,21 @@ def moe_10b_2b_sdpa_for_loop() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
     cfg.checkpoint.interval = 100
+    return cfg
+
+
+def moe_10b_2b_sdpa_for_loop_ep() -> FaultTolerantTrainer.Config:
+    """10B_2B SDPA + for_loop backend, EP=2 + AC=full.
+
+    Same parallelism shape as `moe_10b_2b_sdpa_ep` for a like-for-like
+    comparison against the new for-loop expert backend.
+    """
+    cfg = moe_10b_2b_sdpa_for_loop()
+    cfg.activation_checkpoint.mode = "full"
+    cfg.model_spec = model_registry(
+        "10B_2B_sdpa_for_loop", moe_comm_backend="standard",
+    )
+    cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
