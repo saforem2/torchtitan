@@ -296,6 +296,20 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def moe_10b_2b_sdpa_batched_mm_padded() -> FaultTolerantTrainer.Config:
+    cfg = moe(
+        "10B_2B_sdpa_batched_mm_padded",
+        local_batch_size=2,
+        activation_checkpoint_mode="none",
+    )
+    cfg.optimizer.lr = 2.2e-4
+    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.training.steps = 1000
+    cfg.checkpoint.interval = 100
+    return cfg
+
+
 def smoke_moe_500m_50steps() -> FaultTolerantTrainer.Config:
     """50-step moe smoke test for the post-#2963/#2937 replay.
 
@@ -338,6 +352,10 @@ def moe_16b_from_json() -> FaultTolerantTrainer.Config:
 
 def moe_10b_2b_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json(moe_10b_2b)
+
+
+def moe_10b_2b_sdpa_batched_mm_padded_from_json() -> FaultTolerantTrainer.Config:
+    return _config_from_json(moe_10b_2b_sdpa_batched_mm_padded)
 
 
 def moe_671b_from_json() -> FaultTolerantTrainer.Config:

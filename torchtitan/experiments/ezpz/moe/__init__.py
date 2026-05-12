@@ -938,6 +938,16 @@ def _10b_2b_sdpa() -> moeModel.Config:
     return cfg
 
 
+def _10b_2b_sdpa_batched_mm_padded() -> moeModel.Config:
+    """10B_2B SDPA with padded torch.bmm expert computation."""
+    cfg = _10b_2b_sdpa()
+    for layer_cfg in cfg.layers:
+        if layer_cfg.moe is None:
+            continue
+        layer_cfg.moe.experts.compute_backend = "batched_mm_padded"
+    return cfg
+
+
 moe_configs = {
     "debugmodel": _debugmodel,
     "debugmodel_flex_attn": _debugmodel_flex_attn,
@@ -951,6 +961,7 @@ moe_configs = {
     "671B": _671b,
     "10B_2B": _10b_2b,
     "10B_2B_sdpa": _10b_2b_sdpa,
+    "10B_2B_sdpa_batched_mm_padded": _10b_2b_sdpa_batched_mm_padded,
 }
 
 moe_configs["debugmodel_hf"] = moe_configs["debugmodel"]

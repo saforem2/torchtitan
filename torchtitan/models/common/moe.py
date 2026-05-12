@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -20,6 +21,24 @@ from torchtitan.protocols.module import Module
 from .token_dispatcher import LocalTokenDispatcher
 
 
+ExpertComputeBackend = Literal["for_loop", "grouped_mm", "batched_mm_padded"]
+ExpertComputeFn = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    torch.Tensor,
+]
+
+
+def _empty_expert_output(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+) -> torch.Tensor:
+    output = x.new_empty((0, w2.shape[1]))
+    # Preserve a zero-gradient path for empty expert inputs.
+    return output + (w1.sum() + w2.sum() + w3.sum() + x.sum()) * 0
+
+
 # NOTE: keeping this for-loop implementation for comparison
 #       and readability, may remove later
 def _run_experts_for_loop(
@@ -29,6 +48,9 @@ def _run_experts_for_loop(
     x: torch.Tensor,
     num_tokens_per_expert: torch.Tensor,
 ) -> torch.Tensor:
+    if num_tokens_per_expert.numel() == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
     # NOTE: this would incur a synchronization between device and host
     num_tokens_per_expert_list = num_tokens_per_expert.tolist()
 
@@ -53,6 +75,60 @@ def _run_experts_for_loop(
     return out
 
 
+def _compute_expert_layout(
+    counts: torch.Tensor,
+    total_tokens: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Map grouped routed tokens to padded expert rows.
+
+    ``x`` is expected to be grouped by expert, with ``counts`` giving each
+    expert's contiguous token count in the same order.
+    """
+    offsets = counts.cumsum(0) - counts
+    expert_indices = torch.repeat_interleave(
+        torch.arange(counts.numel(), device=device, dtype=torch.int64),
+        counts,
+    )
+    token_indices_within_expert = torch.arange(
+        total_tokens, device=device, dtype=torch.int64
+    ) - torch.repeat_interleave(offsets, counts)
+    return expert_indices, token_indices_within_expert
+
+
+def _run_experts_batched_mm_padded(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    counts = num_tokens_per_expert.to(device=x.device, dtype=torch.int64)
+    if counts.numel() == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    max_tokens = int(counts.max().item())
+    if max_tokens == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    num_experts = counts.numel()
+    total_tokens = x.shape[0]
+    device = x.device
+
+    expert_indices, token_indices_within_expert = _compute_expert_layout(
+        counts, total_tokens, device
+    )
+
+    padded_x = x.new_zeros((num_experts, max_tokens, x.shape[-1]))
+    padded_x[expert_indices, token_indices_within_expert] = x
+
+    h = F.silu(torch.bmm(padded_x, w1.transpose(-2, -1)))
+    h = h * torch.bmm(padded_x, w3.transpose(-2, -1))
+    out_padded = torch.bmm(h, w2.transpose(-2, -1))
+
+    return out_padded[expert_indices, token_indices_within_expert]
+
+
 def _run_experts_grouped_mm(
     w1: torch.Tensor,
     w2: torch.Tensor,
@@ -73,13 +149,22 @@ def _run_experts_grouped_mm(
     return out
 
 
+_EXPERT_COMPUTE_BACKENDS: dict[ExpertComputeBackend, ExpertComputeFn] = {
+    "grouped_mm": _run_experts_grouped_mm,
+    "batched_mm_padded": _run_experts_batched_mm_padded,
+    "for_loop": _run_experts_for_loop,
+}
+
+
 class GroupedExperts(Module):
     @dataclass(kw_only=True, slots=True)
     class Config(Module.Config):
         dim: int
         hidden_dim: int
         num_experts: int
+        # Backward-compatible legacy selector. Ignored when compute_backend is set.
         use_grouped_mm: bool = True
+        compute_backend: ExpertComputeBackend | None = None
         token_dispatcher: LocalTokenDispatcher.Config
 
     def __init__(self, config: Config):
@@ -94,7 +179,11 @@ class GroupedExperts(Module):
         self.w3 = nn.Parameter(
             torch.empty(config.num_experts, config.hidden_dim, config.dim)
         )
-        self.use_grouped_mm = config.use_grouped_mm
+        self.compute_backend: ExpertComputeBackend = (
+            config.compute_backend
+            if config.compute_backend is not None
+            else ("grouped_mm" if config.use_grouped_mm else "for_loop")
+        )
         self.token_dispatcher = config.token_dispatcher.build()
 
     def _experts_forward(
@@ -116,10 +205,13 @@ class GroupedExperts(Module):
             w2 = self.w2
             w3 = self.w3
 
-        if self.use_grouped_mm:
-            return _run_experts_grouped_mm(w1, w2, w3, x, num_tokens_per_expert)
-        else:
-            return _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
+        try:
+            compute_backend = _EXPERT_COMPUTE_BACKENDS[self.compute_backend]
+        except KeyError as e:
+            raise ValueError(
+                f"Unknown expert compute backend: {self.compute_backend}"
+            ) from e
+        return compute_backend(w1, w2, w3, x, num_tokens_per_expert)
 
     def forward(
         self,
