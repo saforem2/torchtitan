@@ -125,7 +125,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             seq_len=2048,
             steps=10000,
         ),
-        dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
+        dataloader=BlendCorpusDataLoader.Config(dataset="c4_test", num_workers=2),
         metrics=MetricsProcessor.Config(log_freq=10),
         checkpoint=CheckpointManager.Config(
             interval=500,
@@ -153,6 +153,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
                 dataset="blendcorpus",
                 serve_validation=True,
                 infinite=False,
+                num_workers=2,
             ),
         ),
     )
