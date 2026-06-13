@@ -639,6 +639,16 @@ def _pick_chat_template(tokenizer) -> tuple[str, str]:
 
 
 def main() -> None:
+    # Apply XPU compatibility patches BEFORE importing trl (some are
+    # active at import time of TRL submodules, e.g. the cuda alias
+    # patch needs to be in place before GRPOTrainer constructs
+    # VLLMGeneration which hardcodes torch.cuda.current_device()).
+    from torchtitan.experiments.ezpz.rl.xpu_overrides import (
+        apply_all_xpu_patches,
+    )
+
+    apply_all_xpu_patches()
+
     from trl import GRPOTrainer
     from transformers import AutoTokenizer, HfArgumentParser
 

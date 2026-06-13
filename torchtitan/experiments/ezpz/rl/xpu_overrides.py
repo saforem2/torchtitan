@@ -267,6 +267,37 @@ def patch_dtensor_rng_broadcast_for_xpu() -> None:
     )
 
 
+def patch_torch_cuda_aliases_for_xpu() -> None:
+    """Alias `torch.cuda.current_device()` → `torch.xpu.current_device()`.
+
+    TRL's `VLLMGeneration._init_vllm` hardcodes
+    `self.vllm_client.init_communicator(device=torch.cuda.current_device())`
+    when wiring up the trainer→server weight-sync NCCL group. On XPU,
+    this fails immediately with "Torch not compiled with CUDA enabled".
+
+    Aliasing the call to its XPU equivalent fixes the immediate import,
+    and the resulting `device=<xpu_idx>` is what TRL would have passed
+    on a CUDA host anyway.
+
+    Idempotent. Call BEFORE constructing TRL's `GRPOTrainer` (or any
+    TRL class that runs VLLMGeneration init).
+    """
+    if torch.cuda.is_available():
+        return
+    if getattr(torch.cuda.current_device, "_xpu_aliased", False):
+        return
+    orig = torch.cuda.current_device
+
+    def _aliased():
+        return torch.xpu.current_device()
+
+    _aliased._xpu_aliased = True  # type: ignore[attr-defined]
+    torch.cuda.current_device = _aliased
+    logger.info(
+        "Aliased torch.cuda.current_device → torch.xpu.current_device (XPU)"
+    )
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -284,3 +315,4 @@ def apply_all_xpu_patches() -> None:
     patch_has_cuda_capability_for_xpu()
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()
+    patch_torch_cuda_aliases_for_xpu()
