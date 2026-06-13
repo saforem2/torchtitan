@@ -30,6 +30,11 @@ export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
+# Don't route our own server health/generate polls through the ALCF
+# proxy — it can't reach loopback. The model+pip downloads above use
+# the proxy normally.
+export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
+export NO_PROXY="${no_proxy}"
 mkdir -p "/tmp/vllm-${USER}"
 export TMPDIR="/tmp/vllm-${USER}"
 
@@ -100,7 +105,7 @@ echo "serve PID=${SERVE_PID}" | tee -a "${LOG}"
 echo "[$(date +%T)] waiting for /health/ on :${PORT} (up to 300s)..." | tee -a "${LOG}"
 
 SECONDS_WAITED=0
-until curl -sf "http://localhost:${PORT}/health/" > /dev/null 2>&1; do
+until curl -sf "http://127.0.0.1:${PORT}/health/" > /dev/null 2>&1; do
     if ! kill -0 "${SERVE_PID}" 2>/dev/null; then
         echo "FATAL: serve PID ${SERVE_PID} died before /health/ came up" | tee -a "${LOG}"
         echo "--- last 50 lines of vllm_serve.log ---" | tee -a "${LOG}"
@@ -123,7 +128,7 @@ echo "[$(date +%T)] /health/ up after ${SECONDS_WAITED}s" | tee -a "${LOG}"
 echo "" | tee -a "${LOG}"
 echo "[$(date +%T)] Phase 3: POST /generate sanity request" | tee -a "${LOG}"
 curl -sS -w "\n[HTTP %{http_code}, %{time_total}s]\n" \
-     -X POST "http://localhost:${PORT}/generate/" \
+     -X POST "http://127.0.0.1:${PORT}/generate/" \
      -H "Content-Type: application/json" \
      -d '{
             "prompts": ["What is 3 + 7 + 2?"],
