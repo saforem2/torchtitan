@@ -164,6 +164,30 @@ The XPU porting layer (`xpu_overrides.py`) is reusable for either —
 the `has_cuda_capability` patch and `EzpzPerHostProvisioner` apply
 regardless of how the worker processes are launched.
 
+## Update 2026-06-13 PM: Track C confirmed working (job 12468772)
+
+`trl_vllm_serve_smoke.sh` runs `trl vllm-serve` from `venvs/rl-vllm/`
+against Qwen3-0.6B and works end-to-end:
+
+- Phase 1: stack imports clean (torch 2.12+xpu / vllm 0.22.1 /
+  trl 1.6.0 / transformers 5.11.0 / xpu_count=12)
+- Phase 2: `trl vllm-serve` launches, EngineCore loads the
+  checkpoint, uvicorn comes up on :8765
+- Phase 3: POST `/generate/` returns HTTP 200 in 2.3s with 32
+  completion tokens + per-token logprobs
+
+Two non-obvious issues caught along the way (now baked into the
+smoke script):
+- TRL 1.6's FastAPI endpoints all have trailing slashes (`/health/`,
+  `/generate/`, `/chat/`). `/health` without the slash 404s.
+- The ALCF `http_proxy` intercepts loopback. Need
+  `no_proxy=127.0.0.1,localhost` for our own server polls.
+
+This unblocks Track C entirely. The TRL `vllm_mode="server"` GRPO
+loop can use this server pattern with our existing ezpz trainer
+(mpiexec-launched, XCCL-working) on one set of tiles and the vLLM
+server on another. No Monarch in the picture means no PMIx mismatch.
+
 ## Files added during this investigation
 
 - `torchtitan/experiments/ezpz/rl/xpu_overrides.py`
