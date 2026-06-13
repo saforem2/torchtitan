@@ -2,7 +2,7 @@
 
 > **Living document** — updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-06-12
+> Last updated: 2026-06-13
 
 ## Scaling Performance
 
@@ -57,7 +57,7 @@ python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 256 | **74,300** (persisted) | **2.66** | **3.74T** (80.1%) | [`8521630`](agpt/2b/n256/README.md) R since 2026-06-12 14:42 | Async-mode chain advanced 55,026 → 74,300 (+19,274 across 9 dispatches since 2026-05-28). 8521626 walltime-finished cleanly at step-72,500 on 2026-06-08; **8521630 (cont10) transitioned Q→R 2026-06-12 14:42** after 9d queue-wait. Step-66K / 68K / 69.9K / 72.5K evals show plateau: HSn ~0.555, ARC-E ~0.59, ARC-C ~0.33, **Wino 0.5627 (best yet at step-69900)**. Cont11 (8534293) H behind 8521630. |
+| 2B  | 256 | **80,400** (persisted) | **2.66286** | **4.05T** (86.6%) | [`8534293`](agpt/2b/n256/README.md) Q (afterany released 2026-06-13 02:43) | **8521630 (cont10) clean walltime exit at 12h00m22s** on 2026-06-13 02:42 — added **+5,100 steps** (74,300 → 80,400, +51 ckpts persisted), loss 2.66325 → 2.66286, no NaN. Async-mode chain has now advanced 55,026 → 80,400 (+25,374 across 10 dispatches since 2026-05-28). Cont11 (`8534293`) auto-released to Q for next 256N slot; cont12 (`8534294`) held behind. **Eval backfill `8541782` queued** for step-74,400..80,400 (61 new ckpts × 7 tasks) on capacity queue. |
 | 20B | 256 | **1,125** (persisted) | **3.28** | **113B** (2.4%) | [`8505255`](agpt/20b/n256/README.md) F (12h walltime) | Sync-mode 12h dispatch reached step 1,125 cleanly. No continuation queued (256N is per-token comparator; canonical chain is 512N). |
 
 ### Other jobs

@@ -111,10 +111,19 @@ PRODUCTION_RUNS: dict[str, dict] = {
         # 8vmrcxqr = 8505252 (12h continuation, step 30700 -> 36528, 57 ckpts)
         # 56lkkkh1 = 8507195 (12h chain, step 36528 -> 42515, 57 ckpts)
         # 24wfvoje = 8507198 (12h chain, step 42610 -> 48329, 57 ckpts)
-        # bs6tay8l = 8508020 (12h R, step 48400+, currently running)
+        # bs6tay8l = 8508020 (12h, step 48400+, ended cleanly at ~step-54700)
+        # zrqx75x7 = 8508977 (cont4, 2026-05-28 pals-RPC partial — ~5 ckpts step-53800..54200)
+        # ied4spbx = 8513544 (cont5, 2026-05-30 12h walltime, step 55001 -> 59750)
+        # yklnyjd5 = 8516364 (cont6, 2026-06-01 12h walltime, step 59701 -> 64922)
+        # (no W&B run for 8516365 — cont7, 2026-06-04 pals-RPC init-only failure)
+        # 8ujhblrp = 8519833 (cont8, 2026-06-06 11h walltime, step 64901 -> 69914)
+        # a52q40kx = 8521626 (cont9, 2026-06-10 12h walltime, step 69900 -> 74300)
+        # okyt09kv = 8521630 (cont10, 2026-06-12→13 12h walltime, step 74300 -> 80404, +51 ckpts)
         "run_ids": ["lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
                     "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
-                    "56lkkkh1", "24wfvoje", "bs6tay8l"],
+                    "56lkkkh1", "24wfvoje", "bs6tay8l",
+                    "zrqx75x7", "ied4spbx", "yklnyjd5",
+                    "8ujhblrp", "a52q40kx", "okyt09kv"],
         "num_nodes": 256,
         "model": "2b",
     },
