@@ -93,33 +93,29 @@ class EzpzPerHostProvisioner:
         local_size = num_gpus
 
         def _bootstrap():
+            # Runs ONCE inside each Monarch-spawned actor process,
+            # BEFORE the actor's __init__ runs. This is the only
+            # hook where we can set up the actor process's env and
+            # apply XPU compatibility patches; calling
+            # apply_all_xpu_patches() from the controller doesn't
+            # carry over to the forked actor processes.
             os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
-            # Inherited from upstream — eager torch import before
-            # Monarch's pickle path can race.
-            import torch  # noqa: F401
-
-            # Monarch's spawn_procs forks fresh processes without the
-            # PMI/PALS env that oneCCL needs to initialize its SYCL
-            # queue per tile. Without these, every XCCL collective
-            # fails the USM pointer check
-            # ("ccl_check_usm_pointers: invalid usm pointer type").
-            #
-            # We don't know the actor's coordinate inside this
-            # callable (Monarch doesn't pass it), but the actor will
-            # set `LOCAL_RANK` from torch.distributed env when it
-            # calls init_process_group. We can pre-populate the PALS
-            # vars from the actor's MONARCH-side hostname env that
-            # gets set when the proc mesh wires things up.
-            #
-            # Strategy: only set the env vars that don't depend on
-            # rank (they're static for the host); the rank-specific
-            # ones (PALS_RANKID, PALS_LOCAL_RANKID) get filled in by
-            # the actor itself from its os.environ["LOCAL_RANK"]
-            # once init_distributed has set that up.
             os.environ.setdefault("PALS_LOCAL_SIZE", str(local_size))
             os.environ.setdefault("PALS_NODEID", "0")
             os.environ.setdefault("PALS_DEPTH", "1")
             os.environ.setdefault("PALS_PMI", "pmix")
+
+            # Eager torch import before Monarch's pickle path can race.
+            import torch  # noqa: F401
+
+            # Apply our XPU patches inside the actor process. The
+            # controller's call to apply_all_xpu_patches() doesn't
+            # propagate across the Monarch spawn boundary.
+            from torchtitan.experiments.ezpz.rl.xpu_overrides import (
+                apply_all_xpu_patches,
+            )
+
+            apply_all_xpu_patches()
 
         return _bootstrap
 
