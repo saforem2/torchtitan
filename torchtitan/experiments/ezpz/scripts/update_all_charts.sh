@@ -38,6 +38,10 @@ declare -A SCRIPTS=(
     [evals_combined]="torchtitan/experiments/ezpz/eval/plot_evals_combined.py"
     [evals_2b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py"
     [evals_20b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py"
+    # Not a chart, but the same "every-time-we-refresh-docs" cadence: rewrite
+    # the docs/README.md table Modified column from `git log -1 --format=%cs`
+    # for each linked path. Keeps the top-level index honest.
+    [docs_readme_dates]="torchtitan/experiments/ezpz/utils/refresh_docs_readme_table.py"
 )
 
 declare -A PIDS LOGS
