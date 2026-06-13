@@ -77,6 +77,15 @@ VIRTUAL_ENV="${VENV}" uv pip install --reinstall --no-cache --no-deps --link-mod
     --index-url https://download.pytorch.org/whl/xpu "triton-xpu==3.7.1"
 
 echo ""
+echo "=== Step 6.5: deps for upstream torchtitan.experiments.rl ==="
+# torchdata, tyro, spmd-types, tensorboard, wandb, renderers (Prime Intellect).
+# These are pulled in transitively by upstream rl/ but not by bare vllm-xpu.
+VIRTUAL_ENV="${VENV}" uv pip install --no-cache --link-mode=copy \
+    torchdata tyro spmd-types tensorboard wandb
+VIRTUAL_ENV="${VENV}" uv pip install --no-cache --link-mode=copy \
+    "renderers @ git+https://github.com/PrimeIntellect-ai/renderers.git@main"
+
+echo ""
 echo "=== Step 7: trl, transformers, accelerate, datasets ==="
 VIRTUAL_ENV="${VENV}" uv pip install --no-cache --link-mode=copy \
     "trl==1.6.0" "transformers==5.11.0" "accelerate==1.14.0" "datasets==5.0.0"

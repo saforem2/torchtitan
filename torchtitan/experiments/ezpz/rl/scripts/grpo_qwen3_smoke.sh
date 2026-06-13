@@ -66,7 +66,14 @@ echo "" | tee -a "${LOG_DIR}/run.log"
     -m torchtitan.experiments.ezpz.rl.train_upstream \
     --module rl --config rl_grpo_qwen3_0_6b_varlen \
     --hf_assets_path "${SUBMIT_DIR}/torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B" \
+    --trainer.debug.seed 42 \
     2>&1 | tee -a "${LOG_DIR}/run.log"
+# --trainer.debug.seed 42: skip the seed-broadcast branch in
+# dist_utils.set_determinism. The CPU-byte-tensor it broadcasts
+# crashes oneCCL XCCL ("invalid usm pointer type: unknown for
+# device type: gpu") because xpu RNG state is not USM-allocated.
+# Providing a seed bypasses that branch entirely. Reproducibility
+# bonus.
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "VERDICT: complete" | tee -a "${LOG_DIR}/run.log"
