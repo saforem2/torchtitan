@@ -267,58 +267,63 @@ def patch_dtensor_rng_broadcast_for_xpu() -> None:
     )
 
 
-def patch_trl_vllm_no_weight_sync() -> None:
-    """No-op TRL's vLLM weight-sync communicator (XPU + server mode).
+def setup_oneccl_tcp_kvs_for_xpu() -> None:
+    """Configure oneCCL to use TCP-KVS rendezvous (not PMI/MPI bootstrap).
 
-    TRL's `vllm_mode="server"` design assumes NCCL can create a
-    cross-process-tree group between trainer ranks and the vLLM server
-    worker. This works on CUDA via env-based init but fails on XPU
-    because oneCCL XCCL requires a PMIx KVS rendezvous that doesn't
-    span separate MPI worlds — the trainer hangs in
-    `pmi_resizable_simple_internal.cpp:337 kvs_get_value: KVS get error`
-    and eventually segfaults.
+    Discovery (2026-06-13 PM): a 2-process cross-tree XCCL broadcast on
+    plain xpu tensors works when we set:
 
-    For smokes (no real training) and "frozen-generator" RL ablations,
-    we can no-op the communicator and the `update_named_param` calls.
-    The server keeps the initial weights; generations still work; the
-    trainer still updates its own copy. We lose the trainer→server
-    weight propagation that GRPO normally needs for on-policy
-    behavior, but the loop runs end-to-end.
+        CCL_PROCESS_LAUNCHER=none       (no MPI bootstrap expected)
+        CCL_ATL_TRANSPORT=ofi           (OFI transport)
+        FI_PROVIDER=tcp                 (TCP fabric, not Slingshot CXI)
+        CCL_KVS_IP_PORT=127.0.0.1_PORT  (TCP-based KVS endpoint)
+        unset CCL_OP_SYNC
+        unset FI_CXI_*
 
-    Long-term fix: pass weight updates through HTTP `/update_named_param/`
-    POSTs (tensor bytes over the wire) instead of an NCCL group. TRL
-    already has the endpoint; just need to flip the dispatch.
+    Without this, oneCCL hits `pmi_resizable_simple_internal.cpp:337
+    kvs_get_value` timeouts and segfaults when two separate process
+    trees (trainer + vllm-serve) try to form an XCCL group.
 
-    Idempotent. Call BEFORE constructing GRPOTrainer.
+    Call from the actor `_bootstrap` BEFORE any torch.distributed XCCL
+    init. The settings affect ALL XCCL groups in this process — including
+    the trainer's intra-mesh group AND the trainer↔server weight-sync
+    group. TCP-KVS works for both; the perf hit vs Slingshot CXI on
+    intra-node collectives is acceptable for first-validation.
+
+    Idempotent. Call from `_bootstrap` (which runs once per Monarch
+    actor) or from the entrypoint just after `ezpz_setup_job`.
     """
     if torch.cuda.is_available():
         return
-    try:
-        from trl.generation.vllm_client import VLLMClient
-    except ImportError:
-        return  # TRL not installed
-    if getattr(VLLMClient.init_communicator, "_xpu_noop", False):
-        return
-
-    orig_init = VLLMClient.init_communicator
-    orig_update = VLLMClient.update_named_param
-
-    def noop_init(self, device=0):
-        logger.warning(
-            "TRL VLLMClient.init_communicator: no-op (XPU). Trainer→server "
-            "weight sync via NCCL is disabled — server keeps initial weights."
-        )
-
-    def noop_update(self, name, weights):
-        # silent no-op — called once per param per step
-        pass
-
-    noop_init._xpu_noop = True  # type: ignore[attr-defined]
-    VLLMClient.init_communicator = noop_init
-    VLLMClient.update_named_param = noop_update
+    os.environ["CCL_PROCESS_LAUNCHER"] = "none"
+    os.environ["CCL_ATL_TRANSPORT"] = "ofi"
+    os.environ["FI_PROVIDER"] = "tcp"
+    # If the caller hasn't set CCL_KVS_IP_PORT, leave it alone — it
+    # needs to be agreed upon by both ends of the cross-process group.
+    # The launcher should set it before invoking python.
+    os.environ.pop("CCL_OP_SYNC", None)
+    for _k in (
+        "FI_CXI_DEFAULT_CQ_SIZE",
+        "FI_CXI_DEFAULT_TX_SIZE",
+        "FI_CXI_OFLOW_BUF_COUNT",
+        "FI_CXI_OFLOW_BUF_SIZE",
+        "FI_CXI_RDZV_EAGER_SIZE",
+        "FI_CXI_RDZV_THRESHOLD",
+        "FI_CXI_REQ_BUF_MAX_CACHED",
+        "FI_CXI_REQ_BUF_MIN_POSTED",
+        "FI_CXI_REQ_BUF_SIZE",
+        "FI_CXI_RX_MATCH_MODE",
+        "FI_MR_CACHE_MAX_COUNT",
+        "FI_MR_CACHE_MAX_SIZE",
+        "FI_LOG_LEVEL",
+        "FI_LOG_PROV",
+        "FI_LOG_LOCATION",
+    ):
+        os.environ.pop(_k, None)
     logger.info(
-        "Patched TRL VLLMClient.init_communicator + update_named_param "
-        "as no-ops (XPU: server-mode weight sync disabled)"
+        "Configured oneCCL for TCP-KVS rendezvous: CCL_PROCESS_LAUNCHER=none "
+        "CCL_ATL_TRANSPORT=ofi FI_PROVIDER=tcp (CCL_KVS_IP_PORT=%s)",
+        os.environ.get("CCL_KVS_IP_PORT", "<unset>"),
     )
 
 
@@ -371,4 +376,4 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()
     patch_torch_cuda_aliases_for_xpu()
-    patch_trl_vllm_no_weight_sync()
+    setup_oneccl_tcp_kvs_for_xpu()

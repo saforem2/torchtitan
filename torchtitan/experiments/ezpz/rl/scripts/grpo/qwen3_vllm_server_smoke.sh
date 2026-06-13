@@ -47,9 +47,28 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
-# Server-side env scrub (only affects the vllm-serve background
-# subprocess, set just for its launch). The trainer needs the
-# CCL_*/FI_* vars from ezpz_setup_env intact for its XCCL collectives.
+# Configure oneCCL for TCP-KVS rendezvous so trainer↔server XCCL group
+# works without a shared PMIx parent. This is the architecturally-correct
+# alternative to no-op'ing TRL's weight-sync — verified working with a
+# 2-process cross-tree XCCL broadcast (xpu tensors) on 2026-06-13 PM.
+#
+# CRITICAL: both the server and the trainer must share these env vars
+# (and especially the same CCL_KVS_IP_PORT) so they rendezvous at the
+# same TCP endpoint. We export them at the outer-script scope (BEFORE
+# launching the server subshell) so they propagate to both.
+unset CCL_OP_SYNC CCL_OFI_PROVIDER
+unset FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
+unset FI_CXI_DEFAULT_CQ_SIZE FI_CXI_DEFAULT_TX_SIZE FI_CXI_OFLOW_BUF_COUNT
+unset FI_CXI_OFLOW_BUF_SIZE FI_CXI_RDZV_EAGER_SIZE FI_CXI_RDZV_THRESHOLD
+unset FI_CXI_REQ_BUF_MAX_CACHED FI_CXI_REQ_BUF_MIN_POSTED FI_CXI_REQ_BUF_SIZE
+unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
+export CCL_PROCESS_LAUNCHER=none
+export CCL_ATL_TRANSPORT=ofi
+export FI_PROVIDER=tcp
+# Pick a port for the TCP-KVS endpoint. Both server and trainer must
+# agree on this for the cross-process XCCL group to form.
+export CCL_KVS_IP_PORT="127.0.0.1_29513"
+
 MODEL="${MODEL:-${SUBMIT_DIR}/torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B}"
 VLLM_PORT="${VLLM_PORT:-8765}"
 
@@ -68,16 +87,9 @@ echo "" | tee -a "${LOG}"
 # --- Phase 1: launch vllm-serve on tile 0 ---------------------------
 echo "[$(date +%T)] Phase 1: launching trl vllm-serve on :${VLLM_PORT}" | tee -a "${LOG}"
 
-# Run the server in a subshell with scrubbed CCL/FI env. The outer
-# shell keeps them set for the trainer.
+# Server inherits the outer-scope env (CCL_KVS_IP_PORT, CCL_PROCESS_LAUNCHER=none,
+# FI_PROVIDER=tcp). Pin to tile 0; trainer will use tiles 1-8.
 (
-    unset CCL_OP_SYNC CCL_PROCESS_LAUNCHER CCL_ATL_TRANSPORT CCL_OFI_PROVIDER
-    unset FI_PROVIDER FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
-    unset FI_CXI_DEFAULT_CQ_SIZE FI_CXI_DEFAULT_TX_SIZE FI_CXI_OFLOW_BUF_COUNT
-    unset FI_CXI_OFLOW_BUF_SIZE FI_CXI_RDZV_EAGER_SIZE FI_CXI_RDZV_THRESHOLD
-    unset FI_CXI_REQ_BUF_MAX_CACHED FI_CXI_REQ_BUF_MIN_POSTED FI_CXI_REQ_BUF_SIZE
-    unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
-    # Pin to tile 0 — the trainer mpiexec will use tiles 1-11.
     export ZE_AFFINITY_MASK=0
     exec "${SUBMIT_DIR}/venvs/rl-vllm/bin/trl" vllm-serve \
         --model "${MODEL}" \
@@ -115,9 +127,11 @@ echo "[$(date +%T)] vllm /health/ up after ${SECONDS_WAITED}s" | tee -a "${LOG}"
 echo "" | tee -a "${LOG}"
 echo "[$(date +%T)] Phase 2: launching GRPO trainer on 11 ranks (tiles 1-11)" | tee -a "${LOG}"
 
-# Trainer keeps the CCL_*/FI_* env (set by ezpz_setup_env) for its
-# own XCCL collectives, since it's launched via ezpz launch (mpiexec)
-# which gives it a real PMIx parent.
+# Trainer inherits the same TCP-KVS oneCCL env as the server
+# (CCL_PROCESS_LAUNCHER=none, FI_PROVIDER=tcp, CCL_KVS_IP_PORT=...).
+# This unifies the rendezvous: trainer's intra-mesh group AND the
+# trainer↔server weight-sync group both use TCP-KVS. Slower than
+# Slingshot CXI for intra-node collectives but functional.
 CKPT_DIR="outputs/grpo/grpo-vllm-server-smoke"
 mkdir -p "${CKPT_DIR}"
 TRAINER_LOG="${LOG_DIR}/trainer.log"
@@ -136,9 +150,11 @@ TRAINER_LOG="${LOG_DIR}/trainer.log"
 # python sees tiles 1..11 (re-indexed as xpu:0..xpu:10) and doesn't
 # touch tile 0.
 
-export ZE_AFFINITY_MASK=1,2,3,4,5,6,7,8,9,10,11
+# Use 8 trainer tiles (1..8) so generation_batch_size (8 * bsz=1 = 8)
+# is divisible by num_generations=4. Tiles 9-11 idle; tile 0 = vllm server.
+export ZE_AFFINITY_MASK=1,2,3,4,5,6,7,8
 
-"${SUBMIT_DIR}/.venv/bin/ezpz" launch --np 11 -ppn 11 \
+"${SUBMIT_DIR}/.venv/bin/ezpz" launch --np 8 -ppn 8 \
     "${SUBMIT_DIR}/venvs/rl-vllm/bin/python" \
     -m torchtitan.experiments.ezpz.rl.train_grpo \
     --task sum_digits \
