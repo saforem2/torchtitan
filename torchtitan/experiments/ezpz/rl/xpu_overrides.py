@@ -94,11 +94,7 @@ class EzpzPerHostProvisioner:
 
         def _bootstrap():
             # Runs ONCE inside each Monarch-spawned actor process,
-            # BEFORE the actor's __init__ runs. This is the only
-            # hook where we can set up the actor process's env and
-            # apply XPU compatibility patches; calling
-            # apply_all_xpu_patches() from the controller doesn't
-            # carry over to the forked actor processes.
+            # BEFORE the actor's __init__ runs.
             os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
             os.environ.setdefault("PALS_LOCAL_SIZE", str(local_size))
             os.environ.setdefault("PALS_NODEID", "0")
@@ -108,26 +104,17 @@ class EzpzPerHostProvisioner:
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
 
-            # ORDER MATTERS: apply XPU patches BEFORE importing
-            # torch.distributed.checkpoint. Importing torch.distributed.*
-            # triggers backend module registration, including XCCL setup
-            # paths that read PALS env. Our init_distributed patch needs
-            # to be in place first so it can inject PALS_LOCAL_RANKID /
-            # PALS_RANKID right before the process group init does its
-            # first XCCL collective.
+            # Apply XPU patches FIRST (must be installed before any
+            # torch.distributed.* import that could trigger XCCL
+            # backend registration).
             from torchtitan.experiments.ezpz.rl.xpu_overrides import (
                 apply_all_xpu_patches,
             )
 
             apply_all_xpu_patches()
 
-            # NOW pre-resolve torch.distributed.checkpoint to avoid a
-            # circular-import race when torchstore.state_dict_utils
-            # later does `from torch.distributed.checkpoint._nested_dict
-            # import flatten_state_dict, unflatten_state_dict` mid-actor-setup.
-            # Order matters: must come AFTER the patches so any backend
-            # initialization triggered by these imports sees the patched
-            # env-injection in place.
+            # Pre-resolve torch.distributed.checkpoint to avoid a
+            # circular-import race with torchstore during actor setup.
             import torch.distributed.checkpoint  # noqa: F401
             import torch.distributed.checkpoint._nested_dict  # noqa: F401
 
@@ -135,14 +122,29 @@ class EzpzPerHostProvisioner:
 
 
 def patch_init_distributed_for_xpu() -> None:
-    """Inject PALS_LOCAL_RANKID/PALS_RANKID into env before init_process_group.
+    """Force torchtitan's trainer process group to use Gloo on XPU.
 
-    oneCCL's XCCL backend reads these to set up per-tile SYCL queues.
-    Monarch-spawned actors don't have them; torch.distributed sets
-    LOCAL_RANK / RANK, so we can mirror those into the PALS vars right
-    before the process group init.
+    Diagnostic results from job 12468765 confirmed our PALS_LOCAL_RANKID /
+    PALS_RANKID env injection runs correctly in each Monarch-spawned
+    actor — yet oneCCL XCCL still rejects every collective with
+    "ccl_check_usm_pointers: invalid usm pointer type". The env vars
+    are necessary-but-not-sufficient: oneCCL needs an *active* PMIx
+    rendezvous (provided by a real mpiexec launcher), not just env
+    strings. Monarch's fork-based spawn doesn't supply one.
 
-    Patches `torchtitan.distributed.utils.init_distributed`.
+    Pragmatic workaround: replace `_get_distributed_backend` in
+    `torchtitan.distributed.utils` so it returns `"gloo"` instead of
+    `"xccl"`. Gloo doesn't go through oneCCL at all — it does CPU-side
+    rendezvous and ring/tree collectives. It's slower than XCCL but
+    bypasses the USM issue entirely.
+
+    This is fine for trainer-side parameter sharding/state-sync (which
+    happens infrequently). vLLM-XPU's GENERATOR side still uses XCCL
+    via its own process group (TP=4 internal); that's launched via
+    vLLM's "external launcher" which IS PMIx-aware and works.
+
+    Patches `torchtitan.distributed.utils.init_distributed` to wrap
+    `_get_distributed_backend` returning `"gloo"`.
     """
     if torch.cuda.is_available():
         return
@@ -153,19 +155,41 @@ def patch_init_distributed_for_xpu() -> None:
         return
 
     def patched(*args, **kwargs):
-        # Mirror LOCAL_RANK / RANK into PALS env so oneCCL sees them.
+        import sys
+
         lr = os.environ.get("LOCAL_RANK")
         r = os.environ.get("RANK")
         if lr is not None:
             os.environ.setdefault("PALS_LOCAL_RANKID", lr)
         if r is not None:
             os.environ.setdefault("PALS_RANKID", r)
-        return orig(*args, **kwargs)
+
+        # Force the trainer's torch.distributed to use Gloo instead
+        # of XCCL. This is the only way to bypass oneCCL's USM check
+        # for Monarch-spawned actors that lack a PMIx rendezvous.
+        import torch.distributed.distributed_c10d as _c10d
+
+        orig_default_map = _c10d.Backend.default_device_backend_map
+        _c10d.Backend.default_device_backend_map = {
+            **orig_default_map,
+            "xpu": "gloo",
+        }
+        print(
+            f"[xpu_patch pid={os.getpid()}] forcing torch.distributed default xpu backend → gloo",
+            flush=True,
+            file=sys.stderr,
+        )
+        try:
+            return orig(*args, **kwargs)
+        finally:
+            _c10d.Backend.default_device_backend_map = orig_default_map
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
     _dutils.init_distributed = patched
-    logger.info(
-        "Patched torchtitan.distributed.utils.init_distributed to inject PALS_* env vars for oneCCL XPU"
+    print(
+        f"[xpu_overrides pid={os.getpid()}] Patched torchtitan init_distributed (XCCL → Gloo on XPU)",
+        flush=True,
+        file=__import__("sys").stderr,
     )
 
 
