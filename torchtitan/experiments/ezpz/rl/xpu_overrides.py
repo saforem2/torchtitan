@@ -89,6 +89,8 @@ class EzpzPerHostProvisioner:
             )
         gpu_ids = list(range(self.next_gpu, self.next_gpu + num_gpus))
         self.next_gpu += num_gpus
+        # capture once for the closure
+        local_size = num_gpus
 
         def _bootstrap():
             os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
@@ -96,7 +98,65 @@ class EzpzPerHostProvisioner:
             # Monarch's pickle path can race.
             import torch  # noqa: F401
 
+            # Monarch's spawn_procs forks fresh processes without the
+            # PMI/PALS env that oneCCL needs to initialize its SYCL
+            # queue per tile. Without these, every XCCL collective
+            # fails the USM pointer check
+            # ("ccl_check_usm_pointers: invalid usm pointer type").
+            #
+            # We don't know the actor's coordinate inside this
+            # callable (Monarch doesn't pass it), but the actor will
+            # set `LOCAL_RANK` from torch.distributed env when it
+            # calls init_process_group. We can pre-populate the PALS
+            # vars from the actor's MONARCH-side hostname env that
+            # gets set when the proc mesh wires things up.
+            #
+            # Strategy: only set the env vars that don't depend on
+            # rank (they're static for the host); the rank-specific
+            # ones (PALS_RANKID, PALS_LOCAL_RANKID) get filled in by
+            # the actor itself from its os.environ["LOCAL_RANK"]
+            # once init_distributed has set that up.
+            os.environ.setdefault("PALS_LOCAL_SIZE", str(local_size))
+            os.environ.setdefault("PALS_NODEID", "0")
+            os.environ.setdefault("PALS_DEPTH", "1")
+            os.environ.setdefault("PALS_PMI", "pmix")
+
         return _bootstrap
+
+
+def patch_init_distributed_for_xpu() -> None:
+    """Inject PALS_LOCAL_RANKID/PALS_RANKID into env before init_process_group.
+
+    oneCCL's XCCL backend reads these to set up per-tile SYCL queues.
+    Monarch-spawned actors don't have them; torch.distributed sets
+    LOCAL_RANK / RANK, so we can mirror those into the PALS vars right
+    before the process group init.
+
+    Patches `torchtitan.distributed.utils.init_distributed`.
+    """
+    if torch.cuda.is_available():
+        return
+    import torchtitan.distributed.utils as _dutils
+
+    orig = _dutils.init_distributed
+    if getattr(orig, "_xpu_patched", False):
+        return
+
+    def patched(*args, **kwargs):
+        # Mirror LOCAL_RANK / RANK into PALS env so oneCCL sees them.
+        lr = os.environ.get("LOCAL_RANK")
+        r = os.environ.get("RANK")
+        if lr is not None:
+            os.environ.setdefault("PALS_LOCAL_RANKID", lr)
+        if r is not None:
+            os.environ.setdefault("PALS_RANKID", r)
+        return orig(*args, **kwargs)
+
+    patched._xpu_patched = True  # type: ignore[attr-defined]
+    _dutils.init_distributed = patched
+    logger.info(
+        "Patched torchtitan.distributed.utils.init_distributed to inject PALS_* env vars for oneCCL XPU"
+    )
 
 
 def patch_has_cuda_capability_for_xpu() -> None:
@@ -170,8 +230,13 @@ def apply_all_xpu_patches() -> None:
     `torchtitan.experiments.rl.*`. Currently:
       1. `has_cuda_capability` → always False on XPU.
       2. `OffsetBasedRNGTracker.__init__` → skip the broadcast at
-         world_size=1 (XCCL USM-pointer-check workaround).
+         world_size=1.
+      3. `init_distributed` → inject PALS_LOCAL_RANKID / PALS_RANKID
+         env vars from torch's LOCAL_RANK / RANK, so oneCCL XCCL
+         can set up its per-tile SYCL queue. (Without these, every
+         XCCL collective fails the USM pointer check.)
     Provisioner replacement is done in the entrypoint itself.
     """
     patch_has_cuda_capability_for_xpu()
     patch_dtensor_rng_broadcast_for_xpu()
+    patch_init_distributed_for_xpu()
