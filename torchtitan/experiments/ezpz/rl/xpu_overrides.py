@@ -120,12 +120,58 @@ def patch_has_cuda_capability_for_xpu() -> None:
     logger.info("Patched torchtitan.tools.utils.has_cuda_capability for XPU")
 
 
+def patch_dtensor_rng_broadcast_for_xpu() -> None:
+    """Skip the world_size=1 RNG-state broadcast in DTensor.
+
+    `torch.distributed.tensor._random.OffsetBasedRNGTracker.__init__`
+    unconditionally calls `torch.distributed.broadcast(rng_state, 0)`
+    to sync rank-0's RNG state across the mesh. On XPU, `rng_state`
+    is a CPU ByteTensor moved to the XPU device, and oneCCL XCCL
+    rejects the broadcast with "ccl_check_usm_pointers: invalid usm
+    pointer type: unknown for device type: gpu" — the .to(xpu) path
+    doesn't produce a SYCL-USM-device-allocated tensor.
+
+    At world_size=1 the broadcast is a no-op, so we can simply skip
+    it. At world_size>1 we still trip the bug; that needs an upstream
+    fix in torch.xpu's allocator or in oneCCL's USM check.
+
+    Idempotent.
+    """
+    if torch.cuda.is_available():
+        return
+    import torch.distributed as dist
+    import torch.distributed.tensor._random as _dtrand
+
+    orig_init = _dtrand.OffsetBasedRNGTracker.__init__
+    if getattr(orig_init, "_xpu_patched", False):
+        return
+
+    def patched_init(self, device_mesh, run_state_sync=True):
+        # If we're single-rank on this mesh, the broadcast is a no-op.
+        # Force run_state_sync=False to skip the offending call.
+        if not dist.is_initialized() or dist.get_world_size() == 1:
+            return orig_init(self, device_mesh, run_state_sync=False)
+        # World > 1: same call path, will still trip the USM check.
+        # TODO: replace rng_state.to(self._device) with a torch.xpu.empty()+copy_
+        #       so the destination tensor is SYCL-USM-allocated.
+        return orig_init(self, device_mesh, run_state_sync=run_state_sync)
+
+    patched_init._xpu_patched = True  # type: ignore[attr-defined]
+    _dtrand.OffsetBasedRNGTracker.__init__ = patched_init
+    logger.info(
+        "Patched OffsetBasedRNGTracker.__init__ to skip world_size=1 RNG broadcast on XPU"
+    )
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
     Call this at the top of any entrypoint that pulls in
-    `torchtitan.experiments.rl.*`. Currently just patches
-    `has_cuda_capability`; provisioner replacement is done in the
-    entrypoint itself.
+    `torchtitan.experiments.rl.*`. Currently:
+      1. `has_cuda_capability` → always False on XPU.
+      2. `OffsetBasedRNGTracker.__init__` → skip the broadcast at
+         world_size=1 (XCCL USM-pointer-check workaround).
+    Provisioner replacement is done in the entrypoint itself.
     """
     patch_has_cuda_capability_for_xpu()
+    patch_dtensor_rng_broadcast_for_xpu()

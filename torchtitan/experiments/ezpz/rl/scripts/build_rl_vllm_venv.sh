@@ -102,6 +102,19 @@ VIRTUAL_ENV="${VENV}" uv pip install --no-cache --link-mode=copy \
     pydantic-extra-types pyzes apache-tvm-ffi tcmlib intel-cmplr-lic-rt
 
 echo ""
+echo "=== Step 8.5: uninstall impi-rt + in-venv oneCCL (CRITICAL) ==="
+# torch 2.12+xpu pulls these as deps, and they install in-venv copies
+# of libccl.so and libmpi.so that SHADOW the system /opt/aurora/.../oneapi
+# stack at runtime. The in-venv oneCCL doesn't know about Sunspot's USM
+# allocator and rejects every XCCL broadcast with
+#   "ccl_check_usm_pointers: invalid usm pointer type: unknown".
+# Removing them lets torch's libtorch_xpu.so resolve libccl.so → the
+# system module-loaded one, which works correctly.
+# Verify with: ldd venvs/rl-vllm/lib/python3.12/site-packages/torch/lib/libtorch_xpu.so | grep ccl
+# should point to /opt/aurora/.../oneapi/ccl/latest/lib, not venvs/rl-vllm/lib.
+VIRTUAL_ENV="${VENV}" uv pip uninstall impi-rt oneccl oneccl-devel 2>/dev/null || true
+
+echo ""
 echo "=== Step 9: verify full stack ==="
 "${VENV}/bin/python" -c "
 import torch; print('torch', torch.__version__)

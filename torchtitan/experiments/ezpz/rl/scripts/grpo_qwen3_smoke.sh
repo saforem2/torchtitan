@@ -69,11 +69,11 @@ echo "" | tee -a "${LOG_DIR}/run.log"
     --trainer.debug.seed 42 \
     2>&1 | tee -a "${LOG_DIR}/run.log"
 # --trainer.debug.seed 42: skip the seed-broadcast branch in
-# dist_utils.set_determinism. The CPU-byte-tensor it broadcasts
-# crashes oneCCL XCCL ("invalid usm pointer type: unknown for
-# device type: gpu") because xpu RNG state is not USM-allocated.
-# Providing a seed bypasses that branch entirely. Reproducibility
-# bonus.
+#   dist_utils.set_determinism. Originally added when oneCCL was
+#   misbehaving on every broadcast (impi-rt poisoning the in-venv
+#   libccl). Now also a reproducibility win.
+#
+# (Default config has trainer TP=2 + generator TP=4 = 6 tiles.)
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "VERDICT: complete" | tee -a "${LOG_DIR}/run.log"
