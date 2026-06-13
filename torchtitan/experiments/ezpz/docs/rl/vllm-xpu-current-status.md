@@ -44,10 +44,20 @@ current Sunspot stack.** Specifically:
 The 2026-06-10
 [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md)
 verification ran the same vLLM 0.22.1 version and worked end-to-end.
-Something in the stack between then and now has shifted such that
-single-rank XCCL+MPI init no longer survives. Same pattern as the
-recent MoE EP=12 + AC=selective regression we hit (env drift not
-captured by venv version pins).
+Why it worked then and not now is **not yet diagnosed** — the system
+hasn't drifted, so the difference must be in how the two runs were
+invoked. Candidate hypotheses (untested):
+1. The original was an interactive run inside a compute allocation
+   that already had MPI bootstrapped from an earlier `mpiexec`. Today's
+   smokes PBS-direct, then try to init MPI from scratch in a single-rank
+   context.
+2. The original used `venvs/vllm-test/` (py3.14); today's bare smoke
+   uses `venvs/rl-actors/` (py3.13). Different Python ABIs binding to
+   the same torch 2.12 / oneCCL wheels. Haven't re-tested vllm-test on
+   a fresh allocation.
+3. The original used `dtype="bfloat16"`, `max_model_len=2048`,
+   `gpu_memory_utilization=0.85`. Some combination might dodge the
+   XCCL allreduce code path that today's defaults hit.
 
 ## Debug chain so far (jobs 12468737..12468748)
 
@@ -115,13 +125,16 @@ CPU-only).
 
 ## Recommended next steps
 
-1. Try the np=2 launch hypothesis — if `ezpz launch --np 2` survives
+1. **Test the np=2 hypothesis** — if `ezpz launch --np 2` survives
    MPI init, the single-rank case is the only broken thing and we
-   can architect around it (vLLM server on 2 tiles, not 1).
-2. If that fails too, the system regression hypothesis becomes
-   strong; check `/opt/aurora` timestamps + module versions before
-   filing ALCF.
-3. While waiting on (1)/(2), the Monarch+TorchStore framework is
-   usable independent of vLLM — could start prototyping
+   can architect around it (vLLM server on 2 tiles, not 1). Job
+   `12468749` queued for this.
+2. **Re-run the original 2026-06-10 recipe verbatim from venvs/vllm-test/**
+   on a fresh allocation. If it succeeds, the breakage is specific
+   to my smoke (py3.13/rl-actors venv + different LLM init kwargs).
+   If it fails, what's different about the original allocation context
+   (interactive run inside an existing mpiexec session?).
+3. While debugging the vLLM side, the Monarch+TorchStore framework
+   is usable independent of vLLM — could start prototyping
    `EzpzPolicyTrainer` against the existing HF-`.generate()` flow
    to validate the actor pattern works for our trainer side.
