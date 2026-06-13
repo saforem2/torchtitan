@@ -33,20 +33,58 @@ Memory usage grows with node count (all-to-all communication buffers).
 moe_7b OOMs at 32+ nodes. See [TODO — MoE throughput optimization](../TODO.md#3-moe-throughput-optimization)
 for planned experiments (EP, TP, float8).
 
-## Aurora torch 2.13 — NOT RUNNING
+## Aurora torch 2.13 — partial
+
+### moe_2b — works at small N, blocked at 128+
+
+| Nodes | GPUs | GBS | TPS/GPU | TFLOPS | MFU | Memory | Status | Job |
+|-------|------|-----|---------|--------|-----|--------|--------|-----|
+| 8 | 96 | 192 | 2,586 | 16.50 | 5.53% | 31.42 GiB (49%) | Complete | [8530108](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2zubxd41) (2026-06-07) |
+| 64 | 768 | 1,536 | — | — | — | — | NO_OUTPUT | 8528805 (2026-06-06, pre-spmd_types fix, 251s wall) + 8529046 (post-fix, 235s wall, same failure) |
+| 128 | 1,536 | 3,072 | — | — | — | — | **OOM** | 8529081 (2026-06-07), 616s wall — all-to-all buffer growth past 1,536 ranks |
+| 256 | 3,072 | 6,144 | — | — | — | — | **OOM** | 8529509 (2026-06-07), 1,149s wall |
+
+64N NO_OUTPUT likely the upstream `edp_mesh=None` SIGABRT regression
+noted in CLAUDE.md "MoE SIGABRT". 128N+ is a genuine memory wall in
+the all-to-all expert routing path. Open diagnosis task: needs the
+upstream MoE expert-routing memory fix before we can scale past
+128 nodes. Logs preserved at
+`outputs/scaling_study_aurora/20260606_{170634,175221}/n{64,128}/light/moe_2b.log`
+and `outputs/scaling_study_aurora/20260607_{144151,203508}/n{128,256}/light/moe_2b.log`.
+
+### Aurora large-N — blocked (same `set_determinism` wall as agpt)
 
 | Nodes | Status | Notes |
 |-------|--------|-------|
-| 64 | NO_OUTPUT | 8528805 (2026-06-06), 251s wall — pre-spmd_types fix |
-| 64 | NO_OUTPUT | 8529046 (2026-06-06), 235s wall — post-spmd_types fix; failure mode changed (longer wall) but still NO_OUTPUT |
-| 128 | CRASH | 8528834 (2026-06-06), 163s wall — pre-spmd_types fix |
-| 128 | OOM | 8529081 (2026-06-07), 616s wall — post-spmd_types fix; all-to-all buffer growth |
+| 1024 | CRASH | 8437390 (2026-04-16, 841s wall); 8529597 (2026-06-10, 102s wall) |
+| 2048 | NO_OUTPUT | 8529598 (2026-06-08), 169s wall |
+| 4096 | NO_OUTPUT | 8529599 (2026-06-08), 70s wall |
 
-Likely the upstream `edp_mesh=None` SIGABRT regression noted in
-CLAUDE.md "MoE SIGABRT". Open diagnosis task: re-run on Aurora torch
-2.13 was attempted as part of the 2026-06-06 scaling unblock; logs
-preserved at
-`outputs/scaling_study_aurora/20260606_{170634,175221}/n{64,128}/light/moe_2b.log`.
+Same root cause as agpt: bare `ezpz launch` hits `set_determinism
+std::bad_alloc` at 12k+ ranks. The production failover path
+unblocks this for agpt; once that's wired into the scaling harness
+we can retry MoE here too.
+
+### moe_10b_2b / moe_7b — Aurora not retried (already OOM on Sunspot at 32N+)
+
+Both larger MoE configs OOM'd at 32N on Sunspot; haven't retried on
+Aurora yet. The 2026-06-07 sweep at n=8 caught one OK row for moe_10b_2b:
+
+| Model | Nodes | GPUs | TPS/GPU | MFU | Status | Job |
+|-------|------|------|---------|-----|--------|-----|
+| moe_10b_2b | 1 | 12 | 844 | 3.98% | Complete | 8437408 (2026-04-15) |
+| moe_10b_2b | 2 | 24 | 558 | 2.63% | Complete | 8437409 (2026-04-15) |
+| moe_10b_2b | 4 | 48 | 636 | 3.00% | Complete | 8437410 (2026-04-15) |
+| moe_10b_2b | 8 | 96 | 484 | 2.28% | Complete | 8437411 (2026-04-15) |
+| moe_10b_2b | 32+ | — | — | — | OOM | 8437750 (2026-04-15) + later |
+
+| Model | Nodes | GPUs | TPS/GPU | MFU | Status | Job |
+|-------|------|------|---------|-----|--------|-----|
+| moe_7b | 1 | 12 | 1,626 | 7.39% | Complete | 8437408 (2026-04-15) |
+| moe_7b | 2 | 24 | 1,185 | 5.38% | Complete | 8437409 (2026-04-15) |
+| moe_7b | 4 | 48 | 1,334 | 6.06% | Complete | 8437410 (2026-04-15) |
+| moe_7b | 8 | 96 | 1,067 | 4.85% | Complete | 8437411 (2026-04-15) |
+| moe_7b | 32+ | — | — | — | OOM | 8437750 (2026-04-15) + later |
 
 ## Results Directory
 

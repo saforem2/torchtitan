@@ -17,7 +17,8 @@
 | 64    | 768  | 1,536  | 6,083 (6,553) | 4,671,744 | 22.82% (24.59%) | 82.8% (89.3%) | [8529046](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/ihiy4ej1), [8528940](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/_) (2026-06-06) |
 | 128   | 1,536| 3,072  | 4,934   | 7,578,624  | 18.51% | 67.2%            | [8529081](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/m9i0long) (2026-06-07) |
 | 256   | 3,072| 6,144  | 5,002   | 15,366,144 | 18.77% | 68.1%            | 2026-05-29 sweep |
-| 512   | 6,144| 12,288 | —       | —          | —      | —                | Pending (needs prod queue) |
+| **512 (LBS=1)** | 6,144| 6,144 | 1,988 | 12,214,272 | 7.46% | 27.1% | 8437389 (2026-04-16, GBS=6,144 because that sweep ran with LBS=1) |
+| 512 (LBS=2) | 6,144 | 12,288 | — | — | — | — | Bare-launch path blocked: `set_determinism` `std::bad_alloc` at 6,144 ranks. Production failover path works (we have a 2B 512N production chain running). Retry via failover wrapper pending. |
 | 1,024 | 12,288| 24,576| —       | —          | —      | —                | Blocked: `set_determinism` init crash, see [project_1024n_init_crash](.) |
 | 2,048 | 24,576| 49,152| —       | —          | —      | —                | Blocked: same as 1,024 |
 | 4,096 | 49,152| 98,304| —       | —          | —      | —                | Blocked: same as 1,024 |
