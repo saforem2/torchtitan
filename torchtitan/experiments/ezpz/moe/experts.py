@@ -17,16 +17,25 @@ without modifying core. Two backends are supported here:
 """
 
 from dataclasses import dataclass
+import os
 from typing import Literal
 
 import torch
 import torch.nn.functional as F
 from torch.distributed.tensor import DTensor
+from torch.utils.checkpoint import checkpoint
 
+# GroupedExperts comes straight from upstream — the local `.moe` copy
+# was deleted because it was byte-identical to the upstream module. See
+# moe/__init__.py for the same import-re-route.
 from torchtitan.models.common.moe import GroupedExperts
 
 
 ExpertComputeBackend = Literal["for_loop", "grouped_mm"]
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes"}
 
 
 def _empty_expert_output(
@@ -40,6 +49,7 @@ def _empty_expert_output(
     return out + (w1.sum() + w2.sum() + w3.sum() + x.sum()) * 0
 
 
+@torch.compiler.disable
 def _run_experts_for_loop(
     w1: torch.Tensor,
     w2: torch.Tensor,
@@ -53,17 +63,59 @@ def _run_experts_for_loop(
     # NOTE: this incurs a device-host sync.
     num_tokens_per_expert_list = num_tokens_per_expert.tolist()
 
-    x_splits = torch.split(
-        x,
-        split_size_or_sections=num_tokens_per_expert_list,
-        dim=0,
-    )
+    if _env_flag_enabled("TT_MOE_EXPERT_PREALLOC_OUTPUT"):
+        out = x.new_empty((x.shape[0], w2.shape[1]))
+        offset = 0
+        for expert_idx, num_tokens in enumerate(num_tokens_per_expert_list):
+            if num_tokens == 0:
+                continue
+            x_expert = x[offset : offset + num_tokens]
+            x_expert_bf16 = x_expert.bfloat16()
+            h = F.silu(
+                torch.matmul(
+                    x_expert_bf16,
+                    w1[expert_idx].bfloat16().transpose(-2, -1),
+                )
+            )
+            gate = torch.matmul(
+                x_expert_bf16,
+                w3[expert_idx].bfloat16().transpose(-2, -1),
+            )
+            if _env_flag_enabled("TT_MOE_EXPERT_INPLACE_GATE_MUL"):
+                h.mul_(gate)
+            else:
+                h = h * gate
+            h = torch.matmul(h, w2[expert_idx].bfloat16().transpose(-2, -1))
+            out[offset : offset + num_tokens].copy_(h.type_as(x))
+            offset += num_tokens
+        return out
+
     out_experts_splits = []
-    for expert_idx, x_expert in enumerate(x_splits):
-        h = F.silu(torch.matmul(x_expert, w1[expert_idx].transpose(-2, -1)))
-        h = h * torch.matmul(x_expert, w3[expert_idx].transpose(-2, -1))
-        h = torch.matmul(h, w2[expert_idx].transpose(-2, -1))
-        out_experts_splits.append(h)
+    offset = 0
+    for expert_idx, num_tokens in enumerate(num_tokens_per_expert_list):
+        if num_tokens == 0:
+            continue
+        x_expert = x[offset : offset + num_tokens]
+        x_expert_bf16 = x_expert.bfloat16()
+        h = F.silu(
+            torch.matmul(
+                x_expert_bf16,
+                w1[expert_idx].bfloat16().transpose(-2, -1),
+            )
+        )
+        gate = torch.matmul(
+            x_expert_bf16,
+            w3[expert_idx].bfloat16().transpose(-2, -1),
+        )
+        if _env_flag_enabled("TT_MOE_EXPERT_INPLACE_GATE_MUL"):
+            h.mul_(gate)
+        else:
+            h = h * gate
+        h = torch.matmul(h, w2[expert_idx].bfloat16().transpose(-2, -1))
+        out_experts_splits.append(h.type_as(x))
+        offset += num_tokens
+    if len(out_experts_splits) == 0:
+        return _empty_expert_output(w1, w2, w3, x)
     return torch.cat(out_experts_splits, dim=0)
 
 
@@ -88,6 +140,12 @@ class EzpzGroupedExperts(GroupedExperts):
         x: torch.Tensor,
         num_tokens_per_expert: torch.Tensor,
     ) -> torch.Tensor:
+        # NOTE: this method is intentionally NOT marked with
+        # @torch.compiler.disable. The grouped_mm path delegates straight to
+        # the upstream `super()._experts_forward(...)` which is
+        # compile-friendly, and we want torch.compile to see it. The
+        # for-loop path is opted out of compile via the module-level
+        # @torch.compiler.disable decorator on `_run_experts_for_loop`.
         if self.compute_backend == "grouped_mm":
             return super()._experts_forward(x, num_tokens_per_expert)
 
@@ -105,5 +163,16 @@ class EzpzGroupedExperts(GroupedExperts):
             w3 = self.w3_EFD
 
         if self.compute_backend == "for_loop":
+            if _env_flag_enabled("TT_MOE_CHECKPOINT_EXPERTS"):
+                return checkpoint(
+                    _run_experts_for_loop,
+                    w1,
+                    w2,
+                    w3,
+                    x,
+                    num_tokens_per_expert,
+                    use_reentrant=False,
+                    preserve_rng_state=False,
+                )
             return _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")

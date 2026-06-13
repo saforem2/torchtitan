@@ -9,13 +9,12 @@ from collections.abc import Callable
 from functools import partial
 from typing import Literal
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
-from torchtitan.experiments.ezpz.agpt import (
-    _default_inner_attention,
-    _ezpz_get_attention_config,
-)
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -24,20 +23,159 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
+from torchtitan.models.common.attention import ScaledDotProductAttention
 from torchtitan.models.common.config_utils import (
-    make_experts_config,
+    get_attention_config,
     make_ffn_config,
-    make_moe_config,
-    make_router_config,
 )
 from torchtitan.models.common.param_init import depth_scaled_std
+from torchtitan.protocols.module import Module
 from torchtitan.protocols.model_spec import ModelSpec
+
+# MoE and TokenChoiceTopKRouter come straight from upstream — we have no
+# ezpz-specific override for them. Earlier this re-imported from a local
+# `.moe` copy that was a byte-for-byte fork of `torchtitan/models/common/moe.py`;
+# that fork has been deleted to avoid silent skew on upstream MoE/router
+# fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
+from torchtitan.models.common.moe import MoE, TokenChoiceTopKRouter
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
+from .token_dispatcher import (
+    AllToAllTokenDispatcher,
+    DeepEPTokenDispatcher,
+    HybridEPTokenDispatcher,
+)
 
 from .parallelize import parallelize_moe
 from .state_dict_adapter import moeStateDictAdapter
+
+
+class EzpzScaledDotProductAttention(ScaledDotProductAttention):
+    """SDPA variant that avoids set_priority=True in sdpa_kernel."""
+
+    @dataclasses.dataclass(kw_only=True, slots=True)
+    class Config(ScaledDotProductAttention.Config):
+        pass
+
+    # pyrefly: ignore [bad-override]
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        scale: float | None = None,
+        enable_gqa: bool = False,
+        is_causal: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+        with sdpa_kernel(self.sdpa_backends):
+            out = F.scaled_dot_product_attention(
+                q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
+            )
+        return out.transpose(1, 2)
+
+
+class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
+    """SDPA with OVERRIDEABLE first for XPU fused attention."""
+
+    @dataclasses.dataclass(kw_only=True, slots=True)
+    class Config(EzpzScaledDotProductAttention.Config):
+        pass
+
+    sdpa_backends = [
+        SDPBackend.OVERRIDEABLE,
+        SDPBackend.CUDNN_ATTENTION,
+        SDPBackend.FLASH_ATTENTION,
+        SDPBackend.MATH,
+    ]
+
+
+def _default_inner_attention() -> ScaledDotProductAttention.Config:
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        return XPUScaledDotProductAttention.Config()
+    return EzpzScaledDotProductAttention.Config()
+
+
+def _ezpz_get_attention_config(backend: str) -> Module.Config:
+    """XPU-aware attention config selection.
+
+    Mirrors the agpt sibling. Upstream PR #3571 (replayed at ezpz
+    `db3b916a8`) dropped the `(config, mask_type)` tuple return in
+    favor of returning just the config; the caller now supplies
+    mask_type separately (see `_build_moe_layers` which sets
+    `_mask = "causal"` next to the call site). Returning a tuple
+    here would break the downstream `inner_attention.sharding_config`
+    setattr in `moe/sharding.py:set_gqa_inner_attention_local_map`.
+    """
+    if backend == "sdpa":
+        return _default_inner_attention()
+    return get_attention_config(backend)
+
+
+def make_ezpz_router_config(
+    *,
+    dim: int,
+    num_experts: int,
+    gate_param_init: dict[str, Callable],
+    top_k: int = 1,
+    score_func: Literal["sigmoid", "softmax"] = "sigmoid",
+    route_norm: bool = False,
+    route_scale: float = 1.0,
+    num_expert_groups: int | None = None,
+    num_limited_groups: int | None = None,
+    bias: bool = False,
+) -> TokenChoiceTopKRouter.Config:
+    return TokenChoiceTopKRouter.Config(
+        num_experts=num_experts,
+        gate=Linear.Config(
+            in_features=dim,
+            out_features=num_experts,
+            bias=bias,
+            param_init=gate_param_init,
+        ),
+        top_k=top_k,
+        score_func=score_func,
+        route_norm=route_norm,
+        route_scale=route_scale,
+        num_expert_groups=num_expert_groups,
+        num_limited_groups=num_limited_groups,
+    )
+
+
+def make_ezpz_token_dispatcher_config(
+    *,
+    num_experts: int,
+    top_k: int,
+    score_before_experts: bool = True,
+    comm_backend: str,
+    non_blocking_capacity_factor: float | None = None,
+):
+    if comm_backend == "deepep":
+        return DeepEPTokenDispatcher.Config(
+            num_experts=num_experts,
+            top_k=top_k,
+            score_before_experts=score_before_experts,
+        )
+    if comm_backend == "hybridep":
+        return HybridEPTokenDispatcher.Config(
+            num_experts=num_experts,
+            top_k=top_k,
+            score_before_experts=score_before_experts,
+            non_blocking_capacity_factor=non_blocking_capacity_factor,
+        )
+    if comm_backend == "standard":
+        return AllToAllTokenDispatcher.Config(
+            num_experts=num_experts,
+            top_k=top_k,
+            score_before_experts=score_before_experts,
+        )
+    raise ValueError(
+        f"Unknown comm_backend: {comm_backend!r}. "
+        "Must be one of 'standard', 'deepep', 'hybridep'."
+    )
 
 
 def make_ezpz_experts_config(
@@ -55,24 +193,36 @@ def make_ezpz_experts_config(
     """Build an EzpzGroupedExperts.Config from the same args as upstream
     `make_experts_config`, plus a `compute_backend` selector.
     """
-    base = make_experts_config(
+    return EzpzGroupedExperts.Config(
         dim=dim,
         hidden_dim=hidden_dim,
         num_experts=num_experts,
-        top_k=top_k,
         param_init=param_init,
-        score_before_experts=score_before_experts,
-        comm_backend=comm_backend,
-        non_blocking_capacity_factor=non_blocking_capacity_factor,
-    )
-    # Re-wrap as the ezpz subclass Config so the runtime build instantiates
-    # EzpzGroupedExperts (which understands `compute_backend`).
-    field_values = {
-        f.name: getattr(base, f.name) for f in dataclasses.fields(base) if f.init
-    }
-    return EzpzGroupedExperts.Config(
-        **field_values,
+        token_dispatcher=make_ezpz_token_dispatcher_config(
+            num_experts=num_experts,
+            top_k=top_k,
+            score_before_experts=score_before_experts,
+            comm_backend=comm_backend,
+            non_blocking_capacity_factor=non_blocking_capacity_factor,
+        ),
         compute_backend=compute_backend,
+    )
+
+
+def make_ezpz_moe_config(
+    *,
+    num_experts: int = 8,
+    router: TokenChoiceTopKRouter.Config,
+    experts: EzpzGroupedExperts.Config,
+    shared_experts=None,
+    load_balance_coeff: float | None = 1e-3,
+) -> MoE.Config:
+    return MoE.Config(
+        num_experts=num_experts,
+        load_balance_coeff=load_balance_coeff,
+        router=router,
+        experts=experts,
+        shared_experts=shared_experts,
     )
 
 
@@ -266,9 +416,9 @@ def _build_moe_layers(
             moe_cfg = None
         else:
             ffn_cfg = None
-            moe_cfg = make_moe_config(
+            moe_cfg = make_ezpz_moe_config(
                 num_experts=num_experts,
-                router=make_router_config(
+                router=make_ezpz_router_config(
                     dim=dim,
                     num_experts=num_experts,
                     gate_param_init=_depth_init(layer_id),
@@ -1006,7 +1156,6 @@ def model_registry(
 ) -> ModelSpec:
     from torchtitan.components.quantization import QuantizationConverter
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
-    from torchtitan.models.common.config_utils import make_token_dispatcher_config
 
     config = moe_configs[flavor]()
 
@@ -1016,7 +1165,7 @@ def model_registry(
     for layer_cfg in config.layers:
         if layer_cfg.moe is not None:
             experts_cfg = layer_cfg.moe.experts
-            experts_cfg.token_dispatcher = make_token_dispatcher_config(
+            experts_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
                 num_experts=experts_cfg.num_experts,
                 top_k=experts_cfg.token_dispatcher.top_k,
                 score_before_experts=experts_cfg.token_dispatcher.score_before_experts,

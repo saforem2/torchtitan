@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import os
+import dataclasses
 from dataclasses import dataclass
 
 import torch
@@ -19,11 +21,30 @@ from torchtitan.models.common.attention import (
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
 from torchtitan.models.common.nn_modules import Linear, RMSNorm
 from torchtitan.models.common.rope import RoPE
+from torchtitan.models.common.token_dispatcher import (
+    DeepEPTokenDispatcher,
+    HybridEPTokenDispatcher,
+)
 from torchtitan.models.utils import get_moe_model_nparams_and_flops
 from torchtitan.protocols.module import Module
 from torchtitan.experiments.ezpz.logging import warn_once
 from torchtitan.tools.logging import logger
 from torchtitan.tools.utils import has_cuda_capability
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes"}
+
+
+def _maybe_release_device_cache_between_attention_and_moe(x: torch.Tensor) -> None:
+    if not _env_flag_enabled("TT_MOE_EMPTY_CACHE_BETWEEN_ATTN_MOE"):
+        return
+    if x.device.type == "xpu":
+        torch.xpu.synchronize(x.device)
+        torch.xpu.empty_cache()
+    elif x.device.type == "cuda":
+        torch.cuda.synchronize(x.device)
+        torch.cuda.empty_cache()
 
 
 class Attention(BaseAttention):
@@ -178,6 +199,7 @@ class moeTransformerBlock(TransformerBlock):  # noqa: N801
         positions: torch.Tensor | None = None,
     ):
         x = x + self.attention(self.attention_norm(x), attention_masks, positions)
+        _maybe_release_device_cache_between_attention_and_moe(x)
         if self.moe_enabled:
             x = x + self.moe(self.ffn_norm(x))
         else:
@@ -209,6 +231,7 @@ class moeModel(Decoder):  # noqa: N801
             # instance instead of inheriting fields from self.rope.
             Decoder.Config.update_from_config(self, config=config, **kwargs)
             parallelism = config.parallelism
+            debug = config.debug
 
             # for_loop fallback when CUDA SM90+ grouped_mm is unavailable
             # (notably on XPU). Upstream Decoder.Config doesn't know about
@@ -228,6 +251,45 @@ class moeModel(Decoder):  # noqa: N801
                             "back to for_loop expert backend.",
                         )
                         experts_cfg.compute_backend = "for_loop"
+                    layer_cfg.moe.router._debug_force_load_balance = (
+                        debug.moe_force_load_balance
+                    )
+                    if hasattr(
+                        layer_cfg.moe.experts.token_dispatcher, "force_load_balance"
+                    ):
+                        layer_cfg.moe.experts.token_dispatcher.force_load_balance = (
+                            debug.moe_force_load_balance
+                        )
+                    # Detect deepep/hybridep configs by the dispatcher
+                    # Config class, not by a `comm_backend` attribute that
+                    # doesn't exist on the dispatcher Config. The old
+                    # `getattr(..., "comm_backend", "standard")` lookup
+                    # always returned "standard" (the function-arg name
+                    # was never stored on the resulting Config), so the
+                    # downstream EP=1 guard was dead code.
+                    #
+                    # We also dropped the `MoE → DeepEPMoE.Config` swap
+                    # that used to live here — `DeepEPMoE` no longer
+                    # exists upstream (the dispatcher classes now own
+                    # the comm-backend-specific logic via their own
+                    # `dispatch` / `combine` implementations). Keep
+                    # the EP=1 guard so a misconfigured deepep/hybridep
+                    # user gets a clear error before model init.
+                    if isinstance(
+                        layer_cfg.moe.experts.token_dispatcher,
+                        (
+                            DeepEPTokenDispatcher.Config,
+                            HybridEPTokenDispatcher.Config,
+                        ),
+                    ):
+                        dispatcher_name = type(
+                            layer_cfg.moe.experts.token_dispatcher
+                        ).__qualname__.split(".")[0]
+                        if parallelism.expert_parallel_degree == 1:
+                            raise ValueError(
+                                f"{dispatcher_name} requires expert "
+                                "parallelism (expert_parallel_degree > 1)."
+                            )
 
             if parallelism.context_parallel_degree > 1 and not isinstance(
                 self.layers[0].attention.inner_attention,
