@@ -72,10 +72,23 @@ vLLM server workers. Main `.venv` stays unchanged for everything else.
 
 ### Open
 
-- `12468739` (re-monarch smoke with `MonarchRPC` fix) — running.
-- `12468740` (bare vllm-xpu, no TRL) — running. If it works, the
-  failure in `12468737` is specifically TRL's `llm_worker` wrapping;
-  if it fails, the vllm-test stack has regressed since 2026-06-10.
+- ✅ `12468739` (monarch smoke with `MonarchRPC` fix) — **PASSED**.
+  Both ranks reported `xpu_count=12`. Monarch framework on XPU is
+  confirmed working.
+- ❌ `12468740..12468749` (bare vllm-xpu from `rl-actors/`, no TRL) —
+  10-job debug chain, all failing at the same
+  `MPIDI_GPU_init_mpl_global` segfault inside oneCCL's MPI transport.
+  Fixed 8 distinct error layers along the way (xgrammar, heredoc,
+  atl_ofi libs, PMIX, ezpz path, ZMQ IPC, monkey-patch dist_backend,
+  np=2 test) — the underlying MPI bootstrap segfault is unchanged
+  through all of them. See
+  [`docs/rl/vllm-xpu-current-status.md`](rl/vllm-xpu-current-status.md)
+  for the full chain.
+- 🔍 `12468750` (replay 2026-06-10 recipe verbatim from `venvs/vllm-test/`,
+  py3.14) — queued. Discriminates: (a) breakage is in the rl-actors
+  venv (py3.13 ABI binding) vs (b) original 2026-06-10 invocation
+  context differed from today's PBS-direct runs. The drift hypothesis
+  was retracted at Sam's pushback — system unchanged since 06/10.
 
 ---
 
