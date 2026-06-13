@@ -13,7 +13,7 @@
 #   1. Launches `trl vllm-serve` against a small HF checkpoint from the
 #      unified venvs/rl-vllm/ venv (py3.12 + torch 2.12+xpu + vllm 0.22
 #      + triton-xpu 3.7.1 + TRL 1.6).
-#   2. Polls /health until the server is up (or 5 min timeout).
+#   2. Polls /health/ until the server is up (or 5 min timeout).
 #   3. POSTs a sanity completion request, checks the response.
 #   4. Tears down the server.
 #
@@ -97,19 +97,19 @@ SERVE_PID=$!
 trap 'echo "[cleanup] kill -TERM ${SERVE_PID}"; kill -TERM ${SERVE_PID} 2>/dev/null || true; sleep 2; kill -KILL ${SERVE_PID} 2>/dev/null || true' EXIT
 
 echo "serve PID=${SERVE_PID}" | tee -a "${LOG}"
-echo "[$(date +%T)] waiting for /health on :${PORT} (up to 300s)..." | tee -a "${LOG}"
+echo "[$(date +%T)] waiting for /health/ on :${PORT} (up to 300s)..." | tee -a "${LOG}"
 
 SECONDS_WAITED=0
-until curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; do
+until curl -sf "http://localhost:${PORT}/health/" > /dev/null 2>&1; do
     if ! kill -0 "${SERVE_PID}" 2>/dev/null; then
-        echo "FATAL: serve PID ${SERVE_PID} died before /health came up" | tee -a "${LOG}"
+        echo "FATAL: serve PID ${SERVE_PID} died before /health/ came up" | tee -a "${LOG}"
         echo "--- last 50 lines of vllm_serve.log ---" | tee -a "${LOG}"
         tail -50 "${SERVE_LOG}" | tee -a "${LOG}"
         echo "VERDICT: FAILED at startup" | tee -a "${LOG}"
         exit 1
     fi
     if (( SECONDS_WAITED >= 300 )); then
-        echo "FATAL: /health not responding after 300s" | tee -a "${LOG}"
+        echo "FATAL: /health/ not responding after 300s" | tee -a "${LOG}"
         tail -50 "${SERVE_LOG}" | tee -a "${LOG}"
         echo "VERDICT: FAILED at startup" | tee -a "${LOG}"
         exit 1
@@ -117,7 +117,7 @@ until curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; do
     sleep 3
     SECONDS_WAITED=$((SECONDS_WAITED + 3))
 done
-echo "[$(date +%T)] /health up after ${SECONDS_WAITED}s" | tee -a "${LOG}"
+echo "[$(date +%T)] /health/ up after ${SECONDS_WAITED}s" | tee -a "${LOG}"
 
 # --- Phase 3: /generate sanity request -----------------------------
 echo "" | tee -a "${LOG}"
