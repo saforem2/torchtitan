@@ -95,11 +95,21 @@ class EzpzPerHostProvisioner:
         def _bootstrap():
             # Runs ONCE inside each Monarch-spawned actor process,
             # BEFORE the actor's __init__ runs.
+            #
+            # We're running under `mpiexec --np 1 ./venvs/.../python
+            # -m torchtitan.experiments.ezpz.rl.train_upstream`. The
+            # launcher's mpiexec sets PALS_LOCAL_SIZE=1, PALS_RANKID=0,
+            # etc — those values describe the LAUNCHER's mesh, not the
+            # actor's. Monarch-spawned actors form a separate per-mesh
+            # rank space (trainer mesh has size N, generator mesh has
+            # size M). Override the inherited launcher values with the
+            # actor mesh values so oneCCL sets up its SYCL queue for
+            # the right tile.
             os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
-            os.environ.setdefault("PALS_LOCAL_SIZE", str(local_size))
-            os.environ.setdefault("PALS_NODEID", "0")
-            os.environ.setdefault("PALS_DEPTH", "1")
-            os.environ.setdefault("PALS_PMI", "pmix")
+            os.environ["PALS_LOCAL_SIZE"] = str(local_size)
+            os.environ["PALS_NODEID"] = "0"
+            os.environ["PALS_DEPTH"] = "1"
+            os.environ["PALS_PMI"] = "pmix"
 
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
@@ -164,30 +174,21 @@ def patch_init_distributed_for_xpu() -> None:
         if r is not None:
             os.environ.setdefault("PALS_RANKID", r)
 
-        # Force trainer's torch.distributed to use Gloo for the xpu
-        # device. oneCCL XCCL needs an active PMIx rendezvous that
-        # Monarch's fork-spawn doesn't provide; Gloo doesn't.
+        # The trainer needs XCCL (not Gloo — Gloo is CPU-only and
+        # can't broadcast xpu tensors). For XCCL to work, oneCCL
+        # needs PALS_LOCAL_RANKID + PALS_RANKID to match the actor's
+        # mesh-local rank, NOT the launcher's rank-0 (inherited from
+        # the outer mpiexec --np 1 wrapper).
         #
-        # Pass `enable_cpu_backend=True` through to upstream so it
-        # builds backend="xpu:xccl,cpu:gloo" — then patch the map so
-        # `xpu` maps to `gloo` and the final string becomes
-        # "xpu:gloo,cpu:gloo". This registers Gloo for BOTH device
-        # types, so DTensor's lookup for "what backend handles xpu
-        # tensors" returns Gloo.
-        import torch.distributed.distributed_c10d as _c10d
-
-        _c10d.Backend.default_device_backend_map = {
-            **_c10d.Backend.default_device_backend_map,
-            "xpu": "gloo",
-        }
-        # Inject enable_cpu_backend=True for upstream init_distributed
-        # so it builds "xpu:gloo,cpu:gloo" (per-device prefixing).
-        if args and len(args) >= 2:
-            args = (args[0], True, *args[2:])
-        else:
-            kwargs["enable_cpu_backend"] = True
+        # Use `=` not `setdefault` so we OVERRIDE the inherited
+        # launcher values from PMIx with the actor's actual rank.
+        os.environ["PALS_LOCAL_RANKID"] = lr or "0"
+        os.environ["PALS_RANKID"] = r or "0"
+        # PALS_LOCAL_SIZE was set in _bootstrap from the provisioner's
+        # num_gpus; that's the per-actor-mesh size, correct as-is.
+        # Don't touch it here.
         print(
-            f"[xpu_patch pid={os.getpid()}] forcing torch.distributed: xpu:gloo,cpu:gloo",
+            f"[xpu_patch pid={os.getpid()}] override PALS_LOCAL_RANKID={lr} PALS_RANKID={r}",
             flush=True,
             file=sys.stderr,
         )

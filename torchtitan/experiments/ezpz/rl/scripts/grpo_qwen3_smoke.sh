@@ -62,7 +62,13 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # Plain python — NO `ezpz launch`, NO `mpiexec`. The Monarch
 # controller picks tiles itself via `this_host().spawn_procs(...)`
 # and `EzpzPerHostProvisioner` partitions them with ZE_AFFINITY_MASK.
-"${SUBMIT_DIR}/venvs/rl-vllm/bin/python" \
+# Launch under mpiexec --np 1 so the controller has a PMIx parent.
+# Monarch's spawn_procs forks children that inherit the PMIx context,
+# which oneCCL needs to set up per-tile SYCL queues and USM allocation.
+# Without this wrapper, every Monarch-spawned actor's XCCL collective
+# fails ccl_check_usm_pointers with "invalid usm pointer type".
+mpiexec --envall --np 1 --ppn 1 \
+    "${SUBMIT_DIR}/venvs/rl-vllm/bin/python" \
     -m torchtitan.experiments.ezpz.rl.train_upstream \
     --module rl --config rl_grpo_qwen3_0_6b_varlen \
     --hf_assets_path "${SUBMIT_DIR}/torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B" \
