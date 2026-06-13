@@ -167,11 +167,15 @@ def patch_init_distributed_for_xpu() -> None:
         # Force the trainer's torch.distributed to use Gloo instead
         # of XCCL. This is the only way to bypass oneCCL's USM check
         # for Monarch-spawned actors that lack a PMIx rendezvous.
+        # NB: leave the mapping in place permanently for this process —
+        # DTensor uses it later (e.g. in init_weights' collectives) to
+        # look up the backend for the xpu device. Restoring it would
+        # cause "RuntimeError: No backend type associated with device
+        # type xpu" at the next collective.
         import torch.distributed.distributed_c10d as _c10d
 
-        orig_default_map = _c10d.Backend.default_device_backend_map
         _c10d.Backend.default_device_backend_map = {
-            **orig_default_map,
+            **_c10d.Backend.default_device_backend_map,
             "xpu": "gloo",
         }
         print(
@@ -179,10 +183,7 @@ def patch_init_distributed_for_xpu() -> None:
             flush=True,
             file=sys.stderr,
         )
-        try:
-            return orig(*args, **kwargs)
-        finally:
-            _c10d.Backend.default_device_backend_map = orig_default_map
+        return orig(*args, **kwargs)
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
     _dutils.init_distributed = patched
