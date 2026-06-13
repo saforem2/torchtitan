@@ -12,8 +12,19 @@ flash-attn).
 - **TRL GRPOTrainer** — handles the GRPO training loop (generate → score →
   compute advantages → update policy)
 - **ezpz** — distributed launch, device setup, wandb tracking
-- **No vLLM** — uses HF transformers `.generate()` for completions (slower
-  but works on XPU)
+- **Generation backend** — by default uses HF transformers `.generate()` on
+  every rank (slow but always works on XPU). For the vLLM-server-mode path,
+  see the wiring plan and submit scripts:
+  - [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md) —
+    sibling-venv install recipe for vLLM-XPU + torch 2.12.
+  - [`vllm-xpu-wiring-plan.md`](vllm-xpu-wiring-plan.md) —
+    architecture decision (TRL `vllm_mode="server"` vs Monarch+TorchStore),
+    install/smoke commands, sequencing.
+  - `rl/scripts/vllm_serve_xpu.sh` — launches `trl vllm-serve` from the
+    `venvs/vllm-test/` venv.
+  - `rl/scripts/vllm_serve_smoke.sh` — standalone PBS smoke (Phase 1 + 2).
+  - `rl/scripts/grpo/aurora2b_sft_arithmetic_8n_vllm.sh` — 8N production
+    GRPO variant that pre-launches the server.
 
 ## Tasks
 
