@@ -38,14 +38,6 @@ def main() -> int:
     )
 
     import torch
-
-    # Force XPU distributed backend to gloo (default is xccl, which on
-    # Sunspot crashes with `MPIDI_GPU_init_mpl_global` segfault inside
-    # oneCCL's MPI transport even at world_size=1). Must monkey-patch
-    # BEFORE the platform class is used by vllm's engine init.
-    import vllm.platforms.xpu as _xpu_platform
-    _xpu_platform.XPUPlatform.dist_backend = "gloo"
-
     import vllm
     from vllm import LLM, SamplingParams
 

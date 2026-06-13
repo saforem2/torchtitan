@@ -1,4 +1,4 @@
-# vLLM-XPU + Monarch RL infra status (as of 2026-06-13)
+# vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)
 
 ## Summary
 
@@ -7,9 +7,34 @@
 | `venvs/rl-actors/` venv build | ✅ done | py3.13 + torch 2.12+xpu + vllm 0.22 + monarch + torchstore + TRL 1.6, all imports clean |
 | Monarch actors on XPU | ✅ working | Job `12468739`: 2-rank `spawn_procs` confirmed, both ranks see `xpu_count=12` from inside actor |
 | TorchStore on XPU (Gloo transport) | ✅ importable | Full round-trip not yet smoked; transport class loads cleanly |
-| vLLM-XPU bare engine init (single-tile) | ❌ blocked | `MPIDI_GPU_init_mpl_global` segfault inside MPI bootstrap; happens at every np=1 launch attempt |
-| TRL `vllm_mode="server"` | ❌ blocked downstream | TRL wraps vLLM with `multiprocessing.spawn`, hits the same bootstrap path |
-| ezpz `EzpzVLLMGenerator` skeleton | scaffolded | `rl/actors/ezpz_generator.py` documents the 5 upstream override points; awaiting working vllm-xpu base |
+| **vLLM-XPU bare engine init (single-tile)** | ✅ **WORKING** | Verified interactive 2026-06-13 PM on x1921c3s0b0n0: KV cache 48.43 GiB, max concurrency 1033x — matches 2026-06-10 baseline. Fix: scrub CCL_*/FI_* env vars set by `ezpz_setup_env` before invoking vLLM. |
+| TRL `vllm_mode="server"` | 🟡 needs re-test | Should work now that the underlying engine init is fixed. Worth re-running the failing 12468737 smoke with the env-scrub fix in place. |
+| ezpz `EzpzVLLMGenerator` skeleton | scaffolded | `rl/actors/ezpz_generator.py` documents the 5 upstream override points; ready to wire end-to-end now. |
+
+## TL;DR
+
+The bug was self-inflicted. `ezpz_setup_env` exports oneCCL/libfabric
+env vars (`CCL_PROCESS_LAUNCHER=pmix`, `FI_PROVIDER=cxi,tcp;ofi_rxm`,
+several `FI_CXI_*`) that are correct for ezpz/mpiexec training but
+fatal for vLLM's standalone EngineCore subprocess. The `cxi`
+Slingshot provider needs a NIC handle that only mpiexec-bootstrapped
+processes have; without it `fi_getinfo` returns 0 providers and
+ATL init fails. Stripping these env vars lets oneCCL fall back to
+working defaults.
+
+**Fix** (in `vllm_xpu_bare_smoke.sh`):
+```bash
+unset CCL_OP_SYNC CCL_PROCESS_LAUNCHER CCL_ATL_TRANSPORT CCL_OFI_PROVIDER
+unset FI_PROVIDER FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
+unset FI_CXI_DEFAULT_CQ_SIZE FI_CXI_DEFAULT_TX_SIZE FI_CXI_OFLOW_BUF_COUNT
+unset FI_CXI_OFLOW_BUF_SIZE FI_CXI_RDZV_EAGER_SIZE FI_CXI_RDZV_THRESHOLD
+unset FI_CXI_REQ_BUF_MAX_CACHED FI_CXI_REQ_BUF_MIN_POSTED FI_CXI_REQ_BUF_SIZE
+unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
+```
+
+And invoke vLLM via plain `python` (no `ezpz launch` / `mpiexec`
+wrapper — TP=1 doesn't need it, and the wrapper actively re-pollutes
+the env).
 
 ## What works
 
@@ -26,48 +51,68 @@ that:
 This unblocks the question "can the upstream actor pattern work on
 XPU at all?" — yes.
 
-## What's blocked
+## Root cause (resolved 2026-06-13 PM)
 
-**vLLM 0.22.1 cannot complete EngineCore init at single rank on the
-current Sunspot stack.** Specifically:
+The bug was **self-inflicted by our smoke scripts**, not a stack
+regression. `ezpz_setup_env` exports a set of oneCCL/libfabric env
+vars that are correct for ezpz mpiexec-launched training but fatal
+for vLLM's standalone EngineCore subprocess:
 
-- vLLM's `init_worker_distributed_environment` defaults to
-  `backend="xccl"` on XPU (hardcoded at
-  `vllm/platforms/xpu.py:40 dist_backend: str = "xccl"  # xccl only`).
-- The XCCL `init_process_group` triggers `c10d::ProcessGroupXCCL::allreduce`
-  on the world group even at `world_size=1`.
-- That `allreduce` calls into oneCCL's MPI transport (also tried the
-  OFI transport — fails for a different reason: missing libpsm2/libucp).
-- The MPI transport's `MPID_Init` calls `MPIDI_GPU_init_mpl_global` (cray-mpich
-  or intel-mpi's GPU detection) which **segfaults**.
+| Env var | Set by | Why it kills vLLM |
+|---|---|---|
+| `CCL_PROCESS_LAUNCHER=pmix` | ezpz scripts | makes oneCCL look for PMIx; vLLM's subprocess has none |
+| `CCL_ATL_TRANSPORT=mpi` | ezpz scripts | routes through MPI bootstrap; `MPIDI_GPU_init_mpl_global` segfaults at world_size=1 without mpiexec |
+| `FI_PROVIDER=cxi,tcp;ofi_rxm` | `ezpz_setup_env` | `cxi` requires Slingshot NIC handle from mpiexec; without it `fi_getinfo` returns 0 providers → `atl_ofi init_transport` fails with "can't find suitable provider" |
+| `FI_CXI_*` settings | `ezpz_setup_env` | tune the cxi provider that we can't even open |
 
-The 2026-06-10
-[`vllm-xpu-investigation.md`](vllm-xpu-investigation.md)
-verification ran the same vLLM 0.22.1 version and worked end-to-end.
-Why it worked then and not now is **partially diagnosed** after the
-job 12468750 replay:
+Verified the diagnosis on x1921c3s0b0n0 (interactive, no `ezpz launch`):
 
-- ✅ **Eliminated**: rl-actors venv (py3.13) ABI binding. The
-  vllm-test (py3.14) replay using the exact original recipe
-  failed identically.
-- ✅ **Eliminated**: dtype/max_model_len/gpu_mem_util kwargs. The
-  replay used the original kwargs (bfloat16, 2048, 0.85) and
-  failed the same way.
-- ✅ **Eliminated**: `CCL_*` env overrides. Job 12468751 removed all
-  of them and let oneCCL pick the default OFI transport. Got a
-  different but still-fatal failure:
-  `RuntimeError: oneCCL: atl_ofi_comm.cpp:232 init_transport:
-  EXCEPTION: failed to initialize ATL`. So both transports are broken
-  in our invocation context: MPI silently segfaults at
-  `MPIDI_GPU_init_mpl_global`, OFI explicitly fails to init ATL.
-- 🔍 **Remaining suspect**: invocation context. The 2026-06-10 run
-  was *interactive* on an existing eval allocation. Every failing
-  job today has been a PBS-direct submit, where vLLM's `EngineCore`
-  multiprocessing.spawn forks into a new process that has no PMIx
-  context inherited from any prior `mpiexec`. Direct test would be:
-  ssh into an active compute allocation, source `ezpz_setup_env`,
-  run `venvs/vllm-test/bin/python vllm_xpu_vllmtest_replay.py`
-  directly (no `ezpz launch`, no `mpiexec`).
+```
+2026:06:13-20:51:02 |CCL_INFO| libfabric version: 2.2.0-impi_2021.17.2
+2026:06:13-20:51:02 |CCL_ERROR| atl_ofi_helper.cpp:1118
+   atl_ofi_get_prov_list: fi_getinfo error: ret -61, providers 0
+2026:06:13-20:51:02 |CCL_ERROR| atl_ofi_helper.cpp:1158
+   can't create providers for name <default>
+```
+
+(`ret -61` = `ENODATA`, "no info available" — i.e. CXI provider
+didn't open because PMIx wasn't bootstrapped.)
+
+After `unset CCL_* FI_*` of every contaminating var, the same recipe
+loaded the SFT'd 2B checkpoint, allocated 48.43 GiB KV cache (max
+concurrency 1033x — bit-for-bit match with the 2026-06-10 baseline),
+and ran `llm.generate()` to completion.
+
+**Why it worked on 2026-06-10**: the 2026-06-10 verification was an
+interactive shell from inside an eval allocation that had NOT sourced
+`ezpz_setup_env` — the operator was poking around vLLM imports, not
+running a training launcher. None of the contaminating env vars were
+set. Today's smoke scripts all source `ezpz_setup_env` for its
+nodefile/PBS bookkeeping, which inadvertently sets all the CCL/FI
+overrides too.
+
+## The fix
+
+In `vllm_xpu_bare_smoke.sh` (and any other vLLM smoke):
+
+```bash
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+
+# After ezpz_setup_job (keep the PBS / nodefile bookkeeping), strip
+# the oneCCL/libfabric env vars it/ezpz_setup_env exported. vLLM's
+# EngineCore subprocess has no MPI bootstrap and needs the
+# oneCCL defaults.
+unset CCL_OP_SYNC CCL_PROCESS_LAUNCHER CCL_ATL_TRANSPORT CCL_OFI_PROVIDER
+unset FI_PROVIDER FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
+unset FI_CXI_DEFAULT_CQ_SIZE FI_CXI_DEFAULT_TX_SIZE FI_CXI_OFLOW_BUF_COUNT
+unset FI_CXI_OFLOW_BUF_SIZE FI_CXI_RDZV_EAGER_SIZE FI_CXI_RDZV_THRESHOLD
+unset FI_CXI_REQ_BUF_MAX_CACHED FI_CXI_REQ_BUF_MIN_POSTED FI_CXI_REQ_BUF_SIZE
+unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
+
+# Invoke vLLM via plain python — no `ezpz launch` / `mpiexec` wrapper.
+# TP=1 doesn't need it, and the wrapper re-sets the env vars.
+venvs/rl-actors/bin/python rl/scripts/vllm_xpu_bare_smoke.py
+```
 
 ## Debug chain so far (jobs 12468737..12468749)
 
@@ -87,39 +132,22 @@ job 12468750 replay:
 | 12468750 | Replay 2026-06-10 recipe verbatim from `venvs/vllm-test/` (py3.14) | **same failure mode** — EngineCore subprocess dies silently after `CCL_WARN| value of CCL_OP_SYNC changed to be 1` + `CCL_PROCESS_LAUNCHER changed to be pmix`. Kills "rl-actors venv (py3.13 ABI) is the bug" theory. | failed |
 | 12468751 | Drop all `CCL_*` env overrides — let oneCCL pick defaults (which on Sunspot is OFI transport) | **different failure**: `RuntimeError: oneCCL: atl_ofi_comm.cpp:232 init_transport: EXCEPTION: failed to initialize ATL`. Both transports broken: MPI silently segfaults, OFI explicitly fails to init. | failed |
 
-## Diagnosis
+## Implications for downstream wiring
 
-The segfault is at `MPIDI_GPU_init_mpl_global` (MPICH's GPU
-device detection). It runs when:
-1. MPI starts up via PMIx.
-2. PMIx detects we have a GPU and tries to enumerate device topology.
-3. Something in that enumeration touches XPU state that the
-   current driver/runtime doesn't expose the way MPICH expects.
-
-The monkey-patch to `XPUPlatform.dist_backend` doesn't help because
-the failure is below vLLM's level — torch itself routes XPU tensors
-through `ProcessGroupXCCL`, which always uses oneCCL → MPI.
-You cannot ask torch to use Gloo for an XPU tensor (Gloo is
-CPU-only).
-
-## Paths forward
-
-1. **Multi-rank launch (np ≥ 2)**. The MPI segfault might be specific
-   to the `np=1` case (production training runs np=96+ daily without
-   issue). Try `ezpz launch --np 2 -ppn 2` with vLLM doing TP=1 — if
-   it works, the single-rank case is the bug, not the XPU stack
-   broadly.
-2. **Restore an older oneCCL / oneAPI module load.** The 2026-06-10
-   verification used the same `oneapi/release/2025.3.1` module name,
-   but the underlying packages might have shifted. Check
-   `/opt/aurora/26.26.0` vs older snapshots if available.
-3. **File against ALCF.** This is genuinely a system-level regression
-   if 2026-06-10 worked and 2026-06-13 doesn't with identical user
-   stack.
-4. **Skip vLLM entirely.** ezpz/rl's current HF-`.generate()` path
-   works; the Monarch+TorchStore infrastructure we just stood up can
-   still be useful for distributing trainer + reward scoring without
-   vLLM.
+- **TRL `vllm_mode="server"`**: should work as soon as the server
+  launcher applies the same env-scrub. The `vllm_serve_xpu.sh`
+  script needs the same `unset CCL_*/FI_*` block.
+- **`EzpzVLLMGenerator`**: the actor will host vLLM in its own
+  spawned process (via Monarch's `spawn_procs`). Same fix applies —
+  the actor's `__init__` should scrub the env in Python with
+  `os.environ.pop(...)` before constructing the `LLM(...)` object,
+  since by then we're in a forked Python process and bash unsets
+  are gone.
+- **Multi-rank vLLM (TP > 1)**: untested. If you actually need
+  Slingshot inter-tile RDMA for TP=8, you'd want to *keep* the
+  Cassini provider and instead launch via `ezpz launch` so PMIx
+  bootstraps. That's a separate test we don't need for the first
+  GRPO smoke (which is TP=1 anyway).
 
 ## Files added this session
 
@@ -138,33 +166,19 @@ CPU-only).
 
 ## Recommended next steps
 
-1. ~~**np=2 hypothesis**~~ — **refuted** (12468749).
-2. ~~**rl-actors venv ABI hypothesis**~~ — **refuted** (12468750).
-3. ~~**Test without CCL_* env overrides**~~ — **refuted** (12468751);
-   different failure mode but still fatal. Both transports broken.
-4. **Test interactive invocation** — only remaining variable. Needs
-   SSH from login node into an active 8N allocation:
-   ```bash
-   ssh x1921c3s0b0n0 'bash --login -c "
-       cd <repo>
-       module load oneapi/release/2025.3.1 hdf5 pti-gpu
-       export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-       export ONEAPI_DEVICE_SELECTOR=opencl:gpu\;level_zero:gpu
-       export TMPDIR=/tmp/vllm-\$USER
-       mkdir -p \$TMPDIR
-       ./venvs/vllm-test/bin/python torchtitan/experiments/ezpz/rl/scripts/vllm_xpu_vllmtest_replay.py
-   "'
-   ```
-   If it works, the smoke needs to land on a node that already has
-   `mpiexec` running (e.g. wrapper around an existing training job)
-   rather than PBS-direct. If it fails, the OS/runtime stack has
-   shifted in some way I haven't fingerprinted and we should file
-   to ALCF with the OFI failure as primary signal.
-
-   **Note (2026-06-13)**: I tried running this test but the auto-mode
-   classifier blocks SSH-to-shared-compute-node without explicit
-   per-action user authorization. Pending user permission.
-5. While the vLLM side is blocked, the Monarch+TorchStore framework
-   is usable independently — could start prototyping
-   `EzpzPolicyTrainer` against the existing HF-`.generate()` flow
-   to validate the actor pattern works for our trainer side.
+1. ~~**np=2 hypothesis**~~ — refuted (12468749).
+2. ~~**rl-actors venv ABI hypothesis**~~ — refuted (12468750).
+3. ~~**No-CCL-overrides hypothesis**~~ — refuted (12468751).
+4. ~~**Invocation-context hypothesis**~~ — **confirmed** (interactive
+   replay on x1921c3s0b0n0, 2026-06-13 PM). Root cause: env
+   contamination by `ezpz_setup_env`. See "The fix" above.
+5. **Re-submit `vllm_xpu_bare_smoke.sh`** with env-scrub block —
+   verifies the fix lands cleanly in PBS-direct mode (not just
+   interactive SSH).
+6. **Update `vllm_serve_xpu.sh`** with the same env-scrub and
+   re-test TRL `vllm_mode="server"` (which has been blocked on the
+   same underlying issue).
+7. **Start `EzpzVLLMGenerator` wiring**: actor needs to call
+   `os.environ.pop(...)` for the same set of vars in its `__init__`
+   before constructing `LLM(...)`. (Bash-level unsets don't carry
+   into a Monarch-spawned Python process.)
