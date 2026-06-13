@@ -267,6 +267,61 @@ def patch_dtensor_rng_broadcast_for_xpu() -> None:
     )
 
 
+def patch_trl_vllm_no_weight_sync() -> None:
+    """No-op TRL's vLLM weight-sync communicator (XPU + server mode).
+
+    TRL's `vllm_mode="server"` design assumes NCCL can create a
+    cross-process-tree group between trainer ranks and the vLLM server
+    worker. This works on CUDA via env-based init but fails on XPU
+    because oneCCL XCCL requires a PMIx KVS rendezvous that doesn't
+    span separate MPI worlds — the trainer hangs in
+    `pmi_resizable_simple_internal.cpp:337 kvs_get_value: KVS get error`
+    and eventually segfaults.
+
+    For smokes (no real training) and "frozen-generator" RL ablations,
+    we can no-op the communicator and the `update_named_param` calls.
+    The server keeps the initial weights; generations still work; the
+    trainer still updates its own copy. We lose the trainer→server
+    weight propagation that GRPO normally needs for on-policy
+    behavior, but the loop runs end-to-end.
+
+    Long-term fix: pass weight updates through HTTP `/update_named_param/`
+    POSTs (tensor bytes over the wire) instead of an NCCL group. TRL
+    already has the endpoint; just need to flip the dispatch.
+
+    Idempotent. Call BEFORE constructing GRPOTrainer.
+    """
+    if torch.cuda.is_available():
+        return
+    try:
+        from trl.generation.vllm_client import VLLMClient
+    except ImportError:
+        return  # TRL not installed
+    if getattr(VLLMClient.init_communicator, "_xpu_noop", False):
+        return
+
+    orig_init = VLLMClient.init_communicator
+    orig_update = VLLMClient.update_named_param
+
+    def noop_init(self, device=0):
+        logger.warning(
+            "TRL VLLMClient.init_communicator: no-op (XPU). Trainer→server "
+            "weight sync via NCCL is disabled — server keeps initial weights."
+        )
+
+    def noop_update(self, name, weights):
+        # silent no-op — called once per param per step
+        pass
+
+    noop_init._xpu_noop = True  # type: ignore[attr-defined]
+    VLLMClient.init_communicator = noop_init
+    VLLMClient.update_named_param = noop_update
+    logger.info(
+        "Patched TRL VLLMClient.init_communicator + update_named_param "
+        "as no-ops (XPU: server-mode weight sync disabled)"
+    )
+
+
 def patch_torch_cuda_aliases_for_xpu() -> None:
     """Alias `torch.cuda.current_device()` → `torch.xpu.current_device()`.
 
@@ -316,3 +371,4 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()
     patch_torch_cuda_aliases_for_xpu()
+    patch_trl_vllm_no_weight_sync()
