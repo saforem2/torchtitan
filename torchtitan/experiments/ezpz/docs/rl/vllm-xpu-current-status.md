@@ -171,21 +171,34 @@ chain picks up:
 
 Neither works with vllm-xpu-kernels.
 
-**Operational fix**: use `venvs/vllm-test/` (py3.14, has the right
-triton-xpu wheel) as the vLLM worker venv. The rl-actors venv
-(py3.13) is still the Monarch *controller* venv (torchmonarch only
-publishes cp310-cp313 wheels). Monarch's
-`HostMesh.spawn_procs(bootstrap_command=BootstrapCommand(program=...))`
-hook lets a controller in one Python spawn workers in another.
+**Initial workaround** (2 venvs): use `venvs/vllm-test/` (py3.14)
+for vLLM workers, `venvs/rl-actors/` (py3.13) for Monarch
+controllers. Verified PBS-direct on job 12468753 (KV cache 26.04 GiB,
+GEN line printed).
 
-| Venv | Python | Role | Why this version |
-|---|---|---|---|
-| `venvs/rl-actors/` | 3.13 | Monarch controller | torchmonarch has no cp314 wheel |
-| `venvs/vllm-test/` | 3.14 | vLLM worker | triton-xpu has no cp313 wheel |
-| `.venv/` | 3.14 | Trainer | torch 2.13.dev, our main stack |
+**Final fix** (1 venv): `venvs/rl-vllm/` (py3.12) — py3.12 is the
+intersection where BOTH `torchmonarch==0.5.0` (cp310-cp313) AND
+`triton-xpu==3.7.1` (cp312-cp314) ship native wheels. Single venv
+covers actor framework + vLLM worker + trainer. Verified
+interactively 2026-06-13 PM on x1921c3s0b0n0:
+- Monarch: 2-actor mesh, both ranks see `xpu_count=12`, TorchStore
+  Gloo strategy importable.
+- bare vLLM: `Available KV cache 26.04 GiB`, `GEN:` line printed.
 
-`vllm_xpu_bare_smoke.sh` now invokes `venvs/vllm-test/bin/python`.
-Job 12468753 queued for end-to-end PBS verification.
+The earlier "vanilla triton from xgrammar overwrote triton-xpu" issue
+is captured explicitly in `rl/scripts/build_rl_vllm_venv.sh` step 6
+(uninstall vanilla triton, re-pin triton-xpu).
+
+| Venv | Python | Role |
+|---|---|---|
+| `venvs/rl-vllm/` | 3.12 | **Unified RL+vLLM venv** (Monarch + vLLM worker + TRL + transformers + accelerate + datasets) |
+| `.venv/` | 3.14 | Trainer (torch 2.13.dev, our main stack) |
+| ~~`venvs/rl-actors/`~~ | 3.13 | superseded by `rl-vllm/` |
+| ~~`venvs/vllm-test/`~~ | 3.14 | superseded by `rl-vllm/` |
+
+`vllm_xpu_bare_smoke.sh` and `monarch_smoke.sh` both invoke
+`venvs/rl-vllm/bin/python`. `rl/actors/ezpz_generator.py` docstring
+updated to reference the unified venv.
 
 ## Files added this session
 

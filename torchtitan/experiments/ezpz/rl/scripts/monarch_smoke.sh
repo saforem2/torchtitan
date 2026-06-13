@@ -8,7 +8,7 @@
 #PBS -j oe
 #
 # Runs torchtitan/experiments/ezpz/rl/scripts/monarch_smoke.py inside
-# the `venvs/rl-actors/` venv (py3.13 + torch 2.12+xpu + monarch +
+# the `venvs/rl-vllm/` venv (py3.12 + torch 2.12+xpu + monarch +
 # torchstore + vllm-xpu). Single node, single tile is enough for the
 # Phase 1 smoke (import + 2-actor message-pass + torchstore transport
 # import).
@@ -32,8 +32,8 @@ cd "${SUBMIT_DIR}"
 LOG_DIR="logs/monarch-smoke-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}"
 
-# Tarball the rl-actors venv too so it's available on the compute node /tmp.
+# Tarball the rl-vllm venv too so it's available on the compute node /tmp.
 # (Match the .venv yeet pattern from production submit scripts.)
-source venvs/rl-actors/bin/activate
+source venvs/rl-vllm/bin/activate
 echo "venv torch: $(python -c 'import torch; print(torch.__version__)')" | tee "${LOG_DIR}/run.log"
 python torchtitan/experiments/ezpz/rl/scripts/monarch_smoke.py 2>&1 | tee -a "${LOG_DIR}/run.log"

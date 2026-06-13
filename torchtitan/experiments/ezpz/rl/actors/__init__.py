@@ -17,7 +17,7 @@ module structure, but specialized for the XPU stack:
 Lives in its own namespace (`ezpz.rl.actors`) so the import resolution
 is unambiguous when both the upstream and ezpz actor modules are on
 sys.path. Use this from a venv that has both monarch + vllm-xpu
-installed (see `venvs/rl-actors/`).
+installed (see `venvs/rl-vllm/`).
 """
 
 from .ezpz_generator import EzpzVLLMGenerator  # noqa: F401

@@ -61,8 +61,8 @@ from dataclasses import dataclass, field
 
 import torch
 
-# Upstream imports — note these only resolve in the rl-actors venv
-# (py3.13 + torch 2.12 + monarch + vllm-xpu). Don't import this module
+# Upstream imports — note these only resolve in the rl-vllm venv
+# (py3.12 + torch 2.12 + monarch + vllm-xpu). Don't import this module
 # from a context that doesn't have all of those.
 try:
     from torchtitan.experiments.rl.actors.generator import (
@@ -72,7 +72,7 @@ try:
 except ImportError as e:  # noqa: BLE001
     raise ImportError(
         "EzpzVLLMGenerator requires upstream `torchtitan.experiments.rl.actors`"
-        " which only resolves in the rl-actors venv (py3.13 + torch 2.12 +"
+        " which only resolves in the rl-vllm venv (py3.12 + torch 2.12 +"
         " monarch + vllm-xpu). See docs/rl/vllm-xpu-wiring-plan.md."
     ) from e
 

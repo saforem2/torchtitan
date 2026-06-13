@@ -8,8 +8,9 @@
 #PBS -j oe
 #
 # Standalone vLLM-XPU smoke (no TRL wrapper). Replays the 2026-06-10
-# end-to-end verification from venvs/vllm-test/ (py3.14 + torch 2.12 +
-# vllm 0.22 + vllm-xpu-kernels + triton-xpu 3.7.1).
+# end-to-end verification from venvs/rl-vllm/ (py3.12 + torch 2.12 +
+# vllm 0.22 + vllm-xpu-kernels + triton-xpu 3.7.1 + monarch +
+# torchstore + trl + transformers + accelerate + datasets).
 #
 # **Critical**: scrub CCL_*/FI_* env vars before invoking python.
 # `ezpz_setup_env` exports CCL_PROCESS_LAUNCHER=pmix, CCL_OP_SYNC=1,
@@ -61,7 +62,7 @@ mkdir -p "${LOG_DIR}"
 
 MODEL="${MODEL:-outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf}"
 
-echo "=== vllm-xpu bare smoke (vllm-test venv, env-scrubbed) ===" | tee "${LOG_DIR}/run.log"
+echo "=== vllm-xpu bare smoke (rl-vllm venv, env-scrubbed) ===" | tee "${LOG_DIR}/run.log"
 echo "MODEL=${MODEL}" | tee -a "${LOG_DIR}/run.log"
 date | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
@@ -73,17 +74,11 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # EngineCore subprocess spawns itself; an outer mpiexec adds no value
 # at TP=1 and actively breaks the PMIx state oneCCL ends up in.
 #
-# Use venvs/vllm-test/ (py3.14) rather than venvs/rl-actors/ (py3.13)
-# because triton-xpu only ships a cp314 wheel for 3.7.1; the cp313
-# fallbacks (vanilla triton 3.7.0 + pytorch-triton-xpu 3.5.0) miss
-# either the Intel symbols or the `triton.language.target_info` module
-# vllm-xpu-kernels needs. See job 12468752 verdict in
-# `docs/rl/vllm-xpu-current-status.md`.
-#
-# This means Monarch actors that want to host vLLM need to spawn into
-# the vllm-test interpreter via `BootstrapCommand(program=...)`,
-# while the controller runs on rl-actors. Resolved in the wiring plan.
-MODEL="${MODEL}" "${SUBMIT_DIR}/venvs/vllm-test/bin/python" \
+# Uses venvs/rl-vllm/ (py3.12), the unified Monarch+vLLM venv. Both
+# torchmonarch and triton-xpu==3.7.1 ship cp312 wheels, so a single
+# Python version covers actor framework + vLLM worker + trainer
+# (no need for the prior 2-venv split with rl-actors/vllm-test).
+MODEL="${MODEL}" "${SUBMIT_DIR}/venvs/rl-vllm/bin/python" \
     "${SUBMIT_DIR}/torchtitan/experiments/ezpz/rl/scripts/vllm_xpu_bare_smoke.py" \
     2>&1 | tee -a "${LOG_DIR}/run.log"
 
