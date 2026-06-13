@@ -20,6 +20,26 @@ was required in ezpz.
 
 ---
 
+## 2026-06-13 — 56th sync (2 commits, `0a73d82a4..7b579adde`)
+
+Merged clean (no conflicts) as `3935fc654`. No replays needed — both
+commits are additive or scoped outside ezpz.
+
+### Upstream commits
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `588fc12fd` | `[RL] Add deterministic loss guard for GRPO training (#3474)` | None — `experiments/rl/` only (generator/trainer/rollouter + new `loss_compare.py`). ezpz/rl has its own `train_grpo.py` / `train_sft.py`. |
+| `7b579adde` | `Add MinimalAsyncEP (#3561)` | **Mostly additive** — new `MinimalAsyncEPTokenDispatcher` class in `common/token_dispatcher.py`, new `distributed/minimal_async_ep/` module, new deepseek_v3 + graph_trainer configs. Two small in-place mods to `AllToAllTokenDispatcher` (add `output_size=total` hint to `repeat_interleave` for compile-time shape). PR14's fork at `ezpz/moe/token_dispatcher.py` has the same `repeat_interleave` call but no replay needed: the `output_size` arg is only a static-shape hint for `torch.compile`, runtime behavior identical without it (and we run MoE with `--compile.no-enable`). |
+
+### Verification
+
+Static: ezpz imports cleanly. Dynamic smoke deferred — PR14's
+`moe_10b_2b_sdpa_ep` 8N validation just landed (jobs `12468735` +
+`12468736`), and this sync touches no path that wasn't covered.
+
+---
+
 ## 2026-06-12 — 55th sync (3 commits, `96ab7487d..0a73d82a4`)
 
 Merged clean (no conflicts) as `439ccf220`. No replays needed — all

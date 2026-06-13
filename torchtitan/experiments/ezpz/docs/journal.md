@@ -4,6 +4,43 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-13 (sunspot) — PR #14 merged + 56th upstream sync
+
+**PR #14 (`Isolate ezpz MoE` by @nscottnichols) landed on `ezpz`** as
+merge commit `de85a179b`. Final pre-merge validation:
+
+- `12468735` (pr14-fixes, 8N, EP=12, padding=1, AC=selective, 20 steps)
+  ran clean: loss `12.91575 → 7.00367`, 272s, no errors. The
+  `ezpz/moe/activation_checkpoint.py` wrapper (commit `82100fd67`)
+  works as designed.
+- `12468736` (ezpz baseline, same config) for comparison: ran 17 steps
+  cleanly, then hit an apparently unrelated upstream tensor-size
+  overflow at step 17 (`RuntimeError: Storage size calculation
+  overflowed with sizes=[176...e18, 2048]`). Through step 17, **loss
+  matched pr14-fixes within ~1e-4 nats** at every step
+  (e.g. step 17: 7.74314 vs 7.74329) — strong evidence that
+  PR14's fork + AC wrapper are numerically equivalent to upstream
+  on this stack.
+
+The earlier investigation isolating the
+`TT_MOE_NORMAL_EQUAL_A2A_PADDING=1 × AC=selective` GPU PDE Write
+fault and the AC-save-list workaround is documented in PR thread
+[issuecomment-4698951275](https://github.com/saforem2/torchtitan/pull/14#issuecomment-4698951275).
+
+Right after, pulled in 2 more upstream commits as the 56th sync
+(`3935fc654`):
+
+- `588fc12fd` `[RL] Add deterministic loss guard for GRPO training (#3474)` —
+  `experiments/rl/` only; ezpz/rl has its own train_grpo.py.
+- `7b579adde` `Add MinimalAsyncEP (#3561)` — adds new EP backend
+  (additive). Touches `common/token_dispatcher.py` with a small
+  `output_size=total` compile-hint on `repeat_interleave`; PR14's
+  fork has the same call but no replay needed (runtime behavior
+  identical when not compiled). See
+  [`docs/upstream-sync.md`](upstream-sync.md).
+
+---
+
 ## 2026-06-12 (sunspot eve) — 55th upstream sync (3 commits, no replays)
 
 Three more upstream commits landed since the 54th sync earlier today
