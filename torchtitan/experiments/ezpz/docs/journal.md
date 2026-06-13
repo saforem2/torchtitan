@@ -70,25 +70,33 @@ vLLM server workers. Main `.venv` stays unchanged for everything else.
 - `rl/scripts/grpo/aurora2b_sft_arithmetic_8n_vllm.sh` — production
   GRPO submit variant using server-mode (Phase 5 of the wiring plan).
 
-### Open
+### Resolution (eve PM, 2026-06-13)
 
-- ✅ `12468739` (monarch smoke with `MonarchRPC` fix) — **PASSED**.
-  Both ranks reported `xpu_count=12`. Monarch framework on XPU is
+- ✅ `12468739` (monarch smoke with `MonarchRPC` fix) — PASSED. Both
+  ranks reported `xpu_count=12`. Monarch framework on XPU is
   confirmed working.
-- ❌ `12468740..12468749` (bare vllm-xpu from `rl-actors/`, no TRL) —
-  10-job debug chain, all failing at the same
-  `MPIDI_GPU_init_mpl_global` segfault inside oneCCL's MPI transport.
-  Fixed 8 distinct error layers along the way (xgrammar, heredoc,
-  atl_ofi libs, PMIX, ezpz path, ZMQ IPC, monkey-patch dist_backend,
-  np=2 test) — the underlying MPI bootstrap segfault is unchanged
-  through all of them. See
-  [`docs/rl/vllm-xpu-current-status.md`](rl/vllm-xpu-current-status.md)
-  for the full chain.
-- 🔍 `12468750` (replay 2026-06-10 recipe verbatim from `venvs/vllm-test/`,
-  py3.14) — queued. Discriminates: (a) breakage is in the rl-actors
-  venv (py3.13 ABI binding) vs (b) original 2026-06-10 invocation
-  context differed from today's PBS-direct runs. The drift hypothesis
-  was retracted at Sam's pushback — system unchanged since 06/10.
+- ✅ **vLLM-XPU SOLVED interactively on x1921c3s0b0n0**: KV cache
+  48.43 GiB, max concurrency 1033x — bit-for-bit match with the
+  2026-06-10 baseline.
+- ❌ → ✅ `12468740..12468751` (12-job debug chain) — root-caused via
+  the interactive replay. The bug was self-inflicted env contamination
+  by `ezpz_setup_env`:
+  - `CCL_PROCESS_LAUNCHER=pmix` made oneCCL look for a PMIx context
+    vLLM's `multiprocessing.spawn`'d EngineCore doesn't have.
+  - `FI_PROVIDER=cxi,tcp;ofi_rxm` made libfabric try the Slingshot
+    CXI provider, which needs a NIC handle only mpiexec-bootstrapped
+    processes get. `fi_getinfo` returned 0 providers; `atl_ofi
+    init_transport` failed.
+  Sam's pushback ("nothing has changed about the environment or
+  system since 06/10/2026") was correct. Today's smoke scripts source
+  `ezpz_setup_env` for PBS bookkeeping; the original 2026-06-10
+  verification was a raw interactive shell with none of those env
+  vars set. Fix: `unset CCL_*/FI_*` after `ezpz_setup_job`, invoke
+  vLLM via plain python (no `ezpz launch`).
+- 🔍 `12468752` (env-scrubbed PBS submit of the bare smoke) — queued.
+  Verifies the fix works under PBS-direct, not just interactive SSH.
+- See [`docs/rl/vllm-xpu-current-status.md`](rl/vllm-xpu-current-status.md)
+  for the full debug chain, root cause, and fix.
 
 ---
 
