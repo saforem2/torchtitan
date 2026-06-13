@@ -108,24 +108,28 @@ class EzpzPerHostProvisioner:
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
 
-            # Pre-resolve torch.distributed.checkpoint to avoid a
-            # circular-import race when torchstore.state_dict_utils
-            # later does `from torch.distributed.checkpoint._nested_dict
-            # import flatten_state_dict, unflatten_state_dict` mid-actor-setup.
-            # The race happens because torch's checkpoint __init__ imports
-            # from `_nested_dict` which is partway through its own init.
-            # A top-level import here completes the chain cleanly.
-            import torch.distributed.checkpoint  # noqa: F401
-            import torch.distributed.checkpoint._nested_dict  # noqa: F401
-
-            # Apply our XPU patches inside the actor process. The
-            # controller's call to apply_all_xpu_patches() doesn't
-            # propagate across the Monarch spawn boundary.
+            # ORDER MATTERS: apply XPU patches BEFORE importing
+            # torch.distributed.checkpoint. Importing torch.distributed.*
+            # triggers backend module registration, including XCCL setup
+            # paths that read PALS env. Our init_distributed patch needs
+            # to be in place first so it can inject PALS_LOCAL_RANKID /
+            # PALS_RANKID right before the process group init does its
+            # first XCCL collective.
             from torchtitan.experiments.ezpz.rl.xpu_overrides import (
                 apply_all_xpu_patches,
             )
 
             apply_all_xpu_patches()
+
+            # NOW pre-resolve torch.distributed.checkpoint to avoid a
+            # circular-import race when torchstore.state_dict_utils
+            # later does `from torch.distributed.checkpoint._nested_dict
+            # import flatten_state_dict, unflatten_state_dict` mid-actor-setup.
+            # Order matters: must come AFTER the patches so any backend
+            # initialization triggered by these imports sees the patched
+            # env-injection in place.
+            import torch.distributed.checkpoint  # noqa: F401
+            import torch.distributed.checkpoint._nested_dict  # noqa: F401
 
         return _bootstrap
 
