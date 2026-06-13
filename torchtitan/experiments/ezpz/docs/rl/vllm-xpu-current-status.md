@@ -59,7 +59,7 @@ invoked. Candidate hypotheses (untested):
    `gpu_memory_utilization=0.85`. Some combination might dodge the
    XCCL allreduce code path that today's defaults hit.
 
-## Debug chain so far (jobs 12468737..12468748)
+## Debug chain so far (jobs 12468737..12468749)
 
 | Job | Symptom | Fix attempted | Result |
 |---|---|---|---|
@@ -73,6 +73,7 @@ invoked. Candidate hypotheses (untested):
 | 12468746 | `ZMQError: ipc path > 107 chars` | `TMPDIR=/tmp/vllm-$USER` (short path) | got past ZMQ, hit MPI segfault |
 | 12468747 | `MPIDI_GPU_init_mpl_global` segfault in MPI bootstrap | n/a — root cause | failed |
 | 12468748 | same segfault, even with monkey-patched `XPUPlatform.dist_backend="gloo"` | torch's XCCL fires anyway since tensors are on XPU | failed |
+| 12468749 | `ezpz launch --np 2 -ppn 2` to test single-rank hypothesis | **same segfault** at both ranks — kills the "np=1 is the bug" theory | failed |
 
 ## Diagnosis
 
@@ -125,15 +126,23 @@ CPU-only).
 
 ## Recommended next steps
 
-1. **Test the np=2 hypothesis** — if `ezpz launch --np 2` survives
-   MPI init, the single-rank case is the only broken thing and we
-   can architect around it (vLLM server on 2 tiles, not 1). Job
-   `12468749` queued for this.
+1. ~~**Test the np=2 hypothesis**~~ — **done, refuted** (job 12468749).
+   Both ranks died at the same `MPIDI_GPU_init_mpl_global` segfault.
+   Single-rank is not the problem; it's the XCCL+MPI bootstrap path
+   itself, regardless of world size.
 2. **Re-run the original 2026-06-10 recipe verbatim from venvs/vllm-test/**
-   on a fresh allocation. If it succeeds, the breakage is specific
-   to my smoke (py3.13/rl-actors venv + different LLM init kwargs).
-   If it fails, what's different about the original allocation context
-   (interactive run inside an existing mpiexec session?).
+   on a fresh allocation. This is now the highest-signal next test:
+   - same model name, same args (`dtype="bfloat16"`,
+     `max_model_len=2048`, `gpu_memory_utilization=0.85`),
+   - same launch path (PBS-direct? interactive?),
+   - just `venvs/vllm-test/` (py3.14) instead of `venvs/rl-actors/`
+     (py3.13).
+
+   If it succeeds → the breakage is specific to the rl-actors venv
+   build (py3.13 ABI binding to torch 2.12 + oneCCL wheels).
+   If it fails → something about the invocation context differs from
+   2026-06-10 (interactive vs PBS, etc.) and the original verification
+   was a snowflake.
 3. While debugging the vLLM side, the Monarch+TorchStore framework
    is usable independent of vLLM — could start prototyping
    `EzpzPolicyTrainer` against the existing HF-`.generate()` flow

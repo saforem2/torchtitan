@@ -58,7 +58,9 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # Launch via `ezpz launch --np 1` so PMIx is initialized — vLLM 0.22's
 # EngineCore creates a TP=1 world group via XCCL even at single rank,
 # which fails at `MPIR_pmi_init` if launched without an MPI bootstrap.
-MODEL="${MODEL}" "${SUBMIT_DIR}/.venv/bin/ezpz" launch --np 1 -ppn 1 \
+NP="${NP:-1}"
+PPN="${PPN:-1}"
+MODEL="${MODEL}" "${SUBMIT_DIR}/.venv/bin/ezpz" launch --np "${NP}" -ppn "${PPN}" \
     "${SUBMIT_DIR}/venvs/rl-actors/bin/python" \
     "${SUBMIT_DIR}/torchtitan/experiments/ezpz/rl/scripts/vllm_xpu_bare_smoke.py" \
     2>&1 | tee -a "${LOG_DIR}/run.log"
