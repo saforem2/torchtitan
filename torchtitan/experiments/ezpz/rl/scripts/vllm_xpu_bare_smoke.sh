@@ -19,10 +19,26 @@ module load oneapi/release/2025.3.1 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
+# Force oneCCL to use MPI transport (default before vllm 0.22 flipped
+# to OFI). OFI needs libpsm2/libucp which aren't on the runtime LD
+# path with just the oneapi module loaded.
+export CCL_ATL_TRANSPORT="${CCL_ATL_TRANSPORT:-mpi}"
+export CCL_PROCESS_LAUNCHER="${CCL_PROCESS_LAUNCHER:-pmix}"
+export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
+# vLLM uses ZMQ IPC for its EngineCore IPC, but Linux's sockaddr_un.sun_path
+# is limited to 107 chars. The default PBS-job TMPDIR
+# (/var/tmp/pbs.<long-jobid>/...) exceeds that once vLLM appends a UUID.
+# Override to a short path under /tmp.
+mkdir -p "/tmp/vllm-${USER}"
+export TMPDIR="/tmp/vllm-${USER}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
+# Source ezpz so we get a populated `ezpz launch` (mpiexec wrapper)
+# that provides the PMIx env vLLM 0.22's EngineCore wants for its
+# torch.distributed bootstrap even at TP=1.
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
 JOBID_SHORT="${PBS_JOBID%%.*}"
@@ -37,21 +53,15 @@ date | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
 
 # Bare vLLM API — no TRL, no server.
-venvs/rl-actors/bin/python - <<EOF 2>&1 | tee -a "${LOG_DIR}/run.log"
-import torch, vllm
-print(f'torch={torch.__version__} vllm={vllm.__version__} xpu={torch.xpu.device_count()}')
-
-from vllm import LLM, SamplingParams
-
-llm = LLM(
-    model="${MODEL}",
-    tensor_parallel_size=1,
-    gpu_memory_utilization=0.5,
-    enforce_eager=True,
-)
-out = llm.generate(["What is 3 + 7 + 2?"], SamplingParams(max_tokens=32, temperature=0))
-print("GEN:", out[0].outputs[0].text)
-EOF
+# Run as a real .py file (not a heredoc) so vLLM's
+# multiprocessing.spawn worker can `runpy.run_path()` it.
+# Launch via `ezpz launch --np 1` so PMIx is initialized — vLLM 0.22's
+# EngineCore creates a TP=1 world group via XCCL even at single rank,
+# which fails at `MPIR_pmi_init` if launched without an MPI bootstrap.
+MODEL="${MODEL}" "${SUBMIT_DIR}/.venv/bin/ezpz" launch --np 1 -ppn 1 \
+    "${SUBMIT_DIR}/venvs/rl-actors/bin/python" \
+    "${SUBMIT_DIR}/torchtitan/experiments/ezpz/rl/scripts/vllm_xpu_bare_smoke.py" \
+    2>&1 | tee -a "${LOG_DIR}/run.log"
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "VERDICT: complete" | tee -a "${LOG_DIR}/run.log"
