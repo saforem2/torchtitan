@@ -34,7 +34,8 @@ cd "${SUBMIT_DIR}"
 
 MODEL="${MODEL:-outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf}"
 PORT="${PORT:-8765}"
-LOG_DIR="logs/vllm-xpu-smoke-${PBS_JOBID%%.*:-$(date +%Y%m%d-%H%M%S)}"
+JOBID_SHORT="${PBS_JOBID%%.*}"
+LOG_DIR="logs/vllm-xpu-smoke-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "${LOG_DIR}"
 
 echo "=== vLLM-XPU smoke ===" | tee "${LOG_DIR}/run.log"

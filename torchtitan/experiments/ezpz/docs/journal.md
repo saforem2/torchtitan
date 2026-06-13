@@ -4,6 +4,81 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-13 (sunspot eve) — vLLM-XPU + Monarch RL actor infra
+
+Kicked off the long-deferred wiring of vLLM into ezpz/rl. Per
+[`docs/rl/vllm-xpu-wiring-plan.md`](rl/vllm-xpu-wiring-plan.md),
+two parallel paths:
+
+- **Track 2 (TRL `vllm_mode="server"`)** — wires existing TRL-based
+  `train_grpo.py` to an external vLLM-XPU server. Faster to land but
+  the live `venvs/vllm-test/` + TRL 1.5.1 combo hit a worker-side
+  `current_platform.device_type` empty-string error (jobs `12468737`,
+  failing in TRL's `vllm_serve.py:llm_worker`). TRL 1.5.1 also warns
+  vllm 0.22.1 is outside its 0.12.0-0.18.0 supported range. Need to
+  either drop to vllm 0.18.x or use TRL 1.6.0 (which no longer
+  hard-pins the vllm version).
+- **Track 1 (Monarch + TorchStore actors)** — was thought blocked
+  on torchmonarch lacking cp314 wheels. Resolved by building a new
+  sibling venv `venvs/rl-actors/` on **py3.13** + torch 2.12+xpu +
+  monarch 0.5 + torchstore (main) + vllm 0.22.1 + vllm-xpu-kernels
+  0.1.9.1 + TRL 1.6.0 + transformers 5.11 + accelerate 1.14 +
+  datasets 5.0. All imports clean.
+
+`scripts/monarch_smoke.py` + `scripts/monarch_smoke.sh` validate
+the framework end-to-end. First run (job `12468738`, 1N) showed:
+
+- 2-actor `this_host().spawn_procs({"gpus": 2})` works on XPU.
+  Both ranks reported `xpu_count=12 xpu_avail=True` from inside the
+  spawned actor — Monarch's CUDA-only assumptions don't actually
+  block XPU runtime use.
+- `monarch.actor` + `torchstore` imports clean on py3.13 + torch 2.12+xpu.
+- TorchStore transport probe hit a minor naming bug
+  (`TransportType.RPC` vs `TransportType.MonarchRPC`); fixed in the
+  smoke script. Rerunning as `12468739`.
+
+This unblocks the Monarch path — the open question shifts from "is it
+even possible on XPU" to "how much rewrite to adapt ezpz/rl off TRL".
+
+### Stack table
+
+| Component | Main `.venv` | `venvs/vllm-test/` | `venvs/rl-actors/` |
+|---|---|---|---|
+| Python | 3.14.2 | 3.14.2 | 3.13.6 |
+| torch | 2.13.dev | 2.12.0+xpu | 2.12.0+xpu |
+| vllm | — | 0.22.1 | 0.22.1 |
+| vllm-xpu-kernels | — | 0.1.9.1 | 0.1.9.1 |
+| trl | 1.5.1 | — | 1.6.0 |
+| transformers | 5.6.2 | (vllm dep) | 5.11.0 |
+| torchmonarch | — | — | 0.5.0 |
+| torchstore | — | — | main |
+
+`rl-actors/` is the new "actor venv" for both Monarch controllers and
+vLLM server workers. Main `.venv` stays unchanged for everything else.
+
+### Scripts landed this session
+
+- `rl/scripts/vllm_serve_xpu.sh` — generic launcher: `trl vllm-serve`
+  from `venvs/vllm-test/` with `PYTHONPATH` to .venv's TRL wrapper.
+- `rl/scripts/vllm_serve_smoke.sh` — PBS smoke for Phase 1+2 of the
+  wiring plan.
+- `rl/scripts/vllm_xpu_bare_smoke.sh` — standalone vLLM-XPU sanity
+  (no TRL wrapper) using `venvs/rl-actors/` directly. Isolates whether
+  the failure is in TRL's wrapping vs in the underlying vLLM stack.
+- `rl/scripts/monarch_smoke.py` + `monarch_smoke.sh` — Monarch +
+  TorchStore framework smoke.
+- `rl/scripts/grpo/aurora2b_sft_arithmetic_8n_vllm.sh` — production
+  GRPO submit variant using server-mode (Phase 5 of the wiring plan).
+
+### Open
+
+- `12468739` (re-monarch smoke with `MonarchRPC` fix) — running.
+- `12468740` (bare vllm-xpu, no TRL) — running. If it works, the
+  failure in `12468737` is specifically TRL's `llm_worker` wrapping;
+  if it fails, the vllm-test stack has regressed since 2026-06-10.
+
+---
+
 ## 2026-06-13 (sunspot) — PR #14 merged + 56th upstream sync
 
 **PR #14 (`Isolate ezpz MoE` by @nscottnichols) landed on `ezpz`** as
