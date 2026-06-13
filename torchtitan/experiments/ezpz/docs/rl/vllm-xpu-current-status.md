@@ -44,20 +44,28 @@ current Sunspot stack.** Specifically:
 The 2026-06-10
 [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md)
 verification ran the same vLLM 0.22.1 version and worked end-to-end.
-Why it worked then and not now is **not yet diagnosed** — the system
-hasn't drifted, so the difference must be in how the two runs were
-invoked. Candidate hypotheses (untested):
-1. The original was an interactive run inside a compute allocation
-   that already had MPI bootstrapped from an earlier `mpiexec`. Today's
-   smokes PBS-direct, then try to init MPI from scratch in a single-rank
-   context.
-2. The original used `venvs/vllm-test/` (py3.14); today's bare smoke
-   uses `venvs/rl-actors/` (py3.13). Different Python ABIs binding to
-   the same torch 2.12 / oneCCL wheels. Haven't re-tested vllm-test on
-   a fresh allocation.
-3. The original used `dtype="bfloat16"`, `max_model_len=2048`,
-   `gpu_memory_utilization=0.85`. Some combination might dodge the
-   XCCL allreduce code path that today's defaults hit.
+Why it worked then and not now is **partially diagnosed** after the
+job 12468750 replay:
+
+- ✅ **Eliminated**: rl-actors venv (py3.13) ABI binding. The
+  vllm-test (py3.14) replay using the exact original recipe
+  failed identically.
+- ✅ **Eliminated**: dtype/max_model_len/gpu_mem_util kwargs. The
+  replay used the original kwargs (bfloat16, 2048, 0.85) and
+  failed the same way.
+- 🔍 **Current suspect**: the `CCL_*` env overrides our smoke
+  scripts set (`CCL_OP_SYNC=1`, `CCL_PROCESS_LAUNCHER=pmix`,
+  `CCL_ATL_TRANSPORT=mpi`). The replay log shows the EngineCore
+  subprocess dies silently right after these CCL warnings:
+  ```
+  CCL_WARN| value of CCL_OP_SYNC changed to be 1 (default:0)
+  CCL_WARN| value of CCL_PROCESS_LAUNCHER changed to be pmix (default:hydra)
+  ```
+  The 2026-06-10 working run did not export any of these.
+  Test queued: job 12468751
+  (`vllm_xpu_no_ccl_overrides.sh`).
+- 🔍 **Also possible**: invocation context (interactive on an
+  allocation already bootstrapped vs PBS-direct).
 
 ## Debug chain so far (jobs 12468737..12468749)
 
@@ -74,6 +82,7 @@ invoked. Candidate hypotheses (untested):
 | 12468747 | `MPIDI_GPU_init_mpl_global` segfault in MPI bootstrap | n/a — root cause | failed |
 | 12468748 | same segfault, even with monkey-patched `XPUPlatform.dist_backend="gloo"` | torch's XCCL fires anyway since tensors are on XPU | failed |
 | 12468749 | `ezpz launch --np 2 -ppn 2` to test single-rank hypothesis | **same segfault** at both ranks — kills the "np=1 is the bug" theory | failed |
+| 12468750 | Replay 2026-06-10 recipe verbatim from `venvs/vllm-test/` (py3.14) | **same failure mode** — EngineCore subprocess dies silently after `CCL_WARN| value of CCL_OP_SYNC changed to be 1` + `CCL_PROCESS_LAUNCHER changed to be pmix`. Kills "rl-actors venv (py3.13 ABI) is the bug" theory. | failed |
 
 ## Diagnosis
 
@@ -126,24 +135,24 @@ CPU-only).
 
 ## Recommended next steps
 
-1. ~~**Test the np=2 hypothesis**~~ — **done, refuted** (job 12468749).
-   Both ranks died at the same `MPIDI_GPU_init_mpl_global` segfault.
-   Single-rank is not the problem; it's the XCCL+MPI bootstrap path
-   itself, regardless of world size.
-2. **Re-run the original 2026-06-10 recipe verbatim from venvs/vllm-test/**
-   on a fresh allocation. This is now the highest-signal next test:
-   - same model name, same args (`dtype="bfloat16"`,
-     `max_model_len=2048`, `gpu_memory_utilization=0.85`),
-   - same launch path (PBS-direct? interactive?),
-   - just `venvs/vllm-test/` (py3.14) instead of `venvs/rl-actors/`
-     (py3.13).
-
-   If it succeeds → the breakage is specific to the rl-actors venv
-   build (py3.13 ABI binding to torch 2.12 + oneCCL wheels).
-   If it fails → something about the invocation context differs from
-   2026-06-10 (interactive vs PBS, etc.) and the original verification
-   was a snowflake.
-3. While debugging the vLLM side, the Monarch+TorchStore framework
+1. ~~**np=2 hypothesis**~~ — **refuted** (job 12468749). Single-rank
+   is not the problem.
+2. ~~**rl-actors venv ABI hypothesis**~~ — **refuted** (job 12468750).
+   The vllm-test (py3.14) replay failed identically with the exact
+   original kwargs.
+3. **Test without CCL_* env overrides** — job 12468751 queued. Drops
+   `CCL_OP_SYNC=1`, `CCL_PROCESS_LAUNCHER=pmix`, `CCL_ATL_TRANSPORT=mpi`
+   (none of which the 2026-06-10 invocation set). If it succeeds,
+   one of those was poisoning the EngineCore subprocess.
+4. **If (3) fails**: the only remaining variable is the invocation
+   context. The 2026-06-10 verification was done interactively from
+   a compute node inside an existing eval allocation — possibly with
+   `mpiexec` already running and PMIx already initialized.
+   - Test by getting an interactive shell on a compute node
+     (`ssh <node>`), sourcing `ezpz_setup_env`, then running the
+     replay script as a bare `python vllm_xpu_vllmtest_replay.py`
+     (no `ezpz launch`, no PBS-direct invocation).
+5. While debugging the vLLM side, the Monarch+TorchStore framework
    is usable independent of vLLM — could start prototyping
    `EzpzPolicyTrainer` against the existing HF-`.generate()` flow
    to validate the actor pattern works for our trainer side.
