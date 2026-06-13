@@ -164,22 +164,30 @@ def patch_init_distributed_for_xpu() -> None:
         if r is not None:
             os.environ.setdefault("PALS_RANKID", r)
 
-        # Force the trainer's torch.distributed to use Gloo instead
-        # of XCCL. This is the only way to bypass oneCCL's USM check
-        # for Monarch-spawned actors that lack a PMIx rendezvous.
-        # NB: leave the mapping in place permanently for this process —
-        # DTensor uses it later (e.g. in init_weights' collectives) to
-        # look up the backend for the xpu device. Restoring it would
-        # cause "RuntimeError: No backend type associated with device
-        # type xpu" at the next collective.
+        # Force trainer's torch.distributed to use Gloo for the xpu
+        # device. oneCCL XCCL needs an active PMIx rendezvous that
+        # Monarch's fork-spawn doesn't provide; Gloo doesn't.
+        #
+        # Pass `enable_cpu_backend=True` through to upstream so it
+        # builds backend="xpu:xccl,cpu:gloo" — then patch the map so
+        # `xpu` maps to `gloo` and the final string becomes
+        # "xpu:gloo,cpu:gloo". This registers Gloo for BOTH device
+        # types, so DTensor's lookup for "what backend handles xpu
+        # tensors" returns Gloo.
         import torch.distributed.distributed_c10d as _c10d
 
         _c10d.Backend.default_device_backend_map = {
             **_c10d.Backend.default_device_backend_map,
             "xpu": "gloo",
         }
+        # Inject enable_cpu_backend=True for upstream init_distributed
+        # so it builds "xpu:gloo,cpu:gloo" (per-device prefixing).
+        if args and len(args) >= 2:
+            args = (args[0], True, *args[2:])
+        else:
+            kwargs["enable_cpu_backend"] = True
         print(
-            f"[xpu_patch pid={os.getpid()}] forcing torch.distributed default xpu backend → gloo",
+            f"[xpu_patch pid={os.getpid()}] forcing torch.distributed: xpu:gloo,cpu:gloo",
             flush=True,
             file=sys.stderr,
         )
