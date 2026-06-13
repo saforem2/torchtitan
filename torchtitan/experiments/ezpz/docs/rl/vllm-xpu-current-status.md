@@ -53,19 +53,21 @@ job 12468750 replay:
 - ✅ **Eliminated**: dtype/max_model_len/gpu_mem_util kwargs. The
   replay used the original kwargs (bfloat16, 2048, 0.85) and
   failed the same way.
-- 🔍 **Current suspect**: the `CCL_*` env overrides our smoke
-  scripts set (`CCL_OP_SYNC=1`, `CCL_PROCESS_LAUNCHER=pmix`,
-  `CCL_ATL_TRANSPORT=mpi`). The replay log shows the EngineCore
-  subprocess dies silently right after these CCL warnings:
-  ```
-  CCL_WARN| value of CCL_OP_SYNC changed to be 1 (default:0)
-  CCL_WARN| value of CCL_PROCESS_LAUNCHER changed to be pmix (default:hydra)
-  ```
-  The 2026-06-10 working run did not export any of these.
-  Test queued: job 12468751
-  (`vllm_xpu_no_ccl_overrides.sh`).
-- 🔍 **Also possible**: invocation context (interactive on an
-  allocation already bootstrapped vs PBS-direct).
+- ✅ **Eliminated**: `CCL_*` env overrides. Job 12468751 removed all
+  of them and let oneCCL pick the default OFI transport. Got a
+  different but still-fatal failure:
+  `RuntimeError: oneCCL: atl_ofi_comm.cpp:232 init_transport:
+  EXCEPTION: failed to initialize ATL`. So both transports are broken
+  in our invocation context: MPI silently segfaults at
+  `MPIDI_GPU_init_mpl_global`, OFI explicitly fails to init ATL.
+- 🔍 **Remaining suspect**: invocation context. The 2026-06-10 run
+  was *interactive* on an existing eval allocation. Every failing
+  job today has been a PBS-direct submit, where vLLM's `EngineCore`
+  multiprocessing.spawn forks into a new process that has no PMIx
+  context inherited from any prior `mpiexec`. Direct test would be:
+  ssh into an active compute allocation, source `ezpz_setup_env`,
+  run `venvs/vllm-test/bin/python vllm_xpu_vllmtest_replay.py`
+  directly (no `ezpz launch`, no `mpiexec`).
 
 ## Debug chain so far (jobs 12468737..12468749)
 
@@ -83,6 +85,7 @@ job 12468750 replay:
 | 12468748 | same segfault, even with monkey-patched `XPUPlatform.dist_backend="gloo"` | torch's XCCL fires anyway since tensors are on XPU | failed |
 | 12468749 | `ezpz launch --np 2 -ppn 2` to test single-rank hypothesis | **same segfault** at both ranks — kills the "np=1 is the bug" theory | failed |
 | 12468750 | Replay 2026-06-10 recipe verbatim from `venvs/vllm-test/` (py3.14) | **same failure mode** — EngineCore subprocess dies silently after `CCL_WARN| value of CCL_OP_SYNC changed to be 1` + `CCL_PROCESS_LAUNCHER changed to be pmix`. Kills "rl-actors venv (py3.13 ABI) is the bug" theory. | failed |
+| 12468751 | Drop all `CCL_*` env overrides — let oneCCL pick defaults (which on Sunspot is OFI transport) | **different failure**: `RuntimeError: oneCCL: atl_ofi_comm.cpp:232 init_transport: EXCEPTION: failed to initialize ATL`. Both transports broken: MPI silently segfaults, OFI explicitly fails to init. | failed |
 
 ## Diagnosis
 
@@ -135,24 +138,33 @@ CPU-only).
 
 ## Recommended next steps
 
-1. ~~**np=2 hypothesis**~~ — **refuted** (job 12468749). Single-rank
-   is not the problem.
-2. ~~**rl-actors venv ABI hypothesis**~~ — **refuted** (job 12468750).
-   The vllm-test (py3.14) replay failed identically with the exact
-   original kwargs.
-3. **Test without CCL_* env overrides** — job 12468751 queued. Drops
-   `CCL_OP_SYNC=1`, `CCL_PROCESS_LAUNCHER=pmix`, `CCL_ATL_TRANSPORT=mpi`
-   (none of which the 2026-06-10 invocation set). If it succeeds,
-   one of those was poisoning the EngineCore subprocess.
-4. **If (3) fails**: the only remaining variable is the invocation
-   context. The 2026-06-10 verification was done interactively from
-   a compute node inside an existing eval allocation — possibly with
-   `mpiexec` already running and PMIx already initialized.
-   - Test by getting an interactive shell on a compute node
-     (`ssh <node>`), sourcing `ezpz_setup_env`, then running the
-     replay script as a bare `python vllm_xpu_vllmtest_replay.py`
-     (no `ezpz launch`, no PBS-direct invocation).
-5. While debugging the vLLM side, the Monarch+TorchStore framework
-   is usable independent of vLLM — could start prototyping
+1. ~~**np=2 hypothesis**~~ — **refuted** (12468749).
+2. ~~**rl-actors venv ABI hypothesis**~~ — **refuted** (12468750).
+3. ~~**Test without CCL_* env overrides**~~ — **refuted** (12468751);
+   different failure mode but still fatal. Both transports broken.
+4. **Test interactive invocation** — only remaining variable. Needs
+   SSH from login node into an active 8N allocation:
+   ```bash
+   ssh x1921c3s0b0n0 'bash --login -c "
+       cd <repo>
+       module load oneapi/release/2025.3.1 hdf5 pti-gpu
+       export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+       export ONEAPI_DEVICE_SELECTOR=opencl:gpu\;level_zero:gpu
+       export TMPDIR=/tmp/vllm-\$USER
+       mkdir -p \$TMPDIR
+       ./venvs/vllm-test/bin/python torchtitan/experiments/ezpz/rl/scripts/vllm_xpu_vllmtest_replay.py
+   "'
+   ```
+   If it works, the smoke needs to land on a node that already has
+   `mpiexec` running (e.g. wrapper around an existing training job)
+   rather than PBS-direct. If it fails, the OS/runtime stack has
+   shifted in some way I haven't fingerprinted and we should file
+   to ALCF with the OFI failure as primary signal.
+
+   **Note (2026-06-13)**: I tried running this test but the auto-mode
+   classifier blocks SSH-to-shared-compute-node without explicit
+   per-action user authorization. Pending user permission.
+5. While the vLLM side is blocked, the Monarch+TorchStore framework
+   is usable independently — could start prototyping
    `EzpzPolicyTrainer` against the existing HF-`.generate()` flow
    to validate the actor pattern works for our trainer side.
