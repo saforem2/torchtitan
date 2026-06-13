@@ -138,16 +138,54 @@ venvs/rl-actors/bin/python rl/scripts/vllm_xpu_bare_smoke.py
   launcher applies the same env-scrub. The `vllm_serve_xpu.sh`
   script needs the same `unset CCL_*/FI_*` block.
 - **`EzpzVLLMGenerator`**: the actor will host vLLM in its own
-  spawned process (via Monarch's `spawn_procs`). Same fix applies —
-  the actor's `__init__` should scrub the env in Python with
-  `os.environ.pop(...)` before constructing the `LLM(...)` object,
-  since by then we're in a forked Python process and bash unsets
-  are gone.
+  spawned process (via Monarch's `spawn_procs`). Same env-scrub
+  applies — the actor's `__init__` should call
+  `os.environ.pop(...)` for the contaminating vars before
+  constructing the `LLM(...)` object, since by then we're in a
+  forked Python process and bash unsets are gone.
 - **Multi-rank vLLM (TP > 1)**: untested. If you actually need
   Slingshot inter-tile RDMA for TP=8, you'd want to *keep* the
   Cassini provider and instead launch via `ezpz launch` so PMIx
   bootstraps. That's a separate test we don't need for the first
   GRPO smoke (which is TP=1 anyway).
+
+## Second issue caught by 12468752: triton-xpu cp313 wheels don't exist
+
+Once env-scrub got us past the oneCCL/MPI bootstrap, the rl-actors
+(py3.13) venv hit a follow-up failure:
+
+```
+ERROR config.py:29 Failed to import Triton kernels.
+   Error: cannot import name 'intel' from 'triton._C.libtriton'
+...
+TypeError: 'function' object is not subscriptable
+  at _compute_slot_mapping_kernel[(num_reqs + 1,)](...)
+```
+
+Cause: `triton-xpu==3.7.1` (which vllm-xpu-kernels 0.1.9.1 needs)
+only ships a `cp314-cp314-manylinux` wheel. The py3.13 fallback
+chain picks up:
+- vanilla `triton==3.7.0` (cp313 wheel, no Intel symbols)
+- `pytorch-triton-xpu==3.5.0` from pytorch.org/whl/xpu (cp313 wheel,
+  no `triton.language.target_info` module)
+
+Neither works with vllm-xpu-kernels.
+
+**Operational fix**: use `venvs/vllm-test/` (py3.14, has the right
+triton-xpu wheel) as the vLLM worker venv. The rl-actors venv
+(py3.13) is still the Monarch *controller* venv (torchmonarch only
+publishes cp310-cp313 wheels). Monarch's
+`HostMesh.spawn_procs(bootstrap_command=BootstrapCommand(program=...))`
+hook lets a controller in one Python spawn workers in another.
+
+| Venv | Python | Role | Why this version |
+|---|---|---|---|
+| `venvs/rl-actors/` | 3.13 | Monarch controller | torchmonarch has no cp314 wheel |
+| `venvs/vllm-test/` | 3.14 | vLLM worker | triton-xpu has no cp313 wheel |
+| `.venv/` | 3.14 | Trainer | torch 2.13.dev, our main stack |
+
+`vllm_xpu_bare_smoke.sh` now invokes `venvs/vllm-test/bin/python`.
+Job 12468753 queued for end-to-end PBS verification.
 
 ## Files added this session
 
