@@ -22,9 +22,9 @@ going?" Tracking is per-model and per-node-count.
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-13 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-11 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | Step **49,666+** persisted (2.50T tokens, 53.5% of target). 8508020 R as of 2026-05-27 12:37, loss 2.68. Async stable at 256N across 5 dispatches. | 2026-06-13 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | Step **27,106+** persisted (2.73T tokens, 58.4% of target). 8508753 R as of 2026-05-27 12:37, loss 2.72. Sync-mode workaround continues to hold; one pals-RPC infra failure on 8507196 (separate issue). | 2026-06-09 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | **🏁 20B 512N sync now beats 2B 256N async per token on every benchmark.** Step **3,270** persisted (329B tokens, 7.0% of target), loss 2.65 at end of 8507200 (12h walltime exit 2026-05-27 03:43). 8508214 Q ~10h in `small` (capacity exhausted). | 2026-06-10 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**80,400** (4.047T tokens, 86.6% of 4.67T), loss 2.66286. | 2026-06-13 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30500** (3.07T tokens, 65.7% of 4.67T). | 2026-06-09 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,500** (453.0B tokens, 9.7% of 4.67T). | 2026-06-10 |
 | [20B 256N](./production/agpt/20b/n256/README.md) | Step **300** persisted. Same async wall as 512N; sync-mode (`8505255`) Q to test fix. | 2026-06-12 |
 | [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-12 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
