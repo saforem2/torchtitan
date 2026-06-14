@@ -13,18 +13,25 @@ flash-attn).
   compute advantages → update policy)
 - **ezpz** — distributed launch, device setup, wandb tracking
 - **Generation backend** — by default uses HF transformers `.generate()` on
-  every rank (slow but always works on XPU). For the vLLM-server-mode path,
-  see the wiring plan and submit scripts:
-  - [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md) —
-    sibling-venv install recipe for vLLM-XPU + torch 2.12.
-  - [`vllm-xpu-wiring-plan.md`](vllm-xpu-wiring-plan.md) —
-    architecture decision (TRL `vllm_mode="server"` vs Monarch+TorchStore),
-    install/smoke commands, sequencing.
-  - `rl/scripts/vllm_serve_xpu.sh` — launches `trl vllm-serve` from the
-    `venvs/vllm-test/` venv.
-  - `rl/scripts/vllm_serve_smoke.sh` — standalone PBS smoke (Phase 1 + 2).
-  - `rl/scripts/grpo/aurora2b_sft_arithmetic_8n_vllm.sh` — 8N production
-    GRPO variant that pre-launches the server.
+  every rank (slow but always works on XPU). For the vLLM-server-mode path:
+  - ✅ **[`grpo-on-xpu-status.md`](grpo-on-xpu-status.md)** — end-to-end
+    GRPO on XPU is working (job `12468780`, 2026-06-13). 5/5 steps with
+    real on-policy weight sync. **Read this first.**
+  - `rl/scripts/grpo/qwen3_vllm_server_smoke.sh` — the 1N PBS smoke that
+    proved it. Uses the unified `venvs/rl-vllm/` venv (py3.12).
+  - `rl/scripts/build_rl_vllm_venv.sh` — reproducible venv build.
+  - `rl/xpu_overrides.py` — XPU shim collecting every monkey-patch +
+    env setup needed for the port.
+  - Background reading:
+    - [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md) — original
+      2026-06-10 vLLM-XPU verification + sibling-venv recipe.
+    - [`vllm-xpu-current-status.md`](vllm-xpu-current-status.md) — the
+      15-job bare-vLLM debug chain that led to the venv design.
+    - [`vllm-xpu-wiring-plan.md`](vllm-xpu-wiring-plan.md) — pre-impl
+      architecture decision (TRL `vllm_mode="server"` vs Monarch+TorchStore).
+    - [`upstream-rl-port-status.md`](upstream-rl-port-status.md) — why
+      using upstream `torchtitan.experiments.rl` directly (Monarch+TorchStore)
+      is blocked on the same Sunspot stack.
 
 ## Tasks
 

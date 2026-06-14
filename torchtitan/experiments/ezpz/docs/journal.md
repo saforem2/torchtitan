@@ -4,6 +4,36 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-13 (sunspot late eve) — 🎉 GRPO end-to-end on XPU via TRL vllm-serve
+
+Job `12468780` completed **5/5 GRPO steps with real on-policy weight
+sync** on Sunspot XPU. Full pipeline: trl vllm-serve on tile 0,
+8-rank GRPO trainer on tiles 1-8 via ezpz launch, communicating via
+HTTP for rollouts and via XCCL TCP-KVS for trainer→server weight
+broadcasts.
+
+`format_reward/mean` moved 0 → 0.0625 → 0.25 → 0.0625 → 0.125 over 5
+steps with a cold Qwen3-0.6B on the `sum_digits` task. Signal is
+noisy at bsz=8×ngens=4 but the upward trend in steps 1-3 confirms the
+policy update path is alive.
+
+The breakthrough was discovering that oneCCL DOES support a
+non-PMIx, TCP-based rendezvous when configured correctly:
+
+    CCL_PROCESS_LAUNCHER=none   FI_PROVIDER=tcp
+    CCL_ATL_TRANSPORT=ofi       CCL_KVS_IP_PORT=127.0.0.1_29513
+
+Both server and trainer set the same env, and XCCL forms an N+1-rank
+group across the two process trees without any PMIx coupling. This
+is exactly what TRL's `vllm_mode="server"` needs.
+
+Sam's pushback on the no-op workaround was correct — the proper fix
+exists and we just needed to find the right env knobs.
+
+Full writeup: [`docs/rl/grpo-on-xpu-status.md`](rl/grpo-on-xpu-status.md).
+
+---
+
 ## 2026-06-13 (sunspot eve) — vLLM-XPU + Monarch RL actor infra
 
 Kicked off the long-deferred wiring of vLLM into ezpz/rl. Per
