@@ -164,6 +164,42 @@ The XPU porting layer (`xpu_overrides.py`) is reusable for either —
 the `has_cuda_capability` patch and `EzpzPerHostProvisioner` apply
 regardless of how the worker processes are launched.
 
+## Update 2026-06-13 deeper eve: torch 2.13 nightly probe — untested
+
+Sam suggested trying torch 2.13 nightly to see if newer xpu allocator
+fixes the DTensor USM problem. Built `venvs/torch213-test/` (py3.12
++ torch 2.13.0.dev20260611+xpu) but ran into stack-version mismatch:
+
+- `torch.xpu` import fails because the system
+  `/opt/aurora/26.26.0/oneapi/compiler/latest/lib/libur_loader.so.0`
+  (loaded via `ezpz_setup_job`'s `module load oneapi/release/2025.3.1`)
+  is missing symbol `urDeviceWaitExp` that torch 2.13 needs.
+- Skipping the module load fails differently: `pyzes` hardcodes
+  `/usr/lib/x86_64-linux-gnu/libze_loader.so.1` (Debian path) but
+  Sunspot has it at `/usr/lib64/libze_loader.so.1`.
+
+This is fixable (symlink + careful LD_LIBRARY_PATH) but each round
+takes minutes and the next layer of breakage (vllm-xpu-kernels
+0.1.9.1 is built against torch 2.12 → likely C++ ABI mismatch like
+the original 2026-06-10 `c10::impl::cow::materialize_cow_storage`
+problem) probably blocks the actual test we want to run.
+
+**Practical answer**: deferring the torch 2.13 path. If we revisit,
+the recipe is:
+1. Build `venvs/rl-vllm-torch213/` (py3.12 + torch
+   2.13.0.dev20260611+xpu) with `module unload` first
+2. Symlink `/usr/lib/x86_64-linux-gnu/libze_loader.so.1` →
+   `/usr/lib64/libze_loader.so.1` (or set
+   `LD_LIBRARY_PATH=/usr/lib64`)
+3. Pin `triton-xpu==3.7.2+git5fcc14d9` (matches torch 2.13)
+4. Build vllm-xpu-kernels from source against torch 2.13 (HEAD of
+   vllm-project/vllm-xpu-kernels)
+5. Re-run the Monarch GRPO smoke; if DTensor's USM issues are
+   resolved, we get the full Monarch+TorchStore path on XPU.
+
+Track C (TRL+vllm-serve, py3.12 + torch 2.12) is the live production
+path until then.
+
 ## Update 2026-06-13 deep eve: extensive Monarch-port investigation (jobs 12468783..12468794)
 
 After Track C (TRL+vllm-serve) landed working GRPO end-to-end, took
