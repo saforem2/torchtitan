@@ -140,13 +140,26 @@ def spawn_proc_mesh(
         # Single-node: partition tiles on this_host() via ZE_AFFINITY_MASK.
         # Sunspot / Aurora compute nodes have 12 tiles per host (6 PVCs × 2).
         provisioner = EzpzPerHostProvisioner(total_gpus=total_gpus)
+        # `bootstrap_command=` injects env (ZE_AFFINITY_MASK, LOCAL_RANK,
+        # PALS_*) into the actor's process BEFORE execve, so the eager
+        # `import torch` in monarch's bootstrap_main.py sees the right
+        # tile visibility. `bootstrap=` runs AFTER torch imports — too
+        # late for the SYCL primary context to pick up ZE_AFFINITY_MASK.
+        trainer_boot = provisioner.allocate(trainer_world_size)
+        generator_boot = provisioner.allocate(generator_world_size)
         trainer_mesh = this_host().spawn_procs(
             per_host={"gpus": trainer_world_size},
-            bootstrap=provisioner.allocate(trainer_world_size),
+            bootstrap=trainer_boot,
+            bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
+                trainer_boot.gpu_ids
+            ),
         )
         generator_mesh = this_host().spawn_procs(
             per_host={"gpus": generator_world_size},
-            bootstrap=provisioner.allocate(generator_world_size),
+            bootstrap=generator_boot,
+            bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
+                generator_boot.gpu_ids
+            ),
         )
 
     return trainer_mesh, generator_mesh
