@@ -4,6 +4,76 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-14 (sunspot overnight) — Monarch + torch 2.13: 6 patches, 16 jobs, still wall
+
+Pushed the upstream `torchtitan.experiments.rl.train` Monarch + GRPO
+pipeline through 16 PBS submissions (`12468799` → `12468815`),
+peeling back one failure mode at a time. Each crash mapped to a
+distinct XPU porting gap, all now fixed in `xpu_overrides.py`:
+
+1. `_make_replicate_tensor` skip-broadcast (oneCCL USM check rejects
+   torch.xpu USM-device pointers under Monarch's execve'd actors —
+   buffers are deterministic-identical anyway)
+2. Force `init_distributed(enable_cpu_backend=True)` → backend becomes
+   `xpu:xccl,cpu:gloo` so DCP's `all_gather_object` for the central
+   plan routes objects through gloo, not xccl
+3. Suppress vLLM-XPU's `xpu_worker.py:103` oneCCL "warmup" allreduce
+   on a `torch.zeros(1).xpu()` — that allreduce is unconditional in
+   vLLM-XPU and trips USM check immediately at engine init
+4. `XPUPlatform.get_attn_backend_cls` patched to accept
+   `AttentionBackendEnum.CUSTOM` (vLLM-XPU's selector raises
+   `ValueError: Invalid attention backend` for any backend it doesn't
+   explicitly list; CUSTOM is the path `rl/actors/generator.py` uses
+   for varlen attention)
+5. `vllm._torch_cuda_wrapper` patched to NOT alias
+   `torch.cuda.current_stream = torch.xpu.current_stream` (Dynamo's
+   `(cuda, xpu, accelerator).current_stream` handler-table build then
+   trips `AssertionError: Handler already registered` because the
+   same function appears twice). Keep `Stream`/`stream`/etc. aliases.
+6. `EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids` —
+   pre-execve env overlay via Monarch's `bootstrap_command=`. Sets
+   `ZE_AFFINITY_MASK` BEFORE `import torch` runs in bootstrap_main.py,
+   so torch.xpu's primary SYCL context picks up the right tile
+   topology.
+
+Got past every torchtitan + DCP + XCCL issue, but hit a wall at
+vLLM's `profile_run` → `_dummy_run(max_num_tokens=2048,
+is_profile=True)` → first decoder layer `F.linear` →
+`RuntimeError: could not create a memory`. This is oneDNN's
+`dnnl::memory` constructor failing — not OOM (model load succeeded
+at 1.22 GiB, we have 46 GiB tile). Same crash with:
+
+- `--generator.gpu-memory-limit 0.4`
+- `--generator.sampling.max-tokens 256`
+- `--generator.cudagraph.no-enable + --compile.no-enable`
+- `--batcher.batch.seq-len 512`
+- narrow `ZE_AFFINITY_MASK` per actor
+- `ONEAPI_DEVICE_SELECTOR=level_zero:gpu`
+- `VLLM_DISABLED_KERNELS=xpu_kernels` (rules out our custom-built
+  vllm-xpu-kernels)
+
+Suspect: oneDNN scratchpad allocator queries `sycl::get_pointer_type`
+with a different context than torch.xpu's allocator (same root cause
+as the oneCCL USM check — but there's no "skip the check" knob for
+oneDNN). Either Monarch's execve'd actors construct SYCL context
+differently than mpiexec'd processes, or our custom-built vllm-xpu-
+kernels somehow taint the allocator pool. Disabling its custom ops
+didn't help, so leaning toward the first cause.
+
+Full writeup: [`docs/rl/2026-06-14_monarch-torch213-deep-dive.md`](rl/2026-06-14_monarch-torch213-deep-dive.md).
+
+Next options when resumed:
+1. Get an Intel torch.xpu engineer to look at `DNNL_VERBOSE=2`
+   output from profile_run.
+2. Try the same code path under mpiexec to confirm it's Monarch-
+   spawn-specific.
+3. Fall back to torch 2.12 + prebuilt vllm-xpu-kernels (known-good
+   combo on Sunspot), accept losing torch 2.13's DTensor USM fixes
+   (we skipped the broadcast anyway).
+4. Drop vLLM for the generator side — naive HF .generate() loop.
+
+---
+
 ## 2026-06-13 (sunspot late eve) — 🎉 GRPO end-to-end on XPU via TRL vllm-serve
 
 Job `12468780` completed **5/5 GRPO steps with real on-policy weight

@@ -32,6 +32,10 @@ flash-attn).
     - [`upstream-rl-port-status.md`](upstream-rl-port-status.md) — why
       using upstream `torchtitan.experiments.rl` directly (Monarch+TorchStore)
       is blocked on the same Sunspot stack.
+    - [`2026-06-14_monarch-torch213-deep-dive.md`](2026-06-14_monarch-torch213-deep-dive.md)
+      — torch 2.13 + monarch + vllm-xpu push: got past every XCCL/USM/DCP/dynamo
+      blocker (6 new patches in `xpu_overrides.py`), final wall is vLLM
+      `profile_run` → oneDNN `could not create a memory` on `F.linear`.
 
 ## Tasks
 
