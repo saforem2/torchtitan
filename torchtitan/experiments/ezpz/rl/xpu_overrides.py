@@ -76,10 +76,106 @@ class EzpzPerHostProvisioner:
     def __init__(self, total_gpus: int = 12):
         self.total_gpus = total_gpus
         self.next_gpu = 0
+        self.last_allocated_gpu_ids: list[int] = []
 
     @property
     def available(self) -> int:
         return self.total_gpus - self.next_gpu
+
+    @staticmethod
+    def make_bootstrap_command_for_gpu_ids(
+        gpu_ids: list[int],
+    ) -> Callable:
+        """Return a per-Point callable producing a ``BootstrapCommand``.
+
+        Use this with ``spawn_procs(bootstrap_command=...)`` so env vars
+        (especially ``ZE_AFFINITY_MASK``) are set in the actor process
+        BEFORE ``import torch`` runs in monarch's ``bootstrap_main.py``.
+
+        Crucial on XPU: torch.xpu initializes its primary SYCL context
+        at import time. If ZE_AFFINITY_MASK is set AFTER torch imports
+        (the ``bootstrap=...`` callable runs after Python+torch are
+        already up), oneCCL later can't classify USM pointers because
+        the SYCL device-id ↔ L0 device-id mapping is wrong.
+
+        Take the ``gpu_ids`` returned from ``allocate(num_gpus)`` (via
+        the closure-captured tile list — or just pass them directly).
+        """
+        if not gpu_ids:
+            raise ValueError("gpu_ids must be non-empty")
+        num_gpus = len(gpu_ids)
+        local_size = num_gpus
+
+        # Lazy imports — only needed when actually spawning.
+        from monarch._src.actor.host_mesh import default_bootstrap_cmd
+
+        base_cmd = default_bootstrap_cmd()
+
+        def _per_rank(point):
+            # Try common Point API attrs to extract per-mesh rank.
+            rank_in_mesh = None
+            for attr in ("rank", "ordinal", "index"):
+                if hasattr(point, attr):
+                    val = getattr(point, attr)
+                    if isinstance(val, int):
+                        rank_in_mesh = val
+                        break
+            if rank_in_mesh is None:
+                raise RuntimeError(
+                    f"could not extract rank from Point: {point} "
+                    f"(attrs={dir(point)})"
+                )
+            my_tile = gpu_ids[rank_in_mesh]
+            env_overlay = {
+                # NARROW mask: each actor sees exactly ONE tile.
+                # Reasons:
+                #   (a) Isolates the SYCL primary context to one tile,
+                #       so oneDNN/onemkl allocators don't fight over
+                #       which tile to put a tensor on.
+                #   (b) Each actor's LOCAL_RANK=0 maps to its only
+                #       visible tile, so torch.xpu.set_device(0) works
+                #       transparently.
+                # Trade-off: forbids intra-actor multi-tile work, which
+                # we don't need at TP=1.
+                "ZE_AFFINITY_MASK": str(my_tile),
+                "LOCAL_RANK": "0",
+                "RANK": str(rank_in_mesh),
+                "WORLD_SIZE": str(num_gpus),
+                "PALS_LOCAL_RANKID": str(rank_in_mesh),
+                "PALS_RANKID": str(rank_in_mesh),
+                "PALS_LOCAL_SIZE": str(local_size),
+                "PALS_NODEID": "0",
+                "PALS_DEPTH": "1",
+                "PALS_PMI": "pmix",
+            }
+            # Forward critical env vars from the controller process.
+            # `bootstrap_command` env overlay REPLACES the actor's
+            # inherited env for the listed keys; anything not listed
+            # comes from monarch's default propagation. But to be
+            # safe, explicitly mirror these (vLLM/oneCCL config):
+            for k in (
+                "VLLM_ATTENTION_BACKEND",
+                "CCL_PROCESS_LAUNCHER",
+                "CCL_ATL_TRANSPORT",
+                "CCL_KVS_IP_PORT",
+                "CCL_LOG_LEVEL",
+                "FI_PROVIDER",
+                "ZE_FLAT_DEVICE_HIERARCHY",
+                "ONEAPI_DEVICE_SELECTOR",
+                "http_proxy",
+                "https_proxy",
+                "no_proxy",
+                "NO_PROXY",
+                "HF_HOME",
+                "HF_HUB_OFFLINE",
+                "TMPDIR",
+                "VIRTUAL_ENV",
+            ):
+                if k in os.environ:
+                    env_overlay[k] = os.environ[k]
+            return base_cmd.with_env(env_overlay)
+
+        return _per_rank
 
     def allocate(self, num_gpus: int) -> Callable[[], None]:
         if num_gpus > self.available:
@@ -89,6 +185,7 @@ class EzpzPerHostProvisioner:
             )
         gpu_ids = list(range(self.next_gpu, self.next_gpu + num_gpus))
         self.next_gpu += num_gpus
+        self.last_allocated_gpu_ids = list(gpu_ids)
         # capture once for the closure
         local_size = num_gpus
 
@@ -147,24 +244,27 @@ class EzpzPerHostProvisioner:
                 if 0 <= rank_in_mesh < len(gpu_ids):
                     my_tile = gpu_ids[rank_in_mesh]
             if my_tile is not None:
-                os.environ["ZE_AFFINITY_MASK"] = str(my_tile)
-                # Each actor process now sees exactly ONE xpu tile,
-                # re-indexed locally as xpu:0. Upstream rl/ does
-                # `torch.xpu.set_device(int(os.environ['LOCAL_RANK']))`,
-                # which would crash for rank_in_mesh>0 because xpu:N
-                # is out of range. Override LOCAL_RANK to 0 so the
-                # device lookup hits the (only) visible tile.
+                # ALL actors in a mesh see the SAME (full-mesh) tile
+                # set. Each actor picks its own tile via LOCAL_RANK.
                 #
-                # Set PALS_LOCAL_RANKID to the REAL rank_in_mesh now
-                # (before init_distributed's patched mirror would
-                # otherwise copy from LOCAL_RANK=0 across all actors).
-                os.environ["LOCAL_RANK"] = "0"
+                # Per-actor narrow masks (e.g. ZE_AFFINITY_MASK=1 for
+                # rank 1) make oneCCL fail with:
+                #   "comm_dev_uuids ... size 2, node_dev_uuids size 1,
+                #    this may happen due to narrow device affinity mask"
+                # followed by ccl_check_usm_pointers: invalid usm
+                # pointer type. The TRL+vllm-serve success case showed
+                # that the working pattern is: each rank sees all
+                # mesh-allocated tiles, LOCAL_RANK picks one.
+                os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
+                os.environ["LOCAL_RANK"] = str(rank_in_mesh)
                 os.environ["PALS_LOCAL_RANKID"] = str(rank_in_mesh)
                 os.environ["PALS_RANKID"] = str(rank_in_mesh)
                 print(
                     f"[xpu_bootstrap pid={os.getpid()}] HYPERACTOR_PROCESS_NAME={hpn!r} "
-                    f"→ rank_in_mesh={rank_in_mesh} → ZE_AFFINITY_MASK={my_tile}, "
-                    f"LOCAL_RANK=0, PALS_*_RANKID={rank_in_mesh}",
+                    f"→ rank_in_mesh={rank_in_mesh} → "
+                    f"ZE_AFFINITY_MASK={os.environ['ZE_AFFINITY_MASK']} "
+                    f"(my_tile={my_tile} via LOCAL_RANK={rank_in_mesh}), "
+                    f"PALS_*_RANKID={rank_in_mesh}",
                     flush=True,
                     file=_sys.stderr,
                 )
@@ -199,6 +299,9 @@ class EzpzPerHostProvisioner:
             import torch.distributed.checkpoint  # noqa: F401
             import torch.distributed.checkpoint._nested_dict  # noqa: F401
 
+        # Stash the tile range on the closure so the caller can build
+        # the per-rank BootstrapCommand env from the same allocation.
+        _bootstrap.gpu_ids = list(gpu_ids)  # type: ignore[attr-defined]
         return _bootstrap
 
 
@@ -240,15 +343,22 @@ def patch_init_distributed_for_xpu() -> None:
         os.environ["PALS_RANKID"] = r or "0"
         # PALS_LOCAL_SIZE was set in _bootstrap from the provisioner's
         # num_gpus; that's the per-actor-mesh size, correct as-is.
-        ws = os.environ.get("WORLD_SIZE")
-        print(
-            f"[xpu_patch pid={os.getpid()}] env dump at init_distributed: "
-            f"MASTER_ADDR={os.environ.get('MASTER_ADDR')!r} "
-            f"MASTER_PORT={os.environ.get('MASTER_PORT')!r} "
-            f"RANK={r!r} WORLD_SIZE={ws!r} LOCAL_RANK={lr!r}",
-            flush=True,
-            file=sys.stderr,
-        )
+
+        # CRITICAL: force enable_cpu_backend=True on XPU so the default
+        # PG is a hybrid "xpu:xccl,cpu:gloo" instead of pure xccl.
+        # DCP planner uses dist.all_gather_object with object pickles
+        # routed through CPU tensors; on pure xccl, oneCCL's
+        # ccl_check_usm_pointers blocks every call because torch.xpu's
+        # USM-device allocator returns pointers that sycl::
+        # get_pointer_type can't classify. With the gloo CPU backend
+        # available, object collectives stay on CPU and avoid xccl.
+        if not torch.cuda.is_available() and len(args) >= 1:
+            comm_config = args[0]
+            # comm_config is positional arg 0; enable_cpu_backend is arg 1
+            if len(args) >= 2:
+                args = (comm_config, True, *args[2:])
+            else:
+                kwargs["enable_cpu_backend"] = True
         return orig(*args, **kwargs)
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
@@ -495,6 +605,220 @@ def patch_torch_cuda_aliases_for_xpu() -> None:
     )
 
 
+def patch_dtensor_make_replicate_for_xpu() -> None:
+    """Rebox the input tensor to Replicate._make_replicate_tensor.
+
+    DTensor's `Replicate._make_replicate_tensor` calls mesh_broadcast on
+    whatever tensor it's given. On XPU under Monarch's spawn pattern,
+    even tensors freshly allocated with `torch.empty(device=xpu)` fail
+    oneCCL's USM pointer check during broadcast.
+
+    Hypothesis: the buffer init path allocates via paths that don't
+    fully fill the USM-device pointer metadata. Re-allocating via
+    `torch.empty_like(t, device=t.device).copy_(t)` forces a fresh
+    SYCL-USM-device allocation through the caching allocator → oneCCL
+    recognizes it.
+    """
+    if torch.cuda.is_available():
+        return
+    import torch.distributed.tensor.placement_types as _pt
+
+    orig = _pt.Replicate._make_replicate_tensor
+    if getattr(orig, "_xpu_patched", False):
+        return
+
+    @staticmethod
+    def _patched(local_tensor, device_mesh, mesh_dim, src_data_rank=0):
+        # XPU + oneCCL workaround: SKIP the broadcast entirely.
+        # Every TP rank already constructed the same buffer locally
+        # (parallelize_fn runs identical code on every rank, and
+        # init_states / RoPE recompute caches via deterministic math
+        # — no random init crosses ranks). So Replicate-placement
+        # buffers are bitwise identical across TP ranks *before* the
+        # broadcast even fires.
+        #
+        # oneCCL's `ccl_check_usm_pointers` returns "unknown" for
+        # torch.xpu's USM allocations under torch 2.13 (sycl::
+        # get_pointer_type can't classify them across SYCL contexts),
+        # so every broadcast crashes. Bypassing the broadcast and
+        # returning the local tensor preserves correctness as long as
+        # the inputs really are identical across ranks — which they are
+        # for the deterministic init paths this protects.
+        #
+        # If a true rank-divergent buffer ever needs Replicate, this
+        # WILL silently break it. So far (Qwen3 RoPE, RMSNorm scale,
+        # etc.) all hits are deterministic re-computation, not broadcast.
+        my_coordinate = device_mesh.get_coordinate()
+        if my_coordinate is None:
+            return local_tensor.new_empty(
+                0, requires_grad=local_tensor.requires_grad
+            )
+        return local_tensor.contiguous()
+
+    _patched._xpu_patched = True
+    _pt.Replicate._make_replicate_tensor = _patched
+    logger.info("Patched DTensor Replicate._make_replicate_tensor to rebox xpu tensors")
+
+
+def patch_vllm_xpu_no_alias_current_stream() -> None:
+    """Stop vLLM-XPU from aliasing ``torch.cuda.current_stream``.
+
+    vLLM-XPU's ``v1/worker/xpu_model_runner._torch_cuda_wrapper`` does
+        torch.cuda.current_stream = torch.xpu.current_stream
+    permanently (it's a context manager but doesn't restore on exit).
+    Dynamo's handler-registration then trips its
+    ``AssertionError: Handler already registered`` when the same
+    function appears twice in
+        register(torch.accelerator.current_stream,
+                 torch.cuda.current_stream,
+                 torch.xpu.current_stream)
+
+    Replace the offending wrapper with a version that does NOT alias
+    ``current_stream`` (or ``Stream`` / ``default_stream`` / ``stream``).
+    The Qwen3 model and vLLM internals reach for stream via
+    ``torch.accelerator.current_stream()`` anyway, which already works
+    on XPU.
+    """
+    if torch.cuda.is_available():
+        return
+    try:
+        from vllm.v1.worker import xpu_model_runner as _xmr
+    except ImportError:
+        return
+    if getattr(_xmr, "_xpu_wrapper_no_alias_patched", False):
+        return
+
+    import contextlib as _ctx
+
+    @_ctx.contextmanager
+    def _patched_wrapper():
+        # Mirror upstream but SKIP `torch.cuda.current_stream = ...`
+        # to avoid Dynamo's "Handler already registered" assertion
+        # when (cuda, xpu, accelerator).current_stream all resolve to
+        # the same function object.
+        torch.cuda.Stream = torch.xpu.Stream
+        torch.cuda.default_stream = torch.xpu.current_stream
+        # torch.cuda.current_stream = torch.xpu.current_stream  ← SKIP
+        torch.cuda.stream = torch.xpu.stream
+        torch.cuda.mem_get_info = torch.xpu.mem_get_info
+        torch.cuda.Event = torch.Event
+        torch.cuda.set_stream = torch.xpu.set_stream
+        try:
+            from vllm.v1.worker.xpu_model_runner import supports_xpu_graph
+            if supports_xpu_graph():
+                torch.cuda.graph = torch.xpu.graph
+                torch.cuda.CUDAGraph = torch.xpu.XPUGraph
+                torch.cuda.graph_pool_handle = torch.xpu.graph_pool_handle
+        except Exception:
+            pass
+        yield
+
+    _xmr._torch_cuda_wrapper = _patched_wrapper
+    _xmr._xpu_wrapper_no_alias_patched = True
+    print(
+        f"[xpu_overrides pid={os.getpid()}] "
+        "Patched vllm._torch_cuda_wrapper to NOT alias current_stream "
+        "(avoids torch._dynamo duplicate-handler assertion)",
+        flush=True,
+        file=__import__("sys").stderr,
+    )
+
+
+def patch_vllm_xpu_attention_backend() -> None:
+    """Allow ``AttentionBackendEnum.CUSTOM`` on vLLM-XPU.
+
+    ``rl/actors/generator.py`` configures vLLM with
+    ``AttentionBackendEnum.CUSTOM`` when the model spec uses
+    ``VarlenAttention.Config`` (rl_grpo_qwen3_0_6b_varlen). vLLM-XPU's
+    platform selector only recognizes TRITON_ATTN / FLASH_ATTN and
+    raises ``ValueError: Invalid attention backend for xpu`` for any
+    other backend — including CUSTOM, even though CUSTOM is registered
+    via ``register_backend`` and works on CUDA.
+
+    Patch the selector to return CUSTOM's registered path when CUSTOM
+    is requested, otherwise delegate to the original.
+    """
+    if torch.cuda.is_available():
+        return
+    try:
+        from vllm.platforms.xpu import XPUPlatform
+        from vllm.v1.attention.backends.registry import AttentionBackendEnum
+    except ImportError:
+        return
+
+    orig = XPUPlatform.get_attn_backend_cls
+    if getattr(orig, "_xpu_patched", False):
+        return
+
+    @classmethod
+    def patched(cls, selected_backend, attn_selector_config, num_heads=None):
+        if selected_backend == AttentionBackendEnum.CUSTOM:
+            return AttentionBackendEnum.CUSTOM.get_path()
+        return orig.__func__(cls, selected_backend, attn_selector_config, num_heads)
+
+    patched.__func__._xpu_patched = True  # type: ignore[attr-defined]
+    XPUPlatform.get_attn_backend_cls = patched
+    print(
+        f"[xpu_overrides pid={os.getpid()}] "
+        "Patched XPUPlatform.get_attn_backend_cls to accept CUSTOM backend",
+        flush=True,
+        file=__import__("sys").stderr,
+    )
+
+
+def patch_vllm_xpu_skip_oneccl_warmup() -> None:
+    """Skip vLLM-XPU's oneCCL warmup all_reduce in the engine's worker.
+
+    `vllm/v1/worker/xpu_worker.py` does
+        torch.distributed.all_reduce(torch.zeros(1).xpu())
+    after `init_worker_distributed_environment` to "warm up oneCCL".
+    On Monarch-spawned actors (no PMIx), this allreduce hits oneCCL's
+    `ccl_check_usm_pointers` which returns "invalid usm pointer type:
+    unknown" and crashes the engine init.
+
+    Monkey-patch `torch.distributed.all_reduce` with a guard: skip if
+    the only caller is vllm's xpu warmup site. Use a module-level
+    flag so we only short-circuit the specific warmup call, not real
+    user-issued allreduces.
+    """
+    if torch.cuda.is_available():
+        return
+
+    import torch.distributed as _dist
+
+    orig_all_reduce = _dist.all_reduce
+    if getattr(orig_all_reduce, "_xpu_warmup_patched", False):
+        return
+
+    def patched_all_reduce(tensor, *args, **kwargs):
+        # Cheap inspection: only suppress the literal warmup tensor.
+        if (
+            tensor is not None
+            and tensor.numel() == 1
+            and tensor.device.type == "xpu"
+        ):
+            # Check the call stack one frame up.
+            import sys as _sys
+
+            frame = _sys._getframe(1)
+            if (
+                frame is not None
+                and frame.f_code.co_filename.endswith("xpu_worker.py")
+                and frame.f_code.co_name == "init_device"
+            ):
+                print(
+                    f"[xpu_overrides pid={os.getpid()}] "
+                    "Suppressed vllm-xpu oneCCL warmup all_reduce",
+                    flush=True,
+                    file=__import__("sys").stderr,
+                )
+                return None
+        return orig_all_reduce(tensor, *args, **kwargs)
+
+    patched_all_reduce._xpu_warmup_patched = True  # type: ignore[attr-defined]
+    _dist.all_reduce = patched_all_reduce
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -513,5 +837,12 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()
     patch_torch_cuda_aliases_for_xpu()
-    patch_torch_xpu_set_device_for_single_tile()
+    # Note: patch_torch_xpu_set_device_for_single_tile is intentionally
+    # NOT applied. We now give each actor full mesh visibility and use
+    # LOCAL_RANK to pick the tile, matching the working TRL+vllm-serve
+    # pattern. Per-actor narrow masks broke oneCCL's USM check.
+    patch_dtensor_make_replicate_for_xpu()
+    patch_vllm_xpu_skip_oneccl_warmup()
+    patch_vllm_xpu_attention_backend()
+    patch_vllm_xpu_no_alias_current_stream()
     setup_oneccl_tcp_kvs_for_xpu()
