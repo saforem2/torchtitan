@@ -164,6 +164,46 @@ The XPU porting layer (`xpu_overrides.py`) is reusable for either —
 the `has_cuda_capability` patch and `EzpzPerHostProvisioner` apply
 regardless of how the worker processes are launched.
 
+## Update 2026-06-13 late eve: TCP-KVS XCCL fix tried but Monarch path STILL blocked
+
+After the TCP-KVS XCCL discovery unblocked Track C (TRL+vllm-serve,
+see `grpo-on-xpu-status.md`), I applied the same fix to the Monarch
+path (jobs 12468781, 12468782). Same env vars set, same
+`apply_all_xpu_patches()` running in each actor's `_bootstrap`:
+
+```
+[xpu_patch] override PALS_LOCAL_RANKID=1 PALS_RANKID=1
+   CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi FI_PROVIDER=tcp
+   CCL_KVS_IP_PORT=127.0.0.1_29515 PALS_LOCAL_SIZE=2
+```
+
+Diagnostic confirms every env var oneCCL needs is present at
+`init_distributed` time. Yet the same `mesh_broadcast` →
+`ccl_check_usm_pointers: invalid usm pointer type` error fires.
+
+So the TCP-KVS env knobs are **necessary but still not sufficient**
+for Monarch's particular spawn pattern. The remaining hypotheses:
+
+1. **Process-tree relationship**: TRL's working case has each rank
+   independently launched from bash (mpiexec child or background
+   subshell). Monarch's actors all descend from a single Python
+   parent via `BootstrapCommand(program=...)`. Even though execve
+   gives them fresh interpreters, something about that shared
+   ancestry might leak into oneCCL/SYCL state.
+2. **TCPStore vs env://**: TRL's `init_communicator` constructs an
+   explicit `torch.distributed.TCPStore` and passes it to
+   `ProcessGroupXCCL`. The torchtitan trainer calls
+   `init_process_group(backend="xccl")` without a store, falling
+   back to env-based rendezvous. The env-based path may invoke
+   different oneCCL init code that still trips PMI.
+3. **Master-bind race**: TCPStore needs one rank to be `is_master=True`
+   and bind the port. With Monarch spawning 6 actors near-simultaneously,
+   the race to bind could mess up rendezvous.
+
+Track C unblocks production GRPO on XPU, so the urgency to fix the
+Monarch path is lower. The XPU porting shim (`xpu_overrides.py`)
+remains the right place to land any further fixes when revisited.
+
 ## Update 2026-06-13 PM: Track C confirmed working (job 12468772)
 
 `trl_vllm_serve_smoke.sh` runs `trl vllm-serve` from `venvs/rl-vllm/`

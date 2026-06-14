@@ -132,29 +132,20 @@ class EzpzPerHostProvisioner:
 
 
 def patch_init_distributed_for_xpu() -> None:
-    """Force torchtitan's trainer process group to use Gloo on XPU.
+    """Override per-rank PALS_*_RANKID right before init_process_group.
 
-    Diagnostic results from job 12468765 confirmed our PALS_LOCAL_RANKID /
-    PALS_RANKID env injection runs correctly in each Monarch-spawned
-    actor — yet oneCCL XCCL still rejects every collective with
-    "ccl_check_usm_pointers: invalid usm pointer type". The env vars
-    are necessary-but-not-sufficient: oneCCL needs an *active* PMIx
-    rendezvous (provided by a real mpiexec launcher), not just env
-    strings. Monarch's fork-based spawn doesn't supply one.
+    Wraps `torchtitan.distributed.utils.init_distributed` and, just
+    before the first XCCL collective fires, OVERRIDES the inherited
+    PALS_LOCAL_RANKID / PALS_RANKID env vars with the actor's actual
+    LOCAL_RANK / RANK. This matters when launching under
+    `mpiexec --np 1` (the controller's launcher), which sets
+    PALS_RANKID=0 on every child even though Monarch spawns N children
+    with logical ranks 0..N-1.
 
-    Pragmatic workaround: replace `_get_distributed_backend` in
-    `torchtitan.distributed.utils` so it returns `"gloo"` instead of
-    `"xccl"`. Gloo doesn't go through oneCCL at all — it does CPU-side
-    rendezvous and ring/tree collectives. It's slower than XCCL but
-    bypasses the USM issue entirely.
-
-    This is fine for trainer-side parameter sharding/state-sync (which
-    happens infrequently). vLLM-XPU's GENERATOR side still uses XCCL
-    via its own process group (TP=4 internal); that's launched via
-    vLLM's "external launcher" which IS PMIx-aware and works.
-
-    Patches `torchtitan.distributed.utils.init_distributed` to wrap
-    `_get_distributed_backend` returning `"gloo"`.
+    Pairs with `setup_oneccl_tcp_kvs_for_xpu()` which sets the static
+    CCL_*/FI_* knobs in _bootstrap. Together they let oneCCL form an
+    XCCL group across Monarch-spawned actors using TCP-KVS rendezvous
+    (no PMIx parent needed).
     """
     if torch.cuda.is_available():
         return
@@ -174,30 +165,18 @@ def patch_init_distributed_for_xpu() -> None:
         if r is not None:
             os.environ.setdefault("PALS_RANKID", r)
 
-        # The trainer needs XCCL (not Gloo — Gloo is CPU-only and
-        # can't broadcast xpu tensors). For XCCL to work, oneCCL
-        # needs PALS_LOCAL_RANKID + PALS_RANKID to match the actor's
-        # mesh-local rank, NOT the launcher's rank-0 (inherited from
-        # the outer mpiexec --np 1 wrapper).
-        #
-        # Use `=` not `setdefault` so we OVERRIDE the inherited
-        # launcher values from PMIx with the actor's actual rank.
+        # Override (not setdefault) so we replace the inherited
+        # launcher's PALS_RANKID=0 with this actor's logical rank.
         os.environ["PALS_LOCAL_RANKID"] = lr or "0"
         os.environ["PALS_RANKID"] = r or "0"
         # PALS_LOCAL_SIZE was set in _bootstrap from the provisioner's
         # num_gpus; that's the per-actor-mesh size, correct as-is.
-        # Don't touch it here.
-        print(
-            f"[xpu_patch pid={os.getpid()}] override PALS_LOCAL_RANKID={lr} PALS_RANKID={r}",
-            flush=True,
-            file=sys.stderr,
-        )
         return orig(*args, **kwargs)
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
     _dutils.init_distributed = patched
     print(
-        f"[xpu_overrides pid={os.getpid()}] Patched torchtitan init_distributed (XCCL → Gloo on XPU)",
+        f"[xpu_overrides pid={os.getpid()}] Patched torchtitan init_distributed (PALS_*_RANKID override)",
         flush=True,
         file=__import__("sys").stderr,
     )
