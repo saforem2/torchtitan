@@ -164,6 +164,50 @@ The XPU porting layer (`xpu_overrides.py`) is reusable for either —
 the `has_cuda_capability` patch and `EzpzPerHostProvisioner` apply
 regardless of how the worker processes are launched.
 
+## Update 2026-06-13 deep eve: extensive Monarch-port investigation (jobs 12468783..12468794)
+
+After Track C (TRL+vllm-serve) landed working GRPO end-to-end, took
+a serious run at unblocking the Monarch+TorchStore path. 12 iterations
+each pushed the failure to a new layer:
+
+| Job | Discovery | Fix added |
+|---|---|---|
+| 12468783-784 | MASTER_ADDR/RANK/LOCAL_RANK env all correct at init_distributed | (diagnostic only) |
+| 12468785 | per-actor ZE_AFFINITY_MASK needed (was 0,1 for both trainer ranks) | parse HYPERACTOR_PROCESS_NAME |
+| 12468786-788 | Monarch's HYPERACTOR_PROCESS_NAME='anon-N' gives per-actor rank | extract N as rank_in_mesh |
+| 12468789 | trainer.__init__ crashes: xpu:1 out of range | force LOCAL_RANK=0 + PALS_*_RANKID=rank_in_mesh in _bootstrap |
+| 12468790 | Monarch RESETS LOCAL_RANK between _bootstrap and trainer.__init__ | (diagnostic confirmed) |
+| 12468791 | set_device patched to pin device 0 | torch.xpu.set_device→0 |
+| 12468792 | torch.device patch broke type unions (`int \| device \| None`) | reverted |
+| 12468793 | os.environ wrapper for LOCAL_RANK reads | patched __getitem__/get to always return "0" |
+| 12468794 | RNG broadcast → fixed; now buffer init broadcast also fails | rewrote _get_device_state to use torch.empty(device=) for USM |
+
+**Net result**: every DTensor broadcast on XPU under Monarch's spawn
+pattern still fails the USM check, regardless of how much we sanitize
+the env. The RNG-state broadcast was just the first; `init_states →
+distribute_tensor → _make_replicate_tensor → mesh_broadcast` is the
+next, and there are more.
+
+The 2-process bare baseline (`mpiexec --np 2 python ... torch.zeros
+(device='xpu:0'); dist.broadcast(t)`) works perfectly. The same
+broadcast inside DTensor's Replicate-placement materialization under
+Monarch fails. The differentiator is something about how DTensor's
+internal tensor allocation interacts with Monarch's process tree —
+likely each `_make_replicate_tensor` allocation goes through a path
+that doesn't produce SYCL-USM-device memory.
+
+**Fixing this would require either**:
+- An upstream torch.xpu / oneCCL change so allocator paths reliably
+  produce USM-classified tensors regardless of how they're constructed.
+- Reimplementing `Replicate._make_replicate_tensor` (and the other
+  DTensor collective wrappers) to allocate via `torch.empty(device=...)`
+  + copy_ rather than `.to(device)`. Too intrusive to do as a shim.
+
+Track C remains the working production path. The `xpu_overrides.py`
+patches added during this investigation are independently useful (the
+RNG-state USM allocator fix, the LOCAL_RANK hook, the set_device pin)
+and are kept in place for future Monarch attempts.
+
 ## Update 2026-06-13 late eve: TCP-KVS XCCL fix tried but Monarch path STILL blocked
 
 After the TCP-KVS XCCL discovery unblocked Track C (TRL+vllm-serve,

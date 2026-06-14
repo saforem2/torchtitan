@@ -96,16 +96,87 @@ class EzpzPerHostProvisioner:
             # Runs ONCE inside each Monarch-spawned actor process,
             # BEFORE the actor's __init__ runs.
             #
-            # We're running under `mpiexec --np 1 ./venvs/.../python
-            # -m torchtitan.experiments.ezpz.rl.train_upstream`. The
-            # launcher's mpiexec sets PALS_LOCAL_SIZE=1, PALS_RANKID=0,
-            # etc — those values describe the LAUNCHER's mesh, not the
-            # actor's. Monarch-spawned actors form a separate per-mesh
-            # rank space (trainer mesh has size N, generator mesh has
-            # size M). Override the inherited launcher values with the
-            # actor mesh values so oneCCL sets up its SYCL queue for
-            # the right tile.
-            os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
+            # CRITICAL: on XPU, each actor must get a SINGLE-TILE
+            # ZE_AFFINITY_MASK (not the full mesh range). With
+            # `ZE_AFFINITY_MASK=0,1` set on both trainer actors, both
+            # processes see both tiles and oneCCL's USM check fails
+            # because the SYCL contexts get confused about which tile
+            # each tensor lives on.
+            #
+            # We don't have per-actor rank info inside this closure
+            # (Monarch passes the full gpu_ids list to every actor).
+            # But each actor's LOCAL_RANK is set by Monarch in env
+            # BEFORE _bootstrap runs. Use it to pick a single tile
+            # from gpu_ids.
+            # Diagnostic dump: which env vars CAN we use to identify this actor?
+            import sys as _sys
+
+            _candidate_keys = [
+                "LOCAL_RANK", "RANK", "WORLD_SIZE",
+                "MONARCH_RANK", "MONARCH_LOCAL_RANK", "MONARCH_WORLD_SIZE",
+                "HYPERACTOR_RANK", "HYPERACTOR_LOCAL_RANK",
+                "PALS_LOCAL_RANKID", "PALS_RANKID",
+                "PMI_RANK", "PMI_LOCAL_RANK",
+                "PMIX_RANK", "PMIX_LOCAL_RANK",
+            ]
+            _hits = {k: os.environ[k] for k in _candidate_keys if k in os.environ}
+            _monarch_kv = {
+                k: os.environ[k]
+                for k in os.environ
+                if "MONARCH" in k.upper() or "HYPERACTOR" in k.upper()
+            }
+            print(
+                f"[xpu_bootstrap pid={os.getpid()}] gpu_ids={gpu_ids} "
+                f"candidate-env={_hits} monarch-env={_monarch_kv}",
+                flush=True,
+                file=_sys.stderr,
+            )
+            # Monarch encodes the actor's identity in HYPERACTOR_PROCESS_NAME
+            # (as 'anon-N<...>'). Extract N as the per-actor rank within
+            # this mesh and use it to pick a single tile from gpu_ids.
+            #
+            # Falls back to full-mesh ZE_AFFINITY_MASK (CUDA-style) if we
+            # can't parse — e.g. when run outside Monarch.
+            my_tile = None
+            import re
+
+            hpn = os.environ.get("HYPERACTOR_PROCESS_NAME", "")
+            m = re.search(r"anon-(\d+)", hpn)
+            if m:
+                rank_in_mesh = int(m.group(1))
+                if 0 <= rank_in_mesh < len(gpu_ids):
+                    my_tile = gpu_ids[rank_in_mesh]
+            if my_tile is not None:
+                os.environ["ZE_AFFINITY_MASK"] = str(my_tile)
+                # Each actor process now sees exactly ONE xpu tile,
+                # re-indexed locally as xpu:0. Upstream rl/ does
+                # `torch.xpu.set_device(int(os.environ['LOCAL_RANK']))`,
+                # which would crash for rank_in_mesh>0 because xpu:N
+                # is out of range. Override LOCAL_RANK to 0 so the
+                # device lookup hits the (only) visible tile.
+                #
+                # Set PALS_LOCAL_RANKID to the REAL rank_in_mesh now
+                # (before init_distributed's patched mirror would
+                # otherwise copy from LOCAL_RANK=0 across all actors).
+                os.environ["LOCAL_RANK"] = "0"
+                os.environ["PALS_LOCAL_RANKID"] = str(rank_in_mesh)
+                os.environ["PALS_RANKID"] = str(rank_in_mesh)
+                print(
+                    f"[xpu_bootstrap pid={os.getpid()}] HYPERACTOR_PROCESS_NAME={hpn!r} "
+                    f"→ rank_in_mesh={rank_in_mesh} → ZE_AFFINITY_MASK={my_tile}, "
+                    f"LOCAL_RANK=0, PALS_*_RANKID={rank_in_mesh}",
+                    flush=True,
+                    file=_sys.stderr,
+                )
+            else:
+                os.environ["ZE_AFFINITY_MASK"] = ",".join(str(g) for g in gpu_ids)
+                print(
+                    f"[xpu_bootstrap pid={os.getpid()}] could not parse rank from "
+                    f"HYPERACTOR_PROCESS_NAME={hpn!r}, falling back to "
+                    f"ZE_AFFINITY_MASK={os.environ['ZE_AFFINITY_MASK']}",
+                    flush=True,
+                    file=_sys.stderr,
+                )
             os.environ["PALS_LOCAL_SIZE"] = str(local_size)
             os.environ["PALS_NODEID"] = "0"
             os.environ["PALS_DEPTH"] = "1"
@@ -156,8 +227,6 @@ def patch_init_distributed_for_xpu() -> None:
         return
 
     def patched(*args, **kwargs):
-        import sys
-
         lr = os.environ.get("LOCAL_RANK")
         r = os.environ.get("RANK")
         if lr is not None:
@@ -171,6 +240,15 @@ def patch_init_distributed_for_xpu() -> None:
         os.environ["PALS_RANKID"] = r or "0"
         # PALS_LOCAL_SIZE was set in _bootstrap from the provisioner's
         # num_gpus; that's the per-actor-mesh size, correct as-is.
+        ws = os.environ.get("WORLD_SIZE")
+        print(
+            f"[xpu_patch pid={os.getpid()}] env dump at init_distributed: "
+            f"MASTER_ADDR={os.environ.get('MASTER_ADDR')!r} "
+            f"MASTER_PORT={os.environ.get('MASTER_PORT')!r} "
+            f"RANK={r!r} WORLD_SIZE={ws!r} LOCAL_RANK={lr!r}",
+            flush=True,
+            file=sys.stderr,
+        )
         return orig(*args, **kwargs)
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
@@ -204,21 +282,21 @@ def patch_has_cuda_capability_for_xpu() -> None:
 
 
 def patch_dtensor_rng_broadcast_for_xpu() -> None:
-    """Skip the world_size=1 RNG-state broadcast in DTensor.
+    """Fix DTensor's RNG-state broadcast for XPU.
 
     `torch.distributed.tensor._random.OffsetBasedRNGTracker.__init__`
-    unconditionally calls `torch.distributed.broadcast(rng_state, 0)`
-    to sync rank-0's RNG state across the mesh. On XPU, `rng_state`
-    is a CPU ByteTensor moved to the XPU device, and oneCCL XCCL
-    rejects the broadcast with "ccl_check_usm_pointers: invalid usm
-    pointer type: unknown for device type: gpu" — the .to(xpu) path
-    doesn't produce a SYCL-USM-device-allocated tensor.
+    calls `torch.distributed.broadcast(rng_state, 0)` to sync rank-0's
+    RNG state across the mesh. On XPU, `rng_state` is built via
+    `device_handle.get_rng_state().to(self._device)` — a CPU ByteTensor
+    moved to XPU via `.to()`. The resulting tensor's allocation is NOT
+    SYCL-USM-device, so oneCCL XCCL rejects the broadcast with
+    "ccl_check_usm_pointers: invalid usm pointer type: unknown".
 
-    At world_size=1 the broadcast is a no-op, so we can simply skip
-    it. At world_size>1 we still trip the bug; that needs an upstream
-    fix in torch.xpu's allocator or in oneCCL's USM check.
-
-    Idempotent.
+    Two fixes:
+      1. At world_size=1, skip the broadcast (no-op anyway).
+      2. At world_size>1, replace `_get_device_state` to allocate via
+         `torch.empty(..., device=...)` (which DOES go through the
+         caching allocator → USM device memory) and copy_ into it.
     """
     if torch.cuda.is_available():
         return
@@ -226,23 +304,32 @@ def patch_dtensor_rng_broadcast_for_xpu() -> None:
     import torch.distributed.tensor._random as _dtrand
 
     orig_init = _dtrand.OffsetBasedRNGTracker.__init__
+    orig_get_state = _dtrand.OffsetBasedRNGTracker._get_device_state
     if getattr(orig_init, "_xpu_patched", False):
         return
 
+    def patched_get_device_state(self):
+        # Always allocate a fresh device-side USM tensor and copy from
+        # the CPU rng_state into it. The plain `.to(device)` path
+        # produces a tensor whose allocation oneCCL can't classify.
+        # `torch.empty(..., device=...)` goes through the caching
+        # allocator → SYCL USM device memory → recognized by oneCCL.
+        cpu_state = self._device_handle.get_rng_state()
+        device_state = torch.empty_like(cpu_state, device=self._device)
+        device_state.copy_(cpu_state)
+        return device_state
+
     def patched_init(self, device_mesh, run_state_sync=True):
-        # If we're single-rank on this mesh, the broadcast is a no-op.
-        # Force run_state_sync=False to skip the offending call.
         if not dist.is_initialized() or dist.get_world_size() == 1:
             return orig_init(self, device_mesh, run_state_sync=False)
-        # World > 1: same call path, will still trip the USM check.
-        # TODO: replace rng_state.to(self._device) with a torch.xpu.empty()+copy_
-        #       so the destination tensor is SYCL-USM-allocated.
         return orig_init(self, device_mesh, run_state_sync=run_state_sync)
 
     patched_init._xpu_patched = True  # type: ignore[attr-defined]
     _dtrand.OffsetBasedRNGTracker.__init__ = patched_init
+    _dtrand.OffsetBasedRNGTracker._get_device_state = patched_get_device_state
     logger.info(
-        "Patched OffsetBasedRNGTracker.__init__ to skip world_size=1 RNG broadcast on XPU"
+        "Patched OffsetBasedRNGTracker for XPU: skip ws=1 broadcast + "
+        "_get_device_state uses torch.empty(device=...) for USM allocation"
     )
 
 
@@ -306,6 +393,77 @@ def setup_oneccl_tcp_kvs_for_xpu() -> None:
     )
 
 
+def patch_torch_xpu_set_device_for_single_tile() -> None:
+    """Pin all xpu device references in this process to `xpu:0`.
+
+    When ZE_AFFINITY_MASK pins this process to a single tile, the
+    only visible XPU device is `xpu:0` (re-indexed locally). But
+    upstream `rl/actors/trainer.py:186` reads
+    `int(os.environ['LOCAL_RANK'])` and uses it as an xpu device
+    index. Monarch's lifecycle resets LOCAL_RANK between our
+    `_bootstrap` override (LOCAL_RANK=0) and the trainer's
+    `__init__` (LOCAL_RANK=1 for anon-1).
+
+    Cleanest fix: replace `os.environ` with a wrapper that always
+    returns `"0"` for `LOCAL_RANK` lookups, while passing every
+    other key through unchanged. Then any code reading
+    `os.environ['LOCAL_RANK']` gets the device index that actually
+    works in this single-tile-masked process, regardless of who
+    last wrote to the underlying env.
+
+    The REAL per-actor rank is preserved in `PALS_*_RANKID` /
+    `RANK`, which is what torch.distributed env-rendezvous uses.
+
+    Also patches `torch.xpu.set_device` as belt-and-braces in case
+    something computes the index from a different source.
+
+    Idempotent. Call from _bootstrap BEFORE any torch.xpu use.
+    """
+    if torch.cuda.is_available():
+        return
+    if getattr(torch.xpu.set_device, "_xpu_pinned", False):
+        return
+
+    # 1. Override LOCAL_RANK reads via os.environ wrapper.
+    # We can't subclass os._Environ trivially (it's bound to libc
+    # in some Python builds), so we override the key directly and
+    # use a sys.audit hook... actually simpler: just override the
+    # __getitem__ via instance method swap.
+    import os as _os
+    _orig_getitem = _os.environ.__class__.__getitem__
+
+    def _patched_getitem(self, key):
+        if key == "LOCAL_RANK":
+            return "0"
+        return _orig_getitem(self, key)
+
+    _os.environ.__class__.__getitem__ = _patched_getitem
+
+    # Also override .get for consistency
+    _orig_get = _os.environ.__class__.get
+
+    def _patched_get(self, key, default=None):
+        if key == "LOCAL_RANK":
+            return "0"
+        return _orig_get(self, key, default)
+
+    _os.environ.__class__.get = _patched_get
+
+    # 2. set_device — belt-and-braces
+    orig_set = torch.xpu.set_device
+
+    def pinned_set(device, /):
+        return orig_set(0)
+
+    pinned_set._xpu_pinned = True  # type: ignore[attr-defined]
+    torch.xpu.set_device = pinned_set
+
+    logger.info(
+        "Patched os.environ['LOCAL_RANK']→'0' and torch.xpu.set_device→0 "
+        "for single-tile actor"
+    )
+
+
 def patch_torch_cuda_aliases_for_xpu() -> None:
     """Alias `torch.cuda.current_device()` → `torch.xpu.current_device()`.
 
@@ -355,4 +513,5 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()
     patch_torch_cuda_aliases_for_xpu()
+    patch_torch_xpu_set_device_for_single_tile()
     setup_oneccl_tcp_kvs_for_xpu()
