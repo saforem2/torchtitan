@@ -5,6 +5,22 @@
 trained 20 steps clean at GBS≥192 is `--training.mixed-precision-param=float32`
 at TP=4.
 
+> **UPDATE 2026-06-24 — the "fp32-acts is the only clean path at GBS≥192"
+> conclusion is INCOMPLETE.** A config this factorial never tested,
+> **TP=4 + LBS=1 + bf16 + GBS=372 (reached via GAS=2, not LBS)**, trained
+> 20 and 30 clean steps in pure bf16 (Sunspot jobs 12469494, 12469509).
+> The factorial only tried TP=4 at GBS=96 (LBS=1, NaN step 18) and TP=4
+> GBS=192 via **LBS=2** (NaN step 2) — it never ran TP=4 LBS=1 with GAS to
+> push GBS up. Reframed trigger: the NaN tracks **LBS>1** and **large
+> dp_degree** (= NGPUS/TP), not raw GBS. Keeping LBS=1 and dp_degree
+> low (TP=4 halves it: 744/4=186 vs 744/2=372) stays in the safe regime
+> in pure bf16. Full matrix + perf numbers:
+> `docs/production/agpt/80b/README.md` ("grad_norm NaN: two independent
+> triggers"). Stability of the bf16 path is still under confirmation
+> (repeats in flight) — the nondeterminism caveat below still applies, so
+> this is "promising, not yet proven." fp32-acts remains the safe
+> fallback.
+
 ## 🚨🚨 Counter-evidence (2026-06-12 evening, 8540102)
 
 **`--debug.deterministic` does NOT scale to n=64.** The fix that was

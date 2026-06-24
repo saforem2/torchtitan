@@ -95,6 +95,29 @@ batch-size ramp (`FaultTolerantTrainer.batch_ramp_steps`, commit
 `09f2d243b`) ramps GAS only (LBS/dp fixed), so it mitigates the
 dp-degree onset but NOT the LBS trigger.
 
+#### Stability of the TP=4/LBS=1/bf16 path (in progress, 2026-06-24)
+
+The clean 80B runs were single shots, and the failure mode is partly
+**nondeterministic** (see the n32 diagnosis doc reconciliation below: the
+*same* config can be clean or NaN run-to-run depending on XPU execution
+order during the step-15-17 grad spike). So one clean 20-step run is NOT
+proof of a stable path. Running repeats of the exact clean config
+(TP=4, LBS=1, GAS=2, GBS=372, bf16, LR=1e-6) to test:
+
+| Job ID | Steps | Result |
+|--------|-------|--------|
+| 12469494 | 20 | clean, loss 12.94 -> 10.31, 0 NaN |
+| 12469509 | 30 | clean, loss 12.94 -> 9.69, 0 NaN (cleared the step-15-20 danger zone) |
+| 12469510 | 30 | in progress (clean past step 24 as of writing) |
+| 12469511 | 30 | queued |
+
+2 full clean passes confirmed so far (one 20-step, one 30-step), both
+traversing the danger window that NaN'd every TP=2 GBS>=192 run.
+**Pending: the 3rd/4th samples to call it stable with confidence.** If
+all repeats stay clean, TP=4/LBS=1/bf16 is a genuine production path; any
+NaN means it's the nondeterministic knife-edge and fp32-acts remains the
+only proven fix.
+
 ## Working 4N stack (Aurora + Sunspot)
 
 The working 80B config has been replicated four times across the

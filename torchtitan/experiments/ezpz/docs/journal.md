@@ -4,6 +4,44 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- 80B grad-path NaN: mapped to LBS>1 + dp-degree; TP=4/bf16 path found
+
+Root-caused the 80B grad_norm-NaN with a controlled multi-node sweep
+(LR=1e-6, q_BLNH fix in). Findings (full matrix + perf in
+`docs/production/agpt/80b/README.md`):
+
+- The NaN is **not** a raw-GBS threshold. Two independent triggers, both
+  in the gradient path (grad_norm NaNs one step before loss): **LBS>1**
+  and **large dp_degree** (=NGPUS/TP). GBS=372 is clean (TP=4/LBS=1) AND
+  NaN (TP=2, or TP=4/LBS=2) depending on composition.
+- **New clean path the prior n32 factorial missed: TP=4 + LBS=1 + bf16 +
+  GBS=372** via GAS (12469494 20 steps, 12469509 30 steps, both clean,
+  loss -> 9.7/10.3). The factorial concluded "fp32-acts is the only clean
+  path at GBS>=192" but never tried TP=4/LBS=1 with GAS. Reconciled the
+  20260611 n32 diagnosis doc with an UPDATE header.
+- **Perf:** TP=4 stable path is ~9.85% MFU, ~half the TP=2 baseline
+  (18.7%). Cost is TP=4 comm, GAS-independent (GAS=1 and GAS=2 both
+  ~9.8%). LBS=2 was faster (~15%) and fit memory (48%) but NaNs.
+- **Stability NOT yet proven** -- the failure is partly nondeterministic
+  (n32 doc: same config clean-or-NaN run-to-run). Running repeats
+  (12469509 done 30 clean, 12469510/11 in flight) before calling
+  TP=4/bf16 a production path. 2/4 clean so far.
+- Added a **batch-size ramp** (`FaultTolerantTrainer.batch_ramp_steps`,
+  `09f2d243b`) -- ramps GAS (effective GBS) like LR warmup; mitigates the
+  dp-degree onset but not the LBS trigger.
+
+Also: the live `.venv` pyzes hardcodes a Debian `libze_loader.so.1`
+path that doesn't exist on Sunspot (SUSE -> /usr/lib64); patched to the
+bare soname. Only bites interactive live-`.venv` use, not yeet-env
+training (tarball torch doesn't bundle pyzes). NOT an LD_LIBRARY_PATH
+issue (chased that wrongly first). See
+[[project_venv_ld_library_path_ze_loader]].
+
+Filesystem was 100% full earlier today (amplified transient failures);
+cleaned ~6.3 TB of core dumps + test ckpts -> 57% used.
+
+---
+
 ## 2026-06-24 (sunspot) -- 80B verified at 28N + TP>1 sync regression fix
 
 First **multi-node** 80B v2 functionality verification (all prior
