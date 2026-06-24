@@ -20,6 +20,52 @@ was required in ezpz.
 
 ---
 
+## 2026-06-14 — 57th sync (59 commits, `7b579adde..c6c2fb2c5`)
+
+Merged clean (no conflicts) as `1f288f2e7`. Largest sync in weeks --
+6 commits touch `models/llama3/` or `models/deepseek_v3/` and need
+replay onto `ezpz/agpt/` / `ezpz/moe/`. Replays are NOT included in
+this merge commit; they will land as follow-up commits with smoke
+tests per item.
+
+### Upstream commits that need replay
+
+| Upstream commit | Title | Source dir | ezpz target |
+|---|---|---|---|
+| `70dd94551` | `FusedQKVLinear checkpoint interop via state_dict hooks (#3656)` | `llama3/state_dict_adapter.py` | `ezpz/agpt/` -- no `state_dict_adapter.py` yet; check whether agpt needs FusedQKVLinear or whether we keep stock QKVLinear. |
+| `b3b60dabf` | `delete --disable_loss_parallel flag (#3694)` | `llama3/{model,sharding}.py` + `deepseek_v3/{model,sharding}.py` | **Both forks have the same call site** (`model.py:49` / `model.py:313` -- `loss_parallel=not parallelism.disable_loss_parallel`). Need to remove the kwarg from both call sites AND from `agpt/sharding.py:39` + `moe/sharding.py:63` signatures. TP=on now implies LP=on for trainers via `tp_gather_logits=False`. |
+| `c5d93d109` | `Refactor activation checkpointing into a policy class hierarchy (#3674)` | `llama3/{parallelize,config_registry}.py` + `deepseek_v3/{parallelize,config_registry}.py` | **Significant API change.** `ActivationCheckpointConfig(mode="...")` is replaced with a `Configurable` policy hierarchy. Every ezpz `agpt_*` / `moe_*` config that sets `ac_config` needs porting. The `apply_ac()` callers in `agpt/parallelize.py` + `moe/parallelize.py` need updating too. |
+| `581f175dc` | `fuse swiglu using silu_and_mul kernel (#3712)` | `deepseek_v3/config_registry.py` | Check whether ezpz/moe MoE configs opt into `FusedGroupExperts` w13 fusion + `silu_and_mul` override. PR14 fork at `ezpz/moe/experts.py` may need parity. |
+| `aa1d37414` | `Add FusedGroupedExperts override and offset-aware kernels (#3659)` | `deepseek_v3/config_registry.py` | Same as above -- offset-aware SwiGLU kernels for syncless EP (MinimalAsyncEP / HybridEP). Not currently used by ezpz/moe production. |
+| `cd8950ba7` | `[MoE] Remove unused score_before_experts dispatcher flag (#3663)` | `deepseek_v3/__init__.py` | Trivial -- `ezpz/moe/__init__.py` builds the token dispatcher the same way; need to drop the `score_before_experts` kwarg from the dispatcher construction call (if present). |
+
+### Other notable upstream commits (no replay needed)
+
+| Commit | Title | Why no replay |
+|---|---|---|
+| `c6c2fb2c5` | `[rl] Checkpoint + resume the RL training loop (#3735)` | `experiments/rl/` only; ezpz/rl has its own GRPO loop. May want to study for our Monarch port though. |
+| `df81df57a` | `Switch to v1 vllm model runner (#3749)` | `experiments/rl/actors/generator.py`; same as above. |
+| `739bb9a9e` | `bring back broadcasted rope branch, spmd.local_map (#3750)` | `models/common/rope.py`; ezpz consumes upstream RoPE unchanged. |
+| `46c797105` | `Raise GPT-OSS Dynamo recompile limit (#3737)` | `models/gpt_oss/`; ezpz doesn't use gpt_oss. |
+| `b934b0c2b` | `Exclude ROCm from has_cuda_capability (#3738)` | `tools/utils.py`; ezpz already monkey-patches this on XPU (see `ezpz/rl/xpu_overrides.py:has_xpu_kernels`). Upstream's tweak is CUDA/ROCm-only, leaves the XPU branch alone. |
+| `e5cc36550` | `[spmd_types] qwen3 sharding (#3653)` | `models/qwen3/sharding.py`; no `ezpz/qwen3/` fork exists. |
+| `bfd0a998c` | `[rl] add inference_perf_hillclimb skill (#3716)` | `experiments/rl/.claude/skills/`; not used. |
+| `e4035785d` | `[RL] enable GPT-OSS for titan RL loop (#3687)` | `experiments/rl/`; ezpz/rl uses Qwen3 only currently. |
+| Many more | misc CI / docs / spmd_types refactors | None hit ezpz directly. |
+
+### Verification
+
+Static: ezpz imports cleanly post-merge (no missing symbols at merge
+time; all forked files are intact). Dynamic smoke deferred -- the 6
+real replays above will each be smoke-tested as they land.
+
+**Until the replays land, agpt and moe production configs that pass
+`disable_loss_parallel=...` will fail with `TypeError: unexpected
+keyword argument` if torchtitan's upstream config dataclass dropped
+the field**. Check before re-launching production training.
+
+---
+
 ## 2026-06-13 — 56th sync (2 commits, `0a73d82a4..7b579adde`)
 
 Merged clean (no conflicts) as `3935fc654`. No replays needed — both
