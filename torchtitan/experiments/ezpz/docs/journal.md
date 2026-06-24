@@ -4,6 +4,52 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- 57th upstream sync + replays
+
+Merged `upstream/main` into `ezpz` (59 commits, `7b579adde..c6c2fb2c5`,
+merge `1f288f2e7`, no conflicts). Worked through all 6 commits that
+touch `llama3/` or `deepseek_v3/`:
+
+**2 real replays (source changes + smoke-verified):**
+- `b3b60dabf` delete `--disable_loss_parallel` (commit `fa6f0681e`):
+  dropped the kwarg from agpt/moe model+sharding and trainer.py.
+- `c5d93d109` AC policy class hierarchy (commit `bb38b95e1`):
+  `ActivationCheckpointConfig(mode=...)` -> `FullAC`/`SelectiveAC`/`None`;
+  `apply_ac()` -> `ac_config.build().apply()`. Rewrote the
+  `moe/activation_checkpoint.py` `_get_save_ops` monkey-patch as a clean
+  `MoeSelectiveAC(SelectiveAC)` subclass. Fixed two
+  `cfg.activation_checkpoint.mode =` mutation sites in the config-registry
+  wrappers (slots Config has no `mode`).
+
+**4 no-ops with documented reasons:**
+- `cd8950ba7` score_before_experts: deliberate divergence -- ezpz fork's
+  dispatcher genuinely branches on the flag upstream removed as dead.
+- `70dd94551` FusedQKVLinear hooks: inherited via upstream import,
+  inactive path (ezpz uses stock QKVLinear).
+- `581f175dc` / `aa1d37414` fused/offset-aware experts: opt-in EP
+  features ezpz/moe doesn't enable.
+
+**Scripts (commit `807d5050b`):** PR #3674 made AC a tyro subcommand,
+so `--activation_checkpoint.mode=full` no longer parses. Migrated 7
+launcher scripts to the positional `activation-checkpoint:full` token.
+
+**Smoke (job `12469466`, sunspot 1N, seed=42 --debug.deterministic):**
+agpt_debugmodel (FullAC) loss `10.83863 -> 10.67256`; moe_debugmodel
+(MoeSelectiveAC, seq=512/lbs=1) loss `12.90956 -> 12.36751`; both rc=0.
+agpt step-1 loss bitwise identical across two runs.
+
+**Venv note:** ran the smoke in `venvs/rl-monarch-torch213` (py3.13.6 +
+torch 2.13). The repo-root `.venv` is now py3.14 (torchtitan import
+fails on `importlib.metadata`) and `.venv.tar.gz` is stale. Had to
+add `sh`, editable `ezpz` (`-e ../ezpz` -- installed 0.19.0 wheel was
+missing `get_timestamp`), and editable `blendcorpus` (`-e
+deps/blendcorpus`) -- all `--no-deps`, torch untouched. Worth
+rebuilding a clean py3.13 training venv + fresh `.venv.tar.gz`.
+
+Full detail: `docs/upstream-sync.md` (57th sync entry).
+
+---
+
 ## 2026-06-14 (sunspot overnight) — Monarch + torch 2.13: 6 patches, 16 jobs, still wall
 
 Pushed the upstream `torchtitan.experiments.rl.train` Monarch + GRPO
