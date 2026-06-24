@@ -16,10 +16,12 @@ at TP=4.
 > low (TP=4 halves it: 744/4=186 vs 744/2=372) stays in the safe regime
 > in pure bf16. Full matrix + perf numbers:
 > `docs/production/agpt/80b/README.md` ("grad_norm NaN: two independent
-> triggers"). Stability of the bf16 path is still under confirmation
-> (repeats in flight) — the nondeterminism caveat below still applies, so
-> this is "promising, not yet proven." fp32-acts remains the safe
-> fallback.
+> triggers"). **Stability CONFIRMED 4/4 clean** (jobs 12469494/509/510/511,
+> 20-30 steps each, 0 NaN, three landing at identical loss 9.69-9.70) —
+> not the nondeterministic knife-edge. New production recommendation:
+> **TP=4, LBS=1, bf16, GAS-to-GBS** — cheaper than fp32-acts (~3-5x) and
+> determinism (~50%, doesn't scale past n=32). The underlying TP=2 /
+> LBS>1 grad-path overflow remains an open upstream-worthy bug.
 
 ## 🚨🚨 Counter-evidence (2026-06-12 evening, 8540102)
 

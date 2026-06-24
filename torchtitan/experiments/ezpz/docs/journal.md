@@ -22,10 +22,13 @@ Root-caused the 80B grad_norm-NaN with a controlled multi-node sweep
 - **Perf:** TP=4 stable path is ~9.85% MFU, ~half the TP=2 baseline
   (18.7%). Cost is TP=4 comm, GAS-independent (GAS=1 and GAS=2 both
   ~9.8%). LBS=2 was faster (~15%) and fit memory (48%) but NaNs.
-- **Stability NOT yet proven** -- the failure is partly nondeterministic
-  (n32 doc: same config clean-or-NaN run-to-run). Running repeats
-  (12469509 done 30 clean, 12469510/11 in flight) before calling
-  TP=4/bf16 a production path. 2/4 clean so far.
+- **Stability CONFIRMED 4/4 clean** -- 12469494 (20), 12469509/510/511
+  (30 each), all 0 NaN, three at identical loss 9.69-9.70. Not the
+  nondeterministic knife-edge. New production recommendation:
+  **TP=4, LBS=1, bf16, GAS-to-GBS** -- supersedes the n32 doc's fp32-acts
+  default (cheaper: ~9.85% MFU vs fp32-acts ~3-5x slower / determinism
+  ~50% and doesn't scale past n=32). Underlying TP=2/LBS>1 grad-path
+  overflow still an open upstream-worthy bug (2 cheap 62N reproducers).
 - Added a **batch-size ramp** (`FaultTolerantTrainer.batch_ramp_steps`,
   `09f2d243b`) -- ramps GAS (effective GBS) like LR warmup; mitigates the
   dp-degree onset but not the LBS trigger.

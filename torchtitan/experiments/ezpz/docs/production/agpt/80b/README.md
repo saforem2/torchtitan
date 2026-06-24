@@ -95,28 +95,36 @@ batch-size ramp (`FaultTolerantTrainer.batch_ramp_steps`, commit
 `09f2d243b`) ramps GAS only (LBS/dp fixed), so it mitigates the
 dp-degree onset but NOT the LBS trigger.
 
-#### Stability of the TP=4/LBS=1/bf16 path (in progress, 2026-06-24)
+#### Stability of the TP=4/LBS=1/bf16 path — CONFIRMED 4/4 clean (2026-06-24)
 
-The clean 80B runs were single shots, and the failure mode is partly
-**nondeterministic** (see the n32 diagnosis doc reconciliation below: the
-*same* config can be clean or NaN run-to-run depending on XPU execution
-order during the step-15-17 grad spike). So one clean 20-step run is NOT
-proof of a stable path. Running repeats of the exact clean config
-(TP=4, LBS=1, GAS=2, GBS=372, bf16, LR=1e-6) to test:
+The clean 80B runs could have been single-shot luck: the failure mode is
+partly **nondeterministic** (see the n32 diagnosis doc reconciliation
+below: the *same* config can be clean or NaN run-to-run depending on XPU
+execution order during the step-15-17 grad spike). So we ran 4
+independent repeats of the exact config (TP=4, LBS=1, GAS=2, GBS=372,
+bf16, LR=1e-6):
 
 | Job ID | Steps | Result |
 |--------|-------|--------|
 | 12469494 | 20 | clean, loss 12.94 -> 10.31, 0 NaN |
-| 12469509 | 30 | clean, loss 12.94 -> 9.69, 0 NaN (cleared the step-15-20 danger zone) |
-| 12469510 | 30 | in progress (clean past step 24 as of writing) |
-| 12469511 | 30 | queued |
+| 12469509 | 30 | clean, loss 12.94 -> 9.69, 0 NaN |
+| 12469510 | 30 | clean, loss 12.94 -> 9.69, 0 NaN |
+| 12469511 | 30 | clean, loss 12.94 -> 9.70, 0 NaN |
 
-2 full clean passes confirmed so far (one 20-step, one 30-step), both
-traversing the danger window that NaN'd every TP=2 GBS>=192 run.
-**Pending: the 3rd/4th samples to call it stable with confidence.** If
-all repeats stay clean, TP=4/LBS=1/bf16 is a genuine production path; any
-NaN means it's the nondeterministic knife-edge and fp32-acts remains the
-only proven fix.
+**4/4 clean, all traversing the step-15-20 danger window that NaN'd every
+TP=2 GBS>=192 run; three landed at the identical final loss (9.69-9.70).**
+This is not the nondeterministic knife-edge -- TP=4/LBS=1/bf16 is a
+genuinely stable 80B path at GBS=372, in pure bf16 (no fp32-acts, no
+determinism flag). It costs ~half the TP=2 MFU (~9.85% vs 18.7%), which
+is the price of TP=4 communication.
+
+**Production recommendation (supersedes the n32 doc's fp32-acts default):**
+run 80B at **TP=4, LBS=1, bf16, GAS to reach target GBS**. Cheaper than
+fp32-acts (~3-5x) and determinism (~50%, and determinism doesn't even
+scale past n=32). Caveat: validated to 30 steps / GBS=372 / 62N; a longer
+production chain should still be watched for late-training instability,
+and the underlying TP=2 / LBS>1 grad-path overflow is still an open
+upstream-worthy bug (two cheap 62N reproducers recorded above).
 
 ## Working 4N stack (Aurora + Sunspot)
 
