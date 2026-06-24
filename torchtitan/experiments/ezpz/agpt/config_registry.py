@@ -11,7 +11,8 @@ from torchtitan.components.lr_scheduler import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
-from torchtitan.config import ActivationCheckpointConfig, CommConfig, TrainingConfig
+from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.config.configs import CompileConfig
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
@@ -132,7 +133,12 @@ def agpt(
     cfg.hf_assets_path = hf_assets_path
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
-    cfg.activation_checkpoint.mode = activation_checkpoint_mode
+    # 57th sync: PR #3674 replaced the `mode` string with a policy class
+    # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
+    # is the agpt default (was mode="full").
+    cfg.activation_checkpoint = (
+        None if activation_checkpoint_mode == "none" else FullAC.Config()
+    )
     cfg.training.seq_len = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
@@ -178,9 +184,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             interval=500,
             last_save_model_only=False,
         ),
-        activation_checkpoint=ActivationCheckpointConfig(
-            mode="full",
-        ),
+        activation_checkpoint=FullAC.Config(),
         comm=CommConfig(train_timeout_seconds=100),
         fault_tolerance=FaultTolerance(enable=False),
         # Validator runs on the blendcorpus validation split (5% of the

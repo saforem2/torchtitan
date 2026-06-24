@@ -40,15 +40,14 @@ from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecision
 from torch.distributed.tensor import Shard
 
 from torchtitan.config import (
-    ActivationCheckpointConfig,
     CompileConfig,
     ParallelismConfig,
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import apply_ac
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
 from torchtitan.experiments.ezpz.moe import moeModel
@@ -99,7 +98,7 @@ def parallelize_moe(
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
-    ac_config: ActivationCheckpointConfig,
+    ac_config: ActivationCheckpointingConfig,
     dump_folder: str,
 ):
     """Apply CP + TP + EP + AC + compile + FSDP to the moe model.
@@ -146,13 +145,14 @@ def parallelize_moe(
         compile_config.enable and "model" in compile_config.components
     )
 
-    if ac_config.mode != "none":
-        apply_ac(
-            model,
-            ac_config,
-            model_compile_enabled=model_compile_enabled,
-            base_folder=dump_folder,
-        )
+    # 57th sync: PR #3674 refactored AC into a Configurable policy
+    # hierarchy. ac_config is now an ActivationCheckpointing.Config
+    # subclass or None. The MoE save-set override lives in
+    # ``ezpz/moe/activation_checkpoint.py`` as a SelectiveAC subclass
+    # (MoeSelectiveAC) which drops _c10d_functional.all_to_all_single
+    # from the save list -- see that file for the rationale.
+    if ac_config is not None:
+        ac_config.build(dump_folder=dump_folder).apply(model)
 
     if model_compile_enabled:
         # Upstream apply_compile_sparse uses fullgraph=True which fails on

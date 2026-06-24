@@ -32,14 +32,13 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
 
 from torchtitan.config import (
-    ActivationCheckpointConfig,
     CompileConfig,
     ParallelismConfig,
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
-from torchtitan.distributed.activation_checkpoint import apply_ac
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import apply_compile
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
@@ -55,7 +54,7 @@ def parallelize_llama(
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
-    ac_config: ActivationCheckpointConfig,
+    ac_config: ActivationCheckpointingConfig,
     dump_folder: str,
 ):
     """Apply TP, AC, compile, and FSDP to an agpt model.
@@ -92,13 +91,12 @@ def parallelize_llama(
         compile_config.enable and "model" in compile_config.components
     )
 
-    if ac_config.mode != "none":
-        apply_ac(
-            model,
-            ac_config,
-            model_compile_enabled=model_compile_enabled,
-            base_folder=dump_folder,
-        )
+    # 57th sync: PR #3674 refactored AC into a Configurable policy
+    # hierarchy. ac_config is now an ActivationCheckpointing.Config
+    # subclass (FullAC.Config / SelectiveAC.Config / MemoryBudgetAC.Config)
+    # or None. The old `mode="none"` sentinel is replaced by `None`.
+    if ac_config is not None:
+        ac_config.build(dump_folder=dump_folder).apply(model)
 
     if model_compile_enabled:
         apply_compile(model, compile_config)
