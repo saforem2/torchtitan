@@ -39,6 +39,31 @@ tests per item.
 | `aa1d37414` | `Add FusedGroupedExperts override and offset-aware kernels (#3659)` | `deepseek_v3/config_registry.py` | Same as above -- offset-aware SwiGLU kernels for syncless EP (MinimalAsyncEP / HybridEP). Not currently used by ezpz/moe production. |
 | `cd8950ba7` | `[MoE] Remove unused score_before_experts dispatcher flag (#3663)` | `deepseek_v3/__init__.py` | Trivial -- `ezpz/moe/__init__.py` builds the token dispatcher the same way; need to drop the `score_before_experts` kwarg from the dispatcher construction call (if present). |
 
+### Replay outcomes (2026-06-24)
+
+| Commit | Status | Notes |
+|---|---|---|
+| `b3b60dabf` (disable_loss_parallel) | **DONE** `fa6f0681e` | Dropped the kwarg from `agpt/{model,sharding}.py`, `moe/{model,sharding}.py`, and `trainer.py` (`get_train_context` no longer takes `enable_loss_parallel`). |
+| `c5d93d109` (AC policy hierarchy) | **DONE** `bb38b95e1` | `ActivationCheckpointConfig(mode=...)` -> `FullAC`/`SelectiveAC`/`None`; `apply_ac()` -> `ac_config.build(...).apply(model)`. Rewrote the `ezpz/moe/activation_checkpoint.py` `_get_save_ops` monkey-patch as a clean `MoeSelectiveAC(SelectiveAC)` subclass (the extension point the refactor was designed for). Also fixed two `cfg.activation_checkpoint.mode =` mutation sites in the `agpt()`/`moe()` config-registry wrappers (slots Config has no `mode` attr). |
+| `cd8950ba7` (score_before_experts) | **NO REPLAY (deliberate divergence)** | Upstream removed the flag because it was *dead* in their dispatcher. The ezpz fork's `moe/token_dispatcher.py` genuinely branches on it (`_local_reorder`: scores applied before experts when True; `combine`: scores applied after when False -- two live, mutually-exclusive code paths). ezpz's `make_ezpz_token_dispatcher_config` owns its own `score_before_experts` param and the dispatcher its own `Config` field; ezpz imports only `get_attention_config` + `make_ffn_config` from `config_utils` (NOT the `make_token_dispatcher_config` whose signature lost the kwarg), so nothing breaks. Keeping the field. Verified `moe_debugmodel` + `moe_debugmodel_ep` build clean. |
+| `70dd94551` (FusedQKVLinear state_dict hooks) | **NO REPLAY (inherited via import, inactive)** | ezpz/agpt imports `Llama3StateDictAdapter` directly from upstream (no fork) -- it gets the change for free. ezpz/agpt's model uses stock `QKVLinear`, never `FusedQKVLinear.Config`, so the new `self.fuse_qkv` branch in the adapter is always False. Nothing to port. |
+| `581f175dc` (fuse swiglu via silu_and_mul) | **NO REPLAY (opt-in, unused)** | Touches `deepseek_v3/config_registry.py` to opt into `FusedGroupExperts` w13 fusion + `silu_and_mul` override. ezpz/moe uses `EzpzGroupedExperts(GroupedExperts)` with a `compute_backend` selector and never references `FusedGroupExperts` / `silu_and_mul`. Not enabled by any ezpz config. |
+| `aa1d37414` (FusedGroupedExperts offset-aware) | **NO REPLAY (opt-in, unused)** | Offset-aware SwiGLU kernels for syncless EP (MinimalAsyncEP / HybridEP). ezpz/moe doesn't enable these EP backends in production; zero references in `ezpz/moe/`. |
+
+Smoke verification (job `12469466`, `venvs/rl-monarch-torch213` py3.13.6
++ torch 2.13, sunspot 1N, `--debug.seed 42 --debug.deterministic`):
+- `agpt_debugmodel` (FullAC + LP): loss `10.83863 -> 10.67256`, rc=0.
+  Step-1 loss bitwise identical across two runs (`12469465`, `12469466`).
+- `moe_debugmodel` (MoeSelectiveAC + LP, seq_len=512/lbs=1 to fit 1
+  tile): loss `12.90956 -> 12.36751`, rc=0.
+
+Venv note: `venvs/rl-monarch-torch213` needed `sh`, editable `ezpz`
+(`-e ../ezpz`, the installed 0.19.0 wheel was missing `get_timestamp`),
+and editable `blendcorpus` (`-e deps/blendcorpus`) added (all `--no-deps`,
+torch untouched) before the agpt/moe train path would run. The repo-root
+`.venv` is currently py3.14 (torchtitan import fails on
+`importlib.metadata`) and `.venv.tar.gz` is stale.
+
 ### Other notable upstream commits (no replay needed)
 
 | Commit | Title | Why no replay |
