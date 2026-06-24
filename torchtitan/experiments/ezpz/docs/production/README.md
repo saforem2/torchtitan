@@ -20,10 +20,15 @@ budget. Detail + per-dispatch history in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | running (cont12 Q) | **86,200** | 2.656 | **92.9%** | 🟢 nearing completion |
-| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q 14d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
-| [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
+| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~20d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
+| [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q ~20d) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
 | [20B 256N](agpt/20b/n256/README.md) | re-armed (Q) | 1,100 | 3.28 | 1.2% | 🟡 just re-launched |
 | [80B 256N](agpt/80b/README.md) | blocked (NaN) | — | — | — | 🔴 step-2 NaN; fix unresolved |
+
+> **512N queue starvation** (both 512N chains ~20 days in `small`) is
+> pure node contention, not a hold or bad request — and re-submitting
+> would *reset* their accrued priority. Full diagnosis + data:
+> [queue-wait-analysis.md](queue-wait-analysis.md).
 
 > **80B status**: 4N stack validated end-to-end; 256N production blocked
 > on a step-2 NaN. `--debug.deterministic` was refuted at n=64
