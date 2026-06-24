@@ -7,16 +7,24 @@
 
 ## Current production scripts
 
-All current (v2) production training is driven by:
+All current (v2) production training is driven by the **failover**
+submit scripts:
 
-- [`scripts/submit_agpt_2b_aurora_venv.sh`](../scripts/submit_agpt_2b_aurora_venv.sh)
-- [`scripts/submit_agpt_20b_aurora_venv.sh`](../scripts/submit_agpt_20b_aurora_venv.sh)
-- [`scripts/train_agpt_80b_venv.sh`](../scripts/train_agpt_80b_venv.sh) (80B has no v2 submitter yet — interactive launcher only)
+- [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../scripts/submit_agpt_2b_aurora_venv_failover.sh)
+- [`scripts/submit_agpt_20b_aurora_venv_failover.sh`](../scripts/submit_agpt_20b_aurora_venv_failover.sh)
+- [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../scripts/submit_agpt_80b_aurora_venv_failover.sh)
 
 One script per model handles all node counts (256/512/1024) via env
-vars (`NNODES`, `LBS`, `CKPT_DIR`, `CHECKPOINT_ASYNC_MODE`, …) and
-runs on the **torch 2.13 venv** (`.venv/` + `ezpz yeet-env` tarball
-broadcast).
+vars (`NHOSTS_TRAIN`, `FAILOVER_MAX_RETRIES`, `LBS`, `CKPT_DIR`,
+`CHECKPOINT_ASYNC_MODE`, …) and runs on the **torch 2.13 venv**
+(`.venv/` + `ezpz yeet-env` tarball broadcast). The wrapper splits the
+PBS nodefile into active + spare nodes, runs a preflight smoke, and
+swaps in spares on a bad-node hit.
+
+> The non-failover `scripts/submit_agpt_{2b,20b}_aurora_venv.sh` are
+> **DEPRECATED (2026-06-24)** — superseded by the failover versions;
+> kept only to reproduce pre-failover dispatches. Nothing live calls
+> them.
 
 ## Why these are legacy
 

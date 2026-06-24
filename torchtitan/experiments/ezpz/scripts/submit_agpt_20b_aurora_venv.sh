@@ -7,6 +7,13 @@
 #PBS -q prod
 #PBS -j oe
 
+# DEPRECATED (2026-06-24): superseded by
+# submit_agpt_20b_aurora_venv_failover.sh, which ALL live 20B production
+# uses. The failover wrapper adds bad-node preflight + spare-swap retry
+# and is a standalone launcher (it does NOT call this script). This
+# plain version is kept only to reproduce pre-failover dispatches; do
+# not use it for new production runs.
+#
 # Aurora-adapted variant of train_agpt_20b_venv.sh.
 # - Uses Aurora queue/filesystem/account.
 # - Restart from scratch under /flare/AuroraGPT/foremans/runs/agpt-20b-v2/
