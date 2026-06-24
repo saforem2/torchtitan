@@ -394,6 +394,211 @@ def _wandb_latest_loss(traj: dict) -> float | None:
     return None
 
 
+# Rollup pages whose Snapshot tables restate each leaf's step/loss/tokens.
+# Each row links to a leaf README; we match the row by that link and
+# rewrite ONLY the numeric cells, never the Status/narrative cell.
+# (The cross-model agpt/README.md is intentionally absent: it is pure
+# narrative Headlines with no snapshot table.)
+ROLLUP_PAGES = [
+    "torchtitan/experiments/ezpz/docs/production/agpt/2b/README.md",
+    "torchtitan/experiments/ezpz/docs/production/agpt/20b/README.md",
+    "torchtitan/experiments/ezpz/docs/production/README.md",
+]
+
+
+def _canon_readme(repo_rel: str) -> str:
+    """Normalize a leaf README repo-relative path to its canonical
+    docs-relative form, e.g.
+    'torchtitan/.../docs/production/agpt/2b/n256/README.md' ->
+    'production/agpt/2b/n256/README.md'. Used as the disambiguating key
+    so 2B-256N and 20B-256N never collide (both end '.../n256/README.md'
+    but differ in the model segment)."""
+    marker = "docs/"
+    i = repo_rel.find(marker)
+    return repo_rel[i + len(marker):] if i != -1 else repo_rel
+
+
+def _resolve_rollup_link(page_rel: str, link: str) -> str:
+    """Resolve a markdown link found inside a rollup page to the same
+    canonical docs-relative form as _canon_readme. ``page_rel`` is the
+    rollup's repo-relative path; ``link`` is the (possibly relative)
+    link target from the table row (e.g. 'n256/README.md',
+    'agpt/2b/n256/README.md', or '2b/n256/README.md')."""
+    page_docs = _canon_readme(page_rel)           # e.g. production/agpt/2b/README.md
+    page_dir = "/".join(page_docs.split("/")[:-1])  # production/agpt/2b
+    # Resolve link relative to the page's directory, collapsing any '../'.
+    parts = (page_dir.split("/") if page_dir else []) + link.split("/")
+    stack: list[str] = []
+    for p in parts:
+        if p == "..":
+            if stack:
+                stack.pop()
+        elif p in ("", "."):
+            continue
+        else:
+            stack.append(p)
+    return "/".join(stack)
+
+
+def _compute_disk_values(traj: dict) -> dict | None:
+    """Authoritative (step, tokens_str, pct, loss_str) for a trajectory,
+    from disk + its leaf README. Returns None if no valid ckpt.
+    The step/tokens come from disk; loss + precision come from the leaf
+    README so the rollup matches the leaf exactly.
+    """
+    step = largest_valid_step(traj["ckpt_dir"])
+    if step is None:
+        return None
+    leaf = REPO_ROOT / traj["readme"]
+    leaf_text = leaf.read_text() if leaf.is_file() else ""
+    gbs_m = GBS_ROW_RE.search(leaf_text)
+    gbs = int(gbs_m.group(1).replace(",", "")) if gbs_m else traj["gbs"]
+    # Clone the leaf Tokens line's precision so rollup matches it.
+    t_dec, b_dec, pct_dec = 3, 1, 1
+    tm = TOKENS_RE.search(leaf_text)
+    if tm:
+        tok_old = re.search(r"([\d.]+)\s*([TB])\s*tokens", tm.group("body"))
+        pct_old = re.search(r"([\d.]+)\s*%", tm.group("body"))
+        if tok_old:
+            if tok_old.group(2) == "T":
+                t_dec = _decimals_in(tok_old.group(1))
+            else:
+                b_dec = _decimals_in(tok_old.group(1))
+        if pct_old:
+            pct_dec = _decimals_in(pct_old.group(1))
+    tok_str, pct = format_tokens(
+        step, gbs, traj["seq_len"], traj["token_target"],
+        t_decimals=t_dec, b_decimals=b_dec, pct_decimals=pct_dec,
+    )
+    # Loss: read the leaf's **Loss:** field if present (leading number).
+    loss_str = None
+    lm = LOSS_RE.search(leaf_text)
+    if lm:
+        lnum = LEADING_NUM_RE.match(lm.group("body").strip())
+        if lnum:
+            loss_str = lnum.group(1)
+    return {"step": step, "tokens": tok_str, "pct": pct, "loss": loss_str}
+
+
+def propagate_to_rollups(
+    trajs: list[dict], *, dry_run: bool
+) -> tuple[int, list[str]]:
+    """Update rollup Snapshot table rows from each live trajectory's
+    disk-authoritative values. Rewrites ONLY the step/loss/tokens numeric
+    cells of the row that links to a given leaf README; the Status/
+    narrative cell and all other rows are untouched. Returns (n_changed,
+    warnings).
+    """
+    # Build {canonical-docs-rel README: values} -- keyed so 2B-256N and
+    # 20B-256N never collide.
+    vals: dict[str, dict] = {}
+    for t in trajs:
+        v = _compute_disk_values(t)
+        if v:
+            vals[_canon_readme(t["readme"])] = v
+    n_changed = 0
+    warns: list[str] = []
+
+    for page_rel in ROLLUP_PAGES:
+        page = REPO_ROOT / page_rel
+        if not page.is_file():
+            continue
+        lines = page.read_text().splitlines(keepends=False)
+        out: list[str] = []
+        changed_here = False
+        for line in lines:
+            if not line.lstrip().startswith("|") or "README.md)" not in line:
+                out.append(line)
+                continue
+            # Resolve THIS row's leaf link to the same canonical key.
+            link_m = re.search(r"\]\(([^)]*?n\d+/README\.md)\)", line)
+            if not link_m:
+                out.append(line)
+                continue
+            key = _resolve_rollup_link(page_rel, link_m.group(1))
+            v = vals.get(key)
+            if not v:
+                out.append(line)
+                continue
+            new_line = _rewrite_rollup_row(line, v)
+            if new_line != line:
+                out.append(new_line)
+                changed_here = True
+                n_changed += 1
+            else:
+                out.append(line)
+        if changed_here and not dry_run:
+            page.write_text("\n".join(out) + "\n")
+        if changed_here:
+            print(f"  [rollup] {page_rel}: updated snapshot row(s)")
+    return n_changed, warns
+
+
+def _rewrite_rollup_row(line: str, v: dict) -> str:
+    """Rewrite the step / loss / tokens(pct) numeric cells of one rollup
+    table row, preserving every other cell (esp. the Status narrative)
+    and the row's existing bold / comma / '~' / '(persisted)' styling.
+
+    Two row shapes are handled:
+      A. model-rollup:  | [name](nN/README.md) ... | <status> | **STEP** | **LOSS** | **TOK (PCT)** |
+      B. top-level:     | Model | N | **STEP** (persisted) | **LOSS** | **TOK** (PCT) | [job](..nN/README.md) | <status> |
+    We edit cells by matching the numeric *content* with anchored regexes
+    rather than by column index, so both shapes work.
+    """
+    step_comma = f"{v['step']:,}"
+
+    def sub_step(cell: str) -> str:
+        # Replace a leading bold-or-plain integer (the cumulative step),
+        # keep any '(persisted)' / suffix text.
+        return re.sub(
+            r"(\*{0,2})[\d,]+(\*{0,2})",
+            lambda m: f"{m.group(1)}{step_comma}{m.group(2)}",
+            cell, count=1,
+        )
+
+    def sub_loss(cell: str) -> str:
+        if v["loss"] is None:
+            return cell
+        return re.sub(
+            r"(\*{0,2})[\d.]+(\*{0,2})",
+            lambda m: f"{m.group(1)}{v['loss']}{m.group(2)}",
+            cell, count=1,
+        )
+
+    def sub_tokens(cell: str) -> str:
+        # Replace "X.XXT" / "X.XB" and the "(YY.Y%)" while keeping ~, bold,
+        # 'of ...' text, and any surrounding words.
+        c = re.sub(r"[\d.]+\s*[TB]", v["tokens"], cell, count=1)
+        c = re.sub(r"[\d.]+\s*%", v["pct"], c, count=1)
+        return c
+
+    cells = line.split("|")
+    # Find the cell index that holds the leaf link (shape discriminator).
+    link_idx = next(
+        (i for i, c in enumerate(cells) if re.search(r"n\d+/README\.md\)", c)),
+        None,
+    )
+    if link_idx is None:
+        return line
+
+    if link_idx <= 2:
+        # Shape A (model rollup): link in col 1 -> numeric cells are the
+        # LAST three pipe-separated cells (steps, loss, tokens).
+        # cells[-1] is '' (trailing pipe), so real last is cells[-2].
+        if len(cells) >= 5:
+            cells[-4] = sub_step(cells[-4])
+            cells[-3] = sub_loss(cells[-3])
+            cells[-2] = sub_tokens(cells[-2])
+    else:
+        # Shape B (top-level): link is near the end; numeric cells are
+        # cols 3,4,5 (1-indexed within the row) = cells[3],[4],[5].
+        if len(cells) >= 6:
+            cells[3] = sub_step(cells[3])
+            cells[4] = sub_loss(cells[4])
+            cells[5] = sub_tokens(cells[5])
+    return "|".join(cells)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--dry-run", action="store_true", help="print diffs, don't write")
@@ -403,6 +608,10 @@ def main() -> int:
         "--today",
         help="override today's date (YYYY-MM-DD); for testing. Date.now is "
         "otherwise used.",
+    )
+    ap.add_argument(
+        "--no-rollups", action="store_true",
+        help="skip propagating leaf values into rollup Snapshot tables",
     )
     args = ap.parse_args()
 
@@ -436,8 +645,23 @@ def main() -> int:
         total_changes += len(changes)
         total_warns += len(warns)
 
+    # Propagate leaf disk values into rollup Snapshot tables (numeric
+    # cells only; never the Status narrative). Always over the full live
+    # set so a --model run doesn't half-update a rollup row.
+    rollup_changed = 0
+    if not args.no_rollups:
+        rollup_trajs = live_trajectories()
+        rollup_changed, rollup_warns = propagate_to_rollups(
+            rollup_trajs, dry_run=args.dry_run
+        )
+        for w in rollup_warns:
+            print(f"  ! {w}")
+
     suffix = " (dry-run)" if args.dry_run else ""
-    print(f"\n=== {total_changes} field(s) changed, {total_warns} warning(s){suffix} ===")
+    print(
+        f"\n=== {total_changes} leaf field(s), {rollup_changed} rollup row(s) "
+        f"changed, {total_warns} warning(s){suffix} ==="
+    )
     return 0
 
 
