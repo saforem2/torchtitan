@@ -174,6 +174,35 @@ def load_mds_trajectory(csv_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarr
     return np.array(iters), np.array(losses), np.array(tps_list)
 
 
+def _apply_loss_ylim(ax, series: list[dict]) -> None:
+    """Crop the loss y-axis to the informative band.
+
+    Bottom = ~0.1 below the global min loss. Top = the max loss reached
+    after each series' first 5% of tokens (drops the step-0 warmup spike
+    of ~12+ nats while keeping the full descent). No-op if degenerate.
+    """
+    mins, tops = [], []
+    for s in series:
+        loss = np.asarray(s["loss"], dtype=float)
+        loss = loss[np.isfinite(loss)]
+        if loss.size == 0:
+            continue
+        mins.append(float(loss.min()))
+        # Drop the leading 5% (warmup spike) before taking the max.
+        start = max(1, int(0.05 * loss.size))
+        tail = loss[start:] if loss.size > start else loss
+        tops.append(float(tail.max()))
+    if not mins or not tops:
+        return
+    lo = min(mins) - 0.1
+    hi = max(tops)
+    # A touch of headroom above the post-warmup max so curves don't kiss
+    # the top border.
+    hi = hi + 0.05 * (hi - lo)
+    if hi > lo:
+        ax.set_ylim(lo, hi)
+
+
 def render_figure(
     series: list[dict],
     *,
@@ -205,6 +234,13 @@ def render_figure(
     ax.set_title("Training Loss")
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, loc="upper right", frameon=False)
+    # Crop the y-axis so the converged region (where the trajectories
+    # actually diverge) is legible instead of being squashed under the
+    # step-0 spike (~12+ nats). Bottom: a hair below the global min.
+    # Top: the highest loss reached AFTER each curve's first ~5% of
+    # tokens, so the early warmup spike is cropped but the full descent
+    # still shows. Falls back to autoscale if data is degenerate.
+    _apply_loss_ylim(ax, series)
 
     # Panel 2: TPS/GPU vs tokens
     ax = axes[1]

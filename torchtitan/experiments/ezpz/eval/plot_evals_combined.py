@@ -28,14 +28,15 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-# ambivalent is required — silent fallback gave us months of charts with
-# the wrong style + opaque white background. If it fails to load, surface
-# loudly so we install the missing dep instead of shipping bad plots.
-import ambivalent
-import matplotlib.pyplot as plt
+# Shared ambivalent + Iosevka styling (identical to the production
+# charts). apply_style registers Iosevka when installed and falls back
+# to a monospace chain otherwise; ambivalent itself is a hard dep there
+# (silent fallback previously gave us months of wrong-style charts).
+import matplotlib.pyplot as plt  # noqa: F401,E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-plt.rcParams["font.family"] = "monospace"
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
+
+apply_style()
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EVALS_DIR = REPO_ROOT / "outputs" / "evals"

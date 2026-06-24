@@ -23,15 +23,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: F401
 
-# ambivalent is required — silent fallback gave us months of charts with
-# the wrong style + opaque white background. If it fails to load, surface
-# loudly so we install the missing dep instead of shipping bad plots.
-import ambivalent  # noqa: F401
+# Shared ambivalent + Iosevka styling (identical to the production
+# charts) via the one helper, so eval + production charts match.
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-plt.rcParams["font.family"] = "monospace"
+apply_style()
 
 REPO_ROOT = Path(__file__).resolve().parents[7]
 # Per-trajectory v2 eval roots; gbs differs per node count, so they
