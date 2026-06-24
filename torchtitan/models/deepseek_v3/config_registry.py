@@ -13,16 +13,18 @@ from torchtitan.components.quantization import (
     Float8GroupedExpertsConverter,
     Float8LinearConverter,
 )
-from torchtitan.config import (
-    ActivationCheckpointConfig,
-    CompileConfig,
-    ParallelismConfig,
-    TrainingConfig,
-)
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.distributed.activation_checkpoint import SelectiveAC
 from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
 from torchtitan.trainer import Trainer
 
 from . import model_registry
+
+
+def enable_fused_swiglu(config: Trainer.Config) -> None:
+    override = "torchtitan.overrides.fused_swiglu"
+    assert override not in config.override.imports
+    config.override.imports.append(override)
 
 
 def deepseek_v3_debugmodel() -> Trainer.Config:
@@ -51,9 +53,7 @@ def deepseek_v3_debugmodel() -> Trainer.Config:
             interval=10,
             last_save_model_only=False,
         ),
-        activation_checkpoint=ActivationCheckpointConfig(
-            mode="selective",
-        ),
+        activation_checkpoint=SelectiveAC.Config(),
     )
 
 
@@ -73,6 +73,7 @@ def deepseek_v3_debugmodel_minimal_async_ep() -> Trainer.Config:
         "debugmodel",
         moe_comm_backend="minimal_async_ep",
     )
+    enable_fused_swiglu(config)
     config.parallelism = ParallelismConfig(
         data_parallel_replicate_degree=1,
         data_parallel_shard_degree=1,
@@ -109,9 +110,7 @@ def deepseek_v3_16b() -> Trainer.Config:
             expert_parallel_degree=8,
         ),
         checkpoint=CheckpointManager.Config(interval=10),
-        activation_checkpoint=ActivationCheckpointConfig(
-            mode="selective",
-        ),
+        activation_checkpoint=SelectiveAC.Config(),
         compile=CompileConfig(enable=True, components=["loss"]),
     )
 
@@ -134,6 +133,7 @@ def deepseek_v3_16b_minimal_async_ep() -> Trainer.Config:
         attn_backend="flex",
         moe_comm_backend="minimal_async_ep",
     )
+    enable_fused_swiglu(config)
     config.parallelism = ParallelismConfig(
         data_parallel_replicate_degree=1,
         data_parallel_shard_degree=1,
@@ -187,8 +187,6 @@ def deepseek_v3_671b() -> Trainer.Config:
             expert_parallel_degree=2,
         ),
         checkpoint=CheckpointManager.Config(interval=500),
-        activation_checkpoint=ActivationCheckpointConfig(
-            mode="selective",
-        ),
+        activation_checkpoint=SelectiveAC.Config(),
         compile=compile_config,
     )

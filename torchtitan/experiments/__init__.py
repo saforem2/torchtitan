@@ -17,5 +17,9 @@ _supported_experiments = frozenset(
         "ezpz.moe",
         "ezpz.qwen3",
         "rl",
+        # RL examples own a per-example config_registry under rl/examples/<name>;
+        # listed here so `--module <name>` resolves (see ConfigManager).
+        "alphabet_sort",
+        "search_r1",
     ]
 )
