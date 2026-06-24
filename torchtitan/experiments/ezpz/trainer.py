@@ -94,6 +94,28 @@ class FaultTolerantTrainer(Trainer):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
         lr_finder: LRFinderConfig = field(default_factory=LRFinderConfig)
 
+        # Batch-size ramp (analogous to LR warmup, but for global batch
+        # size). Ramps the effective gradient-accumulation count -- and
+        # thus effective GBS = LBS * dp_degree * GAS -- linearly from
+        # `batch_ramp_start_gas` up to the full `gradient_accumulation_steps`
+        # over the first `batch_ramp_steps` optimizer steps, then holds at
+        # full GBS. LBS and DP degree are unchanged, so this needs no
+        # dataloader/parallelism changes; loss stays correct because the
+        # ezpz train_step normalizes by global_valid_tokens (token count),
+        # not by microbatch count.
+        #
+        # Motivation: 80B NaNs at GBS>=372 (grad_norm NaNs at step 2) but
+        # is stable at GBS=168. A ramp lets training stabilize at small GBS
+        # before reaching the target GBS. `batch_ramp_steps=0` disables it
+        # (default), preserving exact current behavior.
+        batch_ramp_steps: int = 0
+        """Number of steps to linearly ramp GAS from batch_ramp_start_gas to
+        the full gradient_accumulation_steps. 0 disables the ramp."""
+        batch_ramp_start_gas: int = 1
+        """GAS to start the ramp from (effective GBS at step 0 =
+        LBS * dp_degree * batch_ramp_start_gas). Must be >= 1 and <= the
+        full gradient_accumulation_steps."""
+
     ft_manager: FTManager
 
     @record
@@ -269,6 +291,32 @@ class FaultTolerantTrainer(Trainer):
             config.training.local_batch_size * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
+
+        # Batch-size ramp config validation (see Config docstrings).
+        self.batch_ramp_steps = config.batch_ramp_steps
+        self.batch_ramp_start_gas = config.batch_ramp_start_gas
+        if self.batch_ramp_steps < 0:
+            raise ValueError(
+                f"batch_ramp_steps must be >= 0, got {self.batch_ramp_steps}"
+            )
+        if self.batch_ramp_steps > 0:
+            if not 1 <= self.batch_ramp_start_gas <= self.gradient_accumulation_steps:
+                raise ValueError(
+                    "batch_ramp_start_gas must be in "
+                    f"[1, {self.gradient_accumulation_steps}], got "
+                    f"{self.batch_ramp_start_gas}"
+                )
+            logger.info(
+                "Batch-size ramp ENABLED: GAS %d -> %d over %d steps "
+                "(effective GBS %d -> %d)",
+                self.batch_ramp_start_gas,
+                self.gradient_accumulation_steps,
+                self.batch_ramp_steps,
+                self.batch_ramp_start_gas
+                * config.training.local_batch_size
+                * batch_degree,
+                global_batch_size,
+            )
 
         # apply parallelisms and initialization
         if parallel_dims.pp_enabled:
@@ -514,6 +562,26 @@ class FaultTolerantTrainer(Trainer):
 
         return ParallelDims.from_config(config.parallelism, world_size)
 
+    def _effective_gas(self) -> int:
+        """Gradient-accumulation steps for the current step under the ramp.
+
+        Linearly interpolates GAS from ``batch_ramp_start_gas`` (at step 0)
+        to the full ``gradient_accumulation_steps`` (at ``batch_ramp_steps``),
+        holding at full after. Returns the full GAS when the ramp is
+        disabled (``batch_ramp_steps == 0``). ``self.step`` is 0-indexed at
+        the point train_step runs.
+        """
+        if self.batch_ramp_steps <= 0:
+            return self.gradient_accumulation_steps
+        if self.step >= self.batch_ramp_steps:
+            return self.gradient_accumulation_steps
+        start = self.batch_ramp_start_gas
+        full = self.gradient_accumulation_steps
+        # Linear interpolation; round to nearest int, clamp to [start, full].
+        frac = self.step / self.batch_ramp_steps
+        gas = round(start + (full - start) * frac)
+        return max(start, min(full, gas))
+
     def train_step(
         self, data_iterator: Iterator[tuple[dict[str, torch.Tensor], torch.Tensor]]
     ):
@@ -525,10 +593,14 @@ class FaultTolerantTrainer(Trainer):
         # the major variables that are used in the training loop.
         parallel_dims = self.parallel_dims
 
+        # Effective grad-accum count for this step (batch-size ramp).
+        # Equals self.gradient_accumulation_steps unless the ramp is on.
+        gas = self._effective_gas()
+
         # Collect all microbatches on CPU and count total valid tokens
         microbatches = []
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
-        for _microbatch in range(self.gradient_accumulation_steps):
+        for _microbatch in range(gas):
             input_dict, labels = next(data_iterator)
             local_valid_tokens += (labels != IGNORE_INDEX).sum()
             microbatches.append((input_dict, labels))
