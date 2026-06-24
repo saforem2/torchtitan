@@ -20,6 +20,24 @@ was required in ezpz.
 
 ---
 
+## 2026-06-24 — 58th sync (1 commit, `c6c2fb2c5..395833a46`)
+
+Merged clean (no conflicts) as `2c0daba85`. No replays needed.
+
+### Upstream commit
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `395833a46` | `Make generator actor aware of DP rank layout (#3743)` | None -- touches only `experiments/rl/actors/generator.py` + `rl/tests/test_engine_loop.py`. Fixes a v2-runner DP collective-mismatch hang (DP0 returns early when `total_num_scheduled_tokens == 0`, colliding with DP1's collective). ezpz/rl has its own GRPO loop and does not fork upstream `rl/actors/generator.py`, so nothing to replay. Relevant background for the Monarch port (`docs/rl/2026-06-14_monarch-torch213-deep-dive.md`) if/when we wire the upstream generator. |
+
+### Verification
+
+Static: ezpz imports clean post-merge (`agpt_debugmodel` + `moe_debugmodel`
+build OK). No model/parallelize/config surface touched, so the
+57th-sync smoke (job 12469469) coverage still holds.
+
+---
+
 ## 2026-06-14 — 57th sync (59 commits, `7b579adde..c6c2fb2c5`)
 
 Merged clean (no conflicts) as `1f288f2e7`. Largest sync in weeks --
