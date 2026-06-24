@@ -1,6 +1,6 @@
 # Production Training — agpt 2B
 
-> Last updated: 2026-06-12
+> Last updated: 2026-06-24
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -23,8 +23,8 @@ For the cross-model view (2B + 20B together), see
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 256N (async)**](n256/README.md) (per-token comparator) | 8519833 walltime-finished 2026-06-06 18:07; cont6 (8521626) Q, cont7 (8521630) H | **69,900** | **2.67** | **~3.52T (75.4%)** |
-| [**v2 512N (sync)**](n512/README.md) (canonical chain) | Stalled — last walltime-clean run 8508753 (2026-05-27); 8521627 yeet-rsync failure on 2026-06-07; cont10 (8521631) Q | **30,500** | **2.71** | **~3.07T (65.7%)** |
+| [**v2 256N (async)**](n256/README.md) (per-token comparator) | 8519833 walltime-finished 2026-06-06 18:07; cont6 (8521626) Q, cont7 (8521630) H | **86,200** | **2.656** | **~4.339T (92.8%)** |
+| [**v2 512N (sync)**](n512/README.md) (canonical chain) | Stalled — last walltime-clean run 8508753 (2026-05-27); 8521627 yeet-rsync failure on 2026-06-07; cont10 (8521631) Q | **30,400** | **2.71** | **~3.06T (65.5%)** |
 | [v2 1024N](n1024/README.md) | Crashed at startup (12,288-rank init OOM/SIGSEGV); not retried | — | — | — |
 | v2 512N sqrt(2)-LR fork | 8467141 → 8467142 (separate ckpt dir `gbs12288-lr3.22e-5`) | 200 | — | ~20B |
 

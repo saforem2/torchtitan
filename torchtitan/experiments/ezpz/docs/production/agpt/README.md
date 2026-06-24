@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-06-09
+> Last updated: 2026-06-24
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -18,6 +18,28 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 [2b/](2b/README.md#all-2b-chains-overlaid), [20b/](20b/README.md#all-20b-chains-overlaid). 80B not yet
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
+
+## Headline (2026-06-24)
+
+- **🏁 2B 256N async chain at step 86,200** (loss **2.656**, **~4.34T
+  tokens, 92.9%** of target — closing on completion). cont11
+  [8534293](2b/n256/README.md#log-8534293) walltime-clean 2026-06-15
+  04:45 (+59 ckpts step-80,400→86,200); cont12 [8558531](2b/n256/README.md)
+  Q, cont13 [8558532](2b/n256/README.md) H. **+16,300 steps since the
+  2026-06-10 headline below.**
+- **2B 512N sync chain** still stalled at step **30,400** (loss 2.71,
+  ~3.06T, 65.5%) — no advance since 2026-05-30; cont10 [8521631](2b/n512/README.md) Q.
+- **20B 512N sync chain** at step **4,400** (loss 2.51, ~442.9B, 9.5%) —
+  the step-4,500 dir is a mid-save placeholder (no `.metadata`), so the
+  last finalized ckpt is step-4,400; cont [8521632](20b/n512/README.md) Q.
+- **20B 256N relocated + re-armed** to its own `agpt-20b-n256/` clone
+  2026-06-12; step **1,100** (55.4B, 1.2%). Re-arm blocked twice on a
+  stale-tarball `spmd_types` miss, fixed 2026-06-16; resubmitted
+  [8558548](20b/n256/README.md)+[8558549](20b/n256/README.md).
+- **80B 256N still blocked on the step-2 NaN** — `--debug.deterministic`
+  refuted at n=64 (2026-06-12); fp32-activations at TP=4 is the only
+  remaining clean-training candidate, untested at GBS=384. See
+  [80b NaN diagnosis](../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md).
 
 ## Headline (2026-06-10)
 

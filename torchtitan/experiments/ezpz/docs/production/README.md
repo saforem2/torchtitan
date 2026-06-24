@@ -2,7 +2,7 @@
 
 > **Living document** — updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-06-13
+> Last updated: 2026-06-24
 
 ## Scaling Performance
 
@@ -47,8 +47,8 @@ python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 512 | **30,500** (persisted) | **2.71** | **3.07T** (65.7%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
-| 20B | 512 | **4,500** (persisted) | **3.46** | **452.9B** (9.7%) | [`8521632`](agpt/20b/n512/README.md) Q (sync-mode) | **Q+H — Aurora `small` queue contention.** 8521628 ran 2026-06-10, advanced step-4400 → step-4500 cleanly + persisted DCP, then crashed at the next `set_determinism` init step (std::bad_alloc, same failure mode as 8466848). Cont (8521632) Q for next 512N slot — resumes from step-4500. |
+| 2B  | 512 | **30,400** (persisted) | **2.71** | **3.06T** (65.5%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
+| 20B | 512 | **4,400** (persisted) | **3.46** | **442.9B** (9.5%) | [`8521632`](agpt/20b/n512/README.md) Q (sync-mode) | **Q+H — Aurora `small` queue contention.** 8521628 ran 2026-06-10, advanced step-4400 → step-4500 cleanly + persisted DCP, then crashed at the next `set_determinism` init step (std::bad_alloc, same failure mode as 8466848). Cont (8521632) Q for next 512N slot — resumes from step-4500. |
 | 80B | 4 | **10** (smoke) | **12.03** | smoke | [`int-r7`](agpt/80b/n4/README.md) ✅ end-to-end validated; **256N blocked on NaN** | **2026-06-12 evening: determinism fix refuted at n=64.** [`8540102`](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) (n=64, GBS=384, `--debug.seed=42 --debug.deterministic`, overprovisioned select=68) trained 8 clean steps then grad_norm=inf step 3, recovered, grad_norm=nan step 9 → loss=nan step 10. Clean exit (no node failure). The earlier n=32 success was lucky, not causal. **Only remaining clean-training candidate is `--training.mixed-precision-param=float32` at TP=4 (validated at GBS=96, untested at GBS=384, ~75% throughput cost).** See [80b-n32-nan-diagnosis.md](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) — section "🚨🚨 Counter-evidence". |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
@@ -57,7 +57,7 @@ python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 256 | **86,200** (persisted) | **2.656** | **4.34T** (92.9%) | [`8558531`](agpt/2b/n256/README.md) Q (cont12) | **8534293 (cont11) clean 12h walltime exit** 2026-06-15 04:45 — added **+5,860 steps** (80,400 → 86,260, +59 ckpts persisted), loss 2.656, no NaN. Async-mode chain has now advanced 55,026 → 86,200 (+31,234 across 11 dispatches since 2026-05-28); **closing on the 4.67T target (92.9%)**. Chain continuation restored: cont12 (`8558531`) Q + cont13 (`8558532`) H. **Eval backfill `8558536` queued** for step-80,500..86,200 (58 ckpts × 7 tasks); the step-74,400..80,400 range completed via 8541782+8542227. |
+| 2B  | 256 | **86,200** (persisted) | **2.656** | **4.339T** (92.8%) | [`8558531`](agpt/2b/n256/README.md) Q (cont12) | **8534293 (cont11) clean 12h walltime exit** 2026-06-15 04:45 — added **+5,860 steps** (80,400 → 86,260, +59 ckpts persisted), loss 2.656, no NaN. Async-mode chain has now advanced 55,026 → 86,200 (+31,234 across 11 dispatches since 2026-05-28); **closing on the 4.67T target (92.9%)**. Chain continuation restored: cont12 (`8558531`) Q + cont13 (`8558532`) H. **Eval backfill `8558536` queued** for step-80,500..86,200 (58 ckpts × 7 tasks); the step-74,400..80,400 range completed via 8541782+8542227. |
 | 20B | 256 | **1,100** (persisted) | **3.28** | **55.4B** (1.2%) | [`8558548`](agpt/20b/n256/README.md) Q (re-armed) | Relocated 2026-06-12 to its own `agpt-20b-n256/` clone. Re-arm blocked twice (`8540345`/`8540346`, missing spmd_types in the symlinked tarball) then fixed 2026-06-16 (installed spmd_types==0.2.1 + rebuilt tarball). Re-submitted `8558548` (resumes step-1,100) + `8558549` (cont1). Prior: `8505255` (2026-05-22) broke the step-300 stall → step-1,125, persisted step-400..1,100. |
 
 ### Other jobs
