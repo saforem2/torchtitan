@@ -61,8 +61,15 @@ SEED="${SEED:-42}"
 # that materializes a (8, H, 8192, 8192) attention matrix = 32 GiB
 # single alloc -> OOM on 1 tile/rank. Shrink to seq_len=512 / lbs=1 to
 # exercise the train loop + AC + loss path (not a perf measurement).
+# A TP>1 entry is REQUIRED: TP=1 (pure FSDP) never wraps the attention
+# local_map, so it misses the entire sharding-contract surface. The 57th
+# sync's q_BLNH rename broke the ezpz attention forks under TP>1 and the
+# TP=1 debugmodels passed clean -- the regression only surfaced at 64N.
+# agpt_debugmodel @ TP=2 exercises model.parallelize's local_map path on
+# a single node (12 tiles).
 DEFAULT_CONFIGS=(
     "ezpz.agpt:agpt_debugmodel:"
+    "ezpz.agpt:agpt_debugmodel:--parallelism.tensor-parallel-degree=2"
     "ezpz.moe:moe_debugmodel:--training.seq-len=512 --training.local-batch-size=1"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
@@ -117,15 +124,22 @@ fi
 # --- Phase 2: per-config train smoke ---
 declare -a RESULTS=()
 OVERALL_OK=1
+idx=0
 for spec in "${CONFIGS[@]}"; do
+    idx=$((idx + 1))
     module="${spec%%:*}"
     rest="${spec#*:}"
     config="${rest%%:*}"
     extra="${rest#*:}"
     [[ "${extra}" == "${rest}" ]] && extra=""  # no extra-args segment
 
+    # Label includes the index so the same config can appear more than
+    # once (e.g. agpt_debugmodel at TP=1 and TP=2) without its per-entry
+    # log or result key colliding.
+    label="${idx}-${config}"
+
     echo "" | tee -a "${LOG}"
-    echo "--- ${module} / ${config}: ${STEPS} deterministic steps ${extra:+(${extra})} ---" | tee -a "${LOG}"
+    echo "--- [${idx}] ${module} / ${config}: ${STEPS} deterministic steps ${extra:+(${extra})} ---" | tee -a "${LOG}"
     # shellcheck disable=SC2086 -- extra is an intentional word-split arg list
     ezpz launch python3 -m torchtitan.experiments.ezpz.train \
         --module="${module}" \
@@ -136,10 +150,10 @@ for spec in "${CONFIGS[@]}"; do
         --metrics.enable-wandb \
         --checkpoint.no-enable \
         ${extra} \
-        2>&1 | tee -a "${LOG_DIR}/${config}.log" | tee -a "${LOG}"
+        2>&1 | tee -a "${LOG_DIR}/${label}.log" | tee -a "${LOG}"
     rc=${PIPESTATUS[0]}
-    RESULTS+=("${config}=${rc}")
-    echo "${config} rc=${rc}" | tee -a "${LOG}"
+    RESULTS+=("${label}=${rc}")
+    echo "${label} rc=${rc}" | tee -a "${LOG}"
     [[ ${rc} -ne 0 ]] && OVERALL_OK=0
 done
 

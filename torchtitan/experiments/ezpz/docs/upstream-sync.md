@@ -75,6 +75,39 @@ Smoke verification (job `12469466`, `venvs/rl-monarch-torch213` py3.13.6
 - `moe_debugmodel` (MoeSelectiveAC + LP, seq_len=512/lbs=1 to fit 1
   tile): loss `12.90956 -> 12.36751`, rc=0.
 
+#### Follow-up: TP>1 attention local_map regression (caught at 64N, fixed)
+
+The two debugmodel smokes above run at **TP=1**, which does NOT exercise
+`model.parallelize()`'s local_map wrapping. A 64N `agpt_80b` (TP=2)
+functionality run (job `12469471`) then crashed at init on **every
+rank**:
+
+```
+AssertionError: XPUScaledDotProductAttention: local_map is set but
+in_dst_shardings is missing entries for: ['q', 'k', 'v']
+```
+
+Root cause: the 57th sync adopted the Noam Shazeer shape-suffix naming
+convention upstream (see CLAUDE.md "Shape-suffix tensor names"). Upstream
+`ScaledDotProductAttention.forward` renamed its positional args to
+`q_BLNH/k_BLNH/v_BLNH`, and `set_gqa_inner_attention_local_map` now keys
+`in_dst_shardings` by those suffixed names. The local_map contract check
+(`protocols/module.py:_maybe_wrap_local_map`) matches `in_dst_shardings`
+keys against the wrapped forward's **positional-arg names** -- and the
+ezpz attention forks (`agpt/__init__.py` `EzpzScaledDotProductAttention`
++ `SoftcappedFlexAttention`, `moe/__init__.py`
+`EzpzScaledDotProductAttention`) still used bare `q/k/v`. The mismatch
+only asserts under TP>1, so the TP=1 debugmodel smokes passed.
+
+Fix (commit pending): renamed the positional params of all three ezpz
+attention `forward`s to `q_BLNH/k_BLNH/v_BLNH` (transposing into local
+`q/k/v` in the body). Verified with a TP=2 smoke (job `12469472`,
+`smoke_agpt_tp2.sh`, agpt_2b 2N) before relaunching 64N.
+
+**Lesson: post-sync smokes must include a TP>1 config.** Pure-FSDP
+(TP=1) debugmodels miss the entire local_map / sharding-contract
+surface. `sync_smoke.sh` should grow a TP=2 entry.
+
 Venv note: `venvs/rl-monarch-torch213` needed `sh`, editable `ezpz`
 (`-e ../ezpz`, the installed 0.19.0 wheel was missing `get_timestamp`),
 and editable `blendcorpus` (`-e deps/blendcorpus`) added (all `--no-deps`,
