@@ -35,32 +35,65 @@ tried at 256N.
 | 8531345 | 2026-06-08 | 1e-7 | OOM / failover-exhausted | Retry with smaller LR; bad-node hit storm, never reached step 1. |
 | 8531721 | 2026-06-09 | 1e-7 | `std::bad_alloc` at model construction | Ranks 401-528 (contiguous block on 11-12 nodes) — failover ran out of spares. Never reached step 1. |
 
-### NaN onset is GBS-dependent — threshold is GBS ∈ (168, 372] (2026-06-24)
+### grad_norm NaN: two independent triggers (LBS>1 and large dp-degree), 2026-06-24
 
-The 2026-06-24 multi-node functionality sweep (LR=1e-6, the *working*
-4N recipe, q_BLNH fix in place) shows the NaN is **batch-size driven,
-and the onset GBS is far lower than the 256N/GBS=1536 where we first
-saw it**:
+A controlled 5-run sweep at 80B (LR=1e-6, the working recipe, q_BLNH
+fix in) maps the grad_norm-first NaN. **It is NOT simply GBS-driven, nor
+purely TP-driven** -- an early "TP=4 fixes it" read was disproved by the
+LBS=2 run. The real picture, with `dp_degree = NGPUS / TP` (the rank
+count the gradient all-reduce spans) and LBS = per-forward local batch:
 
-| Job ID | Nodes | GBS | Result | step-1 → step-3 |
-|--------|-------|-----|--------|------------------|
-| 12469486 | 28 | 168 | **clean 20 steps** | 12.949 → 12.856 (descends to 10.38 @ step 20) |
-| 12469492 | 62 | 372 | **NaN at step 3** | step 1 loss 12.930 / grad_norm 7.91 (clean); step 2 loss 12.898 / **grad_norm NaN**; step 3+ loss NaN |
+| Job ID | TP | LBS | GAS | dp_degree | GBS | Result |
+|--------|----|----|----|-----------|-----|--------|
+| 12469486 | 2 | 1 | 1 | 168 | 168 | **clean** → loss 10.38 @ step20 |
+| 12469492 | 2 | 1 | 1 | 372 | 372 | **NaN** @ step 3 |
+| 12469494 | 4 | 1 | 2 | 186 | 372 | **clean** → loss 10.31 @ step20 |
+| 12469495 | 4 | 1 | 1 | 186 | 186 | **clean** |
+| 12469499 | 4 | **2** | 1 | 186 | 372 | **NaN** @ step 4 |
 
-So a clean 80B run is reproducible at GBS=168 and breaks by GBS=372,
-identical LR/recipe. Same signature as the 256N failure: **grad_norm
-goes NaN one step before the loss does** — i.e. the blow-up is in the
-gradient/optimizer path (grad reduction, clipping, or fp32 second-moment),
-NOT the forward loss value (still finite the step grad_norm first NaNs).
-This rules out the "bf16 overflow at huge GBS=1536" framing — it happens
-at GBS=372 too — and points the diagnosis at the TP=2 grad path or
-optimizer. The grad_norm-first ordering is the strongest lead.
+Reading the matrix:
 
-**Status:** 80B production at GBS>168 is **blocked on this NaN**. The
-GBS=372 repro is far cheaper to debug than 256N — next step is a
-node-count sweep at fixed small GBS (does 62N @ GBS=168 also NaN? that
-would isolate scale vs batch-size) plus instrumenting the grad path at
-the step-2 grad_norm-NaN boundary. Diagnostic ideas in `Next steps`.
+- **GBS alone is not the trigger.** GBS=372 is clean (12469494) *and*
+  NaN (12469492, 12469499) depending on how it's composed.
+- **Two distinct things each cause the NaN:**
+  1. **Large `dp_degree`** -- 12469492 (dp=372) NaNs at LBS=1; the three
+     clean runs all have dp ≤ 186. Bigger DP all-reduce -> grad blowup.
+  2. **LBS > 1** -- 12469499 NaNs with dp=186 (same as the clean runs)
+     and GAS=1, differing from the clean 12469494 *only* by
+     LBS=2 vs LBS=1+GAS=2. So a larger per-forward batch independently
+     triggers it, even at a "safe" dp_degree.
+- The safe corner is **LBS=1 and dp_degree ≤ ~186**; you reach a target
+  GBS by adding GAS (sequential microbatches), not by raising LBS or
+  dp_degree past that. TP=4 helps only because, at fixed NGPUS, it halves
+  dp_degree (744/4=186 vs 744/2=372) -- it's not a TP fix per se.
+- Signature throughout: **grad_norm goes NaN one step before loss**, so
+  the blowup is in the gradient/optimizer path (DP grad all-reduce, TP
+  loss-parallel grad, clipping, or fp32 second-moment), not the forward.
+
+**Performance cost of the safe corner (TP=4, 62N, GBS=372):**
+
+| Config | LBS | GAS | MFU | TFLOPS/gpu | Memory |
+|--------|----|----|-----|-----------|--------|
+| TP=2, GBS=168 (baseline) | 1 | 1 | 18.7% | 55.7 | 65.9% |
+| TP=4, GBS=372 (GAS=2) | 1 | 2 | 9.85% | 29.4 | 32.0% |
+| TP=4, GBS=372 (LBS=2) | 2 | 1 | ~14-15.8% | ~42-47 | 48.0% |
+
+LBS=2 is markedly faster than GAS=2 (better comm amortization, ~15% vs
+~10% MFU) and fits memory comfortably (48%) -- **but it NaNs**, so it's
+not usable until the LBS>1 trigger is fixed. The viable stable config is
+TP=4 + LBS=1 + GAS to reach GBS, at ~9.85% MFU -- roughly **half** the
+TP=2 baseline throughput. The penalty is TP=4 communication (confirmed
+GAS-independent: GAS=1 and GAS=2 both ~9.8%).
+
+**Status / next:** a stable 80B path exists (TP=4, LBS=1, GAS-to-GBS) but
+costs ~2x throughput. The high-value fix is root-causing the grad-path
+NaN -- two reproducers now exist that are far cheaper than 256N: the
+dp-degree trigger (12469492, 62N) and the LBS trigger (12469499, 62N).
+Both show grad_norm NaN first. Likely an upstream DTensor/loss-parallel
+or FSDP grad-reduction numerical issue worth an upstream report. The
+batch-size ramp (`FaultTolerantTrainer.batch_ramp_steps`, commit
+`09f2d243b`) ramps GAS only (LBS/dp fixed), so it mitigates the
+dp-degree onset but NOT the LBS trigger.
 
 ## Working 4N stack (Aurora + Sunspot)
 
