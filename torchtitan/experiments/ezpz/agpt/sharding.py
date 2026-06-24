@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 def set_agpt_sharding_config(
     config: "Llama3Model.Config",
     *,
-    loss_parallel: bool,
     enable_sp: bool,
 ) -> None:
     """Fill ``sharding_config`` on all agpt sub-configs.
@@ -45,9 +44,11 @@ def set_agpt_sharding_config(
     present. Specs are populated unconditionally; the runtime mesh
     determines which declarations apply.
     """
-    set_decoder_sharding_config(
-        config, loss_parallel=loss_parallel, enable_sp=enable_sp
-    )
+    # 57th sync: upstream PR #3694 removed the loss_parallel kwarg.
+    # TP-on now always implies LP-on via tp_gather_logits=False; logits
+    # come out vocab-sharded and cross_entropy_loss handles the
+    # all-reduce via _LossParallelCrossEntropy autograd.
+    set_decoder_sharding_config(config, enable_sp=enable_sp)
     for layer_cfg in config.layers:
         _set_agpt_layer_sharding(layer_cfg, enable_sp=enable_sp)
 

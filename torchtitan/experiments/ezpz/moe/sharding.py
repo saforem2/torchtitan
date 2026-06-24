@@ -60,23 +60,24 @@ _GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, Placement] = {
 def set_moe_sharding_config(
     config: "moeModel.Config",
     *,
-    loss_parallel: bool,
     enable_sp: bool,
     enable_ep: bool,
 ) -> None:
     """Fill ``sharding_config`` on all moe sub-configs (dense + MoE).
 
     Dense sub-configs (attention, norms, dense FFN) are populated
-    unconditionally — ``Module.parallelize`` filters disabled axes at
+    unconditionally -- ``Module.parallelize`` filters disabled axes at
     runtime.
 
     MoE sub-configs (router, shared experts, routed experts) are
     populated unconditionally via upstream's ``set_moe_sharding_config``
-    helper — ``resolve_mesh`` filters disabled axes at runtime.
+    helper -- ``resolve_mesh`` filters disabled axes at runtime.
     """
-    set_decoder_sharding_config(
-        config, loss_parallel=loss_parallel, enable_sp=enable_sp
-    )
+    # 57th sync: upstream PR #3694 removed the loss_parallel kwarg.
+    # TP-on now always implies LP-on via tp_gather_logits=False; logits
+    # come out vocab-sharded and cross_entropy_loss handles the
+    # all-reduce via _LossParallelCrossEntropy autograd.
+    set_decoder_sharding_config(config, enable_sp=enable_sp)
     for layer_cfg in config.layers:
         _set_moe_layer_sharding(
             layer_cfg, enable_sp=enable_sp, enable_ep=enable_ep

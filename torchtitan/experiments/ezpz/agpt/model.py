@@ -46,6 +46,5 @@ class AgptModel(Llama3Model):
             parallelism = config.parallelism
             set_agpt_sharding_config(
                 self,
-                loss_parallel=not parallelism.disable_loss_parallel,
                 enable_sp=parallelism.enable_sequence_parallel,
             )

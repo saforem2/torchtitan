@@ -424,16 +424,11 @@ class FaultTolerantTrainer(Trainer):
             ckpt_kwargs["ft_manager"] = self.ft_manager
         self.checkpointer = config.checkpoint.build(**ckpt_kwargs)
 
-        loss_parallel_enabled = (
-            parallel_dims.tp_enabled and not config.parallelism.disable_loss_parallel
-        )
-        # 52nd sync: PR #3641 changed get_train_context to keyword-only
-        # signature (`enable_loss_parallel`, plus optional `parallel_dims`
-        # and `spmd_typechecking` for the new spmd_types backend). ezpz
-        # doesn't use the spmd_types backend, so just forward the loss
-        # parallel flag.
+        # 57th sync: PR #3694 deleted the --disable_loss_parallel flag.
+        # TP-on now always implies LP-on; get_train_context no longer
+        # takes enable_loss_parallel (the loss-parallel autograd handling
+        # moved into cross_entropy_loss). Mirror upstream Trainer.
         self.train_context = dist_utils.get_train_context(
-            enable_loss_parallel=loss_parallel_enabled,
             parallel_dims=parallel_dims,
         )
 
