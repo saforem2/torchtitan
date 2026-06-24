@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-16
+> Last updated: 2026-06-24
 >
 > Status: chain at step **1,100** persisted ≈ 55.4B tokens (**1.2%** of
 > 4.67T). `8505255` (2026-05-22, sync mode) broke the multi-week step-300

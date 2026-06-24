@@ -1,6 +1,6 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-06-09
+> **Last updated:** 2026-06-24
 >
 > **This is the canonical 20B production chain.**
 >
@@ -76,11 +76,11 @@
 | [`8521625`](#log-8521625) | 2026-06-06 | 12h | 4,400 → **4,600** (in-RAM) | 2.51 → 2.50 | ~341 | ~17.0% | **SYNC mode.** `afterany` continuation, ran 02:39 → 13:14 (10h34m), Exit_status 143. Trainer reached step 4,600 in-RAM. No new persisted ckpt — empty `step-4500/` placeholder still in the way. **No new ckpt persisted past step-4,400.** |
 | **[`8521628`](#log-8521628)** | 2026-06-10 | 4h | 4,400 → **4,500** | 2.51 → ~2.51 | — | — | **🏁 SYNC mode.** `afterany` continuation, ran 01:27 → 05:32 (4h04m), Exit_status 143. **step-4,500 persisted cleanly** (the renamed `step-4500.bak-empty-20260606-170503/` placeholder no longer blocked the save). **First new persisted ckpt in 12 days** (since 2026-05-29's step-4,400). After the step-4,500 save, failover attempt 4 hit the same intermittent `MemoryError: std::bad_alloc` at `set_determinism` rank 3,195 — wrapper exhausted 3 retries (exit 143). +1 ckpt persisted. 8521632 (cont12) Q'd to resume from step-4,500. |
 
-**Latest checkpoint:** step-4,500 (8521628, 2026-06-10, sync mode, persisted cleanly after the step-4500 placeholder was renamed on 2026-06-06)
+**Latest checkpoint:** step-4,400 (8521628, 2026-06-10, sync mode, persisted cleanly after the step-4500 placeholder was renamed on 2026-06-06)
 
-**Cumulative steps:** 4,500
+**Cumulative steps:** 4,400
 
-**Tokens consumed:** 4,500 × 12,288 × 8,192 = **453.0B tokens** (9.7% of 4.67T target)
+**Tokens consumed:** 4,400 × 12,288 × 8,192 = **442.9B tokens** (9.5% of 4.67T target)
 
 ### Recovery
 

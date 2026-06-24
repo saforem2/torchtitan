@@ -5,7 +5,7 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-16
+> Last updated: 2026-06-24
 >
 > Status: chain at step **86,200** ≈ 4.339T tokens (**92.9%** of
 > 4.67T target). `8534293` (cont11) ran 2026-06-14 → 2026-06-15,
@@ -95,7 +95,7 @@
 
 **Cumulative steps:** 86,200
 
-**Tokens consumed:** 86,200 × 6,144 × 8,192 = **4.339T tokens** (**92.9%** of 4.67T target)
+**Tokens consumed:** 86,200 × 6,144 × 8,192 = **4.339T tokens** (**92.8%** of 4.67T target)
 
 **Loss:** 2.656 (last log ~step-86,260 from 8534293; evals current through step-80,400 — backfill for step-80,500..86,200 pending)
 

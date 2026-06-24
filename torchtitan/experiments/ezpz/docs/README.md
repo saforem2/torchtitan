@@ -22,10 +22,10 @@ going?" Tracking is per-model and per-node-count.
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-24 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-11 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.9% of 4.67T), loss 2.656. | 2026-06-24 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30500** (3.07T tokens, 65.7% of 4.67T). | 2026-06-09 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,500** (453.0B tokens, 9.7% of 4.67T). | 2026-06-10 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,100** (55.4B tokens, 1.2% of 4.67T), loss 3.28. | 2026-06-12 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.8% of 4.67T), loss 2.656. | 2026-06-24 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-09 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-10 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,100** (55.4B tokens, 1.2% of 4.67T), loss 3.28. | 2026-06-24 |
 | [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-12 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-05-28 |
@@ -63,7 +63,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-06-13 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-06-24 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-05-05 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-05-12 |
@@ -100,7 +100,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-06-13 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-06-24 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 

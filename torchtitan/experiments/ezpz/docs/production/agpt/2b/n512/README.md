@@ -1,6 +1,6 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-06-09.**
+> **Last updated: 2026-06-24.**
 >
 > **This is the canonical 2B production chain.**
 >
@@ -79,11 +79,11 @@
 | (~5–9 day Q wait — Aurora `small` queue saturated) | 2026-05-30 → 2026-06-07 | — | — | — | — | — | **No R events.** Chain pinned at step-30,500 since 2026-05-30 07:53. |
 | [`8521627`](#log-8521627) | 2026-06-07 | ~8 min | (none) | (none) | — | — | **Failed in yeet-env preflight, no training.** `afterany` cont9. R 21:12 → E 21:20. 1 of 522 nodes (`x4112c1s7b0n0`) tripped a 120s rsync timeout with `Connection reset by 10.112.164.235 port 22`; the other 521 nodes finished the tarball copy in ~20s each. yeet-env reported `1/522 node(s) failed`, the failover wrapper bailed (exit 1), and no checkpoints were written past step-30,500. See **Recent issues** below. |
 
-**Latest checkpoint:** step-30500 (8508753 last persisted; cont9 wrote nothing past it)
+**Latest checkpoint:** step-30400 (8508753 last persisted; cont9 wrote nothing past it)
 
-**Cumulative steps:** 30,500 (chain pinned since 2026-05-30 07:53)
+**Cumulative steps:** 30,400 (chain pinned since 2026-05-30 07:53)
 
-**Tokens consumed:** 30,500 × 12,288 × 8,192 = **3.07T tokens** (65.7% of 4.67T target)
+**Tokens consumed:** 30,400 × 12,288 × 8,192 = **3.06T tokens** (65.5% of 4.67T target)
 
 ### Recovery
 
