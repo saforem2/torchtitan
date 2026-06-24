@@ -21,10 +21,10 @@ vars (`NHOSTS_TRAIN`, `FAILOVER_MAX_RETRIES`, `LBS`, `CKPT_DIR`,
 PBS nodefile into active + spare nodes, runs a preflight smoke, and
 swaps in spares on a bad-node hit.
 
-> The non-failover `scripts/submit_agpt_{2b,20b}_aurora_venv.sh` are
-> **DEPRECATED (2026-06-24)** — superseded by the failover versions;
-> kept only to reproduce pre-failover dispatches. Nothing live calls
-> them.
+> The non-failover `scripts/submit_agpt_{2b,20b}_aurora_venv.sh` were
+> **removed 2026-06-24** — superseded by the failover versions above.
+> Recover from git history if a pre-failover dispatch ever needs
+> reproducing.
 
 ## Why these are legacy
 
