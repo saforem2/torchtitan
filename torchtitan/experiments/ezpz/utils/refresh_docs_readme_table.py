@@ -66,6 +66,34 @@ LOSS_NUM_RE = re.compile(r"^([\d.]+)")
 # Opt-out sentinel
 NOAUTO_SENTINEL = "<!-- noauto -->"
 
+# Default token-budget label when a README isn't in the manifest (every
+# current trajectory shares the olmo-mix-1124 4.67T budget).
+_DEFAULT_TOKEN_TARGET_LABEL = "4.67T"
+
+
+def _fmt_token_target(total: int) -> str:
+    """Short human label for a token target, e.g. 4_673_780_159_710 -> '4.67T'."""
+    if total >= 1e12:
+        return f"{total / 1e12:.2f}T"
+    return f"{total / 1e9:.0f}B"
+
+
+def _token_target_label(readme_path: Path) -> str:
+    """Resolve the per-page token-budget label from the trajectory
+    manifest by matching the linked README path. Falls back to the
+    shared olmo-mix default if the page isn't a tracked trajectory.
+    """
+    try:
+        from torchtitan.experiments.ezpz.utils.trajectories import TRAJECTORIES
+    except Exception:
+        return _DEFAULT_TOKEN_TARGET_LABEL
+    rp = str(readme_path.resolve())
+    for t in TRAJECTORIES:
+        rdm = t.get("readme")
+        if rdm and rp.endswith(rdm):
+            return _fmt_token_target(t["token_target"])
+    return _DEFAULT_TOKEN_TARGET_LABEL
+
 
 def git_last_commit_date(repo_root: Path, path: Path) -> str | None:
     """Return YYYY-MM-DD of the last commit touching ``path``."""
@@ -111,13 +139,16 @@ def synthesize_notes(target_path: Path) -> str | None:
     step_m = STEP_NUM_RE.search(latest_str)
     step_part = f"step-**{step_m.group(1)}**" if step_m else latest_str.split(" ")[0]
 
-    # Pull "X.XXT tokens (YY%)" tidily.
+    # Pull "X.XXT tokens (YY%)" tidily. The "of <target>" suffix comes
+    # from the trajectory manifest (per-page token_target) rather than a
+    # hardcoded 4.67T, so a future non-olmo-mix model labels correctly.
     tokens_part = ""
     if tokens_str:
         ts = tokens_str.group(1).strip()
         m = TOKEN_TOTAL_RE.search(ts)
         if m:
-            tokens_part = f" ({m.group(1)} tokens, {m.group(2)} of 4.67T)"
+            target_label = _token_target_label(target_path)
+            tokens_part = f" ({m.group(1)} tokens, {m.group(2)} of {target_label})"
         else:
             tokens_part = f" ({ts.split('(')[0].strip()})"
 

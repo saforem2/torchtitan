@@ -32,7 +32,9 @@ fi
 export PYTHONPATH=.
 
 declare -A SCRIPTS=(
-    [production]="torchtitan/experiments/ezpz/utils/plot_production.py"
+    # plot_production.py (PBS-.o-file plotter) dropped 2026-06-24: it is
+    # DEPRECATED, its default .o files are gone, and no README embeds its
+    # output. Use plot_production_wandb.py instead.
     [production_combined]="torchtitan/experiments/ezpz/utils/plot_production_combined.py"
     [production_wandb]="torchtitan/experiments/ezpz/utils/plot_production_wandb.py"
     [evals_combined]="torchtitan/experiments/ezpz/eval/plot_evals_combined.py"

@@ -82,127 +82,16 @@ def _savefig_both(fig, svg_path, dpi=200):
 #      agpt-{2b,20b}-v2/ (torch 2.13 venv, LBS=2,
 #      `--training.dtype=float32`, plain CrossEntropyLoss). These are
 #      the current production runs.
-PRODUCTION_RUNS: dict[str, dict] = {
-    "2b_v1_256": {
-        "run_ids": [
-            "v5ytgu0o", "pjanidnw", "4u9w23p9", "tahlsmy9", "iy1xbv0t",
-            "11jzfnno", "hqwaw075", "6ictshbs", "wviyqysc",
-        ],
-        "num_nodes": 256,
-        "model": "2b",
-    },
-    "20b_v1_256": {
-        "run_ids": [
-            "q9oq5huj", "pnkaurba", "lrlv3xsc", "pigwfqkg", "lvyzlocg",
-            "e2anhgt2", "he01jr7f", "t0ja3dl4",
-        ],
-        "num_nodes": 256,
-        "model": "20b",
-    },
-    "2b_v2_256": {
-        # lytjeegk = 8459818 (6h initial, step 0->2070)
-        # 0t4h0kuw = 8470100 (12h chain1, resumed step 2000)
-        # j7bz39tj = 8470101 (12h chain2)
-        # 0qpf3hnc = 8481320 (failover wrapper, 2026-05-22, step 13K->18K)
-        # iekiq5rq = 8503506 (failover continuation, 2026-05-22→23, step 18.8K->23.5K+)
-        # ni0etxx7 = 8505118 (post-fix dispatch, exhausted retries cleanly)
-        # 0fk1bvtt = 8505119 (post-fix continuation, advanced to step-25,100+)
-        # 3n22a69q = 8505175 (12h, fresh ezpz 0.16.0 tarball, step 25500 -> 30791, async stable at 256N)
-        # 8vmrcxqr = 8505252 (12h continuation, step 30700 -> 36528, 57 ckpts)
-        # 56lkkkh1 = 8507195 (12h chain, step 36528 -> 42515, 57 ckpts)
-        # 24wfvoje = 8507198 (12h chain, step 42610 -> 48329, 57 ckpts)
-        # bs6tay8l = 8508020 (12h, step 48400+, ended cleanly at ~step-54700)
-        # zrqx75x7 = 8508977 (cont4, 2026-05-28 pals-RPC partial — ~5 ckpts step-53800..54200)
-        # ied4spbx = 8513544 (cont5, 2026-05-30 12h walltime, step 55001 -> 59750)
-        # yklnyjd5 = 8516364 (cont6, 2026-06-01 12h walltime, step 59701 -> 64922)
-        # (no W&B run for 8516365 — cont7, 2026-06-04 pals-RPC init-only failure)
-        # 8ujhblrp = 8519833 (cont8, 2026-06-06 11h walltime, step 64901 -> 69914)
-        # a52q40kx = 8521626 (cont9, 2026-06-10 12h walltime, step 69900 -> 74300)
-        # okyt09kv = 8521630 (cont10, 2026-06-12→13 12h walltime, step 74300 -> 80404, +51 ckpts)
-        # zcmlqbd8 = 8534293 (cont11, 2026-06-14→15 12h walltime, step 80400 -> 86260, +59 ckpts)
-        "run_ids": ["lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
-                    "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
-                    "56lkkkh1", "24wfvoje", "bs6tay8l",
-                    "zrqx75x7", "ied4spbx", "yklnyjd5",
-                    "8ujhblrp", "a52q40kx", "okyt09kv", "zcmlqbd8"],
-        "num_nodes": 256,
-        "model": "2b",
-    },
-    "2b_v2_512": {
-        # i252kps9 = 8460301 (initial 6h, step 0->1387)
-        # d4hlr8qe = 8463626 (12h chain1, resumed step 1300, ended step 5073)
-        # 1va7zfki = 8463627 (12h chain2, resumed step 5000, ended step 6955)
-        # 6op7ozfh = 8466847 (12h chain3)
-        # y70rh76h = 8479989 (12h chain5, advanced step 13282 -> 13400)
-        # logai2xn = 8485509 (1h19m chain6, pinned at step-13400)
-        # 2qqhpcrm = 8485511 (1h23m chain7, also pinned at step-13400)
-        # 8505176 async-mode died at step-13400 cascade again (3 attempts) — no clean run wandb
-        # w78n1akt = 8506221 (12h, SYNC MODE — async-cascade workaround, step 13300 -> 16676, 21 ckpts)
-        # i0ayskft = 8507196 (12h SYNC, step 16601 -> 20989; W&B run crashed mid-sync,
-        #            history() returns 0 rows — recovered via .o-log fallback below)
-        # 21grc6o7 = 8507199 (12h SYNC, step 20900 -> 25967, 50 ckpts)
-        # nv4qwxc8 = 8508753 (12h R SYNC, step 25900 -> 27106+, currently running)
-        # (NB: afr5yvx9 + la416h9c are preflight ezpz.examples.test runs, not the training run)
-        "run_ids": ["i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
-                    "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
-                    "i0ayskft", "21grc6o7", "nv4qwxc8"],
-        "num_nodes": 512,
-        "model": "2b",
-        # Map W&B run_id -> .o log path for runs whose W&B history() is empty
-        # (run crashed mid-sync). Parsed for `step: N loss: L grad_norm: G
-        # memory: ... tps: T tflops: F mfu: M` lines.
-        "olog_fallbacks": {
-            "i0ayskft": "/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/agpt-2b-n512-v2-failover-sync-cont.o8507196",
-        },
-    },
-    "20b_v2_512": {
-        # 9tsyx5us = 8460302 (initial 6h, step 0->300)
-        # ej3zy5cq = 8463628 (12h chain1, resumed step 200, ended step 863)
-        # 8466848 (chain2 resubmit) crashed at startup with std::bad_alloc, no wandb run
-        # s6b159xk = 8479579 (12h chain2 retry, silent hang killed by qdel @ 5h56m)
-        # gkzl19dg = 8481645 (failover wrapper, 200 fresh steps; step-900 ckpt
-        #            never persisted — log shows step 800->1000 in-memory)
-        # 10vf1mqr = 8481647 (failover continuation, 2026-05-22)
-        # qttj3l3p = 8505124 (post-fix dispatch 2026-05-23, exhausted retries)
-        # wjy5pvxm = 8505258 (12h, SYNC MODE — first 512N progress since 05-03, step 800 -> 1414, 6 ckpts)
-        # cv3wii8x = 8505259 (12h continuation, step 1414 -> 2043, 6 more ckpts)
-        # tu77pzu7 = 8507197 (12h SYNC continuation, step 2043 -> 2686, 6 ckpts)
-        # 8vixdfg2 = 8507200 (12h SYNC continuation, step 2600 -> 3270, 6 ckpts)
-        # 0pmsn01c = 8509393 (12h SYNC continuation, resumed 2026-05-28 23:34,
-        #            step 3300 -> 4300+ as of 2026-05-29, +11 ckpts so far;
-        #            d00iszlc is the preflight set_determinism test run,
-        #            not the training run.)
-        "run_ids": ["9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
-                    "qttj3l3p", "wjy5pvxm", "cv3wii8x",
-                    "tu77pzu7", "8vixdfg2", "0pmsn01c"],
-        "num_nodes": 512,
-        "model": "20b",
-    },
-    "20b_v2_256": {
-        # r1yyxbmt = 8463659 (12h initial, step 0->363, NODE_FAIL)
-        # 72airpph = 8470102 (3h, resumed step 300, gloo TCP timeout @ ~3h)
-        # m9c5wx2e = 8470103 (3h, chain2, also gloo TCP timeout @ ~3h)
-        # 6eocrnxs = 8479581 (12h chain3 retry, resumed step 400, gloo TCP @ 3h39m)
-        # 5481v99b = 8479582 (chain4 continuation, 2h40m)
-        # yrq1s1ac = 8481646 (failover wrapper validated, swap+retry; no new ckpt persisted)
-        # xt03uvp6 = 8481648 (failover continuation, 2026-05-22)
-        # f1p8nyxh = 8505122 (post-fix dispatch 2026-05-23, exhausted retries)
-        # g6ekeu4j = 8505123 (post-fix continuation, currently running)
-        "run_ids": ["r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
-                    "5481v99b", "yrq1s1ac", "xt03uvp6",
-                    "f1p8nyxh", "g6ekeu4j"],
-        "num_nodes": 256,
-        "model": "20b",
-    },
-    "2b_v2_512_lr3.22e-5": {
-        # 8edrii5e = 8467141 (4h, sqrt(2)-LR fork — separate ckpt dir gbs12288-lr3.22e-5)
-        # oujzdxri = 8467142 (1h53m, chain2)
-        # Tests whether scaling LR by sqrt(2) closes per-token gap to 256N at GBS=12288
-        "run_ids": ["8edrii5e", "oujzdxri"],
-        "num_nodes": 512,
-        "model": "2b",
-    },
-}
+# PRODUCTION_RUNS now lives in trajectories.py (the single source of
+# truth shared with check_stale_docs.sh, fill_trajectory_fields.py, and
+# the eval scripts). It is imported here as a drop-in: same dict shape
+# {key: {run_ids, num_nodes, model[, olog_fallbacks]}}, same key order.
+# Add new W&B run-ids by appending to a trajectory's wandb_run_ids in
+# trajectories.py — that single edit updates the charts, the stale-doc
+# map, the field-filler, and the eval plots together.
+from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    PRODUCTION_RUNS,
+)
 
 MODEL_COLORS = {
     "2b": "#1E88E5",

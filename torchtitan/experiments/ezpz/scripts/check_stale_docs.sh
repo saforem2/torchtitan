@@ -20,15 +20,18 @@ set -o pipefail
 
 cd "$(dirname "$0")/../../../.."   # repo root
 
-# Map: ckpt_dir → README path. Add new chains here as they appear.
-declare -A CHAIN_TO_README=(
-    [/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144]="torchtitan/experiments/ezpz/docs/production/agpt/2b/n256/README.md"
-    [/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288]="torchtitan/experiments/ezpz/docs/production/agpt/2b/n512/README.md"
-    [/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-gbs12288-lr3.22e-5]="torchtitan/experiments/ezpz/docs/production/agpt/2b/n512/README.md"
-    [/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288]="torchtitan/experiments/ezpz/docs/production/agpt/20b/n512/README.md"
-    [/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-80b-adamw-olmo-mix-1124-n4-gbs24]="torchtitan/experiments/ezpz/docs/production/agpt/80b/n4/README.md"
-    [/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-80b-adamw-olmo-mix-1124-n256-gbs1536]="torchtitan/experiments/ezpz/docs/production/agpt/80b/n256/README.md"
-)
+# Map: ckpt_dir -> README path. SINGLE SOURCE OF TRUTH is the trajectory
+# manifest (utils/trajectories.py); this emits the bash assoc-array from
+# it, filtered to dirs that exist on disk. To add/move a chain, edit the
+# manifest -- never hand-edit a map here (that drift is exactly how the
+# relocated 20B-256N path went missing). Falls back to nothing if the
+# emitter fails (loop below just reports zero chains).
+PY="${PY:-.venv/bin/python3}"
+[[ -x "$PY" ]] || PY="python3"
+eval "$(PYTHONPATH=. "$PY" -m torchtitan.experiments.ezpz.utils.trajectories --emit stale-map 2>/dev/null)"
+if [[ "${#CHAIN_TO_README[@]}" -eq 0 ]]; then
+    echo "WARNING: trajectory manifest emitted no chains (emitter failed?)" >&2
+fi
 
 stale_count=0
 missing_count=0
@@ -46,12 +49,21 @@ for ckpt_dir in "${!CHAIN_TO_README[@]}"; do
         continue
     fi
 
-    # Latest valid step-N dir (digits only — excludes .bak-* and other suffixes)
-    last_ckpt=$(ls "$ckpt_dir" 2>/dev/null | grep -E '^step-[0-9]+$' | sort -t- -k2 -n | tail -1)
-    if [[ -z "$last_ckpt" ]]; then
+    # Latest VALID step-N (has .metadata + >=1 .distcp; excludes mid-save
+    # placeholders + .bak-*). Computed by the SAME helper the field-filler
+    # uses (fill_trajectory_fields.largest_valid_step) so the checker and
+    # the filler can never disagree about disk truth.
+    last_num=$(PYTHONPATH=. "$PY" -c "
+import sys
+from torchtitan.experiments.ezpz.utils.fill_trajectory_fields import largest_valid_step
+s = largest_valid_step('$ckpt_dir')
+print(s if s is not None else '')
+" 2>/dev/null)
+    if [[ -z "$last_num" ]]; then
         echo "  [no ckpts] $chain_name"
         continue
     fi
+    last_ckpt="step-${last_num}"
     last_mtime=$(stat -c '%y' "$ckpt_dir/$last_ckpt" 2>/dev/null | head -c 19)
 
     if [[ ! -f "$readme" ]]; then
@@ -63,8 +75,17 @@ for ckpt_dir in "${!CHAIN_TO_README[@]}"; do
         continue
     fi
 
-    # Latest step-N mentioned in the README (purely textual scan)
-    readme_step=$(grep -oE 'step-[0-9]+' "$readme" 2>/dev/null | sort -u | sort -t- -k2 -n | tail -1)
+    # Prefer the canonical "**Latest checkpoint:** step-N" field (the one
+    # fill_trajectory_fields.py writes), tolerating commas + bold
+    # (step-**86,200**). Fall back to a textual max-scan of all step-N
+    # mentions only if that field is absent. Strip commas/asterisks so
+    # the numeric compare below works.
+    readme_step=$(grep -oE '\*\*Latest(\s+\*[a-z]+\*)? checkpoint:\*\*[^|]*' "$readme" 2>/dev/null \
+        | grep -oE 'step-\**[0-9,]+' | head -1 | tr -d '*,')
+    if [[ -z "$readme_step" ]]; then
+        readme_step=$(grep -oE 'step-\**[0-9,]+' "$readme" 2>/dev/null | tr -d '*,' \
+            | sort -u | sort -t- -k2 -n | tail -1)
+    fi
     readme_git=$(git log -1 --format='%ad' --date=short -- "$readme" 2>/dev/null)
 
     if [[ -z "$readme_step" ]]; then
