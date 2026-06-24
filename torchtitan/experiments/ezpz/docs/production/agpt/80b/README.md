@@ -35,9 +35,32 @@ tried at 256N.
 | 8531345 | 2026-06-08 | 1e-7 | OOM / failover-exhausted | Retry with smaller LR; bad-node hit storm, never reached step 1. |
 | 8531721 | 2026-06-09 | 1e-7 | `std::bad_alloc` at model construction | Ranks 401-528 (contiguous block on 11-12 nodes) — failover ran out of spares. Never reached step 1. |
 
-**Status:** 80B 256N production is **still blocked**. The NaN-at-step-2
-diagnosis is the first thing to chase once we get queue time;
-diagnostic ideas in `Next steps` below.
+### NaN onset is GBS-dependent — threshold is GBS ∈ (168, 372] (2026-06-24)
+
+The 2026-06-24 multi-node functionality sweep (LR=1e-6, the *working*
+4N recipe, q_BLNH fix in place) shows the NaN is **batch-size driven,
+and the onset GBS is far lower than the 256N/GBS=1536 where we first
+saw it**:
+
+| Job ID | Nodes | GBS | Result | step-1 → step-3 |
+|--------|-------|-----|--------|------------------|
+| 12469486 | 28 | 168 | **clean 20 steps** | 12.949 → 12.856 (descends to 10.38 @ step 20) |
+| 12469492 | 62 | 372 | **NaN at step 3** | step 1 loss 12.930 / grad_norm 7.91 (clean); step 2 loss 12.898 / **grad_norm NaN**; step 3+ loss NaN |
+
+So a clean 80B run is reproducible at GBS=168 and breaks by GBS=372,
+identical LR/recipe. Same signature as the 256N failure: **grad_norm
+goes NaN one step before the loss does** — i.e. the blow-up is in the
+gradient/optimizer path (grad reduction, clipping, or fp32 second-moment),
+NOT the forward loss value (still finite the step grad_norm first NaNs).
+This rules out the "bf16 overflow at huge GBS=1536" framing — it happens
+at GBS=372 too — and points the diagnosis at the TP=2 grad path or
+optimizer. The grad_norm-first ordering is the strongest lead.
+
+**Status:** 80B production at GBS>168 is **blocked on this NaN**. The
+GBS=372 repro is far cheaper to debug than 256N — next step is a
+node-count sweep at fixed small GBS (does 62N @ GBS=168 also NaN? that
+would isolate scale vs batch-size) plus instrumenting the grad path at
+the step-2 grad_norm-NaN boundary. Diagnostic ideas in `Next steps`.
 
 ## Working 4N stack (Aurora + Sunspot)
 
