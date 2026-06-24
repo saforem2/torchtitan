@@ -72,11 +72,16 @@
 
 ### Job Submission
 
-- **All current (v2) production training:** Use
-  `scripts/submit_agpt_{2b,20b}_aurora_venv.sh`. These use the torch
-  2.13 `.venv/` (broadcast via `ezpz yeet-env` tarball mode), LBS=2,
-  fp32 master, and one script handles all node counts via env vars
-  (`NNODES`, `LBS`, `CKPT_DIR`, `CHECKPOINT_ASYNC_MODE`, …).
+- **All current (v2) production training:** Use the **failover**
+  scripts `scripts/submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh`.
+  These use the torch 2.13 `.venv/` (broadcast via `ezpz yeet-env`
+  tarball mode), LBS=2, fp32 master, add a bad-node preflight +
+  spare-swap retry path, and one script handles all node counts via env
+  vars (`NHOSTS_TRAIN`, `FAILOVER_MAX_RETRIES`, `LBS`, `CKPT_DIR`,
+  `CHECKPOINT_ASYNC_MODE`, …). The non-failover
+  `submit_agpt_{2b,20b}_aurora_venv.sh` are DEPRECATED (2026-06-24) —
+  kept only to reproduce pre-failover dispatches; nothing live calls
+  them.
 - **Legacy torch-2.10 v1 scripts** live under `submit/{aurora,sunspot}/*.sh`
   with their own README. They produced every v1 (bf16-tainted)
   trajectory and are kept only for reproducing v1 numbers — nothing
@@ -338,7 +343,7 @@ that touches one of these areas.
 ## Production Training Status (Aurora)
 
 Tracking in `docs/production/`. **All v2 (post-bf16-fix) runs use
-the torch 2.13 venv stack + `scripts/submit_agpt_*_aurora_venv.sh`**.
+the torch 2.13 venv stack + `scripts/submit_agpt_*_aurora_venv_failover.sh`**.
 Default dtype is now `float32` (see Recent Findings).
 
 ### v2 — 2B 512N canonical chain (`8460301 → 8463626 → 8463627 → 8466847`)
@@ -522,10 +527,11 @@ moved up to "Golden Rules".
   `scripts/interactive-launch.sh`.
 - **Append-only tables** — production training progress tables should
   append, not replace.
-- **Use `scripts/submit_agpt_*_aurora_venv.sh`** for all current
-  (torch 2.13 venv, fp32-master) production. The legacy
-  `submit/{aurora,sunspot}/*.sh` (torch 2.10 conda) are kept only for
-  reproducing v1 numbers — see `submit/README.md`.
+- **Use `scripts/submit_agpt_*_aurora_venv_failover.sh`** for all
+  current (torch 2.13 venv, fp32-master) production. The non-failover
+  `submit_agpt_{2b,20b}_aurora_venv.sh` are DEPRECATED (nothing live
+  calls them). The legacy `submit/{aurora,sunspot}/*.sh` (torch 2.10
+  conda) are kept only for reproducing v1 numbers — see `submit/README.md`.
 - **Date filenames as `YYYY-MM-DD`** for any per-day artifacts.
   Per-recurring-meeting docs use a stable filename with `## YYYY-MM-DD`
   sections inside (see `docs/meeting-notes/agpt-sync.md`).

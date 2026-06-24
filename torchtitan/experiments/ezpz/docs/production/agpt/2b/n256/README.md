@@ -45,7 +45,7 @@
 | Field | Value |
 |-------|-------|
 | Clone | `/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/` |
-| Submit script | [`scripts/submit_agpt_2b_aurora_venv.sh`](../../../../../scripts/submit_agpt_2b_aurora_venv.sh) (one script handles all v2 node counts via env vars) |
+| Submit script | [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../../../../../scripts/submit_agpt_2b_aurora_venv_failover.sh) (failover wrapper: bad-node preflight + spare-swap retry; one script handles all node counts via env vars) |
 | Stack | torch 2.13 venv (yeet-env tarball mode) |
 | Optimizer | SophiaG, LR=2.28e-5 |
 | Compile | on |
@@ -134,7 +134,7 @@ shifts the four-metric vector by <1pp in any direction now that we're
 - **Behind it:** `8521630` (cont10) H'd behind 8521626 — chain stays
   **+2 deep** so a clean walltime exit on cont9 will immediately
   release cont10 onto the next available 256N slot.
-- Submit script unchanged: `scripts/submit_agpt_2b_aurora_venv.sh`
+- Submit script unchanged: `scripts/submit_agpt_2b_aurora_venv_failover.sh`
   with the same env (LBS=2, GBS=6144, SophiaG LR=2.28e-5, fp32 master,
   async ckpt mode, ckpt-interval=100, keep-latest-k=0).
 
