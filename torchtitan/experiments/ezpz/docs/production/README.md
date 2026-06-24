@@ -58,7 +58,7 @@ python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **86,200** (persisted) | **2.656** | **4.34T** (92.9%) | [`8558531`](agpt/2b/n256/README.md) Q (cont12) | **8534293 (cont11) clean 12h walltime exit** 2026-06-15 04:45 — added **+5,860 steps** (80,400 → 86,260, +59 ckpts persisted), loss 2.656, no NaN. Async-mode chain has now advanced 55,026 → 86,200 (+31,234 across 11 dispatches since 2026-05-28); **closing on the 4.67T target (92.9%)**. Chain continuation restored: cont12 (`8558531`) Q + cont13 (`8558532`) H. **Eval backfill `8558536` queued** for step-80,500..86,200 (58 ckpts × 7 tasks); the step-74,400..80,400 range completed via 8541782+8542227. |
-| 20B | 256 | **1,125** (persisted) | **3.28** | **113B** (2.4%) | [`8505255`](agpt/20b/n256/README.md) F (12h walltime) | Sync-mode 12h dispatch reached step 1,125 cleanly. No continuation queued (256N is per-token comparator; canonical chain is 512N). |
+| 20B | 256 | **1,100** (persisted) | **3.28** | **55.4B** (1.2%) | [`8558548`](agpt/20b/n256/README.md) Q (re-armed) | Relocated 2026-06-12 to its own `agpt-20b-n256/` clone. Re-arm blocked twice (`8540345`/`8540346`, missing spmd_types in the symlinked tarball) then fixed 2026-06-16 (installed spmd_types==0.2.1 + rebuilt tarball). Re-submitted `8558548` (resumes step-1,100) + `8558549` (cont1). Prior: `8505255` (2026-05-22) broke the step-300 stall → step-1,125, persisted step-400..1,100. |
 
 ### Other jobs
 

@@ -5,16 +5,29 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Status (2026-05-11 evening): **Training again.** 8479581 (chain3
-> retry) resumed from step-400 and is now at step **441, loss 4.30**
-> (~2h22m elapsed). MFU bouncing 1.6–9.6% with flare contention but
-> no crashes yet. Four runs so far: 8463659 NODE_FAIL @ 364
-> (signal 9 on bad node), 8470102 + 8470103 chain both **gloo TCP
-> timeouts at ~3h** (didn't reproduce on retry), then 8479581
-> running cleanly. Independent trajectory from the canonical 512N
-> chain ([n512/](../n512/README.md)) — different ckpt dir
-> (`gbs6144` vs `gbs12288`), so it can't extend the chain — but
-> useful as a per-token comparator at the same optimizer state.
+> Last updated: 2026-06-16
+>
+> Status: chain at step **1,100** persisted ≈ 55.4B tokens (**1.2%** of
+> 4.67T). `8505255` (2026-05-22, sync mode) broke the multi-week step-300
+> stall — reached step-1,125 cleanly and persisted step-400..1,100 (11
+> valid ckpts on disk now). **Relocated 2026-06-12** to its own clone
+> `agpt-20b-n256/` (metadata-only `mv`, to relieve Lustre dir-size on the
+> `agpt-20b-v2/` subtree) so it can be re-armed independently of the
+> canonical 512N chain.
+>
+> **Re-arm blocked then fixed (2026-06-14 → 16):** first two re-launches
+> from the new clone (`8540345`, `8540346`) both died in <10s with
+> `ModuleNotFoundError: No module named 'spmd_types'` — the symlinked
+> `.venv.tar.gz` (2026-05-23) predated the spmd_types==0.2.1 install, so
+> the broadcast `/tmp/.venv` lacked it. Fixed 2026-06-16: installed
+> spmd_types into the venv (`--no-deps`, torch untouched), rebuilt the
+> tarball, re-verified. Chain re-submitted as `8558548` (head, resumes
+> step-1,100) + `8558549` (cont1, `afterany`).
+>
+> Independent trajectory from the canonical 512N chain
+> ([n512/](../n512/README.md)) — different ckpt dir (`gbs6144` vs
+> `gbs12288`), so it can't extend that chain — but useful as a per-token
+> comparator at the same optimizer state.
 
 | Field | Value |
 |-------|-------|
@@ -52,19 +65,19 @@
 | [`8479581`](#log-8479581) | 2026-05-11 | 12h | 400–500 | (resumed) → 4.08 | 31-419 (variable) | 1.6-20.9% (variable) | **Crashed** @ 3h39m (also gloo TCP timeout, peer 10.115.83.2; exit 0). step-500 ckpt saved. |
 | [`8479582`](#log-8479582) | 2026-05-11 | 12h | 500+ | — | — | — | Released, Q to resume from step-500 |
 | [`8481646`](#log-8481646) | 2026-05-21 | 12h | 301-500 (logged) | 4.95 → 4.12 | ~405 (steady) | **~20%** | **Failover wrapper validated end-to-end**: attempt 1 ran 2h33m, hit gloo crash from `x4110c3s3b0n0`, wrapper auto-swapped in spare `x4114c7s4b0n0`. **No new ckpts persisted** — `step-400` ckpt dir is empty (May 8 stale from `8470102`) and `step-500` was never written (async save killed by walltime). Attempt 2 only had 98s of parent walltime left. The wrapper's swap+retry path is proven; the training-progress contribution is zero. See [failover writeup](../../../../experiments/agpt/aurora/20260521-failover-validated-8481646.md). |
+| `8505255` | 2026-05-22 | 12h | 300 → **1,125** | 4.12 → **3.28** | ~480 (steady) | ~24% | **Broke the step-300 stall.** Sync-mode 12h dispatch, advanced step-300 → step-1,125 cleanly. Persisted step-400..1,100 (11 valid ckpts). `step-400.bak-20260523-095600` is the old empty placeholder, renamed. |
+| `8540345` | 2026-06-14 | 12h | — | — | — | — | **Died <10s** (`ModuleNotFoundError: spmd_types`). First re-launch from the relocated `agpt-20b-n256/` clone; symlinked tarball predated the spmd_types install. All 4 failover attempts failed identically (venv bug, not bad nodes). No ckpts. |
+| `8540346` | 2026-06-16 | 12h | — | — | — | — | Same `spmd_types` failure (cont1 of 8540345, auto-released). No ckpts. |
+| `8558548` | 2026-06-16 | 12h | 1,100 → ? | — | — | — | **Re-submit after tarball fix** (spmd_types==0.2.1 installed + rebuilt 2026-06-16). Resumes from step-1,100. Q at submit. |
+| `8558549` | — | 12h | (cont1) | — | — | — | Held (`afterany:8558548`). |
 
-**Latest *complete* checkpoint:** step-300 (8463659 era; `step-400` dir is empty, `step-500` doesn't exist)
+**Latest checkpoint:** step-1,100 (8505255, all of step-100..1,100 have valid `.metadata`)
 
-**Cumulative *persisted* steps:** 300
+**Cumulative persisted steps:** 1,100
 
-**Tokens consumed (persisted):** 300 × 6,144 × 8,192 = **15B tokens** (0.32% of 4.67T target)
+**Tokens consumed:** 1,100 × 6,144 × 8,192 = **55.4B tokens** (1.2% of 4.67T target)
 
-> 8479581 + 8470102 + 8481646 all *logged* steps past 300 (up to ~500
-> across the runs), but **no async ckpt save past step-300 has
-> successfully finalized on disk** — every crash has been mid-save.
-> The continuation chain has been retracing the same 200-step
-> window for three weeks. Track the persisted-vs-logged gap in
-> the writeup.
+**Loss:** 3.28 (8505255 end, step-1,125)
 
 ### Logs
 
