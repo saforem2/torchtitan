@@ -39,6 +39,43 @@ _failover_log() { echo "[failover] $*" >&2; }
 # Exports PBS_NODEFILE → active.hostfile.
 # Yeets venv to ALL nodes (so spare swap-in is instantaneous later).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# failover_log_queue_wait
+#
+# Record this job's queue-wait (qtime -> now/start) to a shared CSV so we
+# have a precise, durable record after the job ages out of `qstat`. PBS
+# does not pass qtime as an env var, so we read it back from the job's own
+# qstat record (available while the job runs). Best-effort: never fails the
+# job. Columns: jobid,jobname,nodes,queue,qtime,stime,wait_seconds,wait_h
+# ---------------------------------------------------------------------------
+failover_log_queue_wait() {
+    local jobid="${PBS_JOBID%%.*}"
+    [[ -n "$jobid" ]] || return 0
+    local csv="${QUEUE_WAIT_CSV:-${PBS_O_WORKDIR:-$PWD}/logs/queue_wait.csv}"
+    mkdir -p "$(dirname "$csv")" 2>/dev/null || return 0
+    local rec qt jn nodes q
+    rec=$(qstat -xf "$PBS_JOBID" 2>/dev/null) || return 0
+    qt=$(echo "$rec"  | grep -m1 "qtime "    | sed 's/.*= //')
+    jn=$(echo "$rec"  | grep -m1 "Job_Name"  | sed 's/.*= //')
+    nodes=$(echo "$rec" | grep -m1 "Resource_List.nodect" | sed 's/.*= //')
+    q=$(echo "$rec"   | grep -m1 "queue ="   | sed 's/.*= //')
+    local stt qts sts wait
+    # Prefer the job's actual stime (start). Falls back to "now" -- which
+    # is correct when this runs at job start (now ~= stime), and is the
+    # only option if stime isn't published yet.
+    stt=$(echo "$rec"  | grep -m1 "stime "    | sed 's/.*= //')
+    qts=$(date -d "$qt" +%s 2>/dev/null) || return 0
+    sts=$(date -d "$stt" +%s 2>/dev/null) || sts=$(date +%s)
+    wait=$(( sts - qts ))
+    [[ -f "$csv" ]] || echo "jobid,jobname,nodes,queue,qtime,stime,wait_seconds,wait_hours" > "$csv"
+    printf '%s,%s,%s,%s,%s,%s,%d,%.1f\n' \
+        "$jobid" "$jn" "$nodes" "$q" \
+        "$(date -d "@$qts" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+        "$(date -d "@$sts" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+        "$wait" "$(awk "BEGIN{print $wait/3600}")" >> "$csv"
+    _failover_log "queue wait: $(awk "BEGIN{printf \"%.1f\", $wait/3600}")h (qtime->start); logged to $csv"
+}
+
 failover_init() {
     local nhosts_train="$1"
     [[ -n "$nhosts_train" ]] || { _failover_log "ERROR: failover_init needs NHOSTS_TRAIN arg"; return 1; }
@@ -70,6 +107,9 @@ failover_init() {
     _failover_log "active hostfile: $FAILOVER_ACTIVE"
     _failover_log "spare hostfile:  $FAILOVER_SPARE"
     _failover_log "bad-node log:    $FAILOVER_BAD"
+
+    # Record how long this job waited in the queue (best-effort).
+    failover_log_queue_wait
 }
 
 # ---------------------------------------------------------------------------
