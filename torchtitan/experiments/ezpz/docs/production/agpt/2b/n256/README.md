@@ -5,18 +5,19 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-13
+> Last updated: 2026-06-16
 >
-> Status: chain at step **80,400** (8521630 cont10 ran 2026-06-12
-> 14:42 → 2026-06-13 02:42, **clean 12h00m22s walltime exit**, last
-> ckpt step-80,400 persisted 8 seconds before kill, **+51 ckpts
-> persisted**). Loss 2.66325 → **2.66286** across 5,104 clean training
-> steps, grad_norm steady at ~0.14, no NaN, no NODE_FAIL.
+> Status: chain at step **86,200** ≈ 4.339T tokens (**92.9%** of
+> 4.67T target). `8534293` (cont11) ran 2026-06-14 → 2026-06-15,
+> clean 12h walltime exit at step-86,260 (loss **2.656**, grad_norm
+> ~0.10), **+59 ckpts persisted** (step-80,400..86,200). Chain
+> continuation restored: `8558531` (cont12) Q + `8558532` (cont13)
+> H'd behind it as of 2026-06-16.
 >
-> Prior dispatch: `8521626` (cont9, 2026-06-10 06:35 → 18:37) added
-> +44 ckpts step-70000..74,300. `8519833` (cont8, 2026-06-06) added
-> +50 ckpts step-65000..69,900. Now idle pending next 256N slot for
-> `8534293` cont11 (Q, just released from H by `afterany:8521630`).
+> Prior dispatches: `8521630` (cont10, 2026-06-12 → 13) added +51
+> ckpts step-74,400..80,400, clean 12h exit, loss 2.66325 → 2.66286.
+> `8521626` (cont9, 2026-06-10) added +44 ckpts step-70000..74,300.
+> `8519833` (cont8, 2026-06-06) added +50 ckpts step-65000..69,900.
 > Five dispatches landed across the
 > 5/28 → 6/6 window: `8508977` (cont4, 5/28 pals-RPC infra failure,
 > persisted ~5 ckpts step-53800..54200 before bailing), `8513544`
@@ -86,16 +87,17 @@
 | [`8519833`](#log-8519833) | 2026-06-06 | 11h | 64,901 → **69,914** (last log) | ~1,000 | ~3.8% | Done (walltime, exit -29: `walltime 43209 exceeded limit 43200`). Async mode. `afterany` continuation of 8516365 (07:05 → 18:08; last ckpt step-69900 at 18:07:17). Persisted **~50 ckpts** step-65000..step-69900, ended at loss **2.659**. **Clean walltime exit**, no infra issues. |
 | **[`8521626`](#log-8521626)** | 2026-06-10 | 12h | 69,900 → **74,300** | — | — | Done (walltime exit at 18:37). Async mode. `afterany` continuation of 8519833 — finally landed after 4 days of queue contention. step-70000 ckpt persisted at 06:55 (first new persisted ckpt in 4 days); ckpts every 100 steps since at ~9-15 min/ckpt steady-state through step-74,300. **+44 ckpts persisted** across this 12h run. |
 | **[`8521630`](#log-8521630)** | 2026-06-12 → 2026-06-13 | 12h | 74,300 → **80,400** (last log step-80,404) | ~3,400-3,900 | ~13-14.5% | Done (**clean walltime exit at 12h00m22s**). Async mode. `afterany` continuation of 8521626 — landed 2026-06-12 14:42 after **9 days of `small` queue contention**. Loss **2.66325 → 2.66286**, grad_norm steady ~0.14. **+51 ckpts persisted** (step-74,400..step-80,400, last persisted 8 seconds before walltime kill). No NaN, no NODE_FAIL. |
-| `8534293` | — | 12h | (cont11) | — | — | **Queued** (`afterany:8521630` released 2026-06-13 02:43). |
-| `8534294` | — | 12h | (cont12) | — | — | (held; will be requeued behind cont11 when slot frees) |
+| **[`8534293`](#log-8534293)** | 2026-06-14 → 2026-06-15 | 12h | 80,400 → **86,260** (last log) | ~3,200-3,900 | ~12-14.5% | Done (**clean 12h walltime exit at 04:45**). Async mode. `afterany` continuation of 8521630. Loss **2.656**, grad_norm ~0.10. **+59 ckpts persisted** (step-80,500..step-86,200). No NaN, no NODE_FAIL. |
+| `8558531` | — | 12h | (cont12) | — | — | **Queued** (`prod`→`small`, resumes step-86,200). |
+| `8558532` | — | 12h | (cont13) | — | — | Held (`afterany:8558531`). |
 
-**Latest checkpoint:** step-80,400 (8521630, 2026-06-13 02:42; chain now idle pending next 256N slot for cont11/8534293)
+**Latest checkpoint:** step-86,200 (8534293, 2026-06-15 04:39; chain idle pending next 256N slot for cont12/8558531)
 
-**Cumulative steps:** 80,400
+**Cumulative steps:** 86,200
 
-**Tokens consumed:** 80,400 × 6,144 × 8,192 = **4.047T tokens** (**86.6%** of 4.67T target)
+**Tokens consumed:** 86,200 × 6,144 × 8,192 = **4.339T tokens** (**92.9%** of 4.67T target)
 
-**Loss:** 2.66286 (last log step-80,404 from 8521630; no new eval yet on step-70,000+ ckpts — backfill queued)
+**Loss:** 2.656 (last log ~step-86,260 from 8534293; evals current through step-80,400 — backfill for step-80,500..86,200 pending)
 
 > **Note:** 2026-05-24 → 2026-06-06 chain has now advanced step 25,500
 > → **69,900** (+44,400 steps) across 10 dispatches; **~395 ckpts

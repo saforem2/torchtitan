@@ -119,11 +119,12 @@ PRODUCTION_RUNS: dict[str, dict] = {
         # 8ujhblrp = 8519833 (cont8, 2026-06-06 11h walltime, step 64901 -> 69914)
         # a52q40kx = 8521626 (cont9, 2026-06-10 12h walltime, step 69900 -> 74300)
         # okyt09kv = 8521630 (cont10, 2026-06-12→13 12h walltime, step 74300 -> 80404, +51 ckpts)
+        # zcmlqbd8 = 8534293 (cont11, 2026-06-14→15 12h walltime, step 80400 -> 86260, +59 ckpts)
         "run_ids": ["lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
                     "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
                     "56lkkkh1", "24wfvoje", "bs6tay8l",
                     "zrqx75x7", "ied4spbx", "yklnyjd5",
-                    "8ujhblrp", "a52q40kx", "okyt09kv"],
+                    "8ujhblrp", "a52q40kx", "okyt09kv", "zcmlqbd8"],
         "num_nodes": 256,
         "model": "2b",
     },

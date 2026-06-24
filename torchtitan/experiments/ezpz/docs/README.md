@@ -22,7 +22,7 @@ going?" Tracking is per-model and per-node-count.
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-13 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-11 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**80,400** (4.047T tokens, 86.6% of 4.67T), loss 2.66286. | 2026-06-13 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.9% of 4.67T), loss 2.656. | 2026-06-13 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30500** (3.07T tokens, 65.7% of 4.67T). | 2026-06-09 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,500** (453.0B tokens, 9.7% of 4.67T). | 2026-06-10 |
 | [20B 256N](./production/agpt/20b/n256/README.md) | Step **300** persisted. Same async wall as 512N; sync-mode (`8505255`) Q to test fix. | 2026-06-12 |
@@ -83,10 +83,10 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Scaling Index](./scaling/README.md) | Top-level scaling landing page | 2026-06-06 |
-| [agpt 2B scaling](./scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-06-07 |
-| [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-06-07 |
+| [agpt 2B scaling](./scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-06-13 |
+| [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-06-13 |
 | [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
-| [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-07 |
+| [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
 | [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-04-12 |
 
 ## Sandboxes / Side-channels
@@ -94,7 +94,7 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Optimizer Speedrun Competitions](./competitions/README.md) | [W&B link](https://api.wandb.ai/links/aurora_gpt/hda3milo) | 2026-04-28 |
-| [RL (GRPO) Experiment](./rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-06-07 |
+| [RL (GRPO) Experiment](./rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-06-13 |
 
 ## Outbound (upstream)
 
