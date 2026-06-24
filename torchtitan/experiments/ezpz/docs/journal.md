@@ -4,6 +4,57 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- 80B verified at 28N + TP>1 sync regression fix
+
+First **multi-node** 80B v2 functionality verification (all prior
+validations were 4N). Job `12469486`, 28 active nodes (TP=2), torch
+2.13, books blendcorpus dataset, 20 steps:
+
+- Loss descended **12.94893 -> 10.38276** (-2.57 nats), matching the
+  4N baseline (12.98 -> 10.46) within noise.
+- MFU steady **~18.7%** (4N was ~17.8%), TPS ~102, ~40s/step, memory
+  flat 65.86%. grad_norm climbed to ~33 at steps 15-16 then settled
+  to ~14 by step 20 -- same pattern the 4N smoke showed; production
+  still needs the 200-step warmup.
+- `step-20` checkpoint saved cleanly.
+- Failover swapped one bad node (rank 204 signal 15) at launch and
+  training started clean -- the 8-spare headroom did its job.
+
+**The reason this run mattered: it caught a TP>1-only 57th-sync
+regression that the TP=1 debugmodel smokes missed.** A first 64N
+attempt (`12469471`) crashed on every rank at `model.parallelize`:
+
+```
+AssertionError: XPUScaledDotProductAttention: local_map is set but
+in_dst_shardings is missing entries for: ['q', 'k', 'v']
+```
+
+Root cause: the 57th sync adopted upstream's shape-suffix naming --
+`ScaledDotProductAttention.forward` args became `q_BLNH/k_BLNH/v_BLNH`
+and `set_gqa_inner_attention_local_map` keys `in_dst_shardings` by
+those names. The local_map contract check matches `in_dst_shardings`
+against the wrapped forward's positional-arg names, and the ezpz
+attention forks still used bare `q/k/v`. Only asserts under TP>1, so
+TP=1 smokes passed. Fixed in `74c7452f6` (renamed the three ezpz
+attention forwards) + `13c09ddf9` (added a TP=2 entry to
+`sync_smoke.sh` so this class of regression can't slip through again).
+See `docs/upstream-sync.md` 57th-sync "Follow-up" for the full chain.
+
+Getting here also surfaced two non-code issues, both resolved:
+- **Filesystem was 100% full** (`/tegu` 0 avail) -- amplified transient
+  yeet/checkpoint failures. Cleaned ~6.3 TB: 864 core dumps (5.66 TB,
+  Apr 26 -> today crash debris) + 3 async/smoke test checkpoints
+  (621 GB). torchtitan/ 8.6T -> 2.3T, fs 100% -> 57% used.
+- **HF `eliplutchok/fineweb-small-sample` is too small** for a 28N
+  multi-step run -- exhausts and re-loops in a tight spam loop
+  (944k warnings) instead of feeding step 2. Use a real blendcorpus
+  data list (books) for anything past a single step.
+
+Throwaway verification ckpt dirs left for cleanup:
+`outputs/checkpoints/agpt-80b-{32n,64n}-funcverify`.
+
+---
+
 ## 2026-06-24 (sunspot) -- 57th upstream sync + replays
 
 Merged `upstream/main` into `ezpz` (59 commits, `7b579adde..c6c2fb2c5`,

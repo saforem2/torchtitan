@@ -50,10 +50,20 @@ two clusters with bit-equivalent numerics:
 | 12467825 | Sunspot | 2026-06-02 | + xccl_split_group workaround (commit 8031d1d3a) | 12.94 → 10.39 | ~17.8% |
 | 12468157 | Sunspot | 2026-06-06 | + 47th upstream sync (RoPE refactor PR #3458, mixed-optimizer PR #3269) | 12.97 → 10.41 | ~17.8% |
 | 8530800 (r4 smoke) | Aurora | 2026-06-08 | + blendcorpus barrier fix + venv-symlink fix + `ZE_FLAT_DEVICE_HIERARCHY=FLAT` | step-10 ckpt saved (904 GB, 48 shards) | — |
+| 12469486 (**28N**) | Sunspot | 2026-06-24 | + 57th/58th upstream sync (AC policy hierarchy, disable_loss_parallel removal, **q_BLNH attention fix** for TP>1 local_map) | 12.95 → 10.38 | ~18.7% |
 
-All 4 land within ±0.08 nat of one another at step 20 and have
-identical MFU + memory (88.94% peak). See [n4/README.md](n4/README.md)
-for the latest Aurora interactive smoke.
+The first four are 4N and land within ±0.08 nat of one another at
+step 20 (88.94% peak memory). **`12469486` is the first multi-node
+(28N) validation** -- loss 12.95 → 10.38 matches the 4N baseline
+within noise at ~18.7% MFU / 65.86% memory, `step-20` ckpt saved.
+It also flushed out a TP>1-only regression from the 57th sync: the
+ezpz attention forks used bare `q/k/v` forward args while upstream's
+`set_gqa_inner_attention_local_map` now keys `in_dst_shardings` by the
+shape-suffixed `q_BLNH/k_BLNH/v_BLNH`; the local_map contract check
+asserts under TP>1. Fixed in `74c7452f6`; `sync_smoke.sh` gained a TP=2
+entry (`13c09ddf9`) so future syncs catch it. See
+[../../../upstream-sync.md](../../../upstream-sync.md) 57th-sync
+follow-up. See [n4/README.md](n4/README.md) for the 4N smokes.
 
 **Working config**: AdamW LR=1e-6, TP=2, AC=full, compile=OFF,
 fp32-master, sync checkpoint mode (`CHECKPOINT_ASYNC_MODE=disabled`).
