@@ -61,16 +61,24 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
+        q_BLNH: torch.Tensor,
+        k_BLNH: torch.Tensor,
+        v_BLNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+        # 57th sync: positional arg names MUST be the shape-suffixed
+        # q_BLNH/k_BLNH/v_BLNH to match set_gqa_inner_attention_local_map's
+        # in_dst_shardings keys; the local_map contract check matches by
+        # positional-arg name and asserts under TP>1 otherwise.
+        q, k, v = (
+            q_BLNH.transpose(1, 2),
+            k_BLNH.transpose(1, 2),
+            v_BLNH.transpose(1, 2),
+        )
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
                 q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa

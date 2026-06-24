@@ -47,16 +47,26 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
+        q_BLNH: torch.Tensor,
+        k_BLNH: torch.Tensor,
+        v_BLNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+        # 57th sync: positional arg names MUST be the shape-suffixed
+        # q_BLNH/k_BLNH/v_BLNH to match the keys in
+        # set_gqa_inner_attention_local_map's in_dst_shardings -- the
+        # local_map contract check (protocols/module.py:_maybe_wrap_local_map)
+        # matches by positional-arg name, and asserts under TP>1 if a
+        # mapped input name is missing from in_dst_shardings.
+        q, k, v = (
+            q_BLNH.transpose(1, 2),
+            k_BLNH.transpose(1, 2),
+            v_BLNH.transpose(1, 2),
+        )
         # Avoid set_priority=True — triggers a torch._dynamo bug in
         # PyTorch 2.11 where FX proxy nodes are incorrectly passed to
         # int() during fake tensor tracing.
@@ -129,16 +139,22 @@ class SoftcappedFlexAttention(Module):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
+        q_BLNH: torch.Tensor,
+        k_BLNH: torch.Tensor,
+        v_BLNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+        # 57th sync: shape-suffixed positional names required to match
+        # set_gqa_inner_attention_local_map's in_dst_shardings under TP>1.
+        q, k, v = (
+            q_BLNH.transpose(1, 2),
+            k_BLNH.transpose(1, 2),
+            v_BLNH.transpose(1, 2),
+        )
 
         cap = self.logit_cap
 
