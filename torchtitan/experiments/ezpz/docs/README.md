@@ -21,7 +21,7 @@ going?" Tracking is per-model and per-node-count.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-24 |
-| [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-11 |
+| [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-24 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.8% of 4.67T), loss 2.656. | 2026-06-24 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-24 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-24 |
@@ -30,7 +30,7 @@ going?" Tracking is per-model and per-node-count.
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-05-28 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-05-28 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-12 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-24 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-04-26 |
 

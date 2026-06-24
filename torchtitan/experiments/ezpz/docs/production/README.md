@@ -1,45 +1,48 @@
 # Production Training Runs — Aurora
 
 > **Living document** — updated as jobs complete and new runs are submitted.
+> Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
+> disk + W&B.
 >
 > Last updated: 2026-06-24
 
-## Scaling Performance
+**Jump to:** [Status at a glance](#status-at-a-glance) ·
+[Canonical chains](#canonical-chains-one-per-model) ·
+[256N trajectories](#active-256n-trajectories) ·
+[Other jobs](#other-jobs) · [Known issues](#known-issues) ·
+[Overview](#overview)
 
-- [`scaling-performance.md`](scaling-performance.md) — detailed
-  experiment log from Apr 18-21 (compile scaling, 80B at 4-512N,
-  interactive workflow validation).
-- [`docs/scaling/yeet_env/`](../scaling/yeet_env/README.md) —
-  yeet-env tarball broadcast scaling (8N to 4096N) on Aurora.
+## Status at a glance
 
-## Overview
+One row per live trajectory; `% target` is against the 4.67T olmo-mix
+budget. Detail + per-dispatch history in the linked pages.
 
-Full-scale production training of AuroraGPT models on the
-[olmo-mix-1124](https://huggingface.co/datasets/allenai/olmo-mix-1124) dataset
-(4.67T tokens) across Aurora compute nodes.
+| Trajectory | State | Persisted step | Loss | % target | Trend |
+|------------|-------|---------------:|-----:|---------:|-------|
+| [**2B 256N**](agpt/2b/n256/README.md) async | running (cont12 Q) | **86,200** | 2.656 | **92.9%** | 🟢 nearing completion |
+| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q 14d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
+| [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
+| [20B 256N](agpt/20b/n256/README.md) | re-armed (Q) | 1,100 | 3.28 | 1.2% | 🟡 just re-launched |
+| [80B 256N](agpt/80b/README.md) | blocked (NaN) | — | — | — | 🔴 step-2 NaN; fix unresolved |
 
-**Restarted on 2026-04-30 (v2)** after discovering the bf16-master
-RMSNorm-freeze bug. All current production runs use `dtype=float32`
-master weights, plain CrossEntropyLoss, LBS=2 with the torch 2.13 venv
-(yeet-env tarball mode). See
-[`docs/guides/training-dtype-bf16-norm-freeze.md`](../guides/training-dtype-bf16-norm-freeze.md)
-for the diagnosis.
+> **80B status**: 4N stack validated end-to-end; 256N production blocked
+> on a step-2 NaN. `--debug.deterministic` was refuted at n=64
+> (2026-06-12); fp32-activations at TP=4 is the only remaining
+> clean-training candidate, untested at the production GBS. Full
+> diagnosis: [80b-n32-nan-diagnosis.md](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md).
 
 ## All production trajectories — overlay vs tokens
 
 All canonical chains overlaid on shared axes (Loss / TPS-per-GPU / MFU)
-against tokens consumed. Direct cross-GBS comparison.
+against tokens consumed (loss y-axis cropped to the post-warmup band).
+Direct cross-GBS comparison.
 
 ![All-production training overlay](figures/all_production_training.svg)
 
-The companion eval-side chart (same 5 trajectories on HellaSwag / ARC /
-Winogrande vs tokens) is at
+Companion eval-side chart (HellaSwag / ARC / Winogrande vs tokens):
 [`../evals/figures/all_production_evals.svg`](../evals/figures/all_production_evals.svg).
-
-Reproduce:
-```bash
-python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined
-```
+Per-model overlays: [2B](agpt/2b/README.md) · [20B](agpt/20b/README.md).
+Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combined`.
 
 ## Active Runs
 
@@ -117,3 +120,26 @@ See per-model READMEs (`agpt/2b/`, `agpt/20b/`, `agpt/80b/`).
    `--checkpoint.async-mode=sync` for at least one save per chain
    continuation, OR detect and `mv` the orphaned ckpt dir before next
    training start (the resume code falls back to the previous step).
+
+## Overview
+
+Full-scale production training of AuroraGPT models on the
+[olmo-mix-1124](https://huggingface.co/datasets/allenai/olmo-mix-1124) dataset
+(4.67T tokens) across Aurora compute nodes.
+
+**Restarted on 2026-04-30 (v2)** after discovering the bf16-master
+RMSNorm-freeze bug. All current production runs use `dtype=float32`
+master weights, plain CrossEntropyLoss, LBS=2 with the torch 2.13 venv
+(yeet-env tarball mode). See
+[`docs/guides/training-dtype-bf16-norm-freeze.md`](../guides/training-dtype-bf16-norm-freeze.md)
+for the diagnosis.
+
+## Scaling Performance
+
+- [`scaling-performance.md`](scaling-performance.md) — detailed
+  experiment log from Apr 18-21 (compile scaling, 80B at 4-512N,
+  interactive workflow validation).
+- [`docs/scaling/`](../scaling/README.md) — per-model weak-scaling
+  tables (2B / 20B / MoE, 1-512N).
+- [`docs/scaling/yeet_env/`](../scaling/yeet_env/README.md) —
+  yeet-env tarball broadcast scaling (8N to 4096N) on Aurora.
