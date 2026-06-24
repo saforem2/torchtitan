@@ -73,7 +73,7 @@ if ! command -v ezpz >/dev/null; then
 fi
 
 # ---- Launch ----
-# --activation_checkpoint.mode full \
+# activation-checkpoint:full \   (positional tyro subcommand, passed last; 57th sync / PR #3674)
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt \
     --config="agpt_${MODEL}" \

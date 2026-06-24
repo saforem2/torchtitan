@@ -110,7 +110,16 @@ OPTIMIZER="${OPTIMIZER:-adamw}"
 LR="${LR:-1e-6}"
 
 # Activation checkpoint is required at 80B to fit in tile memory.
+# 57th sync (PR #3674): AC is now a tyro subcommand union. Map the
+# ACKPT_MODE knob to its `activation-checkpoint:<policy>` token, which
+# is positional and must be passed LAST (after every --flag and "$@").
 ACKPT_MODE="${ACKPT_MODE:-full}"
+case "${ACKPT_MODE}" in
+    none)      ACKPT_SUBCOMMAND="activation-checkpoint:none" ;;
+    full)      ACKPT_SUBCOMMAND="activation-checkpoint:full" ;;
+    selective) ACKPT_SUBCOMMAND="activation-checkpoint:selective" ;;
+    *) echo "Unknown ACKPT_MODE: ${ACKPT_MODE}" >&2; exit 1 ;;
+esac
 
 DFL_PARENT="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)"
 DFL_NAME="${DFL_NAME:-olmo-mix-1124}"
@@ -170,7 +179,7 @@ log_message INFO "==========================================="
 # The launch line below mirrors the user's validated Sunspot
 # command + the 12466025 smoke config. Key differences from 2B/20B:
 #   --parallelism.tensor-parallel-degree=2 (TP must be > 1 for 80B)
-#   --activation-checkpoint.mode=full     (required to fit in memory)
+#   activation-checkpoint:full             (required to fit in memory; positional tyro subcommand, passed last)
 #   --compile.no-enable                    (compile crashes on torch 2.13)
 #   --parallelism.expert-parallel-degree=1 (dense, no MoE)
 
@@ -229,10 +238,10 @@ failover_run ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --parallelism.expert-parallel-degree=1 \
     --parallelism.data-parallel-replicate-degree=1 \
     --parallelism.data-parallel-shard-degree=-1 \
-    --activation-checkpoint.mode="${ACKPT_MODE}" \
     --compile.no-enable \
     --training.local-batch-size="${LBS}" \
     --training.global-batch-size="${GBS}" \
     --training.seq-len="${SEQ_LEN}" \
     --training.steps="${TRAINING_STEPS}" \
-    "$@"
+    "$@" \
+    "${ACKPT_SUBCOMMAND}"

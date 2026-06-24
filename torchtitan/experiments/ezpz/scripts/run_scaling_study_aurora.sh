@@ -268,9 +268,17 @@ for ((i = 0; i < NUM_CONFIGS; i++)); do
     if [[ "${do_compile}" == "off" ]]; then
         extra_args+=("--compile.no-enable")
     fi
-    if [[ "${ac_mode}" != "full" ]]; then
-        extra_args+=("--activation_checkpoint.mode" "${ac_mode}")
-    fi
+    # 57th sync (PR #3674): AC is now a tyro subcommand union, not a
+    # `--activation_checkpoint.mode=<str>` flag. The subcommand token
+    # (`activation-checkpoint:<policy>`) is positional and must come
+    # AFTER all --flags, so it goes last in the launch arg list (see
+    # ac_subcommand below, appended after extra_args).
+    case "${ac_mode}" in
+        none)      ac_subcommand="activation-checkpoint:none" ;;
+        full)      ac_subcommand="activation-checkpoint:full" ;;
+        selective) ac_subcommand="activation-checkpoint:selective" ;;
+        *) echo "Unknown ac_mode: ${ac_mode}" >&2; exit 1 ;;
+    esac
 
     # Dataset selection: SCALING_DATASET=blendcorpus (default) uses local
     # books.txt list; SCALING_DATASET=<hf/repo> streams from HF.
@@ -302,6 +310,7 @@ for ((i = 0; i < NUM_CONFIGS; i++)); do
         --checkpoint.no-enable \
         "${dataset_args[@]}" \
         "${extra_args[@]}" \
+        "${ac_subcommand}" \
         2>&1 | if ((FILTER_NONZERO_RANKS)); then grep -v '^\[rank[1-9][0-9]*\]:'; else cat; fi >"${logfile}" || true
     exit_code=${PIPESTATUS[0]}
 

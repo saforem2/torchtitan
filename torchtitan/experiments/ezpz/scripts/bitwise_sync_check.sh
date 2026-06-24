@@ -157,18 +157,18 @@ run_one() {
     #   - `agpt_${MODEL}_chunkedce`         vs `agpt_${MODEL}`: chunks the
     #     vocab=256k logit slice (~16 GB at LBS=2) into 8 pieces (~2 GB
     #     each). Mathematically equivalent — sum of chunked CE == full CE.
-    #   - `--activation_checkpoint.mode=full` vs the default of "none" on
+    #   - `activation-checkpoint:full` vs the default policy on
     #     `ezpz_agpt_2b`: trades attention activation memory for recompute.
     #     Numerically identical compute. Without this, attention activations
     #     at SEQ_LEN=8192 + LBS=1 with `--debug.deterministic` (which uses
     #     more workspace than the default kernels) OOM in SDPA forward at
-    #     the first training step (jobs 12468306, 12468308).
+    #     the first training step (jobs 12468306, 12468308). 57th sync
+    #     (PR #3674): AC is now a positional tyro subcommand, passed last.
     ezpz launch python3 -m torchtitan.experiments.ezpz.train \
         --module=ezpz.agpt \
         --config="agpt_${MODEL}_chunkedce" \
         --compile.no-enable \
         --checkpoint.no-enable \
-        --activation_checkpoint.mode=full \
         --dataloader.dataset=blendcorpus \
         --dataloader.dataset-path="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt" \
         --dataloader.data-cache-path="${SHARED_CACHE}" \
@@ -180,6 +180,7 @@ run_one() {
         --training.steps="${STEPS}" \
         --optimizer=sophiag \
         --optimizer.lr=2.28e-5 \
+        activation-checkpoint:full \
         2>&1 | tee "${outlog}"
 }
 

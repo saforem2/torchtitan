@@ -49,7 +49,6 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --config=agpt_2b_chunkedce \
     --compile.no-enable \
     --checkpoint.no-enable \
-    --activation_checkpoint.mode=full \
     --dataloader.dataset=eliplutchok/fineweb-small-sample \
     --dataloader.num-workers=0 \
     --training.local-batch-size=1 \
@@ -57,4 +56,5 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --training.steps=10 \
     --optimizer=sophiag \
     --optimizer.lr=2.28e-5 \
+    activation-checkpoint:full \
     2>&1 | tee "${LOG_DIR}/run.log"

@@ -74,7 +74,6 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --parallelism.tensor-parallel-degree=2 \
     --compile.no-enable \
     --checkpoint.no-enable \
-    --activation_checkpoint.mode=full \
     --dataloader.dataset=blendcorpus \
     --dataloader.dataset-path="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt" \
     --debug.seed="${SEED}" \
@@ -85,6 +84,7 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --training.steps="${STEPS}" \
     --optimizer=sophiag \
     --optimizer.lr=2.28e-5 \
+    activation-checkpoint:full \
     2>&1 | tee -a "${LOG_FILE}"
 
 echo "---" | tee -a "${LOG_FILE}"

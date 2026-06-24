@@ -254,7 +254,6 @@ print('OK')
                     --training.local_batch_size "${BENCH_LOCAL_BS}" \
                     --training.global_batch_size "${global_bs}" \
                     --training.seq_len "${seq_len}" \
-                    --activation_checkpoint.mode full \
                     --metrics.log_freq 1 \
                     --checkpoint.no-enable \
                     --parallelism.tensor_parallel_degree "${tp}" \
@@ -262,6 +261,7 @@ print('OK')
                     --dataloader.dataset blendcorpus \
                     --dataloader.dataset_path "${DATASET_PATH}" \
                     "${compile_args[@]}" \
+                    activation-checkpoint:full \
                 2>&1 | if (( FILTER_NONZERO_RANKS )); then grep -v '^\[rank[1-9][0-9]*\]:'; else cat; fi > "${logfile}" || true
             exit_code=${PIPESTATUS[0]}
 
