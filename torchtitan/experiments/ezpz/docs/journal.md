@@ -84,12 +84,16 @@ survived by winning the timing race.
    derivation mirrors the autoretry scripts exactly (verified: MODEL=80b
    NHOSTS_TRAIN=62 GAS=2 -> agpt-80b-adamw-books-n62-gbs372).
 
-**Validation:** attempt 3 (12469551) ran on the now-fully-warm cache
-(both layers `loading`, no build, no race), reached training and
-descended clean -- step 1-3 loss 12.93 -> 12.92, grad_norm ~7.8-8.0,
-mem ~32%, MFU ~9.8% (matches prior stable 12469509 step 1 exactly).
-Running to step 100 to confirm the TP=4 corner holds well past 30 steps.
-[final result pending]
+**Validation: clean success.** Attempt 3 (12469551) ran on the
+now-fully-warm cache (both layers `loading`, no build, no race) and
+completed **100/100 steps with zero NaN**: loss 12.93 -> 7.72 (-5.2
+nats), grad_norm bounded throughout (peak ~9.9 early, settling ~2-6, no
+spike-to-inf), MFU steady ~9.8%, mem flat 32%. step-100 checkpoint saved
+(906 GiB, 163 s), `[auto-retry] FAILOVER STOP: success`, rc=0. This
+**supersedes the prior 30-step TP=4 evidence** and confirms TP=4/LBS=1/
+bf16/GBS=372 as the production-ready 80B corner (the TP=2/LBS>1 grad-path
+overflow remains the open upstream bug). Full report:
+`docs/experiments/agpt/sunspot/2026-06-25-80b-tp4-100step-validation.md`.
 
 ---
 
