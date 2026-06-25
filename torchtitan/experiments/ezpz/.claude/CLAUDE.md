@@ -82,15 +82,19 @@
   `submit_agpt_{2b,20b}_aurora_venv.sh` were REMOVED 2026-06-24
   (superseded by the failover versions; recover from git history if
   ever needed).
-- **Native auto-retry variant (2B):** `scripts/submit_agpt_2b_autoretry.sh`
-  does the same job with `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR
+- **Native auto-retry variants:** `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`
+  do the same job with `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR
   #170) instead of the bash `failover_lib.sh` -- ezpz owns the
-  split + scrape + swap + retry loop. The script still yeets the venv to
-  the whole (un-split) nodefile itself (auto-retry does NOT broadcast),
-  and computes `--nproc`/GBS from the active count (`NHOSTS_TRAIN*12`).
+  split + scrape + swap + retry loop. The scripts still yeet the venv to
+  the whole (un-split) nodefile themselves (auto-retry does NOT broadcast),
+  and compute `--nproc`/GBS from the active count (`NHOSTS_TRAIN*12`).
   Portable: Sunspot PBS headers by default (data list `books`), Aurora
   via qsub overrides (data list `olmo-mix-1124`). Same `NHOSTS_TRAIN` +
-  `select=active+spare` contract; `--spare-nodes auto`. See
+  `select=active+spare` contract; `--spare-nodes auto`. The 80B script
+  defaults to the confirmed-stable **TP=4/LBS=1/AdamW LR=1e-6** corner
+  (supersedes the old TP=2 failover default, which NaNs at production
+  GBS) and **warns when `dp_degree=NGPUS/TP > 186`** (the grad-path NaN
+  trigger; safe corner validated only to ~62N). See
   `docs/guides/bad-node-failover.md` "Two implementations".
 - **Legacy torch-2.10 v1 scripts** live under `submit/{aurora,sunspot}/*.sh`
   with their own README. They produced every v1 (bf16-tainted)

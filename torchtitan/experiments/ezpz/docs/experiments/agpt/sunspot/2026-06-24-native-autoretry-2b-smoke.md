@@ -82,9 +82,70 @@ Peak 69.83% memory, steady ~26.6% MFU (matches the 2N scaling-table
 figure), loss descending. This is the canonical 2B config under the new
 script -- no chunked CE / LBS=1 workaround needed.
 
-## Conclusion
+## Conclusion (2B)
 
 The native-auto-retry plumbing (yeet-to-all, active-only nproc/GBS,
 internal split, scrape, spare swap, stuck-pre-training guard) is
 validated end-to-end on Sunspot, and the script trains cleanly. It is a
 drop-in portable replacement for the bash failover wrapper for 2B.
+
+---
+
+# 20B + 80B native auto-retry scripts (2026-06-24)
+
+Ported the validated 2B template to `submit_agpt_20b_autoretry.sh` and
+`submit_agpt_80b_autoretry.sh`. The shared plumbing is identical to 2B
+(already proven above); per-model config deltas were verified.
+
+## 20B -- job 12469526 (own select=4, NHOSTS_TRAIN=2 + 2 spare)
+
+Production config (compile ON, LBS=2 -> GBS=48 at 2N, sophiag
+LR=2.28e-5), `--checkpoint.no-enable`, 5 steps. Adds vs 2B: the `DATASET`
+blendcorpus/HF knob, `--dataloader.num-workers=2`, `_CKPT_DATASET_SLUG`,
+and `--checkpoint.async-mode=disabled` default. Launched cmd verified:
+`--np=24`, `--config=agpt_20b`, `--global-batch-size=48`,
+`--checkpoint.async-mode=disabled`, books dataloader flags. Trained all
+5 steps, completed cleanly:
+
+```
+step: 1  loss: 12.90  grad_norm:  5.05  memory: 46.48GiB(72.64%)  mfu: 13.89%
+step: 2  loss: 12.03  grad_norm:  5.09  memory: 54.30GiB(84.86%)  mfu: 23.68%
+step: 3  loss: 12.99  grad_norm: 58.53  memory: 54.30GiB(84.86%)  mfu: 23.85%
+step: 4  loss: 16.18  grad_norm: 90.18  memory: 54.30GiB(84.86%)  mfu: 23.61%
+step: 5  loss: 14.24  grad_norm: 12.72  memory: 54.30GiB(84.86%)  mfu: 23.64%
+Training completed
+```
+
+This was a plumbing/launch smoke -- the loss bounce + grad_norm spikes
+are expected for a tiny GBS=48 / 5-step / no-warmup run (production uses
+200-step LR warmup); it is not OOM and not a crash. Peak 84.86% mem at
+2N (20B is tight at small N -- production runs at 512N where it shards
+far thinner). Split / nproc / yeet / dataloader / compile / clean-exit
+all validated.
+
+## 80B -- argv dry-render (config-resolution PASS)
+
+A real 80B smoke needs >=62 active nodes (TP=4 + the dp_degree<=186 safe
+corner), so instead of burning that allocation to test plumbing already
+proven by 2B/20B, the 80B launch argv was dry-rendered (PATH-shimmed
+`ezpz`) at NHOSTS_TRAIN=62, GAS=2. It matches the confirmed-stable job
+12469494 token-for-token:
+
+```
+--config=agpt_80b --optimizer=adamw --optimizer.lr=1e-6
+--parallelism.tensor-parallel-degree=4 --parallelism.expert-parallel-degree=1
+--parallelism.data-parallel-replicate-degree=1 --parallelism.data-parallel-shard-degree=-1
+--compile.no-enable --training.local-batch-size=1 --training.global-batch-size=372
+activation-checkpoint:full        # positional subcommand, passed LAST
+```
+
+Log confirmed `dp_degree: 186` (no warn at 62N) and `GBS: 372`. At
+NHOSTS_TRAIN=64 (dp_degree=192) the script emits the documented
+NaN-regime WARN block. bf16-compute / fp32-master is the `agpt_80b()`
+builder default, so no `--training.dtype` flag is needed.
+
+## Conclusion (20B/80B)
+
+Both scripts are faithful ports of the proven 2B template with each
+model's validated config baked in. 20B is live-smoke-validated; 80B's
+launch argv is dry-render-validated against the known-good stable run.

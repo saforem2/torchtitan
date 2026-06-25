@@ -4,6 +4,41 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- ezpz-native auto-retry 20B + 80B scripts
+
+Ported the validated 2B native-auto-retry template to
+`scripts/submit_agpt_{20b,80b}_autoretry.sh` (full report appended to
+`docs/experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md`).
+
+- **20B** -- same shared plumbing as 2B; per-model deltas: the `DATASET`
+  blendcorpus/HF knob, `--dataloader.num-workers=2`, `_CKPT_DATASET_SLUG`
+  (sanitizes HF `/` in ckpt dir), `--checkpoint.async-mode=disabled`
+  default. Live-smoked (12469526, own select=4): `--np=24`, GBS=48,
+  trained 5 steps clean, Training completed. (Loss bounce / grad spikes
+  are the expected tiny-GBS/no-warmup smoke behavior, not a crash.)
+- **80B** -- defaults to the confirmed-stable **TP=4 / LBS=1 / AdamW
+  LR=1e-6 / bf16-compute+fp32-master / AC=full / compile=OFF** corner,
+  which SUPERSEDES the old failover script's TP=2 default (TP=2 NaNs at
+  production GBS -- see the 80B NaN investigation entry below). bf16 is
+  the agpt_80b() builder default so no --training.dtype flag is needed.
+  GBS defaults to `dp_degree*LBS*GAS`; you reach a token target via GAS,
+  not by raising dp_degree past the safe ceiling. The script **warns when
+  `dp_degree = NGPUS/TP > 186`** -- the grad-path NaN trigger, validated
+  safe only to ~62N. Validated by dry-rendering the launch argv (PATH-
+  shimmed ezpz): it matches the known-good stable job 12469494
+  token-for-token, incl. `activation-checkpoint:full` passed LAST. A real
+  80B live smoke needs >=62N (TP=4 + safe dp), so plumbing (already proven
+  by 2B/20B) was not re-burned at that scale.
+
+Note: during 80B argv dry-rendering I accidentally truncated the live
+`.venv/bin/activate` to 0 bytes (a `: >` redirect in the test harness);
+restored it from the `venvs/rl-monarch-torch213` activate template
+(path + `torchtitan` prompt patched) and verified `source .venv/bin/
+activate && ezpz launch --help` works. Lesson: never aim `: >`/`>` at
+real venv paths in a shim.
+
+---
+
 ## 2026-06-24 (sunspot) -- ezpz-native auto-retry 2B submit script
 
 Wrote `scripts/submit_agpt_2b_autoretry.sh`: a portable 2B production

@@ -37,17 +37,25 @@ runs the retry loop.
 | Scrape patterns | `scrape_bad_nodes.py` | same taxonomy, in ezpz |
 | Retry cap | `FAILOVER_MAX_RETRIES` (default 3) | `--max-failover-retries` (default unbounded) |
 | Idle watchdog | `FAILOVER_IDLE_TIMEOUT` (default 1800) | `--timeout` (default 1800 when `--auto-retry`) |
-| Scripts | `submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh` | `submit_agpt_2b_autoretry.sh` (portable Sunspot/Aurora) |
+| Scripts | `submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh` | `submit_agpt_{2b,20b,80b}_autoretry.sh` (portable Sunspot/Aurora) |
 
 The native path is the maintained one going forward; the bash wrapper
-remains in place for the 20B/80B production scripts and is still the
-canonical reference for the *failure taxonomy* below (which both share).
+remains in place (Aurora-headed `*_aurora_venv_failover.sh`) and is still
+the canonical reference for the *failure taxonomy* below (which both
+share). The native `*_autoretry.sh` scripts preserve each model's
+validated training config:
+
+| Model | TP | LBS | Optimizer | LR | Notes |
+|---|---|---|---|---|---|
+| 2B  | 1 | 2 | sophiag | 2.28e-5 | compile ON |
+| 20B | 1 | 2 | sophiag | 2.28e-5 | compile ON; `DATASET` knob (blendcorpus/HF), async-mode disabled |
+| 80B | 4 | 1 | adamw | 1e-6 | bf16-compute/fp32-master, AC=full, compile OFF. Default supersedes the old TP=2 (NaN-prone). Warns when `dp_degree>186`. |
 
 ### Native auto-retry: what the submit script still must do
 
 `ezpz launch --auto-retry` handles the split + retry loop, but it does
-**not** broadcast the venv. The portable
-[`scripts/submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh)
+**not** broadcast the venv. The portable `submit_agpt_{2b,20b,80b}_autoretry.sh`
+scripts (e.g. [`submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh))
 therefore:
 
 1. Leaves `PBS_NODEFILE` **whole** (does NOT pre-split -- ezpz needs the
@@ -81,6 +89,14 @@ qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
 qsub -A AuroraGPT -q prod -l filesystems=home:flare \
     -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
     torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
+
+# 80B: TP=4/LBS=1/AdamW default. Keep dp_degree (=NGPUS/TP) <= ~186 --
+# the safe corner is validated at 62 active nodes (dp=186, GBS=372 via
+# GAS=2). The script WARNS if dp_degree exceeds 186. Cap retries (each
+# 80B retry pays ~5-15 min init):
+qsub -l select=64 -l walltime=12:00:00 \
+    -v NHOSTS_TRAIN=62,MAX_FAILOVER_RETRIES=2,GAS=2 \
+    torchtitan/experiments/ezpz/scripts/submit_agpt_80b_autoretry.sh
 ```
 
 ## Why this exists
@@ -115,6 +131,8 @@ crash swaps the offending node out for a spare and retries.
 | [`scripts/failover_lib.sh`](../../scripts/failover_lib.sh) | Bash library: `failover_init`, `failover_yeet_all`, `failover_swap_in`, `failover_swap_one_blind`, `failover_run`. |
 | [`scripts/scrape_bad_nodes.py`](../../scripts/scrape_bad_nodes.py) | Extracts bad-node hostnames from a training log. |
 | [`scripts/submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh) | 2B submit script using **native** `ezpz launch --auto-retry` instead of `failover_lib.sh`. Portable Sunspot/Aurora. See "Two implementations" above. |
+| [`scripts/submit_agpt_20b_autoretry.sh`](../../scripts/submit_agpt_20b_autoretry.sh) | 20B native auto-retry submit script (adds the `DATASET` blendcorpus/HF knob). |
+| [`scripts/submit_agpt_80b_autoretry.sh`](../../scripts/submit_agpt_80b_autoretry.sh) | 80B native auto-retry submit script (TP=4/LBS=1/AdamW default; `dp_degree>186` NaN warning). |
 | [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../../scripts/submit_agpt_2b_aurora_venv_failover.sh) | 2B production submit script with failover. |
 | [`scripts/submit_agpt_20b_aurora_venv_failover.sh`](../../scripts/submit_agpt_20b_aurora_venv_failover.sh) | 20B production submit script with failover. |
 | [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../scripts/submit_agpt_80b_aurora_venv_failover.sh) | 80B production submit script with failover (AdamW LR=1e-6, TP=2, AC=full, compile=OFF). |
