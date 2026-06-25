@@ -230,6 +230,7 @@ ezpz launch \
     --validator.freq="${VALIDATOR_FREQ}" \
     --validator.steps="${VALIDATOR_STEPS}" \
     --validator.dataloader.dataset-path="${DFL}" \
+    --validator.dataloader.data-cache-path="${DATA_CACHE_PATH}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \

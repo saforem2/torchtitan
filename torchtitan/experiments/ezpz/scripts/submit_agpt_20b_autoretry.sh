@@ -205,6 +205,7 @@ if [[ "${DATASET}" == "blendcorpus" ]]; then
     )
     VALIDATOR_DATA_FLAGS=(
         "--validator.dataloader.dataset-path=${DFL}"
+        "--validator.dataloader.data-cache-path=${DATA_CACHE_PATH}"
     )
 else
     DATALOADER_FLAGS=(
