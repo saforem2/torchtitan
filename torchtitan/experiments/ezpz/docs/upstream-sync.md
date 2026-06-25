@@ -20,6 +20,43 @@ was required in ezpz.
 
 ---
 
+## 2026-06-25 — 59th sync (10 commits, `395833a46..upstream/main`)
+
+Merged clean (no conflicts) as `daa9d7453`. **No code replays required**;
+the shared `common/` + `protocols/` changes flow into ezpz agpt/moe
+automatically. Config-build smoke passed: `agpt_2b`, `agpt_2b_real`,
+`agpt_80b`, `moe_10b_2b`, `moe_10b_2b_sdpa` all build through the merged
+paths; both ezpz models import.
+
+### Upstream commits
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `3396a4b37` | Enable Fused qkv by default... (#3714) | **Auto via common/.** Flips llama3's `fuse_qkv` default False->True and adds `_fused_qkv_param_init` + a contiguous/`local_map`-wrapped `FusedQKVLinear.forward` in `common/attention.py` + `common/config_utils.py`. ezpz/agpt keeps its OWN `fuse_qkv=False` default (`agpt/__init__.py`), so the 2B/80B production chains are unchanged -- **zero checkpoint risk**. Attention forward sig unchanged (q_BLNH/k_BLNH/v_BLNH contract intact). moe uses MLA, unaffected. No replay. |
+| `b3213ef8c` | Fix LoRA freezing for non-linear modules (#3456) | **Protocol change, benign for ezpz.** `ModelConfigConverter.convert()` now returns `Module.Config` (was `None`); `ModelSpec.traverse()` gains `recurse=`. ezpz/agpt has no converters. ezpz/moe calls `q.build().convert(config)` for side-effect (ignores return) at `moe/__init__.py:1188` -- still works because the Float8/quant converters mutate in place. LATENT GAP: if a converter ever returns a *replacement* config, moe would drop it; pre-existing pattern, not broken by this merge. moe quant config builds OK. No replay; optional hardening noted. |
+| `73b64151e` | Disable Varlen + PP support (#3777) | **No-op for ezpz.** Adds a `ValueError` in `common/decoder.py` if PP>1 AND VarlenAttention. No ezpz config combines varlen+PP (agpt has a `debugmodel_varlen_attn` flavor but never with PP). No replay. |
+| `7083a8055` | [spmd] normalize partial->replicate on size-1 mesh axes (#3762) | **Free fix for ezpz/moe.** `protocols/sharding.py` `resolve_placements` now normalizes `Partial` (not just `Shard`) to `Replicate` on size-1 axes -- fixes the MoE routed-expert `Partial(sum)` mismatch at `dp_shard=1`. ezpz/moe benefits automatically. No replay. |
+| `7e7a234cd` | scaled bias rowwise linear (#3781) | None -- `quantization/{float8,mx}.py` rowwise path; ezpz doesn't use it. |
+| `854898a36` | [graph_trainer] Fix DSv3 bucketing order... (#3770) | None -- `experiments/graph_trainer/` only. |
+| `e20fe8a41` | [minAsyncMoE] Fix active swiglu int32 overflow (#3769) | None -- `distributed/minimal_async_ep/kernels.py`; ezpz/moe doesn't use minAsyncMoE. |
+| `f713a0254` | [minAsyncMoE] Make Triton metadata contiguous (#3771) | None -- same minAsyncMoE kernels path. |
+| `4054e01c4` | [Flux] Use CI local dataset for Flux validation (#3715) | None -- flux only. |
+| `d4f3687cc` | Disable qwen3_5 for the TorchTitan CI (#3774) | None -- CI/qwen3_5 only; ezpz has no qwen3_5 fork. |
+
+### Verification
+
+- Clean merge, no conflicts (`daa9d7453`).
+- Config-build smoke (login node): agpt_2b / agpt_2b_real / agpt_80b /
+  moe_10b_2b / moe_10b_2b_sdpa all build; agpt + moe import OK.
+- Recommend a post-sync training smoke (`scripts/sync_smoke.sh` or a 2N
+  agpt_2b_real + a small moe run) before the next production launch, to
+  confirm the fused-QKV `common/attention.py` refactor is bitwise-safe on
+  the non-fused ezpz path at runtime (config-build doesn't exercise the
+  forward). The 80B TP=4 production path (agpt_80b, fuse_qkv=False,
+  compile=OFF) is unaffected by the fused-QKV default flip.
+
+---
+
 ## 2026-06-24 — 58th sync (1 commit, `c6c2fb2c5..395833a46`)
 
 Merged clean (no conflicts) as `2c0daba85`. No replays needed.
