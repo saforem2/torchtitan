@@ -23,6 +23,66 @@
 > `failover_lib.sh`, run `bash tests/failover/run_tests.sh` to
 > verify behavior — all 9 fixtures must pass.
 
+## Two implementations
+
+There are now two ways to get bad-node failover. They share the same
+failure taxonomy and the same spare-swap idea; they differ in *who*
+runs the retry loop.
+
+| | **Bash wrapper** (`failover_lib.sh`) | **Native** (`ezpz launch --auto-retry`) |
+|---|---|---|
+| Retry loop | `failover_run` in bash | inside `ezpz launch` (ezpz >= 0.17.1, PR #170) |
+| Nodefile split | `failover_init` (we pre-split, narrow `PBS_NODEFILE`) | ezpz splits internally from `--nproc`; **do not pre-split** |
+| Venv broadcast to spares | `failover_yeet_all` | **still the submit script's job** -- ezpz does NOT yeet |
+| Scrape patterns | `scrape_bad_nodes.py` | same taxonomy, in ezpz |
+| Retry cap | `FAILOVER_MAX_RETRIES` (default 3) | `--max-failover-retries` (default unbounded) |
+| Idle watchdog | `FAILOVER_IDLE_TIMEOUT` (default 1800) | `--timeout` (default 1800 when `--auto-retry`) |
+| Scripts | `submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh` | `submit_agpt_2b_autoretry.sh` (portable Sunspot/Aurora) |
+
+The native path is the maintained one going forward; the bash wrapper
+remains in place for the 20B/80B production scripts and is still the
+canonical reference for the *failure taxonomy* below (which both share).
+
+### Native auto-retry: what the submit script still must do
+
+`ezpz launch --auto-retry` handles the split + retry loop, but it does
+**not** broadcast the venv. The portable
+[`scripts/submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh)
+therefore:
+
+1. Leaves `PBS_NODEFILE` **whole** (does NOT pre-split -- ezpz needs the
+   full list to carve out active + spare itself).
+2. Runs `ezpz yeet --src .venv.tar.gz` against that whole nodefile, so
+   `/tmp/.venv` lands on active **and** spare nodes -- a swapped-in spare
+   is then a filesystem no-op, exactly as `failover_yeet_all` achieved.
+3. Computes `--nproc` and `GBS` from the **active** count
+   (`NHOSTS_TRAIN * 12`), NOT from `ezpz_setup_job`'s `$NGPUS` (which sees
+   the full allocation). The active count is constant across retries
+   (a swap replaces a node in-place by index), so this is valid for the
+   whole run; at runtime `os.environ["WORLD_SIZE"]` also equals it.
+4. Calls `ezpz launch --nproc <active> --nproc_per_node 12 --auto-retry
+   --spare-nodes auto --timeout 1800 -- python3 -m ...train ...`.
+   `--spare-nodes auto` => spares = `total_pbs_nodes - active`, so the
+   submitter sets `select = NHOSTS_TRAIN + desired_spares`.
+
+No separate preflight smoke: ezpz's `STUCK_PRE_TRAINING` guard bails
+(without burning spares) if init crashes twice with zero training
+progress, which is what the old bash preflight was for.
+
+Usage (Sunspot default; data list defaults to `books` on Sunspot,
+`olmo-mix-1124` on Aurora):
+
+```bash
+# Sunspot: 12 active + 2 spare
+qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
+    torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
+
+# Aurora: qsub flags override the #PBS Sunspot defaults
+qsub -A AuroraGPT -q prod -l filesystems=home:flare \
+    -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
+    torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
+```
+
 ## Why this exists
 
 Recurring Aurora bad-node failures have killed at least 6 production
@@ -54,6 +114,7 @@ crash swaps the offending node out for a spare and retries.
 |---|---|
 | [`scripts/failover_lib.sh`](../../scripts/failover_lib.sh) | Bash library: `failover_init`, `failover_yeet_all`, `failover_swap_in`, `failover_swap_one_blind`, `failover_run`. |
 | [`scripts/scrape_bad_nodes.py`](../../scripts/scrape_bad_nodes.py) | Extracts bad-node hostnames from a training log. |
+| [`scripts/submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh) | 2B submit script using **native** `ezpz launch --auto-retry` instead of `failover_lib.sh`. Portable Sunspot/Aurora. See "Two implementations" above. |
 | [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../../scripts/submit_agpt_2b_aurora_venv_failover.sh) | 2B production submit script with failover. |
 | [`scripts/submit_agpt_20b_aurora_venv_failover.sh`](../../scripts/submit_agpt_20b_aurora_venv_failover.sh) | 20B production submit script with failover. |
 | [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../scripts/submit_agpt_80b_aurora_venv_failover.sh) | 80B production submit script with failover (AdamW LR=1e-6, TP=2, AC=full, compile=OFF). |

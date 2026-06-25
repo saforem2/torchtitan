@@ -11,9 +11,10 @@
 |---|---|
 | `failover_lib.sh` | Bash library: `failover_init`, `failover_yeet_all`, `failover_swap_in`, `failover_swap_one_blind`, `failover_run`. Source from a submit script. |
 | `scrape_bad_nodes.py` | Extracts bad-node hostnames from a training log. Used by `failover_run` to decide which node to swap out. |
-| `submit_agpt_2b_aurora_venv_failover.sh` | 2B production submit script with failover. |
+| `submit_agpt_2b_aurora_venv_failover.sh` | 2B production submit script with failover (bash `failover_lib.sh`). |
 | `submit_agpt_20b_aurora_venv_failover.sh` | 20B production submit script with failover. |
 | `submit_agpt_80b_aurora_venv_failover.sh` | 80B production submit script with failover (AdamW LR=1e-6, TP=2, AC=full, compile=OFF). |
+| `submit_agpt_2b_autoretry.sh` | 2B submit script using **native** `ezpz launch --auto-retry` (no `failover_lib.sh`). Portable Sunspot/Aurora. |
 
 ## One-liner usage
 
@@ -26,6 +27,11 @@ qsub -q prod -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
 qsub -q prod -l select=522 -l walltime=12:00:00 \
     -v NHOSTS_TRAIN=512,FAILOVER_MAX_RETRIES=2 \
     submit_agpt_80b_aurora_venv_failover.sh
+
+# 2B native auto-retry (no failover_lib.sh). Sunspot default headers;
+# select = active + spare, --spare-nodes auto. 12 active + 2 spare:
+qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
+    submit_agpt_2b_autoretry.sh
 ```
 
 See [`docs/guides/bad-node-failover.md`](../docs/guides/bad-node-failover.md)

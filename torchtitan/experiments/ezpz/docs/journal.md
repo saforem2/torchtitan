@@ -4,6 +4,70 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- ezpz-native auto-retry 2B submit script
+
+Wrote `scripts/submit_agpt_2b_autoretry.sh`: a portable 2B production
+submit script that uses `ezpz launch --auto-retry` **exclusively** for
+bad-node failover, replacing the bash `failover_lib.sh` machinery
+(`failover_init`/`failover_yeet_all`/`failover_run`). Native auto-retry
+landed in ezpz >= 0.17.1 (PR #170); the installed venv is 0.20.0.
+
+Key design points (verified against `../ezpz` source):
+- `ezpz launch --auto-retry` splits the PBS allocation into active +
+  spare internally from `--nproc`, runs the inner command, scrapes the
+  same bad-node signatures on any non-zero exit (incl. watchdog 124 /
+  walltime-racing 143), swaps a spare in-place, and retries. Active
+  count is constant across retries (in-place swap by index).
+- The **one** thing native auto-retry does NOT do is broadcast the venv
+  to spares. So the script still `ezpz yeet --src .venv.tar.gz` to the
+  **whole** (un-split) nodefile -- covering active + spare -- before
+  launch. This is the only piece of `failover_yeet_all` we keep.
+- GBS / `--nproc` are computed from the **active** count
+  (`NHOSTS_TRAIN * 12`), not `ezpz_setup_job`'s `$NGPUS` (which sees the
+  full allocation). Dry-checked: NHOSTS_TRAIN=12 of a 14-node alloc ->
+  `--nproc 144`, GBS 288 (active-only), not 168/336.
+- No preflight: ezpz's `STUCK_PRE_TRAINING` guard already bails without
+  burning spares on a twice-zero-progress init crash.
+- Portable: PBS headers default to Sunspot (datascience/workq/tegu:home);
+  Aurora via qsub overrides. Per-machine data default -- Sunspot `books`
+  (the `/tegu .../books-dataset` data actually resident on Sunspot; the
+  `dolma`/`olmo-mix-1124` lists point at `/gila`, NOT mounted on Sunspot
+  even on compute), Aurora `olmo-mix-1124`. `books` is already the
+  established Sunspot smoke/benchmark dataset.
+- Caught + fixed a real bug pre-submit: `${VAR:+--flag "$VAR"}` collapses
+  to a SINGLE argv token (`--max-failover-retries 3`) that argparse
+  rejects; switched to an array (`mfr_args=(...)`) -> two tokens / zero.
+
+Smoke (my own select=4 jobs, NHOSTS_TRAIN=2 + 2 spare, 5 steps;
+full report `docs/experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md`):
+- **12469523** -- exercised the FULL native failover lifecycle for real
+  (a node genuinely crashed): yeet-to-all (63.6s), active-only
+  `--np=24`, ezpz split `4 total / 2 active / 2 spare`, attempt-1 crash
+  -> scrape -> blind spare swap -> attempt 2 (`active=2/spare=1`) ->
+  `FAILOVER STOP: stuck_pre_training` -> exit 143. The no-preflight
+  guard fired exactly as designed.
+- **12469524** -- chunkedce + LBS=1 + AC-full (compile-off fit recipe):
+  trained all 5 steps clean, loss 12.94 -> 12.18, finite grad_norm.
+- **12469525** -- production config (compile ON, LBS=2, sophiag): trained
+  all 5 steps clean, loss 13.01 -> 12.06, peak 69.83% mem, ~26.6% MFU
+  (matches the 2N scaling figure). agpt_2b LBS=2 on 2N fits fine.
+
+NOTE: the 12469523 OOM (`UR_RESULT_ERROR_OUT_OF_RESOURCES` in
+`cross_entropy_loss`) was NOT a script defect and NOT inherent to LBS=2
+at 2N -- it was an artifact of the smoke passing `--compile.no-enable`.
+Eager-mode CE materializes the full ~16GB 256k-vocab logit slice;
+production compile-ON fuses it. agpt_2b LBS=2 on 2N is the normal
+config. (Also confirmed: 2B defaults to sophiag via the submit-script
+`--optimizer=sophiag` override; the registry base-config AdamW default
+from PR #3269 replay `bac0a3473` is just the inherited template
+fallback, not what 2B trains with.)
+
+Extended `docs/guides/bad-node-failover.md` with a "Two implementations"
+section (bash wrapper vs native) rather than a new doc. Old failover
+scripts (20B/80B) untouched -- they still use `failover_lib.sh`.
+
+---
+
 ## 2026-06-24 (sunspot) -- 80B grad-path NaN: mapped to LBS>1 + dp-degree; TP=4/bf16 path found
 
 Root-caused the 80B grad_norm-NaN with a controlled multi-node sweep
