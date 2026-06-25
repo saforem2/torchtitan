@@ -48,12 +48,21 @@ paths; both ezpz models import.
 - Clean merge, no conflicts (`daa9d7453`).
 - Config-build smoke (login node): agpt_2b / agpt_2b_real / agpt_80b /
   moe_10b_2b / moe_10b_2b_sdpa all build; agpt + moe import OK.
-- Recommend a post-sync training smoke (`scripts/sync_smoke.sh` or a 2N
-  agpt_2b_real + a small moe run) before the next production launch, to
-  confirm the fused-QKV `common/attention.py` refactor is bitwise-safe on
-  the non-fused ezpz path at runtime (config-build doesn't exercise the
-  forward). The 80B TP=4 production path (agpt_80b, fuse_qkv=False,
-  compile=OFF) is unaffected by the fused-QKV default flip.
+- **Post-sync runtime smoke PASSED** (`sync_smoke.sh`, job 12469577,
+  own select=1): import probe OK; all 3 default configs trained 2
+  deterministic steps clean -> `VERDICT: ok`:
+  - `agpt_debugmodel` TP=1 rc=0 (loss 10.84 -> 10.67)
+  - `agpt_debugmodel` **TP=2** rc=0 (loss 10.84 -> 10.66, mem halved to
+    13.4%) -- confirms the fused-QKV `common/attention.py` refactor is
+    safe on the ezpz **non-fused** path under TP>1; the local_map /
+    `in_dst_shardings` contract holds (this is the exact surface the 57th
+    sync's q_BLNH rename regressed at TP>1).
+  - `moe_debugmodel` rc=0 (loss 12.91 -> 12.37) -- exercises the
+    `convert()` protocol change + the SPMD Partial-size-1 fix; no
+    `Partial`/`in_src_shardings` mismatch. (One benign `_redistribute`
+    perf warning on the moe norm -- upstream behavior, not a regression.)
+- The 80B TP=4 production path (agpt_80b, fuse_qkv=False, compile=OFF) is
+  unaffected by the fused-QKV default flip.
 
 ---
 
