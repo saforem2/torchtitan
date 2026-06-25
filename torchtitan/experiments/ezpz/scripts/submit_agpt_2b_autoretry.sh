@@ -118,6 +118,11 @@ NNODES="$NHOSTS_TRAIN"                    # for CKPT_DIR naming
 
 # ---- Configuration (matches submit_agpt_2b_aurora_venv_failover.sh) ----
 MODEL="2b"
+# Default to the `_real` flavor: real-valued (cos_sin) RoPE instead of the
+# complex backend, which torch.compile's inductor cannot lower (it falls
+# back to eager). With compile ON (the 2B default) cos_sin is faster.
+# Override with CONFIG_SUFFIX= (empty) to get the plain complex flavor.
+CONFIG_SUFFIX="${CONFIG_SUFFIX-_real}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TP="${TP:-1}"
 PP="${PP:-1}"
@@ -131,6 +136,12 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 
 OPTIMIZER="${OPTIMIZER:-sophiag}"
 LR="${LR:-2.28e-5}"
+
+# Validation: run the EzpzValidator on the blendcorpus validation split
+# every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
+# set VALIDATOR_FREQ to a huge number or pass --validator.no-enable to skip.
+VALIDATOR_FREQ="${VALIDATOR_FREQ:-100}"
+VALIDATOR_STEPS="${VALIDATOR_STEPS:-10}"
 
 # Per-machine data default. Aurora's canonical 2B mixture is olmo-mix-1124.
 # On Sunspot that list does not exist AND the dolma list points at /gila
@@ -215,6 +226,10 @@ ezpz launch \
     --dataloader.dataset=blendcorpus \
     --dataloader.dataset-path="${DFL}" \
     --dataloader.data-cache-path="${DATA_CACHE_PATH}" \
+    --validator.enable \
+    --validator.freq="${VALIDATOR_FREQ}" \
+    --validator.steps="${VALIDATOR_STEPS}" \
+    --validator.dataloader.dataset-path="${DFL}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \

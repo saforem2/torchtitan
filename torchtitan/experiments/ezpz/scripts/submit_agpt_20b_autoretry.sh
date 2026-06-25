@@ -100,6 +100,11 @@ NNODES="$NHOSTS_TRAIN"                    # for CKPT_DIR naming
 
 # ---- Configuration (matches submit_agpt_20b_aurora_venv_failover.sh) ----
 MODEL="20b"
+# Default to the `_real` flavor: real-valued (cos_sin) RoPE instead of the
+# complex backend, which torch.compile's inductor cannot lower (it falls
+# back to eager). With compile ON (the 20B default) cos_sin is faster.
+# Override with CONFIG_SUFFIX= (empty) to get the plain complex flavor.
+CONFIG_SUFFIX="${CONFIG_SUFFIX-_real}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TP="${TP:-1}"
 PP="${PP:-1}"
@@ -113,6 +118,12 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 
 OPTIMIZER="${OPTIMIZER:-sophiag}"
 LR="${LR:-2.28e-5}"
+
+# Validation: run the EzpzValidator on the blendcorpus validation split
+# every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
+# set VALIDATOR_FREQ to a huge number or pass --validator.no-enable to skip.
+VALIDATOR_FREQ="${VALIDATOR_FREQ:-100}"
+VALIDATOR_STEPS="${VALIDATOR_STEPS:-10}"
 
 # Per-machine data default. Aurora's canonical 20B mixture is olmo-mix-1124.
 # On Sunspot that list does not exist AND the dolma list points at /gila
@@ -181,7 +192,10 @@ log_message INFO "Checkpoint directory: ${CKPT_DIR}"
 log_message INFO "==========================================="
 
 # Build dataloader flag set based on DATASET shape. BlendCorpus needs the
-# data-list path + index cache; HF streaming takes neither.
+# data-list path + index cache; HF streaming takes neither. The validator
+# reads the validation split of the same corpus, so for blendcorpus we
+# point its dataloader at the same $DFL; for HF streaming it inherits the
+# config default (no explicit path).
 if [[ "${DATASET}" == "blendcorpus" ]]; then
     DATALOADER_FLAGS=(
         "--dataloader.dataset=blendcorpus"
@@ -189,11 +203,15 @@ if [[ "${DATASET}" == "blendcorpus" ]]; then
         "--dataloader.data-cache-path=${DATA_CACHE_PATH}"
         "--dataloader.num-workers=2"
     )
+    VALIDATOR_DATA_FLAGS=(
+        "--validator.dataloader.dataset-path=${DFL}"
+    )
 else
     DATALOADER_FLAGS=(
         "--dataloader.dataset=${DATASET}"
         "--dataloader.num-workers=2"
     )
+    VALIDATOR_DATA_FLAGS=()
 fi
 
 # ---- Launch with native auto-retry ----
@@ -226,6 +244,10 @@ ezpz launch \
     --checkpoint.no-last-save-model-only \
     --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     "${DATALOADER_FLAGS[@]}" \
+    --validator.enable \
+    --validator.freq="${VALIDATOR_FREQ}" \
+    --validator.steps="${VALIDATOR_STEPS}" \
+    "${VALIDATOR_DATA_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \

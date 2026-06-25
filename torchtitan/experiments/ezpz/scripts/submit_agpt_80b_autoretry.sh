@@ -141,6 +141,16 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 OPTIMIZER="${OPTIMIZER:-adamw}"
 LR="${LR:-1e-6}"
 
+# Validation: run the EzpzValidator on the blendcorpus validation split
+# every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
+# set VALIDATOR_FREQ to a huge number or pass --validator.no-enable to skip.
+# NOTE: 80B stays on the plain `agpt_80b` flavor (complex RoPE) -- it runs
+# compile OFF, where the `_real` cos_sin RoPE win (a torch.compile lowering
+# optimization) does not apply, and agpt_80b is the numerically-validated
+# config. So no CONFIG_SUFFIX=_real default here, unlike 2B/20B.
+VALIDATOR_FREQ="${VALIDATOR_FREQ:-100}"
+VALIDATOR_STEPS="${VALIDATOR_STEPS:-10}"
+
 # Activation checkpoint is required at 80B to fit in tile memory.
 # AC is a tyro subcommand union (57th sync, PR #3674): the
 # `activation-checkpoint:<policy>` token is positional and must be passed
@@ -209,7 +219,10 @@ log_message INFO "DATASET: ${DATASET}"
 log_message INFO "Checkpoint directory: ${CKPT_DIR}"
 log_message INFO "==========================================="
 
-# Build dataloader flag set based on DATASET shape.
+# Build dataloader flag set based on DATASET shape. The validator reads
+# the validation split of the same corpus, so for blendcorpus we point its
+# dataloader at the same $DFL; for HF streaming it inherits the config
+# default (no explicit path).
 if [[ "${DATASET}" == "blendcorpus" ]]; then
     DATALOADER_FLAGS=(
         "--dataloader.dataset=blendcorpus"
@@ -217,11 +230,15 @@ if [[ "${DATASET}" == "blendcorpus" ]]; then
         "--dataloader.data-cache-path=${DATA_CACHE_PATH}"
         "--dataloader.num-workers=2"
     )
+    VALIDATOR_DATA_FLAGS=(
+        "--validator.dataloader.dataset-path=${DFL}"
+    )
 else
     DATALOADER_FLAGS=(
         "--dataloader.dataset=${DATASET}"
         "--dataloader.num-workers=2"
     )
+    VALIDATOR_DATA_FLAGS=()
 fi
 
 # ---- Launch with native auto-retry ----
@@ -256,6 +273,10 @@ ezpz launch \
     --checkpoint.no-last-save-model-only \
     --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     "${DATALOADER_FLAGS[@]}" \
+    --validator.enable \
+    --validator.freq="${VALIDATOR_FREQ}" \
+    --validator.steps="${VALIDATOR_STEPS}" \
+    "${VALIDATOR_DATA_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
