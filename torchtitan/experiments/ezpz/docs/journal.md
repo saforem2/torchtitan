@@ -4,6 +4,53 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-24 (sunspot) -- py313-pt214 torch-2.14 compile segfault diagnosed
+
+A user training attempt in the new `venvs/py313-pt214` env (torch
+2.14.0.dev20260623+xpu, triton 3.7.2, py3.13) crashed with SIGSEGV at
+step 1, in `triton/backends/intel/driver.py:364 __init__` (via
+`get_current_device` -> `get_current_target`) during the first
+`torch.compile` codegen. Two SEPARATE problems, isolated by minimal tests
+on a compute node (see `project_py313_pt214_compile_segfault` memory):
+
+1. **UR-loader symbol mismatch (import-time) -- FIXABLE.**
+   `import torch` fails with
+   `ImportError: libsycl.so.9: undefined symbol: urDeviceWaitExp, version
+   LIBUR_LOADER_0.12` whenever the inherited `LD_LIBRARY_PATH` puts the
+   system oneAPI loader first. Both the system loader
+   (`/opt/aurora/26.26.0/oneapi/compiler/latest/lib/libur_loader.so.0.12.0`)
+   and the venv-bundled one (`venvs/py313-pt214/lib/libur_loader.so.0.12.0`)
+   advertise `LIBUR_LOADER_0.12`, but only the **bundled** one actually
+   exports `urDeviceWaitExp` (system `nm -D | grep -c` = 0; bundled = 1)
+   -- Aurora 26.26.0 ships an older 0.12 predating that symbol. Fix:
+   prepend the venv lib so the bundled loader wins:
+   `export LD_LIBRARY_PATH="$VIRTUAL_ENV/lib:$LD_LIBRARY_PATH"` (AFTER the
+   oneAPI module load). With this, import + `torch.xpu.is_available()`
+   (6 devices) + EAGER xpu compute all succeed. Same class as the
+   pyzes/libze_loader bug -- bundled-vs-system Intel runtime collision.
+
+2. **Triton XPU `torch.compile` segfault -- NOT fixable from our side.**
+   Even WITH the loader fix, `torch.compile(backend="inductor")` on an
+   xpu tensor segfaults at `driver.py:364 __init__`. Confirmed compile-
+   specific: eager xpu ops exit 0; compile exits 139. Not a
+   fork/concurrency issue (`TORCHINDUCTOR_COMPILE_THREADS=1` still
+   segfaults). triton 3.7.2 here vs 3.7.1 in the working torch-2.13
+   `.venv`. Env-build incompatibility between triton 3.7.2's Intel backend
+   and the Sunspot compute runtime.
+
+Conclusion: `venvs/py313-pt214` is not usable for compiled XPU training
+on Sunspot yet. Use the production torch-2.13 `.venv` (triton 3.7.1),
+where agpt_2b/20b compile + train cleanly (smokes 12469525/12469526
+today). If py313-pt214 is needed, run `--compile.no-enable` (eager works)
+or wait for a triton-xpu build matched to the system runtime.
+
+Also: tegu project-quota (pid 2297) hit its 11 TB hard cap mid-session
+(`EDQUOT` on every write; `lfs df` OST imbalance was a red herring --
+pinning to an empty OST also failed, proving it was the project quota).
+User cleared space (11.0 TB -> 4.8 TB used); writes recovered.
+
+---
+
 ## 2026-06-24 (sunspot) -- ezpz-native auto-retry 20B + 80B scripts
 
 Ported the validated 2B native-auto-retry template to
