@@ -114,7 +114,12 @@ class EzpzValidator(Validator):
                 input_dict[k] = v.to(device_type)
             labels = labels.to(device_type)
 
-            inputs, labels, extra_inputs, extra_kwargs = self.post_dataloading_process(
+            # post_dataloading_process returns a 3-tuple (inputs, labels,
+            # extra_kwargs); an older upstream signature also returned a
+            # separate `extra_inputs`, which has since been folded into
+            # extra_kwargs. Match the current upstream contract (see
+            # torchtitan/components/validate.py).
+            inputs, labels, extra_kwargs = self.post_dataloading_process(
                 input_dict, labels, model_parts
             )
 
@@ -143,7 +148,6 @@ class EzpzValidator(Validator):
                     if self.pp_has_first_stage:
                         self.pp_schedule.eval(
                             inputs,
-                            **extra_inputs,
                             **extra_kwargs,
                             target=targets,
                             losses=losses,
@@ -163,7 +167,7 @@ class EzpzValidator(Validator):
             else:
                 with self.validation_context():
                     assert len(model_parts) == 1
-                    predictions = model_parts[0](inputs, **extra_inputs, **extra_kwargs)
+                    predictions = model_parts[0](inputs, **extra_kwargs)
                     loss_sum = self.loss_fn(predictions, labels)
 
             accumulated_losses.append(loss_sum.detach() / global_valid_tokens)
