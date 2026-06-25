@@ -126,6 +126,13 @@ log_message INFO "==========================================="
 # Build the cache by running 1 training step at the warm (small) rank
 # count, checkpoint + compile OFF (we only want the dataloader to build
 # the index). Same dataset/data-cache-path the target run will use.
+#
+# Also enable the validator so its VALIDATION-SPLIT index is built into the
+# same cache dir: the real run enables the validator, whose dataloader
+# builds a SEPARATE (validation) index. If we don't build it here, the real
+# run builds it cold at full scale -- the exact race that crashed job
+# 12469584. --validator.freq=1 forces one validation pass during the single
+# training step so the val index gets written.
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt \
     --config="agpt_${MODEL}" \
@@ -135,6 +142,11 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --dataloader.dataset-path="${DFL}" \
     --dataloader.data-cache-path="${DATA_CACHE_PATH}" \
     --dataloader.num-workers=2 \
+    --validator.enable \
+    --validator.freq=1 \
+    --validator.steps=1 \
+    --validator.dataloader.dataset-path="${DFL}" \
+    --validator.dataloader.data-cache-path="${DATA_CACHE_PATH}" \
     --training.seq-len="${SEQ_LEN}" \
     --training.steps=1 \
     "$@"
