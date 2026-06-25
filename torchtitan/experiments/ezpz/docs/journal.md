@@ -4,6 +4,55 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-25 (sunspot) -- 80B TP=4 first real run + blendcorpus cache-build race fix
+
+Launched the first real 80B TP=4/LBS=1/AdamW/bf16/GAS=2 run (GBS=372)
+via `submit_agpt_80b_autoretry.sh`, 62 active + 2 spare on Sunspot, to
+validate the stable corner past the 30-step doc result.
+
+**Two init crashes -- NOT NaN/model/script. Root cause: blendcorpus
+index-cache build race at TP>1, structurally broken barrier.**
+- 12469548: 3 ranks raced the per-corpus `shuffle_idx.npy` (EOF magic /
+  mmap-length errors).
+- 12469550: per-corpus loaded warm, then 558 ranks raced the BLENDABLE
+  index (`FileNotFoundError: a23baff6..._index.npy`).
+
+The build path builds on global rank 0, then "waits" with only
+`get_data_parallel_group()` + `get_pipeline_model_parallel_group()`
+barriers before all ranks `np.load`. Those subgroup barriers do NOT gate
+ranks whose TP coordinate != 0 against rank 0 (their DP/PP subgroups
+exclude rank 0), so ~(1 - 1/TP) of ranks race ahead and read the .npy
+mid-write. At TP=4/744 ranks that's ~3/4 -- matches the 558 blast radius.
+The cross-group `all_reduce` that used to backstop this was commented out
+("I don't think this is necessary any more") in
+`deps/blendcorpus/.../blendable_dataset.py`. Prior "stable" 80B runs
+(12469494/12469509) hit the same `building on rank 0` warning and only
+survived by winning the timing race.
+
+**Fix (both, per user):**
+1. **Root cause** -- `deps/blendcorpus` (saforem2/blendcorpus, branch
+   feat/remove-deepspeed, commit `debfff5`): added a global
+   `torch.distributed.barrier()` after the subgroup barriers at all three
+   build-then-load sites (gpt_dataset corpus-load + corpus-build
+   completion, blendable_dataset load) so every rank waits for the
+   rank-0 writer regardless of TP/PP/DP coordinate. (Outside
+   experiments/ezpz/, but its own repo + the user's, so in scope.)
+2. **Defense-in-depth** -- new `scripts/prewarm_blendcorpus_cache.sh`:
+   a small/low-rank job that builds the index cache (1 step, compile+ckpt
+   off) at the SAME data-cache-path a large run will use, so the big run
+   loads-not-builds and never exercises the build path at scale. Path
+   derivation mirrors the autoretry scripts exactly (verified: MODEL=80b
+   NHOSTS_TRAIN=62 GAS=2 -> agpt-80b-adamw-books-n62-gbs372).
+
+**Validation:** attempt 3 (12469551) ran on the now-fully-warm cache
+(both layers `loading`, no build, no race), reached training and
+descended clean -- step 1-3 loss 12.93 -> 12.92, grad_norm ~7.8-8.0,
+mem ~32%, MFU ~9.8% (matches prior stable 12469509 step 1 exactly).
+Running to step 100 to confirm the TP=4 corner holds well past 30 steps.
+[final result pending]
+
+---
+
 ## 2026-06-24 (sunspot) -- py313-pt214 torch-2.14 compile segfault diagnosed
 
 A user training attempt in the new `venvs/py313-pt214` env (torch
