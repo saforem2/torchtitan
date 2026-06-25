@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-06-10
+> Last updated: 2026-06-24
 >
 > **Training curves:** see [`docs/production/agpt/2b/`](../../../production/agpt/2b/README.md)
 > for loss / throughput / MFU dashboards across the live 2B trajectories
@@ -179,6 +179,11 @@ columns are marked `no DCP`.
 | **v2 256N** | **68,000** | **3422.6** | **0.5576** | **0.6486** | **0.3259** | **0.5627** | **0.7361** | **0.3420** | **0.5685** |
 | **v2 256N** | **69,000** | **3472.9** | **0.5598** | **0.6456** | **0.3311** | **0.5651** | **0.7312** | **0.3380** | **0.5703** |
 | **v2 256N** | **69,900** | **3518.2** | **0.5555** | **0.6490** | **0.3336** | **0.5580** | **0.7323** | **0.3380** | **0.5829** |
+| **v2 256N** | **74,400** | **3744.7** | **0.5564** | **0.5930** | **0.3311** | **0.5533** | **0.7307** | **0.3380** | **0.5709** |
+| **v2 256N** | **77,400** | **3895.7** | **0.5601** | **0.5964** | **0.3362** | **0.5667** | **0.7361** | **0.3400** | **0.5670** |
+| **v2 256N** | **80,500** | **4051.7** | **0.5608** | **0.5909** | **0.3345** | **0.5533** | **0.7269** | **0.3400** | **0.5713** |
+| **v2 256N** | **83,500** | **4202.7** | **0.5592** | **0.5913** | **0.3311** | **0.5564** | **0.7301** | **0.3400** | **0.5703** |
+| **v2 256N** | **86,200** | **4338.6** | **0.5595** | **0.5976** | **0.3353** | **0.5564** | **0.7285** | **0.3420** | **0.5835** |
 | **v2 512N** | **1,000** | **100.7** | **0.2638** | **0.3620** | **0.2270** | **0.5130** | **0.5887** | **0.2420** | **0.6217** |
 | **v2 512N** | **2,000** | **201.3** | **0.3034** | **0.4613** | **0.2261** | **0.5059** | **0.6338** | **0.2800** | **0.6089** |
 | **v2 512N** | **3,000** | **302.0** | **0.3481** | **0.5130** | **0.2509** | **0.5193** | **0.6567** | **0.2740** | **0.5838** |
@@ -227,13 +232,24 @@ numbers but plateau-ing without more tokens.
 
 ### Saturation note
 
-The 2B 256N async chain has visibly **plateaued at ARC-Easy ~0.59,
-HellaSwag norm ~0.54** in the step-36K..49.5K range — the per-token
-learning curve is saturating for the 2B capacity at ~2T tokens.
-Further training at this LR/data mix won't materially improve eval
-scores; reaching MDS-level scores would need either more tokens
-(7.77T target) or capacity changes the v2 stack doesn't currently
-make.
+The 2B 256N async chain has visibly **plateaued** — HellaSwag norm
+~0.56, ARC-Challenge ~0.33, Winogrande ~0.55, piqa ~0.73 are dead flat
+across step-36K all the way to **step-86,200 (4.34T tokens, 92.9% of
+target)**. The per-token learning curve saturated for the 2B capacity
+around ~2T tokens; the +2.3T tokens since have not moved the
+benchmarks. Reaching MDS-level scores would need either far more
+tokens or capacity changes the v2 stack doesn't currently make.
+
+> **ARC-Easy caveat (step-70K onward):** the step-74,400..86,200
+> backfill batch reports ARC-Easy ~0.59, vs ~0.65 in the step-66K..69.9K
+> rows just above. This is almost certainly an eval-harness/config
+> difference in the later backfill (those results.json files are also a
+> flatter schema), NOT a real model regression — every *other* task is
+> continuous across the 69.9K->74.4K boundary, and ARC-Easy alone
+> dropping 6pp while the model keeps training is not a plausible real
+> effect. Treat the step>=74,400 ARC-Easy column as not directly
+> comparable to the earlier rows until the two batches are re-run under
+> one harness.
 
 ### Per-checkpoint missing data
 
