@@ -4,6 +4,46 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-25 (sunspot) -- autoretry scripts: _real RoPE + validator; validator.py bug fixed
+
+Two requested changes to `submit_agpt_{2b,20b,80b}_autoretry.sh`, plus a
+latent validator bug surfaced + fixed.
+
+1. **`_real` RoPE default (2B/20B).** `CONFIG_SUFFIX` now defaults to
+   `_real` for 2B/20B -> `agpt_{2b,20b}_real`, which use real-valued
+   (cos_sin) RoPE. The default complex backend uses torch.complex64 ops
+   that torch.compile's inductor refuses to lower (eager fallback inside
+   the compiled graph); cos_sin is real-valued and compiles, so it's the
+   faster path with compile ON. Overridable via `CONFIG_SUFFIX=` (empty).
+   **80B left on plain `agpt_80b`**: it runs compile OFF (the `_real`
+   win is a compile-lowering optimization, moot there) and `agpt_80b` is
+   the numerically-validated config.
+
+2. **Validator enabled (all three).** `--validator.enable` +
+   `VALIDATOR_FREQ` (default 100) + `VALIDATOR_STEPS` (default 10) knobs
+   + `--validator.dataloader.dataset-path=$DFL` (blendcorpus only).
+
+3. **Fixed a real EzpzValidator bug** (the "validator wired but not
+   smoke-tested" CLAUDE.md flag). `validator.py:validate()` unpacked
+   `post_dataloading_process` into 4 values
+   (`inputs, labels, extra_inputs, extra_kwargs`) and splatted
+   `**extra_inputs` at the pp-eval + model-forward sites, but upstream
+   `torchtitan/components/validate.py` now returns a **3-tuple**
+   (`extra_inputs` folded into `extra_kwargs`) -> every validate() call
+   raised `ValueError: not enough values to unpack (expected 4, got 3)`.
+   Dropped `extra_inputs` at all 3 sites to match upstream.
+
+Smoke (job 12469561, agpt_2b_real, 2N, validator freq=3): config
+resolved to `agpt_2b_real`, validation ran clean at steps 3 + 6
+(val loss 12.46 -> 11.96), training completed. First crash (12469560)
+is what caught the validator.py bug.
+
+Commits (ezpz): `117ac69ce` validator.py fix, `5ffb850a1` script changes.
+NOTE: torchtitan imports from the repo path (not copied into `.venv`),
+so the validator.py fix is live for new jobs without re-yeeting.
+
+---
+
 ## 2026-06-25 (sunspot) -- 80B TP=4 first real run + blendcorpus cache-build race fix
 
 Launched the first real 80B TP=4/LBS=1/AdamW/bf16/GAS=2 run (GBS=372)
