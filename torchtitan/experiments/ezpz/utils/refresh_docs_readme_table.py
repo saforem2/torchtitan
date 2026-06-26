@@ -66,6 +66,78 @@ LOSS_NUM_RE = re.compile(r"^([\d.]+)")
 # Opt-out sentinel
 NOAUTO_SENTINEL = "<!-- noauto -->"
 
+# Auto-generated "Recently Updated" region markers in docs/README.md.
+RECENT_BEGIN = "<!-- BEGIN recently-updated (auto-generated) -->"
+RECENT_END = "<!-- END recently-updated (auto-generated) -->"
+RECENT_LIMIT = 25
+# H1 title at the top of a markdown doc (first "# ..." line).
+H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+
+
+def doc_title(path: Path) -> str:
+    """First H1 heading in the doc, else its repo-relative stem."""
+    try:
+        m = H1_RE.search(path.read_text())
+    except OSError:
+        m = None
+    if m:
+        # Strip emoji/backtick noise lightly; keep it readable.
+        return m.group(1).replace("`", "").strip()
+    return path.stem
+
+
+def build_recently_updated(readme_path: Path, *, limit: int = RECENT_LIMIT) -> str:
+    """Return the markdown table body (between the markers) listing the
+    `limit` most-recently-committed docs under docs/, newest first. The
+    git commit date covers EVERY doc, not just those in the curated
+    tables -- this is the manifest-independent freshness view.
+    """
+    repo_root = find_repo_root(readme_path)
+    docs_dir = readme_path.parent
+    # All tracked .md under docs/ (git ls-files keeps it to versioned docs).
+    out = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", str(docs_dir.resolve().relative_to(repo_root)) + "/*.md"],
+        capture_output=True, text=True, check=True,
+    )
+    rows: list[tuple[str, str, str]] = []  # (date, title, rel_link)
+    for rel in out.stdout.split():
+        abs_path = repo_root / rel
+        if not abs_path.exists():
+            continue
+        date = git_last_commit_date(repo_root, abs_path)
+        if not date:
+            continue
+        link = "./" + str(abs_path.resolve().relative_to(docs_dir.resolve()))
+        rows.append((date, doc_title(abs_path), link))
+    # Newest first; tie-break by path for determinism.
+    rows.sort(key=lambda r: (r[0], r[2]), reverse=True)
+    body = ["| Modified | Doc |", "|---------:|-----|"]
+    for date, title, link in rows[:limit]:
+        body.append(f"| {date} | [{title}]({link}) |")
+    return "\n".join(body)
+
+
+def refresh_recently_updated(readme_path: Path, *, dry_run: bool = False) -> bool:
+    """Rewrite the BEGIN/END recently-updated region in place. Returns
+    True if the region changed. No-op (with a warning) if the markers
+    aren't present.
+    """
+    text = readme_path.read_text()
+    if RECENT_BEGIN not in text or RECENT_END not in text:
+        print("  [recently-updated] markers not found; skipping", file=sys.stderr)
+        return False
+    pre, rest = text.split(RECENT_BEGIN, 1)
+    _, post = rest.split(RECENT_END, 1)
+    table = build_recently_updated(readme_path)
+    new_text = f"{pre}{RECENT_BEGIN}\n{table}\n{RECENT_END}{post}"
+    if new_text == text:
+        print("  [recently-updated] already current")
+        return False
+    if not dry_run:
+        readme_path.write_text(new_text)
+    print(f"  [recently-updated] table refreshed{' (dry-run)' if dry_run else ''}")
+    return True
+
 # Default token-budget label when a README isn't in the manifest (every
 # current trajectory shares the olmo-mix-1124 4.67T budget).
 _DEFAULT_TOKEN_TARGET_LABEL = "4.67T"
@@ -248,6 +320,10 @@ def refresh_readme(readme_path: Path, *, dry_run: bool = False) -> tuple[int, in
 
     if n_changed and not dry_run:
         readme_path.write_text("\n".join(updated_lines) + "\n")
+
+    # Refresh the auto-generated "Recently Updated" region (reads the file
+    # back so it sees the row-date rewrites above).
+    refresh_recently_updated(readme_path, dry_run=dry_run)
 
     suffix = " (dry-run)" if dry_run else ""
     print(

@@ -13,6 +13,42 @@ date: 2026-03-15
 > for a single-page annotated tree of every directory and file
 > under `docs/`, with descriptions of what goes where.
 
+## Recently Updated
+
+The 25 most-recently-changed docs by git commit date (across all 136
+docs, not just the curated tables below). Auto-generated -- do not edit
+by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
+
+<!-- BEGIN recently-updated (auto-generated) -->
+| Modified | Doc |
+|---------:|-----|
+| 2026-06-26 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-06-26 | [Summaries](./summaries/README.md) |
+| 2026-06-26 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
+| 2026-06-26 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
+| 2026-06-26 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
+| 2026-06-26 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
+| 2026-06-26 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
+| 2026-06-26 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-06-26 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-06-26 | [Development Journal](./journal.md) |
+| 2026-06-26 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
+| 2026-06-26 | [80B GBS=2976 1024N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md) |
+| 2026-06-26 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
+| 2026-06-26 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
+| 2026-06-26 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
+| 2026-06-26 | [Evaluation Results](./evals/README.md) |
+| 2026-06-26 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-06-25 | [80B TP=4 stable-corner validation, 100 steps (Sunspot, 2026-06-25)](./experiments/agpt/sunspot/2026-06-25-80b-tp4-100step-validation.md) |
+| 2026-06-25 | [80B GBS=1488 512N-batch simulation (Sunspot, 2026-06-25)](./experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md) |
+| 2026-06-24 | [Production Queue-Wait Analysis (Aurora small)](./production/queue-wait-analysis.md) |
+| 2026-06-24 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
+| 2026-06-24 | [Production Training — agpt 2B @ 1024 nodes](./production/agpt/2b/n1024/README.md) |
+| 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
+| 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
+| 2026-06-24 | [Production Training Runs — Aurora](./production/README.md) |
+<!-- END recently-updated (auto-generated) -->
+
 ## Production Training (live)
 
 The canonical place for "what's training right now, and how is it
@@ -22,15 +58,15 @@ going?" Tracking is per-model and per-node-count.
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-24 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-24 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.8% of 4.67T), loss 2.6511. | 2026-06-24 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-24 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-24 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,100** (55.4B tokens, 1.2% of 4.67T), loss 4.8092. | 2026-06-24 |
-| [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-25 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**86,200** (4.339T tokens, 92.8% of 4.67T), loss 2.6511. | 2026-06-26 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-26 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-26 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,100** (55.4B tokens, 1.2% of 4.67T), loss 4.8092. | 2026-06-26 |
+| [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-26 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-24 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-26 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-04-26 |
 
@@ -63,7 +99,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-06-25 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-06-26 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-05-05 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-05-12 |
@@ -100,7 +136,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-06-25 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-06-26 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
