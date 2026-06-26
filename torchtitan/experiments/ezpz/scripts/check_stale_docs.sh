@@ -114,4 +114,36 @@ print(s if s is not None else '')
 done
 
 echo "=== summary: $ok_count up-to-date, $stale_count stale, $missing_count missing-README ==="
+
+# --- Phase 2: 'Last updated:' freshness across ALL docs (manifest-independent) ---
+#
+# The trajectory check above only covers per-chain READMEs (those with a
+# checkpoint dir). Overview/guide pages (e.g. agpt/80b/README.md, the
+# top-level production/README.md) carry a '> Last updated: YYYY-MM-DD'
+# marker but are NOT in the manifest, so a content edit that forgets to
+# bump the marker goes unnoticed (this is exactly how 80b/README.md sat
+# at 2026-06-12 while being edited 2026-06-26). Flag any doc whose
+# 'Last updated' date is OLDER than that file's last git-commit date.
+echo ""
+echo "=== 'Last updated:' freshness (all docs with the marker) ==="
+lu_stale=0
+lu_ok=0
+while IFS= read -r doc; do
+    marker=$(grep -oE "Last updated:?\*{0,2} *[0-9]{4}-[0-9]{2}-[0-9]{2}" "$doc" 2>/dev/null \
+        | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1)
+    [[ -z "$marker" ]] && continue
+    git_date=$(git log -1 --format='%ad' --date=short -- "$doc" 2>/dev/null)
+    [[ -z "$git_date" ]] && continue
+    # String compare works for YYYY-MM-DD. Stale = marker predates the
+    # file's last commit (content changed after the stamp was last set).
+    if [[ "$marker" < "$git_date" ]]; then
+        echo "  [STALE] ${doc#torchtitan/experiments/ezpz/}"
+        echo "    marker: $marker   last commit: $git_date"
+        lu_stale=$((lu_stale + 1))
+    else
+        lu_ok=$((lu_ok + 1))
+    fi
+done < <(grep -rlE "^> *\*{0,2}Last updated" torchtitan/experiments/ezpz/docs 2>/dev/null)
+echo "=== Last-updated summary: $lu_ok fresh, $lu_stale stale ==="
+
 exit 0

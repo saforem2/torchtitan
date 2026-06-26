@@ -1,6 +1,6 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-06-12
+> Last updated: 2026-06-26
 
 ## 80B trajectory chart
 
@@ -15,11 +15,15 @@ production chain starts persisting ckpts.
 For the cross-model view (2B + 20B together — 80B is not on it yet for
 the reasons above), see [`../README.md`](../README.md).
 
-## v2 status — 4N validated 2026-06-08; 256N still blocked
+## v2 status — stable TP=4/LBS=1 corner found; production-restart pending
 
-**Headline**: the 80B production stack was validated end-to-end on
-Aurora on **2026-06-08** via an interactive 4N smoke that completed
-through step-10 sync-checkpoint save cleanly
+**Headline**: a stable 80B training corner (TP=4 / LBS=1 / bf16 / AdamW
+LR=1e-6, GAS-to-GBS) was identified 2026-06-24 and has held NaN-free from
+GBS=372 up to GBS=5952 (8-16x batch; see the simulation campaign below) --
+this supersedes the long "256N blocked on NaN" status. The original
+end-to-end stack validation was on Aurora **2026-06-08** via an
+interactive 4N smoke that completed through step-10 sync-checkpoint save
+cleanly
 ([n4/README.md](n4/README.md): 904 GB / 48 .distcp shards / .metadata —
 matches the Sunspot 12468197 reference exactly). Required clearing 5
 stacked bugs: repo 229 commits behind, broken venv symlink, blendcorpus
