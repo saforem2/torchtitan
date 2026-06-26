@@ -126,26 +126,29 @@ production chain should still be watched for late-training instability,
 and the underlying TP=2 / LBS>1 grad-path overflow is still an open
 upstream-worthy bug (two cheap 62N reproducers recorded above).
 
-#### Corner holds at 4x batch (GBS=1488, 512N-sim) -- 2026-06-25
+#### Corner holds at 4x-8x batch (global-batch simulation campaign) -- 2026-06-25/26
 
-To check the corner isn't specific to the small GBS=372 batch, job
-`12469609` raised GAS to 8 at fixed 62N (dp_degree=186), giving
-**GBS=1488** -- within ~3% of the global batch an Aurora **512N** run
-would see (1536), but on the safe side of the dp_degree<=186 ceiling
-(GAS scales GBS without touching dp_degree).
+To check the corner isn't specific to the small GBS=372 batch, a series
+of runs raised GAS at fixed 62N (dp_degree=186) to reach the *global
+batch* an Aurora 512N/1024N/2048N run would see -- on the safe side of
+the dp_degree<=186 ceiling (GAS scales GBS without touching dp_degree).
 
-| Job ID | TP | LBS | GAS | dp_degree | GBS | Steps | Result |
-|--------|----|----|----|-----------|-----|-------|--------|
-| 12469551 | 4 | 1 | 2 | 186 | 372 | 100 | clean, 12.93 -> 7.72, 0 NaN |
-| 12469609 | 4 | 1 | 8 | 186 | 1488 | 46 (walltime) | clean, 12.92 -> 8.84, 0 NaN |
+| Job ID | TP | LBS | GAS | dp_degree | GBS | Simulates | Steps | Result |
+|--------|----|----|----|-----------|-----|-----------|-------|--------|
+| 12469551 | 4 | 1 | 2 | 186 | 372 | native | 100 | clean, 12.93 -> 7.72, 0 NaN |
+| 12469609 | 4 | 1 | 8 | 186 | 1488 | 512N | 46 (walltime) | clean, 12.92 -> 8.84, 0 NaN |
+| 12469626 | 4 | 1 | 16 | 186 | 2976 | 1024N | 34 (walltime) | clean, 12.92 -> 9.84, 0 NaN |
+| 12469627 | 4 | 1 | 32 | 186 | 5952 | 2048N | in flight | clean through step 24, 0 NaN |
 
-**4x the validated batch, still zero NaN** (grad_norm spiked to ~22 in
-the step-22-27 window and recovered, never inf). This confirms the
-corner's stability is a property of the (TP=4, LBS=1, dp<=186) regime,
-not of the specific batch size. It does **not** establish dp_degree>186
-(the real 512N+ regime) or the >512N init path -- those need a node-count
-study, not a batch study. Full report:
-[`../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md`](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md).
+**Up to 8x the validated batch, still zero NaN** (grad_norm shows the
+same step-22-27 transient -- peaks ~21-23 then recovers, never inf, at
+every GBS). This confirms the corner's stability is a property of the
+(TP=4, LBS=1, dp<=186) regime, not of the specific batch size. It does
+**not** establish dp_degree>186 (the real 512N+ regime) or the >512N
+init path -- those need a node-count study (the dp-degree cliff bisect),
+not a batch study. Reports:
+[`gbs1488 512N`](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md),
+[`gbs2976 1024N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md).
 
 ## Working 4N stack (Aurora + Sunspot)
 

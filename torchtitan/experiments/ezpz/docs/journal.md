@@ -4,6 +4,34 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-26 (sunspot) -- 80B global-batch sim campaign continues: GAS=16 (1024N) clean
+
+Continued the 80B batch-scaling campaign past the GBS=1488/512N sim.
+
+- **GAS=16 / GBS=2976 / 1024N-batch** (job `12469626`, 62N, dp=186):
+  **clean, 34/34 steps to the 6h walltime cut, zero NaN**, loss
+  12.92 -> 9.84. grad_norm showed the same step-22-27 transient as the
+  other sims (peak 21.5 @ step 23, recovered to ~9.3). 8x the validated
+  GBS=372, same smooth descent. Report:
+  [`docs/experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md`](experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md).
+  Notably this run **cold-built the blendcorpus index at 744 ranks
+  cleanly** (no race at this index size), confirming the `debfff5`
+  sibling barriers suffice for cold-build-at-scale.
+- **GAS=32 / GBS=5952 / 2048N-batch** (job `12469627`): in flight, clean
+  through step 24 (0 NaN); its first attempt hit the blendcorpus
+  cold-cache build-then-load race at this larger index size (`EOFError`),
+  and **auto-retry self-healed** (attempt 1 finished the write, attempt 2
+  loaded warm) at the cost of one spare node. Writeup pending the
+  walltime cut.
+- Campaign so far: GBS=372 (native), 1488 (512N), 2976 (1024N) all clean;
+  5952 (2048N) running. The TP=4/LBS=1/bf16 corner holds NaN-free to 8x
+  the validated batch. Still pending: the dp-degree cliff bisect
+  (n64/n88/n108 -> dp 192/264/324), the actual probe of whether the
+  corner survives node-count scaling past dp=186. 80B README table
+  updated with all rows.
+
+---
+
 ## 2026-06-25 (sunspot) -- 80B GBS=1488 512N-batch simulation: clean, 4x batch NaN-free
 
 Pushed the 80B TP=4/LBS=1/bf16 stable corner to **4x the validated
