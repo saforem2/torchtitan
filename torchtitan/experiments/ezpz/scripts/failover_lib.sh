@@ -39,6 +39,75 @@ _failover_log() { echo "[failover] $*" >&2; }
 # Exports PBS_NODEFILE → active.hostfile.
 # Yeets venv to ALL nodes (so spare swap-in is instantaneous later).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# failover_log_queue_wait
+#
+# Record this job's queue-wait (qtime -> now/start) to a shared CSV so we
+# have a precise, durable record after the job ages out of `qstat`. PBS
+# does not pass qtime as an env var, so we read it back from the job's own
+# qstat record (available while the job runs). Best-effort: never fails the
+# job. Columns: jobid,jobname,nodes,queue,qtime,stime,wait_seconds,wait_h
+# ---------------------------------------------------------------------------
+failover_log_queue_wait() {
+    local jobid="${PBS_JOBID%%.*}"
+    [[ -n "$jobid" ]] || return 0
+    local csv="${QUEUE_WAIT_CSV:-${PBS_O_WORKDIR:-$PWD}/logs/queue_wait.csv}"
+    mkdir -p "$(dirname "$csv")" 2>/dev/null || return 0
+    local rec qt jn nodes q
+    rec=$(qstat -xf "$PBS_JOBID" 2>/dev/null) || return 0
+    qt=$(echo "$rec"  | grep -m1 "qtime "    | sed 's/.*= //')
+    jn=$(echo "$rec"  | grep -m1 "Job_Name"  | sed 's/.*= //')
+    nodes=$(echo "$rec" | grep -m1 "Resource_List.nodect" | sed 's/.*= //')
+    q=$(echo "$rec"   | grep -m1 "queue ="   | sed 's/.*= //')
+    local stt qts sts wait
+    # Prefer the job's actual stime (start). Falls back to "now" -- which
+    # is correct when this runs at job start (now ~= stime), and is the
+    # only option if stime isn't published yet.
+    stt=$(echo "$rec"  | grep -m1 "stime "    | sed 's/.*= //')
+    qts=$(date -d "$qt" +%s 2>/dev/null) || return 0
+    sts=$(date -d "$stt" +%s 2>/dev/null) || sts=$(date +%s)
+    wait=$(( sts - qts ))
+    [[ -f "$csv" ]] || echo "jobid,jobname,nodes,queue,qtime,stime,wait_seconds,wait_hours" > "$csv"
+    printf '%s,%s,%s,%s,%s,%s,%d,%.1f\n' \
+        "$jobid" "$jn" "$nodes" "$q" \
+        "$(date -d "@$qts" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+        "$(date -d "@$sts" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+        "$wait" "$(awk "BEGIN{print $wait/3600}")" >> "$csv"
+    _failover_log "queue wait: $(awk "BEGIN{printf \"%.1f\", $wait/3600}")h (qtime->start); logged to $csv"
+}
+
+# ---------------------------------------------------------------------------
+# failover_remaining_walltime
+#
+# Echo the number of seconds of PBS walltime REMAINING for this job, for use
+# as WALLTIME_SECONDS by the trainer's walltime-aware checkpointing. PBS does
+# not export walltime as an env var, so we read it back from the job's own
+# qstat record: remaining = Resource_List.walltime - (now - stime).
+#
+# "Remaining" (not total) is what the trainer wants: it starts its budget
+# clock at loop entry, AFTER yeet/preflight/ckpt-load have already burned
+# part of the wall, so subtracting elapsed-since-start here keeps the two in
+# sync. Best-effort: echoes 0 (disables the feature) if anything is missing.
+# ---------------------------------------------------------------------------
+failover_remaining_walltime() {
+    [[ -n "${PBS_JOBID:-}" ]] || { echo 0; return 0; }
+    local rec wt stt total now_s start_s elapsed remain
+    rec=$(qstat -xf "$PBS_JOBID" 2>/dev/null) || { echo 0; return 0; }
+    wt=$(echo "$rec"  | grep -m1 "Resource_List.walltime" | sed 's/.*= //')
+    stt=$(echo "$rec" | grep -m1 "stime "                 | sed 's/.*= //')
+    [[ -n "$wt" ]] || { echo 0; return 0; }
+    # Walltime is HH:MM:SS (or D+HH:MM:SS). Convert to seconds.
+    total=$(awk -F: 'NF==3{print ($1*3600)+($2*60)+$3} NF==2{print ($1*60)+$2} NF==1{print $1}' <<< "$wt")
+    [[ -n "$total" && "$total" -gt 0 ]] 2>/dev/null || { echo 0; return 0; }
+    now_s=$(date +%s)
+    start_s=$(date -d "$stt" +%s 2>/dev/null) || start_s="$now_s"
+    elapsed=$(( now_s - start_s ))
+    (( elapsed < 0 )) && elapsed=0
+    remain=$(( total - elapsed ))
+    (( remain < 0 )) && remain=0
+    echo "$remain"
+}
+
 failover_init() {
     local nhosts_train="$1"
     [[ -n "$nhosts_train" ]] || { _failover_log "ERROR: failover_init needs NHOSTS_TRAIN arg"; return 1; }
@@ -70,6 +139,9 @@ failover_init() {
     _failover_log "active hostfile: $FAILOVER_ACTIVE"
     _failover_log "spare hostfile:  $FAILOVER_SPARE"
     _failover_log "bad-node log:    $FAILOVER_BAD"
+
+    # Record how long this job waited in the queue (best-effort).
+    failover_log_queue_wait
 }
 
 # ---------------------------------------------------------------------------
