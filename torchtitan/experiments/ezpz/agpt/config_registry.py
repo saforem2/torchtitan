@@ -187,6 +187,12 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         activation_checkpoint=FullAC.Config(),
         comm=CommConfig(train_timeout_seconds=100),
         fault_tolerance=FaultTolerance(enable=False),
+        # Walltime-aware checkpointing: guarantee a save before the PBS walltime
+        # runs out (otherwise a short job can save nothing -- see the train loop
+        # in trainer.py). The failover submit scripts export $WALLTIME_SECONDS
+        # (REMAINING budget at launch); 0/unset disables it (interactive runs,
+        # non-PBS). Overridable on the CLI via --walltime-seconds.
+        walltime_seconds=int(os.environ.get("WALLTIME_SECONDS", "0") or "0"),
         # Validator runs on the blendcorpus validation split (5% of the
         # corpus by default — see BlendCorpusDataLoader.Config.split). The
         # validator builds its own dataloader from this Config every time
