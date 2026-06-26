@@ -116,6 +116,25 @@ class FaultTolerantTrainer(Trainer):
         LBS * dp_degree * batch_ramp_start_gas). Must be >= 1 and <= the
         full gradient_accumulation_steps."""
 
+        # Walltime-aware checkpointing. A short job can otherwise run its whole
+        # PBS window and save NOTHING (e.g. 20B 512N at ~48s/step never reaches
+        # the next interval=100 boundary inside a 2h window), wasting all the
+        # compute. When walltime_seconds > 0, the train loop watches a monotonic
+        # clock and, once elapsed reaches walltime_seconds minus the margin,
+        # forces a final checkpoint and stops cleanly -- guaranteeing a save
+        # before walltime regardless of step rate, model size, or startup cost.
+        # walltime_seconds=0 (default) disables this, preserving exact current
+        # behavior. The value is normally the REMAINING walltime at loop entry,
+        # exported as $WALLTIME_SECONDS by the failover submit scripts (so the
+        # startup already spent on yeet/preflight/ckpt-load is excluded).
+        walltime_seconds: int = 0
+        """Job walltime budget in seconds (typically remaining-at-launch, from
+        $WALLTIME_SECONDS). 0 disables walltime-aware checkpointing."""
+        walltime_checkpoint_margin_seconds: int = 600
+        """Force a final checkpoint + stop once elapsed >= walltime_seconds
+        minus this margin. Must cover one checkpoint save + async flush at the
+        target scale (20B/512N+ may want ~900; 600 is safe for <=2B/256N)."""
+
     ft_manager: FTManager
 
     @record
@@ -739,6 +758,14 @@ class FaultTolerantTrainer(Trainer):
                 ),
             ),
         ):
+            # Walltime-aware checkpointing: start the budget clock at loop entry
+            # so the (already-elapsed) startup -- yeet, preflight, ckpt load --
+            # is excluded. walltime_seconds is the REMAINING budget at launch.
+            wall_budget = config.walltime_seconds
+            wall_margin = config.walltime_checkpoint_margin_seconds
+            wall_start = time.monotonic()
+            wall_limit = wall_budget - wall_margin if wall_budget > 0 else None
+
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
@@ -749,9 +776,31 @@ class FaultTolerantTrainer(Trainer):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                self.checkpointer.save(
+                saved_this_step = self.checkpointer.save(
                     self.step, last_step=(self.step == config.training.steps)
                 )
+
+                # Walltime guard: if the budget (minus margin) is exhausted,
+                # force a final checkpoint now and stop cleanly. Reuses the
+                # interval-bypassing last_step path, then flushes any async save
+                # so it actually lands on disk before the process exits. Without
+                # this, a short job can run its whole window and save nothing.
+                if wall_limit is not None:
+                    elapsed = time.monotonic() - wall_start
+                    if elapsed >= wall_limit:
+                        logger.info(
+                            f"walltime budget reached at step {self.step} "
+                            f"(elapsed ~{elapsed:.0f}s of {wall_budget}s, "
+                            f"margin {wall_margin}s); forcing final checkpoint "
+                            "and stopping"
+                        )
+                        if not saved_this_step:
+                            self.checkpointer.save(self.step, last_step=True)
+                        # Block until any async save is fully on disk before we
+                        # break to teardown (close() does NOT wait for pending
+                        # saves).
+                        self.checkpointer.maybe_wait_for_saving()
+                        break
 
                 # Run validation if validator is available
                 if self.config.validator.enable and self.validator.should_validate(

@@ -70,9 +70,17 @@ ezpz_setup_job
 
 source .venv/bin/activate
 # yeet to ALL nodes (active + spare) so any spare can swap in instantly.
-failover_yeet_all || exit 1
+# SKIP_YEET=1 lets an outer orchestrator (the multi-chain umbrella) pre-stage
+# the venv itself and skip this per-job broadcast -- needed when several jobs
+# share ONE PBS allocation, since ezpz yeet's local-copy always lands on the
+# shared mom node's /tmp and concurrent broadcasts would corrupt each other.
+# VENV_DST is where the (pre-staged or just-yeeted) venv lives on each node;
+# defaults to /tmp/.venv so standalone behavior is unchanged.
+if [[ "${SKIP_YEET:-0}" != "1" ]]; then
+    failover_yeet_all || exit 1
+fi
 deactivate
-source /tmp/.venv/bin/activate
+source "${VENV_DST:-/tmp/.venv}/bin/activate"
 
 # Kill stale palsd processes from previous runs.
 _my_pids=$(ps -o pid= --ppid $$ 2>/dev/null | tr '\n' '|')
@@ -190,6 +198,19 @@ FAILOVER_IDLE_TIMEOUT="${PREFLIGHT_IDLE_TIMEOUT:-600}" FAILOVER_MAX_RETRIES=2 \
     failover_run ezpz launch python3 -m ezpz.examples.test --train-iters 5 \
     || { log_message ERROR "preflight smoke failed after retries; bailing"; exit 1; }
 log_message INFO "preflight smoke OK — proceeding to main training launch"
+
+# ---- Walltime-aware checkpointing ----
+# Pass the REMAINING walltime so the trainer always saves a checkpoint before
+# the PBS walltime runs out (a short job can otherwise save nothing). Computed
+# AFTER preflight so it reflects the wall left when training actually begins.
+# config_registry reads $WALLTIME_SECONDS into walltime_seconds; mpiexec
+# --envall propagates it to all ranks. Override WALLTIME_SECONDS in the
+# environment to force a value (or 0 to disable).
+if [[ -z "${WALLTIME_SECONDS:-}" ]]; then
+    WALLTIME_SECONDS=$(failover_remaining_walltime)
+fi
+export WALLTIME_SECONDS
+log_message INFO "WALLTIME_SECONDS (remaining): ${WALLTIME_SECONDS}"
 
 # ---- Launch with failover ----
 failover_run ezpz launch python3 -m torchtitan.experiments.ezpz.train \
