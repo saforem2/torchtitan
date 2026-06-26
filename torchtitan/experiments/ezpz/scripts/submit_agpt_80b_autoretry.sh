@@ -140,6 +140,12 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 # GBS; LR=1e-6 was stable.
 OPTIMIZER="${OPTIMIZER:-adamw}"
 LR="${LR:-1e-6}"
+# Linear-warmup length (steps). Default 200 matches the 2B/20B v2 configs.
+# NOTE: the scheduler clamps warmup to total_steps when warmup > total, so
+# short smoke/sim runs (steps < 200) are effectively warming up the whole
+# time (effective LR = LR * step/total). Lower this to exercise the full
+# nominal LR within a short run (e.g. WARMUP_STEPS=5 for an LR probe).
+WARMUP_STEPS="${WARMUP_STEPS:-200}"
 
 # Validation: run the EzpzValidator on the blendcorpus validation split
 # every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
@@ -212,7 +218,7 @@ log_message INFO "IDLE_TIMEOUT: ${IDLE_TIMEOUT:-1800}"
 log_message INFO "TRAINING_STEPS: ${TRAINING_STEPS}"
 log_message INFO "PBS_JOBID: ${PBS_JOBID}"
 log_message INFO "OPTIMIZER: ${OPTIMIZER}"
-log_message INFO "LR: ${LR}"
+log_message INFO "LR: ${LR}  (warmup_steps: ${WARMUP_STEPS})"
 log_message INFO "TP: ${TP}, LBS: ${LBS}, GAS: ${GAS}, dp_degree: ${DP_DEGREE}, AC: ${ACKPT_MODE}, compile: OFF"
 log_message INFO "GBS: ${GBS}"
 log_message INFO "DATASET: ${DATASET}"
@@ -294,6 +300,7 @@ ezpz launch \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
+    --lr-scheduler.warmup-steps="${WARMUP_STEPS}" \
     --parallelism.tensor-parallel-degree="${TP}" \
     --parallelism.expert-parallel-degree=1 \
     --parallelism.data-parallel-replicate-degree=1 \
