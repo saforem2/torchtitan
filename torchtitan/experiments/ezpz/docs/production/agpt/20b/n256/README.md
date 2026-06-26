@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-24
+> Last updated: 2026-06-26
 >
 > Status: chain at step **1,100** persisted ≈ 55.4B tokens (**1.2%** of
 > 4.67T). `8505255` (2026-05-22, sync mode) broke the multi-week step-300
@@ -77,7 +77,7 @@
 
 **Tokens consumed:** 1,100 × 6,144 × 8,192 = **55.4B tokens** (1.2% of 4.67T target)
 
-**Loss:** 3.28 (8505255 end, step-1,125)
+**Loss:** 4.8092 (8505255 end, step-1,125)
 
 ### Logs
 

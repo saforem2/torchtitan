@@ -1,6 +1,6 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-06-24
+> **Last updated:** 2026-06-26
 >
 > **This is the canonical 20B production chain.**
 >

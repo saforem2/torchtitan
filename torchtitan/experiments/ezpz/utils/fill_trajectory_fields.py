@@ -399,10 +399,18 @@ def _wandb_latest_loss(traj: dict) -> float | None:
 # rewrite ONLY the numeric cells, never the Status/narrative cell.
 # (The cross-model agpt/README.md is intentionally absent: it is pure
 # narrative Headlines with no snapshot table.)
+#
+# The top-level docs/production/README.md is ALSO intentionally absent: its
+# "Status-at-a-glance" dashboard uses a different column schema
+# (Trajectory | State | Persisted step | Loss | % target | Trend) than the
+# per-model rollup tables (... | Cumulative steps | Loss | Tokens). The
+# rollup propagator assumes the per-model schema, so pointing it at the
+# dashboard mangled the Loss/% cells (e.g. wrote "86,200.656" into Loss).
+# The dashboard's trend-lights + narrative State are hand-curated; leave it
+# to manual upkeep.
 ROLLUP_PAGES = [
     "torchtitan/experiments/ezpz/docs/production/agpt/2b/README.md",
     "torchtitan/experiments/ezpz/docs/production/agpt/20b/README.md",
-    "torchtitan/experiments/ezpz/docs/production/README.md",
 ]
 
 
