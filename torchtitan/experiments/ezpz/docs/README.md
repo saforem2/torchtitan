@@ -47,6 +47,39 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
 | 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-06-24 | [Production Training Runs — Aurora](./production/README.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
+| 2026-06-24 | [Native auto-retry 2B submit-script smoke (Sunspot, 2026-06-24)](./experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md) |
+| 2026-06-24 | [80B NaN diagnosis — bf16 forward overflow at GBS≥384, only fp32-activations confirmed-clean](./experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) |
+| 2026-06-13 | [MoE Model Scaling](./scaling/moe.md) |
+| 2026-06-13 | [AuroraGPT-2B Scaling](./scaling/agpt-2b.md) |
+| 2026-06-13 | [AuroraGPT-20B Scaling](./scaling/agpt-20b.md) |
+| 2026-06-13 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./rl/vllm-xpu-wiring-plan.md) |
+| 2026-06-13 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./rl/vllm-xpu-current-status.md) |
+| 2026-06-13 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./rl/upstream-rl-port-status.md) |
+| 2026-06-13 | [GRPO on Intel XPU — end-to-end status (2026-06-13)](./rl/grpo-on-xpu-status.md) |
+| 2026-06-13 | [RL (GRPO) Experiment](./rl/README.md) |
+| 2026-06-13 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./rl/2026-06-14_monarch-torch213-deep-dive.md) |
+| 2026-06-12 | [_dist_reduce skips mesh all_reduce on DTensor inputs, breaking loss reporting on TP > 1](./upstream-issues/dist_reduce_dtensor_skip.md) |
+| 2026-06-12 | [2026-06-05 → 2026-06-12 — One-Week Summary](./summaries/2026-06-05_to_2026-06-12.md) |
+| 2026-06-12 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/aurora2b/tulu_math_uc_mix/README.md) |
+| 2026-06-12 | [GRPO recipe: AuroraGPT-2B-sft-tulu-mix x sum_digits arithmetic (8N)](./production/grpo/aurora2b/sft_arithmetic/README.md) |
+| 2026-06-12 | [Production GRPO](./production/grpo/README.md) |
+| 2026-06-12 | [Loss reporting was off by dp_world_size on TP > 1 — fixed upstream 2026-05-18](./guides/loss-reporting-tp-dist-reduce.md) |
+| 2026-06-11 | [lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline](./production/sft/aurora2b/tulu_math_uc_mix/evals/README.md) |
+| 2026-06-11 | [Local HF Dataset Cache for Distributed Training](./guides/hf-dataset-offline-cache.md) |
+| 2026-06-10 | [ShardedTensor.device fallback hardcodes CUDA, breaking FSDP resume on XPU](./upstream-issues/sharded_tensor_device_cuda_hardcode.md) |
+| 2026-06-10 | [vLLM-XPU on torch 2.13 — investigation findings](./rl/vllm-xpu-investigation.md) |
+| 2026-06-10 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/aurora2b/tulu_math_uc_mix/failover-story.md) |
+| 2026-06-10 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/aurora2b/tulu_math_uc_mix/evals/ifeval.md) |
+| 2026-06-10 | [GRPO smoke — SFT-step729 vs baseline as RL starting point](./production/sft/aurora2b/tulu_math_uc_mix/evals/grpo-smoke.md) |
+| 2026-06-10 | [Production SFT](./production/sft/README.md) |
+
+</details>
 <!-- END recently-updated (auto-generated) -->
 
 ## Production Training (live)

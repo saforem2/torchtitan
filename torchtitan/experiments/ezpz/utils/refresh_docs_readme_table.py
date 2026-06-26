@@ -69,7 +69,8 @@ NOAUTO_SENTINEL = "<!-- noauto -->"
 # Auto-generated "Recently Updated" region markers in docs/README.md.
 RECENT_BEGIN = "<!-- BEGIN recently-updated (auto-generated) -->"
 RECENT_END = "<!-- END recently-updated (auto-generated) -->"
-RECENT_LIMIT = 25
+RECENT_LIMIT = 25  # rows shown in the always-visible table
+RECENT_EXTRA = 25  # additional rows tucked into the <details> block
 # H1 title at the top of a markdown doc (first "# ..." line).
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
 
@@ -86,20 +87,18 @@ def doc_title(path: Path) -> str:
     return path.stem
 
 
-def build_recently_updated(readme_path: Path, *, limit: int = RECENT_LIMIT) -> str:
-    """Return the markdown table body (between the markers) listing the
-    `limit` most-recently-committed docs under docs/, newest first. The
-    git commit date covers EVERY doc, not just those in the curated
-    tables -- this is the manifest-independent freshness view.
+def _collect_doc_rows(readme_path: Path) -> list[tuple[str, str, str]]:
+    """All tracked docs under docs/ as (date, title, rel_link), newest
+    first. git commit date covers EVERY doc, not just those in the
+    curated tables -- the manifest-independent freshness view.
     """
     repo_root = find_repo_root(readme_path)
     docs_dir = readme_path.parent
-    # All tracked .md under docs/ (git ls-files keeps it to versioned docs).
     out = subprocess.run(
         ["git", "-C", str(repo_root), "ls-files", str(docs_dir.resolve().relative_to(repo_root)) + "/*.md"],
         capture_output=True, text=True, check=True,
     )
-    rows: list[tuple[str, str, str]] = []  # (date, title, rel_link)
+    rows: list[tuple[str, str, str]] = []
     for rel in out.stdout.split():
         abs_path = repo_root / rel
         if not abs_path.exists():
@@ -111,9 +110,37 @@ def build_recently_updated(readme_path: Path, *, limit: int = RECENT_LIMIT) -> s
         rows.append((date, doc_title(abs_path), link))
     # Newest first; tie-break by path for determinism.
     rows.sort(key=lambda r: (r[0], r[2]), reverse=True)
-    body = ["| Modified | Doc |", "|---------:|-----|"]
-    for date, title, link in rows[:limit]:
-        body.append(f"| {date} | [{title}]({link}) |")
+    return rows
+
+
+def _md_table(rows: list[tuple[str, str, str]]) -> list[str]:
+    """Render (date, title, link) rows as a Modified|Doc markdown table."""
+    lines = ["| Modified | Doc |", "|---------:|-----|"]
+    for date, title, link in rows:
+        lines.append(f"| {date} | [{title}]({link}) |")
+    return lines
+
+
+def build_recently_updated(
+    readme_path: Path, *, limit: int = RECENT_LIMIT, extra: int = RECENT_EXTRA
+) -> str:
+    """Region body: the `limit` most-recent docs as a visible table, then
+    the next `extra` tucked into a collapsed <details> block.
+    """
+    rows = _collect_doc_rows(readme_path)
+    body = _md_table(rows[:limit])
+    next_rows = rows[limit : limit + extra]
+    if next_rows:
+        lo, hi = limit + 1, limit + len(next_rows)
+        body += [
+            "",
+            "<details>",
+            f"<summary>Next {len(next_rows)} (#{lo}-{hi})</summary>",
+            "",
+            *_md_table(next_rows),
+            "",
+            "</details>",
+        ]
     return "\n".join(body)
 
 
