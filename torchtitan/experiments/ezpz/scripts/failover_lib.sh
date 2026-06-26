@@ -76,6 +76,38 @@ failover_log_queue_wait() {
     _failover_log "queue wait: $(awk "BEGIN{printf \"%.1f\", $wait/3600}")h (qtime->start); logged to $csv"
 }
 
+# ---------------------------------------------------------------------------
+# failover_remaining_walltime
+#
+# Echo the number of seconds of PBS walltime REMAINING for this job, for use
+# as WALLTIME_SECONDS by the trainer's walltime-aware checkpointing. PBS does
+# not export walltime as an env var, so we read it back from the job's own
+# qstat record: remaining = Resource_List.walltime - (now - stime).
+#
+# "Remaining" (not total) is what the trainer wants: it starts its budget
+# clock at loop entry, AFTER yeet/preflight/ckpt-load have already burned
+# part of the wall, so subtracting elapsed-since-start here keeps the two in
+# sync. Best-effort: echoes 0 (disables the feature) if anything is missing.
+# ---------------------------------------------------------------------------
+failover_remaining_walltime() {
+    [[ -n "${PBS_JOBID:-}" ]] || { echo 0; return 0; }
+    local rec wt stt total now_s start_s elapsed remain
+    rec=$(qstat -xf "$PBS_JOBID" 2>/dev/null) || { echo 0; return 0; }
+    wt=$(echo "$rec"  | grep -m1 "Resource_List.walltime" | sed 's/.*= //')
+    stt=$(echo "$rec" | grep -m1 "stime "                 | sed 's/.*= //')
+    [[ -n "$wt" ]] || { echo 0; return 0; }
+    # Walltime is HH:MM:SS (or D+HH:MM:SS). Convert to seconds.
+    total=$(awk -F: 'NF==3{print ($1*3600)+($2*60)+$3} NF==2{print ($1*60)+$2} NF==1{print $1}' <<< "$wt")
+    [[ -n "$total" && "$total" -gt 0 ]] 2>/dev/null || { echo 0; return 0; }
+    now_s=$(date +%s)
+    start_s=$(date -d "$stt" +%s 2>/dev/null) || start_s="$now_s"
+    elapsed=$(( now_s - start_s ))
+    (( elapsed < 0 )) && elapsed=0
+    remain=$(( total - elapsed ))
+    (( remain < 0 )) && remain=0
+    echo "$remain"
+}
+
 failover_init() {
     local nhosts_train="$1"
     [[ -n "$nhosts_train" ]] || { _failover_log "ERROR: failover_init needs NHOSTS_TRAIN arg"; return 1; }
