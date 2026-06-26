@@ -293,6 +293,13 @@ prestage_venvs() {
 }
 
 # ---- Launch one trainer in an isolated background subshell --------------------
+# Backgrounds directly in the CALLER's shell and records the pid into PIDS[idx].
+# It must NOT be called via command substitution ($(...)): that would run the
+# `&` in a subshell, making the job a child of THAT subshell, so the main
+# shell's later `wait "${PIDS[idx]}"` would fail with "pid is not a child of
+# this shell" and return 127 for every trainer (observed: smoke 8567358, all
+# 4 spuriously rc=127 the instant they launched, while they were really still
+# starting up). Call it plainly: `launch_trainer "$idx"`.
 launch_trainer() {
     local idx="$1"
     local console="$MULTI_LOG_DIR/trainer-${idx}.console.log"
@@ -323,7 +330,8 @@ launch_trainer() {
         # function not inherited by a plain `bash child.sh`).
         exec bash --login "${T_CHILD[$idx]}"
     ) > "$console" 2>&1 &
-    echo $!
+    # Record the pid in the caller's shell so `wait` recognizes it as a child.
+    PIDS[$idx]=$!
 }
 
 if (( DRY_RUN == 1 )); then
@@ -364,9 +372,8 @@ prestage_venvs
 # ---- Launch all 4, staggered --------------------------------------------------
 declare -a PIDS
 for idx in "${!TRAINERS[@]}"; do
-    pid=$(launch_trainer "$idx")
-    PIDS[$idx]="$pid"
-    log "launched trainer $idx (${T_MODEL[$idx]} n=${T_NNODES[$idx]}) pid=$pid -> $MULTI_LOG_DIR/trainer-${idx}.console.log"
+    launch_trainer "$idx"   # sets PIDS[$idx] directly (NOT via $(...) -- see note)
+    log "launched trainer $idx (${T_MODEL[$idx]} n=${T_NNODES[$idx]}) pid=${PIDS[$idx]} -> $MULTI_LOG_DIR/trainer-${idx}.console.log"
     # Stagger all but the last.
     if (( idx < ${#TRAINERS[@]} - 1 )); then
         sleep "$LAUNCH_STAGGER"
