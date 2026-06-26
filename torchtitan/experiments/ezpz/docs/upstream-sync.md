@@ -77,11 +77,23 @@ installed dep): agpt, common.attention, ezpz.moe all import OK.
   (`2.13.0.dev20260519+xpu`, `__init__.py` mtime pre-merge).
 - Import smoke (login node, merged code): agpt, common.attention,
   ezpz.moe all import OK.
-- **Runtime bitwise smoke: PENDING** -- `sync_smoke.sh` queued behind the
-  80B sim/bisect/LR-finder campaign (own PBS job). Will verify the 3
-  default configs (agpt_debugmodel TP=1/TP=2, moe_debugmodel) train clean
-  + the agpt 2B path is bitwise-identical pre/post merge. Entry will be
-  updated with the verdict + job id.
+- **Runtime smoke PASSED** (`sync_smoke.sh`, job 12469667, own select=1)
+  -> `VERDICT: ok`. All 3 default configs trained 2 deterministic steps
+  clean:
+  - `agpt_debugmodel` TP=1 rc=0 (loss 10.839 -> 10.673) -- identical to
+    the 59th-sync baseline, so the merge is numerically consistent.
+  - `agpt_debugmodel` **TP=2** rc=0 (loss 10.839 -> 10.662, mem halved
+    to 13.4%) -- confirms the `[spmd_types]` attention/parallelize
+    refactor is safe on the ezpz path under TP>1 (`spmd_backend=default`,
+    typechecking off), the surface the 57th sync regressed at.
+  - `moe_debugmodel` rc=0 (loss 12.910 -> 12.368).
+  - First attempt (12469660) hit the known blendcorpus cold-cache
+    build-then-load race at TP=2 (`EOFError` in `_build_index_mappings`)
+    -- NOT a sync issue (TP=2 cleared the entire spmd/parallelize path
+    and only tripped in dataloader init); the cold build left the cache
+    warm and 12469667 passed. (Smoke ran from worktree `ezpz-60th-sync`
+    with `.venv`/`.venv.tar.gz`/`assets/hf` symlinked from the main
+    checkout.)
 
 ---
 
