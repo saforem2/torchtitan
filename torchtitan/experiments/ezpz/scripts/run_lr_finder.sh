@@ -135,10 +135,28 @@ RUN_IDX=0
 
 for model in "${MODELS[@]}"; do
     config="agpt_${model}"
-    # 80B needs TP=2
+    # Per-model parallelism + stability flags.
+    #
+    # For 80B the validated stable corner is TP=4 / LBS=1 / compile OFF /
+    # AC=full / pure FSDP (see docs/production/agpt/80b/README.md). TP=2
+    # here would put dp_degree at 62*12/2 = 372 -- past the ~186 NaN
+    # ceiling -- so every 80B sweep would NaN from the dp-degree trigger
+    # rather than from the LR being swept, making the curve meaningless.
+    # TP=4 keeps dp_degree=186 (safe) so the sweep actually measures the
+    # LR cliff. Override the TP via LRF_TP if probing a different corner.
     tp_args=()
+    ac_subcommand=()
     if [[ "${model}" == "80b" || "${model}" == "80B" ]]; then
-        tp_args=("--parallelism.tensor_parallel_degree" "2")
+        tp_args=(
+            --parallelism.tensor_parallel_degree "${LRF_TP:-4}"
+            --parallelism.expert_parallel_degree 1
+            --parallelism.data_parallel_replicate_degree 1
+            --parallelism.data_parallel_shard_degree -1
+            --compile.no-enable
+        )
+        # activation-checkpoint is a positional tyro subcommand and must
+        # be the LAST argv token (after every --flag and "$@").
+        ac_subcommand=("activation-checkpoint:full")
     fi
 
     for opt in "${OPTIMIZERS[@]}"; do
@@ -175,6 +193,7 @@ for model in "${MODELS[@]}"; do
             --lr_finder.fraction "${LRF_FRACTION}" \
             "${tp_args[@]}" \
             "$@" \
+            "${ac_subcommand[@]}" \
             >"${logfile}" 2>&1 || true
         exit_code=$?
 
