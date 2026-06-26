@@ -20,6 +20,83 @@ was required in ezpz.
 
 ---
 
+## 2026-06-26 — 60th sync (23 commits, `daa9d7453..upstream/main`)
+
+Merged clean (no conflicts) as `0b083d3ee` in worktree
+`ezpz-60th-sync`. **No code replays required**, but this sync adds a
+**new pip dependency**: `spmd_types==0.2.1`. The `[spmd_types]` commit
+series adds a hard top-level `import spmd_types as spmd` to
+`common/attention.py`, `common/moe.py`, and ~20 other core files that
+ezpz agpt/moe import. The module is a pure-Python wheel but declares
+`torch>=2.10`, so it was installed `--no-deps --no-cache` to protect the
+XPU torch build (verified torch still `2.13.0.dev...+xpu`, untouched).
+
+All the new spmd-typing logic is gated behind
+`get_spmd_backend() == "spmd_types"` (default is `"default"`), so it is a
+**functional no-op for ezpz** -- we just need the module importable so
+the hard imports resolve. agpt subclasses `ScaledDotProductAttention`
+(forward signature **unchanged** by this merge -- the new
+`@spmd.local_map` decorator landed on `VarlenAttention.forward`, which
+agpt does not use); moe imports `MoE`/`GroupedExperts`/
+`TokenChoiceTopKRouter`/token_dispatcher, whose new spmd typecheck blocks
+are all `spmd_backend`-gated. Import smoke (login node, merged code +
+installed dep): agpt, common.attention, ezpz.moe all import OK.
+
+### Upstream commits
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `0a4aa4542` | [spmd_types] llama3 enablement (#3763) | **Dep + no-op.** Adds `import spmd_types` to `common/attention.py` + `common/rope.py` and `@spmd.local_map` on `VarlenAttention.forward`. agpt subclasses `ScaledDotProductAttention` (untouched); not the varlen path. Gated by `spmd_backend`. No replay. |
+| `9b91827ab` | [spmd_types] qwen3 enablement (#3655) | Same surface (`common/attention.py` + `rope.py`). ezpz has no live qwen3 fork. No replay. |
+| `622c1acaa` | [spmd_types] dsv3 enablement (#3673) | `deepseek_v3/{model,parallelize,sharding}.py`. moe replays from dsv3 but the changes are spmd-typecheck annotations gated by `spmd_backend`; inert at `default`. No replay. |
+| `7144431d6` | [spmd_types] GPT-OSS enablement (#3690) | `gpt_oss/` only; ezpz has no gpt_oss fork. None. |
+| `565cb810c` | [spmd_types] fix MoE sequence-sharded combine (#3664) | `common/moe.py` + `moe_sharding.py`. ezpz/moe uses `sp_size=1` so the SP-combine path is never live (same as the 54th-sync MoE SP fix). Inert. No replay. |
+| `b052f36fe` | [spmd_types] MoE sparse mesh transitions (#3654) | `common/moe.py` + `token_dispatcher.py`: adds `maybe_set_sparse_mesh()` context (no-op unless spmd active). moe imports through it; inert at `default`. No replay. |
+| `fbf79bcc5` | [spmd_types] helion rope & fused_swiglu rules (#3741) | `overrides/{helion_rope,fused_swiglu}.py` typecheck rules. ezpz uses neither override. None. |
+| `c86821ecd` | use funcol for custom LP autograd (#3793) | `distributed/` LP autograd; ezpz doesn't use loss-parallel custom autograd. None. |
+| `40f1a553b` | [graph_trainer] EP overlap scheduling pass (#3328) | `common/token_dispatcher.py` + `experiments/graph_trainer/`. moe imports token_dispatcher; the change is graph-trainer scheduling, inert outside graph_trainer. No replay. |
+| `1c0fde2b6` | [graph_trainer] graph EP chunking pass (#3325) | `experiments/graph_trainer/` only. None. |
+| `616182011` | [graph_trainer] EP overlap eager chunking scaffolding (#3363) | graph_trainer only. None. |
+| `a37b9f98d` | [graph_trainer] marked symbolic input dims in tracing (#3362) | `common/rope.py` symbolic-dim hooks; gated/tracing-only, agpt rope path unchanged at runtime. No replay. |
+| `f7a8e22e3` | [graph_trainer] Fix failing CI tests (#3791) | CI/graph_trainer only. None. |
+| `966983a73` | [rl] Async RL loop (#3642) | `experiments/rl/` (upstream Monarch path). ezpz has its own XPU rl port; upstream rl flows in but isn't on our path. None. |
+| `fcde6db8e` | Add DP fan-in to generator + DP routing (#3765) | upstream rl generator. None for ezpz. |
+| `baa6a6446` | [rl] Fix RL load weights: fused qkv load hooks bypassed (#3794) | upstream rl. None. |
+| `b67239bc9` | [rl] annotate varlen Attention cudagraph capability (#3776) | upstream rl + varlen; ezpz doesn't use the rl varlen path. None. |
+| `3e477ead0` | [rl] Fix model max seq length / batcher check (#3796) | upstream rl. None. |
+| `7c951af4f` | [rl] vllm All-reduce patch in generator (#3759) | upstream rl/vllm. None (ezpz rl uses its own TRL vllm-serve path). |
+| `457e55d2b` | keep all_to_all_single for compiled token_dispatcher (#3797) | `common/token_dispatcher.py`. moe imports it; restores `all_to_all_single` on the compiled path (mirrors our own `82100fd67` SAC save-list intent). Benign/beneficial. No replay. |
+| `2ce277326` | [flex attention] pass score_mod to flex_attn (#3789) | `common/attention.py` FlexAttention. agpt's `SoftcappedFlexAttention` subclasses FlexAttention + uses score_mod -- **verify in smoke** that the score_mod plumbing change is compatible (XPU has no flex backend, so the live agpt path is SDPA; flex is debug-only). No replay expected. |
+| `16de1d625` | float8: enable on ROCm gfx942+ (#3760) | `quantization/float8`. ezpz XPU doesn't use float8. None. |
+| `1dbdbc672` | Skip torchcomms install in feature CI (#3792) | CI only. None. |
+
+### Verification
+
+- Clean merge, no conflicts (`0b083d3ee`, worktree `ezpz-60th-sync`).
+- `spmd_types==0.2.1` installed `--no-deps --no-cache`; torch unchanged
+  (`2.13.0.dev20260519+xpu`, `__init__.py` mtime pre-merge).
+- Import smoke (login node, merged code): agpt, common.attention,
+  ezpz.moe all import OK.
+- **Runtime smoke PASSED** (`sync_smoke.sh`, job 12469667, own select=1)
+  -> `VERDICT: ok`. All 3 default configs trained 2 deterministic steps
+  clean:
+  - `agpt_debugmodel` TP=1 rc=0 (loss 10.839 -> 10.673) -- identical to
+    the 59th-sync baseline, so the merge is numerically consistent.
+  - `agpt_debugmodel` **TP=2** rc=0 (loss 10.839 -> 10.662, mem halved
+    to 13.4%) -- confirms the `[spmd_types]` attention/parallelize
+    refactor is safe on the ezpz path under TP>1 (`spmd_backend=default`,
+    typechecking off), the surface the 57th sync regressed at.
+  - `moe_debugmodel` rc=0 (loss 12.910 -> 12.368).
+  - First attempt (12469660) hit the known blendcorpus cold-cache
+    build-then-load race at TP=2 (`EOFError` in `_build_index_mappings`)
+    -- NOT a sync issue (TP=2 cleared the entire spmd/parallelize path
+    and only tripped in dataloader init); the cold build left the cache
+    warm and 12469667 passed. (Smoke ran from worktree `ezpz-60th-sync`
+    with `.venv`/`.venv.tar.gz`/`assets/hf` symlinked from the main
+    checkout.)
+
+---
+
 ## 2026-06-25 — 59th sync (10 commits, `395833a46..upstream/main`)
 
 Merged clean (no conflicts) as `daa9d7453`. **No code replays required**;
