@@ -23,28 +23,39 @@ the dangerous dp_degree.
 - Full report:
   [`docs/experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md`](experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md).
 
-**The multi-attempt arc + its real root cause (the lesson).** This run
-was the successful relaunch after two prior allocations hung in
-`config.build()` (~20 min each, then aborted). The cause was
-**self-inflicted**: a global `torch.distributed.barrier()` I had added
-inside blendcorpus `_build_index_mappings` (`c7eb628`). That function is
-called a *data-dependent* number of times (per corpus x per split, with
-a `build_indices` branch that differs across ranks), so ranks hit the
-barrier a mismatched number of times -> partial-participation collective
-deadlock (`oneCCL allreduce_scaleout ... atl_comm->wait fails with
-status: 1`). **Reverted in `74b09fd`** (NOTE left explaining why no
-barrier belongs there); the relaunch trained clean.
+**The multi-attempt arc had TWO distinct causes (corrected after reading
+all four failed-job logs).** This run was the successful relaunch after
+four prior GBS=1488 attempts failed:
 
-- Ruled out: **NOT node health** (an `rc=127` was failover-scrape noise;
-  healthy nodes hung identically), **NOT batch size** (step 1 always
-  clean -- the hang was in init, before any step).
-- The **3 sibling barriers** from `debfff5` (`_cache_indices`,
-  `build_corpus_datasets`, `blendable_dataset.py`) are correct and kept
-  -- each sits next to a pre-existing collective reached uniformly by all
-  ranks. (blendcorpus PR #8.)
+1. **Validator cold-built at the wrong path (12469584).** That attempt's
+   *training* dataloader built the full 74773-sample index **cold at 744
+   ranks and succeeded**, reaching step 1 clean -- so cold-build at scale
+   already works with the `debfff5` sibling barriers. The crash was the
+   *validator* building its validation-split index cold at the default
+   `.cache/blendcorpus` path (missing `--validator.dataloader.data-cache-path`).
+2. **Self-inflicted barrier (12469590/592/597).** Reacting to (1), I
+   added a global `torch.distributed.barrier()` in blendcorpus
+   `_build_index_mappings` (`c7eb628`). That function is called a
+   data-dependent number of times (per corpus x per split, branch-gated),
+   so ranks hit the barrier a mismatched number of times ->
+   partial-participation deadlock (`oneCCL allreduce_scaleout ...
+   atl_comm->wait`, confirmed at `gpt_dataset.py:1145` in 12469597).
+   **Reverted in `74b09fd`**; the next run (12469609) trained clean.
+
+- Corrects the earlier read: cold-build at 744 ranks **works** (12469584
+  proves it) -- the cache this run loaded "warm" was built cold by
+  12469584, not by a pre-warm. The `prewarm` `--training.steps=1` call
+  builds a *wrong-sized* index anyway (hash keys on
+  `num_samples = GBS * train_iters`).
+- Ruled out: **NOT node health** (`rc=127` was failover-scrape noise),
+  **NOT batch size** (step 1 always clean; both failures are dataloader
+  init).
+- The **3 sibling barriers** from `debfff5` are correct and kept -- each
+  sits next to a pre-existing all-rank collective. (blendcorpus PR #8.)
 - Systematic-debugging takeaway: a barrier is only safe where every rank
   provably reaches it the same number of times; never inside a
-  branch-gated, per-item loop.
+  branch-gated, per-item loop. And: read *all* the failure logs before
+  naming a single root cause -- there were two here, not one.
 
 What the sim does **not** establish: survival of `dp_degree > 186` (the
 real 512N+ regime, where dp itself is the trigger) or the >512N
