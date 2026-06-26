@@ -1,9 +1,9 @@
 #!/bin/bash --login
-#PBS -A datascience
+#PBS -A AuroraGPT
 #PBS -N agpt-20b-autoretry
 #PBS -l walltime=12:00:00
-#PBS -l filesystems=tegu:home
-#PBS -q workq
+#PBS -l filesystems=home:flare
+#PBS -q prod
 #PBS -j oe
 # select= overridden via qsub -l select=N (e.g. 522 = 512 train + 10 spare)
 
@@ -17,14 +17,17 @@
 # stuck-pre-training / SIGINT. See submit_agpt_2b_autoretry.sh and
 # docs/guides/bad-node-failover.md (current native path).
 #
-# Portable: PBS headers default to Sunspot (datascience / workq /
-# tegu:home). On Aurora, override at submit time (qsub flags beat #PBS):
-#   qsub -A AuroraGPT -q prod -l filesystems=home:flare \
-#     -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
+# Portable: PBS headers default to Aurora (AuroraGPT / prod /
+# home:flare); the data list auto-selects by machine (olmo-mix-1124 on
+# Aurora, books on Sunspot), so no body edit is needed to move between.
+#
+# Submit (Aurora):
+#   qsub -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_20b_autoretry.sh
 #
-# Submit (Sunspot):
-#   qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
+# Sunspot: override the #PBS directives at submit time (qsub flags beat #PBS):
+#   qsub -A datascience -q workq -l filesystems=tegu:home \
+#     -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_20b_autoretry.sh
 #
 # Required: NHOSTS_TRAIN env var (number of nodes to actually train on).

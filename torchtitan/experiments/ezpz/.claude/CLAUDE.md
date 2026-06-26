@@ -78,8 +78,10 @@
   split + scrape + swap + retry loop. The scripts yeet the venv to the
   whole (un-split) nodefile themselves (auto-retry does NOT broadcast)
   and compute `--nproc`/GBS from the active count (`NHOSTS_TRAIN*12`).
-  Portable: Sunspot PBS headers by default (data list `books`), Aurora
-  via qsub overrides (data list `olmo-mix-1124`). Contract:
+  Portable: Aurora PBS headers by default (AuroraGPT/prod/home:flare,
+  data list `olmo-mix-1124`), Sunspot via qsub overrides
+  (`-A datascience -q workq -l filesystems=tegu:home`, data list
+  `books`). Contract:
   `NHOSTS_TRAIN` + `select=active+spare`, `--spare-nodes auto`. 2B/20B
   default to `_real` cos_sin RoPE (compile-lowerable) with the validator
   on; the 80B script defaults to the confirmed-stable

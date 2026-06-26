@@ -1,9 +1,9 @@
 #!/bin/bash --login
-#PBS -A datascience
+#PBS -A AuroraGPT
 #PBS -N agpt-80b-autoretry
 #PBS -l walltime=12:00:00
-#PBS -l filesystems=tegu:home
-#PBS -q workq
+#PBS -l filesystems=home:flare
+#PBS -q prod
 #PBS -j oe
 # select= overridden via qsub -l select=N (e.g. 64 = 62 train + 2 spare)
 
@@ -29,11 +29,11 @@
 # grad-path overflow is an open upstream-worthy bug. This script WARNS when
 # dp_degree > 186 so you don't silently enter the NaN regime.
 #
-# Submit (Sunspot, 62 active + 2 spare):
+# Submit (Aurora, 62 active + 2 spare):
 #   qsub -l select=64 -l walltime=12:00:00 -v NHOSTS_TRAIN=62 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_80b_autoretry.sh
-# Aurora (qsub flags beat #PBS):
-#   qsub -A AuroraGPT -q prod -l filesystems=home:flare \
+# Sunspot (override the #PBS directives; qsub flags beat #PBS):
+#   qsub -A datascience -q workq -l filesystems=tegu:home \
 #     -l select=64 -v NHOSTS_TRAIN=62 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_80b_autoretry.sh
 #

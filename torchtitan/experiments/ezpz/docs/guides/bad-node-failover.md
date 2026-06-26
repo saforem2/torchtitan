@@ -22,23 +22,26 @@ retry loop.
 `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR #170) owns the whole
 split + scrape + swap + retry loop internally. The submit scripts
 [`submit_agpt_{2b,20b,80b}_autoretry.sh`](../../scripts/) are portable:
-Sunspot PBS headers by default (data list `books`), Aurora via qsub
-overrides (data list `olmo-mix-1124`).
+**Aurora PBS headers by default** (`AuroraGPT` / `prod` / `home:flare`,
+data list `olmo-mix-1124`), Sunspot via qsub overrides
+(`-A datascience -q workq -l filesystems=tegu:home`, data list `books`).
+The data list auto-selects by `ezpz_get_machine_name`, so only the
+account/queue/filesystem flags need overriding off-Aurora.
 
 ### Usage
 
 ```bash
-# Sunspot: 12 active + 2 spare (select = NHOSTS_TRAIN + spares)
-qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
+# Aurora (default headers): 512 active + 10 spare (select = NHOSTS_TRAIN + spares)
+qsub -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
     torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
 
-# Aurora: qsub flags override the #PBS Sunspot defaults
-qsub -A AuroraGPT -q prod -l filesystems=home:flare \
-    -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
+# Sunspot: qsub flags override the #PBS Aurora defaults
+qsub -A datascience -q workq -l filesystems=tegu:home \
+    -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
     torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
 
-# 80B: TP=4/LBS=1/AdamW default. Keep dp_degree (=NGPUS/TP) <= ~186 --
-# the safe corner is validated at 62 active nodes (dp=186, GBS=372 via
+# 80B (Aurora): TP=4/LBS=1/AdamW default. Keep dp_degree (=NGPUS/TP) <= ~186
+# -- the safe corner is validated at 62 active nodes (dp=186, GBS=372 via
 # GAS=2). The script WARNS if dp_degree exceeds 186. Cap retries (each
 # 80B retry pays ~5-15 min init):
 qsub -l select=64 -l walltime=12:00:00 \

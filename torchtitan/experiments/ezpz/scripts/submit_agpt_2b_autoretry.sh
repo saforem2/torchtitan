@@ -1,9 +1,9 @@
 #!/bin/bash --login
-#PBS -A datascience
+#PBS -A AuroraGPT
 #PBS -N agpt-2b-autoretry
 #PBS -l walltime=12:00:00
-#PBS -l filesystems=tegu:home
-#PBS -q workq
+#PBS -l filesystems=home:flare
+#PBS -q prod
 #PBS -j oe
 # select= overridden via qsub -l select=N (e.g. 14 = 12 train + 2 spare)
 
@@ -18,15 +18,19 @@
 # as 143), swap a spare in-place, and retry until success / walltime /
 # spare-exhaustion / stuck-pre-training / SIGINT.
 #
-# Portable: PBS headers default to Sunspot (datascience / workq /
-# tegu:home). On Aurora, override at submit time -- qsub flags beat the
-# #PBS directives:
-#   qsub -A AuroraGPT -q prod -l filesystems=home:flare \
-#     -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
+# Portable: PBS headers default to Aurora (AuroraGPT / prod /
+# home:flare). The data list also auto-selects by machine
+# (olmo-mix-1124 on Aurora, books on Sunspot), so no body edit is needed
+# to move between them.
+#
+# Submit (Aurora):
+#   qsub -l select=522 -l walltime=12:00:00 -v NHOSTS_TRAIN=512 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
 #
-# Submit (Sunspot):
-#   qsub -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
+# Sunspot: override the #PBS directives at submit time -- qsub flags beat
+# the #PBS lines:
+#   qsub -A datascience -q workq -l filesystems=tegu:home \
+#     -l select=14 -l walltime=12:00:00 -v NHOSTS_TRAIN=12 \
 #     torchtitan/experiments/ezpz/scripts/submit_agpt_2b_autoretry.sh
 #
 # The job requests NHOSTS_TRAIN + spares nodes from PBS. ezpz splits the
