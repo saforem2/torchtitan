@@ -72,30 +72,29 @@
 
 ### Job Submission
 
-- **All current (v2) production training:** Use the **failover**
-  scripts `scripts/submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh`.
-  These use the torch 2.13 `.venv/` (broadcast via `ezpz yeet-env`
-  tarball mode), LBS=2, fp32 master, add a bad-node preflight +
-  spare-swap retry path, and one script handles all node counts via env
-  vars (`NHOSTS_TRAIN`, `FAILOVER_MAX_RETRIES`, `LBS`, `CKPT_DIR`,
-  `CHECKPOINT_ASYNC_MODE`, …). The non-failover
-  `submit_agpt_{2b,20b}_aurora_venv.sh` were REMOVED 2026-06-24
-  (superseded by the failover versions; recover from git history if
-  ever needed).
-- **Native auto-retry variants:** `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`
-  do the same job with `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR
-  #170) instead of the bash `failover_lib.sh` -- ezpz owns the
-  split + scrape + swap + retry loop. The scripts still yeet the venv to
-  the whole (un-split) nodefile themselves (auto-retry does NOT broadcast),
+- **Current production path (native auto-retry):** Use
+  `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`, which use
+  `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR #170) -- ezpz owns the
+  split + scrape + swap + retry loop. The scripts yeet the venv to the
+  whole (un-split) nodefile themselves (auto-retry does NOT broadcast)
   and compute `--nproc`/GBS from the active count (`NHOSTS_TRAIN*12`).
   Portable: Sunspot PBS headers by default (data list `books`), Aurora
-  via qsub overrides (data list `olmo-mix-1124`). Same `NHOSTS_TRAIN` +
-  `select=active+spare` contract; `--spare-nodes auto`. The 80B script
-  defaults to the confirmed-stable **TP=4/LBS=1/AdamW LR=1e-6** corner
-  (supersedes the old TP=2 failover default, which NaNs at production
-  GBS) and **warns when `dp_degree=NGPUS/TP > 186`** (the grad-path NaN
-  trigger; safe corner validated only to ~62N). See
-  `docs/guides/bad-node-failover.md` "Two implementations".
+  via qsub overrides (data list `olmo-mix-1124`). Contract:
+  `NHOSTS_TRAIN` + `select=active+spare`, `--spare-nodes auto`. 2B/20B
+  default to `_real` cos_sin RoPE (compile-lowerable) with the validator
+  on; the 80B script defaults to the confirmed-stable
+  **TP=4/LBS=1/AdamW LR=1e-6** corner (supersedes the legacy TP=2
+  default, which NaNs at production GBS) and **warns when
+  `dp_degree=NGPUS/TP > 186`** (the grad-path NaN trigger; safe corner
+  validated only to ~62N). See `docs/guides/bad-node-failover.md`.
+- **Legacy (retained, not for new runs):** the bash `failover_lib.sh`
+  wrapper scripts `scripts/submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh`
+  (torch 2.13 `.venv/`, LBS=2, fp32 master, bash preflight + spare-swap
+  via `NHOSTS_TRAIN`/`FAILOVER_MAX_RETRIES`/...). Kept for reproducing
+  earlier Aurora production runs and as the fixture-tested reference for
+  the failure taxonomy; superseded by native auto-retry 2026-06-24. The
+  non-failover `submit_agpt_{2b,20b}_aurora_venv.sh` were REMOVED
+  2026-06-24 (recover from git history if ever needed).
 - **Legacy torch-2.10 v1 scripts** live under `submit/{aurora,sunspot}/*.sh`
   with their own README. They produced every v1 (bf16-tainted)
   trajectory and are kept only for reproducing v1 numbers — nothing
@@ -356,9 +355,11 @@ that touches one of these areas.
 
 ## Production Training Status (Aurora)
 
-Tracking in `docs/production/`. **All v2 (post-bf16-fix) runs use
-the torch 2.13 venv stack + `scripts/submit_agpt_*_aurora_venv_failover.sh`**.
-Default dtype is now `float32` (see Recent Findings).
+Tracking in `docs/production/`. All v2 (post-bf16-fix) runs use the
+torch 2.13 venv stack. New runs use the native auto-retry scripts
+(`scripts/submit_agpt_*_autoretry.sh`); earlier Aurora v2 trajectories
+ran under the legacy `*_aurora_venv_failover.sh` wrapper (see Job
+Submission above). Default dtype is now `float32` (see Recent Findings).
 
 ### v2 — 2B 512N canonical chain (`8460301 → 8463626 → 8463627 → 8466847`)
 
@@ -541,12 +542,14 @@ moved up to "Golden Rules".
   `scripts/interactive-launch.sh`.
 - **Append-only tables** — production training progress tables should
   append, not replace.
-- **Use `scripts/submit_agpt_*_aurora_venv_failover.sh`** for all
-  current (torch 2.13 venv, fp32-master) production. The non-failover
-  `submit_agpt_{2b,20b}_aurora_venv.sh` were removed 2026-06-24
-  (recover from git history if needed). The legacy
-  `submit/{aurora,sunspot}/*.sh` (torch 2.10 conda) are kept only for
-  reproducing v1 numbers — see `submit/README.md`.
+- **Use `scripts/submit_agpt_*_autoretry.sh`** (native
+  `ezpz launch --auto-retry`) for current production (torch 2.13 venv,
+  fp32-master). The bash `*_aurora_venv_failover.sh` wrapper is legacy
+  but retained (reproducing earlier Aurora runs + failure-taxonomy
+  reference). The non-failover `submit_agpt_{2b,20b}_aurora_venv.sh`
+  were removed 2026-06-24 (recover from git history if needed). The
+  legacy `submit/{aurora,sunspot}/*.sh` (torch 2.10 conda) are kept only
+  for reproducing v1 numbers — see `submit/README.md`.
 - **Date filenames as `YYYY-MM-DD`** for any per-day artifacts.
   Per-recurring-meeting docs use a stable filename with `## YYYY-MM-DD`
   sections inside (see `docs/meeting-notes/agpt-sync.md`).

@@ -15,7 +15,7 @@
 # non-zero exit (incl. watchdog 124 / walltime-racing 143), swaps a spare
 # in-place, and retries until success / walltime / spare-exhaustion /
 # stuck-pre-training / SIGINT. See submit_agpt_2b_autoretry.sh and
-# docs/guides/bad-node-failover.md "Two implementations".
+# docs/guides/bad-node-failover.md (current native path).
 #
 # Portable: PBS headers default to Sunspot (datascience / workq /
 # tegu:home). On Aurora, override at submit time (qsub flags beat #PBS):
