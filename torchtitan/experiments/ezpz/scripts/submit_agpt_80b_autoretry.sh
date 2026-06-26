@@ -242,6 +242,22 @@ else
     VALIDATOR_DATA_FLAGS=()
 fi
 
+# Validator flag set, gated by VALIDATOR_ENABLE (default 1 = on). Set
+# VALIDATOR_ENABLE=0 to skip validation entirely (no --validator.enable,
+# no validator dataloader build). Useful when validation isn't the point
+# of a run (e.g. batch-size/throughput studies) or to sidestep a validator
+# collective issue at scale.
+if [[ "${VALIDATOR_ENABLE:-1}" == "1" ]]; then
+    VALIDATOR_FLAGS=(
+        "--validator.enable"
+        "--validator.freq=${VALIDATOR_FREQ}"
+        "--validator.steps=${VALIDATOR_STEPS}"
+        "${VALIDATOR_DATA_FLAGS[@]}"
+    )
+else
+    VALIDATOR_FLAGS=("--validator.no-enable")
+fi
+
 # ---- Launch with native auto-retry ----
 # No preflight: ezpz's STUCK_PRE_TRAINING guard bails (without burning
 # spares) on a twice-zero-progress init crash. Key 80B-specific flags:
@@ -274,10 +290,7 @@ ezpz launch \
     --checkpoint.no-last-save-model-only \
     --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     "${DATALOADER_FLAGS[@]}" \
-    --validator.enable \
-    --validator.freq="${VALIDATOR_FREQ}" \
-    --validator.steps="${VALIDATOR_STEPS}" \
-    "${VALIDATOR_DATA_FLAGS[@]}" \
+    "${VALIDATOR_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \

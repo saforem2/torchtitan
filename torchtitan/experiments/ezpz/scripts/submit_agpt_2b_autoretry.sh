@@ -175,6 +175,22 @@ CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
 CKPT_DIR="${CKPT_DIR:-checkpoints/agpt-${MODEL}-${OPTIMIZER}-${DFL_NAME}-n${NNODES}-gbs${GBS}}"
 DATA_CACHE_PATH="${CKPT_DIR}/.cache/${DFL_NAME}/index-cache"
 
+# Validator flag set, gated by VALIDATOR_ENABLE (default 1 = on). Set
+# VALIDATOR_ENABLE=0 to skip validation entirely (no --validator.enable,
+# no validator dataloader build) -- e.g. for batch-size/throughput studies
+# or to sidestep a validator collective issue at scale.
+if [[ "${VALIDATOR_ENABLE:-1}" == "1" ]]; then
+    VALIDATOR_FLAGS=(
+        "--validator.enable"
+        "--validator.freq=${VALIDATOR_FREQ}"
+        "--validator.steps=${VALIDATOR_STEPS}"
+        "--validator.dataloader.dataset-path=${DFL}"
+        "--validator.dataloader.data-cache-path=${DATA_CACHE_PATH}"
+    )
+else
+    VALIDATOR_FLAGS=("--validator.no-enable")
+fi
+
 log_message INFO "==========================================="
 log_message INFO "Training ${MODEL} (native --auto-retry, ${NNODES} active nodes)"
 log_message INFO "-------------------------------------------"
@@ -226,11 +242,7 @@ ezpz launch \
     --dataloader.dataset=blendcorpus \
     --dataloader.dataset-path="${DFL}" \
     --dataloader.data-cache-path="${DATA_CACHE_PATH}" \
-    --validator.enable \
-    --validator.freq="${VALIDATOR_FREQ}" \
-    --validator.steps="${VALIDATOR_STEPS}" \
-    --validator.dataloader.dataset-path="${DFL}" \
-    --validator.dataloader.data-cache-path="${DATA_CACHE_PATH}" \
+    "${VALIDATOR_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
