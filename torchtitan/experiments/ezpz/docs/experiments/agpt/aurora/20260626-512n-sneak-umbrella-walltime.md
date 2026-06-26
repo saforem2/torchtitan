@@ -2,7 +2,7 @@
 author: Sam Foreman
 date: 2026-06-26
 jobid: 8564220,8564221,8567005,8567614,8566938,8567189,8567358,8567461,8567626,8567781,8568429
-status: MIXED
+status: MIXED (ckpt-resume incident recovered + verified)
 ---
 
 # Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing
@@ -26,6 +26,7 @@ status: MIXED
 | Multi-chain umbrella (1536 train nodes -> medium queue) | **BUILT + VALIDATED** | 8567461: trainer reached train->checkpoint->rc=0 under 4-way concurrency |
 | 2b-v2 venv missing spmd_types | **FOUND + FIXED** | rebuilt .venv.tar.gz (2.7G, 56 spmd entries) |
 | First real umbrella production submit | **QUEUED** | 8568429, 1576N, 12h, medium |
+| Clone-sync broke DCP resume (fused-optimizer keys) | **CAUSED + RECOVERED + VERIFIED** | rolled 3 clones back to pre-fused 1263e5a1; load-test 8570407 loaded step-86200 in 32.6s, exit 0 |
 
 ## 1. The 512N starvation + the sneak tactic
 
@@ -150,6 +151,50 @@ backed up `.bak-no-spmd-20260626-104344`). Unblocks the 2B chain, 2B
 sneak, and umbrella 2B trainers on fresh nodes.
 (See `project_2b_v2_venv_missing_spmd_types` memory.)
 
+## 6. Incident: clone-sync broke DCP resume; rolled back + verified
+
+While shipping the umbrella/walltime code, the v2 clones were `git pull`'d
+from their old HEAD `1263e5a1` (2026-05-27) to today's `b66ba723`. That
+crossed **#3714 "Enable Fused qkv by default" (3396a4b37, 2026-06-24)**,
+which changed the optimizer state-dict layout. Every production checkpoint
+was saved pre-#3714, so resume crashed:
+```
+RuntimeError: Missing key in checkpoint state_dict:
+optimizer.param_groups.tok_embeddings.weight.fused.
+```
+The 2B + 20B 512N sneaks (8567005 / 8567614) exposed it -- first jobs to
+actually resume on the new code. ALL chains were affected (same clones,
+pre-fused ckpts). Root cause: a clone-pull updates the TRAINING code too,
+not just the infra files intended.
+
+**Recovery (per-clone, reversible):** for each of agpt-2b-v2, agpt-20b-v2,
+agpt-20b-n256: created a `rollback-safety-<ts>` branch, `git reset --hard
+1263e5a1` (pre-fused, the proven-working commit), then re-applied this
+session's ckpt-safe infra (walltime checkpointing, umbrella + skip-yeet
+hooks, failover_remaining_walltime, umbrella wait-fix) via cherry-pick
+(2b-v2) / file-copy from the fixed clone (20b clones). Verified per clone:
+#3714 absent, files compile, infra markers present. **Checkpoints were
+never touched -- only code moved.**
+
+**Verification (8570407, 8N debug-scaling):** loaded the real 2B-256N
+step-86200 with the rolled-back code using `TRAINING_STEPS=86200` so the
+loop exits immediately after a full model+optimizer load (the exact crash
+path) -- no training, no save, read-only on the chain.
+```
+[18:22:05] Loading the checkpoint from ./outputs/checkpoints/agpt-2b-...n256...
+[18:22:38] Finished loading the checkpoint in 32.62 seconds.
+[18:22:40] Training completed   [18:22:42] Execution finished with 0.
+```
+PASS: no Missing-key, exit 0, chain still tops out at step-86200 (nothing
+written). DCP resharding 256N->8N also confirmed. The production chains
+will now resume cleanly.
+
+**Lesson** ([[feedback_clone_pull_can_break_ckpt_resume]]): to ship infra to
+a production clone, do NOT blanket `git pull` -- pin the training code at
+the commit matching its checkpoints and only `cp` / `checkout` the specific
+infra paths. The durable fix is a checkpoint-compat shim (fused-key
+migration) on the up-to-date branch (see What's open).
+
 ## What's open / next
 
 - **First real umbrella submit `8568429`** (1576N, 12h, medium) -- queued,
@@ -161,3 +206,10 @@ sneak, and umbrella 2B trainers on fresh nodes.
   capture progress (2B venv fixed; 20B interval=25 + walltime backstop).
 - The TP=2/LBS>1 80B grad-path bug and the >512N init crash remain open
   (separate threads, not touched here).
+- **Checkpoint-compat shim (planned):** the production clones are now pinned
+  pre-#3714 so they resume existing ckpts. To eventually return them to
+  current code, a DCP compat shim must migrate pre-fused optimizer state
+  (`optimizer.param_groups.X.weight`) to the fused layout
+  (`...weight.fused`) on load, with a test asserting bit-identical
+  loss/grad_norm pre/post migration. Until that exists + is validated, keep
+  clones pinned pre-#3714.
