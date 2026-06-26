@@ -17,18 +17,26 @@ Continued the 80B batch-scaling campaign past the GBS=1488/512N sim.
   Notably this run **cold-built the blendcorpus index at 744 ranks
   cleanly** (no race at this index size), confirming the `debfff5`
   sibling barriers suffice for cold-build-at-scale.
-- **GAS=32 / GBS=5952 / 2048N-batch** (job `12469627`): in flight, clean
-  through step 24 (0 NaN); its first attempt hit the blendcorpus
-  cold-cache build-then-load race at this larger index size (`EOFError`),
-  and **auto-retry self-healed** (attempt 1 finished the write, attempt 2
-  loaded warm) at the cost of one spare node. Writeup pending the
-  walltime cut.
-- Campaign so far: GBS=372 (native), 1488 (512N), 2976 (1024N) all clean;
-  5952 (2048N) running. The TP=4/LBS=1/bf16 corner holds NaN-free to 8x
-  the validated batch. Still pending: the dp-degree cliff bisect
-  (n64/n88/n108 -> dp 192/264/324), the actual probe of whether the
-  corner survives node-count scaling past dp=186. 80B README table
-  updated with all rows.
+- **GAS=32 / GBS=5952 / 2048N-batch** (job `12469627`): **NaN at step 29**
+  (UPDATE -- the line below said "in flight, clean through step 24"; it
+  went on to NaN). Ran 28 clean steps then `grad_norm=nan` at step 29
+  (loss still finite -- grad-path-first signature), then PBS walltime-cut.
+  Its first attempt hit the blendcorpus cold-cache race (`EOFError`) and
+  **auto-retry self-healed** (one spare). Full report:
+  [`docs/experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md`](experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md).
+- Campaign result: GBS=372/1488/2976 clean; **5952 (16x) NaN'd at step
+  29.** The corner holds NaN-free to **8x** the validated batch, breaks
+  at 16x. CAVEAT (the key catch): LR was flat 1e-6 for ALL rungs (no
+  batch scaling) and every run was *inside warmup* (clamped to
+  total_steps), so effective LR at the NaN was only ~5.8e-7. So the 16x
+  NaN is batch-dependent at matched step+effective-LR, but its dependence
+  on the full / batch-scaled LR is unknown. Two follow-ups queued:
+  `12469698` (LR=1.6e-5 scaled + warmup=5) and `12469699` (LR=1e-6,
+  warmup=200, 60 steps -- reproducibility). Added a WARMUP_STEPS knob to
+  the 80b script for this.
+- Still pending: the dp-degree cliff bisect (n64/n88/n108 -> dp
+  192/264/324), the actual probe of whether the corner survives
+  node-count scaling past dp=186.
 
 ---
 

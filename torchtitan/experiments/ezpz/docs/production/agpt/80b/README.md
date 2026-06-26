@@ -19,7 +19,8 @@ the reasons above), see [`../README.md`](../README.md).
 
 **Headline**: a stable 80B training corner (TP=4 / LBS=1 / bf16 / AdamW
 LR=1e-6, GAS-to-GBS) was identified 2026-06-24 and has held NaN-free from
-GBS=372 up to GBS=5952 (8-16x batch; see the simulation campaign below) --
+GBS=372 up to **GBS=2976 (8x batch)**; the 16x rung (GBS=5952) NaN'd at
+step 29 (see the simulation campaign below, with its LR/warmup caveat) --
 this supersedes the long "256N blocked on NaN" status. The original
 end-to-end stack validation was on Aurora **2026-06-08** via an
 interactive 4N smoke that completed through step-10 sync-checkpoint save
@@ -130,7 +131,7 @@ production chain should still be watched for late-training instability,
 and the underlying TP=2 / LBS>1 grad-path overflow is still an open
 upstream-worthy bug (two cheap 62N reproducers recorded above).
 
-#### Corner holds at 4x-8x batch (global-batch simulation campaign) -- 2026-06-25/26
+#### Corner holds to 8x batch, breaks at 16x (global-batch simulation campaign) -- 2026-06-25/26
 
 To check the corner isn't specific to the small GBS=372 batch, a series
 of runs raised GAS at fixed 62N (dp_degree=186) to reach the *global
@@ -142,15 +143,26 @@ the dp_degree<=186 ceiling (GAS scales GBS without touching dp_degree).
 | 12469551 | 4 | 1 | 2 | 186 | 372 | native | 100 | clean, 12.93 -> 7.72, 0 NaN |
 | 12469609 | 4 | 1 | 8 | 186 | 1488 | 512N | 46 (walltime) | clean, 12.92 -> 8.84, 0 NaN |
 | 12469626 | 4 | 1 | 16 | 186 | 2976 | 1024N | 34 (walltime) | clean, 12.92 -> 9.84, 0 NaN |
-| 12469627 | 4 | 1 | 32 | 186 | 5952 | 2048N | in flight | clean through step 24, 0 NaN |
+| 12469627 | 4 | 1 | 32 | 186 | 5952 | 2048N | NaN @ step 29 | 28 clean, grad_norm NaN @ 29 |
 
-**Up to 8x the validated batch, still zero NaN** (grad_norm shows the
-same step-22-27 transient -- peaks ~21-23 then recovers, never inf, at
-every GBS). This confirms the corner's stability is a property of the
-(TP=4, LBS=1, dp<=186) regime, not of the specific batch size. It does
-**not** establish dp_degree>186 (the real 512N+ regime) or the >512N
-init path -- those need a node-count study (the dp-degree cliff bisect),
-not a batch study. Reports:
+**Holds to 8x (GBS=2976), breaks at 16x (GBS=5952).** All rungs ride the
+same step-22-27 grad transient (peaks ~21-23); 1488/2976 recover and run
+past step 29 clean, but 5952 fails to come down off it and NaNs at step
+29 -- batch-dependent at *matched step count*.
+
+**Key caveat (do not over-read):** LR was flat 1e-6 for every rung (NO
+batch scaling), and the runs were *inside warmup* (clamped to
+total_steps), so effective LR at the 5952 NaN was only ~5.8e-7. So the
+16x NaN is batch-dependent at matched step + effective-LR, but its
+dependence on the full nominal / batch-scaled LR is unknown. Follow-ups:
+`12469698` (LR=1.6e-5 16x-scaled + warmup=5), `12469699` (LR=1e-6,
+warmup=200, reproducibility). Full report:
+[`gbs5952 2048N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md).
+
+This campaign establishes the corner's stability is largely batch-size
+independent up to 8x, but does **not** establish dp_degree>186 (the real
+512N+ regime) or the >512N init path -- those need a node-count study
+(the dp-degree cliff bisect), not a batch study. Reports:
 [`gbs1488 512N`](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md),
 [`gbs2976 1024N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md).
 
