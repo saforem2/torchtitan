@@ -4,6 +4,57 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-25 (sunspot) -- 80B GBS=1488 512N-batch simulation: clean, 4x batch NaN-free
+
+Pushed the 80B TP=4/LBS=1/bf16 stable corner to **4x the validated
+global batch** (GBS 372 -> 1488) via GAS=8, to simulate the global batch
+an Aurora 512N run would see while staying inside the NaN-free
+`dp_degree <= 186` corner. Held 62N (dp=186) and raised GAS, since
+`GBS = dp_degree * LBS * GAS` -- GAS scales the batch without touching
+the dangerous dp_degree.
+
+- **Job `12469609`** (62 active + 6 spare), GBS=1488 (~3% under the
+  Aurora 512N GBS of 1536), AdamW LR=1e-6, AC=full, compile=OFF,
+  `VALIDATOR_ENABLE=0`.
+- **Result: clean.** 46/46 steps before the 4h walltime cut, **zero
+  NaN**, loss 12.92 -> 8.84, grad_norm bounded (peak 22 @ step 23,
+  recovered to ~8), MFU steady ~9.85%. The corner's stability is not
+  specific to the small batch.
+- Full report:
+  [`docs/experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md`](experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md).
+
+**The multi-attempt arc + its real root cause (the lesson).** This run
+was the successful relaunch after two prior allocations hung in
+`config.build()` (~20 min each, then aborted). The cause was
+**self-inflicted**: a global `torch.distributed.barrier()` I had added
+inside blendcorpus `_build_index_mappings` (`c7eb628`). That function is
+called a *data-dependent* number of times (per corpus x per split, with
+a `build_indices` branch that differs across ranks), so ranks hit the
+barrier a mismatched number of times -> partial-participation collective
+deadlock (`oneCCL allreduce_scaleout ... atl_comm->wait fails with
+status: 1`). **Reverted in `74b09fd`** (NOTE left explaining why no
+barrier belongs there); the relaunch trained clean.
+
+- Ruled out: **NOT node health** (an `rc=127` was failover-scrape noise;
+  healthy nodes hung identically), **NOT batch size** (step 1 always
+  clean -- the hang was in init, before any step).
+- The **3 sibling barriers** from `debfff5` (`_cache_indices`,
+  `build_corpus_datasets`, `blendable_dataset.py`) are correct and kept
+  -- each sits next to a pre-existing collective reached uniformly by all
+  ranks. (blendcorpus PR #8.)
+- Systematic-debugging takeaway: a barrier is only safe where every rank
+  provably reaches it the same number of times; never inside a
+  branch-gated, per-item loop.
+
+What the sim does **not** establish: survival of `dp_degree > 186` (the
+real 512N+ regime, where dp itself is the trigger) or the >512N
+distributed-init path (open `set_determinism` crash at 12,288+ ranks).
+Those need a node-count study (dp-degree cliff bisect), not a batch
+study. The separate validator-CCL-deadlock at 80B TP=4 was sidestepped
+(`VALIDATOR_ENABLE=0`), not fixed.
+
+---
+
 ## 2026-06-25 (sunspot) -- autoretry scripts: _real RoPE + validator; validator.py bug fixed
 
 Two requested changes to `submit_agpt_{2b,20b,80b}_autoretry.sh`, plus a

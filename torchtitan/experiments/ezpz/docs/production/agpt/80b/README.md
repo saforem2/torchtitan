@@ -126,6 +126,27 @@ production chain should still be watched for late-training instability,
 and the underlying TP=2 / LBS>1 grad-path overflow is still an open
 upstream-worthy bug (two cheap 62N reproducers recorded above).
 
+#### Corner holds at 4x batch (GBS=1488, 512N-sim) -- 2026-06-25
+
+To check the corner isn't specific to the small GBS=372 batch, job
+`12469609` raised GAS to 8 at fixed 62N (dp_degree=186), giving
+**GBS=1488** -- within ~3% of the global batch an Aurora **512N** run
+would see (1536), but on the safe side of the dp_degree<=186 ceiling
+(GAS scales GBS without touching dp_degree).
+
+| Job ID | TP | LBS | GAS | dp_degree | GBS | Steps | Result |
+|--------|----|----|----|-----------|-----|-------|--------|
+| 12469551 | 4 | 1 | 2 | 186 | 372 | 100 | clean, 12.93 -> 7.72, 0 NaN |
+| 12469609 | 4 | 1 | 8 | 186 | 1488 | 46 (walltime) | clean, 12.92 -> 8.84, 0 NaN |
+
+**4x the validated batch, still zero NaN** (grad_norm spiked to ~22 in
+the step-22-27 window and recovered, never inf). This confirms the
+corner's stability is a property of the (TP=4, LBS=1, dp<=186) regime,
+not of the specific batch size. It does **not** establish dp_degree>186
+(the real 512N+ regime) or the >512N init path -- those need a node-count
+study, not a batch study. Full report:
+[`../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md`](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md).
+
 ## Working 4N stack (Aurora + Sunspot)
 
 The working 80B config has been replicated four times across the
