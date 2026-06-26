@@ -15,7 +15,7 @@ production chain starts persisting ckpts.
 For the cross-model view (2B + 20B together — 80B is not on it yet for
 the reasons above), see [`../README.md`](../README.md).
 
-## v2 status — stable TP=4/LBS=1 corner found; production-restart pending
+## v2 status -- stable TP=4/LBS=1 corner found; production-restart pending
 
 **Headline**: a stable 80B training corner (TP=4 / LBS=1 / bf16 / AdamW
 LR=1e-6, GAS-to-GBS) was identified 2026-06-24 and has held NaN-free from
