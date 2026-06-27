@@ -328,9 +328,12 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path(
-            "torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/sunspot/figures"
+            "torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures"
         ),
-        help="Directory to save plots",
+        help=(
+            "Directory to save plots. Figures are shared per family; prefix "
+            "filenames by machine (e.g. sunspot_2b.png) when committing."
+        ),
     )
     args = parser.parse_args()
 

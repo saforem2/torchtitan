@@ -364,9 +364,13 @@ diverged to NaN** from step 1 (grad_norm=NaN on first backward pass).
 - **Memory:** 43.02 GiB (67%) — plenty of headroom at this FSDP degree
 
 **NaN root cause:** SophiaG is broken at 80B scale — confirmed by the
-[LR finder 80B report](../experiments/lr-finder/agpt/sunspot/20260421-lr-finder-80b-n2.md)
-which found Muon and SophiaG both produce NaN for 80B. Use **AdamW with
-LR=1.1e-5** for 80B production runs.
+[LR finder 80B report](../experiments/lr-finder/agpt/README.md#2026-04-21----80b--gas-sweep-sunspot)
+which found Muon and SophiaG both produce NaN for 80B. The small-batch finder
+suggested AdamW LR=1.1e-5, but **that does NOT hold at the production batch**:
+re-running at GBS=6144 ([2026-06-27 report](../experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot))
+shows AdamW's usable LR collapses to ~7e-7 (NaN cliff) and **mano** is the
+better-behaved optimizer (clean U-min at 1.6e-5). For 80B production at
+GBS~6144, use AdamW LR~5e-7 or switch to mano (~3e-6).
 
 ---
 
