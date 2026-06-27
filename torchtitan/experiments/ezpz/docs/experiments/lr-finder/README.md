@@ -25,16 +25,35 @@ ported from [argonne-lcf/Megatron-DeepSpeed](https://github.com/argonne-lcf/Mega
 
 ### The LR-vs-Loss Curve
 
-The sweep produces a characteristic curve with three regions:
+The sweep produces a characteristic curve. Loss stays flat while the LR is
+too small, descends through the useful range, bottoms out at a minimum, then
+diverges (blows up) once the LR is too large -- so the curve ends HIGH on the
+right, not low:
 
 ```
 Loss
-  |  ___________
-  | /           \        <- flat (LR too small to affect loss)
-  |/             \       <- descent (optimal region)
-  |               \___   <- blow-up (LR too large, divergence)
-  +-----|-----|--------> LR (log scale)
-     init_lr  optimal  max_lr
+  |
+  |"""""""\                                            .
+  |        \                                         .     (4) blow-up:
+  | flat    \                                      .          LR too large
+  | (1)(2)   \                                   .            -> loss
+  |           \                                .              diverges (NaN)
+  |            \         (3) descent          .
+  |             \      (optimal region)      .
+  |              \                          .
+  |               \________________________/
+  |                      (5) minimum
+  |                suggested LR ~= blow-up / 10
+  +---|----------------------|--------------|--------> LR (log scale)
+   init_lr               optimal          max_lr
+```
+
+```
+(1) warmup   - LR held at init_lr for warmup_fraction steps; model settles
+(2) flat     - LR still too small to matter; loss ~ constant
+(3) descent  - useful range; the optimal LR is on this slope (toward the min)
+(4) blow-up  - LR too large; loss diverges, NaN at the extreme (curve ends HIGH)
+(5) minimum  - lowest loss; suggested LR ~= blow-up point / 10 (conservative)
 ```
 
 ### Selecting the Optimal LR
