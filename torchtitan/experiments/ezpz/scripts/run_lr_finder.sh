@@ -205,10 +205,36 @@ for model in "${MODELS[@]}"; do
 
         start_seconds=$SECONDS
 
+        # Use `ezpz launch --auto-retry` (the same path the production
+        # submit scripts use, e.g. submit_agpt_2b_autoretry.sh) rather than
+        # a bare launch. This gives the finder the retry-on-crash loop for
+        # free, which self-heals the blendcorpus cold-cache build-then-load
+        # race: at TP>1 the first attempt cold-builds the index on rank 0
+        # while other ranks race to np.load it mid-write (EOFError / "mmap
+        # length is greater than file size" / DistNetworkError); auto-retry
+        # re-runs, and attempt 2 loads the now-written index warm (exactly
+        # how the GBS=5952 production run recovered). `--spare-nodes auto`
+        # carves spares from any nodes beyond what the sweep uses; the venv
+        # is already yeeted to the whole nodefile above so a swapped spare
+        # is a filesystem no-op. (Prewarming single-rank still avoids the
+        # race up front; this is the in-band safety net + bad-node failover.)
+        # Proper fix = a rank-0-build barrier in blendcorpus, tracked
+        # separately.
+        lrf_mfr=()
+        [[ -n "${LRF_MAX_FAILOVER_RETRIES:-}" ]] && \
+            lrf_mfr=(--max-failover-retries "${LRF_MAX_FAILOVER_RETRIES}")
         timeout "${LRF_TIMEOUT}" \
             stdbuf -oL -eL \
             env NGPU="${NGPUS}" PYTHONUNBUFFERED=1 \
-            ezpz launch python3 -m torchtitan.experiments.ezpz.train \
+            ezpz launch \
+            --nproc "${NGPUS}" \
+            --nproc_per_node "${NGPU_PER_HOST:-12}" \
+            --auto-retry \
+            --spare-nodes auto \
+            --timeout "${LRF_IDLE_TIMEOUT:-1800}" \
+            "${lrf_mfr[@]}" \
+            -- \
+            python3 -m torchtitan.experiments.ezpz.train \
             --module ezpz.agpt \
             --config "${config}" \
             --optimizer "${opt}" \
