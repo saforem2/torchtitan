@@ -17,7 +17,7 @@ import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
 from torchtitan.components.dataloader import DataloaderExhaustedError
-from torchtitan.components.loss import ChunkedCELoss, IGNORE_INDEX
+from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
@@ -285,7 +285,7 @@ class FaultTolerantTrainer(Trainer):
             buffer_device = None
 
         # Loss is now built from the JobConfig.loss field (upstream #2937 /
-        # ChunkedCELoss). The FT integration no longer wraps the loss
+        # ChunkedLossWrapper). The FT integration no longer wraps the loss
         # function — FTOptimizersContainer below still passes ft_manager
         # for gradient sync.
         self.loss_fn = config.loss.build(compile_config=config.compile)
@@ -401,26 +401,26 @@ class FaultTolerantTrainer(Trainer):
 
             self.model_parts = [model]
 
-        # Set lm_head reference for ChunkedCELoss after model construction.
+        # Set lm_head reference for ChunkedLossWrapper after model construction.
         # Replayed from upstream torchtitan/trainer.py (lines 391-411). Required
-        # whenever loss=ChunkedCELoss.Config(...) — the loss object computes
+        # whenever loss=ChunkedLossWrapper.Config(...) — the loss object computes
         # logits from hidden states in chunks, so it needs a handle to lm_head
         # and signals the model to skip its own lm_head pass via _skip_lm_head.
         # Non-PP: single model part always has lm_head.
         # PP: only the last stage has lm_head; non-last stages skip this.
-        if isinstance(self.loss_fn, ChunkedCELoss):
+        if isinstance(self.loss_fn, ChunkedLossWrapper):
             if parallel_dims.pp_enabled:
                 if self.pp_has_last_stage:
                     lm_head = self.model_parts[-1].lm_head
                     assert (
                         lm_head is not None
-                    ), "Last PP stage must have lm_head for ChunkedCELoss"
+                    ), "Last PP stage must have lm_head for ChunkedLossWrapper"
                     self.loss_fn.set_lm_head(lm_head)
                     self.model_parts[-1]._skip_lm_head = True
             else:
                 assert len(self.model_parts) == 1
                 lm_head = self.model_parts[0].lm_head
-                assert lm_head is not None, "Model must have lm_head for ChunkedCELoss"
+                assert lm_head is not None, "Model must have lm_head for ChunkedLossWrapper"
                 self.loss_fn.set_lm_head(lm_head)
                 self.model_parts[0]._skip_lm_head = True
 
