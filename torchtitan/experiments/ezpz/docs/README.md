@@ -33,6 +33,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-26 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-06-26 | [Development Journal](./journal.md) |
 | 2026-06-26 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
+| 2026-06-26 | [80B: LR, batch size, and dp-degree -- a connected set of findings (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md) |
 | 2026-06-26 | [80B GBS=5952 2048N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md) |
 | 2026-06-26 | [80B GBS=2976 1024N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md) |
 | 2026-06-26 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-24 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-06-24 | [Production Training — agpt 2B @ 1024 nodes](./production/agpt/2b/n1024/README.md) |
 | 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
-| 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-06-24 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-06-24 | [Native auto-retry 2B submit-script smoke (Sunspot, 2026-06-24)](./experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md) |
 | 2026-06-24 | [80B NaN diagnosis — bf16 forward overflow at GBS≥384, only fp32-activations confirmed-clean](./experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-10 | [vLLM-XPU on torch 2.13 — investigation findings](./rl/vllm-xpu-investigation.md) |
 | 2026-06-10 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/aurora2b/tulu_math_uc_mix/failover-story.md) |
 | 2026-06-10 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/aurora2b/tulu_math_uc_mix/evals/ifeval.md) |
-| 2026-06-10 | [GRPO smoke — SFT-step729 vs baseline as RL starting point](./production/sft/aurora2b/tulu_math_uc_mix/evals/grpo-smoke.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
