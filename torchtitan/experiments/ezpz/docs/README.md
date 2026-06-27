@@ -22,6 +22,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-27 | [80B LR-finder at the production batch (GBS=6144) -- Sunspot, 2026-06-27](./experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md) |
 | 2026-06-26 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-06-26 | [Summaries](./summaries/README.md) |
 | 2026-06-26 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-24 | [Production Queue-Wait Analysis (Aurora small)](./production/queue-wait-analysis.md) |
 | 2026-06-24 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-06-24 | [Production Training — agpt 2B @ 1024 nodes](./production/agpt/2b/n1024/README.md) |
-| 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
 | 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-06-24 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-06-24 | [Native auto-retry 2B submit-script smoke (Sunspot, 2026-06-24)](./experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-10 | [ShardedTensor.device fallback hardcodes CUDA, breaking FSDP resume on XPU](./upstream-issues/sharded_tensor_device_cuda_hardcode.md) |
 | 2026-06-10 | [vLLM-XPU on torch 2.13 — investigation findings](./rl/vllm-xpu-investigation.md) |
 | 2026-06-10 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/aurora2b/tulu_math_uc_mix/failover-story.md) |
-| 2026-06-10 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/aurora2b/tulu_math_uc_mix/evals/ifeval.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
