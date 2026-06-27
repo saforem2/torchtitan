@@ -52,12 +52,34 @@ def _set_pg_timeouts_xpu_aware(
     instead of aborting (see
     ``docs/upstream-issues/train_timeout_xpu_silent_noop.md``).
 
-    Workaround: invoke the upstream helper first (covers cpu/cuda
-    backends + the safety barrier), then walk each PG ourselves and
-    call ``ProcessGroupXCCL.set_timeout`` on any xccl-backed groups.
-    Remove once PyTorch's ``_set_pg_timeout`` learns about XPU.
+    Workaround: set the timeout on every mesh PG ourselves (with the
+    safety barrier the upstream helper uses), then additionally call
+    ``ProcessGroupXCCL.set_timeout`` on any xccl-backed groups.
+
+    61st sync: we no longer delegate to ``dist_utils.set_pg_timeouts``.
+    The spmd_types series switched it from
+    ``distributed_c10d._set_pg_timeout`` to ``torch.distributed.set_timeout``,
+    which does NOT exist in our pinned torch 2.13 (AttributeError ->
+    every collective unguarded). So we inline the pre-sync behavior
+    against ``_set_pg_timeout`` (present in torch 2.13's
+    ``distributed_c10d``), keeping this shim independent of upstream's
+    timeout-API churn. Remove once PyTorch's timeout dispatch learns
+    about XPU and our torch exposes the matching API.
     """
-    dist_utils.set_pg_timeouts(timeout=timeout, parallel_dims=parallel_dims)
+    from torch.distributed import distributed_c10d as c10d
+
+    device_module = dist_utils.device_module
+    # Flush in-flight work under the old timeout before lowering it
+    # (mirrors upstream set_pg_timeouts' safety barrier).
+    torch.distributed.barrier(device_ids=[device_module.current_device()])
+    device_module.synchronize()
+
+    timeout_groups: list[torch.distributed.ProcessGroup | None] = [
+        mesh.get_group()
+        for mesh in parallel_dims.get_all_one_dimensional_meshes().values()
+    ] + [None]
+    for group in timeout_groups:
+        c10d._set_pg_timeout(timeout, group)
 
     xpu_device = torch.device("xpu")
     if not (
