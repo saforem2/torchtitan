@@ -74,89 +74,39 @@ Two heuristics (both implemented):
 
 ## Results
 
-### Recommended Learning Rates
+Results are split by model family, each with its own consolidated report
+(all machines and dates in one page, figures in a shared `figures/` dir):
 
-Latest results using `sqrt(2/(5*d))` weight init and 5% warmup (Sunspot 2026-04-14).
+- **[agpt (dense)](agpt/README.md)** -- 2B / 20B / 80B across Aurora, Sunspot,
+  Polaris. Includes the headline recommended-LR table, cross-machine
+  comparison, and the GBS=6144 production-batch finding.
+- **[moe (sparse)](moe/README.md)** -- DeepSeek-style MoE configs on Sunspot.
+
+### Headline recommended LRs (agpt, small-batch)
 
 | Model | AdamW   | Muon    | SophiaG |
 |-------|---------|---------|---------|
 | 2B    | **1.3e-3**| **2.4e-3**| **3.1e-4**|
 | 20B   | **4.0e-4**| **1.7e-4**| **1.8e-5**|
-| 80B   | **1.1e-5** | N/A† | N/A† |
+| 80B (small batch, GBS=192) | **1.1e-5** | N/A[1] | N/A[1] |
 
-†80B Muon/SophiaG broken: bf16 overflow in Newton-Schulz (Muon) and Hessian
-estimate (SophiaG) on 9216-dim matrices. See [2026-04-21 report](agpt/sunspot/20260421-lr-finder-80b-n2.md).
+[1] 80B Muon/SophiaG broken at dim=9216 (bf16 overflow). **Important:** at the
+80B *production* batch (GBS=6144) the AdamW number above does NOT hold -- its
+usable LR collapses to ~7e-7 (a NaN cliff) and mano becomes the best-behaved
+optimizer. See the
+[agpt GBS=6144 section](agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 
-### Cross-Machine Comparison — agpt 2B
-
-| Optimizer | Aurora (std=0.02) | Sunspot (sqrt(2/5d)) | Polaris (std=0.02) |
-|-----------|--------|---------|---------|
-| **AdamW** suggested LR | 2e-3 | 1.3e-3 | 2e-3 |
-| **Muon** suggested LR | 8e-4 | **2.4e-3** | 1e-3 |
-| **SophiaG** suggested LR | 3e-4 | 3.1e-4 | 3e-4 |
-
-### Cross-Machine Comparison — agpt 20B
-
-| Optimizer | Aurora (std=0.02) | Sunspot (sqrt(2/5d)) | Polaris (std=0.02) |
-|-----------|--------|---------|---------|
-| **AdamW** suggested LR | 4e-4 | 4.0e-4 | 4e-4 |
-| **Muon** suggested LR | 4e-5 | **1.7e-4** | — |
-| **SophiaG** suggested LR | 1e-5 | 1.8e-5 | — |
-
-**Takeaway:** AdamW and SophiaG are robust to weight init changes. Muon is
-sensitive — `sqrt(2/(5*d))` init allows 3-10x higher LRs vs fixed `std=0.02`.
-This is because Muon's orthogonal momentum amplifies gradient scale differences.
-
-### Key Findings
+### Cross-family key findings
 
 1. **Optimizer sensitivity:** `AdamW (most tolerant) > Muon > SophiaG (most sensitive)`
 2. **Model scaling:** Larger models need lower LRs. Muon/SophiaG scale more
-   aggressively (~N^-0.5) than AdamW (~N^-0.25)
+   aggressively (~N^-0.5) than AdamW (~N^-0.25).
 3. **Blow-up severity:** SophiaG diverges catastrophically (loss 7,000+) vs
-   gradual blow-up for AdamW (loss ~60). SophiaG requires tighter LR scheduling
+   gradual blow-up for AdamW (loss ~60).
 4. **Cross-hardware consistency:** Suggested LRs match within 2x across Intel
-   XPU (Aurora, Sunspot) and NVIDIA A100 (Polaris)
-
-### LR Finder Curves
-
-#### Aurora (Intel Max 1550, 2 nodes / 24 XPUs)
-
-![Comparison](agpt/aurora/figures/lr_finder_comparison.png)
-
-| | |
-|---|---|
-| ![2B](agpt/aurora/figures/lr_finder_2b.png) | ![20B](agpt/aurora/figures/lr_finder_20b.png) |
-| ![Optimal LR](agpt/aurora/figures/lr_finder_optimal_lr.png) | |
-
-#### Sunspot (Intel Max 1550, 2 nodes / 24 XPUs)
-
-![Comparison](agpt/sunspot/figures/lr_finder_comparison.png)
-
-| | |
-|---|---|
-| ![2B](agpt/sunspot/figures/lr_finder_2b.png) | ![20B](agpt/sunspot/figures/lr_finder_20b.png) |
-| ![Optimal LR](agpt/sunspot/figures/lr_finder_optimal_lr.png) | ![80B](agpt/sunspot/figures/lr_finder_80B.png) |
-
-### MoE Models — Sunspot (torch 2.13, 2 nodes / 24 XPUs)
-
-![MoE Comparison](moe/sunspot/figures/lr_finder_comparison.png)
-
-| | |
-|---|---|
-| ![debugmodel](moe/sunspot/figures/lr_finder_debugmodel.png) | ![500M](moe/sunspot/figures/lr_finder_500M.png) |
-| ![2B](moe/sunspot/figures/lr_finder_2B.png) | ![4B](moe/sunspot/figures/lr_finder_4B.png) |
-| ![7B](moe/sunspot/figures/lr_finder_7B.png) | ![Optimal LR](moe/sunspot/figures/lr_finder_optimal_lr.png) |
-
-See [MoE LR finder report](moe/sunspot/20260421-lr-finder-moe-n2.md) for details.
-
-#### Polaris (NVIDIA A100-40GB, 2 nodes / 8 GPUs)
-
-![Comparison](agpt/polaris/figures/lr_finder_comparison.png)
-
-| | |
-|---|---|
-| ![2B](agpt/polaris/figures/lr_finder_2b.png) | ![20B](agpt/polaris/figures/lr_finder_20b.png) |
-| ![Optimal LR](agpt/polaris/figures/lr_finder_optimal_lr.png) | |
+   XPU (Aurora, Sunspot) and NVIDIA A100 (Polaris).
+5. **Batch dependence:** the optimal/ceiling LR shifts strongly with batch size
+   -- a small-batch sweep cannot calibrate a large-batch production LR (80B).
 
 ---
 
@@ -208,17 +158,12 @@ documented in the Megatron-DeepSpeed notes.
 
 ## Reports
 
-### agpt (Dense)
+Per-family consolidated pages (each holds all dates and machines):
 
-| Date | Report | Models | Optimizers | Nodes | Machine | Key Result |
-|------|--------|--------|-----------|-------|---------|------------|
-| 2026-04-12 | [LR Finder](agpt/aurora/20260412-144400-lr-finder-n2.md) | 2B, 20B | AdamW, Muon, SophiaG | 2 | Aurora | AdamW most tolerant; SophiaG 10x lower LR |
-| 2026-04-12 | [LR Finder](agpt/sunspot/20260412-lr-finder-n2.md) | 2B, 20B | AdamW, Muon, SophiaG | 2 | Sunspot | All 6 sweeps; SophiaG 20B blow-up at 7,145 |
-| 2026-04-13 | [LR Finder](agpt/polaris/20260413-015510-lr-finder-n2.md) | 2B, 20B | AdamW, Muon, SophiaG | 2 | Polaris | Reproduces Aurora; cross-hardware LR consistency |
-
-### moe (Sparse)
-
-*No LR finder runs yet.*
+- **[agpt (dense)](agpt/README.md)** -- 2B / 20B / 80B, Aurora + Sunspot +
+  Polaris, 2026-04-12 through the 2026-06-27 GBS=6144 production-batch finding.
+- **[moe (sparse)](moe/README.md)** -- DeepSeek-style MoE configs, Sunspot
+  2026-04-21.
 
 ---
 
@@ -291,10 +236,11 @@ LRF_MODELS="2b 20b" LRF_OPTIMIZERS="adamw muon sophiag" \
 ### Generating plots
 
 ```bash
-# From repo root:
+# From repo root (figures are now in a shared per-family dir; prefix the
+# filenames by machine, e.g. sunspot_2b.png, when committing):
 python3 torchtitan/experiments/ezpz/utils/plot_lr_finder.py \
     --data-dir outputs/lr_finder/ezpz/ezpz.agpt \
-    --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/sunspot/figures
+    --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures
 ```
 
 ## References
