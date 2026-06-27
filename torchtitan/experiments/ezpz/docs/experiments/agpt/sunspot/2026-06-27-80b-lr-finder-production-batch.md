@@ -22,6 +22,14 @@ at GBS~6000 and argues production LR should drop to ~5e-7.
 
 ## Result: AdamW (job 12469723, DONE)
 
+![AdamW LR-finder at GBS=6144](figures/80b-adamw-lrfinder-gbs6144.png)
+
+(The finder's auto-generated `lr_vs_loss.png` is misleading here: it drops
+the 7 NaN points entirely and its derivative-based annotations misfire on
+the near-flat floor -- it labels the trivial step-2 loss bump as the
+"blow-up" and "suggests" lr=1.17e-9. The plot above is rebuilt from the
+CSV to show the actual NaN cliff and the real ceiling.)
+
 Exact curve (`lr_finder_data.csv`):
 
 ```
