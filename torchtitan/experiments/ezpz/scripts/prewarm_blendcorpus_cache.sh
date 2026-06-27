@@ -92,6 +92,12 @@ TP="${TP:-$( [[ "$MODEL" == "80b" ]] && echo 4 || echo 1 )}"
 PP="${PP:-1}"; CP="${CP:-1}"
 LBS="${LBS:-$( [[ "$MODEL" == "80b" ]] && echo 1 || echo 2 )}"
 GAS="${GAS:-1}"
+# The index cache hash keys on num_samples = GBS * train_iters, so the
+# prewarm MUST use the same training.steps the target run will pass, or
+# the hash won't match and the target re-builds cold. Default 1 (cheapest)
+# is fine when the target also runs 1 step; set TRAINING_STEPS to the
+# target's step count otherwise (e.g. an LR-finder sweeping 15 steps).
+TRAINING_STEPS="${TRAINING_STEPS:-1}"
 OPTIMIZER="${OPTIMIZER:-$( [[ "$MODEL" == "80b" ]] && echo adamw || echo sophiag )}"
 # NNODES/GBS mirror the TARGET run (so the path matches), via NHOSTS_TRAIN.
 NHOSTS_TRAIN="${NHOSTS_TRAIN:-$NHOSTS_WARM}"
@@ -148,7 +154,7 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --validator.dataloader.dataset-path="${DFL}" \
     --validator.dataloader.data-cache-path="${DATA_CACHE_PATH}" \
     --training.seq-len="${SEQ_LEN}" \
-    --training.steps=1 \
+    --training.steps="${TRAINING_STEPS}" \
     "$@"
 
 log_message INFO "pre-warm done -- cache at ${DATA_CACHE_PATH} is now built."

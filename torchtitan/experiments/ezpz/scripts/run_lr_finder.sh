@@ -91,6 +91,18 @@ LRF_INIT_LR="${LRF_INIT_LR:-1e-6}"
 LRF_MAX_LR="${LRF_MAX_LR:-1.0}"
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
 LRF_LBS="${LRF_LBS:-1}"
+# Target global batch for the sweep. The optimal LR is batch-size
+# dependent, so to calibrate a production run you must sweep at THAT run's
+# GBS. Empty (default) = whatever world_size*LBS/TP gives. Set e.g.
+# LRF_GBS=6144 to add --training.global-batch-size and let the trainer
+# derive GAS to hit it (GBS = dp_degree * LBS * GAS). For 80B at TP=4 the
+# small-batch default (192) is ~32x below the 6144 production target and
+# does NOT generalize -- always set LRF_GBS for an 80B production calibration.
+LRF_GBS="${LRF_GBS:-}"
+# Shared blendcorpus index-cache dir (see cache_args below). Prewarm it at
+# the SAME GBS + LRF_STEPS so the hash matches and every optimizer loads
+# warm. Empty = default .cache/blendcorpus (cold-build race on optimizer 1).
+LRF_DATA_CACHE_PATH="${LRF_DATA_CACHE_PATH:-}"
 
 read -ra MODELS <<< "${LRF_MODELS}"
 read -ra OPTIMIZERS <<< "${LRF_OPTIMIZERS}"
@@ -159,6 +171,26 @@ for model in "${MODELS[@]}"; do
         ac_subcommand=("activation-checkpoint:full")
     fi
 
+    # Optional target global batch. The optimal LR is batch-size
+    # dependent, so calibrating a production run requires sweeping at that
+    # run's GBS (the trainer derives the needed GAS from
+    # GBS = dp_degree * LBS * GAS). Empty = use world_size*LBS/TP.
+    gbs_args=()
+    if [[ -n "${LRF_GBS}" ]]; then
+        gbs_args=(--training.global_batch_size "${LRF_GBS}")
+    fi
+
+    # Optional shared index-cache dir. The blendcorpus index cold-builds
+    # on the FIRST optimizer of a sweep and (at TP>1) races the
+    # build-then-load; the finder has no auto-retry, so a cold first
+    # optimizer crashes (this is what killed adamw/muon in the GBS=192
+    # run). Point all jobs at one LRF_DATA_CACHE_PATH that a small prewarm
+    # built, so every optimizer loads warm. Empty = default .cache/blendcorpus.
+    cache_args=()
+    if [[ -n "${LRF_DATA_CACHE_PATH}" ]]; then
+        cache_args=(--dataloader.data-cache-path "${LRF_DATA_CACHE_PATH}")
+    fi
+
     for opt in "${OPTIMIZERS[@]}"; do
         label="${model}_${opt}"
         logfile="${OUTDIR}/${label}.log"
@@ -182,11 +214,13 @@ for model in "${MODELS[@]}"; do
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \
             --training.local_batch_size "${LRF_LBS}" \
+            "${gbs_args[@]}" \
             --training.seq_len 8192 \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
             --dataloader.dataset blendcorpus \
             --dataloader.dataset_path "${DATASET_PATH}" \
+            "${cache_args[@]}" \
             --lr_finder.enable \
             --lr_finder.init_lr "${LRF_INIT_LR}" \
             --lr_finder.max_lr "${LRF_MAX_LR}" \
