@@ -23,9 +23,11 @@ was required in ezpz.
 ## 2026-06-27 — 61st sync (7 commits, `0b083d3ee..upstream/main`)
 
 Merged clean (no conflicts) as `5245d470e` in worktree
-`ezpz-61st-sync`. **No code replays required.** The ezpz-relevant
-changes are all either gated/unused on our path or symbol-compatible;
-agpt + moe + common.decoder import clean on the merged code.
+`ezpz-61st-sync`. **One replay required** (`600e79f63`): the #3779
+`ChunkedCELoss -> ChunkedLossWrapper` rename. (My first-pass "no replays"
+read was WRONG -- the runtime smoke caught it as `import_failed`; an audit
+grep with a bad glob had hidden the two ezpz usages. The smoke gate
+working as intended.)
 
 ### Upstream commits
 
@@ -33,7 +35,7 @@ agpt + moe + common.decoder import clean on the merged code.
 |---|---|---|
 | `0e886617e` | Fix weight-tying corrupting lm_head.weight in HF checkpoint (#3764) | **Relevant to eval, benign.** Touches `llama3/state_dict_adapter.py` (which agpt imports as `Llama3StateDictAdapter` for DCP->HF convert) + `distributed/utils.py`. The fix corrects a real safetensors corruption on tied embeddings; agpt uses the adapter unchanged (symbol intact, import OK). Improves eval/convert correctness, no replay. |
 | `3c9940675` | Fix fused qkv load weights + init when FSDP > n_kv_heads (#3807) | **No-op for ezpz.** Only the `FusedQKVLinear` path in `common/attention.py`/`config_utils.py`. agpt keeps `fuse_qkv=False` (4 callsites), so it never constructs FusedQKV. SDPA forward unchanged. No replay. |
-| `9530a874d` | [rl] grpo chunked loss (#3779) | **Symbol rename, ezpz unaffected.** Renames `ChunkedCELoss` -> `ChunkedLossWrapper` in `common/decoder.py` + touches loss/validate/pp. moe imports `Decoder`/`TransformerBlock` from `common/decoder.py` (import OK post-rename); no live ezpz code references `ChunkedCELoss` (only historical sync-doc mentions). No replay. |
+| `9530a874d` | [rl] grpo chunked loss (#3779) | **REPLAY (`600e79f63`).** Renames `ChunkedCELoss` -> `ChunkedLossWrapper` in `components/loss.py` (no back-compat alias). ezpz uses it in TWO files: `agpt/config_registry.py` (import + agpt_{2b,20b,80b}_chunkedce builders) and `trainer.py` (import + `isinstance(loss_fn, ...)` lm_head-plumbing gate). Replayed the rename; API-compatible (`.Config(num_chunks=8)`, `set_lm_head`, `_skip_lm_head` all unchanged). moe imports `Decoder`/`TransformerBlock` from `common/decoder.py`, fine. |
 | `c8abb170a` | expand model integration tests to full_dtensor, spmd_types backends (#3740) | None -- CI test matrix only. |
 | `fcbcb6d53` | Enable RL spmd backend selection (#3803) | None -- `distributed/utils.py` spmd-backend knob + experiments/{rl,forge,graph_trainer,torchft}; ezpz uses spmd_backend=default. |
 | `2e962a153` | [rl] cudagraph capture size + batched-tokens knobs (#3806) | None -- experiments/rl only. |
