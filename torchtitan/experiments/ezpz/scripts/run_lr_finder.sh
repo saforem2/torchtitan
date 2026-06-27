@@ -109,8 +109,18 @@ read -ra OPTIMIZERS <<< "${LRF_OPTIMIZERS}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 NUM_NODES="${NHOSTS:-${SLURM_NNODES:-1}}"
-OUTDIR="outputs/lr_finder/${TIMESTAMP}"
+# Include the PBS jobid so concurrent finder jobs (e.g. a GBS-trend sweep
+# submitted in the same second) get DISTINCT per-run dirs. date alone is
+# second-resolution and collides on simultaneous submits.
+_JOBTAG="${PBS_JOBID%%.*}"
+OUTDIR="outputs/lr_finder/${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}"
 mkdir -p "${OUTDIR}"
+# The trainer writes the CSV/plot/npz under <dump_folder>/lr_finder/
+# ezpz.agpt/<flavor>/<optimizer>/ -- a path keyed by model+optimizer, NOT
+# by GBS. Concurrent same-(model,optimizer) jobs at different GBS therefore
+# clobber each other's CSV. Set LRF_DUMP_FOLDER per job (default ./outputs)
+# so a trend sweep isolates each GBS's outputs.
+LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 
 DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt"
 
@@ -237,6 +247,7 @@ for model in "${MODELS[@]}"; do
             python3 -m torchtitan.experiments.ezpz.train \
             --module ezpz.agpt \
             --config "${config}" \
+            --job.dump-folder "${LRF_DUMP_FOLDER}" \
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \
             --training.local_batch_size "${LRF_LBS}" \
