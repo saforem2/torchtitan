@@ -41,14 +41,40 @@ working as intended.)
 | `2e962a153` | [rl] cudagraph capture size + batched-tokens knobs (#3806) | None -- experiments/rl only. |
 | `574502c80` | Add DPRequestRouter, use in generator (#3768) | None -- experiments/rl generator only. |
 
+### Replays required (3 -- all spmd_types-series fallout)
+
+The runtime smoke caught these one at a time (an import probe alone misses
+runtime attribute access; my first-pass static audit also missed them --
+grep glob bug). All three are plumbing renames/API shifts with **zero
+numerical effect** (final losses match the 60th-sync baseline exactly):
+
+1. **`600e79f63`** -- `ChunkedCELoss -> ChunkedLossWrapper` (#3779), no
+   back-compat alias. ezpz used it in `agpt/config_registry.py`
+   (agpt_{2b,20b,80b}_chunkedce) + `trainer.py` (isinstance gate).
+   API-compatible (`.Config(num_chunks=8)`, `set_lm_head`).
+2. **`5701faef8`** -- `dist_utils.get_train_context -> get_spmd_context`
+   (+ `spmd_typechecking` kwarg). ezpz `trainer.py` train_context build.
+   Mirrored upstream; inert at our `spmd_backend=default`.
+3. **`3cf8c9343`** -- upstream `set_pg_timeouts` switched from
+   `distributed_c10d._set_pg_timeout` to `torch.distributed.set_timeout`,
+   which our **torch 2.13 does not have**. The ezpz
+   `_set_pg_timeouts_xpu_aware` shim no longer delegates to the upstream
+   helper; it inlines the pre-sync `_set_pg_timeout` path (present in 2.13)
+   before its XCCL patch. (Not an ezpz-rename -- a torch-version skew the
+   sync introduced; scanned all ezpz `torch.distributed.*` calls, this was
+   the only 2.13-missing one.)
+
 ### Verification
 
 - Clean merge, no conflicts (`5245d470e`, worktree `ezpz-61st-sync`).
-- Import smoke (login node, merged code): agpt, moe, common.decoder all
-  import OK; `Llama3StateDictAdapter` + `ChunkedCELoss`-rename checked.
-- **Runtime bitwise smoke: PENDING** -- `sync_smoke.sh` queued (own
-  select=1). Will verify agpt_debugmodel TP=1/TP=2 + moe_debugmodel train
-  clean. Entry updated with verdict + job id when it lands.
+- **Runtime smoke PASSED** (`sync_smoke.sh`, job 12469757, own select=1)
+  -> `VERDICT: ok` after the 3 replays:
+  - `agpt_debugmodel` TP=1 rc=0 (loss -> 10.673)
+  - `agpt_debugmodel` **TP=2** rc=0 (loss -> 10.662, mem halved)
+  - `moe_debugmodel` rc=0 (loss -> 12.368)
+  All three match the 60th-sync baseline exactly -> the replays are pure
+  plumbing, no numerical change. (Smokes 12469753/755/756 failed on the 3
+  issues above before the fixes -- the gate working as intended.)
 
 ---
 
