@@ -15,10 +15,12 @@ All at TP=4 / LBS=1 / bf16 / AdamW (except the LR-finder optimizer sweep),
 
 ## TL;DR
 
-- **The usable LR for 80B is low and batch-independent.** LR-finder min
-  loss is at **lr~3e-6 (sophiag) / ~8e-6 (mano)**, diverging by ~1e-2.
-  The production default **1e-6** sits deliberately on the stable
-  left-shoulder, *below* the optimum.
+- **The usable LR for 80B is low.** LR-finder (at GBS=192) min loss is at
+  **lr~3e-6 (sophiag) / ~8e-6 (mano)**, diverging by ~1e-2; production
+  **1e-6** sits on the stable left-shoulder, *below* the optimum.
+  **CAVEAT:** this finder ran at GBS=192, ~32x below the ~6144 production
+  target, and optimal LR shifts with batch -- a corrected GBS=6138 sweep
+  (jobs 12469715-18) is running; these are provisional / a ranking only.
 - **Do NOT linearly scale LR up with batch.** The GBS=5952 (16x) run with
   a 16x-linear-scaled LR=1.6e-5 NaN'd at **step 7** -- *far worse* than
   the same batch at flat LR=1e-6 (step 29). 1.6e-5 sits at the LR-finder's
@@ -30,11 +32,21 @@ All at TP=4 / LBS=1 / bf16 / AdamW (except the LR-finder optimizer sweep),
 
 ## 1. LR-finder: the usable LR is ~1e-6 to ~1e-5, set by the optimizer
 
-Swept lr = 1e-6 -> 1.0 over 40 steps at GBS=372 (the native corner batch),
-per optimizer. SophiaG/Muon are documented-broken at 80B (bf16 overflow at
-dim=9216); included to confirm.
+Swept lr = 1e-6 -> 1.0 over 40 steps at **GBS=192** (world_size 768 x
+LBS=1 / TP=4, no GAS), per optimizer. SophiaG/Muon are documented-broken
+at 80B (bf16 overflow at dim=9216); included to confirm.
 
-| Optimizer | min-loss LR | stable ceiling (<=5% above min) | diverges |
+> **IMPORTANT (batch-size caveat, 2026-06-26):** this sweep ran at
+> **GBS=192 -- ~32x below the ~6144 production target.** Optimal LR is
+> batch-size dependent, so these numbers give at best the *optimizer
+> ranking* and a rough scale, NOT the production LR. A corrected sweep at
+> the production batch (GBS=6138 via GAS=33) is running: prewarm 12469714
+> -> per-optimizer finders 12469715 (adamw) / 716 (mano) / 717 (muon) /
+> 718 (sophiag), sweeping 1e-8 -> 1e-4. This section will be updated with
+> the production-batch curves; treat the GBS=192 numbers below as
+> provisional.
+
+| Optimizer | min-loss LR (GBS=192) | stable ceiling (<=5% above min) | diverges |
 |---|---|---|---|
 | sophiag | 2.8e-6 | 1.1e-5 | NaN by ~1.8e-1 |
 | mano | 7.9e-6 | 6.3e-5 | hard rise past ~1e-2 |
@@ -127,7 +139,7 @@ raise LR for larger batches.
 - Reproducibility of the flat-LR GBS=5952 step-29 NaN (12469699, queued)
   not yet in -- whether that mild batch effect is deterministic vs
   XPU-execution-order nondeterminism is still open.
-- The LR-finder ran at GBS=372; a batch-size sweep of the LR curve itself
+- The LR-finder ran at GBS=192 (corrected sweep at GBS=6138 in flight); a batch-size sweep of the LR curve itself
   (does the optimum shift with GBS?) was not done.
 
 ## Jobs
