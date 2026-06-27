@@ -160,11 +160,40 @@ warmup=200, reproducibility). Full report:
 [`gbs5952 2048N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md).
 
 This campaign establishes the corner's stability is largely batch-size
-independent up to 8x, but does **not** establish dp_degree>186 (the real
-512N+ regime) or the >512N init path -- those need a node-count study
-(the dp-degree cliff bisect), not a batch study. Reports:
+independent up to 8x. Reports:
 [`gbs1488 512N`](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md),
-[`gbs2976 1024N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md).
+[`gbs2976 1024N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md),
+[`gbs5952 2048N`](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md).
+
+#### The dp_degree<=186 "ceiling" is not a cliff -- corner scales past it (2026-06-26)
+
+186 was only `62N x 12 / TP=4`, the highest *tested* point -- not a
+measured boundary. A node-count bisect at fixed TP=4/LBS=1/GAS=1 raised
+dp_degree directly:
+
+| Job | N | dp_degree | vs 186 | Result |
+|---|---|---|---|---|
+| 12469628 | 64 | 192 | 1.03x | **clean** 30 steps, 0 NaN |
+| 12469629 | 88 | 264 | 1.42x | **clean** 30 steps, 0 NaN |
+| 12469630 | 108 | 324 | 1.74x | queued |
+
+**dp=192 and dp=264 both ran NaN-free.** The only dp-axis NaN ever seen
+remains 12469492 (TP=2, dp=372). So the safe corner extends to at least
+dp=264; the real cliff is somewhere in (264, 372], unmapped (dp=372 needs
+124N > Sunspot's 114 usable nodes -- confirmable only on Aurora). **The
+script's `dp_degree>186` warning is therefore over-conservative** (left in
+place pending the exact cliff, but 192-264 are now known-safe).
+
+#### LR is the sharp wall, not batch or dp-degree (2026-06-26)
+
+An LR-finder sweep (lr 1e-6->1.0, GBS=372) puts the min-loss LR at
+**~3e-6 (sophiag) / ~8e-6 (mano)**, diverging by ~1e-2 -- production
+LR=1e-6 sits safely on the left shoulder. Confirming the wall is LR not
+batch: GBS=5952 with a 16x-linear-scaled LR=1.6e-5 NaN'd at **step 7**
+(vs step 29 at flat 1e-6) -- scaling LR up walks straight into the
+divergence shoulder. **Do not scale LR with batch size**; the ceiling is
+fixed by the bf16/dim-9216 overflow. Full analysis:
+[`lr/batch/dp-degree findings`](../../../experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md).
 
 ## Working 4N stack (Aurora + Sunspot)
 

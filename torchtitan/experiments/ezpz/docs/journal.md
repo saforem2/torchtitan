@@ -4,6 +4,34 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-26 (sunspot eve) -- 80B: LR is the wall, dp-ceiling isn't, don't scale LR with batch
+
+Five jobs resolving the LR/batch/dp-degree questions the sim campaign
+raised. Synthesis report:
+[`docs/experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md`](experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md).
+
+- **Were the sims LR-scaled? No -- and they shouldn't be.** All sims used
+  flat LR=1e-6. An LR-finder (lr 1e-6->1.0, GBS=372) puts min-loss LR at
+  **~3e-6 (sophiag) / ~8e-6 (mano)**, diverging by ~1e-2 -- production
+  1e-6 is on the safe left shoulder, below optimum. (adamw/muon curves
+  lost to the cold-cache race; need warm rerun.)
+- **Scaling LR up with batch made it WORSE:** GBS=5952 + 16x-scaled
+  LR=1.6e-5 (job 12469698) NaN'd at **step 7** (loss 11.6->20.4->nan),
+  vs step 29 at flat 1e-6. 1.6e-5 is at the LR-finder divergence shoulder.
+  The LR ceiling is fixed by bf16/dim-9216 overflow, not the batch ->
+  **do not linearly scale LR with batch here.**
+- **The dp_degree<=186 "ceiling" is not a cliff:** bisect jobs 12469628
+  (dp=192) and 12469629 (dp=264) both ran 30 steps NaN-free. 186 was just
+  the highest tested point. Corner scales to at least dp=264; the script's
+  dp>186 warning is over-conservative. dp=324 (12469630) queued; dp=372
+  needs Aurora. **This vindicates the earlier instinct that TP=4 should
+  scale past 62N.**
+- Net: two walls quantified -- a sharp LR wall (~1e-5, optimizer-set) and
+  a much-further-out dp-degree wall (>264). The GBS=5952 flat-LR step-29
+  NaN is a separate, mild batch-accumulation effect at low LR.
+
+---
+
 ## 2026-06-26 (sunspot) -- 80B global-batch sim campaign continues: GAS=16 (1024N) clean
 
 Continued the 80B batch-scaling campaign past the GBS=1488/512N sim.
