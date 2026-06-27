@@ -17,6 +17,49 @@
   scheduling priority (`eligible_time`); a fresh submit resets that to
   zero and goes to the back of the queue. Re-submitting makes it worse.
 
+## UPDATE 2026-06-26 -- `at_queue`, and even 256N is now blocked
+
+The "pure contention" framing above is incomplete. On 2026-06-26 the
+blocking PBS comment was `Not Running: Insufficient amount of resource:
+at_queue` -- a queue-level resource limit, not simply "not enough free
+nodes". **Evidenced** observations (not theory):
+
+- **`small` is live and DID start 256N jobs** -- seven 256N/288N jobs
+  from OTHER projects (`alcf_training` x5, `AI4SRM`, a physics project)
+  started 09:42-11:16 on 2026-06-26.
+- **AuroraGPT had 0 jobs running in `small`** (1 running machine-wide)
+  the entire time, despite ~3000 physically-free nodes.
+- So the freed `small` capacity went to other projects' jobs ahead of
+  AuroraGPT's. AuroraGPT is **losing the scheduling race for `small`**,
+  not waiting on raw node availability.
+- **It is NOT about eligibility/age**: a fresh throwaway 256N submit
+  (eligible_time ~0) shows the same `at_queue` as the canonical
+  cont (eligible_time ~56h). So kill+resubmit of a starved canonical job
+  is pointless -- it burns ~56h of accrued priority and hits the same
+  wall. (Verified by submitting `agpt-2b-n256-FRESHTEST` alongside.)
+
+**What is NOT the cause** (checked + ruled out 2026-06-26): a hold
+(`Hold_Types = n`), a bad dependency, an unsatisfiable request, the
+Jun-29 PM reservation (starts in ~57h; too far out to be draining nodes
+now), the project allocation (burn_ratio 0.29 -- only 29% of INCITE-2026
+used, healthy), or a job-config error.
+
+**What is NOT yet known** (needs scheduler-policy / ALCF visibility, not
+derivable from `qstat`): the exact mechanism by which other projects
+outrank an INCITE allocation for `small` right now. Candidates
+(UNCONFIRMED -- do not state as fact): a higher-priority training/
+reservation queue for `alcf_training`, a recent-usage decay term, or an
+AuroraGPT priority standing worth raising with ALCF. An earlier draft of
+this note guessed "WFP fair-share"; that was speculation from seeing
+`enable_wfp=1` on the job and should not be trusted without confirmation.
+
+**Implication for tactics:** more submits (sneaks, re-queues) cannot beat
+this -- they share the project's scheduling standing. The levers are
+time (the race shifts), the pre-PM drain (forces placement of backlog),
+or a PI->ALCF priority question. The multi-chain umbrella in `medium`
+(uncapped, 0 assigned) is a parallel bet but waits on the same project
+standing.
+
 ## Live data (from PBS `qtime`, 2026-06-24)
 
 | Job | Trajectory | Nodes | Queued since | Wait so far | PBS comment |
