@@ -20,6 +20,36 @@ was required in ezpz.
 
 ---
 
+## 2026-06-27 — 61st sync (7 commits, `0b083d3ee..upstream/main`)
+
+Merged clean (no conflicts) as `5245d470e` in worktree
+`ezpz-61st-sync`. **No code replays required.** The ezpz-relevant
+changes are all either gated/unused on our path or symbol-compatible;
+agpt + moe + common.decoder import clean on the merged code.
+
+### Upstream commits
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `0e886617e` | Fix weight-tying corrupting lm_head.weight in HF checkpoint (#3764) | **Relevant to eval, benign.** Touches `llama3/state_dict_adapter.py` (which agpt imports as `Llama3StateDictAdapter` for DCP->HF convert) + `distributed/utils.py`. The fix corrects a real safetensors corruption on tied embeddings; agpt uses the adapter unchanged (symbol intact, import OK). Improves eval/convert correctness, no replay. |
+| `3c9940675` | Fix fused qkv load weights + init when FSDP > n_kv_heads (#3807) | **No-op for ezpz.** Only the `FusedQKVLinear` path in `common/attention.py`/`config_utils.py`. agpt keeps `fuse_qkv=False` (4 callsites), so it never constructs FusedQKV. SDPA forward unchanged. No replay. |
+| `9530a874d` | [rl] grpo chunked loss (#3779) | **Symbol rename, ezpz unaffected.** Renames `ChunkedCELoss` -> `ChunkedLossWrapper` in `common/decoder.py` + touches loss/validate/pp. moe imports `Decoder`/`TransformerBlock` from `common/decoder.py` (import OK post-rename); no live ezpz code references `ChunkedCELoss` (only historical sync-doc mentions). No replay. |
+| `c8abb170a` | expand model integration tests to full_dtensor, spmd_types backends (#3740) | None -- CI test matrix only. |
+| `fcbcb6d53` | Enable RL spmd backend selection (#3803) | None -- `distributed/utils.py` spmd-backend knob + experiments/{rl,forge,graph_trainer,torchft}; ezpz uses spmd_backend=default. |
+| `2e962a153` | [rl] cudagraph capture size + batched-tokens knobs (#3806) | None -- experiments/rl only. |
+| `574502c80` | Add DPRequestRouter, use in generator (#3768) | None -- experiments/rl generator only. |
+
+### Verification
+
+- Clean merge, no conflicts (`5245d470e`, worktree `ezpz-61st-sync`).
+- Import smoke (login node, merged code): agpt, moe, common.decoder all
+  import OK; `Llama3StateDictAdapter` + `ChunkedCELoss`-rename checked.
+- **Runtime bitwise smoke: PENDING** -- `sync_smoke.sh` queued (own
+  select=1). Will verify agpt_debugmodel TP=1/TP=2 + moe_debugmodel train
+  clean. Entry updated with verdict + job id when it lands.
+
+---
+
 ## 2026-06-26 — 60th sync (23 commits, `daa9d7453..upstream/main`)
 
 Merged clean (no conflicts) as `0b083d3ee` in worktree
