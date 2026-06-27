@@ -492,11 +492,19 @@ class FaultTolerantTrainer(Trainer):
         self.checkpointer = config.checkpoint.build(**ckpt_kwargs)
 
         # 57th sync: PR #3694 deleted the --disable_loss_parallel flag.
-        # TP-on now always implies LP-on; get_train_context no longer
-        # takes enable_loss_parallel (the loss-parallel autograd handling
-        # moved into cross_entropy_loss). Mirror upstream Trainer.
-        self.train_context = dist_utils.get_train_context(
+        # TP-on now always implies LP-on; the context no longer takes
+        # enable_loss_parallel (loss-parallel autograd moved into
+        # cross_entropy_loss).
+        # 61st sync: the spmd_types series renamed get_train_context ->
+        # get_spmd_context and added the spmd_typechecking kwarg. Mirror
+        # upstream Trainer; we run spmd_backend=default so typechecking is
+        # off (the kwarg is inert unless backend == "spmd_types").
+        self.train_context = dist_utils.get_spmd_context(
             parallel_dims=parallel_dims,
+            spmd_typechecking=(
+                config.parallelism.spmd_backend == "spmd_types"
+                and config.debug.spmd_typechecking
+            ),
         )
 
         # Build validator if validation is configured
