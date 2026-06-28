@@ -69,9 +69,9 @@ This is rare (narrow window), which is why only 2 of 48 ranks hit it. The
 cascade: those 2 ranks die -> launch tears down -> rank-0 (builder) gets
 SIGTERM (signal 15) -> autoretry sees rc=143 and (mis)labels it "walltime".
 
-### One-line fix
+### Fix -- LANDED `saforem2/blendcorpus@1f7e9c0` (2026-06-28)
 
-Move the existence/size probe inside the `try` (so every filesystem access on
+Moved the existence/size probe inside the `try` (so every filesystem access on
 `target` is covered by the same `except OSError`):
 
 ```python
@@ -100,9 +100,10 @@ now build the index and proceed to training + checkpoint with zero
 FileNotFoundError and zero EOFError. Then 32N to confirm at scale.
 
 ## Operational status
-- Venv currently on `041d015f` (mass race fixed; rare TOCTOU remains).
-- Until the one-liner lands, a cold-`CKPT_DIR` 80B run can still trip the
-  TOCTOU. Mitigation: single-rank prewarm
-  (`scripts/prewarm_blendcorpus_singlerank.sh`) so readers always hit a fully
-  warm cache (no concurrent builder -> no TOCTOU). A warm-cache run (reused
-  `CKPT_DIR`) is unaffected.
+- `041d015f` = atomic writes + poll (kills the mass race).
+- `1f7e9c0` = TOCTOU fix (getsize inside the try). **Both now on
+  `feat/remove-deepspeed`.**
+- Venv reinstalled to `1f7e9c0`, tarball rebuilt. Cold-cache 80B TP=4
+  re-validation pending (re-run of the 8574237 config) -- mark this fully
+  closed once that passes with 0 EOFError AND 0 FileNotFoundError through to
+  training + checkpoint.
