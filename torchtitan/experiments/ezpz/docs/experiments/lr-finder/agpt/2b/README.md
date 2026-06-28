@@ -52,6 +52,13 @@ no divergence cliff, even at 2x the production batch.
 [1] GBS=24576 mano/sophiag still finishing at writeup time; AdamW (the
 headline) is complete. Table refreshes when they land.
 
+All three optimizers at the 2B production batch -- every curve is a clean
+U-min that turns back up, 0 NaN (contrast the
+[80B production-batch figure](../80b/README.md#headline-result-all-four-optimizers-at-the-production-batch),
+where AdamW cliffs to NaN):
+
+![2B all optimizers at GBS=12288](figures/lr_finder_2b_gbs12288_all_optimizers.png)
+
 ### Contrast with 80B (same dp=192)
 
 | | 2B (dim=2048) | 80B (dim=9216) |
