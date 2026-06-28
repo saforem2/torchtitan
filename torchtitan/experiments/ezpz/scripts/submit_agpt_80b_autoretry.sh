@@ -147,6 +147,15 @@ LR="${LR:-1e-6}"
 # nominal LR within a short run (e.g. WARMUP_STEPS=5 for an LR probe).
 WARMUP_STEPS="${WARMUP_STEPS:-200}"
 
+# LR-scheduler decay-ratio. The agpt base config defaults to a WSD decay
+# (decay_ratio=0.8: stable then linear decay over the last 80% of steps).
+# Set DECAY_RATIO=0 for warmup-then-CONSTANT (no decay) -- needed for
+# continued pre-training (CPT) past the nominal token budget, where the LR
+# must stay flat after warmup. Default empty = leave the config default
+# untouched (decay as before). When set, passed as
+# --lr-scheduler.decay-ratio=${DECAY_RATIO}.
+DECAY_RATIO="${DECAY_RATIO:-}"
+
 # Validation: run the EzpzValidator on the blendcorpus validation split
 # every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
 # set VALIDATOR_FREQ to a huge number or pass --validator.no-enable to skip.
@@ -219,6 +228,15 @@ log_message INFO "TRAINING_STEPS: ${TRAINING_STEPS}"
 log_message INFO "PBS_JOBID: ${PBS_JOBID}"
 log_message INFO "OPTIMIZER: ${OPTIMIZER}"
 log_message INFO "LR: ${LR}  (warmup_steps: ${WARMUP_STEPS})"
+if [[ -n "${DECAY_RATIO}" ]]; then
+    if [[ "${DECAY_RATIO}" == "0" || "${DECAY_RATIO}" == "0.0" ]]; then
+        log_message INFO "LR schedule: warmup then CONSTANT (decay_ratio=${DECAY_RATIO}, no decay -- CPT mode)"
+    else
+        log_message INFO "LR schedule: WSD (decay_ratio=${DECAY_RATIO})"
+    fi
+else
+    log_message INFO "LR schedule: config default (WSD decay_ratio=0.8)"
+fi
 log_message INFO "TP: ${TP}, LBS: ${LBS}, GAS: ${GAS}, dp_degree: ${DP_DEGREE}, AC: ${ACKPT_MODE}, compile: OFF"
 log_message INFO "GBS: ${GBS}"
 log_message INFO "DATASET: ${DATASET}"
@@ -278,6 +296,12 @@ fi
 mfr_args=()
 [[ -n "${MAX_FAILOVER_RETRIES:-}" ]] && mfr_args=(--max-failover-retries "${MAX_FAILOVER_RETRIES}")
 
+# Optional --lr-scheduler.decay-ratio (ARRAY for the same reason). Empty
+# DECAY_RATIO leaves the config's base decay_ratio (0.8 WSD) untouched;
+# DECAY_RATIO=0 yields warmup-then-constant (no decay) for CPT.
+lr_sched_args=()
+[[ -n "${DECAY_RATIO}" ]] && lr_sched_args=(--lr-scheduler.decay-ratio="${DECAY_RATIO}")
+
 ezpz launch \
     --nproc "${NGPUS_ACTIVE}" \
     --nproc_per_node "${PPN}" \
@@ -301,6 +325,7 @@ ezpz launch \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
     --lr-scheduler.warmup-steps="${WARMUP_STEPS}" \
+    "${lr_sched_args[@]}" \
     --parallelism.tensor-parallel-degree="${TP}" \
     --parallelism.expert-parallel-degree=1 \
     --parallelism.data-parallel-replicate-degree=1 \
