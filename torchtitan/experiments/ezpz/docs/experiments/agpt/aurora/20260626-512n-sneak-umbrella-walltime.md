@@ -26,7 +26,7 @@ status: MIXED (ckpt-resume incident recovered + verified)
 | Multi-chain umbrella (1536 train nodes -> medium queue) | **BUILT + VALIDATED** | 8567461: trainer reached train->checkpoint->rc=0 under 4-way concurrency |
 | 2b-v2 venv missing spmd_types | **FOUND + FIXED** | rebuilt .venv.tar.gz (2.7G, 56 spmd entries) |
 | First real umbrella production submit | **QUEUED** | 8568429, 1576N, 12h, medium |
-| Clone-sync broke DCP resume (fused-optimizer keys) | **CAUSED + RECOVERED + VERIFIED** | rolled 3 clones back to pre-fused 1263e5a1; load-test 8570407 loaded step-86200 in 32.6s, exit 0 |
+| Clone-sync broke DCP resume (optim-statedict format migration, #3623/#3269) | **CAUSED + RECOVERED + VERIFIED** | rolled 3 clones back to pre-migration 1263e5a1; load-test 8570407 loaded step-86200 in 32.6s, exit 0 |
 
 ## 1. The 512N starvation + the sneak tactic
 
@@ -155,17 +155,30 @@ sneak, and umbrella 2B trainers on fresh nodes.
 
 While shipping the umbrella/walltime code, the v2 clones were `git pull`'d
 from their old HEAD `1263e5a1` (2026-05-27) to today's `b66ba723`. That
-crossed **#3714 "Enable Fused qkv by default" (3396a4b37, 2026-06-24)**,
-which changed the optimizer state-dict layout. Every production checkpoint
-was saved pre-#3714, so resume crashed:
+crossed an **optimizer state-dict FORMAT migration** -- upstream
+**#3623 "[Checkpointer] Remove the dependencies on PyTorch distributed
+state_dict APIs" (772dd1b6c)** plus **#3269 "support mixed optimizers"
+(632f67f12)** -- which swapped `get/set_optimizer_state_dict` for
+`get_flat_optim_state_dict` / `load_flat_optim_state_dict` (a different,
+flattened serialization, not a key rename). Every production checkpoint was
+saved with the old nested format, so resume on the new code crashed:
 ```
 RuntimeError: Missing key in checkpoint state_dict:
 optimizer.param_groups.tok_embeddings.weight.fused.
 ```
 The 2B + 20B 512N sneaks (8567005 / 8567614) exposed it -- first jobs to
 actually resume on the new code. ALL chains were affected (same clones,
-pre-fused ckpts). Root cause: a clone-pull updates the TRAINING code too,
-not just the infra files intended.
+pre-migration ckpts). Root cause: a clone-pull updates the TRAINING code
+too, not just the infra files intended.
+
+> **Correction (2026-06-28):** initially attributed (this session, in flight)
+> to #3714 "Enable Fused qkv by default" and then to the optimizer
+> `implementation="fused"` flag. Both were ruled out by direct evidence
+> (`implementation` defaulted to `fused` in BOTH the pre and post commits;
+> FusedQKV hooks only touch MODEL state, never `tok_embeddings` optimizer
+> state). The verified cause is the #3623/#3269 flat-optim-state migration.
+> Full diagnosis + the `git diff` reproduction:
+> [`docs/guides/known-bugs/pre3623-optim-statedict-resume.md`](../../../guides/known-bugs/pre3623-optim-statedict-resume.md).
 
 **Recovery (per-clone, reversible):** for each of agpt-2b-v2, agpt-20b-v2,
 agpt-20b-n256: created a `rollback-safety-<ts>` branch, `git reset --hard
