@@ -203,29 +203,37 @@ Caveats for `prewarm_blendcorpus_cache.sh`:
 
 ## Status
 
-**PARTIALLY fixed; the 80B-relevant path is still OPEN.** The repo `.venv`
-was upgraded `3926c542` -> `74b09fd` (broadcast tarball rebuilt), which
-closes the *blendable* + `_cache_indices` races. But hardware tests on
-2026-06-28 (jobs 8574063 32N, 8574172 4N, both TP=4 cold-cache) proved
-the 80B smoke STILL races -- in `_build_index_mappings` (`gpt_dataset.py:1158`),
-the path `74b09fd` deliberately leaves barrier-free to avoid an oneCCL
-hang. See "IMPORTANT: 74b09fd does NOT fix..." above.
+**FIXED at the source 2026-06-28** by `saforem2/blendcorpus@041d015f`
+("data: fix build-then-load index race at TP>1 (atomic writes +
+poll-for-complete)") -- the atomic-rename approach. rank 0 writes each
+`*_idx.npy` to a per-pid/per-rank temp then `os.replace()`s it onto the
+final path (atomic on Lustre); every rank polls via `_wait_for_index_files`
+until all three files are complete before `np.load`. File-polling instead
+of a barrier => immune to the oneCCL participation hang that killed the
+barrier approach (`c7eb628e`, reverted in `74b09fd`). Works at any TP,
+needs no prewarm. The repo `.venv` was reinstalled `74b09fd` -> `041d015f`
+and the broadcast tarball rebuilt.
 
-**Operational status for 80B:** to run 80B from a fresh `CKPT_DIR`, the
-index cache must be pre-built **single-rank** first (the in-code NOTE
-names `prewarm_blendcorpus_cache.sh` as the intended mitigation, but that
-script must be run effectively single-reader -- 1 node / TP=1 -- and with
-matching `GBS`/`TRAINING_STEPS`, or it races itself). A standing 80B
-chain that reuses one `CKPT_DIR` only pays this once.
+Pending on-hardware confirmation: a cold-`CKPT_DIR` 80B TP=4 smoke (the
+exact config that raced on `74b09fd`) -- see
+[`docs/experiments/agpt/aurora`](../../experiments/agpt/aurora/). (Do NOT
+mark this fully closed until that cold run passes; an earlier in-session
+"FIXED" claim for `74b09fd` was premature -- the hardware re-run then
+showed `74b09fd` only fixed the sibling paths, not `_build_index_mappings`.
+`041d015f` is the commit that actually patches `_build_index_mappings`.)
 
-NOTE (correcting an earlier claim in this session): I initially wrote
-"FIXED" here after the offline venv upgrade, BEFORE the hardware re-run.
-That was premature -- the 4N/32N runs then showed the race persists in
-`_build_index_mappings`. Lesson: do not mark a distributed-race bug fixed
-until a cold-cache run at the target TP actually passes.
+### Timeline of the fix
+- `3926c542` (Jun 2): DP/PP-subgroup barriers only -> races at TP>1.
+- `debfff5` / `c7eb628e`: global barrier in `_build_index_mappings` ->
+  oneCCL participation hang (data-dependent call count).
+- `74b09fd`: reverts that barrier; adds safe global barriers in the
+  sibling `blendable` / `_cache_indices` / `build_corpus_datasets` paths.
+  Does NOT fix `_build_index_mappings` (relies on prewarm). 80B TP=4
+  cold-cache STILL raced (jobs 8574063 32N, 8574172 4N).
+- `041d015f`: atomic writes + poll in `_build_index_mappings`. THE fix.
 
-Historical context: previously open with only the "reuse `CKPT_DIR`"
-workaround; 80B never benefited because every 80B dispatch started fresh
-(no prior successful dispatch to inherit a warm cache from). The
-`CKPT_DIR`-reuse workaround is no longer required with the fixed venv,
-though reusing a warm cache is still slightly faster at startup.
+### Legacy workaround (pre-`041d015f` venvs only)
+Single-rank prewarm (`scripts/prewarm_blendcorpus_singlerank.sh`): build
+the index with `--nproc 1` (no concurrent readers) at matching
+`GBS`/`TRAINING_STEPS`/`SEQ_LEN`/`CKPT_DIR`. No longer needed with
+`041d015f`, but kept for reproducing older runs.
