@@ -137,15 +137,53 @@ To get the fix into a venv (torch-free package, safe with `--no-deps`):
 # then rebuild the broadcast tarball: tar -czf .venv.tar.gz --directory <parent> .venv
 ```
 The repo `.venv` was on the pre-fix `3926c542` (Jun 2) which had the
-subgroup barriers but not the global one -- hence it still raced.
+subgroup barriers but not the global one.
 
-### Legacy workaround (pre-fix venvs only)
-If stuck on a pre-`74b09fd` blendcorpus, pre-build the cache so the big
-run finds it warm. NOTE this is imperfect: `prewarm_blendcorpus_cache.sh`
-still uses all ranks (so it can itself race at TP>1) and does not pass
-`--training.global-batch-size`, so the cache hash (keyed on
-`num_samples = GBS x train_iters`) won't match a target run with a
-different GBS. Prefer the venv upgrade above.
+### IMPORTANT: `74b09fd` does NOT fix the `_build_index_mappings` race
+
+Verified on hardware 2026-06-28 (jobs 8574063 32N, 8574172 4N, both TP=4,
+cold cache): even with `74b09fd` installed, the 80B smoke STILL crashes
+with the identical EOFError/mmap pattern. The crash traceback is:
+```
+gpt_dataset.py:835  __init__ -> _build_index_mappings(
+gpt_dataset.py:1158 shuffle_idx = np.load(idx_path["shuffle"], ...)  <- EOFError
+```
+i.e. the race is in **`_build_index_mappings`** -- the ONE path where
+`74b09fd` *deliberately reverted* the barrier (a barrier there fires a
+data-dependent (cache-hit vs miss) number of times across ranks ->
+oneCCL `allreduce_scaleout` participation mismatch / hang, strictly worse
+than the race). The 3 global barriers `74b09fd` adds protect the
+*blendable* index + `_cache_indices` + `build_corpus_datasets` paths --
+real races, but NOT the per-corpus `_build_index_mappings` one that an 80B
+TP=4 cold-cache run actually hits first.
+
+The in-code NOTE at `gpt_dataset.py:1135` is explicit: the
+`_build_index_mappings` race "is mitigated operationally by pre-warming
+the index cache before large runs
+(`scripts/prewarm_blendcorpus_cache.sh`); a deadlock is strictly worse
+than that rare race." So **prewarm is the intended mitigation for this
+path**, not a barrier. (And empirically at TP=4 cold-cache the race is
+not "rare" -- it hit immediately on both runs.)
+
+### Mitigation: single-rank prewarm (the real workaround)
+
+The race is between rank-0 (writer) and the other ranks (`np.load`
+readers) with no barrier between in `_build_index_mappings`. The ONLY
+race-free build is **a single rank** (no concurrent readers at all).
+Caveats for `prewarm_blendcorpus_cache.sh`:
+- It launches with ALL ranks of its allocation, so at TP>1 it can itself
+  hit this same race (observed: the 2N prewarm 8574084 raced). Run it so
+  the dataset build sees effectively one reader -- e.g. a 1-node / TP=1
+  build, or extend the script to run the dataloader build on a single
+  rank.
+- The cache hash keys on `num_samples = GBS x train_iters` (per-corpus
+  `desc = prefix + num_samples + seq_length + seed`, `gpt_dataset.py:121`),
+  so the prewarm MUST pass the SAME `GBS` and `TRAINING_STEPS` as the
+  target run or the hash won't match and the target rebuilds cold. The
+  script does NOT currently forward `--training.global-batch-size`; pass
+  `GBS=` explicitly or fix the script.
+- Reusing the same `CKPT_DIR` across dispatches keeps the cache warm
+  (chain-continuation `afterany:` naturally satisfies this).
 
 ## Related
 
@@ -165,14 +203,26 @@ different GBS. Prefer the venv upgrade above.
 
 ## Status
 
-**FIXED 2026-06-28** by the global-barrier patch in
-`saforem2/blendcorpus@74b09fd` (see "Fix" above). The repo `.venv` was
-upgraded from `3926c542` -> `74b09fd` and the broadcast tarball rebuilt,
-so fresh-CKPT_DIR runs (incl. 80B TP=4) no longer race. Validated when
-re-running the 80B 32N autoretry smoke that first exposed it
-(job 8574063 raced on the old venv; the re-run on `74b09fd` is the
-verification -- see
-[`docs/experiments/agpt/aurora`](../../experiments/agpt/aurora/)).
+**PARTIALLY fixed; the 80B-relevant path is still OPEN.** The repo `.venv`
+was upgraded `3926c542` -> `74b09fd` (broadcast tarball rebuilt), which
+closes the *blendable* + `_cache_indices` races. But hardware tests on
+2026-06-28 (jobs 8574063 32N, 8574172 4N, both TP=4 cold-cache) proved
+the 80B smoke STILL races -- in `_build_index_mappings` (`gpt_dataset.py:1158`),
+the path `74b09fd` deliberately leaves barrier-free to avoid an oneCCL
+hang. See "IMPORTANT: 74b09fd does NOT fix..." above.
+
+**Operational status for 80B:** to run 80B from a fresh `CKPT_DIR`, the
+index cache must be pre-built **single-rank** first (the in-code NOTE
+names `prewarm_blendcorpus_cache.sh` as the intended mitigation, but that
+script must be run effectively single-reader -- 1 node / TP=1 -- and with
+matching `GBS`/`TRAINING_STEPS`, or it races itself). A standing 80B
+chain that reuses one `CKPT_DIR` only pays this once.
+
+NOTE (correcting an earlier claim in this session): I initially wrote
+"FIXED" here after the offline venv upgrade, BEFORE the hardware re-run.
+That was premature -- the 4N/32N runs then showed the race persists in
+`_build_index_mappings`. Lesson: do not mark a distributed-race bug fixed
+until a cold-cache run at the target TP actually passes.
 
 Historical context: previously open with only the "reuse `CKPT_DIR`"
 workaround; 80B never benefited because every 80B dispatch started fresh
