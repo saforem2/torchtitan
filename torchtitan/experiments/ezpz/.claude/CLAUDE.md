@@ -342,12 +342,18 @@ that touches one of these areas.
   with 768N / 896N before resubmitting. See
   [`memory/project_1024n_init_crash.md`](.).
 
-- **`EzpzValidator` + blendcorpus validation split wired in but not
-  smoke-tested yet.** `BlendCorpusDataLoader.Config` has
-  `serve_validation: bool` and `eval_iters: int`; `_base_config`
-  builds the validator with a blendcorpus loader pointed at the
-  validation slice. Default `enable=False` so production isn't
-  disturbed. End-to-end smoke with `--validator.enable` is pending.
+- **`EzpzValidator` at 80B TP=4: the "CCL deadlock" was a phantom.** The
+  prior "validator deadlocks on a collective at 80B TP=4" framing is not
+  backed by any log -- it conflated two unrelated NON-collective failures
+  (a validator dataloader cold-cache `mmap`-race CRASH in job 12469584, and a
+  training-side `_build_index_mappings` barrier stall in job 12469597) plus a
+  genuine `loss_fn` tuple-unpack crash in `validator.py`. All now fixed
+  (tuple-unpack; validator inherits the warm `data_cache_path`; prewarm builds
+  the validation index). 2B/2N validator smoke is green (12469561); **80B TP=4
+  validation has still never completed a `validate()` -- fixed-but-unconfirmed,
+  needs a short `--validator.enable --validator.freq=1` run on a prewarmed
+  cache.** `VALIDATOR_ENABLE=0` remains the safe escape hatch. Full evidence +
+  repro: [`docs/guides/known-bugs/validator-tp4-at-80b.md`](../docs/guides/known-bugs/validator-tp4-at-80b.md).
 
 ## Common Pitfalls
 
