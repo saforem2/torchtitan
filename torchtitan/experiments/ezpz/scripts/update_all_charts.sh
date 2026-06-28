@@ -40,6 +40,11 @@ declare -A SCRIPTS=(
     [evals_combined]="torchtitan/experiments/ezpz/eval/plot_evals_combined.py"
     [evals_2b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py"
     [evals_20b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py"
+    # LR-finder trend + per-GBS figures (2B/80B). Regenerates from the
+    # isolated per-GBS CSVs under outputs/lrtrend*/; tolerates missing CSVs
+    # (a queued/incomplete GBS just plots fewer curves), so it is safe to run
+    # every refresh -- it auto-picks-up new points as reruns land.
+    [lr_finder_trend]="torchtitan/experiments/ezpz/scripts/plot_lr_trend.py"
     # Not a chart, but the same "every-time-we-refresh-docs" cadence: rewrite
     # the docs/README.md table Modified column from `git log -1 --format=%cs`
     # for each linked path. Keeps the top-level index honest.
