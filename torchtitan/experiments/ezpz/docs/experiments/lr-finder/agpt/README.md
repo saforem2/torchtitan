@@ -190,9 +190,52 @@ to set a large-batch production LR for AdamW at 80B.
    @ ~1e-6 vs AdamW @ ~5e-7, GBS=6144) before locking the config -- the
    finder measures early-step stability/descent, not full convergence.
 
-Raw per-experiment record + the in-progress LR-ceiling-vs-GBS trend sweep
-(8N probes, GBS=144..4608):
+Raw per-experiment record:
 [`docs/experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md`](../../agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md).
+
+### LR-ceiling vs GBS trend (AdamW)
+
+The GBS=192 vs GBS=6144 jump above is two endpoints of a continuous trend.
+To see *how* AdamW's usable LR collapses as the batch grows -- and where the
+clean U-min turns into the hard NaN cliff -- we swept AdamW at a ladder of
+batch sizes (TP=4 throughout; small-GBS points at 8N/dp=24, larger points at
+64N/dp=192).
+
+![AdamW LR-ceiling and min-loss vs GBS](figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png)
+
+| GBS | nodes | usable/min LR | min loss | sweep | shape |
+|----:|------:|---------------|---------:|-------|-------|
+| 144  | 8  | 1.0e-5  | 11.73 | 1e-6 -> 1e-3 (15/15) | clean U-min |
+| 288  | 8  | 1.6e-5  | 11.81 | 1e-6 -> 1e-3 (15/15) | clean U-min |
+| 576  | 8  | 1.6e-5  | 11.83 | 1e-6 -> 1e-3 (15/15) | clean U-min |
+| 1152 | -- | (rerun queued) | -- | -- | -- |
+| 2304 | 16 | ~4.4e-6 | 11.24 | 1e-6 -> 1e-3 (11/15) | soft/noisy basin |
+| 4608 | -- | (rerun queued) | -- | -- | -- |
+| 6144 | 64 | ~7.4e-7 | 12.78 | 1e-8 -> 1e-4 (15/15) | **NaN cliff (no min)** |
+
+Reading the trend:
+
+- **Usable LR falls monotonically with batch** -- from ~1.6e-5 (GBS<=576)
+  toward ~7e-7 (GBS=6144), roughly a ~20x drop across a 10x batch increase.
+- **The failure mode changes, not just the number.** Small batches blow up
+  cleanly with a real loss minimum in-range; the production batch has *no*
+  minimum -- loss descends to a wall and NaNs (the "usable LR" there is a
+  ceiling, not a U-bottom).
+- **The transition is gradual.** GBS=2304 already shows a soft, noisy basin
+  (loss flat 11.2-11.6 across lr 4e-6..2e-5, grad_norm bouncing 13-85) rather
+  than either a clean U or a sharp cliff -- the edge sharpens somewhere
+  between GBS=2304 and 6144.
+- **Min-loss is non-monotonic** (right panel): it improves slightly to the
+  GBS=2304 basin (11.24) then jumps up at the cliff (12.78) -- once divergence
+  caps the LR, the 15-step sweep simply can't descend as far.
+
+**Caveats (this is in progress):** GBS=1152/2304/4608 are being re-run at 64N
+(jobs 12469765-767) -- the first 2304 attempt reached only step 11/15 (6h
+walltime) and the first 4608 attempt produced 0 points (the auto-retry
+watchdog fired mid-step-1: at 16N/dp=48 the GAS=96 step exceeded the 1800s
+no-output timeout). The reruns use dp=192 (GAS 6/12/24, fast steps) and a
+2400s watchdog. The figure + table will be refreshed when they land; the
+8N small-GBS points and the 6144 cliff are final.
 
 ---
 
