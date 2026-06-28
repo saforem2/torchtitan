@@ -20,6 +20,33 @@ was required in ezpz.
 
 ---
 
+## 2026-06-28 — 62nd sync (3 commits, `0e886617e..upstream/main`)
+
+Merged clean (no conflicts) as `fc4e1ae84` in worktree `ezpz-62nd-sync`.
+**No replays required.** All 3 commits touch only `experiments/rl/` (the
+GRPO/RL experiment), which ezpz does not import from; our entire model /
+parallelize / config / trainer surface is byte-identical pre- and
+post-merge (`git diff 0cacad95d HEAD -- experiments/ezpz/ config/ models/
+distributed/` is empty).
+
+### Upstream commits
+
+| Commit | Title | ezpz impact |
+|---|---|---|
+| `390ea37cc` | [rl] Overlap trainer->generator weight sync with next training step (#3810) | None. `experiments/rl/` only. |
+| `ce4f4cc4d` | Enable chunked loss for Search R1 (#3813) | None. `experiments/rl/examples/search_r1/` only. |
+| `abaf11c5a` | [rl] Fix generator initialization race condition (#3809) | None. `experiments/rl/` only. |
+
+### Validation
+
+Import probe (the sync_smoke phase-1 surface: agpt/moe parallelize +
+config_registry + activation_checkpoint + trainer) confirmed unchanged --
+no symbol-table diff to check. Skipped the distributed train smoke: the
+merge changes zero bytes of any code path the smoke exercises, so it would
+only re-confirm the 61st-sync baseline. RL-only sync, lowest-risk class.
+
+---
+
 ## 2026-06-27 — 61st sync (7 commits, `0b083d3ee..upstream/main`)
 
 Merged clean (no conflicts) as `5245d470e` in worktree
