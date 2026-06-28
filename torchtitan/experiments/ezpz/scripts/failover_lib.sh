@@ -108,6 +108,32 @@ failover_remaining_walltime() {
     echo "$remain"
 }
 
+# ---------------------------------------------------------------------------
+# failover_deadline_epoch
+#
+# Echo the ABSOLUTE Unix timestamp (job_start + walltime) at which PBS will
+# kill this job, for use as WALLTIME_DEADLINE_EPOCH by the trainer's
+# walltime-aware checkpointing. Unlike failover_remaining_walltime (a relative
+# budget that resets every time the trainer relaunches on a failover retry),
+# this absolute deadline is STABLE across retries -- so the backstop still
+# fires before the real PBS walltime even after a mid-job bad-node swap
+# (fixes the 2026-06-27 retry-resets-budget bug). Best-effort: echoes 0
+# (disables) if anything is missing.
+# ---------------------------------------------------------------------------
+failover_deadline_epoch() {
+    [[ -n "${PBS_JOBID:-}" ]] || { echo 0; return 0; }
+    local rec wt stt total start_s
+    rec=$(qstat -xf "$PBS_JOBID" 2>/dev/null) || { echo 0; return 0; }
+    wt=$(echo "$rec"  | grep -m1 "Resource_List.walltime" | sed 's/.*= //')
+    stt=$(echo "$rec" | grep -m1 "stime "                 | sed 's/.*= //')
+    [[ -n "$wt" ]] || { echo 0; return 0; }
+    total=$(awk -F: 'NF==3{print ($1*3600)+($2*60)+$3} NF==2{print ($1*60)+$2} NF==1{print $1}' <<< "$wt")
+    [[ -n "$total" && "$total" -gt 0 ]] 2>/dev/null || { echo 0; return 0; }
+    # Prefer the real job start (stime); fall back to now if not yet published.
+    start_s=$(date -d "$stt" +%s 2>/dev/null) || start_s=$(date +%s)
+    echo "$(( start_s + total ))"
+}
+
 failover_init() {
     local nhosts_train="$1"
     [[ -n "$nhosts_train" ]] || { _failover_log "ERROR: failover_init needs NHOSTS_TRAIN arg"; return 1; }

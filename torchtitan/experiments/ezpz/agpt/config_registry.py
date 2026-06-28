@@ -189,9 +189,14 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         fault_tolerance=FaultTolerance(enable=False),
         # Walltime-aware checkpointing: guarantee a save before the PBS walltime
         # runs out (otherwise a short job can save nothing -- see the train loop
-        # in trainer.py). The failover submit scripts export $WALLTIME_SECONDS
-        # (REMAINING budget at launch); 0/unset disables it (interactive runs,
-        # non-PBS). Overridable on the CLI via --walltime-seconds.
+        # in trainer.py). The failover submit scripts export
+        # $WALLTIME_DEADLINE_EPOCH (absolute job_start+walltime timestamp,
+        # survives failover retries -- PREFERRED) and $WALLTIME_SECONDS (relative
+        # fallback). 0/unset disables it (interactive runs, non-PBS). Overridable
+        # on the CLI via --walltime-deadline-epoch / --walltime-seconds.
+        walltime_deadline_epoch=int(
+            os.environ.get("WALLTIME_DEADLINE_EPOCH", "0") or "0"
+        ),
         walltime_seconds=int(os.environ.get("WALLTIME_SECONDS", "0") or "0"),
         # Validator runs on the blendcorpus validation split (5% of the
         # corpus by default — see BlendCorpusDataLoader.Config.split). The

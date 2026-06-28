@@ -200,17 +200,21 @@ FAILOVER_IDLE_TIMEOUT="${PREFLIGHT_IDLE_TIMEOUT:-600}" FAILOVER_MAX_RETRIES=2 \
 log_message INFO "preflight smoke OK — proceeding to main training launch"
 
 # ---- Walltime-aware checkpointing ----
-# Pass the REMAINING walltime so the trainer always saves a checkpoint before
-# the PBS walltime runs out (a short job can otherwise save nothing). Computed
-# AFTER preflight so it reflects the wall left when training actually begins.
-# config_registry reads $WALLTIME_SECONDS into walltime_seconds; mpiexec
-# --envall propagates it to all ranks. Override WALLTIME_SECONDS in the
-# environment to force a value (or 0 to disable).
+# Force a checkpoint before the PBS walltime runs out (a short job can otherwise
+# save nothing). Export an ABSOLUTE deadline (job_start + walltime) as
+# WALLTIME_DEADLINE_EPOCH -- it survives failover relaunches, so the backstop
+# still fires after a mid-job bad-node swap (the relative WALLTIME_SECONDS reset
+# on retry and the job was SIGTERM'd mid-save, 2026-06-27). Also export the
+# relative remaining as a fallback. config_registry reads both; mpiexec --envall
+# propagates them to all ranks. Override either in the environment (0 to disable).
+if [[ -z "${WALLTIME_DEADLINE_EPOCH:-}" ]]; then
+    WALLTIME_DEADLINE_EPOCH=$(failover_deadline_epoch)
+fi
 if [[ -z "${WALLTIME_SECONDS:-}" ]]; then
     WALLTIME_SECONDS=$(failover_remaining_walltime)
 fi
-export WALLTIME_SECONDS
-log_message INFO "WALLTIME_SECONDS (remaining): ${WALLTIME_SECONDS}"
+export WALLTIME_DEADLINE_EPOCH WALLTIME_SECONDS
+log_message INFO "WALLTIME_DEADLINE_EPOCH: ${WALLTIME_DEADLINE_EPOCH} (remaining ~${WALLTIME_SECONDS}s)"
 
 # ---- Launch with failover ----
 failover_run ezpz launch python3 -m torchtitan.experiments.ezpz.train \

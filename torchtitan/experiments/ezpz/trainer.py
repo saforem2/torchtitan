@@ -141,21 +141,39 @@ class FaultTolerantTrainer(Trainer):
         # Walltime-aware checkpointing. A short job can otherwise run its whole
         # PBS window and save NOTHING (e.g. 20B 512N at ~48s/step never reaches
         # the next interval=100 boundary inside a 2h window), wasting all the
-        # compute. When walltime_seconds > 0, the train loop watches a monotonic
-        # clock and, once elapsed reaches walltime_seconds minus the margin,
-        # forces a final checkpoint and stops cleanly -- guaranteeing a save
-        # before walltime regardless of step rate, model size, or startup cost.
-        # walltime_seconds=0 (default) disables this, preserving exact current
-        # behavior. The value is normally the REMAINING walltime at loop entry,
-        # exported as $WALLTIME_SECONDS by the failover submit scripts (so the
-        # startup already spent on yeet/preflight/ckpt-load is excluded).
+        # compute. The train loop watches the clock and, once it is within
+        # walltime_checkpoint_margin_seconds of the deadline, forces a final
+        # checkpoint and stops cleanly -- guaranteeing a save before walltime
+        # regardless of step rate, model size, or startup cost.
+        #
+        # TWO ways to set the deadline (deadline_epoch wins if both set):
+        #
+        # * walltime_deadline_epoch (PREFERRED) -- an ABSOLUTE Unix timestamp
+        #   (job_start + PBS_walltime), exported once as $WALLTIME_DEADLINE_EPOCH
+        #   by the failover submit scripts. Because it is absolute, it SURVIVES
+        #   failover relaunches: a mid-job bad-node swap restarts the trainer but
+        #   the deadline is unchanged, so the backstop still fires before the real
+        #   PBS walltime. This fixes the 2026-06-27 failure where the relative
+        #   budget reset on retry and the job was SIGTERM'd mid-save (see
+        #   memory project_walltime_ckpt_resets_on_failover_retry).
+        #
+        # * walltime_seconds (FALLBACK) -- a RELATIVE budget in seconds, measured
+        #   from loop entry. Resets on each relaunch, so it is unreliable across
+        #   failover retries; kept only for backward compatibility / non-PBS use.
+        #
+        # Both 0/unset disables the feature (exact prior behavior).
+        walltime_deadline_epoch: int = 0
+        """Absolute Unix timestamp (job_start + walltime) past which a final
+        checkpoint is forced. From $WALLTIME_DEADLINE_EPOCH. Survives failover
+        retries. Takes precedence over walltime_seconds. 0 disables."""
         walltime_seconds: int = 0
-        """Job walltime budget in seconds (typically remaining-at-launch, from
-        $WALLTIME_SECONDS). 0 disables walltime-aware checkpointing."""
+        """RELATIVE walltime budget in seconds from loop entry (fallback when
+        walltime_deadline_epoch is unset). Resets on failover relaunch -- prefer
+        walltime_deadline_epoch. 0 disables."""
         walltime_checkpoint_margin_seconds: int = 600
-        """Force a final checkpoint + stop once elapsed >= walltime_seconds
-        minus this margin. Must cover one checkpoint save + async flush at the
-        target scale (20B/512N+ may want ~900; 600 is safe for <=2B/256N)."""
+        """Force a final checkpoint + stop once within this many seconds of the
+        deadline. Must cover one checkpoint save + async flush at the target
+        scale (20B/512N+ may want ~900; 600 is safe for <=2B/256N)."""
 
     ft_manager: FTManager
 
@@ -788,13 +806,27 @@ class FaultTolerantTrainer(Trainer):
                 ),
             ),
         ):
-            # Walltime-aware checkpointing: start the budget clock at loop entry
-            # so the (already-elapsed) startup -- yeet, preflight, ckpt load --
-            # is excluded. walltime_seconds is the REMAINING budget at launch.
-            wall_budget = config.walltime_seconds
+            # Walltime-aware checkpointing: resolve an ABSOLUTE wall-clock
+            # deadline (time.time() epoch) so the backstop survives failover
+            # relaunches. Prefer walltime_deadline_epoch (set once per job);
+            # fall back to the relative walltime_seconds measured from now.
             wall_margin = config.walltime_checkpoint_margin_seconds
-            wall_start = time.monotonic()
-            wall_limit = wall_budget - wall_margin if wall_budget > 0 else None
+            if config.walltime_deadline_epoch > 0:
+                wall_deadline = float(config.walltime_deadline_epoch)
+                logger.info(
+                    f"walltime-ckpt: absolute deadline {wall_deadline:.0f} "
+                    f"(~{(wall_deadline - time.time()) / 60:.0f} min from now), "
+                    f"margin {wall_margin}s"
+                )
+            elif config.walltime_seconds > 0:
+                wall_deadline = time.time() + config.walltime_seconds
+                logger.info(
+                    f"walltime-ckpt: relative budget {config.walltime_seconds}s "
+                    f"from loop entry (NOTE: resets on failover retry -- prefer "
+                    f"walltime_deadline_epoch), margin {wall_margin}s"
+                )
+            else:
+                wall_deadline = None
 
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
@@ -810,19 +842,18 @@ class FaultTolerantTrainer(Trainer):
                     self.step, last_step=(self.step == config.training.steps)
                 )
 
-                # Walltime guard: if the budget (minus margin) is exhausted,
+                # Walltime guard: once within margin of the (absolute) deadline,
                 # force a final checkpoint now and stop cleanly. Reuses the
                 # interval-bypassing last_step path, then flushes any async save
                 # so it actually lands on disk before the process exits. Without
                 # this, a short job can run its whole window and save nothing.
-                if wall_limit is not None:
-                    elapsed = time.monotonic() - wall_start
-                    if elapsed >= wall_limit:
+                if wall_deadline is not None:
+                    remaining = wall_deadline - time.time()
+                    if remaining <= wall_margin:
                         logger.info(
-                            f"walltime budget reached at step {self.step} "
-                            f"(elapsed ~{elapsed:.0f}s of {wall_budget}s, "
-                            f"margin {wall_margin}s); forcing final checkpoint "
-                            "and stopping"
+                            f"walltime deadline near at step {self.step} "
+                            f"({remaining:.0f}s left <= margin {wall_margin}s); "
+                            "forcing final checkpoint and stopping"
                         )
                         if not saved_this_step:
                             self.checkpointer.save(self.step, last_step=True)
