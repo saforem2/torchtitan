@@ -38,19 +38,24 @@ Every point is a clean U-min with **0 NaN** -- across a **128x** batch range.
 The AdamW usable LR sits flat at ~1e-2 the whole way; there is no collapse and
 no divergence cliff, even at 2x the production batch.
 
-| GBS | AdamW min-LR | AdamW min-loss | mano min-LR | sophiag min-LR | shape (all opts) |
-|----:|--------------|---------------:|-------------|----------------|------------------|
-| 192   | 8.6e-3 | 11.25 | 8.6e-3 | 1.2e-4 | clean U-min |
-| 384   | 1.6e-2 | 11.51 | 8.6e-3 | 1.4e-3 | clean U-min |
-| 768   | 1.6e-2 | 11.68 | 8.6e-3 | 7.4e-4 | clean U-min |
-| 1536  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 | clean U-min |
-| 3072  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 | clean U-min |
-| 6144  | 8.6e-3 | 11.57 | 1.6e-2 | 1.4e-3 | clean U-min |
-| **12288** (prod) | 1.6e-2 | 11.56 | 1.6e-2 | 8.6e-3 | clean U-min |
-| **24576** (2x prod) | 1.6e-2 | 11.63 | 8.6e-2 [1] | -- [1] | clean U-min |
+All three optimizers ran to completion (15/15, 0 NaN) at all 8 batch sizes.
 
-[1] GBS=24576 mano/sophiag still finishing at writeup time; AdamW (the
-headline) is complete. Table refreshes when they land.
+| GBS | AdamW min-LR | AdamW min-loss | mano min-LR | sophiag min-LR [1] |
+|----:|--------------|---------------:|-------------|--------------------|
+| 192   | 8.6e-3 | 11.25 | 8.6e-3 | 1.2e-4 |
+| 384   | 1.6e-2 | 11.51 | 8.6e-3 | 1.4e-3 |
+| 768   | 1.6e-2 | 11.68 | 8.6e-3 | 7.4e-4 |
+| 1536  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 |
+| 3072  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 |
+| 6144  | 8.6e-3 | 11.57 | 1.6e-2 | 1.4e-3 |
+| **12288** (prod) | 1.6e-2 | 11.56 | 1.6e-2 | 8.6e-3 |
+| **24576** (2x prod) | 1.6e-2 | 11.63 | 8.6e-3 | 8.6e-3 |
+
+[1] sophiag's auto-detected min-LR is noisy at small batch (the
+derivative-based detector latches onto early-curve noise, the same artifact
+seen in the MoE finder) -- it reads 1e-4..1e-3 at GBS<=768 but the curves
+show the real basin is ~1e-2 once the batch is large enough to sharpen the U
+(GBS>=1536). See the per-optimizer figures below.
 
 All three optimizers at the 2B production batch -- every curve is a clean
 U-min that turns back up, 0 NaN (contrast the
@@ -64,6 +69,21 @@ the batch-independence visual -- all 8 curves share the same ~1e-2 minimum,
 no drift, no NaN:
 
 ![2B AdamW loss vs LR, all GBS](figures/lr_finder_2b_loss_vs_lr_by_gbs.png)
+
+The same per-GBS view for mano and sophiag (all 8 batches, 0 NaN). mano is
+batch-independent like AdamW; sophiag's U sharpens and deepens as the batch
+grows -- small batches are shallow/noisy, but by GBS>=1536 it settles into a
+clean ~1e-2 minimum:
+
+![2B mano loss vs LR, all GBS](figures/lr_finder_2b_mano_loss_vs_lr_by_gbs.png)
+
+![2B sophiag loss vs LR, all GBS](figures/lr_finder_2b_sophiag_loss_vs_lr_by_gbs.png)
+
+Usable LR vs batch for all three optimizers on one axis -- none collapses,
+none cliffs (the direct 2B counterpart to the 80B trend, where AdamW falls
+~20x and NaNs):
+
+![2B usable LR vs GBS, all optimizers](figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png)
 
 ### Contrast with 80B (same dp=192)
 

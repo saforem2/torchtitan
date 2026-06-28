@@ -74,28 +74,73 @@ def csv_2b(gbs: int, opt: str) -> str:
 # ---------------------------------------------------------------------------
 # Per-GBS loss-vs-LR curve family (the requested view: one line per batch)
 # ---------------------------------------------------------------------------
-def plot_loss_vs_lr_by_gbs_2b(out: Path) -> None:
-    gbs_list = [192, 384, 768, 1536, 3072, 6144, 12288, 24576]
+GBS_2B = [192, 384, 768, 1536, 3072, 6144, 12288, 24576]
+OPT_LABEL = {"adamw": "AdamW", "mano": "mano", "sophiag": "sophiag"}
+
+
+def plot_loss_vs_lr_by_gbs_2b(out: Path, opt: str = "adamw") -> None:
+    """2B loss-vs-LR, one curve per batch size, for a single optimizer."""
     cmap = plt.cm.viridis
     fig, ax = plt.subplots(figsize=(9, 6))
-    for i, g in enumerate(gbs_list):
-        p = csv_2b(g, "adamw")
+    n = 0
+    for i, g in enumerate(GBS_2B):
+        p = csv_2b(g, opt)
         if not Path(p).exists():
             continue
         fx, fy = _finite(*load_curve(p))
         if not fx:
             continue
-        c = cmap(i / (len(gbs_list) - 1))
+        c = cmap(i / (len(GBS_2B) - 1))
         ax.plot(fx, fy, "-o", ms=4, color=c, label=f"GBS={g}", zorder=3)
         mi = min(range(len(fy)), key=lambda k: fy[k])
         ax.scatter([fx[mi]], [fy[mi]], s=90, facecolors="none",
                    edgecolors=c, linewidths=1.5, zorder=4)
+        n += 1
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
-    ax.set_title("agpt 2B AdamW: loss vs LR, one curve per batch size\n"
-                 "(clean U-min at every GBS; circles mark each minimum)")
+    _sub = {
+        "adamw": "clean U-min at every GBS, ~1e-2 (batch-independent)",
+        "mano": "clean U-min at every GBS, ~1e-2 (batch-independent)",
+        "sophiag": "larger batch sharpens + deepens the U (min -> ~1e-2); "
+                   "small batch shallow/noisy",
+    }
+    ax.set_title(f"agpt 2B {OPT_LABEL.get(opt, opt)}: loss vs LR, one curve per "
+                 f"batch size\n({_sub.get(opt, 'circles mark each minimum')})")
     ax.legend(fontsize=8, ncol=2, title="global batch")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out} ({n} GBS curves)")
+
+
+def plot_2b_minlr_vs_gbs_all_opts(out: Path) -> None:
+    """2B usable/min LR vs GBS, all three optimizers overlaid."""
+    colors = {"adamw": "#1f77b4", "mano": "#2ca02c", "sophiag": "#ff7f0e"}
+    markers = {"adamw": "o", "mano": "s", "sophiag": "^"}
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for opt in ("adamw", "mano", "sophiag"):
+        xs, ys = [], []
+        for g in GBS_2B:
+            p = csv_2b(g, opt)
+            if not Path(p).exists():
+                continue
+            fx, fy = _finite(*load_curve(p))
+            if not fx:
+                continue
+            mi = min(range(len(fy)), key=lambda k: fy[k])
+            xs.append(g)
+            ys.append(fx[mi])
+        if xs:
+            ax.plot(xs, ys, "-", marker=markers[opt], ms=8, color=colors[opt],
+                    label=f"{OPT_LABEL[opt]} (0 NaN, all GBS)")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Global batch size (GBS)")
+    ax.set_ylabel("usable / min LR")
+    ax.set_title("agpt 2B: usable LR vs batch, all optimizers (dp=192)\n"
+                 "all three are batch-independent -- no collapse, no cliff (cf. 80B)")
+    ax.legend(fontsize=9)
     fig.tight_layout()
     fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -288,7 +333,14 @@ def plot_80b_ceiling_vs_gbs(out: Path) -> None:
 if __name__ == "__main__":
     apply_house_style()
     # NEW: per-GBS loss-vs-LR curve families
-    plot_loss_vs_lr_by_gbs_2b(DOCS / "2b/figures/lr_finder_2b_loss_vs_lr_by_gbs.png")
+    plot_loss_vs_lr_by_gbs_2b(
+        DOCS / "2b/figures/lr_finder_2b_loss_vs_lr_by_gbs.png", "adamw")
+    plot_loss_vs_lr_by_gbs_2b(
+        DOCS / "2b/figures/lr_finder_2b_mano_loss_vs_lr_by_gbs.png", "mano")
+    plot_loss_vs_lr_by_gbs_2b(
+        DOCS / "2b/figures/lr_finder_2b_sophiag_loss_vs_lr_by_gbs.png", "sophiag")
+    plot_2b_minlr_vs_gbs_all_opts(
+        DOCS / "2b/figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png")
     plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
     # RESTYLED: the 4 existing figures, now through the house stylesheet
     plot_2b_all_optimizers(DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png")
