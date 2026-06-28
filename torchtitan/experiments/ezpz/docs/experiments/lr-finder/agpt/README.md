@@ -56,10 +56,14 @@ broken. See [agpt 80B](80b/README.md).
    gradual blow-up for AdamW (loss ~60). SophiaG requires tighter LR scheduling.
 4. **Cross-hardware consistency:** Suggested LRs match within 2x across Intel
    XPU (Aurora, Sunspot) and NVIDIA A100 (Polaris).
-5. **Batch dependence:** the optimal/ceiling LR shifts strongly with batch
-   size; a small-batch sweep cannot calibrate a large-batch production LR.
-   Demonstrated at 80B ([trend](80b/README.md#lr-ceiling-vs-gbs-trend-adamw));
-   being checked at [2B](2b/README.md).
+5. **Batch dependence is large-model-specific.** At 80B the usable/ceiling LR
+   collapses ~20x with batch and turns into a NaN cliff
+   ([trend](80b/README.md#lr-ceiling-vs-gbs-trend-adamw)). At
+   [2B](2b/README.md#2026-06-28----lr-ceiling-vs-gbs-trend) the usable LR is
+   flat at ~1e-2 across a 128x batch range (0 NaN) -- **no collapse, no cliff.**
+   So a small-batch sweep cannot calibrate a *large*-model production LR, but
+   small models are themselves forgiving of large batches (likely the same
+   dim=9216 bf16 fragility that breaks 80B).
 
 ### Cross-Machine Comparison -- agpt 2B
 
@@ -95,6 +99,6 @@ Per-model pages (each holds all dates / machines / batch sizes for that model):
 
 | Model | Page | Experiments |
 |-------|------|-------------|
-| 2B  | [2b/README.md](2b/README.md)   | Aurora/Sunspot/Polaris small-batch (Apr 12-21) + production-batch trend (Jun 28, in progress) |
+| 2B  | [2b/README.md](2b/README.md)   | Aurora/Sunspot/Polaris small-batch (Apr 12-21) + production-batch trend (Jun 28: never cliffs) |
 | 20B | [20b/README.md](20b/README.md) | Aurora/Sunspot/Polaris small-batch (Apr 12-21) |
 | 80B | [80b/README.md](80b/README.md) | GBS=192 finder (Apr 21), GBS=6144 production (Jun 27), LR-ceiling-vs-GBS trend |

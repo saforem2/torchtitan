@@ -53,7 +53,12 @@ dp_degree=192), one job per optimizer.
 
 ### Headline result: all four optimizers at the production batch
 
-![AdamW vs mano LR-finder at GBS=6144](figures/sunspot_80b_gbs6144_adamw_vs_mano.png)
+![80B LR finder at GBS=6144, all optimizers](figures/sunspot_80b_gbs6144_all_optimizers.png)
+
+(mano and sophiag both have real loss minima; AdamW only descends to a wall
+then NaNs -- no minimum. muon is omitted from the plot: it NaNs from step 7
+regardless of LR. The earlier `adamw_vs_mano` figure predated the sophiag
+sweep and is superseded by this all-optimizer version.)
 
 | Optimizer | behavior @ GBS=6144 | usable LR | min loss | NaN | verdict |
 |-----------|---------------------|-----------|----------|-----|---------|
