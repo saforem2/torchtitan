@@ -27,7 +27,8 @@ differing). Each GBS swept adamw + mano + sophiag (muon dropped -- it crashes
 every job via a oneCCL collective abort; use `torchmuon` if needed).
 
 - LR range 1e-5 -> 1e-1 (2B optimal ~1e-2, ~100x higher than 80B).
-- GBS ladder 192 .. 24576 (12288 = 2B production, 24576 = 2x production).
+- GBS ladder 192 .. 24576 (6144 = common production batch / 2B 256N + all
+  80B; 12288 = 2B 512N, 24576 = 2B 1024N).
 - Jobs 12469769-776, isolated dumps `outputs/lrtrend-2b/gbs<N>/`.
 
 ### Result: 2B never cliffs
@@ -44,7 +45,8 @@ every job via a oneCCL collective abort; use `torchmuon` if needed).
 
 Every point is a clean U-min with **0 NaN** -- across a **128x** batch range.
 The AdamW usable LR sits flat at ~1e-2 the whole way; there is no collapse and
-no divergence cliff, even at 2x the production batch.
+no divergence cliff, all the way out to GBS=24576 (4x the GBS=6144 production
+batch).
 
 All three optimizers ran to completion (15/15, 0 NaN) at all 8 batch sizes.
 
@@ -55,9 +57,9 @@ All three optimizers ran to completion (15/15, 0 NaN) at all 8 batch sizes.
 | 768   | 1.6e-2 | 11.68 | 8.6e-3 | 7.4e-4 |
 | 1536  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 |
 | 3072  | 8.6e-3 | 11.53 | 8.6e-3 | 8.6e-3 |
-| 6144  | 8.6e-3 | 11.57 | 1.6e-2 | 1.4e-3 |
-| **12288** (prod) | 1.6e-2 | 11.56 | 1.6e-2 | 8.6e-3 |
-| **24576** (2x prod) | 1.6e-2 | 11.63 | 8.6e-3 | 8.6e-3 |
+| **6144** (prod / 256N) | 8.6e-3 | 11.57 | 1.6e-2 | 1.4e-3 |
+| 12288 (512N chain) | 1.6e-2 | 11.56 | 1.6e-2 | 8.6e-3 |
+| 24576 (1024N chain) | 1.6e-2 | 11.63 | 8.6e-3 | 8.6e-3 |
 
 [1] sophiag's auto-detected min-LR is noisy at small batch (the
 derivative-based detector latches onto early-curve noise, the same artifact
@@ -65,10 +67,15 @@ seen in the MoE finder) -- it reads 1e-4..1e-3 at GBS<=768 but the curves
 show the real basin is ~1e-2 once the batch is large enough to sharpen the U
 (GBS>=1536). See the per-optimizer figures below.
 
-All three optimizers at the 2B production batch -- every curve is a clean
-U-min that turns back up, 0 NaN (contrast the
-[80B production-batch figure](../80b/README.md#headline-result-all-four-optimizers-at-the-production-batch),
+All three optimizers at the production batch (GBS=6144, the common 2B 256N +
+80B batch) -- every curve is a clean U-min that turns back up, 0 NaN (contrast
+the [80B production-batch figure](../80b/README.md#headline-result-all-four-optimizers-at-the-production-batch),
 where AdamW cliffs to NaN):
+
+![2B all optimizers at GBS=6144](figures/lr_finder_2b_gbs6144_all_optimizers.png)
+
+The same holds at the larger 2B 512N batch (GBS=12288) -- still a clean U-min
+for all three, confirming the batch-independence past the common batch:
 
 ![2B all optimizers at GBS=12288](figures/lr_finder_2b_gbs12288_all_optimizers.png)
 

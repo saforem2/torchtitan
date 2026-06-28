@@ -204,7 +204,7 @@ def _min(lrs, losses):
 # ---------------------------------------------------------------------------
 # Regenerate the 4 existing figures with house style (were raw matplotlib).
 # ---------------------------------------------------------------------------
-def plot_2b_all_optimizers(out: Path, gbs: int = 12288) -> None:
+def plot_2b_all_optimizers(out: Path, gbs: int = 6144) -> None:
     fig, ax = plt.subplots(figsize=(9, 6))
     specs = [("adamw", "AdamW"), ("mano", "mano"), ("sophiag", "sophiag")]
     for opt, lab in specs:
@@ -219,7 +219,10 @@ def plot_2b_all_optimizers(out: Path, gbs: int = 12288) -> None:
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
-    ax.set_title(f"agpt 2B LR finder at the PRODUCTION batch (GBS={gbs}, dp=192)\n"
+    # 6144 is the common production batch (2B 256N + all 80B); larger GBS are
+    # the 2B 512N/1024N chains. Only label 6144 as "production".
+    tag = "the PRODUCTION batch" if gbs == 6144 else "GBS"
+    ax.set_title(f"agpt 2B LR finder at {tag} (GBS={gbs}, dp=192)\n"
                  "all optimizers have clean U-minima, 0 NaN -- no cliff (cf. 80B)")
     ax.legend(fontsize=9)
     fig.tight_layout()
@@ -343,7 +346,10 @@ if __name__ == "__main__":
         DOCS / "2b/figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png")
     plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
     # RESTYLED: the 4 existing figures, now through the house stylesheet
-    plot_2b_all_optimizers(DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png")
+    plot_2b_all_optimizers(
+        DOCS / "2b/figures/lr_finder_2b_gbs6144_all_optimizers.png", 6144)
+    plot_2b_all_optimizers(
+        DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png", 12288)
     plot_80b_all_optimizers(DOCS / "80b/figures/sunspot_80b_gbs6144_all_optimizers.png")
     plot_ceiling_overlay_2b_vs_80b(DOCS / "2b/figures/lr_ceiling_vs_gbs_2b_vs_80b.png")
     plot_80b_ceiling_vs_gbs(DOCS / "80b/figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png")

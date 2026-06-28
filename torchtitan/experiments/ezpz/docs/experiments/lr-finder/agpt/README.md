@@ -35,20 +35,21 @@ small-batch table as a rough starting point for *small* runs only.
 production optimizer, sophiag a viable second.** Full detail + the
 LR-ceiling-vs-GBS trend: [agpt 80B](80b/README.md).
 
-### 2B at the production batch (GBS=12288) -- the validated guidance
+### 2B at the production batch (GBS=6144) -- the validated guidance
 
-All three optimizers are clean U-mins with 0 NaN at the 2B production batch
-(no cliff -- 2B is batch-independent across GBS 192..24576, the collapse is
-large-model-specific):
+GBS=6144 is the common production batch (the 2B 256N chain and all 80B runs).
+The 2B chains also run larger: GBS=12288 (512N) and 24576 (1024N) -- 2B is
+batch-independent across the whole 192..24576 range (clean U-min, 0 NaN
+everywhere; no cliff -- the collapse is large-model-specific). At GBS=6144:
 
-| Optimizer @ GBS=12288 | min LR | min loss | suggested (min/10) |
+| Optimizer @ GBS=6144 | min LR | min loss | suggested (min/10) |
 |---|---|---|---|
-| AdamW | 1.6e-2 | 11.56 | ~1.6e-3 |
-| mano | 1.6e-2 | 11.89 | ~1.6e-3 |
-| sophiag | 8.6e-3 | 11.72 | ~8.6e-4 |
+| AdamW | 8.6e-3 | 11.57 | ~8.6e-4 |
+| mano | 1.6e-2 | 11.71 | ~1.6e-3 |
+| sophiag | 1.4e-3 | 12.29 | ~1.4e-4 |
 
-Note: 2B production currently runs sophiag at **LR=2.28e-5**, which is ~40x
-below the finder's suggested ~8.6e-4 -- i.e. there is substantial LR headroom
+Note: 2B production currently runs sophiag at **LR=2.28e-5**, which is ~60x
+below the finder's suggested ~1.4e-3 -- i.e. there is substantial LR headroom
 at this batch (consistent with small models being forgiving). Worth a
 convergence A/B before changing a live run, but the finder says a higher 2B
 LR is safe. Full per-GBS detail: [agpt 2B](2b/README.md).
