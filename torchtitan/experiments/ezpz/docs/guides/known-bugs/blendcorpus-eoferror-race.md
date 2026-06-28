@@ -104,21 +104,48 @@ the file but mmaps zero bytes.
    launching the multi-rank training. Could be wired into `failover_run`
    as a pre-step.
 
-## Fix (upstream)
+## Fix (upstream) -- LANDED 2026-06-28
 
-Two acceptable patches at the `blendcorpus/data/gpt_dataset.py`
-build path:
+**Root cause (refined):** the build path already had DP-group and
+PP-group barriers, but at **TP>1** those subgroup barriers do NOT gate
+ranks whose TP coordinate != 0 against the global rank-0 writer -- those
+ranks live in DP/PP subgroups that exclude rank 0, so their subgroup
+barriers self-satisfy and ~(1 - 1/TP) of ranks race ahead to `np.load`
+the index before rank 0 finished writing it. That is exactly why an 80B
+TP=4 run saw ~75% of ranks crash (EOFError / "mmap length > file size" /
+"invalid load key '\x00'").
 
-- **File-size check + spin-wait**: non-builder ranks block until
-  the file is non-zero AND a sibling `.done` marker exists. The
-  builder writes the `.done` marker only after `flush+close`.
-- **Atomic rename**: builder writes to `*.tmp`, fsyncs, then
-  renames to the final name. Non-builders only see the final name
-  once it's complete (rename is atomic on Lustre).
+**The fix** is `saforem2/blendcorpus@74b09fd` (branch
+`feat/remove-deepspeed`): add a plain **global** `torch.distributed.barrier()`
+right after the existing DP/PP-subgroup barriers in three places --
+`blendable_dataset.py` (blendable index) and `gpt_dataset.py`
+`_cache_indices` + `build_corpus_datasets` (per-corpus index). Every rank
+now waits for the rank-0 writer before reading.
 
-Either fix would need a single rank to be the designated builder
-(currently inferred from `torch.distributed.get_rank() == 0` plus a
-broadcast).
+IMPORTANT: the same commit **deliberately does NOT** add a barrier in
+`_build_index_mappings` (an earlier attempt to, commits `debfff5` /
+`c7eb628e`, was reverted in `74b09fd`): that function is called per-corpus
+x per-split and its build-vs-read branch is data-dependent (cache hit vs
+miss), so a barrier there fires a mismatched number of times across ranks
+-> oneCCL `allreduce_scaleout` participation mismatch / hang
+(`atl_comm->wait fails with status: 1`), seen on 80B TP=4 / 744 ranks.
+
+To get the fix into a venv (torch-free package, safe with `--no-deps`):
+```bash
+.venv/bin/python3 -m pip install --no-deps --no-cache --force-reinstall \
+  'git+https://github.com/saforem2/blendcorpus@74b09fd44f8a9974568c977b23c05b11b1148668'
+# then rebuild the broadcast tarball: tar -czf .venv.tar.gz --directory <parent> .venv
+```
+The repo `.venv` was on the pre-fix `3926c542` (Jun 2) which had the
+subgroup barriers but not the global one -- hence it still raced.
+
+### Legacy workaround (pre-fix venvs only)
+If stuck on a pre-`74b09fd` blendcorpus, pre-build the cache so the big
+run finds it warm. NOTE this is imperfect: `prewarm_blendcorpus_cache.sh`
+still uses all ranks (so it can itself race at TP>1) and does not pass
+`--training.global-batch-size`, so the cache hash (keyed on
+`num_samples = GBS x train_iters`) won't match a target run with a
+different GBS. Prefer the venv upgrade above.
 
 ## Related
 
@@ -138,9 +165,17 @@ broadcast).
 
 ## Status
 
-Open. Workaround in place (reuse `CKPT_DIR` between dispatches).
-80B production has not benefited because every 80B dispatch starts
-fresh (no successful prior dispatch to inherit a cache from); 80B
-production has additionally been blocked by the separate
-[node-SIGSEGV pattern](../../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md#what-this-does-not-validate)
-documented in the 80B 256N production track record.
+**FIXED 2026-06-28** by the global-barrier patch in
+`saforem2/blendcorpus@74b09fd` (see "Fix" above). The repo `.venv` was
+upgraded from `3926c542` -> `74b09fd` and the broadcast tarball rebuilt,
+so fresh-CKPT_DIR runs (incl. 80B TP=4) no longer race. Validated when
+re-running the 80B 32N autoretry smoke that first exposed it
+(job 8574063 raced on the old venv; the re-run on `74b09fd` is the
+verification -- see
+[`docs/experiments/agpt/aurora`](../../experiments/agpt/aurora/)).
+
+Historical context: previously open with only the "reuse `CKPT_DIR`"
+workaround; 80B never benefited because every 80B dispatch started fresh
+(no prior successful dispatch to inherit a warm cache from). The
+`CKPT_DIR`-reuse workaround is no longer required with the fixed venv,
+though reusing a warm cache is still slightly faster at startup.
