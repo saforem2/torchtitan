@@ -168,7 +168,11 @@ class EzpzValidator(Validator):
                 with self.validation_context():
                     assert len(model_parts) == 1
                     predictions = model_parts[0](inputs, **extra_kwargs)
-                    loss_sum = self.loss_fn(predictions, labels)
+                    # loss_fn (BaseLoss.__call__) returns (loss, metrics_dict)
+                    # -- upstream validate.py unpacks the same way. Without the
+                    # unpack, loss_sum is a tuple and loss_sum.detach() below
+                    # raises AttributeError on the first validation batch.
+                    loss_sum, _ = self.loss_fn(predictions, labels)
 
             accumulated_losses.append(loss_sum.detach() / global_valid_tokens)
             num_steps += 1
