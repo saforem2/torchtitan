@@ -1,115 +1,108 @@
-# Proposal: atomic-rename fix for the blendcorpus `_build_index_mappings` race (the real runtime fix)
+# blendcorpus index-cache race: atomic-rename fix landed (`041d015f`) + one follow-up TOCTOU bug
 
-> **Target repo:** `saforem2/blendcorpus` (NOT torchtitan-ezpz). This is the
-> durable, barrier-free fix that makes the index cache build correctly at
-> runtime at any TP -- eliminating the need for a pre-warm step entirely.
+> **Target repo:** `saforem2/blendcorpus` (branch `feat/remove-deepspeed`).
+> The atomic-rename fix `041d015f` is the right approach and eliminates the
+> mass race. Hardware testing surfaced ONE small remaining bug in the poll
+> guard (a TOCTOU on `os.path.getsize`) -- details + one-line fix below.
 
-## The problem (recap)
+## Background: the original race (fixed)
 
-`blendcorpus/data/gpt_dataset.py::_build_index_mappings` builds the per-corpus
-`*_doc_idx.npy` / `*_sample_idx.npy` / `*_shuffle_idx.npy` on rank 0, writing
-each to its **final filename directly** via `np.save`, then ALL ranks fall
-through to `np.load` those same files -- with **no synchronization** between the
-write and the read. A non-rank-0 reader that reaches `np.load` while rank 0 is
-mid-write sees the final filename present but incomplete:
-`EOFError: No data left in file` / `ValueError: mmap length is greater than
-file size` / `_pickle.UnpicklingError: invalid load key '\x00'`.
+`gpt_dataset.py::_build_index_mappings` built the per-corpus
+`*_{doc,sample,shuffle}_idx.npy` on rank 0, writing each to its **final**
+filename via `np.save`, then ALL ranks `np.load`'d them with no
+synchronization. At TP>1, ~(1 - 1/TP) of ranks (TP-coord != 0, not gated by
+any sibling subgroup barrier) raced ahead and mmap'd a file mid-write:
+`EOFError` / `mmap length > file size` / `invalid load key '\x00'`. Verified
+on 80B TP=4 cold cache: jobs 8574063 (32N) and 8574172 (4N) crashed with
+~75% of ranks hitting it. A `dist.barrier()` could not fix it (the
+data-dependent per-corpus/per-split call count -> oneCCL participation hang;
+that attempt was `c7eb628e`, reverted in `74b09fd`).
 
-At TP>1 this is not rare: ~(1 - 1/TP) of ranks (those whose TP coordinate != 0)
-are not gated by any sibling subgroup barrier and reliably race. Verified on 80B
-TP=4 cold-cache (jobs 8574063 32N, 8574172 4N -- ~75% of ranks crashed).
+## The fix that landed: `041d015f` (atomic writes + poll)
 
-## Why the two existing approaches fall short
+`saforem2/blendcorpus@041d015f` ("data: fix build-then-load index race at
+TP>1 (atomic writes + poll-for-complete)"):
+- **Writer (rank 0):** `_atomic_save` writes to
+  `f"{final}.tmp.{pid}.{rank}"` then `os.replace(saved, final)` -- atomic on
+  Lustre, so a reader never sees a torn file.
+- **Readers (all ranks):** `_wait_for_index_files(paths, timeout=1800, poll=0.5)`
+  polls each path until it exists, is non-empty, and `np.load(mmap)` validates
+  the header. File-polling, NOT a collective -> immune to the participation
+  hang the barrier had.
 
-1. **`dist.barrier()` between write and read** (tried in `c7eb628e`, reverted in
-   `74b09fd`): `_build_index_mappings` is called a *data-dependent* number of
-   times (per-corpus x per-split; whether a rank takes the build branch depends
-   on cache hit/miss), so the barrier fires a mismatched number of times across
-   ranks -> oneCCL `allreduce_scaleout` participation mismatch / hang
-   (`atl_comm->wait fails with status: 1`). A deadlock is strictly worse than
-   the race, hence the revert.
-2. **Pre-warm the cache** (current mitigation, `prewarm_blendcorpus_*.sh`):
-   works but is a manual pre-step, and the all-ranks prewarm can itself race at
-   TP>1 (must be run single-rank). Operational, not a real fix.
+**Hardware result (job 8574237, 4N TP=4, COLD cache, 2026-06-28):** the mass
+race is GONE -- **0 EOFError / mmap / invalid-load** across all ranks (vs ~75%
+before). The atomic-write side works as intended.
 
-## The fix: atomic publish via temp-file + `os.rename`
+## Remaining bug: TOCTOU on `os.path.getsize` in `_wait_for_index_files`
 
-`os.rename` (same filesystem) is **atomic** -- including on Lustre. If rank 0
-writes each index to a unique temp path, fsyncs, then renames to the final
-name, a reader doing `np.load(final)` sees **either**:
-- the file absent (final name not yet renamed) -> handle with a short retry, or
-- the file fully present and complete (rename published the finished file).
-
-It can NEVER see a partially-written final file. No barrier, no collective, no
-deadlock risk, correct at any TP. This is the standard "atomic publish" pattern.
-
-### Writer side (rank 0), in `_build_index_mappings`
-
-Replace each `np.save(idx_path[k], arr, ...)` with a temp-then-rename helper:
+Job 8574237 still failed -- but with a *different*, much narrower error: **2
+ranks** (rank1, rank2) raised an UNCAUGHT
+`FileNotFoundError: ... _shuffle_idx.npy` at `gpt_dataset.py:66`. That line is
+the poll guard:
 
 ```python
-import os, tempfile
+while True:
+    ok = False
+    if os.path.isfile(target) and os.path.getsize(target) > 0:   # <-- line 66
+        try:
+            np.load(target, allow_pickle=True, mmap_mode="r")
+            ok = True
+        except (ValueError, EOFError, OSError):
+            ok = False
+    if ok:
+        break
+    ...
+```
 
-def _atomic_np_save(final_path, arr):
-    # Write to a unique temp in the SAME dir (same fs -> rename is atomic),
-    # flush+fsync, then atomically publish via os.replace.
-    d = os.path.dirname(final_path)
-    fd, tmp = tempfile.mkstemp(dir=d, suffix=".npy.tmp")
+**Root cause (TOCTOU):** `os.path.isfile(target)` returns True, but between
+that check and `os.path.getsize(target)`, the builder's `os.replace(saved,
+final)` swaps the inode for `target` (the builder writes per-corpus indices
+sequentially; a reader polling corpus N can observe corpus N's file being
+(re)published). `getsize` on the briefly-absent path raises
+`FileNotFoundError` -- which is OUTSIDE the `try`, so it escapes uncaught and
+kills the rank. The `np.load` inside the `try` is protected (it catches
+`OSError`, and `FileNotFoundError` is an `OSError` subclass), but the
+`isfile`/`getsize` GUARD is not.
+
+This is rare (narrow window), which is why only 2 of 48 ranks hit it. The
+cascade: those 2 ranks die -> launch tears down -> rank-0 (builder) gets
+SIGTERM (signal 15) -> autoretry sees rc=143 and (mis)labels it "walltime".
+
+### One-line fix
+
+Move the existence/size probe inside the `try` (so every filesystem access on
+`target` is covered by the same `except OSError`):
+
+```python
+while True:
+    ok = False
     try:
-        with os.fdopen(fd, "wb") as f:
-            np.save(f, arr, allow_pickle=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, final_path)   # atomic publish (overwrites if present)
-    except BaseException:
-        try: os.unlink(tmp)
-        except OSError: pass
-        raise
+        if os.path.getsize(target) > 0:          # raises FileNotFoundError if absent -> caught below
+            np.load(target, allow_pickle=True, mmap_mode="r")
+            ok = True
+    except (ValueError, EOFError, OSError):       # FileNotFoundError is-a OSError
+        ok = False
+    if ok:
+        break
+    if time.time() - start > timeout:
+        raise TimeoutError(f"index file not complete after {timeout:.0f}s: {target}")
+    time.sleep(poll)
 ```
 
-Use `_atomic_np_save(idx_path["doc"], doc_idx)` etc. Also publish the `.desc`
-marker LAST (write desc to a tmp, fsync, rename) -- and treat `.desc` presence
-as the "all three idx files are complete" signal (it is written only after the
-three `np.save`s succeed).
+(`os.path.getsize` alone is enough -- it raises if the file is absent, which
+the `except` now treats as "keep polling". Drop the separate `os.path.isfile`
+to remove the two-syscall window entirely.)
 
-### Reader side (all ranks), before the `np.load` block
+### Validation once patched
+Re-run the cold-cache 4N TP=4 80B smoke (the config in 8574237) -- it should
+now build the index and proceed to training + checkpoint with zero
+FileNotFoundError and zero EOFError. Then 32N to confirm at scale.
 
-Because a non-builder can arrive before rank 0 has published, add a bounded
-spin-wait on the `.desc` marker (the last thing the writer publishes), then load:
-
-```python
-import time
-deadline = time.time() + 600  # generous; builds are seconds, fs latency varies
-while not os.path.exists(idx_path["desc"]):
-    if time.time() > deadline:
-        raise RuntimeError(f"timed out waiting for index cache {idx_path['desc']}")
-    time.sleep(0.5)
-doc_idx = np.load(idx_path["doc"], allow_pickle=True, mmap_mode="r")
-sample_idx = np.load(idx_path["sample"], allow_pickle=True, mmap_mode="r")
-shuffle_idx = np.load(idx_path["shuffle"], allow_pickle=True, mmap_mode="r")
-```
-
-The spin-wait is per-rank wall-clock (no collective), so it cannot deadlock the
-way a barrier does -- a rank that never sees the file fails its own timeout
-rather than hanging the job. (`.desc` is published only after all three idx
-files are renamed into place, so its presence guarantees the loads succeed.)
-
-## Why this is safe where the barrier was not
-
-- No `torch.distributed` collective is added, so the data-dependent call-count
-  that broke the barrier approach is irrelevant.
-- `os.replace` is atomic on POSIX + Lustre; readers never observe a torn file.
-- The spin-wait degrades to an immediate load on a cache hit (`.desc` already
-  present), so the warm-cache fast path is unchanged.
-
-## Validation plan (once patched in saforem2/blendcorpus)
-
-1. Reinstall the patched blendcorpus into `.venv` (`--no-deps`), rebuild tarball.
-2. Re-run the 80B 4N TP=4 smoke from a **cold** `CKPT_DIR` -- must build the
-   index and proceed to training with ZERO EOFError/mmap/invalid-load, no
-   prewarm.
-3. Re-run at 32N TP=4 (the original failure scale) to confirm at scale.
-4. Confirm warm-cache path still fast (second run loads instantly).
-
-Until this lands, the operational workaround is the single-rank prewarm
-(`scripts/prewarm_blendcorpus_singlerank.sh`).
+## Operational status
+- Venv currently on `041d015f` (mass race fixed; rare TOCTOU remains).
+- Until the one-liner lands, a cold-`CKPT_DIR` 80B run can still trip the
+  TOCTOU. Mitigation: single-rank prewarm
+  (`scripts/prewarm_blendcorpus_singlerank.sh`) so readers always hit a fully
+  warm cache (no concurrent builder -> no TOCTOU). A warm-cache run (reused
+  `CKPT_DIR`) is unaffected.
