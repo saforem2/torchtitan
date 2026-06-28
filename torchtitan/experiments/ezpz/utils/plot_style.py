@@ -15,21 +15,50 @@ Reproduce font setup once per machine (login node, with proxy):
 """
 from __future__ import annotations
 
+import importlib.util
+import warnings
 from pathlib import Path
 
-import matplotlib
+import matplotlib  # noqa: F401
 import matplotlib.font_manager as _fm
 import matplotlib.pyplot as plt
-
-import ambivalent
 
 _IOSEVKA_DIR = Path.home() / ".local/share/fonts/Iosevka"
 
 _applied = False
 
 
+def _ambivalent_stylefile() -> str | None:
+    """Locate ambivalent's bundled .mplstyle WITHOUT importing the package.
+
+    `import ambivalent` executes its __init__, which imports IPython -- absent
+    from the XPU training .venv, so a plain import raises ModuleNotFoundError
+    there. The stylesheet itself is a static file in the package dir, so we
+    find the package location via importlib's finder (no execution) and read
+    the .mplstyle directly. This lets the in-process LR finder pick up the
+    house style on the same env that runs training.
+    """
+    try:
+        spec = importlib.util.find_spec("ambivalent")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    for loc in spec.submodule_search_locations:
+        cand = Path(loc) / "stylefiles" / "ambivalent.mplstyle"
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 def apply_style(font_family: str | list[str] = "Iosevka") -> None:
-    """Apply ambivalent style + Iosevka font (idempotent)."""
+    """Apply ambivalent style + Iosevka font (idempotent).
+
+    Import-safe in environments without IPython (e.g. the XPU training
+    .venv): loads the ambivalent stylesheet from its file rather than
+    importing the package. Falls back to matplotlib defaults with a warning
+    if the stylesheet can't be located.
+    """
     global _applied
     if _applied:
         return
@@ -37,7 +66,14 @@ def apply_style(font_family: str | list[str] = "Iosevka") -> None:
         for f in _IOSEVKA_DIR.iterdir():
             if f.suffix.lower() in (".ttf", ".ttc", ".otf"):
                 _fm.fontManager.addfont(str(f))
-    plt.style.use(ambivalent.STYLES["ambivalent"])
+    stylefile = _ambivalent_stylefile()
+    if stylefile is not None:
+        plt.style.use(stylefile)
+    else:
+        warnings.warn(
+            "ambivalent stylesheet not found; using matplotlib defaults",
+            stacklevel=2,
+        )
     if isinstance(font_family, str):
         font_family = [font_family, "DejaVu Sans Mono", "monospace"]
     plt.rcParams["font.family"] = font_family

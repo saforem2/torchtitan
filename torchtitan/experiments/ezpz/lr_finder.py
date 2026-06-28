@@ -313,17 +313,15 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            try:
-                import ambivalent
+            # House style (ambivalent + Iosevka), matching the production /
+            # eval / docs charts. apply_style is import-safe in the XPU
+            # training .venv (loads the stylesheet from file rather than
+            # importing ambivalent, which would pull IPython).
+            from torchtitan.experiments.ezpz.utils.plot_style import (
+                apply_style,
+            )
 
-                plt.style.use(ambivalent.STYLES["ambivalent"])
-            except ImportError as e:
-                import warnings
-
-                warnings.warn(
-                    f"ambivalent style unavailable, using matplotlib defaults: {e}",
-                    stacklevel=2,
-                )
+            apply_style()
 
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(lrs, losses, linewidth=1.5)

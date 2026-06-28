@@ -138,6 +138,13 @@ batch sizes (TP=4 throughout; small-GBS points at 8N/dp=24, larger points at
 
 ![AdamW LR-ceiling and min-loss vs GBS](figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png)
 
+The underlying loss-vs-LR curves, one line per batch size, show the
+transition directly: the small-batch U-minima (144-1152) sit near lr~1.5e-5,
+while the GBS=6144 curve has slid left to lr~1e-6 and just descends to the
+NaN cliff with no minimum at all:
+
+![80B AdamW loss vs LR, all GBS](figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png)
+
 | GBS | nodes | usable/min LR | min loss | sweep | shape |
 |----:|------:|---------------|---------:|-------|-------|
 | 144  | 8  | 1.0e-5  | 11.73 | 1e-6 -> 1e-3 (15/15) | clean U-min |
