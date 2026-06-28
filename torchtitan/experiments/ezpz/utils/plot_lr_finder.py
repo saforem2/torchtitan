@@ -21,11 +21,11 @@ import argparse
 import csv
 from pathlib import Path
 
-import ambivalent
 import matplotlib.pyplot as plt
 import numpy as np
 
 from torchtitan.experiments.ezpz.lr_finder import find_optimal_lr
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 
 OPTIMIZER_COLORS = {
@@ -81,7 +81,7 @@ def plot_single_model(
     output_dir: Path,
 ) -> Path:
     """Plot LR vs loss for all optimizers of a single model."""
-    plt.style.use(ambivalent.STYLES["ambivalent"])
+    apply_style()
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -174,7 +174,7 @@ def plot_comparison(
     output_dir: Path,
 ) -> Path:
     """Plot all models side-by-side for comparison."""
-    plt.style.use(ambivalent.STYLES["ambivalent"])
+    apply_style()
 
     models = sorted(results.keys())
     n_models = len(models)
@@ -250,7 +250,7 @@ def plot_optimal_lr_summary(
     output_dir: Path,
 ) -> Path:
     """Bar chart of optimal LR per model x optimizer."""
-    plt.style.use(ambivalent.STYLES["ambivalent"])
+    apply_style()
 
     models = sorted(results.keys())
     optimizers_all = sorted(
