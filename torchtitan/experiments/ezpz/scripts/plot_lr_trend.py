@@ -1,0 +1,297 @@
+"""Regenerate the LR-finder trend + per-GBS figures with house style.
+
+Applies the ambivalent stylesheet + Iosevka font (matching the production /
+eval / SFT charts) and rebuilds, from the isolated per-GBS CSVs:
+
+  agpt/2b/figures/
+    lr_ceiling_vs_gbs_2b_vs_80b.png        (2B vs 80B usable-LR overlay)
+    lr_finder_2b_gbs12288_all_optimizers.png
+    lr_finder_2b_loss_vs_lr_by_gbs.png     (NEW: one loss-vs-LR curve per GBS)
+  agpt/80b/figures/
+    sunspot_80b_adamw_lr_ceiling_vs_gbs.png
+    sunspot_80b_gbs6144_all_optimizers.png
+    sunspot_80b_adamw_loss_vs_lr_by_gbs.png  (NEW)
+
+Style is loaded from the ambivalent .mplstyle FILE directly (not `import
+ambivalent`) because that package pulls IPython, which is absent from the
+XPU .venv; the stylesheet + Iosevka registration reproduce
+utils.plot_style.apply_style() output exactly. Run from repo root with the
+.venv active.
+"""
+from __future__ import annotations
+
+import csv
+import glob
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.font_manager as fm  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+
+DOCS = Path("torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt")
+
+
+def apply_house_style() -> None:
+    """ambivalent .mplstyle + Iosevka, without importing the package."""
+    hits = glob.glob(
+        ".venv/**/ambivalent/stylefiles/ambivalent.mplstyle", recursive=True
+    )
+    iosevka = Path.home() / ".local/share/fonts/Iosevka"
+    if iosevka.is_dir():
+        for f in iosevka.iterdir():
+            if f.suffix.lower() in (".ttf", ".ttc", ".otf"):
+                fm.fontManager.addfont(str(f))
+    if hits:
+        plt.style.use(hits[0])
+    plt.rcParams["font.family"] = ["Iosevka", "DejaVu Sans Mono", "monospace"]
+
+
+def load_curve(path: str):
+    """Return (lrs, losses) with NaN losses as None, last sweep only."""
+    rows = list(csv.DictReader(open(path)))[-15:]
+    lrs, losses = [], []
+    for r in rows:
+        lrs.append(float(r["learning_rate"]))
+        try:
+            v = float(r["loss"])
+            losses.append(v if v == v else None)
+        except (ValueError, TypeError):
+            losses.append(None)
+    return lrs, losses
+
+
+def _finite(lrs, losses):
+    pts = [(x, y) for x, y in zip(lrs, losses) if y is not None]
+    return ([p[0] for p in pts], [p[1] for p in pts])
+
+
+def csv_2b(gbs: int, opt: str) -> str:
+    return f"outputs/lrtrend-2b/gbs{gbs}/lr_finder/ezpz/ezpz.agpt/2b/{opt}/lr_finder_data.csv"
+
+
+# ---------------------------------------------------------------------------
+# Per-GBS loss-vs-LR curve family (the requested view: one line per batch)
+# ---------------------------------------------------------------------------
+def plot_loss_vs_lr_by_gbs_2b(out: Path) -> None:
+    gbs_list = [192, 384, 768, 1536, 3072, 6144, 12288, 24576]
+    cmap = plt.cm.viridis
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for i, g in enumerate(gbs_list):
+        p = csv_2b(g, "adamw")
+        if not Path(p).exists():
+            continue
+        fx, fy = _finite(*load_curve(p))
+        if not fx:
+            continue
+        c = cmap(i / (len(gbs_list) - 1))
+        ax.plot(fx, fy, "-o", ms=4, color=c, label=f"GBS={g}", zorder=3)
+        mi = min(range(len(fy)), key=lambda k: fy[k])
+        ax.scatter([fx[mi]], [fy[mi]], s=90, facecolors="none",
+                   edgecolors=c, linewidths=1.5, zorder=4)
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title("agpt 2B AdamW: loss vs LR, one curve per batch size\n"
+                 "(clean U-min at every GBS; circles mark each minimum)")
+    ax.legend(fontsize=8, ncol=2, title="global batch")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def plot_loss_vs_lr_by_gbs_80b(out: Path) -> None:
+    # 80B adamw per-GBS: small-batch (8N) + reruns (64N) + the 6144 cliff.
+    sources = {
+        144: "outputs/lrtrend/gbs144",
+        288: "outputs/lrtrend/gbs288",
+        576: "outputs/lrtrend/gbs576",
+        1152: "outputs/lrtrend/gbs1152-rerun",
+        2304: "outputs/lrtrend/gbs2304-rerun2",
+        4608: "outputs/lrtrend/gbs4608-rerun",
+    }
+    # GBS=6144 adamw curve (its live CSV was overwritten by trend probes;
+    # values from the dated experiment record).
+    cliff_lr = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7,
+                3.981e-7, 7.356e-7]
+    cliff_loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844,
+                  12.785]
+    gbs_order = [144, 288, 576, 1152, 2304, 4608, 6144]
+    cmap = plt.cm.plasma
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for i, g in enumerate(gbs_order):
+        c = cmap(i / (len(gbs_order) - 1))
+        if g == 6144:
+            fx, fy = cliff_lr, cliff_loss
+        else:
+            hits = glob.glob(f"{sources[g]}/**/80B/adamw/lr_finder_data.csv",
+                             recursive=True)
+            if not hits:
+                continue
+            fx, fy = _finite(*load_curve(hits[0]))
+            if not fx:
+                continue
+        lab = f"GBS={g}" + (" (cliff->NaN)" if g == 6144 else "")
+        ax.plot(fx, fy, "-o", ms=4, color=c, label=lab, zorder=3)
+        mi = min(range(len(fy)), key=lambda k: fy[k])
+        ax.scatter([fx[mi]], [fy[mi]], s=90, facecolors="none",
+                   edgecolors=c, linewidths=1.5, zorder=4)
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title("agpt 80B AdamW: loss vs LR, one curve per batch size\n"
+                 "(U-min shrinks + usable LR falls as GBS grows; 6144 cliffs to NaN)")
+    ax.legend(fontsize=8, ncol=2, title="global batch")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def _min(lrs, losses):
+    fx, fy = _finite(lrs, losses)
+    i = min(range(len(fy)), key=lambda k: fy[k])
+    return fx[i], fy[i]
+
+
+# ---------------------------------------------------------------------------
+# Regenerate the 4 existing figures with house style (were raw matplotlib).
+# ---------------------------------------------------------------------------
+def plot_2b_all_optimizers(out: Path, gbs: int = 12288) -> None:
+    fig, ax = plt.subplots(figsize=(9, 6))
+    specs = [("adamw", "AdamW"), ("mano", "mano"), ("sophiag", "sophiag")]
+    for opt, lab in specs:
+        p = csv_2b(gbs, opt)
+        if not Path(p).exists():
+            continue
+        fx, fy = _finite(*load_curve(p))
+        mlr, mloss = _min(*load_curve(p))
+        line, = ax.plot(fx, fy, "-o", ms=6, label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
+        ax.scatter([mlr], [mloss], s=170, facecolors="none",
+                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title(f"agpt 2B LR finder at the PRODUCTION batch (GBS={gbs}, dp=192)\n"
+                 "all optimizers have clean U-minima, 0 NaN -- no cliff (cf. 80B)")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def plot_80b_all_optimizers(out: Path) -> None:
+    base = "outputs/lr_finder/ezpz/ezpz.agpt/80B"
+    # adamw 6144 from the dated record (live CSV overwritten by trend probes)
+    adamw_lr = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7,
+                3.981e-7, 7.356e-7]
+    adamw_loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844,
+                  12.785]
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for opt, lab in [("mano", "mano -- U-min @ 1.6e-5 (best, 0 NaN)"),
+                     ("sophiag", "sophiag -- U-min @ 2.5e-6, lowest loss (0 NaN)")]:
+        p = f"{base}/{opt}/lr_finder_data.csv"
+        if not Path(p).exists():
+            continue
+        fx, fy = _finite(*load_curve(p))
+        mlr, mloss = _min(*load_curve(p))
+        line, = ax.plot(fx, fy, "-o", ms=6, label=lab)
+        ax.scatter([mlr], [mloss], s=170, facecolors="none",
+                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
+    ax.plot(adamw_lr, adamw_loss, "-^", ms=7, color="#111111", zorder=5,
+            label="AdamW -- NaN cliff: last finite 7.4e-7, NaN from 1.36e-6")
+    # mark AdamW's last-finite point (its "min" is just the cliff edge)
+    ax.scatter([7.356e-7], [12.785], s=170, facecolors="none",
+               edgecolors="#111111", linewidths=1.8, zorder=6)
+    ax.annotate("AdamW: last finite 7.4e-7,\nthen NaN (no real min)",
+                xy=(7.356e-7, 12.785), xytext=(1.0e-8, 12.35), fontsize=8,
+                color="#111111",
+                arrowprops=dict(arrowstyle="->", color="#111111"))
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title("agpt 80B LR finder at the PRODUCTION batch (GBS=6144, dp=192)\n"
+                 "mano & sophiag have real U-minima; AdamW only cliffs to NaN")
+    ax.legend(fontsize=8.5, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
+    b2 = [(192, 8.58e-3), (384, 1.585e-2), (768, 1.585e-2), (1536, 8.58e-3),
+          (3072, 8.58e-3), (6144, 8.58e-3), (12288, 1.585e-2), (24576, 1.585e-2)]
+    b80_u = [(144, 1.0e-5), (288, 1.585e-5), (576, 1.585e-5), (1152, 1.585e-5)]
+    cliff = (6144, 7.4e-7)
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot([p[0] for p in b2], [p[1] for p in b2], "-o", ms=8,
+            label="2B AdamW (dim=2048) -- clean U-min, 0 NaN")
+    ax.plot([p[0] for p in b80_u], [p[1] for p in b80_u], "-o", ms=8,
+            color="#d62728", label="80B AdamW (dim=9216) -- U-min (small batch)")
+    ax.plot([cliff[0]], [cliff[1]], "v", ms=13, color="#d62728",
+            label="80B AdamW -- NaN cliff (no min)")
+    ax.plot([b80_u[-1][0], cliff[0]], [b80_u[-1][1], cliff[1]], "--",
+            color="#d62728", alpha=0.7)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_ylim(3e-7, 6e-2)
+    ax.set_xlabel("Global batch size (GBS)")
+    ax.set_ylabel("AdamW usable / min LR")
+    ax.set_title("LR-finder usable LR vs batch: 2B vs 80B (TP-adjusted, dp=192)")
+    ax.annotate("2B: flat at ~1e-2 across 128x batch (192 -> 24576), 0 NaN",
+                xy=(1536, 8.58e-3), xytext=(210, 3.0e-3), fontsize=9,
+                arrowprops=dict(arrowstyle="->"))
+    ax.annotate("80B: usable LR falls ~20x, then NaN cliff by GBS=6144",
+                xy=cliff, xytext=(230, 9e-5), fontsize=9, color="#d62728",
+                arrowprops=dict(arrowstyle="->", color="#d62728"))
+    ax.legend(fontsize=9, loc="lower left")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def plot_80b_ceiling_vs_gbs(out: Path) -> None:
+    # adamw 80B trend: (gbs, min/usable LR, min loss, shape)
+    pts = [(144, 1.0e-5, 11.73, "U"), (288, 1.585e-5, 11.81, "U"),
+           (576, 1.585e-5, 11.83, "U"), (2304, 4.394e-6, 11.24, "partial"),
+           (6144, 7.4e-7, 12.78, "cliff")]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    for g, lr, _, sh in pts:
+        mk = "v" if sh == "cliff" else "o"
+        col = "#d62728" if sh == "cliff" else ("#ff7f0e" if sh == "partial" else "#1f77b4")
+        ax1.scatter([g], [lr], s=90, marker=mk, color=col, edgecolor="k",
+                    linewidth=0.5, zorder=3)
+    ax1.plot([p[0] for p in pts], [p[1] for p in pts], "-", color="0.6", zorder=1)
+    ax1.set_xscale("log"); ax1.set_yscale("log")
+    ax1.set_xlabel("Global batch size (GBS)")
+    ax1.set_ylabel("AdamW usable / min LR")
+    ax1.set_title("80B AdamW: usable LR falls as batch grows")
+    ax1.annotate("NaN cliff", xy=(6144, 7.4e-7), xytext=(1500, 1.8e-7),
+                 fontsize=8, color="#d62728",
+                 arrowprops=dict(arrowstyle="->", color="#d62728"))
+    ax2.plot([p[0] for p in pts], [p[2] for p in pts], "-o", color="0.4")
+    ax2.set_xscale("log")
+    ax2.set_xlabel("Global batch size (GBS)")
+    ax2.set_ylabel("Min loss reached in 15-step sweep")
+    ax2.set_title("80B AdamW: min loss vs batch")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+if __name__ == "__main__":
+    apply_house_style()
+    # NEW: per-GBS loss-vs-LR curve families
+    plot_loss_vs_lr_by_gbs_2b(DOCS / "2b/figures/lr_finder_2b_loss_vs_lr_by_gbs.png")
+    plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
+    # RESTYLED: the 4 existing figures, now through the house stylesheet
+    plot_2b_all_optimizers(DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png")
+    plot_80b_all_optimizers(DOCS / "80b/figures/sunspot_80b_gbs6144_all_optimizers.png")
+    plot_ceiling_overlay_2b_vs_80b(DOCS / "2b/figures/lr_ceiling_vs_gbs_2b_vs_80b.png")
+    plot_80b_ceiling_vs_gbs(DOCS / "80b/figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png")

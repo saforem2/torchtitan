@@ -59,6 +59,12 @@ where AdamW cliffs to NaN):
 
 ![2B all optimizers at GBS=12288](figures/lr_finder_2b_gbs12288_all_optimizers.png)
 
+The full AdamW loss-vs-LR curve at every batch size (one line per GBS) makes
+the batch-independence visual -- all 8 curves share the same ~1e-2 minimum,
+no drift, no NaN:
+
+![2B AdamW loss vs LR, all GBS](figures/lr_finder_2b_loss_vs_lr_by_gbs.png)
+
 ### Contrast with 80B (same dp=192)
 
 | | 2B (dim=2048) | 80B (dim=9216) |
