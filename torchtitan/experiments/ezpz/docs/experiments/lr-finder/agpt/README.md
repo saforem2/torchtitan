@@ -15,37 +15,63 @@ figures live under each model page's `figures/`.
 
 ## Recommended Learning Rates
 
-Small-batch finder (`sqrt(2/(5*d))` weight init, 5% warmup, Sunspot 2026-04-14,
-GBS at the 2-node default):
+**Calibrate at your production batch size, not a small one.** The optimal LR
+is batch-dependent, and for large models the small-batch number is actively
+misleading -- the 80B small-batch finder said "AdamW 1.1e-5" but at the real
+production batch (GBS=6144) AdamW's usable LR collapses to ~7e-7 and 1e-6
+sits on a NaN cliff. Prefer the production-batch results below; treat the
+small-batch table as a rough starting point for *small* runs only.
+
+### 80B at the production batch (GBS=6144) -- the validated guidance
+
+| Optimizer @ GBS=6144 | usable LR | min loss | behavior |
+|---|---|---|---|
+| **mano** | **~1.6e-5 (use ~3e-6)** | 12.62 | **clean broad U-min, 0 NaN** |
+| **sophiag** | ~2.5e-6 (use ~1e-6) | **12.60** | real U-min, 0 NaN, narrower band |
+| AdamW | ~7e-7 (use ~5e-7) | 12.78 | NaN cliff at 1.36e-6 |
+| muon | -- | -- | broken (NaN from step 7) |
+
+**Recommendation: do not run AdamW @ 1e-6 at GBS=6144; mano is the safest 80B
+production optimizer, sophiag a viable second.** Full detail + the
+LR-ceiling-vs-GBS trend: [agpt 80B](80b/README.md).
+
+### 2B at the production batch (GBS=6144) -- the validated guidance
+
+GBS=6144 is the common production batch (the 2B 256N chain and all 80B runs).
+The 2B chains also run larger: GBS=12288 (512N) and 24576 (1024N) -- 2B is
+batch-independent across the whole 192..24576 range (clean U-min, 0 NaN
+everywhere; no cliff -- the collapse is large-model-specific). At GBS=6144:
+
+| Optimizer @ GBS=6144 | min LR | min loss | suggested (min/10) |
+|---|---|---|---|
+| AdamW | 8.6e-3 | 11.57 | ~8.6e-4 |
+| mano | 1.6e-2 | 11.71 | ~1.6e-3 |
+| sophiag | 1.4e-3 | 12.29 | ~1.4e-4 |
+
+Note: 2B production currently runs sophiag at **LR=2.28e-5**, which is ~60x
+below the finder's suggested ~1.4e-3 -- i.e. there is substantial LR headroom
+at this batch (consistent with small models being forgiving). Worth a
+convergence A/B before changing a live run, but the finder says a higher 2B
+LR is safe. Full per-GBS detail: [agpt 2B](2b/README.md).
+
+### Small-batch finder (reference only -- does NOT transfer to large-model production)
+
+`sqrt(2/(5*d))` weight init, 5% warmup, Sunspot 2026-04-14, GBS at the 2-node
+default. Useful as a rough starting LR for small / small-batch runs; for 20B+
+at production batch, re-run the finder at that batch.
 
 | Model | AdamW   | Muon    | SophiaG |
 |-------|---------|---------|---------|
-| 2B    | **1.3e-3**| **2.4e-3**| **3.1e-4**|
-| 20B   | **4.0e-4**| **1.7e-4**| **1.8e-5**|
-| 80B (small batch, GBS=192) | **1.1e-5** | N/A[1] | N/A[1] |
+| 2B    | 1.3e-3 | 2.4e-3 | 3.1e-4 |
+| 20B   | 4.0e-4 | 1.7e-4 | 1.8e-5 |
+| 80B (GBS=192) | 1.1e-5 [1] | N/A[2] | N/A[2] |
 
-[1] At GBS=192, Muon/SophiaG NaN'd: bf16 overflow in Newton-Schulz (Muon) and
-Hessian estimate (SophiaG) on 9216-dim matrices. **At the production batch
-GBS=6144 SophiaG is NOT broken** (real U-min at lr~2.5e-6); only Muon stays
-broken. See [agpt 80B](80b/README.md).
-
-> **80B at the PRODUCTION batch (GBS=6144) is different -- the small-batch
-> number above does NOT transfer.** Re-running the finder at the real
-> production batch (32x larger) shows AdamW's usable LR collapses from
-> 1.1e-5 to **~7e-7** (a NaN cliff), so the production default LR=1e-6 sits
-> *on the cliff*. **mano** is the best-behaved optimizer at GBS=6144 (clean
-> U-min at 1.6e-5).
->
-> | Optimizer @ GBS=6144 | usable LR | min loss | behavior |
-> |---|---|---|---|
-> | **mano** | **~1.6e-5 (use ~3e-6)** | 12.62 | **clean broad U-min, 0 NaN** |
-> | **sophiag** | ~2.5e-6 (use ~1e-6) | **12.60** | real U-min, 0 NaN, narrower band |
-> | AdamW | ~7e-7 (use ~5e-7) | 12.78 | NaN cliff at 1.36e-6 |
-> | muon | -- | -- | broken (NaN from step 7) |
->
-> Full detail: [agpt 80B](80b/README.md). **Recommendation: do not run AdamW
-> @ 1e-6 at GBS=6144; mano is the safest 80B production optimizer, sophiag a
-> viable second.**
+[1] Superseded for production -- see the GBS=6144 table above (real ceiling
+~7e-7).
+[2] At GBS=192, Muon/SophiaG NaN'd: bf16 overflow in Newton-Schulz (Muon) and
+Hessian estimate (SophiaG) on 9216-dim matrices. **At GBS=6144 SophiaG is NOT
+broken** (real U-min at lr~2.5e-6); only Muon stays broken. See
+[agpt 80B](80b/README.md).
 
 ## Key Findings (cross-model / cross-machine)
 

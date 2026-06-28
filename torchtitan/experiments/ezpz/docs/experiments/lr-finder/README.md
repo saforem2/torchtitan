@@ -88,6 +88,18 @@ Two heuristics (both implemented):
   before recording
 - The sweep runs the **full training step** including gradient clipping,
   so the curve reflects realistic training dynamics
+- **The sweep is cumulative, not per-LR-independent.** Each step takes one
+  real optimizer update at the current LR, *then* raises the LR -- the model
+  keeps training throughout. So the absolute loss depth depends on the number
+  of sweep steps: a 100-step sweep reaches a lower minimum than a 15-step
+  sweep simply because it has done ~6x more updates by the time it hits the
+  optimal-LR region, even at the same model/init/LR. **Only the LR at the
+  minimum is comparable across sweeps of different length; the loss value is
+  not.** (Concretely: the Apr-2026 2B finders ran 100 steps and bottom out
+  near loss ~9-10, while the 2026-06-28 GBS-trend sweeps ran 15 steps and
+  bottom out near ~11.3 -- both at the same min LR ~8.6e-3. The shorter sweep
+  was chosen because high-GBS / 80B steps are expensive and the finder only
+  needs to locate the LR, not converge.)
 
 ---
 
