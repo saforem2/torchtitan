@@ -32,6 +32,14 @@ every job via a oneCCL collective abort; use `torchmuon` if needed).
 
 ### Result: 2B never cliffs
 
+> **Loss-depth note:** this trend swept **15 steps** per GBS, so its minima
+> bottom out near loss ~11.3. The older 2B finders further down this page
+> (2026-04-12/13/14) swept **100 steps** and reach loss ~9-10. That is a
+> sweep-length artifact -- the finder trains cumulatively, so more steps =
+> lower loss at the same LR -- **not** a difference in the optimal LR (both
+> agree at ~8.6e-3). See [the methodology note](../../README.md#important-notes).
+> Compare these figures by the LR-of-minimum, not the loss value.
+
 ![2B vs 80B usable LR vs GBS](figures/lr_ceiling_vs_gbs_2b_vs_80b.png)
 
 Every point is a clean U-min with **0 NaN** -- across a **128x** batch range.
