@@ -93,13 +93,17 @@ Two heuristics (both implemented):
 
 ## Results
 
-Results are split by model family, each with its own consolidated report
-(all machines and dates in one page, figures in a shared `figures/` dir):
+Results are split by model family, then by model size (each size has its own
+page + `figures/`):
 
-- **[agpt (dense)](agpt/README.md)** -- 2B / 20B / 80B across Aurora, Sunspot,
-  Polaris. Includes the headline recommended-LR table, cross-machine
-  comparison, and the GBS=6144 production-batch finding.
-- **[moe (sparse)](moe/README.md)** -- DeepSeek-style MoE configs on Sunspot.
+- **agpt (dense)** -- [index](agpt/README.md) (master LR table + cross-model
+  findings), with per-size pages: [2B](agpt/2b/README.md) /
+  [20B](agpt/20b/README.md) /
+  [80B](agpt/80b/README.md) (incl. the GBS=6144 production-batch finding +
+  LR-ceiling-vs-GBS trend).
+- **moe (sparse)** -- [index](moe/README.md), with per-config pages:
+  [debugmodel](moe/debugmodel/README.md) / [500M](moe/500m/README.md) /
+  [2B](moe/2b/README.md) / [4B](moe/4b/README.md) / [7B](moe/7b/README.md).
 
 ### Headline recommended LRs (agpt, small-batch)
 
@@ -113,7 +117,7 @@ Results are split by model family, each with its own consolidated report
 80B *production* batch (GBS=6144) the AdamW number above does NOT hold -- its
 usable LR collapses to ~7e-7 (a NaN cliff) and mano becomes the best-behaved
 optimizer. See the
-[agpt GBS=6144 section](agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
+[agpt 80B page](agpt/80b/README.md).
 
 ### Cross-family key findings
 
@@ -177,12 +181,13 @@ documented in the Megatron-DeepSpeed notes.
 
 ## Reports
 
-Per-family consolidated pages (each holds all dates and machines):
+Per-model pages (each holds all dates / machines / batch sizes for that model):
 
-- **[agpt (dense)](agpt/README.md)** -- 2B / 20B / 80B, Aurora + Sunspot +
-  Polaris, 2026-04-12 through the 2026-06-27 GBS=6144 production-batch finding.
-- **[moe (sparse)](moe/README.md)** -- DeepSeek-style MoE configs, Sunspot
-  2026-04-21.
+- **agpt** -- [index](agpt/README.md) | [2B](agpt/2b/README.md) |
+  [20B](agpt/20b/README.md) | [80B](agpt/80b/README.md)
+- **moe** -- [index](moe/README.md) | [debugmodel](moe/debugmodel/README.md) |
+  [500M](moe/500m/README.md) | [2B](moe/2b/README.md) | [4B](moe/4b/README.md) |
+  [7B](moe/7b/README.md)
 
 ---
 
