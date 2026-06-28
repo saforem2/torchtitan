@@ -139,9 +139,24 @@ so always build the tarball first via `ezpz tar-env`. See
 
 ### Optimizer Constraints at Scale
 
-- **SophiaG/Muon broken at 80B:** bf16 overflow in Hessian/Newton-Schulz
-  at dim=9216. Use AdamW only for 80B.
-- **80B AdamW LR=1.1e-5 → NaN** at production GBS (1536–3072). Use LR=1e-6.
+- **Muon broken at 80B:** bf16 overflow in Newton-Schulz at dim=9216 (NaN
+  from step 7 regardless of LR; not relieved by batch size). Do NOT use Muon
+  at 80B.
+- **SophiaG broken at 80B ONLY at small batch.** It NaN'd at GBS=192, but at
+  the production batch GBS=6144 it runs clean with a real LR-finder minimum
+  at lr~2.5e-6 (larger batch smooths the Hessian grad*grad estimate below the
+  bf16 overflow threshold). It is a viable 80B optimizer at production batch.
+- **80B optimizer choice at GBS~6144 (measured 2026-06-27):** prefer **mano**
+  (safest: clean broad U-min, suggested LR ~3e-6) or **sophiag** (lowest
+  loss but narrower band, suggested LR ~1e-6). **AdamW is the worst of the
+  three at this batch.**
+- **80B AdamW at production GBS is on a NaN cliff.** At GBS=6144 the usable LR
+  ceiling is only ~7e-7; LR=1e-6 sits PAST the last stable point (NaN onset
+  1.36e-6), which is why GBS~6000 AdamW runs NaN nondeterministically. The
+  old "use LR=1e-6" guidance is unsafe -- if staying on AdamW use ~5e-7, but
+  prefer mano/sophiag. The small-batch "AdamW 1.1e-5" finder number does NOT
+  transfer (batch-dependent: ~14x lower ceiling at production). See
+  [`docs/experiments/lr-finder/agpt/README.md`](../docs/experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 - **torch.compile OOM at 512N:** 2B OOMs on GPU, 80B OOMs on CPU.
   Use `--compile.no-enable` for 512N jobs.
 - **torch.compile time:** ~7–15 min at 256N depending on model size.

@@ -19,9 +19,12 @@ GBS at the 2-node default):
 | 20B   | **4.0e-4**| **1.7e-4**| **1.8e-5**|
 | 80B (small batch, GBS=192) | **1.1e-5** | N/A[1] | N/A[1] |
 
-[1] 80B Muon/SophiaG broken: bf16 overflow in Newton-Schulz (Muon) and Hessian
-estimate (SophiaG) on 9216-dim matrices. See the
-[2026-04-21 80B section](#2026-04-21----80b--gas-sweep-sunspot).
+[1] At GBS=192, Muon/SophiaG NaN'd: bf16 overflow in Newton-Schulz (Muon) and
+Hessian estimate (SophiaG) on 9216-dim matrices. See the
+[2026-04-21 80B section](#2026-04-21----80b--gas-sweep-sunspot). **At the
+production batch GBS=6144 SophiaG is NOT broken** (real U-min at lr~2.5e-6);
+only Muon stays broken -- see the
+[2026-06-27 section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 
 > **80B at the PRODUCTION batch (GBS=6144) is different -- the small-batch
 > number above does NOT transfer.** Re-running the finder at the real
@@ -31,14 +34,18 @@ estimate (SophiaG) on 9216-dim matrices. See the
 > is the best-behaved optimizer at GBS=6144 -- a clean U-min at **1.6e-5**,
 > no divergence, lower loss than AdamW.
 >
-> | Optimizer @ GBS=6144 | usable LR | behavior |
-> |---|---|---|
-> | AdamW | ~7e-7 (use ~5e-7) | NaN cliff at 1.36e-6 |
-> | **mano** | **~1.6e-5 (use ~3e-6)** | **clean U-min, no NaN** |
+> | Optimizer @ GBS=6144 | usable LR | min loss | behavior |
+> |---|---|---|---|
+> | **mano** | **~1.6e-5 (use ~3e-6)** | 12.62 | **clean broad U-min, 0 NaN** |
+> | **sophiag** | ~2.5e-6 (use ~1e-6) | **12.60** | real U-min, 0 NaN, narrower band |
+> | AdamW | ~7e-7 (use ~5e-7) | 12.78 | NaN cliff at 1.36e-6 |
+> | muon | -- | -- | broken (NaN from step 7) |
 >
-> Full detail in the [2026-06-27 production-batch section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot)
-> below. **Recommendation: do not run AdamW @ 1e-6 at GBS=6144; strongly
-> consider switching 80B production to mano.**
+> Note **sophiag is NOT broken at this batch** (it was at GBS=192) -- only
+> muon still overflows. Full detail in the
+> [2026-06-27 production-batch section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot)
+> below. **Recommendation: do not run AdamW @ 1e-6 at GBS=6144; mano is the
+> safest 80B production optimizer, sophiag a viable second.**
 
 ## Key Findings (cross-machine)
 
@@ -84,6 +91,14 @@ This is because Muon's orthogonal momentum amplifies gradient scale differences.
 > collapses to **~7e-7**, and the production default LR=1e-6 sits **on the
 > NaN cliff**. mano -- marked "N/A / broken" in the old table -- is actually
 > the **best-behaved optimizer at this batch**.
+>
+> **Two-part correction to the "SophiaG/Muon broken at 80B" claim:** at this
+> batch **sophiag is NOT broken** -- it runs all 15 steps finite with a real
+> minimum at lr~2.5e-6 and the *lowest loss of all four optimizers* (12.60).
+> Only **muon** is broken as documented (NaN from step 7). The old "both NaN
+> regardless of LR" line came from the GBS=192 finder; the larger batch
+> smooths sophiag's Hessian `grad*grad` term below the bf16 overflow
+> threshold. (mano stays the safest production pick -- see below.)
 
 ### Why redo the finder at GBS=6144
 
@@ -103,27 +118,42 @@ dp_degree=192), one job per optimizer.
 | GBS | **6144** (production batch) |
 | Compile | disabled (80B AC+TP regression) |
 | Seq len | 8192 |
-| LR range | 1e-8 -> 1e-4, 15 steps |
-| Jobs | adamw 12469723, mano 12469724 |
+| LR range | 1e-8 -> 1e-4, 15 steps (adamw 1e-6 -> 1e-3) |
+| Jobs | adamw 12469723, mano 12469724, muon 12469725, sophiag 12469726 |
 
-### Headline result: AdamW cliffs, mano doesn't
+### Headline result: all four optimizers at the production batch
 
 ![AdamW vs mano LR-finder at GBS=6144](figures/sunspot_80b_gbs6144_adamw_vs_mano.png)
 
-| Optimizer | behavior @ GBS=6144 | usable LR | min loss | vs prod LR=1e-6 |
-|-----------|---------------------|-----------|----------|-----------------|
-| **AdamW** | NaN **cliff** (no minimum in range) | ~7.4e-7 (cliff-bounded) | 12.78 @ 7.4e-7 | **1e-6 is past the cliff** (NaN @ 1.36e-6) |
-| **mano** | clean **U-curve** | ~1.6e-5 (minimum-bounded) | **12.62 @ 1.6e-5** | comfortably stable |
-| muon | expected NaN (bf16 dim=9216) | -- | -- | -- |
-| sophiag | expected NaN (bf16 dim=9216) | -- | -- | -- |
+| Optimizer | behavior @ GBS=6144 | usable LR | min loss | NaN | verdict |
+|-----------|---------------------|-----------|----------|-----|---------|
+| **mano** | clean broad **U-curve** | ~1.6e-5 (min-bounded) | 12.62 @ 1.6e-5 | 0/15 | **best (safest) production pick** |
+| **sophiag** | real **U-min**, blow-up onset ~4.6e-6 | ~2.5e-6 (min-bounded) | **12.60 @ 2.5e-6** (lowest of all four) | 0/15 | **NOT broken at this batch** |
+| **AdamW** | NaN **cliff** (no minimum in range) | ~7.4e-7 (cliff-bounded) | 12.78 @ 7.4e-7 | 7/15 | **1e-6 is past the cliff** (NaN @ 1.36e-6) |
+| muon | NaN from step 7 (~4e-7) | -- | (12.91) | 9/15 | broken as documented (bf16 dim=9216) |
 
+- **mano**: a textbook LR-finder U -- descends to a real minimum at
+  lr=1.6e-5 (loss 12.62) then rises gently, no divergence across the whole
+  1e-8 -> 5.4e-5 sweep. **~20x more LR headroom than AdamW with a soft top.**
+- **sophiag**: descends cleanly to a real minimum at lr=2.5e-6 (loss 12.60,
+  the lowest of all four), then blows up sharply (grad_norm 14 -> 85 -> 132
+  over steps 10 -> 12). **Directly contradicts the GBS=192 finding that
+  sophiag NaNs by step 7 regardless of LR** -- at GBS=6144 it has a usable
+  region and the best minimum. Narrower safe band than mano, though.
 - **AdamW**: loss descends monotonically to lr=7.4e-7 (12.78), then NaNs
   at 1.36e-6 -- no minimum, just a wall. The production LR=1e-6 lands
   *between* the last stable point and the NaN, explaining the
   nondeterministic NaNs observed on GBS~6000 production attempts.
-- **mano**: a textbook LR-finder U -- descends to a real minimum at
-  lr=1.6e-5 (loss 12.62) then rises, no divergence across the whole
-  1e-8 -> 5.4e-5 sweep. **~20x more LR headroom and lower loss than AdamW.**
+- **muon**: NaN from step 7 (lr~4e-7) onward, exactly as the GBS=192 finder
+  reported -- the Newton-Schulz `A @ A` (9216x9216) overflow is not relieved
+  by the larger batch the way sophiag's Hessian term is.
+
+> **Data note:** the GBS=6144 AdamW numbers here come from the figures /
+> per-experiment record below, not from the live `.../80B/adamw/
+> lr_finder_data.csv` -- that CSV is keyed by `(model, optimizer)` only, so
+> the later GBS=2304 and GBS=288 trend probes overwrote the GBS=6144 AdamW
+> rows in place. The mano/sophiag/muon CSVs are unique (their optimizer ran
+> only at GBS=6144) and are stamped `global_batch_size=6144, world_size=768`.
 
 ![AdamW LR-finder GBS=6144](figures/sunspot_80b_gbs6144_adamw.png)
 
@@ -148,11 +178,17 @@ to set a large-batch production LR for AdamW at 80B.
 1. **Do not run AdamW at LR=1e-6 at GBS=6144** -- it is on the NaN cliff.
    If staying on AdamW, use **~5e-7** (under the 7.4e-7 stable point).
 2. **Strongly consider mano as the 80B production optimizer at this batch**
-   -- no cliff, ~20x LR headroom, lower loss. Suggested mano LR **~3e-6**
-   (min/5).
-3. **Confirm with a head-to-head convergence run** (mano @ ~3e-6 vs AdamW
-   @ ~5e-7, GBS=6144) before locking the config -- the finder measures
-   early-step stability/descent, not full convergence.
+   -- no cliff, ~20x LR headroom, soft top. Suggested mano LR **~3e-6**
+   (min/5). mano is the *safest* pick: the widest margin between a usable LR
+   and divergence.
+3. **sophiag is a viable second** (no longer "broken" at this batch): it has
+   the lowest minimum loss (12.60) but a narrower safe band -- blow-up onset
+   is only ~2x above its minimum (2.5e-6 -> 4.6e-6), vs mano's gentle rise.
+   If trying sophiag, stay conservative: LR **~1e-6** (min/2.5) with tight
+   grad clipping.
+4. **Confirm with a head-to-head convergence run** (mano @ ~3e-6 vs sophiag
+   @ ~1e-6 vs AdamW @ ~5e-7, GBS=6144) before locking the config -- the
+   finder measures early-step stability/descent, not full convergence.
 
 Raw per-experiment record + the in-progress LR-ceiling-vs-GBS trend sweep
 (8N probes, GBS=144..4608):
@@ -169,7 +205,7 @@ tiles, torch 2.13, compile disabled, seq_len=8192, LR 1e-6 -> 1.0 over 100 steps
 |-----------|-------------|---------|-----------|--------|
 | **AdamW** | **1.13e-5** | 1.13e-4 | 0/100 | Clean sweep |
 | **Muon** | N/A | NaN at step 7 | 93+/100 | Broken (bf16 overflow) |
-| **SophiaG** | N/A | NaN at step 7 | 93+/100 | Broken (bf16 overflow) |
+| **SophiaG** | N/A | NaN at step 7 | 93+/100 | Broken **at GBS=192** (see note) |
 
 **Muon/SophiaG bf16 overflow** -- both produce NaN regardless of LR at 80B
 (dim=9216): Muon's Newton-Schulz `A @ A` (9216x9216 matmul) overflows bf16,
@@ -177,6 +213,13 @@ SophiaG's Hessian estimate `grad * grad` overflows bf16. Confirmed
 LR-independent (NaN even at LR=1e-8). fp32 Newton-Schulz delays Muon NaN to
 step 16 but is 6x slower -- not viable. Overflow is model-size-specific: 20B
 (dim=5120) works fine for both.
+
+> **Correction (2026-06-27): the SophiaG "broken at 80B" verdict is
+> batch-specific.** At the production batch GBS=6144, SophiaG runs all 15
+> finder steps finite with a real minimum at lr~2.5e-6 (loss 12.60) -- the
+> larger batch smooths its Hessian `grad*grad` estimate below the bf16
+> overflow threshold. **Muon stays broken regardless of batch.** See the
+> [2026-06-27 production-batch section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 
 ![80B small-batch finder](figures/sunspot_80b.png)
 
