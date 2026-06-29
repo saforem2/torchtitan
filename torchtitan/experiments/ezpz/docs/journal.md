@@ -4,6 +4,53 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-28 (sunspot) -- LR-finder docs overhaul, 2B trend, 62nd sync, validator phantom fixed
+
+Docs/tooling-heavy session plus one real bug closed.
+
+- **LR-finder docs split per-model.** `docs/experiments/lr-finder/` went from
+  two consolidated family pages to `{agpt,moe}/<model>/README.md` +
+  per-model `figures/` (agpt 2b/20b/80b; moe debugmodel/500m/2b/4b/7b), each
+  family keeping an index README. All inbound links + anchors repointed.
+- **2B LR-ceiling-vs-GBS trend (jobs 12469769-776, 16N/dp=192, GBS
+  192..24576).** Headline: **2B never cliffs** -- AdamW usable LR flat at
+  ~1e-2 across the whole 128x batch range, 0 NaN, vs 80B's collapse to a
+  ~7e-7 NaN cliff. So the batch-dependent usable-LR collapse is a
+  LARGE-MODEL (dim=9216 bf16) phenomenon, not universal. Ran all 3 working
+  optimizers (adamw/mano/sophiag) at all 8 GBS; muon dropped (oneCCL abort
+  ~7min in). Found sophiag's U sharpens/deepens with batch (not perfectly
+  batch-independent like adamw/mano).
+- **Charts: house style + completeness.** Wired `apply_style()` (ambivalent +
+  Iosevka) into the finder auto-plot and `plot_lr_finder.py`, made
+  `apply_style` import-safe without IPython (loads the .mplstyle by path).
+  Added per-GBS loss-vs-LR curve families for all optimizers + a reusable
+  `scripts/plot_lr_trend.py`, registered in the refresh catch-all.
+- **Corrections caught by the user:** (1) "production batch" is **GBS=6144**
+  (2B 256N + all 80B), not 12288 (that's 2B 512N) -- relabeled, kept all
+  12288 data/figures. (2) Documented why old finder min-loss (~9-10) <
+  new (~11.3): sweep length (100 vs 15 steps), since the finder trains
+  cumulatively -- only the min-LR is comparable across sweep lengths.
+- **62nd upstream sync** (3 commits, `0e886617e..390ea37cc`, all
+  experiments/rl/ -- no replays).
+- **Validator "CCL deadlock at 80B TP=4" was a PHANTOM (root-caused + fixed +
+  CONFIRMED).** A 4-way worktree fan-out found no collective-deadlock log:
+  the label conflated a validator dataloader cold-cache mmap-race CRASH (job
+  12469584) and a training-side index-build barrier stall (job 12469597),
+  plus a genuine `loss_fn` tuple-unpack crash in `validator.py`. Fixes:
+  tuple-unpack (`loss_sum, _ = self.loss_fn(...)`); validator inherits the
+  warm `data_cache_path` (config default + the submit script already passed
+  it on the CLI); prewarm builds the validation index. **Confirmed 2026-06-28
+  (jobs 12469784 prewarm + 12469785 train-loop, 4N/dp=12):** first-ever
+  `validate()` completions at 80B TP=4 -- finite val loss, no
+  mmap/AttributeError/CCL hang, across 4 passes. dp=12 confirmation; a 62N
+  pass would be belt-and-suspenders. Writeup:
+  [`docs/guides/known-bugs/validator-tp4-at-80b.md`](guides/known-bugs/validator-tp4-at-80b.md).
+- **Ops:** flipped the default to auto-push-after-batch on working branches
+  (pull-rebase first); the 80B trend gap-fill reruns (2304-redo 12469778,
+  4608 12469767) and dp=324 bisect (12469630) are still out.
+
+---
+
 ## 2026-06-26 (sunspot eve) -- 80B: LR is the wall, dp-ceiling isn't, don't scale LR with batch
 
 Five jobs resolving the LR/batch/dp-degree questions the sim campaign
