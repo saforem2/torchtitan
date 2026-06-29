@@ -354,6 +354,42 @@ def plot_80b_all_optimizers(out: Path) -> None:
     print("wrote", out)
 
 
+def plot_80b_adamw_cliff(out: Path) -> None:
+    """AdamW-only GBS=6144 cliff (styled rebuild of the original hand-made
+    sunspot_80b_gbs6144_adamw.png). The live CSV was overwritten by trend
+    probes, so the curve is the dated-record values: 8 finite points then NaN
+    from 1.36e-6 (drawn as a shaded NaN region, not dropped, so the cliff is
+    explicit -- unlike the finder's auto lr_vs_loss.png which silently drops
+    the NaN points)."""
+    lr = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7,
+          3.981e-7, 7.356e-7]
+    loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844, 12.785]
+    nan_lr = [1.359e-6, 2.512e-6, 4.642e-6, 8.577e-6, 1.585e-5, 2.929e-5,
+              5.412e-5]  # all NaN
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(lr, loss, "-^", ms=7, color="#d62728", zorder=4,
+            label="AdamW (finite)")
+    ax.scatter([7.356e-7], [12.785], s=180, facecolors="none",
+               edgecolors="#d62728", linewidths=1.8, zorder=5)
+    # shade the NaN region so the cliff is explicit
+    ax.axvspan(1.0e-6, max(nan_lr), color="#d62728", alpha=0.08, zorder=0)
+    ax.axvline(1.359e-6, color="#d62728", ls="--", lw=1, alpha=0.7, zorder=1)
+    ax.annotate("NaN from 1.36e-6\n(usable ceiling ~7.4e-7,\nno real minimum)",
+                xy=(1.359e-6, 12.83), xytext=(2.0e-6, 12.86), fontsize=8.5,
+                color="#d62728",
+                arrowprops=dict(arrowstyle="->", color="#d62728"))
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title("agpt 80B AdamW at the PRODUCTION batch (GBS=6144, dp=192)\n"
+                 "monotone descent to a wall, then NaN -- a cliff, not a U-min")
+    ax.legend(fontsize=9, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
 def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
     b2 = [(192, 8.58e-3), (384, 1.585e-2), (768, 1.585e-2), (1536, 8.58e-3),
           (3072, 8.58e-3), (6144, 8.58e-3), (12288, 1.585e-2), (24576, 1.585e-2)]
@@ -444,5 +480,6 @@ if __name__ == "__main__":
     plot_2b_all_optimizers(
         DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png", 12288)
     plot_80b_all_optimizers(DOCS / "80b/figures/sunspot_80b_gbs6144_all_optimizers.png")
+    plot_80b_adamw_cliff(DOCS / "80b/figures/sunspot_80b_gbs6144_adamw.png")
     plot_ceiling_overlay_2b_vs_80b(DOCS / "2b/figures/lr_ceiling_vs_gbs_2b_vs_80b.png")
     plot_80b_ceiling_vs_gbs(DOCS / "80b/figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png")
