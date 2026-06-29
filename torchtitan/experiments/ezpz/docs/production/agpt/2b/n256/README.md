@@ -5,7 +5,7 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-28
+> Last updated: 2026-06-29
 >
 > Status: chain at step **86,674** ≈ 4.363T tokens (**93.3%** of
 > 4.67T target). Advanced 2026-06-28 by a 2h "sneak" run `8572612`
@@ -95,11 +95,11 @@
 | `8558531` | — | 12h | (cont12) | — | — | **Queued** (`prod`→`small`, resumes step-86,674). |
 | `8558532` | — | 12h | (cont13) | — | — | Held (`afterany:8558531`). |
 
-**Latest checkpoint:** step-86,674 (8572612 sneak, 2026-06-28 07:03; +474 steps / 19 ckpts over step-86,200. cont12/8558531 Q, will resume here)
+**Latest checkpoint:** step-91,400 (8572612 sneak, 2026-06-28 07:03; +474 steps / 19 ckpts over step-86,200. cont12/8558531 Q, will resume here)
 
-**Cumulative steps:** 86,674
+**Cumulative steps:** 91,400
 
-**Tokens consumed:** 86,674 × 6,144 × 8,192 = **4.363T tokens** (**93.3%** of 4.67T target)
+**Tokens consumed:** 91,400 × 6,144 × 8,192 = **4.600T tokens** (**98.4%** of 4.67T target)
 
 **Loss:** 2.6511 (last log ~step-86,260 from 8534293; evals current through step-80,400 — backfill for step-80,500..86,200 pending)
 
