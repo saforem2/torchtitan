@@ -140,11 +140,11 @@ classic finder length so the curves are smooth and the minima are deep. Run at
 comparable). Jobs 12469854-868, isolated dumps
 `outputs/lrfind-2b-100step-prod/gbs<N>/`.
 
-> **Status (2026-06-29): PRELIMINARY -- 9/15 jobs done.** The 1536 / 3072 /
-> **6144 (production)** tiers are complete for all three optimizers (0 NaN
-> everywhere); 12288 + 24576 are still computing (the long poles). Figures
-> below are regenerated as jobs land, so they fill in automatically. The
-> headline production point (GBS=6144) is already in.
+> **Status (2026-06-29): PRELIMINARY -- 12/15 jobs done.** The 1536 / 3072 /
+> **6144 (production)** / 12288 tiers are complete for all three optimizers
+> (0 NaN everywhere); only the 24576 tier is still computing (the long pole,
+> ~3h). Figures below are regenerated as jobs land, so they fill in
+> automatically. The headline production point (GBS=6144) is already in.
 
 Everything on one axis, hue = optimizer and batch size encoded three ways at
 once (shade light->dark, width thin->thick, opacity faint->opaque, all
@@ -163,7 +163,7 @@ Completed points so far (smoothed-min LR / loss, all 0 NaN):
 | 1536 | 3.3e-3 / 7.74 | 9.1e-3 / 8.02 | 1.9e-3 / 8.28 |
 | 3072 | 2.8e-3 / 7.69 | 6.9e-3 / 7.75 | 2.1e-3 / 8.28 |
 | **6144** (prod) | 2.5e-3 / 7.76 | 5.2e-3 / 7.92 | 2.1e-3 / 8.19 |
-| 12288 | _pending_ | _pending_ | _pending_ |
+| 12288 | 2.8e-3 / 7.85 | 8.3e-3 / 7.90 | 1.9e-3 / 8.24 |
 | 24576 | _pending_ | _pending_ | _pending_ |
 
 Consistent with everything above: **0 NaN at every batch** (2B never cliffs,
