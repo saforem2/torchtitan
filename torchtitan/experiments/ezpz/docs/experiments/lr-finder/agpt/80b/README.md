@@ -189,11 +189,22 @@ A 2B reproduction of this same trend (16N, dp=192, GBS 192..24576) is running
 First empirical 80B LR finder (previously extrapolated only), 2 nodes / 24 XPU
 tiles, torch 2.13, compile disabled, seq_len=8192, LR 1e-6 -> 1.0 over 100 steps.
 
-| Optimizer | Suggested LR | Blow-up | NaN Count | Status |
+> **Small-batch results -- do NOT use for production.** Everything in this
+> section is at GBS=192 (2-node default). The optimal LR is batch-dependent,
+> and at the production batch (GBS=6144) all of these numbers change: AdamW's
+> "1.13e-5 / clean" collapses to a ~7e-7 NaN cliff, and SophiaG stops being
+> broken. See the [2026-06-27 production section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot)
+> and the [LR-ceiling-vs-GBS trend](#lr-ceiling-vs-gbs-trend-adamw) for the
+> values that actually apply at scale. "Suggested LR" below is the
+> conservative blow-up/10 heuristic (so 1.13e-5 = blow-up 1.13e-4 / 10); the
+> trend section reports the loss-minimum LR directly (~1.6e-5 at these small
+> batches) -- consistent, just a different definition.
+
+| Optimizer | Suggested LR (blow-up/10) | Blow-up | NaN Count | Status @ GBS=192 |
 |-----------|-------------|---------|-----------|--------|
-| **AdamW** | **1.13e-5** | 1.13e-4 | 0/100 | Clean sweep |
-| **Muon** | N/A | NaN at step 7 | 93+/100 | Broken (bf16 overflow) |
-| **SophiaG** | N/A | NaN at step 7 | 93+/100 | Broken **at GBS=192** (see note) |
+| **AdamW** | **1.13e-5** [small batch only] | 1.13e-4 | 0/100 | Clean sweep -- but cliffs at production, see note |
+| **Muon** | N/A | NaN at step 7 | 93+/100 | Broken (bf16 overflow), at any batch |
+| **SophiaG** | N/A | NaN at step 7 | 93+/100 | Broken **at GBS=192 only** (see note) |
 
 **Muon/SophiaG bf16 overflow** -- both produce NaN regardless of LR at 80B
 (dim=9216): Muon's Newton-Schulz `A @ A` (9216x9216 matmul) overflows bf16,
@@ -209,6 +220,15 @@ step 16 but is 6x slower -- not viable. Overflow is model-size-specific: 20B
 > overflow threshold. **Muon stays broken regardless of batch.** See the
 > [2026-06-27 production-batch section](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot)
 > above.
+
+> **Correction (2026-06-27): the AdamW "1.13e-5 / clean" result does NOT
+> transfer to production.** That LR is the small-batch (GBS=192) usable
+> ceiling. The LR-ceiling-vs-GBS trend shows AdamW's usable LR holds ~1.5e-5
+> only through GBS~1152, eases to ~4.6e-6 by 2304/4608, then collapses to a
+> ~7.4e-7 NaN cliff at the production batch GBS=6144 -- where LR=1e-6 sits
+> *past* the last stable point. Do not set 80B production AdamW LR from this
+> 1.13e-5 number; use ~5e-7 (or prefer mano/sophiag). Same batch-dependence
+> the GBS=192 finder could not have seen.
 
 ![80B small-batch finder](figures/sunspot_80b.png)
 
