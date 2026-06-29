@@ -31,6 +31,14 @@ fi
 # top-level torchtitan import that needs the repo root on sys.path.
 export PYTHONPATH=.
 
+# The W&B-sourced production charts (plot_production_wandb.py) fetch run
+# histories over the network. On the Aurora/Sunspot login nodes that needs
+# the ALCF proxy, or the fetch fails and the charts silently stay stale
+# (refresh_all.sh treats the chart step as non-fatal). Export the proxy if
+# it isn't already set so an unattended refresh actually regenerates them.
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+
 declare -A SCRIPTS=(
     # plot_production.py (PBS-.o-file plotter) dropped 2026-06-24: it is
     # DEPRECATED, its default .o files are gone, and no README embeds its
