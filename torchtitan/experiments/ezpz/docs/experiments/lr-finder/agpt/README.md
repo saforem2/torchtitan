@@ -4,7 +4,7 @@ Learning-rate-finder results for the dense **agpt** (AuroraGPT) models. This
 page is the cross-model index (master recommended-LR table + findings that
 span model sizes / machines). Per-model detail lives in its own page:
 
-- **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (in progress)
+- **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (never cliffs)
 - **[agpt 20B](20b/README.md)** -- small-batch finders (no trend yet)
 - **[agpt 80B](80b/README.md)** -- GBS=192 finder, GBS=6144 production batch, LR-ceiling-vs-GBS trend
 

@@ -150,9 +150,9 @@ NaN cliff with no minimum at all:
 | 144  | 8  | 1.0e-5  | 11.73 | 1e-6 -> 1e-3 (15/15) | clean U-min |
 | 288  | 8  | 1.6e-5  | 11.81 | 1e-6 -> 1e-3 (15/15) | clean U-min |
 | 576  | 8  | 1.6e-5  | 11.83 | 1e-6 -> 1e-3 (15/15) | clean U-min |
-| 1152 | -- | (rerun queued) | -- | -- | -- |
-| 2304 | 16 | ~4.4e-6 | 11.24 | 1e-6 -> 1e-3 (11/15) | soft/noisy basin |
-| 4608 | -- | (rerun queued) | -- | -- | -- |
+| 1152 | 64 | 1.6e-5  | 11.65 | 1e-6 -> 1e-3 (15/15) | clean U-min |
+| 2304 | 64 | 4.6e-6  | 12.58 | 1e-8 -> 1e-4 (15/15) | U-min (pre-cliff shoulder) |
+| 4608 | 64 | 4.6e-6  | 12.54 | 1e-8 -> 1e-4 (15/15) | U-min (pre-cliff shoulder) |
 | 6144 | 64 | ~7.4e-7 | 12.78 | 1e-8 -> 1e-4 (15/15) | **NaN cliff (no min)** |
 
 Reading the trend:
@@ -163,21 +163,21 @@ Reading the trend:
   cleanly with a real loss minimum in-range; the production batch has *no*
   minimum -- loss descends to a wall and NaNs (the "usable LR" there is a
   ceiling, not a U-bottom).
-- **The transition is gradual.** GBS=2304 already shows a soft, noisy basin
-  (loss flat 11.2-11.6 across lr 4e-6..2e-5, grad_norm bouncing 13-85) rather
-  than either a clean U or a sharp cliff -- the edge sharpens somewhere
-  between GBS=2304 and 6144.
-- **Min-loss is non-monotonic** (right panel): it improves slightly to the
-  GBS=2304 basin (11.24) then jumps up at the cliff (12.78) -- once divergence
-  caps the LR, the 15-step sweep simply can't descend as far.
+- **The plateau holds, then steps down before the cliff.** Usable LR is flat
+  at ~1.5e-5 through GBS=1152, eases to ~4.6e-6 at GBS=2304 and 4608 (a clean
+  U-min "shoulder", still 0 NaN), then collapses to the ~7.4e-7 NaN cliff at
+  6144. The 2304/4608 shoulder is the last clean-U stage before divergence
+  swallows the minimum.
+- **Min-loss is non-monotonic** (right panel): nearly flat (~11.7-11.8)
+  through 1152, then steps up to ~12.5-12.6 at the 2304/4608 shoulder and
+  ~12.78 at the cliff -- once the usable LR drops, the 15-step sweep can't
+  descend as far.
 
-**Caveats (this is in progress):** GBS=1152/2304/4608 are being re-run at 64N
-(jobs 12469765-767) -- the first 2304 attempt reached only step 11/15 (6h
-walltime) and the first 4608 attempt produced 0 points (the auto-retry
-watchdog fired mid-step-1: at 16N/dp=48 the GAS=96 step exceeded the 1800s
-no-output timeout). The reruns use dp=192 (GAS 6/12/24, fast steps) and a
-2400s watchdog. The figure + table will be refreshed when they land; the
-8N small-GBS points and the 6144 cliff are final.
+All seven points are final (15/15, 0 NaN except the 6144 cliff). The
+1152/2304/4608 points were re-run at 64N/dp=192 after the first attempts hit
+walltime/watchdog limits at 16N; the original GBS=2304 partial (11/15, the
+"11.24" basin reported earlier) was superseded by the clean 64N rerun
+(min-LR 4.6e-6, loss 12.58).
 
 A 2B reproduction of this same trend (16N, dp=192, GBS 192..24576) is running
 -- see [agpt 2B](../2b/README.md).

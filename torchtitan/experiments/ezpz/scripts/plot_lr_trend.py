@@ -304,9 +304,13 @@ def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
 
 
 def plot_80b_ceiling_vs_gbs(out: Path) -> None:
-    # adamw 80B trend: (gbs, min/usable LR, min loss, shape)
+    # adamw 80B trend: (gbs, min/usable LR, min loss, shape). Complete after
+    # the 1152/2304/4608 gap-fill reruns landed (2026-06-28): clean U-min
+    # holds ~1.5e-5 through 1152, eases to ~4.6e-6 at 2304/4608 (the
+    # pre-cliff shoulder), then collapses to the ~7.4e-7 NaN cliff at 6144.
     pts = [(144, 1.0e-5, 11.73, "U"), (288, 1.585e-5, 11.81, "U"),
-           (576, 1.585e-5, 11.83, "U"), (2304, 4.394e-6, 11.24, "partial"),
+           (576, 1.585e-5, 11.83, "U"), (1152, 1.585e-5, 11.65, "U"),
+           (2304, 4.642e-6, 12.58, "U"), (4608, 4.642e-6, 12.54, "U"),
            (6144, 7.4e-7, 12.78, "cliff")]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
     for g, lr, _, sh in pts:
