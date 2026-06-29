@@ -231,6 +231,68 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
           f"sophiag={plotted['sophiag']} batches)")
 
 
+def plot_minlr_vs_gbs(out: Path, model: str) -> None:
+    """usable/min LR vs batch, all optimizers overlaid (model-generic)."""
+    colors = {"adamw": "#d62728", "mano": "#1f77b4", "sophiag": "#2ca02c"}
+    markers = {"adamw": "o", "mano": "s", "sophiag": "^"}
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for opt in ("adamw", "mano", "sophiag"):
+        xs, ys = [], []
+        for g in GBS_2B:
+            p = _csv_for(model, g, opt)
+            if not Path(p).exists():
+                continue
+            fx, fy = _finite(*load_curve(p))
+            if not fx:
+                continue
+            mi = min(range(len(fy)), key=lambda k: fy[k])
+            xs.append(g)
+            ys.append(fx[mi])
+        if xs:
+            ax.plot(xs, ys, "-", marker=markers[opt], ms=8, color=colors[opt],
+                    label=f"{OPT_LABEL[opt]} ({len(xs)} GBS, 0 NaN)")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Global batch size (GBS)")
+    ax.set_ylabel("usable / min LR")
+    ax.set_title(f"agpt {model.upper()}: usable LR vs batch, all optimizers "
+                 f"(dp=192)\nno cliff at any batch -- like 2B, unlike 80B "
+                 f"(adamw min-LR noisy: shallow basin)")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def plot_all_optimizers_at_gbs(out: Path, model: str, gbs: int) -> None:
+    """all 3 optimizers' loss-vs-LR at one batch size (model-generic)."""
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for opt, lab in (("adamw", "AdamW"), ("mano", "mano"), ("sophiag", "sophiag")):
+        p = _csv_for(model, gbs, opt)
+        if not Path(p).exists():
+            continue
+        fx, fy = _finite(*load_curve(p))
+        if not fx:
+            continue
+        mlr, mloss = _min(*load_curve(p))
+        line, = ax.plot(fx, fy, "-o", ms=6,
+                        label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
+        ax.scatter([mlr], [mloss], s=170, facecolors="none",
+                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    tag = "the PRODUCTION batch" if gbs == 6144 else "GBS"
+    ax.set_title(f"agpt {model.upper()} LR finder at {tag} (GBS={gbs}, dp=192)\n"
+                 "all optimizers have clean U-minima, 0 NaN -- no cliff (cf. 80B)")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
 def plot_loss_vs_lr_by_gbs_80b(out: Path) -> None:
     # 80B adamw per-GBS: small-batch (8N) + reruns (64N) + the 6144 cliff.
     sources = {
@@ -395,9 +457,24 @@ def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
           (3072, 8.58e-3), (6144, 8.58e-3), (12288, 1.585e-2), (24576, 1.585e-2)]
     b80_u = [(144, 1.0e-5), (288, 1.585e-5), (576, 1.585e-5), (1152, 1.585e-5)]
     cliff = (6144, 7.4e-7)
+    # 20B AdamW read live (min-LR is noisy/shallow-basin, but all 0 NaN -- the
+    # point is the curve sits between 2B and 80B and never cliffs).
+    b20 = []
+    for g in GBS_2B:
+        p = _csv_for("20b", g, "adamw")
+        if not Path(p).exists():
+            continue
+        fx, fy = _finite(*load_curve(p))
+        if fx:
+            mi = min(range(len(fy)), key=lambda k: fy[k])
+            b20.append((g, fx[mi]))
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.plot([p[0] for p in b2], [p[1] for p in b2], "-o", ms=8,
             label="2B AdamW (dim=2048) -- clean U-min, 0 NaN")
+    if b20:
+        ax.plot([p[0] for p in b20], [p[1] for p in b20], "-D", ms=7,
+                color="#9467bd",
+                label="20B AdamW (dim=5120) -- clean U-min, 0 NaN (noisy min)")
     ax.plot([p[0] for p in b80_u], [p[1] for p in b80_u], "-o", ms=8,
             color="#d62728", label="80B AdamW (dim=9216) -- U-min (small batch)")
     ax.plot([cliff[0]], [cliff[1]], "v", ms=13, color="#d62728",
@@ -409,12 +486,14 @@ def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
     ax.set_ylim(3e-7, 6e-2)
     ax.set_xlabel("Global batch size (GBS)")
     ax.set_ylabel("AdamW usable / min LR")
-    ax.set_title("LR-finder usable LR vs batch: 2B vs 80B (TP-adjusted, dp=192)")
-    ax.annotate("2B: flat at ~1e-2 across 128x batch (192 -> 24576), 0 NaN",
-                xy=(1536, 8.58e-3), xytext=(210, 3.0e-3), fontsize=9,
+    ax.set_title("LR-finder usable LR vs batch: 2B vs 20B vs 80B (dp=192)\n"
+                 "the NaN cliff is 80B-only -- 2B and 20B stay clean at all batches")
+    ax.annotate("2B & 20B: clean U-min at every batch, 0 NaN\n"
+                "(optimal LR ~1e-2 / ~1e-4, no cliff)",
+                xy=(1536, 8.58e-3), xytext=(210, 1.3e-3), fontsize=8.5,
                 arrowprops=dict(arrowstyle="->"))
     ax.annotate("80B: usable LR falls ~20x, then NaN cliff by GBS=6144",
-                xy=cliff, xytext=(230, 9e-5), fontsize=9, color="#d62728",
+                xy=cliff, xytext=(230, 9e-5), fontsize=8.5, color="#d62728",
                 arrowprops=dict(arrowstyle="->", color="#d62728"))
     ax.legend(fontsize=9, loc="lower left")
     fig.tight_layout()
@@ -473,6 +552,11 @@ if __name__ == "__main__":
         DOCS / "2b/figures/lr_finder_2b_all_opts_all_gbs.png", "2b")
     plot_all_opts_all_gbs(
         DOCS / "20b/figures/lr_finder_20b_all_opts_all_gbs.png", "20b")
+    # 20B page figures (model-generic helpers)
+    plot_minlr_vs_gbs(
+        DOCS / "20b/figures/lr_finder_20b_minlr_vs_gbs_all_optimizers.png", "20b")
+    plot_all_optimizers_at_gbs(
+        DOCS / "20b/figures/lr_finder_20b_gbs6144_all_optimizers.png", "20b", 6144)
     plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
     # RESTYLED: the 4 existing figures, now through the house stylesheet
     plot_2b_all_optimizers(

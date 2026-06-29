@@ -130,23 +130,29 @@ sophiag still find real minima.
 | Model | all-optimizer finder curves @ GBS=6144 |
 |---|---|
 | 2B (dim=2048) | ![2B @ GBS=6144](2b/figures/lr_finder_2b_gbs6144_all_optimizers.png) |
-| 20B (dim=5120) | _(pending -- job 12469806; this row fills when the 20B GBS=6144 sweep lands)_ |
+| 20B (dim=5120) | ![20B @ GBS=6144](20b/figures/lr_finder_20b_gbs6144_all_optimizers.png) |
 | 80B (dim=9216) | ![80B @ GBS=6144](80b/figures/sunspot_80b_gbs6144_all_optimizers.png) |
 
 Min-LR / min-loss at GBS=6144 (0 NaN unless noted):
 
 | Optimizer | 2B (dim=2048) | 20B (dim=5120) | 80B (dim=9216) |
 |---|---|---|---|
-| **AdamW** | 8.6e-3 / 11.57 (U-min) | _pending_ | **~7.4e-7 / 12.78 (NaN cliff, no min)** |
-| **mano** | 1.6e-2 / 11.71 (U-min) | _pending_ | 1.6e-5 / 12.62 (U-min) |
-| **sophiag** | 1.4e-3 / 12.29 (U-min) | _pending_ | 2.5e-6 / 12.60 (U-min) |
-| **muon** | _(not swept)_ | _pending_ | broken -- NaN from step 7 (bf16 dim=9216) |
+| **AdamW** | 8.6e-3 / 11.57 (U-min) | 1.6e-4 / 11.90 (U-min) [1] | **~7.4e-7 / 12.78 (NaN cliff, no min)** |
+| **mano** | 1.6e-2 / 11.71 (U-min) | 8.6e-5 / 11.51 (U-min) | 1.6e-5 / 12.62 (U-min) |
+| **sophiag** | 1.4e-3 / 12.29 (U-min) | 1.4e-3 / 12.30 (U-min) | 2.5e-6 / 12.60 (U-min) |
+| **muon** | _(not swept)_ | _(not swept)_ | broken -- NaN from step 7 (bf16 dim=9216) |
+
+[1] 20B AdamW min-LR is noisy across batches (shallow basin); 1.6e-4 is the
+GBS=6144 point estimate. All 20B cells are 0 NaN -- it never cliffs (cf. the
+[20B trend](20b/README.md#2026-06-29----lr-ceiling-vs-gbs-trend-16n-tp1-dp192)).
 
 Reading across a row shows the model-size dependence of the optimal LR at
-fixed batch: AdamW falls ~4 orders of magnitude (8.6e-3 -> ~7e-7) from 2B to
-80B and changes character (U-min -> NaN cliff); mano/sophiag fall similarly
-but keep a real minimum at 80B. The 20B column (dim=5120, the midpoint) fills
-in when its production-batch sweep completes.
+fixed batch: AdamW falls ~4 orders of magnitude (8.6e-3 -> 1.6e-4 -> ~7e-7)
+across 2B/20B/80B, but only **80B changes character** (U-min -> NaN cliff) --
+2B and 20B both keep clean minima with 0 NaN. So the cliff is not a smooth
+midpoint 20B sits on; 20B (dim=5120) is on the clean side of a threshold only
+80B (dim=9216) crosses. mano/sophiag fall similarly and keep real minima at
+all three sizes.
 
 ## Reports
 

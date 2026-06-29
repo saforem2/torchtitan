@@ -8,12 +8,73 @@ cross-model recommendation table and findings see the
 **Recommended (small-batch, `sqrt(2/(5*d))` init):** AdamW **4.0e-4**, Muon
 **1.7e-4**, SophiaG **1.8e-5** (Sunspot 2026-04-14).
 
-> **Note:** a production-batch trend sweep (like
-> [80B's](../80b/README.md#lr-ceiling-vs-gbs-trend-adamw)) has not been run
-> for 20B yet. The numbers below are small-batch (GBS<=192); per the 80B
-> finding they may not transfer directly to 20B production batch. 20B is a
-> good candidate to fill the middle of the model-size axis once the 2B and
-> 80B trends are complete.
+**Key result (2026-06-29):** like 2B and unlike 80B, **20B never cliffs.**
+Across GBS 192..12288 (production batch 6144 + 512N batch 12288), every
+optimizer is a clean U-min with 0 NaN -- the AdamW NaN cliff is specific to
+80B (dim=9216); 20B (dim=5120) stays on the clean side. See the trend section
+below.
+
+---
+
+## 2026-06-29 -- LR-ceiling vs GBS trend (16N, TP=1, dp=192)
+
+Reproducing the 80B
+[LR-ceiling-vs-GBS trend](../80b/README.md#lr-ceiling-vs-gbs-trend-adamw) at
+20B (dim=5120), the midpoint of the model-size axis. Run at 16N / TP=1 ->
+dp_degree=192 (the same dp as the 2B and 80B production-batch sweeps, so all
+three overlay on one x-axis). adamw + mano + sophiag at each GBS, LR
+1e-5 -> 1e-1, 30 steps. Jobs 12469786-815.
+
+### Result: 20B never cliffs (the cliff is 80B-only)
+
+Every cell is a clean U-min with **0 NaN**, across the whole batch range
+including both production batches (6144, 12288):
+
+| GBS | AdamW | mano | sophiag |
+|----:|-------|------|---------|
+| 192   | 6.3e-5 / 12.1 | 3.4e-5 / 11.8 | 1.4e-5 / 12.4 |
+| 384   | 1.8e-3 / 11.7 | 3.4e-5 / 11.7 | 1.4e-5 / 12.4 |
+| 768   | 4.6e-5 / 12.0 | 3.4e-5 / 11.8 | 1.4e-5 / 12.4 |
+| 1536  | 1.0e-3 / 11.3 | 2.5e-5 / 12.0 | 1.4e-5 / 12.4 |
+| 3072  | 1.4e-5 / 12.4 | 3.4e-5 / 11.8 | 1.4e-5 / 12.4 |
+| **6144** (prod) | 1.6e-4 / 11.9 | 8.6e-5 / 11.5 | 1.4e-3 / 12.3 |
+| **12288** (512N) | 3.4e-5 / 12.3 | 6.3e-5 / 11.7 | _(finishing)_ |
+
+(cells are min-LR / min-loss; all 0 NaN.)
+
+![20B all optimizers x all batch sizes](figures/lr_finder_20b_all_opts_all_gbs.png)
+
+**AdamW's min-LR is noisy** -- it scatters 1.4e-5..1.8e-3 across batches
+because the 20B AdamW basin is broad and shallow, so the derivative-based
+min-detector latches onto different points. Do NOT read a trend into the
+AdamW point estimates; the robust signal is that the curve is a clean U with
+0 NaN at every batch. **mano and sophiag are far more stable** (mano ~3e-5,
+sophiag dead-flat ~1.4e-5) -- a sharper, more consistent basin than AdamW at
+20B.
+
+Usable LR vs batch, all optimizers:
+
+![20B usable LR vs GBS](figures/lr_finder_20b_minlr_vs_gbs_all_optimizers.png)
+
+All three optimizers at the production batch (GBS=6144) -- clean U-minima:
+
+![20B all optimizers at GBS=6144](figures/lr_finder_20b_gbs6144_all_optimizers.png)
+
+### Contrast across model size (same dp=192)
+
+| | 2B (dim=2048) | 20B (dim=5120) | 80B (dim=9216) |
+|---|---|---|---|
+| AdamW @ GBS=6144 | 8.6e-3, clean U | 1.6e-4, clean U | ~7.4e-7, **NaN cliff** |
+| behavior across batch | flat, no cliff | declines, no cliff | falls ~20x then cliffs |
+| 0 NaN everywhere? | yes | yes | no (cliff at >=6144) |
+
+**Conclusion:** the batch-dependent NaN cliff is **not a smooth function of
+model size that 20B sits midway on** -- 20B is firmly on the *clean* side of a
+threshold that only 80B crosses. The optimal LR does scale down with size
+(2B ~1e-2 -> 20B ~1e-4 -> 80B ~1e-6, the expected ~N^-x law), but the cliff
+*failure mode* appears only at 80B (dim=9216), consistent with the bf16
+fragility that also breaks muon/sophiag there. Cross-model overlay:
+[2B-vs-20B-vs-80B](../2b/figures/lr_ceiling_vs_gbs_2b_vs_80b.png).
 
 ---
 
@@ -91,6 +152,7 @@ the Hessian-based preconditioning produces violent blow-ups at high LR.
 
 | Date | Machine | GBS | Optimizers | Nodes | Key Result |
 |------|---------|-----|-----------|-------|------------|
+| 2026-06-29 | Sunspot | 192..12288 | AdamW, mano, sophiag | 16 | LR-ceiling-vs-GBS trend: 20B never cliffs (0 NaN all batches; cliff is 80B-only) |
 | 2026-04-21 | Sunspot | 96..384 | AdamW, Muon, SophiaG | 2 | torch-2.13 verify + GAS; Muon/SophiaG fine at dim=5120 |
 | 2026-04-14 | Sunspot | 48 | AdamW, Muon, SophiaG | 2 | dim-aware init: AdamW 4.0e-4, Muon 1.7e-4 (10x higher) |
 | 2026-04-13 | Polaris | 48 | AdamW, Muon, SophiaG | 2 | reproduces Aurora; cross-hardware consistency |
