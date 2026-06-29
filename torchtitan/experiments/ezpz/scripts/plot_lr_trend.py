@@ -147,6 +147,90 @@ def plot_2b_minlr_vs_gbs_all_opts(out: Path) -> None:
     print("wrote", out)
 
 
+# ---------------------------------------------------------------------------
+# Combined: every (optimizer x batch size) loss-vs-LR curve on one axis.
+# Hue encodes optimizer (AdamW=orange, mano=blue, sophiag=green); shade
+# encodes batch size (light = small GBS, dark = large GBS).
+# ---------------------------------------------------------------------------
+from matplotlib.lines import Line2D  # noqa: E402
+
+_OPT_CMAP = {"adamw": "Oranges", "mano": "Blues", "sophiag": "Greens"}
+
+
+def _csv_for(model: str, gbs: int, opt: str) -> str:
+    flav = "20b" if model == "20b" else "2b"
+    return (f"outputs/lrtrend-{flav}/gbs{gbs}/lr_finder/ezpz/ezpz.agpt/"
+            f"{flav}/{opt}/lr_finder_data.csv")
+
+
+def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
+    """One axis: loss-vs-LR for every optimizer x batch size.
+
+    Hue = optimizer, shade = batch size (light small -> dark large). Only
+    plots cells with a CSV, so it is safe to run while a sweep is partial.
+    """
+    gbs_list = GBS_2B
+    opts = ("adamw", "mano", "sophiag")
+    n = len(gbs_list)
+    # Three ramps, all keyed off batch-size rank r in [0,1] (small -> large),
+    # so large batch = darker + thicker + more opaque (foregrounds the
+    # production-relevant curves; small/noisy batches recede).
+    def _rank(i):
+        return i / max(1, n - 1)
+    shade = {g: 0.35 + 0.60 * _rank(i) for i, g in enumerate(gbs_list)}
+    width = {g: 0.8 + 2.7 * _rank(i) for i, g in enumerate(gbs_list)}   # 0.8 -> 3.5 pt
+    alpha = {g: 0.35 + 0.60 * _rank(i) for i, g in enumerate(gbs_list)}  # 0.35 -> 0.95
+    fig, ax = plt.subplots(figsize=(11, 7))
+    plotted = {o: 0 for o in opts}
+    for opt in opts:
+        cmap = plt.get_cmap(_OPT_CMAP[opt])
+        # draw small-batch (thin/faint) first so the thick opaque large-batch
+        # lines land on top.
+        for g in gbs_list:
+            p = _csv_for(model, g, opt)
+            if not Path(p).exists():
+                continue
+            fx, fy = _finite(*load_curve(p))
+            if not fx:
+                continue
+            i = gbs_list.index(g)
+            ax.plot(fx, fy, "-", lw=width[g], alpha=alpha[g],
+                    color=cmap(shade[g]), zorder=2 + i)
+            mi = min(range(len(fy)), key=lambda k: fy[k])
+            ax.scatter([fx[mi]], [fy[mi]], s=20 + 6 * i, alpha=alpha[g],
+                       color=cmap(shade[g]), edgecolor="k", linewidth=0.4,
+                       zorder=2 + i + 0.5)
+            plotted[opt] += 1
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title(f"agpt {model.upper()}: loss vs LR -- every optimizer x batch "
+                 f"size (dp=192)\nhue = optimizer; larger batch = darker + "
+                 f"thicker + more opaque; dots mark each minimum")
+    opt_handles = [
+        Line2D([0], [0], color=plt.get_cmap(_OPT_CMAP[o])(0.75), lw=3,
+               label=f"{OPT_LABEL[o]} ({plotted[o]} batches)")
+        for o in opts if plotted[o]
+    ]
+    # batch-size swatches mirror the plot encoding (shade + width + alpha)
+    gbs_handles = [
+        Line2D([0], [0], color=plt.get_cmap("Greys")(shade[g]),
+               lw=width[g], alpha=alpha[g], label=f"GBS={g}")
+        for g in gbs_list
+        if any(Path(_csv_for(model, g, o)).exists() for o in opts)
+    ]
+    leg1 = ax.legend(handles=opt_handles, fontsize=9, loc="upper left",
+                     title="optimizer (hue)")
+    ax.add_artist(leg1)
+    ax.legend(handles=gbs_handles, fontsize=7.5, loc="lower left",
+              title="batch size (shade/width/opacity)", ncol=2)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out} (adamw={plotted['adamw']} mano={plotted['mano']} "
+          f"sophiag={plotted['sophiag']} batches)")
+
+
 def plot_loss_vs_lr_by_gbs_80b(out: Path) -> None:
     # 80B adamw per-GBS: small-batch (8N) + reruns (64N) + the 6144 cliff.
     sources = {
@@ -270,6 +354,42 @@ def plot_80b_all_optimizers(out: Path) -> None:
     print("wrote", out)
 
 
+def plot_80b_adamw_cliff(out: Path) -> None:
+    """AdamW-only GBS=6144 cliff (styled rebuild of the original hand-made
+    sunspot_80b_gbs6144_adamw.png). The live CSV was overwritten by trend
+    probes, so the curve is the dated-record values: 8 finite points then NaN
+    from 1.36e-6 (drawn as a shaded NaN region, not dropped, so the cliff is
+    explicit -- unlike the finder's auto lr_vs_loss.png which silently drops
+    the NaN points)."""
+    lr = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7,
+          3.981e-7, 7.356e-7]
+    loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844, 12.785]
+    nan_lr = [1.359e-6, 2.512e-6, 4.642e-6, 8.577e-6, 1.585e-5, 2.929e-5,
+              5.412e-5]  # all NaN
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(lr, loss, "-^", ms=7, color="#d62728", zorder=4,
+            label="AdamW (finite)")
+    ax.scatter([7.356e-7], [12.785], s=180, facecolors="none",
+               edgecolors="#d62728", linewidths=1.8, zorder=5)
+    # shade the NaN region so the cliff is explicit
+    ax.axvspan(1.0e-6, max(nan_lr), color="#d62728", alpha=0.08, zorder=0)
+    ax.axvline(1.359e-6, color="#d62728", ls="--", lw=1, alpha=0.7, zorder=1)
+    ax.annotate("NaN from 1.36e-6\n(usable ceiling ~7.4e-7,\nno real minimum)",
+                xy=(1.359e-6, 12.83), xytext=(2.0e-6, 12.86), fontsize=8.5,
+                color="#d62728",
+                arrowprops=dict(arrowstyle="->", color="#d62728"))
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title("agpt 80B AdamW at the PRODUCTION batch (GBS=6144, dp=192)\n"
+                 "monotone descent to a wall, then NaN -- a cliff, not a U-min")
+    ax.legend(fontsize=9, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
 def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
     b2 = [(192, 8.58e-3), (384, 1.585e-2), (768, 1.585e-2), (1536, 8.58e-3),
           (3072, 8.58e-3), (6144, 8.58e-3), (12288, 1.585e-2), (24576, 1.585e-2)]
@@ -304,9 +424,13 @@ def plot_ceiling_overlay_2b_vs_80b(out: Path) -> None:
 
 
 def plot_80b_ceiling_vs_gbs(out: Path) -> None:
-    # adamw 80B trend: (gbs, min/usable LR, min loss, shape)
+    # adamw 80B trend: (gbs, min/usable LR, min loss, shape). Complete after
+    # the 1152/2304/4608 gap-fill reruns landed (2026-06-28): clean U-min
+    # holds ~1.5e-5 through 1152, eases to ~4.6e-6 at 2304/4608 (the
+    # pre-cliff shoulder), then collapses to the ~7.4e-7 NaN cliff at 6144.
     pts = [(144, 1.0e-5, 11.73, "U"), (288, 1.585e-5, 11.81, "U"),
-           (576, 1.585e-5, 11.83, "U"), (2304, 4.394e-6, 11.24, "partial"),
+           (576, 1.585e-5, 11.83, "U"), (1152, 1.585e-5, 11.65, "U"),
+           (2304, 4.642e-6, 12.58, "U"), (4608, 4.642e-6, 12.54, "U"),
            (6144, 7.4e-7, 12.78, "cliff")]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
     for g, lr, _, sh in pts:
@@ -344,6 +468,11 @@ if __name__ == "__main__":
         DOCS / "2b/figures/lr_finder_2b_sophiag_loss_vs_lr_by_gbs.png", "sophiag")
     plot_2b_minlr_vs_gbs_all_opts(
         DOCS / "2b/figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png")
+    # combined: every optimizer x batch on one axis (hue=opt, shade=batch)
+    plot_all_opts_all_gbs(
+        DOCS / "2b/figures/lr_finder_2b_all_opts_all_gbs.png", "2b")
+    plot_all_opts_all_gbs(
+        DOCS / "20b/figures/lr_finder_20b_all_opts_all_gbs.png", "20b")
     plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
     # RESTYLED: the 4 existing figures, now through the house stylesheet
     plot_2b_all_optimizers(
@@ -351,5 +480,6 @@ if __name__ == "__main__":
     plot_2b_all_optimizers(
         DOCS / "2b/figures/lr_finder_2b_gbs12288_all_optimizers.png", 12288)
     plot_80b_all_optimizers(DOCS / "80b/figures/sunspot_80b_gbs6144_all_optimizers.png")
+    plot_80b_adamw_cliff(DOCS / "80b/figures/sunspot_80b_gbs6144_adamw.png")
     plot_ceiling_overlay_2b_vs_80b(DOCS / "2b/figures/lr_ceiling_vs_gbs_2b_vs_80b.png")
     plot_80b_ceiling_vs_gbs(DOCS / "80b/figures/sunspot_80b_adamw_lr_ceiling_vs_gbs.png")

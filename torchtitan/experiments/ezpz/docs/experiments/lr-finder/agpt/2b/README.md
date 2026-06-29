@@ -100,6 +100,16 @@ none cliffs (the direct 2B counterpart to the 80B trend, where AdamW falls
 
 ![2B usable LR vs GBS, all optimizers](figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png)
 
+Everything on one axis -- all 24 curves (3 optimizers x 8 batch sizes). Hue
+is the optimizer (orange AdamW / blue mano / green sophiag), shade is the
+batch size (light = small GBS, dark = large). The optimizer families separate
+cleanly (AdamW reaches the deepest loss, sophiag the shallowest), and within
+each family the U-minima all stack around ~1e-2 regardless of batch -- the
+batch-independence, shown directly. The light (small-batch) curves are the
+ones that blow up highest at the right, as expected:
+
+![2B all optimizers x all batch sizes](figures/lr_finder_2b_all_opts_all_gbs.png)
+
 ### Contrast with 80B (same dp=192)
 
 | | 2B (dim=2048) | 80B (dim=9216) |

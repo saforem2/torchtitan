@@ -4,7 +4,7 @@ Learning-rate-finder results for the dense **agpt** (AuroraGPT) models. This
 page is the cross-model index (master recommended-LR table + findings that
 span model sizes / machines). Per-model detail lives in its own page:
 
-- **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (in progress)
+- **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (never cliffs)
 - **[agpt 20B](20b/README.md)** -- small-batch finders (no trend yet)
 - **[agpt 80B](80b/README.md)** -- GBS=192 finder, GBS=6144 production batch, LR-ceiling-vs-GBS trend
 
@@ -118,6 +118,35 @@ This is because Muon's orthogonal momentum amplifies gradient scale differences.
 | Aurora | ![Aurora comparison](figures/aurora_comparison.png) | ![Aurora optimal](figures/aurora_optimal_lr.png) |
 | Sunspot | ![Sunspot comparison](figures/sunspot_comparison.png) | ![Sunspot optimal](figures/sunspot_optimal_lr.png) |
 | Polaris | ![Polaris comparison](figures/polaris_comparison.png) | ![Polaris optimal](figures/polaris_optimal_lr.png) |
+
+### Cross-model finder curves at the PRODUCTION batch (GBS=6144)
+
+All optimizers, one curve per optimizer, at the common production batch
+(GBS=6144, dp=192) -- the apples-to-apples comparison across model size. This
+is where the large-model fragility shows: 2B descends to clean U-minima for
+every optimizer; 80B's AdamW has no minimum (it cliffs to NaN) while mano and
+sophiag still find real minima.
+
+| Model | all-optimizer finder curves @ GBS=6144 |
+|---|---|
+| 2B (dim=2048) | ![2B @ GBS=6144](2b/figures/lr_finder_2b_gbs6144_all_optimizers.png) |
+| 20B (dim=5120) | _(pending -- job 12469806; this row fills when the 20B GBS=6144 sweep lands)_ |
+| 80B (dim=9216) | ![80B @ GBS=6144](80b/figures/sunspot_80b_gbs6144_all_optimizers.png) |
+
+Min-LR / min-loss at GBS=6144 (0 NaN unless noted):
+
+| Optimizer | 2B (dim=2048) | 20B (dim=5120) | 80B (dim=9216) |
+|---|---|---|---|
+| **AdamW** | 8.6e-3 / 11.57 (U-min) | _pending_ | **~7.4e-7 / 12.78 (NaN cliff, no min)** |
+| **mano** | 1.6e-2 / 11.71 (U-min) | _pending_ | 1.6e-5 / 12.62 (U-min) |
+| **sophiag** | 1.4e-3 / 12.29 (U-min) | _pending_ | 2.5e-6 / 12.60 (U-min) |
+| **muon** | _(not swept)_ | _pending_ | broken -- NaN from step 7 (bf16 dim=9216) |
+
+Reading across a row shows the model-size dependence of the optimal LR at
+fixed batch: AdamW falls ~4 orders of magnitude (8.6e-3 -> ~7e-7) from 2B to
+80B and changes character (U-min -> NaN cliff); mano/sophiag fall similarly
+but keep a real minimum at 80B. The 20B column (dim=5120, the midpoint) fills
+in when its production-batch sweep completes.
 
 ## Reports
 
