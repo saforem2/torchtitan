@@ -9,8 +9,9 @@ matplotlib.use("Agg")
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
-# repo root = 3 levels up from this script (experiments/ezpz/scripts/)
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# repo root = 4 levels up: scripts/ -> ezpz/ -> experiments/ -> torchtitan/ -> <root>
+REPO = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 BASE = f"{REPO}/outputs/lrfind-2b-100step/lr_finder/ezpz/ezpz.agpt/2b"
 OUT = f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/2b/figures/lr_finder_2b_100step_all_optimizers.png"
 OPT_COLOR = {"adamw": "#ff7f0e", "mano": "#1f77b4", "sophiag": "#2ca02c"}
@@ -64,11 +65,15 @@ for opt in ("adamw", "mano", "sophiag"):
     ax.scatter([lr[mi]], [ls[mi]], s=150, facecolors="none",
                edgecolors=OPT_COLOR[opt], linewidths=1.8, zorder=4)
 ax.set_xscale("log")
+# Cap y at 13: minima cluster ~7.8-8.5; sophiag's blow-up runs to ~32 and
+# otherwise crushes the basin into the bottom strip. 13 zooms into the minima
+# while still showing the descent + start of each blow-up.
+ax.set_ylim(top=13)
 ax.set_xlabel("Learning rate")
 ax.set_ylabel("LR-finder smoothed loss")
 ax.set_title("agpt 2B LR finder -- 100 steps, small batch (dp=192)\n"
              "deeper minima than the 15-step sweep (cumulative training); "
-             "all 0 NaN")
+             "all 0 NaN (y capped at 13)")
 ax.legend(fontsize=9)
 fig.tight_layout()
 fig.savefig(OUT, dpi=130, bbox_inches="tight")
