@@ -94,7 +94,7 @@ going?" Tracking is per-model and per-node-count.
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-06-29 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-29 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-29 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,900** (95.6B tokens, 2.0% of 4.67T), loss 4.8092. | 2026-06-29 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**2,100** (105.7B tokens, 2.3% of 4.67T), loss 4.8092. | 2026-06-29 |
 | [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-26 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |

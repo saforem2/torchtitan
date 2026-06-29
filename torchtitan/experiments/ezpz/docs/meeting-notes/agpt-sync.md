@@ -4,6 +4,79 @@
 
 ---
 
+## 2026-06-29
+
+### Headline: 2B v2 256N pre-training is COMPLETE (4.674T tokens, 100% of target)
+
+The 2B 256N v2 chain reached its full **4.67T-token budget**: final
+checkpoint **step-92,859 = 4.674T tokens (100.0%)**, final loss **2.652**,
+grad_norm ~0.056, ~14% MFU. Chain head `8558531` (cont12) finished a clean
+exit-0 ~10.2h run on 2026-06-29 03:03 UTC. This is the first agpt model to
+finish the full v2 (fp32-master) base pre-training run end to end.
+
+**Discussion / decisions for the team:**
+- **Eval the final 2B checkpoint.** Convert step-92,859 DCP -> HF and run the
+  full lm-eval suite (ARC-E/C, HellaSwag, Winogrande, etc.) so we have the
+  end-of-pretraining scorecard. Blocked until Aurora returns from PM (lm-eval
+  needs compute). Queue it first thing.
+- **What's next for 2B?** Options: (a) start CPT (continued pre-training) on
+  additional tokens with the constant-LR config we just built, (b) SFT, (c)
+  freeze it as the reference base. The constant-LR (decay_ratio=0) plumbing is
+  ready -- see the 80B launch item below.
+
+### 80B production launched at SophiaG / constant-LR / scale brackets
+
+Submitted the first real 80B v2 production runs (queued, will start post-PM):
+**512N + 1024N + 2048N simultaneously**, SophiaG @ LR=1e-6, **constant LR after
+warmup (no decay)** for the planned CPT regime, validator ON (95/5 split).
+
+- **Optimizer/LR is the discussion point.** Per the 2026-06-27 production-batch
+  LR-finder, AdamW @ GBS~6144 is on a NaN cliff (LR=1e-6 past it); the finder's
+  safest pick is **mano @ ~3e-6**, with SophiaG @ ~1e-6 as the lowest-loss but
+  narrow-band alternative. We launched **SophiaG @ 1e-6**. Worth a team
+  decision: stick with SophiaG, or switch the 80B base to mano for the wider
+  stability margin on an unattended multi-T-token run?
+- **Scale is unvalidated above ~512N.** 1024N (12,288 ranks) is documented to
+  crash at init (`set_determinism`); 2048N (24,576 ranks, dp_degree~6138) is 2x
+  that and untested. The 512N bracket is the safety net; submitting all three
+  is itself the scaling experiment. Expect possible init crashes at 1024/2048N.
+- A 4N pre-check confirmed the config wiring + clean SophiaG descent before
+  committing the big allocations.
+
+### Infra fixes this week (all landed + pushed)
+
+- **blendcorpus cold-cache index race FIXED** (was blocking any fresh-CKPT_DIR
+  80B run). Root cause: at TP>1 the non-rank-0 readers raced rank-0's index
+  write. Fixed at source in `saforem2/blendcorpus` -- atomic writes + poll
+  (`041d015f`) + a TOCTOU follow-up (`1f7e9c0`). Confirmed end-to-end: cold 4N
+  TP=4 80B now builds the index and trains with 0 EOFError. **80B no longer
+  needs a manual cache prewarm.**
+- **Validator at 80B TP=4: the "CCL deadlock" was a phantom** -- 3 unrelated
+  bugs (cold-cache mmap race, a training-side barrier stall, a `loss_fn`
+  tuple-unpack crash), all fixed. Validation CONFIRMED working at TP=4
+  (job 12469784). `VALIDATOR_ENABLE=1` is now safe; 95/5 split is the default.
+- **Checkpoint-resume incident (recovered).** A clone `git pull` advanced the
+  prod clones past an optimizer state-dict format migration (#3623/#3269,
+  nested->flat), breaking DCP resume. Recovered by pinning clones pre-#3623;
+  resume verified. The clones stay pinned -- a nested->flat migration shim is
+  hard/risky and not worth it (chains resume fine pinned).
+- **walltime-aware checkpointing** added to the ezpz trainer (force a final
+  ckpt before walltime) + a job-absolute-deadline fix so it survives failover
+  retries.
+
+### 20B 256N status
+
+Running through the PM boundary; finished clean at **step-2,100 = 105.7B tokens
+(2.3%)**, loss **2.85**, ~21.8% MFU. Resumes post-PM via `8558549`.
+
+### Going into the PM maintenance (2026-06-29 06:00 -> 07-01 03:30 UTC)
+
+Both 256N chains exited with valid checkpoints (2B step-92,859, 20B step-2,100);
+all continuations + the 6 80B jobs are queued to resume/start post-maintenance.
+Nothing at risk.
+
+---
+
 ## 2026-05-04
 
 ### bf16-master RMSNorm-freeze fix is producing real downstream gains

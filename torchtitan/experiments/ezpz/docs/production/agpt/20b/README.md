@@ -41,7 +41,7 @@ per-task table.
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
 | [**v2 512N (sync)**](n512/README.md) (canonical chain) | Stalled — last walltime-clean run 8509393 (2026-05-29 12:01); 8516701 / 8521624 / 8521625 trained in-RAM past step-4400 but a stale `step-4500/` placeholder (renamed 2026-06-06) blocked persistence; cont (8521628) Q in `small`, cont (8521632) H | **4,400** (persisted) | **2.51** | **~442.9B (9.5%)** |
-| [v2 256N](n256/README.md) (8505255 final) | Done — 12h walltime end 2026-05-26 20:35 at step **1,125**. No chain continuation queued (256N is per-token comparator; canonical 20B chain is 512N). | 1,900 | — | — |
+| [v2 256N](n256/README.md) (8505255 final) | Done — 12h walltime end 2026-05-26 20:35 at step **1,125**. No chain continuation queued (256N is per-token comparator; canonical 20B chain is 512N). | 2,100 | — | — |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode
