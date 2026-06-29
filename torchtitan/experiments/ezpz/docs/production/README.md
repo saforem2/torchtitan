@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-06-24
+> Last updated: 2026-06-29
 
 **Jump to:** [Status at a glance](#status-at-a-glance) ·
 [Canonical chains](#canonical-chains-one-per-model) ·
@@ -19,22 +19,26 @@ budget. Detail + per-dispatch history in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
-| [**2B 256N**](agpt/2b/n256/README.md) async | running (cont12 Q) | **86,200** | 2.656 | **92.9%** | 🟢 nearing completion |
-| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~20d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
-| [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q ~20d) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
-| [20B 256N](agpt/20b/n256/README.md) | re-armed (Q) | 1,100 | 3.28 | 1.2% | 🟡 just re-launched |
-| [80B 256N](agpt/80b/README.md) | blocked (NaN) | — | — | — | 🔴 step-2 NaN; fix unresolved |
+| [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
+| [**80B** 512/1024/2048N](agpt/80b/README.md) | launched (Q, post-PM) | — | — | — | 🟢 SophiaG 1e-6, const-LR; 6 jobs queued |
+| [20B 256N](agpt/20b/n256/README.md) | running→PM | **2,100** | 2.85 | 2.3% | 🟢 advancing (resumes post-PM) |
+| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
+| [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q ~25d) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
 
 > **512N queue starvation** (both 512N chains ~20 days in `small`) is
 > pure node contention, not a hold or bad request — and re-submitting
 > would *reset* their accrued priority. Full diagnosis + data:
 > [queue-wait-analysis.md](queue-wait-analysis.md).
 
-> **80B status**: 4N stack validated end-to-end; 256N production blocked
-> on a step-2 NaN. `--debug.deterministic` was refuted at n=64
-> (2026-06-12); fp32-activations at TP=4 is the only remaining
-> clean-training candidate, untested at the production GBS. Full
-> diagnosis: [80b-n32-nan-diagnosis.md](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md).
+> **80B status (2026-06-29)**: production LAUNCHED. The old AdamW step-2 NaN
+> was root-caused as a production-batch LR problem -- the 2026-06-27 LR-finder
+> (GBS=6144) showed AdamW is on a NaN cliff (ceiling ~7e-7, NaN onset 1.36e-6),
+> while **mano (~3e-6)** and **sophiag (~1e-6)** train clean. Launched
+> **SophiaG @ 1e-6, constant-LR** at 512N+1024N+2048N (6 jobs queued, start
+> post-PM). TEAM DECISION OPEN: SophiaG vs mano for the base. Scale >512N
+> is untested (1024N has a documented init crash). Full plan:
+> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md);
+> LR-finder: [lr-finder/agpt/80b](../experiments/lr-finder/agpt/80b/README.md).
 
 ## All production trajectories — overlay vs tokens
 
@@ -57,7 +61,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **30,400** (persisted) | **2.71** | **3.06T** (65.5%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
 | 20B | 512 | **4,400** (persisted) | **3.46** | **442.9B** (9.5%) | [`8521632`](agpt/20b/n512/README.md) Q (sync-mode) | **Q+H — Aurora `small` queue contention.** 8521628 ran 2026-06-10, advanced step-4400 → step-4500 cleanly + persisted DCP, then crashed at the next `set_determinism` init step (std::bad_alloc, same failure mode as 8466848). Cont (8521632) Q for next 512N slot — resumes from step-4500. |
-| 80B | 4 | **10** (smoke) | **12.03** | smoke | [`int-r7`](agpt/80b/n4/README.md) ✅ end-to-end validated; **256N blocked on NaN** | **2026-06-12 evening: determinism fix refuted at n=64.** [`8540102`](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) (n=64, GBS=384, `--debug.seed=42 --debug.deterministic`, overprovisioned select=68) trained 8 clean steps then grad_norm=inf step 3, recovered, grad_norm=nan step 9 → loss=nan step 10. Clean exit (no node failure). The earlier n=32 success was lucky, not causal. **Only remaining clean-training candidate is `--training.mixed-precision-param=float32` at TP=4 (validated at GBS=96, untested at GBS=384, ~75% throughput cost).** See [80b-n32-nan-diagnosis.md](../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) — section "🚨🚨 Counter-evidence". |
+| 80B | 512/1024/2048 | — (queued) | — | — | [`8574385`](agpt/80b/README.md)/`8574386`/`8574387` Q (post-PM) | **Production LAUNCHED 2026-06-28** (SophiaG @ 1e-6, constant-LR, validator on). The old AdamW step-2 NaN was a production-batch LR problem (LR-finder: AdamW NaN-cliff at GBS=6144; mano ~3e-6 / sophiag ~1e-6 train clean). 6 jobs queued (3 heads + 3 conts), start post-PM. Scale >512N untested (1024N init-crash risk). Plan: [20260628-80b-sophiag-constant-lr-...](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
 
@@ -65,8 +69,8 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 256 | **86,200** (persisted) | **2.656** | **4.339T** (92.8%) | [`8558531`](agpt/2b/n256/README.md) Q (cont12) | **8534293 (cont11) clean 12h walltime exit** 2026-06-15 04:45 — added **+5,860 steps** (80,400 → 86,260, +59 ckpts persisted), loss 2.656, no NaN. Async-mode chain has now advanced 55,026 → 86,200 (+31,234 across 11 dispatches since 2026-05-28); **closing on the 4.67T target (92.9%)**. Chain continuation restored: cont12 (`8558531`) Q + cont13 (`8558532`) H. **Eval backfill `8558536` queued** for step-80,500..86,200 (58 ckpts × 7 tasks); the step-74,400..80,400 range completed via 8541782+8542227. |
-| 20B | 256 | **1,100** (persisted) | **3.28** | **55.4B** (1.2%) | [`8558548`](agpt/20b/n256/README.md) Q (re-armed) | Relocated 2026-06-12 to its own `agpt-20b-n256/` clone. Re-arm blocked twice (`8540345`/`8540346`, missing spmd_types in the symlinked tarball) then fixed 2026-06-16 (installed spmd_types==0.2.1 + rebuilt tarball). Re-submitted `8558548` (resumes step-1,100) + `8558549` (cont1). Prior: `8505255` (2026-05-22) broke the step-300 stall → step-1,125, persisted step-400..1,100. |
+| 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the final ckpt (blocked on PM).** |
+| 20B | 256 | **2,100** (persisted) | **2.85** | **105.7B** (2.3%) | [`8558548`](agpt/20b/n256/README.md) Done→PM (cont1 Q) | Advanced step-1,100 → **2,100** (+1,000 steps), loss **2.85**, ~21.8% MFU; clean exit at the PM boundary. cont1 (`8558549`) Q to resume step-2,100 post-maintenance. Relocated 2026-06-12 to its own `agpt-20b-n256/` clone (spmd_types fixed 2026-06-16). |
 
 ### Other jobs
 

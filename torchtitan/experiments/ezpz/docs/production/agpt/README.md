@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-06-24
+> Last updated: 2026-06-29
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -19,27 +19,29 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
 
-## Headline (2026-06-24)
+## Headline (2026-06-29)
 
-- **🏁 2B 256N async chain at step 86,200** (loss **2.656**, **~4.34T
-  tokens, 92.9%** of target — closing on completion). cont11
-  [8534293](2b/n256/README.md#log-8534293) walltime-clean 2026-06-15
-  04:45 (+59 ckpts step-80,400→86,200); cont12 [8558531](2b/n256/README.md)
-  Q, cont13 [8558532](2b/n256/README.md) H. **+16,300 steps since the
-  2026-06-10 headline below.**
+- **🏁 2B 256N async chain COMPLETE — step 92,859 = 4.674T tokens
+  (100.0%** of target). cont12 [8558531](2b/n256/README.md) finished
+  clean exit-0 (~10.2h) 2026-06-29 03:03, final loss **2.652**. The full
+  v2 2B base pre-training run is done; cont13 [8558532](2b/n256/README.md)
+  Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the
+  final ckpt (blocked on PM maintenance).**
+- **80B production LAUNCHED 2026-06-28** — SophiaG @ 1e-6, **constant-LR**
+  (for CPT), validator on, at **512N+1024N+2048N** simultaneously
+  ([8574385](80b/README.md)/8574386/8574387 + 3 conts, Q, start post-PM).
+  The old AdamW step-2 NaN was a production-batch LR problem (LR-finder:
+  AdamW NaN-cliff at GBS=6144; mano ~3e-6 / sophiag ~1e-6 train clean).
+  **TEAM DECISION OPEN: SophiaG vs mano** for the base; scale >512N
+  untested. Plan: [80B SophiaG launch](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+- **20B 256N** advanced to step **2,100** (105.7B, 2.3%, loss 2.85,
+  ~21.8% MFU); clean exit at the PM boundary, cont1
+  [8558549](20b/n256/README.md) Q to resume post-maintenance.
 - **2B 512N sync chain** still stalled at step **30,400** (loss 2.71,
   ~3.06T, 65.5%) — no advance since 2026-05-30; cont10 [8521631](2b/n512/README.md) Q.
 - **20B 512N sync chain** at step **4,400** (loss 2.51, ~442.9B, 9.5%) —
   the step-4,500 dir is a mid-save placeholder (no `.metadata`), so the
   last finalized ckpt is step-4,400; cont [8521632](20b/n512/README.md) Q.
-- **20B 256N relocated + re-armed** to its own `agpt-20b-n256/` clone
-  2026-06-12; step **1,100** (55.4B, 1.2%). Re-arm blocked twice on a
-  stale-tarball `spmd_types` miss, fixed 2026-06-16; resubmitted
-  [8558548](20b/n256/README.md)+[8558549](20b/n256/README.md).
-- **80B 256N still blocked on the step-2 NaN** — `--debug.deterministic`
-  refuted at n=64 (2026-06-12); fp32-activations at TP=4 is the only
-  remaining clean-training candidate, untested at GBS=384. See
-  [80b NaN diagnosis](../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md).
 
 ## Headline (2026-06-10)
 

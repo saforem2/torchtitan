@@ -1,6 +1,6 @@
 # Production Training — agpt 2B
 
-> Last updated: 2026-06-24
+> Last updated: 2026-06-29
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
