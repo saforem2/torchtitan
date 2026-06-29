@@ -22,11 +22,17 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-29 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
+| 2026-06-29 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
+| 2026-06-29 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
+| 2026-06-29 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-06-29 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-06-29 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
+| 2026-06-29 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-06-28 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-06-28 | [blendcorpus index-cache race: atomic-rename fix landed (041d015f) + one follow-up TOCTOU bug](./upstream-issues/blendcorpus-atomic-rename-index-fix.md) |
 | 2026-06-28 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) |
 | 2026-06-28 | [Scaling Tests & Production Runs — Aurora (2026-04-18 to 2026-04-21)](./production/scaling-performance.md) |
-| 2026-06-28 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-06-28 | [Development Journal](./journal.md) |
 | 2026-06-28 | [The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs](./guides/known-bugs/validator-tp4-at-80b.md) |
 | 2026-06-28 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
@@ -41,28 +47,23 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-28 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
 | 2026-06-28 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
 | 2026-06-28 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
-| 2026-06-28 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
-| 2026-06-28 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
-| 2026-06-28 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
-| 2026-06-28 | [80B autoretry verification + blendcorpus cold-cache race fix (end-to-end)](./experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) |
-| 2026-06-28 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
-| 2026-06-28 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
-| 2026-06-28 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-06-28 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
+| 2026-06-28 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
+| 2026-06-28 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
+| 2026-06-28 | [80B autoretry verification + blendcorpus cold-cache race fix (end-to-end)](./experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) |
+| 2026-06-28 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
+| 2026-06-28 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-06-27 | [Production Queue-Wait Analysis (Aurora small)](./production/queue-wait-analysis.md) |
 | 2026-06-27 | [80B LR-finder at the production batch (GBS=6144) -- Sunspot, 2026-06-27](./experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md) |
 | 2026-06-26 | [Summaries](./summaries/README.md) |
 | 2026-06-26 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
 | 2026-06-26 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
-| 2026-06-26 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
-| 2026-06-26 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
-| 2026-06-26 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-06-26 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-06-26 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
 | 2026-06-26 | [80B: LR, batch size, and dp-degree -- a connected set of findings (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md) |
 | 2026-06-26 | [80B GBS=5952 2048N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md) |
@@ -75,7 +76,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-24 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-06-24 | [Production Training — agpt 2B @ 1024 nodes](./production/agpt/2b/n1024/README.md) |
 | 2026-06-24 | [Production Training — agpt 20B @ 1024 nodes](./production/agpt/20b/n1024/README.md) |
-| 2026-06-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-06-24 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-06-24 | [Native auto-retry 2B submit-script smoke (Sunspot, 2026-06-24)](./experiments/agpt/sunspot/2026-06-24-native-autoretry-2b-smoke.md) |
 
@@ -91,15 +91,15 @@ going?" Tracking is per-model and per-node-count.
 |------|-------|---------:|
 | [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-06-24 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-06-24 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**91,400** (4.600T tokens, 98.4% of 4.67T), loss 2.6511. | 2026-06-28 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-26 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-26 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,700** (85.6B tokens, 1.8% of 4.67T), loss 4.8092. | 2026-06-26 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-06-29 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-29 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-29 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**1,900** (95.6B tokens, 2.0% of 4.67T), loss 4.8092. | 2026-06-29 |
 | [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-06-26 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-26 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-29 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
 
