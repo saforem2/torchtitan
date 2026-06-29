@@ -38,9 +38,9 @@ including both production batches (6144, 12288):
 | 1536  | 1.0e-3 / 11.3 | 2.5e-5 / 12.0 | 1.4e-5 / 12.4 |
 | 3072  | 1.4e-5 / 12.4 | 3.4e-5 / 11.8 | 1.4e-5 / 12.4 |
 | **6144** (prod) | 1.6e-4 / 11.9 | 8.6e-5 / 11.5 | 1.4e-3 / 12.3 |
-| **12288** (512N) | 3.4e-5 / 12.3 | 6.3e-5 / 11.7 | _(finishing)_ |
+| **12288** (512N) | 3.4e-5 / 12.3 | 6.3e-5 / 11.7 | 1.4e-5 / 12.4 |
 
-(cells are min-LR / min-loss; all 0 NaN.)
+(cells are min-LR / min-loss; **all 21 cells 0 NaN** -- 20B never cliffs.)
 
 ![20B all optimizers x all batch sizes](figures/lr_finder_20b_all_opts_all_gbs.png)
 
