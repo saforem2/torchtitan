@@ -420,11 +420,14 @@ def plot_2b_all_optimizers(out: Path, gbs: int = 6144) -> None:
         p = csv_2b(gbs, opt)
         if not Path(p).exists():
             continue
-        fx, fy = _finite(*load_curve(p))
-        mlr, mloss = _min(*load_curve(p))
-        line, = ax.plot(fx, fy, "-o", ms=6, label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
+        fx, fy_raw = _finite(*load_curve(p))
+        fy = _smooth(fy_raw)
+        mi = min(range(len(fy)), key=lambda k: fy[k])
+        mlr, mloss = fx[mi], fy[mi]
+        ax.plot(fx, fy, "-o", ms=6, color=OPT_COLOR[opt],
+                label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
         ax.scatter([mlr], [mloss], s=170, facecolors="none",
-                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
+                   edgecolors=OPT_COLOR[opt], linewidths=1.8, zorder=4)
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
