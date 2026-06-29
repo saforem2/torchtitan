@@ -216,11 +216,17 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
                        zorder=2 + i + 0.5)
             plotted[opt] += 1
     ax.set_xscale("log")
+    # Cap the y-axis at 15: the high-LR blow-up runs to ~50 (esp. sophiag),
+    # which crushes the interesting basin (loss ~11-14) into the bottom of the
+    # plot. Trimming to 15 zooms into the minima while still showing the
+    # upturn. Curves continue off-axis above 15 (that is the blow-up region,
+    # not where the optimum is).
+    ax.set_ylim(top=15)
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
     ax.set_title(f"agpt {model.upper()}: loss vs LR -- every optimizer x batch "
                  f"size (dp=192)\nhue = optimizer; larger batch = darker + "
-                 f"thicker + more opaque; dots mark each minimum")
+                 f"thicker + more opaque; dots mark each minimum (y capped at 15)")
     opt_handles = [
         Line2D([0], [0], color=plt.get_cmap(_OPT_CMAP[o])(0.75), lw=3,
                label=f"{OPT_LABEL[o]} ({plotted[o]} batches)")
