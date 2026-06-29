@@ -172,12 +172,20 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
     gbs_list = GBS_2B
     opts = ("adamw", "mano", "sophiag")
     n = len(gbs_list)
-    # shade ramp [0.35, 0.95] (skip near-white so small-GBS curves show)
-    shade = {g: 0.35 + 0.60 * (i / max(1, n - 1)) for i, g in enumerate(gbs_list)}
+    # Three ramps, all keyed off batch-size rank r in [0,1] (small -> large),
+    # so large batch = darker + thicker + more opaque (foregrounds the
+    # production-relevant curves; small/noisy batches recede).
+    def _rank(i):
+        return i / max(1, n - 1)
+    shade = {g: 0.35 + 0.60 * _rank(i) for i, g in enumerate(gbs_list)}
+    width = {g: 0.8 + 2.7 * _rank(i) for i, g in enumerate(gbs_list)}   # 0.8 -> 3.5 pt
+    alpha = {g: 0.35 + 0.60 * _rank(i) for i, g in enumerate(gbs_list)}  # 0.35 -> 0.95
     fig, ax = plt.subplots(figsize=(11, 7))
     plotted = {o: 0 for o in opts}
     for opt in opts:
         cmap = plt.get_cmap(_OPT_CMAP[opt])
+        # draw small-batch (thin/faint) first so the thick opaque large-batch
+        # lines land on top.
         for g in gbs_list:
             p = _csv_for(model, g, opt)
             if not Path(p).exists():
@@ -185,25 +193,29 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
             fx, fy = _finite(*load_curve(p))
             if not fx:
                 continue
-            ax.plot(fx, fy, "-", lw=1.3, color=cmap(shade[g]), zorder=2)
+            i = gbs_list.index(g)
+            ax.plot(fx, fy, "-", lw=width[g], alpha=alpha[g],
+                    color=cmap(shade[g]), zorder=2 + i)
             mi = min(range(len(fy)), key=lambda k: fy[k])
-            ax.scatter([fx[mi]], [fy[mi]], s=30, color=cmap(shade[g]),
-                       edgecolor="k", linewidth=0.4, zorder=3)
+            ax.scatter([fx[mi]], [fy[mi]], s=20 + 6 * i, alpha=alpha[g],
+                       color=cmap(shade[g]), edgecolor="k", linewidth=0.4,
+                       zorder=2 + i + 0.5)
             plotted[opt] += 1
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
     ax.set_title(f"agpt {model.upper()}: loss vs LR -- every optimizer x batch "
-                 f"size (dp=192)\nhue = optimizer, shade = batch (light small -> "
-                 f"dark large); dots mark each minimum")
+                 f"size (dp=192)\nhue = optimizer; larger batch = darker + "
+                 f"thicker + more opaque; dots mark each minimum")
     opt_handles = [
         Line2D([0], [0], color=plt.get_cmap(_OPT_CMAP[o])(0.75), lw=3,
                label=f"{OPT_LABEL[o]} ({plotted[o]} batches)")
         for o in opts if plotted[o]
     ]
+    # batch-size swatches mirror the plot encoding (shade + width + alpha)
     gbs_handles = [
-        Line2D([0], [0], color=plt.get_cmap("Greys")(shade[g]), lw=3,
-               label=f"GBS={g}")
+        Line2D([0], [0], color=plt.get_cmap("Greys")(shade[g]),
+               lw=width[g], alpha=alpha[g], label=f"GBS={g}")
         for g in gbs_list
         if any(Path(_csv_for(model, g, o)).exists() for o in opts)
     ]
@@ -211,7 +223,7 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
                      title="optimizer (hue)")
     ax.add_artist(leg1)
     ax.legend(handles=gbs_handles, fontsize=7.5, loc="lower left",
-              title="batch size (shade)", ncol=2)
+              title="batch size (shade/width/opacity)", ncol=2)
     fig.tight_layout()
     fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)
