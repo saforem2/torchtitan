@@ -49,8 +49,22 @@ def apply_house_style() -> None:
 
 
 def load_curve(path: str):
-    """Return (lrs, losses) with NaN losses as None, last sweep only."""
-    rows = list(csv.DictReader(open(path)))[-15:]
+    """Return (lrs, losses) with NaN losses as None, last sweep only.
+
+    A sweep is one monotonically-increasing LR run. Files can hold more than
+    one sweep (e.g. an LR-finder rerun appends, or different step counts), so
+    take the LAST contiguous ascending-LR block rather than a fixed row count
+    -- a hardcoded tail (the old [-15:]) silently dropped the lower half of a
+    30-step sweep, truncating the x-range to ~1e-3 instead of 1e-5.
+    """
+    rows = list(csv.DictReader(open(path)))
+    # walk backward while LR strictly decreases (= ascending forward)
+    start = len(rows) - 1
+    while start > 0 and float(rows[start - 1]["learning_rate"]) < float(
+        rows[start]["learning_rate"]
+    ):
+        start -= 1
+    rows = rows[start:]
     lrs, losses = [], []
     for r in rows:
         lrs.append(float(r["learning_rate"]))
