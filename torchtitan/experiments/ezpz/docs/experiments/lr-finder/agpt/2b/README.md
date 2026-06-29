@@ -130,6 +130,49 @@ comparable across sweep lengths; the loss *value* is not. Optimizer ordering
 is consistent with the trend (AdamW deepest + widest basin, sophiag
 shallowest + sharpest blow-up). All three 0 NaN.
 
+#### Deeper sweep: 100 steps across the production GBS ladder
+
+The 100-step run above is a single small batch. This extends it to the full
+**production GBS ladder** (1536 / 3072 / 6144 / 12288 / 24576) at 100 steps,
+all three optimizers -- i.e. the 15-step trend's batch sweep, re-run at the
+classic finder length so the curves are smooth and the minima are deep. Run at
+16N, TP=1 -> dp=192 (same dp as the 15-step trend, so the min-LR is directly
+comparable). Jobs 12469854-868, isolated dumps
+`outputs/lrfind-2b-100step-prod/gbs<N>/`.
+
+> **Status (2026-06-29): PRELIMINARY -- 9/15 jobs done.** The 1536 / 3072 /
+> **6144 (production)** tiers are complete for all three optimizers (0 NaN
+> everywhere); 12288 + 24576 are still computing (the long poles). Figures
+> below are regenerated as jobs land, so they fill in automatically. The
+> headline production point (GBS=6144) is already in.
+
+Everything on one axis, hue = optimizer and batch size encoded three ways at
+once (shade light->dark, width thin->thick, opacity faint->opaque, all
+increasing with GBS):
+
+![2B 100-step production ladder, all opts x all GBS](figures/lr_finder_2b_100step_prod_all_opts_all_gbs.png)
+
+Optimal (min-loss) LR vs batch size, 100-step sweeps:
+
+![2B 100-step production ladder, min-LR vs GBS](figures/lr_finder_2b_100step_prod_minlr_vs_gbs.png)
+
+Completed points so far (smoothed-min LR / loss, all 0 NaN):
+
+| GBS | AdamW | mano | sophiag |
+|----:|-------|------|---------|
+| 1536 | 3.3e-3 / 7.74 | 9.1e-3 / 8.02 | 1.9e-3 / 8.28 |
+| 3072 | 2.8e-3 / 7.69 | 6.9e-3 / 7.75 | 2.1e-3 / 8.28 |
+| **6144** (prod) | 2.5e-3 / 7.76 | 5.2e-3 / 7.92 | 2.1e-3 / 8.19 |
+| 12288 | _pending_ | _pending_ | _pending_ |
+| 24576 | _pending_ | _pending_ | _pending_ |
+
+Consistent with everything above: **0 NaN at every batch** (2B never cliffs,
+even at 100 steps + production batch), optimal LRs sit ~2e-3..9e-3 (4 orders of
+magnitude above the 80B cliff at ~7e-7), and the optimizer ordering is stable
+(mano's optimum ~2x AdamW's, sophiag's the lowest, at every batch). The deep
+minima (~7.7..8.3 vs ~11.5 at 15 steps) are the cumulative-training
+sweep-length effect, not a better LR -- compare by min-LR, not loss value.
+
 ### Contrast with 80B (same dp=192)
 
 | | 2B (dim=2048) | 80B (dim=9216) |
@@ -231,6 +274,7 @@ blendcorpus (books), xccl.
 
 | Date | Machine | GBS | Optimizers | Nodes | Key Result |
 |------|---------|-----|-----------|-------|------------|
+| 2026-06-29 | Sunspot | 1536..24576 | AdamW, mano, sophiag | 16 | 100-step production ladder (PRELIM 9/15): 6144 done, 0 NaN, min-LR ~2-5e-3 |
 | 2026-06-28 | Sunspot | 192..24576 | AdamW, mano, sophiag | 16 | LR-ceiling-vs-GBS trend: 2B never cliffs (flat ~1e-2, 0 NaN, 128x batch) |
 | 2026-04-21 | Sunspot | 24..384 | AdamW, Muon, SophiaG | 2 | torch-2.13 verify + GAS sweep; LR stable 4.9-9.0e-4 |
 | 2026-04-14 | Sunspot | 48 | AdamW, Muon, SophiaG | 2 | dim-aware init: AdamW 1.3e-3, Muon 2.4e-3 (3x higher) |
