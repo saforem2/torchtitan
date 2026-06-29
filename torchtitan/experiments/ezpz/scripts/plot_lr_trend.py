@@ -110,7 +110,25 @@ def csv_2b(gbs: int, opt: str) -> str:
 # Per-GBS loss-vs-LR curve family (the requested view: one line per batch)
 # ---------------------------------------------------------------------------
 GBS_2B = [192, 384, 768, 1536, 3072, 6144, 12288, 24576]
-OPT_LABEL = {"adamw": "AdamW", "mano": "mano", "sophiag": "sophiag"}
+OPT_LABEL = {"adamw": "AdamW", "mano": "mano", "sophiag": "sophiag",
+             "muon": "muon"}
+
+# CANONICAL optimizer colors -- use these EVERYWHERE so an optimizer is the
+# same color in every chart (was inconsistent: sophiag green in one fig, red
+# in another; adamw blue/red/black across figs). Solid color + matching
+# colormap (for the shade-by-batch plots).
+OPT_COLOR = {
+    "adamw": "#ff7f0e",   # orange
+    "mano": "#1f77b4",    # blue
+    "sophiag": "#2ca02c", # green
+    "muon": "#9467bd",    # purple
+}
+OPT_CMAP = {
+    "adamw": "Oranges",
+    "mano": "Blues",
+    "sophiag": "Greens",
+    "muon": "Purples",
+}
 
 
 def plot_loss_vs_lr_by_gbs_2b(out: Path, opt: str = "adamw") -> None:
@@ -151,7 +169,7 @@ def plot_loss_vs_lr_by_gbs_2b(out: Path, opt: str = "adamw") -> None:
 
 def plot_2b_minlr_vs_gbs_all_opts(out: Path) -> None:
     """2B usable/min LR vs GBS, all three optimizers overlaid."""
-    colors = {"adamw": "#1f77b4", "mano": "#2ca02c", "sophiag": "#ff7f0e"}
+    colors = OPT_COLOR
     markers = {"adamw": "o", "mano": "s", "sophiag": "^"}
     fig, ax = plt.subplots(figsize=(9, 6))
     for opt in ("adamw", "mano", "sophiag"):
@@ -189,7 +207,7 @@ def plot_2b_minlr_vs_gbs_all_opts(out: Path) -> None:
 # ---------------------------------------------------------------------------
 from matplotlib.lines import Line2D  # noqa: E402
 
-_OPT_CMAP = {"adamw": "Oranges", "mano": "Blues", "sophiag": "Greens"}
+_OPT_CMAP = OPT_CMAP  # canonical (see OPT_COLOR/OPT_CMAP at module top)
 
 
 def _csv_for(model: str, gbs: int, opt: str) -> str:
@@ -276,7 +294,7 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
 
 def plot_minlr_vs_gbs(out: Path, model: str) -> None:
     """usable/min LR vs batch, all optimizers overlaid (model-generic)."""
-    colors = {"adamw": "#d62728", "mano": "#1f77b4", "sophiag": "#2ca02c"}
+    colors = OPT_COLOR
     markers = {"adamw": "o", "mano": "s", "sophiag": "^"}
     fig, ax = plt.subplots(figsize=(9, 6))
     for opt in ("adamw", "mano", "sophiag"):
@@ -315,14 +333,16 @@ def plot_all_optimizers_at_gbs(out: Path, model: str, gbs: int) -> None:
         p = _csv_for(model, gbs, opt)
         if not Path(p).exists():
             continue
-        fx, fy = _finite(*load_curve(p))
+        fx, fy_raw = _finite(*load_curve(p))
         if not fx:
             continue
-        mlr, mloss = _min(*load_curve(p))
-        line, = ax.plot(fx, fy, "-o", ms=6,
-                        label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
+        fy = _smooth(fy_raw)
+        mi = min(range(len(fy)), key=lambda k: fy[k])
+        mlr, mloss = fx[mi], fy[mi]
+        ax.plot(fx, fy, "-o", ms=6, color=OPT_COLOR[opt],
+                label=f"{lab} -- U-min @ {mlr:.1e} (0 NaN)")
         ax.scatter([mlr], [mloss], s=170, facecolors="none",
-                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
+                   edgecolors=OPT_COLOR[opt], linewidths=1.8, zorder=4)
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
@@ -433,20 +453,23 @@ def plot_80b_all_optimizers(out: Path) -> None:
         p = f"{base}/{opt}/lr_finder_data.csv"
         if not Path(p).exists():
             continue
-        fx, fy = _finite(*load_curve(p))
-        mlr, mloss = _min(*load_curve(p))
-        line, = ax.plot(fx, fy, "-o", ms=6, label=lab)
+        fx, fy_raw = _finite(*load_curve(p))
+        fy = _smooth(fy_raw)
+        mi = min(range(len(fy)), key=lambda k: fy[k])
+        mlr, mloss = fx[mi], fy[mi]
+        ax.plot(fx, fy, "-o", ms=6, color=OPT_COLOR[opt], label=lab)
         ax.scatter([mlr], [mloss], s=170, facecolors="none",
-                   edgecolors=line.get_color(), linewidths=1.8, zorder=4)
-    ax.plot(adamw_lr, adamw_loss, "-^", ms=7, color="#111111", zorder=5,
+                   edgecolors=OPT_COLOR[opt], linewidths=1.8, zorder=4)
+    # AdamW uses its canonical orange (consistent with every other chart); the
+    # ^ marker + dashed annotation distinguish it as the NaN-cliff line.
+    ax.plot(adamw_lr, adamw_loss, "-^", ms=7, color=OPT_COLOR["adamw"], zorder=5,
             label="AdamW -- NaN cliff: last finite 7.4e-7, NaN from 1.36e-6")
-    # mark AdamW's last-finite point (its "min" is just the cliff edge)
     ax.scatter([7.356e-7], [12.785], s=170, facecolors="none",
-               edgecolors="#111111", linewidths=1.8, zorder=6)
+               edgecolors=OPT_COLOR["adamw"], linewidths=1.8, zorder=6)
     ax.annotate("AdamW: last finite 7.4e-7,\nthen NaN (no real min)",
                 xy=(7.356e-7, 12.785), xytext=(1.0e-8, 12.35), fontsize=8,
-                color="#111111",
-                arrowprops=dict(arrowstyle="->", color="#111111"))
+                color=OPT_COLOR["adamw"],
+                arrowprops=dict(arrowstyle="->", color=OPT_COLOR["adamw"]))
     ax.set_xscale("log")
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
@@ -472,10 +495,13 @@ def plot_80b_adamw_cliff(out: Path) -> None:
     nan_lr = [1.359e-6, 2.512e-6, 4.642e-6, 8.577e-6, 1.585e-5, 2.929e-5,
               5.412e-5]  # all NaN
     fig, ax = plt.subplots(figsize=(9, 6))
-    ax.plot(lr, loss, "-^", ms=7, color="#d62728", zorder=4,
+    # AdamW line = canonical orange (consistent with every chart). The NaN
+    # region stays RED -- there red means "divergence zone", a semantic
+    # separate from the optimizer hue.
+    ax.plot(lr, loss, "-^", ms=7, color=OPT_COLOR["adamw"], zorder=4,
             label="AdamW (finite)")
     ax.scatter([7.356e-7], [12.785], s=180, facecolors="none",
-               edgecolors="#d62728", linewidths=1.8, zorder=5)
+               edgecolors=OPT_COLOR["adamw"], linewidths=1.8, zorder=5)
     # shade the NaN region so the cliff is explicit
     ax.axvspan(1.0e-6, max(nan_lr), color="#d62728", alpha=0.08, zorder=0)
     ax.axvline(1.359e-6, color="#d62728", ls="--", lw=1, alpha=0.7, zorder=1)

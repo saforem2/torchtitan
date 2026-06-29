@@ -5,6 +5,15 @@ Periodic retrospectives covering the project at a higher level than
 Each summary names the explicit date range it covers in its filename
 (`YYYY-MM-DD_to_YYYY-MM-DD.md`) and in its title.
 
+## Quarterly / program reports
+
+Higher-level rollups for external (INCITE / program) reporting,
+synthesized from the two-week summaries below.
+
+| Period | Report | Headline |
+|---|---|---|
+| 2026 Q2 (Apr 1 -> Jun 30) | [INCITE Quarterly Report](2026-Q2-incite.md) | 2B base pre-training COMPLETE (4.674T tokens); 20B leading per token; 80B launched; RL (SFT+GRPO) end-to-end on XPU; ~29% Year-2 Aurora burn |
+
 ## Index
 
 | Period | Summary | Headline |
