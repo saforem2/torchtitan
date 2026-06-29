@@ -1,16 +1,27 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-06-26
+> Last updated: 2026-06-29
+
+> **🟢 PRODUCTION LAUNCHED 2026-06-28.** First real 80B v2 production
+> dispatches are queued: **SophiaG @ LR=1e-6, constant-LR (no decay, for
+> CPT), validator on**, at **512N + 1024N + 2048N** simultaneously
+> (`8574385`/`8574386`/`8574387` heads + 3 `afterany` conts). They start
+> after the PM maintenance (2026-07-01 03:30 UTC). The old AdamW "step-2
+> NaN" was root-caused as a production-batch LR problem: the 2026-06-27
+> LR-finder (GBS=6144) showed AdamW is on a NaN cliff (ceiling ~7e-7),
+> while **mano (~3e-6)** and **sophiag (~1e-6)** train clean. **TEAM
+> DECISION OPEN: SophiaG vs mano** for the base optimizer. Scale >512N is
+> unvalidated (1024N has a documented init crash; 2048N dp_degree~6138
+> untested) -- the 512N bracket is the safety net. Full plan:
+> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+> LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
 
 ## 80B trajectory chart
 
-**No live 80B production chart yet** — production has not begun (4N
-smokes are ≤20 steps each, and 256N is currently blocked on the NaN
-diagnosed [here](../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md)).
-The per-trajectory stub [`n4/README.md`](n4/README.md) holds the 4N
-validation details, and the 256N production-fix recipe will be linked
-here once `--debug.deterministic` n=64/128/256 sweep validates and a
-production chain starts persisting ckpts.
+**No live 80B production chart yet** — the production brackets (above) are
+queued but haven't started persisting ckpts (machine in PM). The chart
+will populate once they run. The per-trajectory stub
+[`n4/README.md`](n4/README.md) holds the 4N validation details.
 
 For the cross-model view (2B + 20B together — 80B is not on it yet for
 the reasons above), see [`../README.md`](../README.md).

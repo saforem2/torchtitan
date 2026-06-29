@@ -2,7 +2,14 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-06-24
+> Last updated: 2026-06-29
+>
+> **NOTE (2026-06-29):** the 2B 256N chain **COMPLETED** at step-92,859 =
+> 4.674T tokens (100%). The scores below run through **step-86,200**; the
+> final stretch (step-86,300 -> 92,859) is **not yet eval'd** -- queue the
+> backfill (incl. the final step-92,859 checkpoint) when Aurora returns
+> from PM maintenance. lm-eval needs compute, so it can't run during the
+> outage.
 >
 > **Training curves:** see [`docs/production/agpt/2b/`](../../../production/agpt/2b/README.md)
 > for loss / throughput / MFU dashboards across the live 2B trajectories
