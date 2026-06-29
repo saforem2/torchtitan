@@ -147,6 +147,78 @@ def plot_2b_minlr_vs_gbs_all_opts(out: Path) -> None:
     print("wrote", out)
 
 
+# ---------------------------------------------------------------------------
+# Combined: every (optimizer x batch size) loss-vs-LR curve on one axis.
+# Hue encodes optimizer (AdamW=orange, mano=blue, sophiag=green); shade
+# encodes batch size (light = small GBS, dark = large GBS).
+# ---------------------------------------------------------------------------
+from matplotlib.lines import Line2D  # noqa: E402
+
+_OPT_CMAP = {"adamw": "Oranges", "mano": "Blues", "sophiag": "Greens"}
+
+
+def _csv_for(model: str, gbs: int, opt: str) -> str:
+    flav = "20b" if model == "20b" else "2b"
+    return (f"outputs/lrtrend-{flav}/gbs{gbs}/lr_finder/ezpz/ezpz.agpt/"
+            f"{flav}/{opt}/lr_finder_data.csv")
+
+
+def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
+    """One axis: loss-vs-LR for every optimizer x batch size.
+
+    Hue = optimizer, shade = batch size (light small -> dark large). Only
+    plots cells with a CSV, so it is safe to run while a sweep is partial.
+    """
+    gbs_list = GBS_2B
+    opts = ("adamw", "mano", "sophiag")
+    n = len(gbs_list)
+    # shade ramp [0.35, 0.95] (skip near-white so small-GBS curves show)
+    shade = {g: 0.35 + 0.60 * (i / max(1, n - 1)) for i, g in enumerate(gbs_list)}
+    fig, ax = plt.subplots(figsize=(11, 7))
+    plotted = {o: 0 for o in opts}
+    for opt in opts:
+        cmap = plt.get_cmap(_OPT_CMAP[opt])
+        for g in gbs_list:
+            p = _csv_for(model, g, opt)
+            if not Path(p).exists():
+                continue
+            fx, fy = _finite(*load_curve(p))
+            if not fx:
+                continue
+            ax.plot(fx, fy, "-", lw=1.3, color=cmap(shade[g]), zorder=2)
+            mi = min(range(len(fy)), key=lambda k: fy[k])
+            ax.scatter([fx[mi]], [fy[mi]], s=30, color=cmap(shade[g]),
+                       edgecolor="k", linewidth=0.4, zorder=3)
+            plotted[opt] += 1
+    ax.set_xscale("log")
+    ax.set_xlabel("Learning rate")
+    ax.set_ylabel("LR-finder smoothed loss")
+    ax.set_title(f"agpt {model.upper()}: loss vs LR -- every optimizer x batch "
+                 f"size (dp=192)\nhue = optimizer, shade = batch (light small -> "
+                 f"dark large); dots mark each minimum")
+    opt_handles = [
+        Line2D([0], [0], color=plt.get_cmap(_OPT_CMAP[o])(0.75), lw=3,
+               label=f"{OPT_LABEL[o]} ({plotted[o]} batches)")
+        for o in opts if plotted[o]
+    ]
+    gbs_handles = [
+        Line2D([0], [0], color=plt.get_cmap("Greys")(shade[g]), lw=3,
+               label=f"GBS={g}")
+        for g in gbs_list
+        if any(Path(_csv_for(model, g, o)).exists() for o in opts)
+    ]
+    leg1 = ax.legend(handles=opt_handles, fontsize=9, loc="upper left",
+                     title="optimizer (hue)")
+    ax.add_artist(leg1)
+    ax.legend(handles=gbs_handles, fontsize=7.5, loc="lower left",
+              title="batch size (shade)", ncol=2)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out} (adamw={plotted['adamw']} mano={plotted['mano']} "
+          f"sophiag={plotted['sophiag']} batches)")
+
+
 def plot_loss_vs_lr_by_gbs_80b(out: Path) -> None:
     # 80B adamw per-GBS: small-batch (8N) + reruns (64N) + the 6144 cliff.
     sources = {
@@ -348,6 +420,11 @@ if __name__ == "__main__":
         DOCS / "2b/figures/lr_finder_2b_sophiag_loss_vs_lr_by_gbs.png", "sophiag")
     plot_2b_minlr_vs_gbs_all_opts(
         DOCS / "2b/figures/lr_finder_2b_minlr_vs_gbs_all_optimizers.png")
+    # combined: every optimizer x batch on one axis (hue=opt, shade=batch)
+    plot_all_opts_all_gbs(
+        DOCS / "2b/figures/lr_finder_2b_all_opts_all_gbs.png", "2b")
+    plot_all_opts_all_gbs(
+        DOCS / "20b/figures/lr_finder_20b_all_opts_all_gbs.png", "20b")
     plot_loss_vs_lr_by_gbs_80b(DOCS / "80b/figures/sunspot_80b_adamw_loss_vs_lr_by_gbs.png")
     # RESTYLED: the 4 existing figures, now through the house stylesheet
     plot_2b_all_optimizers(
