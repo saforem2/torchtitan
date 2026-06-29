@@ -350,10 +350,11 @@ that touches one of these areas.
   genuine `loss_fn` tuple-unpack crash in `validator.py`. All now fixed
   (tuple-unpack; validator inherits the warm `data_cache_path`; prewarm builds
   the validation index). 2B/2N validator smoke is green (12469561); **80B TP=4
-  validation has still never completed a `validate()` -- fixed-but-unconfirmed,
-  needs a short `--validator.enable --validator.freq=1` run on a prewarmed
-  cache.** `VALIDATOR_ENABLE=0` remains the safe escape hatch. Full evidence +
-  repro: [`docs/guides/known-bugs/validator-tp4-at-80b.md`](../docs/guides/known-bugs/validator-tp4-at-80b.md).
+  validation CONFIRMED working 2026-06-28 (job 12469784, 4N/dp=12, warm cache):
+  `validate()` completed at step 1, finite loss, no mmap/AttributeError/CCL
+  hang.** (Confirmed at dp=12; a 62N pass would be belt-and-suspenders for
+  production dp=186.) `VALIDATOR_ENABLE=0` remains the escape hatch. Full
+  evidence: [`docs/guides/known-bugs/validator-tp4-at-80b.md`](../docs/guides/known-bugs/validator-tp4-at-80b.md).
 
 ## Common Pitfalls
 

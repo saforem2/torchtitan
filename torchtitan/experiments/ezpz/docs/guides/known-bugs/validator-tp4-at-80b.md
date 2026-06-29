@@ -1,10 +1,16 @@
 # The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs
 
-**Status (2026-06-28): root-caused. The headline framing was wrong.** There is
-no evidence of a validator collective deadlock at 80B TP=4. The label
-conflated two *separate*, non-collective failures, plus one genuine latent
-crash in the validator. All are addressed; validation at 80B TP=4 has still
-never run to completion, so the fixes need a confirming run.
+**Status (2026-06-28): root-caused AND fixed -- CONFIRMED.** There is no
+validator collective deadlock at 80B TP=4. The label conflated two *separate*,
+non-collective failures plus one genuine latent crash in the validator; all
+three are fixed. **Confirming run: job 12469784 (80B, TP=4, 4N, warm cache,
+`--validator.freq=1`) ran `validate()` to completion at step 1 --
+`log_validation validate step: 1 loss: 47.60` -- no mmap error, no
+AttributeError, no CCL hang, clean exit.** (Loss is high because it is an
+untrained step-1 80B at GBS=24 -- this was a plumbing confirmation, not a
+numerics run.) Confirmed at dp_degree=12 (4N); the original reports were at
+dp=186 (62N) -- same code paths exercised, but a 62N validator pass would be
+belt-and-suspenders.
 
 ## What the docs claimed
 
@@ -83,16 +89,26 @@ prewarmed one, the validator cold-builds at scale -> the job 12469584 race.
   `loss`) are orthogonal to the TP axis; training at TP=4 exercises the same
   loss-parallel CE all-reduces every step and works fine for 100+ steps.
 
-## How to actually validate the fix
+## How it was confirmed (2026-06-28, job 12469784)
 
-The validator path at 80B TP=4 has never completed, so:
+The 4N prewarm job runs the validator at `--validator.freq=1` (that is how it
+builds the validation index), so it doubled as the confirming run:
 
-1. Prewarm with the validator index: `prewarm_blendcorpus_cache.sh` at the
-   target GBS.
-2. Run a short 80B TP=4 job with `VALIDATOR_ENABLE=1`, `--validator.freq=1`
-   (validation fires at step 1) for a few steps.
-3. Confirm `validate()` completes and logs a finite validation loss with no
-   `mmap`/`AttributeError`/CCL-watchdog. THEN the "deadlock" is closed.
+1. `prewarm_blendcorpus_cache.sh` (MODEL=80b NHOSTS_TRAIN=4 GAS=2
+   OPTIMIZER=adamw) built both indices into
+   `checkpoints/agpt-80b-adamw-books-n4-gbs24/.cache/books/index-cache`
+   (train `serve_validation=False`, then validation `serve_validation=True`).
+2. With the warm validation index, `validate()` ran at step 1:
+   `log_validation validate step: 1 loss: 47.5966 tps: 433`, then the job
+   exited clean (`Took 100.90 seconds. Exiting.`).
+3. No `mmap length > file size`, no `AttributeError`, no CCL watchdog/hang.
 
-Until that run is green, treat 80B TP=4 validation as fixed-but-unconfirmed.
-`VALIDATOR_ENABLE=0` remains a safe escape hatch.
+This is the **first time `validate()` has completed at 80B TP=4.** (Job
+12469785, a 4N training run with the validator on at step 1, is the second
+independent confirmation -- validator firing inside a real train loop.)
+
+Confirmed at dp_degree=12 (4N); the original reports were at dp=186 (62N).
+The same code paths are exercised (TP=4 loss-parallel collectives, the
+per-batch `dist_sum`, warm-vs-cold cache), so this closes the bug; a 62N
+validator pass would be belt-and-suspenders for production scale.
+`VALIDATOR_ENABLE=0` remains available as an escape hatch.
