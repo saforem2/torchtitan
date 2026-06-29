@@ -81,6 +81,27 @@ def _finite(lrs, losses):
     return ([p[0] for p in pts], [p[1] for p in pts])
 
 
+def _smooth(ys, frac=0.15):
+    """Moving-average smooth a loss curve (mirrors lr_finder.find_optimal_lr).
+
+    The CSV stores RAW per-step loss -- one minibatch per LR, so the curve is
+    noisy, and at 30-step resolution (vs the old 15) that noise shows up as a
+    jagged double-dip 'W' instead of a clean U. The finder smooths internally
+    for its own min-detection but writes raw loss; we replicate that smoothing
+    for display so the basin shape (not minibatch noise) is what's plotted.
+    """
+    n = len(ys)
+    if n < 4:
+        return ys[:]
+    w = max(2, int(n * frac))
+    out = []
+    for i in range(n):
+        lo = max(0, i - w // 2)
+        hi = min(n, i + w // 2 + 1)
+        out.append(sum(ys[lo:hi]) / (hi - lo))
+    return out
+
+
 def csv_2b(gbs: int, opt: str) -> str:
     return f"outputs/lrtrend-2b/gbs{gbs}/lr_finder/ezpz/ezpz.agpt/2b/{opt}/lr_finder_data.csv"
 
@@ -204,9 +225,10 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
             p = _csv_for(model, g, opt)
             if not Path(p).exists():
                 continue
-            fx, fy = _finite(*load_curve(p))
+            fx, fy_raw = _finite(*load_curve(p))
             if not fx:
                 continue
+            fy = _smooth(fy_raw)  # display the basin shape, not minibatch noise
             i = gbs_list.index(g)
             ax.plot(fx, fy, "-", lw=width[g], alpha=alpha[g],
                     color=cmap(shade[g]), zorder=2 + i)
@@ -226,7 +248,8 @@ def plot_all_opts_all_gbs(out: Path, model: str = "2b") -> None:
     ax.set_ylabel("LR-finder smoothed loss")
     ax.set_title(f"agpt {model.upper()}: loss vs LR -- every optimizer x batch "
                  f"size (dp=192)\nhue = optimizer; larger batch = darker + "
-                 f"thicker + more opaque; dots mark each minimum (y capped at 15)")
+                 f"thicker + more opaque; dots mark each minimum\n"
+                 f"(loss moving-avg smoothed; y capped at 15)")
     opt_handles = [
         Line2D([0], [0], color=plt.get_cmap(_OPT_CMAP[o])(0.75), lw=3,
                label=f"{OPT_LABEL[o]} ({plotted[o]} batches)")
