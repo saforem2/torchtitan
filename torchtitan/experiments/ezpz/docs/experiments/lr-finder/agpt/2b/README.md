@@ -110,6 +110,26 @@ ones that blow up highest at the right, as expected:
 
 ![2B all optimizers x all batch sizes](figures/lr_finder_2b_all_opts_all_gbs.png)
 
+#### Deeper sweep: 100 steps (small batch)
+
+The trend sweeps above are 15 steps each (chosen because the high-GBS/80B
+sweeps are expensive). At 2B the steps are cheap (~1-2 s each), so this is a
+companion run at **100 steps** (single small batch, all three optimizers,
+job 12469840) -- the classic finder length, matching the 2026-04 runs.
+
+![2B 100-step finder, all optimizers](figures/lr_finder_2b_100step_all_optimizers.png)
+
+Two things the longer sweep buys: (1) **much smoother curves** -- 100 steps +
+moving-average smoothing gives clean textbook U's with none of the 15-step
+jaggedness; (2) **far deeper minima** -- AdamW 7.80, mano 8.08, sophiag 8.35
+(vs ~11.3-12.4 at 15 steps). **The depth is a sweep-length effect, not a
+better LR**: the finder trains cumulatively, so 100 steps drives the loss
+much lower than 15 by the time it reaches the optimal-LR region. The
+*min-LR* (AdamW ~3e-3, mano ~4.8e-3, sophiag ~1.4e-3) is the quantity that's
+comparable across sweep lengths; the loss *value* is not. Optimizer ordering
+is consistent with the trend (AdamW deepest + widest basin, sophiag
+shallowest + sharpest blow-up). All three 0 NaN.
+
 ### Contrast with 80B (same dp=192)
 
 | | 2B (dim=2048) | 80B (dim=9216) |
