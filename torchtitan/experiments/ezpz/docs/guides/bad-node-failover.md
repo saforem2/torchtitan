@@ -277,3 +277,7 @@ attempt.
 - [`docs/production/agpt/80b/README.md`](../production/agpt/80b/README.md)
   -- 80B TP=4/LBS=1 stable corner + `dp_degree<=186` ceiling
 - [`scripts/FAILOVER.md`](../../scripts/FAILOVER.md) -- code-adjacent quickref
+- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../experiments/agpt/aurora/20260630-failover-restart-economics.md)
+  -- log-mined restart economics: 7 confirmed successful restarts, ~11% raw
+  recovery rate (higher for genuinely node-local failures), 132 spare swaps
+  across 133 failover-wrapped jobs (2026-06-30 analysis)
