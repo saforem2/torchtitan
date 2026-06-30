@@ -78,7 +78,14 @@ fragility that also breaks muon/sophiag there. Cross-model overlay:
 
 ---
 
-## 2026-04-14 -- 20B (Sunspot, dim-aware init)
+<details closed>
+<summary><b>Small-batch debug experiments (2026-04, 2-node finders)</b></summary>
+
+The original small-batch (GBS=48-384, 2-node) finders from April. Superseded
+for production by the trend sweep above -- kept for the historical record and
+the cross-hardware / dim-aware-init comparisons.
+
+### 2026-04-14 -- 20B (Sunspot, dim-aware init)
 
 2 nodes / 24 XPU tiles, 100 finder steps (5 warmup + 95 sweep), LR 1e-6 -> 1.0,
 weight init `sqrt(2/(5*d))` (dim-aware), blendcorpus (books). (Same job also
@@ -96,7 +103,7 @@ relatively unaffected.
 
 ![Sunspot 20B finder](figures/sunspot_20b.png)
 
-## 2026-04-21 -- 20B verification + GAS sweep (Sunspot)
+### 2026-04-21 -- 20B verification + GAS sweep (Sunspot)
 
 Re-ran 20B on torch 2.13 (compile enabled) alongside the 80B finder.
 
@@ -111,7 +118,7 @@ captured in output (SSH pipe buffering). 20B (dim=5120) works fine for Muon
 and SophiaG -- the bf16 overflow that breaks them is specific to 80B
 (dim=9216).
 
-## 2026-04-13 -- 20B (Polaris, NVIDIA A100)
+### 2026-04-13 -- 20B (Polaris, NVIDIA A100)
 
 2 nodes / 8 A100-40GB, 100 finder steps, LR 1e-6 -> 1.0, fixed `std=0.02` init,
 blendcorpus (books), NCCL.
@@ -130,7 +137,7 @@ W&B: [AdamW](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/9vx92cl7).
 
 ![Polaris 20B finder](figures/polaris_20b.png)
 
-## 2026-04-12 -- 20B (Aurora, first run)
+### 2026-04-12 -- 20B (Aurora, first run)
 
 2 nodes / 24 XPU tiles, 100 finder steps, LR 1e-6 -> 1.0, fixed `std=0.02` init,
 blendcorpus (books), xccl.
@@ -145,6 +152,8 @@ SophiaG shows catastrophic divergence (loss > 7500) vs AdamW/Muon (~60) --
 the Hessian-based preconditioning produces violent blow-ups at high LR.
 
 ![Aurora 20B finder](figures/aurora_20b.png)
+
+</details>
 
 ---
 

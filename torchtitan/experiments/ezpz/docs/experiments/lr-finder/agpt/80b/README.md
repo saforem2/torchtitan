@@ -184,7 +184,10 @@ A 2B reproduction of this same trend (16N, dp=192, GBS 192..24576) is running
 
 ---
 
-## 2026-04-21 -- 80B + GAS sweep (Sunspot, small batch GBS=192)
+<details closed>
+<summary><b>Small-batch debug experiment (2026-04-21, GBS=192, 2-node) -- superseded by the production sweep above</b></summary>
+
+### 2026-04-21 -- 80B + GAS sweep (Sunspot, small batch GBS=192)
 
 First empirical 80B LR finder (previously extrapolated only), 2 nodes / 24 XPU
 tiles, torch 2.13, compile disabled, seq_len=8192, LR 1e-6 -> 1.0 over 100 steps.
@@ -235,6 +238,8 @@ step 16 but is 6x slower -- not viable. Overflow is model-size-specific: 20B
 (The 2B/20B verification runs and the 2B AdamW GAS sweep that shared this
 2026-04-21 job are recorded on the [2B](../2b/README.md) and
 [20B](../20b/README.md) pages.)
+
+</details>
 
 ---
 
