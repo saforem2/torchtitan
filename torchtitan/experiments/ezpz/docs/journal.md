@@ -4,6 +4,40 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-06-29 (sunspot) -- 2B 100-step production-batch ladder + LR-finder page reorg
+
+Continuation of the LR-finder work. Two deliverables, both shipped.
+
+- **2B 100-step production-GBS ladder (jobs 12469854-868, 16N/dp=192).**
+  Re-ran the production batch sweep (GBS 1536/3072/6144/12288/24576) at the
+  classic **100-step** finder length (the 2026-06-28 trend used 15 steps) for
+  adamw/mano/sophiag -- 15 jobs in parallel, isolated dumps
+  `outputs/lrfind-2b-100step-prod/gbs<N>/`. **All 15 complete, 0 NaN across
+  the full 16x batch range.** Confirms the 15-step story at the longer length:
+  2B never cliffs even at 100 steps + 4x production batch, no batch-scaling
+  trend (AdamW ~2.5-3.6e-3, mano ~5-9e-3, sophiag dead-flat ~2e-3), 3-4 orders
+  above the 80B 7e-7 cliff. Deep minima (~7.7-8.3 vs ~11.5 at 15 steps) are the
+  cumulative-training sweep-length effect -- compare by min-LR, not loss value.
+  New `scripts/plot_2b_100step_prod.py` (hue=optimizer canonical colors, batch
+  = shade+width+opacity); two figures, generated on Sunspot from real CSVs,
+  y-capped + smoothed. Built incrementally as tiers landed (9/15 -> 12/15 ->
+  15/15), regenerating each time. Commits `a9bfc91b5`, `e1eefcba6`,
+  `6f7f6b6b6`.
+- **LR-finder pages reorganized production-first.** All three agpt pages now
+  lead with the production/recent results and collapse the old 2026-04 2-node
+  small-batch finders into `<details closed>` blocks:
+  - 2B (`542ae2d49`): (1) 100-step production ladder, (2) 15-step trend,
+    (3) additional findings, (4) collapsed April debug runs, (5) reports index.
+  - 20B + 80B (`098ec19cc`): production/trend on top, April runs collapsed
+    (demoted to `###`). Heading text preserved verbatim so every inbound anchor
+    (2B page, agpt index, experiments/agpt, scaling-performance) still resolves.
+- **Docs hygiene.** Caught + corrected a missed step: the docs-root
+  "Recently Updated" index table is git-commit-date driven and auto-generated
+  (`utils/refresh_docs_readme_table.py`) -- refreshed it in the same commit on
+  every doc push from here on, not after the fact.
+
+---
+
 ## 2026-06-28 (sunspot) -- LR-finder docs overhaul, 2B trend, 62nd sync, validator phantom fixed
 
 Docs/tooling-heavy session plus one real bug closed.

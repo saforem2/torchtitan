@@ -94,3 +94,36 @@
   program-level item worth raising.
 - Added a "Quarterly / program reports" section to
   `docs/summaries/README.md` index.
+
+## 2026-06-29 (2B 100-step production ladder + LR-finder reorg)
+
+### Commits
+
+- `a9bfc91b5`, `e1eefcba6`, `6f7f6b6b6` -- 2B 100-step production-GBS ladder
+  (preliminary 9/15 -> 12/15 -> complete 15/15): new
+  `scripts/plot_2b_100step_prod.py` + two figures + README section.
+- `542ae2d49` -- reorganized the 2B LR-finder page production-first
+  (100-step ladder, 15-step trend, additional findings, collapsed April
+  debug runs, reports index).
+- `098ec19cc` -- same reorg for 20B + 80B (production/trend on top, 2026-04
+  small-batch runs collapsed into `<details closed>`).
+- Each doc commit also refreshed the docs-root recently-updated index table.
+
+### Discussion
+
+- Finished the 2B production-batch finder at 100 steps (jobs 12469854-868,
+  16N/dp=192, GBS 1536..24576). All 15 done, 0 NaN. Headline: 2B never
+  cliffs even at the long sweep length + 4x production batch; no
+  batch-scaling trend; optimal LR ~2-9e-3 (3-4 orders above the 80B 7e-7
+  cliff). Built figures incrementally on Sunspot as tiers landed.
+- User caught that I'd skipped refreshing the auto-generated "Recently
+  Updated" table after doc commits -- it's git-commit-date driven
+  (`refresh_docs_readme_table.py`), so it must run on Sunspot where the
+  commits live. Folded it into every subsequent doc commit.
+- Reorganized all three agpt LR-finder pages to a consistent
+  production-first structure with the old April 2-node small-batch finders
+  in collapsed details blocks. Audited every inbound anchor first; kept
+  heading text verbatim so links from the sibling pages, the agpt index,
+  `experiments/agpt`, and `scaling-performance.md` all still resolve.
+- Only queued job left is the dp=324 bisect (12469630, 112N, still Q, low
+  priority -- dp ceiling already disproved).

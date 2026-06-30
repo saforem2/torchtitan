@@ -23,7 +23,9 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
+| 2026-06-30 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
 | 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
+| 2026-06-30 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
 | 2026-06-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-06-29 | [Summaries](./summaries/README.md) |
 | 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
@@ -38,7 +40,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-06-29 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-06-29 | [AuroraGPT Sync — 2026-06-29 (Sam Foreman)](./meeting-notes/2026-06-29.md) |
-| 2026-06-29 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
 | 2026-06-29 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-06-29 | [Claude Session Log](./claude-sessions.md) |
 | 2026-06-28 | [Upstream Sync Log](./upstream-sync.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-28 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) |
 | 2026-06-28 | [Scaling Tests & Production Runs — Aurora (2026-04-18 to 2026-04-21)](./production/scaling-performance.md) |
 | 2026-06-28 | [Development Journal](./journal.md) |
-| 2026-06-28 | [The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs](./guides/known-bugs/validator-tp4-at-80b.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-28 | [The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs](./guides/known-bugs/validator-tp4-at-80b.md) |
 | 2026-06-28 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
 | 2026-06-28 | [Blendcorpus EOFError Race in _build_index_mappings](./guides/known-bugs/blendcorpus-eoferror-race.md) |
 | 2026-06-28 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
@@ -62,7 +63,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-28 | [LR Finder -- moe 500M (16 experts)](./experiments/lr-finder/moe/500m/README.md) |
 | 2026-06-28 | [LR Finder -- moe 4B (24 experts)](./experiments/lr-finder/moe/4b/README.md) |
 | 2026-06-28 | [LR Finder -- moe 2B (24 experts)](./experiments/lr-finder/moe/2b/README.md) |
-| 2026-06-28 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
 | 2026-06-28 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
 | 2026-06-28 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-06-28 | [80B autoretry verification + blendcorpus cold-cache race fix (end-to-end)](./experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) |
