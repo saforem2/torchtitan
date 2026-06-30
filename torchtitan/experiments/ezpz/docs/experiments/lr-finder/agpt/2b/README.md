@@ -140,11 +140,7 @@ classic finder length so the curves are smooth and the minima are deep. Run at
 comparable). Jobs 12469854-868, isolated dumps
 `outputs/lrfind-2b-100step-prod/gbs<N>/`.
 
-> **Status (2026-06-29): PRELIMINARY -- 12/15 jobs done.** The 1536 / 3072 /
-> **6144 (production)** / 12288 tiers are complete for all three optimizers
-> (0 NaN everywhere); only the 24576 tier is still computing (the long pole,
-> ~3h). Figures below are regenerated as jobs land, so they fill in
-> automatically. The headline production point (GBS=6144) is already in.
+**Complete (2026-06-29): all 15 jobs done, 0 NaN across the full ladder.**
 
 Everything on one axis, hue = optimizer and batch size encoded three ways at
 once (shade light->dark, width thin->thick, opacity faint->opaque, all
@@ -156,7 +152,7 @@ Optimal (min-loss) LR vs batch size, 100-step sweeps:
 
 ![2B 100-step production ladder, min-LR vs GBS](figures/lr_finder_2b_100step_prod_minlr_vs_gbs.png)
 
-Completed points so far (smoothed-min LR / loss, all 0 NaN):
+Smoothed-min LR / loss at every batch (all 0 NaN):
 
 | GBS | AdamW | mano | sophiag |
 |----:|-------|------|---------|
@@ -164,14 +160,18 @@ Completed points so far (smoothed-min LR / loss, all 0 NaN):
 | 3072 | 2.8e-3 / 7.69 | 6.9e-3 / 7.75 | 2.1e-3 / 8.28 |
 | **6144** (prod) | 2.5e-3 / 7.76 | 5.2e-3 / 7.92 | 2.1e-3 / 8.19 |
 | 12288 | 2.8e-3 / 7.85 | 8.3e-3 / 7.90 | 1.9e-3 / 8.24 |
-| 24576 | _pending_ | _pending_ | _pending_ |
+| 24576 | 3.6e-3 / 7.69 | 4.8e-3 / 7.93 | 2.1e-3 / 8.27 |
 
-Consistent with everything above: **0 NaN at every batch** (2B never cliffs,
-even at 100 steps + production batch), optimal LRs sit ~2e-3..9e-3 (4 orders of
-magnitude above the 80B cliff at ~7e-7), and the optimizer ordering is stable
-(mano's optimum ~2x AdamW's, sophiag's the lowest, at every batch). The deep
-minima (~7.7..8.3 vs ~11.5 at 15 steps) are the cumulative-training
-sweep-length effect, not a better LR -- compare by min-LR, not loss value.
+The 100-step ladder confirms the 15-step trend at the classic finder length:
+**0 NaN at every batch across the full 16x range** (2B never cliffs, even at
+100 steps + 4x the production batch), and **no batch-scaling trend** -- each
+optimizer's optimal LR is flat-to-shallow-U across the ladder (AdamW
+~2.5-3.6e-3, mano ~5-9e-3, sophiag dead flat ~2e-3), 3-4 orders of magnitude
+above the 80B cliff at ~7e-7. Optimizer ordering is stable (sophiag lowest,
+AdamW in the middle, mano highest) and the basin shape is consistent (AdamW
+widest, sophiag sharpest blow-up). The deep minima (~7.7..8.3 vs ~11.5 at 15
+steps) are the cumulative-training sweep-length effect, not a better LR --
+compare by min-LR, not loss value.
 
 ### Contrast with 80B (same dp=192)
 
@@ -274,7 +274,7 @@ blendcorpus (books), xccl.
 
 | Date | Machine | GBS | Optimizers | Nodes | Key Result |
 |------|---------|-----|-----------|-------|------------|
-| 2026-06-29 | Sunspot | 1536..24576 | AdamW, mano, sophiag | 16 | 100-step production ladder (PRELIM 9/15): 6144 done, 0 NaN, min-LR ~2-5e-3 |
+| 2026-06-29 | Sunspot | 1536..24576 | AdamW, mano, sophiag | 16 | 100-step production ladder (15/15): 0 NaN full range, no batch-scaling, min-LR ~2-9e-3 |
 | 2026-06-28 | Sunspot | 192..24576 | AdamW, mano, sophiag | 16 | LR-ceiling-vs-GBS trend: 2B never cliffs (flat ~1e-2, 0 NaN, 128x batch) |
 | 2026-04-21 | Sunspot | 24..384 | AdamW, Muon, SophiaG | 2 | torch-2.13 verify + GAS sweep; LR stable 4.9-9.0e-4 |
 | 2026-04-14 | Sunspot | 48 | AdamW, Muon, SophiaG | 2 | dim-aware init: AdamW 1.3e-3, Muon 2.4e-3 (3x higher) |
