@@ -26,9 +26,46 @@
 
 set -o pipefail
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
-command -v ezpz >/dev/null || uv pip install --no-cache --link-mode=copy \
-    "git+https://github.com/saforem2/ezpz"
+# ---------------------------------------------------------------------------
+# Environment setup -- mirrors run_lr_finder.sh exactly. The bare `ezpz
+# launch` inside the per-optimizer loop only resolves if the broadcast
+# /tmp/.venv is active on every node; skipping the yeet-env + /tmp/.venv
+# activation is what caused the first smoke (job 12469907) to exit 127 with
+# "env: 'ezpz': No such file or directory".
+# ---------------------------------------------------------------------------
+module load oneapi/release/2025.3.1 hdf5 pti-gpu
+# /opt/pbs/bin on PATH so `sh.qstat` works inside `ezpz launch`
+# (ezpz.pbs.get_pbs_jobid_of_active_job calls `from sh import qstat`).
+export PATH="/opt/pbs/bin:${PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export TORCH_CPP_LOG_LEVEL=ERROR
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
+export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov}"
+
+# Must cd into the repo BEFORE ezpz_setup_job and before sourcing .venv
+# (PBS spawns in $HOME; a relative `source .venv/...` would pick up
+# $HOME/.venv, and ezpz_setup_job captures WORKING_DIR=$(pwd) at start).
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+
+set +u
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+set -u
+
+source .venv/bin/activate
+if [[ -f .venv.tar.gz ]]; then
+    log_message INFO "conv-80b: yeet-env via tarball (.venv.tar.gz)"
+    ezpz yeet-env --src .venv.tar.gz
+else
+    log_message INFO "conv-80b: yeet-env via per-file rsync (.venv.tar.gz not present)"
+    ezpz yeet-env
+fi
+deactivate
+source /tmp/.venv/bin/activate
 
 CONV_OPTIMIZERS="${CONV_OPTIMIZERS:-mano sophiag adamw}"
 CONV_STEPS="${CONV_STEPS:-200}"
@@ -45,8 +82,9 @@ for opt in "${!LR[@]}"; do
     [[ -n "${!var:-}" ]] && LR[$opt]="${!var}"
 done
 
-NGPUS="${NGPUS:-$(wc -l < "${PBS_NODEFILE:-/dev/null}" 2>/dev/null | awk -v n="${NGPU_PER_HOST:-12}" '{print $1*n}')}"
+# NGPUS / NHOSTS / NGPU_PER_HOST are exported by ezpz_setup_job above.
 NGPU_PER_HOST="${NGPU_PER_HOST:-12}"
+NGPUS="${NGPUS:-$(( ${NHOSTS:-1} * NGPU_PER_HOST ))}"
 DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt"
 
 echo "============================================================"
