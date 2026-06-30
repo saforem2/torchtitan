@@ -3,7 +3,16 @@
 Part of the [moe LR-finder index](../README.md); methodology in the
 [parent README](../../README.md). Figures in [`figures/`](figures/).
 
-## 2026-04-21 (Sunspot, 2N, torch 2.13, compile on, seq_len=8192, LBS=1)
+**Status:** small-batch only -- the single 2026-04-21 GBS=192 sweep below is
+all current data; no production-GBS MoE finder yet (see the
+[index status note](../README.md#status-small-batch-only-no-production-gbs-finder-yet)).
+This config's AdamW optimum (1.22e-3) is one of the two most representative
+small-batch MoE values (with 7B).
+
+<details closed>
+<summary><b>Small-batch debug sweep (2026-04-21, GBS=192, 2-node)</b></summary>
+
+### 2026-04-21 (Sunspot, 2N, torch 2.13, compile on, seq_len=8192, LBS=1)
 
 | Optimizer | NaN | Suggested LR | Blow-up | Status |
 |-----------|-----|-------------|---------|--------|
@@ -12,3 +21,5 @@ Part of the [moe LR-finder index](../README.md); methodology in the
 | SophiaG | 1 | -- | -- | mild instability at high LR only |
 
 ![moe 4B finder](figures/lr_finder_4B.png)
+
+</details>
