@@ -11,11 +11,56 @@ cross-model recommendation table and findings see the
 **Key result (2026-06-28):** unlike 80B, **2B never cliffs.** Its AdamW usable
 LR is flat at ~1e-2 across the entire GBS 192..24576 range (128x batch, 0 NaN
 anywhere) -- the usable-LR collapse + NaN cliff seen at 80B is a large-model
-(dim=9216 bf16) phenomenon, not universal. See the trend section below.
+(dim=9216 bf16) phenomenon, not universal. See sections 1-2 below.
 
 ---
 
-## 2026-06-28 -- LR-ceiling vs GBS trend
+## 1. Production GBS ladder, 100 steps (best results)
+
+The headline 2B finder: the full **production GBS ladder**
+(1536 / 3072 / 6144 / 12288 / 24576) swept at **100 steps** (the classic finder
+length -- smooth curves, deep minima) for all three optimizers. Same batch
+sweep as the 15-step trend in section 2, re-run at the longer length. Run at
+16N, TP=1 -> dp=192 (same dp as the 15-step trend, so the min-LR is directly
+comparable). Jobs 12469854-868, isolated dumps
+`outputs/lrfind-2b-100step-prod/gbs<N>/`.
+
+**Complete (2026-06-29): all 15 jobs done, 0 NaN across the full ladder.**
+
+Everything on one axis, hue = optimizer and batch size encoded three ways at
+once (shade light->dark, width thin->thick, opacity faint->opaque, all
+increasing with GBS):
+
+![2B 100-step production ladder, all opts x all GBS](figures/lr_finder_2b_100step_prod_all_opts_all_gbs.png)
+
+Optimal (min-loss) LR vs batch size, 100-step sweeps:
+
+![2B 100-step production ladder, min-LR vs GBS](figures/lr_finder_2b_100step_prod_minlr_vs_gbs.png)
+
+Smoothed-min LR / loss at every batch (all 0 NaN):
+
+| GBS | AdamW | mano | sophiag |
+|----:|-------|------|---------|
+| 1536 | 3.3e-3 / 7.74 | 9.1e-3 / 8.02 | 1.9e-3 / 8.28 |
+| 3072 | 2.8e-3 / 7.69 | 6.9e-3 / 7.75 | 2.1e-3 / 8.28 |
+| **6144** (prod) | 2.5e-3 / 7.76 | 5.2e-3 / 7.92 | 2.1e-3 / 8.19 |
+| 12288 | 2.8e-3 / 7.85 | 8.3e-3 / 7.90 | 1.9e-3 / 8.24 |
+| 24576 | 3.6e-3 / 7.69 | 4.8e-3 / 7.93 | 2.1e-3 / 8.27 |
+
+The 100-step ladder confirms the 15-step trend at the classic finder length:
+**0 NaN at every batch across the full 16x range** (2B never cliffs, even at
+100 steps + 4x the production batch), and **no batch-scaling trend** -- each
+optimizer's optimal LR is flat-to-shallow-U across the ladder (AdamW
+~2.5-3.6e-3, mano ~5-9e-3, sophiag dead flat ~2e-3), 3-4 orders of magnitude
+above the 80B cliff at ~7e-7. Optimizer ordering is stable (sophiag lowest,
+AdamW in the middle, mano highest) and the basin shape is consistent (AdamW
+widest, sophiag sharpest blow-up). The deep minima (~7.7..8.3 vs ~11.5 at 15
+steps) are the cumulative-training sweep-length effect, not a better LR --
+compare by min-LR, not loss value.
+
+---
+
+## 2. Production GBS ladder, 15 steps (LR-ceiling vs GBS trend)
 
 Reproducing the 80B
 [LR-ceiling-vs-GBS trend](../80b/README.md#lr-ceiling-vs-gbs-trend-adamw) at
@@ -34,8 +79,8 @@ every job via a oneCCL collective abort; use `torchmuon` if needed).
 ### Result: 2B never cliffs
 
 > **Loss-depth note:** this trend swept **15 steps** per GBS, so its minima
-> bottom out near loss ~11.3. The older 2B finders further down this page
-> (2026-04-12/13/14) swept **100 steps** and reach loss ~9-10. That is a
+> bottom out near loss ~11.3. The 100-step ladder (section 1) and the
+> 2026-04 debug runs (collapsed below) reach loss ~7-10. That is a
 > sweep-length artifact -- the finder trains cumulatively, so more steps =
 > lower loss at the same LR -- **not** a difference in the optimal LR (both
 > agree at ~8.6e-3). See [the methodology note](../../README.md#important-notes).
@@ -110,12 +155,21 @@ ones that blow up highest at the right, as expected:
 
 ![2B all optimizers x all batch sizes](figures/lr_finder_2b_all_opts_all_gbs.png)
 
-#### Deeper sweep: 100 steps (small batch)
+---
 
-The trend sweeps above are 15 steps each (chosen because the high-GBS/80B
-sweeps are expensive). At 2B the steps are cheap (~1-2 s each), so this is a
-companion run at **100 steps** (single small batch, all three optimizers,
-job 12469840) -- the classic finder length, matching the 2026-04 runs.
+## 3. Additional findings
+
+Supplementary 2B results that support the two production sweeps above: the
+first 100-step run (a single small batch, which motivated the ladder), and the
+head-to-head contrast with 80B that frames the whole "2B never cliffs" story.
+
+### 100 steps, single small batch (precursor to the ladder)
+
+This was the first 100-step 2B sweep (job 12469840) -- a single small batch,
+all three optimizers -- that motivated the full production ladder in section 1.
+The 15-step trend sweeps (section 2) use 15 steps each because the high-GBS/80B
+sweeps are expensive; at 2B the steps are cheap (~1-2 s each), so 100 steps is
+affordable -- the classic finder length, matching the 2026-04 debug runs below.
 
 ![2B 100-step finder, all optimizers](figures/lr_finder_2b_100step_all_optimizers.png)
 
@@ -129,49 +183,6 @@ much lower than 15 by the time it reaches the optimal-LR region. The
 comparable across sweep lengths; the loss *value* is not. Optimizer ordering
 is consistent with the trend (AdamW deepest + widest basin, sophiag
 shallowest + sharpest blow-up). All three 0 NaN.
-
-#### Deeper sweep: 100 steps across the production GBS ladder
-
-The 100-step run above is a single small batch. This extends it to the full
-**production GBS ladder** (1536 / 3072 / 6144 / 12288 / 24576) at 100 steps,
-all three optimizers -- i.e. the 15-step trend's batch sweep, re-run at the
-classic finder length so the curves are smooth and the minima are deep. Run at
-16N, TP=1 -> dp=192 (same dp as the 15-step trend, so the min-LR is directly
-comparable). Jobs 12469854-868, isolated dumps
-`outputs/lrfind-2b-100step-prod/gbs<N>/`.
-
-**Complete (2026-06-29): all 15 jobs done, 0 NaN across the full ladder.**
-
-Everything on one axis, hue = optimizer and batch size encoded three ways at
-once (shade light->dark, width thin->thick, opacity faint->opaque, all
-increasing with GBS):
-
-![2B 100-step production ladder, all opts x all GBS](figures/lr_finder_2b_100step_prod_all_opts_all_gbs.png)
-
-Optimal (min-loss) LR vs batch size, 100-step sweeps:
-
-![2B 100-step production ladder, min-LR vs GBS](figures/lr_finder_2b_100step_prod_minlr_vs_gbs.png)
-
-Smoothed-min LR / loss at every batch (all 0 NaN):
-
-| GBS | AdamW | mano | sophiag |
-|----:|-------|------|---------|
-| 1536 | 3.3e-3 / 7.74 | 9.1e-3 / 8.02 | 1.9e-3 / 8.28 |
-| 3072 | 2.8e-3 / 7.69 | 6.9e-3 / 7.75 | 2.1e-3 / 8.28 |
-| **6144** (prod) | 2.5e-3 / 7.76 | 5.2e-3 / 7.92 | 2.1e-3 / 8.19 |
-| 12288 | 2.8e-3 / 7.85 | 8.3e-3 / 7.90 | 1.9e-3 / 8.24 |
-| 24576 | 3.6e-3 / 7.69 | 4.8e-3 / 7.93 | 2.1e-3 / 8.27 |
-
-The 100-step ladder confirms the 15-step trend at the classic finder length:
-**0 NaN at every batch across the full 16x range** (2B never cliffs, even at
-100 steps + 4x the production batch), and **no batch-scaling trend** -- each
-optimizer's optimal LR is flat-to-shallow-U across the ladder (AdamW
-~2.5-3.6e-3, mano ~5-9e-3, sophiag dead flat ~2e-3), 3-4 orders of magnitude
-above the 80B cliff at ~7e-7. Optimizer ordering is stable (sophiag lowest,
-AdamW in the middle, mano highest) and the basin shape is consistent (AdamW
-widest, sophiag sharpest blow-up). The deep minima (~7.7..8.3 vs ~11.5 at 15
-steps) are the cumulative-training sweep-length effect, not a better LR --
-compare by min-LR, not loss value.
 
 ### Contrast with 80B (same dp=192)
 
@@ -191,7 +202,10 @@ lesson), but small models themselves are forgiving of large batches.
 
 ---
 
-## 2026-04-14 -- 2B (Sunspot, dim-aware init)
+<details closed>
+<summary><b>4. Small-batch debug experiments (2026-04, 2-node finders)</b></summary>
+
+### 2026-04-14 -- 2B (Sunspot, dim-aware init)
 
 2 nodes / 24 XPU tiles, 100 finder steps (5 warmup + 95 sweep), LR 1e-6 -> 1.0,
 weight init `sqrt(2/(5*d))` (dim-aware), blendcorpus (books). (Same job also
@@ -210,7 +224,7 @@ higher LRs.
 
 ![Sunspot 2B finder](figures/sunspot_2b.png)
 
-## 2026-04-21 -- 2B verification + GAS sweep (Sunspot)
+### 2026-04-21 -- 2B verification + GAS sweep (Sunspot)
 
 Re-ran 2B on torch 2.13 (compile enabled) alongside the 80B finder to verify
 no regression, plus a gradient-accumulation sweep.
@@ -221,7 +235,7 @@ no regression, plus a gradient-accumulation sweep.
 | Muon | 0/100 | ~7e-4 | ~7e-3 |
 | SophiaG | 2/100 | ~5e-7 | ~5e-6 |
 
-### GAS (gradient accumulation) sweep -- 2B AdamW
+#### GAS (gradient accumulation) sweep -- 2B AdamW
 
 | GAS | GBS | NaN | Suggested LR | Blow-up |
 |-----|-----|-----|-------------|---------|
@@ -231,11 +245,10 @@ no regression, plus a gradient-accumulation sweep.
 | 16 | 384 | 0 | 4.90e-4 | 4.90e-3 |
 
 Optimal LR is relatively stable across GBS for 2B AdamW (4.9e-4 .. 9.0e-4
-across 16x GBS) at this *small* scale -- the 2026-06-28 trend sweep above
-extends this to the full production-batch range to test whether that stays
-true.
+across 16x GBS) at this *small* scale -- the production sweeps (sections 1-2)
+extend this to the full production-batch range and confirm it stays true.
 
-## 2026-04-13 -- 2B (Polaris, NVIDIA A100)
+### 2026-04-13 -- 2B (Polaris, NVIDIA A100)
 
 2 nodes / 8 A100-40GB, 100 finder steps, LR 1e-6 -> 1.0, fixed `std=0.02` init,
 blendcorpus (books), NCCL.
@@ -255,7 +268,7 @@ W&B: [AdamW](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2tz2slwx),
 
 ![Polaris 2B finder](figures/polaris_2b.png)
 
-## 2026-04-12 -- 2B (Aurora, first run)
+### 2026-04-12 -- 2B (Aurora, first run)
 
 2 nodes / 24 XPU tiles, 100 finder steps, LR 1e-6 -> 1.0, fixed `std=0.02` init,
 blendcorpus (books), xccl.
@@ -268,9 +281,11 @@ blendcorpus (books), xccl.
 
 ![Aurora 2B finder](figures/aurora_2b.png)
 
+</details>
+
 ---
 
-## Reports index
+## 5. Reports index
 
 | Date | Machine | GBS | Optimizers | Nodes | Key Result |
 |------|---------|-----|-----------|-------|------------|

@@ -85,8 +85,9 @@ broken** (real U-min at lr~2.5e-6); only Muon stays broken. See
 5. **Batch dependence is large-model-specific.** At 80B the usable/ceiling LR
    collapses ~20x with batch and turns into a NaN cliff
    ([trend](80b/README.md#lr-ceiling-vs-gbs-trend-adamw)). At
-   [2B](2b/README.md#2026-06-28----lr-ceiling-vs-gbs-trend) the usable LR is
-   flat at ~1e-2 across a 128x batch range (0 NaN) -- **no collapse, no cliff.**
+   [2B](2b/README.md#2-production-gbs-ladder-15-steps-lr-ceiling-vs-gbs-trend)
+   the usable LR is flat at ~1e-2 across a 128x batch range (0 NaN) --
+   **no collapse, no cliff.**
    So a small-batch sweep cannot calibrate a *large*-model production LR, but
    small models are themselves forgiving of large batches (likely the same
    dim=9216 bf16 fragility that breaks 80B).

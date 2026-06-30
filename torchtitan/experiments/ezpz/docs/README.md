@@ -22,6 +22,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
 | 2026-06-29 | [Summaries](./summaries/README.md) |
 | 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 | 2026-06-29 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
@@ -36,7 +37,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-06-29 | [AuroraGPT Sync — 2026-06-29 (Sam Foreman)](./meeting-notes/2026-06-29.md) |
 | 2026-06-29 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-06-29 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
 | 2026-06-29 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
 | 2026-06-29 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-06-29 | [Claude Session Log](./claude-sessions.md) |
