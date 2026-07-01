@@ -1,130 +1,66 @@
-# GRPO on Intel XPU — end-to-end status (2026-06-13)
+# GRPO on Intel XPU — status
 
-## TL;DR
+On-policy GRPO (TRL `GRPOTrainer` + `trl vllm-serve`, no Monarch) running on
+Sunspot XPU. This page is **current status first**; the 2026-06-13 bring-up
+narrative (how the XPU port was won, the 26-job debug chain) is collapsed
+under [History](#history-2026-06-13-bring-up) at the bottom.
 
-**On-policy GRPO is running end-to-end on Sunspot XPU** as of job
-`12468780` (2026-06-13 ~18:55 CDT). Architecture:
+## Current status (2026-07-01)
 
-```
-1-node PBS allocation (12 tiles, 1× Aurora node)
-├── tile 0      : trl vllm-serve (TP=1)  — generates rollouts
-└── tiles 1-8   : ezpz train_grpo (8 ranks, ezpz launch / mpiexec)
-                  --use_vllm --vllm_mode=server
-                  --vllm_server_base_url=http://127.0.0.1:8765
-```
+| Config | Status | Evidence |
+|---|---|---|
+| **1 node** (server + trainer on `127.0.0.1`) | ✅ works | job 12468780 -- 5/5 steps, real weight-sync |
+| **Cross-node generation** (server on node A, **1** trainer node on node B) | ✅ works | job 12469976 -- 10/10 steps, cross-node weight-sync active, accuracy reward moving |
+| **Multi-trainer-node** (trainer spans 2+ nodes) | ⛔ blocked, fix in progress | 10N job 12469978 -> oneCCL AVG wall; CXI retry 12469980 -> different post-weight-sync hang |
 
-5/5 GRPO steps completed. `format_reward/mean` moved
-**0 → 0.0625 → 0.25 → 0.0625 → 0.125** over those 5 steps with a
-cold Qwen3-0.6B on the `sum_digits` task — proof that the
-trainer→server **weight sync is actually landing** (not no-op'd) and
-the policy updates flow through to subsequent rollouts.
+**Usable today:** the 1-trainer-node config (server on head node + trainer on
+one other node). Multi-node generation is proven; multi-node *training* (FSDP
+across nodes) is the open frontier.
 
-Single-node smoke metrics:
-- `train_runtime: 28.51s` (5 steps post-warmup)
-- `train_samples_per_second: 1.403`
-- `train_steps_per_second: 0.175`
-- Per-step wall: 4-8s after step 1 (step 1 includes JIT warmup)
+**Working scripts:**
+- 1N smoke: [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
+- cross-node (server + trainer nodes):
+  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
+  (works at 1 trainer node; the multi-trainer-node hang below applies at 2+)
 
-The path here required ~26 job submissions and three separate
-architectural pivots. This doc captures the full chain so the
-relevant landmines stay documented.
-
-## UPDATE 2026-07-01: cross-node generation works; multi-node TRAINER hit the oneCCL AVG wall (being resolved)
-
-**Status nuance:** cross-node *generation* (trainer on node B, vLLM server on
-node A) is proven at **2 nodes / 1 trainer node** (job 12469976, below). But
-scaling the *trainer* to multiple nodes (10N run, job 12469978) hit a oneCCL
-transport wall -- see "The multi-node AVG wall" at the end of this section.
-The 2N recipe is the current usable config; the multi-trainer-node fix is in
-progress.
-
-The 1N architecture above (server + trainer share `127.0.0.1`) is now
-extended to **cross-node**: the vLLM server runs on the head node and
-the trainer runs on *other* nodes, reaching the server over its real
-hostname. Validated by a **2-node smoke (job 12469976)**: 10/10 GRPO steps,
-server on node A + 8 trainer ranks on node B, on the SFT'd AuroraGPT-2B
-`checkpoint-729-hf`, `arithmetic` task. Accuracy reward moved across the run
-(0.75 / 0.375 / 0.25 / ... / 0.625) and TRL's `importance_sampling_ratio`
-metrics were present (mean ~0.5-0.84) -- proof the cross-node weight-sync is
-active, not no-op'd. `[rank 0] Training complete.`, ~70 s/step.
-
-```
-select=N PBS allocation
-├── node 0 (head): venvs/rl-vllm trl vllm-serve (TP=1), bound 0.0.0.0:8765
-└── nodes 1..N-1 : ezpz train_grpo ranks (rl-vllm python), hitting
-                   http://<head-hostname>:8765; weight-sync via TCP-KVS
-                   XCCL rendezvous at CCL_KVS_IP_PORT=<head>_29513
-```
-
-**Three fixes were required vs. the 1N recipe** (all landed):
-
+**The recipe (what makes cross-node work), all landed:**
 1. **Unified `venvs/rl-vllm/` for BOTH server and trainer.** The older
-   `rl/scripts/vllm_serve_xpu.sh` ran vLLM from `venvs/vllm-test/` with a
-   `PYTHONPATH=.venv` bridge for TRL; that mixed environment breaks
+   `vllm_serve_xpu.sh` `venvs/vllm-test` + `PYTHONPATH=.venv` bridge breaks
    vLLM-XPU platform detection (`RuntimeError: Device string must not be
-   empty` -- `current_platform.device_type` comes back empty). The 1N
-   smoke already used the unified venv; the never-run
-   `aurora2b_sft_arithmetic_8n_vllm.sh` used the broken helper.
-2. **`--fsdp` handling for TRL 1.6 / transformers >= 5.11.** New
-   transformers dropped string parsing for `--fsdp`; `--fsdp full_shard`
-   now parses to the bare bool `True`. Fixed in `train_grpo.py`
-   `_bootstrap_fsdp_env` (commit `0558eb592`): treat `fsdp is True` as
-   `full_shard`.
-3. **Cross-node TCP-KVS endpoint = head node** (not `127.0.0.1` as in the
-   1N smoke), shared by server and trainer so the weight-sync XCCL group
-   forms across process trees.
+   empty`).
+2. **`--fsdp` for TRL 1.6 / transformers >= 5.11:** string parsing was
+   dropped -- `--fsdp full_shard` now parses to bare `True`. Handled in
+   `train_grpo.py` `_bootstrap_fsdp_env` (commit `0558eb592`: `fsdp is True`
+   -> `full_shard`).
+3. **Server launches as a plain local subshell** (NOT `mpiexec`-wrapped),
+   PMIx/CXI env scrubbed inside its subshell; vLLM stack checks run from a
+   `.py` file with an `if __name__ == "__main__":` guard (vLLM's
+   multiprocessing EngineCore re-imports the parent).
+4. Weight-sync is TRL's own `StatelessProcessGroup` on a dedicated host:port
+   (`trl/scripts/vllm_serve.py:111`, XPU-aware) -- **independent of** the
+   trainer's oneCCL transport.
 
-Server must launch as a plain local subshell (NOT `mpiexec`-wrapped) with
-the PMIx/CXI env scrubbed (`unset CCL_PROCESS_LAUNCHER CCL_OP_SYNC
-FI_PROVIDER`, then `CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi
-FI_PROVIDER=tcp`) -- exactly as the 1N smoke did. Also: the vLLM stack
-check must run from a `.py` file with an `if __name__ == "__main__":` guard
-(vLLM's multiprocessing EngineCore re-execs/re-imports the parent).
+### Open blocker: multi-trainer-node (2026-07-01)
 
-Working production script:
-[`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
-(server on head node, trainer on all other nodes, 1000 steps, resumable).
+Two failure modes found scaling the *trainer* past 1 node:
 
-### The multi-node AVG wall (10N run, job 12469978)
+1. **oneCCL AVG wall** (10N job 12469978, `select=10`, 108 trainer ranks):
+   step-0 crash on all ranks in FSDP2 backward grad reduce-scatter:
+   `oneCCL: coll_param.cpp:458 ... average operation is not supported for
+   the scheduler path`. Cause: the trainer was (needlessly) forced onto the
+   TCP-KVS/OFI-tcp scheduler path, which lacks `ReduceOp.AVG`. Masked at 1
+   trainer node (grad AVG stayed off the cross-node path). Per fix #4 above,
+   the trainer never needed TCP-KVS.
+2. **Post-weight-sync hang** (CXI retry, 3N job 12469980): trainer on the
+   normal pmix/CXI transport -- **no AVG error**, and the cross-node
+   weight-sync completed (`get_world_size` / `init_communicator` /
+   `update_named_param` all 200 OK on the server). But it then hung *before*
+   the first `/generate/` (0 generate calls, 0 steps, ~22 min idle) -- a
+   different silent cross-node collective stall.
 
-The first full 10N run (server on node 0, 108 trainer ranks on nodes 1-9)
-**failed at step 0**: all 108 ranks raised, inside FSDP2's backward
-grad reduce-scatter (`torch/.../_fsdp_param_group.py:922`):
-
-```
-RuntimeError: oneCCL: coll_param.cpp:458 validate: EXCEPTION:
-   average operation is not supported for the scheduler path
-```
-
-Root cause: the trainer was forced onto the **TCP-KVS / OFI-tcp scheduler
-path** (`CCL_PROCESS_LAUNCHER=none`, `CCL_ATL_TRANSPORT=ofi`,
-`FI_PROVIDER=tcp`, `CCL_KVS_IP_PORT=<head>`), copied from the 1N smoke. That
-transport does not implement `ReduceOp.AVG`, which FSDP uses for gradient
-reduction. The 2N smoke masked it: with 1 trainer node (8 ranks), the grad
-AVG did not route through the cross-node scheduler path.
-
-**Key realization (from reading TRL 1.6 source):** the trainer did NOT need
-the TCP-KVS env at all. TRL's weight-sync group is a
-`StatelessProcessGroup.create(host, port, world_size)` +
-`PyNcclCommunicator` (`trl/scripts/vllm_serve.py:111`, XPU-aware via
-`is_torch_xpu_available`), created on its **own** dedicated host:port -- it
-does NOT reuse oneCCL's `CCL_KVS_IP_PORT`. So the weight-sync collective is
-independent of the trainer's FSDP transport. Forcing TCP-KVS onto the trainer
-was unnecessary AND caused the AVG failure.
-
-**Fix directions (2026-07-01, in progress; togglable):**
-1. Let the trainer use the normal ezpz **pmix/CXI** transport (AVG-capable,
-   like every production FSDP run); TRL's stateless group handles weight-sync
-   on its own port. Cheapest -- likely resolves it outright.
-2. If (1) is insufficient, patch FSDP grad reduce **AVG -> SUM + divide by
-   world_size** in `train_grpo.py` (avoids the unsupported op on any
-   transport).
-3. Longer-term: explicit **split transports** (fast CXI for the FSDP mesh,
-   TCP-KVS only for weight-sync if ever needed), behind an env toggle so we
-   can switch between (2) and (3).
-
-First full 10N run: job `12469978` (2026-07-01) -- FAILED at the AVG wall;
-fix in progress per above.
+**Fix plan (togglable):** (a) trainer on pmix/CXI [done -- clears AVG but
+hits the hang]; (b) patch FSDP grad AVG -> SUM+scale in `train_grpo.py`
+[next]; (c) explicit split transports behind an env toggle [long-term].
 
 ## Stack
 
@@ -153,6 +89,15 @@ fix in progress per above.
 
 The venv is reproducible via `rl/scripts/build_rl_vllm_venv.sh`
 (see commit `b43acb8b2`).
+
+<details>
+<summary><b>History (2026-06-13 bring-up): winning the XPU port -- the 26-job debug chain, TCP-KVS fix, xpu_overrides shim, 1N smoke metrics</b></summary>
+
+> Historical narrative from the original 2026-06-13 bring-up. Kept for the
+> landmine record. NOTE: the "TCP-KVS is THE fix" framing below is how the 1N
+> path was won; the 2026-07-01 multi-node work (top of page) later found the
+> trainer does NOT need TCP-KVS -- it caused the AVG wall. TCP-KVS is still
+> how the *1N* cross-process group was first formed.
 
 ## The fix that landed it: TCP-KVS XCCL rendezvous
 
@@ -459,21 +404,13 @@ in the first 3 steps confirms the policy update path is live.
 confirming on-policy semantics (server gets the updated weights
 quickly enough that the old rollouts aren't badly off-policy).
 
-## Next steps
+### History next-steps (2026-06-13, mostly superseded)
 
-1. **Production model swap**: rerun with `--model_name_or_path
-   outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf`
-   (the SFT'd AuroraGPT-2B). Expect non-zero `accuracy_reward` from
-   step 1 since the SFT'd model already does math.
-2. **Longer runs**: bump `--max_steps` to ~1000, enable wandb
-   reporting, add `--save_strategy steps --save_steps 100`.
-3. **Multi-node scaling**: try `select=2` PBS allocations. Trainer
-   spans 16-23 tiles, server stays single-tile. Tests cross-node
-   XCCL with TCP fabric.
-4. **Per-group XCCL env**: investigate whether we can use Slingshot
-   CXI for the intra-trainer group while keeping TCP-KVS for the
-   server group. Would recover most of the perf hit.
-5. **TRL upstream fix**: file a PR or issue with TRL re:
-   `torch.cuda.current_device()` hardcode in
-   `vllm_generation.py:309`. They should use the accelerator
-   abstraction.
+The original next-steps have largely been done or superseded by the
+2026-07-01 multi-node work at the top of this page: production model swap
+(done -- SFT'd AuroraGPT-2B), longer runs (done -- 1000-step 8N GRPO,
+reward 1.26), multi-node scaling (in progress -- see "Open blocker" at top).
+Still open: a TRL upstream fix for the `torch.cuda.current_device()` hardcode
+in `vllm_generation.py` (should use the accelerator abstraction).
+
+</details>
