@@ -58,9 +58,42 @@ Two failure modes found scaling the *trainer* past 1 node:
    the first `/generate/` (0 generate calls, 0 steps, ~22 min idle) -- a
    different silent cross-node collective stall.
 
+**Root causes (investigated 2026-07-01, 4-agent fan-out):**
+
+- The AVG wall (#1) has a clean upstream fix: torch >= 2.8 exposes the public
+  **`FSDPModule.set_force_sum_reduction_for_comms(True)`**, which switches the
+  grad reduce-scatter from `ReduceOp.AVG` to `SUM` + post-divide by
+  world_size (numerically identical). AVG is selected in
+  `torch/.../fsdp/_fully_shard/_fsdp_collectives.py`
+  `_get_gradient_divide_factors` (the `ReduceOp.AVG` branch, hit when
+  reduce_dtype is bf16/fp32 and no custom divide factor). No torch-internals
+  monkey-patch needed. accelerate wraps each decoder block + root via
+  `fully_shard` (`accelerate/utils/fsdp_utils.py fsdp2_prepare_model`), so
+  the flag must be set on **every** wrapped `FSDPModule`, not just the root.
+- The hang (#2) is **NOT** the vLLM HTTP call and **NOT** FSDP grad reduction.
+  It is TRL's **`gather_object(prompts)` at
+  `trl/generation/vllm_generation.py:560`** -- a `torch.distributed` *object*
+  collective (`all_gather_object`) across all trainer ranks that runs at the
+  start of generation, *before* rank 0 calls `/generate/` (line 587, guarded
+  by `is_main_process`; results distributed via `broadcast_object_list` at
+  line 603). Weight-sync succeeded because it only needs FSDP float-tensor
+  all-gathers + rank-0 HTTP; generation additionally needs object
+  (pickle -> byte-tensor) collectives. Likely XPU cause: the object
+  collective's byte tensor lands on a mis-resolved device (TRL/accelerate
+  hardcode `torch.cuda.current_device()` in places, e.g.
+  `vllm_generation.py:309`), so the cross-node `all_gather_object` never
+  matches and every rank blocks. This is a genuinely new, unsolved XPU issue.
+- Operational note: `CommConfig.train_timeout_seconds` is silently ignored on
+  XPU/xccl (see `docs/upstream-issues/train_timeout_xpu_silent_noop.md`),
+  which is why the hang burned to walltime instead of aborting.
+
 **Fix plan (togglable):** (a) trainer on pmix/CXI [done -- clears AVG but
-hits the hang]; (b) patch FSDP grad AVG -> SUM+scale in `train_grpo.py`
-[next]; (c) explicit split transports behind an env toggle [long-term].
+hits the hang]; (b) `set_force_sum_reduction_for_comms(True)` via an
+`xpu_overrides.py` wrapper of `fsdp2_prepare_model` [ready to implement, the
+robust form of the old "AVG->SUM patch"]; (c) fix the `gather_object` device
+mismatch for XPU object-collectives [the real remaining blocker for
+multi-trainer-node]; (d) explicit split transports behind an env toggle
+[long-term perf].
 
 ## Stack
 
