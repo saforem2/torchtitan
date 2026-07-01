@@ -242,12 +242,21 @@ Should get past `init_process_group` and run to completion.
 
 ## Reference: known-good venv this mirrors
 
-`datascience/.venv` on Polaris (`foremans`):
+The structure of this recipe (standalone uv-managed CPython, no conda, native
+`mpi4py`) mirrors `datascience/.venv` on Polaris (`foremans`), verified
+2026-07-01:
 
 - `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
-- `torch` from the pytorch cu129 index (`manylinux_2_28` wheel -- normal)
-- `mpi4py`, native `linux_x86_64` tag (built from source against Cray MPICH)
+- `torch 2.10.0+cu128`
+- `mpi4py 4.2.0.dev0`, native `cp312-cp312-linux_x86_64` tag (built from source
+  against Cray MPICH)
 - `ezpz` editable from `github.com/saforem2/ezpz`
+
+> [!NOTE]
+> That reference venv predates this guide and is on `torch 2.10.0+cu128`. The
+> steps above target the newer **cu129** stack (which resolves to
+> `torch 2.12.1+cu129`, verified 2026-07-01). The standalone-venv + native-mpi4py
+> structure is identical; only the torch/CUDA version differs.
 
 ## Verification
 
