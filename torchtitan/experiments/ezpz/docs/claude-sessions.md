@@ -127,3 +127,41 @@
   `experiments/agpt`, and `scaling-performance.md` all still resolve.
 - Only queued job left is the dp=324 bisect (12469630, 112N, still Q, low
   priority -- dp ceiling already disproved).
+
+## 2026-07-01 (80B convergence + MoE reorg + 63rd sync)
+
+### Commits
+
+- `56aad15ac` -- MoE lr-finder pages reorganized production-first (status
+  banner up top; 2026-04-21 small-batch sweep collapsed on index + 5 config
+  pages).
+- `632c0736e`, `1b554df71` -- 80B convergence runner + submit scripts
+  (`scripts/{run,submit}_80b_convergence.sh`); the second fixes the
+  env-preamble bug (missing yeet-env/`/tmp/.venv` -> `env: ezpz` exit 127).
+- `c015d55d5`, `006643ca8` -- 80B convergence experiment report + 80B page
+  updates (TL;DR caveat, item-4 DONE, reports-index row) + index-table refresh.
+- `cf99e127e` -- 63rd upstream sync (13 commits, no replays; RL conflict
+  resolved by taking upstream).
+
+### Discussion
+
+- **80B convergence run: all 3 optimizers NaN at their finder LRs** (jobs
+  12469910/911/912, mano 3e-6 / sophiag 1e-6 / AdamW 5e-7, GBS=6144, 64N).
+  Each descends a few steps then grad_norm explodes -> loss NaN: mano step 5,
+  AdamW step 9, sophiag step 12. The finder's early-step ranking does not
+  predict sustained stability; the shared failure across 3 optimizers = a
+  corner instability (bf16/dim=9216), needs long warmup + clipping or fp32
+  grads. Corner is ~20 min/step. Smoke-first caught a real config bug before
+  the full run.
+- **Queue hygiene:** qdel'd the stale 112N dp=324 bisect (12469630) + the
+  finished smoke, unblocking the convergence jobs to backfill.
+- **63rd sync smoke-validated:** agpt 2B trained clean (loss 8.35); moe
+  debugmodel exercised the DeepEP-v2 dispatcher then OOM'd downstream (known
+  XPU resource limit, not a merge regression). Big lesson: running jobs from a
+  git worktree needs `.venv` / `.venv.tar.gz` / `assets/hf` symlinked in
+  (worktrees only carry tracked files).
+- The `ImportError: Cannot import config_registry for module 'ezpz.agpt'` is a
+  generic MASK from `config/manager.py` -- always look past it to the real
+  traceback (a user hit it just from running in the wrong dir).
+- Pulled the local Mac mirror forward 23 commits to `cf99e127e` (stash-pull-pop;
+  preserved 9 pre-existing WIP tracked edits).

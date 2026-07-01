@@ -37,6 +37,49 @@ SophiaG/constant-LR production launch and refreshing docs.
   for ~64% of the ~31.8k wasted node-h). See
   [`20260630-failover-restart-economics.md`](experiments/agpt/aurora/20260630-failover-restart-economics.md).
 
+## 2026-07-01 (sunspot) -- 80B convergence run (all optimizers NaN), MoE page reorg, 63rd sync
+
+Concurrent Sunspot session (separate from the Aurora 80B launch above).
+Three things landed.
+
+- **MoE LR-finder pages reorganized production-first** (`56aad15ac`). Matched
+  the dense-page reorg: MoE has no production-GBS finder yet (all data is the
+  2026-04-21 GBS=192 small-batch sweep), so the index leads with a "Status:
+  small-batch only" banner + the batch-dependence lesson, and the April sweep
+  is collapsed into `<details closed>` on the index + all 5 config pages.
+  Preserved the one inbound anchor (`experiments/moe/README.md`).
+- **80B head-to-head convergence run -- all three optimizers NaN**
+  (`c015d55d5` + report `2026-06-30-80b-convergence-gbs6144.md`). New
+  `scripts/{run,submit}_80b_convergence.sh`. Ran mano/sophiag/AdamW at their
+  finder-recommended CONSTANT LRs (3e-6/1e-6/5e-7, GBS=6144, 64N, jobs
+  12469910/911/912). **All three descended a few steps then diverged: mano
+  first (grad NaN step 5), AdamW step 9, sophiag step 12.** grad_norm runs up
+  then explodes, loss NaNs one step later. The finder's early-step ranking
+  (which said mano safest) does NOT predict sustained stability; the shared
+  failure across 3 different optimizers points to a corner-level instability
+  (bf16 at dim=9216), not tuning. Conclusion: no finder LR is production-safe
+  as a constant LR here -- needs a long warmup (>=200 steps) + grad clipping,
+  possibly an fp32 grad path. Smoke-first caught a real bug first (the runner
+  missed the yeet-env/`/tmp/.venv` preamble -> `env: ezpz` exit 127, fixed in
+  `1b554df71`). The corner is ~20 min/step, so 50-step jobs were the practical
+  cap (all NaN'd by step 12 anyway).
+- **Queue hygiene:** qdel'd the stale 112N dp=324 bisect (12469630, queued ~5d,
+  dp ceiling already disproved) and the finished smoke -- unblocked the
+  convergence jobs to backfill immediately.
+- **63rd upstream sync** (`cf99e127e`, 13 commits `390ea37cc..`). No replays
+  (llama3/deepseek_v3 untouched; agpt/moe byte-identical). One RL conflict in
+  `generator.py` resolved by taking upstream (spmd_types if/else superset).
+  Impact is RL/FLUX/spmd_types (no-ops for our DTensor backend; loss.py edits
+  are spmd_types-guarded) + a DeepEP-v2 upgrade touching moe's token
+  dispatcher. **Smoke-validated:** agpt 2B trained clean 10 steps (loss 8.35);
+  moe debugmodel exercised the DeepEP-v2 dispatcher path without error then
+  OOM'd downstream (`UR_RESULT_ERROR_OUT_OF_RESOURCES`, a known XPU resource
+  limit, not a merge regression). Most of the effort was worktree plumbing --
+  a git worktree only has tracked files, so jobs run from one need `.venv`,
+  `.venv.tar.gz`, and `assets/hf` symlinked in (the last tripped me: `assets/`
+  is a tracked dir, so the tokenizer download links at `assets/hf`, 3 levels
+  up).
+
 ## 2026-06-29 (sunspot) -- 2B 100-step production-batch ladder + LR-finder page reorg
 
 Continuation of the LR-finder work. Two deliverables, both shipped.
