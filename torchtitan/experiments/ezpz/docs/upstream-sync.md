@@ -59,10 +59,28 @@ run.
   v2 upgrade — the moe smoke exercises this.
 - `models/{flux,gpt_oss,qwen3}/`: other families, not run here.
 
-### Validation
-- **agpt 2B smoke** (job TBD): pure regression check — agpt is untouched, must still train.
-- **moe smoke** (job TBD): exercises the DeepEP v2 token-dispatcher path.
-- (both submitted on Sunspot 2026-06-30; results appended.)
+### Validation — smoke-passed (Sunspot, 2026-07-01)
+Both 2N smokes run from the sync worktree so `$PBS_O_WORKDIR` uses the merged
+code. Landed to `origin/ezpz` as `cf99e127e` after these passed.
+
+- **agpt 2B (job 12469960): PASS.** Clean 10-step train, final loss 8.35,
+  0 NaN — the regression check is green (agpt was untouched by the merge, and
+  it still trains).
+- **moe debugmodel (job 12469961): DeepEP-v2 path exercised OK.** Built the
+  mesh + MoE model + expert backend (past the token-dispatcher code the merge
+  changed), logged the expected pre-existing XPU note `torch._grouped_mm
+  requires SM90+ CUDA; falling back to for_loop expert backend`, then OOM'd
+  downstream on a compute kernel (`RuntimeError: level_zero backend failed
+  with error: 40 (UR_RESULT_ERROR_OUT_OF_RESOURCES)`). That is a **known XPU
+  resource limit at debugmodel's default 2N settings, NOT a merge regression**
+  — the changed DeepEP-v2 dispatcher ran without error before the OOM.
+- **Conclusion: merge is safe.** agpt trains clean; the one ezpz-relevant
+  upstream change (DeepEP v2) runs. Merge landed.
+- Note: running jobs from a git worktree needs `.venv`, `.venv.tar.gz`, and
+  `assets/hf` symlinked in (worktrees carry only tracked files) — this cost a
+  few false-start smokes (missing tokenizer, missing venv) before the real
+  validation. Config `ImportError: Cannot import config_registry` is a generic
+  mask; the real cause was the missing tokenizer path.
 
 ## 2026-06-28 — 62nd sync (3 commits, `0e886617e..upstream/main`)
 
