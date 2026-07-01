@@ -324,7 +324,9 @@ class BaseLoss(ABC, Configurable):
         """Return the scaled loss and any metrics computed by the loss."""
         loss = self.fn(pred, labels)
         if global_valid_tokens is not None:
-            loss = loss / global_valid_tokens
+            # TODO(pianpwk): Teach spmd_types that P / scalar preserves P.
+            with spmd.no_typecheck():
+                loss = loss / global_valid_tokens
         return loss, {}
 
 
@@ -349,7 +351,9 @@ class CrossEntropyLoss(BaseLoss):
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         loss = self.fn(pred, labels, global_vocab_size=self.global_vocab_size)
         if global_valid_tokens is not None:
-            loss = loss / global_valid_tokens
+            # TODO(pianpwk): Teach spmd_types that P / scalar preserves P.
+            with spmd.no_typecheck():
+                loss = loss / global_valid_tokens
         return loss, {}
 
 
@@ -386,6 +390,21 @@ def compute_logprobs(
             for p in logits.placements
         )
         logits = logits.redistribute(placements=placements).to_local()
+    elif get_spmd_backend() == "spmd_types" and spmd_mesh_size("tp") > 1:
+        # spmd_types returns a plain local vocab shard. Labels are global token
+        # ids, so cross_entropy needs full-vocab logits.
+        mesh = current_spmd_mesh()
+        assert mesh is not None
+        # dst=I, not R: the vocab all-gather's grad is the replicated upstream
+        # grad sliced back to this rank's vocab shard (I's backward), not an
+        # all-reduce (R's backward). The latter over-counts by tp_degree and
+        # diverges from the DTensor path above, whose redistribute grad slices.
+        logits = spmd.redistribute(
+            logits,
+            mesh.get_group("tp"),
+            src=spmd.S(-1),
+            dst=spmd.I,
+        )
 
     B, L, V = logits.shape
     return -F.cross_entropy(
