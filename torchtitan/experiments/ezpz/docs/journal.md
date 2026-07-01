@@ -4,6 +4,37 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-01 (aurora) -- 20B 512N chain relaunched on native auto-retry
+
+Recovered the 20B 512N canonical chain, frozen at step-4400 since 2026-05-29.
+
+- **Root cause it was stuck:** its latest attempt (trainer-1 in the umbrella
+  job 8568429, legacy `failover_lib.sh`) died at init on bad node
+  `x4410c0s0b0n0` (signal 11), and the failover **blind-swapped the wrong
+  nodes** every retry -- the scraper counts `died from signal 11` lines but
+  can't parse the hostname out, so it rotated innocent `x4411` spares and
+  left `x4410` in. Exhausted retries. (Concrete case of the blind-swap class
+  from the [restart-economics writeup](experiments/agpt/aurora/20260630-failover-restart-economics.md).)
+- **Fix = relaunch on native `ezpz launch --auto-retry`** (better scraper).
+  Three obstacles resolved: (1) verified step-4400 is nested/pre-#3623 format
+  (resume-safe with the pinned clone's rolled-back code); (2) upgraded the
+  clone venv ezpz 0.16.0 -> 0.21.3 via `uvi` (torch UNCHANGED, auto-retry
+  flag now present); (3) rebuilt `.venv.tar.gz` -- login/compute-node `tar`
+  crawled on 37K small Lustre files, so used a fast tmpfs surgical-swap
+  (decompress good tarball in RAM, swap the 2.4M ezpz, re-tar) in job 8638674.
+- **Smoke (8638756, 2N) CONFIRMED resume:** `Finished loading the checkpoint
+  in 567s` + `Training starts at step 4401`, ezpz 0.21.3 launches on compute,
+  XPU 24/24, no save (chain untouched).
+- **Gotcha caught by the smoke:** `dump_folder=./outputs` prepends `outputs/`,
+  so the correct CKPT_DIR is the BARE `checkpoints/...` (script default);
+  `outputs/checkpoints/...` doubles to `outputs/outputs/...` and silently
+  fresh-starts. The 512N launch needs no override (default = n512-gbs12288).
+- **Launched:** head 8638793 (Q, select=522, NHOSTS_TRAIN=512, resume
+  step-4400) + cont 8638795 (H, afterany). Report:
+  [`20260701-20b-512n-relaunch-autoretry.md`](experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md).
+- **Also:** 2B eval backfill (job 8638581) filling the completed 2B 256N tail
+  (step-86500..92859, 14 ckpts) ran in parallel.
+
 ## 2026-07-01 (aurora) -- 80B launch: 2048N crashes at init, 512N + 1024N run
 
 Machine returned from the Mon 2026-06-29 maintenance. Managing the 80B
