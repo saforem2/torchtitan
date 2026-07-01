@@ -226,6 +226,14 @@ log_message INFO "==========================================="
 mfr_args=()
 [[ -n "${MAX_FAILOVER_RETRIES:-}" ]] && mfr_args=(--max-failover-retries "${MAX_FAILOVER_RETRIES}")
 
+# EXTRA_ARGS: whitespace-split passthrough of additional torchtitan flags,
+# for PBS submits where trailing "$@" args are not available (qsub can't
+# forward them to a #PBS script). Use for CPT forks / one-off overrides, e.g.
+#   -v EXTRA_ARGS="--checkpoint.initial-load-path=/abs/step-N --lr-scheduler.warmup-steps=200"
+# Interactive callers can still append flags positionally via "$@" below.
+extra_args=()
+[[ -n "${EXTRA_ARGS:-}" ]] && read -ra extra_args <<< "${EXTRA_ARGS}"
+
 ezpz launch \
     --nproc "${NGPUS_ACTIVE}" \
     --nproc_per_node "${PPN}" \
@@ -254,4 +262,5 @@ ezpz launch \
     --training.global-batch-size="${GBS}" \
     --training.seq-len="${SEQ_LEN}" \
     --training.steps="${TRAINING_STEPS}" \
+    "${extra_args[@]}" \
     "$@"

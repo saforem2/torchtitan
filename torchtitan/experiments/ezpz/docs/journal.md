@@ -4,6 +4,35 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-01 (aurora) -- 2B CPT sweep launched + completed-2B eval closeout
+
+The 2B 256N base completed (step-92,859) and its eval tail is dead flat --
+so the next move is continued pretraining on a different data mix.
+
+- **Completed-2B eval closeout.** Backfill (8638581) filled the tail
+  (step-86,500..92,859, 14 ckpts). Eval table + charts refreshed; plateau
+  confirmed to completion (HellaSwag 0.560, ARC-Easy 0.651 flat over the final
+  ~635B tokens). Resolved the old ARC-Easy ~0.59 artifact (fresh eval = ~0.65).
+  Final step-92,859: hellaswag_norm 0.561, arc_easy 0.651, piqa 0.733.
+- **CPT mixing-ratio sweep launched (pilot).** Fork the plateaued base
+  (model-weights-only via `--checkpoint.initial-load-path`) and CPT on
+  olmo x dolmino blends. Built 3 data-lists (`dolmino-mix-1124`,
+  `olmo50-dolmino50`, `olmo25-dolmino75`; renormalized to exact ratios).
+  Launched 256N pilots: 8638977 (dolmino-100) + 8638978 (olmo50-dolmino50),
+  each + afterany cont. GAS=1 -> GBS=6144 (batch held to keep LR calibrated),
+  LR 2.28e-5 re-warm 200 + decay 0.8, ~300B tokens. Distinct CKPT_DIRs
+  (no overwrite; base read-only in a separate clone).
+- **Fork verified by smoke 8638933:** loads step-92,859 clean (0 mismatch),
+  loss 7.2->5.9 descending (dolmino is a real distribution shift = the CPT
+  signal). Report:
+  [`20260701-2b-cpt-olmo-dolmino-sweep.md`](experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md).
+- **Bug found:** the 2b autoretry script defaults async checkpointing, which
+  is XPU-broken on torch 2.13.0.dev20260520 (`new_group(gloo)` ->
+  `No backend type for xpu` in checkpoint.py:484). First CPT smoke (8638909)
+  died on it. Workaround: `CHECKPOINT_ASYNC_MODE=disabled` (the 20b script
+  already defaults to disabled). TODO: fix the 2b default. Also added an
+  `EXTRA_ARGS` env passthrough to the 2b script (PBS can't forward "$@").
+
 ## 2026-07-01 (aurora) -- 20B 512N chain relaunched on native auto-retry
 
 Recovered the 20B 512N canonical chain, frozen at step-4400 since 2026-05-29.
