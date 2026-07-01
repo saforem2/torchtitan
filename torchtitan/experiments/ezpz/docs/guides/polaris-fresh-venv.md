@@ -2,10 +2,10 @@
 
 > [!NOTE]
 > This guide builds a **standalone** torchtitan/ezpz environment on Polaris
-> that does NOT layer on top of a conda env. It mirrors the known-good
-> `datascience/.venv` (uv-managed CPython 3.12, `include-system-site-packages
-> = false`, torch 2.10.0+cu128, `mpi4py` built from source against Cray
-> MPICH).
+> that does NOT layer on top of a conda env: uv-managed CPython 3.12,
+> `include-system-site-packages = false`, `torch 2.12.1+cu129`, and `mpi4py`
+> built from source against Cray MPICH. Verified end-to-end on 2026-07-01
+> (see the Verification section).
 
 ## Symptom this fixes
 
@@ -179,7 +179,7 @@ cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
 ### 5. Install ezpz + torchtitan
 
 ```bash
-# ezpz (editable from git, as in the known-good venv)
+# ezpz (editable from git)
 uv pip install --no-cache --link-mode=copy "git+https://github.com/saforem2/ezpz.git"
 
 # torchtitan itself, editable from the repo root
@@ -240,23 +240,17 @@ Should get past `init_process_group` and run to completion.
 > will silently swap the native build back to the portable wheel and
 > reintroduce this exact bug.
 
-## Reference: known-good venv this mirrors
+## Reference: known-good venv this produces
 
-The structure of this recipe (standalone uv-managed CPython, no conda, native
-`mpi4py`) mirrors `datascience/.venv` on Polaris (`foremans`), verified
-2026-07-01:
+This exact recipe was run from scratch and produced a working venv on
+2026-07-01 (job 7232069, node x3001c0s19b1n0 -- see the Verification section
+above for captured output):
 
 - `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
-- `torch 2.10.0+cu128`
-- `mpi4py 4.2.0.dev0`, native `cp312-cp312-linux_x86_64` tag (built from source
-  against Cray MPICH)
+- `torch 2.12.1+cu129`
+- `mpi4py 4.1.2`, native `cp312-cp312-linux_x86_64` tag (built from source
+  against Cray MPICH under `PrgEnv-gnu`)
 - `ezpz` editable from `github.com/saforem2/ezpz`
-
-> [!NOTE]
-> That reference venv predates this guide and is on `torch 2.10.0+cu128`. The
-> steps above target the newer **cu129** stack (which resolves to
-> `torch 2.12.1+cu129`, verified 2026-07-01). The standalone-venv + native-mpi4py
-> structure is identical; only the torch/CUDA version differs.
 
 ## Verification
 
