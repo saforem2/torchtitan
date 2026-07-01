@@ -95,3 +95,52 @@ Two marquee cases:
 - No PBS wall-clock for these aged-out jobs, so per-attempt time cost is
   estimated as "init-time = minutes" (all 7 recoveries failed at init, not
   mid-training) rather than measured.
+
+---
+
+## Follow-up (2026-06-30): root-cause of non-recoveries + node-hours burned
+
+### Why the 47 exhausted episodes could NOT be recovered (infra signature)
+
+| root cause | count | % | swap-fixable? |
+|---|---|---|---|
+| **CCL/PMI KVS timeout** (`kvs_get_value` / KVS get error) | 27 | **57%** | NO -- collective-init rendezvous timeout across ALL ranks, not one bad node |
+| **blendcorpus index race** (EOFError/mmap/invalid-load) | 7 | 15% | NO -- systemic; **now FIXED via atomic-rename (041d015f+1f7e9c0)** |
+| env-broken / venv miss (exit 127; incl. spmd_types, ckpt-resume era) | ~4 | 9% | partial |
+| node-death / SIGTERM (exit 143) | ~3 | 6% | sometimes |
+| **pals-RPC launch failure** (`Couldn't forward RPC launch`) | 3 | 6% | NO -- transient scheduler/launcher infra |
+| idle-watchdog fired but no recovery (exit 124) | ~2 | 4% | sometimes |
+| generic init (exit 1) | ~2 | 4% | maybe |
+
+**Key point:** ~37/47 (~78%) of exhausted failures are **systemic** (KVS + blendcorpus +
+pals-RPC) -- failures node-swapping fundamentally cannot fix. This reframes the ~11%
+recovery rate: failover isn't underperforming, it's frequently invoked against
+failures outside its remit. **The dominant un-fixable mode is CCL/PMI KVS timeout
+(57%)** -- that's the #1 target for an upstream fix. The #2 (blendcorpus race, 15%)
+is **already eliminated** by the atomic-rename patch, so that bucket should vanish.
+
+### Node-hours burned (log-timestamp estimate, approximate)
+
+- **~31,800 wasted node-hours** across 55 exhausted episodes (episodes that
+  triggered failover, swapped spares, and still gave up).
+- BUT the cost is **bimodal**:
+  - **38 of 55 exhausted in <=1h** (median **~11 min**) -- fast init-time crashes
+    (KVS/pals-RPC/bad_alloc). Cheap: failover correctly bails fast when it can't help.
+  - **8 episodes ran >3h before exhausting** -- these dominate the waste. The two
+    worst (`8507196` 11.1h/5,789 node-h, `8521625` 10.4h/5,424 node-h) alone are
+    ~11.2k node-h; all 8 together are **~20k of the ~31.8k wasted node-h (~64%)**.
+- (Separately, ~9,600 node-h were spent in episodes that DID recover -- productive,
+  not waste. And ~17k node-h tagged "other" are full-length successful runs that had
+  an incidental mid-run swap -- also NOT waste; excluded from the 31.8k figure.)
+
+**Actionable takeaway:** the cheap losses are the fast init-crashes; the expensive
+losses are the **handful of jobs that fail LATE (hours in) then can't recover**. That
+late-failure class is exactly what the walltime-aware checkpointing (force a ckpt
+before a late failure) is designed to protect -- and argues for smaller CKPT_INTERVAL
+on failure-prone large-N runs so a >3h death loses minutes, not hours.
+
+### Caveats
+- Node-hours are estimated from log timestamps (first->last within an episode), not
+  PBS accounting (aged out of `qstat -xf`). Durations >14h clamped as garbled.
+- "Exhausted" counts each `attempt 1/M` sequence; a relaunch reusing the same `.o`
+  counts separately (55 episodes vs 47 unique-job dedup earlier).
