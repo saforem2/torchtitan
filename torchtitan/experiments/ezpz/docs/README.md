@@ -22,13 +22,15 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-01 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
+| 2026-07-01 | [80B head-to-head convergence at the production batch (GBS=6144) -- Sunspot, 2026-06-30](./experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md) |
 | 2026-06-30 | [Development Journal](./journal.md) |
+| 2026-06-30 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
 | 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-06-30 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
 | 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
 | 2026-06-30 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
+| 2026-06-30 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
 | 2026-06-30 | [Claude Session Log](./claude-sessions.md) |
-| 2026-06-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-06-29 | [Summaries](./summaries/README.md) |
 | 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 | 2026-06-29 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
@@ -42,27 +44,28 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-06-29 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-06-29 | [AuroraGPT Sync — 2026-06-29 (Sam Foreman)](./meeting-notes/2026-06-29.md) |
-| 2026-06-29 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
-| 2026-06-28 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-06-28 | [blendcorpus index-cache race: atomic-rename fix landed (041d015f) + one follow-up TOCTOU bug](./upstream-issues/blendcorpus-atomic-rename-index-fix.md) |
-| 2026-06-28 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) |
-| 2026-06-28 | [Scaling Tests & Production Runs — Aurora (2026-04-18 to 2026-04-21)](./production/scaling-performance.md) |
+| 2026-06-29 | [LR Finder -- moe debugmodel (8 experts)](./experiments/lr-finder/moe/debugmodel/README.md) |
+| 2026-06-29 | [LR Finder -- moe (Sparse) -- index](./experiments/lr-finder/moe/README.md) |
+| 2026-06-29 | [LR Finder -- moe 7B (36 experts)](./experiments/lr-finder/moe/7b/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-29 | [LR Finder -- moe 500M (16 experts)](./experiments/lr-finder/moe/500m/README.md) |
+| 2026-06-29 | [LR Finder -- moe 4B (24 experts)](./experiments/lr-finder/moe/4b/README.md) |
+| 2026-06-29 | [LR Finder -- moe 2B (24 experts)](./experiments/lr-finder/moe/2b/README.md) |
+| 2026-06-29 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
+| 2026-06-29 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-06-28 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-06-28 | [blendcorpus index-cache race: atomic-rename fix landed (041d015f) + one follow-up TOCTOU bug](./upstream-issues/blendcorpus-atomic-rename-index-fix.md) |
+| 2026-06-28 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) |
+| 2026-06-28 | [Scaling Tests & Production Runs — Aurora (2026-04-18 to 2026-04-21)](./production/scaling-performance.md) |
 | 2026-06-28 | [The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs](./guides/known-bugs/validator-tp4-at-80b.md) |
 | 2026-06-28 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
 | 2026-06-28 | [Blendcorpus EOFError Race in _build_index_mappings](./guides/known-bugs/blendcorpus-eoferror-race.md) |
 | 2026-06-28 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
-| 2026-06-28 | [LR Finder -- moe debugmodel (8 experts)](./experiments/lr-finder/moe/debugmodel/README.md) |
-| 2026-06-28 | [LR Finder -- moe (Sparse) -- index](./experiments/lr-finder/moe/README.md) |
-| 2026-06-28 | [LR Finder -- moe 7B (36 experts)](./experiments/lr-finder/moe/7b/README.md) |
-| 2026-06-28 | [LR Finder -- moe 500M (16 experts)](./experiments/lr-finder/moe/500m/README.md) |
-| 2026-06-28 | [LR Finder -- moe 4B (24 experts)](./experiments/lr-finder/moe/4b/README.md) |
-| 2026-06-28 | [LR Finder -- moe 2B (24 experts)](./experiments/lr-finder/moe/2b/README.md) |
 | 2026-06-28 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
 | 2026-06-28 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-06-28 | [80B autoretry verification + blendcorpus cold-cache race fix (end-to-end)](./experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) |
@@ -71,13 +74,10 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-27 | [Production Queue-Wait Analysis (Aurora small)](./production/queue-wait-analysis.md) |
 | 2026-06-27 | [80B LR-finder at the production batch (GBS=6144) -- Sunspot, 2026-06-27](./experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md) |
 | 2026-06-26 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
-| 2026-06-26 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
 | 2026-06-26 | [80B: LR, batch size, and dp-degree -- a connected set of findings (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md) |
 | 2026-06-26 | [80B GBS=5952 2048N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md) |
 | 2026-06-26 | [80B GBS=2976 1024N-batch simulation (Sunspot, 2026-06-26)](./experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md) |
 | 2026-06-26 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
-| 2026-06-26 | [Evaluation Results](./evals/README.md) |
-| 2026-06-25 | [80B TP=4 stable-corner validation, 100 steps (Sunspot, 2026-06-25)](./experiments/agpt/sunspot/2026-06-25-80b-tp4-100step-validation.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -122,7 +122,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Bad-node failover wrapper](./guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](./experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-26 |
+| [Bad-node failover wrapper](./guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](./experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-30 |
 | [Known Issues / Operational Notes](./guides/known-issues.md) | **Top entry (2026-05-23)**: `--checkpoint.async-mode=async` kills the cluster at 20B 512N+ — root cause of 3 weeks of lost persisted progress. Workaround: `CHECKPOINT_ASYNC_MODE=disabled`. | 2026-05-23 |
 | [bf16-master RMSNorm freeze](./guides/training-dtype-bf16-norm-freeze.md) | Root cause of v1 → v2 restart; `dtype=float32` is now default | 2026-06-10 |
 | [TP > 1 loss reporting off by `dp_world_size`](./guides/loss-reporting-tp-dist-reduce.md) | **Resolved upstream 2026-05-18** (PR #3159, commit `d64eabcce`). Doc preserved as historical context for affected 80B W&B traces. | 2026-06-12 |

@@ -10,6 +10,15 @@ the NaN cliff. Use **mano ~3e-6** (safest), **sophiag ~1e-6** (lowest loss,
 narrower band), or AdamW ~5e-7. The small-batch "AdamW 1.1e-5" number does
 not transfer to the production batch.
 
+> **UPDATE 2026-06-30 -- these finder LRs do NOT hold as CONSTANT LRs.** A
+> [head-to-head convergence run](../../../agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
+> at GBS=6144 found **all three optimizers NaN within 5-12 steps** at their
+> finder-recommended constant LRs (mano @ 3e-6 dies first, step 5; AdamW @
+> 5e-7 step 9; sophiag @ 1e-6 step 12). grad_norm runs up then explodes,
+> loss NaNs one step later -- a shared instability at this corner that the
+> finder's ramping LR masked. A long warmup (>=200 steps) + grad clipping
+> is required before any of these is a usable production LR.
+
 ---
 
 ## 2026-06-27 -- 80B at the PRODUCTION batch (GBS=6144, Sunspot)
@@ -121,9 +130,16 @@ to set a large-batch production LR for AdamW at 80B.
    is only ~2x above its minimum (2.5e-6 -> 4.6e-6), vs mano's gentle rise.
    If trying sophiag, stay conservative: LR **~1e-6** (min/2.5) with tight
    grad clipping.
-4. **Confirm with a head-to-head convergence run** (mano @ ~3e-6 vs sophiag
-   @ ~1e-6 vs AdamW @ ~5e-7, GBS=6144) before locking the config -- the
-   finder measures early-step stability/descent, not full convergence.
+4. **Head-to-head convergence run DONE (2026-06-30) -- all three diverge.**
+   Running each at its finder LR as a *constant* LR (GBS=6144, 64N), all
+   three NaN'd within 5-12 steps: mano @ 3e-6 first (step 5), AdamW @ 5e-7
+   (step 9), sophiag @ 1e-6 (step 12). Each descends a few steps, then
+   grad_norm explodes and loss NaNs. The finder's early-step ranking does
+   NOT predict sustained stability. **No finder LR is production-safe as a
+   constant LR here** -- a long warmup (>=200 steps, vs the 2B/20B configs'
+   200) plus grad clipping is needed, and it may be a bf16-at-dim=9216 wall
+   requiring an fp32 grad path. Full trajectories:
+   [2026-06-30 convergence report](../../../agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md).
 
 Raw per-experiment record:
 [`docs/experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md`](../../../agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md).
@@ -247,6 +263,7 @@ step 16 but is 6x slower -- not viable. Overflow is model-size-specific: 20B
 
 | Date | Machine | GBS | Optimizers | Nodes | Key Result |
 |------|---------|-----|-----------|-------|------------|
+| [2026-06-30](../../../agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md) | Sunspot | 6144 (prod) | mano, sophiag, AdamW | 64 | convergence: ALL 3 NaN in 5-12 steps at finder LRs (constant LR); needs long warmup + clipping |
 | [2026-06-27](#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot) | Sunspot | 6144 (prod) | AdamW, mano, muon, sophiag | 64 | AdamW cliffs @ ~7e-7; mano U-min 1.6e-5 (best); sophiag NOT broken |
 | trend | Sunspot | 144..6144 | AdamW | 8-64 | usable LR falls ~20x; U-min -> NaN cliff transition |
 | [2026-04-21](#2026-04-21----80b-gas-sweep-sunspot-small-batch-gbs192) | Sunspot | 192 | AdamW, Muon, SophiaG | 2 | AdamW 1.1e-5 (small batch); Muon/SophiaG NaN |
