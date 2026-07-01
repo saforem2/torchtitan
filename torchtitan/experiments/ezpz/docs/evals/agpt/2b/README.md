@@ -2,14 +2,17 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-06-29
+> Last updated: 2026-07-01
 >
-> **NOTE (2026-06-29):** the 2B 256N chain **COMPLETED** at step-92,859 =
+> **NOTE (2026-07-01):** the 2B 256N chain **COMPLETED** at step-92,859 =
 > 4.674T tokens (100%). The scores below run through **step-86,200**; the
-> final stretch (step-86,300 -> 92,859) is **not yet eval'd** -- queue the
-> backfill (incl. the final step-92,859 checkpoint) when Aurora returns
-> from PM maintenance. lm-eval needs compute, so it can't run during the
-> outage.
+> tail backfill (step-86,500 -> 92,859 at 500-step cadence + the final
+> step-92,859 checkpoint, 14 ckpts) was **submitted post-PM as job
+> 8638581** (`capacity` queue, single node, TP=1; script
+> [`scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh`](../../../scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh)).
+> This page + `figures/eval_overview.svg` need a refresh once it lands.
+> (20B is already caught up to its last valid ckpt step-4,400; step-4,500
+> is an empty/aborted save, nothing to eval.)
 >
 > **Training curves:** see [`docs/production/agpt/2b/`](../../../production/agpt/2b/README.md)
 > for loss / throughput / MFU dashboards across the live 2B trajectories
