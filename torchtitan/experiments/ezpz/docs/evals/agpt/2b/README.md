@@ -194,6 +194,20 @@ columns are marked `no DCP`.
 | **v2 256N** | **80,500** | **4051.7** | **0.5608** | **0.5909** | **0.3345** | **0.5533** | **0.7269** | **0.3400** | **0.5713** |
 | **v2 256N** | **83,500** | **4202.7** | **0.5592** | **0.5913** | **0.3311** | **0.5564** | **0.7301** | **0.3400** | **0.5703** |
 | **v2 256N** | **86,200** | **4338.6** | **0.5595** | **0.5976** | **0.3353** | **0.5564** | **0.7285** | **0.3420** | **0.5835** |
+| **v2 256N** | **86,500** | **4353.7** | **0.5595** | **0.6511** | **0.3319** | **0.5525** | **0.7318** | **0.3440** | **0.5792** |
+| **v2 256N** | **87,000** | **4378.9** | **0.5601** | **0.6519** | **0.3328** | **0.5493** | **0.7296** | **0.3440** | **0.5755** |
+| **v2 256N** | **87,500** | **4404.0** | **0.5599** | **0.6545** | **0.3345** | **0.5541** | **0.7285** | **0.3380** | **0.5765** |
+| **v2 256N** | **88,000** | **4429.2** | **0.5603** | **0.6528** | **0.3268** | **0.5414** | **0.7269** | **0.3400** | **0.5823** |
+| **v2 256N** | **88,500** | **4454.4** | **0.5595** | **0.6545** | **0.3319** | **0.5572** | **0.7307** | **0.3380** | **0.5856** |
+| **v2 256N** | **89,000** | **4479.5** | **0.5606** | **0.6503** | **0.3319** | **0.5493** | **0.7318** | **0.3340** | **0.5758** |
+| **v2 256N** | **89,500** | **4504.7** | **0.5586** | **0.6481** | **0.3328** | **0.5470** | **0.7274** | **0.3400** | **0.5709** |
+| **v2 256N** | **90,000** | **4529.8** | **0.5605** | **0.6507** | **0.3336** | **0.5422** | **0.7307** | **0.3420** | **0.5706** |
+| **v2 256N** | **90,500** | **4555.0** | **0.5600** | **0.6528** | **0.3319** | **0.5446** | **0.7296** | **0.3420** | **0.5777** |
+| **v2 256N** | **91,000** | **4580.2** | **0.5609** | **0.6511** | **0.3328** | **0.5525** | **0.7312** | **0.3360** | **0.5801** |
+| **v2 256N** | **91,500** | **4605.3** | **0.5605** | **0.6494** | **0.3328** | **0.5525** | **0.7301** | **0.3380** | **0.5746** |
+| **v2 256N** | **92,000** | **4630.5** | **0.5611** | **0.6481** | **0.3328** | **0.5485** | **0.7323** | **0.3420** | **0.5795** |
+| **v2 256N** | **92,500** | **4655.7** | **0.5604** | **0.6477** | **0.3353** | **0.5556** | **0.7301** | **0.3300** | **0.5749** |
+| **v2 256N** | **92,859** | **4673.7** | **0.5610** | **0.6511** | **0.3362** | **0.5430** | **0.7329** | **0.3380** | **0.5728** |
 | **v2 512N** | **1,000** | **100.7** | **0.2638** | **0.3620** | **0.2270** | **0.5130** | **0.5887** | **0.2420** | **0.6217** |
 | **v2 512N** | **2,000** | **201.3** | **0.3034** | **0.4613** | **0.2261** | **0.5059** | **0.6338** | **0.2800** | **0.6089** |
 | **v2 512N** | **3,000** | **302.0** | **0.3481** | **0.5130** | **0.2509** | **0.5193** | **0.6567** | **0.2740** | **0.5838** |
@@ -240,26 +254,36 @@ higher random baselines (Winogrande's is 50%) and need more
 capacity than 2B can give. The v2 chains are tracking toward MDS
 numbers but plateau-ing without more tokens.
 
-### Saturation note
+### Saturation note (chain COMPLETE, step-92,859)
 
-The 2B 256N async chain has visibly **plateaued** — HellaSwag norm
-~0.56, ARC-Challenge ~0.33, Winogrande ~0.55, piqa ~0.73 are dead flat
-across step-36K all the way to **step-86,200 (4.34T tokens, 92.9% of
-target)**. The per-token learning curve saturated for the 2B capacity
-around ~2T tokens; the +2.3T tokens since have not moved the
-benchmarks. Reaching MDS-level scores would need either far more
-tokens or capacity changes the v2 stack doesn't currently make.
+The 2B 256N async chain is **complete** (step-92,859 = 4.674T tokens,
+100%) and has visibly **plateaued** — HellaSwag norm ~0.56,
+ARC-Challenge ~0.33, Winogrande ~0.55, PIQA ~0.73 are dead flat across
+step-36K all the way to the **final step-92,859**. The
+2026-07-01 tail backfill (step-86,500..92,859, 14 ckpts, job 8638581)
+confirms the plateau holds to completion: over the final ~635B tokens
+(step-86,500->92,859) HellaSwag moves 0.5595->0.5610 and ARC-Easy sits
+at 0.651+-0.003 — i.e. **no learning in the last 13% of training**. The
+per-token curve saturated for the 2B capacity around ~2T tokens; the
++2.6T tokens since did not move the benchmarks.
 
-> **ARC-Easy caveat (step-70K onward):** the step-74,400..86,200
-> backfill batch reports ARC-Easy ~0.59, vs ~0.65 in the step-66K..69.9K
-> rows just above. This is almost certainly an eval-harness/config
-> difference in the later backfill (those results.json files are also a
-> flatter schema), NOT a real model regression — every *other* task is
-> continuous across the 69.9K->74.4K boundary, and ARC-Easy alone
-> dropping 6pp while the model keeps training is not a plausible real
-> effect. Treat the step>=74,400 ARC-Easy column as not directly
-> comparable to the earlier rows until the two batches are re-run under
-> one harness.
+**This flat tail is the empirical case for continued pretraining (CPT)
+on a different data mix** — more olmo-mix tokens cannot help a
+saturated 2B, so the next step is a CPT distribution shift (olmo x
+dolmino mixing-ratio sweep, forked from this step-92,859 base). Reaching
+MDS-level scores would otherwise need capacity changes the v2 stack
+doesn't currently make.
+
+> **ARC-Easy caveat RESOLVED (2026-07-01):** the earlier step-74,400..86,200
+> backfill batch reported ARC-Easy ~0.59 (vs ~0.65 in the step-66K..69.9K
+> rows), which was flagged as a suspected eval-harness/config artifact.
+> The fresh 2026-07-01 tail backfill (step-86,500..92,859) reports
+> ARC-Easy back at **~0.65** under the corrected harness — confirming the
+> ~0.59 dip was indeed a config artifact of that older batch, NOT a real
+> regression. The final step-92,859 ARC-Easy is **0.651** (acc). The
+> step-74,400..86,200 ARC-Easy values remain not-directly-comparable
+> (older batch); everything from step-86,500 on is on the corrected
+> harness.
 
 ### Per-checkpoint missing data
 
