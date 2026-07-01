@@ -29,10 +29,17 @@ The path here required ~26 job submissions and three separate
 architectural pivots. This doc captures the full chain so the
 relevant landmines stay documented.
 
-## UPDATE 2026-07-01: multi-node (cross-node) vLLM GRPO works
+## UPDATE 2026-07-01: cross-node generation works; multi-node TRAINER hit the oneCCL AVG wall (being resolved)
+
+**Status nuance:** cross-node *generation* (trainer on node B, vLLM server on
+node A) is proven at **2 nodes / 1 trainer node** (job 12469976, below). But
+scaling the *trainer* to multiple nodes (10N run, job 12469978) hit a oneCCL
+transport wall -- see "The multi-node AVG wall" at the end of this section.
+The 2N recipe is the current usable config; the multi-trainer-node fix is in
+progress.
 
 The 1N architecture above (server + trainer share `127.0.0.1`) is now
-extended to **true multi-node**: the vLLM server runs on the head node and
+extended to **cross-node**: the vLLM server runs on the head node and
 the trainer runs on *other* nodes, reaching the server over its real
 hostname. Validated by a **2-node smoke (job 12469976)**: 10/10 GRPO steps,
 server on node A + 8 trainer ranks on node B, on the SFT'd AuroraGPT-2B
@@ -77,7 +84,47 @@ check must run from a `.py` file with an `if __name__ == "__main__":` guard
 Working production script:
 [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
 (server on head node, trainer on all other nodes, 1000 steps, resumable).
-First full 10N run: job `12469978` (2026-07-01, in flight).
+
+### The multi-node AVG wall (10N run, job 12469978)
+
+The first full 10N run (server on node 0, 108 trainer ranks on nodes 1-9)
+**failed at step 0**: all 108 ranks raised, inside FSDP2's backward
+grad reduce-scatter (`torch/.../_fsdp_param_group.py:922`):
+
+```
+RuntimeError: oneCCL: coll_param.cpp:458 validate: EXCEPTION:
+   average operation is not supported for the scheduler path
+```
+
+Root cause: the trainer was forced onto the **TCP-KVS / OFI-tcp scheduler
+path** (`CCL_PROCESS_LAUNCHER=none`, `CCL_ATL_TRANSPORT=ofi`,
+`FI_PROVIDER=tcp`, `CCL_KVS_IP_PORT=<head>`), copied from the 1N smoke. That
+transport does not implement `ReduceOp.AVG`, which FSDP uses for gradient
+reduction. The 2N smoke masked it: with 1 trainer node (8 ranks), the grad
+AVG did not route through the cross-node scheduler path.
+
+**Key realization (from reading TRL 1.6 source):** the trainer did NOT need
+the TCP-KVS env at all. TRL's weight-sync group is a
+`StatelessProcessGroup.create(host, port, world_size)` +
+`PyNcclCommunicator` (`trl/scripts/vllm_serve.py:111`, XPU-aware via
+`is_torch_xpu_available`), created on its **own** dedicated host:port -- it
+does NOT reuse oneCCL's `CCL_KVS_IP_PORT`. So the weight-sync collective is
+independent of the trainer's FSDP transport. Forcing TCP-KVS onto the trainer
+was unnecessary AND caused the AVG failure.
+
+**Fix directions (2026-07-01, in progress; togglable):**
+1. Let the trainer use the normal ezpz **pmix/CXI** transport (AVG-capable,
+   like every production FSDP run); TRL's stateless group handles weight-sync
+   on its own port. Cheapest -- likely resolves it outright.
+2. If (1) is insufficient, patch FSDP grad reduce **AVG -> SUM + divide by
+   world_size** in `train_grpo.py` (avoids the unsupported op on any
+   transport).
+3. Longer-term: explicit **split transports** (fast CXI for the FSDP mesh,
+   TCP-KVS only for weight-sync if ever needed), behind an env toggle so we
+   can switch between (2) and (3).
+
+First full 10N run: job `12469978` (2026-07-01) -- FAILED at the AVG wall;
+fix in progress per above.
 
 ## Stack
 
