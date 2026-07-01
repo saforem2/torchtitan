@@ -95,6 +95,52 @@ mismatch for XPU object-collectives [the real remaining blocker for
 multi-trainer-node]; (d) explicit split transports behind an env toggle
 [long-term perf].
 
+### Attempt log + current frontier (2026-07-01, end of session)
+
+Both fixes from the plan were implemented in `xpu_overrides.py` (commit
+`c69a11bec`):
+- `patch_fsdp2_force_sum_reduction_for_xpu()` -- AVG->SUM via the public
+  `FSDPModule.set_force_sum_reduction_for_comms(True)`, applied to every
+  `fully_shard`'d module by wrapping accelerate's `fsdp2_prepare_model`.
+- `apply_all_xpu_patches()` gates `setup_oneccl_tcp_kvs_for_xpu()` behind
+  `EZPZ_RL_ONECCL_TCP_KVS` (default `1`; set `0` for multi-trainer-node so
+  the trainer stays on pmix/CXI).
+
+Multi-trainer-node (2 trainer nodes, 3N total) still does not step. Attempts:
+
+| Job | Config | Result |
+|-----|--------|--------|
+| 12469978 | 10N, TCP-KVS forced | AVG wall at step 0 |
+| 12469980 | 3N, CXI (via script, no outer TCP-KVS) | weight-sync OK, **silent hang** at first `gather_object`, 0 generate, ~22 min idle |
+| 12469984 | 3N, both fixes, `-x` env flag | died instantly: `mpiexec: unrecognized option '-x'` (PALS != OpenMPI) |
+| 12469985 | 3N, both fixes, `export` env | TCP-KVS **still forced** (toggle env did not reach ranks -- 0 "skipping" logs), so KVS `kvs_get_value timeout 60>60` at first `gather_object` |
+
+**Two unresolved sub-problems, both at the same site (the first
+`gather_object` cross-node object-collective in
+`trl/generation/vllm_generation.py:560`):**
+1. **Toggle propagation:** `export EZPZ_RL_ONECCL_TCP_KVS=0` before
+   `ezpz launch` did NOT reach the ranks even though ezpz emits
+   `mpiexec --envall`. Reliable alternative (per ezpz launch source): pass
+   it explicitly as a PALS flag through the launcher separator --
+   `ezpz launch ... -- --env EZPZ_RL_ONECCL_TCP_KVS=0 python ...` (`--env`
+   takes `VAR=VAL` as one arg; PALS `mpiexec` has `--env`/`--genv`, NOT
+   OpenMPI's `-x`). Or `os.environ.setdefault(...)` at the top of
+   `train_grpo.py:main()`.
+2. **The real wall:** even on pure CXI (12469980), the cross-node
+   `all_gather_object` hangs silently -- an XPU object-collective
+   (pickle -> byte-tensor `all_gather`) that doesn't complete across nodes.
+   This is the genuine blocker and is NOT yet solved. TCP-KVS makes it fail
+   loudly (KVS timeout) instead of silently, but neither transport gets the
+   object-collective through cross-node.
+
+**Frontier for next session:** get the toggle to the ranks via the `-- --env`
+form, confirm the SUM patch fires (look for the "forced ReduceOp.SUM" stderr
+line) and clears AVG, then focus entirely on the `all_gather_object`
+cross-node object-collective on XPU (device placement of the byte tensor;
+possibly force it onto the XPU device or route it via a CPU/gloo group).
+**Usable today: the 1-trainer-node config** (server + 1 trainer node), which
+runs clean end-to-end.
+
 ## Stack
 
 | Component | Pin | Notes |
