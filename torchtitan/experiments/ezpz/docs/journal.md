@@ -4,12 +4,12 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
-## 2026-07-01 (aurora) -- 80B production launches post-maintenance (2048N first out)
+## 2026-07-01 (aurora) -- 80B launch: 2048N crashes at init, 512N + 1024N run
 
 Machine returned from the Mon 2026-06-29 maintenance. Managing the 80B
 SophiaG/constant-LR production launch and refreshing docs.
 
-- **80B launch began (~15:00 UTC).** All 6 jobs (3 heads + 3 conts) stayed
+- **80B launch attempted (~15:00 UTC).** All 6 jobs (3 heads + 3 conts) stayed
   queued through the PM; no head ran pre-maintenance, so these are cold starts.
   The **2048N head (8574387) started first**, ahead of the 512N/1024N brackets.
 - **4 exec-server rejects before it placed.** run_count 1-4: the job flipped
@@ -18,17 +18,33 @@ SophiaG/constant-LR production launch and refreshing docs.
   were running fleet-wide* during the reject window, so it was post-maintenance
   node-release flapping specific to our attempts, not a machine-wide inability to
   place large jobs. Attempt 5 (~15:00 UTC) placed cleanly on 2072 nodes.
-- **Now in launch (not validated).** Config echo confirms the intended knobs
-  (GBS=6138, TP=4, LBS=1, compile OFF, steps=92,950, SophiaG, constant-LR);
-  `ezpz launch --auto-retry` armed (active=2046, spare=26); venv broadcast done;
-  NGPUS=24,864. Has NOT yet cleared `set_determinism` init (past the documented
-  1024N/12,288-rank crash zone -- 2048N = 24,552 train ranks is new ground) or
-  logged a first `step:`. Grabbing 2072 nodes drained free to ~68, so 512N
-  (8574385) + 1024N (8574386) heads are `Not enough free nodes` until it settles.
-- **Docs refreshed:** production dashboard + agpt/80b rollups moved to
-  "launching" (2026-07-01), launch report gained a post-maintenance Launch-log
-  section. Operational lesson recorded: after a reservation tears down, a large
-  job can eat several exec-server rejects before nodes stabilize; wait (don't
+- **Then it SIGSEGV'd in `set_determinism`** (`F`, rc=143, 14:47 walltime).
+  Config echo was correct (GBS=6138, TP=4, LBS=1, compile OFF, steps=92,950,
+  SophiaG, constant-LR) and venv broadcast finished, but the seed broadcast in
+  `distributed/utils.py:231` faulted at **24,864 ranks** (`rank 13602 died from
+  signal 11`; CCL/PMI KVS "Connection reset by peer"). This is the **documented
+  init-crash class** (2B/20B at 1024N/12,288 ranks), now confirmed for 80B at
+  2048N. NOTE: I briefly misread an earlier `build_mesh` success as
+  "set_determinism cleared" -- it had not; the crash is *in* set_determinism.
+- **Finding: init-crash ceiling for 80B is bracketed by the 1024N run.**
+  512N (dp=1530) proven; 2048N (dp=6138) crashes; **1024N (8574386, dp=3066) is
+  the missing measurement** -- if it survives init the ceiling is ~2048N-specific,
+  if it crashes then 512N is the practical 80B max on this stack.
+- **Finding: auto-retry misclassified the SIGSEGV as a walltime stop.** The rank
+  SIGSEGV -> SIGTERM -> job rc=143, which `launch_autoretry.py:726` logged as
+  `FAILOVER STOP: walltime` and did NOT consume its 2 retries. Moot for a
+  deterministic init crash, but a real classifier gap: a swappable bad-node
+  SIGSEGV would also produce rc=143 and never trigger a spare-swap. Filed as a
+  follow-up (rc=143/SIGTERM should be distinguished from a wrapper-initiated
+  walltime-margin stop).
+- **Action:** `qhold`'d the 2048N continuation (8574390, `afterany:8574387`) --
+  `afterany` fires on failure too, so it would have grabbed 2072 nodes for the
+  same crash. 512N + 1024N heads left to run; backfilling as 8574387's nodes
+  release. No `qdel` (holds are reversible).
+- **Docs refreshed:** dashboard + agpt/80b rollups + launch report all corrected
+  from "launching" to the crash outcome, with the two findings recorded.
+  Operational lesson also recorded: after a reservation tears down, a large job
+  can eat several exec-server rejects before nodes stabilize; wait (don't
   requeue, which forfeits queue priority) as long as peer large jobs are placing.
 - **Restart-economics analysis** (from 2026-06-30) stands: ~7 confirmed failover
   recoveries of ~62 triggered episodes; ~78% of exhaustions are systemic

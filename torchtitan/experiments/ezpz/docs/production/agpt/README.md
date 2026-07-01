@@ -27,17 +27,20 @@ included (no overlay until production ckpts land — see
   v2 2B base pre-training run is done; cont13 [8558532](2b/n256/README.md)
   Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the
   final ckpt (blocked on PM maintenance).**
-- **80B production LAUNCHING (2026-07-01)** — SophiaG @ 1e-6, **constant-LR**
-  (for CPT), validator on, at **512N+1024N+2048N** ([8574385](80b/README.md)/
-  8574386/8574387 + 3 conts). All 6 queued through the 06-29 PM (no head ran
-  pre-PM); post-PM the **2048N head (8574387) started first** at ~15:00 UTC on
-  its 5th attempt (4 exec-server rejects during node-release flapping), now in
-  venv-broadcast at NGPUS=24,864 — **not yet past `set_determinism` init /
-  first step.** 512N+1024N backfill once it settles. The old AdamW step-2 NaN
-  was a production-batch LR problem (LR-finder: AdamW NaN-cliff at GBS=6144;
-  mano ~3e-6 / sophiag ~1e-6 train clean). **TEAM DECISION OPEN: SophiaG vs
-  mano** for the base; scale >512N untested (2048N = new ground). Plan +
-  launch log: [80B SophiaG launch](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+- **80B launch attempted (2026-07-01) — 2048N crashed at init; 512N + 1024N
+  running.** SophiaG @ 1e-6, **constant-LR** (for CPT), validator on, at
+  **512N+1024N+2048N** ([8574385](80b/README.md)/8574386/8574387 + 3 conts).
+  All 6 queued through the 06-29 PM (no head ran pre-PM); post-PM the **2048N
+  head (8574387) started first** (~15:00 UTC, 5th attempt after 4 exec-server
+  rejects) but **SIGSEGV'd in `set_determinism`** at 24,864 ranks (`F`, rc=143)
+  — the documented init-crash class, now confirmed for 80B at 2048N. 2048N cont
+  `qhold`'d. **512N (proven) + 1024N (untested 80B data point) are live** and
+  will bracket where the 80B init ceiling sits. Also: auto-retry misclassified
+  the SIGSEGV (rc=143) as walltime and skipped its retries. The old AdamW
+  step-2 NaN was a production-batch LR problem (LR-finder: AdamW NaN-cliff at
+  GBS=6144; mano ~3e-6 / sophiag ~1e-6 train clean). **TEAM DECISION OPEN:
+  SophiaG vs mano** for the base. Plan + launch log:
+  [80B SophiaG launch](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 - **20B 256N** advanced to step **2,100** (105.7B, 2.3%, loss 2.85,
   ~21.8% MFU); clean exit at the PM boundary, cont1
   [8558549](20b/n256/README.md) Q to resume post-maintenance.

@@ -20,7 +20,7 @@ budget. Detail + per-dispatch history in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [**80B** 512/1024/2048N](agpt/80b/README.md) | **launching** (2048N R, init) | — | — | — | 🟢 SophiaG 1e-6, const-LR; 2048N first out post-PM |
+| [**80B** 512/1024N](agpt/80b/README.md) | 512N+1024N Q; **2048N crashed** | — | — | — | 🟡 2048N SIGSEGV'd in set_determinism (24,864 ranks); 512N+1024N live |
 | [20B 256N](agpt/20b/n256/README.md) | running→PM | **2,100** | 2.85 | 2.3% | 🟢 advancing (resumes post-PM) |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
 | [20B 512N](agpt/20b/n512/README.md) sync | stalled (Q ~25d) | 4,400 | 2.51 | 9.5% | 🟡 queue-starved + init-crash |
@@ -30,19 +30,21 @@ budget. Detail + per-dispatch history in the linked pages.
 > would *reset* their accrued priority. Full diagnosis + data:
 > [queue-wait-analysis.md](queue-wait-analysis.md).
 
-> **80B status (2026-07-01)**: production LAUNCHING. The old AdamW step-2 NaN
-> was root-caused as a production-batch LR problem -- the 2026-06-27 LR-finder
-> (GBS=6144) showed AdamW is on a NaN cliff (ceiling ~7e-7, NaN onset 1.36e-6),
-> while **mano (~3e-6)** and **sophiag (~1e-6)** train clean. Launched
-> **SophiaG @ 1e-6, constant-LR** at 512N+1024N+2048N (6 jobs; 3 heads + 3
-> conts). All 6 stayed queued through the 06-29 maintenance (no head ran pre-PM);
-> post-PM the **2048N head (8574387) started first** at ~15:00 UTC on its 5th
-> attempt (4 exec-server rejects during post-maintenance node-release flapping),
-> now in venv-broadcast at NGPUS=24,864. It has NOT yet cleared `set_determinism`
-> init or produced a first `step:` -- **treat as launching, not validated.**
-> 512N/1024N heads backfill once 2048N settles. TEAM DECISION OPEN: SophiaG vs
-> mano for the base. Scale >512N is untested (1024N has a documented init crash;
-> 2048N = 24,864 ranks is new ground). Full plan + launch log:
+> **80B status (2026-07-01)**: launch attempted post-PM; **2048N crashed at
+> init, 512N + 1024N running.** All 6 SophiaG/constant-LR jobs queued through the
+> 06-29 maintenance (no head ran pre-PM). Post-PM the **2048N head (8574387)
+> started first** (~15:00 UTC, 5th attempt after 4 exec-server rejects) but
+> **SIGSEGV'd in `set_determinism`** at 24,864 ranks (`F`, rc=143) -- the
+> documented init-crash class (seen 2B/20B at 1024N), now confirmed at 2048N for
+> 80B. Its continuation was `qhold`'d (would recrash). **512N (8574385,
+> proven-safe) + 1024N (8574386, the untested 80B data point) are the live
+> brackets** -- 1024N will bracket exactly where the init ceiling sits. Also
+> found: auto-retry misclassified the SIGSEGV (rc=143) as a walltime stop and
+> skipped its retries (a classifier gap; moot for a deterministic crash but real
+> for swappable bad-node SIGSEGVs). The old AdamW step-2 NaN was a
+> production-batch LR problem (LR-finder: AdamW NaN-cliff at GBS=6144; mano ~3e-6
+> / sophiag ~1e-6 clean). TEAM DECISION OPEN: SophiaG vs mano. Full plan +
+> launch log:
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md);
 > LR-finder: [lr-finder/agpt/80b](../experiments/lr-finder/agpt/80b/README.md).
 
@@ -67,7 +69,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **30,400** (persisted) | **2.71** | **3.06T** (65.5%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
 | 20B | 512 | **4,400** (persisted) | **3.46** | **442.9B** (9.5%) | [`8521632`](agpt/20b/n512/README.md) Q (sync-mode) | **Q+H — Aurora `small` queue contention.** 8521628 ran 2026-06-10, advanced step-4400 → step-4500 cleanly + persisted DCP, then crashed at the next `set_determinism` init step (std::bad_alloc, same failure mode as 8466848). Cont (8521632) Q for next 512N slot — resumes from step-4500. |
-| 80B | 512/1024/2048 | — (launching) | — | — | [`8574387`](agpt/80b/README.md) R (2048N, init) / `8574385`+`8574386` Q | **Production LAUNCHING** (SophiaG @ 1e-6, constant-LR, validator on). The old AdamW step-2 NaN was a production-batch LR problem (LR-finder: AdamW NaN-cliff at GBS=6144; mano ~3e-6 / sophiag ~1e-6 train clean). All 6 jobs (3 heads + 3 conts) queued through the 06-29 PM; post-PM the **2048N head started first** (2026-07-01 ~15:00 UTC, 5th attempt after 4 exec-server rejects), now in venv-broadcast at NGPUS=24,864 — **not yet past `set_determinism` init / first step.** 512N+1024N backfill once it settles. Scale >512N untested (2048N = new ground). Plan + launch log: [20260628-80b-sophiag-constant-lr-...](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md). |
+| 80B | 512/1024 | — (2048N crashed) | — | — | [`8574385`](agpt/80b/README.md)+`8574386` Q; `8574387` F | **Launch attempted 2026-07-01; 2048N crashed at init.** SophiaG @ 1e-6, constant-LR, validator on. All 6 jobs queued through the 06-29 PM; post-PM the 2048N head (8574387) started first (5th attempt after 4 exec-server rejects) but **SIGSEGV'd in `set_determinism` at 24,864 ranks** (`F`, rc=143) — the documented init-crash class, now confirmed at 2048N for 80B. 2048N cont `qhold`'d (would recrash). **512N (8574385, proven) + 1024N (8574386, untested 80B data point) are live** and backfilling as 2048N's nodes release. Plan + launch log: [20260628-80b-sophiag-constant-lr-...](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
 
