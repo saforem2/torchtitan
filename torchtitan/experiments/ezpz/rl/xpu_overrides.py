@@ -819,6 +819,64 @@ def patch_vllm_xpu_skip_oneccl_warmup() -> None:
     _dist.all_reduce = patched_all_reduce
 
 
+def patch_fsdp2_force_sum_reduction_for_xpu() -> None:
+    """Force FSDP2 grad reduce-scatter to SUM+divide instead of AVG on XPU.
+
+    oneCCL's scheduler-path reduce-scatter has no AVG kernel, so FSDP2's
+    default ``ReduceOp.AVG`` (chosen in torch's
+    ``_fsdp_collectives._get_gradient_divide_factors``) crashes multi-node
+    with: ``oneCCL: coll_param.cpp:458 validate: EXCEPTION: average operation
+    is not supported for the scheduler path`` (10N GRPO job 12469978, all
+    ranks, step 0, in FSDP2 backward). Single-trainer-node runs never hit it
+    because the grad AVG stayed off the cross-node path.
+
+    torch >= 2.8 exposes the public
+    ``FSDPModule.set_force_sum_reduction_for_comms(True)``, which switches the
+    reduce-scatter to ``ReduceOp.SUM`` followed by a post-divide by
+    world_size -- numerically identical to AVG, but avoids the unsupported op
+    on every transport. accelerate FSDP2-wraps each decoder block AND the root
+    via ``fully_shard`` (``accelerate/utils/fsdp_utils.py:fsdp2_prepare_model``),
+    and each wrapped ``FSDPModule`` has its own
+    ``FSDPParamGroup.force_sum_reduction_for_comms`` flag -- so we must set it
+    on every wrapped module, not just the root. We do that by wrapping
+    ``fsdp2_prepare_model`` and walking the returned module tree.
+    """
+    if torch.cuda.is_available():
+        return
+    try:
+        import accelerate.utils.fsdp_utils as _fu
+    except ImportError:
+        return
+    orig = getattr(_fu, "fsdp2_prepare_model", None)
+    if orig is None or getattr(orig, "_xpu_patched", False):
+        return
+
+    def patched(accelerator, model):
+        wrapped = orig(accelerator, model)
+        try:
+            from torch.distributed.fsdp import FSDPModule
+        except ImportError:
+            return wrapped
+        target = getattr(wrapped, "_orig_mod", wrapped)  # unwrap torch.compile
+        count = 0
+        for m in list(target.modules()) + [wrapped]:
+            if isinstance(m, FSDPModule) and hasattr(
+                m, "set_force_sum_reduction_for_comms"
+            ):
+                m.set_force_sum_reduction_for_comms(True)
+                count += 1
+        print(
+            f"[xpu_overrides pid={os.getpid()}] forced ReduceOp.SUM+divide on "
+            f"{count} FSDP2 modules (oneCCL has no AVG reduce-scatter kernel)",
+            flush=True,
+            file=__import__("sys").stderr,
+        )
+        return wrapped
+
+    patched._xpu_patched = True  # type: ignore[attr-defined]
+    _fu.fsdp2_prepare_model = patched
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -845,4 +903,22 @@ def apply_all_xpu_patches() -> None:
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
     patch_vllm_xpu_no_alias_current_stream()
-    setup_oneccl_tcp_kvs_for_xpu()
+    # Force FSDP2 grad reduce-scatter to SUM+divide (oneCCL lacks AVG on the
+    # scheduler path). Correct regardless of transport; needed for
+    # multi-trainer-node FSDP. See patch_fsdp2_force_sum_reduction_for_xpu.
+    patch_fsdp2_force_sum_reduction_for_xpu()
+    # TCP-KVS forcing is TOGGLABLE. It was required for the 1N cross-process
+    # XCCL rendezvous, but it puts the trainer's FSDP collectives on the
+    # OFI-tcp scheduler path -- which is what triggered the multi-node AVG
+    # wall. TRL's weight-sync uses its own StatelessProcessGroup (independent
+    # of oneCCL), so multi-trainer-node runs should leave this OFF and let the
+    # trainer use the normal pmix/CXI transport. Default ON preserves the
+    # working 1N/1-trainer-node behavior; set EZPZ_RL_ONECCL_TCP_KVS=0 to
+    # disable (multi-trainer-node).
+    if os.environ.get("EZPZ_RL_ONECCL_TCP_KVS", "1") != "0":
+        setup_oneccl_tcp_kvs_for_xpu()
+    else:
+        logger.info(
+            "EZPZ_RL_ONECCL_TCP_KVS=0: skipping TCP-KVS forcing; "
+            "trainer uses the default (pmix/CXI) oneCCL transport"
+        )
