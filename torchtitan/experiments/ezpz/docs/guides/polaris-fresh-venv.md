@@ -251,14 +251,51 @@ Should get past `init_process_group` and run to completion.
 
 ## Verification
 
-This recipe was run end-to-end from scratch in an isolated directory on a
-Polaris compute node on 2026-07-01 (job 7232069, node x3001c0s19b1n0):
+This recipe was run end-to-end from scratch in an isolated directory
+(`/eagle/AuroraGPT/foremans/tmp/venv-verify-20260701`) on a Polaris compute
+node on 2026-07-01 (job 7232069, node x3001c0s19b1n0). Actual captured
+output below.
 
-- venv created uv-managed, `include-system-site-packages = false` (no conda)
-- `torch==2.12.1+cu129` installed and imported
-- `mpi4py==4.1.2` built from source under `PrgEnv-gnu`, native
-  `cp312-cp312-linux_x86_64` tag
-- **Step 6a:** `mpiexec -n 4` bcast returned `56465` on all 4 ranks
-- **Step 6b:** `ezpz launch python3 -m ezpz.examples.test` ran to
-  `Execution finished with 0` (200 iters, loss 1.04 -> 0.16), no
-  `MASTER_PORT='None'`
+### Environment produced
+
+```console
+$ grep -E "home|include-system-site-packages" .venv/pyvenv.cfg
+home = /home/foremans/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/bin
+include-system-site-packages = false
+
+$ python3 -c "import torch; print('torch', torch.__version__)"
+torch 2.12.1+cu129
+
+$ cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
+Tag: cp312-cp312-linux_x86_64        # native build, NOT manylinux
+```
+
+### Step 6a -- mpiexec bcast (the regression test)
+
+```console
+$ mpiexec -n 4 --ppn 4 python3 -c \
+    "from mpi4py import MPI; c=MPI.COMM_WORLD; print(c.rank, c.bcast(56465 if c.rank==0 else None, root=0))"
+0 56465
+1 56465
+2 56465
+3 56465
+```
+
+All 4 ranks return `56465` (the broken portable-wheel install prints `56465`
+on rank 0 and `None` on the rest).
+
+### Step 6b -- `ezpz launch python3 -m ezpz.examples.test`
+
+```console
+[I][ezpz/launch:855] Job ID: 7232069
+[I][ezpz/launch:856] nodelist: ['x3001c0s19b1n0']
+[I][ezpz/distributed:1755:_setup_ddp] init_process_group: master_addr=x3001c0s19b1n0.hsn.cm.polaris.alcf.anl.gov, master_port=47949, world_size=4, rank=0, backend=nccl, timeout=1:00:00
+[I][examples/test:403:train_step] iter=10   loss=1.042641 accuracy=0.703125
+[I][examples/test:403:train_step] iter=50   loss=0.354128 accuracy=0.875000
+[I][examples/test:403:train_step] iter=100  loss=0.276477 accuracy=0.898438
+[I][examples/test:403:train_step] iter=150  loss=0.179395 accuracy=0.945312
+[I][ezpz/launch:913] Execution finished with 0.
+```
+
+Gets past `init_process_group` with a real `master_port=47949` on all ranks
+(no `MASTER_PORT='None'`), trains cleanly, and exits 0.
