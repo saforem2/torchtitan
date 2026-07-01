@@ -3,9 +3,10 @@
 > [!NOTE]
 > This guide builds a **standalone** torchtitan/ezpz environment on Polaris
 > that does NOT layer on top of a conda env: uv-managed CPython 3.12,
-> `include-system-site-packages = false`, `torch 2.12.1+cu129`, and `mpi4py`
-> built from source against Cray MPICH. Verified end-to-end on 2026-07-01
-> (see the Verification section).
+> `include-system-site-packages = false`, `torch 2.12.1+cu129`, `mpi4py`
+> built from source against Cray MPICH, plus ezpz/torchtitan/blendcorpus.
+> Verified end-to-end on 2026-07-01 (venv init, ezpz self-test, and an
+> agpt_2b training smoke -- see the Verification section).
 
 ## Symptom this fixes
 
@@ -145,7 +146,32 @@ uv pip install --no-cache --link-mode=copy --force-reinstall --upgrade \
 > the system CUDA matches at run time. (Verified 2026-07-01: torch resolves
 > to `2.12.1+cu129`.)
 
-### 4. Build `mpi4py` from source against Cray MPICH (THE fix)
+### 4. Install ezpz, torchtitan, and blendcorpus
+
+> [!IMPORTANT]
+> Install everything that depends on `mpi4py` **before** the mpi4py source
+> build in step 5. `blendcorpus` (and others) list `mpi4py` as a dependency,
+> so `uv pip install` will pull in the portable PyPI wheel and silently
+> overwrite a native build. Do the mpi4py source build **last** so nothing
+> clobbers it. (Symptom if you get the order wrong:
+> `RuntimeError: cannot load MPI library` / `libmpi.so.12: cannot open
+> shared object file` at import -- that is the portable wheel.)
+
+```bash
+# ezpz (editable from git)
+uv pip install --no-cache --link-mode=copy "git+https://github.com/saforem2/ezpz.git"
+
+# torchtitan itself, editable from the repo root
+uv pip install --no-cache --link-mode=copy -e .
+
+# blendcorpus -- the agpt/moe configs default to `--dataloader.dataset blendcorpus`.
+# Use the remove-deepspeed branch: the upstream zhenghh04/blendcorpus pulls in
+# `deepspeed` as a transitive import, which is not needed here.
+uv pip install --no-cache --link-mode=copy \
+    "git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed"
+```
+
+### 5. Build `mpi4py` from source against Cray MPICH (THE fix) -- do this LAST
 
 > [!IMPORTANT]
 > Switch to the **GNU** programming environment first. Polaris defaults to
@@ -168,22 +194,13 @@ MPICC=cc uv pip install --no-cache --no-binary mpi4py --force-reinstall mpi4py
 - `--no-binary mpi4py` forces a source build (no portable wheel).
 - `MPICC=cc` links it against the Cray MPICH compiler wrapper.
 
-Confirm `cc` is GCC, then build. Verify it built native:
+Confirm `cc` is GCC, then build. Verify it built native and imports:
 
 ```bash
 cc --version | head -1     # -> gcc-14 (SUSE Linux) 14.3.0
 cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
-# WANT: Tag: cp312-cp312-linux_x86_64
-```
-
-### 5. Install ezpz + torchtitan
-
-```bash
-# ezpz (editable from git)
-uv pip install --no-cache --link-mode=copy "git+https://github.com/saforem2/ezpz.git"
-
-# torchtitan itself, editable from the repo root
-uv pip install --no-cache --link-mode=copy -e .
+# WANT: Tag: cp312-cp312-linux_x86_64  (NOT manylinux)
+python3 -c "from mpi4py import MPI; print('mpi4py OK', MPI.COMM_WORLD.rank)"
 ```
 
 ### 6. Download tokenizer assets (if training)
@@ -213,13 +230,29 @@ mpiexec -n 4 --ppn 4 python3 -c \
 - **Still broken:** only rank 0 prints `56465`; the rest print `None`
   (that is the `MASTER_PORT='None'` bug).
 
-### 6b. End-to-end
+### 6b. End-to-end (ezpz self-test)
 
 ```bash
 ezpz launch python3 -m ezpz.examples.test
 ```
 
 Should get past `init_process_group` and run to completion.
+
+### 6c. End-to-end (agpt training smoke)
+
+Exercises the full torchtitan + blendcorpus path -- this is what catches a
+clobbered mpi4py or a missing dataloader dep:
+
+```bash
+ezpz launch python3 -m torchtitan.experiments.ezpz.train \
+    --module=ezpz.agpt --config=agpt_2b \
+    --checkpoint.no-enable \
+    --training.local-batch-size=1 --training.seq-len=8192 \
+    --training.steps=5
+```
+
+Should build the blendcorpus index and log training steps, ending in
+`Execution finished with 0`.
 
 ---
 
@@ -231,7 +264,9 @@ Should get past `init_process_group` and run to completion.
 | `--python-preference only-managed` | Guarantees a standalone CPython, never conda's |
 | no `--system-site-packages` | Nothing from a base env can shadow or leak in |
 | `module swap PrgEnv-nvidia PrgEnv-gnu` | Makes `cc` wrap `gcc` (not `nvc`), so mpi4py's GCC-built CPython CFLAGS compile |
+| mpi4py built **last**, after blendcorpus | blendcorpus depends on mpi4py; installing it after would pull the portable wheel and clobber the native build (`cannot load MPI library`) |
 | `MPICC=cc --no-binary mpi4py` | Compiles against `cray-mpich/9.0.1` so `bcast` actually works under PALS `mpiexec` |
+| blendcorpus `@feat/remove-deepspeed` | agpt/moe default to `--dataloader.dataset blendcorpus`; the remove-deepspeed branch drops the unused `deepspeed` transitive import |
 | `cuda/12.9` + torch from the `cu129` index | Matches the system CUDA 12.9 toolkit with the cu129 wheels |
 
 > [!WARNING]
@@ -249,8 +284,10 @@ above for captured output):
 - `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
 - `torch 2.12.1+cu129`
 - `mpi4py 4.1.2`, native `cp312-cp312-linux_x86_64` tag (built from source
-  against Cray MPICH under `PrgEnv-gnu`)
+  against Cray MPICH under `PrgEnv-gnu`, **last**, so nothing clobbers it)
 - `ezpz` editable from `github.com/saforem2/ezpz`
+- `blendcorpus` from `github.com/saforem2/blendcorpus@feat/remove-deepspeed`
+  (no `deepspeed` dep)
 
 ## Verification
 
@@ -302,3 +339,23 @@ on rank 0 and `None` on the rest).
 
 Gets past `init_process_group` with a real `master_port=47949` on all ranks
 (no `MASTER_PORT='None'`), trains cleanly, and exits 0.
+
+### Step 6c -- agpt_2b training smoke (full torchtitan + blendcorpus path)
+
+```console
+$ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
+    --module=ezpz.agpt --config=agpt_2b --checkpoint.no-enable \
+    --training.local-batch-size=1 --training.seq-len=8192 --training.steps=5
+[I][blendcorpus/blendcorpus_builder:311] Using BlendCorpus dataloader backend
+[I][components/metrics:523] step: 1  loss: 12.94838  grad_norm:  1.9474  memory: 23.57GiB(59.68%)  tps: 172     mfu: 0.62%
+[I][components/metrics:523] step: 2  loss: 12.86991  grad_norm:  5.3677  memory: 27.48GiB(69.59%)  tps: 13,801  mfu: 49.49%
+[I][components/metrics:523] step: 3  loss: 16.68076  grad_norm: 45.1054  memory: 27.48GiB(69.59%)  tps: 15,426  mfu: 55.32%
+[I][components/metrics:523] step: 4  loss: 16.80319  grad_norm: 43.6638  memory: 27.48GiB(69.59%)  tps: 16,003  mfu: 57.39%
+[I][components/metrics:523] step: 5  loss: 13.54631  grad_norm: 30.9798  memory: 27.48GiB(69.59%)  tps: 15,926  mfu: 57.11%
+[I][ezpz/launch:913] Execution finished with 0.
+```
+
+Builds the blendcorpus index and runs training steps to `Execution finished
+with 0` (~57% MFU on A100 at this small config). This is the step that caught
+(a) blendcorpus missing, (b) the `deepspeed` transitive dep, and (c) the
+mpi4py wheel clobber -- see the install-order warning in step 4.
