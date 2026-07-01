@@ -20,6 +20,50 @@ was required in ezpz.
 
 ---
 
+## 2026-06-30 — 63rd sync (13 commits, `390ea37cc..upstream/main`)
+
+Merged as `11356e218` in worktree `.worktrees/ezpz-63rd-sync`. **No replays
+required** — nothing touches `models/llama3/` or `models/deepseek_v3/`, so
+`agpt/` and `moe/` need no replay. Post-merge `git diff 006643ca8 HEAD --
+experiments/ezpz/agpt/ experiments/ezpz/moe/` is EMPTY (our model code
+untouched).
+
+### One merge conflict (RL, resolved)
+`experiments/rl/actors/generator.py`: our HEAD only dropped a TODO comment;
+upstream wrapped the `ts.get_state_dict` call in a `spmd_types` if/else
+(new `_get_spmd_state_dict` path). Took upstream — its `else` branch preserves
+our exact call, so upstream is a strict superset. RL code, not on any path we
+run.
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `952427842` | [spmd_types] FLUX enablement (#3823) | None (flux/ + spmd_types-guarded loss.py). |
+| `d9ebce1bd` | Pin MONARCH_ACTOR_QUEUE_DISPATCH to 0 (#3832) | None. RL. |
+| `0052a3870` | Set drop_zero_std_reward_groups=False for debug configs (#3802) | None. RL. |
+| `9e4a8512b` | [rl] fix the breakable cudagraph env var (#3829) | None. RL. |
+| `02f00eec3` | [RL] spmd_types: fix trainer logprob grad, generator TP all-reduce, FusedSwiGLU sync (#3827) | None (spmd_types + RL). |
+| `a06d4e757` | Revert "[RL] spmd_types: fix trainer logprob gradient..." (#3826) | None. RL. |
+| `5aefc0229` | [RL] spmd_types: fix trainer logprob gradient... (#3822) | None. RL. |
+| `c2a3293fb` | [rl] Remove buffer from weight sync dtype conversion (#3825) | None. RL. |
+| `3e819667f` | [rl] Enable batch-invariant using FSDP mixed precision (#2932) | None. RL. |
+| `ac240f926` | Fix transformers_modeling_backend for pretrained dense models (#3772) | None (eval-backend path we don't use in training). |
+| `0f5dfc1e9` | [rl] add perf run config (#3778) | None. RL. |
+| `756213e15` | Upgrade DeepEP to DeepEP v2 APIs, cudagraphable (#3808) | **Touches `distributed/deepep/` + `models/common/token_dispatcher.py`, which ezpz `moe/token_dispatcher.py` imports.** The one change worth smoking on moe. |
+| `0e2565100` | Fix RL spmd_types generator weight sync (#3804) | None. RL. |
+
+### Shared files changed (none break our DTensor-backend agpt/moe)
+- `components/loss.py` (+23): all under `spmd.no_typecheck()` /
+  `get_spmd_backend()=="spmd_types"` guards — no-op on our default backend.
+- `distributed/deepep/*` + `models/common/token_dispatcher.py` (+690): DeepEP
+  v2 upgrade — the moe smoke exercises this.
+- `models/{flux,gpt_oss,qwen3}/`: other families, not run here.
+
+### Validation
+- **agpt 2B smoke** (job TBD): pure regression check — agpt is untouched, must still train.
+- **moe smoke** (job TBD): exercises the DeepEP v2 token-dispatcher path.
+- (both submitted on Sunspot 2026-06-30; results appended.)
+
 ## 2026-06-28 — 62nd sync (3 commits, `0e886617e..upstream/main`)
 
 Merged clean (no conflicts) as `fc4e1ae84` in worktree `ezpz-62nd-sync`.
