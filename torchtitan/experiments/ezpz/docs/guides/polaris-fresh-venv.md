@@ -128,29 +128,50 @@ env -- delete `.venv`, `conda deactivate`, and redo step 2.
 
 ### 3. Install PyTorch (CUDA 12.9 build)
 
-Load the standalone CUDA 12.9 toolkit (keep it loaded at run time too), then
-install the cu129 wheels:
+Load the CUDA 12.9 toolkit (keep it loaded at run time too), then install the
+cu129 wheels:
 
 ```bash
-module load cudatoolkit-standalone/12.9.1
+module load cuda/12.9
 
 uv pip install --no-cache --link-mode=copy --force-reinstall --upgrade \
     torch torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/cu129
 ```
 
+> [!NOTE]
+> The cu129 wheels bundle their own CUDA runtime (`nvidia-*-cu12`), so the
+> pip install succeeds even without the module. Load `cuda/12.9` anyway so
+> the system CUDA matches at run time. (Verified 2026-07-01: torch resolves
+> to `2.12.1+cu129`.)
+
 ### 4. Build `mpi4py` from source against Cray MPICH (THE fix)
 
+> [!IMPORTANT]
+> Switch to the **GNU** programming environment first. Polaris defaults to
+> `PrgEnv-nvidia`, which makes `cc` wrap the NVIDIA HPC compiler (`nvc`).
+> The uv-managed CPython was built with GCC, so its `sysconfig` CFLAGS
+> include GCC-only flags (`-fno-strict-overflow`, `-Wunreachable-code`)
+> that `nvc` rejects -- the mpi4py build then dies with
+> `nvc-Error-Unknown switch: -fno-strict-overflow` /
+> `error: Cannot compile MPI programs`. `PrgEnv-gnu` makes `cc` wrap
+> `gcc`, which accepts those flags.
+
 ```bash
+module swap PrgEnv-nvidia PrgEnv-gnu
+
 MPICC=cc uv pip install --no-cache --no-binary mpi4py --force-reinstall mpi4py
 ```
 
+- `module swap PrgEnv-nvidia PrgEnv-gnu` makes `cc` the GCC-backed Cray
+  wrapper (also switches `MPICH_DIR` to `.../mpich/9.0.1/ofi/gnu/12.3`).
 - `--no-binary mpi4py` forces a source build (no portable wheel).
 - `MPICC=cc` links it against the Cray MPICH compiler wrapper.
 
-Confirm it built native:
+Confirm `cc` is GCC, then build. Verify it built native:
 
 ```bash
+cc --version | head -1     # -> gcc-14 (SUSE Linux) 14.3.0
 cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
 # WANT: Tag: cp312-cp312-linux_x86_64
 ```
@@ -179,7 +200,9 @@ python3 scripts/download_hf_assets.py --repo_id google/gemma-7b --assets tokeniz
 
 This is the exact operation that was broken. Run it on a **compute node**
 (grab a debug allocation first: `qsub -I -A <acct> -q debug -l select=1
--l walltime=00:30:00 -l filesystems=home:eagle`):
+-l walltime=00:30:00 -l filesystems=home:eagle`) with the same environment
+active (`source .venv/bin/activate && module load cuda/12.9 &&
+module swap PrgEnv-nvidia PrgEnv-gnu`):
 
 ```bash
 mpiexec -n 4 --ppn 4 python3 -c \
@@ -207,8 +230,9 @@ Should get past `init_process_group` and run to completion.
 | `conda deactivate` first | Prevents `uv` from seeding the venv off a conda interpreter (the original mistake) |
 | `--python-preference only-managed` | Guarantees a standalone CPython, never conda's |
 | no `--system-site-packages` | Nothing from a base env can shadow or leak in |
+| `module swap PrgEnv-nvidia PrgEnv-gnu` | Makes `cc` wrap `gcc` (not `nvc`), so mpi4py's GCC-built CPython CFLAGS compile |
 | `MPICC=cc --no-binary mpi4py` | Compiles against `cray-mpich/9.0.1` so `bcast` actually works under PALS `mpiexec` |
-| `cudatoolkit-standalone/12.9.1` + torch from the `cu129` index | Matches the CUDA 12.9 toolkit with the cu129 wheels |
+| `cuda/12.9` + torch from the `cu129` index | Matches the system CUDA 12.9 toolkit with the cu129 wheels |
 
 > [!WARNING]
 > Do NOT later run a bare `uv pip install mpi4py` (or a `uv sync` /
@@ -221,7 +245,20 @@ Should get past `init_process_group` and run to completion.
 `datascience/.venv` on Polaris (`foremans`):
 
 - `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
-- `torch` from the pytorch cu129 index (`manylinux_2_28` wheel -- normal), built
-  against `cudatoolkit-standalone/12.9.1`
-- `mpi4py` 4.2.0.dev0, native `linux_x86_64` tag (built from source)
+- `torch` from the pytorch cu129 index (`manylinux_2_28` wheel -- normal)
+- `mpi4py`, native `linux_x86_64` tag (built from source against Cray MPICH)
 - `ezpz` editable from `github.com/saforem2/ezpz`
+
+## Verification
+
+This recipe was run end-to-end from scratch in an isolated directory on a
+Polaris compute node on 2026-07-01 (job 7232069, node x3001c0s19b1n0):
+
+- venv created uv-managed, `include-system-site-packages = false` (no conda)
+- `torch==2.12.1+cu129` installed and imported
+- `mpi4py==4.1.2` built from source under `PrgEnv-gnu`, native
+  `cp312-cp312-linux_x86_64` tag
+- **Step 6a:** `mpiexec -n 4` bcast returned `56465` on all 4 ranks
+- **Step 6b:** `ezpz launch python3 -m ezpz.examples.test` ran to
+  `Execution finished with 0` (200 iters, loss 1.04 -> 0.16), no
+  `MASTER_PORT='None'`
