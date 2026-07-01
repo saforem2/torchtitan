@@ -427,16 +427,24 @@ def _bootstrap_fsdp_env(
     parsing — TRL/HF accept either a string ('full_shard', 'shard_grad_op',
     ...) or a list of FSDPOption enums. We coerce both shapes here.
     """
-    # TrainingArguments.fsdp accepts str | list[FSDPOption] | None
+    # TrainingArguments.fsdp accepts str | list[FSDPOption] | bool | None
     if not fsdp:
-        return  # plain DDP — leave env alone
+        return  # plain DDP (None/False/"") — leave env alone
 
     def _opt_name(x) -> str:
         # FSDPOption is a str enum; its .value is e.g. 'full_shard'.
         # Plain strings come through unchanged.
         return getattr(x, "value", str(x)).lower()
 
-    if isinstance(fsdp, (list, tuple)):
+    if fsdp is True:
+        # transformers >= 5.11 (the rl-vllm venv) dropped string parsing for
+        # --fsdp: `--fsdp full_shard` (or `--fsdp=full_shard`) now parses to
+        # the bare bool True and expects the strategy via fsdp_config. There
+        # is no strategy token to read, so default to full_shard (the only
+        # strategy any ezpz/rl run uses). Older transformers (.venv) still
+        # deliver the string and take the branch below unchanged.
+        tokens = ["full_shard"]
+    elif isinstance(fsdp, (list, tuple)):
         # CLI like --fsdp "full_shard auto_wrap" parses into a list of
         # FSDPOption enums; we only care about the sharding-strategy slot.
         tokens = [_opt_name(x) for x in fsdp]
