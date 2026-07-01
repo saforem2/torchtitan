@@ -1,18 +1,24 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-06-29
+> Last updated: 2026-07-01
 
-> **🟢 PRODUCTION LAUNCHED 2026-06-28.** First real 80B v2 production
-> dispatches are queued: **SophiaG @ LR=1e-6, constant-LR (no decay, for
-> CPT), validator on**, at **512N + 1024N + 2048N** simultaneously
-> (`8574385`/`8574386`/`8574387` heads + 3 `afterany` conts). They start
-> after the PM maintenance (2026-07-01 03:30 UTC). The old AdamW "step-2
-> NaN" was root-caused as a production-batch LR problem: the 2026-06-27
-> LR-finder (GBS=6144) showed AdamW is on a NaN cliff (ceiling ~7e-7),
-> while **mano (~3e-6)** and **sophiag (~1e-6)** train clean. **TEAM
-> DECISION OPEN: SophiaG vs mano** for the base optimizer. Scale >512N is
-> unvalidated (1024N has a documented init crash; 2048N dp_degree~6138
-> untested) -- the 512N bracket is the safety net. Full plan:
+> **🟢 PRODUCTION LAUNCHING 2026-07-01.** The 6 80B v2 dispatches
+> (**SophiaG @ LR=1e-6, constant-LR for CPT, validator on**, at **512N +
+> 1024N + 2048N**: `8574385`/`8574386`/`8574387` heads + 3 `afterany`
+> conts) all stayed queued through the 06-29 maintenance -- **no head ran
+> pre-PM.** Post-PM the **2048N head (8574387) started first** at
+> 2026-07-01 ~15:00 UTC, on its 5th attempt (4 exec-server rejects during
+> post-maintenance node-release flapping; peer large jobs were placing, so
+> we waited rather than requeued). It is in the venv-broadcast phase
+> (NGPUS=24,864) and has **NOT yet cleared `set_determinism` init or logged
+> a first `step:`** -- treat as launching, not validated. 512N+1024N
+> backfill once it settles. The old AdamW "step-2 NaN" was root-caused as a
+> production-batch LR problem: the 2026-06-27 LR-finder (GBS=6144) showed
+> AdamW is on a NaN cliff (ceiling ~7e-7), while **mano (~3e-6)** and
+> **sophiag (~1e-6)** train clean. **TEAM DECISION OPEN: SophiaG vs mano**
+> for the base optimizer. Scale >512N is unvalidated (1024N has a documented
+> init crash; 2048N = 24,864 ranks is new ground) -- the 512N bracket is
+> the safety net. Full plan + launch log:
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 > LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
 

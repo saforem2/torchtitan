@@ -4,6 +4,39 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-01 (aurora) -- 80B production launches post-maintenance (2048N first out)
+
+Machine returned from the Mon 2026-06-29 maintenance. Managing the 80B
+SophiaG/constant-LR production launch and refreshing docs.
+
+- **80B launch began (~15:00 UTC).** All 6 jobs (3 heads + 3 conts) stayed
+  queued through the PM; no head ran pre-maintenance, so these are cold starts.
+  The **2048N head (8574387) started first**, ahead of the 512N/1024N brackets.
+- **4 exec-server rejects before it placed.** run_count 1-4: the job flipped
+  Q -> R -> Q with `PBS Error: Execution server rejected request`, never writing
+  a log. Diagnostic that drove the "wait, don't requeue" call: *peer 2000+N jobs
+  were running fleet-wide* during the reject window, so it was post-maintenance
+  node-release flapping specific to our attempts, not a machine-wide inability to
+  place large jobs. Attempt 5 (~15:00 UTC) placed cleanly on 2072 nodes.
+- **Now in launch (not validated).** Config echo confirms the intended knobs
+  (GBS=6138, TP=4, LBS=1, compile OFF, steps=92,950, SophiaG, constant-LR);
+  `ezpz launch --auto-retry` armed (active=2046, spare=26); venv broadcast done;
+  NGPUS=24,864. Has NOT yet cleared `set_determinism` init (past the documented
+  1024N/12,288-rank crash zone -- 2048N = 24,552 train ranks is new ground) or
+  logged a first `step:`. Grabbing 2072 nodes drained free to ~68, so 512N
+  (8574385) + 1024N (8574386) heads are `Not enough free nodes` until it settles.
+- **Docs refreshed:** production dashboard + agpt/80b rollups moved to
+  "launching" (2026-07-01), launch report gained a post-maintenance Launch-log
+  section. Operational lesson recorded: after a reservation tears down, a large
+  job can eat several exec-server rejects before nodes stabilize; wait (don't
+  requeue, which forfeits queue priority) as long as peer large jobs are placing.
+- **Restart-economics analysis** (from 2026-06-30) stands: ~7 confirmed failover
+  recoveries of ~62 triggered episodes; ~78% of exhaustions are systemic
+  (CCL/PMI KVS timeout 57%, now-fixed blendcorpus race 15%, pals-RPC 6%);
+  node-hour waste is bimodal (median episode ~11min but 8 episodes >3h account
+  for ~64% of the ~31.8k wasted node-h). See
+  [`20260630-failover-restart-economics.md`](experiments/agpt/aurora/20260630-failover-restart-economics.md).
+
 ## 2026-06-29 (sunspot) -- 2B 100-step production-batch ladder + LR-finder page reorg
 
 Continuation of the LR-finder work. Two deliverables, both shipped.
