@@ -29,6 +29,56 @@ The path here required ~26 job submissions and three separate
 architectural pivots. This doc captures the full chain so the
 relevant landmines stay documented.
 
+## UPDATE 2026-07-01: multi-node (cross-node) vLLM GRPO works
+
+The 1N architecture above (server + trainer share `127.0.0.1`) is now
+extended to **true multi-node**: the vLLM server runs on the head node and
+the trainer runs on *other* nodes, reaching the server over its real
+hostname. Validated by a **2-node smoke (job 12469976)**: 10/10 GRPO steps,
+server on node A + 8 trainer ranks on node B, on the SFT'd AuroraGPT-2B
+`checkpoint-729-hf`, `arithmetic` task. Accuracy reward moved across the run
+(0.75 / 0.375 / 0.25 / ... / 0.625) and TRL's `importance_sampling_ratio`
+metrics were present (mean ~0.5-0.84) -- proof the cross-node weight-sync is
+active, not no-op'd. `[rank 0] Training complete.`, ~70 s/step.
+
+```
+select=N PBS allocation
+├── node 0 (head): venvs/rl-vllm trl vllm-serve (TP=1), bound 0.0.0.0:8765
+└── nodes 1..N-1 : ezpz train_grpo ranks (rl-vllm python), hitting
+                   http://<head-hostname>:8765; weight-sync via TCP-KVS
+                   XCCL rendezvous at CCL_KVS_IP_PORT=<head>_29513
+```
+
+**Three fixes were required vs. the 1N recipe** (all landed):
+
+1. **Unified `venvs/rl-vllm/` for BOTH server and trainer.** The older
+   `rl/scripts/vllm_serve_xpu.sh` ran vLLM from `venvs/vllm-test/` with a
+   `PYTHONPATH=.venv` bridge for TRL; that mixed environment breaks
+   vLLM-XPU platform detection (`RuntimeError: Device string must not be
+   empty` -- `current_platform.device_type` comes back empty). The 1N
+   smoke already used the unified venv; the never-run
+   `aurora2b_sft_arithmetic_8n_vllm.sh` used the broken helper.
+2. **`--fsdp` handling for TRL 1.6 / transformers >= 5.11.** New
+   transformers dropped string parsing for `--fsdp`; `--fsdp full_shard`
+   now parses to the bare bool `True`. Fixed in `train_grpo.py`
+   `_bootstrap_fsdp_env` (commit `0558eb592`): treat `fsdp is True` as
+   `full_shard`.
+3. **Cross-node TCP-KVS endpoint = head node** (not `127.0.0.1` as in the
+   1N smoke), shared by server and trainer so the weight-sync XCCL group
+   forms across process trees.
+
+Server must launch as a plain local subshell (NOT `mpiexec`-wrapped) with
+the PMIx/CXI env scrubbed (`unset CCL_PROCESS_LAUNCHER CCL_OP_SYNC
+FI_PROVIDER`, then `CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi
+FI_PROVIDER=tcp`) -- exactly as the 1N smoke did. Also: the vLLM stack
+check must run from a `.py` file with an `if __name__ == "__main__":` guard
+(vLLM's multiprocessing EngineCore re-execs/re-imports the parent).
+
+Working production script:
+[`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
+(server on head node, trainer on all other nodes, 1000 steps, resumable).
+First full 10N run: job `12469978` (2026-07-01, in flight).
+
 ## Stack
 
 | Component | Pin | Notes |
