@@ -676,10 +676,31 @@ def main() -> None:
     if _fh_secs:
         import faulthandler as _fh
 
-        _fh.enable()
+        # Per-rank stack file (all ranks, not just rank 0) so we can compare
+        # stacks across ranks and detect desync. Directory via
+        # EZPZ_RL_FAULTHANDLER_DIR; falls back to stderr if unset/unwritable.
+        _fh_dir = _os.environ.get("EZPZ_RL_FAULTHANDLER_DIR")
+        _fh_file = None
+        if _fh_dir:
+            try:
+                _os.makedirs(_fh_dir, exist_ok=True)
+                _rk = _os.environ.get("RANK", _os.environ.get("PMI_RANK", "0"))
+                _fh_file = open(  # noqa: SIM115 (kept open for the watchdog)
+                    _os.path.join(_fh_dir, f"stack-rank{_rk}.txt"),
+                    "w",
+                    buffering=1,
+                )
+            except OSError:
+                _fh_file = None
+        _fh.enable(file=_fh_file) if _fh_file else _fh.enable()
         try:
             # dump_traceback_later with repeat gives periodic stack dumps
-            _fh.dump_traceback_later(float(_fh_secs), repeat=True)
+            if _fh_file:
+                _fh.dump_traceback_later(
+                    float(_fh_secs), repeat=True, file=_fh_file
+                )
+            else:
+                _fh.dump_traceback_later(float(_fh_secs), repeat=True)
         except (ValueError, RuntimeError):
             pass
 
