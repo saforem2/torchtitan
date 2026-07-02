@@ -666,6 +666,23 @@ def main() -> None:
         _sys.argv.remove("--no-oneccl-tcp-kvs")
         _os.environ["EZPZ_RL_ONECCL_TCP_KVS"] = "0"
 
+    # Hang diagnostics: with EZPZ_RL_FAULTHANDLER_SECS set, every rank dumps
+    # all Python thread stacks to stderr after that many seconds, repeating.
+    # This localizes multi-node collective deadlocks (e.g. the gather_object
+    # hang) by showing exactly which line each rank is stuck on -- and whether
+    # ranks are desynced (different stacks = the real cause of a collective
+    # deadlock). Opt-in so normal runs are unaffected.
+    _fh_secs = _os.environ.get("EZPZ_RL_FAULTHANDLER_SECS")
+    if _fh_secs:
+        import faulthandler as _fh
+
+        _fh.enable()
+        try:
+            # dump_traceback_later with repeat gives periodic stack dumps
+            _fh.dump_traceback_later(float(_fh_secs), repeat=True)
+        except (ValueError, RuntimeError):
+            pass
+
     # Apply XPU compatibility patches BEFORE importing trl (some are
     # active at import time of TRL submodules, e.g. the cuda alias
     # patch needs to be in place before GRPOTrainer constructs
