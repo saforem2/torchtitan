@@ -170,16 +170,57 @@ mid-run (the broadcast op-type / a subgroup), triggering `initXCCLComm`.
 - **clean CXI/pmix**: existing comms work, but forming a *new* comm mid-run
   hangs (no KVS for the lazily-created communicator).
 
-**Fix direction (next):** stop a new comm from being created for the object
-collectives -- make `broadcast_object_list` / `gather_object` reuse the
-already-initialized default communicator. Practically that means pinning the
-byte tensor to the exact device the default PG's comm was built on (so XCCL
-finds the cached comm instead of creating one), or pre-creating/warming the
-needed comm during init while the bootstrap KVS is still live. Repro v3 (job
-12470007) isolates the mechanism: broadcast on the DEFAULT group (expect OK)
-vs a freshly `new_group`'d subgroup (expect HANG) -- if the new-group
-collective hangs, lazy new-comm creation on CXI is confirmed as the wall and
-the fix is "reuse/prewarm the comm," not "change the transport."
+**Fix direction (initially suspected):** reuse/prewarm the default comm for
+the object collectives. **BUT repro v3 (job 12470007) DISPROVED the simple
+form of this:** creating a new group mid-run and running `all_reduce` (I) AND
+`broadcast_object_list` (J) on it both completed in ~1.5s on clean CXI. So
+lazy new-comm creation is NOT inherently broken either.
+
+### Four hypotheses ruled out -> the trigger is rank DESYNC (2026-07-01, end of overnight)
+
+Minimal repros have now cleared, on clean cross-node CXI:
+1. plain `all_gather_object` on the default group (v1) -- OK
+2. `all_gather_object` after an FSDP2 fwd/bwd (v2) -- OK
+3. new-group `all_reduce` and new-group `broadcast_object_list` (v3) -- OK
+
+Yet the real GRPO run reproducibly hangs, and the rank-0 faulthandler dump
+shows `broadcast -> initXCCLComm -> atl_mpi::allgatherv`. Every repro has all
+ranks call the collective *identically*, so none can reproduce a **rank
+desync**. The most consistent remaining explanation: in the real run the
+ranks do NOT all reach the same collective with the same args -- e.g. one rank
+takes a different branch into generation (data-dependent, or the
+`num_generations`/batch-size divisibility path), so `initXCCLComm`'s
+`allgatherv` waits forever for a participant that never arrives, or arrives
+with a mismatched comm-creation key. `initXCCLComm` appears in the stack
+precisely because a desynced/first-of-its-kind collective is where XCCL lazily
+builds the comm -- the hang is the *rendezvous waiting for absent ranks*, not
+comm-creation being broken per se.
+
+**The missing evidence:** the faulthandler dump captured only rank 0 (ezpz
+stderr routing collapses to rank 0). The decisive next step is an **all-rank**
+stack dump -- if ranks are at different lines (some in `broadcast`, some
+elsewhere / not in generation), desync is confirmed and the fix is in the
+GRPO generation control flow (ensure every trainer rank enters the same
+collective), not in the transport or comm layer.
+
+**Frontier for next session (precise):**
+1. Get per-rank stacks from ALL 24 ranks at the hang. Options: write
+   faulthandler output to a per-rank file (`faulthandler.enable(file=open(
+   f"/path/rank{RANK}.stack","w"))` + `dump_traceback_later(...,file=...)`),
+   or run `py-spy dump` against each rank PID, or set
+   `TORCH_DISTRIBUTED_DEBUG=DETAIL` + a short XCCL watchdog so torch prints
+   the colls each rank is waiting on and flags the mismatch.
+2. If desync confirmed: inspect TRL `vllm_generation.generate()` /
+   `_generate_and_score_completions` for a per-rank branch before the
+   `broadcast_object_list` (e.g. an `is_main_process`-gated path, or a
+   rank-dependent early-return) and make all ranks reach the broadcast.
+3. The AVG->SUM patch (`patch_fsdp2_force_sum_reduction_for_xpu`) and the
+   `--no-oneccl-tcp-kvs` flag are correct and committed; they are prerequisites
+   but not sufficient. Keep them.
+
+**Usable deliverable unchanged: the 1-trainer-node config runs clean
+end-to-end** (server on head node + a single trainer node); multi-*trainer*-node
+is blocked on the desync above.
 
 ## Stack
 
