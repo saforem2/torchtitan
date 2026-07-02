@@ -218,9 +218,41 @@ collective), not in the transport or comm layer.
    `--no-oneccl-tcp-kvs` flag are correct and committed; they are prerequisites
    but not sufficient. Keep them.
 
+### Instrumentation wall (2026-07-01 late) -- all-rank stacks not yet captured
+
+Tried to capture per-rank stacks via `faulthandler` (commit `fc5d96925`,
+`EZPZ_RL_FAULTHANDLER_DIR` -> `stack-rank<N>.txt`). Two runs (jobs 12470008 @
+150s, 12470009 @ 45s): all 24 files were **created but 0 bytes**. Two reasons,
+both real:
+- Jobs were **preempted** early (~2-2.5 min walltime used; abrupt stop, no
+  teardown logs) before longer timers fire. Dropping to 45s did not help ->
+- The hang is in a **C++ XCCL collective**; `faulthandler.dump_traceback_later`
+  writing to a *file* did not flush (the one time we got a real stack, run
+  12470006, it went to **stderr**, which flushed during a momentary GIL
+  release). File-target faulthandler under a GIL-held C++ hang is unreliable.
+- `TORCH_DISTRIBUTED_DEBUG=DETAIL` was active but logged no mismatch -- the
+  trainer hung before torch's periodic collective logging emitted.
+
+Net: ~9 diagnostic jobs this session; the rank-0 C++ stack
+(`broadcast->initXCCLComm->allgatherv`) remains the single solid datapoint.
+Getting all-rank stacks hit an instrumentation wall, so per the
+"3+ fixes failed -> stop and reassess" rule the overnight push was halted here
+rather than burn more jobs tuning faulthandler.
+
+**Correct next tactic: `py-spy dump --pid <PID>`** against several live trainer
+ranks while hung. py-spy reads another process's stack externally and works
+through GIL-held C++ hangs (where in-process faulthandler-to-file does not). It
+is not in the rl-vllm venv yet -- install `py-spy` (a standalone Rust binary,
+no torch deps: `uv pip install py-spy` or grab the release binary), then in the
+PBS script, after launching the trainer, sleep ~60s and
+`ssh <trainer-node> 'py-spy dump --pid <rank0_pid>'` for a couple ranks on each
+node. Compare stacks: same line across ranks = not desync; split = desync in
+TRL generation. This avoids all the in-process faulthandler pitfalls.
+
 **Usable deliverable unchanged: the 1-trainer-node config runs clean
 end-to-end** (server on head node + a single trainer node); multi-*trainer*-node
-is blocked on the desync above.
+is blocked on the hang above, which is now localized (rank-0 C++ stack) but not
+yet fully characterized across ranks.
 
 ## Stack
 
