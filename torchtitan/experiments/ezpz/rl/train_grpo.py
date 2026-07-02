@@ -647,6 +647,25 @@ def _pick_chat_template(tokenizer) -> tuple[str, str]:
 
 
 def main() -> None:
+    # Multi-trainer-node transport selection. The `--no-oneccl-tcp-kvs` CLI
+    # flag (or EZPZ_RL_ONECCL_TCP_KVS=0) keeps the trainer on the default
+    # pmix/CXI oneCCL transport instead of forcing the TCP-KVS scheduler
+    # path. TCP-KVS is required for the 1-node cross-process XCCL rendezvous
+    # but breaks multi-trainer-node FSDP: its scheduler path has no AVG
+    # kernel and its object-collective rendezvous times out. A minimal repro
+    # (job 12470002) confirmed all_gather_object works cross-node on plain
+    # pmix/CXI. We set the env var from argv here -- BEFORE
+    # apply_all_xpu_patches() reads it -- because mpiexec env-forwarding of
+    # a shell `export` proved unreliable on Cray PALS, whereas argv always
+    # propagates. TRL's weight-sync uses its own StatelessProcessGroup, so it
+    # does not need TCP-KVS.
+    import os as _os
+    import sys as _sys
+
+    if "--no-oneccl-tcp-kvs" in _sys.argv:
+        _sys.argv.remove("--no-oneccl-tcp-kvs")
+        _os.environ["EZPZ_RL_ONECCL_TCP_KVS"] = "0"
+
     # Apply XPU compatibility patches BEFORE importing trl (some are
     # active at import time of TRL submodules, e.g. the cuda alias
     # patch needs to be in place before GRPOTrainer constructs
