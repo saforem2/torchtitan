@@ -4,6 +4,32 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-02 (aurora) -- umbrella exit-3 diagnosed + auto-retry umbrella smoke
+
+- **Umbrella 8568429 (legacy failover_lib.sh) exited 3 = 3/4 chains lost.**
+  t0 2b-512N rc143 (rank signal 11 on x4409, blind-swap exhausted retries);
+  t1 20b-512N rc143 (same class, already relaunched as 8638793); t2 2b-256N
+  rc0 clean; t3 20b-256N rc127 (node x4208 unreachable mid-run @ step-2186,
+  failover exhausted). Every failure = legacy failover giving up on a
+  recoverable bad-node event -- the blind-swap defect (can't parse hostname
+  from `signal 11`).
+- **Built + smoked a native auto-retry umbrella.** New
+  `scripts/smoke_multi_autoretry.sh` launches each trainer via
+  `ezpz launch --auto-retry` directly (not failover_lib.sh): ONE venv
+  broadcast for the whole alloc (no concurrent-yeet /tmp/.venv race), split
+  nodefile into per-trainer slices, concurrent launches with distinct
+  ports/CKPT_DIRs/spares, async-mode=disabled. Job 8639375 (2 trainers x
+  2+1 nodes): **failed 0/2**, both OK to step 20, auto-retry armed per
+  trainer (active=2 spare=1), 0 error signals, no cross-talk. The native
+  auto-retry umbrella pattern works. Report:
+  [`20260702-multi-autoretry-umbrella-smoke.md`](experiments/agpt/aurora/20260702-multi-autoretry-umbrella-smoke.md).
+- **Still TODO:** 2b-512N chain (umbrella t0) not yet relaunched (only 20b
+  was); relaunch it on autoretry, or promote the umbrella smoke to a prod
+  multi-chain replacement for the legacy failover umbrella.
+- **Fleet:** deep post-PM queue contention persists; the umbrella ended ~00:45
+  so nothing is training on Aurora right now -- all jobs (80B, 20B relaunch,
+  CPT sweep, 2b/20b 256N) Q behind node availability.
+
 ## 2026-07-01 (aurora) -- 2B CPT sweep launched + completed-2B eval closeout
 
 The 2B 256N base completed (step-92,859) and its eval tail is dead flat --
