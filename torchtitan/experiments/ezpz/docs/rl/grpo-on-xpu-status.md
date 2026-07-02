@@ -133,13 +133,53 @@ Multi-trainer-node (2 trainer nodes, 3N total) still does not step. Attempts:
    loudly (KVS timeout) instead of silently, but neither transport gets the
    object-collective through cross-node.
 
-**Frontier for next session:** get the toggle to the ranks via the `-- --env`
-form, confirm the SUM patch fires (look for the "forced ReduceOp.SUM" stderr
-line) and clears AVG, then focus entirely on the `all_gather_object`
-cross-node object-collective on XPU (device placement of the byte tensor;
-possibly force it onto the XPU device or route it via a CPU/gloo group).
 **Usable today: the 1-trainer-node config** (server + 1 trainer node), which
 runs clean end-to-end.
+
+### ROOT CAUSE FOUND (2026-07-01 overnight): lazy XCCL new-communicator creation hangs
+
+A `faulthandler` stack dump of the hung run (job 12470006, argv
+`--no-oneccl-tcp-kvs` -> confirmed clean CXI, no `CCL_ATL_TRANSPORT changed`)
+caught rank 0's C++ stack:
+
+```
+ProcessGroupXCCL::broadcast
+  -> ProcessGroupXCCL::initXCCLComm            <- creating a NEW xccl comm
+    -> ccl_comm::create -> create_comm_id
+      -> atl_mpi::allgatherv                   <- HANGS in the KVS rendezvous
+```
+
+So the hang is **not the object collective per se, and not `gather_object`**
+(the two agents' inference) -- it is a **`broadcast`** (TRL's
+`broadcast_object_list`, `vllm_generation.py:603`, distributing gen results
+from rank 0) that triggers **lazy creation of a new XCCL communicator**
+mid-run. XCCL builds a communicator lazily on first use of a given
+(group, device, optype) combo; the comm-creation step does its own
+`atl_mpi::allgatherv` KVS rendezvous, and on clean CXI -- with no TCP-KVS
+endpoint and outside the original mpiexec/PMIx bootstrap -- that rendezvous
+for a *newly formed* comm has no way to complete, so it hangs.
+
+This explains why every prior repro passed: v1/v2 exercised
+`all_gather_object`/`broadcast` on the **default** group, whose comm was
+already built during init. Only the real GRPO path forms a *new* comm
+mid-run (the broadcast op-type / a subgroup), triggering `initXCCLComm`.
+
+**The genuine catch-22 (both transports fail, for opposite reasons):**
+- **TCP-KVS**: a new comm *can* rendezvous (KVS endpoint exists), but the
+  scheduler path has no `ReduceOp.AVG` and times out object-collective ops.
+- **clean CXI/pmix**: existing comms work, but forming a *new* comm mid-run
+  hangs (no KVS for the lazily-created communicator).
+
+**Fix direction (next):** stop a new comm from being created for the object
+collectives -- make `broadcast_object_list` / `gather_object` reuse the
+already-initialized default communicator. Practically that means pinning the
+byte tensor to the exact device the default PG's comm was built on (so XCCL
+finds the cached comm instead of creating one), or pre-creating/warming the
+needed comm during init while the bootstrap KVS is still live. Repro v3 (job
+12470007) isolates the mechanism: broadcast on the DEFAULT group (expect OK)
+vs a freshly `new_group`'d subgroup (expect HANG) -- if the new-group
+collective hangs, lazy new-comm creation on CXI is confirmed as the wall and
+the fix is "reuse/prewarm the comm," not "change the transport."
 
 ## Stack
 
