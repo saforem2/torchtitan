@@ -121,15 +121,27 @@ TRAJECTORIES: list[dict] = [
         # iekiq5rq=8503506 ni0etxx7=8505118 0fk1bvtt=8505119 3n22a69q=8505175
         # 8vmrcxqr=8505252 56lkkkh1=8507195 24wfvoje=8507198 bs6tay8l=8508020
         # zrqx75x7=8508977 ied4spbx=8513544 yklnyjd5=8516364 8ujhblrp=8519833
-        # a52q40kx=8521626 okyt09kv=8521630 zcmlqbd8=8534293
+        # a52q40kx=8521626 okyt09kv=8521630 zcmlqbd8=8534293(->step86259)
+        # --- chain COMPLETION (86259->92859), added 2026-07-06: ---
+        # a5h4aaf7=8572612(sneak2h,86201-86674) gx7ph91w=8573619(sneak2h,86675-87146)
+        # mqi69lx2=8558531(cont12,87126->92859 DONE)
         "wandb_run_ids": [
             "lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
             "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
             "56lkkkh1", "24wfvoje", "bs6tay8l",
             "zrqx75x7", "ied4spbx", "yklnyjd5",
             "8ujhblrp", "a52q40kx", "okyt09kv", "zcmlqbd8",
+            "a5h4aaf7", "gx7ph91w", "mqi69lx2",
         ],
-        "olog_fallbacks": None,
+        # The 3 completion runs logged to a DIFFERENT W&B project
+        # (aurora_gpt/ezpz.examples.test, not torchtitan.ezpz.train), so they
+        # can't be pulled from PROJECT -- recover their trajectory from the .o
+        # logs instead. These carry the chain from step-86259 to 92859 (DONE).
+        "olog_fallbacks": {
+            "a5h4aaf7": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-sneak2h.o8572612"),
+            "gx7ph91w": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-sneak2h.o8573619"),
+            "mqi69lx2": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-v2-cont12.o8558531"),
+        },
         "eval_subdir": "agpt-2b-v2-256n",
         "cls": "live",
     },

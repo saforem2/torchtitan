@@ -119,8 +119,17 @@ def fetch_run(api: wandb.Api, run_id: str) -> dict[str, np.ndarray]:
     """Pull the full history for the given metric keys from one wandb run.
 
     Uses ``scan_history`` so we get every logged step, not a downsample.
+
+    Returns empty arrays if the run cannot be found in ``PROJECT`` (e.g. it
+    logged to a different W&B project). concat_runs treats an empty result as
+    a cue to use the run's ``olog_fallbacks`` entry, so a mis-projected run
+    still contributes its trajectory from the PBS .o log.
     """
-    run = api.run(f"{PROJECT}/{run_id}")
+    try:
+        run = api.run(f"{PROJECT}/{run_id}")
+    except Exception as e:  # wandb CommError / not-found
+        print(f"  {run_id}: not in {PROJECT} ({type(e).__name__}) -- will try .o fallback")
+        return {k: np.array([]) for k in METRIC_KEYS}
     columns: dict[str, list] = {k: [] for k in METRIC_KEYS}
     for row in run.scan_history(keys=list(METRIC_KEYS)):
         for k in METRIC_KEYS:
