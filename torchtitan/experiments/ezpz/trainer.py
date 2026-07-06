@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import os
 import time
 from collections.abc import Iterator
@@ -174,6 +175,19 @@ class FaultTolerantTrainer(Trainer):
         """Force a final checkpoint + stop once within this many seconds of the
         deadline. Must cover one checkpoint save + async flush at the target
         scale (20B/512N+ may want ~900; 600 is safe for <=2B/256N)."""
+
+        # NaN-abort guard. A diverged run (e.g. an 80B optimizer NaN) otherwise
+        # keeps "training" on non-finite losses for the ENTIRE walltime -- the
+        # 2026-07-03 80B SophiaG run NaN'd at step 14 and burned ~12h / ~6,100
+        # node-h producing garbage. When enabled, the loop aborts after this
+        # many CONSECUTIVE non-finite (NaN/inf) reported losses, reclaiming the
+        # rest of the window. Counts reset on any finite loss, so a lone
+        # transient never trips it. 0 disables (exact prior behavior); set a
+        # small value (e.g. 5) for optimizer-stability-risky runs.
+        nan_abort_consecutive: int = 0
+        """Abort training after this many consecutive non-finite reported
+        losses (NaN/inf). 0 disables. Set ~5 for NaN-prone runs (e.g. 80B
+        optimizer probes) so a divergence does not burn the full walltime."""
 
     ft_manager: FTManager
 
@@ -828,15 +842,43 @@ class FaultTolerantTrainer(Trainer):
             else:
                 wall_deadline = None
 
+            # NaN-abort: count consecutive non-finite reported losses so a
+            # diverged run does not "train" on NaN for the whole walltime.
+            nan_abort_n = config.training.nan_abort_consecutive
+            consecutive_nonfinite = 0
+
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
                 self.gc_handler.run(self.step)
                 try:
-                    self.train_step(data_iterator)
+                    loss_val = self.train_step(data_iterator)
                 except DataloaderExhaustedError:
                     logger.warning("Ran out of data; last step was canceled.")
                     break
+
+                # NaN-abort guard (opt-in via training.nan_abort_consecutive>0).
+                # A diverged optimizer keeps emitting NaN/inf loss every step;
+                # without this the job burns its full window (see the 2026-07-03
+                # 80B SophiaG NaN, ~12h wasted). Reset on any finite loss so a
+                # lone transient never trips it.
+                if nan_abort_n > 0:
+                    if loss_val is None or not math.isfinite(loss_val):
+                        consecutive_nonfinite += 1
+                        logger.warning(
+                            f"non-finite loss at step {self.step} "
+                            f"({consecutive_nonfinite}/{nan_abort_n} consecutive)"
+                        )
+                        if consecutive_nonfinite >= nan_abort_n:
+                            logger.error(
+                                f"aborting: {consecutive_nonfinite} consecutive "
+                                f"non-finite losses (nan_abort_consecutive="
+                                f"{nan_abort_n}); run has diverged, stopping to "
+                                "reclaim walltime"
+                            )
+                            break
+                    else:
+                        consecutive_nonfinite = 0
 
                 saved_this_step = self.checkpointer.save(
                     self.step, last_step=(self.step == config.training.steps)
