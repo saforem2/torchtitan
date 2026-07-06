@@ -34,9 +34,19 @@
 
 | Job | Date | Steps | Loss | Notes |
 |-----|------|------:|-----:|-------|
-| 12470088 | 2026-07-06 -> | (in progress) | -- | Full 32N, select=36 (32+4 spare), --auto-retry. Launched on the v2 base. |
+| 12470088 | 2026-07-06 -> | ~100+/729 (in progress) | 1.35 -> 0.95 | Full 32N, select=36 (32+4 spare), --auto-retry. Fresh CKPT_DIR (resume coerced to None -> clean start on v2 base, NOT resuming old 729). **checkpoint-100 saved** at 16:20; trajectory persists. mean_token_accuracy 0.68 -> 0.757. |
 
 <!-- RUN-PROGRESS -->
+
+### Early trajectory (job 12470088)
+
+First ~100 steps on the v2 base (2N-smoke-consistent descent, at production
+GBS=6144): loss 1.35 -> 0.95, mean_token_accuracy 0.68 -> 0.757. First
+checkpoint (step-100) saved cleanly via `save_fsdp_model`. Runs to ~729 steps
+(3 epochs), saving every 100 with `--save-total-limit 8` and auto-retry
+bad-node protection. Compare: the gs138650 SFT started ~1.16 (this v2 base
+starts higher because it is a different pretrained model seeing the chat
+format cold) and finished 0.77 over 729 steps.
 
 ## Comparison to the gs138650 SFT
 
