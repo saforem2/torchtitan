@@ -397,7 +397,7 @@ Slingshot NIC handle that only mpiexec-bootstrapped processes have.
 Sam's pushback ("nothing has changed about the env since 06/10/2026")
 was right — the drift was in my invocation, not the platform. Captured
 in
-[`docs/rl/vllm-xpu-current-status.md`](vllm-xpu-current-status.md).
+[`docs/rl/vllm-xpu-current-status.md`](history/vllm-xpu-current-status.md).
 
 Mid-debug discovery: `impi-rt` + `oneccl` + `oneccl-devel` were pulled
 in by torch 2.12+xpu and installed in-venv copies of `libccl.so` that
@@ -439,7 +439,7 @@ env strings), and Monarch's `spawn_procs` uses fork which doesn't
 inherit live PMIx state.
 
 That avenue is documented as blocked in
-[`docs/rl/upstream-rl-port-status.md`](upstream-rl-port-status.md).
+[`docs/rl/upstream-rl-port-status.md`](history/upstream-rl-port-status.md).
 The `xpu_overrides.py` patches are reusable when/if we revisit
 Monarch (e.g. by launching Monarch actors under `mpiexec --np N` so
 they inherit a real PMIx parent).
@@ -565,7 +565,7 @@ proxy for those URLs.
    blocked. The `xpu_overrides.py` patches are necessary-but-not-
    sufficient for Monarch; the `spawn_procs` vs PMIx issue is below
    them in the stack. See
-   [`docs/rl/upstream-rl-port-status.md`](upstream-rl-port-status.md).
+   [`docs/rl/upstream-rl-port-status.md`](history/upstream-rl-port-status.md).
 2. **Production-grade XCCL performance** for the trainer's intra-mesh
    group. We're using TCP fabric for everything; CXI would be faster.
 3. **Multi-node GRPO scaling.** Untested. Probably needs additional

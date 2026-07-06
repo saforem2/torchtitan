@@ -28,17 +28,18 @@ flash-attn).
   - `rl/scripts/build_rl_vllm_venv.sh` — reproducible venv build.
   - `rl/xpu_overrides.py` — XPU shim collecting every monkey-patch +
     env setup needed for the port.
-  - Background reading:
-    - [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md) — original
+  - Background reading (superseded 2026-06 bring-up records, archived under
+    [`history/`](history/README.md)):
+    - [`history/vllm-xpu-investigation.md`](history/vllm-xpu-investigation.md) — original
       2026-06-10 vLLM-XPU verification + sibling-venv recipe.
-    - [`vllm-xpu-current-status.md`](vllm-xpu-current-status.md) — the
+    - [`history/vllm-xpu-current-status.md`](history/vllm-xpu-current-status.md) — the
       15-job bare-vLLM debug chain that led to the venv design.
-    - [`vllm-xpu-wiring-plan.md`](vllm-xpu-wiring-plan.md) — pre-impl
+    - [`history/vllm-xpu-wiring-plan.md`](history/vllm-xpu-wiring-plan.md) — pre-impl
       architecture decision (TRL `vllm_mode="server"` vs Monarch+TorchStore).
-    - [`upstream-rl-port-status.md`](upstream-rl-port-status.md) — why
+    - [`history/upstream-rl-port-status.md`](history/upstream-rl-port-status.md) — why
       using upstream `torchtitan.experiments.rl` directly (Monarch+TorchStore)
       is blocked on the same Sunspot stack.
-    - [`2026-06-14_monarch-torch213-deep-dive.md`](2026-06-14_monarch-torch213-deep-dive.md)
+    - [`history/2026-06-14_monarch-torch213-deep-dive.md`](history/2026-06-14_monarch-torch213-deep-dive.md)
       — torch 2.13 + monarch + vllm-xpu push: got past every XCCL/USM/DCP/dynamo
       blocker (6 new patches in `xpu_overrides.py`), final wall is vLLM
       `profile_run` → oneDNN `could not create a memory` on `F.linear`.
