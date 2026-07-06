@@ -37,6 +37,7 @@ another recipe.
 | Base | Recipe | Status | Final loss | Tokens | Checkpoint | Trajectory |
 |---|---|---|---:|---:|---|---|
 | `AuroraGPT-2B-sophiag-gs138650` | [tulu_math_uc_mix](aurora2b/tulu_math_uc_mix/README.md) | **complete** | 0.77 | 4.5B | `outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf/` | 3 epochs, 32N, GBS=6144, 4 mpiexec attempts via autoretry, 3 SIGABRTs survived (2026-06-10) |
+| `agpt-2b-v2-256n-step92859` (completed 4.674T base) | tulu_math_uc_mix | **smoke passed; full run pending** | -- | -- | (pending) | 2N smoke green on the completed v2 base (loss 2.08->1.7, 10 steps, job 12470086). Prep: DCP->HF convert + Aurora->Sunspot transfer. See [prep report](../../experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) (2026-07-06) |
 
 ## Why SFT is a separate production stage (and not just an `experiment/`)
 
