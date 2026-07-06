@@ -1,18 +1,19 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-06-29
+> **Last updated:** 2026-07-06
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status:** persisted at step **4,400** (~442.9B tokens, 9.5% of
-> 4.67T target), loss **2.51** as of 2026-05-29 (step-4,400 ckpt,
-> 244 GB, complete). Chain has been **stalled ~10 days in Q+H since
-> 2026-05-29** — Aurora `small` queue heavily contended. Five
-> dispatches did run in this window (`8513546`, `8514610`, `8516701`,
-> `8521624`, `8521625`) but **none persisted a new checkpoint past
-> step-4,400** — see [`Recovery`](#recovery). Active continuation
-> `8521628` (cont10) Q'd in `small` since 2026-06-03 07:20;
-> `8521632` (cont11) H'd behind it.
+> **Status:** persisted at step **5,100** (~513.7B tokens, 11.0% of
+> 4.67T target), loss ~2.4. **Advanced 2026-07-03** via a native
+> `ezpz --auto-retry` relaunch (`8638793`, resumed step-4,400 ->
+> step-5,109; step-5,100 ckpt persisted). This ended the long stall:
+> the chain had been stuck at step-4,400 since 2026-05-29 under
+> `small`-queue contention, and its legacy `failover_lib.sh`
+> continuations kept dying to bad-node blind-swap (see the
+> [20B 512N relaunch report](../../../../experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md)).
+> Continuation `8647383` (cont2) is Q'd behind the next head; the stale
+> legacy conts (8521631/8534294) were superseded by the autoretry chain.
 >
 > **Latest eval (step-4,400, 2026-05-29):**
 > HSn **0.6346** (+0.7pp from step-4,300), ARC-E 0.6641 (flat),

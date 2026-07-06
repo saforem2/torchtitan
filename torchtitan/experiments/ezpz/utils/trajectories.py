@@ -181,11 +181,13 @@ TRAJECTORIES: list[dict] = [
         "token_target": OLMO_MIX_1124_TOKENS,
         # 9tsyx5us=8460302 ej3zy5cq=8463628 s6b159xk=8479579 gkzl19dg=8481645
         # 10vf1mqr=8481647 qttj3l3p=8505124 wjy5pvxm=8505258 cv3wii8x=8505259
-        # tu77pzu7=8507197 8vixdfg2=8507200 0pmsn01c=8509393
+        # tu77pzu7=8507197 8vixdfg2=8507200 0pmsn01c=8509393(->step4418)
+        # tu1iseu1=8638793 native-autoretry relaunch (4401->5109), added 2026-07-06
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
             "qttj3l3p", "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
+            "tu1iseu1",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-20b-v2-512n",
@@ -204,13 +206,21 @@ TRAJECTORIES: list[dict] = [
         "token_target": OLMO_MIX_1124_TOKENS,
         # r1yyxbmt=8463659 72airpph=8470102 m9c5wx2e=8470103 6eocrnxs=8479581
         # 5481v99b=8479582 yrq1s1ac=8481646 xt03uvp6=8481648 f1p8nyxh=8505122
-        # g6ekeu4j=8505123
+        # g6ekeu4j=8505123(->~step500)
+        # --- gap 500->3136 filled 2026-07-06: ---
+        # kk4h0i7m=8505255(301-1125, in torchtitan.ezpz.train)
+        # dpiog1q7=8558548(1101-2109) auy8wohg=8558549(2101->3136)
+        #   [both in ezpz.examples.test -> .o-log fallbacks]
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
+            "kk4h0i7m", "dpiog1q7", "auy8wohg",
         ],
-        "olog_fallbacks": None,
+        "olog_fallbacks": {
+            "dpiog1q7": str(RUNS / "agpt-20b-n256/torchtitan-ezpz/agpt-20b-n256-v2.o8558548"),
+            "auy8wohg": str(RUNS / "agpt-20b-n256/torchtitan-ezpz/agpt-20b-n256-v2-cont1.o8558549"),
+        },
         "eval_subdir": None,
         "cls": "live",
     },

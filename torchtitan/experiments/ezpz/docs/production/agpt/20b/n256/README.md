@@ -5,12 +5,18 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-06-29
+> Last updated: 2026-07-06
 >
-> Status: chain at step **1,100** persisted ≈ 55.4B tokens (**1.2%** of
-> 4.67T). `8505255` (2026-05-22, sync mode) broke the multi-week step-300
-> stall — reached step-1,125 cleanly and persisted step-400..1,100 (11
-> valid ckpts on disk now). **Relocated 2026-06-12** to its own clone
+> Status: chain at step **3,100** persisted (~156.0B tokens, **3.3%** of
+> 4.67T), advancing. Trajectory since the step-300 stall: `8505255`
+> (sync mode) reached step-1,125; jobs `8558548`/`8558549` carried it
+> 1,101 -> 3,136 (persisted through step-3,100). Now relaunched on native
+> autoretry (`8647385` head + `8647386` cont, both currently qhold'd while
+> a 1h `debug-scaling` **sneak** job `8647907` advances the chain during
+> prod-queue contention). NOTE: the 1,101->3,136 W&B runs logged to the
+> `ezpz.examples.test` project (not `torchtitan.ezpz.train`), so the
+> production charts pull them via .o-log fallback.
+> **Relocated 2026-06-12** to its own clone
 > `agpt-20b-n256/` (metadata-only `mv`, to relieve Lustre dir-size on the
 > `agpt-20b-v2/` subtree) so it can be re-armed independently of the
 > canonical 512N chain.
