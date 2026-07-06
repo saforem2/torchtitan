@@ -20,6 +20,45 @@ was required in ezpz.
 
 ---
 
+## 2026-07-06 — 64th sync (6 commits, `952427842..upstream/main`)
+
+Merged as `01e575116` in worktree `.worktrees/ezpz-64th-sync`. **No replays
+required** — nothing touches `models/llama3/`, `models/deepseek_v3/`,
+`models/qwen3/`, `models/common/`, `distributed/`, or core `trainer.py`.
+Post-merge `git diff 4e4f75666 HEAD -- experiments/ezpz/agpt/
+experiments/ezpz/moe/` is EMPTY (our model code untouched). Clean automatic
+merge, **zero conflicts** (disjoint file sets — the whole sync is confined to
+`experiments/graph_trainer/` plus two loss test assets).
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `77444f3d3` | Fix loss comparison failure because of pytorch triton version upgrade (#3858) | None (updates `tests/assets/losses/{llama3,qwen3_moe}_cuda.txt` reference numbers only). |
+| `11f8dd125` | [graph_trainer][aot_fx_trace][graph_pp] Add multiplexed graph coverage and DualPipeV validation (#3090) | None. `experiments/graph_trainer/` — we don't use it. |
+| `21e795494` | [graph_trainer][aot_fx_trace][graph_pp] Add GraphPP runner integration (#3089) | None. graph_trainer. |
+| `0ea4b78c7` | [graph_trainer][aot_fx_trace][graph_pp] Add FSDP collective splitting (#3088) | None. graph_trainer. |
+| `ae1f88f2f` | [graph_trainer][aot_fx_trace][graph_pp] Add dI/dW backward splitting (#2727) | None. graph_trainer. |
+| `e8adc7904` | [graph_trainer][aot_fx_trace][graph_pp] Add stage graph partitioning (#2726) | None. graph_trainer. |
+
+### Shared files changed (none affect our DTensor-backend agpt/moe)
+- `tests/assets/losses/llama3_cuda.txt`, `tests/assets/losses/qwen3_moe_cuda.txt`:
+  reference-loss numbers bumped for the upstream triton version upgrade
+  (CUDA-only test fixtures; not exercised on our XPU path).
+- Everything else is new/modified files under `experiments/graph_trainer/`
+  (GraphPP: `graph_pp/`, `fsdp_patterns.py`, `fsdp_passes.py`, tests) — an
+  experiment we don't run; the `llama3/`/`deepseek_v3/`/`qwen3/` files touched
+  are graph_trainer's OWN per-model copies, NOT the core models, so no replay
+  to `agpt/`/`moe/`.
+
+### Validation
+Lowest-risk sync class: zero core/ezpz files changed, agpt/moe diff empty. A
+2N agpt smoke from the sync worktree is the belt-and-suspenders regression
+check (agpt should train identically since it was untouched).
+
+<!-- 64TH-SYNC-VALIDATION -->
+
+---
+
 ## 2026-06-30 — 63rd sync (13 commits, `390ea37cc..upstream/main`)
 
 Merged as `11356e218` in worktree `.worktrees/ezpz-63rd-sync`. **No replays
