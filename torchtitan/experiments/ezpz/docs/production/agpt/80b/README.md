@@ -1,28 +1,31 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-07-01
+> Last updated: 2026-07-06
 
-> **🟡 LAUNCH ATTEMPTED 2026-07-01 -- 2048N crashed at init; 512N + 1024N
-> running.** The 6 80B v2 dispatches (**SophiaG @ LR=1e-6, constant-LR for
-> CPT, validator on**, at **512N + 1024N + 2048N**:
-> `8574385`/`8574386`/`8574387` heads + 3 `afterany` conts) all stayed
-> queued through the 06-29 maintenance -- **no head ran pre-PM.** Post-PM the
-> **2048N head (8574387) started first** at ~15:00 UTC (5th attempt after 4
-> exec-server rejects during post-maintenance node-release flapping) but
-> **SIGSEGV'd in `set_determinism`** at 24,864 ranks (`F`, rc=143, 14:47
-> walltime). This is the **documented init-crash class** (previously 2B/20B
-> at 1024N/12,288 ranks), now confirmed for 80B at 2048N. Its continuation
-> (8574390) was `qhold`'d (would recrash deterministically). **512N
-> (8574385, proven-safe) and 1024N (8574386, the untested 80B data point)
-> are the live brackets** -- 1024N will bracket exactly where the 80B init
-> ceiling sits (512N=dp1530 proven, 2048N=dp6138 crashes, 1024N=dp3066 is
-> the missing measurement). Also found: auto-retry misclassified the SIGSEGV
-> (rc=143) as a walltime stop and skipped its 2 retries -- a classifier gap
-> (moot for a deterministic init crash, but real for swappable bad-node
-> SIGSEGVs). The old AdamW "step-2 NaN" was a production-batch LR problem
-> (LR-finder GBS=6144: AdamW NaN-cliff ~7e-7; mano ~3e-6 / sophiag ~1e-6
-> clean). **TEAM DECISION OPEN: SophiaG vs mano** for the base optimizer.
-> Full plan + launch log:
+> **🔴 SophiaG production config NaN'd 2026-07-03 -- 80B needs a new optimizer.**
+> The 512N head (8574385) finally cleared the queue and ran a full 12h window,
+> but **diverged to NaN at step 14** (SophiaG LR=1e-6, warmup=4650, constant,
+> GBS=6120, TP=4/LBS=1): grad_norm -> inf while loss was still flat (~12.9, LR
+> ~3e-9 mid-warmup), then NaN every step for the rest of 12h (~6,100 node-h
+> wasted). **A long warmup (already 4650) and grad-clip (already max_norm=1.0)
+> do NOT fix it** -- the overflow is inside SophiaG's Hessian (`grad*grad`) term
+> at dim=9216, not the update magnitude. This confirms, at the 512N production
+> dp-degree, the shared instability the
+> [80B convergence run (2026-06-30)](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
+> found (all 3 optimizers NaN at constant finder LRs: mano@3e-6 step5,
+> AdamW@5e-7 step9, sophiag@1e-6 step12).
+>
+> **Next: mano @ LR=1e-6** (below its step-5-death 3e-6), being **probed at
+> 32N/GBS=6144 first** (job 8647404, warmup=200, constant, 40 steps) before any
+> 512N relaunch -- avoids burning another 12h/512N on a guess. If it also NaNs,
+> the shared Hessian/bf16 overflow at dim=9216 needs a root-cause fix
+> (optimizer dtype/eps) before 80B production is viable. Full analysis:
+> [20260703-80b-512n-sophiag-nan.md](../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md).
+>
+> *(Earlier, 2026-07-01: the 2048N head 8574387 SIGSEGV'd in `set_determinism`
+> at 24,864 ranks -- the init-crash ceiling; 1024N remains the untested
+> dp-degree bracket. That is an orthogonal init-scaling limit, separate from
+> this optimizer-NaN.)* Launch history:
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 > LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
 

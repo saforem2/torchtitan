@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-07-01
+> Last updated: 2026-07-06
 
 **Jump to:** [Status at a glance](#status-at-a-glance) ·
 [Canonical chains](#canonical-chains-one-per-model) ·
@@ -20,7 +20,7 @@ budget. Detail + per-dispatch history in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [**80B** 512/1024N](agpt/80b/README.md) | 512N+1024N Q; **2048N crashed** | — | — | — | 🟡 2048N SIGSEGV'd in set_determinism (24,864 ranks); 512N+1024N live |
+| [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
 | [20B 256N](agpt/20b/n256/README.md) | running→PM | **2,100** | 2.85 | 2.3% | 🟢 advancing (resumes post-PM) |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
 | [20B 512N](agpt/20b/n512/README.md) | relaunched (Q, autoretry) | 4,400 | 2.51 | 9.5% | 🟢 resumes step-4400 on native auto-retry (8638793) |
@@ -31,18 +31,20 @@ budget. Detail + per-dispatch history in the linked pages.
 > would *reset* their accrued priority. Full diagnosis + data:
 > [queue-wait-analysis.md](queue-wait-analysis.md).
 
-> **80B status (2026-07-01)**: launch attempted post-PM; **2048N crashed at
-> init, 512N + 1024N running.** All 6 SophiaG/constant-LR jobs queued through the
-> 06-29 maintenance (no head ran pre-PM). Post-PM the **2048N head (8574387)
-> started first** (~15:00 UTC, 5th attempt after 4 exec-server rejects) but
-> **SIGSEGV'd in `set_determinism`** at 24,864 ranks (`F`, rc=143) -- the
-> documented init-crash class (seen 2B/20B at 1024N), now confirmed at 2048N for
-> 80B. Its continuation was `qhold`'d (would recrash). **512N (8574385,
-> proven-safe) + 1024N (8574386, the untested 80B data point) are the live
-> brackets** -- 1024N will bracket exactly where the init ceiling sits. Also
-> found: auto-retry misclassified the SIGSEGV (rc=143) as a walltime stop and
-> skipped its retries (a classifier gap; moot for a deterministic crash but real
-> for swappable bad-node SIGSEGVs). The old AdamW step-2 NaN was a
+> **80B status (2026-07-06)**: **SophiaG production config NaN'd -- needs a new
+> optimizer.** The 512N head (8574385) finally placed and ran a full 12h window
+> (2026-07-03), but **diverged to NaN at step 14** (SophiaG LR=1e-6, warmup=4650,
+> constant): grad_norm -> inf while loss was flat (LR ~3e-9 mid-warmup), then NaN
+> for the rest of 12h (~6,100 node-h wasted). A **long warmup (already 4650) and
+> grad-clip (already max_norm=1.0) do NOT fix it** -- the overflow is inside
+> SophiaG's Hessian term at dim=9216, not the update magnitude. This matches the
+> [80B convergence run](../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
+> (all 3 optimizers NaN at constant finder LRs). **Next: mano @ LR=1e-6** (below
+> its step-5-death 3e-6), being **probed at 32N/GBS=6144 first** (job 8647404)
+> before any 512N relaunch. Full analysis:
+> [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md).
+> (Earlier: the 2048N bracket SIGSEGV'd in set_determinism at 24,864 ranks --
+> the init-crash ceiling; 1024N untested.) The old AdamW step-2 NaN was a
 > production-batch LR problem (LR-finder: AdamW NaN-cliff at GBS=6144; mano ~3e-6
 > / sophiag ~1e-6 clean). TEAM DECISION OPEN: SophiaG vs mano. Full plan +
 > launch log:
@@ -70,7 +72,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **30,400** (persisted) | **2.71** | **3.06T** (65.5%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
 | 20B | 512 | **4,400** (persisted) | **3.46** | **442.9B** (9.5%) | [`8638793`](../experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) Q (autoretry) | **RELAUNCHED 2026-07-01 on native auto-retry.** Frozen at step-4400 since 05-29: its last advance was as trainer-1 in umbrella 8568429, which died at init on bad node x4410 and the legacy `failover_lib.sh` blind-swapped the wrong nodes (scraper can't parse the hostname from `signal 11`), exhausting retries. Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned runs/agpt-20b-v2 clone (ezpz upgraded 0.16->0.21.3 for `--auto-retry`; resume step-4400 CONFIRMED by 2N smoke 8638756: `Training starts at step 4401`). NOTE step-4500 is an empty/aborted save (not resumable); step-4400 is the last valid ckpt. Legacy sync jobs 8521632/8534295 qdel'd to avoid ckpt-dir collision. head 8638793 + cont 8638795 (afterany). |
-| 80B | 512/1024 | — (2048N crashed) | — | — | [`8574385`](agpt/80b/README.md)+`8574386` Q; `8574387` F | **Launch attempted 2026-07-01; 2048N crashed at init.** SophiaG @ 1e-6, constant-LR, validator on. All 6 jobs queued through the 06-29 PM; post-PM the 2048N head (8574387) started first (5th attempt after 4 exec-server rejects) but **SIGSEGV'd in `set_determinism` at 24,864 ranks** (`F`, rc=143) — the documented init-crash class, now confirmed at 2048N for 80B. 2048N cont `qhold`'d (would recrash). **512N (8574385, proven) + 1024N (8574386, untested 80B data point) are live** and backfilling as 2048N's nodes release. Plan + launch log: [20260628-80b-sophiag-constant-lr-...](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md). |
+| 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
 
