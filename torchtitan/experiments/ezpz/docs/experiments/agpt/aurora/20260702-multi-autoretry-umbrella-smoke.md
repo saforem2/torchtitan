@@ -81,6 +81,52 @@ Follow-ups:
   alloc) still needs the pre-stage-to-distinct-`/tmp/.venv-<model>` approach
   the legacy umbrella uses, since `ezpz launch` alone won't broadcast.
 
+## Production promotion: `submit_agpt_multi_autoretry.sh` (2026-07-06)
+
+Promoted the smoke into a production 4-chain umbrella
+`scripts/submit_agpt_multi_autoretry.sh` that advances all four canonical
+chains (2B-512, 20B-512, 2B-256, 20B-256) in one allocation. Default layout
+1536 train (512+512+256+256) + 4*SPARES(10) = `select=1576`.
+
+Design (differs from the single-venv smoke):
+- **Per-trainer `cd` to its OWN pinned clone.** torchtitan is imported from
+  cwd (no editable install in site-packages), and the 20B clones are rolled
+  back pre-#3623 for DCP-resume compat -- so the cwd is load-bearing, not
+  cosmetic. Getting it wrong silently breaks a chain's resume.
+- **Per-model venv pre-stage** to `/tmp/.venv-<model>`, deduped by RESOLVED
+  tarball (20B-n256 symlinks 20B-v2's -> ONE broadcast). `ezpz launch
+  --auto-retry` only READS the venv, so concurrent disjoint slices never
+  collide on it.
+- **Inline training command** = faithful copy of the
+  `submit_agpt_{2b,20b}_autoretry.sh` flag set, so a bug in a pinned clone's
+  own script cannot break the umbrella and there is no palsd cross-kill.
+
+**Login-node dry-run (DRY_RUN=1, fixture 1576 hostfile): PASSED.** 4 disjoint
+slices (522+522+266+266=1576), correct clones + ckpt dirs, venv dedup verified
+(trainers 0+2 -> `/tmp/.venv-2b`, 1+3 -> `/tmp/.venv-20b`).
+
+### Smoke `8648251` (MULTI_PROFILE=tiny, select=12) -- FAILED, then fixed
+
+> [!IMPORTANT]
+> The tiny smoke (4x 2B, throwaway ckpt dirs) came back **`failed: 4/4`** --
+> and caught a real prod blocker before the 1576 submit. Root cause: the
+> **`agpt-2b-v2` clone venv had ezpz 0.16.0**, which predates `--auto-retry`.
+> Old ezpz does not recognize the flag, so `--auto-retry --spare-nodes 1`
+> leaked PAST the `--` into `cmd_to_launch` and mpiexec rejected it
+> (`--cpu-bind` usage dump, exit 1 in ~1s). The 20B-v2 venv was already
+> 0.21.3, so only 2B was affected. (The original single-venv smoke `8639375`
+> passed because it ran from the MAIN clone's venv, not the runs-clone
+> tarballs.)
+
+**Fix:** upgraded ezpz in the `agpt-2b-v2` venv `0.16.0 -> 0.21.5`
+(`uv pip install --no-deps --no-cache 'ezpz @ git+https://github.com/saforem2/ezpz@main'`
+-- torch build untouched, verified `2.13.0.dev20260428+xpu` intact and
+`--auto-retry` now in `ezpz launch --help`). Rebuilt the `agpt-2b-v2`
+`.venv.tar.gz` via the fast tmpfs surgical-swap (decompress good tarball in
+`/dev/shm`, replace just the `ezpz` package + dist-info, re-tar) so the
+broadcast `/tmp/.venv-2b` carries the new ezpz. Old tarball backed up
+(`.venv.tar.gz-20260706-211636`).
+
 ## Cross-refs
 
 - 20B 512N relaunch (same bad-node class):
