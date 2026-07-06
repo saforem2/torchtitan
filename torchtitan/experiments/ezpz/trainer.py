@@ -844,7 +844,11 @@ class FaultTolerantTrainer(Trainer):
 
             # NaN-abort: count consecutive non-finite reported losses so a
             # diverged run does not "train" on NaN for the whole walltime.
-            nan_abort_n = config.training.nan_abort_consecutive
+            # Field lives on the top-level trainer Config (sibling of
+            # walltime_deadline_epoch/batch_ramp_steps), so read config.<field>
+            # -- NOT config.training.<field> (that is core TrainingConfig,
+            # which has no such attribute -> AttributeError at train() start).
+            nan_abort_n = config.nan_abort_consecutive
             consecutive_nonfinite = 0
 
             data_iterator = self.batch_generator(self.dataloader)
@@ -857,7 +861,7 @@ class FaultTolerantTrainer(Trainer):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                # NaN-abort guard (opt-in via training.nan_abort_consecutive>0).
+                # NaN-abort guard (opt-in via --nan-abort-consecutive>0).
                 # A diverged optimizer keeps emitting NaN/inf loss every step;
                 # without this the job burns its full window (see the 2026-07-03
                 # 80B SophiaG NaN, ~12h wasted). Reset on any finite loss so a
