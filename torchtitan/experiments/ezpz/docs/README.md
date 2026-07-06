@@ -22,6 +22,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-06 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-06 | [Summaries](./summaries/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
 | 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
@@ -31,11 +32,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [Production SFT](./production/sft/README.md) |
 | 2026-07-06 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
 | 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
+| 2026-07-06 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-07-06 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-06 | [SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke](./experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) |
 | 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
 | 2026-07-06 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
-| 2026-07-01 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-01 | [Production GRPO](./production/grpo/README.md) |
 | 2026-07-01 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-07-01 | [Development Journal](./journal.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-01 | [2B continued-pretraining (CPT): olmo x dolmino mixing-ratio sweep](./experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md) |
 | 2026-07-01 | [20B 512N canonical chain: relaunch on native auto-retry (resume step-4400)](./experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) |
 | 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
-| 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-07-01 | [Claude Session Log](./claude-sessions.md) |
 | 2026-06-30 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
@@ -62,7 +63,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 | 2026-06-29 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-06-29 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
-| 2026-06-29 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-06-29 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-06-29 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-06-29 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
@@ -99,7 +99,7 @@ going?" Tracking is per-model and per-node-count.
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-06-29 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-07-06 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
 
@@ -169,7 +169,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-01 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-06 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
