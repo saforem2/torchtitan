@@ -34,6 +34,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
 | 2026-07-06 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-07-06 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-07-06 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-07-06 | [SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke](./experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) |
 | 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
 | 2026-07-06 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-01 | [Multi-chain umbrella on native auto-retry: diagnosis + smoke](./experiments/agpt/aurora/20260702-multi-autoretry-umbrella-smoke.md) |
 | 2026-07-01 | [2B continued-pretraining (CPT): olmo x dolmino mixing-ratio sweep](./experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md) |
 | 2026-07-01 | [20B 512N canonical chain: relaunch on native auto-retry (resume step-4400)](./experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) |
-| 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
 | 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-07-01 | [Claude Session Log](./claude-sessions.md) |
@@ -66,7 +67,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-06-29 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-06-29 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-06-29 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-06-29 | [AuroraGPT Sync — 2026-06-29 (Sam Foreman)](./meeting-notes/2026-06-29.md) |
 | 2026-06-29 | [LR Finder -- moe debugmodel (8 experts)](./experiments/lr-finder/moe/debugmodel/README.md) |
 | 2026-06-29 | [LR Finder -- moe (Sparse) -- index](./experiments/lr-finder/moe/README.md) |
@@ -133,7 +133,7 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-07-01 |
-| [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-06-29 |
+| [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-07-06 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-06-28 |
 | [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-07-06 |
