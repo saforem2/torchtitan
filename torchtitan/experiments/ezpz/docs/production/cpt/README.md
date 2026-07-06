@@ -50,6 +50,28 @@ Both pilots forked the base (model-weights-only via
 > LR=2e-6 constant, warmup=20 (job 8648114)** -- if it holds the plateau, the
 > recipe was the culprit; if it also tanks, dolmino is wrong for downstream.
 
+### Downstream eval (job 8647850, full 12-point screen)
+
+![2B CPT downstream eval](figures/cpt_eval.svg)
+
+| Task | olmo-100 base | dolmino-100 (5960) | olmo50-dolmino50 (5960) |
+|------|--------------:|-------------------:|------------------------:|
+| HellaSwag (acc_norm) | **0.560** | 0.486 (-7.4pp) | 0.491 (-6.9pp) |
+| ARC-Easy (acc) | **0.651** | 0.547 (-10.4pp) | **0.610 (-4.1pp)** |
+| PIQA (acc_norm) | **0.733** | 0.687 | ~0.69 |
+
+**Two distinct damage modes:**
+1. **Immediate, ratio-independent HellaSwag drop** (~-6-7pp at step-1000, both
+   mixes, never recovers) -- consistent with the **LR-spike/re-warm shock** on
+   the converged base (the recipe). This is what the gentle-LR retry tests.
+2. **Slow, ratio-DEPENDENT ARC-Easy bleed:** dolmino-100 collapses monotonically
+   (0.619 -> 0.547) while **olmo50-dolmino50 HOLDS (~0.61)**. Keeping olmo in
+   the mix prevents the ARC-Easy bleed -> pure dolmino is specifically bad here.
+
+So both levers matter: **gentler LR** (for the shock) AND **keeping some olmo**
+(for the bleed). The gentle retry isolates the LR lever on dolmino-100; if it
+recovers, a gentle-LR + blended-mix run is the next step.
+
 **Loss-only findings (do NOT imply capability gains -- see the eval warning above):**
 1. **The distribution shift is real.** Both runs started at ~7.2 -- far above
    the base's 2.8 plateau -- because dolmino is genuinely out-of-distribution
