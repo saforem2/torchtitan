@@ -24,12 +24,17 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 |---------:|-----|
 | 2026-07-06 | [Summaries](./summaries/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
+| 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
+| 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
+| 2026-07-06 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./rl/2026-07-06_multinode-grpo-root-cause.md) |
+| 2026-07-06 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
+| 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
+| 2026-07-06 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
+| 2026-07-06 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-01 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-07-01 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
 | 2026-07-01 | [Production GRPO](./production/grpo/README.md) |
 | 2026-07-01 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
-| 2026-07-01 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
-| 2026-07-01 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-01 | [Development Journal](./journal.md) |
 | 2026-07-01 | [Fresh, Self-Contained .venv on Polaris (no conda inheritance)](./guides/polaris-fresh-venv.md) |
 | 2026-07-01 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
@@ -41,18 +46,17 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-07-01 | [Claude Session Log](./claude-sessions.md) |
-| 2026-07-01 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-06-30 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
-| 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
-| 2026-06-30 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
-| 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
+| 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
+| 2026-06-30 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
+| 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 | 2026-06-29 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-06-29 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-06-29 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
@@ -74,10 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-28 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
 | 2026-06-28 | [Blendcorpus EOFError Race in _build_index_mappings](./guides/known-bugs/blendcorpus-eoferror-race.md) |
 | 2026-06-28 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
-| 2026-06-28 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
-| 2026-06-28 | [80B autoretry verification + blendcorpus cold-cache race fix (end-to-end)](./experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) |
-| 2026-06-28 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
-| 2026-06-28 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,13 +89,13 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-01 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-06 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-06-29 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-29 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-29 |
 | [20B 256N](./production/agpt/20b/n256/README.md) | step-**2,100** (105.7B tokens, 2.3% of 4.67T), loss 4.8092. | 2026-06-29 |
-| [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-07-01 |
+| [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-07-06 |
 | [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
@@ -163,7 +163,7 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Optimizer Speedrun Competitions](./competitions/README.md) | [W&B link](https://api.wandb.ai/links/aurora_gpt/hda3milo) | 2026-04-28 |
-| [RL (GRPO) Experiment](./rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-06-13 |
+| [RL (GRPO) Experiment](./rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-07-06 |
 
 ## Outbound (upstream)
 
