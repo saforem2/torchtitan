@@ -32,11 +32,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./rl/history/upstream-rl-port-status.md) |
 | 2026-07-06 | [RL bring-up history](./rl/history/README.md) |
 | 2026-07-06 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
+| 2026-07-06 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
 | 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
 | 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 | 2026-07-06 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./rl/2026-07-06_multinode-grpo-root-cause.md) |
 | 2026-07-06 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-07-06 | [Production SFT](./production/sft/README.md) |
+| 2026-07-06 | [Production GRPO](./production/grpo/README.md) |
 | 2026-07-06 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
 | 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
 | 2026-07-06 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
@@ -45,14 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [Development Journal](./journal.md) |
 | 2026-07-06 | [SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke](./experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) |
 | 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
-| 2026-07-06 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
-| 2026-07-01 | [Production GRPO](./production/grpo/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-06 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-01 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-07-01 | [Fresh, Self-Contained .venv on Polaris (no conda inheritance)](./guides/polaris-fresh-venv.md) |
 | 2026-07-01 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-29 | [LR Finder -- moe debugmodel (8 experts)](./experiments/lr-finder/moe/debugmodel/README.md) |
 | 2026-06-29 | [LR Finder -- moe (Sparse) -- index](./experiments/lr-finder/moe/README.md) |
 | 2026-06-29 | [LR Finder -- moe 7B (36 experts)](./experiments/lr-finder/moe/7b/README.md) |
-| 2026-06-29 | [LR Finder -- moe 500M (16 experts)](./experiments/lr-finder/moe/500m/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
