@@ -72,13 +72,39 @@ Both pilots forked the base (model-weights-only via
   (note the `outputs/` prefix from `job.dump_folder=./outputs`). Base is
   read-only; each mix has a distinct dir (no collision); `keep-latest-k=0`.
 
-## Next steps
+## Token budget: pilot (300B) vs the reference stage-2 (2.4T)
 
-1. **Eval the CPT checkpoints** (step-5,960 each) on the downstream benchmark
-   suite and overlay vs the olmo-100 flat tail -- the real quality test.
-2. **Fan out `olmo25-dolmino75`** (data-list ready) to complete the ratio curve.
-3. Consider a longer / larger CPT run at the winning ratio if the eval signal
-   holds.
+The pilots run **~300B tokens** each -- this is a deliberately small **ratio
+screen**, NOT a full stage-2. The MDS 2B reference recipe (which our v2 base
+mirrors up to its stage-1 boundary) did a much larger stage-2:
+
+| MDS stage | tokens | cumulative |
+|-----------|-------:|-----------:|
+| stage-1 (base pretrain) | 4.673T | 4.673T |
+| **stage-2 (mid-training)** | **2.391T** | 7.064T |
+| stage-3 (final anneal) | 0.706T | 7.770T |
+
+Our completed v2 2B base = **4.674T = exactly the MDS stage-1 boundary**, so
+the direct stage-2 analog is **~2.391T tokens** (~8x the 300B pilot). See
+[`docs/evals/agpt/2b-mds`](../../evals/agpt/2b-mds/README.md).
+
+## Plan: two-phase (screen cheap, scale the winner)
+
+1. **Eval the 300B pilot checkpoints** (step-5,960 each: dolmino-100 +
+   olmo50-dolmino50, + olmo25-dolmino75 once it runs) on the downstream
+   benchmark suite, overlaid vs the olmo-100 flat tail -- the real quality
+   test that decides the winning olmo:dolmino ratio.
+2. **Fan out `olmo25-dolmino75`** (data-list ready) so the ratio screen covers
+   0/50/75/100% dolmino.
+3. **Scale ONLY the winning ratio to the full ~2.391T** (TRAINING_STEPS ~47,500
+   at GBS=6144) -- the principled stage-2 match to the MDS reference. This
+   two-phase approach (cheap 300B screen -> one expensive 2.4T run at the best
+   mix) avoids paying the full stage-2 cost x3 across all ratios.
+
+> **Why not run 2.4T up front:** at GBS=6144 a 2.391T run is ~47,500 steps
+> (~5x the 512N 12h window -> multi-day, chained). Running that for 3 ratios
+> before knowing which wins would be ~7T tokens of compute; the 300B screen
+> costs ~1/8 of one and identifies the winner first.
 
 ## Cross-refs
 
