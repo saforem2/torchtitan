@@ -16,7 +16,13 @@ flash-attn).
   every rank (slow but always works on XPU). For the vLLM-server-mode path:
   - ✅ **[`grpo-on-xpu-status.md`](grpo-on-xpu-status.md)** — end-to-end
     GRPO on XPU is working (job `12468780`, 2026-06-13). 5/5 steps with
-    real on-policy weight sync. **Read this first.**
+    real on-policy weight sync. **Read this first.** Multi-trainer-node
+    (FSDP across 2+ nodes) now also works as of 2026-07-06 (job `12470083`).
+  - ✅ **[`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md)**
+    — the multi-trainer-node blocker root-caused + fixed: two ordinary bugs
+    (a `CCL_ATL_TRANSPORT` transport-default regression + the AVG->SUM FSDP
+    patch rebinding the wrong name), NOT the "desync" the 2026-07-01 session
+    had concluded. 3N run steps with real cross-node FSDP grad reduce-scatter.
   - `rl/scripts/grpo/qwen3_vllm_server_smoke.sh` — the 1N PBS smoke that
     proved it. Uses the unified `venvs/rl-vllm/` venv (py3.12).
   - `rl/scripts/build_rl_vllm_venv.sh` — reproducible venv build.

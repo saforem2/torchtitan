@@ -5,17 +5,35 @@ Sunspot XPU. This page is **current status first**; the 2026-06-13 bring-up
 narrative (how the XPU port was won, the 26-job debug chain) is collapsed
 under [History](#history-2026-06-13-bring-up) at the bottom.
 
-## Current status (2026-07-01)
+## Current status (2026-07-06)
 
 | Config | Status | Evidence |
 |---|---|---|
 | **1 node** (server + trainer on `127.0.0.1`) | ✅ works | job 12468780 -- 5/5 steps, real weight-sync |
 | **Cross-node generation** (server on node A, **1** trainer node on node B) | ✅ works | job 12469976 -- 10/10 steps, cross-node weight-sync active, accuracy reward moving |
-| **Multi-trainer-node** (trainer spans 2+ nodes) | ⛔ blocked, fix in progress | 10N job 12469978 -> oneCCL AVG wall; CXI retry 12469980 -> different post-weight-sync hang |
+| **Multi-trainer-node** (trainer spans 2+ nodes) | ✅ works | job 12470083 (3N, 2 trainer nodes, 24 ranks) -- steps: loss -0.028, accuracy_reward 0.333, real cross-node FSDP grad reduce-scatter |
 
-**Usable today:** the 1-trainer-node config (server on head node + trainer on
-one other node). Multi-node generation is proven; multi-node *training* (FSDP
-across nodes) is the open frontier.
+**Usable today:** all three. The multi-trainer-node blocker was root-caused and
+fixed 2026-07-06 -- it was **two ordinary bugs, not the "desync" this page
+previously concluded**:
+1. a transport-default regression (the overnight `--no-oneccl-tcp-kvs` runs left
+   `CCL_ATL_TRANSPORT` at oneCCL's `mpi` default, which SIGSEGVs forming the
+   cross-world weight-sync PG in `atl_mpi::create_comm_id`); and
+2. the AVG->SUM FSDP patch never engaging (it rebound the wrong `from`-import
+   name, then a broad `getattr` sweep tripped transformers' lazy import of
+   `torchvision`).
+
+Full evidence + the all-rank `reduce_scatter_tensor` stack that refutes the
+desync hypothesis: [`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md).
+
+**Recipe for multi-trainer-node:** `ofi`/TCP-KVS transport ON (do NOT pass
+`--no-oneccl-tcp-kvs`) + the AVG->SUM patch (auto-applied by
+`apply_all_xpu_patches`). Script:
+[`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../rl/scripts/grpo/grpo_3n_multinode_validate.sh).
+
+> NOTE: everything below this line from the 2026-07-01 session (the "open
+> blocker", "catch-22", "desync", and "py-spy frontier" narrative) is
+> SUPERSEDED by the root cause above. Kept for the investigation record.
 
 **Working scripts:**
 - 1N smoke: [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
