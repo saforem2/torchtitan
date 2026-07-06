@@ -7,6 +7,7 @@ today, see [`../grpo-on-xpu-status.md`](../grpo-on-xpu-status.md) and
 
 | Doc | Date | What it captured |
 |---|---|---|
+| [`2026-06-13-bringup-and-2026-07-01-desync.md`](2026-06-13-bringup-and-2026-07-01-desync.md) | 2026-06-13 / 07-01 | The full bring-up chronology (26-job debug chain, TCP-KVS fix, xpu_overrides shim, 1N smoke metrics) + the 2026-07-01 multi-node desync investigation (REFUTED 2026-07-06). Relocated from grpo-on-xpu-status.md. |
 | [`vllm-xpu-investigation.md`](vllm-xpu-investigation.md) | 2026-06-10 | Original vLLM-XPU feasibility survey + sibling-venv recipe. |
 | [`vllm-xpu-wiring-plan.md`](vllm-xpu-wiring-plan.md) | 2026-06-13 | Pre-implementation architecture decision (TRL `vllm_mode="server"` vs Monarch+TorchStore). Now implemented. |
 | [`vllm-xpu-current-status.md`](vllm-xpu-current-status.md) | 2026-06-13 | The 15-job bare-vLLM debug chain that led to the venv design. ("current" in the filename is historical.) |
