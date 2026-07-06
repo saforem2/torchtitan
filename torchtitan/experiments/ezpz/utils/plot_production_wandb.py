@@ -626,7 +626,7 @@ def main() -> None:
         out_dir = args.output_dir or default_out
 
         print(f"\n=== Pulling {key} ({len(cfg['run_ids'])} runs) ===")
-        data = concat_runs(api, cfg["run_ids"])
+        data = concat_runs(api, cfg["run_ids"], cfg.get("olog_fallbacks"))
         print(f"  Concatenated: {len(data['_step'])} unique steps")
         if len(data["_step"]) == 0:
             print(f"  no data, skipping {key}")
