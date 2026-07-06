@@ -199,7 +199,53 @@ Metrics logged during training (every `logging_steps`):
 
 ## Verified Results
 
-### Sunspot 4N + FSDP full_shard, AuroraGPT-2B (2026-06-07, job 12468209)
+Most recent first. The **vLLM-server** entries (on-policy: `trl vllm-serve`
+generates, weights synced back each step) are the current milestones; the
+older `hf.generate` smokes below are the bring-up record. Full status +
+recipe: [`grpo-on-xpu-status.md`](grpo-on-xpu-status.md).
+
+### vLLM-server, multi-trainer-node (2026-07-06, job 12470083)
+
+**The multi-trainer-node milestone** -- FSDP2 across 2 trainer nodes, on-policy.
+
+- 3N = 1 server + 2 trainer nodes (24 trainer ranks); task `arithmetic`,
+  model = SFT'd AuroraGPT-2B (`checkpoint-729-hf`).
+- **8/8 steps clean**, `train_loss` -0.02445, `train_runtime` 1411s (~176s/step);
+  `accuracy_reward` -> 0.375, `format_reward` -> 0.25 by step 8; real cross-node
+  FSDP grad `reduce_scatter_tensor`, 0 AVG-wall / 0 segfault.
+- W&B: [light-thunder-84](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/p52blp3u).
+- Root cause of the prior block + fix:
+  [`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md).
+
+### vLLM-server, cross-node generation (2026-07-01, job 12469976)
+
+Server on node A, **1** trainer node on node B -- proves cross-node on-policy
+weight-sync + generation over HTTP.
+
+- 2N; **10/10 steps**, 1110 `update_named_param` weight-syncs to the server,
+  rewards moving. This is the working baseline the multi-trainer-node work
+  built on. Recipe:
+  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh).
+
+### vLLM-server, 1 node (2026-06-13, job 12468780)
+
+**First end-to-end on-policy GRPO on XPU** -- server + trainer co-located,
+real weight-sync (not the frozen-generator no-op).
+
+- Task `sum_digits`, AuroraGPT-2B; 5/5 steps, `train_loss` -0.0134,
+  `format_reward` ratchets 0 -> 0.0625 -> 0.25 -> 0.125 across 5 steps on a
+  model that never saw the task; `importance_sampling_ratio` ~1.0 (on-policy
+  confirmed). ~4.3s/step after JIT warmup. Script:
+  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh).
+
+---
+
+### hf.generate bring-up smokes (historical, 2026-04 -> 06)
+
+Early per-rank-`hf.generate` / DDP smokes from before the vLLM-server path
+landed. Kept for the record.
+
+#### Sunspot 4N + FSDP full_shard, AuroraGPT-2B (2026-06-07, job 12468209)
 
 End-to-end smoke (48 ranks, 2 training steps for verification only):
 
@@ -208,7 +254,7 @@ End-to-end smoke (48 ranks, 2 training steps for verification only):
 - Training: 21 seconds for 2 steps (init + 2 generate/score/update cycles)
 - W&B: [fearless-galaxy-48](https://wandb.ai/aurora_gpt/torchtitan.ezpz.rl/runs/jjzwmija)
 
-### Sample completions (chat-template verification, job 12468210)
+#### Sample completions (chat-template verification, job 12468210)
 
 25-step run on Sunspot 4N FSDP-full_shard with AuroraGPT-2B-sophiag-gs138650
 on the `sum_digits` task. The Gemma-style chat-template fallback fires
@@ -267,13 +313,13 @@ prompt asked for. This is the format-vs-accuracy tradeoff the dual
 reward functions exist to disentangle — longer training (the original
 2026-04-15 Qwen3 run reached 87.5% accuracy at step 9) drives both.
 
-### Sunspot 4N + FSDP full_shard, Qwen3-0.6B (2026-06-07, job 12468205)
+#### Sunspot 4N + FSDP full_shard, Qwen3-0.6B (2026-06-07, job 12468205)
 
 Same harness, Qwen3-0.6B from HF Hub. Verified the
 `device_map="auto"` → `None` override path; reached
 `Training complete.` cleanly.
 
-### Sunspot 2N + DDP, Qwen3-0.6B (2026-04-15)
+#### Sunspot 2N + DDP, Qwen3-0.6B (2026-04-15)
 
 **Config:** Qwen3-0.6B, 24 XPU tiles (2 nodes), 10 steps, batch=1,
 2 generations per prompt, 100 training samples.
