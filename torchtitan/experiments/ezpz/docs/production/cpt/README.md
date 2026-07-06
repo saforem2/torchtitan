@@ -34,13 +34,29 @@ Both pilots forked the base (model-weights-only via
 | olmo25-dolmino75 | (queued) | — | — | — | — |
 | olmo-100 (control) | (base plateau) | — | ~2.80 | ~2.80 | 0 |
 
-**Findings:**
+> [!WARNING]
+> **The loss numbers are MISLEADING -- downstream eval (2026-07-06, job
+> 8647850) shows this CPT recipe DEGRADES benchmarks.** dolmino-100
+> step-5960: HellaSwag **0.486** (vs olmo-100 plateau 0.560, **-7.4pp**),
+> ARC-Easy **0.547** (vs 0.651, **-10.4pp**), PIQA 0.687 (vs 0.733). The
+> decline is monotonic over CPT steps, and olmo50-dolmino50 tanks
+> **similarly** (HS ~0.49) -- i.e. the damage is ~independent of the dolmino
+> ratio. Lower dolmino train-loss just reflects dolmino's lower-entropy
+> (DCLM-heavy) distribution; the model over-specializes AWAY from the eval
+> distribution. **Root cause hypothesis: the recipe re-warmed the converged
+> base back to the FULL peak LR (2.28e-5), disrupting it (downstream
+> forgetting).** The MDS reference ran continuous SophiaG @ 2.17e-5 and never
+> re-warmed to peak for stage-2. **Gentler retry launched: dolmino-100 @
+> LR=2e-6 constant, warmup=20 (job 8648114)** -- if it holds the plateau, the
+> recipe was the culprit; if it also tanks, dolmino is wrong for downstream.
+
+**Loss-only findings (do NOT imply capability gains -- see the eval warning above):**
 1. **The distribution shift is real.** Both runs started at ~7.2 -- far above
    the base's 2.8 plateau -- because dolmino is genuinely out-of-distribution
-   for the olmo-trained base. That gap is the headroom CPT recovers.
-2. **CPT beats the plateau.** Both mixes descend well below the olmo-100
-   plateau (2.80): dolmino-100 to **2.49**, olmo50-dolmino50 to **2.60**.
-3. **More dolmino is better, monotonically.** dolmino-100 (2.49) <
+   for the olmo-trained base.
+2. **CPT beats the plateau ON LOSS** (but not on benchmarks): dolmino-100 to
+   **2.49**, olmo50-dolmino50 to **2.60** vs olmo-100's 2.80.
+3. **More dolmino = lower loss, monotonically.** dolmino-100 (2.49) <
    olmo50-dolmino50 (2.60) < olmo-100 (2.80). ~0.31 nats gained at 100%
    dolmino. The `olmo25-dolmino75` arm (data-list built) will fill in the
    ratio curve between 50 and 100.
