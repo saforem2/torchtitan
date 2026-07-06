@@ -93,14 +93,15 @@ going?" Tracking is per-model and per-node-count.
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-06-29 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-29 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-06-29 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**2,100** (105.7B tokens, 2.3% of 4.67T), loss 4.8092. | 2026-06-29 |
-| [agpt 80B](./production/agpt/80b/README.md) | 11 attempts since 2026-05-11; zero persisted. Wrapper detects failures correctly, but Aurora bad-node prevalence at init is too high for current spare count. | 2026-07-06 |
-| [80B 256N](./production/agpt/80b/n512/README.md) | Latest config: AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master. Most recent attempt `8505221` used 20 spares + 5 retries, still died in init. | 2026-05-28 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**5,100** (513.7B tokens, 11.0% of 4.67T); advanced via native-autoretry relaunch (8638793), cont chained. | 2026-07-06 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**3,100** (156.0B tokens, 3.3% of 4.67T); relaunched on native autoretry (8647385 + cont). | 2026-07-06 |
+| [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-06 |
+| [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
 | [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-07-06 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
+| [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-07-06 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
 
 ## Evaluation (lm-eval results)
