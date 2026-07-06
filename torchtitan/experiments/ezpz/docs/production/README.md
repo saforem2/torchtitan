@@ -24,6 +24,7 @@ budget. Detail + per-dispatch history in the linked pages.
 | [20B 256N](agpt/20b/n256/README.md) | running→PM | **2,100** | 2.85 | 2.3% | 🟢 advancing (resumes post-PM) |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 30,400 | 2.71 | 65.5% | 🟡 queue-starved |
 | [20B 512N](agpt/20b/n512/README.md) | relaunched (Q, autoretry) | 4,400 | 2.51 | 9.5% | 🟢 resumes step-4400 on native auto-retry (8638793) |
+| [**2B CPT** sweep](cpt/README.md) | **pilot complete** ✅ | 5,960 | **2.49** | — | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
 
 > **512N queue starvation** (both 512N chains ~20 days in `small`) is
 > pure node contention, not a hold or bad request — and re-submitting
