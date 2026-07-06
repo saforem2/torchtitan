@@ -27,6 +27,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
 | 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 | 2026-07-06 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./rl/2026-07-06_multinode-grpo-root-cause.md) |
+| 2026-07-06 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-07-06 | [Production SFT](./production/sft/README.md) |
 | 2026-07-06 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
 | 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-01 | [20B 512N canonical chain: relaunch on native auto-retry (resume step-4400)](./experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) |
 | 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
 | 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
-| 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
 | 2026-07-01 | [Claude Session Log](./claude-sessions.md) |
 | 2026-06-30 | [Bad-node failover for production training](./guides/bad-node-failover.md) |
 | 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-28 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) |
 | 2026-06-28 | [Scaling Tests & Production Runs — Aurora (2026-04-18 to 2026-04-21)](./production/scaling-performance.md) |
 | 2026-06-28 | [The "validator CCL deadlock at 80B TP=4" was a phantom -- two unrelated bugs](./guides/known-bugs/validator-tp4-at-80b.md) |
-| 2026-06-28 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
