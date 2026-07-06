@@ -177,9 +177,12 @@ def load_mds_trajectory(csv_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarr
 def _apply_loss_ylim(ax, series: list[dict]) -> None:
     """Crop the loss y-axis to the informative band.
 
-    Bottom = ~0.1 below the global min loss. Top = the max loss reached
-    after each series' first 5% of tokens (drops the step-0 warmup spike
-    of ~12+ nats while keeping the full descent). No-op if degenerate.
+    Bottom = ~0.1 below the global min loss. Top = the 95th percentile of
+    each series' post-warmup losses (drops the step-0 warmup spike of ~12+
+    nats AND the residual early-transient tail of the least-converged chain,
+    so the well-converged chains don't get compressed into a thin band).
+    This intentionally clips the very top of a young, still-descending chain.
+    No-op if degenerate.
     """
     mins, tops = [], []
     for s in series:
@@ -188,16 +191,17 @@ def _apply_loss_ylim(ax, series: list[dict]) -> None:
         if loss.size == 0:
             continue
         mins.append(float(loss.min()))
-        # Drop the leading 5% (warmup spike) before taking the max.
+        # Drop the leading 5% (warmup spike), then take the 95th percentile
+        # of the remainder as the top (trims residual early-transient values
+        # that a raw max would otherwise let dominate the axis).
         start = max(1, int(0.05 * loss.size))
         tail = loss[start:] if loss.size > start else loss
-        tops.append(float(tail.max()))
+        tops.append(float(np.percentile(tail, 95)))
     if not mins or not tops:
         return
     lo = min(mins) - 0.1
     hi = max(tops)
-    # A touch of headroom above the post-warmup max so curves don't kiss
-    # the top border.
+    # A touch of headroom above the crop so curves don't kiss the top border.
     hi = hi + 0.05 * (hi - lo)
     if hi > lo:
         ax.set_ylim(lo, hi)
