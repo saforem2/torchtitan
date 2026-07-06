@@ -4,6 +4,113 @@
 
 ---
 
+## 2026-07-06
+
+### Headline: 2B base closed out (eval) and three new fronts opened -- CPT sweep, multi-node GRPO solved, first SFT on the completed v2 base
+
+The week since 2026-06-29 resolved the entire post-PM action list and added
+three new deliverables. Full detail in the
+[~10-day summary](../summaries/2026-06-26_to_2026-07-06.md).
+
+### 1. 2B base eval closeout (resolves 2026-06-29 action #1)
+
+The final 2B checkpoint (**step-92,859 = 4.674T tokens**) was converted and
+evaluated. Tail backfill (job `8638581`, 14 ckpts step-86,500..92,859):
+**HellaSwag_norm 0.561, ARC-Easy 0.651, PIQA 0.733** at the final step, flat
+over the last ~635B tokens (also resolved the old ARC-Easy ~0.59 artifact -- a
+fresh eval reads ~0.65). The **dead-flat tail is the motivation for CPT** (item
+2), not more base tokens. Table:
+[`evals/agpt/2b`](../evals/agpt/2b/README.md).
+
+### 2. 2B continued-pretraining (CPT) mixing-ratio sweep launched (resolves action #2)
+
+With the base plateaued, launched a CPT pilot that forks the completed base and
+continues on new data blends.
+
+- **Fork mechanism:** `--checkpoint.initial-load-path` (weights-only) off the
+  read-only step-92,859 base in a separate clone; distinct CKPT_DIRs so the base
+  is never overwritten.
+- **3 renormalized mixes:** `dolmino-mix-1124` (100), `olmo50-dolmino50`,
+  `olmo25-dolmino75`. **256N pilots** `8638977` (dolmino-100) + `8638978`
+  (olmo50/50) + afterany conts; GBS held 6144 (LR calibrated), LR 2.28e-5
+  re-warm 200 + decay 0.8, ~300B tokens.
+- **Fork verified** (smoke `8638933`): loads step-92,859 clean (0 mismatch),
+  loss 7.2 -> 5.9 -- dolmino is a real distribution shift, so the CPT signal is
+  live. Report:
+  [`20260701-2b-cpt-olmo-dolmino-sweep`](../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md).
+- **Bug flagged:** the 2B autoretry script defaults async checkpointing, which
+  is XPU-broken on this torch (`new_group(gloo)` -> `No backend type for xpu`).
+  Workaround `CHECKPOINT_ASYNC_MODE=disabled` (20B already defaults disabled); a
+  2B-default fix is TODO.
+
+### 3. 80B: convergence NaN + 2048N init crash (resolves actions #2/#4)
+
+- **Convergence run @ GBS=6144: all 3 optimizers NaN** at finder LRs past
+  warmup -- a corner instability, not a tuning problem (only 80B cliffs; 2B/20B
+  never do). Report:
+  [`2026-06-30-80b-convergence`](../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md).
+- **Post-PM production launch:** 512N + 1024N ran; **2048N SIGSEGVs in
+  `set_determinism`** at 24,864 ranks (init-time scaling wall, same class as the
+  known 1024N crash). [`80b/README`](../production/agpt/80b/README.md).
+- **Still open (team decision):** 80B optimizer -- SophiaG @1e-6 (launched) vs
+  **mano @3e-6** (wider stability margin for a long unattended run); and whether
+  to keep pushing scale above 512N given the 2048N init crash.
+
+### 4. Multi-trainer-node GRPO on XPU -- SOLVED (new)
+
+Multi-*trainer*-node GRPO (FSDP across 2+ nodes) now works: job `12470083`
+(3N = 1 server + 2 trainer, 24 ranks) ran **8/8 steps**, loss -0.028,
+**accuracy_reward 0.375**, real cross-node FSDP grad reduce-scatter. The
+2026-07-01 overnight "desync hang" was **two ordinary bugs, not a desync**:
+(a) the `--no-oneccl-tcp-kvs` runs left `CCL_ATL_TRANSPORT` at oneCCL's `mpi`
+default, which SIGSEGVs forming the cross-world weight-sync PG; and (b) the
+AVG->SUM FSDP patch rebound the wrong `from`-import name so it never ran. Both
+fixed. Root cause + all-rank stack evidence:
+[`2026-07-06_multinode-grpo-root-cause`](../rl/2026-07-06_multinode-grpo-root-cause.md);
+status flipped to works in
+[`grpo-on-xpu-status`](../rl/grpo-on-xpu-status.md).
+
+### 5. First SFT on the completed v2 2B base (new)
+
+Every prior production SFT (and thus all GRPO) used the older
+`AuroraGPT-2B-sophiag-gs138650` base. Launched the first SFT on the **completed
+v2 256N base** (step-92,859): converted DCP->HF on Aurora, transferred to
+Sunspot, ran the proven `tulu_math_uc_mix` recipe. 2N smoke green; 32N full run
+`12470088` in progress (loss 1.35 -> 0.95, mean_token_accuracy 0.68 -> 0.757,
+checkpoint-100 saved, fresh CKPT_DIR confirmed). Trajectory:
+[`sft/agpt-2b-v2-256n`](../production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md).
+**Sets up an eval question:** does SFT on the completed base beat SFT on the
+older lineage? (head-to-head once it finishes.)
+
+### 6. Upstream syncs 60th-64th absorbed
+
+Four syncs in the summary window (60th-63rd) plus the **64th** (2026-07-06,
+6 commits: graph_trainer + a triton-upgrade loss asset, no replay). The 64th's
+`sync_smoke.sh` caught a **latent bug unrelated to the merge**: the NaN-abort
+guard read `config.training.nan_abort_consecutive` but the field lives on the
+top-level trainer `Config`, so `trainer.train()` `AttributeError`'d on EVERY
+agpt/moe run (SFT/GRPO unaffected -> unnoticed). Fixed. See
+[`upstream-sync`](../upstream-sync.md).
+
+### 7. Infra
+
+Native `ezpz launch --auto-retry` umbrella replaces the legacy `failover_lib.sh`
+wrapper; 20B 512N chain recovered; blendcorpus index-race fixed at source
+(atomic-rename). Detail in the summary.
+
+### Decisions / asks for the team
+
+1. **80B optimizer:** keep SophiaG @1e-6, or switch the base to mano @3e-6 for
+   the wider margin? (Easy to switch before the brackets run.)
+2. **80B scale ceiling:** 2048N crashes at init; cap production at <=1024N until
+   the `set_determinism` init-scaling issue is understood?
+3. **2B CPT direction:** once the dolmino/olmo mixes report, which wins ->
+   promote to the CPT base?
+4. **SFT base:** eval v2-base SFT (`12470088`) head-to-head vs the gs138650 SFT
+   to decide the canonical instruct checkpoint.
+
+---
+
 ## 2026-06-29
 
 ### Headline: 2B v2 256N pre-training is COMPLETE (4.674T tokens, 100% of target)
