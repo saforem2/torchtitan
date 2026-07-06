@@ -885,10 +885,18 @@ def patch_fsdp2_force_sum_reduction_for_xpu() -> None:
     # (observed: 3N job 12470080 hit the AVG wall with zero wrapper output).
     # Rebind every already-imported module that holds a `from`-import reference
     # to the original -- robust to accelerate reorganizing its imports.
+    #
+    # Inspect `_mod.__dict__` directly, NOT getattr(_mod, ...): some packages
+    # (e.g. transformers) install a lazy module `__getattr__` that imports a
+    # submodule on any attribute probe, and transformers.models.aria pulls
+    # `torchvision` (not in this venv) -> ModuleNotFoundError at patch time
+    # (observed: 3N job 12470082). Reading __dict__ only sees names already
+    # bound in the namespace and never triggers a lazy import.
     import sys as _sys
 
     for _mod in list(_sys.modules.values()):
-        if getattr(_mod, "fsdp2_prepare_model", None) is orig:
+        _d = getattr(_mod, "__dict__", None)
+        if _d is not None and _d.get("fsdp2_prepare_model") is orig:
             _mod.fsdp2_prepare_model = patched
 
 
