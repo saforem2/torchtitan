@@ -180,10 +180,15 @@ def _apply_loss_ylim(ax, series: list[dict]) -> None:
     Bottom = ~0.1 below the global min loss. Top = the 95th percentile of
     each series' post-warmup losses (drops the step-0 warmup spike of ~12+
     nats AND the residual early-transient tail of the least-converged chain,
-    so the well-converged chains don't get compressed into a thin band).
-    This intentionally clips the very top of a young, still-descending chain.
-    No-op if degenerate.
+    so the well-converged chains don't get compressed into a thin band),
+    hard-capped at ``LOSS_YMAX_CAP`` so a young chain's early values can never
+    push the axis top above the informative band. This intentionally clips
+    the very top of a young, still-descending chain. No-op if degenerate.
     """
+    # Hard ceiling on the loss y-axis. The converged chains sit ~2.5-2.7 and
+    # even early chains are well under this; capping keeps the panel zoomed on
+    # the informative band regardless of any transient early spike.
+    LOSS_YMAX_CAP = 8.0
     mins, tops = [], []
     for s in series:
         loss = np.asarray(s["loss"], dtype=float)
@@ -203,6 +208,8 @@ def _apply_loss_ylim(ax, series: list[dict]) -> None:
     hi = max(tops)
     # A touch of headroom above the crop so curves don't kiss the top border.
     hi = hi + 0.05 * (hi - lo)
+    # Hard cap so no early-transient value can push the top above the band.
+    hi = min(hi, LOSS_YMAX_CAP)
     if hi > lo:
         ax.set_ylim(lo, hi)
 
