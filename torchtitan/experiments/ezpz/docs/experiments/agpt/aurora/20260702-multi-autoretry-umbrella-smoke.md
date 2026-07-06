@@ -26,6 +26,16 @@ spares) that stranded the 20B 512N chain. Native `ezpz launch --auto-retry`
 
 ## Smoke: `smoke_multi_autoretry.sh` (native auto-retry umbrella)
 
+> [!IMPORTANT]
+> **VERDICT: native auto-retry umbrella PASSED (`failed: 0/2`, job 8639375).**
+> Two co-allocated trainers, each launched via `ezpz launch --auto-retry`,
+> ran clean to step 20 with auto-retry armed per trainer (`active=2 spare=1`),
+> distinct node-slices/ports/CKPT_DIRs, one shared venv broadcast, and **zero
+> cross-talk / zero error signals**. This is the validated replacement for the
+> legacy `failover_lib.sh` umbrella (whose blind-swap lost 3/4 chains in
+> `8568429`). Not yet promoted to production -- prod multi-venv (2B + 20B in
+> one alloc) still needs the pre-stage-to-distinct-`/tmp/.venv-<model>` step.
+
 A small, self-contained umbrella that mirrors the co-allocation pattern but
 launches each trainer with **`ezpz launch --auto-retry`** directly.
 
