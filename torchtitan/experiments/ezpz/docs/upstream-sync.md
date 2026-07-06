@@ -50,12 +50,31 @@ merge, **zero conflicts** (disjoint file sets — the whole sync is confined to
   are graph_trainer's OWN per-model copies, NOT the core models, so no replay
   to `agpt/`/`moe/`.
 
-### Validation
-Lowest-risk sync class: zero core/ezpz files changed, agpt/moe diff empty. A
-2N agpt smoke from the sync worktree is the belt-and-suspenders regression
-check (agpt should train identically since it was untouched).
+### Validation -- smoke-passed (Sunspot, 2026-07-06)
+`scripts/sync_smoke.sh` from the sync worktree (single node, import probe +
+2 deterministic steps per config). **VERDICT: ok** (job 12470095):
 
-<!-- 64TH-SYNC-VALIDATION -->
+| Config | rc | step-1 -> step-2 loss |
+|--------|----|-----------------------|
+| ezpz.agpt / agpt_debugmodel (TP=1) | 0 | 10.839 -> 10.673 |
+| ezpz.agpt / agpt_debugmodel (TP=2) | 0 | 10.840 -> 10.662 |
+| ezpz.moe / moe_debugmodel | 0 | 12.910 -> 12.368 |
+
+`IMPORT_OK` (all ezpz modules import against the merged tree); all 3 configs
+train, loss descends, TP=1/TP=2 match at step 1 (TP-invariant).
+
+**The smoke earned its keep:** it caught a real, pre-existing bug UNRELATED to
+the merge -- the NaN-abort guard (`a6682a4aa`) read
+`config.training.nan_abort_consecutive` but the field lives on the top-level
+trainer `Config`, so `trainer.train()` raised `AttributeError` on EVERY
+agpt/moe run (SFT via `train_sft.py` was unaffected, so it went unnoticed).
+Fixed in `0063c4f31` (read `config.nan_abort_consecutive`); this sync branch
+merges that fix, then re-smoked green.
+
+Landed to `origin/ezpz` after VERDICT: ok. Worktree symlink note: a fresh
+worktree lacks `.venv` and `assets/hf/gemma-7b/` (both gitignored) -- symlink
+them from the main checkout before smoking (2 false-start jobs, 12470092/94,
+were missing-venv then missing-tokenizer, not code issues).
 
 ---
 
