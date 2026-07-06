@@ -876,6 +876,21 @@ def patch_fsdp2_force_sum_reduction_for_xpu() -> None:
     patched._xpu_patched = True  # type: ignore[attr-defined]
     _fu.fsdp2_prepare_model = patched
 
+    # CRITICAL: accelerate/accelerator.py does `from .utils import
+    # fsdp2_prepare_model` at import time (accelerate/utils/__init__.py re-exports
+    # it from fsdp_utils), and the real call site
+    # (`Accelerator.prepare_model` -> `fsdp2_prepare_model(self, model)`) uses
+    # THAT module-local binding. Rebinding only `fsdp_utils.fsdp2_prepare_model`
+    # leaves the caller pointing at the original, so the wrapper never runs
+    # (observed: 3N job 12470080 hit the AVG wall with zero wrapper output).
+    # Rebind every already-imported module that holds a `from`-import reference
+    # to the original -- robust to accelerate reorganizing its imports.
+    import sys as _sys
+
+    for _mod in list(_sys.modules.values()):
+        if getattr(_mod, "fsdp2_prepare_model", None) is orig:
+            _mod.fsdp2_prepare_model = patched
+
 
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
