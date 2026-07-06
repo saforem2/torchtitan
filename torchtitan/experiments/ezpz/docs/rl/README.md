@@ -242,7 +242,7 @@ recipe: [`grpo-on-xpu-status.md`](grpo-on-xpu-status.md).
 - **8/8 steps clean**, `train_loss` -0.02445, `train_runtime` 1411s (~176s/step);
   `accuracy_reward` -> 0.375, `format_reward` -> 0.25 by step 8; real cross-node
   FSDP grad `reduce_scatter_tensor`, 0 AVG-wall / 0 segfault.
-- W&B: [light-thunder-84](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/p52blp3u).
+- W&B: [run p52blp3u](https://wandb.ai/aurora_gpt/torchtitan.ezpz.rl/runs/p52blp3u).
 - Root cause of the prior block + fix:
   [`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md).
 
