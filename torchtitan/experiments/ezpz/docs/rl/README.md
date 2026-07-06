@@ -3,28 +3,39 @@
 **Status: Experimental** — verified on Sunspot XPU, not production-ready.
 
 Reinforcement Learning via Group Relative Policy Optimization (GRPO) using
-HuggingFace TRL's `GRPOTrainer`. Alternative to upstream torchtitan's RL
-experiment which requires CUDA-only dependencies (vLLM, torchmonarch,
-flash-attn).
+HuggingFace TRL's `GRPOTrainer`, with **on-policy generation via `trl
+vllm-serve` (vLLM-XPU)** — working end-to-end on XPU including
+multi-trainer-node. An alternative to upstream torchtitan's RL experiment,
+which is CUDA-only (Monarch actors + TorchStore RDMA + flash-attn); this path
+reaches the same on-policy generator/trainer + weight-sync shape on the XPU
+stack. (A slower per-rank `hf.generate()` fallback also exists.)
 
 ## Architecture
 
 - **TRL GRPOTrainer** — handles the GRPO training loop (generate → score →
   compute advantages → update policy)
 - **ezpz** — distributed launch, device setup, wandb tracking
-- **Generation backend** — by default uses HF transformers `.generate()` on
-  every rank (slow but always works on XPU). For the vLLM-server-mode path:
-  - ✅ **[`grpo-on-xpu-status.md`](grpo-on-xpu-status.md)** — end-to-end
-    GRPO on XPU is working (job `12468780`, 2026-06-13). 5/5 steps with
-    real on-policy weight sync. **Read this first.** Multi-trainer-node
-    (FSDP across 2+ nodes) now also works as of 2026-07-06 (job `12470083`).
+- **Generation backend** — two options:
+  - ✅ **vLLM server (`trl vllm-serve`) — RECOMMENDED, and what all current
+    results use.** On-policy: a `trl vllm-serve` daemon generates (fast,
+    batched, paged-KV) and the trainer syncs updated weights back to it each
+    step. **Working end-to-end on XPU, including multi-trainer-node** (FSDP
+    across 2+ nodes). This is the performant path — use it unless you have a
+    reason not to. See [Quick Start](#recommended-vllm-server-on-policy) below.
+  - **HF `.generate()` per-rank — fallback.** Every trainer rank generates with
+    transformers `.generate()`. Slow, but needs no server and always works on
+    XPU; use it for a quick single-node sanity check.
+
+  vLLM-server references:
+  - ✅ **[`grpo-on-xpu-status.md`](grpo-on-xpu-status.md)** — current status +
+    the full run recipe (1N / cross-node / multi-trainer-node). **Read this first.**
   - ✅ **[`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md)**
-    — the multi-trainer-node blocker root-caused + fixed: two ordinary bugs
-    (a `CCL_ATL_TRANSPORT` transport-default regression + the AVG->SUM FSDP
-    patch rebinding the wrong name), NOT the "desync" the 2026-07-01 session
-    had concluded. 3N run steps with real cross-node FSDP grad reduce-scatter.
-  - `rl/scripts/grpo/qwen3_vllm_server_smoke.sh` — the 1N PBS smoke that
-    proved it. Uses the unified `venvs/rl-vllm/` venv (py3.12).
+    — how the multi-trainer-node block was root-caused + fixed (a
+    `CCL_ATL_TRANSPORT` transport-default regression + the AVG->SUM FSDP patch
+    rebinding the wrong name), NOT the "desync" the 2026-07-01 session concluded.
+  - `rl/scripts/grpo/qwen3_vllm_server_smoke.sh` — 1N smoke; unified
+    `venvs/rl-vllm/` venv (py3.12). `rl/scripts/grpo/grpo_3n_multinode_validate.sh`
+    — the multi-trainer-node run.
   - `rl/scripts/build_rl_vllm_venv.sh` — reproducible venv build.
   - `rl/xpu_overrides.py` — XPU shim collecting every monkey-patch +
     env setup needed for the port.
@@ -84,48 +95,66 @@ field is exposed as a flag (191 total). Run `--help` for the full list. All
 flags use `snake_case` (e.g. `--per_device_train_batch_size`,
 `--max_steps`), not `--hyphen-form`.
 
-### Minimal (Sunspot, plain DDP)
+### Recommended: vLLM-server (on-policy)
+
+The performant path -- a `trl vllm-serve` daemon generates and the trainer
+syncs weights back each step. It is a **two-process launch** (server on one
+tile/node + trainer on the rest), so use the ready-made PBS scripts rather than
+hand-rolling it; they handle the server subshell, health poll, tile/node
+partitioning, the unified `venvs/rl-vllm/` venv, and the XPU env:
+
+- **1 node** (server + trainer co-located):
+  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
+- **cross-node** (server node + 1 trainer node):
+  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
+- **multi-trainer-node** (server + 2+ trainer nodes):
+  [`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../rl/scripts/grpo/grpo_3n_multinode_validate.sh)
+
+The trainer side is the same `train_grpo` entry point with the vLLM flags:
 
 ```bash
+python3 -m torchtitan.experiments.ezpz.rl.train_grpo \
+    --task arithmetic \
+    --model_name_or_path <hf-checkpoint-dir> \
+    --per_device_train_batch_size 1 --num_generations 4 \
+    --bf16 --beta 0.0 --fsdp full_shard --max_steps 50 \
+    --use_vllm --vllm_mode server --vllm_server_base_url http://<server-host>:8765
+```
+
+Prereqs: build the venv once with
+[`rl/scripts/build_rl_vllm_venv.sh`](../../rl/scripts/build_rl_vllm_venv.sh);
+for **multi-trainer-node**, keep the `ofi`/TCP-KVS transport ON (do NOT pass
+`--no-oneccl-tcp-kvs`) and let `apply_all_xpu_patches` apply the AVG->SUM FSDP
+patch -- see [`grpo-on-xpu-status.md`](grpo-on-xpu-status.md#how-to-run-it).
+
+### Fallback: HF `.generate()` per-rank (no server)
+
+Slower (every rank generates with transformers), but needs no server -- handy
+for a quick single-node sanity check. Omit the `--use_vllm*` flags:
+
+```bash
+# Minimal (plain DDP)
 ezpz launch python3 -m torchtitan.experiments.ezpz.rl.train_grpo \
     --task sum_digits \
     --model_name_or_path /home/foremans/datascience/foremans/projects/saforem2/torchtitan/AuroraGPT-2B-sophiag-gs138650 \
-    --per_device_train_batch_size 1 \
-    --max_steps 50 \
-    --bf16
-```
+    --per_device_train_batch_size 1 --max_steps 50 --bf16
 
-### Recommended (FSDP full-shard, 4N)
-
-```bash
+# FSDP full-shard, 4N
 ezpz launch python3 -m torchtitan.experiments.ezpz.rl.train_grpo \
     --task sum_digits \
     --model_name_or_path /home/foremans/datascience/foremans/projects/saforem2/torchtitan/AuroraGPT-2B-sophiag-gs138650 \
-    --per_device_train_batch_size 1 --per_device_eval_batch_size 1 \
-    --bf16 --beta 0.0 \
-    --fsdp full_shard \
-    --max_steps 50
-```
-
-`--fsdp_transformer_layer_cls_to_wrap` defaults to `LlamaDecoderLayer`
-which matches AuroraGPT-2B's architecture; for other models the script
-auto-detects the right wrap class via `AutoConfig.model_type` (covers
-llama, llama4, qwen2, qwen3, mistral, mixtral, gemma, gemma2, phi, phi3,
-gpt_neox, gpt2, deepseek_v3, olmo, olmo2 — extend the map in
-[`train_grpo.py`](../../rl/train_grpo.py) `_DEFAULT_WRAP_CLS_BY_MODEL_TYPE`
-if you need more).
-
-### Aurora variant
-
-Same command, just swap the path:
-
-```bash
-ezpz launch python3 -m torchtitan.experiments.ezpz.rl.train_grpo \
-    --task sum_digits \
-    --model_name_or_path /flare/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/public/sophiag/hf/global_step138650 \
     --per_device_train_batch_size 1 --per_device_eval_batch_size 1 \
     --bf16 --beta 0.0 --fsdp full_shard --max_steps 50
 ```
+
+On Aurora, swap the path to
+`/flare/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/public/sophiag/hf/global_step138650`.
+
+`--fsdp_transformer_layer_cls_to_wrap` defaults to `LlamaDecoderLayer`
+(matches AuroraGPT-2B); for other models the script auto-detects the wrap class
+via `AutoConfig.model_type` (llama, llama4, qwen2, qwen3, mistral, mixtral,
+gemma, gemma2, phi, phi3, gpt_neox, gpt2, deepseek_v3, olmo, olmo2 — extend
+[`train_grpo.py`](../../rl/train_grpo.py) `_DEFAULT_WRAP_CLS_BY_MODEL_TYPE`).
 
 ## What works under the hood (handled automatically)
 
@@ -348,17 +377,30 @@ Training time: 41.3s, 5.8 samples/sec.
 
 ## Limitations
 
-- **No vLLM** — generation is slow (HF `.generate()` on each rank)
-- **All ranks generate** — no separate generator/trainer split like upstream
-- **No weight sync** — single model instance, no Monarch actor framework
+- **vLLM-XPU TP=1 only** — the `trl vllm-serve` server runs on a single tile;
+  multi-tile vLLM TP>1 on XPU is unexercised by this work.
+- **Trainer XCCL on TCP-KVS, not CXI** — the vLLM-server path currently uses
+  the TCP fabric for the trainer's own collectives too; Slingshot CXI would be
+  faster. A per-group transport split (CXI intra-node + TCP-KVS for the
+  cross-process server group) is the open perf lever. See
+  [`grpo-on-xpu-status.md`](grpo-on-xpu-status.md#operational-details).
+- **Monarch/TorchStore path still blocked** — the upstream (CUDA-native) RL
+  loop does not run on XPU; this ezpz path uses TRL + `trl vllm-serve` instead.
+  See [`history/upstream-rl-port-status.md`](history/upstream-rl-port-status.md).
+- **hf.generate fallback is slow** — if you skip the vLLM server and let every
+  rank generate with `.generate()`, throughput drops sharply. Prefer the
+  vLLM-server path.
 
 ## Upstream Comparison
 
-The upstream `torchtitan/experiments/rl/` experiment uses:
-- Monarch actors for separate generator/trainer GPU meshes
-- vLLM for fast inference (4 GPUs for generation, 2 for training)
-- TorchStore for weight synchronization via GPU-to-GPU RDMA
-- Requires CUDA, flash-attn, torchmonarch
+The upstream `torchtitan/experiments/rl/` experiment uses Monarch actors for
+separate generator/trainer meshes, vLLM for fast inference, and TorchStore for
+weight sync via GPU-to-GPU RDMA — and requires CUDA, flash-attn, torchmonarch.
 
-This ezpz alternative trades performance for portability — runs on any
-device backend that TRL/Accelerate supports (XPU, CUDA, CPU).
+This ezpz alternative reaches the **same on-policy shape** (a `trl vllm-serve`
+generator + trainer with per-step weight sync over TRL's `StatelessProcessGroup`)
+without the CUDA-only stack — it runs on any backend TRL/Accelerate supports
+(XPU, CUDA, CPU). It is not yet as fast as the upstream RDMA path (TP=1 server,
+TCP trainer fabric — see Limitations), but the generator/trainer split and
+weight sync that the old version of this doc said were missing **are now
+present and verified** (jobs 12468780 / 12469976 / 12470083).
