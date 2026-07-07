@@ -58,11 +58,21 @@ a new **crash-on-invalid-loss** guard.
   (abort after N *consecutive* non-finite losses, opt-in) is intentionally
   softer than upstream's (crash on the first) -- keep it.
 
-### Validation
-Zero core/ezpz files changed, agpt/moe diff empty -> same lowest-risk class as
-the 64th. sync_smoke.sh (agpt + moe) is the belt-and-suspenders check.
+### Validation -- smoke-passed (Sunspot, 2026-07-07)
+`sync_smoke.sh` from the sync worktree, **VERDICT: ok** (job 12470143), all 3
+configs rc=0:
 
-<!-- 65TH-SYNC-VALIDATION -->
+| Config | rc | step-1 -> step-2 loss |
+|--------|----|-----------------------|
+| ezpz.agpt / agpt_debugmodel (TP=1) | 0 | 10.839 -> 10.673 |
+| ezpz.agpt / agpt_debugmodel (TP=2) | 0 | 10.840 -> 10.662 |
+| ezpz.moe / moe_debugmodel | 0 | 12.910 -> 12.368 |
+
+`IMPORT_OK`; losses are **bit-identical to the 64th sync** (seed=42
+deterministic) -- confirming the merge changed nothing on the agpt/moe path.
+Landed to `origin/ezpz` after VERDICT: ok. (Worktree needs `.venv` +
+`assets/hf/` symlinked from the main checkout before smoking -- both gitignored;
+done upfront this time, no false-starts.)
 
 ---
 
