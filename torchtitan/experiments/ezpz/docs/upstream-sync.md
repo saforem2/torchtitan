@@ -20,6 +20,52 @@ was required in ezpz.
 
 ---
 
+## 2026-07-07 — 65th sync (9 commits, `77444f3d3..upstream/main`)
+
+Merged as `ec01f510c` in worktree `.worktrees/ezpz-65th-sync`. **No replays
+required** -- nothing touches `models/llama3/`, `models/deepseek_v3/`, or
+`models/qwen3/`. Post-merge `git diff HEAD~1 HEAD -- experiments/ezpz/agpt/
+experiments/ezpz/moe/` is EMPTY. Clean automatic merge, **zero conflicts**.
+
+Theme: mostly upstream RL-experiment (`experiments/rl/`, which we don't run) +
+a new **crash-on-invalid-loss** guard.
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `99a587f4d` | Use HostMesh.spawn's bootstrap_command to setup env vars (#3851) | None. RL/Monarch. |
+| `6164a75a0` | remove full_dtensor features/models tests (#3879) | None. tests/. |
+| `da3be38c1` | Avoid per-microbatch D2H caused by isfinite (#3873) | None (upstream `Trainer`; ezpz overrides `train()`). |
+| `957bf3895` | Controller sends request to generator rank0 when applicable (#3870) | None. RL. |
+| `25c9530c1` | [spmd_types] fix dsv3 ep + chunk loss typecheck (#3866) | None (spmd_types-guarded). |
+| `d04f7b928` | [rl] Add trainer entropy metric (#3848) | None (adds optional `return_entropy` kwarg to `compute_logprobs`; additive/back-compat). |
+| `badf21a13` | [rl] update bitwise identity doc with perf numbers (#3854) | None. docs. |
+| `828ab9c61` | [rl] use checkpoint utils to avoid silent buffer-dtype downcast (#3861) | None. RL. |
+| `90a542ac2` | Crash on invalid loss (infinite or nan) (#3863) | None directly (upstream `Trainer.train()`); see note. |
+
+### Shared files changed (none break ezpz)
+- `components/loss.py` (+40): (a) `spmd_types`-guarded `assert_type` calls
+  (no-op on our default backend); (b) an **additive** `return_entropy=False`
+  kwarg on `compute_logprobs` -- back-compatible, ezpz callers unaffected.
+- `models/common/token_dispatcher.py` (+2/-1): extra `spmd.is_type_checking()`
+  guard on an already-`spmd_types`-gated branch -- no-op on our backend
+  (ezpz `moe/token_dispatcher.py` imports this; safe).
+- `torchtitan/trainer.py` (+11): the invalid-loss crash lands in **upstream's**
+  `Trainer.train()`. ezpz's `FaultTolerantTrainer` **overrides `train()`**
+  (`trainer.py:787`) and already has its own `math.isfinite` NaN handling (the
+  `nan_abort_consecutive` guard added 2026-07-06, `trainer.py:870`), so it does
+  NOT inherit upstream's new check and there is no conflict. Our approach
+  (abort after N *consecutive* non-finite losses, opt-in) is intentionally
+  softer than upstream's (crash on the first) -- keep it.
+
+### Validation
+Zero core/ezpz files changed, agpt/moe diff empty -> same lowest-risk class as
+the 64th. sync_smoke.sh (agpt + moe) is the belt-and-suspenders check.
+
+<!-- 65TH-SYNC-VALIDATION -->
+
+---
+
 ## 2026-07-06 — 64th sync (6 commits, `952427842..upstream/main`)
 
 Merged as `01e575116` in worktree `.worktrees/ezpz-64th-sync`. **No replays
