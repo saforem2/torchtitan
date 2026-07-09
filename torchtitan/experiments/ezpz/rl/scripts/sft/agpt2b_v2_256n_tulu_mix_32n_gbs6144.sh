@@ -90,7 +90,18 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # OpenMathInstruct-2 (14M rows, ~20 min interleave -> blows the XPU oneCCL
 # barrier, crashed job 12468398) for metamathqa (395k, ~10s build). Same
 # GSM8K+MATH distribution coverage.
-ezpz launch --np 384 -ppn 12 --auto-retry --max-failover-retries 3 \
+# --spare-nodes auto is REQUIRED for --auto-retry to actually swap a bad node:
+# the job requests select=36 (32 active + 4 spare); --np 384 pins the trainer
+# to 32 nodes' ranks, and --spare-nodes auto tells ezpz the remaining 4 are
+# swappable spares. WITHOUT this flag, --auto-retry has no spare to swap in, so
+# a bad-node GPU fault (job 12470254 rank 61 / node x1922c3s3b0n0, and again
+# 12470258 which PBS re-handed the same node) just dead-ends at
+# `FAILOVER STOP: stuck_pre_training`. The SFT venv is on the shared tegu FS
+# (source .venv/bin/activate above), NOT a per-node /tmp yeet, so a swapped-in
+# spare already sees it -- no `ezpz yeet` needed (unlike the pretraining
+# autoretry scripts).
+ezpz launch --np 384 -ppn 12 --auto-retry --spare-nodes auto \
+    --max-failover-retries 3 --timeout "${IDLE_TIMEOUT:-1800}" \
     python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset 'tulu-3-sft-mixture:0.65,metamathqa:0.15,ultrachat-200k:0.20' \
     --model_name_or_path "${BASE_MODEL}" \
