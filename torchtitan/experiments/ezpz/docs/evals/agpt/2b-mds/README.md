@@ -10,7 +10,7 @@
 > Training-side plots (loss / grad_norm / TFLOPS / TPS) live at
 > [`docs/production/agpt/2b-mds/`](../../../production/agpt/2b-mds/README.md).
 >
-> Last updated: 2026-05-03
+> Last updated: 2026-06-26
 
 ## Setup
 

@@ -1,6 +1,6 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-06-29
+> Last updated: 2026-07-09
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -21,11 +21,12 @@ comparison, see [`../README.md`](../README.md).
 
 ## 🏁 Headline (2026-06-09)
 
-**20B 512N sync chain still beats 2B 256N async on every benchmark per
-token** at step **4,400** / ~442B tokens — but chain has been stalled
-**since 2026-05-29** (zero new ckpts in 11 days, queue contention only).
-The eval headline is the same data as 2026-05-28, eval'd across
-35+ ckpts step-100 → step-4,400:
+**20B 512N chain beats 2B 256N async on every benchmark per token.**
+Advanced to step **5,400** / ~543.6B tokens (11.6%) after the native
+auto-retry relaunch (8638793 + 8638795) broke the long sync-chain stall on
+2026-07-05..07 (was stuck at step-4,400 since 2026-05-29). The eval headline
+below is the step-100 → step-4,400 window (35+ ckpts; a re-eval of the
+4,400 → 5,400 tail is pending):
 
 - ARC-Easy `acc` 0.463 → **0.664** (+20pp)
 - HellaSwag `acc_norm` 0.296 → **0.635** (+34pp)
@@ -40,8 +41,8 @@ per-task table.
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 512N (sync)**](n512/README.md) (canonical chain) | Stalled — last walltime-clean run 8509393 (2026-05-29 12:01); 8516701 / 8521624 / 8521625 trained in-RAM past step-4400 but a stale `step-4500/` placeholder (renamed 2026-06-06) blocked persistence; cont (8521628) Q in `small`, cont (8521632) H | **5,400** (persisted) | **2.51** | **~543.6B (11.6%)** |
-| [v2 256N](n256/README.md) (8505255 final) | Done — 12h walltime end 2026-05-26 20:35 at step **1,125**. No chain continuation queued (256N is per-token comparator; canonical 20B chain is 512N). | 3,100 | — | — |
+| [**v2 512N**](n512/README.md) (canonical chain) | Advancing — native auto-retry relaunch (8638793 resume + 8638795 cont) broke the sync-chain stall, carried step-4,400 → 5,400 (2026-07-05..07). step-100..5,400 persisted every 100. cont chained. | **5,400** (persisted) | **2.47** | **~543.6B (11.6%)** |
+| [v2 256N](n256/README.md) | Advancing — carried to step **3,100** (156.0B, 3.3%) via the relocated `agpt-20b-n256` clone chain (8558548/8558549 + sneaks). Per-token comparator to the canonical 512N. | 3,100 | 4.81 | ~156.0B (3.3%) |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode
