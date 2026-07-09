@@ -47,11 +47,19 @@ load `hybridep.py`, so standard/EP MoE + the moe smoke are unaffected.
 post-66th `hybridep.py` will `ImportError` on `CustomClassBase` -- that path
 needs a newer torch (or a local shim) before use. We do not run it today.
 
-### Validation
-Zero core/ezpz files changed on our path; agpt/moe diff empty. sync_smoke.sh
-(agpt + moe standard backend) is the check.
+### Validation -- smoke-passed (Sunspot, 2026-07-07)
+`sync_smoke.sh`, **VERDICT: ok** (job 12470255), all 3 configs rc=0:
 
-<!-- 66TH-SYNC-VALIDATION -->
+| Config | rc | step-1 -> step-2 loss |
+|--------|----|-----------------------|
+| ezpz.agpt / agpt_debugmodel (TP=1) | 0 | 10.839 -> 10.673 |
+| ezpz.agpt / agpt_debugmodel (TP=2) | 0 | 10.840 -> 10.662 |
+| ezpz.moe / moe_debugmodel | 0 | 12.910 -> 12.368 |
+
+`IMPORT_OK` (confirms the hybridep `CustomClassBase` rename does NOT break
+`import ezpz.moe` -- the module import is lazy); losses bit-identical to the
+64th/65th syncs (seed=42), so the merge changed nothing on the agpt/moe path.
+Landed to `origin/ezpz` after VERDICT: ok.
 
 ---
 
