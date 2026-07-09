@@ -81,8 +81,9 @@ def _materialized_mix_load_or_build(
         "weights": [round(w, 8) for w in norm_weights],
         "seed": int(seed),
         "stopping": str(stopping_strategy),
-        # Bump if the on-disk arrow format changes incompatibly
-        "v": 1,
+        # Bump if the on-disk arrow format changes incompatibly.
+        # v2: filter empty/whitespace-only prompt+completion rows (see below).
+        "v": 2,
     }
     recipe_str = repr(sorted(recipe.items()))
     recipe_hash = hashlib.sha256(recipe_str.encode("utf-8")).hexdigest()[:16]
@@ -114,8 +115,38 @@ def _materialized_mix_load_or_build(
     )
     log.info(
         f"[mix-cache] interleave built ({len(ds):,} rows in "
-        f"{time.monotonic()-t0:.1f}s); writing to disk"
+        f"{time.monotonic()-t0:.1f}s)"
     )
+
+    # Drop empty / whitespace-only prompt or completion rows. Some upstream
+    # sources (e.g. ~771 rows in the tulu/metamathqa/ultrachat mix, 0.03%)
+    # carry an empty assistant `completion`. With packing=True +
+    # assistant_only_loss=True, a packed window landing on such a row has zero
+    # valid label tokens; the degenerate backward manifests as a
+    # deterministic GPU illegal memory access -- observed as SFT job 12470254/
+    # /258/262 crashing at global step 211 / rank 61 with
+    # `Segmentation fault from GPU ... NotPresent`, reproducible across nodes
+    # (i.e. NOT a bad node). Filtering at the mix layer catches every source at
+    # once. Recipe "v" was bumped so this produces a fresh cache hash.
+    def _nonempty(ex: dict) -> bool:
+        def _content(turns) -> str:
+            if not turns:
+                return ""
+            c = turns[0].get("content", "")
+            return c if isinstance(c, str) else ""
+
+        return bool(_content(ex["prompt"]).strip()) and bool(
+            _content(ex["completion"]).strip()
+        )
+
+    n_before = len(ds)
+    ds = ds.filter(_nonempty, num_proc=16)
+    n_dropped = n_before - len(ds)
+    log.info(
+        f"[mix-cache] filtered {n_dropped:,} empty prompt/completion rows "
+        f"({100 * n_dropped / max(n_before, 1):.3f}%); {len(ds):,} rows remain"
+    )
+    log.info("[mix-cache] writing to disk")
 
     # Save to tmp + atomic rename so a partial write from one rank
     # doesn't leave a corrupt cache that another rank picks up.
