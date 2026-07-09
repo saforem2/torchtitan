@@ -55,6 +55,7 @@ declare -A SCRIPTS=(
     # here is what puts them under refresh_all.sh's catch-all.
     [cpt_loss]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_loss.py"
     [cpt_eval]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_eval.py"
+    [mds_2b_loss]="torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/plot_loss.py"
     [sft_curves]="torchtitan/experiments/ezpz/docs/production/sft/aurora2b/tulu_math_uc_mix/scripts/plot_sft_curves.py"
     [grpo_curves]="torchtitan/experiments/ezpz/docs/production/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
     # LR-finder trend + per-GBS figures (2B/80B). Regenerates from the
