@@ -44,6 +44,14 @@ export CCL_PROCESS_LAUNCHER=pmix
 export CCL_OP_SYNC=1
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
+# Raise oneCCL's Level-Zero IPC-handle caches. With the defaults, the GET/OPEN
+# handle caches grow unbounded over a long run and eventually exhaust device
+# memory in a collective memcpy -- job 12470088 OOM'd at step ~248/729 with
+# `ze error at zeCommandListAppendMemoryCopy, ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`
+# and oneCCL's own hint "Increase the cache size CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD".
+# Same knob moe_ab_check.sh already uses (OPEN variant) for its A2A segfault.
+export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}"
+export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}"
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
