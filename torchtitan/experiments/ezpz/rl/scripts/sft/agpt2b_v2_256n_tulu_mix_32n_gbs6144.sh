@@ -71,7 +71,11 @@ BASE_MODEL="${SUBMIT_DIR}/AuroraGPT-2B-v2-256n-step92859-hf"
 # Fresh, unique CKPT_DIR distinct from the gs138650 run's dir. --resume_from_
 # checkpoint below points here: empty on first launch (train_sft.py coerces to
 # fresh start), then enables auto-retry resume from the latest checkpoint-N.
-CKPT_DIR="outputs/sft/agpt-2b-v2-256n-tulu-mix-32n-gbs6144"
+# NOTE: `-v2mix` suffix = the empty-row-filtered mix (datasets_sft recipe v2,
+# commit e34325e26). The pre-filter run's checkpoints live in the un-suffixed
+# dir; we restart clean here rather than resume ckpt-200 (which was trained on
+# the old unfiltered mix order) so the data order is consistent start-to-finish.
+CKPT_DIR="outputs/sft/agpt-2b-v2-256n-tulu-mix-32n-gbs6144-v2mix"
 LOG_DIR="logs/sft-agpt-2b-v2-256n-tulu-mix-32n-gbs6144-${PBS_JOBID%%.*}"
 mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
 
