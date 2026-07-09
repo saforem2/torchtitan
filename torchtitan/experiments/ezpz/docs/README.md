@@ -23,7 +23,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-07-09 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-07-07 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-07-09 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-06 | [Summaries](./summaries/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
 | 2026-07-06 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
@@ -93,8 +93,8 @@ going?" Tracking is per-model and per-node-count.
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-06-29 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**30400** (3.06T tokens, 65.5% of 4.67T). | 2026-06-29 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**4,400** (442.9B tokens, 9.5% of 4.67T). | 2026-07-06 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**2,100** (105.7B tokens, 2.3% of 4.67T), loss 4.8092. | 2026-07-06 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**5,400** (543.6B tokens, 11.6% of 4.67T). | 2026-07-06 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**3,100** (156.0B tokens, 3.3% of 4.67T), loss 4.8092. | 2026-07-06 |
 | [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-06 |
 | [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
