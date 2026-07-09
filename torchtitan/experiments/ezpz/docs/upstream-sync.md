@@ -20,6 +20,41 @@ was required in ezpz.
 
 ---
 
+## 2026-07-07 — 66th sync (4 commits, `533f604fe..upstream/main`)
+
+Merged as `5dee427fc` in worktree `.worktrees/ezpz-66th-sync`. **No replays
+required** -- no `models/llama3/`, `models/deepseek_v3/`, or `models/qwen3/`
+changes; agpt/moe diff empty. Clean automatic merge, **zero conflicts**.
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `31948fb27` | Enable SFT for HF Transformer backed trainer (#3243) | None. `transformers_modeling_backend/` (HF-backed models; we do not use it). |
+| `1d2d58c00` | Support Helion RoPE override for ComplexRoPE (#3767) | None. `overrides/helion_rope.py` -- ezpz agpt uses its own RoPE, not the Helion override. |
+| `7cdf0aa9f` | Fix Helion RoPE fake strides (#3862) | None. Helion override. |
+| `013cd8be7` | [graph_trainer] fix red CI (#3872) | None. graph_trainer + tests. |
+
+### One landmine noted (does NOT affect the smoke or our runs)
+`distributed/deepep/hybridep.py` changed its base class
+`OpaqueBase -> CustomClassBase` (`torch._library.opaque_object`, a torch-side
+rename for a NEWER torch). **Our venv torch (2.13-era) has only `OpaqueBase`;
+`CustomClassBase` does not exist** (`ImportError` confirmed). ezpz `moe/`
+does import `HybridEPTokenDispatcher`, BUT the `hybridep` *module* import is
+lazy everywhere (all `from ...deepep import hybridep` are inside methods, fired
+only when `comm_backend=hybridep` is actually used). `import ezpz.moe` does NOT
+load `hybridep.py`, so standard/EP MoE + the moe smoke are unaffected.
+**Caveat for later:** if we ever run `comm_backend=hybridep` on this torch, the
+post-66th `hybridep.py` will `ImportError` on `CustomClassBase` -- that path
+needs a newer torch (or a local shim) before use. We do not run it today.
+
+### Validation
+Zero core/ezpz files changed on our path; agpt/moe diff empty. sync_smoke.sh
+(agpt + moe standard backend) is the check.
+
+<!-- 66TH-SYNC-VALIDATION -->
+
+---
+
 ## 2026-07-07 — 65th sync (9 commits, `77444f3d3..upstream/main`)
 
 Merged as `ec01f510c` in worktree `.worktrees/ezpz-65th-sync`. **No replays
