@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-07-06
+> Last updated: 2026-07-09
 >
 > Status: chain at step **3,100** persisted (~156.0B tokens, **3.3%** of
 > 4.67T), advancing. Trajectory since the step-300 stall: `8505255`
@@ -77,11 +77,11 @@
 | `8558548` | 2026-06-16 | 12h | 1,100 → ? | — | — | — | **Re-submit after tarball fix** (spmd_types==0.2.1 installed + rebuilt 2026-06-16). Resumes from step-1,100. Q at submit. |
 | `8558549` | — | 12h | (cont1) | — | — | — | Held (`afterany:8558548`). |
 
-**Latest checkpoint:** step-2,100 (8505255, all of step-100..1,100 have valid `.metadata`)
+**Latest checkpoint:** step-3,100 (8505255, all of step-100..1,100 have valid `.metadata`)
 
-**Cumulative persisted steps:** 2,100
+**Cumulative persisted steps:** 3,100
 
-**Tokens consumed:** 2,100 × 6,144 × 8,192 = **105.7B tokens** (2.3% of 4.67T target)
+**Tokens consumed:** 3,100 × 6,144 × 8,192 = **156.0B tokens** (3.3% of 4.67T target)
 
 **Loss:** 4.8092 (8505255 end, step-1,125)
 

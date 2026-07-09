@@ -1,6 +1,6 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-07-06
+> **Last updated:** 2026-07-09
 >
 > **This is the canonical 20B production chain.**
 >
@@ -76,12 +76,14 @@
 | [`8521624`](#log-8521624) | 2026-06-04 | 12h | 4,400 → **4,520** (in-RAM) | 2.51 → 2.51 | ~225 | ~11.2% | **SYNC mode.** `afterany` continuation. Ran 11:04 → 15:58 (4h54m), Exit_status 143 (SIGTERM). Trainer advanced to step 4,520 in-RAM but the only ckpt-dir candidate (step-4,500) was the empty placeholder from 8516701 — no shards landed in this run either. **No new ckpt persisted past step-4,400.** |
 | [`8521625`](#log-8521625) | 2026-06-06 | 12h | 4,400 → **4,600** (in-RAM) | 2.51 → 2.50 | ~341 | ~17.0% | **SYNC mode.** `afterany` continuation, ran 02:39 → 13:14 (10h34m), Exit_status 143. Trainer reached step 4,600 in-RAM. No new persisted ckpt — empty `step-4500/` placeholder still in the way. **No new ckpt persisted past step-4,400.** |
 | **[`8521628`](#log-8521628)** | 2026-06-10 | 4h | 4,400 → **4,500** | 2.51 → ~2.51 | — | — | **🏁 SYNC mode.** `afterany` continuation, ran 01:27 → 05:32 (4h04m), Exit_status 143. **step-4,500 persisted cleanly** (the renamed `step-4500.bak-empty-20260606-170503/` placeholder no longer blocked the save). **First new persisted ckpt in 12 days** (since 2026-05-29's step-4,400). After the step-4,500 save, failover attempt 4 hit the same intermittent `MemoryError: std::bad_alloc` at `set_determinism` rank 3,195 — wrapper exhausted 3 retries (exit 143). +1 ckpt persisted. 8521632 (cont12) Q'd to resume from step-4,500. |
+| [`8638793`](#log-8638793) | 2026-07-05 | 12h | 4,400 -> **5,109** | (reload blip 6.03) -> **2.54** | ~365 | ~18.2% | **Native `ezpz launch --auto-retry` relaunch** (torch 2.13 venv, ezpz 0.21.3). Resumed cleanly from step-4,400 after the legacy sync chain stalled; ran to step-5,109. step-4,500..5,100 persisted every 100. First forward progress in ~25 days. |
+| [`8638795`](#log-8638795) | 2026-07-07 | 12h | 5,100 -> **5,400** | 2.52 -> **2.47** | ~376 | ~18.7% | **`afterany` continuation** of 8638793 (native auto-retry). step-5,200..5,400 persisted. Advanced during the multi-umbrella queue wait (umbrella 8648363 never won a slot; this standalone carried the chain). |
 
-**Latest checkpoint:** step-4,400 (8521628, 2026-06-10, sync mode, persisted cleanly after the step-4500 placeholder was renamed on 2026-06-06)
+**Latest checkpoint:** step-5,400 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
 
-**Cumulative steps:** 4,400
+**Cumulative steps:** 5,400
 
-**Tokens consumed:** 4,400 × 12,288 × 8,192 = **442.9B tokens** (9.5% of 4.67T target)
+**Tokens consumed:** 5,400 × 12,288 × 8,192 = **543.6B tokens** (11.6% of 4.67T target)
 
 ### Recovery
 
@@ -165,5 +167,7 @@ Default is now 600s + `--train-iters 5`.
 | <a id="log-8516701"></a>`8516701` | `/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/agpt-20b-n512-v2-failover-sync-cont7.o8516701` |
 | <a id="log-8521624"></a>`8521624` | `/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/agpt-20b-n512-v2-failover-sync-cont8.o8521624` |
 | <a id="log-8521625"></a>`8521625` | `/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/agpt-20b-n512-v2-failover-sync-cont9.o8521625` |
+| <a id="log-8638793"></a>`8638793` | `/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/agpt-20b-n512-autoretry-resume.o8638793` |
+| <a id="log-8638795"></a>`8638795` | `/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/agpt-20b-n512-autoretry-cont.o8638795` |
 
 > **Note on 8466848 crash:** `set_determinism` calls `torch.distributed.broadcast(seed_tensor, src=0)` and one rank hit `std::bad_alloc`. This is the same failure mode that killed both 1024N attempts (8463182, 8463183) on 2026-05-04 — but at 6,144 ranks (512N) instead of 12,288 (1024N). The previous 20B 512N run (8463628, 4 days earlier) succeeded at the same scale and same script, and so does the resubmit (8479579), so it's intermittent. See [`memory/project_1024n_init_crash.md`](.) — that memory's "1024N only" claim is stale; the bug fires unpredictably at 512N+ but is not reliably triggered.
