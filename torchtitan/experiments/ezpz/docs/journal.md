@@ -4,6 +4,41 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-09 (aurora) -- production doc-refresh: capture 20B progress + extend catch-all
+
+- **Captured 20B chain progress the last refresh missed.** The 20B-512 chain
+  advanced 4,400 -> 5,400 (543.6B tok, 11.6%) via the native auto-retry
+  relaunch (8638793 resume + 8638795 cont) while the 1536-node umbrella
+  (8648363) stayed queued on `at_queue` contention; 20B-256 advanced
+  2,100 -> 3,100 (156.0B, 3.3%). `refresh_all.sh --model {20b_v2_512,20b_v2_256}`
+  regenerated scalar fields + figures; hand-fixed the 20B-512
+  Latest-checkpoint attribution (was miscredited to 8521628, which only
+  reached 4,500) and appended the two autoretry progress + log rows
+  (append-only). Commit 8843878f0.
+- **Root-caused a coverage gap in the refresh catch-all.** `refresh_all.sh` is
+  100% manifest-driven from `trajectories.py`, which only registers the 6
+  W&B/DCP AGPT chains. Every newer production subtree with a bespoke
+  TSV/JSON plotter (cpt/, sft/, grpo/, 2b-mds/) was structurally excluded --
+  only refreshed by hand. This is why the CPT eval (job 8647850) charts
+  weren't auto-updating.
+- **Fixed by folding them in at the chart layer** (commits cc3c81919 +
+  9f0636866): cpt plotters default `--data-dir` to their in-repo `figures/`
+  (was `/tmp`); sft/grpo plotters skip cleanly (exit 0) when the Sunspot-only
+  `TRAINER_STATE` is absent; registered all 5 plotters in
+  `update_all_charts.sh`; widened `refresh_all.sh` auto-stage globs to
+  `production/**/charts/*` + `production/**/*.tsv`; added a coverage-audit to
+  `check_stale_docs.sh` that flags any `production/**/plot_*.py` NOT wired in.
+  The audit immediately caught the 5th plotter (2b-mds) I'd missed -- exactly
+  its purpose. Validated end-to-end on Aurora: `update_all_charts.sh` = 0/12
+  failed (cpt + 2b-mds regenerate, sft/grpo skip), coverage audit = 5 wired /
+  0 unwired.
+- **Fleet:** still `at_queue`-starved -- 3487 nodes free but every prod job Q
+  ("Insufficient amount of resource: at_queue"). Umbrella 8648363 eligible
+  70h+, never won a slot. The standalone 20B-512 (8638795) carried the chain
+  to 5,400 while the umbrella waited -- the intended fallback.
+
+---
+
 ## 2026-07-02 (aurora) -- umbrella exit-3 diagnosed + auto-retry umbrella smoke
 
 - **Umbrella 8568429 (legacy failover_lib.sh) exited 3 = 3/4 chains lost.**
