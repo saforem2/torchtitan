@@ -56,7 +56,7 @@ def read_tsv(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default="/tmp")
+    ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(__file__), "figures"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "figures", "cpt_loss.svg"))
     args = ap.parse_args()
 

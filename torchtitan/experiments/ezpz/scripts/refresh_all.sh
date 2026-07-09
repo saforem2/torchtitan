@@ -127,6 +127,8 @@ fi
 git add \
     "torchtitan/experiments/ezpz/docs/production/**/README.md" \
     "torchtitan/experiments/ezpz/docs/production/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/production/**/charts/*" \
+    "torchtitan/experiments/ezpz/docs/production/**/*.tsv" \
     "torchtitan/experiments/ezpz/docs/production/figures/*" \
     "torchtitan/experiments/ezpz/docs/evals/**/figures/*" \
     "torchtitan/experiments/ezpz/docs/experiments/lr-finder/**/figures/*" \

@@ -48,6 +48,15 @@ declare -A SCRIPTS=(
     [evals_combined]="torchtitan/experiments/ezpz/eval/plot_evals_combined.py"
     [evals_2b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py"
     [evals_20b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py"
+    # Non-manifest production subtrees with their own bespoke plotters. These
+    # run no-arg (CPT reads its in-repo figures/*.tsv; SFT/GRPO read a Sunspot
+    # trainer_state.json and skip cleanly if absent), so they slot into the
+    # same parallel/failure-isolated contract as the chains above. Wiring them
+    # here is what puts them under refresh_all.sh's catch-all.
+    [cpt_loss]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_loss.py"
+    [cpt_eval]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_eval.py"
+    [sft_curves]="torchtitan/experiments/ezpz/docs/production/sft/aurora2b/tulu_math_uc_mix/scripts/plot_sft_curves.py"
+    [grpo_curves]="torchtitan/experiments/ezpz/docs/production/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
     # LR-finder trend + per-GBS figures (2B/80B). Regenerates from the
     # isolated per-GBS CSVs under outputs/lrtrend*/; tolerates missing CSVs
     # (a queued/incomplete GBS just plots fewer curves), so it is safe to run

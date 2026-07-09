@@ -44,6 +44,12 @@ def add_job_shading(ax, smin, smax):
 
 
 def main():
+    # TRAINER_STATE lives on Sunspot (/lus/tegu/...); on any other host the
+    # data is absent. Skip cleanly (exit 0) so the refresh catch-all's parallel
+    # worker stays green instead of reporting a FileNotFoundError failure.
+    if not TRAINER_STATE.exists():
+        print(f"skip: TRAINER_STATE not found ({TRAINER_STATE}) -- not on this host")
+        return
     state = json.load(open(TRAINER_STATE))
     h = state["log_history"]
     steps = np.array([e["step"] for e in h])

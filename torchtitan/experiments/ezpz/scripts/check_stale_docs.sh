@@ -146,4 +146,27 @@ while IFS= read -r doc; do
 done < <(grep -rlE "^> *\*{0,2}Last updated" torchtitan/experiments/ezpz/docs 2>/dev/null)
 echo "=== Last-updated summary: $lu_ok fresh, $lu_stale stale ==="
 
+# ---- chart-plotter coverage audit --------------------------------------------
+# refresh_all.sh only regenerates charts whose plotter is registered in
+# update_all_charts.sh. A production subtree can ship its own bespoke plotter
+# (docs/production/**/plot_*.py) that nobody wired in -- then its charts go
+# silently stale forever (this is exactly how cpt/ + sft/ + grpo/ were missed).
+# Flag any production plotter NOT referenced by update_all_charts.sh so a new
+# subtree surfaces here instead of being ignored.
+echo ""
+echo "=== chart-plotter coverage (production/ plotters vs update_all_charts.sh) ==="
+uac="torchtitan/experiments/ezpz/scripts/update_all_charts.sh"
+cov_ok=0
+cov_unwired=0
+while IFS= read -r plotter; do
+    if grep -qF "$plotter" "$uac" 2>/dev/null; then
+        cov_ok=$((cov_ok + 1))
+    else
+        echo "  [UNWIRED] ${plotter#torchtitan/experiments/ezpz/}"
+        echo "    not referenced in update_all_charts.sh -- refresh_all.sh will NOT regenerate its charts"
+        cov_unwired=$((cov_unwired + 1))
+    fi
+done < <(find torchtitan/experiments/ezpz/docs/production -type f -name 'plot_*.py' 2>/dev/null | sort)
+echo "=== coverage summary: $cov_ok wired, $cov_unwired unwired ==="
+
 exit 0
