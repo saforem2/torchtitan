@@ -4,6 +4,47 @@ Running log of what's happening, session by session. Most recent first.
 
 ---
 
+## 2026-07-09 (sunspot) -- 65th + 66th upstream syncs; v2-base SFT OOM + bad-node recovery
+
+- **65th upstream sync (9 commits, `77444f3d3..upstream/main`).** Mostly
+  `experiments/rl/` (we don't run it) + a crash-on-invalid-loss guard. No
+  replay (no llama3/deepseek_v3/qwen3); agpt/moe diff empty; clean auto-merge.
+  3 shared files touched, all benign: `components/loss.py` (spmd_types-guarded
+  asserts + additive `return_entropy` kwarg), `token_dispatcher.py` (no-op
+  type-check guard), and `torchtitan/trainer.py` (invalid-loss crash in the
+  UPSTREAM `Trainer.train()`, which ezpz overrides -- ezpz keeps its softer
+  opt-in `nan_abort_consecutive` guard, no conflict). Smoke `VERDICT: ok`
+  (job 12470143), landed `533f604fe`.
+- **66th upstream sync (4 commits, `533f604fe..upstream/main`).** All in paths
+  we don't run (HF-backend SFT, Helion RoPE overrides, graph_trainer). No
+  replay; clean merge. **Landmine noted:** `hybridep.py` renamed its base class
+  `OpaqueBase -> CustomClassBase` (a newer-torch symbol absent in our venv).
+  Verified harmless -- the hybridep module import is lazy, so `import ezpz.moe`
+  and standard/EP MoE are unaffected; only the opt-in `comm_backend=hybridep`
+  path would `ImportError` on this torch. Smoke `VERDICT: ok` (job 12470255,
+  losses bit-identical to 64th/65th), landed `379926566`. Both syncs documented
+  in `upstream-sync.md`.
+- **v2-base SFT crashed on a oneCCL cache leak, then a bad node.** The 32N SFT
+  on the completed v2 2B base (job 12470088) OOM'd at step ~248/729:
+  `ze error at zeCommandListAppendMemoryCopy, ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`.
+  Root cause from oneCCL's own log: the Level-Zero IPC-handle cache fails to
+  release handles (`ipc_handle_cache: handle type is unexpected. Not calling
+  zeMemPutIpcHandle`) and accumulates until device OOM. Fix (commit
+  `ff71b3e79`): set `CCL_ZE_CACHE_{GET,OPEN}_IPC_HANDLES_THRESHOLD=8000` (the
+  knob oneCCL's hint recommends + `moe_ab_check.sh` already uses).
+- **Resume 1 (12470254): CCL fix worked, hit a bad node.** No OOM -- resumed
+  from checkpoint-200 and stepped to 211, then `Segmentation fault from GPU ...
+  type: 0 (NotPresent) ... aborting` -> SIGABRT on **rank 61, node
+  `x1922c3s3b0n0`, both auto-retry attempts**. A hardware fault, not code.
+  (ezpz auto-retry's watchdog reported `stuck_pre_training / zero step=
+  markers` -- a false-positive read of the tqdm carriage-returns, ezpz#163 --
+  but the underlying repeated GPU segfault was real.)
+- **Resume 2 (12470258): queued.** Plain resubmit to dodge the bad node;
+  resumes from checkpoint-200. PBS estimates start ~23:18 (36-node block, busy
+  queue). Nothing lost -- checkpoint-200 intact both times.
+
+---
+
 ## 2026-07-09 (aurora) -- production doc-refresh: capture 20B progress + extend catch-all
 
 - **Captured 20B chain progress the last refresh missed.** The 20B-512 chain
