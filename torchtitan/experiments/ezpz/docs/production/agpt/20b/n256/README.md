@@ -83,7 +83,7 @@
 
 **Tokens consumed:** 3,100 × 6,144 × 8,192 = **156.0B tokens** (3.3% of 4.67T target)
 
-**Loss:** 4.8092 (8505255 end, step-1,125)
+**Loss:** 2.684 (8558549 end, step-3,100)
 
 ### Logs
 
