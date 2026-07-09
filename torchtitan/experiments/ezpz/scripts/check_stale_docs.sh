@@ -169,4 +169,18 @@ while IFS= read -r plotter; do
 done < <(find torchtitan/experiments/ezpz/docs/production -type f -name 'plot_*.py' 2>/dev/null | sort)
 echo "=== coverage summary: $cov_ok wired, $cov_unwired unwired ==="
 
+# ---- dashboard step-drift audit ----------------------------------------------
+# The 'Last updated' check above is date-based: it CANNOT catch content that
+# drifted without the file being re-committed. The hand-narrated top-level
+# dashboard (docs/production/README.md) is not auto-filled, so its per-chain
+# step CELLS can fall behind disk while the marker still looks fresh (it did:
+# 20B rows sat at 4,400 / 2,100 after disk hit 5,400 / 3,100). Cross-check the
+# dashboard's table step-cells against disk truth. Read-only (advisory).
+echo ""
+echo "=== dashboard step-drift (production/README.md cells vs disk) ==="
+PY_DD="${PY:-.venv/bin/python3}"
+[[ -x "$PY_DD" ]] || PY_DD="python3"
+PYTHONPATH=. "$PY_DD" -m torchtitan.experiments.ezpz.utils.check_dashboard_drift 2>&1 \
+    || echo "  (drift check errored -- see above)"
+
 exit 0

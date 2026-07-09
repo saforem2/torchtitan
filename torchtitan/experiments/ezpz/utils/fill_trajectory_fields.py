@@ -411,6 +411,10 @@ def _wandb_latest_loss(traj: dict) -> float | None:
 ROLLUP_PAGES = [
     "torchtitan/experiments/ezpz/docs/production/agpt/2b/README.md",
     "torchtitan/experiments/ezpz/docs/production/agpt/20b/README.md",
+    # The top-level dashboard: its per-model rollup tables are Shape B and its
+    # status-at-a-glance table is Shape C (see _rewrite_rollup_row). Both are
+    # handled cell-by-index so the differing schema is not mangled.
+    "torchtitan/experiments/ezpz/docs/production/README.md",
 ]
 
 
@@ -500,10 +504,12 @@ def propagate_to_rollups(
     # Build {canonical-docs-rel README: values} -- keyed so 2B-256N and
     # 20B-256N never collide.
     vals: dict[str, dict] = {}
+    vals_by_mn: dict[tuple[str, int], dict] = {}
     for t in trajs:
         v = _compute_disk_values(t)
         if v:
             vals[_canon_readme(t["readme"])] = v
+            vals_by_mn[(t["model"].lower(), t["num_nodes"])] = v
     n_changed = 0
     warns: list[str] = []
 
@@ -511,24 +517,51 @@ def propagate_to_rollups(
         page = REPO_ROOT / page_rel
         if not page.is_file():
             continue
+        # The top-level dashboard's Loss cells are hand-curated from the LATEST
+        # run's reported loss (e.g. 20B-256 step-3,100 loss 2.68), which is more
+        # current than the leaf README's **Loss:** field (often lagging at an
+        # older step). Propagating loss there would REGRESS it, so only the
+        # disk-derivable step/tokens/% cells are auto-filled on the dashboard.
+        _page_skip_loss = page_rel.endswith("docs/production/README.md")
         lines = page.read_text().splitlines(keepends=False)
         out: list[str] = []
         changed_here = False
         for line in lines:
-            if not line.lstrip().startswith("|") or "README.md)" not in line:
+            # Process table rows that either link a leaf README (Shape A/B/C)
+            # OR lead with `| Model | Nodes |` (Shape D dashboard rollups whose
+            # only link is an experiments report, not a leaf README).
+            _looks_rollup = re.match(
+                r"\|\s*(?:2B|20B|80B)\s*\|\s*\d+\s*\|", line, re.I
+            )
+            if not line.lstrip().startswith("|") or (
+                "README.md)" not in line and not _looks_rollup
+            ):
                 out.append(line)
                 continue
             # Resolve THIS row's leaf link to the same canonical key.
             link_m = re.search(r"\]\(([^)]*?n\d+/README\.md)\)", line)
-            if not link_m:
+            v = None
+            if link_m:
+                v = vals.get(_resolve_rollup_link(page_rel, link_m.group(1)))
+            if v is None:
+                # Dashboard rollup rows (Shape D) carry no leaf link -- their
+                # job link points at an experiments report. Match them by the
+                # leading `| Model | Nodes |` cells instead.
+                mn = re.match(
+                    r"\|\s*(2B|20B|80B)\s*\|\s*(\d+)\s*\|", line, re.I
+                )
+                _is_shape_d = False
+                if mn:
+                    v = vals_by_mn.get((mn.group(1).lower(), int(mn.group(2))))
+                    _is_shape_d = v is not None
+            else:
+                _is_shape_d = False
+            if v is None:
                 out.append(line)
                 continue
-            key = _resolve_rollup_link(page_rel, link_m.group(1))
-            v = vals.get(key)
-            if not v:
-                out.append(line)
-                continue
-            new_line = _rewrite_rollup_row(line, v)
+            new_line = _rewrite_rollup_row(
+                line, v, skip_loss=_page_skip_loss, force_shape_b=_is_shape_d
+            )
             if new_line != line:
                 out.append(new_line)
                 changed_here = True
@@ -542,7 +575,9 @@ def propagate_to_rollups(
     return n_changed, warns
 
 
-def _rewrite_rollup_row(line: str, v: dict) -> str:
+def _rewrite_rollup_row(
+    line: str, v: dict, *, skip_loss: bool = False, force_shape_b: bool = False
+) -> str:
     """Rewrite the step / loss / tokens(pct) numeric cells of one rollup
     table row, preserving every other cell (esp. the Status narrative)
     and the row's existing bold / comma / '~' / '(persisted)' styling.
@@ -586,8 +621,36 @@ def _rewrite_rollup_row(line: str, v: dict) -> str:
         (i for i, c in enumerate(cells) if re.search(r"n\d+/README\.md\)", c)),
         None,
     )
+    if force_shape_b:
+        # Dashboard rollup row matched by (Model, Nodes) -- no leaf link, but
+        # the numeric cells are the Shape B positions (step=3, loss=4, tok=5).
+        if len(cells) >= 6:
+            cells[3] = sub_step(cells[3])
+            if not skip_loss:
+                cells[4] = sub_loss(cells[4])
+            cells[5] = sub_tokens(cells[5])
+        return "|".join(cells)
     if link_idx is None:
         return line
+
+    # Shape C (status-at-a-glance dashboard table): link col 1, but numerics
+    # are step=cells[3], loss=cells[4], %target=cells[5], then a prose Trend
+    # cell. Detected by a bare step cell at [3] AND a '%'-bearing cell at [5]
+    # (the per-model Shape A rollup has no lone '% target' column).
+    _bare_step = re.compile(r"^\s*\*{0,2}(?:\d{1,3}(?:,\d{3})+|\d{4,})\*{0,2}\s*$")
+    is_shape_c = (
+        link_idx == 1
+        and len(cells) >= 7
+        and _bare_step.match(cells[3])
+        and "%" in cells[5]
+    )
+    if is_shape_c:
+        cells[3] = sub_step(cells[3])
+        if not skip_loss:
+            cells[4] = sub_loss(cells[4])
+        # % target only (no tokens column here); reuse the pct sub.
+        cells[5] = re.sub(r"[\d.]+\s*%", v["pct"], cells[5], count=1)
+        return "|".join(cells)
 
     if link_idx <= 2:
         # Shape A (model rollup): link in col 1 -> numeric cells are the
@@ -595,14 +658,16 @@ def _rewrite_rollup_row(line: str, v: dict) -> str:
         # cells[-1] is '' (trailing pipe), so real last is cells[-2].
         if len(cells) >= 5:
             cells[-4] = sub_step(cells[-4])
-            cells[-3] = sub_loss(cells[-3])
+            if not skip_loss:
+                cells[-3] = sub_loss(cells[-3])
             cells[-2] = sub_tokens(cells[-2])
     else:
         # Shape B (top-level): link is near the end; numeric cells are
         # cols 3,4,5 (1-indexed within the row) = cells[3],[4],[5].
         if len(cells) >= 6:
             cells[3] = sub_step(cells[3])
-            cells[4] = sub_loss(cells[4])
+            if not skip_loss:
+                cells[4] = sub_loss(cells[4])
             cells[5] = sub_tokens(cells[5])
     return "|".join(cells)
 
