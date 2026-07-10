@@ -43,6 +43,28 @@ def add_job_shading(ax, smin, smax):
         ax.axvspan(lo, hi, alpha=0.35, color=color, zorder=0)
 
 
+def cumulative_tokens(entries):
+    """Stitch TRL's per-attempt num_tokens counter into a monotonic total.
+
+    num_tokens is a per-Trainer-instance running count. Each auto-retry
+    resumes from the last checkpoint and re-inits the counter to ~0, so the
+    raw series drops back at every attempt boundary (the sawtooth). Whenever
+    the counter falls below the previous entry, a new attempt has started, so
+    carry the prior cumulative total forward as an offset. global_step is
+    already continuous (restored from checkpoint), so this realigns the token
+    axis with the real, cumulative amount of data the model has seen.
+    """
+    raw = np.array([e["num_tokens"] for e in entries], dtype=float)
+    cum = np.empty_like(raw)
+    offset = prev = 0.0
+    for i, v in enumerate(raw):
+        if v < prev:  # counter reset -> new attempt began
+            offset += prev
+        cum[i] = offset + v
+        prev = v
+    return cum
+
+
 def main():
     # TRAINER_STATE lives on Sunspot (/lus/tegu/...); on any other host the
     # data is absent. Skip cleanly (exit 0) so the refresh catch-all's parallel
@@ -58,7 +80,7 @@ def main():
     lr = np.array([e["learning_rate"] for e in h])
     acc = np.array([e["mean_token_accuracy"] for e in h])
     entropy = np.array([e["entropy"] for e in h])
-    tokens_b = np.array([e["num_tokens"] for e in h]) / 1e9
+    tokens_b = cumulative_tokens(h) / 1e9
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 8.5), sharex=True)
     fig.suptitle(
@@ -72,7 +94,7 @@ def main():
         (axes[0, 2], lr * 1e5,   "learning rate",        "lr (x 1e-5)"),
         (axes[1, 0], acc,        "mean token accuracy",  "mean_token_accuracy"),
         (axes[1, 1], entropy,    "entropy",              "entropy (nats)"),
-        (axes[1, 2], tokens_b,   "tokens seen",          "tokens (B)"),
+        (axes[1, 2], tokens_b,   "tokens seen (cumulative)", "tokens (B)"),
     ]
     for ax, y, title, ylabel in panels:
         add_job_shading(ax, smin, smax)
