@@ -41,6 +41,108 @@ EZPZ_SFT_MIX_CACHE_DIR = os.environ.get(
 )
 
 
+def _interleave_all_exhausted_fast(datasets_list, probabilities, seed):
+    """Vectorized, bit-identical drop-in for HF
+    ``interleave_datasets(..., probabilities=..., stopping_strategy="all_exhausted")``.
+
+    HF's ``_interleave_map_style_datasets`` builds the output index list in a
+    pure-Python for-loop -- one iteration per output row. For a big mix
+    (OpenMathInstruct-2's 14M rows -> ~93M interleaved rows) that loop takes
+    ~90 min single-threaded, which at 384 ranks blew the XPU oneCCL barrier
+    (jobs 12468348/371/398) and is why the big-mix path was avoided. The RNG is
+    already batched; it is Python interpreter overhead, not compute. This
+    reproduces HF's exact algorithm with numpy: ~5s for 93M rows.
+
+    Bit-identical to stock for a fixed ``seed`` because it consumes the RNG
+    exactly as HF does (``rng.choice(n, size=1000, p=probabilities)`` blocks)
+    and applies the same rolling-window index mapping
+    (``current_index`` wraps to 0 on exhaustion). Verified against stock across
+    multiple (lengths, probabilities, seed) cases; a self-check in
+    ``_materialized_mix_load_or_build`` guards against a future HF change to the
+    RNG-consumption pattern.
+
+    Only handles the ``all_exhausted`` + probabilities-given case (what the ezpz
+    SFT mixes use). Callers must fall back to stock for anything else.
+    """
+    import numpy as np
+    from datasets import concatenate_datasets
+
+    lengths = [len(d) for d in datasets_list]
+    n = len(lengths)
+    offsets = np.cumsum([0] + lengths[:-1])
+    L = np.asarray(lengths, dtype=np.int64)
+
+    # Replay HF's iter_random_indices EXACTLY: default_rng(seed), drawn in
+    # 1000-sized blocks. Keep drawing until every source has appeared at least
+    # `length` times (all_exhausted). Track cumulative counts to know when.
+    rng = np.random.default_rng(seed)
+    blocks = []
+    counts = np.zeros(n, dtype=np.int64)
+    while not np.all(counts >= L):
+        block = rng.choice(n, size=1000, p=probabilities)
+        blocks.append(block)
+        counts += np.bincount(block, minlength=n)
+    draws = np.concatenate(blocks)
+
+    # HF sets is_exhausted[s]=True right after source s's L-th draw, and breaks
+    # the loop (before appending) once ALL are exhausted. So the last appended
+    # draw is at position max_s(position of s's L-th occurrence).
+    reach = np.full(n, -1, dtype=np.int64)
+    for s in range(n):
+        occ = np.flatnonzero(draws == s)
+        if len(occ) >= lengths[s]:
+            reach[s] = occ[lengths[s] - 1]
+    use = draws[: reach.max() + 1]
+
+    # Each source's k-th appearance maps to concatenated row
+    # (k-1) % length + offset (rolling window on exhaustion).
+    idx = np.empty(len(use), dtype=np.int64)
+    for s in range(n):
+        pos = np.flatnonzero(use == s)
+        idx[pos] = (np.arange(len(pos)) % lengths[s]) + offsets[s]
+
+    return concatenate_datasets(datasets_list).select(idx.tolist())
+
+
+_FAST_INTERLEAVE_VERIFIED: bool | None = None
+
+
+def _fast_interleave_matches_stock(seed: int = 42) -> bool:
+    """One-time guard: confirm the vectorized fast path is bit-identical to
+    stock ``interleave_datasets`` on a small synthetic case for the installed
+    ``datasets`` version. Cached after the first call. If HF ever changes its
+    RNG-consumption pattern, this returns False and callers fall back to stock
+    (correctness over speed). Cheap (tiny datasets, sub-second).
+    """
+    global _FAST_INTERLEAVE_VERIFIED
+    if _FAST_INTERLEAVE_VERIFIED is not None:
+        return _FAST_INTERLEAVE_VERIFIED
+    try:
+        from datasets import interleave_datasets
+
+        probs = [0.65, 0.15, 0.20]
+        dsets = [
+            Dataset.from_dict({"__v": [f"{i}_{j}" for j in range(L)]})
+            for i, L in enumerate((97, 20, 43))
+        ]
+        want = interleave_datasets(
+            dsets, probabilities=probs, seed=seed,
+            stopping_strategy="all_exhausted",
+        )["__v"]
+        got = _interleave_all_exhausted_fast(dsets, probs, seed)["__v"]
+        _FAST_INTERLEAVE_VERIFIED = want == got
+        if not _FAST_INTERLEAVE_VERIFIED:
+            log.warning(
+                "[mix-cache] fast interleave DIVERGED from stock for this "
+                "datasets version; falling back to the (slow) stock path."
+            )
+    except Exception as e:  # noqa: BLE001 -- never let the guard break a build
+        log.warning(f"[mix-cache] fast-interleave self-check errored ({e}); "
+                    "using stock path.")
+        _FAST_INTERLEAVE_VERIFIED = False
+    return _FAST_INTERLEAVE_VERIFIED
+
+
 def _materialized_mix_load_or_build(
     component_names: list[str],
     weights: list[float],
@@ -107,16 +209,35 @@ def _materialized_mix_load_or_build(
     components_built = [
         SFT_REGISTRY[n].build() for n in component_names
     ]
-    ds = interleave_datasets(
-        components_built,
-        probabilities=norm_weights,
-        seed=seed,
-        stopping_strategy=stopping_strategy,
-    )
-    log.info(
-        f"[mix-cache] interleave built ({len(ds):,} rows in "
-        f"{time.monotonic()-t0:.1f}s)"
-    )
+
+    # Fast path: for the probabilities-given all_exhausted case (all ezpz SFT
+    # mixes), use the vectorized interleave -- HF's Python-loop index build is
+    # ~90 min for a 93M-row mix; the vectorized version is ~5s and bit-identical.
+    # Fall back to stock for any other config. A one-time self-check on tiny
+    # synthetic datasets confirms bit-equivalence against stock for THIS
+    # datasets version, so a future change to HF's RNG-consumption pattern fails
+    # loudly here instead of silently producing a different (still-valid but
+    # non-reproducible) mix.
+    use_fast = stopping_strategy == "all_exhausted" and norm_weights is not None
+    if use_fast and _fast_interleave_matches_stock(seed=seed):
+        ds = _interleave_all_exhausted_fast(
+            components_built, probabilities=norm_weights, seed=seed
+        )
+        log.info(
+            f"[mix-cache] interleave built via FAST vectorized path "
+            f"({len(ds):,} rows in {time.monotonic()-t0:.1f}s)"
+        )
+    else:
+        ds = interleave_datasets(
+            components_built,
+            probabilities=norm_weights,
+            seed=seed,
+            stopping_strategy=stopping_strategy,
+        )
+        log.info(
+            f"[mix-cache] interleave built via stock path "
+            f"({len(ds):,} rows in {time.monotonic()-t0:.1f}s)"
+        )
 
     # Drop empty / whitespace-only prompt or completion rows. Some upstream
     # sources (e.g. ~771 rows in the tulu/metamathqa/ultrachat mix, 0.03%)
