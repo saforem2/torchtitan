@@ -86,14 +86,27 @@ echo "Allocation: select=36 (32 train + 4 spare for --auto-retry)" \
     | tee -a "${LOG_DIR}/run.log"
 echo "Sizing: 384 ranks x bsz=1 x gas=16 = GBS=6144, 12.58M tokens/step" \
     | tee -a "${LOG_DIR}/run.log"
-echo "expecting mix-cache HIT on hash 44608c8c15bd9714 (<60s load, no Hub)" \
+echo "loading PRE-TOKENIZED dataset (TRL skips tokenize+pack; <60s to step 1)" \
     | tee -a "${LOG_DIR}/run.log"
 git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
     torchtitan/experiments/ezpz/rl/datasets_sft.py 2>&1 | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
 
-# Registered `tulu_math_uc_mix` -> the big cached mix (load_from_disk, no build,
-# no Hub, no oneCCL barrier at scale).
+# PRE-TOKENIZED dataset (produced by _pretokenize_tulu_math_uc_mix_1n.sh):
+# already tokenized+packed with input_ids, so TRL SKIPS the ~8.5h runtime
+# tokenize+pack that killed job 12470281 (SFTTrainer re-tokenizes the whole 93M-
+# row mix at job start; the auto-retry idle-watchdog SIGTERM'd it before step 1).
+# With input_ids present, TRL detects the dataset as processed and training
+# starts in <60s. MUST match the pre-tokenize job's --max_length (2048) + base.
+PRETOK_DIR="${HOME}/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len2048"
+if [[ ! -d "${PRETOK_DIR}" ]]; then
+    echo "FATAL: pre-tokenized dataset missing at ${PRETOK_DIR}" \
+        | tee -a "${LOG_DIR}/run.log"
+    echo "Run _pretokenize_tulu_math_uc_mix_1n.sh first." \
+        | tee -a "${LOG_DIR}/run.log"
+    exit 1
+fi
+
 # --spare-nodes auto is REQUIRED for --auto-retry to actually swap a bad node
 # (select=36 = 32 active + 4 spare; --np 384 pins the trainer to 32 nodes).
 # The SFT venv is on shared tegu (source .venv above), NOT a per-node /tmp yeet,
@@ -103,7 +116,7 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 ezpz launch --np 384 -ppn 12 --auto-retry --spare-nodes auto \
     --max-failover-retries 3 --timeout "${IDLE_TIMEOUT:-1800}" \
     python3 -m torchtitan.experiments.ezpz.rl.train_sft \
-    --sft_dataset tulu_math_uc_mix \
+    --pretokenized_dataset "${PRETOK_DIR}" \
     --model_name_or_path "${BASE_MODEL}" \
     --output_dir "${CKPT_DIR}" \
     --num_train_epochs 1 \
