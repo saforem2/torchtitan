@@ -489,6 +489,35 @@ def main() -> None:
             f"[rank {rank}] Loaded pre-tokenized dataset: {len(dataset)} "
             f"packed sequences (TRL will skip tokenize+pack)"
         )
+        # Assistant-only masking on the pre-tokenized path: the masks are
+        # already BAKED IN as the `assistant_masks` column (built during
+        # --pretokenize_to, where assistant_only_loss=True). TRL's collator
+        # applies `assistant_masks` on PRESENCE alone -- it does not read the
+        # assistant_only_loss flag at train time (only compute_loss-irrelevant
+        # code does). But SFTTrainer.__init__ has a guard that raises
+        # "dataset is not conversational" when assistant_only_loss=True and the
+        # sample isn't conversational -- and a pre-tokenized dataset (input_ids
+        # + assistant_masks, no `messages`) is not "conversational" by TRL's
+        # check. So we turn the FLAG off here (masking is unaffected: the
+        # collator still masks non-assistant tokens via the baked-in column) to
+        # skip that spurious guard. If the masks are absent, keep the flag as
+        # the user set it so TRL raises the appropriate error rather than us
+        # silently training on all tokens.
+        if "assistant_masks" in dataset.column_names:
+            if config.assistant_only_loss:
+                log.info(
+                    f"[rank {rank}] pre-tokenized dataset carries "
+                    f"assistant_masks; setting assistant_only_loss=False to "
+                    f"skip TRL's conversational guard (masking preserved via "
+                    f"the baked-in assistant_masks column)"
+                )
+                config.assistant_only_loss = False
+        else:
+            log.warning(
+                f"[rank {rank}] pre-tokenized dataset has NO assistant_masks "
+                f"column; assistant-only masking will NOT be applied "
+                f"(assistant_only_loss={config.assistant_only_loss})"
+            )
     else:
         log.info(
             f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)..."
