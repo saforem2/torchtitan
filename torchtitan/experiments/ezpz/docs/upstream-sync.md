@@ -20,6 +20,30 @@ was required in ezpz.
 
 ---
 
+## 2026-07-10 — 67th sync (1 commit, `4b041be61`)
+
+Direct merge on `ezpz` (single trivial commit, no worktree). **No replays
+required** -- no `models/llama3/`, `models/deepseek_v3/`, or `models/qwen3/`
+changes; agpt/moe diff empty. Clean automatic merge, **zero conflicts**.
+
+### Upstream commit
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `4b041be61` | [rl] Remove RL H100 CI to A10G and drop oversized sample before packing (#3855) | None. Entirely `experiments/rl/` (upstream's RL experiment, which we don't run) + CI YAML: moves the RL loss-guard to A10G, deletes the H100 workflow, and adds an oversized-sample drop in `rl/components/batcher.py`. |
+
+### Content note (adjacent to our SFT work, but different code path)
+The substantive change is *"drop samples longer than seq_len before packing"* in
+upstream's `rl/components/batcher.py` -- same class of issue as our recent SFT
+packing work, but that batcher is upstream's RL path, not our `ezpz/rl` SFT
+(TRL `SFTTrainer` packing, where we already filter empty rows pre-interleave).
+No action; no shared code.
+
+### Validation
+Merge-only, no files on the agpt/moe/qwen3 or core paths -> no smoke required
+(nothing our runs touch changed). Pushed to `origin/ezpz`.
+
+---
+
 ## 2026-07-07 — 66th sync (4 commits, `533f604fe..upstream/main`)
 
 Merged as `5dee427fc` in worktree `.worktrees/ezpz-66th-sync`. **No replays
