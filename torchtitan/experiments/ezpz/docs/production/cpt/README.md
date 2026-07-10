@@ -2,7 +2,7 @@
 
 > **Living document** — updated as CPT runs complete and are evaluated.
 >
-> Last updated: 2026-07-06
+> Last updated: 2026-07-10
 
 ## Motivation
 
@@ -143,6 +143,33 @@ the direct stage-2 analog is **~2.391T tokens** (~8x the 300B pilot). See
 > (~5x the 512N 12h window -> multi-day, chained). Running that for 3 ratios
 > before knowing which wins would be ~7T tokens of compute; the 300B screen
 > costs ~1/8 of one and identifies the winner first.
+
+## Stage-2 LAUNCHED (2026-07-10) -- via the chained umbrella
+
+Rather than pure dolmino-100 (the pilot DEGRADED benchmarks: HellaSwag -7.4pp,
+ARC-Easy -10.4pp -- see the warning above), stage-2 uses **olmo50-dolmino50**
+(the blend that HELD ARC-Easy in the pilot) at **gentle CONSTANT LR = 2e-6**
+(`--lr-scheduler.decay-ratio=0.0 --min-lr-factor=1.0 --warmup-steps=20`),
+model-only forked from the completed stage-1 base (step-92,859).
+
+It runs in the **reclaimed 2B-256 slot of the multi-chain umbrella**: the
+2B-256 base finished stage-1 at 100%, so umbrella trainer-2 was wasting ~256
+nodes re-running a done chain. `submit_agpt_multi_autoretry.sh` was extended
+with per-trainer overrides (dfl_name|lr|initial_load_path|decay_ratio|
+min_lr_factor|train_tokens) so trainer-2 does stage-2 while the other three
+keep their olmo-mix chains. Smoke-validated 0/4 (job 8663111: overrides
+applied, model-only fork loaded, trainers 0/1/3 regression-clean).
+
+- **Ckpt dir:** `outputs/checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144`
+  (fresh -- never touches the stage-1 dir).
+- **Budget:** train_tokens=2.391e12 -> ~47,500 steps at GBS=6144 (the MDS
+  stage-2 analog); spans many 12h umbrella windows, resuming the stage-2
+  ckpt dir each run.
+- **Launch:** chained umbrella `8663177` (H on `afterany:8648363`) -- dispatches
+  when the current umbrella walltimes. The 3 standalone chains it covers
+  (8647383, 8661117, 8647386) were qheld to avoid ckpt-dir collision.
+- **Also running:** the standalone dolmino-100 constant-2e6 CPT retry
+  (`8662867`, distinct dir) still tests the pure-dolmino gentle-LR arm.
 
 ## Cross-refs
 
