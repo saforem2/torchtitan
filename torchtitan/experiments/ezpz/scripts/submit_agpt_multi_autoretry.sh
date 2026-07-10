@@ -126,15 +126,20 @@ log() { echo "[multi $(date +%H:%M:%S)] $*"; }
 die() { echo "[multi ERROR] $*" >&2; exit 1; }
 
 # ---- Per-trainer config table -------------------------------------------------
-# Format: model|nnodes|master_port|workdir(clone; cwd == torchtitan source)|
-#         ckpt_dir(relative; job.dump_folder=./outputs PREPENDS outputs/).
+# Format (5 required + 6 optional trailing override fields; empty override =>
+# fall back to the global default so a plain 5-field row is unchanged behavior):
+#   model|nnodes|master_port|workdir(clone; cwd == torchtitan source)|
+#     ckpt_dir(relative; job.dump_folder=./outputs PREPENDS outputs/)|
+#     dfl_name|lr|initial_load_path|decay_ratio|min_lr_factor|train_tokens
 # GBS is computed per-slice by the launch as NGPUS_ACTIVE*LBS(2)*GAS(1):
 #   512*12*2 = 12288 ; 256*12*2 = 6144. The GBS in each ckpt dir name below
 # MUST match, or the chain fresh-starts instead of resuming.
+# The overrides let ONE trainer run a different recipe (e.g. the 2B stage-2
+# mid-training fork below) while the others keep their olmo-mix chains.
 TRAINERS=(
     "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288"
     "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
-    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144"
+    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144|olmo50-dolmino50|2e-6|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2391000000000"
     "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
 )
 
@@ -186,9 +191,10 @@ log "slice + console logs under: $MULTI_LOG_DIR"
 
 # ---- Slice the nodefile + build each trainer's resolved plan ------------------
 declare -a T_MODEL T_NNODES T_SPARES T_PORT T_WORKDIR T_CKPT T_SLICE T_VENVDST T_VENVSRC
+declare -a T_DFL T_LR T_INITLOAD T_DECAY T_MINLR T_TOKENS
 offset=1
 for idx in "${!TRAINERS[@]}"; do
-    IFS='|' read -r model nnodes port workdir ckpt <<< "${TRAINERS[$idx]}"
+    IFS='|' read -r model nnodes port workdir ckpt o_dfl o_lr o_init o_decay o_minlr o_tokens <<< "${TRAINERS[$idx]}"
 
     # In tiny profile every trainer runs the 2B model on TINY_NNODES nodes and
     # writes a THROWAWAY ckpt dir keyed by jobid+idx -- NEVER a canonical chain.
@@ -218,6 +224,13 @@ for idx in "${!TRAINERS[@]}"; do
     T_WORKDIR[$idx]="$workdir"
     T_CKPT[$idx]="$ckpt"
     T_SLICE[$idx]="$slice_file"
+    # Optional per-trainer recipe overrides (empty -> global fallback in launch).
+    T_DFL[$idx]="$o_dfl"
+    T_LR[$idx]="$o_lr"
+    T_INITLOAD[$idx]="$o_init"
+    T_DECAY[$idx]="$o_decay"
+    T_MINLR[$idx]="$o_minlr"
+    T_TOKENS[$idx]="$o_tokens"
     # Per-model venv dst -- distinct names keep the shared mom node's 2b/20b
     # copies from clobbering each other; on disjoint compute slices the same
     # dst name resolves to physically distinct node-local dirs.
@@ -315,15 +328,28 @@ launch_trainer() {
 
     local nproc=$(( nnodes * PPN ))
     local gbs=$(( nproc * LBS * GAS / (TP * PP * CP) ))
+    # Per-trainer recipe overrides (fall back to the global default when empty).
+    local dfl_name="${T_DFL[$idx]:-$DFL_NAME}"
+    local lr="${T_LR[$idx]:-$LR}"
+    local tok="${T_TOKENS[$idx]:-$TRAIN_TOKENS}"
     local training_steps
     if [[ "$PROFILE" == "tiny" ]]; then
         training_steps="$TINY_STEPS"
     else
-        training_steps=$(( TRAIN_TOKENS / (gbs * SEQ_LEN) ))
+        training_steps=$(( tok / (gbs * SEQ_LEN) ))
     fi
 
-    local dfl="torchtitan/experiments/ezpz/data-lists/aurora/${DFL_NAME}.txt"
-    local data_cache="${ckpt}/.cache/${DFL_NAME}/index-cache"
+    local dfl="torchtitan/experiments/ezpz/data-lists/aurora/${dfl_name}.txt"
+    local data_cache="${ckpt}/.cache/${dfl_name}/index-cache"
+
+    # Optional fork (initial-load) + constant/decayed-LR schedule overrides.
+    local xtra=()
+    [[ -n "${T_INITLOAD[$idx]}" ]] && xtra+=(--checkpoint.initial-load-path="${T_INITLOAD[$idx]}")
+    if [[ -n "${T_DECAY[$idx]}" ]]; then
+        xtra+=(--lr-scheduler.decay-ratio="${T_DECAY[$idx]}"
+               --lr-scheduler.min-lr-factor="${T_MINLR[$idx]:-1.0}"
+               --lr-scheduler.warmup-steps=20)
+    fi
 
     local val_flags
     if [[ "$PROFILE" == "tiny" ]]; then
@@ -365,8 +391,9 @@ launch_trainer() {
             --dataloader.dataset-path="$dfl" \
             --dataloader.data-cache-path="$data_cache" \
             $val_flags \
+            "${xtra[@]}" \
             --optimizer="$OPTIMIZER" \
-            --optimizer.lr="$LR" \
+            --optimizer.lr="$lr" \
             --training.local-batch-size="$LBS" \
             --training.global-batch-size="$gbs" \
             --training.seq-len="$SEQ_LEN" \
