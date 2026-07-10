@@ -88,6 +88,38 @@ class EzpzSFTArgs:
         default=False,
         metadata={"help": "Skip the final trainer.save_model() call."},
     )
+    pretokenize_to: str = field(
+        default="",
+        metadata={
+            "help": (
+                "OFFLINE PRE-TOKENIZE MODE. If set, build the dataset, run "
+                "TRL's tokenize+pack prep exactly as training would (via "
+                "SFTTrainer), save the processed dataset (with `input_ids`) to "
+                "this path via save_to_disk, and EXIT without training. Run "
+                "this once on a 1N compute node for a big mix; the training "
+                "job then loads it with --pretokenized_dataset and skips the "
+                "runtime tokenize entirely. Motivation: SFTTrainer "
+                "re-tokenizes the WHOLE dataset at job start (~2.5k ex/s), so "
+                "a 93M-row mix takes ~8.5h -- longer than any single training "
+                "window and long enough that the auto-retry idle-watchdog "
+                "SIGTERMs the job before the first step (job 12470281). "
+                "Pre-tokenizing moves that cost to a dedicated one-time job."
+            )
+        },
+    )
+    pretokenized_dataset: str = field(
+        default="",
+        metadata={
+            "help": (
+                "Load an already tokenized+packed dataset (produced by "
+                "--pretokenize_to) from this path via load_from_disk and hand "
+                "it straight to SFTTrainer. Because the dataset contains an "
+                "`input_ids` column, TRL detects it as processed and skips the "
+                "tokenize+pack prep. Mutually exclusive with the normal "
+                "--sft_dataset build path (this takes precedence)."
+            )
+        },
+    )
     fsdp_transformer_layer_cls_to_wrap: str = field(
         default="LlamaDecoderLayer",
         metadata={
@@ -371,7 +403,11 @@ def main() -> None:
     else:
         config.report_to = []
 
-    sft_ds = get_sft_dataset(ezpz_args.sft_dataset)
+    # Pre-tokenized load path takes precedence over the mix build: if
+    # --pretokenized_dataset is set we load an already tokenized+packed
+    # dataset (see --pretokenize_to) and skip the build entirely.
+    use_pretokenized = bool(ezpz_args.pretokenized_dataset)
+    sft_ds = None if use_pretokenized else get_sft_dataset(ezpz_args.sft_dataset)
 
     log.info(
         f"[rank {rank}] SFT config: model={model_name} "
@@ -436,22 +472,42 @@ def main() -> None:
     #      stated timeout (12468348, 12468371, 12468398 all died here).
     # Beacon retained for the cold-cache case where the build is slow
     # — so each rank's progress is visible if it stalls.
-    log.info(f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)...")
-    beacon_stop = threading.Event()
-    beacon = threading.Thread(
-        target=_rank0_progress_beacon,
-        args=(beacon_stop, ezpz_args.sft_dataset),
-        daemon=True,
-    )
-    if rank == 0:
-        beacon.start()
-    try:
-        dataset = sft_ds.build()
-    finally:
-        beacon_stop.set()
+    if use_pretokenized:
+        from datasets import load_from_disk
+
+        path = ezpz_args.pretokenized_dataset
+        log.info(f"[rank {rank}] loading PRE-TOKENIZED dataset from {path}")
+        dataset = load_from_disk(path)
+        if "input_ids" not in dataset.column_names:
+            raise ValueError(
+                f"--pretokenized_dataset {path!r} has columns "
+                f"{dataset.column_names} but no 'input_ids' -- it was not "
+                f"produced by --pretokenize_to (or is a raw mix). TRL only "
+                f"skips prep when 'input_ids' is present."
+            )
+        log.info(
+            f"[rank {rank}] Loaded pre-tokenized dataset: {len(dataset)} "
+            f"packed sequences (TRL will skip tokenize+pack)"
+        )
+    else:
+        log.info(
+            f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)..."
+        )
+        beacon_stop = threading.Event()
+        beacon = threading.Thread(
+            target=_rank0_progress_beacon,
+            args=(beacon_stop, ezpz_args.sft_dataset),
+            daemon=True,
+        )
         if rank == 0:
-            beacon.join(timeout=5)
-    log.info(f"[rank {rank}] Built SFT dataset: {len(dataset)} samples")
+            beacon.start()
+        try:
+            dataset = sft_ds.build()
+        finally:
+            beacon_stop.set()
+            if rank == 0:
+                beacon.join(timeout=5)
+        log.info(f"[rank {rank}] Built SFT dataset: {len(dataset)} samples")
 
     if ezpz_args.max_train_samples > 0 and ezpz_args.max_train_samples < len(dataset):
         # Truncate to a fixed sample budget — useful for smoke tests
@@ -471,6 +527,27 @@ def main() -> None:
         train_dataset=dataset,
         processing_class=tokenizer,
     )
+
+    # OFFLINE PRE-TOKENIZE MODE: SFTTrainer.__init__ has just run TRL's
+    # tokenize+pack prep on `dataset`, so trainer.train_dataset now holds the
+    # processed dataset (with `input_ids`). Save it and exit -- no training.
+    # The subsequent training job loads this via --pretokenized_dataset and
+    # TRL skips prep because `input_ids` is present. Saving trainer.train_
+    # dataset (not re-implementing prep here) guarantees the offline result is
+    # bit-identical to what training would have produced in-process.
+    if ezpz_args.pretokenize_to:
+        out = ezpz_args.pretokenize_to
+        if rank == 0:
+            processed = trainer.train_dataset
+            log.info(
+                f"[rank {rank}] PRE-TOKENIZE: saving {len(processed)} packed "
+                f"sequences (cols={processed.column_names}) to {out}"
+            )
+            processed.save_to_disk(out)
+            log.info(f"[rank {rank}] PRE-TOKENIZE done -> {out}; exiting.")
+        # Other ranks: nothing to do. (Pre-tokenize is intended as a 1N/1-rank
+        # job; guard rank 0 only so a stray multi-rank launch still writes once.)
+        return
 
     log.info(f"[rank {rank}] Starting SFT training...")
     # Resolve resume_from_checkpoint into the shape HF Trainer wants:
