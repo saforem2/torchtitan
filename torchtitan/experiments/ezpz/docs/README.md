@@ -25,6 +25,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-10 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-10 | [Production SFT](./production/sft/README.md) |
 | 2026-07-10 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
+| 2026-07-10 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-09 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/aurora2b/tulu_math_uc_mix/README.md) |
 | 2026-07-09 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-07-09 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
@@ -34,7 +35,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-09 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-09 | [Development Journal](./journal.md) |
 | 2026-07-09 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
-| 2026-07-09 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-06 | [Summaries](./summaries/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
 | 2026-07-06 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
