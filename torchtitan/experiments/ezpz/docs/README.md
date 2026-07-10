@@ -23,6 +23,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-07-10 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-07-10 | [Summaries](./summaries/README.md) |
+| 2026-07-10 | [2026-07-06 to 2026-07-10 -- ~4-Day Summary](./summaries/2026-07-06_to_2026-07-10.md) |
 | 2026-07-10 | [Production SFT](./production/sft/README.md) |
 | 2026-07-10 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
 | 2026-07-10 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
@@ -35,7 +37,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-09 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-09 | [Development Journal](./journal.md) |
 | 2026-07-09 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
-| 2026-07-06 | [Summaries](./summaries/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
 | 2026-07-06 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
 | 2026-07-06 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./rl/history/vllm-xpu-wiring-plan.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
 | 2026-07-06 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
 | 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
-| 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 | 2026-07-06 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./rl/2026-07-06_multinode-grpo-root-cause.md) |
 | 2026-07-06 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-07-06 | [Production GRPO](./production/grpo/README.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-06-30 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
 | 2026-06-30 | [LR Finder -- agpt 2B](./experiments/lr-finder/agpt/2b/README.md) |
 | 2026-06-30 | [LR Finder -- agpt 20B](./experiments/lr-finder/agpt/20b/README.md) |
-| 2026-06-29 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -137,7 +137,7 @@ relevant guide before suggesting work that touches one of these.
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-07-06 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-06-28 |
-| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-07-06 |
+| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-07-10 |
 
 ## Setup & Reference
 
