@@ -210,6 +210,41 @@ def _materialized_mix_load_or_build(
         SFT_REGISTRY[n].build() for n in component_names
     ]
 
+    # Drop empty / whitespace-only prompt or completion rows -- BEFORE interleave,
+    # per source. Some upstream sources carry an empty assistant `completion`;
+    # with packing=True + assistant_only_loss=True a packed window landing on such
+    # a row has zero valid label tokens and the degenerate backward manifests as a
+    # deterministic GPU illegal memory access (SFT jobs 12470254/258/262 crashed at
+    # step 211 / rank 61 with `Segmentation fault from GPU ... NotPresent`,
+    # reproducible across nodes -- NOT a bad node). Filtering here, per source, is
+    # ~Nx cheaper than filtering the interleaved output: `all_exhausted` cycling
+    # inflates the sources ~6x (e.g. ~15M source rows -> ~93M interleaved), and a
+    # post-interleave filter over 93M rows takes hours (job 12470276). Empty rows
+    # are empty regardless of cycling, so pre-filtering is identical + much faster.
+    def _nonempty(ex: dict) -> bool:
+        def _content(turns) -> str:
+            if not turns:
+                return ""
+            c = turns[0].get("content", "")
+            return c if isinstance(c, str) else ""
+
+        return bool(_content(ex["prompt"]).strip()) and bool(
+            _content(ex["completion"]).strip()
+        )
+
+    filtered_components = []
+    for name, comp in zip(component_names, components_built):
+        nb = len(comp)
+        comp = comp.filter(_nonempty, num_proc=16)
+        nd = nb - len(comp)
+        if nd:
+            log.info(
+                f"[mix-cache] {name}: dropped {nd:,} empty rows "
+                f"({100 * nd / max(nb, 1):.3f}%); {len(comp):,} remain"
+            )
+        filtered_components.append(comp)
+    components_built = filtered_components
+
     # Fast path: for the probabilities-given all_exhausted case (all ezpz SFT
     # mixes), use the vectorized interleave -- HF's Python-loop index build is
     # ~90 min for a 93M-row mix; the vectorized version is ~5s and bit-identical.
@@ -239,35 +274,7 @@ def _materialized_mix_load_or_build(
             f"({len(ds):,} rows in {time.monotonic()-t0:.1f}s)"
         )
 
-    # Drop empty / whitespace-only prompt or completion rows. Some upstream
-    # sources (e.g. ~771 rows in the tulu/metamathqa/ultrachat mix, 0.03%)
-    # carry an empty assistant `completion`. With packing=True +
-    # assistant_only_loss=True, a packed window landing on such a row has zero
-    # valid label tokens; the degenerate backward manifests as a
-    # deterministic GPU illegal memory access -- observed as SFT job 12470254/
-    # /258/262 crashing at global step 211 / rank 61 with
-    # `Segmentation fault from GPU ... NotPresent`, reproducible across nodes
-    # (i.e. NOT a bad node). Filtering at the mix layer catches every source at
-    # once. Recipe "v" was bumped so this produces a fresh cache hash.
-    def _nonempty(ex: dict) -> bool:
-        def _content(turns) -> str:
-            if not turns:
-                return ""
-            c = turns[0].get("content", "")
-            return c if isinstance(c, str) else ""
-
-        return bool(_content(ex["prompt"]).strip()) and bool(
-            _content(ex["completion"]).strip()
-        )
-
-    n_before = len(ds)
-    ds = ds.filter(_nonempty, num_proc=16)
-    n_dropped = n_before - len(ds)
-    log.info(
-        f"[mix-cache] filtered {n_dropped:,} empty prompt/completion rows "
-        f"({100 * n_dropped / max(n_before, 1):.3f}%); {len(ds):,} rows remain"
-    )
-    log.info("[mix-cache] writing to disk")
+    log.info(f"[mix-cache] writing {len(ds):,} rows to disk")
 
     # Save to tmp + atomic rename so a partial write from one rank
     # doesn't leave a corrupt cache that another rank picks up.
