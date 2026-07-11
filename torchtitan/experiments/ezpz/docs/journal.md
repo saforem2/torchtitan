@@ -2,6 +2,36 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-11 (aurora) -- synthetic-summary data-gen POC (summarize olmo-mix-1124)
+
+Built + validated an end-to-end pipeline to generate synthetic mid-training
+data by summarizing existing gemma-tokenized olmo-mix shards. New code under
+`experiments/ezpz/synthetic/` (4 commits): `detok_to_text.py` (.bin -> text,
+correctness gate = text fixed-point, 265/265 on a wiki slice), `summarize_text.py`
++ `submit_summarize.sh` (batched HF `generate` on 1 XPU tile), `qc_summaries.py`
+(drop prompt-echo/meta/too-short), `retok_to_bin.py` (summaries -> drop-in
+blendcorpus .bin/.idx).
+
+- **Model bake-off:** `DeepHermes-3-Llama-3-3B` beat `Llama-3.1-8B-exvocab`
+  4/4 vs 2/4 on the smoke (exvocab echoed the prompt / emitted meta-commentary).
+- **Full pilot** (job 8665137, 1787 wiki docs, DeepHermes-3, batch 16): rc=0,
+  1.40 docs/s on one tile; QC kept 1784/1787 (99.8%); retok -> 1784-doc /
+  229,104-tok synthetic shard, readback clean.
+- **Key finding: ~9x compression** (2.06M source tok -> 229K summary tok) -- the
+  eval gate must compare equal-token AND equal-doc budgets. Pilot slice is too
+  small to move 2B benchmarks; a real run needs a much larger corpus + vLLM
+  (no XPU vLLM venv in this clone yet).
+- **Two XPU gotchas fixed** (both cost a smoke each): (1) `.venv` XPU env must
+  mirror `train_agpt_2b_venv.sh` (explicit `module load oneapi/release/2025.3.1
+  hdf5 pti-gpu`); (2) under `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `ZE_AFFINITY_MASK`
+  must be a bare int -- the composite `"0.0"` form makes torch.xpu see ZERO
+  devices (memory: project_ze_affinity_mask_flat_format).
+- Report: `docs/experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md`.
+
+**Fleet:** all production chains (2b-512 8661117, 20b-512 8647383, 20b-256
+8647386/8661913, CPT 8662867, umbrella 8663177) remained `at_queue`-starved the
+whole session -- no CLI action possible (never-kill rule).
+
 ---
 
 ## 2026-07-09 (sunspot) -- 65th + 66th upstream syncs; v2-base SFT OOM + bad-node recovery

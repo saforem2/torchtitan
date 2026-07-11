@@ -7,6 +7,7 @@ Benchmark results organized by experiment type and machine.
 - [**agpt/**](agpt/) -- Dense AuroraGPT models (2B, 7B, 20B, 80B)
 - [**moe/**](moe/) -- Mixture of Experts models (500M--10B)
 - [**lr-finder/**](lr-finder/) -- Learning rate finder sweeps across models and optimizers
+- [**synthetic/**](synthetic/) -- Synthetic mid-training data (summarize olmo-mix-1124)
 
 ## Naming Convention
 
