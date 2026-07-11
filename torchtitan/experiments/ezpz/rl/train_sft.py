@@ -568,11 +568,28 @@ def main() -> None:
         out = ezpz_args.pretokenize_to
         if rank == 0:
             processed = trainer.train_dataset
+            # trainer.train_dataset is an indices-mapping dataset
+            # (concatenate_datasets(...).select(idx) upstream). save_to_disk on
+            # such a dataset FIRST flattens the scattered indices -- a
+            # single-threaded random-read pass over the source shards -- before
+            # it writes any output. On a 33.5M-row mix over Lustre that flatten
+            # crawled at ~17 MB/s and the save didn't finish inside the 12h
+            # walltime (job 12470284 wrote 792/2639 shards, no dataset_info.json
+            # -> unusable partial). flatten_indices(num_proc=N) does that
+            # materialization in parallel up front, turning save_to_disk into a
+            # plain sequential write. num_proc mirrors dataset_num_proc.
+            nproc = config.dataset_num_proc or 1
             log.info(
-                f"[rank {rank}] PRE-TOKENIZE: saving {len(processed)} packed "
-                f"sequences (cols={processed.column_names}) to {out}"
+                f"[rank {rank}] PRE-TOKENIZE: flattening {len(processed)} "
+                f"packed sequences (cols={processed.column_names}) with "
+                f"num_proc={nproc} before save"
             )
-            processed.save_to_disk(out)
+            processed = processed.flatten_indices(num_proc=nproc)
+            log.info(
+                f"[rank {rank}] PRE-TOKENIZE: saving to {out} "
+                f"(num_proc={nproc})"
+            )
+            processed.save_to_disk(out, num_proc=nproc)
             log.info(f"[rank {rank}] PRE-TOKENIZE done -> {out}; exiting.")
         # Other ranks: nothing to do. (Pre-tokenize is intended as a 1N/1-rank
         # job; guard rank 0 only so a stray multi-rank launch still writes once.)
