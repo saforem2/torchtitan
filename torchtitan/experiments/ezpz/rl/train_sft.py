@@ -518,6 +518,26 @@ def main() -> None:
                 f"column; assistant-only masking will NOT be applied "
                 f"(assistant_only_loss={config.assistant_only_loss})"
             )
+        # CRITICAL: turn packing OFF on the pre-tokenized path. TRL's "skip
+        # prep" (is_processed = "input_ids" in columns) only skips TOKENIZATION;
+        # the `if packing:` block in SFTTrainer._prepare_dataset is NOT under
+        # the `if not is_processed:` guard, so with packing=True TRL re-packs the
+        # dataset -- even though --pretokenize_to already packed it (the
+        # `seq_lengths` column is the proof). At 33.5M rows that second pack ran
+        # `pack_dataset` (num_proc map) on rank 0 and SIGBUS'd (shared-memory /
+        # mmap exhaustion) at 92% while 383 ranks idled at a barrier -- job
+        # 12470325 died `Bus error (core dumped)` there. The data is already
+        # packed and carries seq_lengths, so packing=False is correct AND
+        # required: it skips the redundant, crashing re-pack. Guard on
+        # seq_lengths so we only disable packing when the dataset really is
+        # pre-packed.
+        if "seq_lengths" in dataset.column_names and config.packing:
+            log.info(
+                f"[rank {rank}] pre-tokenized dataset is already packed "
+                f"(has seq_lengths); setting packing=False to skip TRL's "
+                f"redundant re-pack (which SIGBUS'd at 33.5M rows in 12470325)"
+            )
+            config.packing = False
     else:
         log.info(
             f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)..."
