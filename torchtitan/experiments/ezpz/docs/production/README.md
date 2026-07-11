@@ -6,6 +6,11 @@
 >
 > Last updated: 2026-07-09
 
+> **Polaris (A100) production** is tracked separately (different hardware,
+> `dolma` dataset, `72xxxxx` job IDs): see
+> [**production/polaris/README.md**](polaris/README.md). This page is
+> Aurora/Sunspot (Intel XPU) only.
+
 **Jump to:** [Status at a glance](#status-at-a-glance) ·
 [Canonical chains](#canonical-chains-one-per-model) ·
 [256N trajectories](#active-256n-trajectories) ·
