@@ -72,12 +72,19 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # 2048 ~doubled activation memory vs the completed SFT's 1024, and bsz=1 + AC
 # were already maxed. 1024 is the proven-fitting length (the 729-step SFT ran
 # at 1024). Packs denser -> fewer sequences than the 2048 build.
+# NPROC override: the parallel packing map crashes a worker ("subprocess
+# abruptly died") at 1024 for num_proc 96 (49%) and 32 (86%) -- pyarrow/mp
+# flakiness at ~60M+ packed rows, NOT node OOM (RSS 30GB/512GB). Progress
+# improved as num_proc dropped, so we walk it down (8 -> 2 -> 1). At 1 there is
+# no multiprocessing, so the crash class is impossible (what the datasets error
+# itself suggests). Tokenize is cached, so each retry only redoes packing+save.
+NPROC="${NPROC:-8}"
 ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset tulu_math_uc_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 1024 \
-    --dataset_num_proc 32 \
+    --dataset_num_proc "${NPROC}" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log" || true
 
