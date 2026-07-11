@@ -26,18 +26,21 @@
 # rank-0 barrier and re-probe the Hub per rank). 2N smoke (job 12470280)
 # confirmed: cache loaded 93M rows in 49.1s, 10 steps, 0 crash.
 #
-# Sizing (GBS held at 6144, per-device token load unchanged vs the 1024-len run):
+# Sizing (GBS held at 6144):
 #   NGPUS = 32 nodes x 12 ranks = 384
 #   GBS = NGPUS x per_device_train_batch_size x gradient_accumulation_steps
-#       = 384 x 1 x 16 = 6144
-#   tokens/step = GBS x max_length = 6144 x 2048 = 12.58M
-#   per-device micro-batch = 1 x 2048 = 2048 tokens (== prior 2 x 1024)
+#       = 384 x 2 x 8 = 6144
+#   tokens/step = GBS x max_length = 6144 x 1024 = 6.29M
+#   per-device micro-batch = 2 x 1024 = 2048 tokens
 #
-# seq_len (max_length) = 2048 (per user; the pretraining seq_len was 8192, but
-# SFT packs short instruction turns -- 2048 keeps memory identical to the prior
-# SFT while doubling context vs its 1024).
+# seq_len (max_length) = 1024. seq_len 2048 OOM'd the XPU tile at step 0
+# (job 12470328, UR_RESULT_ERROR_OUT_OF_RESOURCES in compute_loss): packing
+# makes every sequence a dense full-length block, so 2048 ~doubled activation
+# memory vs the completed SFT's 1024, and bsz=1 + AC (via fsdp_config) were
+# already maxed. 1024 is the proven-fitting length -- the 729-step SFT ran at
+# 1024 with bsz=2/gas=8, so we use that known-good corner here.
 #
-# 1 epoch over ~54B tokens at 12.58M tokens/step is ~4.3k steps -- longer than
+# 1 epoch over ~54B tokens at 6.29M tokens/step is ~8.6k steps -- longer than
 # one 12h walltime window. Checkpoints (every 200 steps) + --resume_from_
 # checkpoint + a chained afterany continuation carry it across windows.
 #
@@ -79,12 +82,12 @@ CKPT_DIR="outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-32n-gbs6144"
 LOG_DIR="logs/sft-agpt-2b-gs138650-tulu-math-uc-mix-32n-gbs6144-${PBS_JOBID%%.*}"
 mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
 
-echo "=== 32N SFT: gs138650 + tulu_math_uc_mix (BIG cached mix), 1 epoch, GBS=6144, seq=2048 ===" \
+echo "=== 32N SFT: gs138650 + tulu_math_uc_mix (BIG cached mix), 1 epoch, GBS=6144, seq=1024 ===" \
     | tee "${LOG_DIR}/run.log"
 echo "BASE_MODEL=${BASE_MODEL}" | tee -a "${LOG_DIR}/run.log"
 echo "Allocation: select=36 (32 train + 4 spare for --auto-retry)" \
     | tee -a "${LOG_DIR}/run.log"
-echo "Sizing: 384 ranks x bsz=1 x gas=16 = GBS=6144, 12.58M tokens/step" \
+echo "Sizing: 384 ranks x bsz=2 x gas=8 = GBS=6144, 6.29M tokens/step" \
     | tee -a "${LOG_DIR}/run.log"
 echo "loading PRE-TOKENIZED dataset (TRL skips tokenize+pack; <60s to step 1)" \
     | tee -a "${LOG_DIR}/run.log"
@@ -97,8 +100,8 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # tokenize+pack that killed job 12470281 (SFTTrainer re-tokenizes the whole 93M-
 # row mix at job start; the auto-retry idle-watchdog SIGTERM'd it before step 1).
 # With input_ids present, TRL detects the dataset as processed and training
-# starts in <60s. MUST match the pre-tokenize job's --max_length (2048) + base.
-PRETOK_DIR="${HOME}/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len2048"
+# starts in <60s. MUST match the pre-tokenize job's --max_length (1024) + base.
+PRETOK_DIR="${HOME}/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len1024"
 if [[ ! -d "${PRETOK_DIR}" ]]; then
     echo "FATAL: pre-tokenized dataset missing at ${PRETOK_DIR}" \
         | tee -a "${LOG_DIR}/run.log"
@@ -121,9 +124,9 @@ ezpz launch --np 384 -ppn 12 --auto-retry --spare-nodes auto \
     --output_dir "${CKPT_DIR}" \
     --num_train_epochs 1 \
     --learning_rate 2e-5 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 16 \
-    --max_length 2048 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 8 \
+    --max_length 1024 \
     --bf16 --fsdp full_shard \
     --logging_steps 10 \
     --save_strategy steps --save_steps 200 \

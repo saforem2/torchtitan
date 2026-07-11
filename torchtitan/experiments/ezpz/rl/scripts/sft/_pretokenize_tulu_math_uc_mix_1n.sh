@@ -47,11 +47,11 @@ source .venv/bin/activate
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 
 BASE_MODEL="${HOME}/global_step138650"
-OUT_DIR="${HOME}/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len2048"
+OUT_DIR="${HOME}/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len1024"
 LOG_DIR="logs/pretokenize-tulu-math-uc-mix-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}"
 
-echo "=== 1N PRE-TOKENIZE: tulu_math_uc_mix -> ${OUT_DIR} (len=2048, base=gs138650) ===" \
+echo "=== 1N PRE-TOKENIZE: tulu_math_uc_mix -> ${OUT_DIR} (len=1024, base=gs138650) ===" \
     | tee "${LOG_DIR}/run.log"
 git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
     torchtitan/experiments/ezpz/rl/datasets_sft.py 2>&1 | tee -a "${LOG_DIR}/run.log"
@@ -59,14 +59,21 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 
 # Single-rank launch: pre-tokenize is a data job, no model training / no
 # collectives. `ezpz launch --np 1` keeps the ezpz env plumbing but runs one
-# rank. max_length 2048 + dataset_num_proc 96 MUST match the training job's
-# --max_length (2048) and the base tokenizer, or TRL's skip-prep produces the
+# rank. max_length 1024 + dataset_num_proc 96 MUST match the training job's
+# --max_length (1024) and the base tokenizer, or TRL's skip-prep produces the
 # wrong shapes / a silent mismatch.
+#
+# Why 1024 (not 2048): at seq_len 2048 the 2B forward+backward OOM'd the XPU
+# tile at step 0 (job 12470328, UR_RESULT_ERROR_OUT_OF_RESOURCES in
+# compute_loss) -- packing makes every sequence a dense full-length block, so
+# 2048 ~doubled activation memory vs the completed SFT's 1024, and bsz=1 + AC
+# were already maxed. 1024 is the proven-fitting length (the 729-step SFT ran
+# at 1024). Packs denser -> fewer sequences than the 2048 build.
 ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset tulu_math_uc_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
-    --max_length 2048 \
+    --max_length 1024 \
     --dataset_num_proc 96 \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log" || true
