@@ -22,37 +22,39 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-12 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/gs138650/tulu_math_uc_mix_full/README.md) |
+| 2026-07-12 | [Production SFT](./production/sft/README.md) |
+| 2026-07-12 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
+| 2026-07-12 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
+| 2026-07-12 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
+| 2026-07-12 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-07-12 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-07-12 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
+| 2026-07-12 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-07-12 | [Development Journal](./journal.md) |
+| 2026-07-12 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-11 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
-| 2026-07-11 | [Production Training Runs — Aurora](./production/README.md) |
-| 2026-07-11 | [Development Journal](./journal.md) |
 | 2026-07-11 | [Synthetic-summary data generation POC (olmo-mix-1124)](./experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md) |
+| 2026-07-11 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
 | 2026-07-11 | [Experiment Benchmark Reports](./experiments/README.md) |
 | 2026-07-10 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-10 | [Summaries](./summaries/README.md) |
 | 2026-07-10 | [2026-07-06 to 2026-07-10 -- ~4-Day Summary](./summaries/2026-07-06_to_2026-07-10.md) |
-| 2026-07-10 | [Production SFT](./production/sft/README.md) |
 | 2026-07-10 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-| 2026-07-10 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
 | 2026-07-10 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
-| 2026-07-10 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-09 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/aurora2b/tulu_math_uc_mix/README.md) |
-| 2026-07-09 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
-| 2026-07-09 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
-| 2026-07-09 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-07-09 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-07-09 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-07-09 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
 | 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
 | 2026-07-06 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
 | 2026-07-06 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./rl/history/vllm-xpu-wiring-plan.md) |
-| 2026-07-06 | [vLLM-XPU on torch 2.13 — investigation findings](./rl/history/vllm-xpu-investigation.md) |
-| 2026-07-06 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./rl/history/vllm-xpu-current-status.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-06 | [vLLM-XPU on torch 2.13 — investigation findings](./rl/history/vllm-xpu-investigation.md) |
+| 2026-07-06 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./rl/history/vllm-xpu-current-status.md) |
 | 2026-07-06 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./rl/history/upstream-rl-port-status.md) |
 | 2026-07-06 | [RL bring-up history](./rl/history/README.md) |
 | 2026-07-06 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
@@ -63,7 +65,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-07-06 | [Production GRPO](./production/grpo/README.md) |
 | 2026-07-06 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
-| 2026-07-06 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-07-06 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-07-06 | [SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke](./experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) |
 | 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
 | 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 | 2026-07-01 | [Evaluation Results — agpt 2B](./evals/agpt/2b/README.md) |
-| 2026-07-01 | [Claude Session Log](./claude-sessions.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,17 +89,17 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-11 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-12 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-07-09 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**35000** (3.52T tokens, 75.4% of 4.67T). | 2026-07-09 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,000** (604.0B tokens, 12.9% of 4.67T). | 2026-07-09 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**4,200** (211.4B tokens, 4.5% of 4.67T), loss 3.2631. | 2026-07-09 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-07-12 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**35000** (3.52T tokens, 75.4% of 4.67T). | 2026-07-12 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,000** (604.0B tokens, 12.9% of 4.67T). | 2026-07-12 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**4,200** (211.4B tokens, 4.5% of 4.67T), loss 3.2631. | 2026-07-12 |
 | [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-06 |
 | [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-07-06 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-07-12 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-07-10 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
@@ -133,7 +133,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-07-11 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-07-12 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-07-06 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-06-28 |

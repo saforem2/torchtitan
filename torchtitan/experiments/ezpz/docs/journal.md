@@ -2,6 +2,36 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-12 (sunspot) -- big-mix SFT finally training (at 8N) after a 6-failure saga
+
+Got the "more tokens" SFT running: gs138650 base on the FULL OpenMathInstruct-2
+`tulu_math_uc_mix` (53.3M packed seqs, ~54B tokens, 1 epoch). Job 12470350 +
+afterany chain, stepping cleanly at 8N -- loss 1.34 -> 1.0 by step 128,
+mean_token_accuracy 0.685 -> 0.735, checkpoints every 50. Getting here meant
+root-causing and fixing a cascade (each documented in the
+[launch report](experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md)
++ [production doc](production/sft/gs138650/tulu_math_uc_mix_full/README.md)):
+
+1. **Runtime tokenize** of 93M rows (~8.5h) blew the watchdog -> offline
+   `--pretokenize_to` / `--pretokenized_dataset` (TRL skips prep on `input_ids`).
+2. **save_to_disk** slow/OOM -> parallel `save_to_disk(num_proc)` no-pre-flatten;
+   **packing map** OOM -> `dataset_num_proc` walkdown (96@49% / 32@86% / 8@100%).
+3. **seq_len 2048** OOM'd the XPU tile at step 0 -> reverted to the proven 1024
+   corner (bsz2/gas32 to hold GBS=6144 at 8N).
+4. **TRL re-packs pre-packed data** (Bus error) -> `packing=False` auto-set when
+   `seq_lengths` present.
+5. **ezpz `--auto-retry`** false-positives on TRL (`stuck_pre_training`: it looks
+   for `step=` markers TRL never emits) -> dropped it; fault tolerance now via the
+   afterany chain + `--resume_from_checkpoint` + save_steps=50.
+6. **384-rank GPU page fault** (`Segmentation fault from GPU ... NotPresent
+   Write`, rank 221) -- NOT bad node (reproduces across nodes), NOT OOV (full 53M
+   scan max 255998 < vocab 256000); a real 384-rank scale fault
+   ([[project_sft_v2_base_oom_badnode]] class, base-independent). Bisect
+   (12470343/346/347/348/349): 2/4/8N clean, 12/16/32N segfault -> run at **8N**.
+
+Also: nudged huggingface/datasets PR #8318 (vectorized interleave) -- tagged
+@lhoestq (arrow_dataset.py owner), CI awaits maintainer approval.
+
 ## 2026-07-11 (aurora) -- synthetic-summary data-gen POC (summarize olmo-mix-1124)
 
 Built + validated an end-to-end pipeline to generate synthetic mid-training
