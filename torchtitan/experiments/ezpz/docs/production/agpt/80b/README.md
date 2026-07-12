@@ -1,6 +1,40 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-07-06
+> Last updated: 2026-07-12
+
+> **🔴 80B production is BLOCKED at scale -- two independent walls above ~62N,
+> no viable production run exists yet (as of 2026-07-12).** No 80B job is
+> currently queued or running; every 80B checkpoint dir on disk is empty or
+> holds only a handful of probe/smoke steps. The deepest 80B checkpoints
+> (`AdamW-n256-gbs1536` step-800, `AdamW-n512-gbs3072` step-400) are **v1
+> bf16-tainted** (April 2026, RMSNorm frozen at 1.0) -- frozen historical
+> reference, NOT to be continued; see
+> [historical/v1-bf16](../historical/v1-bf16/README.md).
+>
+> **Wall 1 -- optimizer NaN at production dp.** SophiaG NaN'd at step 14 on the
+> 512N production run (Hessian `grad*grad` overflow at dim=9216; long warmup +
+> grad-clip do NOT fix it). **mano** is clean at small dp (to step 30 at 8N) but
+> **also NaN'd at dp≈186** (62N probe `8661293`, step 17) -- optimizer-independent
+> grad-path overflow. The
+> [80B convergence run (2026-06-30)](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
+> found all 3 optimizers NaN at constant finder LRs (mano@3e-6 step5,
+> AdamW@5e-7 step9, sophiag@1e-6 step12).
+>
+> **Wall 2 -- init crash at 256N.** The 256N/dp=768 production config hits a GPU
+> "NotPresent" segfault during init (separate from the optimizer NaN). The 2048N
+> head also SIGSEGV'd in `set_determinism` at 24,864 ranks (2026-07-01). 1024N is
+> the untested dp bracket.
+>
+> **Next: root-cause the dim=9216 overflow** (optimizer/grad dtype + eps, or
+> fp32 accumulation on the offending term) and the 256N init segfault -- both are
+> prerequisites before any production relaunch. Small-dp mano is the only path
+> that has shown life, but it is far below production scale. History:
+> [20260703-80b-512n-sophiag-nan.md](../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md),
+> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+> LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+
+<details>
+<summary>Earlier status (2026-07-06): SophiaG-NaN + "probe mano next" (superseded)</summary>
 
 > **🔴 SophiaG production config NaN'd 2026-07-03 -- 80B needs a new optimizer.**
 > The 512N head (8574385) finally cleared the queue and ran a full 12h window,
@@ -9,25 +43,14 @@
 > ~3e-9 mid-warmup), then NaN every step for the rest of 12h (~6,100 node-h
 > wasted). **A long warmup (already 4650) and grad-clip (already max_norm=1.0)
 > do NOT fix it** -- the overflow is inside SophiaG's Hessian (`grad*grad`) term
-> at dim=9216, not the update magnitude. This confirms, at the 512N production
-> dp-degree, the shared instability the
-> [80B convergence run (2026-06-30)](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
-> found (all 3 optimizers NaN at constant finder LRs: mano@3e-6 step5,
-> AdamW@5e-7 step9, sophiag@1e-6 step12).
+> at dim=9216, not the update magnitude.
 >
 > **Next: mano @ LR=1e-6** (below its step-5-death 3e-6), being **probed at
 > 32N/GBS=6144 first** (job 8647404, warmup=200, constant, 40 steps) before any
-> 512N relaunch -- avoids burning another 12h/512N on a guess. If it also NaNs,
-> the shared Hessian/bf16 overflow at dim=9216 needs a root-cause fix
-> (optimizer dtype/eps) before 80B production is viable. Full analysis:
-> [20260703-80b-512n-sophiag-nan.md](../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md).
->
-> *(Earlier, 2026-07-01: the 2048N head 8574387 SIGSEGV'd in `set_determinism`
-> at 24,864 ranks -- the init-crash ceiling; 1024N remains the untested
-> dp-degree bracket. That is an orthogonal init-scaling limit, separate from
-> this optimizer-NaN.)* Launch history:
-> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
-> LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+> 512N relaunch. [The probe has since run (8661293, 62N) and NaN'd at dp≈186 --
+> see the current banner above.]
+
+</details>
 
 ## 80B trajectory chart
 

@@ -121,6 +121,10 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 
 OPTIMIZER="${OPTIMIZER:-sophiag}"
 LR="${LR:-2.28e-5}"
+# Constant-LR by default: decay-ratio=0.0 -> decay_steps=0 -> LR stays
+# flat after warmup (no cosine/linear decay). Set DECAY_RATIO=0.8 to
+# restore the old warmup+linear-decay schedule.
+DECAY_RATIO="${DECAY_RATIO:-0.0}"
 
 # Validation: run the EzpzValidator on the blendcorpus validation split
 # every VALIDATOR_FREQ steps for VALIDATOR_STEPS iters. On by default;
@@ -271,4 +275,5 @@ ezpz launch \
     --training.global-batch-size="${GBS}" \
     --training.seq-len="${SEQ_LEN}" \
     --training.steps="${TRAINING_STEPS}" \
+    --lr-scheduler.decay-ratio="${DECAY_RATIO}" \
     "$@"
