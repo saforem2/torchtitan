@@ -110,14 +110,26 @@ if [[ ! -d "${PRETOK_DIR}" ]]; then
     exit 1
 fi
 
-# --spare-nodes auto is REQUIRED for --auto-retry to actually swap a bad node
-# (select=36 = 32 active + 4 spare; --np 384 pins the trainer to 32 nodes).
-# The SFT venv is on shared tegu (source .venv above), NOT a per-node /tmp yeet,
-# so a swapped-in spare already sees it -- no `ezpz yeet` needed.
+# NO --auto-retry for the SFT path. ezpz auto-retry detects training progress
+# via `_PROGRESS_MARKER_RX = re.compile(r"\bstep=\d+")` -- the `step=N` marker
+# that ezpz's OWN training loop prints. TRL's HF Trainer never emits `step=`; it
+# prints `{'loss': ..., 'epoch': ...}` dicts. So auto-retry is structurally
+# BLIND to SFT progress and ALWAYS declares `FAILOVER STOP: stuck_pre_training`
+# after 2 attempts with "zero step= markers" -- even though training is stepping
+# fine (job 12470336: stepped loss 1.334, hit one intermittent SIGABRT after
+# step 1, auto-retry then killed the whole run as "stuck pre-training"). That is
+# a false positive we cannot fix from the ezpz experiment tree (it lives in the
+# pip-installed ezpz lib).
+#
+# Fault tolerance instead comes from JOB-LEVEL chaining: the `afterany`
+# continuation + --resume_from_checkpoint. A SIGABRT ends this job; the queued
+# continuation relaunches and resumes from the latest checkpoint. To make an
+# early SIGABRT cheap (no checkpoint exists until the first save), save_steps=50
+# so a resume loses at most ~50 steps. select=36 gives PBS spare capacity for
+# the relaunch to land on healthy nodes.
 # No --save_total_limit: keep ALL checkpoints (golden rule -- never keep-latest-k;
-# intermediate ckpts are wanted for per-token eval). save_steps 200 bounds count.
-ezpz launch --np 384 -ppn 12 --auto-retry --spare-nodes auto \
-    --max-failover-retries 3 --timeout "${IDLE_TIMEOUT:-1800}" \
+# intermediate ckpts are wanted for per-token eval).
+ezpz launch --np 384 -ppn 12 --timeout "${IDLE_TIMEOUT:-1800}" \
     python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --pretokenized_dataset "${PRETOK_DIR}" \
     --model_name_or_path "${BASE_MODEL}" \
@@ -129,15 +141,14 @@ ezpz launch --np 384 -ppn 12 --auto-retry --spare-nodes auto \
     --max_length 1024 \
     --bf16 --fsdp full_shard \
     --logging_steps 10 \
-    --save_strategy steps --save_steps 200 \
+    --save_strategy steps --save_steps 50 \
     --report_to wandb \
     --resume_from_checkpoint "${CKPT_DIR}" \
     2>&1 | tee -a "${LOG_DIR}/run.log" || true
 
 # --resume_from_checkpoint <dir> is HF Trainer's auto-resume hook: empty dir ->
-# fresh start; has checkpoint-N -> resume latest. Critical for ezpz auto-retry
-# (a bad-node crash relaunches a fresh `python3 -m train_sft`, not in-process),
-# and for the chained afterany continuation across walltime windows.
+# fresh start; has checkpoint-N -> resume latest. Critical for the chained
+# afterany continuation to pick up across a SIGABRT or a walltime window.
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "=== DONE: log in ${LOG_DIR}/, ckpts in ${CKPT_DIR}/ ===" \
