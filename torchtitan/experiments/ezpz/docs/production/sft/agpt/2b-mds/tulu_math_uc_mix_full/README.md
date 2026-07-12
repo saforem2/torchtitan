@@ -114,10 +114,20 @@ First ~482 steps at 8N (GBS=6144): loss **1.343 -> 0.912**, mean_token_accuracy
 descent, consistent with the completed gs138650 SFT's start (~1.16 -> 0.77 over
 729 steps on the small mix). Checkpoints accumulate every 50 steps.
 
+## Evals
+
+Base-LM lm-eval **step sweep** (checkpoints 300/600/900 vs the gs138650
+baseline, job 12470365) in [`evals/README.md`](evals/README.md). TL;DR: the
+expected **alignment-tax** pattern -- base-LM multiple-choice is flat-to-down
+under SFT (arc_easy/challenge decline monotonically with more steps; boolq /
+winogrande tick up), same as the completed metamathqa SFT. The real SFT signal
+lives in IFEval + downstream GRPO (TODO for this run), not these tasks. More
+sweep points land as the run advances.
+
 ## Comparison to the completed 729-step SFT
 
 The prior production SFT
-([tulu_math_uc_mix on gs138650, metamathqa swap](../../2b-mds/tulu_math_uc_mix/README.md))
+([tulu_math_uc_mix, metamathqa swap](../tulu_math_uc_mix/README.md))
 reached final loss 0.77 over 729 steps / ~4.5B tokens. This run keeps the same
 base + recipe weights but uses the FULL OpenMathInstruct-2 mix (~54B tokens,
 ~12x the tokens) for 1 epoch. The eval comparison (base-LM benchmarks, IFEval,
