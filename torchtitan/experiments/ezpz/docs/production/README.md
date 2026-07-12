@@ -27,10 +27,10 @@ in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
-| [20B 256N](agpt/20b/n256/README.md) | advancing | **4,200** | 2.68 | 4.5% | 🟢 carried to 3,100 via relocated n256 clone chain |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 35,000 | 2.71 | 75.4% | 🟡 queue-starved |
+| [20B 256N](agpt/20b/n256/README.md) | advancing | **4,200** | 2.68 | 4.5% | 🟢 carried to 3,100 via relocated n256 clone chain |
 | [20B 512N](agpt/20b/n512/README.md) | advancing | **6,000** | 2.47 | 12.9% | 🟢 native auto-retry (8638793+8638795) broke the stall, 4,400→5,400 |
+| [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
 
 ### Post-training stages (CPT / SFT / RL)
 
