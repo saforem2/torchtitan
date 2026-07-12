@@ -51,16 +51,22 @@ has its own token/step goal in the linked page.
 > Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
 > [production/grpo/README.md](grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
 
-> **512N queue starvation** (both 512N chains ~20 days in `small`) is
-> pure node contention, not a hold or bad request — and re-submitting
-> would *reset* their accrued priority. Full diagnosis + data:
-> [queue-wait-analysis.md](queue-wait-analysis.md).
+<details>
+<summary><strong>512N queue starvation</strong> — both 512N chains ~20d in <code>small</code>; node contention, not a hold (details)</summary>
 
-> **80B status (2026-07-06)**: **SophiaG production config NaN'd -- needs a new
-> optimizer.** The 512N head (8574385) finally placed and ran a full 12h window
-> (2026-07-03), but **diverged to NaN at step 14** (SophiaG LR=1e-6, warmup=4650,
-> constant): grad_norm -> inf while loss was flat (LR ~3e-9 mid-warmup), then NaN
-> for the rest of 12h (~6,100 node-h wasted). A **long warmup (already 4650) and
+> Both 512N chains sitting ~20 days in `small` is pure node contention, not a
+> hold or bad request — and re-submitting would *reset* their accrued priority.
+> Full diagnosis + data: [queue-wait-analysis.md](queue-wait-analysis.md).
+
+</details>
+
+<details>
+<summary><strong>80B status (2026-07-06): SophiaG NaN'd — needs a new optimizer</strong> (full analysis)</summary>
+
+> The 512N head (8574385) finally placed and ran a full 12h window (2026-07-03),
+> but **diverged to NaN at step 14** (SophiaG LR=1e-6, warmup=4650, constant):
+> grad_norm -> inf while loss was flat (LR ~3e-9 mid-warmup), then NaN for the
+> rest of 12h (~6,100 node-h wasted). A **long warmup (already 4650) and
 > grad-clip (already max_norm=1.0) do NOT fix it** -- the overflow is inside
 > SophiaG's Hessian term at dim=9216, not the update magnitude. This matches the
 > [80B convergence run](../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
@@ -75,6 +81,8 @@ has its own token/step goal in the linked page.
 > launch log:
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md);
 > LR-finder: [lr-finder/agpt/80b](../experiments/lr-finder/agpt/80b/README.md).
+
+</details>
 
 ## All production trajectories — overlay vs tokens
 
