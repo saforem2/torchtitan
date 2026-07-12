@@ -136,6 +136,6 @@ Future smokes on the other tasks in `rl/tasks/` will fill these in.
 | Hyperparameters | `beta=0.0`, bf16, `per_device_bsz=1`, `num_gens=4`, `lr=1e-6` (cosine) |
 | Hardware | 3 XPU nodes from PBS allocation 12468471 |
 | Wall time | ~6 min per model |
-| Submit script | [`rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh`](../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh) |
+| Submit script | [`rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh) |
 | Wandb (baseline) | https://wandb.ai/aurora_gpt/torchtitan.ezpz.rl |
 | Wandb (sft-step729) | (link landed in run output) |

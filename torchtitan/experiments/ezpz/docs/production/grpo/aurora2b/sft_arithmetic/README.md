@@ -35,7 +35,7 @@ Reproduce with `python3 scripts/plot_grpo_curves.py`.
 - **Accuracy reward** climbs steadily from ~0.4 to ~0.9 over 1000
   steps; the SFT'd checkpoint starts well above the cold-start
   baseline (which would be ~0 on this task; see the
-  [grpo-smoke comparison](../../../sft/aurora2b/tulu_math_uc_mix/evals/grpo-smoke.md)).
+  [grpo-smoke comparison](../../../sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md)).
 - **Format reward** saturates near 0.5 very early and stays flat —
   the model already learned the format from SFT.
 - **Entropy** descends sharply early then plateaus, consistent with

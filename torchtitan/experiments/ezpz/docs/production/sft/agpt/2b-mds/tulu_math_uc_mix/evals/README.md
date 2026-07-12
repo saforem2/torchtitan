@@ -67,11 +67,11 @@ Three reasons the 7-task suite would not show SFT improvements:
   word X", "use exactly 5 sentences", "do not use commas"). A base
   LM scores near-zero; an SFT'd LM should jump substantially.
   Running now in
-  [`eval_ifeval_sft_vs_baseline.sh`](../../../../../../rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh).
+  [`eval_ifeval_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh).
 - **GRPO from this checkpoint** — the original justification for the
   SFT push. A model that already speaks chat will accept the GRPO
   signal much faster than a raw base LM. Smoke comparison in
-  [`grpo_smoke_sft_vs_baseline.sh`](../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh).
+  [`grpo_smoke_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh).
 - **MMLU 5-shot** — not run here (57 subjects × 14k questions is
   slow at 0-shot on 2B; would burn most of a day on 1 tile). MMLU
   is also a base-LM benchmark and likely to show the same
@@ -91,7 +91,7 @@ Three reasons the 7-task suite would not show SFT improvements:
 | Model dtype | bfloat16 (auto-resolved by lm_eval's default) |
 | Batch size | 4 |
 | n-shot | 0 (default for all 7 tasks) |
-| Submit script | [`eval_sft_vs_baseline_parallel.sh`](../../../../../../rl/scripts/sft/eval_sft_vs_baseline_parallel.sh) |
+| Submit script | [`eval_sft_vs_baseline_parallel.sh`](../../../../../../../rl/scripts/sft/eval_sft_vs_baseline_parallel.sh) |
 | Results dir | `outputs/evals/aurora2b-sft-vs-baseline-parallel-20260610-195131/` |
 
 ### Blockers cleared along the way
@@ -132,9 +132,9 @@ lm-eval-on-XPU work:
   speedup over baseline (0.117 → 0.922 mean reward over last 10 steps,
   100% accuracy by step 40)
 - Eval scripts:
-  [`rl/scripts/sft/eval_sft_vs_baseline_parallel.sh`](../../../../../../rl/scripts/sft/eval_sft_vs_baseline_parallel.sh)
+  [`rl/scripts/sft/eval_sft_vs_baseline_parallel.sh`](../../../../../../../rl/scripts/sft/eval_sft_vs_baseline_parallel.sh)
   (base-LM tasks),
-  [`rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh`](../../../../../../rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh)
+  [`rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh)
   (instruction-following),
-  [`rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh`](../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh)
+  [`rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh)
   (downstream RL).

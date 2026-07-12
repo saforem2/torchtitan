@@ -18,14 +18,14 @@
 | Sequence length | 1024, `packing=True`, `assistant_only_loss=True` |
 | Hyperparameters | LR 2e-5 (cosine to 0), bf16, AdamW (TRL default), 3 epochs |
 | Scale | 32 nodes x 12 ranks = 384 ranks, GBS = 6144 (bsz 2 x gas 8) |
-| Submit script | [`rl/scripts/sft/agpt2b_v2_256n_tulu_mix_32n_gbs6144.sh`](../../../../../rl/scripts/sft/agpt2b_v2_256n_tulu_mix_32n_gbs6144.sh) |
+| Submit script | [`rl/scripts/sft/agpt2b_v2_256n_tulu_mix_32n_gbs6144.sh`](../../../../../../rl/scripts/sft/agpt2b_v2_256n_tulu_mix_32n_gbs6144.sh) |
 | Output dir | `outputs/sft/agpt-2b-v2-256n-tulu-mix-32n-gbs6144/` |
 | Expected steps | ~729 (3 epochs at GBS=6144 over the metamathqa-swap mix) |
 
 ## Prep + validation
 
 - Conversion, transfer, and 2N smoke are documented in the
-  [prep report](../../../../experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md).
+  [prep report](../../../../../experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md).
 - 2N smoke (job 12470086): 10 steps, loss 2.08 -> 1.7, mean_token_accuracy
   ~0.60, 0 Qwen fallback, 0 barrier crash, clean exit. wandb:
   `https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xudygzxr`.
@@ -51,7 +51,7 @@ format cold) and finished 0.77 over 729 steps.
 ## Comparison to the gs138650 SFT
 
 The prior production SFT
-([tulu_math_uc_mix on gs138650](../../aurora2b/tulu_math_uc_mix/README.md))
+([tulu_math_uc_mix on gs138650](../../2b-mds/tulu_math_uc_mix/README.md))
 reached final loss 0.77 over 729 steps. This run applies the identical recipe
 to the completed v2 base; the eval comparison (base-LM benchmarks + downstream
 GRPO signal) will show whether SFT on the completed 4.674T base beats SFT on

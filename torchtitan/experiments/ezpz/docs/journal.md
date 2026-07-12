@@ -10,7 +10,7 @@ afterany chain, stepping cleanly at 8N -- loss 1.34 -> 1.0 by step 128,
 mean_token_accuracy 0.685 -> 0.735, checkpoints every 50. Getting here meant
 root-causing and fixing a cascade (each documented in the
 [launch report](experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md)
-+ [production doc](production/sft/gs138650/tulu_math_uc_mix_full/README.md)):
++ [production doc](production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md)):
 
 1. **Runtime tokenize** of 93M rows (~8.5h) blew the watchdog -> offline
    `--pretokenize_to` / `--pretokenized_dataset` (TRL skips prep on `input_ids`).
@@ -1200,7 +1200,7 @@ not in a separate worktree). Push pending after committing doc updates.
 
 > **Canonical writeup** (with the full failover-cycle worked
 > example and run table):
-> [`docs/production/sft/aurora2b/tulu_math_uc_mix/`](production/sft/aurora2b/tulu_math_uc_mix/README.md).
+> [`docs/production/sft/agpt/2b-mds/tulu_math_uc_mix/`](production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md).
 > This journal entry is the rolling debug log; the report is the
 > end-of-day cleanup.
 
@@ -1304,7 +1304,7 @@ inline review threads addressed + resolved.
 End-of-day deliverables: SFT'd AuroraGPT-2B HF ckpt for GRPO,
 PR #186940 (v2) up for upstream review, autoretry recognizes
 both torchtitan and HF/TRL trainer markers, complete writeup at
-[`docs/production/sft/aurora2b/tulu_math_uc_mix/`](production/sft/aurora2b/tulu_math_uc_mix/README.md).
+[`docs/production/sft/agpt/2b-mds/tulu_math_uc_mix/`](production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md).
 
 **Operational TODO:** file ALCF ticket for `x1921c1s0b0n0` —
 this host showed up as the SIGABRT-er in multiple jobs across

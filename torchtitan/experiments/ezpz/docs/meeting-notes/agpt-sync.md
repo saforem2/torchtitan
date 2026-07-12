@@ -78,7 +78,7 @@ v2 256N base** (step-92,859): converted DCP->HF on Aurora, transferred to
 Sunspot, ran the proven `tulu_math_uc_mix` recipe. 2N smoke green; 32N full run
 `12470088` in progress (loss 1.35 -> 0.95, mean_token_accuracy 0.68 -> 0.757,
 checkpoint-100 saved, fresh CKPT_DIR confirmed). Trajectory:
-[`sft/agpt-2b-v2-256n`](../production/sft/agpt-2b-v2-256n/tulu_math_uc_mix/README.md).
+[`sft/agpt-2b-v2-256n`](../production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md).
 **Sets up an eval question:** does SFT on the completed base beat SFT on the
 older lineage? (head-to-head once it finishes.)
 

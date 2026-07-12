@@ -22,7 +22,7 @@
 | Sequence length | 1024, packing pre-applied offline, `assistant_only_loss` via baked-in `assistant_masks` |
 | Hyperparameters | LR 2e-5 (cosine to 0), bf16, AdamW (TRL default), 1 epoch |
 | Scale | **8 nodes x 12 = 96 ranks**, GBS = 6144 (bsz 2 x gas 32), FSDP full_shard |
-| Submit script | [`rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh`](../../../../../rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh) |
+| Submit script | [`rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh`](../../../../../../rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh) |
 | Output dir | `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/` |
 | Expected steps | ~8,672 (1 epoch at GBS=6144); ~24s/step -> ~58h -> ~5 x 12h windows |
 | Fault tolerance | afterany chain + `--resume_from_checkpoint`, save_steps=50, NO ezpz auto-retry |
@@ -31,7 +31,7 @@
 
 The full OpenMathInstruct-2 mix needed an offline build pipeline; each stage hit
 a distinct failure, all now fixed. Full blow-by-blow in the
-[launch report](../../../../experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md).
+[launch report](../../../../../experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md).
 Short version:
 
 1. **Interleave build** was ~90 min single-threaded -> vectorized to ~5s
@@ -103,7 +103,7 @@ descent, consistent with the completed gs138650 SFT's start (~1.16 -> 0.77 over
 ## Comparison to the completed 729-step SFT
 
 The prior production SFT
-([tulu_math_uc_mix on gs138650, metamathqa swap](../../aurora2b/tulu_math_uc_mix/README.md))
+([tulu_math_uc_mix on gs138650, metamathqa swap](../../2b-mds/tulu_math_uc_mix/README.md))
 reached final loss 0.77 over 729 steps / ~4.5B tokens. This run keeps the same
 base + recipe weights but uses the FULL OpenMathInstruct-2 mix (~54B tokens,
 ~12x the tokens) for 1 epoch. The eval comparison (base-LM benchmarks, IFEval,

@@ -16,7 +16,7 @@
 | Sequence length | 1024 |
 | Hyperparameters | LR 2e-5 (cosine to 0), bf16, AdamW (TRL default), 3 epochs |
 | Scale | 32 nodes × 12 ranks = 384 ranks, GBS = 6144, FSDP `full_shard` |
-| Submit script | [`rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh`](../../../../../rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh) |
+| Submit script | [`rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh`](../../../../../../rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh) |
 | Output dir | `outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/` |
 | Final HF checkpoint | `<output_dir>/checkpoint-729-hf/` (7.5 GB safetensors + config + tokenizer) |
 | Wall time | ~2 h on-node, spread across 4 PBS jobs |
@@ -102,7 +102,7 @@ outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/
 ```
 
 FSDP1 → HF consolidation is via
-[`rl/scripts/consolidate_sft_ckpt.sh`](../../../../../rl/scripts/consolidate_sft_ckpt.sh),
+[`rl/scripts/consolidate_sft_ckpt.sh`](../../../../../../rl/scripts/consolidate_sft_ckpt.sh),
 which wraps `accelerate merge-weights`. Each `checkpoint-N/` is
 ~28 GB on disk (FSDP shards + optimizer + per-rank RNG); the `-hf/`
 flat-format copy is 7.5 GB. Intermediate `checkpoint-N/` dirs are

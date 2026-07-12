@@ -110,7 +110,7 @@ End-of-training summary (from the `Training complete.` block):
 ## How auto-retry's bad-node failover works (with this run as worked example)
 
 The submit script
-[`aurora2b_tulu_mix_32n_gbs6144.sh`](../../../../../rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh)
+[`aurora2b_tulu_mix_32n_gbs6144.sh`](../../../../../../rl/scripts/sft/aurora2b_tulu_mix_32n_gbs6144.sh)
 allocates `select=36` (32 training + 4 spare) and launches via
 `ezpz launch --auto-retry --max-failover-retries 3`. The autoretry
 loop wraps a single `mpiexec` invocation:
@@ -251,7 +251,7 @@ of the PR switched to `torch.accelerator.current_accelerator()`
 to avoid the composite trap entirely.
 
 Full writeup with the proposed fix snippet:
-[`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../upstream-issues/sharded_tensor_device_cuda_hardcode.md).
+[`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../upstream-issues/sharded_tensor_device_cuda_hardcode.md).
 
 ### 2. autoretry STUCK_PRE_TRAINING false-positive on TRL format
 
@@ -320,7 +320,7 @@ empirically each job has needed 1–2 swaps before walltime.
 The fact that the **same host** keeps showing up across jobs
 suggests an ALCF ticket would be worthwhile to get it pulled from
 the queue. Filed as a TODO in
-[`docs/journal.md`](../../../../journal.md) 2026-06-10 entry.
+[`docs/journal.md`](../../../../../journal.md) 2026-06-10 entry.
 
 ## Outputs
 
@@ -333,7 +333,7 @@ the queue. Filed as a TODO in
     `12468408` debug window
   - `checkpoint-729-hf/` — **final consolidated HF format** ready
     for `from_pretrained()`. Written post-completion via
-    [`scripts/consolidate_sft_ckpt.sh`](../../../../../rl/scripts/consolidate_sft_ckpt.sh):
+    [`scripts/consolidate_sft_ckpt.sh`](../../../../../../rl/scripts/consolidate_sft_ckpt.sh):
     `accelerate merge-weights` flattens the FSDP1 distcp shards
     in `pytorch_model_fsdp_0/` into a single `model.safetensors`,
     drops optimizer/rng state, and copies `config.json` +
@@ -363,9 +363,9 @@ instruction-following adaptation has converged on this mix.
 
 ## Related
 
-- Prior SFT smoke: [`20260608-sft-2b-sophiag-metamathqa-n32.md`](../../../../experiments/agpt/sunspot/20260608-sft-2b-sophiag-metamathqa-n32.md)
+- Prior SFT smoke: [`20260608-sft-2b-sophiag-metamathqa-n32.md`](../../../../../experiments/agpt/sunspot/20260608-sft-2b-sophiag-metamathqa-n32.md)
 - Upstream issue + fix: [pytorch/pytorch#186938](https://github.com/pytorch/pytorch/issues/186938) + [pytorch/pytorch#186940](https://github.com/pytorch/pytorch/pull/186940)
 - ezpz autoretry fix: [saforem2/ezpz commit `6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b)
 - ezpz autoretry _drain UTF-8 bug fix (pre-req for this work): [saforem2/ezpz PR #162](https://github.com/saforem2/ezpz/pull/162) (#163)
-- Local upstream-issues writeup: [`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../upstream-issues/sharded_tensor_device_cuda_hardcode.md)
-- Journal entry: [`docs/journal.md`](../../../../journal.md) 2026-06-10
+- Local upstream-issues writeup: [`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../upstream-issues/sharded_tensor_device_cuda_hardcode.md)
+- Journal entry: [`docs/journal.md`](../../../../../journal.md) 2026-06-10
