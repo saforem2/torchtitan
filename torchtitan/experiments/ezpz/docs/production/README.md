@@ -19,8 +19,10 @@
 
 ## Status at a glance
 
-**Pre-training** — one row per live trajectory; `% target` is against the
-4.67T olmo-mix budget. Post-training stages (CPT / SFT / RL-GRPO) are in the
+### Pre-training
+
+One row per live trajectory; `% target` is against the 4.67T olmo-mix budget.
+Post-training stages (CPT / SFT / RL-GRPO) are in the
 [next table](#post-training-stages-cpt--sft--rl). Detail + per-dispatch history
 in the linked pages.
 
