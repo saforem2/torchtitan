@@ -470,10 +470,14 @@ def plot_80b_all_optimizers(out: Path) -> None:
     ax.scatter([7.356e-7], [12.785], s=170, facecolors="none",
                edgecolors=OPT_COLOR["adamw"], linewidths=1.8, zorder=6)
     ax.annotate("AdamW: last finite 7.4e-7,\nthen NaN (no real min)",
-                xy=(7.356e-7, 12.785), xytext=(1.0e-8, 12.35), fontsize=8,
+                xy=(7.356e-7, 12.785), xytext=(1.3e-8, 12.80), fontsize=8,
                 color=OPT_COLOR["adamw"],
                 arrowprops=dict(arrowstyle="->", color=OPT_COLOR["adamw"]))
     ax.set_xscale("log")
+    # Keep the y-axis on the actual loss band: the annotation text must sit
+    # INSIDE the data range or matplotlib autoscales down to it and crushes
+    # the curve into a thin strip (this is exactly what broke the chart).
+    ax.set_ylim(12.77, 12.94)
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
     ax.set_title("agpt 80B LR finder at the PRODUCTION batch (GBS=6144, dp=192)\n"
