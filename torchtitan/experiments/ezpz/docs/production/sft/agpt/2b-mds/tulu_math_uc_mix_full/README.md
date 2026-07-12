@@ -91,7 +91,8 @@ the first `update_all_charts.sh` run lands it on Sunspot.
 | Job | Date | Steps | Loss | Notes |
 |-----|------|------:|-----:|-------|
 | 12470350 (head) | 2026-07-12 | 0 -> ~790/8672 | 1.343 -> 0.864 | 8N head; save_steps=50, checkpoints through step-850. mean_token_accuracy 0.685 -> 0.77, no GPU fault. **Idle-watchdog SIGTERM (rc=124) at step ~790**: a genuine ~30-min mid-training hang (not a crash/walltime; checkpoint saves are ~9s), afterany chain recovered. wandb `summer-mountain-82` / [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh). |
-| 12470351 (cont 1) | 2026-07-12 -> | ~1480/8672 (in progress) | 0.87 -> 0.757 | Resumed from checkpoint-850 (continuous, not step 0); advancing steadily, checkpoints through 1500, 0 hangs this job. Already past the completed 729-step SFT's step count at comparable per-step loss. wandb `peachy-morning-...` / [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7). Chain: 352/353/354/355/364 H. |
+| 12470351 (cont 1) | 2026-07-12 | ~850 -> ~1535 | 0.87 -> 0.75 | Resumed from checkpoint-850. **Idle-watchdog SIGTERM (rc=124) at step ~1535** -- HANG #2 (same ~30-min-silence signature as the head; checkpointed to 1600 before dying). afterany recovered. wandb `peachy-morning-...` / [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7). |
+| 12470352 (cont 2) | 2026-07-12 -> | ~1600/8672 (in progress) | 0.739 | Resumed from checkpoint-1600 (model+optimizer loaded, loss/lr continuous). wandb `dashing-water-...` / [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf). Chain: 353/354/355/364/368 H. |
 
 <!-- RUN-PROGRESS -->
 
@@ -104,8 +105,16 @@ Each continuation resumes from the latest checkpoint (not step 0). Run ids:
 
 | Chain link | wandb run | Steps covered |
 |---|---|---|
-| 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> ~790 (idle-watchdog hang) |
-| 12470351 (cont 1) | [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7) (`peachy-morning-...`) | ~800 -> (in progress), resumed from checkpoint-850 |
+| 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> ~790 (idle-watchdog HANG #1) |
+| 12470351 (cont 1) | [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7) (`peachy-morning-...`) | ~850 -> ~1535 (idle-watchdog HANG #2) |
+| 12470352 (cont 2) | [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf) (`dashing-water-...`) | ~1600 -> (in progress), resumed from checkpoint-1600 |
+
+> **Idle-hang pattern (watching):** both completed chain links so far ended in a
+> ~30-min-silence idle-watchdog SIGTERM (rc=124) mid-training, not a crash or
+> walltime -- head @ ~step 790, cont1 @ ~step 1535 (~every ~5h / ~750 steps).
+> The afterany chain + save_steps=50 recover each cleanly (<=50 steps lost), so
+> the run advances, but it consumes ~1 chain link per hang. If this continues
+> it is an 8N-stability concern worth an ALCF angle; so far tolerable.
 
 ### Early trajectory (job 12470350)
 
