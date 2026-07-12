@@ -20,6 +20,49 @@ was required in ezpz.
 
 ---
 
+## 2026-07-12 — 68th sync (2 commits, `4b041be61..upstream/main`)
+
+Merged as `3d277c141` directly on `ezpz`. **No replays required** -- post-merge
+`git diff -- experiments/ezpz/agpt/ experiments/ezpz/moe/` is EMPTY. Clean
+automatic merge, **zero conflicts**.
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `51c197c86` | Unify CosSinRoPE and ComplexRoPE YaRN computation (#3787) | Touches `models/common/rope.py` (which ezpz/agpt imports: CosSinRoPE/ComplexRoPE/RoPE.Config). **Numerically neutral for us** -- see analysis below. |
+| `0d7f4ab33` | [ci][models] block qwen3.5 spmd_types, fix dsv3 compile (#3901) | Touches `models/common/token_dispatcher.py` + `models/deepseek_v3/model.py`. ezpz/moe imports token_dispatcher but the changes are a qwen3.5 CI block + a dsv3 compile fix; no API our moe uses changed. |
+
+### RoPE change analysis (numerics-sensitive -- checked carefully)
+PR #3787 (a) removes the `mscale` field from `RoPE.Config`, (b) swaps
+`CosSinRoPE` `beta_fast`/`beta_slow` to the YaRN-paper convention, and (c) makes
+`CosSinRoPE` a pure rotation (GPT-OSS folds mscale into its softmax_scale). Our
+production agpt runs use the `_real` (cos_sin) RoPE -- the class this PR
+modifies -- so this needed verification, but it is safe:
+- agpt rope defaults to **`scaling="none"`** (agpt/__init__.py:342), so it never
+  enters the modified YaRN branch. The beta_fast/beta_slow + YaRN math changes
+  are irrelevant to our runs.
+- agpt **never sets `mscale`** (grep clean), so the removed `RoPE.Config.mscale`
+  field does not break `_set_rope_backend`'s `fields()` copy or construction.
+- ezpz/moe's `mscale` is on its **`Attention.Config`** (folded into
+  `softmax_scale` in moe/model.py:110), NOT on `RoPE.Config` -- this already
+  matches the pattern the PR moves toward; unaffected.
+
+### Validation -- smoke-passed (Sunspot, 2026-07-12)
+`sync_smoke.sh`, **VERDICT: ok** (job 12470359, post-merge), all 3 configs rc=0,
+`IMPORT_OK`, and losses **bit-identical to the 64th-67th syncs** (seed=42),
+confirming the RoPE refactor changed nothing on our path:
+
+| Config | step 1 -> step 2 loss |
+|--------|-----------------------|
+| ezpz.agpt / agpt_debugmodel (TP=1) | 10.83863 -> 10.67256 |
+| ezpz.agpt / agpt_debugmodel (TP=2) | 10.83968 -> 10.66184 |
+| ezpz.moe / moe_debugmodel | 12.90956 -> 12.36751 |
+
+(A first smoke submission accidentally ran on pre-merge code; 12470359 is the
+post-merge run.) Landed to `origin/ezpz` after VERDICT: ok.
+
+---
+
 ## 2026-07-10 — 67th sync (1 commit, `4b041be61`)
 
 Direct merge on `ezpz` (single trivial commit, no worktree). **No replays
