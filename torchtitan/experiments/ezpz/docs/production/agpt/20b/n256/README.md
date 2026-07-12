@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-07-09
+> Last updated: 2026-07-12
 >
 > Status: chain at step **3,100** persisted (~156.0B tokens, **3.3%** of
 > 4.67T), advancing. Trajectory since the step-300 stall: `8505255`
@@ -77,13 +77,33 @@
 | `8558548` | 2026-06-16 | 12h | 1,100 → ? | — | — | — | **Re-submit after tarball fix** (spmd_types==0.2.1 installed + rebuilt 2026-06-16). Resumes from step-1,100. Q at submit. |
 | `8558549` | — | 12h | (cont1) | — | — | — | Held (`afterany:8558548`). |
 
-**Latest checkpoint:** step-3,100 (8505255, all of step-100..1,100 have valid `.metadata`)
+**Latest checkpoint:** step-4,200 (8505255, all of step-100..1,100 have valid `.metadata`)
 
-**Cumulative persisted steps:** 3,100
+**Cumulative persisted steps:** 4,200
 
-**Tokens consumed:** 3,100 × 6,144 × 8,192 = **156.0B tokens** (3.3% of 4.67T target)
+**Tokens consumed:** 4,200 × 6,144 × 8,192 = **211.4B tokens** (4.5% of 4.67T target)
 
-**Loss:** 2.684 (8558549 end, step-3,100)
+**Loss:** 3.2631 (8558549 end, step-3,100)
+
+## v2 -- 20B @ 256N -- constant-LR fork (SophiaG, decay-ratio=0, min-lr-factor=1.0)
+
+Experimental fork testing a **gentle constant learning rate** (no decay) at 20B,
+motivated by the CPT LR-rewarm-shock findings. Model-only fork from the base
+weights with a fresh optimizer/scheduler (loss restarts high at step-10 = 12.21,
+not resumed), decay-ratio=0.0 / min-lr-factor=1.0 so LR stays flat after warmup.
+
+- **Job:** `8661913` (256N, 6h, legacy failover wrapper). Ran 2026-07-11 21:59.
+- **Ckpt dir:** `outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-constlr`
+  (distinct dir -- does not touch the canonical SophiaG chain above).
+- **Result:** trains cleanly -- loss **12.21 (step 10) -> ~4.28 (step 435)**,
+  grad_norm healthy (0.5-1.4), MFU ~22%, **no NaN**. Constant LR is stable at 20B.
+- **Checkpoints:** step-50 .. step-400 saved (8 ckpts, synchronous ~385s/save).
+  Latest valid = **step-400**; resumable.
+- **Caveat:** the job **silently hung after ~step 435** (~23:00) and sat idle
+  until PBS walltime-killed it at 04:01 -- most of the 6h window was lost to the
+  hang (same silent-hang class seen before; legacy wrapper did not swap-recover).
+  A continuation should move this fork onto the native auto-retry path.
+
 
 ### Logs
 
