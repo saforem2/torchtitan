@@ -2,6 +2,34 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-12 (aurora) -- 20B chains -> constant LR; corrected mislabeled 8661913
+
+- **Held both canonical 20B chains at constant LR (no decay)** per request. Patched
+  `submit_agpt_20b_autoretry.sh` in BOTH prod clones (agpt-20b-v2 512N,
+  agpt-20b-n256 256N): added `DECAY_RATIO="${DECAY_RATIO:-0.0}"` +
+  `--lr-scheduler.decay-ratio="${DECAY_RATIO}"` on the train cmd. Verified the
+  scheduler math: `decay_ratio=0.0 -> decay_steps=0 -> lr_mult=1.0 at every step`
+  (flat after the 200-step warmup, LR stays 2.28e-5 through step 92,858). Queued
+  continuations 8647383 (512N) + 8647386 (256N) pick it up at launch -- no
+  resubmit, nothing killed. Backups: 512N `-20260712-160557`, 256N
+  `.bak-preconstlr-20260712`. Both chains were still pre-decay anyway (onset was
+  step 18,572; at 6,000 / 4,200). Mirrored the same `DECAY_RATIO` default into the
+  main-repo `submit_agpt_20b_autoretry.sh` so it survives future clone refreshes.
+- **Corrected a wrong record: job 8661913 was NOT a constant-LR fork.** It had
+  been documented (20b-256 README + a refresh commit msg) as "constant-LR fork
+  from the trained base, loss 12.21->4.28, validates constant LR at 20B." The
+  resolved config from its own log disproves that: `initial_load_path=null`,
+  `decay_ratio=0.8`, `warmup_steps=200`, `lr=2.28e-5`, and loss starting at 12.21
+  @ step-10 dropping steeply = random-init warmup, NOT a fork. It was really a
+  from-scratch duplicate 20B-256 run on the DEFAULT schedule that reached only
+  step-400 before silent-hanging. Fixed the 20b-256 README section; NOT resumed
+  (would duplicate the canonical chain at worse loss). The `-constlr` ckpt dir is
+  misnamed and can be archived.
+- Also fixed the 80B GBS6144 LR-finder chart (restored mano/sophiag curves from
+  Sunspot dated-record, hardcoded so it no longer depends on gitignored CSVs) and
+  refreshed all production docs/charts to 2026-07-12 (0 stale / 0 drift).
+
+
 ## 2026-07-12 (sunspot) -- big-mix SFT finally training (at 8N) after a 6-failure saga
 
 Got the "more tokens" SFT running: gs138650 base on the FULL OpenMathInstruct-2

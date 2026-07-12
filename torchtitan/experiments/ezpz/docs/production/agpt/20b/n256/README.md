@@ -85,24 +85,31 @@
 
 **Loss:** 3.2631 (8558549 end, step-3,100)
 
-## v2 -- 20B @ 256N -- constant-LR fork (SophiaG, decay-ratio=0, min-lr-factor=1.0)
+## v2 -- 20B @ 256N -- job 8661913 (MISLABELED "constlr"; actually from-scratch)
 
-Experimental fork testing a **gentle constant learning rate** (no decay) at 20B,
-motivated by the CPT LR-rewarm-shock findings. Model-only fork from the base
-weights with a fresh optimizer/scheduler (loss restarts high at step-10 = 12.21,
-not resumed), decay-ratio=0.0 / min-lr-factor=1.0 so LR stays flat after warmup.
+> **Correction (2026-07-12):** this run was originally recorded here as a
+> "constant-LR fork from the trained base." That was WRONG. Inspecting the
+> resolved config from its own log shows it was a **fresh from-scratch run on
+> the DEFAULT schedule**, not a fork and not constant-LR:
+> `initial_load_path=null` (nothing loaded), `decay_ratio=0.8`,
+> `warmup_steps=200`, `--optimizer.lr=2.28e-5`. Loss starts at **12.21 @ step-10
+> and drops steeply** (12.21 -> 11.0 in 6 steps) -- the classic random-init
+> warmup signature, not a continuation of the base (which was already ~2.7).
+> The `-constlr` in the ckpt-dir name came from an intended config that never
+> reached the command line.
 
 - **Job:** `8661913` (256N, 6h, legacy failover wrapper). Ran 2026-07-11 21:59.
-- **Ckpt dir:** `outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-constlr`
-  (distinct dir -- does not touch the canonical SophiaG chain above).
-- **Result:** trains cleanly -- loss **12.21 (step 10) -> ~4.28 (step 435)**,
-  grad_norm healthy (0.5-1.4), MFU ~22%, **no NaN**. Constant LR is stable at 20B.
-- **Checkpoints:** step-50 .. step-400 saved (8 ckpts, synchronous ~385s/save).
-  Latest valid = **step-400**; resumable.
-- **Caveat:** the job **silently hung after ~step 435** (~23:00) and sat idle
-  until PBS walltime-killed it at 04:01 -- most of the 6h window was lost to the
-  hang (same silent-hang class seen before; legacy wrapper did not swap-recover).
-  A continuation should move this fork onto the native auto-retry path.
+- **What it actually was:** a duplicate 20B-256 training run from random init on
+  the standard warmup+linear-decay schedule (same optimizer/LR as the canonical
+  chain), writing to a NEW dir `...-gbs6144-constlr`.
+- **Result:** reached only **step-400** (still in early warmup, loss ~4.3) before
+  it **silently hung after ~step 435** and sat idle until PBS walltime-killed it
+  at 04:01. No NaN; MFU ~22%; checkpoints step-50..step-400 saved (~385s/save).
+- **Disposition:** NOT resumed -- it would just duplicate the canonical 20B-256
+  chain (already at step-4,200) at a worse loss. The mislabeled ckpt dir can be
+  archived/removed. A REAL constant-LR experiment is now handled differently:
+  the canonical chains hold LR flat via `DECAY_RATIO=0.0` in
+  `submit_agpt_20b_autoretry.sh` (see 2026-07-12 journal entry).
 
 
 ### Logs
