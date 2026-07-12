@@ -44,7 +44,7 @@ cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/to
 # But the convert_to_hf step needs torchtitan + the v2 model registry —
 # so source the v2 venv for the conversion, then deactivate before
 # the lm-eval step.
-V2_REPO="/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz"
+V2_REPO="${REPO:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz}"
 # Default to the canonical 512N chain (gbs12288); override CKPT_NAME +
 # LABEL to evaluate other trajectories (e.g. the 256N comparator).
 V2_CKPT_NAME="${CKPT_NAME:-agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288}"
