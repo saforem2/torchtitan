@@ -22,6 +22,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-12 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-12 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/gs138650/tulu_math_uc_mix_full/README.md) |
 | 2026-07-12 | [Production SFT](./production/sft/README.md) |
 | 2026-07-12 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
@@ -37,7 +38,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-11 | [Synthetic-summary data generation POC (olmo-mix-1124)](./experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md) |
 | 2026-07-11 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
 | 2026-07-11 | [Experiment Benchmark Reports](./experiments/README.md) |
-| 2026-07-10 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-10 | [Summaries](./summaries/README.md) |
 | 2026-07-10 | [2026-07-06 to 2026-07-10 -- ~4-Day Summary](./summaries/2026-07-06_to_2026-07-10.md) |
 | 2026-07-10 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
@@ -170,7 +170,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-10 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-12 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
