@@ -74,6 +74,18 @@ different nodes), **OOV token id** (full 53M-row scan: max 255998 < base vocab
 is near the recurring ~186-192 dp_degree boundary on this XPU/torch stack.
 The scale fault itself remains an open infra issue; running at 8N sidesteps it.
 
+## Loss trajectory
+
+[![SFT training curves](charts/sft-curves.svg)](charts/sft-curves.svg)
+
+Loss + grad_norm + LR + mean-token-accuracy + entropy + cumulative-tokens over
+the run so far (regenerated from the latest checkpoint's `trainer_state.json` by
+[`scripts/plot_sft_curves.py`](scripts/plot_sft_curves.py), wired into the
+[refresh catch-all](../../../../../scripts/update_all_charts.sh)). The token axis
+stitches TRL's per-chain-link `num_tokens` counter into a monotonic total (each
+afterany continuation resumes and re-inits the counter). Chart is absent until
+the first `update_all_charts.sh` run lands it on Sunspot.
+
 ## Run status
 
 | Job | Date | Steps | Loss | Notes |
