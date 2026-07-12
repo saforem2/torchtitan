@@ -444,24 +444,32 @@ def plot_2b_all_optimizers(out: Path, gbs: int = 6144) -> None:
 
 
 def plot_80b_all_optimizers(out: Path) -> None:
-    base = "outputs/lr_finder/ezpz/ezpz.agpt/80B"
-    # adamw 6144 from the dated record (live CSV overwritten by trend probes)
-    adamw_lr = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7,
-                3.981e-7, 7.356e-7]
-    adamw_loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844,
-                  12.785]
+    # All curves are dated-record values (Sunspot jobs 12469631/12469632, GBS=6144,
+    # world_size=768, 2026-06-26/27). They are HARDCODED, not CSV-loaded: the live
+    # CSVs live under outputs/ which is gitignored, so a fresh clone never has them
+    # (that is exactly how this chart broke -- it silently drew AdamW alone and the
+    # annotation autoscaled the axis). Values are the smoothed curves emitted by the
+    # finder loader; the U-minimum index is marked with an open circle.
+    LR15 = [1.0e-8, 1.848e-8, 3.415e-8, 6.31e-8, 1.166e-7, 2.154e-7, 3.981e-7,
+            7.356e-7, 1.359e-6, 2.512e-6, 4.642e-6, 8.577e-6, 1.585e-5, 2.929e-5,
+            5.412e-5]
+    # adamw only stays finite through 7.4e-7 (8 points), then NaN -- no real min.
+    adamw_lr = LR15[:8]
+    adamw_loss = [12.911, 12.908, 12.930, 12.922, 12.904, 12.881, 12.844, 12.785]
+    mano_lr, sophiag_lr = LR15, LR15
+    mano_loss = [12.978, 12.976, 12.974, 12.97, 12.964, 12.954, 12.938, 12.91,
+                 12.863, 12.785, 12.73, 12.684, 12.615, 12.668, 12.725]
+    sophiag_loss = [12.936, 12.939, 12.934, 12.925, 12.918, 12.896, 12.861, 12.801,
+                    12.706, 12.604, 12.694, 13.278, 13.612, 13.955, 14.278]
     fig, ax = plt.subplots(figsize=(9, 6))
-    for opt, lab in [("mano", "mano -- U-min @ 1.6e-5 (best, 0 NaN)"),
-                     ("sophiag", "sophiag -- U-min @ 2.5e-6, lowest loss (0 NaN)")]:
-        p = f"{base}/{opt}/lr_finder_data.csv"
-        if not Path(p).exists():
-            continue
-        fx, fy_raw = _finite(*load_curve(p))
-        fy = _smooth(fy_raw)
+    for opt, fx, fy, lab in [
+        ("mano", mano_lr, mano_loss, "mano -- U-min @ 1.6e-5 (best, 0 NaN)"),
+        ("sophiag", sophiag_lr, sophiag_loss,
+         "sophiag -- U-min @ 2.5e-6, lowest loss (0 NaN)"),
+    ]:
         mi = min(range(len(fy)), key=lambda k: fy[k])
-        mlr, mloss = fx[mi], fy[mi]
         ax.plot(fx, fy, "-o", ms=6, color=OPT_COLOR[opt], label=lab)
-        ax.scatter([mlr], [mloss], s=170, facecolors="none",
+        ax.scatter([fx[mi]], [fy[mi]], s=170, facecolors="none",
                    edgecolors=OPT_COLOR[opt], linewidths=1.8, zorder=4)
     # AdamW uses its canonical orange (consistent with every other chart); the
     # ^ marker + dashed annotation distinguish it as the NaN-cliff line.
@@ -470,19 +478,21 @@ def plot_80b_all_optimizers(out: Path) -> None:
     ax.scatter([7.356e-7], [12.785], s=170, facecolors="none",
                edgecolors=OPT_COLOR["adamw"], linewidths=1.8, zorder=6)
     ax.annotate("AdamW: last finite 7.4e-7,\nthen NaN (no real min)",
-                xy=(7.356e-7, 12.785), xytext=(1.3e-8, 12.80), fontsize=8,
+                xy=(7.356e-7, 12.785), xytext=(1.3e-8, 12.66), fontsize=8,
                 color=OPT_COLOR["adamw"],
                 arrowprops=dict(arrowstyle="->", color=OPT_COLOR["adamw"]))
     ax.set_xscale("log")
-    # Keep the y-axis on the actual loss band: the annotation text must sit
-    # INSIDE the data range or matplotlib autoscales down to it and crushes
-    # the curve into a thin strip (this is exactly what broke the chart).
-    ax.set_ylim(12.77, 12.94)
+    # Pin the y-axis to the real loss band (mano/sophiag U-minima ~12.60-12.62
+    # up to the ~12.94 shoulder). An explicit ylim is REQUIRED: if the
+    # mano/sophiag CSVs are ever missing again, only the AdamW curve is drawn
+    # and the annotation text would otherwise autoscale the axis and crush the
+    # curve into a thin strip (the original bug).
+    ax.set_ylim(12.58, 12.95)
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
     ax.set_title("agpt 80B LR finder at the PRODUCTION batch (GBS=6144, dp=192)\n"
                  "mano & sophiag have real U-minima; AdamW only cliffs to NaN")
-    ax.legend(fontsize=8.5, loc="upper left")
+    ax.legend(fontsize=8.5, loc="lower right")
     fig.tight_layout()
     fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)
