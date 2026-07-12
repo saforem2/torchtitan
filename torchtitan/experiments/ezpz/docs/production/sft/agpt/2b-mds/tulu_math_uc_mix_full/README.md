@@ -78,7 +78,8 @@ The scale fault itself remains an open infra issue; running at 8N sidesteps it.
 
 | Job | Date | Steps | Loss | Notes |
 |-----|------|------:|-----:|-------|
-| 12470350 (+chain 351-355) | 2026-07-12 -> | ~482/8672 (in progress) | 1.343 -> 0.912 | 8N head; save_steps=50, checkpoints through step-500 saved. mean_token_accuracy 0.685 -> ~0.75, grad_norm settled ~0.35. No GPU fault at 8N. wandb: `summer-mountain-82` / [runs/vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh). |
+| 12470350 (head) | 2026-07-12 | 0 -> ~790/8672 | 1.343 -> 0.864 | 8N head; save_steps=50, checkpoints through step-850. mean_token_accuracy 0.685 -> 0.77, no GPU fault. **Idle-watchdog SIGTERM (rc=124) at step ~790**: a genuine ~30-min mid-training hang (not a crash/walltime; checkpoint saves are ~9s), afterany chain recovered. wandb `summer-mountain-82` / [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh). |
+| 12470351 (cont 1) | 2026-07-12 -> | ~800/8672 (in progress) | resumed 0.87 | Resumed from checkpoint-850 (loss/lr continuous, not step 0). wandb `peachy-morning-...` / [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7). Chain: 352/353/354/355/364 H. |
 
 <!-- RUN-PROGRESS -->
 
@@ -91,7 +92,8 @@ Each continuation resumes from the latest checkpoint (not step 0). Run ids:
 
 | Chain link | wandb run | Steps covered |
 |---|---|---|
-| 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> (in progress) |
+| 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> ~790 (idle-watchdog hang) |
+| 12470351 (cont 1) | [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7) (`peachy-morning-...`) | ~800 -> (in progress), resumed from checkpoint-850 |
 
 ### Early trajectory (job 12470350)
 
