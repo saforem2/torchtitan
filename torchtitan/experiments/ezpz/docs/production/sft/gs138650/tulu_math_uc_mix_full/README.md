@@ -78,14 +78,25 @@ The scale fault itself remains an open infra issue; running at 8N sidesteps it.
 
 | Job | Date | Steps | Loss | Notes |
 |-----|------|------:|-----:|-------|
-| 12470350 (+chain 351-355) | 2026-07-12 -> | ~128/8672 (in progress) | 1.343 -> 1.005 | 8N head; save_steps=50, checkpoint-50/100/150 saved. mean_token_accuracy 0.685 -> 0.735, grad_norm settled ~0.27. No GPU fault at 8N. |
+| 12470350 (+chain 351-355) | 2026-07-12 -> | ~305/8672 (in progress) | 1.343 -> 0.946 | 8N head; save_steps=50, checkpoints through step-350 saved. mean_token_accuracy 0.685 -> 0.74, grad_norm settled ~0.29. No GPU fault at 8N. wandb: `summer-mountain-82` / [runs/vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh). |
 
 <!-- RUN-PROGRESS -->
 
+### wandb runs (one per chain link)
+
+This run uses the afterany chain (NOT ezpz auto-retry), so each chain link
+relaunches a fresh `train_sft` process and starts its OWN wandb run under
+project [`aurora_gpt/torchtitan.ezpz.sft`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft).
+Each continuation resumes from the latest checkpoint (not step 0). Run ids:
+
+| Chain link | wandb run | Steps covered |
+|---|---|---|
+| 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> (in progress) |
+
 ### Early trajectory (job 12470350)
 
-First ~128 steps at 8N (GBS=6144): loss **1.343 -> 1.005**, mean_token_accuracy
-**0.685 -> 0.735**, grad_norm settled from 9.2 to ~0.27. Clean textbook SFT
+First ~305 steps at 8N (GBS=6144): loss **1.343 -> 0.946**, mean_token_accuracy
+**0.685 -> 0.74**, grad_norm settled from 9.2 to ~0.29. Clean textbook SFT
 descent, consistent with the completed gs138650 SFT's start (~1.16 -> 0.77 over
 729 steps on the small mix). Checkpoints accumulate every 50 steps.
 
