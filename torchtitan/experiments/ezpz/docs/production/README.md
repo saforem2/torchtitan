@@ -19,8 +19,10 @@
 
 ## Status at a glance
 
-One row per live trajectory; `% target` is against the 4.67T olmo-mix
-budget. Detail + per-dispatch history in the linked pages.
+**Pre-training** — one row per live trajectory; `% target` is against the
+4.67T olmo-mix budget. Post-training stages (CPT / SFT / RL-GRPO) are in the
+[next table](#post-training-stages-cpt--sft--rl). Detail + per-dispatch history
+in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
@@ -29,7 +31,23 @@ budget. Detail + per-dispatch history in the linked pages.
 | [20B 256N](agpt/20b/n256/README.md) | advancing | **4,200** | 2.68 | 4.5% | 🟢 carried to 3,100 via relocated n256 clone chain |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 35,000 | 2.71 | 75.4% | 🟡 queue-starved |
 | [20B 512N](agpt/20b/n512/README.md) | advancing | **6,000** | 2.47 | 12.9% | 🟢 native auto-retry (8638793+8638795) broke the stall, 4,400→5,400 |
-| [**2B CPT** sweep](cpt/README.md) | **pilot complete** ✅ | 5,960 | **2.49** | — | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
+
+### Post-training stages (CPT / SFT / RL)
+
+Continued-pretraining, supervised fine-tuning, and RL-GRPO runs that build ON
+a pre-trained base. No `% target` (they don't consume the 4.67T budget); each
+has its own token/step goal in the linked page.
+
+| Stage | Base | Recipe / trajectory | State | Progress | Notes |
+|-------|------|--------------------|-------|----------|-------|
+| CPT | 2b-256n (plateaued) | [olmo×dolmino sweep](cpt/README.md) | **pilot complete** ✅ | step 5,960, loss **2.49** | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
+| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix/README.md) | tulu_math_uc_mix (metamathqa-swap, ~4.5B tok) | **complete** ✅ | 729 steps, loss **0.77** | 🏁 the reused SFT deliverable (checkpoint-729-hf); input to GRPO |
+| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **advancing** | step 482/8672, loss **0.91** | 🟢 8N (32N GPU-faults; scale-fault bisect); more-tokens SFT |
+| SFT | [2b-v2-256n](sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) | tulu_math_uc_mix | **blocked** | — | 🔴 v2-base 384-rank oneCCL scale crash at 32N |
+| RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
+
+> Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
+> [production/grpo/README.md](grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
 
 > **512N queue starvation** (both 512N chains ~20 days in `small`) is
 > pure node contention, not a hold or bad request — and re-submitting
