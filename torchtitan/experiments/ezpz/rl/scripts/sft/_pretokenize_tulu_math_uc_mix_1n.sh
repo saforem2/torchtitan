@@ -23,10 +23,13 @@
 # trainer.train_dataset directly, so the offline result is bit-identical to
 # in-process prep (same chat template, packing, assistant masks, max_length).
 #
-# num_proc: default dataset_num_proc=32 in EzpzSFTConfig; a Sunspot SPR node has
-# 104 cores, so 96 procs ~3x the per-node tokenize throughput. Even at 96 procs
-# 93M rows is a few hours -- hence the 12h walltime. Runs on ONE rank (rank 0
-# does the save); no distributed collective, no oneCCL barrier, no watchdog.
+# num_proc: dataset_num_proc controls BOTH the tokenize map AND the packing map.
+# At 96 the packing map spiked to ~26TB aggregate vmem and SIGBUS'd the node at
+# 1024 (job 12470330, packing 49%; 1024 packs ~2x more rows than 2048 so the
+# per-map memory pressure is higher). Drop to 32 (the EzpzSFTConfig default):
+# still parallel, far lower peak memory, and tokenize -- the multi-hour part --
+# is only modestly slower. Plenty of 12h walltime headroom. Runs on ONE rank
+# (rank 0 does the save); no distributed collective, no oneCCL barrier.
 #
 # Output: pre-tokenized dataset at
 #   ~/.cache/ezpz_sft_mixes/tokenized/tulu_math_uc_mix-gs138650-len2048/
@@ -59,9 +62,9 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 
 # Single-rank launch: pre-tokenize is a data job, no model training / no
 # collectives. `ezpz launch --np 1` keeps the ezpz env plumbing but runs one
-# rank. max_length 1024 + dataset_num_proc 96 MUST match the training job's
-# --max_length (1024) and the base tokenizer, or TRL's skip-prep produces the
-# wrong shapes / a silent mismatch.
+# rank. max_length 1024 MUST match the training job's --max_length (1024) and
+# the base tokenizer, or TRL's skip-prep produces the wrong shapes / a silent
+# mismatch. (dataset_num_proc only affects build speed/memory, not the output.)
 #
 # Why 1024 (not 2048): at seq_len 2048 the 2B forward+backward OOM'd the XPU
 # tile at step 0 (job 12470328, UR_RESULT_ERROR_OUT_OF_RESOURCES in
@@ -69,12 +72,19 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # 2048 ~doubled activation memory vs the completed SFT's 1024, and bsz=1 + AC
 # were already maxed. 1024 is the proven-fitting length (the 729-step SFT ran
 # at 1024). Packs denser -> fewer sequences than the 2048 build.
+# NPROC override: the parallel packing map crashes a worker ("subprocess
+# abruptly died") at 1024 for num_proc 96 (49%) and 32 (86%) -- pyarrow/mp
+# flakiness at ~60M+ packed rows, NOT node OOM (RSS 30GB/512GB). Progress
+# improved as num_proc dropped, so we walk it down (8 -> 2 -> 1). At 1 there is
+# no multiprocessing, so the crash class is impossible (what the datasets error
+# itself suggests). Tokenize is cached, so each retry only redoes packing+save.
+NPROC="${NPROC:-8}"
 ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset tulu_math_uc_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 1024 \
-    --dataset_num_proc 96 \
+    --dataset_num_proc "${NPROC}" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log" || true
 
