@@ -92,9 +92,22 @@ the first `update_all_charts.sh` run lands it on Sunspot.
 |-----|------|------:|-----:|-------|
 | 12470350 (head) | 2026-07-12 | 0 -> ~790/8672 | 1.343 -> 0.864 | 8N head; save_steps=50, checkpoints through step-850. mean_token_accuracy 0.685 -> 0.77, no GPU fault. **Idle-watchdog SIGTERM (rc=124) at step ~790**: a genuine ~30-min mid-training hang (not a crash/walltime; checkpoint saves are ~9s), afterany chain recovered. wandb `summer-mountain-82` / [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh). |
 | 12470351 (cont 1) | 2026-07-12 | ~850 -> ~1535 | 0.87 -> 0.75 | Resumed from checkpoint-850. **Idle-watchdog SIGTERM (rc=124) at step ~1535** -- HANG #2 (same ~30-min-silence signature as the head; checkpointed to 1600 before dying). afterany recovered. wandb `peachy-morning-...` / [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7). |
-| 12470352 (cont 2) | 2026-07-12 -> | ~1600/8672 (in progress) | 0.739 | Resumed from checkpoint-1600 (model+optimizer loaded, loss/lr continuous). wandb `dashing-water-...` / [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf). Chain: 353/354/355/364/368 H. |
+| 12470352 (cont 2) | 2026-07-12 | ~1600 -> ~2050 | 0.739 -> ~0.70 | Resumed from checkpoint-1600. Ended in ezpz#163 UnicodeDecodeError; chain then hit the DISK-FULL incident below (12470353+ all died with `Disk quota exceeded`). wandb `dashing-water` / [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf). |
+| **DISK-FULL incident** | 2026-07-13 | -- | -- | **datascience project quota hit 10T/10T on /lus/tegu** -> every job died in ~3s with `Disk quota exceeded` (empty logs), draining the whole chain. Root cause: save_steps=50 keep-all (~44 ckpts x 23G) + old SFT runs + 104 core dumps. Freed ~2T (this run's intermediate ckpts, old-SFT-run ckpts, core dumps; all `-hf` deliverables + checkpoint-729-hf preserved) -> project back to ~9.06T. |
+| 12470375/376 (cont 3) | 2026-07-13 -> | resume from **900** (in progress) | ~0.865 | checkpoint-2050 was an INCOMPLETE disk-full casualty (FSDP shards saved but no `trainer_state.json`/rng/scheduler) -> unusable for HF resume; moved aside as `checkpoint-2050.incomplete-diskfull`. Highest COMPLETE kept ckpt was 900 (thinning had removed 950-2000), so resumed from 900 -- **~1150 steps recompute lost**. wandb [rx5p8ifz](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/rx5p8ifz) (375, died) + 376 resumed clean (loss 0.865, lr continuous). Chain: 377/378/379/380 H. |
 
 <!-- RUN-PROGRESS -->
+
+> **DISK-FULL + lost-recompute lesson (2026-07-13):** the /lus/tegu `datascience`
+> project quota filled (save_steps=50 keep-all is ~1T/run); jobs 3s-died on
+> `Disk quota exceeded`. After freeing ~2T, the resume revealed
+> checkpoint-2050 was written incompletely when the disk filled (shards but no
+> `trainer_state.json`). Because thinning had kept ONLY 2050 + 300/600/900, the
+> best *complete* fallback was 900 -> ~1150 steps recompute. **Fixes for next
+> time:** (1) keep the latest 2-3 COMPLETE checkpoints, never just the single
+> latest (the newest is the one most likely mid-write/corrupt); (2) add a
+> keep-latest-N thinning policy so the disk never fills; (3) monitor project
+> quota, not just user quota.
 
 ### wandb runs (one per chain link)
 
@@ -107,7 +120,8 @@ Each continuation resumes from the latest checkpoint (not step 0). Run ids:
 |---|---|---|
 | 12470350 (head) | [vkwpxnqh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/vkwpxnqh) (`summer-mountain-82`) | 0 -> ~790 (idle-watchdog HANG #1) |
 | 12470351 (cont 1) | [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7) (`peachy-morning-...`) | ~850 -> ~1535 (idle-watchdog HANG #2) |
-| 12470352 (cont 2) | [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf) (`dashing-water-...`) | ~1600 -> (in progress), resumed from checkpoint-1600 |
+| 12470352 (cont 2) | [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf) (`dashing-water-...`) | ~1600 -> ~2050 (ezpz#163, then disk-full) |
+| 12470376 (cont 3) | [rx5p8ifz](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/rx5p8ifz) + resumed | resume from **900** (2050 was incomplete disk-full casualty; ~1150 steps recompute) |
 
 > **Idle-hang pattern (watching):** both completed chain links so far ended in a
 > ~30-min-silence idle-watchdog SIGTERM (rc=124) mid-training, not a crash or
