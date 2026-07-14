@@ -2,7 +2,7 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-07-11
+> Last updated: 2026-07-14
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -28,7 +28,7 @@ absolute (not % of a budget).
 | Trajectory | State | Persisted step | Live step | Loss | Tokens | Notes |
 |------------|-------|---------------:|----------:|-----:|-------:|-------|
 | **2B n128** (`gbs512`) | idle (last leg done) | **5,300** | 5,383 | **2.36** | ~22.6B | 53 ckpts; last leg 7228272 ran full 12h |
-| **20B n128** (`gbs1024`) | **RUNNING** (leg 2) | **300** | **~367** | **~3.56** | ~3.1B | leg 1 clean 12h; leg 2 (7237949) resumed from step-300 |
+| **20B n128** (`gbs1024`) | **ADVANCING** (leg 4 Q) | **1,000** | 1,100 | **2.39** | ~11.5B | 3 full 12h legs done; leg 4 (7247525) Q, leg 5 (7252666) held. 10 complete ckpts |
 
 Smaller/earlier 2B node-count variants also exist on disk (comparison
 runs, not the canonical chain): n64 -> step ~1,970 / loss 2.57;
@@ -114,17 +114,27 @@ so the SophiaG LR=2.28e-5 stays valid; GBS = 512 x 1 x 2 = 1024.
 | smokes | 7237663/68/80/90 | config validated | -- | -- |
 | leg 1 (bad) | 7237697 | **killed** -- sync-ckpt deadlock @ step 100 | 0->~100 | (hung) |
 | **leg 1** | 7237948 | ran full 12h, clean | 0 -> **400** | 12.95 -> **3.38** |
-| **leg 2** | 7237949 | **RUNNING** (resumed step-300) | 301 -> **~367** | 4.14 -> **~3.56** |
-| leg 3 | 7243413 | held (`afterany:7237949`) | -- | -- |
+| **leg 2** | 7237949 | ran full 12h (resumed step-300) | 301 -> **705** | 4.14 -> **2.72** |
+| **leg 3** | 7243413 | ran full 12h (resumed step-700) | 701 -> **1,100** | 2.71 -> **2.39** |
+| leg 4 | 7247525 | **Q** (`afterany:7243413`, resumes step-1000) | -- | -- |
+| leg 5 | 7252666 | held (`afterany:7247525`) | -- | -- |
 
-**Persisted checkpoints:** step-100, step-200, step-300 (each 234 GB /
-512 shards, complete). **step-400 is incomplete** (0 files) -- leg 1 was
-walltime-killed mid-async-save, so leg 2 correctly resumed from the last
-complete checkpoint (step-300), replaying ~100 steps. No corruption; the
-fallback is the checkpoint system behaving safely.
+**Persisted checkpoints:** 10 complete (step-100 ... step-1000, each
+234 GB / 512 shards; 2.3 TB total on disk). Two incomplete/empty dirs
+(step-400 from leg 1, step-1100 from leg 3) -- each from a walltime-kill
+landing mid-async-save exactly on a checkpoint boundary, so the next leg
+resumed from the previous complete checkpoint (~100 steps rework). No
+corruption; the fallback is the checkpoint system behaving safely. Leg 2's
+handoff was clean (step-700 flushed before the kill -> leg 3 resumed at
+701, ~5 steps rework), showing the rework only happens when the wall
+coincides with a save.
 
-**Current state:** step **~367**, loss **~3.56**, ~**3.1B tokens**,
-memory 20.2 GiB (51%), ~165 TPS/GPU, ~7.9% MFU. grad_norm ~0.4.
+**Current state:** step **1,100** (persisted 1,000), loss **2.39**,
+~**11.5B tokens**, memory 20.2 GiB (51%), ~140 TPS/GPU, ~6.7% MFU,
+grad_norm ~0.10. Descent across legs: 12.95 -> 3.38 -> 2.72 -> 2.39.
+**Milestone:** matched the mature 2B chain's loss (2.36) at ~half the
+tokens (~11.5B vs ~22.6B) -- the expected larger-model token-efficiency
+crossover.
 
 ---
 
