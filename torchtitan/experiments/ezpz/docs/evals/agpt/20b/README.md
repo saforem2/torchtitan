@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-07-10
+> Last updated: 2026-07-14
 >
 > **Training curves:** see [`docs/production/agpt/20b/`](../../../production/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
