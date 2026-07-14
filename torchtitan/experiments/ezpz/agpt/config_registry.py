@@ -70,6 +70,39 @@ def _set_rope_backend(
     return cfg
 
 
+def _set_fp32_residual(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
+    """Swap every transformer block to the fp32-residual variant.
+
+    Root cause of the 80B production NaN (task #21): the bf16 residual stream
+    overflows across the 84-layer depth. AgptFp32ResidualBlock does the two
+    residual adds in fp32 while keeping the attention/FFN GEMMs in bf16 (see
+    fp32_residual.py). Rebuilds each layer's block Config as the subclass,
+    preserving every other field -- mirrors _set_rope_backend.
+    """
+    import copy
+    from dataclasses import fields
+
+    from torchtitan.experiments.ezpz.agpt.fp32_residual import (
+        AgptFp32ResidualBlock,
+    )
+
+    # Deep-copy first: ezpz_agpt_*() can hand back a config whose model spec is
+    # shared with the agpt_configs template, so mutating .layers in place would
+    # poison the plain flavor for the rest of the process. (Verified: without
+    # this, a later agpt_80b() returned fp32res blocks.)
+    cfg = copy.deepcopy(cfg)
+    model = cfg.model_spec.model
+    model.layers = [
+        AgptFp32ResidualBlock.Config(
+            **{f.name: getattr(layer, f.name) for f in fields(layer)}
+        )
+        for layer in model.layers
+    ]
+    return cfg
+
+
 def agpt_2b_real() -> FaultTolerantTrainer.Config:
     """agpt_2b with real-valued (cos_sin) RoPE instead of complex.
 
@@ -403,6 +436,22 @@ def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
 def agpt_80b_real() -> FaultTolerantTrainer.Config:
     """agpt_80b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
     return _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+
+
+def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
+    """agpt_80b with the fp32 residual-stream fix (task #21/#24).
+
+    Targets the bf16 residual overflow that NaNs 80B at production dp. Does the
+    two residual adds in fp32 while keeping attention/FFN GEMMs bf16. Much
+    cheaper than mixed-precision-param=float32 (which fp32s ALL activations).
+    Validate NaN-free + throughput before production use.
+    """
+    return _set_fp32_residual(ezpz_agpt_80b())
+
+
+def agpt_80b_real_fp32res() -> FaultTolerantTrainer.Config:
+    """agpt_80b_real (cos_sin RoPE) + the fp32 residual-stream fix."""
+    return _set_fp32_residual(_set_rope_backend(ezpz_agpt_80b(), "cos_sin"))
 
 
 def ezpz_agpt_80b_alt() -> FaultTolerantTrainer.Config:
