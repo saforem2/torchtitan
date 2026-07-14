@@ -1,6 +1,6 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-07-12
+> Last updated: 2026-07-14
 
 > **🔴 80B production is BLOCKED at scale -- two independent walls above ~62N,
 > no viable production run exists yet (as of 2026-07-12).** No 80B job is
@@ -11,24 +11,46 @@
 > reference, NOT to be continued; see
 > [historical/v1-bf16](../historical/v1-bf16/README.md).
 >
-> **Wall 1 -- optimizer NaN at production dp.** SophiaG NaN'd at step 14 on the
-> 512N production run (Hessian `grad*grad` overflow at dim=9216; long warmup +
-> grad-clip do NOT fix it). **mano** is clean at small dp (to step 30 at 8N) but
-> **also NaN'd at dp≈186** (62N probe `8661293`, step 17) -- optimizer-independent
-> grad-path overflow. The
-> [80B convergence run (2026-06-30)](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)
-> found all 3 optimizers NaN at constant finder LRs (mano@3e-6 step5,
-> AdamW@5e-7 step9, sophiag@1e-6 step12).
+> **Wall 1 -- bf16 forward-activation overflow (ROOT-CAUSED 2026-07-14, task
+> #21). It is NOT an optimizer bug** -- the earlier "SophiaG Hessian `grad*grad`
+> overflow" framing here was WRONG. Both SophiaG (@512N, step-14) and **mano**
+> (@62N/dp~186, step-17) NaN with the *identical* signature: grad_norm dead-flat
+> ~6.0 then a sudden inf/nan with no runup (SophiaG's step-14 inf even *recovers*
+> to 6.19 before nan'ing at 17). mano has no Hessian term, so the cause is
+> optimizer-independent. Verified in code:
+> - **Loss softmax ruled out** -- all CE paths upcast logits to fp32 before
+>   softmax (`components/loss.py:61,128,263`). (bf16 has fp32's ~3.4e38 exponent
+>   range; the 65504 limit is fp16. bf16's weakness here is its 8-bit *mantissa*.)
+> - **Grad reduction ruled out** -- FSDP `reduce_dtype` is locked to fp32
+>   (`config/configs.py:66`) and loss is token-normalized by a divisor that
+>   *grows* with dp (`trainer.py:694`), so grad magnitude is dp-INVARIANT (not a
+>   sum-before-divide).
+> - **Actual mechanism:** the 84-layer pre-norm residual stream
+>   `h = x + sublayer(norm(x))` accumulates in bf16; RMSNorm rescales sublayer
+>   *inputs* but never the residual itself. At 80B's width x depth
+>   (dim=9216 x 84L x ffn=25600) the deep bf16 residual reaches the
+>   overflow/precision regime 2B/20B never hit (structural, not luck; the
+>   `50B_wide`/`70B_wide` depth-ladder shares the exact 80B per-layer shape).
+> - **Smoking gun:** the fp32-activations run (job `8537349`) trains clean and
+>   reveals TRUE grad_norms of **21K-79K** that bf16 silently masks down to ~5-7.
+> - **dp-dependence** is just: larger dp -> larger effective GBS -> weights reach
+>   the overflow state faster (LR/seed/master-dtype/clip all proven non-causal in
+>   the [7-job factorial](../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md)).
 >
 > **Wall 2 -- init crash at 256N.** The 256N/dp=768 production config hits a GPU
 > "NotPresent" segfault during init (separate from the optimizer NaN). The 2048N
 > head also SIGSEGV'd in `set_determinism` at 24,864 ranks (2026-07-01). 1024N is
 > the untested dp bracket.
 >
-> **Next: root-cause the dim=9216 overflow** (optimizer/grad dtype + eps, or
-> fp32 accumulation on the offending term) and the 256N init segfault -- both are
-> prerequisites before any production relaunch. Small-dp mano is the only path
-> that has shown life, but it is far below production scale. History:
+> **Fixes (ranked).** (1) `--training.mixed-precision-param=float32` @ TP=4 --
+> the one config with confirmed clean training (job `8537349`, 20 steps), but
+> ~3-5x slower. (2) **fp32 residual stream** (the Llama3-405B remedy) -- keep the
+> GEMMs bf16, accumulate only the residual + norm boundaries in fp32; minimal +
+> targeted, being prototyped (task #24) as an experiment-local decoder subclass,
+> to be validated against the fp32-acts reference. (3) Operational: the 80B
+> autoretry script now sets `--nan-abort-consecutive=5` so a diverged run bails
+> instead of burning full walltime (the 512N NaN wasted ~6,100 node-h). Wall 2
+> (256N init segfault) is a separate, still-open blocker. History:
 > [20260703-80b-512n-sophiag-nan.md](../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md),
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 > LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
