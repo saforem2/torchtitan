@@ -45,6 +45,17 @@ export TORCH_CPP_LOG_LEVEL=ERROR
 export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}"
 export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}"
 export HF_HUB_OFFLINE=1
+# Fix ezpz#163: `ezpz launch` reads child stdout via a subprocess.Popen opened
+# with text=True and NO errors= handler -> a STRICT utf-8 TextIOWrapper. When a
+# rank emits a multi-byte utf-8 char (tqdm bars, a `->`/`...` in a warning) that
+# lands on a line-buffer boundary, the drain thread raises
+# `UnicodeDecodeError: ... byte 0xe2 ...` and kills the whole job (rc=1). We
+# can't patch the pip-installed ezpz, so force the CHILD to emit ASCII-only:
+# PYTHONIOENCODING=ascii:replace turns non-ASCII (arrows/box-chars) into `?`, so
+# there are no multibyte sequences on the wire for ezpz's strict decoder to
+# choke on. Only affects console text; checkpoints/data/loss values unaffected.
+# This killed jobs 12470352 + 12470380 mid-run; removes that failure mode.
+export PYTHONIOENCODING="ascii:replace"
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
