@@ -67,6 +67,25 @@ Wired via a post-hoc transform `_set_fp32_residual(cfg)` (mirrors
 - Config wiring: `agpt_80b_fp32res()` -> all 84 layers are
   `AgptFp32ResidualBlock.Config`; plain `agpt_80b()` stays stock (no leak).
 
+### On-XPU smoke result (job 8671066, 4N, 40 steps) -- PASSED
+
+First on-XPU validation of . Trained all 40 steps clean,
+Training completed, zero NaN/inf:
+- **Loss 12.79 -> 9.24** (monotonic descent; the bf16 NaN runs stayed dead-flat
+  ~12.9 -- the model is actually learning).
+- **grad_norm ALIVE + dynamic: 5 -> 22 -> 42 -> 56 (step 24) -> recovers to ~9**
+  -- large gradient spikes that bf16 would mask flat at ~6.0 (or NaN on) are
+  absorbed by the fp32 residual and training continues. Smoking-gun match to the
+  fp32-activations reference.
+- MFU ~11.6%, TPS ~63, mem 42.5 GiB/66%, stable throughout.
+- (First attempt 8671046 failed on invalid CKPT_INTERVAL=0 -- my config error,
+  never trained; resubmitted with CKPT_INTERVAL=100.)
+
+**CAVEAT: 4N is BELOW the NaN wall** (bf16 was also clean at small dp, to step 30
+at 8N). This validates the block trains correctly on XPU with sane numerics and
+throughput -- it does NOT yet prove it clears the dp>186 wall. That is the next
+test.
+
 ### Next (needs a GPU allocation)
 1. Smoke `agpt_80b_fp32res` at small N (e.g. 4-8N) — confirm it trains NaN-free
    and the loss curve matches the fp32-acts reference (job 8537349).
