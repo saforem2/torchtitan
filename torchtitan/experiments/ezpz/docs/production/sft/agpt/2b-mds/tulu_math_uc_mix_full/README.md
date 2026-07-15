@@ -1,8 +1,10 @@
 # SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)
 
-> **Last updated: 2026-07-12.**
-> **Status: in progress at 8N.** Job **12470350** + afterany chain (Sunspot,
-> launched 2026-07-12). This is the "more tokens" SFT: the SAME gs138650 base as
+> **Last updated: 2026-07-15.**
+> **Status: in progress at 8N -- step 5950/8672 (~69%), loss 0.41.** Head job
+> **12470350** (2026-07-12) + afterany chain; currently on link **12470437**
+> (running), with **12470478/12470479** queued behind it (Sunspot). This is the
+> "more tokens" SFT: the SAME gs138650 base as
 > the completed 729-step SFT, but over the FULL OpenMathInstruct-2
 > `tulu_math_uc_mix` (~53.3M packed sequences, ~54B tokens, 1 epoch) instead of
 > the small metamathqa-swap mix (~4.5B tokens).
@@ -96,6 +98,10 @@ the first `update_all_charts.sh` run lands it on Sunspot.
 | **DISK-FULL incident** | 2026-07-13 | -- | -- | **datascience project quota hit 10T/10T on /lus/tegu** -> every job died in ~3s with `Disk quota exceeded` (empty logs), draining the whole chain. Root cause: save_steps=50 keep-all (~44 ckpts x 23G) + old SFT runs + 104 core dumps. Freed ~2T (this run's intermediate ckpts, old-SFT-run ckpts, core dumps; all `-hf` deliverables + checkpoint-729-hf preserved) -> project back to ~9.06T. |
 | 12470375/376 (cont 3) | 2026-07-13 -> | resume from **900** (in progress) | ~0.865 | checkpoint-2050 was an INCOMPLETE disk-full casualty (FSDP shards saved but no `trainer_state.json`/rng/scheduler) -> unusable for HF resume; moved aside as `checkpoint-2050.incomplete-diskfull`. Highest COMPLETE kept ckpt was 900 (thinning had removed 950-2000), so resumed from 900 -- **~1150 steps recompute lost**. wandb [rx5p8ifz](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/rx5p8ifz) (375, died) + 376 resumed clean (loss 0.865, lr continuous). Chain: 377/378/379/380 H. |
 
+| 12470376-380 (cont 3-7) | 2026-07-13/14 | 900 -> ~2400 | 0.865 -> 0.656 | Resumed from 900 (post-disk-full). Five short chain links, each ended by the same ~30-min idle-watchdog SIGTERM (HANGs #3-#7, ~150-750 steps/link); afterany recovered every time. wandb: [7hps3eu1](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/7hps3eu1) (376, 900->1650) / [xjkrtv4y](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xjkrtv4y) (377) / [fdxw19mr](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fdxw19mr) (378) / [i44624kh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/i44624kh) (379) / [5kpf4glh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/5kpf4glh) (380, ->2400). |
+| 12470436 (cont 8) | 2026-07-14 | 2450 -> ~4350 | 0.660 -> 0.496 | Resumed from checkpoint-2450 (relaunched this session, disk freed 2.65T first). **Longest clean link yet (~1900 steps, no idle-hang)** -- ran to its 12h walltime. wandb [fhjznrn4](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fhjznrn4). |
+| **12470437 (cont 9)** | 2026-07-14/15 | 4350 -> **5950 (running)** | 0.511 -> **0.413** | Auto-took-over via afterany when 436 hit walltime. Currently running (~10.5h in). accuracy **0.885**, epoch **0.69**. Continuations **12470478/12470479** queued (afterany). wandb [30ntcag7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/30ntcag7). |
+
 <!-- RUN-PROGRESS -->
 
 > **DISK-FULL + lost-recompute lesson (2026-07-13):** the /lus/tegu `datascience`
@@ -122,13 +128,20 @@ Each continuation resumes from the latest checkpoint (not step 0). Run ids:
 | 12470351 (cont 1) | [hrbfiwk7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/hrbfiwk7) (`peachy-morning-...`) | ~850 -> ~1535 (idle-watchdog HANG #2) |
 | 12470352 (cont 2) | [ghltmvgf](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/ghltmvgf) (`dashing-water-...`) | ~1600 -> ~2050 (ezpz#163, then disk-full) |
 | 12470376 (cont 3) | [rx5p8ifz](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/rx5p8ifz) + resumed | resume from **900** (2050 was incomplete disk-full casualty; ~1150 steps recompute) |
+| 12470376 (cont 3) | [7hps3eu1](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/7hps3eu1) | 900 -> ~1650 |
+| 12470377-380 (cont 4-7) | [xjkrtv4y](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xjkrtv4y) / [fdxw19mr](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fdxw19mr) / [i44624kh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/i44624kh) / [5kpf4glh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/5kpf4glh) | ~1750 -> ~2400 (four idle-hang links) |
+| 12470436 (cont 8) | [fhjznrn4](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fhjznrn4) | 2450 -> ~4350 (clean, walltime) |
+| 12470437 (cont 9) | [30ntcag7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/30ntcag7) | 4350 -> **5950 (running)** |
 
-> **Idle-hang pattern (watching):** both completed chain links so far ended in a
-> ~30-min-silence idle-watchdog SIGTERM (rc=124) mid-training, not a crash or
-> walltime -- head @ ~step 790, cont1 @ ~step 1535 (~every ~5h / ~750 steps).
-> The afterany chain + save_steps=50 recover each cleanly (<=50 steps lost), so
-> the run advances, but it consumes ~1 chain link per hang. If this continues
-> it is an 8N-stability concern worth an ALCF angle; so far tolerable.
+> **Idle-hang pattern (update 2026-07-15):** chain links through step ~2400
+> (head + cont 1-7) each ended in a ~30-min-silence idle-watchdog SIGTERM
+> (rc=124) mid-training -- not a crash or walltime -- ~every 150-750 steps, so
+> the run advanced but burned ~1 chain link per hang. **The pattern then
+> abated**: cont 8 (12470436) ran ~1900 steps clean to walltime and cont 9
+> (12470437) has run 4350 -> 5950 without an idle-hang. The afterany chain +
+> save_steps=50 recovered every hang cleanly (<=50 steps lost). Root cause of
+> the early hangs still unattributed (possible node/IO transients that eased);
+> no longer the active blocker it was through step ~2400.
 
 ### Early trajectory (job 12470350)
 

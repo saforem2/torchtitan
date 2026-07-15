@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-07-12
+> Last updated: 2026-07-15
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -44,7 +44,7 @@ has its own token/step goal in the linked page.
 |-------|------|--------------------|-------|----------|-------|
 | CPT | 2b-256n (plateaued) | [olmo×dolmino sweep](cpt/README.md) | **pilot complete** ✅ | step 5,960, loss **2.49** | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix/README.md) | tulu_math_uc_mix (metamathqa-swap, ~4.5B tok) | **complete** ✅ | 729 steps, loss **0.77** | 🏁 the reused SFT deliverable (checkpoint-729-hf); input to GRPO |
-| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **advancing** | step 482/8672, loss **0.91** | 🟢 8N (32N GPU-faults; scale-fault bisect); more-tokens SFT |
+| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **advancing** | step 5950/8672 (~69%), loss **0.41** | 🟢 8N (32N GPU-faults; scale-fault bisect); acc 0.885, epoch 0.69 |
 | SFT | [2b-v2-256n](sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) | tulu_math_uc_mix | **blocked** | — | 🔴 v2-base 384-rank oneCCL scale crash at 32N |
 | RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
 
