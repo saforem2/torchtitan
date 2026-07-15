@@ -86,6 +86,32 @@ at 8N). This validates the block trains correctly on XPU with sane numerics and
 throughput -- it does NOT yet prove it clears the dp>186 wall. That is the next
 test.
 
+### Wall test (job 8671243, 64N / dp=192, 40 steps) -- FAILED: still NaNs
+
+The decisive test, in the regime that killed mano@62N (step 17) and SophiaG@512N
+(step 14). Result: **the per-block fp32-residual fix does NOT clear the wall.**
+- grad_norm rose 5.4 -> 8.1 (steps 10-18) -- ALIVE, not the bf16-masked flat ~6.0,
+  so the fp32 residual add is genuinely active -- then **step 19 grad_norm nan,
+  step 20 loss nan.** Same flat-ish-then-instant-nan signature, same ~step-17-20
+  window as the bf16 runs. Marginally more headroom (grad_norm reached 8.1 vs
+  ~6.9, NaN 2 steps later) but the wall stands.
+- nan-abort guard worked: bailed at step 27 (8 consecutive NaN), reclaimed
+  walltime. Validated in production conditions.
+
+**Interpretation:** the per-block fp32 residual is **necessary-but-insufficient**.
+It fixes the residual-add masking (grad_norm now visible; 4N trained clean to
+step 40) but the high-dp NaN persists. This means either (a) the FULL-DEPTH fp32
+residual stream is needed (my prototype casts back to bf16 at each block boundary,
+so cross-layer accumulation is still bf16 -- needs an experiment-local Decoder
+subclass to carry fp32 across all 84 layers + cast to lm_head dtype at the end),
+or (b) the overflow is elsewhere (attention scores / a specific activation) that
+per-block casting does not protect. No run has instrumented per-op activation
+maxima to disambiguate -- that is now the decisive next step.
+
+**Fallback that IS confirmed working:** 
+@ TP=4 (job 8537349) -- full fp32 activations, ~3-5x slower but NaN-free. If
+80B production is urgent, that is the unblock today.
+
 ### Next (needs a GPU allocation)
 1. Smoke `agpt_80b_fp32res` at small N (e.g. 4-8N) — confirm it trains NaN-free
    and the loss curve matches the fp32-acts reference (job 8537349).

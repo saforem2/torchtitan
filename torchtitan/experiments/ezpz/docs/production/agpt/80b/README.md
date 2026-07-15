@@ -46,8 +46,10 @@
 > the one config with confirmed clean training (job `8537349`, 20 steps), but
 > ~3-5x slower. (2) **fp32 residual stream** (the Llama3-405B remedy) -- keep the
 > GEMMs bf16, accumulate only the residual + norm boundaries in fp32; minimal +
-> targeted, being prototyped (task #24) as an experiment-local decoder subclass,
-> to be validated against the fp32-acts reference. (3) Operational: the 80B
+> targeted. Prototyped (tasks #24-#26): trains clean at 4N but STILL NaNs at
+> dp=192 (job 8671243, step 19) -- the per-block fp32 add is necessary but
+> insufficient; needs a full-depth fp32 stream or per-op instrumentation to find
+> the true overflow site. Not yet a working fix. (3) Operational: the 80B
 > autoretry script now sets `--nan-abort-consecutive=5` so a diverged run bails
 > instead of burning full walltime (the 512N NaN wasted ~6,100 node-h). Wall 2
 > (256N init segfault) is a separate, still-open blocker. History:
