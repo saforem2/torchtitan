@@ -112,6 +112,28 @@ maxima to disambiguate -- that is now the decisive next step.
 @ TP=4 (job 8537349) -- full fp32 activations, ~3-5x slower but NaN-free. If
 80B production is urgent, that is the unblock today.
 
+### Full-depth fp32 wall test (job 8673658, 64N/dp=192) -- BETTER but STILL NaNs
+
+Full-depth variant (agpt_80b_fp32res_depth: fp32 residual carried across all 84
+layers via AgptFp32ResidualModel, vs per-block which re-truncates each boundary).
+Result: **strictly better, wall moved but did not fall.**
+- Trained clean through **step 37** (loss 12.49 -> 9.47), CLEARING the step-19
+  point where the per-block variant died and the step-14-17 bf16 point.
+- grad_norm spiked to ~40 at steps 22-24 and RECOVERED to ~8, then spiked again
+  17->20 at steps 36-37, then **NaN at step 38.**
+- Ladder: bf16 NaN ~step 14-17 -> per-block fp32 step 19 -> full-depth fp32
+  step 38. Each fp32 layer of protection buys ~18 more steps but does not
+  eliminate the overflow.
+
+**Conclusion: the residual stream is PART of the problem (full-depth fp32 doubled
+the survival window) but NOT the whole story -- there is a second overflow source
+fp32-residual does not protect.** The intermittent grad_norm spikes (40 at s22-24,
+recover, again at s36-37) point at something that spikes then poisons -- attention
+scores are the prime suspect. This is exactly the ambiguity the per-op numerics
+capture resolves; it is now clearly warranted (task #29, wiring committed
+36892d672). Run: single bf16 run at 32N/TP=2 (dp=192, NaNs ~step 6), scan
+rank_0_activations.log for the first non-finite Max -> names the op.
+
 ### Next (needs a GPU allocation)
 1. Smoke `agpt_80b_fp32res` at small N (e.g. 4-8N) — confirm it trains NaN-free
    and the loss curve matches the fp32-acts reference (job 8537349).
