@@ -52,6 +52,8 @@ import torch
 from torchtitan.models.common.attention import AttentionMasksType
 from torchtitan.models.llama3.model import Llama3TransformerBlock
 
+from torchtitan.experiments.ezpz.agpt.model import AgptModel
+
 
 class AgptFp32ResidualBlock(Llama3TransformerBlock):
     """Llama3 block with the residual stream kept in fp32 across depth.
@@ -107,3 +109,105 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
         out = h + ffn_out.float()
 
         return out.to(dt)
+
+
+class AgptFp32ResidualDepthBlock(Llama3TransformerBlock):
+    """Full-depth fp32 residual block: emits fp32, does NOT cast back to bf16.
+
+    The per-block ``AgptFp32ResidualBlock`` above casts the residual back to
+    the compute dtype at each block boundary, so the CROSS-LAYER accumulation
+    over the 84 layers is still bf16 -- and that per-block variant still NaN'd
+    at dp=192 (job 8671243, step 19). This variant instead keeps the residual
+    in fp32 for the WHOLE depth: it accepts fp32 (or bf16) in, does both adds in
+    fp32, and EMITS fp32 so the next block continues the fp32 accumulation.
+
+    The GEMMs still run in bf16 (sublayer inputs are cast to the bf16 param
+    dtype before each norm/Linear). This requires a matching model that carries
+    the fp32 stream through the decoder loop and casts to the lm_head dtype
+    before the head -- see ``AgptFp32ResidualModel``; a plain Decoder would
+    dtype-mismatch feeding fp32 into the bf16 lm_head.
+    """
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(Llama3TransformerBlock.Config):
+        pass
+
+    def _sublayer_dtype(self) -> torch.dtype:
+        try:
+            return next(self.attention.parameters()).dtype
+        except StopIteration:
+            return torch.bfloat16
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attention_masks: AttentionMasksType | None,
+        positions: torch.Tensor | None = None,
+    ):
+        dt = self._sublayer_dtype()
+        # Residual accumulator is fp32 across the whole stack. Cast each
+        # sublayer's input to the bf16 param dtype so the norm + attention/FFN
+        # GEMMs run in bf16; only the two adds (and the fp32 residual carried
+        # between blocks) are fp32.
+        x = x.float()
+        attn_out = self.attention(
+            self.attention_norm(x.to(dt)), attention_masks, positions
+        )
+        h = x + attn_out.float()
+        ffn_out = self.feed_forward(self.ffn_norm(h.to(dt)))
+        out = h + ffn_out.float()
+        # Emit fp32 -- the next block continues the fp32 accumulation.
+        return out
+
+
+class AgptFp32ResidualModel(AgptModel):
+    """agpt model that carries an fp32 residual stream across the full depth.
+
+    Pairs with ``AgptFp32ResidualDepthBlock`` (which emits fp32). This overrides
+    the decoder ``forward`` so the fp32 residual flows through all layers, then
+    casts to the ``lm_head`` param dtype (bf16) right before the head -- a plain
+    ``Decoder.forward`` would feed fp32 into the bf16 ``lm_head`` and
+    dtype-mismatch. The body mirrors ``Decoder.forward``
+    (``models/common/decoder.py``) exactly, including the tok_embeddings
+    passthrough and the ``_skip_lm_head`` PP branch; the ONLY change is the
+    dtype cast before ``norm``/``lm_head``.
+    """
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(AgptModel.Config):
+        pass
+
+    def _lm_head_dtype(self) -> torch.dtype:
+        try:
+            return next(self.lm_head.parameters()).dtype
+        except (StopIteration, AttributeError):
+            return torch.bfloat16
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        positions: torch.Tensor | None = None,
+        attention_masks: AttentionMasksType | None = None,
+    ):
+        h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
+
+        # Layers keep the residual in fp32 (AgptFp32ResidualDepthBlock emits
+        # fp32); h stays fp32 across all layers here.
+        for layer in self.layers.values():
+            h = layer(h, attention_masks, positions)
+
+        # norm is RMSNorm (returns input dtype); run it in fp32 for accuracy,
+        # then cast to the lm_head compute dtype (bf16) before the head so the
+        # head matmul stays bf16 and does not dtype-mismatch.
+        h = self.norm(h) if self.norm is not None else h
+
+        if self._skip_lm_head:
+            # ChunkedLossWrapper applies the head itself; hand it the compute
+            # dtype so the downstream (bf16) head matmul is well-typed.
+            return h.to(self._lm_head_dtype())
+
+        if self.lm_head is not None:
+            output = self.lm_head(h.to(self._lm_head_dtype()))
+        else:
+            output = h
+        return output
