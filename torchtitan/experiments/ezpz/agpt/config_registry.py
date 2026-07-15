@@ -70,6 +70,76 @@ def _set_rope_backend(
     return cfg
 
 
+def _set_fp32_residual(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
+    """Swap every transformer block to the fp32-residual variant.
+
+    Root cause of the 80B production NaN (task #21): the bf16 residual stream
+    overflows across the 84-layer depth. AgptFp32ResidualBlock does the two
+    residual adds in fp32 while keeping the attention/FFN GEMMs in bf16 (see
+    fp32_residual.py). Rebuilds each layer's block Config as the subclass,
+    preserving every other field -- mirrors _set_rope_backend.
+    """
+    import copy
+    from dataclasses import fields
+
+    from torchtitan.experiments.ezpz.agpt.fp32_residual import (
+        AgptFp32ResidualBlock,
+    )
+
+    # Deep-copy first: ezpz_agpt_*() can hand back a config whose model spec is
+    # shared with the agpt_configs template, so mutating .layers in place would
+    # poison the plain flavor for the rest of the process. (Verified: without
+    # this, a later agpt_80b() returned fp32res blocks.)
+    cfg = copy.deepcopy(cfg)
+    model = cfg.model_spec.model
+    model.layers = [
+        AgptFp32ResidualBlock.Config(
+            **{f.name: getattr(layer, f.name) for f in fields(layer)}
+        )
+        for layer in model.layers
+    ]
+    return cfg
+
+
+def _set_fp32_residual_depth(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
+    """Full-depth fp32 residual stream (tasks #24/#26/#27).
+
+    The per-block _set_fp32_residual casts back to bf16 at each block boundary,
+    so the 84-deep cross-layer accumulation is still bf16 -- and it still NaN'd
+    at dp=192 (job 8671243). This variant carries the residual in fp32 across
+    ALL layers: swaps both the block (AgptFp32ResidualDepthBlock, emits fp32)
+    and the model (AgptFp32ResidualModel, forward keeps fp32 through the layer
+    loop then casts to the lm_head dtype before the head). GEMMs stay bf16.
+    Deep-copies first (same shared-template caveat as _set_fp32_residual).
+    """
+    import copy
+    from dataclasses import fields
+
+    from torchtitan.experiments.ezpz.agpt.fp32_residual import (
+        AgptFp32ResidualDepthBlock,
+        AgptFp32ResidualModel,
+    )
+
+    cfg = copy.deepcopy(cfg)
+    model = cfg.model_spec.model
+    model.layers = [
+        AgptFp32ResidualDepthBlock.Config(
+            **{f.name: getattr(layer, f.name) for f in fields(layer)}
+        )
+        for layer in model.layers
+    ]
+    # Rebuild the model config itself as the fp32-residual model subclass,
+    # preserving every field (incl. the freshly-swapped layers).
+    cfg.model_spec.model = AgptFp32ResidualModel.Config(
+        **{f.name: getattr(model, f.name) for f in fields(model)}
+    )
+    return cfg
+
+
 def agpt_2b_real() -> FaultTolerantTrainer.Config:
     """agpt_2b with real-valued (cos_sin) RoPE instead of complex.
 
@@ -403,6 +473,33 @@ def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
 def agpt_80b_real() -> FaultTolerantTrainer.Config:
     """agpt_80b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
     return _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+
+
+def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
+    """agpt_80b with the fp32 residual-stream fix (task #21/#24).
+
+    Targets the bf16 residual overflow that NaNs 80B at production dp. Does the
+    two residual adds in fp32 while keeping attention/FFN GEMMs bf16. Much
+    cheaper than mixed-precision-param=float32 (which fp32s ALL activations).
+    Validate NaN-free + throughput before production use.
+    """
+    return _set_fp32_residual(ezpz_agpt_80b())
+
+
+def agpt_80b_real_fp32res() -> FaultTolerantTrainer.Config:
+    """agpt_80b_real (cos_sin RoPE) + the fp32 residual-stream fix."""
+    return _set_fp32_residual(_set_rope_backend(ezpz_agpt_80b(), "cos_sin"))
+
+
+def agpt_80b_fp32res_depth() -> FaultTolerantTrainer.Config:
+    """agpt_80b with the FULL-DEPTH fp32 residual stream (task #27).
+
+    Carries the residual in fp32 across all 84 layers (vs the per-block
+    agpt_80b_fp32res which re-truncates to bf16 at each boundary and still
+    NaN'd at dp=192). GEMMs stay bf16. The dp>186 wall test for this variant is
+    the open question.
+    """
+    return _set_fp32_residual_depth(ezpz_agpt_80b())
 
 
 def ezpz_agpt_80b_alt() -> FaultTolerantTrainer.Config:

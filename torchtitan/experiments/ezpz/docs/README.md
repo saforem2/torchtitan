@@ -22,9 +22,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-15 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
+| 2026-07-15 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-07-15 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-14 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-07-14 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
-| 2026-07-13 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
 | 2026-07-12 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-12 | [2026-06-05 → 2026-06-12 — One-Week Summary](./summaries/2026-06-05_to_2026-06-12.md) |
 | 2026-07-12 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
@@ -43,10 +45,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-12 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-07-12 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-07-12 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-07-12 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-12 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-07-12 | [Development Journal](./journal.md) |
-| 2026-07-12 | [Synthetic-summary data generation POC (olmo-mix-1124)](./experiments/synthetic.local-preremote-20260711-123714/aurora/2026-07-11-summarize-olmo-mix-poc.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
@@ -57,7 +57,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-12 | [32N SFT failover-resume writeup — MOVED](./experiments/agpt/sunspot/20260610-sft-2b-tulu-mix-n32-failover.md) |
 | 2026-07-12 | [SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke](./experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md) |
 | 2026-07-12 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-07-12 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-11 | [Synthetic-summary data generation POC (olmo-mix-1124)](./experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md) |
 | 2026-07-11 | [SFT on gs138650 with the FULL tulu_math_uc_mix (big OpenMathInstruct-2)](./experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md) |
 | 2026-07-11 | [Experiment Benchmark Reports](./experiments/README.md) |
@@ -78,6 +77,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 | 2026-07-06 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./rl/2026-07-06_multinode-grpo-root-cause.md) |
 | 2026-07-06 | [Production GRPO](./production/grpo/README.md) |
+| 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,12 +89,12 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-12 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-07-15 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-07-12 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**35000** (3.52T tokens, 75.4% of 4.67T). | 2026-07-12 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,000** (604.0B tokens, 12.9% of 4.67T). | 2026-07-12 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**4,200** (211.4B tokens, 4.5% of 4.67T), loss 3.2631. | 2026-07-12 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**4,350** (218.9B tokens, 4.7% of 4.67T), loss 3.2631. | 2026-07-12 |
 | [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-12 |
 | [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
