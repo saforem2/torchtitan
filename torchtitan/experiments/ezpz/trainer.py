@@ -918,6 +918,7 @@ class FaultTolerantTrainer(Trainer):
                 # signal the profiler that the next profiling step has started
                 profiler.step()
 
+
                 # reduce timeout after first train step for faster signal
                 # (assuming lazy init and compilation are finished)
                 if self.step == 1:

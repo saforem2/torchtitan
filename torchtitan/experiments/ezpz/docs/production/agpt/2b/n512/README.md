@@ -1,6 +1,6 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-07-12.**
+> **Last updated: 2026-07-14.**
 >
 > **This is the canonical 2B production chain.**
 >

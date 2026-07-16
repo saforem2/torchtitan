@@ -1,6 +1,6 @@
 # Synthetic-summary data generation POC (olmo-mix-1124)
 
-> Last updated: 2026-07-11
+> Last updated: 2026-07-14
 
 **Goal.** Generate high-quality synthetic mid-training data by summarizing our
 existing `olmo-mix-1124` tokens, and validate the full round-trip is lossless and

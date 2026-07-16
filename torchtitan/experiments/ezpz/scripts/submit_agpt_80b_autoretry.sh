@@ -140,6 +140,10 @@ TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
 # GBS; LR=1e-6 was stable.
 OPTIMIZER="${OPTIMIZER:-adamw}"
 LR="${LR:-1e-6}"
+# NaN-abort guard: bail after N consecutive non-finite losses instead of
+# burning the full walltime on a diverged run (the 512N SophiaG NaN wasted
+# ~6,100 node-h running NaN for 12h). Default 5; set 0 to disable.
+NAN_ABORT_CONSECUTIVE="${NAN_ABORT_CONSECUTIVE:-5}"
 # Linear-warmup length (steps). Default 200 matches the 2B/20B v2 configs.
 # NOTE: the scheduler clamps warmup to total_steps when warmup > total, so
 # short smoke/sim runs (steps < 200) are effectively warming up the whole
@@ -335,5 +339,6 @@ ezpz launch \
     --training.global-batch-size="${GBS}" \
     --training.seq-len="${SEQ_LEN}" \
     --training.steps="${TRAINING_STEPS}" \
+    --nan-abort-consecutive="${NAN_ABORT_CONSECUTIVE}" \
     "$@" \
     "${ACKPT_SUBCOMMAND}"
