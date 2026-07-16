@@ -105,7 +105,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
 
 
 from torchtitan.models.common.feed_forward import FeedForward
-from torchtitan.models.common.nn_modules import Linear
+from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_config
 
 
