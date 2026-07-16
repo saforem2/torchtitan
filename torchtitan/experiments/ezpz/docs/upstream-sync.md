@@ -20,6 +20,46 @@ was required in ezpz.
 
 ---
 
+## 2026-07-16 — 69th sync (9 commits, `..upstream/main`, merge `8c92de86b`)
+
+Merged `upstream/main` into `ezpz` as `8c92de86b` (after fast-forwarding a
+concurrent `origin/ezpz` push `36fdfe2b1`). **One replay/fix required** for the
+`Linear` move (below); no `agpt/`<-`llama3/` or `moe/`<-`deepseek_v3/` content
+replay (neither model dir changed upstream).
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `659a0d2ce` | [common] Move Linear + ScaledBiasRowwiseLinear into common/linear.py (#3923) | **BREAKING for us** -- see fix below. Deletes `Linear` from `common/nn_modules.py`. |
+| `fec3e196a` | Support remote fsspec checkpoint paths (gs://) (#3887) | New `tools/filesystem.py`; no ezpz callsite. |
+| `ec8c90691` | [gpt_oss] Build flex masks via shared decoder helper (#3814) | Touches `models/common/decoder.py` (agpt uses Decoder), but centralizes gpt_oss mask-building into an existing helper; upstream-verified bit-identical, no signature agpt calls changed. |
+| `bee12f1dd` | Add local install command to README (#3902) | docs only. |
+| `fd16c70ac` | [CI] Fix lychee error (#3917) | CI only. |
+| `e622688af` | [rl] Revert generator init race condition fix (#3809) (#3871) | experiments/rl; ezpz/rl unaffected. |
+| `ea3562e70` | batch invariant configs max off-policy=0 (#3910) | rl configs; unaffected. |
+| `491596e86` | [qwen3.5] fix DTensor TP vision position caches (#3899) | qwen3.5 only. |
+| `6ad8c3d30` | Fix dataloader restarting on second resume (#3908) | core dataloader; mildly relevant to our afterany-resume pattern (positive). |
+
+### Linear-move fix (#3923 -- BREAKING, fixed as `2148074cb`)
+The PR moves `Linear` + `ScaledBiasRowwiseLinear` OUT of
+`models/common/nn_modules.py` INTO a new `models/common/linear.py` (nn_modules
+loses 18 lines; `common/__init__.py` re-exports from the new module). Our ezpz
+models import the **deep path** `common.nn_modules`, not the package root, so the
+re-export does NOT save us -- both would raise `ImportError: cannot import name
+Linear`:
+- `agpt/__init__.py:108`: `from ...common.nn_modules import Linear`
+  -> `from ...common.linear import Linear`.
+- `moe/model.py:22`: `from ...common.nn_modules import Linear, RMSNorm`
+  -> split: `Linear` from `common.linear`, `RMSNorm` stays in `common.nn_modules`
+  (RMSNorm was NOT moved).
+
+### Validation -- smoke-passed (Sunspot, 2026-07-16)
+`sync_smoke.sh`, **VERDICT: ok** (job 12470795, post-merge+fix), all 3 configs
+rc=0: `agpt_debugmodel` (loss 10.84->10.67), `agpt_debugmodel @ TP=2`
+(10.84->10.66, matches TP=1), `moe_debugmodel` (12.91->12.37). Import smoke:
+agpt + moe registries import clean. This sync landed right after the full-mix 8N
+SFT completed (epoch 1.0, checkpoint-8672).
+
 ## 2026-07-12 — 68th sync (2 commits, `4b041be61..upstream/main`)
 
 Merged as `3d277c141` directly on `ezpz`. **No replays required** -- post-merge
