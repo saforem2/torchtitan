@@ -2,7 +2,7 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-07-14
+> Last updated: 2026-07-15
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -28,7 +28,7 @@ absolute (not % of a budget).
 | Trajectory | State | Persisted step | Live step | Loss | Tokens | Notes |
 |------------|-------|---------------:|----------:|-----:|-------:|-------|
 | **2B n128** (`gbs512`) | idle (last leg done) | **5,300** | 5,383 | **2.36** | ~22.6B | 53 ckpts; last leg 7228272 ran full 12h |
-| **20B n128** (`gbs1024`) | **ADVANCING** (leg 4 Q) | **1,000** | 1,100 | **2.39** | ~11.5B | 3 full 12h legs done; leg 4 (7247525) Q, leg 5 (7252666) held. 10 complete ckpts |
+| **20B n128** (`gbs1024`) | **RUNNING** (leg 5) | **1,300** | 1,400 | **2.31** | ~14.7B | 4 full 12h legs done; leg 5 (7252666) running from step-1300. leg 6 not yet queued |
 
 Smaller/earlier 2B node-count variants also exist on disk (comparison
 runs, not the canonical chain): n64 -> step ~1,970 / loss 2.57;
@@ -116,22 +116,27 @@ so the SophiaG LR=2.28e-5 stays valid; GBS = 512 x 1 x 2 = 1024.
 | **leg 1** | 7237948 | ran full 12h, clean | 0 -> **400** | 12.95 -> **3.38** |
 | **leg 2** | 7237949 | ran full 12h (resumed step-300) | 301 -> **705** | 4.14 -> **2.72** |
 | **leg 3** | 7243413 | ran full 12h (resumed step-700) | 701 -> **1,100** | 2.71 -> **2.39** |
-| leg 4 | 7247525 | **Q** (`afterany:7243413`, resumes step-1000) | -- | -- |
-| leg 5 | 7252666 | held (`afterany:7247525`) | -- | -- |
+| **leg 4** | 7247525 | ran full 12h (resumed step-1000) | 1001 -> **1,400** | 2.43 -> **2.31** |
+| **leg 5** | 7252666 | **RUNNING** (resumed step-1300) | 1301 -> ... | 2.26 -> ... |
+| leg 6 | -- | not yet queued (leg 5 is the tail) | -- | -- |
 
-**Persisted checkpoints:** 10 complete (step-100 ... step-1000, each
-234 GB / 512 shards; 2.3 TB total on disk). Two incomplete/empty dirs
-(step-400 from leg 1, step-1100 from leg 3) -- each from a walltime-kill
-landing mid-async-save exactly on a checkpoint boundary, so the next leg
-resumed from the previous complete checkpoint (~100 steps rework). No
-corruption; the fallback is the checkpoint system behaving safely. Leg 2's
-handoff was clean (step-700 flushed before the kill -> leg 3 resumed at
-701, ~5 steps rework), showing the rework only happens when the wall
-coincides with a save.
+**Persisted checkpoints (as of leg 5 start):** step-100 ... step-1300
+complete, each 234 GB / 512 shards. A checkpoint is only complete when it
+has a **`.metadata`** file (DCP writes it LAST, after all 512 shards);
+**512 `.distcp` shards alone do NOT mean complete.** Several boundary dirs
+have all shards but no `.metadata` (step-400 from leg 1, step-1100 from
+leg 3, step-1400 from leg 4) -- each from a walltime-kill landing after
+the shards flushed but before `.metadata` was written. DCP correctly skips
+these and resumes from the last checkpoint WITH `.metadata` (~100 steps
+rework). No corruption; safe fallback. Leg 2's handoff was the clean case
+(step-700 fully flushed incl `.metadata` before the kill -> leg 3 resumed
+at 701, ~5 steps rework), so rework only happens when the wall lands
+between the shard flush and the `.metadata` write.
 
-**Current state:** step **1,100** (persisted 1,000), loss **2.39**,
-~**11.5B tokens**, memory 20.2 GiB (51%), ~140 TPS/GPU, ~6.7% MFU,
-grad_norm ~0.10. Descent across legs: 12.95 -> 3.38 -> 2.72 -> 2.39.
+**Current state:** leg 5 running, resumed step 1301 (loss 2.26); loss had
+reached **2.31** at leg 4's step-1400. ~**14.7B tokens**, memory 20.2 GiB
+(51%), grad_norm ~0.10. Descent across legs: 12.95 -> 3.38 -> 2.72 ->
+2.39 -> 2.31.
 **Milestone:** matched the mature 2B chain's loss (2.36) at ~half the
 tokens (~11.5B vs ~22.6B) -- the expected larger-model token-efficiency
 crossover.
@@ -161,11 +166,20 @@ is a Polaris/CUDA-only per-invocation override.
 ### Walltime-kill leaves the final checkpoint incomplete
 
 Each 12h leg is killed mid-step at the wall (`Exit_status = -29`). If the
-kill lands during an async save, that checkpoint dir is left empty and
+kill lands during an async save, the checkpoint dir is left incomplete and
 the next leg resumes from the previous complete one -- costing up to
 `CKPT_INTERVAL` (=100) steps of rework per handoff. Tolerable and
 self-recovering; reducible by lowering `CKPT_INTERVAL` if rework becomes
 costly.
+
+**Completeness test: `.metadata`, NOT shard count.** DCP writes the 512
+`__N_0.distcp` shards first and the `.metadata` file LAST. A dir with all
+512 shards but no `.metadata` is INCOMPLETE -- DCP skips it and falls back
+to the previous checkpoint. When auditing which checkpoint a leg will
+resume from, check for `.metadata`
+(`ls <ckpt>/step-N/.metadata`), do not just count `.distcp` files. Empty
+or metadata-less boundary dirs seen so far: step-400, step-1100, step-1400
+(each a walltime kill between shard-flush and `.metadata` write).
 
 ### Chain continuation
 
