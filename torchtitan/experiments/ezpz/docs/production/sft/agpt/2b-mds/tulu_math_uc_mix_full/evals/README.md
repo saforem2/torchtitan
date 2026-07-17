@@ -1,59 +1,91 @@
-# lm-eval: full-mix SFT'd AuroraGPT-2B vs pretrained baseline (step sweep)
+# Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)
 
-**Date:** 2026-07-12
-**Machine:** Sunspot
-**Job:** 12470365 (1N eval sweep, `rl/scripts/sft/eval_sweep_fullmix_8n.sh`)
-**Models compared:**
-- **baseline**: `global_step138650` (AuroraGPT-2B MDS stage-3, raw pretrained)
-- **sft-step{300,600,900}**: `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-{N}-hf`
-  (the ongoing 8N SFT on the FULL `tulu_math_uc_mix` -- OpenMathInstruct-2 mix,
-  ~54B-token / 1-epoch target; these are early checkpoints, ~2-6B tokens in of
-  ~54B). See [run README](../README.md).
+**Date:** 2026-07-17 (updated at run completion; supersedes the 2026-07-12
+partial-sweep version).
+**Machine:** Sunspot.
+**Jobs:** base-LM sweep 12470365 (steps 300/600/900) + 12470886 (steps
+1500-8672); IFEval + GRPO 12470889 (step 8672) + 12470896 (step 900).
+**Models:** `global_step138650` baseline vs
+`checkpoint-{N}-hf` of the completed full-mix 8N SFT (~54B-token, 1-epoch,
+step 8672 final). See [run README](../README.md).
 
-## TL;DR
+## TL;DR -- the full mix works EARLY and is DESTROYED by full-epoch training
 
-Same **alignment-tax** pattern as the completed metamathqa-swap SFT
-([evals](../../tulu_math_uc_mix/evals/README.md)): base-LM multiple-choice
-benchmarks are flat-to-slightly-down under instruction SFT, not up. The one
-notable *trend* is arc_easy / arc_challenge declining monotonically with more
-SFT steps (arc_easy 0.694 -> 0.640 over 0 -> 900 steps), i.e. more big-mix
-tokens = a bit more base-LM tax; boolq and winogrande tick *up*. This is
-expected and NOT a red flag -- SFT on chat/instruction data doesn't add base
-knowledge. The real SFT payoff is measured by **IFEval** (instruction
-following) and **downstream GRPO**, not these tasks (the completed SFT showed
-base-LM flat but IFEval +8pp and GRPO 8x -- see the sibling recipe's evals).
+The headline the run was built to answer -- "does ~12x more SFT tokens beat
+the metamathqa-729 deliverable?" -- is **no at the final checkpoint, but YES at
+~step 900**:
 
-## Results (0-shot, acc_norm where present else acc)
+- **checkpoint-8672 (final, 1 epoch) catastrophically forgot.** Base-LM
+  benchmarks collapsed to ~random chance (hellaswag 0.59 -> 0.27, arc_easy
+  0.69 -> 0.30) AND IFEval is flat-to-DOWN vs baseline (prompt-strict 0.168 vs
+  base 0.179). It got very good at exactly one thing -- emitting
+  OpenMathInstruct-2-style math CoT (train loss 0.357, token-acc 0.90) -- and
+  lost everything else. **Worse than the metamathqa deliverable on every axis.**
+- **checkpoint-900 (~5.7B tokens) is the real deliverable.** IFEval
+  matches-or-beats metamathqa-729 (prompt-strict 0.253 vs 0.244; inst-loose
+  0.417 vs 0.411) WHILE retaining base-LM capability (pre-collapse: hellaswag
+  0.59, arc_easy 0.64). Best of all four models evaluated.
+- **Root cause of the collapse: LR x tokens.** LR 2e-5 held above 1e-5 through
+  step ~4350 (cosine decay only bites the second half). ~4000 steps at high LR
+  on a narrow math distribution overfit + forgot. The metamathqa SFT survived
+  only because it STOPPED at 729 steps -- before the same damage. Running the
+  full mix to 1 epoch was the mistake, not the mix itself.
 
-| Task | Baseline | step 300 | step 600 | step 900 | step900 - base |
-|---|---:|---:|---:|---:|---:|
-| hellaswag | 0.5926 | 0.5908 | 0.5939 | 0.5919 | -0.001 |
-| arc_easy | 0.6944 | 0.6620 | 0.6553 | 0.6402 | **-0.054** |
-| arc_challenge | 0.3899 | 0.3848 | 0.3686 | 0.3618 | **-0.028** |
-| winogrande | 0.5817 | 0.6069 | 0.6077 | 0.6038 | **+0.022** |
-| piqa | 0.7432 | 0.7361 | 0.7350 | 0.7296 | -0.014 |
-| openbookqa | 0.3660 | 0.3880 | 0.3820 | 0.3760 | +0.010 |
-| boolq | 0.5985 | 0.5963 | 0.6229 | 0.6263 | **+0.028** |
+## Base-LM sweep (0-shot, acc_norm where present else acc)
 
-Metric is `acc_norm,none` where present (hellaswag, arc_*, piqa, openbookqa)
-and `acc,none` otherwise (winogrande, boolq). 0-shot; identical task specs
-across all models. Baseline numbers match the completed-SFT eval's baseline
-(arc_easy 0.694, hellaswag 0.592, ...) -- pipeline-consistent.
+Full trajectory, baseline + steps 300 -> 8672. The collapse is between
+~step 1500 and ~4500:
 
-## Notes
+| Task | base | 300 | 600 | 900 | 1500 | 3000 | 4500 | 6000 | 7500 | 8672 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| hellaswag | 0.593 | 0.591 | 0.594 | 0.592 | 0.592 | 0.502 | 0.321 | 0.287 | 0.275 | 0.273 |
+| arc_easy | 0.694 | 0.662 | 0.655 | 0.640 | 0.632 | 0.516 | 0.372 | 0.331 | 0.298 | 0.298 |
+| arc_challenge | 0.390 | 0.385 | 0.369 | 0.362 | 0.367 | 0.309 | 0.253 | 0.241 | 0.248 | 0.236 |
+| winogrande | 0.582 | 0.607 | 0.608 | 0.604 | 0.590 | 0.519 | 0.496 | 0.523 | 0.511 | 0.530 |
+| piqa | 0.743 | 0.736 | 0.735 | 0.730 | 0.722 | 0.648 | 0.576 | 0.562 | 0.526 | 0.537 |
+| openbookqa | 0.366 | 0.388 | 0.382 | 0.376 | 0.368 | 0.332 | 0.310 | 0.302 | 0.292 | 0.264 |
+| boolq | 0.599 | 0.596 | 0.623 | 0.626 | 0.623 | 0.598 | 0.508 | 0.509 | 0.475 | 0.495 |
 
-- **arc regression is the clearest signal**: arc_easy loses ~5pp and
-  arc_challenge ~3pp monotonically with SFT steps. The completed metamathqa
-  SFT lost ~2pp on arc at step 729 (~4.5B tokens); the bigger mix taxes arc
-  more, plausibly because OpenMathInstruct-2 heavily narrows the output
-  distribution toward math CoT.
-- **boolq / winogrande gain** (+0.028 / +0.022) -- both benefit from the
-  instruction/QA framing in tulu-3 + ultrachat.
-- This is a *base-LM* eval only. **TODO** (higher-signal, not yet run for this
-  run): IFEval (`eval_ifeval_sft_vs_baseline.sh`) and a GRPO smoke
-  (`grpo_smoke_sft_vs_baseline.sh`) -- those are where the completed SFT's real
-  wins showed up.
-- More sweep points land as the run advances:
-  `qsub -v SWEEP_CKPTS="1500 3000" rl/scripts/sft/eval_sweep_fullmix_8n.sh`.
+Steps 300/600/900 are from the earlier sweep (job 12470365); 1500-8672 from
+12470886. Random-chance references: hellaswag/arc/openbookqa ~0.25,
+piqa/boolq/winogrande ~0.50. By step 8672 every task is at or near chance.
 
-Raw results: `outputs/evals/fullmix-8n-sweep-12470365/<label>/<task>/`.
+## IFEval (instruction following -- the actual SFT target)
+
+The higher-signal metric. checkpoint-900 is the standout:
+
+| metric | baseline | full-mix 900 | full-mix 8672 | metamathqa 729 |
+|---|--:|--:|--:|--:|
+| prompt_level_strict | 0.179 | **0.253** | 0.168 | 0.244 |
+| inst_level_strict | 0.289 | **0.384** | 0.287 | 0.386 |
+| prompt_level_loose | 0.183 | **0.283** | 0.183 | 0.274 |
+| inst_level_loose | 0.294 | **0.417** | 0.300 | 0.411 |
+
+- **full-mix 900**: +7.4pp prompt-strict, +9.8pp prompt-loose, +12.4pp
+  inst-loose over baseline -- and matches/edges the metamathqa-729 deliverable.
+- **full-mix 8672**: flat-to-down vs baseline. Overtraining destroyed
+  instruction-following along with base-LM capability.
+
+## GRPO smoke (sum_digits, 50 steps)
+
+INCONCLUSIVE this pass. The `grpo_smoke_sft_vs_baseline.sh` wrapper stalled at
+the GRPO phase for the 8672 job (launcher/PMI plumbing in the combined wrapper;
+IFEval in the same wrapper completed fine). The step-900 GRPO was still running
+at writing. The completed metamathqa SFT showed ~8x reward vs baseline on this
+task; re-run GRPO standalone (not via the combined IFEval+GRPO wrapper) to get a
+clean full-mix number. TODO.
+
+## Recommendation
+
+- **Deliverable = full-mix `checkpoint-900-hf`** (not 8672). It has the
+  instruction-following gains of the metamathqa deliverable AND intact base-LM
+  capability. checkpoint-900-hf is consolidated and preserved.
+- **Do NOT use checkpoint-8672** for anything downstream -- it is a
+  math-CoT-only overfit, near-random on general tasks.
+- **Recipe lesson (recorded):** for full-mix (narrow-distribution) SFT at
+  LR 2e-5, cap training at O(1000) steps or lower the LR substantially; a full
+  epoch (~8672 steps) at peak LR causes catastrophic forgetting. The metamathqa
+  recipe's 729-step stop was load-bearing.
+
+Raw results: `outputs/evals/fullmix-8n-sweep-{12470365,12470886}/` (base-LM);
+`outputs/evals/aurora2b-ifeval-20260717-*/` (IFEval).
