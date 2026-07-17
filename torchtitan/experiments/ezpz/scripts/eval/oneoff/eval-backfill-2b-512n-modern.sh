@@ -1,0 +1,17 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -l select=1
+#PBS -j oe
+
+# Backfill the 2B-512 chain with the MODERN eval suite (MMLU/GSM8K/ARC-C).
+
+cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
+
+STEPS="5000 10000 15000 20000 25000 30000 35000" \
+CKPT_NAME=agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288 \
+LABEL=512n \
+SHOTS_SPEC="5:mmlu,gsm8k;25:arc_challenge" \
+bash torchtitan/experiments/ezpz/scripts/eval/eval-2b-v2.sh

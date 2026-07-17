@@ -127,7 +127,7 @@ for step in $STEPS; do
     echo "[2/2] Running lm-eval..."
     source venvs/aurora/tt-lm-eval/bin/activate
     mkdir -p "${RESULTS_DIR_ABS}"
-    HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" \
+    HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" SHOTS_SPEC="${SHOTS_SPEC:-}" \
     python3 << 'PYEOF'
 import os, json
 import transformers.modeling_utils as mu
@@ -136,21 +136,48 @@ from lm_eval import evaluator
 
 hf_dir = os.environ["HF_DIR_ABS"]
 results_dir = os.environ["RESULTS_DIR_ABS"]
-tasks = os.environ["TASKS"].split(",")
 
-results = evaluator.simple_evaluate(
-    model="hf",
-    model_args=f"pretrained={hf_dir}",
-    tasks=tasks,
-    batch_size=2,
-    num_fewshot=0,
-    device="xpu:0",
-)
+# SHOTS_SPEC groups tasks by few-shot count: "shots:task,task;shots:task".
+# A single lm-eval call uses one global num_fewshot, so mixed-shot suites
+# (mmlu-5, arc_challenge-25, hellaswag-0) require one call PER shot group.
+# Falls back to all of $TASKS at 0-shot when SHOTS_SPEC is unset (legacy).
+shots_spec = os.environ.get("SHOTS_SPEC", "").strip()
+if shots_spec:
+    groups = []
+    for grp in shots_spec.split(";"):
+        grp = grp.strip()
+        if not grp:
+            continue
+        shots_str, _, tlist = grp.partition(":")
+        groups.append((int(shots_str), [t for t in tlist.split(",") if t]))
+else:
+    groups = [(0, os.environ["TASKS"].split(","))]
+
+merged = {}
+for shots, tset in groups:
+    if not tset:
+        continue
+    print(f"  [lm-eval] {len(tset)} task(s) @ {shots}-shot: {','.join(tset)}", flush=True)
+    r = evaluator.simple_evaluate(
+        model="hf",
+        model_args=f"pretrained={hf_dir}",
+        tasks=tset,
+        batch_size=2,
+        num_fewshot=shots,
+        device="xpu:0",
+    )
+    merged.update(r["results"])
+
 with open(f"{results_dir}/results.json", "w") as f:
-    json.dump(results["results"], f, indent=2)
-for task, metrics in results["results"].items():
-    acc = metrics.get("acc_norm,none") or metrics.get("acc,none", "?")
-    print(f"  {task}: {acc:.4f}" if isinstance(acc, float) else f"  {task}: {acc}")
+    json.dump(merged, f, indent=2)
+for task, metrics in merged.items():
+    # prefer acc_norm, then acc, then exact_match (gsm8k), then flexible EM
+    val = (metrics.get("acc_norm,none")
+           or metrics.get("acc,none")
+           or metrics.get("exact_match,strict-match")
+           or metrics.get("exact_match,none")
+           or metrics.get("exact_match,flexible-extract", "?"))
+    print(f"  {task}: {val:.4f}" if isinstance(val, float) else f"  {task}: {val}")
 PYEOF
     deactivate
     echo "[2/2] Eval done. results: ${RESULTS_DIR_ABS}/results.json"
