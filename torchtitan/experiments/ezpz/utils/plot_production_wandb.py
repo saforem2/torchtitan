@@ -204,21 +204,42 @@ def concat_runs(
     survives — which is what the main dashboard plots use.
     """
     olog_fallbacks = olog_fallbacks or {}
+
+    def _max_step(d):
+        steps = d["_step"]
+        if len(steps) == 0:
+            return -1
+        vals = [int(s) for s in steps if s is not None]
+        return max(vals) if vals else -1
+
     parts = []
     for rid in run_ids:
         data = fetch_run(api, rid)
-        if len(data["_step"]) == 0:
-            if rid in olog_fallbacks:
-                print(f"  {rid}: W&B history empty — falling back to .o log {olog_fallbacks[rid]}")
-                data = fetch_from_olog(olog_fallbacks[rid])
-                if len(data["_step"]) == 0:
-                    print(f"  {rid}: .o-log fallback also empty, skipping")
+        # Runs with an olog_fallbacks entry sync to W&B unreliably (crashed
+        # mid-sync or logged to a different project). W&B may return an
+        # empty OR a partial/truncated history for them, so a plain
+        # "empty?" test silently drops the trajectory tail (the 2B-256
+        # chain lost steps 86,484 -> 92,859 this way). The PBS .o log is
+        # the complete authoritative stdout trace: prefer it whenever it
+        # reaches at least as far as the W&B history.
+        if rid in olog_fallbacks:
+            olog_data = fetch_from_olog(olog_fallbacks[rid])
+            w_max, o_max = _max_step(data), _max_step(olog_data)
+            if o_max >= w_max:
+                if o_max < 0:
+                    print(f"  {rid}: both W&B and .o-log empty, skipping")
                     continue
-                print(f"  {rid}: .o-log {len(data['_step'])} rows, steps [{int(data['_step'][0])}, {int(data['_step'][-1])}]")
+                w_str = str(w_max) if w_max >= 0 else "empty"
+                print(f"  {rid}: .o-log {len(olog_data['_step'])} rows, steps "
+                      f"[{int(olog_data['_step'][0])}, {int(olog_data['_step'][-1])}] "
+                      f"(W&B reached {w_str})")
+                data = olog_data
             else:
-                print(f"  {rid}: no rows, skipping")
-                continue
-        else:
+                print(f"  {rid}: W&B reaches step {w_max} > .o-log {o_max}; keeping W&B")
+        if len(data["_step"]) == 0:
+            print(f"  {rid}: no rows, skipping")
+            continue
+        if rid not in olog_fallbacks:
             print(f"  {rid}: {len(data['_step'])} rows, steps [{data['_step'][0]}, {data['_step'][-1]}]")
         parts.append(data)
 
