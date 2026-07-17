@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-07-15
+> Last updated: 2026-07-17
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -29,8 +29,8 @@ in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 35,000 | 2.71 | 75.4% | 🟡 queue-starved |
-| [20B 256N](agpt/20b/n256/README.md) | advancing | **4,350** | 2.68 | 4.7% | 🟢 carried to 3,100 via relocated n256 clone chain |
+| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 38,900 | 2.71 | 83.8% | 🟡 queue-starved |
+| [20B 256N](agpt/20b/n256/README.md) | advancing | **5,000** | 2.68 | 5.4% | 🟢 carried to 3,100 via relocated n256 clone chain |
 | [20B 512N](agpt/20b/n512/README.md) | advancing | **6,000** | 2.47 | 12.9% | 🟢 native auto-retry (8638793+8638795) broke the stall, 4,400→5,400 |
 | [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
 
@@ -103,7 +103,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 512 | **35,000** (persisted) | **2.71** | **3.52T** (75.4%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
+| 2B  | 512 | **38,900** (persisted) | **2.71** | **3.92T** (83.8%) | [`8521631`](agpt/2b/n512/README.md) Q (sync-mode) | **Q+H for 14 days — Aurora `small` queue contention.** Last R was 8521627 (cont9) on 2026-06-07 21:12, died 8 min in when 1 of 522 nodes failed yeet-env rsync (the failure mode fixed by [ezpz PR #160](https://github.com/saforem2/ezpz/pull/160) but not yet deployed to v2 prod venv pending review). Cont10 (8521631) Q for next 512N slot. |
 | 20B | 512 | **6,000** (persisted) | **2.47** | **604.0B** (12.9%) | [`8638795`](../experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) advanced (afterany cont) | **ADVANCING on native auto-retry (broke the stall 2026-07-05..07, 4,400→5,400).** Had been frozen at step-4400 since 05-29: its last advance was as trainer-1 in umbrella 8568429, which died at init on bad node x4410 and the legacy `failover_lib.sh` blind-swapped the wrong nodes (scraper can't parse the hostname from `signal 11`), exhausting retries. Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned runs/agpt-20b-v2 clone (ezpz upgraded 0.16->0.21.3 for `--auto-retry`; resume step-4400 CONFIRMED by 2N smoke 8638756: `Training starts at step 4401`). NOTE step-4500 is an empty/aborted save (not resumable); step-4400 is the last valid ckpt. Legacy sync jobs 8521632/8534295 qdel'd to avoid ckpt-dir collision. head 8638793 + cont 8638795 (afterany). |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
@@ -114,7 +114,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the final ckpt (blocked on PM).** |
-| 20B | 256 | **4,350** (persisted) | **2.68** | **218.9B** (4.7%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
+| 20B | 256 | **5,000** (persisted) | **2.68** | **251.7B** (5.4%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
 
 ### Other jobs
 
