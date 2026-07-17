@@ -107,6 +107,29 @@ Batch config: **LBS=1, GAS=2** on Polaris (LBS=2 OOMs A100-40GB). GAS=2
 keeps the canonical per-GPU effective batch (matching Aurora's LBS=2)
 so the SophiaG LR=2.28e-5 stays valid; GBS = 512 x 1 x 2 = 1024.
 
+### Charts
+
+Loss / throughput / MFU across all legs, stitched from the per-leg W&B
+runs (each `ezpz launch` leg is a separate run; resume points at steps
+300/700/1000/1300 are merged latest-wins into one continuous curve).
+
+![20B Polaris production training](figures/production_20b_polaris_128n.png)
+
+![20B Polaris diagnostics](figures/diagnostics_20b_polaris_128n.png)
+
+Regenerate (from the Polaris repo, whose venv has W&B creds + the
+plotting stack):
+
+```bash
+python3 torchtitan/experiments/ezpz/utils/plot_polaris_20b.py
+```
+
+Append each new leg's W&B run-id to `RUN_IDS` in
+[`plot_polaris_20b.py`](../../../utils/plot_polaris_20b.py) as legs
+start, then rerun. W&B runs (oldest first): `jgjd0qbf` (leg1),
+`h8uzg2om` (leg2), `u81yhgtb` (leg3), `j56diiz9` (leg4), `nm41nsbj`
+(leg5). Project `aurora_gpt/torchtitan.ezpz.train`.
+
 ### Trajectory
 
 | Leg | Job | Outcome | Steps | Loss |
