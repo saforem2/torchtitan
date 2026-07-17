@@ -92,9 +92,10 @@ def main():
     tokens_b = cumulative_tokens(h) / 1e9
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 8.5), sharex=True)
+    _status = "COMPLETE, 1 epoch" if int(steps[-1]) >= 8672 else "in progress"
     fig.suptitle(
         f"AuroraGPT-2B (MDS) x tulu_math_uc_mix_full SFT -- 8N, GBS=6144, 1 epoch "
-        f"(step {int(steps[-1])}/8672, in progress)",
+        f"(step {int(steps[-1])}/8672, {_status})",
         fontsize=13, y=0.995,
     )
     panels = [
