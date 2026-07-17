@@ -239,7 +239,7 @@ class moeModel(Decoder):  # noqa: N801
             # compute_backend, so this stays.
             for layer_cfg in self.layers:
                 if layer_cfg.moe is not None:
-                    experts_cfg = layer_cfg.moe.experts
+                    experts_cfg = layer_cfg.moe.routed_experts.inner_experts
                     if getattr(
                         experts_cfg, "compute_backend", "grouped_mm"
                     ) == "grouped_mm" and not has_cuda_capability(9, 0):
@@ -256,9 +256,9 @@ class moeModel(Decoder):  # noqa: N801
                         debug.moe_force_load_balance
                     )
                     if hasattr(
-                        layer_cfg.moe.experts.token_dispatcher, "force_load_balance"
+                        layer_cfg.moe.routed_experts.token_dispatcher, "force_load_balance"
                     ):
-                        layer_cfg.moe.experts.token_dispatcher.force_load_balance = (
+                        layer_cfg.moe.routed_experts.token_dispatcher.force_load_balance = (
                             debug.moe_force_load_balance
                         )
                     # Detect deepep/hybridep configs by the dispatcher
@@ -277,14 +277,14 @@ class moeModel(Decoder):  # noqa: N801
                     # the EP=1 guard so a misconfigured deepep/hybridep
                     # user gets a clear error before model init.
                     if isinstance(
-                        layer_cfg.moe.experts.token_dispatcher,
+                        layer_cfg.moe.routed_experts.token_dispatcher,
                         (
                             DeepEPTokenDispatcher.Config,
                             HybridEPTokenDispatcher.Config,
                         ),
                     ):
                         dispatcher_name = type(
-                            layer_cfg.moe.experts.token_dispatcher
+                            layer_cfg.moe.routed_experts.token_dispatcher
                         ).__qualname__.split(".")[0]
                         if parallelism.expert_parallel_degree == 1:
                             raise ValueError(

@@ -37,7 +37,7 @@ from torchtitan.protocols.model_spec import ModelSpec
 # `.moe` copy that was a byte-for-byte fork of `torchtitan/models/common/moe.py`;
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
-from torchtitan.models.common.moe import MoE, TokenChoiceTopKRouter
+from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
@@ -197,31 +197,35 @@ def make_ezpz_experts_config(
     comm_backend: str = "standard",
     non_blocking_capacity_factor: float | None = None,
     compute_backend: ExpertComputeBackend = "grouped_mm",
-) -> EzpzGroupedExperts.Config:
+) -> RoutedExperts.Config:
     """Build an EzpzGroupedExperts.Config from the same args as upstream
     `make_experts_config`, plus a `compute_backend` selector.
     """
-    return EzpzGroupedExperts.Config(
+    inner = EzpzGroupedExperts.Config(
         dim=dim,
         hidden_dim=hidden_dim,
         num_experts=num_experts,
         param_init=param_init,
-        token_dispatcher=make_ezpz_token_dispatcher_config(
-            num_experts=num_experts,
-            top_k=top_k,
-            score_before_experts=score_before_experts,
-            comm_backend=comm_backend,
-            non_blocking_capacity_factor=non_blocking_capacity_factor,
-        ),
         compute_backend=compute_backend,
     )
+    # #3859: token_dispatcher is now a sibling of the grouped experts
+    # under a RoutedExperts local_map region, not a child of the experts
+    # config.
+    dispatcher = make_ezpz_token_dispatcher_config(
+        num_experts=num_experts,
+        top_k=top_k,
+        score_before_experts=score_before_experts,
+        comm_backend=comm_backend,
+        non_blocking_capacity_factor=non_blocking_capacity_factor,
+    )
+    return RoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
 
 
 def make_ezpz_moe_config(
     *,
     num_experts: int = 8,
     router: TokenChoiceTopKRouter.Config,
-    experts: EzpzGroupedExperts.Config,
+    routed_experts: RoutedExperts.Config,
     shared_experts=None,
     load_balance_coeff: float | None = 1e-3,
 ) -> MoE.Config:
@@ -229,7 +233,7 @@ def make_ezpz_moe_config(
         num_experts=num_experts,
         load_balance_coeff=load_balance_coeff,
         router=router,
-        experts=experts,
+        routed_experts=routed_experts,
         shared_experts=shared_experts,
     )
 
@@ -437,7 +441,7 @@ def _build_moe_layers(
                     route_scale=router_route_scale,
                     route_norm=router_route_norm,
                 ),
-                experts=make_ezpz_experts_config(
+                routed_experts=make_ezpz_experts_config(
                     dim=dim,
                     hidden_dim=moe_hidden_dim,
                     num_experts=num_experts,
@@ -1172,11 +1176,11 @@ def model_registry(
     # dispatch when EP=1.
     for layer_cfg in config.layers:
         if layer_cfg.moe is not None:
-            experts_cfg = layer_cfg.moe.experts
-            experts_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
-                num_experts=experts_cfg.num_experts,
-                top_k=experts_cfg.token_dispatcher.top_k,
-                score_before_experts=experts_cfg.token_dispatcher.score_before_experts,
+            routed_cfg = layer_cfg.moe.routed_experts
+            routed_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
+                num_experts=routed_cfg.inner_experts.num_experts,
+                top_k=routed_cfg.token_dispatcher.top_k,
+                score_before_experts=routed_cfg.token_dispatcher.score_before_experts,
                 comm_backend=moe_comm_backend,
             )
 
