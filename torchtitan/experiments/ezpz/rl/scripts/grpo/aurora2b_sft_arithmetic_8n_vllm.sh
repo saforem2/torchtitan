@@ -45,8 +45,8 @@ source .venv/bin/activate
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 test -d venvs/vllm-test || { echo "FATAL: venvs/vllm-test/ missing; see docs/rl/vllm-xpu-investigation.md"; exit 1; }
 
-MODEL=outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf
-CKPT_DIR=outputs/grpo/aurora2b-sft-arithmetic-8n-vllm
+MODEL="${MODEL:-outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf}"
+CKPT_DIR="${CKPT_DIR:-outputs/grpo/aurora2b-sft-arithmetic-8n-vllm}"
 LOG_DIR="logs/grpo-aurora2b-sft-arithmetic-8n-vllm-${PBS_JOBID%%.*}"
 mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
 
