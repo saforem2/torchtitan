@@ -43,8 +43,9 @@ FSDP patch never engaging (rebound the wrong `from`-import name). Full evidence
 
 **What makes the cross-node path work (all landed):**
 1. **Unified `venvs/rl-vllm/` for BOTH server and trainer.** The older
-   `vllm_serve_xpu.sh` `venvs/vllm-test` + `PYTHONPATH=.venv` bridge breaks
-   vLLM-XPU platform detection (`RuntimeError: Device string must not be empty`).
+   `vllm_serve_xpu.sh` `venvs/vllm-test` + `PYTHONPATH=.venv` bridge (removed
+   2026-07-17) broke vLLM-XPU platform detection (`RuntimeError: Device string
+   must not be empty`).
 2. **`--fsdp` for TRL 1.6 / transformers >= 5.11:** string parsing was dropped;
    `--fsdp full_shard` now parses to bare `True`, handled in `train_grpo.py`
    `_bootstrap_fsdp_env` (`0558eb592`: `fsdp is True` -> `full_shard`).
