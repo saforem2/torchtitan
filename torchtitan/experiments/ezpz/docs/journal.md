@@ -2,6 +2,34 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-16 (sunspot) -- full-mix 8N SFT COMPLETE (epoch 1.0) + 69th upstream sync
+
+- **Full-mix 8N SFT finished cleanly**: gs138650 x tulu_math_uc_mix_full (~54B
+  tokens, 1 epoch) reached **step 8672 / epoch 1.0, final loss 0.357,
+  mean_token_accuracy 0.902** -- Execution finished with 0, checkpoint-8672
+  saved intact. Ran across 10 fault-tolerant afterany chain links (12470350
+  head -> ... -> 12470478 -> 12470479 final) with clean walltime handoffs; the
+  early idle-hang pattern (HANGs #1-#7 through step ~2400) abated from cont 8 on
+  (12470436/437/478/479 all long+clean). Beats the completed metamathqa SFT
+  (0.77) as expected for ~12x the tokens. Chart + run README + dashboard
+  refreshed to the final step; run-status table de-mangled (a blank-line split +
+  dup cont-3 row had broken its GitHub render).
+- **69th upstream sync** (right after SFT completion): merged 9 commits
+  (8c92de86b), after pulling a concurrent origin/ezpz push. **Caught + fixed a
+  breaking change**: upstream #3923 moved Linear out of common/nn_modules.py
+  into new common/linear.py; our agpt + moe import the deep nn_modules path (not
+  the re-exporting package root), so it would have raised ImportError. Repointed
+  both callsites (2148074cb): agpt -> common.linear, moe split (Linear from
+  common.linear, RMSNorm stays in common.nn_modules). sync_smoke.sh VERDICT: ok
+  (job 12470795), all 3 configs rc=0 (agpt, agpt@TP=2, moe). Details in
+  upstream-sync.md (69th entry).
+- **Disk**: freed 2.65T earlier this session (3 dead 80B diagnostic
+  checkpoints); datascience group /lus/tegu dropped 8.79T -> 6.13T.
+- **Compile root-cause (2026.1.0 venv)**: triton 3.7.2 torch.compile segfault at
+  driver.py:364 is a SYCL version skew (icpx module vs torchs bundled
+  intel_sycl_rt); FIX = match icpx to the wheel (load oneAPI 2026.0.0 module,
+  not 2026.1.0). Recorded in the project_py313_pt214_compile_segfault memory.
+
 ## 2026-07-12 (aurora) -- 20B chains -> constant LR; corrected mislabeled 8661913
 
 - **Held both canonical 20B chains at constant LR (no decay)** per request. Patched

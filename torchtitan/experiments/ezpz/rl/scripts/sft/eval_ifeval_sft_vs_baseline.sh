@@ -17,6 +17,12 @@ set -o pipefail
 SUBMIT_DIR="${PBS_O_WORKDIR:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan}"
 cd "${SUBMIT_DIR}"
 
+# Model selection (env-overridable so this stays reusable across checkpoints).
+# Default: the completed full-mix 8N SFT (checkpoint-8672-hf) vs the gs138650 base.
+BASELINE_MODEL="${BASELINE_MODEL:-${HOME}/global_step138650}"
+SFT_MODEL="${SFT_MODEL:-outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-8672-hf}"
+SFT_LABEL="${SFT_LABEL:-sft-step8672}"
+
 source /etc/profile.d/lmod.sh 2>/dev/null || source /etc/profile 2>/dev/null
 module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1 2>&1 | tail -1
 
@@ -66,18 +72,18 @@ EOF
     echo "=== ${label} done at $(date) ==="
 }
 
-run_one AuroraGPT-2B-sophiag-gs138650 baseline
-run_one outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf sft-step729
+run_one "${BASELINE_MODEL}" baseline
+run_one "${SFT_MODEL}" "${SFT_LABEL}"
 
 echo ""
 echo "=== IFEval comparison ==="
 python3 <<PYEOF
 import glob, json, os
 OUT = "${OUT_BASE}"
-print(f'{"metric":<48} {"baseline":>10} {"sft-step729":>14} {"delta":>10}')
+print(f'{"metric":<48} {"baseline":>10} {"${SFT_LABEL}":>14} {"delta":>10}')
 print('-' * 84)
 b_paths = glob.glob(os.path.join(OUT, 'baseline', '**', 'results*.json'), recursive=True)
-s_paths = glob.glob(os.path.join(OUT, 'sft-step729', '**', 'results*.json'), recursive=True)
+s_paths = glob.glob(os.path.join(OUT, '${SFT_LABEL}', '**', 'results*.json'), recursive=True)
 if not b_paths or not s_paths:
     print('[warn] no results JSON found')
     raise SystemExit

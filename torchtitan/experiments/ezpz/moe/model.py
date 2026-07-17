@@ -19,7 +19,8 @@ from torchtitan.models.common.attention import (
     ScaledDotProductAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
-from torchtitan.models.common.nn_modules import Linear, RMSNorm
+from torchtitan.models.common.linear import Linear
+from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.rope import RoPE
 from torchtitan.models.common.token_dispatcher import (
     DeepEPTokenDispatcher,

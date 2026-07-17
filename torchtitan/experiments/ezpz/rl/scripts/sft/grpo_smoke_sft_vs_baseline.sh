@@ -17,6 +17,12 @@ set -o pipefail
 SUBMIT_DIR="${PBS_O_WORKDIR:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan}"
 cd "${SUBMIT_DIR}"
 
+# Model selection (env-overridable). Default: completed full-mix 8N SFT
+# (checkpoint-8672-hf) vs the gs138650 base.
+BASELINE_MODEL="${BASELINE_MODEL:-${HOME}/global_step138650}"
+SFT_MODEL="${SFT_MODEL:-outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-8672-hf}"
+SFT_LABEL="${SFT_LABEL:-sft-step8672}"
+
 JOBID="${PBS_JOBID:-12468401.sunspot-pbs-0001.head.cm.sunspot.alcf.anl.gov}"
 HOSTFILE="/var/spool/pbs/aux/${JOBID}"
 if [[ ! -f "${HOSTFILE}" ]]; then
@@ -79,15 +85,15 @@ run_grpo() {
     echo "=== ${label} done at $(date) ==="
 }
 
-run_grpo AuroraGPT-2B-sophiag-gs138650 baseline
-run_grpo outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf sft-step729
+run_grpo "${BASELINE_MODEL}" baseline
+run_grpo "${SFT_MODEL}" "${SFT_LABEL}"
 
 echo ""
 echo "=== Reward trajectory comparison ==="
 echo "[baseline] last 5 reward log lines:"
 grep -E "'reward':" "${LOG_DIR}/baseline.log" 2>/dev/null | tail -5
 echo ""
-echo "[sft-step729] last 5 reward log lines:"
-grep -E "'reward':" "${LOG_DIR}/sft-step729.log" 2>/dev/null | tail -5
+echo "[${SFT_LABEL}] last 5 reward log lines:"
+grep -E "'reward':" "${LOG_DIR}/${SFT_LABEL}.log" 2>/dev/null | tail -5
 echo ""
 echo "=== Logs in ${LOG_DIR}/ ==="
