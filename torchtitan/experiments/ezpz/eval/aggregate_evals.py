@@ -49,6 +49,8 @@ TASK_COLORS = {
     "piqa": "#9b59b6",
     "openbookqa": "#1abc9c",
     "boolq": "#34495e",
+    "mmlu": "#e67e22",
+    "gsm8k": "#16a085",
 }
 
 RANDOM_BASELINES = {
@@ -59,6 +61,8 @@ RANDOM_BASELINES = {
     "piqa": 0.5,        # binary choice
     "openbookqa": 0.25, # 4-way MCQ
     "boolq": 0.5,       # yes/no
+    "mmlu": 0.25,      # 4-way MCQ
+    "gsm8k": 0.0,      # generative exact-match
 }
 
 
@@ -69,7 +73,11 @@ def _read_one(path: Path) -> dict[str, float]:
     for task, m in d.items():
         if not isinstance(m, dict):
             continue
-        acc = m.get("acc_norm,none") or m.get("acc,none")
+        acc = (m.get("acc_norm,none")
+               or m.get("acc,none")
+               or m.get("exact_match,strict-match")
+               or m.get("exact_match,none")
+               or m.get("exact_match,flexible-extract"))
         if acc is not None:
             scores[task] = acc
     return scores
