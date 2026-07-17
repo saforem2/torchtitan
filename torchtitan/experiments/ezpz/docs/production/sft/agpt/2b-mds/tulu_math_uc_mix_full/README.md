@@ -152,15 +152,28 @@ First ~482 steps at 8N (GBS=6144): loss **1.343 -> 0.912**, mean_token_accuracy
 descent, consistent with the completed gs138650 SFT's start (~1.16 -> 0.77 over
 729 steps on the small mix). Checkpoints accumulate every 50 steps.
 
-## Evals
+## Evals -- full picture (2026-07-17): the mix works EARLY, dies at full epoch
 
-Base-LM lm-eval **step sweep** (checkpoints 300/600/900 vs the gs138650
-baseline, job 12470365) in [`evals/README.md`](evals/README.md). TL;DR: the
-expected **alignment-tax** pattern -- base-LM multiple-choice is flat-to-down
-under SFT (arc_easy/challenge decline monotonically with more steps; boolq /
-winogrande tick up), same as the completed metamathqa SFT. The real SFT signal
-lives in IFEval + downstream GRPO (TODO for this run), not these tasks. More
-sweep points land as the run advances.
+Full base-LM sweep (0 -> 8672) + IFEval in [`evals/README.md`](evals/README.md).
+**Key finding:** the final checkpoint-8672 **catastrophically forgot** -- base-LM
+benchmarks collapsed to ~random chance (hellaswag 0.59 -> 0.27, arc_easy
+0.69 -> 0.30, collapse between step ~1500-4500) AND IFEval went flat-to-down vs
+baseline. It overfit the OpenMathInstruct-2 math-CoT distribution (train loss
+0.357) and lost everything else.
+
+**BUT checkpoint-900 (~5.7B tokens) is the real deliverable:** IFEval
+matches/beats the metamathqa-729 SFT (prompt-strict 0.253 vs 0.244; inst-loose
+0.417 vs 0.411) WHILE retaining base-LM capability (pre-collapse). It is the
+best of all four models evaluated.
+
+**Root cause:** LR 2e-5 stayed >1e-5 through step ~4350 (cosine decay only bites
+the 2nd half); ~4000 steps at high LR on a narrow distribution = catastrophic
+forgetting. The metamathqa recipe survived only by STOPPING at 729 steps.
+**Recipe lesson:** cap full-mix SFT at O(1000) steps (or drop the LR); a full
+epoch at peak LR is the mistake, not the mix. GRPO smoke inconclusive this pass
+(wrapper launcher stall) -- TODO standalone re-run.
+
+**Deliverable: `checkpoint-900-hf`** (NOT 8672).
 
 ## Comparison to the completed 729-step SFT
 

@@ -135,19 +135,19 @@ class EzpzGroupedExperts(GroupedExperts):
         super().__init__(config)
         self.compute_backend: ExpertComputeBackend = config.compute_backend
 
-    def _experts_forward(
+    def forward(
         self,
         x: torch.Tensor,
         num_tokens_per_expert: torch.Tensor,
     ) -> torch.Tensor:
         # NOTE: this method is intentionally NOT marked with
         # @torch.compiler.disable. The grouped_mm path delegates straight to
-        # the upstream `super()._experts_forward(...)` which is
+        # the upstream `super().forward(...)` which is
         # compile-friendly, and we want torch.compile to see it. The
         # for-loop path is opted out of compile via the module-level
         # @torch.compiler.disable decorator on `_run_experts_for_loop`.
         if self.compute_backend == "grouped_mm":
-            return super()._experts_forward(x, num_tokens_per_expert)
+            return super().forward(x, num_tokens_per_expert)
 
         # Param names use Shazeer shape-suffix style post upstream PR #3425
         # (41st sync): w1_EFD, w2_EDF, w3_EFD.

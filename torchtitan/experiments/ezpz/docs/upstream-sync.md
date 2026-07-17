@@ -20,6 +20,63 @@ was required in ezpz.
 
 ---
 
+## 2026-07-17 — 70th sync (3 commits, `..upstream/main`, merge `412d93fd8`)
+
+Merged 3 new upstream commits (after fast-forwarding a concurrent `origin/ezpz`
+push). **One structural replay required** for the MoE sibling-experts refactor
+(#3859) -- caught by `sync_smoke.sh` (moe config crashed), fixed, re-smoked green.
+
+### Upstream commits
+| Commit | Title | ezpz impact |
+|--------|-------|-------------|
+| `3101b42f9` | [MoE] sibling token_dispatcher + grouped_experts for composable override (#3859) | **BREAKING for ezpz/moe** -- replayed, see below. |
+| `fc5a72960` | [spmd_types] FlexAttention: remove hardcoded spmd_types of `_complex_flex_attn` output (#3924) | Touches `common/decoder.py` (+2); agpt uses Decoder but no signature we call changed. agpt smoke bit-clean. |
+| `fbceec07e` | fix RL ci (#3930) | CI only. |
+
+### MoE refactor replay (#3859 -- BREAKING, fixed as the commit before this doc)
+Upstream split the routed experts so communication and computation are sibling
+submodules under a `local_map` region:
+```
+MoE
+|- routed_experts (RoutedExperts -- local_map region)
+|   |- inner_experts     (GroupedExperts: grouped-GEMM weights)
+|   \- token_dispatcher  (dispatch/combine)
+\- shared_experts
+```
+Previously `MoE.experts` WAS a `GroupedExperts` that owned `token_dispatcher` as
+a child and did dispatch/combine in its own forward. Now: `GroupedExperts` is
+just the weights (its `_experts_forward` was renamed to `forward`, and
+`token_dispatcher` dropped from its Config); a new `RoutedExperts` composes
+`inner_experts` + `token_dispatcher` as siblings and owns the dispatch/combine
+forward. Expert FQNs moved `moe.experts.*` -> `moe.routed_experts.inner_experts.*`.
+
+Our `ezpz/moe` mirrored the OLD flat pattern, so `moe_debugmodel` crashed with
+`EzpzGroupedExperts.Config.__init__() got an unexpected keyword argument
+token_dispatcher` (sync_smoke job 12470895, `3-moe_debugmodel rc=143`).
+Replayed across 5 files:
+- `experts.py`: `_experts_forward` -> `forward` (override + `super()` call + doc).
+- `__init__.py`: `make_ezpz_experts_config` now returns
+  `RoutedExperts.Config(inner_experts=EzpzGroupedExperts.Config, token_dispatcher=...)`;
+  `make_ezpz_moe_config` + its caller pass `routed_experts=`; the EP=1
+  dispatcher-rebuild block walks `routed_experts.{inner_experts,token_dispatcher}`.
+- `model.py`: config-mutation walks `routed_experts.inner_experts.compute_backend`
+  + `routed_experts.token_dispatcher`.
+- `parallelize.py`: runtime `moe.routed_experts.inner_experts.parameters()`.
+- `state_dict_adapter.py`: torchtitan-side expert weight FQNs
+  `moe.experts.wN` -> `moe.routed_experts.inner_experts.wN` (HF-side
+  `mlp.experts` naming unchanged). NOTE: upstream states no native-DCP
+  back-compat by design; old ezpz/moe DCP checkpoints (if any) would need the
+  same FQN remap to load -- no live MoE checkpoints exist, so no migration.
+Our `compute_backend` XPU extension (for_loop vs grouped_mm) is preserved on
+`inner_experts`.
+
+### Validation -- smoke-passed (Sunspot, 2026-07-17)
+`sync_smoke.sh` **VERDICT: ok** (job 12470902, post-replay): all 3 configs rc=0
+-- `agpt_debugmodel` (loss 10.84->10.67), `agpt_debugmodel @ TP=2`, and
+`moe_debugmodel` (now rc=0, was rc=143 pre-replay). Config-build verified:
+`moe_debugmodel()` constructs the `RoutedExperts(inner_experts + token_dispatcher)`
+hierarchy. agpt (all current production) was unaffected throughout.
+
 ## 2026-07-16 — 69th sync (9 commits, `..upstream/main`, merge `8c92de86b`)
 
 Merged `upstream/main` into `ezpz` as `8c92de86b` (after fast-forwarding a
