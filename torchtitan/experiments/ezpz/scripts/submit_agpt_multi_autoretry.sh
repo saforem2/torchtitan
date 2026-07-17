@@ -136,6 +136,12 @@ die() { echo "[multi ERROR] $*" >&2; exit 1; }
 # MUST match, or the chain fresh-starts instead of resuming.
 # The overrides let ONE trainer run a different recipe (e.g. the 2B stage-2
 # mid-training fork below) while the others keep their olmo-mix chains.
+# Bail a trainer that produces N consecutive non-finite (NaN/inf) losses
+# instead of burning the whole allocation. A dolmino-mix CPT trainer
+# NaN'd at step 3801 in job 8663177 and ran ~370 NaN steps unbounded
+# because this was unset (default 0 = off). 5 matches the 80B script.
+NAN_ABORT_CONSECUTIVE="${NAN_ABORT_CONSECUTIVE:-5}"
+
 TRAINERS=(
     "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288"
     "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
@@ -385,6 +391,7 @@ launch_trainer() {
             --checkpoint.folder="$ckpt" \
             --checkpoint.interval="$CKPT_INTERVAL" \
             --checkpoint.keep-latest-k=0 \
+            --nan-abort-consecutive="${NAN_ABORT_CONSECUTIVE}" \
             --checkpoint.no-last-save-model-only \
             --checkpoint.async-mode=disabled \
             --dataloader.dataset=blendcorpus \
