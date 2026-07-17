@@ -72,8 +72,36 @@ for step in $STEPS; do
         continue
     fi
     if [[ -f "${RESULTS_DIR}/results.json" ]]; then
-        echo "[SKIP] 2b-v2 step-${step}: results.json already exists"
-        continue
+        # Content-aware skip: only skip if the existing results.json already
+        # holds every requested task (SHOTS_SPEC groups, else TASKS). A plain
+        # existence check made the modern-suite backfill a no-op (old files
+        # have only the 0-shot commonsense tasks). See patch_skip_guard.py.
+        if SHOTS_SPEC="${SHOTS_SPEC:-}" TASKS="${TASKS}" python3 - "${RESULTS_DIR}/results.json" <<'PYCHK'
+import json, os, sys
+path = sys.argv[1]
+spec = os.environ.get("SHOTS_SPEC", "").strip()
+if spec:
+    want = set()
+    for g in spec.split(";"):
+        _, _, tl = g.partition(":")
+        want |= {t for t in tl.split(",") if t}
+else:
+    want = set(os.environ.get("TASKS", "").split(","))
+try:
+    have = set(json.load(open(path)).keys())
+except Exception:
+    have = set()
+# mmlu expands to a group key + mmlu_* subtasks; treat prefix as satisfied.
+missing = [t for t in want
+           if t and t not in have
+           and not any(k == t or k.startswith(t + "_") for k in have)]
+sys.exit(0 if not missing else 1)
+PYCHK
+        then
+            echo "[SKIP] 2b-v2 step-${step}: all requested tasks already present"
+            continue
+        fi
+        echo "[RERUN] 2b-v2 step-${step}: results.json missing requested task(s); running + merging"
     fi
 
     echo ""
@@ -186,8 +214,18 @@ for shots, tset in groups:
     )
     merged.update(r["results"])
 
-with open(f"{results_dir}/results.json", "w") as f:
-    json.dump(merged, f, indent=2)
+# Merge into any existing results.json so the 0-shot dashboard and the modern
+# suite coexist (a step may be re-run to ADD tasks, not replace them).
+out_path = f"{results_dir}/results.json"
+existing = {}
+if os.path.exists(out_path):
+    try:
+        existing = json.load(open(out_path))
+    except Exception:
+        existing = {}
+existing.update(merged)
+with open(out_path, "w") as f:
+    json.dump(existing, f, indent=2)
 for task, metrics in merged.items():
     # prefer acc_norm, then acc, then exact_match (gsm8k), then flexible EM
     val = (metrics.get("acc_norm,none")

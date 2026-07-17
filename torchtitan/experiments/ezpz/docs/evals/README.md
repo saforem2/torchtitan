@@ -3,6 +3,11 @@
 Benchmark evaluations of AuroraGPT production checkpoints using
 [lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness).
 
+> **[Eval-suite strategy review (2026-07)](eval-landscape-2026-07.md)** -- why
+> the older commonsense suite is saturated, which modern benchmarks we added
+> (MMLU/GSM8K/ARC-Challenge), and how we compare to SmolLM3-3B / Llama-3.2 /
+> OLMo-2.
+
 ## All-production overlay (vs tokens)
 
 One chart, 4 panels (HellaSwag acc_norm, ARC-Easy acc, ARC-C acc_norm,
