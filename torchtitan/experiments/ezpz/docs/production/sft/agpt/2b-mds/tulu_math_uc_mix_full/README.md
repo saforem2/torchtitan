@@ -1,9 +1,11 @@
 # SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)
 
-> **Last updated: 2026-07-15.**
-> **Status: in progress at 8N -- step 5950/8672 (~69%), loss 0.41.** Head job
-> **12470350** (2026-07-12) + afterany chain; currently on link **12470437**
-> (running), with **12470478/12470479** queued behind it (Sunspot). This is the
+> **Last updated: 2026-07-17.**
+> **Status: COMPLETE at 8N -- step 8672/8672, epoch 1.0, final loss 0.357,
+> mean_token_accuracy 0.902** (finished 2026-07-16). Head job **12470350**
+> (2026-07-12) + a 10-link afterany chain (... -> 12470478 -> 12470479 final);
+> `checkpoint-8672` saved, consolidated to `checkpoint-8672-hf` (the deliverable).
+> Eval sweep in progress -- see [evals/](evals/README.md). This is the
 > "more tokens" SFT: the SAME gs138650 base as
 > the completed 729-step SFT, but over the FULL OpenMathInstruct-2
 > `tulu_math_uc_mix` (~53.3M packed sequences, ~54B tokens, 1 epoch) instead of
