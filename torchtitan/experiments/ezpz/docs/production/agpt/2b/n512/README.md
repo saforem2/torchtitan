@@ -79,11 +79,11 @@
 | (~5–9 day Q wait — Aurora `small` queue saturated) | 2026-05-30 → 2026-06-07 | — | — | — | — | — | **No R events.** Chain pinned at step-30,500 since 2026-05-30 07:53. |
 | [`8521627`](#log-8521627) | 2026-06-07 | ~8 min | (none) | (none) | — | — | **Failed in yeet-env preflight, no training.** `afterany` cont9. R 21:12 → E 21:20. 1 of 522 nodes (`x4112c1s7b0n0`) tripped a 120s rsync timeout with `Connection reset by 10.112.164.235 port 22`; the other 521 nodes finished the tarball copy in ~20s each. yeet-env reported `1/522 node(s) failed`, the failover wrapper bailed (exit 1), and no checkpoints were written past step-30,500. See **Recent issues** below. |
 
-**Latest checkpoint:** step-36200 (8508753 last persisted; cont9 wrote nothing past it)
+**Latest checkpoint:** step-38900 (8508753 last persisted; cont9 wrote nothing past it)
 
-**Cumulative steps:** 36,200 (chain pinned since 2026-05-30 07:53)
+**Cumulative steps:** 38,900 (chain pinned since 2026-05-30 07:53)
 
-**Tokens consumed:** 36,200 × 12,288 × 8,192 = **3.64T tokens** (78.0% of 4.67T target)
+**Tokens consumed:** 38,900 × 12,288 × 8,192 = **3.92T tokens** (83.8% of 4.67T target)
 
 ### Recovery
 
