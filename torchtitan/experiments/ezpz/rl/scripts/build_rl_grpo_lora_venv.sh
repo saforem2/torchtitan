@@ -35,6 +35,7 @@ UV="${HOME}/.local/bin/uv"
 # SYCL/xpu RUNTIME, just not as the C/C++ compiler.
 export CC=/usr/bin/gcc-14
 export CXX=/usr/bin/g++-14
+export PATH="${HOME}/.cargo/bin:${PATH}"  # cargo for monarch Rust build
 echo "=== toolchain: $($CC --version | head -1) ==="
 "$CXX" --version | head -1
 
@@ -77,9 +78,11 @@ echo "=== Step 4: editable from-source installs (--no-deps --no-build-isolation)
 VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
     -e "${SRC}/torchstore" --no-deps --no-build-isolation
 VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy pygtrie portpicker
-# monarch (python/ subdir)
+# monarch (Rust + setuptools-rust; project at repo ROOT on this fork, not
+# python/. Needs cargo on PATH -- it is a from-source Rust build.)
+export PATH="${HOME}/.cargo/bin:${PATH}"
 VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
-    -e "${SRC}/monarch/python" --no-deps --no-build-isolation
+    -e "${SRC}/monarch" --no-deps --no-build-isolation
 # vllm (long compile)
 VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
     -e "${SRC}/vllm" --no-deps --no-build-isolation
