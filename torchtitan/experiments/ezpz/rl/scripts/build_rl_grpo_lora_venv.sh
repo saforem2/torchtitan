@@ -46,7 +46,7 @@ mkdir -p "${SRC}"
 
 echo ""
 echo "=== Step 1: py3.12 venv ==="
-"$UV" venv -p 3.12 "${VENV}" --link-mode=copy
+"$UV" venv -p 3.12 "${VENV}" --link-mode=copy --clear
 
 echo ""
 echo "=== Step 2: torch 2.12+xpu + triton-xpu 3.7.1 (resolve deps for triton-xpu) ==="
