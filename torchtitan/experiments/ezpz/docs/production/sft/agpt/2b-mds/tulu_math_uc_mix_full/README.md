@@ -170,8 +170,9 @@ best of all four models evaluated.
 the 2nd half); ~4000 steps at high LR on a narrow distribution = catastrophic
 forgetting. The metamathqa recipe survived only by STOPPING at 729 steps.
 **Recipe lesson:** cap full-mix SFT at O(1000) steps (or drop the LR); a full
-epoch at peak LR is the mistake, not the mix. GRPO smoke inconclusive this pass
-(wrapper launcher stall) -- TODO standalone re-run.
+epoch at peak LR is the mistake, not the mix. GRPO (vLLM server-mode,
+checkpoint-900): accuracy_reward climbed **0.31 -> ~0.74** in ~20 steps -- a
+strong RL starting point (hit 6h walltime, not converged; see evals).
 
 **Deliverable: `checkpoint-900-hf`** (NOT 8672).
 

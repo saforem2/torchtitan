@@ -23,6 +23,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-07-17 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-07-17 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
 | 2026-07-17 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
 | 2026-07-17 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
 | 2026-07-17 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-12 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/agpt/2b-mds/tulu_math_uc_mix/failover-story.md) |
 | 2026-07-12 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/ifeval.md) |
 | 2026-07-12 | [GRPO smoke — SFT-step729 vs baseline as RL starting point](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md) |
-| 2026-07-12 | [lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-12 | [lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/README.md) |
 | 2026-07-12 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
 | 2026-07-12 | [Production SFT](./production/sft/README.md) |
 | 2026-07-12 | [GRPO recipe: AuroraGPT-2B-sft-tulu-mix x sum_digits arithmetic (8N)](./production/grpo/aurora2b/sft_arithmetic/README.md) |
@@ -76,7 +77,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-06 | [RL bring-up history](./rl/history/README.md) |
 | 2026-07-06 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
 | 2026-07-06 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
-| 2026-07-06 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
 | 2026-07-06 | [RL (GRPO) Experiment](./rl/README.md) |
 
 </details>

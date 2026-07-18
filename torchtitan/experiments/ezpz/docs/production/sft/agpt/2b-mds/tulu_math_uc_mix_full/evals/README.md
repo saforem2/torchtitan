@@ -66,14 +66,27 @@ The higher-signal metric. checkpoint-900 is the standout:
 - **full-mix 8672**: flat-to-down vs baseline. Overtraining destroyed
   instruction-following along with base-LM capability.
 
-## GRPO smoke (sum_digits, 50 steps)
+## GRPO (sum_digits) -- checkpoint-900, vLLM server-mode
 
-INCONCLUSIVE this pass. The `grpo_smoke_sft_vs_baseline.sh` wrapper stalled at
-the GRPO phase for the 8672 job (launcher/PMI plumbing in the combined wrapper;
-IFEval in the same wrapper completed fine). The step-900 GRPO was still running
-at writing. The completed metamathqa SFT showed ~8x reward vs baseline on this
-task; re-run GRPO standalone (not via the combined IFEval+GRPO wrapper) to get a
-clean full-mix number. TODO.
+**checkpoint-900 is a strong GRPO starting point.** Run on the blessed
+vLLM-server path (`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`,
+unified `venvs/rl-vllm/`, job 12470959): `accuracy_reward/mean` climbed
+**0.31 -> ~0.74** over the first ~20 steps -- a clean, fast upward RL curve
+(format_reward 0.35 -> 0.43 alongside). The run hit its 6h walltime at ~step 20
+(not a crash), so this is an early-but-decisive trend, not a converged number;
+the completed metamathqa GRPO climbed 0.4 -> 0.9 over a full 1000 steps for
+comparison. Re-run with a higher walltime / lower max_steps for a converged
+figure if needed.
+
+Trajectory: `0.31, 0.34, 0.39, 0.59, 0.54, ..., 0.66, 0.75, 0.79, 0.63, 0.74`.
+
+NOTE on tooling: the earlier attempt via the combined IFEval+GRPO wrapper AND a
+standalone `.venv` hf.generate GRPO both failed -- the former on walltime
+starvation, the latter because the `.venv` (torch 2.13 nightly) per-rank
+`hf.generate()` FSDP path HANGS multi-rank (regressed since June; single-rank
+works). The working path is the vLLM server-mode (`--use_vllm --vllm_mode
+server`) from `venvs/rl-vllm/`; see `docs/rl/grpo-on-xpu-status.md`. The old
+FSDP-generate + vllm-test-split GRPO scripts were removed 2026-07-17.
 
 ## Recommendation
 
