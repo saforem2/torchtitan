@@ -57,6 +57,14 @@ VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --no-deps --link-mode=copy \
     --index-url https://download.pytorch.org/whl/xpu "triton-xpu==3.7.1"
 
 echo ""
+echo "=== Step 2b: build-backend deps for --no-build-isolation ==="
+# With --no-build-isolation, each from-source package build needs its build
+# backend present in the venv. torchstore is plain setuptools (ok); monarch
+# is setuptools-rust; vllm needs cmake/ninja. Pre-install them here.
+VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
+    setuptools "setuptools-rust>=1.9" wheel "numpy<2.5" cmake ninja pybind11
+
+echo ""
 echo "=== Step 3: clone/checkout the 4 PR branches into ${SRC} ==="
 clone_co () {  # $1=url  $2=dir  $3=ref
     if [ ! -d "${SRC}/$2/.git" ]; then
