@@ -24,8 +24,21 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 |---------:|-----|
 | 2026-07-18 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
 | 2026-07-18 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
+| 2026-07-18 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
+| 2026-07-18 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
+| 2026-07-18 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
+| 2026-07-18 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./production/rl/history/upstream-rl-port-status.md) |
+| 2026-07-18 | [RL bring-up history](./production/rl/history/README.md) |
+| 2026-07-18 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./production/rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
+| 2026-07-18 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./production/rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
+| 2026-07-18 | [GRPO recipe: AuroraGPT-2B-sft-tulu-mix x sum_digits arithmetic (8N)](./production/rl/grpo/aurora2b/sft_arithmetic/README.md) |
+| 2026-07-18 | [Production GRPO](./production/rl/grpo/README.md) |
+| 2026-07-18 | [GRPO on Intel XPU — status](./production/rl/grpo-on-xpu-status.md) |
+| 2026-07-18 | [RL (GRPO) Experiment](./production/rl/README.md) |
+| 2026-07-18 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./production/rl/2026-07-06_multinode-grpo-root-cause.md) |
 | 2026-07-18 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-18 | [Development Journal](./journal.md) |
+| 2026-07-18 | [Claude Session Log](./claude-sessions.md) |
 | 2026-07-18 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-17 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-17 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
@@ -34,6 +47,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-17 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-07-17 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-07-17 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-07-17 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-07-17 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-07-17 | [Evaluation Results](./evals/README.md) |
@@ -47,12 +66,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-12 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/ifeval.md) |
 | 2026-07-12 | [GRPO smoke — SFT-step729 vs baseline as RL starting point](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md) |
 | 2026-07-12 | [lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/README.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-07-12 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
 | 2026-07-12 | [Production SFT](./production/sft/README.md) |
 | 2026-07-12 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
@@ -65,19 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-10 | [Summaries](./summaries/README.md) |
 | 2026-07-10 | [2026-07-06 to 2026-07-10 -- ~4-Day Summary](./summaries/2026-07-06_to_2026-07-10.md) |
 | 2026-07-10 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-| 2026-07-09 | [Evaluation Results — agpt 2B (Megatron-DeepSpeed SophiaG)](./evals/agpt/2b-mds/README.md) |
-| 2026-07-06 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-06-26_to_2026-07-06.md) |
-| 2026-07-06 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-12_to_2026-06-26.md) |
-| 2026-07-06 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
-| 2026-07-06 | [Multi-chain umbrella on native auto-retry: diagnosis + smoke](./experiments/agpt/aurora/20260702-multi-autoretry-umbrella-smoke.md) |
-| 2026-07-01 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
-| 2026-07-01 | [Fresh, Self-Contained .venv on Polaris (no conda inheritance)](./guides/polaris-fresh-venv.md) |
-| 2026-07-01 | [LR Finder -- agpt 80B](./experiments/lr-finder/agpt/80b/README.md) |
-| 2026-07-01 | [80B head-to-head convergence at the production batch (GBS=6144) -- Sunspot, 2026-06-30](./experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md) |
-| 2026-07-01 | [2B continued-pretraining (CPT): olmo x dolmino mixing-ratio sweep](./experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md) |
-| 2026-07-01 | [20B 512N canonical chain: relaunch on native auto-retry (resume step-4400)](./experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) |
-| 2026-07-01 | [Failover / auto-retry "restart economics" -- log-mining analysis](./experiments/agpt/aurora/20260630-failover-restart-economics.md) |
-| 2026-07-01 | [80B v2 production launch: SophiaG, constant-LR, scale brackets 512N/1024N/2048N](./experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
