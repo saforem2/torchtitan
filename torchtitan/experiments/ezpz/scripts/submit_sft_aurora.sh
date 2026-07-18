@@ -54,7 +54,7 @@ else
 fi
 
 cd "${SUBMIT_DIR}"
-# Use lustre venv directly — see docs/rl/README.md for why we prefer
+# Use lustre venv directly — see docs/production/rl/README.md for why we prefer
 # this over tarball + yeet on Sunspot/Aurora (tegu/flare both behave
 # well with concurrent direct-import at the 4-16 node scale typical
 # for SFT runs).

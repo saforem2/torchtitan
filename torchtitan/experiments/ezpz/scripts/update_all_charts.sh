@@ -58,7 +58,7 @@ declare -A SCRIPTS=(
     [mds_2b_loss]="torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/plot_loss.py"
     [sft_curves]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix/scripts/plot_sft_curves.py"
     [sft_curves_full]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix_full/scripts/plot_sft_curves.py"
-    [grpo_curves]="torchtitan/experiments/ezpz/docs/production/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
+    [grpo_curves]="torchtitan/experiments/ezpz/docs/production/rl/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
     # LR-finder trend + per-GBS figures (2B/80B). Regenerates from the
     # isolated per-GBS CSVs under outputs/lrtrend*/; tolerates missing CSVs
     # (a queued/incomplete GBS just plots fewer curves), so it is safe to run

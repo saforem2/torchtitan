@@ -14,7 +14,7 @@
 | Trainer | TRL `GRPOTrainer` |
 | Hyperparameters | LR 1e-6 (constant), bf16, per_device_batch=1, max_steps=1000, beta=0.0 |
 | Scale | 8 nodes x 12 ranks = 96 ranks, FSDP `full_shard` |
-| Submit script | [`rl/scripts/grpo/aurora2b_sft_arithmetic_8n.sh`](../../../../../rl/scripts/grpo/aurora2b_sft_arithmetic_8n.sh) |
+| Submit script | [`rl/scripts/grpo/aurora2b_sft_arithmetic_8n.sh`](../../../../../../rl/scripts/grpo/aurora2b_sft_arithmetic_8n.sh) |
 | W&B run | https://wandb.ai/aurora_gpt/torchtitan.ezpz.rl/runs/7ktk55uz |
 
 ## Training curves
@@ -35,7 +35,7 @@ Reproduce with `python3 scripts/plot_grpo_curves.py`.
 - **Accuracy reward** climbs steadily from ~0.4 to ~0.9 over 1000
   steps; the SFT'd checkpoint starts well above the cold-start
   baseline (which would be ~0 on this task; see the
-  [grpo-smoke comparison](../../../sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md)).
+  [grpo-smoke comparison](../../../../sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md)).
 - **Format reward** saturates near 0.5 very early and stays flat —
   the model already learned the format from SFT.
 - **Entropy** descends sharply early then plateaus, consistent with
