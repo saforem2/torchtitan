@@ -61,8 +61,8 @@ clone_co () {  # $1=url  $2=dir  $3=ref
     git -C "${SRC}/$2" submodule update --init --recursive -q || true
     echo "  $2 @ $(git -C "${SRC}/$2" rev-parse --short HEAD) ($3)"
 }
-clone_co https://github.com/meta-pytorch/torchstore.git torchstore xpu-upstream
-clone_co https://github.com/meta-pytorch/monarch.git      monarch      xpu-upstream
+clone_co https://github.com/songhappy/torchstore.git torchstore xpu-upstream
+clone_co https://github.com/songhappy/monarch.git monarch xpu-upstream
 clone_co https://github.com/vllm-project/vllm.git         vllm         main
 clone_co https://github.com/songhappy/torchtitan.git      torchtitan-fork rl
 
