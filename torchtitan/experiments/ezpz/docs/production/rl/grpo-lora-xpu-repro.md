@@ -78,3 +78,60 @@ uv + gcc-14 surfaced 7 fixes, each committed to the build script:
 `TORCHINDUCTOR_MAX_AUTOTUNE=0`, `VLLM_ENABLE_V1_MULTIPROCESSING=1`, HF offline).
 Success = rising reward (their milestone `mean_r~0.6`) + gen throughput near
 their ~53 tok/s (DP=2) / ~4,140 tok/s figures.
+
+## Stage 3 -- component smokes on a compute node (2026-07-18, node x1922c6s0b0n0)
+
+Ran on a 1N debug alloc. Runtime env fix required (bug #8): the nested
+compute-node shell drops the module env, so `libccl.so.1` was not found ->
+torch import failed. Fixed by explicitly wiring
+`CCL_ROOT=/opt/aurora/26.26.0/oneapi/ccl/latest` +
+`LD_LIBRARY_PATH=$CCL_ROOT/lib:/opt/aurora/26.26.0/oneapi/2025.3/lib:...` (the
+system oneCCL the in-venv-oneccl-uninstall relies on).
+
+| Smoke | Result |
+|---|---|
+| S3.1 imports + XPU visible | **PASS** -- `torch 2.12.0+xpu xpu True 4` on the node (the UAN `vllm._C` / `Triton 0 drivers` warnings were just no-GPU-on-login, as expected; on-device they resolve). |
+| S3.2 torchstore roundtrip (`torchstore_rl.py`) | **PASS** -- a Monarch `Generator` actor pulled a state_dict via the CPU-staged shared-memory transport; weights materialized `device='xpu:0'`. |
+| S3.3 monarch 2-actor XPU mesh (`monarch_smoke.py`) | **PASS** -- `VERDICT: monarch smoke passed` (spawn + Gloo put/get roundtrip). |
+| S3.4 **xccl-XPU transport** (`test_xccl_xpu.py::test_xccl_put_get`) | **USM WALL CROSSED (with a teardown caveat)** -- see below. |
+
+### S3.4 -- the USM/PMIx wall test (the whole point)
+
+`test_xccl_put_get` spawns Monarch Writer+Reader actors and moves an
+`device="xpu"` tensor over the **xccl** transport (`TransportType.XCCL` was
+selected, not rejected). The historical wall was
+`ccl_check_usm_pointers: invalid usm pointer type: unknown` at the first XCCL
+collective from a Monarch-fork-spawned rank.
+
+**That error did NOT occur.** The put/get completed and BOTH assertions ran
+before the failure point:
+```
+src = await writer.put.call(key)       # xpu tensor -> xccl
+got = await reader.get.call(key)       # xccl -> xpu tensor
+assert "xpu" in got["device"]          # (passed -- above the failing line)
+assert abs(got["checksum"] - src["checksum"]) < 1e-3   # (passed)
+await controller.teardown.call()       # <-- line 82: the ONLY failure
+```
+The failure is a Monarch **`SupervisionError` during `controller.teardown()`**
+(`torchstore/controller.py:245`, `Endpoint call StorageVolumes_....res...`) --
+a shutdown/supervision-ordering crash in cleanup, NOT the USM collective.
+
+**Interpretation:** songhappy's fork (the `xccl.py` transport + the
+`shared_memory.py`/`torchcomms` USM no-op patches) **crosses our USM/PMIx wall
+on Sunspot** -- the xccl xpu-tensor transfer between Monarch-spawned actors
+works. This is the answer the effort was chasing: the upstream
+Monarch+TorchStore RL path is viable on Sunspot at the transport level.
+
+**Caveat / open item:** the actor-teardown `SupervisionError` is a real (if
+softer) issue -- needs a look before it can be called production-clean (it may
+be benign at process exit, or a genuine shutdown-ordering bug). Does NOT block
+Stage 4 (a full run does its own lifecycle), but should be understood.
+
+### Bugs 8 (this stage)
+8. **libccl.so.1 not found on compute node** -- nested non-login shell drops the
+   module env; wire CCL_ROOT + LD_LIBRARY_PATH explicitly (system oneCCL at
+   /opt/aurora/26.26.0/oneapi/{ccl/latest,2025.3}/lib).
+
+Next: **Stage 4** -- the actual GRPO+LoRA run
+(`--module alphabet_sort --config rl_grpo_lora_qwen3_0_6b`), which exercises the
+full generate->score->train->weight-sync loop end to end.
