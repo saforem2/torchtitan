@@ -63,7 +63,7 @@ echo "=== Step 2b: build-backend deps for --no-build-isolation ==="
 # is setuptools-rust; vllm needs cmake/ninja. Pre-install them here.
 VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
     setuptools "setuptools-rust>=1.9" wheel "numpy<2.5" cmake ninja pybind11 \
-    protoc-wheel-0
+    protoc-wheel-0 setuptools_scm
 # monarch Rust crate tracing-perfetto-sdk-schema needs protoc at build time
 # (not on Sunspot bare shell). protoc-wheel-0 ships a modern one in the venv.
 export PROTOC="${VENV}/bin/protoc"
