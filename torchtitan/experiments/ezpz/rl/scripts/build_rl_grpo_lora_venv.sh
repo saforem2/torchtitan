@@ -28,8 +28,13 @@ SRC="${RL_REPRO_SRC:-${HOME}/rl-repro}"          # external clones (NOT in repo)
 UV="${HOME}/.local/bin/uv"
 
 # --- C++20 toolchain for the from-source builds (gcc-14 on Sunspot) -----------
-export CC="${CC:-/usr/bin/gcc-14}"
-export CXX="${CXX:-/usr/bin/g++-14}"
+# Force gcc-14 UNCONDITIONALLY: the login profile exports CC=icx/CXX=icpx, and a
+# ${CC:-...} default would respect that. The recipe built from source with gcc
+# (13.3); use gcc-14 (not oneAPI icpx) to avoid clang-vs-gcc build/ABI surprises
+# in the vLLM/Monarch C++ extensions. oneAPI is still loaded (below) for the
+# SYCL/xpu RUNTIME, just not as the C/C++ compiler.
+export CC=/usr/bin/gcc-14
+export CXX=/usr/bin/g++-14
 echo "=== toolchain: $($CC --version | head -1) ==="
 "$CXX" --version | head -1
 
