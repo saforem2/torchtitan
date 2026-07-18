@@ -12,8 +12,9 @@
 # 2026-07-01): server on the head node + trainer on the OTHER nodes, all from
 # the unified venvs/rl-vllm/ venv (torch 2.12 + vllm-xpu + TRL 1.6).
 #
-# Supersedes aurora2b_sft_arithmetic_8n_vllm.sh, which used the older
-# vllm_serve_xpu.sh PYTHONPATH-bridge helper (broke vLLM-XPU platform
+# Supersedes aurora2b_sft_arithmetic_8n_vllm.sh (removed 2026-07-17), which
+# used the older vllm_serve_xpu.sh PYTHONPATH-bridge helper (also removed;
+# broke vLLM-XPU platform
 # detection: "Device string must not be empty") and spaced --fsdp (broke on
 # TRL-1.6's boolean --fsdp; now handled in train_grpo.py _bootstrap_fsdp_env).
 #
