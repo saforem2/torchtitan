@@ -22,10 +22,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-18 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
+| 2026-07-18 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
+| 2026-07-18 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-17 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-17 | [GRPO on Intel XPU — status](./rl/grpo-on-xpu-status.md) |
-| 2026-07-17 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
-| 2026-07-17 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
 | 2026-07-17 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-07-17 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-07-17 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
@@ -36,7 +37,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-17 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-07-17 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-07-17 | [Evaluation Results](./evals/README.md) |
-| 2026-07-17 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-16 | [Development Journal](./journal.md) |
 | 2026-07-15 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
 | 2026-07-15 | [80B fp32-residual fix — root-cause + prototype](./experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md) |
