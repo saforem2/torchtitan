@@ -371,3 +371,45 @@ correct, which it is on CUDA but not on this XPU/torch stack.
 - `xpu_worker.py`: one-shot `EZPZMEM` warning dumping every free-mem API + env at
   the failing site (the line above). Remove both once the run is green.
 - `~/mem_api_probe.py`: standalone 2-API x parent/spawn x ZES on/off probe.
+
+## Stage 4 -- PIPELINE GREEN 2026-07-19 (full loop runs; reward=0 was a config/task issue)
+
+After the `mem_utils.py` fix (torch.accelerator.get_memory_info broken on XPU ->
+use torch.xpu.mem_get_info), the FULL upstream GRPO+LoRA loop runs end-to-end on
+Sunspot XPU for the first time (job 12471016, 2-tile COMPOSITE):
+
+- generator vLLM engine init: KV cache 83.86 GiB / 784,896 tokens, warmup 29s
+- **TorchStore weight sync round-trip**: trainer `put_state_dict` 1.78 GB/s ->
+  generator `get_state_dict` 11.21 GB/s (the cross-actor weight transfer we
+  thought was walled off -- WORKS)
+- controller ran pre-training validation, then entered "3 steps of async RL"
+- sustained generation ~2,500-3,200 tok/s (1 tile; recipe milestone ~4,140 on
+  Borealis 2-tile)
+
+**But no train step fired in 22 min.** Root cause (from rollout_samples.jsonl,
+7,602 samples): **7,580/7,602 = `truncated_length`, only 22 `completed`.**
+`RewardAlphabetSort` returns 0.0 when the `<alphabetical_sorted>` block is absent
+(rubric.py:93); at `max_tokens=100` (the LoRA config's own sampling value)
+Qwen3-0.6B almost never closes the block, so ~99.7% score 0, groups never fill to
+`group_size=8` (3,791 groups opened, ~2 samples each), and the async loop never
+assembles a `num_groups_per_train_step=8` batch -> no gradient step.
+
+This is NOT an XPU/Sunspot bug -- the infra (actors, TorchStore, vLLM, scoring,
+advantage, group buffer) all run correctly. It is a task/length-budget property
+of the recipe's smoke config. Fix under test (job 12471017, 60-min walltime):
+`--generator.sampling.max_tokens=700` (matches the varlen config) so completions
+finish, groups fill, and a train step lands. Success = a `Step: 1` train metric
+row (reward may still be low early; the milestone is *step metrics appearing*,
+per GRPO_LORA_XPU.md).
+
+### Reproduction scorecard
+| Piece | Status |
+|-------|--------|
+| Build (torchstore/monarch/vllm/fork from source) | REPRODUCED |
+| USM wall (xccl tensor transfer between actors) | CROSSED |
+| xccl collectives (libfabric fix) | WORKS |
+| Per-actor XPU isolation (COMPOSITE, disjoint masks) | WORKS |
+| vLLM generator init + KV cache (mem_utils fix) | WORKS |
+| TorchStore weight sync round-trip | WORKS |
+| Rollout generation + scoring + grouping | WORKS |
+| Train step / rising reward | pending max_tokens=700 re-run |
