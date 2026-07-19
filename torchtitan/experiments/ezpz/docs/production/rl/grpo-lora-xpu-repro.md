@@ -247,3 +247,42 @@ Stages 0-3 reproduce (build + USM wall crossed + xccl works). Stage 4 reaches
 full actor spawn + vLLM XPU init; blocked ONLY on generator/trainer tile
 isolation on Sunspot's FLAT 12-tile topology -- a placement-config issue, not a
 fundamental one. Bugs fixed to date: 12 (Borealis->Sunspot port).
+
+## Stage 4 -- UPDATE 2026-07-19 (cont): bug #12 narrowed; actor-log capture is the key
+
+More progress on the tile-placement blocker:
+- **Device topology mapped:** on Sunspot, `ZE_AFFINITY_MASK=0,1,2,3` yields 4
+  visible tiles (FLAT default = 12); confirmed by probe. train.py provisions with
+  ONE shared PerHostProvisioner (trainer -> tiles [0,1], generator -> [2,3],
+  disjoint) and rewrites each spawned proc's ZE_AFFINITY_MASK before import
+  torch. Logic is correct in principle.
+- **The 4-tile `Free memory xpu:1 0.0 GiB` collision does NOT reproduce at 2
+  tiles.** Shrinking to trainer dp_shard=1 (1 tile) + generator dp=1/tp=1 (1
+  tile) + gpu_memory_limit=0.70 -> NO mem-collision. So #12-as-mem is a 4-tile
+  over-packing / per-actor-mask-not-fully-isolating issue, not fundamental.
+- **BUT the 2-tile run still dies ~2 min in:** the controller `main()` gets a
+  `KeyboardInterrupt` and cascades into `rl_trainer.close()` ->
+  `generator_router.fanout()` CancelledError + a hyperactor
+  `stop called twice` panic. The KeyboardInterrupt is Monarch propagating a
+  supervision failure -- i.e. **a spawned actor died underneath**, but its real
+  error is NOT in the controller log or `/tmp/foremans/monarch_log.log`
+  (0 bytes). No vLLM KV-cache/ready markers -> it dies during actor setup.
+
+### The blocker for next session: capture the actor's real error
+The controller only sees "actor failed -> KeyboardInterrupt". Need the spawned
+actor's own stderr/traceback. Next steps:
+1. Find/set Monarch's per-actor log redirect (the 0-byte
+   /tmp/foremans/monarch_log.log suggests a configured-but-unused path). Check
+   monarch env knobs for actor stdout/stderr capture, or run the trainer/
+   generator actor standalone (not via the controller) to see its crash.
+2. Likely candidates once visible: the FSDP2+LoRA+flex_attention model build on
+   XPU, or the vLLM generator worker init at 1 tile.
+3. Re-run minimal (2-tile) with actor logging on; then scale to the 4-tile
+   config once the actor error is fixed (+ tune gpu_memory_limit / per-actor
+   mask for the 4-tile packing).
+
+### Standing status (unchanged)
+Stages 0-3 reproduce; xccl works; USM wall crossed. Stage 4 spawns actors +
+reaches runtime but an actor dies during setup with its error not yet captured.
+12 bugs fixed. The reproduction is blocked on OBSERVABILITY (getting the actor
+traceback), then likely 1-2 more fixes.
