@@ -122,3 +122,54 @@ vLLM; RL smoke re-run with `--generator.model-dtype=float32
 
 Credit: the user proposed both the bare-vLLM trace and the fp32 test -- together
 they cracked it.
+
+## RESOLVED 2026-07-19: SFT checkpoint-900 runs in the GRPO loop (fp32)
+
+The full alphabet_sort GRPO+LoRA smoke runs end-to-end with SFT checkpoint-900
+(AuroraGPT-2B) once the generator runs in **fp32** (job 12471035, 2-tile COMPOSITE):
+
+```
+Train | Step: 1   86.6 tok/s   (compile warmup)
+Train | Step: 2   2163 tok/s
+Train | Step: 3   2169 tok/s
+reward_mean=0.0012   nonzero=14/40   max=0.019
+```
+
+- **Completions are coherent** (vs bf16 gibberish): "The task is to sort names in
+  alphabetical order... I will write a Python script..." -- fluent, on-topic,
+  matching HF. Contrast the bf16 run: "5.ciptakan,. Đóeld. Đóeld...".
+- **Reward is real and non-zero** (14/40 rollouts > 0), where base Qwen and bf16
+  agpt-2b both gave a flat 0. The full loop closes: coherent gen -> scoring ->
+  advantage -> GRPO step -> TorchStore weight sync.
+
+### Why reward is still LOW (not a bug)
+checkpoint-900 answers CONVERSATIONALLY (Python scripts, even HTML) instead of the
+rubric's strict `<alphabetical_sorted>...</alphabetical_sorted>` XML block, so
+`RewardAlphabetSort` gives only partial credit. This is expected: the SFT mix was
+tulu/math/ultrachat, NOT alphabet-sort -- the task is out-of-domain for the format.
+The point of the smoke (a trained model producing real reward signal in the XPU
+GRPO loop) is achieved; making reward CLIMB would need either GRPO training for
+many steps (it starts near 0 and rises) or the model's actual SFT domain
+(arithmetic, via the TRL vllm-serve path).
+
+### The recipe (committed launcher `s4_agpt2b.sh`)
+Everything from the port PLUS: `--generator.model-dtype=float32
+--trainer.training.dtype=float32`. The generator fp32 is the essential fix (bf16
+compounds tiny per-op error over greedy decode into gibberish for agpt-2b's large
+vocab/FFN); trainer fp32 is belt-and-suspenders.
+
+### Full reproduction scorecard -- agpt-2b (Llama) GRPO+LoRA on XPU
+| Piece | Status |
+|-------|--------|
+| agpt-2b flavor + RL config + skip_dp fork fix | DONE |
+| Chat-template staging (gemma) | DONE |
+| Weight load (adapter, fused-QKV, sync) | VERIFIED correct |
+| Model math / RoPE (vs HF) | VERIFIED correct |
+| Coherent generation (fp32) | DONE |
+| Non-zero reward signal | DONE (14/40, max 0.019) |
+| GRPO train steps + weight sync | DONE (~2170 tok/s) |
+| Rising reward on alphabet_sort | needs many steps / in-domain task (OOD here) |
+
+Known follow-ups (non-blocking): double-BOS in the gemma template; config.json
+bos/eos swapped vs the tokenizer; CompiledFxGraph `__del__` cleanup warning
+(non-fatal). fp32 generation is ~30% slower than bf16 but correct.

@@ -1,5 +1,5 @@
 # no set -e: module load returns nonzero under Lmod (CLAUDE.md rule)
-LOCK=/tmp/foremans/s4_agpt2b.lock
+LOCK=/tmp/foremans/s4_agpt2b_fp32.lock
 if [ -e "$LOCK" ]; then echo "ALREADY RUNNING (lock $LOCK) -- abort"; exit 3; fi
 mkdir -p /tmp/foremans; touch "$LOCK"; trap 'rm -f "$LOCK"' EXIT
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
@@ -16,17 +16,17 @@ cd "$HOME/rl-repro/run"
 CKPT=/home/foremans/rl-repro/run/agpt2b-ckpt900   # staged: symlinked weights + templated tokenizer
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 PY=$REPO/venvs/rl-grpo-lora/bin/python
-echo "AGPT2B START $(date +%T) host=$(hostname) ckpt=$CKPT"
+echo "AGPT2B-FP32 START $(date +%T) host=$(hostname) ckpt=$CKPT"
 timeout 3300 $PY -u -m torchtitan.experiments.rl.train \
     --module alphabet_sort --config rl_grpo_lora_agpt_2b \
     --hf_assets_path="$CKPT" \
     --async-loop.num-training-steps=3 \
     --async-loop.num-groups-per-train-step=4 \
     --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
-    --dump_folder="$REPO/outputs/rl_lora_agpt2b" \
+    --dump_folder="$REPO/outputs/rl_lora_agpt2b_fp32" \
     --trainer.parallelism.data-parallel-shard-degree=1 \
     --generator.parallelism.data-parallel-degree=1 \
     --generator.parallelism.tensor-parallel-degree=1 \
     --generator.gpu-memory-limit=0.70 \
-    --generator.sampling.max-tokens=700
-echo "AGPT2B EXIT rc=$? $(date +%T)"
+    --generator.model-dtype=float32 --trainer.training.dtype=float32 --generator.sampling.max-tokens=700
+echo "AGPT2B-FP32 EXIT rc=$? $(date +%T)"
