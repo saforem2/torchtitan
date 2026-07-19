@@ -48,7 +48,8 @@ from torchtitan.experiments.ezpz.utils.plot_production_wandb import (  # noqa: E
 import wandb  # noqa: E402
 
 # W&B run-ids for the Polaris 20B chain, oldest first (resume order).
-# leg1 7237948 -> leg2 7237949 -> leg3 7243413 -> leg4 7247525 -> leg5 7252666.
+# leg1 7237948 -> leg2 7237949 -> leg3 7243413 -> leg4 7247525 -> leg5 7252666
+# -> leg6 7260480 (post-NVLink-fault restart) -> leg7 7260483.
 # Append the next leg's run-id here as each leg starts logging.
 RUN_IDS = [
     "jgjd0qbf",  # leg1  steps 1-398
@@ -56,7 +57,21 @@ RUN_IDS = [
     "u81yhgtb",  # leg3  steps 701-1099
     "j56diiz9",  # leg4  steps 1001-1399
     "nm41nsbj",  # leg5  steps 1301-1448
+    "nvmf9hnj",  # leg6  steps 1401-1804 (restart after NVLink fault)
+    "j0jnww7s",  # leg7  steps 1701-...  (running)
 ]
+
+# Some legs' W&B history() carries all rows but scan_history(keys=...) --
+# what plot_production_wandb.fetch_run uses -- returns 0 rows (a wandb
+# server-side quirk seen on the leg6/leg7 runs). concat_runs falls back to
+# parsing the PBS .o log when a run's history is empty; the Polaris per-step
+# lines match plot_production_wandb._OLOG_STEP_RE. Point those legs at their
+# .o logs on the Polaris eagle filesystem (this script runs on Polaris).
+_REPO = "/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan"
+OLOG_FALLBACKS = {
+    "nvmf9hnj": f"{_REPO}/agpt-20b-autoretry.o7260480",
+    "j0jnww7s": f"{_REPO}/agpt-20b-autoretry.o7260483",
+}
 
 NUM_NODES = 128
 GPUS_PER_NODE = 4  # Polaris A100 (Aurora is 12)
@@ -168,7 +183,7 @@ def main() -> None:
 
     api = wandb.Api()
     print(f"=== Pulling Polaris 20B chain ({len(RUN_IDS)} legs) ===")
-    data = concat_runs(api, RUN_IDS)
+    data = concat_runs(api, RUN_IDS, OLOG_FALLBACKS)
     print(f"  Concatenated: {len(data['_step'])} unique steps")
     if len(data["_step"]) == 0:
         raise SystemExit("no W&B data pulled -- nothing to plot")
