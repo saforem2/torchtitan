@@ -1,0 +1,56 @@
+diff --git a/torchtitan/models/llama3/__init__.py b/torchtitan/models/llama3/__init__.py
+index df6bc0fe..1ea735d1 100644
+--- a/torchtitan/models/llama3/__init__.py
++++ b/torchtitan/models/llama3/__init__.py
+@@ -334,8 +334,51 @@ def _405b(attn_backend: str) -> Llama3Model.Config:
+     )
+ 
+ 
++def _agpt2b(attn_backend: str) -> Llama3Model.Config:
++    # AuroraGPT-2B (agpt-2b) -- matches the SFT checkpoint-900 HF config exactly:
++    # LlamaForCausalLM, dim=2048, 12 layers, 16 heads, 4 kv heads, vocab=256000,
++    # intermediate_size=11008, rope_theta=50000, no rope scaling, no weight tying.
++    dim = 2048
++    n_heads = 16
++    n_kv_heads = 4
++    n_layers = 12
++    vocab_size = 256000
++    return Llama3Model.Config(
++        dim=dim,
++        vocab_size=vocab_size,
++        enable_weight_tying=False,
++        tok_embeddings=Embedding.Config(
++            num_embeddings=vocab_size,
++            embedding_dim=dim,
++            param_init=_EMBEDDING_INIT,
++        ),
++        norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
++        lm_head=Linear.Config(
++            in_features=dim,
++            out_features=vocab_size,
++            param_init=_output_linear_init(dim),
++        ),
++        layers=_build_llama3_layers(
++            fuse_qkv=True,
++            n_layers=n_layers,
++            dim=dim,
++            n_heads=n_heads,
++            n_kv_heads=n_kv_heads,
++            hidden_dim=11008,
++            rope=ComplexRoPE.Config(
++                dim=dim // n_heads,
++                max_seq_len=131072,
++                theta=50000,
++                scaling="none",
++            ),
++            attn_backend=attn_backend,
++        ),
++    )
++
++
+ llama3_configs = {
+     "debugmodel": _debugmodel,
++    "agpt-2b": _agpt2b,
+     "1B": _1b,
+     "3B": _3b,
+     "8B": _8b,

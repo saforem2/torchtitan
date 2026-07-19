@@ -1,0 +1,90 @@
+# GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900
+
+**Goal:** repeat the reproduced Qwen3-0.6B alphabet_sort GRPO+LoRA smoke, but with
+the SFT deliverable **checkpoint-900** (AuroraGPT-2B) in the loop, so the reward
+signal reflects a trained model instead of base Qwen (which scored 0).
+
+## Status: PORT COMPLETE + CORRECT; generation fidelity NOT yet resolved
+
+checkpoint-900 is `LlamaForCausalLM` (agpt-2b: dim2048/12L/16H/4KV, vocab256000,
+ffn11008, gemma tokenizer), NOT Qwen3. The smoke config is Qwen3-only, so this
+required an architecture port of the upstream `torchtitan.experiments.rl` path.
+
+### The port (all in the fork ~/rl-repro/, outside the repo) -- verified correct
+1. **agpt-2b llama3 flavor** (`torchtitan/models/llama3/__init__.py`): `_agpt2b`
+   builder + `"agpt-2b"` registered in `llama3_configs`. Exact ckpt-900 params:
+   dim2048/12L/16H/4KV, vocab256000, hidden_dim=11008 (literal -- does NOT fall
+   out of compute_ffn_hidden_dim for dim2048), rope theta=**50000**,
+   scaling=**"none"**, tie_word_embeddings=**False** (these three differ from
+   stock llama3 flavors, which use theta=500000 + llama scaling -- using a stock
+   flavor would silently corrupt generation).
+2. **RL registry + config** (`experiments/rl/examples/alphabet_sort/config_registry.py`):
+   `_llama3_rl_model_registry` (mirrors the qwen3 helper; appends LMHeadCastConverter,
+   wraps `llama3.model_registry`) + `rl_grpo_lora_agpt_2b()` (LoRA wqkv+wo,
+   renderer=auto, bf16, max_tokens=700, num_groups=4).
+3. **parallelize_llama skip_dp fix** (`torchtitan/models/llama3/parallelize.py`):
+   added `skip_dp: bool = False` + the `if skip_dp: return model` guard before FSDP,
+   mirroring `parallelize_qwen3`. This was a REAL fork gap -- the RL generator path
+   passes skip_dp=True (FSDP hooks are incompatible with vLLM inference_mode), and
+   llama3's signature lacked it. Without this the generator actor crashes at init.
+4. **Chat template staging** (`~/rl-repro/run/agpt2b-ckpt900/`): symlinked weights +
+   config, COPIED tokenizer with the SFT gemma chat_template injected (the ckpt
+   tokenizer ships an EMPTY chat_template, so renderer name="auto" fails without
+   it). Original SFT deliverable never mutated.
+
+### What is VERIFIED correct (extensive isolation testing)
+- **HF transformers greedy-gen on ckpt-900 = coherent** ("The capital of France
+  is" -> " Paris"; understood the sort task). Checkpoint is good.
+- **Tokenizer** md5-identical to google/gemma-7b (the SFT tokenizer). Correct.
+- **Weight adapter round-trip** HF->TT->HF = bit-exact (max_abs_diff 0.000, all
+  layers). Permute/RoPE-layout conversion correct.
+- **Fused-QKV load**: model's `wqkv` receives real weights via the merge hook
+  (`still-random? False`, missing=0/unexpected=0). Correct.
+- **TorchTitan model forward (CPU, MATH attention) single-token = MATCHES HF**:
+  argmax 7127 (" Paris"), top-5 nearly identical. Model math + RoPE correct.
+- Full RL pipeline runs: weights load (4.49 GiB), KV cache 81 GiB, gen ~3000 tok/s,
+  TorchStore weight sync, Train Step 1/2/3 fire.
+
+### The unresolved residual (the honest gap)
+Multi-token greedy generation degenerates into repetition
+(`</divisible_sorted_sorted_sorted...`), reward 0. Per-position HF-vs-TT logit A/B
+(teacher-forced) shows **cosine ~1.0 at almost every position** (0.98-1.00) with
+ONE sharp outlier (pos 11: cos 0.454). This rules out a gross bug (wrong RoPE
+would give cos~0 everywhere) -- the port is fundamentally right. The residual is a
+SMALL divergence that compounds under long low-temperature greedy decode.
+Persists in fp32 (so not simply bf16). Caveat: the CPU MATH-attention used for
+these probes is a hand-rolled GQA reimplementation (repeat_interleave) and may
+itself contribute to the pos-11 outlier -- a clean vLLM-path numerical trace is
+needed to separate harness from model.
+
+Also found (secondary): **double-BOS** -- the gemma chat_template emits `<bos>` and
+`add_special_tokens=True` prepends another (`[2,2,...]`). And config.json's
+bos=1/eos=2 is SWAPPED vs the gemma tokenizer's actual bos=2/eos=1.
+
+### Ruled out (each cost a probe)
+torch.compile (gibberish persists with --compile.no-enable); double-RoPE (vLLM
+Attention built with no rotary; single RoPE via TorchTitan ComplexRoPE); fused-QKV
+mismatch (merge hook works); wrong tokenizer (md5-identical); bad checkpoint (HF
+coherent); adapter permute (bit-exact round-trip); gross RoPE convention (cos~1).
+
+### Next session (bounded)
+1. Fix double-BOS: renderer template shouldn't emit `<bos>`, OR set
+   add_special_tokens=False in the render path. Re-check with the corrected eos.
+2. Numerical fidelity: instrument the ACTUAL vLLM generator forward (not a CPU
+   reimpl) -- dump first-layer q/k after RoPE vs HF, and logits at pos 11 -- to
+   separate harness artifact from a real per-layer diff. Compare against a
+   known-good llama3 (e.g. a stock Llama-3-8B HF ckpt) through the same fork path
+   to confirm the fork's llama3+vLLM path is correct for a reference model.
+3. Consider that ckpt-900 is OOD for alphabet-sort (SFT was tulu/math/ultrachat);
+   even a perfect port may need the arithmetic task (its SFT domain) to show
+   rising reward. The TRL vllm-serve GRPO path already does agpt-2b arithmetic.
+
+### Reproduction scorecard
+| Piece | Status |
+|-------|--------|
+| agpt-2b flavor + RL config + skip_dp fix | DONE, correct |
+| Chat-template staging | DONE |
+| Weight load (adapter, fused-QKV, sync) | VERIFIED correct |
+| Model math / RoPE (single-token vs HF) | VERIFIED correct (Paris) |
+| Multi-token coherent generation | NOT yet (small compounding residual) |
+| Rising reward on alphabet_sort | NOT yet (blocked on above + likely OOD) |

@@ -1,0 +1,25 @@
+diff --git a/torchtitan/models/llama3/parallelize.py b/torchtitan/models/llama3/parallelize.py
+index 97776b23..596ef166 100644
+--- a/torchtitan/models/llama3/parallelize.py
++++ b/torchtitan/models/llama3/parallelize.py
+@@ -32,6 +32,7 @@ def parallelize_llama(
+     compile_config: CompileConfig,
+     ac_config: ActivationCheckpointingConfig,
+     dump_folder: str,
++    skip_dp: bool = False,
+ ):
+     """
+     Apply tensor parallelism, activation checkpointing, torch.compile, and data
+@@ -66,6 +67,12 @@ def parallelize_llama(
+     if model_compile_enabled:
+         apply_compile(model, compile_config)
+ 
++    # Skip FSDP wrapper for inference. FSDP's forward hooks are incompatible
++    # with torch.inference_mode() used by vLLM. AC and compile are disabled
++    # via config (mode="none", enable=False). Mirrors parallelize_qwen3.
++    if skip_dp:
++        return model
++
+     # Always run apply_fsdp_to_decoder -- with shard_degree=1 it is a no-op for
+     # the all-gather but still installs the MixedPrecisionPolicy.
+     if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
