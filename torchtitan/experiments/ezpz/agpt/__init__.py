@@ -439,6 +439,10 @@ agpt_configs = {
         vocab_size=256000,
         hidden_dim=11008,
         fuse_qkv=True,
+        # varlen: the RL vLLM generator asserts varlen|flex attention
+        # (generator.py:799), and XPU lacks a working FlexAttention backend, so
+        # varlen is the correct choice (also avoids the flex block-mask compile).
+        attn_backend="varlen",
     ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
