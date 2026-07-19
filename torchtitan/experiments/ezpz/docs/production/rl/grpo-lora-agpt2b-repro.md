@@ -173,3 +173,39 @@ vocab/FFN); trainer fp32 is belt-and-suspenders.
 Known follow-ups (non-blocking): double-BOS in the gemma template; config.json
 bos/eos swapped vs the tokenizer; CompiledFxGraph `__del__` cleanup warning
 (non-fatal). fp32 generation is ~30% slower than bf16 but correct.
+
+## Many-step GRPO training result 2026-07-19: reward CLIMBS when the task is in-reach
+
+After confirming the SFT ckpt-900 runs coherently in the loop (fp32 fix), ran a
+controlled 3-way GRPO+LoRA training comparison on agpt-2b (XPU, 2-tile, 100-step,
+fp32 gen, one-shot format example, linear reward `similarity_power=1`). All three
+share that base; each changes ONE variable:
+
+| run | change | reward trend (64-rollout bin means) | format-hit% | verdict |
+|-----|--------|-------------------------------------|-------------|---------|
+| v4 | default task, lr 2e-5 | 0.14 0.13 0.13 0.13 0.13 (FLAT) | 50 -> 81% | null: format learned, reward not |
+| v5 | **easy task (1 turn, <=3 names)**, lr 2e-5 | 0.17 0.18 0.19 0.19 0.20 (RISING) | 50 -> 62% | **LEARNS** (+18% and climbing) |
+| v6 | default task, **lr 5e-5** | 0.15 0.13 0.14 0.10 (FLAT/down) | 50 -> 61% | null: higher LR did not help |
+
+**Finding: GRPO+LoRA on agpt-2b demonstrably improves the policy on XPU when the
+task is within the model's reach (v5: mean reward 0.17 -> 0.20+, monotonic), and
+stays flat when it is not (v4/v6 ~0.13).** The lever that mattered was TASK
+DIFFICULTY, not learning rate.
+
+**Key control -- v4 disproves the "format saturation converts to reward"
+hypothesis:** v4's format-hit% climbed 50 -> 81% with ZERO reward gain. Optimizing
+the shallow format axis is a dead end; only sort-QUALITY (achievable often enough
+on the easy task) moves the reward. Cranking LR (v6) added noise, not learning.
+
+This is the end-to-end payoff of the whole agpt-2b port: SFT checkpoint in a
+GRPO+LoRA loop on Intel XPU, with a real rising reward curve when the task is
+learnable -- the full Monarch + TorchStore + vLLM + FSDP stack working as an RL
+system, not just a smoke.
+
+### Live dashboard tooling (committed under rl/scripts/grpo_lora_agpt2b_patches/)
+`rl_dash3.py` -- kitcat inline rendering (matplotlib -> kitty graphics), ambivalent
++ transparent + Iosevka styling, auto-fit to terminal, 3-run overlay of mean reward
+vs policy_version. `rl_feed3.sh` pulls the reward stream over SSH and aggregates by
+`max_policy_version` (the model-version = training-step axis). uv venv with
+kitcat + ambivalent + matplotlib==3.9.2 (ambivalent needs style.core, removed in
+mpl 3.10+) + ipython (ambivalent needs it or styles silently fail to load).
