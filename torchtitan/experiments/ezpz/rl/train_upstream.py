@@ -77,12 +77,13 @@ import logging  # noqa: E402
 
 from monarch.actor import HostMesh, ProcMesh, this_host  # noqa: E402
 from torchtitan.config import ConfigManager, ParallelismConfig  # noqa: E402
-from torchtitan.experiments.rl.trainer import RLTrainer  # noqa: E402
+from torchtitan.experiments.rl.controller import Controller  # noqa: E402
 
 # Re-export upstream so future maintainers know what we depend on.
 from torchtitan.experiments.rl.train import (  # noqa: E402,F401
     HostMeshes,
-    _compute_world_size,
+    _compute_generator_world_size,
+    _compute_trainer_world_size,
 )
 from torchtitan.observability import structured_logger as sl  # noqa: E402
 
@@ -166,8 +167,9 @@ def spawn_proc_mesh(
 
 
 async def main():
+    os.environ["MONARCH_ACTOR_QUEUE_DISPATCH"] = "0"
     config = ConfigManager().parse_args()
-    assert isinstance(config, RLTrainer.Config)
+    assert isinstance(config, Controller.Config)
     sl.init_structured_logger(
         source="rl_controller",
         output_dir=config.dump_folder,
@@ -176,10 +178,12 @@ async def main():
     )
     sl.log_trace_instant("structured_logger_started")
 
-    rl_trainer: RLTrainer = config.build()
+    rl_trainer: Controller = config.build()
     try:
-        trainer_world_size = _compute_world_size(config.trainer.parallelism)
-        generator_world_size = _compute_world_size(config.generator.parallelism)
+        trainer_world_size = _compute_trainer_world_size(config.trainer.parallelism)
+        generator_world_size = _compute_generator_world_size(
+            config.generator.parallelism
+        )
         trainer_mesh, generator_mesh = spawn_proc_mesh(
             trainer_world_size,
             generator_world_size,
@@ -189,7 +193,7 @@ async def main():
             trainer_mesh=trainer_mesh,
             generator_meshes=[generator_mesh],
         )
-        await rl_trainer.train()
+        await rl_trainer.run()
     finally:
         await rl_trainer.close()
 
