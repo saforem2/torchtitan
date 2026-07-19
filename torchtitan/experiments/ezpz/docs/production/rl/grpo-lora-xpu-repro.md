@@ -195,3 +195,55 @@ The Stage-4 blocker is a CCL-transport/KVS-rendezvous init issue in the
 Monarch-spawned trainer, NOT the USM pointer wall -- a different, more tractable
 problem. Build (Stages 0-2) + component smokes (Stage 3) reproduce; the full
 end-to-end loop (Stage 4) is one CCL-init fix away.
+
+## Stage 4 -- UPDATE 2026-07-19 AM: xccl segfault FIXED (libfabric); now a tile-placement collision
+
+Big progress. The Stage-4 trainer sig-11 (oneCCL) is SOLVED, and the run now
+gets deep into vLLM generator init. Two more bugs fixed, one new blocker.
+
+### Bug #11 (FIXED) -- xccl SIGSEGV = libfabric.so not on LD_LIBRARY_PATH
+Root-caused with a minimal torchrun 2-rank xccl allreduce probe + CCL_LOG_LEVEL=info:
+```
+could not open the library: libfabric.so -- cannot open shared object file
+could not open .../oneapi/ccl/2021.17/lib/libfabric.so
+could not initialize OFI api
+OFI transport was not initialized, fallback to MPI transport   -> SIGSEGV
+```
+Even with CCL_ATL_TRANSPORT=ofi, OFI couldn't load libfabric -> MPI fallback ->
+the atl_mpi segfault. This was NOT Monarch-specific (plain torchrun hit it too)
+and NOT the USM wall. **Fix: add libfabric to LD_LIBRARY_PATH:**
+`/opt/cray/libfabric/2.3.1/lib64:/opt/aurora/26.26.0/oneapi/2025.3/opt/mpi/libfabric/lib`.
+Verified: after the fix, `torchrun --nproc_per_node=2 ... xccl all_reduce` ->
+`[rank 0/2] all_reduce OK -> 3.0`, rc=0. **xccl works on Sunspot.**
+
+### Bug #12 (OPEN) -- vLLM generator + trainer tile-placement collision
+With xccl fixed, the run reaches the vLLM generator actor's `init_device`, which
+fails:
+```
+ValueError: Free memory on device xpu:1 (0.0/60.79 GiB) on startup is less than
+desired GPU memory utilization (0.9, 54.71 GiB)   [vllm/v1/worker/xpu_worker.py:119]
+```
+The generator (meant for tiles 0-1) landed on a tile the trainer already fully
+occupies (0.0 GiB free). The config `rl_grpo_lora_qwen3_0_6b` is designed for
+"4 GPUs: 2 gen + 2 train" with `ZE_AFFINITY_MASK` device isolation, and monarch
+proc_mesh DOES forward ZE_AFFINITY_MASK to actors. But the recipe used the same
+`ZE_AFFINITY_MASK=0,1,2,3` on Borealis where that exposed 4 devices; on Sunspot
+with `ZE_FLAT_DEVICE_HIERARCHY=FLAT` the node shows **12 tiles** (6 GPUs x 2),
+so monarch's 2-gen + 2-train slicing maps onto overlapping/contended tiles.
+
+### Next-session plan (bounded, the last blocker)
+- Reconcile the device topology: either (a) drop `ZE_FLAT_DEVICE_HIERARCHY=FLAT`
+  or set the mask so exactly 4 distinct tiles are visible and monarch assigns
+  2 gen + 2 train disjointly, or (b) set per-actor `ZE_AFFINITY_MASK` via the
+  monarch proc_mesh setup so generator gets tiles {0,1} and trainer {2,3}
+  with no overlap. Check how songhappy monarch proc_mesh.py / the controller
+  assigns per-actor affinity.
+- Also lower `--generator.gpu_memory_limit` (recipe config uses 0.85) once tiles
+  are disjoint.
+- Then re-run the 5-step smoke; success = rising reward on alphabet_sort.
+
+### Status
+Stages 0-3 reproduce (build + USM wall crossed + xccl works). Stage 4 reaches
+full actor spawn + vLLM XPU init; blocked ONLY on generator/trainer tile
+isolation on Sunspot's FLAT 12-tile topology -- a placement-config issue, not a
+fundamental one. Bugs fixed to date: 12 (Borealis->Sunspot port).
