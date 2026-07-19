@@ -331,3 +331,43 @@ discrete devices) interacts with FLAT so both actors resolve to tile 0.
   isolation (both actors -> xpu:0) on Sunspot FLAT topology. A real, specific,
   narrowed bug (not the USM wall) -- reproduction is one device-placement fix
   from the first reward.
+
+## Stage 4 -- ROOT CAUSE FOUND 2026-07-19 (bug #12 was a red herring chain)
+
+Instrumented the exact failing site (`vllm/v1/worker/xpu_worker.py:118` ->
+`MemorySnapshot.measure()` in `vllm/utils/mem_utils.py:146`) and got the
+definitive line (same process, same instant, generator actor on mask=1):
+
+```
+EZPZMEM dev=xpu:0 ZE_AFFINITY_MASK=1 ZE_FLAT=COMPOSITE ZES=1
+  mem_get_info          = (free=127.51, total=127.97)   <- CORRECT
+  accel_get_memory_info = (free=0.00,   total=121.57)   <- BROKEN
+  reserved=0.00 allocated=0.00
+```
+
+**The bug: `torch.accelerator.get_memory_info()` is broken on Intel XPU.** It
+returns `(free=0, total=sum-of-tiles)` while `torch.xpu.mem_get_info()` returns
+the correct `(free=127.5, total=127.97)` on the very same device at the very same
+call. vLLM's `MemorySnapshot.measure()` uses the generic accelerator API, so
+`request_memory()` sees free=0 and raises
+`ValueError: Free memory on device xpu:0 (0.0/121.57 GiB) ...`.
+
+This had NOTHING to do with tile collision, the USM wall, ZES_ENABLE_SYSMAN, or
+dist-init. The earlier "both actors on xpu:0" and "Sysman" theories were both
+wrong -- disproved by the actor_mask.log (disjoint masks 0/1) and the mem-API
+probe (free reads fine with and without ZES, in parent and spawn-child).
+
+### The fix (experiment-side vLLM patch, ~/rl-repro/vllm)
+`vllm/utils/mem_utils.py` `MemorySnapshot.measure()`: on XPU, source free/total
+from `torch.xpu.mem_get_info(device.index)` instead of
+`torch.accelerator.get_memory_info(device)`. One branch, commented with the
+verified evidence above. This is a legitimate experiment-fork patch (the venv's
+vLLM is our own from-source build); upstream vLLM assumes the accelerator API is
+correct, which it is on CUDA but not on this XPU/torch stack.
+
+### Diagnostic scaffolding used (all in the fork, outside the repo)
+- `train.py` `_bootstrap`: per-actor mask log -> `/tmp/foremans/actor_mask.log`
+  (proved disjoint masks + ZES=1 reached the actor).
+- `xpu_worker.py`: one-shot `EZPZMEM` warning dumping every free-mem API + env at
+  the failing site (the line above). Remove both once the run is green.
+- `~/mem_api_probe.py`: standalone 2-API x parent/spawn x ZES on/off probe.
