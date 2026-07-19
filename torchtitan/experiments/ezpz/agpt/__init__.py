@@ -427,6 +427,19 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=11008,
     ),
+    # [ezpz] agpt-2b variant matching the SFT checkpoint-900 HF config exactly
+    # (vocab 256000, not the 256128 padding) + fused QKV so GRPO LoRA can target
+    # ["wqkv","wo"]. Used by the RL overlay (experiments/ezpz/rl/alphabet_sort_agpt).
+    "2b-rl": _build_agpt_config(
+        dim=2048,
+        n_layers=12,
+        n_heads=16,
+        n_kv_heads=4,
+        rope_theta=50000,
+        vocab_size=256000,
+        hidden_dim=11008,
+        fuse_qkv=True,
+    ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
         n_layers=12,
@@ -640,11 +653,22 @@ agpt_configs["2b_kitchen_sink"] = agpt_configs["2B_kitchen_sink"]
 def model_registry(
     flavor: str,
     attn_backend: str = "sdpa",
+    converters: list | None = None,
 ) -> FaultTolerantModelSpec:
+    from copy import deepcopy
+
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
     from torchtitan.experiments.torchft.diloco import fragment_llm
+    from torchtitan.models.utils import validate_converter_order
 
-    config = agpt_configs[flavor]
+    # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
+    # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,
+    # so copy first to avoid corrupting the cached registry entry.
+    config = deepcopy(agpt_configs[flavor])
+    if converters is not None:
+        validate_converter_order(converters)
+        for c in converters:
+            config = c.build().convert(config)
 
     return FaultTolerantModelSpec(
         name="ezpz.agpt",

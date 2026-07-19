@@ -56,6 +56,7 @@ def parallelize_llama(
     compile_config: CompileConfig,
     ac_config: ActivationCheckpointingConfig,
     dump_folder: str,
+    skip_dp: bool = False,
 ):
     """Apply TP, AC, compile, and FSDP to an agpt model.
 
@@ -105,6 +106,12 @@ def parallelize_llama(
         # the separately-compiled loss_fn when loss_parallel + ignore_index
         # produce unbacked symbols in cross_entropy.
         torch._dynamo.config.capture_scalar_outputs = False
+
+    # [ezpz] Skip FSDP for the vLLM generator: FSDP forward hooks are
+    # incompatible with torch.inference_mode() used by vLLM. The generator's
+    # vllm_wrapper passes skip_dp=True. Mirrors qwen3/gpt_oss parallelize.
+    if skip_dp:
+        return model
 
     names = ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
     dp_mesh = parallel_dims.get_mesh(names)
