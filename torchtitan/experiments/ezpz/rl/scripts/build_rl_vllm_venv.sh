@@ -24,7 +24,7 @@
 #   - Monarch: 2-actor mesh, both ranks see xpu_count=12, TorchStore
 #     transports importable.
 #   - bare vLLM: Available KV cache 26.04 GiB, generation runs.
-# See docs/rl/vllm-xpu-current-status.md.
+# See docs/production/rl/history/vllm-xpu-current-status.md.
 
 set -e
 

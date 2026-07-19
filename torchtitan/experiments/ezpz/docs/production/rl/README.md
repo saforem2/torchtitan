@@ -2,6 +2,17 @@
 
 **Status: Experimental** — verified on Sunspot XPU, not production-ready.
 
+## Layout (this dir consolidates all RL docs, 2026-07-18)
+
+This `docs/production/rl/` tree holds BOTH the RL infrastructure/how-to AND the
+per-run results (previously split across `docs/rl/` + `docs/production/grpo/`):
+
+- **Infra / how-to** (this README + siblings): `grpo-on-xpu-status.md` (the
+  run recipe -- READ FIRST), `2026-07-06_multinode-grpo-root-cause.md`, and the
+  `history/` archive (superseded bring-up writeups).
+- **Per-run results**: [`grpo/`](grpo/README.md) -- the production GRPO index
+  (recipe + checkpoint pairs, e.g. `grpo/aurora2b/sft_arithmetic/`).
+
 Reinforcement Learning via Group Relative Policy Optimization (GRPO) using
 HuggingFace TRL's `GRPOTrainer`, with **on-policy generation via `trl
 vllm-serve` (vLLM-XPU)** — working end-to-end on XPU including
@@ -59,7 +70,7 @@ stack. (A slower per-rank `hf.generate()` fallback also exists.)
 
 Tasks are pluggable via a registry. Use `--task <name>` to select. The
 choices are auto-populated in `--help` from
-[`rl/tasks/__init__.py`](../../rl/tasks/__init__.py):
+[`rl/tasks/__init__.py`](../../../rl/tasks/__init__.py):
 
 | Task | Description | Difficulty |
 |------|-------------|------------|
@@ -72,9 +83,9 @@ choices are auto-populated in `--help` from
 
 Create a module in `rl/tasks/`, define a dataset builder + reward
 functions, and call `register_task()`. Import it from
-[`tasks/__init__.py`](../../rl/tasks/__init__.py) so it self-registers
+[`tasks/__init__.py`](../../../rl/tasks/__init__.py) so it self-registers
 on package load — `--help` will pick it up automatically. See
-[`tasks/sum_digits.py`](../../rl/tasks/sum_digits.py) for the pattern.
+[`tasks/sum_digits.py`](../../../rl/tasks/sum_digits.py) for the pattern.
 
 ## AuroraGPT-2B checkpoint paths
 
@@ -104,11 +115,11 @@ hand-rolling it; they handle the server subshell, health poll, tile/node
 partitioning, the unified `venvs/rl-vllm/` venv, and the XPU env:
 
 - **1 node** (server + trainer co-located):
-  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
+  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
 - **cross-node** (server node + 1 trainer node):
-  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
+  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
 - **multi-trainer-node** (server + 2+ trainer nodes):
-  [`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../rl/scripts/grpo/grpo_3n_multinode_validate.sh)
+  [`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../../rl/scripts/grpo/grpo_3n_multinode_validate.sh)
 
 The trainer side is the same `train_grpo` entry point with the vLLM flags:
 
@@ -122,7 +133,7 @@ python3 -m torchtitan.experiments.ezpz.rl.train_grpo \
 ```
 
 Prereqs: build the venv once with
-[`rl/scripts/build_rl_vllm_venv.sh`](../../rl/scripts/build_rl_vllm_venv.sh);
+[`rl/scripts/build_rl_vllm_venv.sh`](../../../rl/scripts/build_rl_vllm_venv.sh);
 for **multi-trainer-node**, keep the `ofi`/TCP-KVS transport ON (do NOT pass
 `--no-oneccl-tcp-kvs`) and let `apply_all_xpu_patches` apply the AVG->SUM FSDP
 patch -- see [`grpo-on-xpu-status.md`](grpo-on-xpu-status.md#how-to-run-it).
@@ -154,7 +165,7 @@ On Aurora, swap the path to
 (matches AuroraGPT-2B); for other models the script auto-detects the wrap class
 via `AutoConfig.model_type` (llama, llama4, qwen2, qwen3, mistral, mixtral,
 gemma, gemma2, phi, phi3, gpt_neox, gpt2, deepseek_v3, olmo, olmo2 — extend
-[`train_grpo.py`](../../rl/train_grpo.py) `_DEFAULT_WRAP_CLS_BY_MODEL_TYPE`).
+[`train_grpo.py`](../../../rl/train_grpo.py) `_DEFAULT_WRAP_CLS_BY_MODEL_TYPE`).
 
 ## What works under the hood (handled automatically)
 
@@ -254,7 +265,7 @@ weight-sync + generation over HTTP.
 - 2N; **10/10 steps**, 1110 `update_named_param` weight-syncs to the server,
   rewards moving. This is the working baseline the multi-trainer-node work
   built on. Recipe:
-  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh).
+  [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh).
 
 ### vLLM-server, 1 node (2026-06-13, job 12468780)
 
@@ -265,7 +276,7 @@ real weight-sync (not the frozen-generator no-op).
   `format_reward` ratchets 0 -> 0.0625 -> 0.25 -> 0.125 across 5 steps on a
   model that never saw the task; `importance_sampling_ratio` ~1.0 (on-policy
   confirmed). ~4.3s/step after JIT warmup. Script:
-  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh).
+  [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh).
 
 ---
 
@@ -367,13 +378,13 @@ Training time: 41.3s, 5.8 samples/sec.
 
 | File | Description |
 |------|-------------|
-| [`train_grpo.py`](../../rl/train_grpo.py) | Main entry point — task-agnostic GRPO loop, FSDP wiring, W&B init |
-| [`tasks/__init__.py`](../../rl/tasks/__init__.py) | Task registry (`RLTask`, `register_task`, `get_task`) |
-| [`tasks/common.py`](../../rl/tasks/common.py) | Shared helpers (answer extraction, completion text) |
-| [`tasks/sum_digits.py`](../../rl/tasks/sum_digits.py) | Sum-of-digits task (dataset + rewards) |
-| [`tasks/multiply.py`](../../rl/tasks/multiply.py) | Multiplication task |
-| [`tasks/word_sort.py`](../../rl/tasks/word_sort.py) | Word sorting task (partial credit) |
-| [`tasks/countdown.py`](../../rl/tasks/countdown.py) | Countdown arithmetic reasoning task |
+| [`train_grpo.py`](../../../rl/train_grpo.py) | Main entry point — task-agnostic GRPO loop, FSDP wiring, W&B init |
+| [`tasks/__init__.py`](../../../rl/tasks/__init__.py) | Task registry (`RLTask`, `register_task`, `get_task`) |
+| [`tasks/common.py`](../../../rl/tasks/common.py) | Shared helpers (answer extraction, completion text) |
+| [`tasks/sum_digits.py`](../../../rl/tasks/sum_digits.py) | Sum-of-digits task (dataset + rewards) |
+| [`tasks/multiply.py`](../../../rl/tasks/multiply.py) | Multiplication task |
+| [`tasks/word_sort.py`](../../../rl/tasks/word_sort.py) | Word sorting task (partial credit) |
+| [`tasks/countdown.py`](../../../rl/tasks/countdown.py) | Countdown arithmetic reasoning task |
 
 ## Limitations
 

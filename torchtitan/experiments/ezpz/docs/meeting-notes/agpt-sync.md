@@ -66,9 +66,9 @@ Multi-*trainer*-node GRPO (FSDP across 2+ nodes) now works: job `12470083`
 default, which SIGSEGVs forming the cross-world weight-sync PG; and (b) the
 AVG->SUM FSDP patch rebound the wrong `from`-import name so it never ran. Both
 fixed. Root cause + all-rank stack evidence:
-[`2026-07-06_multinode-grpo-root-cause`](../rl/2026-07-06_multinode-grpo-root-cause.md);
+[`2026-07-06_multinode-grpo-root-cause`](../production/rl/2026-07-06_multinode-grpo-root-cause.md);
 status flipped to works in
-[`grpo-on-xpu-status`](../rl/grpo-on-xpu-status.md).
+[`grpo-on-xpu-status`](../production/rl/grpo-on-xpu-status.md).
 
 ### 5. First SFT on the completed v2 2B base (new)
 

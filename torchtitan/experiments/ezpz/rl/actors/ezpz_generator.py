@@ -73,7 +73,7 @@ except ImportError as e:  # noqa: BLE001
     raise ImportError(
         "EzpzVLLMGenerator requires upstream `torchtitan.experiments.rl.actors`"
         " which only resolves in the rl-vllm venv (py3.12 + torch 2.12 +"
-        " monarch + vllm-xpu). See docs/rl/vllm-xpu-wiring-plan.md."
+        " monarch + vllm-xpu). See docs/production/rl/history/vllm-xpu-wiring-plan.md."
     ) from e
 
 
@@ -96,7 +96,7 @@ class EzpzVLLMCudagraphConfig(VLLMCudagraphConfig):
 class EzpzVLLMGenerator(VLLMGenerator):
     """Subclass of upstream `VLLMGenerator` for the ezpz XPU stack.
 
-    WIP — see `docs/rl/vllm-xpu-wiring-plan.md` for the full
+    WIP — see `docs/production/rl/history/vllm-xpu-wiring-plan.md` for the full
     integration plan. Currently a placeholder.
     """
 
