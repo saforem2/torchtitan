@@ -135,3 +135,63 @@ Stage 4 (a full run does its own lifecycle), but should be understood.
 Next: **Stage 4** -- the actual GRPO+LoRA run
 (`--module alphabet_sort --config rl_grpo_lora_qwen3_0_6b`), which exercises the
 full generate->score->train->weight-sync loop end to end.
+
+## Stage 4 -- full GRPO+LoRA run (2026-07-19): BLOCKED at trainer-actor CCL init
+
+Ran the recipe entry point on a compute node (5-step smoke first, not the full
+200): `python -m torchtitan.experiments.rl.train --module alphabet_sort
+--config rl_grpo_lora_qwen3_0_6b`. Got materially further each attempt; NOT
+blocked by the USM wall (that stayed crossed). Two fixes landed, one blocker
+remains.
+
+### Fixed (bugs 9-10)
+9. **`ModuleNotFoundError: renderers`** -- fork rl/rollout imports `renderers`
+   (PrimeIntellect). Added `renderers @ git` to the build (Step 5).
+10. **cwd shadowing** -- the launcher `cd`-ed into our repo, so our repo's
+    `torchtitan/` won on `sys.path` and shadowed the editable FORK torchtitan
+    (which has alphabet_sort + LoRA). Fix: run from a neutral cwd
+    (`~/rl-repro/run`). Confirmed: from a neutral dir, `import torchtitan` ->
+    `~/rl-repro/torchtitan-fork/...`.
+
+After those, the pipeline reached: controller init, actor layout
+(`1 generator x 2 GPUs + 2 trainer GPUs = 4 total`), TorchStore strategy init.
+
+### BLOCKER: trainer SetupActor sig-11 on oneCCL init (Monarch-spawned, no KVS)
+
+The FSDP trainer `SetupActor` dies with `Killed(sig=11)` during oneCCL init.
+Root cause (from the CCL_WARN trail):
+```
+CCL_ATL_TRANSPORT changed to be ofi (default:mpi)      # our export applied
+CCL_PROCESS_LAUNCHER changed to be none                 # applied
+could not get local_idx/count from environment variables
+OFI transport was not initialized, fallback to MPI transport
+Killed(sig=11)
+```
+Even with `CCL_ATL_TRANSPORT=ofi`, OFI can't initialize -> MPI fallback ->
+the documented `atl_mpi::create_comm_id` segfault (see grpo-on-xpu-status.md).
+
+**Why:** architecture mismatch. The WORKING TRL-vllm-serve xnode GRPO script
+spawns trainer ranks via `ezpz launch` (mpiexec) WITH a shared
+`CCL_KVS_IP_PORT` rendezvous -- that provides `local_idx/count` + the KVS OFI
+needs. The GRPO+LoRA recipe spawns the trainer via **Monarch actors** (not
+mpiexec), so no mpiexec-provided rank env / KVS reaches the actor -> OFI init
+fails. The recipe's Borealis env (`env-3.sh` + Monarch bootstrap) evidently
+wired this; porting the CCL/KVS rendezvous through Monarch's actor bootstrap on
+Sunspot is the remaining work.
+
+### Next-session plan (bounded)
+- Wire `CCL_KVS_IP_PORT` (+ `CCL_LOCAL_RANK`/`CCL_LOCAL_SIZE` or the
+  `local_idx/count` CCL expects) into the Monarch trainer-actor bootstrap
+  (proc_mesh SetupActor env), not just the shell. Check how songhappy's monarch
+  `proc_mesh.py` XPU patch sets per-actor CCL env.
+- Alternative: check whether the recipe expects `CCL_ATL_TRANSPORT=mpi` to
+  actually WORK on Borealis (i.e. the mpi-transport segfault is Sunspot-specific
+  and the fix is making OFI init succeed, not avoiding mpi).
+- Then re-run the 5-step smoke; success = rising reward on alphabet_sort.
+
+### Standing verdict (unchanged by this blocker)
+The core question is ANSWERED: **the USM wall is crossed on Sunspot** (Stage 3).
+The Stage-4 blocker is a CCL-transport/KVS-rendezvous init issue in the
+Monarch-spawned trainer, NOT the USM pointer wall -- a different, more tractable
+problem. Build (Stages 0-2) + component smokes (Stage 3) reproduce; the full
+end-to-end loop (Stage 4) is one CCL-init fix away.
