@@ -2,7 +2,7 @@
 
 Superseded historical records from the 2026-06 RL/vLLM-XPU bring-up. Kept for
 the landmine record; **not current status**. For where GRPO on XPU stands
-today, see [`../grpo-on-xpu-status.md`](../grpo-on-xpu-status.md) and
+today, see [`../trl.md`](../trl.md) / [`../monarch.md`](../monarch.md) and
 [`../2026-07-06_multinode-grpo-root-cause.md`](../2026-07-06_multinode-grpo-root-cause.md).
 
 | Doc | Date | What it captured |

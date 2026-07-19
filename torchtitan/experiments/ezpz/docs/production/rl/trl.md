@@ -1,9 +1,12 @@
-# GRPO on Intel XPU — status
+# GRPO on Intel XPU: TRL `GRPOTrainer`
 
-On-policy GRPO (TRL `GRPOTrainer` + `trl vllm-serve`, no Monarch) on Sunspot
-XPU. **Current status only** -- the bring-up chronology and the (refuted)
-2026-07-01 desync investigation live in
-[`history/`](history/README.md).
+On-policy GRPO via **TRL `GRPOTrainer`** on Sunspot XPU (no Monarch). Two
+generation backends: **`trl vllm-serve`** (recommended, on-policy) with a
+**`.generate()` per-rank** fallback. For the Monarch + TorchStore + vLLM path
+see [`monarch.md`](monarch.md); overview in [`README.md`](README.md).
+
+**Current status only** -- the bring-up chronology and the (refuted) 2026-07-01
+desync investigation live in [`history/`](history/README.md).
 
 ## Generation backends (3 tiers)
 
