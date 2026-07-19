@@ -237,3 +237,69 @@ toward the latter; left as a follow-up.
 
 v4 (default task) and v6 (lr 5e-5) stayed flat at ~0.13 throughout -- the easy
 task (v5) is the only run that learned.
+
+## In-tree recipe (2026-07-19): run GRPO+LoRA from OUR repo, no ~/rl-repro fork needed
+
+The whole path is now vendored into `experiments/ezpz/` as a THIN overlay -- it
+drives the CURRENT-UPSTREAM `torchtitan.experiments.rl` engine with OUR
+`ezpz.agpt` model. Zero edits to `experiments/rl/` or `torchtitan/models/**`
+(core). torchstore/monarch/vllm remain external venv build-deps.
+
+### What was added (all under experiments/ezpz/)
+1. **`ezpz/agpt/` gaps** (`14f6a0c39`): `model_registry(converters=...)` (deepcopy-safe
+   so it does not corrupt the shared prebuilt config; applies LoRAConverter +
+   LMHeadCastConverter), `parallelize_llama(skip_dp=False)` (vLLM generator passes
+   skip_dp=True), and `agpt_configs["2b-rl"]` (vocab 256000 to match ckpt-900 exactly
+   vs stock 2B's 256128 padding; fuse_qkv=True so LoRA targets ["wqkv","wo"]).
+2. **`ezpz/rl/train_upstream.py`** refresh (`f3bfc0c45`): the bridge was stale
+   (imported RLTrainer / _compute_world_size, both gone). Now targets current
+   upstream (Controller / .run() / _compute_trainer_world_size +
+   _compute_generator_world_size). Keeps EzpzPerHostProvisioner + bootstrap_command
+   (current upstream still uses that mechanism). `xpu_overrides.apply_all_xpu_patches()`
+   verified to still apply cleanly against current upstream (init_distributed PALS,
+   XPU attention backend, current_stream alias, FSDP2 SUM-reduce, etc.).
+3. **`ezpz/rl/alphabet_sort_agpt/`** overlay (`cf9747b92`): `config_registry.py` with
+   `rl_grpo_lora_agpt_2b()` (stock task) + `rl_grpo_lora_agpt_2b_easy()` (1 turn/3
+   names + lr 2e-5 -- the learning config). Backs the upstream engine with
+   `ezpz.agpt.model_registry("2b-rl", converters=[LoRA, LMHeadCast])`. Winning
+   settings baked in: **fp32 gen+trainer** (the coherence fix), **linear reward**
+   (similarity_power=1), **one-shot format env** (few_shot_env.py). sdpa attention.
+4. **Launcher + provisioning** (`d3904e340`): `scripts/grpo/agpt2b_grpo.sh` +
+   `build_rl_grpo_lora_venv.sh` Step 8b (installs saforem2/ezpz --no-deps -- agpt
+   imports ezpz -- and applies the vllm mem-info fallback via
+   `grpo_lora_agpt2b_patches/patch_vllm_xpu_mem.py`).
+
+### How to run (from the repo, once venvs/rl-grpo-lora is built + ckpt staged)
+```bash
+# stage: symlink ckpt weights + inject the gemma chat_template into a COPIED tokenizer
+bash torchtitan/experiments/ezpz/rl/scripts/grpo/stage_agpt2b.sh
+# 2-tile GRPO (from a compute node); config defaults to the easy-task learning run
+bash torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_grpo.sh
+# CONFIG=rl_grpo_lora_agpt_2b for the stock-task short smoke
+```
+
+### Critical cwd detail (why the launcher cd's to the repo root)
+The `rl-grpo-lora` venv's editable `torchtitan` maps to the FORK
+(`~/rl-repro/torchtitan-fork`, which has NO experiments/ezpz). Running from the repo
+ROOT makes our cwd-local `torchtitan` win, so BOTH `experiments.ezpz` (overlay +
+agpt) AND `experiments.rl` (current-upstream engine) resolve from our repo, while
+monarch/torchstore/vllm still come from the venv. Running from a neutral cwd (e.g.
+~/rl-repro/run) instead picks the fork and `ModuleNotFoundError: torchtitan.experiments.ezpz`.
+
+### vLLM patches -- DO NOT fork/PR
+Upstream vLLM (commit 91055efd3) already fixes the XPU free-mem bug with
+`get_mem_info_wrapper` (vllm/platforms/xpu.py) routing
+`torch.accelerator.get_memory_info` -> `_C_cache_ops.getMemoryInfo`. Our inline
+`mem_utils.py` patch is the same fix in a worse shape; it is kept ONLY as a
+documented, idempotent fallback for kernel builds where the wrapper still returns
+free=0. The `xpu_worker.py` EZPZMEM diagnostic was reverted (debug scaffolding).
+
+### Verification status
+- All 4 increments import-checked on the login node: agpt gaps build + deepcopy-safe;
+  bridge imports resolve against current upstream; overlay config builds to a
+  `Controller.Config` (flavor=2b-rl, vocab=256000, LoRA+lm_head-cast applied,
+  dtype=float32, similarity_power=1); full `--module` dotted-path invocation parses
+  from the repo root.
+- **Compute-node 2-tile smoke: PENDING** (v4/v5/v6 study occupying nodes). The final
+  proof is reproducing the v5 rising-reward curve from OUR repo (no ~/rl-repro fork
+  on the invocation), which the parse-level checks strongly indicate will work.
