@@ -413,3 +413,66 @@ per GRPO_LORA_XPU.md).
 | TorchStore weight sync round-trip | WORKS |
 | Rollout generation + scoring + grouping | WORKS |
 | Train step / rising reward | pending max_tokens=700 re-run |
+
+## Stage 4 -- REPRODUCED 2026-07-19 (train steps fire on Sunspot XPU)
+
+Full GRPO+LoRA async RL loop runs end-to-end on Sunspot XPU with real gradient
+steps (job 12471019, 2-tile COMPOSITE, Qwen3-0.6B, alphabet_sort):
+
+```
+Train | Step: 1  tokens_per_second_full_step: 85.61   (first-step torch.compile warmup)
+Train | Step: 2  tokens_per_second_full_step: 3256.5
+Train | Step: 3  tokens_per_second_full_step: 3272.9
+```
+
+Per GRPO_LORA_XPU.md, "success = if you see step metrics." We see them. The perf
+breakdown confirms the whole async machinery: `fwd_bwd` ratio, near-zero
+`blocking_generator_pull_model_state_dict` / `blocking_trainer_push_model_state_dict`
+(TorchStore weight sync), generator inflight requests. `reward/_mean: 0` across
+the 3 steps is expected -- untrained Qwen3-0.6B can't do alphabet-sort yet and 3
+steps is far short of the recipe's mean_r~0.6 (many-step) milestone.
+
+### Two config gates had to be lifted for a step to fire (both in the recipe's
+### own `rl_grpo_lora_qwen3_0_6b`, NEITHER is XPU-specific)
+1. `--generator.sampling.max-tokens=700` (config ships 100 -> ~99.7% of
+   completions truncate before closing the `<alphabetical_sorted>` block ->
+   reward 0). Cosmetic here since the base model scores 0 either way, but needed
+   so completions finish.
+2. `--async-loop.training-sample-builder.no-drop-zero-std-reward-groups` (the
+   builder defaults `drop_zero_std_reward_groups=True`; the LoRA config never
+   overrides it, unlike its sibling `*_varlen` configs which set it False). With
+   the default, every all-zero-reward group is dropped -> no batch -> no step.
+   THIS is what actually blocked the step; max_tokens alone (run2) never fired
+   one. Also lowered `--async-loop.num-groups-per-train-step=4` (from 8) so a
+   step assembles sooner on a single tile.
+
+tyro gotcha: booleans are `--...no-drop-zero-std-reward-groups` (flag pair), NOT
+`=False`; flag names use dashes. `=False` gives `Unrecognized options: False`.
+
+### FINAL reproduction scorecard -- ALL GREEN
+| Piece | Status |
+|-------|--------|
+| Build (torchstore/monarch/vllm/fork from source) | REPRODUCED |
+| USM wall (xccl tensor transfer between actors) | CROSSED |
+| xccl collectives (libfabric fix) | WORKS |
+| Per-actor XPU isolation (COMPOSITE, disjoint masks) | WORKS |
+| vLLM generator init + KV cache (mem_utils fix) | WORKS |
+| TorchStore weight sync round-trip | WORKS |
+| Rollout generation + scoring + grouping | WORKS |
+| **GRPO+LoRA train steps fire (~3,270 tok/s)** | **REPRODUCED** |
+
+### The two required experiment-fork code patches (in ~/rl-repro, outside repo)
+1. `vllm/utils/mem_utils.py` `MemorySnapshot.measure()`: on XPU use
+   `torch.xpu.mem_get_info(device.index)` (correct) instead of
+   `torch.accelerator.get_memory_info(device)` (returns free=0 on XPU).
+2. (diagnostic scaffolding to remove for a clean run: the `EZPZMEM` warning in
+   `vllm/v1/worker/xpu_worker.py` and the actor_mask.log block in fork
+   `train.py` `_bootstrap`.) The `ZES_ENABLE_SYSMAN=1` in the launcher is
+   harmless but NOT required (the mem_get_info API reads free correctly without it).
+
+### Launcher env that works (2-tile smoke)
+ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE, ZE_AFFINITY_MASK=0,1, FI_PROVIDER=tcp,
+CCL_ATL_TRANSPORT=ofi, CCL_ATL_OFI_PROVIDER=tcp, LD_LIBRARY_PATH includes
+/opt/cray/libfabric/2.3.1/lib64, TORCHINDUCTOR_MAX_AUTOTUNE=0,
+VLLM_ENABLE_V1_MULTIPROCESSING=1, HF offline. Run from a NEUTRAL cwd
+(~/rl-repro/run) so the editable fork wins on sys.path over the main-repo copy.
