@@ -688,6 +688,29 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
     if getattr(_xmr, "_xpu_wrapper_no_alias_patched", False):
         return
 
+    # [ezpz] Current vLLM's _torch_cuda_wrapper already wraps current_stream in
+    # a functools.partial (a DISTINCT object -> dynamo-safe) AND keeps it set, so
+    # torch.cuda.current_stream() works on XPU (gpu_model_runner.py needs it).
+    # Only the OLD direct-alias form (torch.cuda.current_stream = torch.xpu
+    # .current_stream) triggered the dynamo double-handler assert. Inspect the
+    # upstream wrapper source: if it already uses partial(...current_stream),
+    # defer to it (no override) -- overriding would strip the working stream.
+    import inspect as _inspect
+
+    try:
+        _src = _inspect.getsource(_xmr._torch_cuda_wrapper)
+    except (OSError, TypeError):
+        _src = ""
+    if "partial(torch.xpu.current_stream)" in _src or (
+        "current_stream" in _src and "partial(" in _src
+    ):
+        _xmr._xpu_wrapper_no_alias_patched = True
+        print(
+            f"[xpu_overrides pid={os.getpid()}] vLLM _torch_cuda_wrapper already"
+            " dynamo-safe (partial current_stream); deferring, no override"
+        )
+        return
+
     import contextlib as _ctx
 
     @_ctx.contextmanager
