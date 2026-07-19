@@ -303,3 +303,47 @@ free=0. The `xpu_worker.py` EZPZMEM diagnostic was reverted (debug scaffolding).
 - **Compute-node 2-tile smoke: PENDING** (v4/v5/v6 study occupying nodes). The final
   proof is reproducing the v5 rising-reward curve from OUR repo (no ~/rl-repro fork
   on the invocation), which the parse-level checks strongly indicate will work.
+
+## VERIFIED 2026-07-19: vendored overlay runs end-to-end from OUR repo (job 12471049)
+
+The thin overlay reproduces GRPO+LoRA on agpt-2b (SFT ckpt-900) on Intel XPU
+driving the CURRENT-UPSTREAM `torchtitan.experiments.rl` engine -- launched from
+OUR repo, NO ~/rl-repro fork on the invocation:
+
+```
+Train | Step: 1/2/3   ~1765 tok/s (steady state)
+reward_mean=0.1607   nonzero=53%   max=1.000
+```
+
+matching the fork-based v5 baseline (0.167 start), so the vendored path has the
+same learning dynamics. Command:
+`bash torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_grpo.sh` (runs from repo
+root -> our torchtitan.experiments.ezpz + experiments.rl win over the venv's fork
+editable; monarch/torchstore/vllm from the venv).
+
+### Five integration bugs found + fixed to close the loop (all runtime patches /
+### config; ZERO edits to experiments/rl/ or core)
+1. sdpa attn -> RL generator asserts varlen|flex. Fixed: 2b-rl uses flex.
+2. varlen -> XPU lacks aten::_flash_attention_forward_no_dropout_inplace. (Chose
+   flex over varlen; flex is what the working fork used.)
+3. FlexAttention max_autotune -> XPU OUT_OF_RESOURCES. Fixed: overlay config
+   disables max_autotune + recompiles the flex kernel.
+4. Generation `torch.cuda.current_stream()` -> "Torch not compiled with CUDA".
+   Root cause: stale ezpz patch STRIPPED current_stream (written for an old vLLM
+   that direct-aliased); current vLLM wraps it in functools.partial (dynamo-safe)
+   and needs it set. Fixed: patch now DEFERS to upstream when it detects the
+   partial form.
+5. Trainer forward `create_block_mask(separate_full_blocks=...)` -> TypeError
+   (torch XPU wheel lacks the kwarg; core decoder.py:312 passes it
+   unconditionally). Fixed: xpu_overrides wraps the module-global
+   `_compiled_create_block_mask` (NOT create_attention_mask -- decoder binds that
+   by name at import) to strip the kwarg iff torch lacks it. Runs per-actor via
+   the _bootstrap apply_all_xpu_patches().
+
+### Final status: vendoring COMPLETE + VERIFIED
+- torchtitan side fully in-tree under experiments/ezpz/ (agpt gaps, refreshed
+  bridge, alphabet_sort_agpt overlay, launcher, build provisioning).
+- ZERO diffs in experiments/rl/ and torchtitan/models/** (confirm: git status).
+- monarch/torchstore/vllm stay external venv deps (build script provisions them +
+  saforem2/ezpz --no-deps + the documented vllm mem fallback).
+- vLLM: NOT forked/PR'd -- upstream get_mem_info_wrapper already fixes the mem bug.
