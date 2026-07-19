@@ -115,7 +115,8 @@ VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --link-mode=copy \
     diskcache mistral-common ray starlette anyio h11 httptools websockets watchfiles \
     python-multipart openai-harmony pybase64 cachetools uvloop xgrammar llguidance \
     opentelemetry-api opentelemetry-sdk tabulate depyf astor \
-    torchdata tyro spmd-types tensorboard wandb pillow
+    torchdata tyro spmd-types tensorboard wandb pillow \
+    "renderers @ git+https://github.com/PrimeIntellect-ai/renderers.git@main"
 
 echo ""
 echo "=== Step 6: HF/training deps at recipe pins ==="
