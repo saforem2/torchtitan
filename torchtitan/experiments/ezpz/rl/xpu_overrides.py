@@ -945,26 +945,31 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
 
     import torchtitan.models.common.attention as _attn
 
-    if not hasattr(_attn, "create_attention_mask"):
+    # decoder.py binds `create_attention_mask` by name at import, so patching that
+    # module attribute is bypassed. create_attention_mask calls the module-global
+    # `_compiled_create_block_mask(*args, **kwargs)` (looked up at call time), so
+    # wrap THAT to strip the unsupported kwarg.
+    if not hasattr(_attn, "_compiled_create_block_mask"):
         raise RuntimeError(
-            "xpu_overrides: torchtitan.models.common.attention.create_attention_mask "
-            "not found -- upstream renamed it; update "
+            "xpu_overrides: torchtitan.models.common.attention."
+            "_compiled_create_block_mask not found -- upstream renamed it; update "
             "patch_create_block_mask_separate_full_blocks_for_xpu."
         )
-    if getattr(_attn.create_attention_mask, "_xpu_sfb_patched", False):
+    if getattr(_attn._compiled_create_block_mask, "_xpu_sfb_patched", False):
         return
 
-    _orig = _attn.create_attention_mask
+    _orig = _attn._compiled_create_block_mask
 
     def _no_sfb(*args, **kwargs):
         kwargs.pop("separate_full_blocks", None)
         return _orig(*args, **kwargs)
 
     _no_sfb._xpu_sfb_patched = True  # type: ignore[attr-defined]
-    _attn.create_attention_mask = _no_sfb
+    _attn._compiled_create_block_mask = _no_sfb
     print(
         f"[xpu_overrides pid={os.getpid()}] "
-        "Patched create_attention_mask to drop unsupported separate_full_blocks kwarg"
+        "Patched _compiled_create_block_mask to drop unsupported "
+        "separate_full_blocks kwarg"
     )
 
 
