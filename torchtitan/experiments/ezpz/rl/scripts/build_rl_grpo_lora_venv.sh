@@ -137,6 +137,17 @@ echo "  ldd check -- libccl should resolve to SYSTEM oneapi, not the venv:"
 ldd "${VENV}/lib/python3.12/site-packages/torch/lib/libtorch_xpu.so" 2>/dev/null | grep -i ccl || true
 
 echo ""
+echo "=== Step 8b: ezpz (agpt model needs it) + vllm XPU mem-info fallback ==="
+# ezpz.agpt does `import ezpz`; install saforem2/ezpz WITHOUT deps so it cannot
+# pull a CUDA torch over the XPU build.
+VIRTUAL_ENV="${VENV}" "$UV" pip install --no-cache --no-deps --link-mode=copy \
+    "git+https://github.com/saforem2/ezpz" || true
+# vLLM XPU free-mem fallback (idempotent; see the helper for why it may be a no-op).
+MEMU="${VENV}/lib/python3.12/site-packages/vllm/utils/mem_utils.py"
+[ -f "$MEMU" ] || MEMU="${SRC}/vllm/vllm/utils/mem_utils.py"
+PATCH_DIR="$(dirname "$0")/grpo_lora_agpt2b_patches"
+"${VENV}/bin/python" "${PATCH_DIR}/patch_vllm_xpu_mem.py" "$MEMU" || true
+
 echo "=== Step 9: verify imports (build gate) ==="
 "${VENV}/bin/python" -c "
 import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_available(), torch.xpu.device_count())
@@ -147,6 +158,8 @@ import vllm_xpu_kernels; print('vllm_xpu_kernels OK')
 import monarch; from monarch.actor import Actor, endpoint, this_host; print('monarch OK')
 import torchstore; from torchstore.transport import TransportType; print('torchstore OK')
 import torchtitan.experiments.rl as rl; print('fork torchtitan.experiments.rl OK')
+import ezpz; print('ezpz', getattr(ezpz, '__version__', '?'))
+from torchtitan.experiments.ezpz.agpt import model_registry as _mr; print('ezpz.agpt OK')
 print('ALL IMPORTS OK')
 "
 echo ""
