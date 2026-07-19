@@ -286,3 +286,48 @@ Stages 0-3 reproduce; xccl works; USM wall crossed. Stage 4 spawns actors +
 reaches runtime but an actor dies during setup with its error not yet captured.
 12 bugs fixed. The reproduction is blocked on OBSERVABILITY (getting the actor
 traceback), then likely 1-2 more fixes.
+
+## Stage 4 -- CLEAN diagnosis 2026-07-19 (after clearing harness noise)
+
+IMPORTANT: several prior "Stage 4 failures" were self-inflicted harness bugs, now
+fixed: (a) double-launch collision (relaunched on a node with a still-running
+instance -> "stop called twice" panic); (b) over-aggressive grep/tail log
+filtering that hid real errors; (c) `set -e` + `module load` (Lmod exits nonzero)
+killed the script before any output -- the CLAUDE.md "no set -euo in PBS scripts"
+rule; (d) `nohup` through nested-ssh not surviving -> use
+`setsid ... </dev/null & disown`. After clearing ALL of these, a single clean
+2-tile run gives the REAL root cause.
+
+**CONFIRMED root cause of bug #12: per-actor XPU tile isolation fails on Sunspot.**
+Clean run (trainer dp_shard=1 + generator dp=1/tp=1 = 2 tiles, gpu_mem 0.70):
+- dataset loads, actor layout "1 gen + 1 trainer = 2 total",
+- trainer PolicyTrainer builds its device mesh (dp_shard=1) -- takes a tile,
+- generator VLLMGenerator.__init__ -> init_device ->
+  ValueError: Free memory on device xpu:0 (0.0/60.79 GiB) < utilization 0.7.
+
+BOTH actors land on physical xpu:0: the trainer fills it, the generator finds
+0.0 free. The per-proc ZE_AFFINITY_MASK rewrite (train.py PerHostProvisioner
+allocates disjoint tile ids [0] vs [1] and monarch forwards ZE_AFFINITY_MASK) is
+NOT isolating them on Sunspot's FLAT 12-tile topology. Monarch's own
+_warn_if_setup_changed_accel_env_too_late did NOT fire, so it is not the classic
+"mask set after xpu init" -- more likely the global launcher
+ZE_AFFINITY_MASK=0,1,2,3 (which the recipe also sets, but on Borealis exposed 4
+discrete devices) interacts with FLAT so both actors resolve to tile 0.
+
+### Next-session plan (the real, narrowed bug)
+1. Do NOT set a global ZE_AFFINITY_MASK in the launcher; let monarch/the
+   provisioner assign per-actor masks from a clean base (test whether it then
+   picks distinct physical tiles).
+2. OR set ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE (6 GPUs) so tile ids map to whole
+   GPUs and 2 actors get 2 distinct GPUs.
+3. Verify by logging each actor's effective ZE_AFFINITY_MASK +
+   torch.xpu.current_device inside the bootstrap.
+4. Once gen+trainer are on distinct tiles, the 2-tile smoke should reach rollout
+   + reward; then scale to the 4-tile config.
+
+### HONEST STATUS
+- Build (Stages 0-2): reproduced. USM wall (Stage 3): crossed. xccl: works.
+- Full GRPO+LoRA run (Stage 4): NOT reproduced. Blocked on per-actor XPU tile
+  isolation (both actors -> xpu:0) on Sunspot FLAT topology. A real, specific,
+  narrowed bug (not the USM wall) -- reproduction is one device-placement fix
+  from the first reward.
