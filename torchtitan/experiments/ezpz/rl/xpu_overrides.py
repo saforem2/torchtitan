@@ -923,6 +923,51 @@ def patch_fsdp2_force_sum_reduction_for_xpu() -> None:
             _mod.fsdp2_prepare_model = patched
 
 
+def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
+    """Drop the ``separate_full_blocks`` kwarg when torch's create_block_mask
+    lacks it.
+
+    Core ``models/common/decoder.py`` calls
+    ``create_attention_mask(..., separate_full_blocks=not is_in_batch_invariant_mode())``
+    (attention.py wraps torch's ``create_block_mask``). Older/other torch builds
+    -- including our XPU wheel -- do not accept that kwarg, so the trainer's flex
+    forward raises ``TypeError: create_block_mask() got an unexpected keyword
+    argument 'separate_full_blocks'``. Rather than edit core (songhappy dec51385
+    gated it inline), wrap the experiment-facing ``create_attention_mask`` to strip
+    the kwarg iff torch does not support it. No-op when torch already supports it.
+    """
+    import inspect as _inspect
+
+    from torch.nn.attention.flex_attention import create_block_mask as _cbm
+
+    if "separate_full_blocks" in _inspect.signature(_cbm).parameters:
+        return  # torch supports it -> nothing to do
+
+    import torchtitan.models.common.attention as _attn
+
+    if not hasattr(_attn, "create_attention_mask"):
+        raise RuntimeError(
+            "xpu_overrides: torchtitan.models.common.attention.create_attention_mask "
+            "not found -- upstream renamed it; update "
+            "patch_create_block_mask_separate_full_blocks_for_xpu."
+        )
+    if getattr(_attn.create_attention_mask, "_xpu_sfb_patched", False):
+        return
+
+    _orig = _attn.create_attention_mask
+
+    def _no_sfb(*args, **kwargs):
+        kwargs.pop("separate_full_blocks", None)
+        return _orig(*args, **kwargs)
+
+    _no_sfb._xpu_sfb_patched = True  # type: ignore[attr-defined]
+    _attn.create_attention_mask = _no_sfb
+    print(
+        f"[xpu_overrides pid={os.getpid()}] "
+        "Patched create_attention_mask to drop unsupported separate_full_blocks kwarg"
+    )
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -948,6 +993,7 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_make_replicate_for_xpu()
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
+    patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
     # Force FSDP2 grad reduce-scatter to SUM+divide (oneCCL lacks AVG on the
     # scheduler path). Correct regardless of transport; needed for
