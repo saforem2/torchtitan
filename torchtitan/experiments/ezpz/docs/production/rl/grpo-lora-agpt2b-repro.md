@@ -88,3 +88,37 @@ coherent); adapter permute (bit-exact round-trip); gross RoPE convention (cos~1)
 | Model math / RoPE (single-token vs HF) | VERIFIED correct (Paris) |
 | Multi-token coherent generation | NOT yet (small compounding residual) |
 | Rising reward on alphabet_sort | NOT yet (blocked on above + likely OOD) |
+
+## ROOT CAUSE FOUND 2026-07-19 PM: bf16 precision in the vLLM path (fp32 fixes it)
+
+The agpt-2b gibberish is a **bf16 numerical-precision failure in the vLLM
+inference path** -- NOT the port, adapter, RoPE, RL harness, or weight-sync.
+
+**Decisive test -- bare vLLM (no Monarch, no RL loop, no LoRA, no weight-sync),
+same prompt/weights/engine, only dtype differs:**
+```
+dtype=bfloat16 -> "5.ciptakan,. Đóeld. Đóeld. Đóeldmanshipally, formulates..."   GIBBERISH
+dtype=float32  -> "Here is a Python solution using the built-in sort function:
+                   def sort_names(names): return sorted(names, key=lambda x: x[1])..."   COHERENT
+```
+The fp32 output matches HF's greedy completion (HF also answered with a Python
+`sort_names`). So agpt-2b runs correctly in fp32 and breaks in bf16 through vLLM.
+
+This reconciles ALL prior evidence: the per-position teacher-forced HF-vs-TT logit
+A/B was cos~1.0 almost everywhere (tiny per-op bf16 error) with occasional flips;
+those tiny errors **compound over autoregressive greedy decode** in bf16 into
+divergence, while fp32 has the headroom to stay coherent. The single-token prefill
+test passed (one step, no compounding); multi-token generation failed (compounding).
+
+**Why agpt-2b and not Qwen3-0.6B (which works in bf16):** agpt-2b has vocab 256000
+(vs Qwen ~151k) + larger FFN (11008) -> bigger matmuls accumulate more bf16 error,
+and a flatter logit distribution where bf16 rounding flips the greedy argmax.
+
+**FIX:** run the generator in fp32 (`--generator.model-dtype=float32`). The trainer
+already casts the lm_head to fp32 (LMHeadCastConverter) for logprob/KL; the
+generator's vLLM forward needs fp32 too for coherent sampling. Verified in bare
+vLLM; RL smoke re-run with `--generator.model-dtype=float32
+--trainer.training.dtype=float32` (job 12471035).
+
+Credit: the user proposed both the bare-vLLM trace and the fp32 test -- together
+they cracked it.
