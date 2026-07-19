@@ -7,7 +7,10 @@ Reinforcement learning (GRPO) for AuroraGPT / Qwen3 on ALCF XPU systems
 
 There are two independent GRPO stacks. TRL is the mature, multi-node-validated
 path; the Monarch stack is the upstream `torchtitan.experiments.rl` engine,
-recently vendored into our repo and verified.
+recently vendored into our repo and verified (2026-07-19).
+
+> [!NOTE]
+> See [GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900](history/grpo-lora-agpt2b-repro.md)
 
 | # | Path | Framework | Generation | Entry point | venv | Status | Doc |
 |---|------|-----------|------------|-------------|------|--------|-----|
