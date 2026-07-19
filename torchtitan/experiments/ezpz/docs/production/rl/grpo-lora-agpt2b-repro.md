@@ -209,3 +209,31 @@ vs policy_version. `rl_feed3.sh` pulls the reward stream over SSH and aggregates
 `max_policy_version` (the model-version = training-step axis). uv venv with
 kitcat + ambivalent + matplotlib==3.9.2 (ambivalent needs style.core, removed in
 mpl 3.10+) + ipython (ambivalent needs it or styles silently fail to load).
+
+### v5 learning curve (actual numbers, by policy version)
+
+```
+v0 : 0.167  (baseline, untrained ckpt-900 on the easy task)
+v10: 0.221
+v20: 0.210
+v30: 0.224
+v40: 0.240
+v50: 0.244
+v51: 0.268  (peak so far)
+```
+
+Mean reward climbs 0.167 -> ~0.25 over 52 policy versions -- a clean GRPO learning
+curve on Intel XPU (full Monarch + TorchStore + vLLM + FSDP stack). recent_mean
+crossed 0.25 (+50% over baseline) at n~1978 rollouts.
+
+**Honest nuance:** the fraction of near-perfect sorts (reward >= 0.5) actually
+DROPPED toward 0% while the mean rose. GRPO is raising the FLOOR (more
+partially-correct sorts), not producing more perfect ones -- the expected behavior
+of optimizing a linear-reward average: the cheapest average gain is lifting the
+many low-scorers, not perfecting the few high-scorers. So "reward climbs" here
+means "the typical answer got moderately better," not "it learned to sort
+perfectly more often." A rank/step-function reward (or KL-annealing) would push
+toward the latter; left as a follow-up.
+
+v4 (default task) and v6 (lr 5e-5) stayed flat at ~0.13 throughout -- the easy
+task (v5) is the only run that learned.
