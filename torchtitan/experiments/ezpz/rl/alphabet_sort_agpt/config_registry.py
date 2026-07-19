@@ -35,6 +35,8 @@ the generator uses vLLM's own attention regardless.
 
 from __future__ import annotations
 
+import torch
+
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.lora import LoRAConverter
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
@@ -113,6 +115,20 @@ def _agpt_grpo_config(
     max_names_per_turn: int,
     lr: float,
 ) -> Controller.Config:
+    # Disable FlexAttention max_autotune on XPU (backward autotuning exceeds XPU
+    # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
+    # before the model is compiled; recompile the cached flex kernel.
+    from torch.nn.attention.flex_attention import flex_attention
+    from torchtitan.models.common.attention import FlexAttention
+
+    FlexAttention.inductor_configs = {
+        **FlexAttention.inductor_configs,
+        "max_autotune": False,
+        "coordinate_descent_tuning": False,
+    }
+    FlexAttention._compiled_flex_attn = torch.compile(
+        flex_attention, options=FlexAttention.inductor_configs
+    )
     return Controller.Config(
         model_spec=_agpt_rl_model_spec(),
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.

@@ -439,10 +439,14 @@ agpt_configs = {
         vocab_size=256000,
         hidden_dim=11008,
         fuse_qkv=True,
-        # varlen: the RL vLLM generator asserts varlen|flex attention
-        # (generator.py:799), and XPU lacks a working FlexAttention backend, so
-        # varlen is the correct choice (also avoids the flex block-mask compile).
-        attn_backend="varlen",
+        # flex: matches the proven-working fork run (v4/v5/v6). The RL vLLM
+        # generator asserts varlen|flex (generator.py:799) then REPLACES
+        # inner_attention with its own VLLMAttentionWrapper, so the generator
+        # uses vLLM attention regardless; the trainer uses flex. varlen fails on
+        # XPU (aten::_flash_attention_forward_no_dropout_inplace not implemented).
+        # The config fn disables FlexAttention max_autotune to avoid XPU
+        # OUT_OF_RESOURCES on the backward.
+        attn_backend="flex",
     ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
