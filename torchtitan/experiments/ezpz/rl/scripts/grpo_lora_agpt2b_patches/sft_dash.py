@@ -119,8 +119,12 @@ REPO = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan")
 RUN_LOG_GLOB = os.environ.get(
     "SFT_LOG_GLOB", "logs/sft-agpt2b-gsm8k-r1cot-8n-*/run.log")
 RUN_GLOBS = [RUN_LOG_GLOB]  # overridden from argv in __main__
+# --auto <glob>: expand to EVERY matching run.log each refresh (auto-discovers new
+# runs). Default watches all CoT GRPO runs. Set to "" to disable auto mode.
+AUTO_GLOB = os.environ.get("RL_AUTO_GLOB", "")
 # distinct colors when overlaying multiple runs.
-RUN_COLORS = ["#4c78a8", "#e45756", "#59a14f", "#b279a2", "#f0a24b", "#888888"]
+RUN_COLORS = ["#4c78a8", "#e45756", "#59a14f", "#b279a2", "#f0a24b", "#888888",
+              "#54a24b", "#eeca3b", "#b279a2", "#ff9da6"]
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
@@ -233,10 +237,47 @@ def fetch(glob_pat=None):
     return {"rows": [], "final": None, "log": None}
 
 
+# remote one-liner: expand a wildcard into every matching run.log path (newest
+# last), so --auto discovers new runs automatically each refresh.
+_LIST = (
+    "import glob,os,json;"
+    "os.chdir(%r);"
+    "print(json.dumps(sorted(glob.glob(%r), key=os.path.getmtime)))"
+)
+
+
+def list_runs(glob_pat):
+    script = _LIST % (REPO, glob_pat)
+    if LOCAL:
+        r = subprocess.run([sys.executable, "-c", script],
+                           capture_output=True, text=True, timeout=60)
+    else:
+        import base64
+        b64 = base64.b64encode(script.encode()).decode()
+        r = subprocess.run(
+            ["ssh", "-o", "ControlPath=" + SOCK, SSH_TGT,
+             "echo %s | base64 -d | python3" % b64],
+            capture_output=True, text=True, timeout=60)
+    import json
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            try:
+                return json.loads(line)
+            except Exception:
+                pass
+    return []
+
+
 def fetch_all():
-    """One fetch per configured glob -> list of run dicts (skip empty)."""
+    """One fetch per run. In --auto mode, AUTO_GLOB is expanded to every matching
+    run.log first (so new runs appear automatically); otherwise use RUN_GLOBS."""
+    globs = RUN_GLOBS
+    if AUTO_GLOB:
+        found = list_runs(AUTO_GLOB)
+        globs = found or [AUTO_GLOB]  # exact paths -> one series per run
     out = []
-    for g in RUN_GLOBS:
+    for g in globs:
         d = fetch(g)
         d["glob"] = g
         out.append(d)
@@ -352,15 +393,21 @@ def _status_line(data):
 
 
 def main():
-    multi = len(RUN_GLOBS) > 1
-    print("Live dashboard (%d run%s, kitcat+ambivalent). Ctrl-C to stop."
-          % (len(RUN_GLOBS), "s" if multi else ""))
+    if AUTO_GLOB:
+        print("Live dashboard (AUTO: %s, auto-discovers new runs). Ctrl-C to stop."
+              % AUTO_GLOB)
+    else:
+        n = len(RUN_GLOBS)
+        print("Live dashboard (%d run%s, kitcat+ambivalent). Ctrl-C to stop."
+              % (n, "s" if n > 1 else ""))
     while True:
         try:
             runs = fetch_all()
         except Exception as e:
             runs = []
             print("fetch error:", e)
+        # auto mode (or >1 configured glob) -> overlay; else single-run panels.
+        multi = bool(AUTO_GLOB) or len(RUN_GLOBS) > 1
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
         print("[%s]" % time.strftime("%H:%M:%S"))
@@ -370,8 +417,9 @@ def main():
             draw_overlay(runs, *terminal_pixels())
         elif runs:
             draw(runs[0], *terminal_pixels())
-        # stop only when EVERY run is complete (single-run: as before).
-        if runs and all(d.get("final") for d in runs):
+        # stop when every run is complete -- but NOT in auto mode, where new runs
+        # may still appear (keep watching until Ctrl-C).
+        if not AUTO_GLOB and runs and all(d.get("final") for d in runs):
             print("all runs complete -- stopping.")
             break
         try:
@@ -394,4 +442,12 @@ if __name__ == "__main__":
         if globs:
             RUN_GLOBS = globs
             RUN_LOG_GLOB = globs[0]
+    # --auto [glob]: overlay+auto-discover EVERY matching run.log (new runs appear
+    # on each refresh). Bare --auto defaults to all CoT GRPO runs.
+    if "--auto" in sys.argv:
+        j = sys.argv.index("--auto") + 1
+        if j < len(sys.argv) and not sys.argv[j].startswith("--"):
+            AUTO_GLOB = sys.argv[j]
+        else:
+            AUTO_GLOB = "logs/grpo-agpt2b-gsm8k-reason-cot*/run.log"
     main()
