@@ -1,6 +1,6 @@
 #!/bin/bash --login
 #PBS -A datascience
-#PBS -l walltime=04:00:00
+#PBS -l walltime=06:00:00
 #PBS -l filesystems=tegu:home
 #PBS -l select=9
 #PBS -q workq
@@ -12,7 +12,7 @@
 # mirroring the validated aurora2b_sft_arithmetic_vllm_xnode.sh, with the two
 # CoT-specific changes: (1) the vLLM server runs fp32 (agpt-2b emits gibberish
 # in bf16 through vLLM -- confirmed by the Stage 0 eval), and (2)
-# max_completion_length is 700, not 64, so reasoning traces are not truncated.
+# VALIDATED CONFIG (smoke 12471153 cleared step 13): num_gen 4, completion 512,
 #
 # Layout (select=9): node 0 = vLLM server (fp32, tile 0); nodes 1-8 = 96 GRPO
 # trainer ranks. Output: outputs/grpo/agpt2b-gsm8k-reason-cot/
@@ -85,7 +85,7 @@ echo "[$(date +%T)] launching vllm-serve (fp32) on ${HEAD_NODE}" | tee -a "${LOG
         --dtype float32 \
         --host 0.0.0.0 --port "${VLLM_PORT}" \
         --gpu_memory_utilization 0.5 --enforce_eager \
-        --max_model_len 2048
+        --max_model_len 1024
 ) > "${SERVE_LOG}" 2>&1 &
 VLLM_PID=$!
 trap 'kill -TERM ${VLLM_PID} 2>/dev/null || true; sleep 2; kill -KILL ${VLLM_PID} 2>/dev/null || true' EXIT INT TERM
@@ -107,11 +107,11 @@ echo "[$(date +%T)] launching ${NTRAIN_RANKS} trainer ranks on ${NTRAIN_NODES} n
     --task gsm8k_reason \
     --model_name_or_path "${MODEL}" \
     --output_dir "${CKPT_DIR}" \
-    --per_device_train_batch_size 1 --num_generations 8 \
-    --max_completion_length 700 --temperature 0.7 \
+    --per_device_train_batch_size 1 --num_generations 4 \
+    --max_completion_length 512 --temperature 0.7 \
     --max_steps 400 --learning_rate 1e-6 --beta 0.0 --bf16 --fsdp full_shard \
     --gradient_checkpointing \
-    --logging_steps 1 --save_strategy steps --save_steps 50 --save_total_limit 5 \
+    --logging_steps 1 --save_strategy steps --save_steps 25 --save_total_limit 10 \
     --report_to wandb --resume_from_checkpoint "${CKPT_DIR}" \
     --use_vllm --vllm_mode server --vllm_server_base_url "${VLLM_URL}" \
     --vllm_server_timeout 600 \
