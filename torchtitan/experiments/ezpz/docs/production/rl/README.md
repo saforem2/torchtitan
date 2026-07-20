@@ -102,3 +102,7 @@ Two venvs (both py3.12, torch 2.12+xpu, triton-xpu 3.7.1):
 
 NEVER `pip install` torch or its deps without `--no-deps` (silently replaces the
 XPU torch with a CUDA build).
+
+## Plans
+
+- [Teaching agpt-2b chain-of-thought reasoning](plans/cot.md) -- staged R1-style recipe (cold-start CoT-SFT -> GRPO-RLVR), applies the reward-shaping result
