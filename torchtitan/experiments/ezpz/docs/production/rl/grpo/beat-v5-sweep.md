@@ -38,7 +38,7 @@ a distinct lever.
 **Takeaway:** capacity (LoRA rank) is the most promising lever, but the *mean*
 ceiling is set by the reward function -- lifting it needs reward-shaping, not more
 tuning. That is confirmed by the [ceiling-attack](./ceiling-attack.md), which
-breaks the ~0.25 wall (+85% on the identical metric) by componentizing the reward.
+breaks the ~0.25 wall (+168% on the identical metric) by componentizing the reward.
 
 ## Repro
 

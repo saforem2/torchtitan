@@ -55,14 +55,15 @@ reconstruction is exact -- so the shaped number is trustworthy.
 | w1 | 0.249 | lr 5e-5 |
 | w2 | 0.237 | LoRA rank 32 |
 | w3 | 0.237 | lr 5e-5 + 16 groups |
-| **shaped** | **0.462** (through v80, still climbing) | **componentized reward** |
+| **shaped** | **0.667** (final, 100 steps) | **componentized reward** |
 
-**The tuning cluster is flat at ~0.24-0.25; the shaped run reaches 0.462 on the
-same metric -- +85% in genuine task performance, not a scoring artifact.** The
+**The tuning cluster is flat at ~0.24-0.25; the shaped run reaches 0.667 on the
+same metric -- +168% in genuine task performance, not a scoring artifact.** The
 gain shows up even under the old saturating reward, because the model actually
 learned to sort better; the order-specific gradient was the missing ingredient.
-On its own (shaped) scale the run climbs 0.18 -> ~0.50 and is still rising -- the
-healthy learning curve the char-ratio reward never produced.
+On its own (shaped) scale the run climbs 0.18 -> ~0.67 across the full 100
+steps without plateauing -- the healthy learning curve the char-ratio reward
+never produced.
 
 **Takeaway:** for a saturating/noisy reward, reward-shaping beats every
 hyperparameter lever. The ~0.25 wall was a property of the reward function, and
