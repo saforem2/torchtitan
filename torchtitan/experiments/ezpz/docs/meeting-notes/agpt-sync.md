@@ -4,6 +4,213 @@
 
 ---
 
+## 2026-07-20
+
+### Headline: 80B NaN re-root-caused (bf16 activation overflow, not the optimizer); new clean Polaris A100 20B chain; the bulk of the effort went into RL/GRPO+Monarch on XPU, which seeded a brand-new chain-of-thought teaching front
+
+Covers the ~2 weeks since 2026-07-06. Production held steady (2B base
+COMPLETE, 20B advancing, 80B still blocked); the new work is a re-diagnosis
+of the 80B wall, a from-scratch Polaris chain, and a large RL push (Monarch
+GRPO+LoRA vendored in-tree, a reward-ceiling break, and the first CoT-teaching
+stages).
+
+### 1. Production pre-training
+
+**80B -- still the top blocker, but re-diagnosed.**
+
+- NaN re-root-caused 2026-07-14 as a **bf16 residual-stream activation
+  overflow, NOT an optimizer bug**: SophiaG (512N, step-14) and mano
+  (dp~186, step-17) NaN with the *identical* flat grad_norm ~6.0 signature,
+  and mano has no Hessian term -> optimizer-independent (the old
+  SophiaG-vs-mano decision is now moot).
+- Smoking gun: the fp32-activations run (job 8537349, 20 steps) trains clean
+  and exposes **true grad_norms of 21K-79K** that bf16 was silently masking
+  down to ~5-7. Loss softmax and grad-reduction both ruled out in code.
+- The Llama3-405B-style fix (bf16 GEMMs, fp32 only at residual + norm
+  boundaries) trains clean at 4N but **still NaNs at dp=192** (job 8671243,
+  step-19) -- per-block fp32 add is necessary but not sufficient.
+- Only confirmed-clean config remains fp32 mixed-precision-param at TP=4
+  (8537349), ~3-5x slower; no 80B job is currently queued. Operational guard
+  added: 80B autoretry now sets `--nan-abort-consecutive=5` (the 512N NaN
+  wasted ~6,100 node-h before this).
+- Separate "Wall 2" (scale/init): 256N/dp=768 hits a GPU `NotPresent` init
+  segfault; 2048N SIGSEGV'd in `set_determinism` at 24,864 ranks; **1024N
+  (dp=3066, job 8574386) is the untested bracket** that decides whether 512N
+  is the practical 80B max.
+
+**Polaris (A100) -- new, and it just works.**
+
+- New SophiaG/dolma **20B chain on leg 5** (job 7252666): persisted step
+  1,300 / live ~1,400, loss **2.31** (from 12.95), ~14.7B tokens over four
+  clean 12h legs -- already matching the mature 2B chain's loss (2.36) at
+  ~half the tokens. Clean SophiaG convergence at 2B and 20B on A100 is a
+  direct contrast to the Aurora 80B bf16 wall.
+- Polaris 2B reached step 5,300 / loss 2.36 (~22.6B tokens) and is idle.
+  No leg-6 or 2B continuation queued -- afterany +1 chain discipline lapsed
+  on Polaris.
+
+**Aurora 2B / 20B.**
+
+- **2B 256N: COMPLETE** -- cont12 (8558531) finished clean at step 92,859 =
+  **4.674T tokens (100%)**, loss 2.652. This is the base for CPT + SFT;
+  final-ckpt eval still blocked on PM.
+- **20B 512N stall broken**: frozen at step-4,400 since 2026-05-29,
+  relaunched via native auto-retry (head 8638793 + cont 8638795) -> now
+  persisted **step 6,000, loss 2.47, 604.0B tokens (12.9%)**. step-4500 is
+  an empty/aborted save; eval re-run of the 4,400->6,000 tail is pending.
+- 2B 512N sync chain queue-starved ~25 days at step 38,900 / loss 2.71 /
+  83.8%; resubmitting cont10 (8521631) would reset accrued priority.
+
+### 2. Evaluation
+
+- New **eval-strategy review** (`evals/eval-landscape-2026-07.md`,
+  2026-07-17): our 7-benchmark commonsense suite is a good from-scratch
+  thermometer but "nearly useless for positioning vs modern peers" -- HF
+  retired all six OLL-v1 tasks in June 2024 for saturation, and we had **no
+  MMLU and no GSM8K at all**.
+- MMLU (5-shot), GSM8K (5-shot), ARC-Challenge (25-shot) added via a
+  mixed-few-shot loop and **backfilling now** -- but no AuroraGPT
+  MMLU/GSM8K/ARC-C numbers have landed in the docs yet.
+- **OLMo-2 (7B/13B)** named the single correct peer (same olmo-mix family,
+  OLMES suite). Today only HellaSwag overlaps cleanly: 20B ~0.61 vs OLMo-2
+  0.838/0.864 -- large but expected at 604B tokens (13%) vs peers' 9-11T.
+  Targets: MMLU 63.7, GSM8K 67.5.
+- 20B "no plateau" headline no longer holds: HellaSwag peaked **0.6339 at
+  step-4,400** then oscillates 0.60-0.63 (0.6086 at step-6,000). step-4,400
+  is best-per-benchmark (ARC-Easy 0.6932, PIQA 0.7650). IFEval and
+  BBH/GPQA/MATH/HumanEval deferred to instruct-tuning / more tokens.
+
+### 3. RL / GRPO / Monarch (Intel XPU) -- the biggest recent effort
+
+- **Reward ceiling broken (+168%):** a componentized shaped reward (format
+  0.2 + completeness 0.2 + order 0.6) hit **0.667** re-scored on the
+  *identical* char-ratio metric vs the tuning cluster's flat 0.237-0.249
+  (job 12471056, 100 steps), validated as not a scoring artifact. The
+  beat-v5 sweep first proved **no config lever** (LR, LoRA rank, group
+  count) beats the ~0.25 mean-reward ceiling -- the reward *shape* was the
+  wall.
+- **Monarch+TorchStore+vLLM GRPO+LoRA vendored in-tree** as a thin ezpz
+  overlay with **zero edits to experiments/rl or core** (all XPU compat via
+  runtime monkeypatches); job 12471049 fires train steps at ~1765 tok/s,
+  reward_mean 0.1607, matching the fork-based v5 baseline.
+- **agpt-2b gibberish root-caused to bf16** in the vLLM path (bare-vLLM
+  bf16 = gibberish, fp32 = coherent); fix is `--generator.model-dtype=float32`
+  (~30% slower but correct). Qwen3-0.6B GRPO+LoRA also reproduced on Sunspot
+  XPU crossing the USM/PMIx wall (~3256-3273 tok/s).
+- v5 GRPO+LoRA on agpt-2b shows a clean learning curve **0.167 -> 0.268**
+  (crossing 0.25 at ~1978 rollouts); the lever that mattered was task
+  difficulty, not LR.
+- The 2026-07-06 multi-trainer-node "desync hang" closed as **two ordinary
+  bugs** (oneCCL transport default + a mis-scoped AVG->SUM monkeypatch);
+  confirmation job 12470083 (3N, 24 ranks) ran all 8 steps to
+  accuracy_reward 0.375.
+- **Caveat:** everything runs on **TCP fabric, not Slingshot CXI** (~176
+  s/step at 3N); next lever is a per-group transport split. vLLM-XPU TP>1
+  (multi-tile server) still unexercised.
+
+### 4. Chain-of-Thought teaching -- new front (opened 2026-07-20)
+
+- New R1-style plan (`production/rl/plans/cot.md`): **cold-start CoT-SFT**
+  (teach the `<think>...</think><answer>\boxed{}</answer>` envelope) ->
+  **GRPO-RLVR** (reason well). RL-only R1-Zero explicitly rejected as
+  primary (kept as a falsifiable control); no teacher model needed.
+- **Stage 1 works**: envelope emission jumped **0.00 -> 0.955** with no
+  accuracy regression (CoT accuracy 0.15 -> 0.16), from a tiny 16-step / 8N
+  / 38s run on gsm8k's own re-wrapped rationales (base = checkpoint-900-hf).
+- Stage 0 built the first generation-based chat-templated GSM8K-CoT eval
+  (format hit-rate and CoT accuracy scored *separately*, answer read only
+  from the `<answer>`/`\boxed{}` span, fp32 vLLM).
+- Stage 2 applies the ceiling-attack lesson directly: `gsm8k_reason.py` uses
+  three additive rewards (think_format 0.2 + answer_extractable 0.1 +
+  answer_correct 0.7) instead of one saturating binary exact-match.
+- Stage 2 launchers built and **smoke-debugged**: an earlier xnode run hit
+  XPU `OUT_OF_RESOURCES` at step-13 (trainer peak mem = num_gen x
+  (prompt+completion), worsened by a never-EOS cold-start ckpt);
+  diagnosed-fixed at HEAD (commit 46f99a568) via num_gen 4, completion cap
+  512, expandable_segments. **A clean completed Stage 2 run is not yet
+  confirmed.**
+
+### 5. CPT / SFT
+
+- **Full-mix SFT finished but catastrophically forgot** at 1 epoch (step-8672:
+  loss 0.357 / mtacc 0.902 but HellaSwag 0.59->0.27, ARC-Easy 0.69->0.30) --
+  the **deliverable is checkpoint-900** (IFEval prompt-strict 0.253, base-LM
+  retained, strong GRPO start). Root cause: LR 2e-5 held above 1e-5 through
+  step ~4350. Lesson: cap full-mix SFT at O(1000) steps or drop LR. 12x more
+  tokens did NOT beat the small metamathqa-729 SFT.
+- **CPT pilot degraded benchmarks** via two modes (ratio-independent
+  HellaSwag drop from LR re-warm shock; ratio-dependent ARC-Easy bleed --
+  dolmino-100 0.619->0.547 but olmo50-dolmino50 held ~0.61). Relaunched as
+  gentle-LR (2e-6 constant) olmo50-dolmino50 (umbrella 8663177) + a
+  dolmino-100 gentle-LR arm (8662867). An 18-agent data-strategy memo
+  recommends a **stage-2 anneal now** (50-100B tokens, LR->0, science/math
+  upsample); the 2B is ~115x past Chinchilla-optimal.
+- **SFT capped at 8N**: 32N/384-rank deterministic GPU page fault (bisect:
+  2/4/8N clean, 12/16/32N crash, near the ~186-192 dp boundary) -- blocks
+  both the full-mix 32N run and the first v2-256n-base SFT. A /lus/tegu
+  disk-full incident (2026-07-13) cost ~1,150 steps of recompute.
+
+### 6. Development / infrastructure
+
+- **5 upstream syncs (64th-70th)**, two breaking: 70th (MoE #3859
+  sibling-experts) needed a 5-file structural replay (moe.experts ->
+  moe.routed_experts.inner_experts); 69th (#3923 moved Linear to
+  common/linear.py) needed import fixes. Both caught by `sync_smoke`,
+  re-smoked green.
+- **macOS/CPU single-device training** support landed (TORCH_DEVICE=cpu
+  overlay, no-op on XPU/CUDA); the old "Cannot import config_registry" was a
+  masked missing-triton import.
+- **Native ezpz auto-retry umbrella** (`smoke_multi_autoretry.sh`) replaces
+  legacy `failover_lib.sh`, which lost 3/4 chains to blind bad-node swaps.
+- Recurring drags: the 384-rank GPU page fault (pins SFT to 8N),
+  XPU-broken async-ckpt default on torch 2.13, an auto-retry classifier gap
+  (bad-node SIGSEGV misread as walltime -> no spare-swap), and persistent
+  **Aurora at_queue starvation** (3,487 nodes free on 07-09 yet the 1536N
+  umbrella eligible 70h+ without a slot). IPC-handle cache leak fixed via
+  CCL_ZE_CACHE thresholds.
+- Tooling: `refresh_all.sh` coverage gap fixed (cpt/sft/grpo/2b-mds plotters
+  wired in + a stale-doc coverage audit); training dashboards generalized to
+  SFT + GRPO with new multi-run reward overlays.
+
+### Decisions / asks for the team
+
+1. **80B fix path:** commit to fp32 mixed-precision-param at TP=4 as an
+   interim production path (only confirmed-clean, ~3-5x slower), or hold for
+   a full-depth fp32-residual fix (per-block prototype still NaNs at dp=192)?
+   Start the slow-but-stable run now, or wait?
+2. **80B Wall 2:** who investigates the 256N/dp=768 init GPU `NotPresent`
+   segfault, and do we run the 1024N (dp=3066, 8574386) bracket to settle
+   the practical 80B max? Also fix the auto-retry classifier so a bad-node
+   SIGSEGV triggers a spare-swap instead of a walltime stop.
+3. **Unblock SFT above 8N:** file an ALCF ticket for the deterministic
+   384-rank oneCCL/GPU page fault (onset ~96-144 ranks), or accept 8N as the
+   SFT ceiling? This blocks the full-mix 32N run and the v2-256n-base SFT.
+4. **CPT vs data-strategy memo:** wait for the gentle-LR dolmino retry
+   (8662867) before spending the full ~2.391T olmo50-dolmino50 budget? Does
+   the memo's "anneal now, LR->0, science/math upsample" supersede or fold
+   in? Assign an owner for stage-2 upsample weights.
+5. **SFT guardrails project-wide:** cap full-mix SFT at O(1000) steps (or
+   lower LR); enforce keep-latest-N COMPLETE ckpts + project-quota
+   monitoring to prevent another /lus/tegu disk-full drain.
+6. **Aurora 2B 512N (83.8%):** hold cont10 (8521631) for a slot (deploy
+   ezpz PR #160 first), or declare the completed 256N chain (4.674T, 100%)
+   the 2B deliverable and abandon 512N? (Resubmitting resets ~25 days of
+   priority.)
+7. **Peer scorecard:** confirm OLMo-2 (7B/13B) as the single primary peer;
+   present the commonsense suite as a training dashboard only; defer
+   competitive ranking until MMLU/GSM8K/ARC-C backfill.
+8. **RL next milestone + promotion:** prioritize the CoT GRPO-RLVR chain
+   (confirm a clean Stage 2 run on Aurora/Sunspot); resubmit the un-converged
+   10N ckpt-900 arithmetic GRPO (0.74) for convergence? Promote any
+   shaped-reward/v5 LoRA adapters (none promoted yet)?
+9. **Housekeeping:** queue Polaris 20B leg-6 behind 7252666; schedule the
+   blocked-on-PM eval of the completed Aurora 2B 256N final ckpt
+   (step-92,859); fix the 2B autoretry async-checkpoint default (XPU-broken
+   on torch 2.13); bring `journal.md` current (tail is 2026-04-25, no CoT
+   work recorded).
+
+---
+
 ## 2026-07-06
 
 ### Headline: 2B base closed out (eval) and three new fronts opened -- CPT sweep, multi-node GRPO solved, first SFT on the completed v2 base
