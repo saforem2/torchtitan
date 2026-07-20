@@ -130,6 +130,14 @@ INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
 SSH_TGT = os.environ.get("RL_SSH", "sunspot")
 SOCK = os.environ.get("RL_SOCK", "/tmp/sunspot-master.sock")
+# multiply every font size by this (RL_FONT_SCALE=1.6 for even bigger). Base sizes
+# below were tuned small for dense terminals; ~1.35 reads comfortably.
+FONT_SCALE = float(os.environ.get("RL_FONT_SCALE", "1.35"))
+
+
+def fs(base):
+    """Scaled font size."""
+    return base * FONT_SCALE
 
 # Metric panels for each run type. TRL's SFTTrainer and GRPOTrainer both emit
 # dict-log lines in the same shape, but different KEYS -- so we auto-detect
@@ -319,11 +327,11 @@ def draw(data, wpx, hpx):
             ax.plot([p[0] for p in pts], [p[1] for p in pts],
                     "-", lw=1.8, color=color)
             last = pts[-1][1]
-            ax.set_ylabel("%s\n(%.4g)" % (label, last), fontsize=8)
+            ax.set_ylabel("%s\n(%.4g)" % (label, last), fontsize=fs(8))
         else:
-            ax.set_ylabel(label, fontsize=8)
-        ax.tick_params(labelsize=7)
-    axes[-1].set_xlabel(xkey)
+            ax.set_ylabel(label, fontsize=fs(8))
+        ax.tick_params(labelsize=fs(7))
+    axes[-1].set_xlabel(xkey, fontsize=fs(9))
     final = data.get("final")
     kind = "GRPO" if is_grpo else "SFT"
     title = "agpt-2b %s -- %s" % (kind, data.get("log") or "(waiting)")
@@ -332,7 +340,7 @@ def draw(data, wpx, hpx):
         title += "  [DONE%s]" % ("" if fl is None else " train_loss=%.4g" % fl)
     elif rows:
         title += "  [%d log points]" % len(rows)
-    axes[0].set_title(title, fontsize=9)
+    axes[0].set_title(title, fontsize=fs(9))
     fig.tight_layout()
     plt.show()
     plt.close(fig)
@@ -370,12 +378,12 @@ def draw_overlay(runs, wpx, hpx):
                         "-", lw=1.6, color=color,
                         label=(label if ax is axes[0] else None))
     for ax, met in zip(axes, metrics):
-        ax.set_ylabel(met[1], fontsize=8)
-        ax.tick_params(labelsize=7)
-    axes[-1].set_xlabel("step" if is_grpo else "epoch")
-    axes[0].legend(loc="best", fontsize=7, ncol=min(len(runs), 3))
+        ax.set_ylabel(met[1], fontsize=fs(8))
+        ax.tick_params(labelsize=fs(7))
+    axes[-1].set_xlabel("step" if is_grpo else "epoch", fontsize=fs(9))
+    axes[0].legend(loc="best", fontsize=fs(7), ncol=min(len(runs), 3))
     axes[0].set_title("agpt-2b %s -- %d runs overlaid" %
-                      ("GRPO" if is_grpo else "SFT", len(runs)), fontsize=9)
+                      ("GRPO" if is_grpo else "SFT", len(runs)), fontsize=fs(9))
     fig.tight_layout()
     plt.show()
     plt.close(fig)
