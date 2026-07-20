@@ -126,7 +126,7 @@ AUTO_GLOB = os.environ.get("RL_AUTO_GLOB", "")
 # "C0", "C1", ... cycle references -- so the palette matches the theme instead of a
 # hardcoded list. Length covers plenty of concurrent runs; matplotlib wraps C-refs
 # to the cycle automatically, but we build the list explicitly for labeling.
-RUN_COLORS = ["C%d" % i for i in range(9)]  # ambivalent prop_cycle has 9 colors
+RUN_COLORS = ["C%d" % i for i in range(10)]  # Material prop_cycle has 10 colors
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
@@ -184,6 +184,22 @@ _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.low
 if _ios:
     plt.rcParams["font.family"] = next(
         (n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+# Material Design 500-level palette (well-spread hues, distinct at a glance),
+# installed as the prop_cycle so the C0..CN refs used everywhere resolve to it.
+MATERIAL = [
+    "#2196F3",  # blue
+    "#F44336",  # red
+    "#4CAF50",  # green
+    "#FF9800",  # orange
+    "#9C27B0",  # purple
+    "#00BCD4",  # cyan
+    "#FFC107",  # amber
+    "#E91E63",  # pink
+    "#795548",  # brown
+    "#607D8B",  # blue-grey
+]
+from cycler import cycler  # noqa: E402
+plt.rcParams["axes.prop_cycle"] = cycler(color=MATERIAL)
 plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
                      "axes.facecolor": "none"})
 
