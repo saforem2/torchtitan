@@ -61,6 +61,20 @@ stages).
 - 2B 512N sync chain queue-starved ~25 days at step 38,900 / loss 2.71 /
   83.8%; resubmitting cont10 (8521631) would reset accrued priority.
 
+**All Aurora production chains overlaid** (loss / TPS-per-GPU / MFU vs tokens):
+
+![All-production training overlay](../production/figures/all_production_training.svg)
+
+**New Polaris (A100) 20B chain** (loss + diagnostics, 128N, dolma/SophiaG):
+
+![Polaris 20B production](../production/polaris/figures/production_20b_polaris_128n.svg)
+
+See: [production rollup](../production/README.md) ·
+[2B](../production/agpt/2b/README.md) ·
+[20B](../production/agpt/20b/README.md) ·
+[80B](../production/agpt/80b/README.md) ·
+[Polaris](../production/polaris/README.md).
+
 ### 2. Evaluation
 
 - New **eval-strategy review** (`evals/eval-landscape-2026-07.md`,
@@ -79,6 +93,17 @@ stages).
   step-4,400** then oscillates 0.60-0.63 (0.6086 at step-6,000). step-4,400
   is best-per-benchmark (ARC-Easy 0.6932, PIQA 0.7650). IFEval and
   BBH/GPQA/MATH/HumanEval deferred to instruct-tuning / more tokens.
+
+**All-production eval overlay** (HellaSwag / ARC / Winogrande vs tokens) and
+the 20B eval detail:
+
+![All-production evals](../evals/figures/all_production_evals.svg)
+
+![20B eval overview](../evals/agpt/20b/figures/eval_overview.svg)
+
+See: [eval index](../evals/README.md) ·
+[eval-landscape review 2026-07](../evals/eval-landscape-2026-07.md) ·
+[20B evals](../evals/agpt/20b/README.md).
 
 ### 3. RL / GRPO / Monarch (Intel XPU) -- the biggest recent effort
 
@@ -108,6 +133,24 @@ stages).
   s/step at 3N); next lever is a per-group transport split. vLLM-XPU TP>1
   (multi-tile server) still unexercised.
 
+**Ceiling-attack** (shaped reward breaks the ~0.25 wall, +168%) and the
+**beat-v5 tuning sweep** (no config lever beats the ceiling):
+
+![GRPO ceiling-attack](../production/rl/grpo/aurora2b/charts/ceiling-attack.svg)
+
+![GRPO beat-v5 sweep](../production/rl/grpo/aurora2b/charts/beat-v5-sweep.svg)
+
+**sum_digits arithmetic GRPO** (8N, accuracy 0.09 -> 0.76 over 1000 steps):
+
+![GRPO arithmetic curves](../production/rl/grpo/aurora2b/sft_arithmetic/charts/grpo-curves.svg)
+
+See: [RL hub](../production/rl/README.md) ·
+[GRPO index](../production/rl/grpo/README.md) ·
+[ceiling-attack](../production/rl/grpo/ceiling-attack.md) ·
+[beat-v5 sweep](../production/rl/grpo/beat-v5-sweep.md) ·
+[Monarch](../production/rl/monarch.md) ·
+[TRL / cross-node vLLM](../production/rl/trl.md).
+
 ### 4. Chain-of-Thought teaching -- new front (opened 2026-07-20)
 
 - New R1-style plan (`production/rl/plans/cot.md`): **cold-start CoT-SFT**
@@ -128,7 +171,10 @@ stages).
   (prompt+completion), worsened by a never-EOS cold-start ckpt);
   diagnosed-fixed at HEAD (commit 46f99a568) via num_gen 4, completion cap
   512, expandable_segments. **A clean completed Stage 2 run is not yet
-  confirmed.**
+  confirmed.** (No chart yet -- Stage 2 curves land once a clean run
+  completes.)
+
+See: [CoT-teaching plan](../production/rl/plans/cot.md).
 
 ### 5. CPT / SFT
 
@@ -149,6 +195,23 @@ stages).
   2/4/8N clean, 12/16/32N crash, near the ~186-192 dp boundary) -- blocks
   both the full-mix 32N run and the first v2-256n-base SFT. A /lus/tegu
   disk-full incident (2026-07-13) cost ~1,150 steps of recompute.
+
+**CPT pilot: loss beats the plateau but downstream eval DEGRADES** (the
+loss/eval divergence is the whole story):
+
+![CPT loss](../production/cpt/figures/cpt_loss.svg)
+
+![CPT downstream eval](../production/cpt/figures/cpt_eval.svg)
+
+**Full-mix SFT eval** (base-LM collapse at step-8672 -> ckpt-900 is the
+deliverable):
+
+![Full-mix SFT eval curves](../production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/charts/eval-curves.svg)
+
+See: [CPT sweep](../production/cpt/README.md) ·
+[SFT index](../production/sft/README.md) ·
+[full-mix SFT evals](../production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) ·
+[data-strategy memo](../notes/data-strategy-after-olmo-mix-2026-07.md).
 
 ### 6. Development / infrastructure
 
