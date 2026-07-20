@@ -379,6 +379,71 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# gsm8k-r1cot -- gsm8k reformatted into the <think>/<answer> CoT envelope
+# ---------------------------------------------------------------------------
+
+
+def _build_gsm8k_r1cot() -> Dataset:
+    """gsm8k reformatted to teach the R1-style reasoning envelope.
+
+    Reuses gsm8k's own step-by-step rationale (the ``answer`` field, which
+    already ends in ``#### N``) but wraps it as
+    ``<think>{rationale}</think>\n<answer>\\boxed{{N}}</answer>`` so the model
+    learns to EMIT a delimited reasoning trace + boxed final answer. This is the
+    Stage 1 cold-start for the CoT plan
+    (docs/production/rl/plans/cot.md) -- teaches the FORMAT from gsm8k's own
+    data, no teacher model required.
+
+    Two details that matter:
+      - the completion content starts directly with ``<think>`` (no leading
+        newline); the gemma chat template lstrips a leading ``\n`` on the
+        assistant turn, which otherwise trips TRL's prompt/completion
+        tokenization-mismatch and silently breaks the assistant-only loss mask.
+      - the user prompt suffix is byte-identical to the Stage 0 eval's
+        (scripts/eval/eval_cot_gsm8k.py) so train and eval prompts match.
+    """
+    import re
+
+    from datasets import load_dataset
+
+    raw = load_dataset("openai/gsm8k", "main", split="train")
+    calc_re = re.compile(r"<<[^>]*>>")  # gsm8k inline calculator annotations
+    suffix = (
+        "\nReason step by step inside <think></think>, then give the final "
+        "answer inside <answer>\\boxed{}</answer>."
+    )
+
+    def _format(ex):
+        answer = ex["answer"]
+        if "####" in answer:
+            cot, final = answer.split("####", 1)
+        else:
+            cot, final = answer, ""
+        cot = calc_re.sub("", cot).strip()
+        final = final.strip().replace(",", "")
+        completion = f"<think>{cot}</think>\n<answer>\\boxed{{{final}}}</answer>"
+        return {
+            "prompt": [{"role": "user", "content": ex["question"] + suffix}],
+            "completion": [{"role": "assistant", "content": completion}],
+        }
+
+    return raw.map(_format, remove_columns=raw.column_names)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="gsm8k-r1cot",
+        build=_build_gsm8k_r1cot,
+        description=(
+            "gsm8k rationales wrapped in the <think>/<answer> R1-style CoT "
+            "envelope (openai/gsm8k 'main', 7473 examples). Stage 1 cold-start "
+            "for teaching agpt-2b to emit reasoning traces; no teacher needed."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # metamathqa — augmented + rephrased GSM8K+MATH, ~400k examples
 # ---------------------------------------------------------------------------
 
