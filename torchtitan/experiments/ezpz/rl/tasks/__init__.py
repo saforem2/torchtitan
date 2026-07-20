@@ -53,3 +53,4 @@ from torchtitan.experiments.ezpz.rl.tasks import countdown as _  # noqa: F401, E
 from torchtitan.experiments.ezpz.rl.tasks import multiply as _  # noqa: F401, E402
 from torchtitan.experiments.ezpz.rl.tasks import sum_digits as _  # noqa: F401, E402
 from torchtitan.experiments.ezpz.rl.tasks import word_sort as _  # noqa: F401, E402
+from torchtitan.experiments.ezpz.rl.tasks import gsm8k_reason as _  # noqa: F401, E402
