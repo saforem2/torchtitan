@@ -73,6 +73,9 @@ from torchtitan.experiments.rl.models.vllm_registry import InferenceParallelismC
 from torchtitan.experiments.rl.observability.metrics import MetricsProcessor
 from torchtitan.experiments.rl.renderer import RendererConfig
 from torchtitan.experiments.rl.rubrics import Rubric
+from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
+    ShapedRewardAlphabetSort,
+)
 
 
 def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
@@ -90,7 +93,9 @@ def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     )
 
 
-def _agpt_rollouter(*, max_turns: int, max_names_per_turn: int) -> AlphabetSortRollouter.Config:
+def _agpt_rollouter(
+    *, max_turns: int, max_names_per_turn: int, shaped: bool = False
+) -> AlphabetSortRollouter.Config:
     """Upstream AlphabetSortRollouter with: our few-shot env, a linear reward
     (similarity_power=1), and the given task difficulty."""
     return AlphabetSortRollouter.Config(
@@ -101,7 +106,11 @@ def _agpt_rollouter(*, max_turns: int, max_names_per_turn: int) -> AlphabetSortR
             seed=99, max_turns=max_turns, max_names_per_turn=max_names_per_turn
         ),
         rubric=Rubric.Config(
-            reward_fns=[RewardAlphabetSort.Config(weight=1.0, similarity_power=1)]
+            reward_fns=[
+                ShapedRewardAlphabetSort.Config(weight=1.0)
+                if shaped
+                else RewardAlphabetSort.Config(weight=1.0, similarity_power=1)
+            ]
         ),
         message_env=AgptFewShotAlphabetSortEnv.Config(),
     )
@@ -116,6 +125,7 @@ def _agpt_grpo_config(
     lr: float,
     lora_rank: int = 8,
     clip_eps: float = 0.2,
+    shaped_reward: bool = False,
 ) -> Controller.Config:
     # Disable FlexAttention max_autotune on XPU (backward autotuning exceeds XPU
     # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
@@ -148,7 +158,9 @@ def _agpt_grpo_config(
         ),
         compile=CompileConfig(enable=True, backend="aot_eager"),
         rollouter=_agpt_rollouter(
-            max_turns=max_turns, max_names_per_turn=max_names_per_turn
+            max_turns=max_turns,
+            max_names_per_turn=max_names_per_turn,
+            shaped=shaped_reward,
         ),
         # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
         # ckpt dir must carry a chat_template (SFT gemma template injected at staging
@@ -250,4 +262,21 @@ def rl_grpo_lora_agpt_2b_w3() -> Controller.Config:
         max_turns=1,
         max_names_per_turn=3,
         lr=5e-5,
+    )
+
+
+def rl_grpo_lora_agpt_2b_shaped() -> Controller.Config:
+    """Ceiling-attack: componentized SHAPED reward (format+completeness+order)
+    replacing the saturating char-ratio, + the sweep's best levers (LoRA rank 32,
+    lr 5e-5). Hypothesis: the ~0.25 mean-reward ceiling is the reward SHAPE, not
+    capacity; an order-specific additive reward gives GRPO a gradient toward fully
+    correct sorts. Compare against v5/w2 (same easy task)."""
+    return _agpt_grpo_config(
+        num_training_steps=100,
+        num_groups_per_train_step=8,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=5e-5,
+        lora_rank=32,
+        shaped_reward=True,
     )
