@@ -42,6 +42,12 @@ unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
 export CCL_PROCESS_LAUNCHER=none
 export CCL_ATL_TRANSPORT=ofi
 export FI_PROVIDER=tcp
+# Bound oneCCL Level-Zero IPC-handle caches -- they grow ~1 handle/collective/step
+# and are NOT freed on XPU, crossing the ~94%% HBM baseline into OOM at a fixed step
+# count (~13) regardless of per-step size. Same signature+fix as the 32N SFT OOM
+# (job 12470088). Without these, both prior GRPO runs died at step 13.
+export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}
+export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}
 
 # Stage-1 cold-start checkpoint (95.5% envelope emission). Has the gemma
 # chat_template (consolidation copied it from the staged dir).
