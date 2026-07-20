@@ -294,9 +294,14 @@ def main():
         sys.stdout.flush()
         rows = data.get("rows") or []
         tail = rows[-1] if rows else {}
-        print("[%s] %s | points=%d last: loss=%s acc=%s" % (
+        # show the keys that matter for the detected run type.
+        if "reward" in tail:
+            status = "reward=%s std=%s" % (tail.get("reward"), tail.get("reward_std"))
+        else:
+            status = "loss=%s acc=%s" % (tail.get("loss"), tail.get("mean_token_accuracy"))
+        print("[%s] %s | points=%d last: %s" % (
             time.strftime("%H:%M:%S"), data.get("log") or "(no log yet)",
-            len(rows), tail.get("loss"), tail.get("mean_token_accuracy")))
+            len(rows), status))
         draw(data, *terminal_pixels())
         if data.get("final"):
             print("run complete (train_loss=%.4g) -- stopping."
