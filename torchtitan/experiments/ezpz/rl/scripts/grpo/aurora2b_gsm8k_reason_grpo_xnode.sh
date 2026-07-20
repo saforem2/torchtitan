@@ -48,6 +48,10 @@ export FI_PROVIDER=tcp
 # (job 12470088). Without these, both prior GRPO runs died at step 13.
 export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}
 export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}
+# VALIDATED FIX (smoke 12471153): raising the thresholds did NOT help; the ZE IPC
+# handles are never freed, so disable the cache entirely -> cleared step 13 (the
+# wall that killed 3 prior runs) and ran to walltime with ZERO OOM.
+export CCL_ZE_CACHE=${CCL_ZE_CACHE:-0}
 
 # Stage-1 cold-start checkpoint (95.5% envelope emission). Has the gemma
 # chat_template (consolidation copied it from the staged dir).
