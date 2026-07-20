@@ -122,12 +122,33 @@ LOCAL = os.environ.get("RL_LOCAL") == "1"
 SSH_TGT = os.environ.get("RL_SSH", "sunspot")
 SOCK = os.environ.get("RL_SOCK", "/tmp/sunspot-master.sock")
 
-# metrics parsed from each TRL dict-line, and how to plot them.
-METRICS = [
+# Metric panels for each run type. TRL's SFTTrainer and GRPOTrainer both emit
+# dict-log lines in the same shape, but different KEYS -- so we auto-detect
+# which set to plot from the keys present in the parsed rows (see pick_metrics).
+SFT_METRICS = [
     ("loss", "training loss", "#4c78a8"),
     ("mean_token_accuracy", "mean token accuracy", "#59a14f"),
     ("grad_norm", "grad norm", "#e45756"),
 ]
+GRPO_METRICS = [
+    ("reward", "mean reward", "#4c78a8"),
+    ("reward_std", "reward std", "#b279a2"),
+    ("frac_reward_zero_std", "frac zero-std groups", "#f0a24b"),
+    ("completions/mean_length", "completion length", "#59a14f"),
+    ("kl", "KL", "#e45756"),
+]
+
+
+def pick_metrics(rows):
+    """Choose the panel set by which keys the run actually logs. GRPO if any
+    reward key is present, else SFT. Drops panels no row has data for so a
+    partial-metric run doesn't render empty axes."""
+    keys = set()
+    for r in rows:
+        keys.update(r)
+    base = GRPO_METRICS if ("reward" in keys) else SFT_METRICS
+    present = [m for m in base if m[0] in keys]
+    return present or base
 
 # ---- style: ambivalent + Iosevka + transparent ---------------------------
 for d in (os.path.expanduser("~/Library/Fonts"), "/Library/Fonts",
@@ -146,7 +167,9 @@ plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
                      "axes.facecolor": "none"})
 
 
-# remote python that resolves the newest matching log and emits its metric rows
+# remote python that resolves the newest matching log and emits its metric rows.
+# Handles both TRL SFTTrainer ('loss'/'train_loss'/'mean_token_accuracy') and
+# GRPOTrainer ('reward'/'reward_std'/'kl'/'completions/mean_length') dict-lines.
 _AGG = r'''
 import glob, json, os, re, sys
 os.chdir("%s")
@@ -156,19 +179,24 @@ if not paths:
 log = paths[-1]
 rows = []
 final = None
-# strip ANSI, then match TRL dict-lines like {'loss': '0.36', 'epoch': '1.2', ...}
 ansi = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+# a TRL metric dict has at least one of these training keys.
+trigger = re.compile(r"'(?:loss|train_loss|reward)'")
+# keys can contain letters, digits, '_' and '/' (e.g. completions/mean_length).
+kv = re.compile(r"'([a-zA-Z_][\w/]*)':\s*'?([-\d.eE+]+)'?")
 for line in open(log, errors="replace"):
     line = ansi.sub("", line)
-    for m in re.finditer(r"\{[^{}]*'(?:loss|train_loss)'[^{}]*\}", line):
+    for m in re.finditer(r"\{[^{}]*\}", line):
         blob = m.group(0)
+        if not trigger.search(blob):
+            continue
         d = {}
-        for k, v in re.findall(r"'([a-z_]+)':\s*'?([-\d.e+]+)'?", blob):
+        for k, v in kv.findall(blob):
             try: d[k] = float(v)
             except ValueError: pass
         if "train_loss" in d:
-            final = d
-        elif "loss" in d:
+            final = d          # SFT end-of-run summary
+        elif "loss" in d or "reward" in d:
             rows.append(d)
 print(json.dumps({"rows": rows, "final": final, "log": os.path.basename(os.path.dirname(log))}))
 ''' % (REPO, RUN_LOG_GLOB)
@@ -212,15 +240,19 @@ def terminal_pixels():
 
 def draw(data, wpx, hpx):
     rows = data.get("rows") or []
+    metrics = pick_metrics(rows)
+    is_grpo = any(m[0] == "reward" for m in metrics)
     dpi = 100
-    n = len(METRICS)
+    n = len(metrics)
     fig, axes = plt.subplots(
         n, 1, sharex=True, dpi=dpi,
         figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)))
     if n == 1:
         axes = [axes]
-    xs = [r.get("epoch", i) for i, r in enumerate(rows)]
-    for ax, (key, label, color) in zip(axes, METRICS):
+    # GRPO logs 'epoch' too, but step is the more natural x for RL.
+    xkey = "step" if (is_grpo and any("step" in r for r in rows)) else "epoch"
+    xs = [r.get(xkey, i) for i, r in enumerate(rows)]
+    for ax, (key, label, color) in zip(axes, metrics):
         ys = [r.get(key) for r in rows]
         pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
         if pts:
@@ -231,11 +263,13 @@ def draw(data, wpx, hpx):
         else:
             ax.set_ylabel(label, fontsize=8)
         ax.tick_params(labelsize=7)
-    axes[-1].set_xlabel("epoch")
+    axes[-1].set_xlabel(xkey)
     final = data.get("final")
-    title = "agpt-2b gsm8k-r1cot SFT -- %s" % (data.get("log") or "(waiting)")
+    kind = "GRPO" if is_grpo else "SFT"
+    title = "agpt-2b %s -- %s" % (kind, data.get("log") or "(waiting)")
     if final:
-        title += "  [DONE train_loss=%.4g]" % final.get("train_loss", float("nan"))
+        fl = final.get("train_loss")
+        title += "  [DONE%s]" % ("" if fl is None else " train_loss=%.4g" % fl)
     elif rows:
         title += "  [%d log points]" % len(rows)
     axes[0].set_title(title, fontsize=9)
