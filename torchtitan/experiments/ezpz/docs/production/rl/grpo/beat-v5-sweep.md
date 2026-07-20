@@ -16,12 +16,12 @@ a distinct lever.
 | w2 | LoRA rank 8 -> **32** (alpha 64) | `rl_grpo_lora_agpt_2b_w2` |
 | w3 | lr **5e-5** + groups/step 8 -> **16** | `rl_grpo_lora_agpt_2b_w3` |
 
-## Result (through ~step 80; runs to 100)
+## Result (all four runs complete, 100 steps)
 
 | Run | mean reward (plateau) | **peak bin** |
 |-----|-----------------------|--------------|
 | v5 | ~0.25 | 0.277 |
-| w1 (lr5e-5) | ~0.23 | **0.362** |
+| w1 (lr5e-5) | ~0.25 | **0.362** |
 | w2 (rank32) | ~0.24 | **0.386** |
 | w3 (5e-5,16grp) | ~0.24 | 0.279 |
 
@@ -37,7 +37,8 @@ a distinct lever.
 
 **Takeaway:** capacity (LoRA rank) is the most promising lever, but the *mean*
 ceiling is set by the reward function -- lifting it needs reward-shaping, not more
-tuning. That is the [ceiling-attack goal](#).
+tuning. That is confirmed by the [ceiling-attack](./ceiling-attack.md), which
+breaks the ~0.25 wall (+85% on the identical metric) by componentizing the reward.
 
 ## Repro
 
