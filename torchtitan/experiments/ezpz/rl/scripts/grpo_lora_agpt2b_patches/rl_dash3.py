@@ -26,6 +26,104 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 import ambivalent
 
+
+# ---- HiDPI fix: make kitcat render at true device resolution --------------
+# kitcat rasterizes the figure at fig.dpi * get_dpi_scale(); on macOS the
+# kitty-query-dpi_x capability it uses returns None, so get_dpi_scale() falls
+# back to 1.0 and the figure is rendered at LOGICAL pixels. kitty then upscales
+# that logical raster to the Retina display's device pixels -- the upscaling is
+# what makes the text look aliased/fuzzy. We query the real device geometry
+# ourselves and patch kitcat so it renders at device resolution (crisp) while
+# keeping the same terminal footprint (placeholder grid unchanged).
+def _tty_query(seq, timeout=0.3):
+    """Send an escape sequence to the controlling tty and read the reply."""
+    import termios
+    import tty as _tty
+    import select
+    if "TMUX" in os.environ:  # wrap so bytes reach the outer terminal
+        seq = "\033Ptmux;" + seq.replace("\033", "\033\033") + "\033\\"
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        return ""
+    old = termios.tcgetattr(fd)
+    try:
+        _tty.setraw(fd)
+        os.write(fd, seq.encode())
+        buf = b""
+        while True:
+            ready, _, _ = select.select([fd], [], [], timeout)
+            if not ready:
+                break
+            buf += os.read(fd, 64)
+            if buf.endswith(b"t") or len(buf) > 128:
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        os.close(fd)
+    return buf.decode("ascii", errors="replace")
+
+
+def _csi_t(n):
+    """CSI <n> t -> (a, b) from the '\\e[k;a;bt' reply, or None."""
+    import re
+    m = re.search(r"\033\[\d+;(\d+);(\d+)t", _tty_query("\033[%dt" % n))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _backing_and_cells():
+    """(backing_scale, device_cell_w, device_cell_h). backing = device/logical
+    pixel ratio (2.0 on a typical Retina Mac)."""
+    import array
+    import fcntl
+    import termios
+    buf = array.array("H", [0, 0, 0, 0])
+    try:
+        fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, buf)
+    except Exception:
+        pass
+    rows, cols, xpix, ypix = buf
+    log_cw = xpix / cols if (xpix and cols) else 0.0
+    log_ch = ypix / rows if (ypix and rows) else 0.0
+    dev = _csi_t(16)  # kitty reports cell size in DEVICE pixels: (height, width)
+    dev_ch, dev_cw = dev if dev else (0.0, 0.0)
+    forced = os.environ.get("RL_BACKING")  # e.g. RL_BACKING=2 to force Retina
+    if forced:
+        backing = float(forced)
+    elif dev_ch and log_ch:
+        # Authoritative: device cell (CSI 16 t) vs logical cell (TIOCGWINSZ).
+        # 2.0 when TIOCGWINSZ reports logical points (Retina), 1.0 when it
+        # already reports device pixels (no upscaling, nothing to fix).
+        backing = dev_ch / log_ch
+    elif sys.platform == "darwin":
+        backing = 2.0  # can't query the cell sizes; assume Retina
+    else:
+        backing = 1.0
+    backing = max(1.0, min(3.0, backing))
+    cw = dev_cw or (log_cw * backing) or (8 * backing)
+    ch = dev_ch or (log_ch * backing) or (16 * backing)
+    return backing, cw, ch
+
+
+if sys.stdout.isatty():
+    try:
+        _BACKING, _DEV_CW, _DEV_CH = _backing_and_cells()
+        if _BACKING > 1.0:
+            import kitcat.terminal_query as _ktq
+            import kitcat.utils as _ku
+            import kitcat.backend as _kb
+            # render at device resolution ...
+            for _m in (_ktq, _ku, _kb):
+                _m.get_dpi_scale = lambda: _BACKING
+            # ... and measure cells in device pixels so the grid (image_px /
+            # cell_px) is unchanged -> same footprint, just more pixels.
+            _ku.get_char_cell_width = lambda: max(1, int(round(_DEV_CW)))
+            _ku.get_char_cell_height = lambda: max(1, int(round(_DEV_CH)))
+            print("kitcat HiDPI: backing=%.2f cell=%dx%d(dev)"
+                  % (_BACKING, round(_DEV_CW), round(_DEV_CH)))
+    except Exception as _e:
+        print("kitcat HiDPI patch skipped:", _e)
+
 # ---- the runs to track: (tag, output-subdir, label) ----------------------
 BASE = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
         "outputs")
