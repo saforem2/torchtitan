@@ -75,7 +75,7 @@ from torchtitan.experiments.rl.renderer import RendererConfig
 from torchtitan.experiments.rl.rubrics import Rubric
 
 
-def _agpt_rl_model_spec():
+def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     """`ezpz.agpt.model_registry("2b-rl")` for RL: LoRA (wqkv/wo) + fp32 lm_head.
 
     Converter order: LoRA first (wraps the base linears in frozen+adapter form),
@@ -84,7 +84,7 @@ def _agpt_rl_model_spec():
     return agpt_model_registry(
         "2b-rl",
         converters=[
-            LoRAConverter.Config(rank=8, alpha=16.0, target_modules=["wqkv", "wo"]),
+            LoRAConverter.Config(rank=lora_rank, alpha=lora_alpha, target_modules=["wqkv", "wo"]),
             LMHeadCastConverter.Config(),
         ],
     )
@@ -114,6 +114,8 @@ def _agpt_grpo_config(
     max_turns: int,
     max_names_per_turn: int,
     lr: float,
+    lora_rank: int = 8,
+    clip_eps: float = 0.2,
 ) -> Controller.Config:
     # Disable FlexAttention max_autotune on XPU (backward autotuning exceeds XPU
     # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
@@ -130,7 +132,7 @@ def _agpt_grpo_config(
         flex_attention, options=FlexAttention.inductor_configs
     )
     return Controller.Config(
-        model_spec=_agpt_rl_model_spec(),
+        model_spec=_agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank),
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -168,7 +170,7 @@ def _agpt_grpo_config(
                 interval=20,
                 last_save_model_only=False,
             ),
-            loss=GRPOLoss.Config(),
+            loss=GRPOLoss.Config(clip_eps=clip_eps),
         ),
         generator=VLLMGenerator.Config(
             # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
@@ -208,4 +210,44 @@ def rl_grpo_lora_agpt_2b_easy() -> Controller.Config:
         max_turns=1,
         max_names_per_turn=3,
         lr=2e-5,
+    )
+
+
+# --- "beat v5" sweep (2026-07-19): all on the easy task (the winner), each
+# --- combining/extending the levers v5/v6 left on the table. ---
+
+def rl_grpo_lora_agpt_2b_w1() -> Controller.Config:
+    """w1 = v5 easy task + v6's higher LR (5e-5). The untested v5xv6 combo:
+    easy-task dense signal + stronger updates. Most likely to beat v5."""
+    return _agpt_grpo_config(
+        num_training_steps=100,
+        num_groups_per_train_step=8,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=5e-5,
+    )
+
+
+def rl_grpo_lora_agpt_2b_w2() -> Controller.Config:
+    """w2 = easy task + bigger LoRA (rank 32). More adapter capacity to learn the
+    sort itself, not just the format. lr 2e-5 (v5's stable LR)."""
+    return _agpt_grpo_config(
+        num_training_steps=100,
+        num_groups_per_train_step=8,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=2e-5,
+        lora_rank=32,
+    )
+
+
+def rl_grpo_lora_agpt_2b_w3() -> Controller.Config:
+    """w3 = easy task + lr 5e-5 + more groups/step (16) for a larger, less-noisy
+    effective batch (v6 at 5e-5 was noisy; more groups should smooth it)."""
+    return _agpt_grpo_config(
+        num_training_steps=100,
+        num_groups_per_train_step=16,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=5e-5,
     )
