@@ -199,16 +199,20 @@ for line in open(log, errors="replace"):
         elif "loss" in d or "reward" in d:
             rows.append(d)
 print(json.dumps({"rows": rows, "final": final, "log": os.path.basename(os.path.dirname(log))}))
-''' % (REPO, RUN_LOG_GLOB)
+'''  # NOTE: format at call time with the CURRENT glob (see fetch), not here --
+# an early `% (REPO, RUN_LOG_GLOB)` would bake in the module-load glob and make
+# the --log override a no-op.
 
 
 def fetch():
+    # Format the remote script HERE so a --log override of RUN_LOG_GLOB applies.
+    agg = _AGG % (REPO, RUN_LOG_GLOB)
     if LOCAL:
-        r = subprocess.run([sys.executable, "-c", _AGG],
+        r = subprocess.run([sys.executable, "-c", agg],
                            capture_output=True, text=True, timeout=90)
     else:
         import base64
-        b64 = base64.b64encode(_AGG.encode()).decode()
+        b64 = base64.b64encode(agg.encode()).decode()
         remote = "echo %s | base64 -d | python3" % b64
         r = subprocess.run(
             ["ssh", "-o", "ControlPath=" + SOCK, SSH_TGT, remote],

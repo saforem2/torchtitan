@@ -2,7 +2,7 @@
 #PBS -A datascience
 #PBS -l walltime=04:00:00
 #PBS -l filesystems=tegu:home
-#PBS -l select=6
+#PBS -l select=9
 #PBS -q workq
 #PBS -j oe
 #
@@ -14,7 +14,7 @@
 # in bf16 through vLLM -- confirmed by the Stage 0 eval), and (2)
 # max_completion_length is 700, not 64, so reasoning traces are not truncated.
 #
-# Layout (select=6): node 0 = vLLM server (fp32, tile 0); nodes 1-5 = 60 GRPO
+# Layout (select=9): node 0 = vLLM server (fp32, tile 0); nodes 1-8 = 96 GRPO
 # trainer ranks. Output: outputs/grpo/agpt2b-gsm8k-reason-cot/
 set -o pipefail
 
