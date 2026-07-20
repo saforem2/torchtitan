@@ -28,7 +28,11 @@ export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 export PATH="/opt/pbs/bin:$PATH"
 
 CKPT="${CKPT:-$REPO/outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16}"
+# BASE supplies config.json; TOK_SRC supplies the tokenizer WITH the gemma
+# chat_template (the raw checkpoint-900-hf has no template, which breaks
+# apply_chat_template at eval time -- the staged dir has it injected).
 BASE="${BASE:-$REPO/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
+TOK_SRC="${TOK_SRC:-$HOME/rl-repro/run/agpt2b-ckpt900}"
 HF="${CKPT}-hf"
 LIMIT="${LIMIT:-200}"
 VENV_MAIN=$REPO/.venv/bin            # accelerate lives here
@@ -43,8 +47,10 @@ elif [[ -d "${CKPT}/pytorch_model_fsdp_0" ]]; then
     echo "[consolidate] ${CKPT} -> ${HF}"
     source "$REPO/.venv/bin/activate"
     accelerate merge-weights "${CKPT}/pytorch_model_fsdp_0" "${HF}" 2>&1 | tail -3
-    for f in config.json tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json; do
-        [[ -f "${BASE}/${f}" && ! -f "${HF}/${f}" ]] && cp "${BASE}/${f}" "${HF}/"
+    # config from BASE; tokenizer (with chat_template) from TOK_SRC.
+    [[ -f "${BASE}/config.json" && ! -f "${HF}/config.json" ]] && cp "${BASE}/config.json" "${HF}/"
+    for f in tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json; do
+        [[ -f "${TOK_SRC}/${f}" ]] && cp "${TOK_SRC}/${f}" "${HF}/"
     done
     deactivate 2>/dev/null || true
 else
