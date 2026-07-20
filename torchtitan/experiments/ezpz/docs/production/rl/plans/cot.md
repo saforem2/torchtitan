@@ -1,6 +1,6 @@
 # Teaching agpt-2b Chain-of-Thought Reasoning (plan)
 
-> Status: **plan / in progress** (2026-07-20). Staged recipe to take the
+> Status: **in progress** (2026-07-20). Stage 0 (eval) + Stage 1 (cold-start CoT-SFT) DONE and validated; Stage 2 (GRPO-RLVR) next. Staged recipe to take the
 > instruction-tuned AuroraGPT-2B (`checkpoint-900-hf`, full-mix SFT) from "has
 > seen math rationales but does not reliably emit reasoning" to "emits and
 > benefits from an explicit `<think>` scratchpad." Everything lives under
@@ -29,6 +29,31 @@ for small models (R1-Distill-Qwen-1.5B/7B).
 rationales; the scale-up uses pre-distilled, already-correctness-filtered HF R1
 traces (`open-r1/OpenR1-Math-220k`). We distill the *format* from data, not the
 *content* from a live teacher.
+
+## Results so far (2026-07-20)
+
+| Stage | checkpoint | format hit-rate | CoT accuracy (greedy, GSM8K/200) |
+|-------|-----------|-----------------|----------------------------------|
+| baseline (instruct) | `checkpoint-900-hf` | **0.00** | 0.15 |
+| Stage 1 cold-start | `agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf` | **0.955** | 0.16 |
+
+**Stage 1 works.** After only 16 optimizer steps of continue-SFT on `gsm8k-r1cot`,
+the model went from *never* emitting the envelope (0.0) to **95.5%** well-formed
+`<think>...</think><answer>\boxed{}</answer>`, with reasoning accuracy preserved
+(0.15 -> 0.16, within noise) and no regression. Generations are compact (median
+~220 chars, zero truncation at the 768-token budget) and every correct answer is
+now well-formed. This validates the cold-start premise: SFT cheaply teaches the
+*format*; lifting *accuracy* is Stage 2's (GRPO) job.
+
+Notes from the run:
+- 8N was over-provisioned for a 7473-example smoke -- packing + 96 ranks gave only
+  ~16 optimizer steps in 38s. It sufficed to teach the envelope; a longer run (2N
+  / 3 epochs, launcher `..._2n.sh`) is available for a stronger cold-start but is
+  not required to unblock Stage 2.
+- FSDP `trainer.save_model()` leaves `final/` empty; the per-epoch checkpoints are
+  sharded. Consolidate with `accelerate merge-weights` then copy config from the
+  base and the tokenizer (WITH chat_template) from the staged dir -- see
+  `scripts/eval/consolidate_and_eval_cot.sh`.
 
 ## The one thing that gates everything: a CoT eval
 
