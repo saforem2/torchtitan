@@ -122,9 +122,11 @@ RUN_GLOBS = [RUN_LOG_GLOB]  # overridden from argv in __main__
 # --auto <glob>: expand to EVERY matching run.log each refresh (auto-discovers new
 # runs). Default watches all CoT GRPO runs. Set to "" to disable auto mode.
 AUTO_GLOB = os.environ.get("RL_AUTO_GLOB", "")
-# distinct colors when overlaying multiple runs.
-RUN_COLORS = ["#4c78a8", "#e45756", "#59a14f", "#b279a2", "#f0a24b", "#888888",
-              "#54a24b", "#eeca3b", "#b279a2", "#ff9da6"]
+# Overlay run colors come from the ACTIVE style's prop_cycle (ambivalent) via the
+# "C0", "C1", ... cycle references -- so the palette matches the theme instead of a
+# hardcoded list. Length covers plenty of concurrent runs; matplotlib wraps C-refs
+# to the cycle automatically, but we build the list explicitly for labeling.
+RUN_COLORS = ["C%d" % i for i in range(9)]  # ambivalent prop_cycle has 9 colors
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
@@ -142,17 +144,19 @@ def fs(base):
 # Metric panels for each run type. TRL's SFTTrainer and GRPOTrainer both emit
 # dict-log lines in the same shape, but different KEYS -- so we auto-detect
 # which set to plot from the keys present in the parsed rows (see pick_metrics).
+# (key, label, color). Colors are cycle refs (C0, C1, ...) so single-run panels
+# also draw from the ambivalent prop_cycle, not hardcoded hex.
 SFT_METRICS = [
-    ("loss", "training loss", "#4c78a8"),
-    ("mean_token_accuracy", "mean token accuracy", "#59a14f"),
-    ("grad_norm", "grad norm", "#e45756"),
+    ("loss", "training loss", "C0"),
+    ("mean_token_accuracy", "mean token accuracy", "C1"),
+    ("grad_norm", "grad norm", "C2"),
 ]
 GRPO_METRICS = [
-    ("reward", "mean reward", "#4c78a8"),
-    ("reward_std", "reward std", "#b279a2"),
-    ("frac_reward_zero_std", "frac zero-std groups", "#f0a24b"),
-    ("completions/mean_length", "completion length", "#59a14f"),
-    ("kl", "KL", "#e45756"),
+    ("reward", "mean reward", "C0"),
+    ("reward_std", "reward std", "C1"),
+    ("frac_reward_zero_std", "frac zero-std groups", "C2"),
+    ("completions/mean_length", "completion length", "C3"),
+    ("kl", "KL", "C4"),
 ]
 
 
