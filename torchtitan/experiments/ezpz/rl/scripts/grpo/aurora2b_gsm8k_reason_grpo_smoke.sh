@@ -51,6 +51,10 @@ export FI_PROVIDER=tcp
 # (job 12470088). Without these, both prior GRPO runs died at step 13.
 export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}
 export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}
+# ESCALATION: raising the thresholds 8x did NOT help (died step 13 again, job
+# 12471132) -- handles are never freed, so eviction threshold is moot. Disable the
+# ZE IPC-handle cache entirely so each handle is released immediately.
+export CCL_ZE_CACHE=${CCL_ZE_CACHE:-0}
 
 # Stage-1 cold-start checkpoint (95.5% envelope emission). Has the gemma
 # chat_template (consolidation copied it from the staged dir).
