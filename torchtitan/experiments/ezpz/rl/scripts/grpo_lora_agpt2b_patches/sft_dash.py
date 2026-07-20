@@ -113,9 +113,14 @@ if sys.stdout.isatty():
 
 # ---- config --------------------------------------------------------------
 REPO = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan")
-# default: newest CoT-SFT run log; override with --log
+# default: newest CoT-SFT run log; override with --log (accepts MULTIPLE globs to
+# overlay several runs on shared panels, e.g.
+#   sft_dash.py --log 'logs/grpo-...-12471085/run.log' 'logs/grpo-...-fast-*/run.log'
 RUN_LOG_GLOB = os.environ.get(
     "SFT_LOG_GLOB", "logs/sft-agpt2b-gsm8k-r1cot-8n-*/run.log")
+RUN_GLOBS = [RUN_LOG_GLOB]  # overridden from argv in __main__
+# distinct colors when overlaying multiple runs.
+RUN_COLORS = ["#4c78a8", "#e45756", "#59a14f", "#b279a2", "#f0a24b", "#888888"]
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
@@ -204,9 +209,9 @@ print(json.dumps({"rows": rows, "final": final, "log": os.path.basename(os.path.
 # the --log override a no-op.
 
 
-def fetch():
-    # Format the remote script HERE so a --log override of RUN_LOG_GLOB applies.
-    agg = _AGG % (REPO, RUN_LOG_GLOB)
+def fetch(glob_pat=None):
+    # Format the remote script HERE (not at module load) so the glob applies.
+    agg = _AGG % (REPO, glob_pat if glob_pat is not None else RUN_LOG_GLOB)
     if LOCAL:
         r = subprocess.run([sys.executable, "-c", agg],
                            capture_output=True, text=True, timeout=90)
@@ -226,6 +231,16 @@ def fetch():
             except Exception:
                 pass
     return {"rows": [], "final": None, "log": None}
+
+
+def fetch_all():
+    """One fetch per configured glob -> list of run dicts (skip empty)."""
+    out = []
+    for g in RUN_GLOBS:
+        d = fetch(g)
+        d["glob"] = g
+        out.append(d)
+    return out
 
 
 def terminal_pixels():
@@ -282,30 +297,82 @@ def draw(data, wpx, hpx):
     plt.close(fig)
 
 
+def draw_overlay(runs, wpx, hpx):
+    """Overlay several runs on shared panels: one line per run per metric.
+    Panel set is the union across runs (GRPO vs SFT auto-detected per run)."""
+    allrows = [r for run in runs for r in (run.get("rows") or [])]
+    metrics = pick_metrics(allrows)
+    is_grpo = any(m[0] == "reward" for m in metrics)
+    dpi = 100
+    n = len(metrics)
+    fig, axes = plt.subplots(
+        n, 1, sharex=True, dpi=dpi,
+        figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)))
+    if n == 1:
+        axes = [axes]
+    for ri, run in enumerate(runs):
+        rows = run.get("rows") or []
+        if not rows:
+            continue
+        color = RUN_COLORS[ri % len(RUN_COLORS)]
+        label = (run.get("log") or run.get("glob") or "run%d" % ri)
+        # compact label: drop the common prefix, keep the job id / tail
+        label = label.replace("grpo-agpt2b-gsm8k-reason-cot-", "").replace(
+            "sft-agpt2b-gsm8k-r1cot-", "sft-")
+        xkey = "step" if (is_grpo and any("step" in r for r in rows)) else "epoch"
+        xs = [r.get(xkey, i) for i, r in enumerate(rows)]
+        for ax, met in zip(axes, metrics):
+            key = met[0]
+            pts = [(x, r.get(key)) for x, r in zip(xs, rows) if r.get(key) is not None]
+            if pts:
+                ax.plot([p[0] for p in pts], [p[1] for p in pts],
+                        "-", lw=1.6, color=color,
+                        label=(label if ax is axes[0] else None))
+    for ax, met in zip(axes, metrics):
+        ax.set_ylabel(met[1], fontsize=8)
+        ax.tick_params(labelsize=7)
+    axes[-1].set_xlabel("step" if is_grpo else "epoch")
+    axes[0].legend(loc="best", fontsize=7, ncol=min(len(runs), 3))
+    axes[0].set_title("agpt-2b %s -- %d runs overlaid" %
+                      ("GRPO" if is_grpo else "SFT", len(runs)), fontsize=9)
+    fig.tight_layout()
+    plt.show()
+    plt.close(fig)
+
+
+def _status_line(data):
+    rows = data.get("rows") or []
+    tail = rows[-1] if rows else {}
+    if "reward" in tail:
+        s = "reward=%s std=%s" % (tail.get("reward"), tail.get("reward_std"))
+    else:
+        s = "loss=%s acc=%s" % (tail.get("loss"), tail.get("mean_token_accuracy"))
+    label = (data.get("log") or "(no log yet)")
+    return "%s | points=%d last: %s" % (label, len(rows), s)
+
+
 def main():
-    print("Live CoT-SFT dashboard (kitcat+ambivalent). Ctrl-C to stop.")
+    multi = len(RUN_GLOBS) > 1
+    print("Live dashboard (%d run%s, kitcat+ambivalent). Ctrl-C to stop."
+          % (len(RUN_GLOBS), "s" if multi else ""))
     while True:
         try:
-            data = fetch()
+            runs = fetch_all()
         except Exception as e:
-            data = {"rows": [], "final": None, "log": None}
+            runs = []
             print("fetch error:", e)
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
-        rows = data.get("rows") or []
-        tail = rows[-1] if rows else {}
-        # show the keys that matter for the detected run type.
-        if "reward" in tail:
-            status = "reward=%s std=%s" % (tail.get("reward"), tail.get("reward_std"))
-        else:
-            status = "loss=%s acc=%s" % (tail.get("loss"), tail.get("mean_token_accuracy"))
-        print("[%s] %s | points=%d last: %s" % (
-            time.strftime("%H:%M:%S"), data.get("log") or "(no log yet)",
-            len(rows), status))
-        draw(data, *terminal_pixels())
-        if data.get("final"):
-            print("run complete (train_loss=%.4g) -- stopping."
-                  % data["final"].get("train_loss", float("nan")))
+        print("[%s]" % time.strftime("%H:%M:%S"))
+        for d in runs:
+            print("  " + _status_line(d))
+        if multi:
+            draw_overlay(runs, *terminal_pixels())
+        elif runs:
+            draw(runs[0], *terminal_pixels())
+        # stop only when EVERY run is complete (single-run: as before).
+        if runs and all(d.get("final") for d in runs):
+            print("all runs complete -- stopping.")
             break
         try:
             time.sleep(INTERVAL)
@@ -315,6 +382,16 @@ def main():
 
 
 if __name__ == "__main__":
+    # --log accepts one OR more globs (all argv after --log that aren't flags),
+    # so you can overlay several runs:
+    #   sft_dash.py --log 'logs/grpo-...-12471085/run.log' 'logs/grpo-...-fast-*/run.log'
     if "--log" in sys.argv:
-        RUN_LOG_GLOB = sys.argv[sys.argv.index("--log") + 1]
+        i = sys.argv.index("--log") + 1
+        globs = []
+        while i < len(sys.argv) and not sys.argv[i].startswith("--"):
+            globs.append(sys.argv[i])
+            i += 1
+        if globs:
+            RUN_GLOBS = globs
+            RUN_LOG_GLOB = globs[0]
     main()
