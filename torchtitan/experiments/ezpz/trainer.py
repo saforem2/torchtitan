@@ -619,10 +619,23 @@ class FaultTolerantTrainer(Trainer):
             last_rank = first_rank + group_size - 1
             global_ranks = list(range(first_rank, last_rank + 1))
 
-        # init distributed and build meshes
+        # init distributed and build meshes.
+        # Async checkpointing makes core CheckpointManager create a
+        # dist.new_group(backend="gloo") for CPU-side staging. On XPU the
+        # default PG is xccl-only, so gloo is not registered for any device
+        # and new_group raises "No backend type associated with device type
+        # xpu" at trainer init (see
+        # docs/upstream-issues/checkpoint_async_gloo_on_xpu.md). Binding a
+        # cpu:gloo backend alongside xccl (enable_cpu_backend=True ->
+        # "xpu:xccl,cpu:gloo") registers gloo so the staging subgroup builds.
+        # Enable it whenever CPU offload OR async checkpointing needs it.
+        _async_ckpt = str(config.checkpoint.async_mode).lower() in (
+            "async",
+            "async_with_pinned_mem",
+        )
         dist_utils.init_distributed(
             config.comm,
-            enable_cpu_backend=config.training.enable_cpu_offload,
+            enable_cpu_backend=config.training.enable_cpu_offload or _async_ckpt,
             base_folder=config.dump_folder,
             ranks=global_ranks,
         )
