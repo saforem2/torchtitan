@@ -427,3 +427,43 @@ problem. Two cheap fixes to try:
 2. B2: run the unrun 2N/3-epoch cold-start (~930 optimizer steps, ~50x the 16-step
    ckpt) so the model reliably emits the envelope on its own; THEN GRPO with the
    gated reward becomes meaningful.
+
+## 2026-07-21 -- Stage 2 RESOLVED: gated GRPO on the strong B2 base works
+
+The Stage-2 reward-hack (format 0.955->0.635 while reward rose) was caused by the
+WEAK 16-step cold-start, not the reward shape or GRPO machinery. Fixed by moving to
+a stronger cold-start and closing a scoring bug.
+
+**B2 cold-start** (`checkpoint-93`, 3-epoch SFT): raw-generation eval
+`format_hit_rate 0.985`, `cot_accuracy 0.205` on 200 GSM8K -- vs the weak base's
+~0.05 on-policy format. Consolidated DCP->HF with `BASE=checkpoint-729-hf` config
+(arch-identical) + `fix_ckpt_eos` [1,107].
+
+**Scoring bug found by the smoke (job 12471405, all-zero reward):** vLLM's
+DefaultRenderer splits the `<think>...</think>` prefix out of
+`completion_message.content` into `reasoning_content` (tags stripped), so the
+reward's `_completion_text` saw only the `<answer>` span and scored every
+in-envelope rollout 0 -> zero GRPO gradient. Fixed in `reason_agpt/reward.py`
+(commit bb108c043): reconstruct `<think>{reasoning_content}</think>{content}`.
+Verified on 368 real rollouts: format hit 0.000 -> 1.000.
+
+**Gated GRPO smoke on B2 (job 12471406, 20 steps, `rl_grpo_lora_agpt_2b_gsm8k_b2smoke`:
+lr=2e-6, easy curriculum, group_size=4, ckpt@10):** rc=0, both ckpts saved.
+Held-out validation:
+
+| metric | baseline (B2 step 0) | after GRPO (step 20) |
+| --- | --- | --- |
+| reward mean | +0.382 | +0.425 (+11%) |
+| reward sum | +7.633 | +8.502 |
+| reward min | +0.000 | +0.250 |
+| ThinkFormat mean | +0.950 | +1.000 |
+
+The clean OPPOSITE of the earlier reward-hack: reward rose AND format rose. Since
+GRPOLoss exposes only `clip_eps` (no beta/KL anchor), the base prior holding the
+envelope is the sole anti-drift force -- which is exactly why the strong B2 base
+was the prerequisite (as the improve-agpt2b-cot-rl workflow predicted: biggest
+lever is the cold-start, not RL tuning).
+
+**Next:** a longer run on B2 (guardrail: format >= 0.9 hard tripwire; re-eval a
+real merged checkpoint on the shared 200-problem GSM8K metric -- do not trust the
+reward curve).
