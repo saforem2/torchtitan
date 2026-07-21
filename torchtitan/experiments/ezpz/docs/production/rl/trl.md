@@ -1,9 +1,12 @@
-# GRPO on Intel XPU — status
+# GRPO on Intel XPU: TRL `GRPOTrainer`
 
-On-policy GRPO (TRL `GRPOTrainer` + `trl vllm-serve`, no Monarch) on Sunspot
-XPU. **Current status only** -- the bring-up chronology and the (refuted)
-2026-07-01 desync investigation live in
-[`history/`](history/README.md).
+On-policy GRPO via **TRL `GRPOTrainer`** on Sunspot XPU (no Monarch). Two
+generation backends: **`trl vllm-serve`** (recommended, on-policy) with a
+**`.generate()` per-rank** fallback. For the Monarch + TorchStore + vLLM path
+see [`monarch.md`](monarch.md); overview in [`README.md`](README.md).
+
+**Current status only** -- the bring-up chronology and the (refuted) 2026-07-01
+desync investigation live in [`history/`](history/README.md).
 
 ## Generation backends (3 tiers)
 
@@ -36,10 +39,10 @@ FSDP patch never engaging (rebound the wrong `from`-import name). Full evidence
 ## How to run it
 
 **Scripts:**
-- 1N smoke: [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
-- cross-node (1 trainer node): [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
-- multi-trainer-node (2+): [`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../rl/scripts/grpo/grpo_3n_multinode_validate.sh)
-- venv build: [`rl/scripts/build_rl_vllm_venv.sh`](../../rl/scripts/build_rl_vllm_venv.sh)
+- 1N smoke: [`rl/scripts/grpo/qwen3_vllm_server_smoke.sh`](../../../rl/scripts/grpo/qwen3_vllm_server_smoke.sh)
+- cross-node (1 trainer node): [`rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`](../../../rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh)
+- multi-trainer-node (2+): [`rl/scripts/grpo/grpo_3n_multinode_validate.sh`](../../../rl/scripts/grpo/grpo_3n_multinode_validate.sh)
+- venv build: [`rl/scripts/build_rl_vllm_venv.sh`](../../../rl/scripts/build_rl_vllm_venv.sh)
 
 **What makes the cross-node path work (all landed):**
 1. **Unified `venvs/rl-vllm/` for BOTH server and trainer.** The older
@@ -88,7 +91,7 @@ torch's XPU wheel pulls them, but they install in-venv `libccl.so` / `libmpi*.so
 that shadow the system `/opt/aurora/.../oneapi/ccl` stack (in-venv oneCCL doesn't
 know Sunspot's USM allocator). After uninstall, `ldd .../libtorch_xpu.so | grep
 ccl` correctly resolves to the system path. Reproducible via
-[`rl/scripts/build_rl_vllm_venv.sh`](../../rl/scripts/build_rl_vllm_venv.sh)
+[`rl/scripts/build_rl_vllm_venv.sh`](../../../rl/scripts/build_rl_vllm_venv.sh)
 (commit `b43acb8b2`).
 
 ## Operational details

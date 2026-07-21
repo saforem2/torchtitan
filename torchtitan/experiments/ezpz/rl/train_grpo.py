@@ -255,6 +255,16 @@ def _ezpz_grpo_config_cls():
                 self.model_init_kwargs = mik
             super().__post_init__()
 
+    # Make the class PICKLABLE. HF's Trainer._save() does
+    # torch.save(self.args, "training_args.bin"), and save_only_model=True does
+    # NOT skip that (it only skips optimizer/scheduler). pickle resolves a class
+    # by importing its module and walking __qualname__ -- but this class is a
+    # function local ("_ezpz_grpo_config_cls.<locals>.EzpzGRPOConfig"), which
+    # pickle cannot find -> crash on every checkpoint. Fix: flatten __qualname__
+    # and publish the class at module scope under that name, keeping the lazy TRL
+    # import (the class is still only built when this function is first called).
+    EzpzGRPOConfig.__qualname__ = "EzpzGRPOConfig"
+    globals()["EzpzGRPOConfig"] = EzpzGRPOConfig
     return EzpzGRPOConfig
 
 
@@ -778,9 +788,14 @@ def main() -> None:
     else:
         config.report_to = []
 
-    # save_steps must be > max_steps so the in-train save never fires.
-    # (Belt-and-suspenders alongside save_strategy="no".)
-    if config.save_steps and config.save_steps <= config.max_steps:
+    # By default (save_strategy="no") mid-training saves are disabled to avoid
+    # safetensors E2BIG errors on path-length-limited filesystems; force
+    # save_steps > max_steps as belt-and-suspenders. But if the caller EXPLICITLY
+    # opts into checkpointing (--save_strategy steps/epoch), respect their
+    # save_steps -- long RL runs need mid-train checkpoints to eval + resume
+    # across walltime windows.
+    _save_off = config.save_strategy in ("no", "SaveStrategy.NO", None)
+    if _save_off and config.save_steps and config.save_steps <= config.max_steps:
         config.save_steps = config.max_steps + 1
 
     # Resolve task from registry

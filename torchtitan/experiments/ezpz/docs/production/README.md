@@ -44,12 +44,12 @@ has its own token/step goal in the linked page.
 |-------|------|--------------------|-------|----------|-------|
 | CPT | 2b-256n (plateaued) | [olmo×dolmino sweep](cpt/README.md) | **pilot complete** ✅ | step 5,960, loss **2.49** | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix/README.md) | tulu_math_uc_mix (metamathqa-swap, ~4.5B tok) | **complete** ✅ | 729 steps, loss **0.77** | 🏁 the reused SFT deliverable (checkpoint-729-hf); input to GRPO |
-| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **advancing** | **complete; deliverable=ckpt-900** (8672 overfit/forgot) | 🟢 8N (32N GPU-faults; scale-fault bisect); acc 0.885, epoch 0.69 |
+| SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **complete** ✅ | **deliverable=ckpt-900** (8672 overfit) | 🏁 8672 reached epoch 1.0 but forgot (base-LM->chance, IFEval flat); ckpt-900 = IFEval 0.253 >= metamathqa + base-LM intact + GRPO 0.31->0.74 |
 | SFT | [2b-v2-256n](sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) | tulu_math_uc_mix | **blocked** | — | 🔴 v2-base 384-rank oneCCL scale crash at 32N |
-| RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
+| RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](rl/grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
 
 > Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
-> [production/grpo/README.md](grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
+> [production/rl/grpo/README.md](rl/grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
 
 <details>
 <summary><strong>512N queue starvation</strong> — both 512N chains ~20d in <code>small</code>; node contention, not a hold (details)</summary>

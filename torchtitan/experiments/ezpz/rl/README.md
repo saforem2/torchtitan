@@ -1,3 +1,3 @@
 # RL (GRPO) Experiment
 
-Documentation has moved to [docs/rl/README.md](../docs/rl/README.md).
+Documentation has moved to [docs/production/rl/README.md](../docs/production/rl/README.md).

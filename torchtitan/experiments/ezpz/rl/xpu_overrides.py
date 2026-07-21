@@ -688,6 +688,29 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
     if getattr(_xmr, "_xpu_wrapper_no_alias_patched", False):
         return
 
+    # [ezpz] Current vLLM's _torch_cuda_wrapper already wraps current_stream in
+    # a functools.partial (a DISTINCT object -> dynamo-safe) AND keeps it set, so
+    # torch.cuda.current_stream() works on XPU (gpu_model_runner.py needs it).
+    # Only the OLD direct-alias form (torch.cuda.current_stream = torch.xpu
+    # .current_stream) triggered the dynamo double-handler assert. Inspect the
+    # upstream wrapper source: if it already uses partial(...current_stream),
+    # defer to it (no override) -- overriding would strip the working stream.
+    import inspect as _inspect
+
+    try:
+        _src = _inspect.getsource(_xmr._torch_cuda_wrapper)
+    except (OSError, TypeError):
+        _src = ""
+    if "partial(torch.xpu.current_stream)" in _src or (
+        "current_stream" in _src and "partial(" in _src
+    ):
+        _xmr._xpu_wrapper_no_alias_patched = True
+        print(
+            f"[xpu_overrides pid={os.getpid()}] vLLM _torch_cuda_wrapper already"
+            " dynamo-safe (partial current_stream); deferring, no override"
+        )
+        return
+
     import contextlib as _ctx
 
     @_ctx.contextmanager
@@ -900,6 +923,56 @@ def patch_fsdp2_force_sum_reduction_for_xpu() -> None:
             _mod.fsdp2_prepare_model = patched
 
 
+def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
+    """Drop the ``separate_full_blocks`` kwarg when torch's create_block_mask
+    lacks it.
+
+    Core ``models/common/decoder.py`` calls
+    ``create_attention_mask(..., separate_full_blocks=not is_in_batch_invariant_mode())``
+    (attention.py wraps torch's ``create_block_mask``). Older/other torch builds
+    -- including our XPU wheel -- do not accept that kwarg, so the trainer's flex
+    forward raises ``TypeError: create_block_mask() got an unexpected keyword
+    argument 'separate_full_blocks'``. Rather than edit core (songhappy dec51385
+    gated it inline), wrap the experiment-facing ``create_attention_mask`` to strip
+    the kwarg iff torch does not support it. No-op when torch already supports it.
+    """
+    import inspect as _inspect
+
+    from torch.nn.attention.flex_attention import create_block_mask as _cbm
+
+    if "separate_full_blocks" in _inspect.signature(_cbm).parameters:
+        return  # torch supports it -> nothing to do
+
+    import torchtitan.models.common.attention as _attn
+
+    # decoder.py binds `create_attention_mask` by name at import, so patching that
+    # module attribute is bypassed. create_attention_mask calls the module-global
+    # `_compiled_create_block_mask(*args, **kwargs)` (looked up at call time), so
+    # wrap THAT to strip the unsupported kwarg.
+    if not hasattr(_attn, "_compiled_create_block_mask"):
+        raise RuntimeError(
+            "xpu_overrides: torchtitan.models.common.attention."
+            "_compiled_create_block_mask not found -- upstream renamed it; update "
+            "patch_create_block_mask_separate_full_blocks_for_xpu."
+        )
+    if getattr(_attn._compiled_create_block_mask, "_xpu_sfb_patched", False):
+        return
+
+    _orig = _attn._compiled_create_block_mask
+
+    def _no_sfb(*args, **kwargs):
+        kwargs.pop("separate_full_blocks", None)
+        return _orig(*args, **kwargs)
+
+    _no_sfb._xpu_sfb_patched = True  # type: ignore[attr-defined]
+    _attn._compiled_create_block_mask = _no_sfb
+    print(
+        f"[xpu_overrides pid={os.getpid()}] "
+        "Patched _compiled_create_block_mask to drop unsupported "
+        "separate_full_blocks kwarg"
+    )
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -925,6 +998,7 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_make_replicate_for_xpu()
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
+    patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
     # Force FSDP2 grad reduce-scatter to SUM+divide (oneCCL lacks AVG on the
     # scheduler path). Correct regardless of transport; needed for

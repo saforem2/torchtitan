@@ -2,6 +2,52 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-18 (sunspot) -- full-mix SFT eval verdict + GRPO validation + 70th sync + RL cleanup
+
+- **Full-mix SFT eval -- COMPLETE on all 3 axes; deliverable is checkpoint-900, NOT 8672.**
+  Evaluated the finished run (gs138650 x tulu_math_uc_mix_full, step 8672).
+  - **base-LM sweep 0->8672 (jobs 12470365 + 12470886):** checkpoint-8672
+    **catastrophically forgot** -- every base-LM task collapsed to ~random
+    chance (hellaswag 0.59->0.27, arc_easy 0.69->0.30), collapse between step
+    ~1500-4500. checkpoint-900 (pre-collapse) retains base-LM (hellaswag 0.59,
+    arc_easy 0.64).
+  - **IFEval (jobs 12470889 step-8672, 12470896 step-900):** ckpt-900
+    prompt-strict **0.253** (>= metamathqa-729's 0.244, >> baseline 0.179);
+    ckpt-8672 flat-to-down (0.168). The overfit killed instruction-following too.
+  - **GRPO (job 12470959, ckpt-900, sum_digits):** accuracy_reward climbed
+    **0.31 -> ~0.74** in ~20 steps -- strong RL starting point (hit 6h walltime,
+    not converged). Confirms ckpt-900 is good downstream.
+  - **Root cause of the collapse:** LR 2e-5 held >1e-5 through step ~4350 (cosine
+    decay only bites the 2nd half); ~4000 steps at peak LR on the narrow
+    OpenMathInstruct-2 math-CoT distribution overfit + forgot. The metamathqa
+    recipe survived only by STOPPING at 729 steps. **Lesson: cap full-mix SFT at
+    O(1000) steps or lower the LR; a full epoch at peak LR is the mistake, not
+    the mix.** Full writeup: `production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md`.
+- **GRPO-on-XPU detour (documented so it never repeats):** the GRPO data point
+  took a long avoidable path -- I ran the SUPERSEDED `.venv` hf.generate FSDP
+  path (hangs multi-rank; regressed since June-10, single-rank works) and the
+  old vllm-test+.venv-split script (`Device string must not be empty`) before
+  finding the blessed vLLM server-mode path (unified `venvs/rl-vllm/`,
+  `rl/scripts/grpo/aurora2b_sft_arithmetic_vllm_xnode.sh`). Lesson: READ
+  `docs/rl/grpo-on-xpu-status.md` first. Recorded in the
+  `project_grpo_xpu_vllm_path` memory.
+- **RL script cleanup:** removed 10 superseded/bring-up RL scripts (the broken
+  `8n_vllm` + `vllm_serve_xpu.sh` PYTHONPATH-bridge + 8 pre-unified-venv
+  vLLM-XPU one-offs whose writeups already live in `docs/rl/history/`).
+  Reworded the supersede refs to note removal (kept the lessons); history/ +
+  journal untouched.
+- **70th upstream sync** (merge 412d93fd8, 3 commits): required a 5-file replay
+  of the MoE sibling-experts refactor (#3859: `MoE.experts` GroupedExperts ->
+  `MoE.routed_experts` RoutedExperts(inner_experts + token_dispatcher)). Caught
+  by sync_smoke (moe rc=143), fixed, re-smoked VERDICT ok (job 12470902).
+  Details in `upstream-sync.md` 70th entry.
+- **macOS local-run gotcha:** `ezpz launch ... --module ezpz.agpt` fails with a
+  misleading core error "Cannot import config_registry for module 'ezpz.agpt'"
+  -- the real cause (masked by `torchtitan/config/manager.py` catching all
+  ImportError) is `agpt/parallelize.py` doing `import ezpz` when the standalone
+  `ezpz` package isn't installed in the local .venv. Fix: `uv pip install -e
+  <ezpz clone>`.
+
 ## 2026-07-16 (sunspot) -- full-mix 8N SFT COMPLETE (epoch 1.0) + 69th upstream sync
 
 - **Full-mix 8N SFT finished cleanly**: gs138650 x tulu_math_uc_mix_full (~54B

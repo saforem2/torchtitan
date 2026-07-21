@@ -1,5 +1,93 @@
 # Claude Session Log
 
+## 2026-07-18
+
+### Summary
+
+Got `agpt` training to run end-to-end on a local macOS laptop (Apple Silicon).
+Started from a misleading `ImportError: Cannot import config_registry for module
+'ezpz.agpt'` and cleared a stack of platform walls.
+
+### Root cause of the reported crash
+
+The `config_registry` ImportError is a MASK (see `config/manager.py:117`'s bare
+`except ImportError: continue`). The real failure was a transitive, unconditional
+`import triton` in core `distributed/minimal_async_ep/kernels.py:10`, pulled in by
+core `models/common/decoder.py` -> so it hits EVERY model on macOS (triton has no
+macOS wheel), not just ezpz. Plain `llama3` fails identically.
+
+### Walls cleared (in order)
+
+1. **triton** (macOS has no wheel). Added `experiments/ezpz/triton_stub.py`:
+   stubs ONLY the `minimal_async_ep.kernels` leaf module when triton is
+   unimportable. Deliberately NOT a global `sys.modules["triton"]` fake -- that
+   flips torch's `has_triton_package()` to True and then `torch._inductor` dies on
+   `import triton.backends.compiler`. Stubbed kernels raise if actually called
+   (never on a dense run). No-op on XPU/CUDA. Installed from `ezpz/__init__.py`.
+2. **torch version.** Mac `.venv` had torch 2.10 (newest arm64/py3.14 wheel), but
+   this branch needs torch 2.13 APIs (`DataParallelMeshDims`). Upgraded to
+   `torch==2.13.0` (macOS arm64 wheel exists; no nvidia/triton deps pulled --
+   those are Linux-only markers).
+3. **device_module contract + lspci + CPU force.** Added
+   `experiments/ezpz/local_device_compat.py`:
+   - `get_peak_flops` shells out to `lspci` and only catches `FileNotFoundError`;
+     on macOS a missing lspci surfaces as `PermissionError` (execvp reports the
+     first EACCES from a non-searchable PATH entry). Replaced with a
+     subprocess-free A100-fallback stub.
+   - **MPS has NO distributed backend** -- FSDP/DTensor route param-init through
+     `c10d::broadcast_`, which raises NotImplementedError on MPS with no CPU
+     fallback. So MPS cannot run a real FSDP step. `TORCH_DEVICE=cpu` (honored by
+     ezpz but IGNORED by core torchtitan, which keeps selecting MPS) is the only
+     working path. The shim rebinds core `tools.utils.device_type/device_module`
+     to CPU when `TORCH_DEVICE=cpu`, and fills the `torch.cpu` contract gaps
+     (`empty_cache`, `get_device_name`, `get_device_properties`, `memory_stats`,
+     `reset_peak_memory_stats`, `total_memory` from system RAM to avoid a
+     div-by-zero in the memory monitor).
+4. **barrier device_ids.** ezpz `trainer.py:75` (`_set_pg_timeouts_xpu_aware`)
+   called `barrier(device_ids=[current_device()])`; on gloo/CPU any integer index
+   is resolved against the default accelerator (MPS) and hits the missing
+   `c10d::barrier`. Fixed to call `barrier()` with no device_ids when
+   `device_type == "cpu"`.
+5. **data + tokenizer.** agpt hardwires BlendCorpus (needs cluster
+   `.bin`/`.idx` + `data-lists/<machine>/books.txt`) and gemma-7b HF assets --
+   neither present locally. Added config `agpt_debugmodel_local` in
+   `agpt/config_registry.py`: reuses the debug model but swaps in the bundled
+   `c4_test` split (`tests/assets/c4_test`) via `HuggingFaceTextDataLoader`, the
+   checked-in fast tokenizer (`tests/assets/tokenizer`), wandb/checkpoint off,
+   10 steps, seq 512.
+
+### Result (VERIFIED)
+
+```
+TORCH_DEVICE=cpu LOCAL_RANK=0 RANK=0 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 \
+  MASTER_PORT=29610 python3 -m torchtitan.experiments.ezpz.train \
+  --module ezpz.agpt --config agpt_debugmodel_local --compile.no-enable
+```
+
+10/10 steps, exit 0, `Training completed`. Loss 10.75 -> 6.42, grad_norm ~2-3,
+~24s/step on CPU (21.5M-param debug model). All changes confined to
+`experiments/ezpz/` (2 new files + `__init__.py`, `trainer.py`, and
+`agpt/config_registry.py` edits).
+
+### Notes / open
+
+- MPS-only (no `TORCH_DEVICE=cpu`) gets as far as model build but dies at the
+  first collective; the MPS accelerator shim is best-effort for non-distributed
+  poking only.
+- `config/manager.py`'s bare `except ImportError` masking real dependency errors
+  is an upstream footgun worth a separate PR (surface `ModuleNotFoundError` for a
+  missing dep vs. a genuinely missing module path).
+- **Safety audit for XPU/CUDA:** all shims are guarded off real accelerators --
+  triton stub no-ops when `find_spec("triton")` is non-None (XPU ships
+  `pytorch-triton-xpu`, CUDA ships `triton`); `local_device_compat` returns early
+  when `torch.cuda.is_available() or torch.xpu.is_available()`; the trainer
+  barrier change only diverges when `device_type == "cpu"` (else branch is
+  byte-identical to the original). Verified all prod configs (2b/20b/80b) still
+  build unchanged. The torch 2.13 upgrade was to the local Mac `.venv` only --
+  not the cluster envs, and `uv.lock` was not modified.
+- Committed + pushed to `origin/ezpz` after a pull-before-push (a 103-file pull
+  had landed meanwhile); re-smoked post-merge (10/10 steps, loss 10.80 -> 6.46).
+
 ## 2026-03-17
 
 ### Commits

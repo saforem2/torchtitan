@@ -1,0 +1,135 @@
+diff --git a/torchtitan/experiments/rl/examples/alphabet_sort/config_registry.py b/torchtitan/experiments/rl/examples/alphabet_sort/config_registry.py
+index 51334225..0af96c49 100644
+--- a/torchtitan/experiments/rl/examples/alphabet_sort/config_registry.py
++++ b/torchtitan/experiments/rl/examples/alphabet_sort/config_registry.py
+@@ -60,6 +60,7 @@ from torchtitan.experiments.rl.routing.strategies import (
+ )
+ from torchtitan.models.gpt_oss import model_registry as gpt_oss_model_registry
+ from torchtitan.models.qwen3 import model_registry
++from torchtitan.models.llama3 import model_registry as llama3_model_registry
+ from torchtitan.protocols.model import ModelConfigConverter
+ from torchtitan.protocols.model_spec import ModelSpec
+ 
+@@ -83,6 +84,25 @@ def _qwen3_rl_model_registry(
+     return spec
+ 
+ 
++def _llama3_rl_model_registry(
++    flavor: str,
++    *,
++    attn_backend: str,
++    converters: list[ModelConfigConverter.Config] | None = None,
++) -> ModelSpec:
++    """``llama3.model_registry`` for RL, with the lm_head fp32 cast always on.
++
++    Mirror of ``_qwen3_rl_model_registry`` for Llama-architecture checkpoints
++    (e.g. AuroraGPT-2B). RL logprob / KL math needs fp32 lm_head logits, so
++    every RL config runs ``LMHeadCastConverter`` on top of whatever it passes.
++    """
++    converters = list(converters or [])
++    converters.append(LMHeadCastConverter.Config())
++    return llama3_model_registry(
++        flavor, attn_backend=attn_backend, converters=converters
++    )
++
++
+ def rl_grpo_qwen3_0_6b_varlen() -> Controller.Config:
+     """GRPO training config for Qwen3-0.6B (6 GPUs: 4 gen + 2 train)."""
+     group_size = 8
+@@ -282,6 +302,96 @@ def rl_grpo_lora_qwen3_0_6b() -> Controller.Config:
+     )
+ 
+ 
++def rl_grpo_lora_agpt_2b() -> Controller.Config:
++    """GRPO + LoRA config for AuroraGPT-2B (LlamaForCausalLM), the SFT
++    checkpoint-900 deliverable, on the alphabet_sort task.
++
++    Mirrors ``rl_grpo_lora_qwen3_0_6b`` but with the llama3 agpt-2b model spec,
++    a gemma/llama tokenizer resolved from the checkpoint (renderer name="auto"
++    -- the checkpoint's tokenizer must carry a chat_template; the SFT gemma
++    template is injected at staging time), and the smoke gates baked in
++    (max_tokens=700 + num_groups_per_train_step=4). Pass
++    ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups`` on
++    the CLI so all-zero-reward cold-start groups still assemble a batch.
++
++    LoRA targets ``["wqkv", "wo"]`` -- the fused-QKV Linear leaf names, same as
++    qwen3 (llama3 also builds with fuse_qkv=True).
++    """
++    group_size = 8
++    model_spec = _llama3_rl_model_registry(
++        "agpt-2b",
++        attn_backend="flex",
++        converters=[
++            LoRAConverter.Config(rank=8, alpha=16.0, target_modules=["wqkv", "wo"]),
++        ],
++    )
++    # Disable max_autotune for XPU (see rl_grpo_lora_qwen3_0_6b for rationale).
++    from torch.nn.attention.flex_attention import flex_attention
++    from torchtitan.models.common.attention import FlexAttention
++
++    FlexAttention.inductor_configs = {
++        **FlexAttention.inductor_configs,
++        "max_autotune": False,
++        "coordinate_descent_tuning": False,
++    }
++    FlexAttention._compiled_flex_attn = torch.compile(
++        flex_attention, options=FlexAttention.inductor_configs
++    )
++    return Controller.Config(
++        model_spec=model_spec,
++        # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
++        hf_assets_path="torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B",
++        async_loop=AsyncLoopConfig(
++            num_training_steps=3,
++            num_groups_per_train_step=4,
++            group_size=group_size,
++            validation=ValidationConfig(num_samples=20),
++            batcher=Batcher.Config(
++                batch=BatchConfig(local_batch_size=2, seq_len=2048),
++            ),
++        ),
++        compile=CompileConfig(enable=True, backend="aot_eager"),
++        rollouter=AlphabetSortRollouter.Config(),
++        renderer=RendererConfig(name="auto", enable_thinking=False),
++        metrics=MetricsProcessor.Config(enable_wandb=False),
++        trainer=PolicyTrainer.Config(
++            optimizer=default_adamw(lr=2e-6),
++            lr_scheduler=LRSchedulersContainer.Config(
++                warmup_steps=2,
++                decay_type="linear",
++            ),
++            training=TrainingConfig(dtype="bfloat16"),
++            parallelism=ParallelismConfig(
++                data_parallel_shard_degree=1,
++                tensor_parallel_degree=1,
++            ),
++            checkpoint=CheckpointManager.Config(
++                enable=True,
++                initial_load_in_hf=True,
++                interval=10,
++                last_save_model_only=False,
++            ),
++            loss=GRPOLoss.Config(),
++        ),
++        generator=VLLMGenerator.Config(
++            model_dtype="bfloat16",
++            gpu_memory_limit=0.70,
++            cudagraph=VLLMCudagraphConfig(enable=False),
++            attention_config=AttentionConfig(),
++            parallelism=InferenceParallelismConfig(
++                data_parallel_degree=1,
++                tensor_parallel_degree=1,
++            ),
++            checkpoint=CheckpointManager.Config(enable=False),
++            sampling=SamplingConfig(
++                temperature=0.8,
++                top_p=0.95,
++                max_tokens=700,
++            ),
++        ),
++    )
++
++
+ def rl_grpo_qwen3_0_6b_flex_batch_invariant() -> Controller.Config:
+     """GRPO training config for Qwen3-0.6B with flex attention and batch invariance
+     for bitwise-identical numerics between trainer and generator (4 GPUs: 2 gen + 2 train).

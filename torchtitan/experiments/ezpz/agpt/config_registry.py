@@ -20,6 +20,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
 
 from . import model_registry
 
@@ -304,6 +305,35 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
 
 def ezpz_agpt_debugmodel() -> FaultTolerantTrainer.Config:
     return agpt("debugmodel", local_batch_size=2)
+
+
+def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
+    """Fully offline debug config for local single-device dev (e.g. macOS/MPS).
+
+    Same debug model as ``agpt_debugmodel`` but with every dependency that needs
+    the cluster (Megatron-preprocessed BlendCorpus data, the gemma-7b HF assets,
+    wandb, checkpointing) swapped for something that exists in the repo:
+
+    - dataloader: the bundled ``c4_test`` split (``tests/assets/c4_test``) via
+      ``HuggingFaceTextDataLoader`` instead of ``BlendCorpusDataLoader`` (which
+      reads ``data-lists/<machine>/books.txt`` + preprocessed .bin/.idx).
+    - tokenizer: the checked-in fast tokenizer at ``tests/assets/tokenizer``.
+    - wandb and checkpointing off, few steps: a self-contained smoke run.
+
+    Nothing here is production-relevant; it exists so ``--config
+    agpt_debugmodel_local`` runs end to end with no network and no cluster data.
+    """
+    cfg = agpt_debugmodel()
+    cfg.hf_assets_path = "./tests/assets/tokenizer"
+    cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
+    cfg.dataloader = HuggingFaceTextDataLoader.Config(dataset="c4_test")
+    cfg.validator.enable = False
+    cfg.metrics.enable_wandb = False
+    cfg.checkpoint.enable = False
+    cfg.training.steps = 10
+    cfg.training.seq_len = 512
+    cfg.training.local_batch_size = 2
+    return cfg
 
 
 def ezpz_agpt_2b() -> FaultTolerantTrainer.Config:

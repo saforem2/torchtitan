@@ -71,8 +71,14 @@ def _set_pg_timeouts_xpu_aware(
 
     device_module = dist_utils.device_module
     # Flush in-flight work under the old timeout before lowering it
-    # (mirrors upstream set_pg_timeouts' safety barrier).
-    torch.distributed.barrier(device_ids=[device_module.current_device()])
+    # (mirrors upstream set_pg_timeouts' safety barrier). The gloo (CPU)
+    # backend does not take device_ids, and any integer index there is
+    # resolved against the default accelerator (e.g. MPS on a Mac), which has
+    # no c10d::barrier -- so only pass device_ids for real accelerators.
+    if dist_utils.device_type == "cpu":
+        torch.distributed.barrier()
+    else:
+        torch.distributed.barrier(device_ids=[device_module.current_device()])
     device_module.synchronize()
 
     timeout_groups: list[torch.distributed.ProcessGroup | None] = [
