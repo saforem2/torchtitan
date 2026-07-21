@@ -165,11 +165,12 @@ plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
 
 # remote python that aggregates ALL runs' reward-by-version in one shot ------
 _AGG = r'''
-import json, collections, statistics, os, glob, re
+import json, collections, statistics, os, glob, re, time
 BASE = "%s"                 # .../outputs
 REPO = os.path.dirname(BASE)  # repo root (for logs/)
 RUNS = %s
 out = {}
+live = {}
 _ansi = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 for tag, sub, kind in RUNS:
     byv = collections.defaultdict(list)
@@ -202,7 +203,15 @@ for tag, sub, kind in RUNS:
                     except Exception: pass
     if byv:
         out[tag] = {v: round(statistics.mean(byv[v]), 5) for v in sorted(byv)}
-print(json.dumps(out))
+        srcs = (
+            [os.path.join(BASE, sub, "rollout_samples.jsonl")] if kind == "monarch"
+            else glob.glob(os.path.join(REPO, "logs", sub, "run.log"))
+        )
+        try:
+            live[tag] = round(time.time() - max(os.path.getmtime(x) for x in srcs), 1)
+        except Exception:
+            live[tag] = None
+print(json.dumps({"rewards": out, "live": live}))
 '''
 
 
@@ -223,10 +232,14 @@ def fetch():
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                obj = json.loads(line)
+                # new shape {"rewards":..,"live":..}; tolerate old flat shape
+                if "rewards" in obj:
+                    return obj
+                return {"rewards": obj, "live": {}}
             except Exception:
                 pass
-    return {}
+    return {"rewards": {}, "live": {}}
 
 
 def terminal_pixels():
@@ -243,23 +256,34 @@ def terminal_pixels():
     return 1000, 620
 
 
-def draw(data, wpx, hpx):
+# a run is "live" if its source file changed within this many seconds.
+LIVE_WINDOW = float(os.environ.get("RL_LIVE_WINDOW", "300"))
+
+
+def draw(payload, wpx, hpx):
+    data = payload.get("rewards", payload)
+    live = payload.get("live", {})
     dpi = 100
     fig, ax = plt.subplots(figsize=(max(4.0, wpx * 0.92 / dpi),
                                     max(2.6, hpx * 0.80 / dpi)), dpi=dpi)
     parts = []
-    for i, (tag, _sub, label, _kind) in enumerate(RUNS):  # noqa: B007  (_sub unused here)
+    for i, (tag, _sub, label, _kind) in enumerate(RUNS):  # noqa: B007
         d = data.get(tag) or {}
         if not d:
             continue
-        # JSON object keys are strings; sort numerically, look up by string key.
         keys = sorted(d, key=lambda k: int(k))
         vs = [int(k) for k in keys]
         means = [d[k] for k in keys]
         sm = [statistics.mean(means[max(0, j - 2):j + 1]) for j in range(len(means))]
-        ls = "--" if tag == "v5" else "-"
-        ax.plot(vs, sm, ls, lw=(1.5 if tag == "v5" else 2.0),
-                color=COLORS[i % len(COLORS)], label=label)
+        age = live.get(tag)
+        is_live = age is not None and age <= LIVE_WINDOW
+        # live: bright + solid + thick; idle: dim + thin
+        alpha = 1.0 if is_live else 0.28
+        lw = 2.4 if is_live else 1.2
+        z = 5 if is_live else 2
+        lbl = ("* " + label) if is_live else (label + " (idle)")
+        ax.plot(vs, sm, "-", lw=lw, color=COLORS[i % len(COLORS)],
+                alpha=alpha, zorder=z, label=lbl)
         parts.append("%s=%.2f" % (tag, means[-1]))
     ax.axhline(0.248, lw=0.8, ls=":", alpha=0.5)
     ax.set_xlabel("policy version (~ training step)")
@@ -283,8 +307,11 @@ def main():
             print("fetch error:", e)
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
-        live = {k: (max(int(x) for x in v) if v else 0) for k, v in data.items()}
-        print("[%s] latest policy versions: %s" % (time.strftime("%H:%M:%S"), live))
+        rewards = data.get("rewards", {}) if isinstance(data, dict) else {}
+        liveinfo = data.get("live", {}) if isinstance(data, dict) else {}
+        latest = {k: (max(int(x) for x in v) if v else 0) for k, v in rewards.items()}
+        nlive = sum(1 for a in liveinfo.values() if a is not None and a <= float(os.environ.get("RL_LIVE_WINDOW", "300")))
+        print("[%s] %d live | versions: %s" % (time.strftime("%H:%M:%S"), nlive, latest))
         draw(data, *terminal_pixels())
         try:
             time.sleep(INTERVAL)
