@@ -155,7 +155,7 @@ PYCHK
     echo "[2/2] Running lm-eval..."
     source venvs/aurora/tt-lm-eval/bin/activate
     mkdir -p "${RESULTS_DIR_ABS}"
-    HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" SHOTS_SPEC="${SHOTS_SPEC:-}" \
+    HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" SHOTS_SPEC="${SHOTS_SPEC:-}" LIMIT="${LIMIT:-}" \
     python3 << 'PYEOF'
 import os, json
 import transformers.modeling_utils as mu
@@ -170,6 +170,8 @@ results_dir = os.environ["RESULTS_DIR_ABS"]
 # (mmlu-5, arc_challenge-25, hellaswag-0) require one call PER shot group.
 # Falls back to all of $TASKS at 0-shot when SHOTS_SPEC is unset (legacy).
 shots_spec = os.environ.get("SHOTS_SPEC", "").strip()
+_lim = os.environ.get("LIMIT", "").strip()
+eval_limit = int(_lim) if _lim and int(_lim) > 0 else None
 if shots_spec:
     groups = []
     for grp in shots_spec.split(";"):
@@ -193,6 +195,7 @@ for shots, tset in groups:
         batch_size=2,
         num_fewshot=shots,
         device="xpu:0",
+        limit=eval_limit,
     )
     merged.update(r["results"])
 
