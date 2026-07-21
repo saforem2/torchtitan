@@ -619,23 +619,10 @@ class FaultTolerantTrainer(Trainer):
             last_rank = first_rank + group_size - 1
             global_ranks = list(range(first_rank, last_rank + 1))
 
-        # init distributed and build meshes.
-        # Async checkpointing makes core CheckpointManager create a
-        # dist.new_group(backend="gloo") for CPU-side staging. On XPU the
-        # default PG is xccl-only, so gloo is not registered for any device
-        # and new_group raises "No backend type associated with device type
-        # xpu" at trainer init (see
-        # docs/upstream-issues/checkpoint_async_gloo_on_xpu.md). Binding a
-        # cpu:gloo backend alongside xccl (enable_cpu_backend=True ->
-        # "xpu:xccl,cpu:gloo") registers gloo so the staging subgroup builds.
-        # Enable it whenever CPU offload OR async checkpointing needs it.
-        _async_ckpt = str(config.checkpoint.async_mode).lower() in (
-            "async",
-            "async_with_pinned_mem",
-        )
+        # init distributed and build meshes
         dist_utils.init_distributed(
             config.comm,
-            enable_cpu_backend=config.training.enable_cpu_offload or _async_ckpt,
+            enable_cpu_backend=config.training.enable_cpu_offload,
             base_folder=config.dump_folder,
             ranks=global_ranks,
         )
@@ -654,6 +641,15 @@ class FaultTolerantTrainer(Trainer):
         )
 
         maybe_install_xccl_split_group_workaround()
+        # Async-checkpoint CPU staging calls dist.new_group(backend="gloo"),
+        # which crashes on XPU because the gloo subgroup inherits
+        # bound_device_id=xpu and torch's eager-connect then calls
+        # _get_backend(xpu) on the gloo-only group. Install before the
+        # checkpointer builds. See gloo_new_group_workaround.py.
+        from torchtitan.experiments.ezpz.gloo_new_group_workaround import (
+            maybe_install_gloo_new_group_workaround,
+        )
+        maybe_install_gloo_new_group_workaround()
 
         # FT addition: build FTManager
         self.ft_manager = config.fault_tolerance.build()
