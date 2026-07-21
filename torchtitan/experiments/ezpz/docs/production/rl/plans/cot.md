@@ -338,3 +338,40 @@ Stage 1's envelope is solid and you've measured you need reflection depth.
 - [beat-v5 tuning sweep](../grpo/beat-v5-sweep.md) -- no config lever beats a
   reward-shape ceiling.
 - [monarch.md](../monarch.md) / [trl.md](../trl.md) -- the two GRPO frameworks.
+
+## Stage 2 result (2026-07-21): GRPO REGRESSED CoT metrics -- reward-hacking
+
+First trained-policy eval, on the validated Monarch path (reason_agpt, GRPO+LoRA,
+step-100 merged to HF via merge_lora_dcp_to_hf.py):
+
+| Metric | cold-start (ckpt-16) | GRPO step-100 | delta |
+|--------|----------------------|---------------|-------|
+| format hit-rate | 0.955 | 0.635 | **-0.32** |
+| CoT accuracy (GSM8K/200) | 0.16 | 0.105 | **-0.055** |
+
+GRPO made the model WORSE. Generations are coherent (median 242 chars, real
+numbers -- NOT a merge artifact), but 33/200 produced no extractable `<answer>` at
+all: the model drifted AWAY from the `<think>/<answer>` envelope the cold-start SFT
+taught.
+
+**Root cause -- reward/eval divergence (classic reward-hacking):** the shaped
+reward rose (0.118 -> 0.217) while eval accuracy FELL. GRPO optimized the reward
+function, not the task. The likely design error is MINE: I rebalanced the format
+component 0.2 -> 0.05 ("it's saturated, make it a cheap guard") and added a dense
+`answer_close` term that rewards emitting ANY number. But format was saturated only
+BECAUSE the SFT held it there -- once its reward weight dropped to 0.05 and
+closeness rewarded bare numbers, GRPO had little pressure to keep the envelope, so
+formatting decayed. The "anti-saturation" rebalance removed the guardrail.
+
+The 400-step run (cot-long) shows the same reward-up pattern (0.130 -> 0.231) and is
+therefore likely drifting the same way, further -- reward is NOT a proxy for the
+eval here.
+
+**Fixes to try next (not yet run):**
+1. Keep format weight HIGH (0.2+) so GRPO cannot trade away the envelope; or make
+   answer_correct strictly dominate and gate closeness on a well-formed envelope.
+2. Add a small KL to the cold-start reference (beta>0) to anchor against drift
+   (this run used beta=0.0).
+3. Eval EARLY checkpoints (step 20/40) to find where regression begins; the merge
+   + eval loop is one command per step.
+4. Only reward closeness when format_ok, so "emit any number" is not a reward path.
