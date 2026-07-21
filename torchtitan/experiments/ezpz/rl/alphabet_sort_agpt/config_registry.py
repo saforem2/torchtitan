@@ -29,8 +29,8 @@ grpo-lora-agpt2b-repro.md) are baked in:
   - `rl_grpo_lora_agpt_2b_easy()` uses the easy task (1 turn, <=3 names) + lr 2e-5 --
     the config that produced the rising reward curve (0.167 -> 0.26).
 
-agpt "2b-rl" defaults to sdpa attention -- avoids the flex block-mask compile path;
-the generator uses vLLM's own attention regardless.
+agpt "2b-rl" uses FlexAttention (agpt/__init__.py:449); the flex-disable monkeypatch
+below caps its autotune. The generator uses vLLM own attention regardless.
 """
 
 from __future__ import annotations
