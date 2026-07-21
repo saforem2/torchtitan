@@ -32,6 +32,40 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
+# --- preflight: bad-node self-recovery ------------------------------------
+# Some Sunspot compute nodes (e.g. the x1922c1 chassis, 2026-07-21) come up with
+# a broken /lus/tegu mount while PBS still reports them "free", so jobs land
+# there and every rank dies instantly with "Couldn't change directory ... No
+# such file or directory" (exit 127). Verify EVERY node in the nodefile can see
+# the working dir; if any cannot, requeue onto a fresh node set and exit rather
+# than burning the slot. Bounded retry (PREFLIGHT_MAX) guards against a loop.
+SELF_REL="torchtitan/experiments/ezpz/rl/scripts/grpo/aurora2b_gsm8k_reason_grpo_xnode.sh"
+PREFLIGHT_RETRY="${PREFLIGHT_RETRY:-0}"
+PREFLIGHT_MAX="${PREFLIGHT_MAX:-4}"
+if [[ -n "${PBS_NODEFILE:-}" ]]; then
+    bad=""
+    while read -r host; do
+        [[ -z "$host" ]] && continue
+        if ! mpiexec -n 1 --host "$host" test -d "${SUBMIT_DIR}" 2>/dev/null; then
+            bad="${bad} ${host}"
+        fi
+    done < <(sort -u "${PBS_NODEFILE}")
+    if [[ -n "$bad" ]]; then
+        echo "PREFLIGHT FAIL: /lus/tegu working dir not accessible on:${bad}"
+        if (( PREFLIGHT_RETRY < PREFLIGHT_MAX )); then
+            echo "PREFLIGHT: requeuing (attempt $((PREFLIGHT_RETRY+1))/${PREFLIGHT_MAX})"
+            VARS="PREFLIGHT_RETRY=$((PREFLIGHT_RETRY+1))"
+            [[ -n "${GSM8K_MAX_STEPS:-}" ]] && VARS="${VARS},GSM8K_MAX_STEPS=${GSM8K_MAX_STEPS}"
+            qsub -v "${VARS}" "${SUBMIT_DIR}/${SELF_REL}" \
+                || echo "PREFLIGHT: requeue qsub failed -- resubmit manually"
+        else
+            echo "PREFLIGHT: hit PREFLIGHT_MAX=${PREFLIGHT_MAX} -- giving up (likely a real outage, not a bad node)"
+        fi
+        exit 0
+    fi
+    echo "PREFLIGHT OK: working dir accessible on all $(sort -u "${PBS_NODEFILE}" | wc -l) nodes"
+fi
+
 # Cross-tree TCP-KVS XCCL rendezvous (mirror the validated xnode recipe).
 unset CCL_OP_SYNC CCL_OFI_PROVIDER
 unset FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
