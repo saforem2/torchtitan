@@ -81,9 +81,11 @@ def _answer_span(text: str) -> tuple[bool, str | None]:
         boxed = _BOXED_RE.search(span)
         ans = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
         return (ans is not None), ans
-    stripped = _THINK_RE.sub("", text)
-    boxed = _BOXED_RE.search(stripped)
-    return False, (_norm_num(boxed.group(1)) if boxed else None)
+    # No envelope -> NOT format_ok AND no answer. (Previously accepted a bare
+    # \boxed{} here, which let extractable/close/correct fire without the
+    # <think>/<answer> envelope -- the reward-hack path that decayed format
+    # 0.955->0.635. A well-formed answer MUST come through the envelope branch.)
+    return False, None
 
 
 def _relative_closeness(pred: str | None, gold: str) -> float:
@@ -143,8 +145,8 @@ class AnswerExtractableReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        _, ans = _answer_span(_completion_text(rollout))
-        return 1.0 if ans is not None else 0.0
+        format_ok, ans = _answer_span(_completion_text(rollout))
+        return 1.0 if (format_ok and ans is not None) else 0.0
 
 
 class AnswerCloseReward(RewardFn):
@@ -160,7 +162,9 @@ class AnswerCloseReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        _, ans = _answer_span(_completion_text(rollout))
+        format_ok, ans = _answer_span(_completion_text(rollout))
+        if not format_ok:
+            return 0.0
         return _relative_closeness(ans, env_input.answer)
 
 
@@ -175,7 +179,9 @@ class AnswerCorrectReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        _, ans = _answer_span(_completion_text(rollout))
+        format_ok, ans = _answer_span(_completion_text(rollout))
+        if not format_ok:
+            return 0.0
         gold = env_input.answer
         return 1.0 if (ans is not None and gold and ans == str(gold)) else 0.0
 

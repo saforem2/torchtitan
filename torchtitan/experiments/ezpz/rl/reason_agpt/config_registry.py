@@ -121,14 +121,14 @@ def _gsm8k_rollouter(
             seed=42, split="train", max_steps=max_steps, num_samples=num_samples
         ),
         validation_dataset=GSM8KReasonDataset.Config(
-            seed=99, split="test", max_steps=max_steps, shuffle=False
+            seed=99, split="test", max_steps=0, shuffle=False
         ),
         rubric=Rubric.Config(
             reward_fns=[
-                ThinkFormatReward.Config(weight=0.05),
+                ThinkFormatReward.Config(weight=0.20),
                 AnswerExtractableReward.Config(weight=0.05),
                 AnswerCloseReward.Config(weight=0.20),
-                AnswerCorrectReward.Config(weight=0.70),
+                AnswerCorrectReward.Config(weight=0.55),
             ],
             truncation_reward=0.0,
         ),
