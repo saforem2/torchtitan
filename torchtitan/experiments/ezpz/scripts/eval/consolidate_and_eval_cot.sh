@@ -52,6 +52,10 @@ elif [[ -d "${CKPT}/pytorch_model_fsdp_0" ]]; then
     for f in tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json; do
         [[ -f "${TOK_SRC}/${f}" ]] && cp "${TOK_SRC}/${f}" "${HF}/"
     done
+    # Fix the consolidated eos_token_id (stock Llama eos=2 is wrong for gemma and
+    # not what the model emits; it stops on <end_of_turn>=107). Without this
+    # GRPO/vLLM never terminate. See fix_ckpt_eos.py.
+    "${VENV_MAIN}/python" torchtitan/experiments/ezpz/scripts/eval/fix_ckpt_eos.py "${HF}"
     deactivate 2>/dev/null || true
 else
     echo "FATAL: no pytorch_model_fsdp_0 in ${CKPT}"; exit 2
