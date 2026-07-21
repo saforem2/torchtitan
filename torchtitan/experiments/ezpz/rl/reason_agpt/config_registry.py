@@ -149,6 +149,7 @@ def _agpt_grpo_config(
     lr: float,
     lora_rank: int = 8,
     clip_eps: float = 0.2,
+    ckpt_interval: int = 20,
     max_tokens: int = 700,
     num_samples: int = 0,
 ) -> Controller.Config:
@@ -201,7 +202,7 @@ def _agpt_grpo_config(
             checkpoint=CheckpointManager.Config(
                 enable=True,
                 initial_load_in_hf=True,
-                interval=20,
+                interval=ckpt_interval,
                 last_save_model_only=False,
             ),
             loss=GRPOLoss.Config(clip_eps=clip_eps),
@@ -262,4 +263,26 @@ def rl_grpo_lora_agpt_2b_gsm8k_easy() -> Controller.Config:
         group_size=4,
         max_steps=3,
         lr=2e-5,
+    )
+
+
+def rl_grpo_lora_agpt_2b_gsm8k_b2smoke() -> Controller.Config:
+    """B2 pre-flight smoke on the STRONG cold-start base (checkpoint-93-hf,
+    format 0.985, acc 0.205). Audit-recommended SAFE settings for a base we do
+    NOT want to destabilize: easy curriculum (more MIXED groups -> dense
+    gradient), lr=2e-6 (10x below the _easy default 2e-5, which was validated
+    only on the old weak base and has no KL anchor to fall back on), 20 training
+    steps, ckpt every 10 (so a walltime kill still leaves a resumable ckpt --
+    the launcher wraps python in `timeout`, and last-step force-save only fires
+    on clean completion). Pass CKPT=<checkpoint-93-hf> on the CLI. Success =
+    mean reward rises AND format_hit_rate stays >= 0.9 (the hard tripwire: with
+    only clip_eps and no KL/ref anchor, the B2 base prior holding the envelope
+    is the sole restoring force)."""
+    return _agpt_grpo_config(
+        num_training_steps=20,
+        num_groups_per_train_step=8,
+        group_size=4,
+        max_steps=3,
+        lr=2e-6,
+        ckpt_interval=10,
     )
