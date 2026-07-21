@@ -250,7 +250,7 @@ ezpz launch \
     --checkpoint.interval="${CKPT_INTERVAL}" \
     --checkpoint.keep-latest-k="${CKPT_KEEP_LATEST_K}" \
     --checkpoint.no-last-save-model-only \
-    --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-async}" \
+    --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     --dataloader.dataset=blendcorpus \
     --dataloader.dataset-path="${DFL}" \
     --dataloader.data-cache-path="${DATA_CACHE_PATH}" \
