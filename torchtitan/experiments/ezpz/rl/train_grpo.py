@@ -164,6 +164,14 @@ def _ezpz_grpo_config_cls():
         # Disable mid-training checkpoints to avoid safetensors E2BIG errors
         # on filesystems with path-length limits.
         save_strategy: str = "no"
+        # Save ONLY the model (safetensors + config + tokenizer), not the
+        # optimizer state or training_args. Required: HF's _save() pickles
+        # self.args via torch.save, but EzpzGRPOConfig is a function-local class
+        # (built lazily to avoid importing TRL at module load), which pickle
+        # cannot serialize -> "Can't get local object ...EzpzGRPOConfig" crash on
+        # every checkpoint. save_only_model=True skips that pickle and writes
+        # exactly what we need to eval/resume the policy.
+        save_only_model: bool = True
 
         # --- precision / memory ------------------------------------------------
         bf16: bool = True
