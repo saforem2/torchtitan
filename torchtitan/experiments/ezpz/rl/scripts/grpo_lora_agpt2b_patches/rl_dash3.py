@@ -133,6 +133,8 @@ RUNS = [
     ("w2",     "rl_lora_agpt2b_w2",       "w2 easy lr2e-5 r32"),
     ("w3",     "rl_lora_agpt2b_w3",       "w3 easy lr5e-5 16grp"),
     ("shaped", "rl_lora_agpt2b_shaped",   "shaped reward (r32 lr5e-5)"),
+    ("cot",      "rl_lora_agpt2b_cot",      "gsm8k CoT (monarch smoke, 100 steps)"),
+    ("cot-long", "rl_lora_agpt2b_cot_long", "gsm8k CoT (monarch, 400 steps)"),
 ]
 COLORS = ["#888888", "#4c78a8", "#59a14f", "#e45756", "#b279a2", "#f0a24b"]
 
