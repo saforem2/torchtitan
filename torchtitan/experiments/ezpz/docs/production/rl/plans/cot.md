@@ -399,3 +399,31 @@ below baseline on both metrics. This is NOT a train-too-long / early-stop proble
 the reward+setup are wrong from step 1. The fix must change step-1 behavior (reward
 gating on format_ok, format weight up, KL anchor beta>0, and likely a stronger
 cold-start), not just stop earlier.
+
+### Gated-reward run (12471366) result: exposed a deeper problem (2026-07-21)
+
+Applying the format-gated reward (A1) made reward go to EXACTLY 0.000 across all 73
+policy versions -- because it exposed that the TRAINING rollouts were almost never
+in-envelope to begin with:
+
+- 95% of rollouts (1570/1648) emitted NO `<think>` block at all.
+- 20% (322/1648) literally echoed the one-shot exemplar's answer `\boxed{5}`.
+- Typical completion: `\n<answer>\boxed{5}</answer>` (exemplar tail copied).
+
+**Root cause (two workflow findings converge):** the 16-step cold-start
+(checkpoint-16-hf) is too weak to sustain the `<think>/<answer>` envelope during
+on-policy generation, so it latches onto the turn-0 one-shot EXEMPLAR
+(env.py: `<think>...3+2=5</think><answer>\boxed{5}</answer>`) and copies its tail.
+The PRE-fix reward scored those bare-`\boxed{}` outputs (0.95 of mass) -> the
+"learning" (reward 0.118->0.217) was reward-hacking on exemplar echoes, and the
+eval regression (format 0.955->0.635) was the envelope decaying toward the echo.
+The gate (A1) correctly zeroes the echo -- but that leaves no signal, because the
+rollouts are ~never in-envelope. So A1 is CORRECT but insufficient alone.
+
+**This is exactly the workflow's B2 verdict:** the weak cold-start is the binding
+problem. Two cheap fixes to try:
+1. Drop the one-shot exemplar (it POISONS a weak model -> it copies the literal
+   answer instead of reasoning). Rely on the instruction + SFT. Zero-shot test.
+2. B2: run the unrun 2N/3-epoch cold-start (~930 optimizer steps, ~50x the 16-step
+   ckpt) so the model reliably emits the envelope on its own; THEN GRPO with the
+   gated reward becomes meaningful.
