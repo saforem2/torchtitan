@@ -53,13 +53,20 @@ class GSM8KReasonEnv(MessageEnv):
 
     @dataclass(kw_only=True, slots=True)
     class Config(MessageEnv.Config):
-        pass
+        # One-shot exemplar OFF by default: a weak cold-start copies the
+        # exemplar's literal answer instead of reasoning (95% of rollouts emitted
+        # no <think>, 20% echoed the exemplar's \boxed{5}). Turn on only with a
+        # strong cold-start that won't parrot it.
+        one_shot: bool = False
 
     def __init__(self, config: Config, *, env_input: GSM8KReasonSample) -> None:
         self._env_input = env_input
+        self._one_shot = config.one_shot
 
     async def init(self) -> MessageEnvInitOutput:
-        prompt = f"{self._env_input.question}{PROMPT_SUFFIX}\n\n{_ONE_SHOT}"
+        prompt = f"{self._env_input.question}{PROMPT_SUFFIX}"
+        if self._one_shot:
+            prompt = f"{prompt}\n\n{_ONE_SHOT}"
         return MessageEnvInitOutput(
             init_prompt_messages=[{"role": "user", "content": prompt}]
         )
