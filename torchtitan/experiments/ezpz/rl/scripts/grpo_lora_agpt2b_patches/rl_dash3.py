@@ -127,14 +127,18 @@ if sys.stdout.isatty():
 # ---- the runs to track: (tag, output-subdir, label) ----------------------
 BASE = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
         "outputs")
+# (tag, subdir/glob, label, kind). kind="monarch" reads
+# outputs/<sub>/rollout_samples.jsonl (reward-by-policy_version); kind="trl" reads
+# logs/<glob>/run.log TRL dict-lines (reward-by-step). One dashboard, both engines.
 RUNS = [
-    ("v5",     "rl_lora_agpt2b_train_v5", "v5 easy lr2e-5 r8 (prev best)"),
-    ("w1",     "rl_lora_agpt2b_w1",       "w1 easy lr5e-5 r8"),
-    ("w2",     "rl_lora_agpt2b_w2",       "w2 easy lr2e-5 r32"),
-    ("w3",     "rl_lora_agpt2b_w3",       "w3 easy lr5e-5 16grp"),
-    ("shaped", "rl_lora_agpt2b_shaped",   "shaped reward (r32 lr5e-5)"),
-    ("cot",      "rl_lora_agpt2b_cot",      "gsm8k CoT (monarch smoke, 100 steps)"),
-    ("cot-long", "rl_lora_agpt2b_cot_long", "gsm8k CoT (monarch, 400 steps)"),
+    ("v5",       "rl_lora_agpt2b_train_v5", "v5 alphabet (monarch)",        "monarch"),
+    ("w1",       "rl_lora_agpt2b_w1",       "w1 alphabet (monarch)",        "monarch"),
+    ("w2",       "rl_lora_agpt2b_w2",       "w2 alphabet (monarch)",        "monarch"),
+    ("w3",       "rl_lora_agpt2b_w3",       "w3 alphabet (monarch)",        "monarch"),
+    ("shaped",   "rl_lora_agpt2b_shaped",   "shaped alphabet (monarch)",    "monarch"),
+    ("cot",      "rl_lora_agpt2b_cot",      "gsm8k CoT monarch (100st)",    "monarch"),
+    ("cot-long", "rl_lora_agpt2b_cot_long", "gsm8k CoT monarch (400st)",    "monarch"),
+    ("cot-trl",  "grpo-agpt2b-gsm8k-reason-cot-12471247", "gsm8k CoT TRL (12471247)", "trl"),
 ]
 COLORS = ["#888888", "#4c78a8", "#59a14f", "#e45756", "#b279a2", "#f0a24b"]
 
@@ -161,33 +165,49 @@ plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
 
 # remote python that aggregates ALL runs' reward-by-version in one shot ------
 _AGG = r'''
-import json, collections, statistics, os
-BASE = "%s"
+import json, collections, statistics, os, glob, re
+BASE = "%s"                 # .../outputs
+REPO = os.path.dirname(BASE)  # repo root (for logs/)
 RUNS = %s
 out = {}
-for tag, sub in RUNS:
-    p = os.path.join(BASE, sub, "rollout_samples.jsonl")
+_ansi = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+for tag, sub, kind in RUNS:
     byv = collections.defaultdict(list)
-    try:
-        for line in open(p):
-            try: d = json.loads(line)
-            except Exception: continue
-            if d.get("is_validation"): continue
-            t = d.get("turns") or []
-            if not t: continue
-            v = t[0].get("max_policy_version")
-            if v is None: continue
-            try: byv[int(v)].append(float(d.get("reward", 0)))
-            except Exception: pass
-    except FileNotFoundError:
-        continue
-    out[tag] = {v: round(statistics.mean(byv[v]), 5) for v in sorted(byv)}
+    if kind == "monarch":
+        p = os.path.join(BASE, sub, "rollout_samples.jsonl")
+        try:
+            for line in open(p):
+                try: d = json.loads(line)
+                except Exception: continue
+                if d.get("is_validation"): continue
+                t = d.get("turns") or []
+                if not t: continue
+                v = t[0].get("max_policy_version")
+                if v is None: continue
+                try: byv[int(v)].append(float(d.get("reward", 0)))
+                except Exception: pass
+        except FileNotFoundError:
+            continue
+    else:  # trl: parse reward-by-step from the run.log TRL dict-lines
+        cand = glob.glob(os.path.join(REPO, "logs", sub, "run.log"))
+        if not cand:
+            continue
+        step = 0
+        for line in open(cand[-1], errors="replace"):
+            line = _ansi.sub("", line)
+            for m in re.finditer(r"\{[^{}]*'reward'[^{}]*\}", line):
+                mm = re.search(r"'reward':\s*'?([-0-9.eE+]+)'?", m.group(0))
+                if mm:
+                    try: byv[step].append(float(mm.group(1))); step += 1
+                    except Exception: pass
+    if byv:
+        out[tag] = {v: round(statistics.mean(byv[v]), 5) for v in sorted(byv)}
 print(json.dumps(out))
 '''
 
 
 def fetch():
-    script = _AGG % (BASE, repr([(t, s) for t, s, _ in RUNS]))
+    script = _AGG % (BASE, repr([(t, s, k) for t, s, _, k in RUNS]))
     if LOCAL:
         r = subprocess.run([sys.executable, "-c", script],
                            capture_output=True, text=True, timeout=90)
@@ -228,7 +248,7 @@ def draw(data, wpx, hpx):
     fig, ax = plt.subplots(figsize=(max(4.0, wpx * 0.92 / dpi),
                                     max(2.6, hpx * 0.80 / dpi)), dpi=dpi)
     parts = []
-    for i, (tag, _sub, label) in enumerate(RUNS):  # noqa: B007  (_sub unused here)
+    for i, (tag, _sub, label, _kind) in enumerate(RUNS):  # noqa: B007  (_sub unused here)
         d = data.get(tag) or {}
         if not d:
             continue
