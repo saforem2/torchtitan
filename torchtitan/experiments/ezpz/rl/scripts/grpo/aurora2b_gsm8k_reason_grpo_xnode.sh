@@ -112,7 +112,6 @@ echo "[$(date +%T)] launching ${NTRAIN_RANKS} trainer ranks on ${NTRAIN_NODES} n
     --output_dir "${CKPT_DIR}" \
     --per_device_train_batch_size 1 --num_generations 4 \
     --max_completion_length 512 --temperature 1.0 \
-    --generation_kwargs '{"stop": ["</answer>"], "include_stop_str_in_output": true}' \
     --max_steps 400 --learning_rate 3e-6 --beta 0.0 --bf16 --fsdp full_shard \
     --gradient_checkpointing \
     --logging_steps 1 --save_strategy steps --save_steps 25 --save_total_limit 10 \
