@@ -55,6 +55,7 @@ export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=${CCL_ZE_CACHE_OPEN_IPC_HANDLES_T
 # 12471132) -- handles are never freed, so eviction threshold is moot. Disable the
 # ZE IPC-handle cache entirely so each handle is released immediately.
 export CCL_ZE_CACHE=${CCL_ZE_CACHE:-0}
+export GSM8K_MAX_STEPS=${GSM8K_MAX_STEPS:-3}
 
 # Stage-1 cold-start checkpoint (95.5% envelope emission). Has the gemma
 # chat_template (consolidation copied it from the staged dir).
@@ -111,10 +112,11 @@ echo "[$(date +%T)] launching ${NTRAIN_RANKS} trainer ranks on ${NTRAIN_NODES} n
     --model_name_or_path "${MODEL}" \
     --output_dir "${CKPT_DIR}" \
     --per_device_train_batch_size 1 --num_generations 4 \
-    --max_completion_length 512 --temperature 0.7 \
-    --max_steps 30 --learning_rate 1e-6 --beta 0.0 --bf16 --fsdp full_shard \
+    --max_completion_length 512 --temperature 1.0 \
+    --generation_kwargs '{"stop": ["</answer>"], "include_stop_str_in_output": true}' \
+    --max_steps 30 --learning_rate 3e-6 --beta 0.0 --bf16 --fsdp full_shard \
     --gradient_checkpointing \
-    --logging_steps 1 --save_strategy steps --save_steps 50 --save_total_limit 5 \
+    --logging_steps 1 --save_strategy steps --save_steps 10 --save_total_limit 5 \
     --report_to wandb --resume_from_checkpoint "${CKPT_DIR}" \
     --use_vllm --vllm_mode server --vllm_server_base_url "${VLLM_URL}" \
     --vllm_server_timeout 600 \
