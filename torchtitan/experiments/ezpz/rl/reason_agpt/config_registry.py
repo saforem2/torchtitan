@@ -239,6 +239,19 @@ def rl_grpo_lora_agpt_2b_gsm8k() -> Controller.Config:
     )
 
 
+def rl_grpo_lora_agpt_2b_gsm8k_long() -> Controller.Config:
+    """Longer easy-subset run (400 steps) -- same validated config as the _easy
+    smoke that trained clean to 100 steps (reward 0.118 -> 0.217), just 4x the
+    steps to see how far CoT accuracy climbs. group_size=4, easy curriculum."""
+    return _agpt_grpo_config(
+        num_training_steps=400,
+        num_groups_per_train_step=8,
+        group_size=4,
+        max_steps=3,
+        lr=2e-5,
+    )
+
+
 def rl_grpo_lora_agpt_2b_gsm8k_easy() -> Controller.Config:
     """Easy-subset variant (<=3 calculator steps) + lr 2e-5 -- the CoT-plan
     recommendation: a difficulty band where more groups start MIXED so GRPO has a
