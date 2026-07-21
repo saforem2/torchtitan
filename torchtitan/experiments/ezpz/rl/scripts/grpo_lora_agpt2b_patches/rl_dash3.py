@@ -139,6 +139,8 @@ RUNS = [
     ("cot",      "rl_lora_agpt2b_cot",      "gsm8k CoT monarch (100st)",    "monarch"),
     ("cot-long", "rl_lora_agpt2b_cot_long", "gsm8k CoT monarch (400st)",    "monarch"),
     ("cot-trl",  "grpo-agpt2b-gsm8k-reason-cot-12471247", "gsm8k CoT TRL (12471247)", "trl"),
+    ("cot-gated","rl_lora_agpt2b_cot_gated","gsm8k CoT gated-reward (monarch)","monarch"),
+    ("cot-zs",   "rl_lora_agpt2b_cot_zeroshot","gsm8k CoT zero-shot+gated (monarch)","monarch"),
 ]
 COLORS = ["#888888", "#4c78a8", "#59a14f", "#e45756", "#b279a2", "#f0a24b"]
 
