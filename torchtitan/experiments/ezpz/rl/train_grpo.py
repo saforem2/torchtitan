@@ -778,9 +778,14 @@ def main() -> None:
     else:
         config.report_to = []
 
-    # save_steps must be > max_steps so the in-train save never fires.
-    # (Belt-and-suspenders alongside save_strategy="no".)
-    if config.save_steps and config.save_steps <= config.max_steps:
+    # By default (save_strategy="no") mid-training saves are disabled to avoid
+    # safetensors E2BIG errors on path-length-limited filesystems; force
+    # save_steps > max_steps as belt-and-suspenders. But if the caller EXPLICITLY
+    # opts into checkpointing (--save_strategy steps/epoch), respect their
+    # save_steps -- long RL runs need mid-train checkpoints to eval + resume
+    # across walltime windows.
+    _save_off = config.save_strategy in ("no", "SaveStrategy.NO", None)
+    if _save_off and config.save_steps and config.save_steps <= config.max_steps:
         config.save_steps = config.max_steps + 1
 
     # Resolve task from registry
