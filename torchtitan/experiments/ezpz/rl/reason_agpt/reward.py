@@ -117,7 +117,18 @@ def _completion_text(rollout: Rollout) -> str:
     if not rollout.turns:
         return ""
     message = rollout.turns[-1].completion_message
-    return (message.get("content") or "") if message else ""
+    if not message:
+        return ""
+    content = message.get("content") or ""
+    # vLLM DefaultRenderer splits a <think>...</think> prefix out of content
+    # into reasoning_content (tags stripped). The model DID emit the envelope
+    # (raw-generation eval scores format ~0.985), so reconstruct the full
+    # completion the policy actually sampled -- else the reward sees only the
+    # <answer> span and scores every in-envelope rollout 0 (zero gradient).
+    reasoning = message.get("reasoning_content") or ""
+    if reasoning and "<think>" not in content:
+        return "<think>" + reasoning + "</think>" + content
+    return content
 
 
 # --- Reward functions (each logged separately in reward_breakdown) -------------
