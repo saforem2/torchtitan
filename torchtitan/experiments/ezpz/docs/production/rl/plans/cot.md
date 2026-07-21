@@ -375,3 +375,27 @@ eval here.
 3. Eval EARLY checkpoints (step 20/40) to find where regression begins; the merge
    + eval loop is one command per step.
 4. Only reward closeness when format_ok, so "emit any number" is not a reward path.
+
+### Regression trajectory (all early checkpoints eval'd, 2026-07-21)
+
+| step | format_hit_rate | cot_accuracy |
+|------|----------------:|-------------:|
+| 0 (cold-start) | 0.955 | 0.16 |
+| 20 | 0.88 | 0.12 |
+| 40 | 0.79 | 0.12 |
+| 60 | 0.86 | 0.105 |
+| 80 | 0.755 | 0.11 |
+| 100 | 0.635 | 0.105 |
+
+Two SEPARATE failure modes:
+- **Accuracy: instant then flat.** 0.16 -> 0.12 in the FIRST 20 steps, then a stable
+  0.10-0.12 band. GRPO knocks the model off the cold-start's correct answers
+  immediately and never recovers them.
+- **Format: continuous bleed.** near-monotonic 0.955 -> 0.635 over the whole run --
+  the sustained reward-hack (envelope traded for the "any number" closeness reward).
+
+Key implication: there is NO good early checkpoint to stop at -- even step-20 is
+below baseline on both metrics. This is NOT a train-too-long / early-stop problem;
+the reward+setup are wrong from step 1. The fix must change step-1 behavior (reward
+gating on format_ok, format weight up, KL anchor beta>0, and likely a stronger
+cold-start), not just stop earlier.
