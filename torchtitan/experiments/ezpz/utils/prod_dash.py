@@ -493,16 +493,60 @@ def render_board(payload) -> str:
 # ---------------------------------------------------------------------------
 # Curve overlay (modes 1 & 2): shared by live-kitcat and headless-SVG.
 # ---------------------------------------------------------------------------
+def _apply_house_style(plt):
+    """ambivalent + Iosevka, matching the committed production charts.
+
+    Prefer the shared plot_style helper (single source of the house style).
+    If it is unavailable (e.g. run from a python without the ezpz package),
+    fall back to loading the ambivalent stylesheet + registering Iosevka
+    directly, the way rl_dash3 does -- so styling is guaranteed either way.
+    Prefer the 'Iosevka Term' variant if registered (cleaner in plots)."""
+    styled = False
+    try:
+        from torchtitan.experiments.ezpz.utils.plot_style import apply_style
+        apply_style()
+        styled = True
+    except Exception:
+        pass
+    if not styled:
+        import glob as _glob
+        import importlib.util as _ilu
+        from matplotlib import font_manager as _fm
+        for d in (os.path.expanduser("~/.local/share/fonts"),
+                  os.path.expanduser("~/Library/Fonts"), "/usr/share/fonts"):
+            for f in _glob.glob(os.path.join(d, "**", "Iosevka*.tt*"),
+                                recursive=True):
+                try:
+                    _fm.fontManager.addfont(f)
+                except Exception:
+                    pass
+        try:
+            spec = _ilu.find_spec("ambivalent")
+            for loc in (spec.submodule_search_locations or []):
+                cand = os.path.join(loc, "stylefiles", "ambivalent.mplstyle")
+                if os.path.isfile(cand):
+                    plt.style.use(cand)
+                    break
+        except Exception:
+            pass
+    # Prefer 'Iosevka Term' when present (rl_dash3 convention).
+    try:
+        from matplotlib import font_manager as _fm
+        names = {f.name for f in _fm.fontManager.ttflist
+                 if "iosevka" in f.name.lower()}
+        pick = next((n for n in ("Iosevka Term", "Iosevka") if n in names), None)
+        if pick:
+            plt.rcParams["font.family"] = [pick, "DejaVu Sans Mono", "monospace"]
+    except Exception:
+        pass
+
+
 def draw_curves(payload, wpx, hpx, save_path=None):
     import matplotlib
     if save_path:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    try:
-        from torchtitan.experiments.ezpz.utils.plot_style import apply_style
-        apply_style()
-    except Exception:
-        pass
+    _apply_house_style(plt)
     plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
                          "axes.facecolor": "none"})
     chains = payload.get("chains", {})
