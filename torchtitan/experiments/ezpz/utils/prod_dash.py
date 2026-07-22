@@ -523,7 +523,11 @@ def draw_curves(payload, wpx, hpx, save_path=None):
         if len(curve) < 2:
             continue
         toks_per_step = (c.get("gbs") or 0) * (c.get("seq_len") or 0)
-        if xaxis == "tokens" and toks_per_step:
+        if xaxis == "tokens":
+            # Skip chains with no known gbs (experiment forks) rather than
+            # plotting their step count on a tokens axis -- mixing scales.
+            if not toks_per_step:
+                continue
             xs = [p[0] * toks_per_step / 1e9 for p in curve]  # billions of tokens
         else:
             xs = [p[0] for p in curve]
