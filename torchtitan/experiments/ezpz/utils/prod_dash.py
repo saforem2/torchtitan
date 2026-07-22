@@ -258,6 +258,27 @@ def _last_job_from_paths(paths):
                 best = j
     return str(best) if best is not None else None
 
+_WBRUN_RE = re.compile(r"wandb\.ai/[\w./-]+/runs/([A-Za-z0-9]+)")
+
+def _wandb_ids_from_paths(paths):
+    """W&B run-ids parsed from a chain's .o logs, in first-seen order. EVERY
+    run logs to W&B (the autoretry scripts print 'View run at .../runs/<id>'),
+    so experiment forks discovered from logs -- not trajectories.py -- still
+    get their runs. Ordered by log mtime so the newest run is last."""
+    ids, seen = [], set()
+    for p in sorted((x for x in paths or [] if os.path.exists(x)),
+                    key=lambda x: os.path.getmtime(x)):
+        try:
+            txt = ANSI.sub("", open(p, errors="replace").read())
+        except (FileNotFoundError, IsADirectoryError):
+            continue
+        for m in _WBRUN_RE.finditer(txt):
+            rid = m.group(1)
+            if rid not in seen:
+                seen.add(rid)
+                ids.append(rid)
+    return ids
+
 def build_backbone():
     logs = _all_ologs()
     idx = _dir_index(logs)
@@ -315,7 +336,7 @@ def build_backbone():
         curve, _ = _olog_curve(paths)
         if len(curve) < 2:
             continue
-        chains["exp:" + base] = {
+        exp = {
             "label": base.replace("agpt-", ""),
             "model": "2b" if "-2b-" in base or base.endswith("-2b") else "?",
             "num_nodes": None, "gbs": None, "seq_len": 8192,
@@ -323,6 +344,13 @@ def build_backbone():
             "ckpt_base": base, "curve": _downsample(curve),
             "last_job": _last_job_from_paths(paths),
         }
+        # Every run logs to W&B -- parse the run-id(s) from the fork's .o logs
+        # (these forks aren't in trajectories.py) so they get the same
+        # wandb/tps/mfu/updated enrichment as canonical chains.
+        wb_ids = _wandb_ids_from_paths(paths)
+        if wb_ids:
+            exp.update(_wandb_summary(wb_ids))
+        chains["exp:" + base] = exp
     # Cache the ckpt-base -> log-paths index so the per-call path can stat
     # staleness WITHOUT re-reading every log head over Lustre (that scan is
     # the expensive part: ~2 min for the whole repo). Only paths referenced by
