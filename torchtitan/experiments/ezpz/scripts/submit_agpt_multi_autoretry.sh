@@ -140,7 +140,16 @@ die() { echo "[multi ERROR] $*" >&2; exit 1; }
 # instead of burning the whole allocation. A dolmino-mix CPT trainer
 # NaN'd at step 3801 in job 8663177 and ran ~370 NaN steps unbounded
 # because this was unset (default 0 = off). 5 matches the 80B script.
-NAN_ABORT_CONSECUTIVE="${NAN_ABORT_CONSECUTIVE:-5}"
+# Default OFF: the pinned pre-#3623 production clones' train.py has no
+# nan_abort_consecutive field, so passing the flag crashes every rank
+# ("Unrecognized options: --nan-abort-consecutive", rc=143 -- killed umbrella
+# 8680578). Set NAN_ABORT_CONSECUTIVE=5 explicitly only on a HEAD-based clone
+# that has the field. Empty => flag is omitted entirely (see nan_abort_args).
+NAN_ABORT_CONSECUTIVE="${NAN_ABORT_CONSECUTIVE:-}"
+nan_abort_args=()
+if [[ -n "${NAN_ABORT_CONSECUTIVE}" ]]; then
+    nan_abort_args=(--nan-abort-consecutive="${NAN_ABORT_CONSECUTIVE}")
+fi
 
 TRAINERS=(
     "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288"
@@ -395,7 +404,7 @@ launch_trainer() {
             --checkpoint.folder="$ckpt" \
             --checkpoint.interval="$CKPT_INTERVAL" \
             --checkpoint.keep-latest-k=0 \
-            --nan-abort-consecutive="${NAN_ABORT_CONSECUTIVE}" \
+            "${nan_abort_args[@]}" \
             --checkpoint.no-last-save-model-only \
             --checkpoint.async-mode=disabled \
             --dataloader.dataset=blendcorpus \

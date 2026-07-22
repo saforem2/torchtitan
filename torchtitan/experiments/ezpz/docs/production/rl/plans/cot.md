@@ -467,3 +467,39 @@ lever is the cold-start, not RL tuning).
 **Next:** a longer run on B2 (guardrail: format >= 0.9 hard tripwire; re-eval a
 real merged checkpoint on the shared 200-problem GSM8K metric -- do not trust the
 reward curve).
+
+## 2026-07-22 -- 100-step B2 run: format perfected, accuracy FLAT (RL is not the lever)
+
+Scaled the b2smoke recipe to 100 steps (`rl_grpo_lora_agpt_2b_gsm8k_b2long`,
+lr=2e-6, easy curriculum, group_size=4; job 12471432, rc=0, ckpt every 25).
+Format held 1.000 the entire run -- zero reward-hacking, confirming the B2-base +
+gated-reward architecture is drift-proof.
+
+**Decisive measurement** (step-100 LoRA merged into B2 base via
+merge_and_eval_cot_lora.sh, evaluated on the FULL 200-problem GSM8K CoT metric --
+NOT the noisy 20-sample in-loop val):
+
+| GSM8K CoT (200 problems) | B2 base | B2 + 100-step GRPO |
+| --- | --- | --- |
+| cot_accuracy | 0.205 | 0.215 (+1pp, ~2 problems, within noise) |
+| format_hit_rate | 0.985 | 1.000 |
+
+The in-loop 20-sample validation (reward 0.429 -> 0.425, correct 0.250 -> 0.250)
+agreed: accuracy did not move. **RL is not the accuracy lever for a 2B at ~20%
+GSM8K** -- GRPO can only reweight rollouts the base already samples, and at this
+solve rate the correct-rollout density is too thin (group_size=4 => most groups
+all-wrong, zero advantage) and lr=2e-6 too gentle to shift the task. What GRPO
+delivered cleanly: perfected format (0.985 -> 1.000) with no envelope decay.
+
+**Correction to the earlier b2smoke "+11%" read:** that 0.382 -> 0.425 was on the
+same 20-sample in-loop set (+-0.05/problem) and was within noise, not a real gain.
+The 200-problem metric is the one to trust.
+
+**Fork (next levers, in rough priority):**
+1. Stronger/longer cold-start SFT (the workflow's #1 lever -- accuracy lives here,
+   not in RL). More epochs / better CoT data / STaR-style self-distillation.
+2. If continuing RL: raise lr into the 5e-6-1e-5 band (now SAFE -- format is
+   bulletproof at 1.0, so the conservative lr is no longer needed) AND/OR raise
+   group_size (8-16) for denser gradient on the thin correct-rollout signal, AND
+   drop the easy curriculum's max_steps filter once the base is stronger.
+3. Accept RL as a format-perfecter + move accuracy work upstream to SFT.

@@ -53,6 +53,22 @@ TASK_COLORS = {
     "gsm8k": "#16a085",
 }
 
+TASK_ORDER = [
+    # legacy commonsense dashboard
+    "hellaswag", "arc_easy", "arc_challenge", "winogrande",
+    "piqa", "openbookqa", "boolq",
+    # modern suite (2026-07 landscape review)
+    "mmlu", "gsm8k",
+]
+
+
+def _ordered_tasks(found):
+    """TASK_ORDER first (those present), then any extras alphabetically."""
+    present = [t for t in TASK_ORDER if t in found]
+    extras = sorted(t for t in found if t not in TASK_ORDER)
+    return present + extras
+
+
 RANDOM_BASELINES = {
     "hellaswag": 0.25,
     "arc_easy": 0.25,
@@ -73,6 +89,10 @@ def _read_one(path: Path) -> dict[str, float]:
     for task, m in d.items():
         if not isinstance(m, dict):
             continue
+        # mmlu logs a 'mmlu' aggregate PLUS ~57 'mmlu_<subject>' subtasks;
+        # keep only the aggregate so the table/plot are not swamped.
+        if task.startswith("mmlu_"):
+            continue
         acc = (m.get("acc_norm,none")
                or m.get("acc,none")
                or m.get("exact_match,strict-match")
@@ -84,14 +104,25 @@ def _read_one(path: Path) -> dict[str, float]:
 
 
 def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
-    """Load DCP-layout results (single sweep) keyed by training step."""
+    """Load DCP-layout results (single sweep) keyed by training step.
+
+    Reads the legacy agpt-{model}/ dir AND the per-trajectory
+    agpt-{model}-v2-{LABEL}/ dirs (e.g. -v2-512n, -v2-256n) where the
+    current driver writes. Per step, scores from all matching dirs are merged
+    (later dirs win on key collisions), so modern tasks (mmlu/gsm8k/arc_c)
+    that live in the -v2-{LABEL} dirs show up alongside the legacy suite.
+    """
     data: dict[int, dict[str, float]] = {}
-    base = evals_dir / f"agpt-{model}"
-    for step_dir in sorted(base.glob("step-*/results/results.json")):
-        step = int(step_dir.parent.parent.name.split("-")[1])
-        scores = _read_one(step_dir)
-        if scores:
-            data[step] = scores
+    bases = [evals_dir / f"agpt-{model}"]
+    bases += sorted(evals_dir.glob(f"agpt-{model}-v2-*"))
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for step_dir in sorted(base.glob("step-*/results/results.json")):
+            step = int(step_dir.parent.parent.name.split("-")[1])
+            scores = _read_one(step_dir)
+            if scores:
+                data.setdefault(step, {}).update(scores)
     return data
 
 
@@ -295,7 +326,7 @@ def print_table(data: dict, model: str) -> None:
         print(f"\n## agpt_{model}: no results")
         return
 
-    tasks = sorted({t for s in data for t in data[s]})
+    tasks = _ordered_tasks({t for s in data for t in data[s]})
     header = "| Step | " + " | ".join(tasks) + " |"
     sep = "|------|" + "|".join(["------"] * len(tasks)) + "|"
     print(f"\n## agpt_{model} — {len(data)} checkpoints\n")
