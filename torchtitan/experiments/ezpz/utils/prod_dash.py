@@ -51,7 +51,10 @@ INTERVAL = float(os.environ.get("PD_INTERVAL", "30"))
 LOCAL = os.environ.get("PD_LOCAL") == "1"
 SSH_TGT = os.environ.get("PD_SSH", "aurora")
 SOCK = os.environ.get("PD_SOCK", "/tmp/aurora-master.sock")
-BACKBONE_TTL = int(os.environ.get("PD_BACKBONE_TTL", "900"))
+# Backbone = per-chain loss history from W&B. Completed steps never change, so
+# a long TTL is safe; the live tip (moving step/loss of a running job) comes
+# from the cheap per-call live layer, not the backbone. Default 1h.
+BACKBONE_TTL = int(os.environ.get("PD_BACKBONE_TTL", "3600"))
 LIVE_WINDOW = float(os.environ.get("PD_LIVE_WINDOW", "300"))
 # Hide experiment forks whose newest .o log is older than this (default 7d);
 # PD_SHOW_ALL=1 shows every experiment ever run.
@@ -238,7 +241,13 @@ def build_backbone():
             "token_target": None, "kind": "experiment",
             "ckpt_base": base, "curve": _downsample(curve),
         }
-    return {"chains": chains, "built_at": time.time()}
+    # Cache the ckpt-base -> log-paths index so the per-call path can stat
+    # staleness WITHOUT re-reading every log head over Lustre (that scan is
+    # the expensive part: ~2 min for the whole repo). Only paths referenced by
+    # a tracked chain are kept.
+    tracked = {c.get("ckpt_base") for c in chains.values() if c.get("ckpt_base")}
+    slim_idx = {b: p for b, p in idx.items() if b in tracked}
+    return {"chains": chains, "idx": slim_idx, "built_at": time.time()}
 
 def load_backbone():
     if not FRESH and os.path.exists(CACHE):
@@ -272,8 +281,10 @@ def qstat_jobs():
                      "name": f[3], "state": f[-2]})
     return jobs
 
-def live_layer(idx):
-    """Per running/recent job: its ckpt dir + freshest (step, loss)."""
+def live_layer():
+    """Per running job: resolve its ckpt dir + freshest (step, loss). Only the
+    handful of logs belonging to CURRENT qstat jobs are read (cheap), unlike the
+    full-repo head scan in build_backbone."""
     jobs = qstat_jobs()
     live = {}  # ckpt_base -> {state, jobid, step, loss, tps, mfu, age}
     states = {}  # ckpt_base -> worst-known state (R>Q>H)
@@ -309,18 +320,25 @@ def live_layer(idx):
     return states, live
 
 bb = load_backbone()
-logs = _all_ologs()
-idx = _dir_index(logs)
-states, live = live_layer(idx)
-# staleness of each canonical/exp chain's newest .o log (for live/idle color)
+idx = bb.get("idx", {})  # cached ckpt-base -> [log paths]; stat-only, no re-read
+states, live = live_layer()
+now = time.time()
+chains_out = {}
 for key, ch in bb["chains"].items():
     base = ch.get("ckpt_base")
     paths = idx.get(base, [])
     try:
-        ch["log_age"] = round(time.time() - max(os.path.getmtime(p)
+        ch["log_age"] = round(now - max(os.path.getmtime(p)
                               for p in paths if os.path.exists(p)), 1) if paths else None
     except Exception:
         ch["log_age"] = None
+    # Apply the experiment-staleness filter HERE (emit time) so it works even
+    # when reading a cache built before the filter existed. Canonical chains
+    # are always shown; a live job overrides staleness.
+    if (ch.get("kind") == "experiment" and not SHOW_ALL
+            and base not in live
+            and (ch["log_age"] is None or ch["log_age"] > EXP_MAX_AGE)):
+        continue
     ch["queue_state"] = states.get(base)
     lv = live.get(base)
     if lv:
@@ -339,7 +357,10 @@ for key, ch in bb["chains"].items():
     else:
         ch["pct_target"] = None
         ch["tokens"] = None
-bb["built_age"] = round(time.time() - bb["built_at"], 1)
+    chains_out[key] = ch
+bb["chains"] = chains_out
+bb.pop("idx", None)  # don't ship the path index to the client
+bb["built_age"] = round(now - bb["built_at"], 1)
 bb["generated_at"] = time.time()
 print(json.dumps(bb))
 '''
