@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -438,6 +439,96 @@ register_sft_dataset(
             "gsm8k rationales wrapped in the <think>/<answer> R1-style CoT "
             "envelope (openai/gsm8k 'main', 7473 examples). Stage 1 cold-start "
             "for teaching agpt-2b to emit reasoning traces; no teacher needed."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
+# OpenR1-Math-220k -- rich R1-distilled long-form CoT, reformatted into our
+# <think>/<answer>\boxed{} envelope (matches gsm8k-r1cot + the eval).
+# ---------------------------------------------------------------------------
+
+_OPENR1_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_OPENR1_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+_OPENR1_SUFFIX = (
+    "\nReason step by step inside <think></think>, then give the final "
+    "answer inside <answer>\\boxed{}</answer>."
+)
+
+
+def _openr1_format_row(ex):
+    """Pick a verified-correct generation, extract its <think> trace + boxed
+    answer, and reformat to our envelope. Returns a formatted row dict, or
+    None if no correct generation with an extractable boxed answer exists
+    (caller drops None rows so we never train a malformed envelope).
+
+    OpenR1 generations already carry <think>...</think>; we keep that trace
+    verbatim and normalize the tail to a single <answer>\boxed{}</answer>.
+    """
+    gens = ex.get("generations") or []
+    correct = ex.get("correctness_math_verify") or []
+    complete = ex.get("is_reasoning_complete") or []
+    for i, gen in enumerate(gens):
+        if i < len(correct) and not correct[i]:
+            continue
+        if i < len(complete) and not complete[i]:
+            continue
+        if not gen:
+            continue
+        tm = _OPENR1_THINK_RE.search(gen)
+        if not tm:
+            continue
+        trace = tm.group(1).strip()
+        # boxed answer: prefer the LAST \boxed{} anywhere in the generation
+        boxes = _OPENR1_BOXED_RE.findall(gen)
+        if not boxes:
+            continue
+        ans = boxes[-1].strip()
+        if not trace or not ans:
+            continue
+        completion = f"<think>{trace}</think>\n<answer>\\boxed{{{ans}}}</answer>"
+        return {
+            "prompt": [{"role": "user", "content": ex["problem"] + _OPENR1_SUFFIX}],
+            "completion": [{"role": "assistant", "content": completion}],
+        }
+    return None
+
+
+def _build_openr1_math_cot():
+    """open-r1/OpenR1-Math-220k reformatted to the <think>/<answer> envelope.
+
+    Selects a verified-correct (correctness_math_verify) + complete generation
+    per problem, keeps its R1 reasoning trace, and normalizes the final answer
+    to <answer>\boxed{ans}</answer>. Rows with no correct+boxed generation are
+    dropped (map returns the sentinel, then filter removes it). Needs the HF
+    download cached first (see _pretokenize_b3_instruct_cot_mix_1n.sh).
+    """
+    from datasets import load_dataset
+
+    raw = load_dataset("open-r1/OpenR1-Math-220k", "default", split="train")
+    cols = raw.column_names
+
+    def _map(ex):
+        out = _openr1_format_row(ex)
+        if out is None:
+            # sentinel: empty prompt/completion -> dropped by the filter below
+            return {"prompt": [], "completion": []}
+        return out
+
+    mapped = raw.map(_map, remove_columns=cols)
+    return mapped.filter(lambda ex: bool(ex["prompt"]) and bool(ex["completion"]))
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="OpenR1-Math-220k",
+        build=_build_openr1_math_cot,
+        description=(
+            "open-r1/OpenR1-Math-220k R1-distilled long-form CoT, reformatted "
+            "into the <think>/<answer>\\boxed{} envelope. Selects a verified- "
+            "correct generation per problem; rows without a correct+boxed "
+            "generation are dropped. The rich-reasoning half of b3_instruct_cot_mix."
         ),
     )
 )
