@@ -53,6 +53,14 @@ SSH_TGT = os.environ.get("PD_SSH", "aurora")
 SOCK = os.environ.get("PD_SOCK", "/tmp/aurora-master.sock")
 BACKBONE_TTL = int(os.environ.get("PD_BACKBONE_TTL", "900"))
 LIVE_WINDOW = float(os.environ.get("PD_LIVE_WINDOW", "300"))
+# Hide experiment forks whose newest .o log is older than this (default 7d);
+# PD_SHOW_ALL=1 shows every experiment ever run.
+EXP_MAX_AGE = int(os.environ.get("PD_EXP_MAX_AGE", str(7 * 86400)))
+SHOW_ALL = os.environ.get("PD_SHOW_ALL") == "1"
+# Cold W&B backbone build takes ~3 min (scan_history over ~60 runs); the cheap
+# cache-hit path is ~4 s. Give the SSH call room for a cold build so a first
+# call doesn't die at the finish line, then cache-hits are instant.
+SSH_TIMEOUT = float(os.environ.get("PD_SSH_TIMEOUT", "600"))
 REPO = os.environ.get(
     "PD_REPO",
     "/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz",
@@ -77,6 +85,8 @@ import json, os, re, glob, time, subprocess, importlib.util, statistics
 REPO = %(repo)r
 TTL = %(ttl)d
 FRESH = %(fresh)d
+SHOW_ALL = %(show_all)d
+EXP_MAX_AGE = %(exp_max_age)d
 USER = os.environ.get("USER", "foremans")
 PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
@@ -184,14 +194,26 @@ def build_backbone():
         if base:
             canon_dirs.add(base)
         curve = _wandb_curve(t.get("wandb_run_ids") or [], t.get("olog_fallbacks"))
+        # Distinguish sibling chains that share model+nodes (e.g. the canonical
+        # 2b 512N vs the sqrt2-LR fork "2b_v2_512_lr3.22e-5") by appending the
+        # key's suffix beyond the standard "<model>_<version>_<nodes>" form.
+        std = "%%s_%%s_%%d" %% (t["model"], t["version"], t["num_nodes"])
+        extra = t["key"][len(std):].lstrip("_") if t["key"].startswith(std) else ""
+        label = "%%s %%dN" %% (t["model"], t["num_nodes"])
+        if extra:
+            label += " (%%s)" %% extra
         chains[t["key"]] = {
-            "label": "%%s %%dN" %% (t["model"], t["num_nodes"]),
+            "label": label,
             "model": t["model"], "num_nodes": t["num_nodes"],
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
             "ckpt_base": base, "curve": _downsample(curve),
         }
-    # active experiments: agpt-* ckpt dirs with a referencing .o log, not canonical
+    # active experiments: agpt-* ckpt dirs with a referencing .o log, not
+    # canonical. Stale ones (last .o write older than EXP_MAX_AGE seconds) are
+    # hidden by default so the board stays focused on the live picture; set
+    # SHOW_ALL to include every experiment ever run.
+    now = time.time()
     for base, paths in idx.items():
         if base in canon_dirs:
             continue
@@ -199,6 +221,12 @@ def build_backbone():
             continue
         # skip obvious non-training smoke/verify/convert artifacts
         if any(w in base for w in ("asyncfix", "debugmodel")):
+            continue
+        try:
+            age = now - max(os.path.getmtime(p) for p in paths if os.path.exists(p))
+        except ValueError:
+            age = None
+        if not SHOW_ALL and (age is None or age > EXP_MAX_AGE):
             continue
         curve, _ = _olog_curve(paths)
         if len(curve) < 2:
@@ -319,10 +347,12 @@ print(json.dumps(bb))
 
 def fetch() -> dict:
     script = _AGG % {"repo": REPO, "ttl": BACKBONE_TTL,
-                     "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0}
+                     "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0,
+                     "show_all": 1 if SHOW_ALL else 0,
+                     "exp_max_age": EXP_MAX_AGE}
     if LOCAL:
         r = subprocess.run([sys.executable, "-c", script],
-                           capture_output=True, text=True, timeout=180)
+                           capture_output=True, text=True, timeout=SSH_TIMEOUT)
     else:
         b64 = base64.b64encode(script.encode()).decode()
         remote = (
@@ -332,7 +362,7 @@ def fetch() -> dict:
         r = subprocess.run(
             ["ssh", "-S", SOCK, SSH_TGT,
              "cd %s && %s" % (REPO, remote)],
-            capture_output=True, text=True, timeout=180)
+            capture_output=True, text=True, timeout=SSH_TIMEOUT)
     for line in r.stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
@@ -537,7 +567,12 @@ def _init_kitcat():
 
 
 def main():
+    global SHOW_ALL
     argv = sys.argv[1:]
+    if "--all" in argv:            # include stale experiment forks
+        SHOW_ALL = True
+    if "--fresh" in argv:          # force a W&B backbone rebuild this call
+        os.environ["PD_FRESH"] = "1"
     if "--board" in argv:
         print(render_board(fetch()))
         return
