@@ -58,7 +58,9 @@ RUN_IDS = [
     "j56diiz9",  # leg4  steps 1001-1399
     "nm41nsbj",  # leg5  steps 1301-1448
     "nvmf9hnj",  # leg6  steps 1401-1804 (restart after NVLink fault)
-    "j0jnww7s",  # leg7  steps 1701-...  (running)
+    "j0jnww7s",  # leg7  steps 1701-2096
+    "8snyuaxk",  # leg8  steps 2001-2405
+    "rnf9tfhw",  # leg9  steps 2401-2500 (then stuck-resume -> chain went dry)
 ]
 
 # Some legs' W&B history() carries all rows but scan_history(keys=...) --
@@ -71,6 +73,8 @@ _REPO = "/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan"
 OLOG_FALLBACKS = {
     "nvmf9hnj": f"{_REPO}/agpt-20b-autoretry.o7260480",
     "j0jnww7s": f"{_REPO}/agpt-20b-autoretry.o7260483",
+    "8snyuaxk": f"{_REPO}/agpt-20b-autoretry.o7262999",
+    "rnf9tfhw": f"{_REPO}/agpt-20b-autoretry.o7263000",
 }
 
 NUM_NODES = 128

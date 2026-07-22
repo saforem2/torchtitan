@@ -2,7 +2,7 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-07-15
+> Last updated: 2026-07-22
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -28,7 +28,7 @@ absolute (not % of a budget).
 | Trajectory | State | Persisted step | Live step | Loss | Tokens | Notes |
 |------------|-------|---------------:|----------:|-----:|-------:|-------|
 | **2B n128** (`gbs512`) | idle (last leg done) | **5,300** | 5,383 | **2.36** | ~22.6B | 53 ckpts; last leg 7228272 ran full 12h |
-| **20B n128** (`gbs1024`) | **RUNNING** (leg 5) | **1,300** | 1,400 | **2.31** | ~14.7B | 4 full 12h legs done; leg 5 (7252666) running from step-1300. leg 6 not yet queued |
+| **20B n128** (`gbs1024`) | **restarting** (chain 4-deep) | **2,400** | 2,500 | **~2.2** | ~25.2B | 9 legs done -> step-2400; chain went dry after a stuck-resume, resubmitted 7270694 (Q) + 3 held (7270700/01/02) |
 
 Smaller/earlier 2B node-count variants also exist on disk (comparison
 runs, not the canonical chain): n64 -> step ~1,970 / loss 2.57;
@@ -110,8 +110,9 @@ so the SophiaG LR=2.28e-5 stays valid; GBS = 512 x 1 x 2 = 1024.
 ### Charts
 
 Loss / throughput / MFU across all legs, stitched from the per-leg W&B
-runs (each `ezpz launch` leg is a separate run; resume points at steps
-300/700/1000/1300 are merged latest-wins into one continuous curve).
+runs (each `ezpz launch` leg is a separate run; resume points are merged
+latest-wins into one continuous curve). Current through step ~2,500
+(9 legs).
 
 ![20B Polaris production training](figures/production_20b_polaris_128n.png)
 
@@ -126,9 +127,11 @@ python3 torchtitan/experiments/ezpz/utils/plot_polaris_20b.py
 
 Append each new leg's W&B run-id to `RUN_IDS` in
 [`plot_polaris_20b.py`](../../../utils/plot_polaris_20b.py) as legs
-start, then rerun. W&B runs (oldest first): `jgjd0qbf` (leg1),
-`h8uzg2om` (leg2), `u81yhgtb` (leg3), `j56diiz9` (leg4), `nm41nsbj`
-(leg5). Project `aurora_gpt/torchtitan.ezpz.train`.
+start, then rerun (add an `OLOG_FALLBACKS` entry too if a leg's
+`scan_history` returns empty). W&B runs (oldest first): `jgjd0qbf`
+(leg1), `h8uzg2om` (leg2), `u81yhgtb` (leg3), `j56diiz9` (leg4),
+`nm41nsbj` (leg5), `nvmf9hnj` (leg6), `j0jnww7s` (leg7), `8snyuaxk`
+(leg8), `rnf9tfhw` (leg9). Project `aurora_gpt/torchtitan.ezpz.train`.
 
 ### Trajectory
 
@@ -140,29 +143,39 @@ start, then rerun. W&B runs (oldest first): `jgjd0qbf` (leg1),
 | **leg 2** | 7237949 | ran full 12h (resumed step-300) | 301 -> **705** | 4.14 -> **2.72** |
 | **leg 3** | 7243413 | ran full 12h (resumed step-700) | 701 -> **1,100** | 2.71 -> **2.39** |
 | **leg 4** | 7247525 | ran full 12h (resumed step-1000) | 1001 -> **1,400** | 2.43 -> **2.31** |
-| **leg 5** | 7252666 | **RUNNING** (resumed step-1300) | 1301 -> ... | 2.26 -> ... |
-| leg 6 | -- | not yet queued (leg 5 is the tail) | -- | -- |
+| **leg 5** | 7252666 | **NVLink fault** @ step 1,449 (rank426, node ECC-failed) | 1301 -> 1,449 | 2.26 -> 2.20 |
+| **leg 6** | 7260480 | ran full 12h (restart, resumed step-1400) | 1401 -> **1,804** | 2.13 -> 2.25 |
+| **leg 7** | 7260483 | ran full 12h (resumed step-1700) | 1701 -> **2,096** | 2.08 -> 2.24 |
+| **leg 8** | 7262999 | ran full 12h (resumed step-2000) | 2001 -> **2,405** | -> ~2.2 |
+| **leg 9** | 7263000 | **stuck-resume** (init hang, 0 steps 2nd attempt); chain went dry | 2401 -> 2,500 | -> ~2.2 |
+| **restart** | 7270694 (+3 held) | **Q**, resumes step-2400; chain now 4-deep | -- | -- |
 
-**Persisted checkpoints (as of leg 5 start):** step-100 ... step-1300
-complete, each 234 GB / 512 shards. A checkpoint is only complete when it
-has a **`.metadata`** file (DCP writes it LAST, after all 512 shards);
-**512 `.distcp` shards alone do NOT mean complete.** Several boundary dirs
-have all shards but no `.metadata` (step-400 from leg 1, step-1100 from
-leg 3, step-1400 from leg 4) -- each from a walltime-kill landing after
-the shards flushed but before `.metadata` was written. DCP correctly skips
-these and resumes from the last checkpoint WITH `.metadata` (~100 steps
-rework). No corruption; safe fallback. Leg 2's handoff was the clean case
-(step-700 fully flushed incl `.metadata` before the kill -> leg 3 resumed
-at 701, ~5 steps rework), so rework only happens when the wall lands
-between the shard flush and the `.metadata` write.
+**Persisted checkpoints:** complete through **step-2400** (each 234 GB /
+512 shards). A checkpoint is only complete when it has a **`.metadata`**
+file (DCP writes it LAST, after all 512 shards); **512 `.distcp` shards
+alone do NOT mean complete.** Boundary dirs from walltime-kills landing
+between the shard flush and the `.metadata` write are metadata-less and
+DCP correctly skips them, resuming from the last checkpoint WITH
+`.metadata` (up to ~`CKPT_INTERVAL`=100 steps rework). No corruption;
+safe fallback. When auditing which ckpt a leg resumes from, check
+`ls step-N/.metadata`, not the shard count.
 
-**Current state:** leg 5 running, resumed step 1301 (loss 2.26); loss had
-reached **2.31** at leg 4's step-1400. ~**14.7B tokens**, memory 20.2 GiB
-(51%), grad_norm ~0.10. Descent across legs: 12.95 -> 3.38 -> 2.72 ->
-2.39 -> 2.31.
-**Milestone:** matched the mature 2B chain's loss (2.36) at ~half the
-tokens (~11.5B vs ~22.6B) -- the expected larger-model token-efficiency
-crossover.
+**Failure notes (legs 5, 9):** leg 5 died to a genuine NVLink hardware
+fault (rank426 on `x3205c0s37b0n0`, which ALCF then took offline for
+"2763 uncorrected ECC errors -- Replace"); leg 9 died to a stuck resume
+(bad-node init hang, `stuck_pre_training` guard bailed after 0-step
+retries). Both left step-2400 (leg 9) / step-1400 (leg 5) intact. The
+chain went dry twice because it was only 1-2 deep at the time -- now run
+**4-deep** (7270694 + 7270700/01/02) to survive multi-day unattended
+windows.
+
+**Current state:** step **2,400** persisted (loss **~2.2**), ~**25.2B
+tokens**, memory 20.2 GiB (51%), grad_norm ~0.10. Descent across legs:
+12.95 -> 3.38 -> 2.72 -> 2.39 -> 2.31 -> ~2.2. Restart 7270694 resumes
+from step-2400 when it lands a slot.
+**Milestone:** now past the mature 2B chain's token count (~25B vs
+~22.6B) at a lower loss (~2.2 vs 2.36) -- the larger-model
+token-efficiency lead is holding.
 
 ---
 
