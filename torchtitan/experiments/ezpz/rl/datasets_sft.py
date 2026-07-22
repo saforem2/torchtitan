@@ -894,6 +894,50 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# b3_instruct_cot_mix -- balanced instruction + CoT mix for the B3 cold-start
+# rebuild (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
+# ---------------------------------------------------------------------------
+
+
+def _build_b3_instruct_cot_mix(seed: int = 42):
+    """Balanced instruction + CoT SFT mix for the B3 cold-start rebuild
+    (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
+      0.30 tulu-3-sft-mixture (general instruction-following)
+      0.25 OpenR1-Math-220k   (rich long-form R1 CoT, our envelope)
+      0.15 gsm8k-r1cot        (in-distribution CoT, eval-matching format)
+      0.15 ultrachat-200k     (multi-turn chat)
+      0.15 OpenMathInstruct-2 (math breadth)
+    45%% instruction/chat, 55%% math/CoT. Folds the CoT envelope INTO one SFT
+    (vs B2's two-stage tulu-math -> gsm8k-r1cot lineage). Uses the same
+    materialized-mix cache + all_exhausted interleave as tulu_math_uc_mix.
+    """
+    return _materialized_mix_load_or_build(
+        component_names=[
+            "tulu-3-sft-mixture",
+            "OpenR1-Math-220k",
+            "gsm8k-r1cot",
+            "ultrachat-200k",
+            "OpenMathInstruct-2",
+        ],
+        weights=[0.30, 0.25, 0.15, 0.15, 0.15],
+        seed=seed,
+    )
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="b3_instruct_cot_mix",
+        build=_build_b3_instruct_cot_mix,
+        description=(
+            "B3 cold-start mix: 30%% tulu-3 + 25%% OpenR1-Math-220k (CoT) + "
+            "15%% gsm8k-r1cot + 15%% ultrachat-200k + 15%% OpenMathInstruct-2. "
+            "Combined instruction+CoT rebuild from gs138650."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Generic mix-spec parser — `--sft_dataset 'a:0.5,b:0.3,c:0.2'`
 # ---------------------------------------------------------------------------
 
