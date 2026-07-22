@@ -464,15 +464,19 @@ def _openr1_format_row(ex):
     (caller drops None rows so we never train a malformed envelope).
 
     OpenR1 generations already carry <think>...</think>; we keep that trace
-    verbatim and normalize the tail to a single <answer>\boxed{}</answer>.
+    verbatim and normalize the tail to a single <answer>\\boxed{}</answer>.
+
+    Missing or short correctness/completeness metadata is treated as
+    NOT verified (default-exclude): a generation at an index beyond the
+    metadata list's length is never accepted as unverified-but-allowed.
     """
     gens = ex.get("generations") or []
     correct = ex.get("correctness_math_verify") or []
     complete = ex.get("is_reasoning_complete") or []
     for i, gen in enumerate(gens):
-        if i < len(correct) and not correct[i]:
-            continue
-        if i < len(complete) and not complete[i]:
+        correct_i = correct[i] if i < len(correct) else False
+        complete_i = complete[i] if i < len(complete) else False
+        if not correct_i or not complete_i:
             continue
         if not gen:
             continue
@@ -495,29 +499,54 @@ def _openr1_format_row(ex):
     return None
 
 
+def _openr1_map_row(ex):
+    """map() fn for _build_openr1_math_cot: format, or emit a same-shaped
+    empty-content sentinel row on failure (see _build_openr1_math_cot for
+    why the sentinel must be same-shaped rather than empty-list). Factored
+    out so tests can exercise the exact map+filter logic without
+    load_dataset("open-r1/OpenR1-Math-220k").
+    """
+    out = _openr1_format_row(ex)
+    if out is not None:
+        return out
+    return {
+        "prompt": [{"role": "user", "content": ""}],
+        "completion": [{"role": "assistant", "content": ""}],
+    }
+
+
+def _openr1_filter_row(ex):
+    """filter() predicate for _build_openr1_math_cot: keep only rows with
+    non-empty prompt/completion content, i.e. drop _openr1_map_row's
+    sentinel rows. A real formatted row always has non-empty problem text
+    and a non-empty envelope, so this never drops a genuine row.
+    """
+    return (
+        bool(ex["prompt"])
+        and bool(ex["completion"])
+        and bool(ex["prompt"][0]["content"])
+        and bool(ex["completion"][0]["content"])
+    )
+
+
 def _build_openr1_math_cot():
     """open-r1/OpenR1-Math-220k reformatted to the <think>/<answer> envelope.
 
     Selects a verified-correct (correctness_math_verify) + complete generation
     per problem, keeps its R1 reasoning trace, and normalizes the final answer
-    to <answer>\boxed{ans}</answer>. Rows with no correct+boxed generation are
-    dropped (map returns the sentinel, then filter removes it). Needs the HF
-    download cached first (see _pretokenize_b3_instruct_cot_mix_1n.sh).
+    to <answer>\\boxed{ans}</answer>. Rows with no correct+boxed generation
+    are dropped: map() emits a same-shaped empty-content sentinel row (NOT an
+    empty-list sentinel -- see _openr1_map_row) and filter() removes it by
+    content truthiness. Needs the HF download cached first (see
+    _pretokenize_b3_instruct_cot_mix_1n.sh).
     """
     from datasets import load_dataset
 
     raw = load_dataset("open-r1/OpenR1-Math-220k", "default", split="train")
     cols = raw.column_names
 
-    def _map(ex):
-        out = _openr1_format_row(ex)
-        if out is None:
-            # sentinel: empty prompt/completion -> dropped by the filter below
-            return {"prompt": [], "completion": []}
-        return out
-
-    mapped = raw.map(_map, remove_columns=cols)
-    return mapped.filter(lambda ex: bool(ex["prompt"]) and bool(ex["completion"]))
+    mapped = raw.map(_openr1_map_row, remove_columns=cols)
+    return mapped.filter(_openr1_filter_row)
 
 
 register_sft_dataset(
