@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -444,6 +445,125 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# OpenR1-Math-220k -- rich R1-distilled long-form CoT, reformatted into our
+# <think>/<answer>\boxed{} envelope (matches gsm8k-r1cot + the eval).
+# ---------------------------------------------------------------------------
+
+_OPENR1_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_OPENR1_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+_OPENR1_SUFFIX = (
+    "\nReason step by step inside <think></think>, then give the final "
+    "answer inside <answer>\\boxed{}</answer>."
+)
+
+
+def _openr1_format_row(ex):
+    """Pick a verified-correct generation, extract its <think> trace + boxed
+    answer, and reformat to our envelope. Returns a formatted row dict, or
+    None if no correct generation with an extractable boxed answer exists
+    (caller drops None rows so we never train a malformed envelope).
+
+    OpenR1 generations already carry <think>...</think>; we keep that trace
+    verbatim and normalize the tail to a single <answer>\\boxed{}</answer>.
+
+    Missing or short correctness/completeness metadata is treated as
+    NOT verified (default-exclude): a generation at an index beyond the
+    metadata list's length is never accepted as unverified-but-allowed.
+    """
+    gens = ex.get("generations") or []
+    correct = ex.get("correctness_math_verify") or []
+    complete = ex.get("is_reasoning_complete") or []
+    for i, gen in enumerate(gens):
+        correct_i = correct[i] if i < len(correct) else False
+        complete_i = complete[i] if i < len(complete) else False
+        if not correct_i or not complete_i:
+            continue
+        if not gen:
+            continue
+        tm = _OPENR1_THINK_RE.search(gen)
+        if not tm:
+            continue
+        trace = tm.group(1).strip()
+        # boxed answer: prefer the LAST \boxed{} anywhere in the generation
+        boxes = _OPENR1_BOXED_RE.findall(gen)
+        if not boxes:
+            continue
+        ans = boxes[-1].strip()
+        if not trace or not ans:
+            continue
+        completion = f"<think>{trace}</think>\n<answer>\\boxed{{{ans}}}</answer>"
+        return {
+            "prompt": [{"role": "user", "content": ex["problem"] + _OPENR1_SUFFIX}],
+            "completion": [{"role": "assistant", "content": completion}],
+        }
+    return None
+
+
+def _openr1_map_row(ex):
+    """map() fn for _build_openr1_math_cot: format, or emit a same-shaped
+    empty-content sentinel row on failure (see _build_openr1_math_cot for
+    why the sentinel must be same-shaped rather than empty-list). Factored
+    out so tests can exercise the exact map+filter logic without
+    load_dataset("open-r1/OpenR1-Math-220k").
+    """
+    out = _openr1_format_row(ex)
+    if out is not None:
+        return out
+    return {
+        "prompt": [{"role": "user", "content": ""}],
+        "completion": [{"role": "assistant", "content": ""}],
+    }
+
+
+def _openr1_filter_row(ex):
+    """filter() predicate for _build_openr1_math_cot: keep only rows with
+    non-empty prompt/completion content, i.e. drop _openr1_map_row's
+    sentinel rows. A real formatted row always has non-empty problem text
+    and a non-empty envelope, so this never drops a genuine row.
+    """
+    return (
+        bool(ex["prompt"])
+        and bool(ex["completion"])
+        and bool(ex["prompt"][0]["content"])
+        and bool(ex["completion"][0]["content"])
+    )
+
+
+def _build_openr1_math_cot():
+    """open-r1/OpenR1-Math-220k reformatted to the <think>/<answer> envelope.
+
+    Selects a verified-correct (correctness_math_verify) + complete generation
+    per problem, keeps its R1 reasoning trace, and normalizes the final answer
+    to <answer>\\boxed{ans}</answer>. Rows with no correct+boxed generation
+    are dropped: map() emits a same-shaped empty-content sentinel row (NOT an
+    empty-list sentinel -- see _openr1_map_row) and filter() removes it by
+    content truthiness. Needs the HF download cached first (see
+    _pretokenize_b3_instruct_cot_mix_1n.sh).
+    """
+    from datasets import load_dataset
+
+    raw = load_dataset("open-r1/OpenR1-Math-220k", "default", split="train")
+    cols = raw.column_names
+
+    mapped = raw.map(_openr1_map_row, remove_columns=cols)
+    return mapped.filter(_openr1_filter_row)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="OpenR1-Math-220k",
+        build=_build_openr1_math_cot,
+        description=(
+            "open-r1/OpenR1-Math-220k R1-distilled long-form CoT, reformatted "
+            "into the <think>/<answer>\\boxed{} envelope. Selects a verified- "
+            "correct generation per problem; rows without a correct+boxed "
+            "generation are dropped. The rich-reasoning half of b3_instruct_cot_mix."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # metamathqa — augmented + rephrased GSM8K+MATH, ~400k examples
 # ---------------------------------------------------------------------------
 
@@ -768,6 +888,50 @@ register_sft_dataset(
             "Canonical SFT recipe: 65%% tulu-3-sft-mixture + "
             "15%% OpenMathInstruct-2 + 20%% ultrachat-200k. Tulu's "
             "validated broad mix + extra math depth + multi-turn IF."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
+# b3_instruct_cot_mix -- balanced instruction + CoT mix for the B3 cold-start
+# rebuild (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
+# ---------------------------------------------------------------------------
+
+
+def _build_b3_instruct_cot_mix(seed: int = 42):
+    """Balanced instruction + CoT SFT mix for the B3 cold-start rebuild
+    (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
+      0.30 tulu-3-sft-mixture (general instruction-following)
+      0.25 OpenR1-Math-220k   (rich long-form R1 CoT, our envelope)
+      0.15 gsm8k-r1cot        (in-distribution CoT, eval-matching format)
+      0.15 ultrachat-200k     (multi-turn chat)
+      0.15 OpenMathInstruct-2 (math breadth)
+    45%% instruction/chat, 55%% math/CoT. Folds the CoT envelope INTO one SFT
+    (vs B2's two-stage tulu-math -> gsm8k-r1cot lineage). Uses the same
+    materialized-mix cache + all_exhausted interleave as tulu_math_uc_mix.
+    """
+    return _materialized_mix_load_or_build(
+        component_names=[
+            "tulu-3-sft-mixture",
+            "OpenR1-Math-220k",
+            "gsm8k-r1cot",
+            "ultrachat-200k",
+            "OpenMathInstruct-2",
+        ],
+        weights=[0.30, 0.25, 0.15, 0.15, 0.15],
+        seed=seed,
+    )
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="b3_instruct_cot_mix",
+        build=_build_b3_instruct_cot_mix,
+        description=(
+            "B3 cold-start mix: 30%% tulu-3 + 25%% OpenR1-Math-220k (CoT) + "
+            "15%% gsm8k-r1cot + 15%% ultrachat-200k + 15%% OpenMathInstruct-2. "
+            "Combined instruction+CoT rebuild from gs138650."
         ),
     )
 )
