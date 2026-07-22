@@ -1,6 +1,6 @@
 #!/bin/bash --login
 #PBS -A datascience
-#PBS -l walltime=12:00:00
+#PBS -l walltime=24:00:00
 #PBS -l filesystems=tegu:home
 #PBS -l select=1
 #PBS -q workq
