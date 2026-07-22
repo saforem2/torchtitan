@@ -58,6 +58,9 @@ cd "${SUBMIT_DIR}"
 source .venv/bin/activate
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 
+# num_proc override knob: walk down (e.g. NPROC=16) if the 8192 packing map
+# SIGBUSes -- see the tulu pretokenize memory lesson in the header comment.
+NPROC="${NPROC:-32}"
 BASE_MODEL="${HOME}/global_step138650"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"
 LOG_DIR="logs/pretokenize-b3-instruct-cot-mix-${PBS_JOBID%%.*}"
@@ -77,7 +80,7 @@ ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 8192 \
-    --dataset_num_proc 32 \
+    --dataset_num_proc "${NPROC:-32}" \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
