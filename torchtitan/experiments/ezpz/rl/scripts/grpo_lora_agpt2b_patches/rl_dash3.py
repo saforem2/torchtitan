@@ -4,7 +4,7 @@
 Self-contained: reads each run's rollout_samples.jsonl directly (over SSH if run
 locally, or from the local FS if run on the cluster), aggregates reward by
 max_policy_version (~ training step), and overlays every run's curve. No separate
-feed script. Edit the RUNS table to add/remove experiments.
+feed script. Runs are auto-discovered on the cluster; edit LABELS for pretty names.
 
 Run in a kitty terminal:
     /tmp/kitcat-venv/bin/python rl_dash3.py            # local, pulls over SSH
@@ -19,6 +19,7 @@ import time
 import glob
 import subprocess
 import statistics
+import zlib
 
 import matplotlib
 matplotlib.use("module://kitcat")
@@ -124,25 +125,32 @@ if sys.stdout.isatty():
     except Exception as _e:
         print("kitcat HiDPI patch skipped:", _e)
 
-# ---- the runs to track: (tag, output-subdir, label) ----------------------
+# ---- the runs to track --------------------------------------------------
 BASE = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
         "outputs")
-# (tag, subdir/glob, label, kind). kind="monarch" reads
-# outputs/<sub>/rollout_samples.jsonl (reward-by-policy_version); kind="trl" reads
-# logs/<glob>/run.log TRL dict-lines (reward-by-step). One dashboard, both engines.
-RUNS = [
-    ("v5",       "rl_lora_agpt2b_train_v5", "v5 alphabet (monarch)",        "monarch"),
-    ("w1",       "rl_lora_agpt2b_w1",       "w1 alphabet (monarch)",        "monarch"),
-    ("w2",       "rl_lora_agpt2b_w2",       "w2 alphabet (monarch)",        "monarch"),
-    ("w3",       "rl_lora_agpt2b_w3",       "w3 alphabet (monarch)",        "monarch"),
-    ("shaped",   "rl_lora_agpt2b_shaped",   "shaped alphabet (monarch)",    "monarch"),
-    ("cot",      "rl_lora_agpt2b_cot",      "gsm8k CoT monarch (100st)",    "monarch"),
-    ("cot-long", "rl_lora_agpt2b_cot_long", "gsm8k CoT monarch (400st)",    "monarch"),
-    ("cot-trl",  "grpo-agpt2b-gsm8k-reason-cot-12471247", "gsm8k CoT TRL (12471247)", "trl"),
-    ("cot-gated","rl_lora_agpt2b_cot_gated","gsm8k CoT gated-reward (monarch)","monarch"),
-    ("cot-zs",   "rl_lora_agpt2b_cot_zeroshot","gsm8k CoT zero-shot+gated (monarch)","monarch"),
-]
-COLORS = ["#888888", "#4c78a8", "#59a14f", "#e45756", "#b279a2", "#f0a24b"]
+# Curated pretty labels + non-glob run declarations, keyed by output subdir.
+# Monarch runs are AUTO-DISCOVERED in _AGG (glob of
+# outputs/rl_lora_agpt2b_*/rollout_samples.jsonl); an entry here only overrides
+# the auto-derived label ("<subdir minus rl_lora_agpt2b_>" with _ -> space).
+# Non-"monarch" kinds (e.g. "trl") are NOT globbed and MUST be listed here to
+# appear. value = (label, kind).
+LABELS = {
+    "rl_lora_agpt2b_train_v5":       ("v5 alphabet (monarch)",              "monarch"),
+    "rl_lora_agpt2b_w1":             ("w1 alphabet (monarch)",              "monarch"),
+    "rl_lora_agpt2b_w2":             ("w2 alphabet (monarch)",              "monarch"),
+    "rl_lora_agpt2b_w3":             ("w3 alphabet (monarch)",              "monarch"),
+    "rl_lora_agpt2b_shaped":         ("shaped alphabet (monarch)",          "monarch"),
+    "rl_lora_agpt2b_cot":            ("gsm8k CoT monarch (100st)",          "monarch"),
+    "rl_lora_agpt2b_cot_long":       ("gsm8k CoT monarch (400st)",          "monarch"),
+    "rl_lora_agpt2b_cot_gated":      ("gsm8k CoT gated-reward (monarch)",   "monarch"),
+    "rl_lora_agpt2b_cot_zeroshot":   ("gsm8k CoT zero-shot+gated (monarch)","monarch"),
+    "rl_lora_agpt2b_cot_b2smoke":    ("gsm8k CoT B2 smoke (monarch)",       "monarch"),
+    "rl_lora_agpt2b_cot_b2smoke_v2": ("gsm8k CoT B2 smoke v2 (monarch)",    "monarch"),
+    "grpo-agpt2b-gsm8k-reason-cot-12471247": ("gsm8k CoT TRL (12471247)",   "trl"),
+}
+COLORS = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2",
+          "#ff9da6", "#9d755d", "#bab0ac", "#edc948", "#b07aa1", "#86bcb6"]
+# PREFIX lives inside _AGG (remote). LABELS is passed to _AGG via repr(LABELS).
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
 LOCAL = os.environ.get("RL_LOCAL") == "1"
@@ -170,11 +178,23 @@ _AGG = r'''
 import json, collections, statistics, os, glob, re, time
 BASE = "%s"                 # .../outputs
 REPO = os.path.dirname(BASE)  # repo root (for logs/)
-RUNS = %s
-out = {}
-live = {}
+LABELS = %s
+PREFIX = "rl_lora_agpt2b_"
+def _tag(sub):
+    return sub[len(PREFIX):] if sub.startswith(PREFIX) else sub
+# Discover monarch runs by globbing every rollout_samples.jsonl under BASE;
+# then union in any non-monarch (e.g. trl) runs declared in LABELS. Dedup by
+# tag, glob wins. LABELS only supplies pretty labels + declares non-glob runs.
+runs = {}                      # tag -> (subdir, kind)
+for _p in sorted(glob.glob(os.path.join(BASE, PREFIX + "*", "rollout_samples.jsonl"))):
+    _sub = os.path.basename(os.path.dirname(_p))
+    runs[_tag(_sub)] = (_sub, "monarch")
+for _sub, (_lab, _kind) in LABELS.items():
+    if _kind != "monarch":
+        runs.setdefault(_tag(_sub), (_sub, _kind))
+out, live, meta = {}, {}, {}
 _ansi = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
-for tag, sub, kind in RUNS:
+for tag, (sub, kind) in runs.items():
     byv = collections.defaultdict(list)
     if kind == "monarch":
         p = os.path.join(BASE, sub, "rollout_samples.jsonl")
@@ -205,6 +225,8 @@ for tag, sub, kind in RUNS:
                     except Exception: pass
     if byv:
         out[tag] = {v: round(statistics.mean(byv[v]), 5) for v in sorted(byv)}
+        meta[tag] = {"label": LABELS[sub][0] if sub in LABELS else _tag(sub).replace("_", " "),
+                     "kind": kind, "sub": sub}
         srcs = (
             [os.path.join(BASE, sub, "rollout_samples.jsonl")] if kind == "monarch"
             else glob.glob(os.path.join(REPO, "logs", sub, "run.log"))
@@ -213,12 +235,12 @@ for tag, sub, kind in RUNS:
             live[tag] = round(time.time() - max(os.path.getmtime(x) for x in srcs), 1)
         except Exception:
             live[tag] = None
-print(json.dumps({"rewards": out, "live": live}))
+print(json.dumps({"rewards": out, "live": live, "meta": meta}))
 '''
 
 
 def fetch():
-    script = _AGG % (BASE, repr([(t, s, k) for t, s, _, k in RUNS]))
+    script = _AGG % (BASE, repr(LABELS))
     if LOCAL:
         r = subprocess.run([sys.executable, "-c", script],
                            capture_output=True, text=True, timeout=90)
@@ -265,28 +287,39 @@ LIVE_WINDOW = float(os.environ.get("RL_LIVE_WINDOW", "300"))
 def draw(payload, wpx, hpx):
     data = payload.get("rewards", payload)
     live = payload.get("live", {})
+    meta = payload.get("meta", {})
     dpi = 100
     fig, ax = plt.subplots(figsize=(max(4.0, wpx * 0.92 / dpi),
                                     max(2.6, hpx * 0.80 / dpi)), dpi=dpi)
     parts = []
-    for i, (tag, _sub, label, _kind) in enumerate(RUNS):  # noqa: B007
+    # Stable order: group by kind (monarch, then trl), alpha within kind. Groups
+    # cot_*/train_*/w* adjacently and never reshuffles as liveness flips. Color
+    # is hash-based (below), independent of this order.
+    order = sorted(meta, key=lambda t: (meta[t].get("kind", "monarch"), t))
+    for tag in order:
         d = data.get(tag) or {}
         if not d:
             continue
+        m = meta.get(tag, {})
+        label = m.get("label", tag)
         keys = sorted(d, key=lambda k: int(k))
         vs = [int(k) for k in keys]
         means = [d[k] for k in keys]
         sm = [statistics.mean(means[max(0, j - 2):j + 1]) for j in range(len(means))]
         age = live.get(tag)
         is_live = age is not None and age <= LIVE_WINDOW
-        # live: bright + solid + thick; idle: dim + thin
         alpha = 1.0 if is_live else 0.28
         lw = 2.4 if is_live else 1.2
         z = 5 if is_live else 2
         lbl = ("* " + label) if is_live else (label + " (idle)")
-        ax.plot(vs, sm, "-", lw=lw, color=COLORS[i % len(COLORS)],
+        # Deterministic, set-independent color: crc32(tag) is stable across
+        # process restarts (unlike hash(), PYTHONHASHSEED-salted) and does not
+        # shift when other runs appear/disappear.
+        color = COLORS[zlib.crc32(tag.encode()) % len(COLORS)]
+        ax.plot(vs, sm, "-", lw=lw, color=color,
                 alpha=alpha, zorder=z, label=lbl)
-        parts.append("%s=%.2f" % (tag, means[-1]))
+        if is_live:                       # keep the title readable with ~20 runs
+            parts.append("%s=%.2f" % (tag, means[-1]))
     ax.axhline(0.248, lw=0.8, ls=":", alpha=0.5)
     ax.set_xlabel("policy version (~ training step)")
     ax.set_ylabel("mean reward (3-step rolling)")
@@ -299,8 +332,7 @@ def draw(payload, wpx, hpx):
 
 
 def main():
-    print("Live GRPO dashboard (%d runs, kitcat+ambivalent). Ctrl-C to stop."
-          % len(RUNS))
+    print("Live GRPO dashboard (autodiscovered runs, kitcat+ambivalent). Ctrl-C to stop.")
     while True:
         try:
             data = fetch()
