@@ -190,40 +190,59 @@ def _wandb_curve(run_ids, olog_fallbacks):
     return [(x, by[x]) for x in xs]
 
 def _wandb_summary(run_ids):
-    """Cheap per-chain W&B metadata from the LAST run's summary (one api.run +
-    .summary read, NO scan_history): last tps/mfu/step, url, run-id, and the
-    heartbeat epoch. All best-effort -> {} on any failure."""
+    """Cheap per-chain W&B metadata (one api.run + .summary read per tried run,
+    NO scan_history): tps/mfu/step, url, run-id, heartbeat epoch.
+
+    The chain's LAST run-id is preferred for wandb_id/url, but some chains end
+    on a run that never synced to W&B (logged to a different project or died
+    mid-sync -- these appear in olog_fallbacks and 'Could not find run'). So we
+    walk run_ids from newest to oldest and take tps/mfu/updated from the first
+    one that BOTH loads AND has throughput in its summary. All best-effort."""
     if not run_ids:
         return {}
-    rid = run_ids[-1]
-    out = {"wandb_id": rid}
+    out = {"wandb_id": run_ids[-1]}
     try:
         import wandb
-        run = wandb.Api().run(PROJECT + "/" + rid)
+        api = wandb.Api()
     except Exception:
         return out
-    try:
-        out["wandb_url"] = run.url
-    except Exception:
-        pass
-    try:
-        s = run.summary
-        for src, dst in (("throughput(tps)", "wb_tps"), ("mfu(%%)", "wb_mfu"),
-                         ("_timestamp", "wb_ts")):
-            v = s.get(src)
-            if v is not None:
-                out[dst] = float(v)
-    except Exception:
-        pass
-    # heartbeatAt (ISO-8601 Z) -> epoch; preferred "updated" signal.
-    try:
-        hb = getattr(run, "heartbeatAt", None)
-        if hb:
-            import calendar
-            t = time.strptime(hb.replace("Z", "").split(".")[0], "%%Y-%%m-%%dT%%H:%%M:%%S")
-            out["updated_ts"] = calendar.timegm(t)
-    except Exception:
-        pass
+    got_metrics = False
+    for i, rid in enumerate(reversed(run_ids)):
+        try:
+            run = api.run(PROJECT + "/" + rid)
+        except Exception:
+            continue  # unsynced/missing run -> try the previous one
+        if i == 0:  # the actual last run loaded: use its url/id
+            try:
+                out["wandb_url"] = run.url
+            except Exception:
+                pass
+        try:
+            s = run.summary
+            tps, mfu = s.get("throughput(tps)"), s.get("mfu(%%)")
+            if tps is not None:
+                out["wb_tps"] = float(tps)
+            if mfu is not None:
+                out["wb_mfu"] = float(mfu)
+            if s.get("_timestamp") is not None:
+                out["wb_ts"] = float(s.get("_timestamp"))
+        except Exception:
+            pass
+        try:
+            hb = getattr(run, "heartbeatAt", None)
+            if hb:
+                import calendar
+                t = time.strptime(hb.replace("Z", "").split(".")[0],
+                                  "%%Y-%%m-%%dT%%H:%%M:%%S")
+                out["updated_ts"] = calendar.timegm(t)
+        except Exception:
+            pass
+        if "wb_tps" in out or "wb_mfu" in out:
+            got_metrics = True
+        # url from the last run + metrics from some run -> done. Otherwise keep
+        # walking back to recover throughput from the last SYNCED run.
+        if got_metrics and ("wandb_url" in out or i > 0):
+            break
     if "updated_ts" not in out and "wb_ts" in out:
         out["updated_ts"] = out["wb_ts"]
     return out
@@ -266,7 +285,13 @@ def build_backbone():
             "ckpt_base": base, "curve": _downsample(curve),
         }
         rec.update(_wandb_summary(t.get("wandb_run_ids") or []))
-        rec["last_job"] = _last_job_from_paths(idx.get(base, []))
+        # last-job from main-repo .o logs, PLUS the trajectory's olog_fallbacks
+        # (whose filenames encode job ids, e.g. ...cont1.o8558549). Chains that
+        # run from a sibling clone leave no .o log in the main repo, so the
+        # fallback filenames are the only job-id source for them.
+        lj_paths = list(idx.get(base, [])) + list(
+            (t.get("olog_fallbacks") or {}).values())
+        rec["last_job"] = _last_job_from_paths(lj_paths)
         chains[t["key"]] = rec
     # active experiments: agpt-* ckpt dirs with a referencing .o log, not
     # canonical. Stale ones (last .o write older than EXP_MAX_AGE seconds) are
