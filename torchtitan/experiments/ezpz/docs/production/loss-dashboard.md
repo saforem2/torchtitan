@@ -49,10 +49,25 @@ python .../prod_dash.py --once        # one live frame then exit
 python .../prod_dash.py --svg figures/production_loss_live.svg
 
 # 3. Stall-aware text status board (no matplotlib needed). Best while the
-#    queue is stalled: per-chain last loss, step, % to token target,
-#    queue state (R/Q/idle), tps/mfu, and log staleness.
+#    queue is stalled.
 python .../prod_dash.py --board
 ```
+
+### Board columns
+
+`chain | state | step | loss | % tgt | tps | mfu | updated | last | next | wandb`
+
+- **tps / mfu**: from the live running job if one exists, else the last value
+  in the chain's most recent W&B run summary (so they show even when idle).
+- **updated**: age of the chain's last W&B heartbeat (`heartbeatAt`),
+  humanized (`3h`, `5d`). This replaced the old filesystem `log age` column --
+  it is the "when did this chain last make progress" signal.
+- **last**: the most recent PBS job id seen in the chain's `.o` logs.
+- **next**: the queued/held PBS job mapped to this chain (by `CKPT_DIR`, else
+  model+`NHOSTS_TRAIN`); `-` if none is queued.
+- **wandb**: the last run's 8-char id. The board header prints the constant
+  base URL once (`https://wandb.ai/<project>/runs/`), so the full run URL is
+  `base + <wandb>`.
 
 Flags: `--all` (include stale experiments), `--fresh` (force a W&B
 rebuild this call), `--tokens` (x-axis in billions of tokens instead of

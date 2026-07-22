@@ -47,6 +47,9 @@ import sys
 import time
 import zlib
 
+# W&B project (also defined inside the _AGG remote script; kept here for the
+# board's base-URL header).
+PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 INTERVAL = float(os.environ.get("PD_INTERVAL", "30"))
 LOCAL = os.environ.get("PD_LOCAL") == "1"
 SSH_TGT = os.environ.get("PD_SSH", "aurora")
@@ -186,6 +189,56 @@ def _wandb_curve(run_ids, olog_fallbacks):
     xs = sorted(by)
     return [(x, by[x]) for x in xs]
 
+def _wandb_summary(run_ids):
+    """Cheap per-chain W&B metadata from the LAST run's summary (one api.run +
+    .summary read, NO scan_history): last tps/mfu/step, url, run-id, and the
+    heartbeat epoch. All best-effort -> {} on any failure."""
+    if not run_ids:
+        return {}
+    rid = run_ids[-1]
+    out = {"wandb_id": rid}
+    try:
+        import wandb
+        run = wandb.Api().run(PROJECT + "/" + rid)
+    except Exception:
+        return out
+    try:
+        out["wandb_url"] = run.url
+    except Exception:
+        pass
+    try:
+        s = run.summary
+        for src, dst in (("throughput(tps)", "wb_tps"), ("mfu(%%)", "wb_mfu"),
+                         ("_timestamp", "wb_ts")):
+            v = s.get(src)
+            if v is not None:
+                out[dst] = float(v)
+    except Exception:
+        pass
+    # heartbeatAt (ISO-8601 Z) -> epoch; preferred "updated" signal.
+    try:
+        hb = getattr(run, "heartbeatAt", None)
+        if hb:
+            import calendar
+            t = time.strptime(hb.replace("Z", "").split(".")[0], "%%Y-%%m-%%dT%%H:%%M:%%S")
+            out["updated_ts"] = calendar.timegm(t)
+    except Exception:
+        pass
+    if "updated_ts" not in out and "wb_ts" in out:
+        out["updated_ts"] = out["wb_ts"]
+    return out
+
+def _last_job_from_paths(paths):
+    """Max PBS job-id referenced by a chain's .o log filenames (*.oNNNNN)."""
+    best = None
+    for p in paths or []:
+        m = re.search(r"\.o(\d+)$", p) or re.search(r"[^0-9](\d{6,})/run\.log$", p)
+        if m:
+            j = int(m.group(1))
+            if best is None or j > best:
+                best = j
+    return str(best) if best is not None else None
+
 def build_backbone():
     logs = _all_ologs()
     idx = _dir_index(logs)
@@ -205,13 +258,16 @@ def build_backbone():
         label = "%%s %%dN" %% (t["model"], t["num_nodes"])
         if extra:
             label += " (%%s)" %% extra
-        chains[t["key"]] = {
+        rec = {
             "label": label,
             "model": t["model"], "num_nodes": t["num_nodes"],
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
             "ckpt_base": base, "curve": _downsample(curve),
         }
+        rec.update(_wandb_summary(t.get("wandb_run_ids") or []))
+        rec["last_job"] = _last_job_from_paths(idx.get(base, []))
+        chains[t["key"]] = rec
     # active experiments: agpt-* ckpt dirs with a referencing .o log, not
     # canonical. Stale ones (last .o write older than EXP_MAX_AGE seconds) are
     # hidden by default so the board stays focused on the live picture; set
@@ -240,6 +296,7 @@ def build_backbone():
             "num_nodes": None, "gbs": None, "seq_len": 8192,
             "token_target": None, "kind": "experiment",
             "ckpt_base": base, "curve": _downsample(curve),
+            "last_job": _last_job_from_paths(paths),
         }
     # Cache the ckpt-base -> log-paths index so the per-call path can stat
     # staleness WITHOUT re-reading every log head over Lustre (that scan is
@@ -320,6 +377,44 @@ def qstat_jobs():
                      "name": f[3], "state": f[-2]})
     return jobs
 
+def next_jobs(chains):
+    """Map queued/held (Q/H) PBS jobs to chains -> {ckpt_base: next_job_id}.
+    Queued jobs have no .o log yet, so read `qstat -f` once per Q/H job for
+    Job_Name + Submit_arguments (CKPT_DIR=, NHOSTS_TRAIN=). Match by ckpt-dir
+    basename first, else model+nodes from the job name. Lowest id = soonest."""
+    pending = [j for j in qstat_jobs() if j["state"] in ("Q", "H")]
+    if not pending:
+        return {}
+    # (model, nodes) -> ckpt_base for canonical chains (fallback match)
+    by_modelnodes = {}
+    for ch in chains.values():
+        if ch.get("kind") == "canonical" and ch.get("ckpt_base"):
+            by_modelnodes[(ch.get("model"), ch.get("num_nodes"))] = ch["ckpt_base"]
+    bases = {ch.get("ckpt_base") for ch in chains.values() if ch.get("ckpt_base")}
+    out = {}
+    for j in sorted(pending, key=lambda x: int(x["id"])):
+        try:
+            det = subprocess.run(["/opt/pbs/bin/qstat", "-f", j["id"]],
+                                 capture_output=True, text=True,
+                                 timeout=30).stdout
+        except Exception:
+            continue
+        flat = det.replace("\n\t", "").replace("\n ", "")
+        base = None
+        mck = re.search(r"CKPT_DIR=([^,\s]+)", flat)
+        if mck:
+            cand = os.path.basename(mck.group(1).rstrip("/"))
+            if cand in bases:
+                base = cand
+        if base is None:
+            mnm = re.search(r"Job_Name = agpt-(\d+b)-", flat)
+            mnh = re.search(r"NHOSTS_TRAIN=(\d+)", flat)
+            if mnm and mnh:
+                base = by_modelnodes.get((mnm.group(1), int(mnh.group(1))))
+        if base and base not in out:  # first (lowest id) wins
+            out[base] = j["id"]
+    return out
+
 def live_layer():
     """Per running job: resolve its ckpt dir + freshest (step, loss). Only the
     handful of logs belonging to CURRENT qstat jobs are read (cheap), unlike the
@@ -361,6 +456,7 @@ def live_layer():
 bb = load_backbone()
 idx = bb.get("idx", {})  # cached ckpt-base -> [log paths]; stat-only, no re-read
 states, live = live_layer()
+nextj = next_jobs(bb["chains"])
 now = time.time()
 chains_out = {}
 for key, ch in bb["chains"].items():
@@ -371,6 +467,7 @@ for key, ch in bb["chains"].items():
                               for p in paths if os.path.exists(p)), 1) if paths else None
     except Exception:
         ch["log_age"] = None
+    ch["next_job"] = nextj.get(base)
     # Apply the experiment-staleness filter HERE (emit time) so it works even
     # when reading a cache built before the filter existed. Canonical chains
     # are always shown; a live job overrides staleness.
@@ -448,27 +545,42 @@ def render_board(payload) -> str:
         return (c.get("kind") != "canonical", c.get("model") or "z",
                 -(c.get("num_nodes") or 0), k)
 
+    def _age(sec):
+        if sec is None:
+            return "-"
+        if sec < 90:
+            return "%.0fs" % sec
+        if sec < 5400:
+            return "%.0fm" % (sec / 60)
+        if sec < 172800:
+            return "%.0fh" % (sec / 3600)
+        return "%.0fd" % (sec / 86400)
+
     rows = []
-    header = ("chain", "state", "step", "loss", "% tgt", "tps", "mfu", "log age")
+    header = ("chain", "state", "step", "loss", "% tgt", "tps", "mfu",
+              "updated", "last", "next", "wandb")
     for key, c in sorted(chains.items(), key=order):
         st = c.get("queue_state") or ("run" if (c.get("log_age") or 1e9) < LIVE_WINDOW else "idle")
         tip = c.get("live_tip") or {}
         step = c.get("latest_step")
         loss = c.get("latest_loss")
-        age = c.get("log_age")
-        age_s = "-" if age is None else (
-            "%.0fs" % age if age < 90 else
-            "%.0fm" % (age / 60) if age < 5400 else
-            "%.1fh" % (age / 3600))
+        # tps/mfu: prefer the live running-job tip, else the last W&B summary.
+        tps = tip.get("tps", c.get("wb_tps"))
+        mfu = tip.get("mfu", c.get("wb_mfu"))
+        # "updated" = W&B heartbeat age (cleaner than the filesystem log age).
+        upd = c.get("updated_ts")
         rows.append((
             c.get("label", key)[:34],
             st,
             "-" if step is None else str(step),
             "-" if loss is None else "%.4f" % loss,
             "-" if c.get("pct_target") is None else "%.1f%%" % c["pct_target"],
-            "%.0f" % tip["tps"] if tip.get("tps") else "-",
-            "%.1f%%" % tip["mfu"] if tip.get("mfu") else "-",
-            age_s,
+            "-" if tps is None else "%.0f" % tps,
+            "-" if mfu is None else "%.1f%%" % mfu,
+            _age(now - upd) if upd else "-",
+            c.get("last_job") or "-",
+            c.get("next_job") or "-",
+            c.get("wandb_id") or "-",
         ))
     widths = [max(len(header[i]), *(len(r[i]) for r in rows)) if rows else len(header[i])
               for i in range(len(header))]
@@ -479,10 +591,12 @@ def render_board(payload) -> str:
                 or (c.get("log_age") or 1e9) < LIVE_WINDOW)
     bb_age = payload.get("built_age")
     stale = " (refreshing)" if payload.get("stale") else ""
+    base_url = "https://wandb.ai/%s/runs/" % PROJECT
     out = [
         "AuroraGPT production loss board  [%s]  %d live / %d chains  (W&B backbone %s%s)"
         % (time.strftime("%H:%M:%S", time.localtime(now)), nlive, len(chains),
            "-" if bb_age is None else "%.0fm old" % (bb_age / 60), stale),
+        "W&B: %s<wandb>   'updated' = W&B heartbeat age" % base_url,
         fmt(header),
         "  ".join("-" * w for w in widths),
     ]
