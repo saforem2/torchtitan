@@ -33,7 +33,7 @@ CKPT="${CKPT:-$REPO/outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16}"
 # apply_chat_template at eval time -- the staged dir has it injected).
 BASE="${BASE:-$REPO/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
 TOK_SRC="${TOK_SRC:-$HOME/rl-repro/run/agpt2b-ckpt900}"
-HF="${CKPT}-hf"
+HF="${HF_OUT:-${CKPT}-hf}"
 LIMIT="${LIMIT:-200}"
 VENV_MAIN=$REPO/.venv/bin            # accelerate lives here
 PY=$REPO/venvs/rl-vllm/bin/python    # vLLM eval

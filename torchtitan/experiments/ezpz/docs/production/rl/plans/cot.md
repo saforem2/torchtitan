@@ -338,3 +338,168 @@ Stage 1's envelope is solid and you've measured you need reflection depth.
 - [beat-v5 tuning sweep](../grpo/beat-v5-sweep.md) -- no config lever beats a
   reward-shape ceiling.
 - [monarch.md](../monarch.md) / [trl.md](../trl.md) -- the two GRPO frameworks.
+
+## Stage 2 result (2026-07-21): GRPO REGRESSED CoT metrics -- reward-hacking
+
+First trained-policy eval, on the validated Monarch path (reason_agpt, GRPO+LoRA,
+step-100 merged to HF via merge_lora_dcp_to_hf.py):
+
+| Metric | cold-start (ckpt-16) | GRPO step-100 | delta |
+|--------|----------------------|---------------|-------|
+| format hit-rate | 0.955 | 0.635 | **-0.32** |
+| CoT accuracy (GSM8K/200) | 0.16 | 0.105 | **-0.055** |
+
+GRPO made the model WORSE. Generations are coherent (median 242 chars, real
+numbers -- NOT a merge artifact), but 33/200 produced no extractable `<answer>` at
+all: the model drifted AWAY from the `<think>/<answer>` envelope the cold-start SFT
+taught.
+
+**Root cause -- reward/eval divergence (classic reward-hacking):** the shaped
+reward rose (0.118 -> 0.217) while eval accuracy FELL. GRPO optimized the reward
+function, not the task. The likely design error is MINE: I rebalanced the format
+component 0.2 -> 0.05 ("it's saturated, make it a cheap guard") and added a dense
+`answer_close` term that rewards emitting ANY number. But format was saturated only
+BECAUSE the SFT held it there -- once its reward weight dropped to 0.05 and
+closeness rewarded bare numbers, GRPO had little pressure to keep the envelope, so
+formatting decayed. The "anti-saturation" rebalance removed the guardrail.
+
+The 400-step run (cot-long) shows the same reward-up pattern (0.130 -> 0.231) and is
+therefore likely drifting the same way, further -- reward is NOT a proxy for the
+eval here.
+
+**Fixes to try next (not yet run):**
+1. Keep format weight HIGH (0.2+) so GRPO cannot trade away the envelope; or make
+   answer_correct strictly dominate and gate closeness on a well-formed envelope.
+2. Add a small KL to the cold-start reference (beta>0) to anchor against drift
+   (this run used beta=0.0).
+3. Eval EARLY checkpoints (step 20/40) to find where regression begins; the merge
+   + eval loop is one command per step.
+4. Only reward closeness when format_ok, so "emit any number" is not a reward path.
+
+### Regression trajectory (all early checkpoints eval'd, 2026-07-21)
+
+| step | format_hit_rate | cot_accuracy |
+|------|----------------:|-------------:|
+| 0 (cold-start) | 0.955 | 0.16 |
+| 20 | 0.88 | 0.12 |
+| 40 | 0.79 | 0.12 |
+| 60 | 0.86 | 0.105 |
+| 80 | 0.755 | 0.11 |
+| 100 | 0.635 | 0.105 |
+
+Two SEPARATE failure modes:
+- **Accuracy: instant then flat.** 0.16 -> 0.12 in the FIRST 20 steps, then a stable
+  0.10-0.12 band. GRPO knocks the model off the cold-start's correct answers
+  immediately and never recovers them.
+- **Format: continuous bleed.** near-monotonic 0.955 -> 0.635 over the whole run --
+  the sustained reward-hack (envelope traded for the "any number" closeness reward).
+
+Key implication: there is NO good early checkpoint to stop at -- even step-20 is
+below baseline on both metrics. This is NOT a train-too-long / early-stop problem;
+the reward+setup are wrong from step 1. The fix must change step-1 behavior (reward
+gating on format_ok, format weight up, KL anchor beta>0, and likely a stronger
+cold-start), not just stop earlier.
+
+### Gated-reward run (12471366) result: exposed a deeper problem (2026-07-21)
+
+Applying the format-gated reward (A1) made reward go to EXACTLY 0.000 across all 73
+policy versions -- because it exposed that the TRAINING rollouts were almost never
+in-envelope to begin with:
+
+- 95% of rollouts (1570/1648) emitted NO `<think>` block at all.
+- 20% (322/1648) literally echoed the one-shot exemplar's answer `\boxed{5}`.
+- Typical completion: `\n<answer>\boxed{5}</answer>` (exemplar tail copied).
+
+**Root cause (two workflow findings converge):** the 16-step cold-start
+(checkpoint-16-hf) is too weak to sustain the `<think>/<answer>` envelope during
+on-policy generation, so it latches onto the turn-0 one-shot EXEMPLAR
+(env.py: `<think>...3+2=5</think><answer>\boxed{5}</answer>`) and copies its tail.
+The PRE-fix reward scored those bare-`\boxed{}` outputs (0.95 of mass) -> the
+"learning" (reward 0.118->0.217) was reward-hacking on exemplar echoes, and the
+eval regression (format 0.955->0.635) was the envelope decaying toward the echo.
+The gate (A1) correctly zeroes the echo -- but that leaves no signal, because the
+rollouts are ~never in-envelope. So A1 is CORRECT but insufficient alone.
+
+**This is exactly the workflow's B2 verdict:** the weak cold-start is the binding
+problem. Two cheap fixes to try:
+1. Drop the one-shot exemplar (it POISONS a weak model -> it copies the literal
+   answer instead of reasoning). Rely on the instruction + SFT. Zero-shot test.
+2. B2: run the unrun 2N/3-epoch cold-start (~930 optimizer steps, ~50x the 16-step
+   ckpt) so the model reliably emits the envelope on its own; THEN GRPO with the
+   gated reward becomes meaningful.
+
+## 2026-07-21 -- Stage 2 RESOLVED: gated GRPO on the strong B2 base works
+
+The Stage-2 reward-hack (format 0.955->0.635 while reward rose) was caused by the
+WEAK 16-step cold-start, not the reward shape or GRPO machinery. Fixed by moving to
+a stronger cold-start and closing a scoring bug.
+
+**B2 cold-start** (`checkpoint-93`, 3-epoch SFT): raw-generation eval
+`format_hit_rate 0.985`, `cot_accuracy 0.205` on 200 GSM8K -- vs the weak base's
+~0.05 on-policy format. Consolidated DCP->HF with `BASE=checkpoint-729-hf` config
+(arch-identical) + `fix_ckpt_eos` [1,107].
+
+**Scoring bug found by the smoke (job 12471405, all-zero reward):** vLLM's
+DefaultRenderer splits the `<think>...</think>` prefix out of
+`completion_message.content` into `reasoning_content` (tags stripped), so the
+reward's `_completion_text` saw only the `<answer>` span and scored every
+in-envelope rollout 0 -> zero GRPO gradient. Fixed in `reason_agpt/reward.py`
+(commit bb108c043): reconstruct `<think>{reasoning_content}</think>{content}`.
+Verified on 368 real rollouts: format hit 0.000 -> 1.000.
+
+**Gated GRPO smoke on B2 (job 12471406, 20 steps, `rl_grpo_lora_agpt_2b_gsm8k_b2smoke`:
+lr=2e-6, easy curriculum, group_size=4, ckpt@10):** rc=0, both ckpts saved.
+Held-out validation:
+
+| metric | baseline (B2 step 0) | after GRPO (step 20) |
+| --- | --- | --- |
+| reward mean | +0.382 | +0.425 (+11%) |
+| reward sum | +7.633 | +8.502 |
+| reward min | +0.000 | +0.250 |
+| ThinkFormat mean | +0.950 | +1.000 |
+
+The clean OPPOSITE of the earlier reward-hack: reward rose AND format rose. Since
+GRPOLoss exposes only `clip_eps` (no beta/KL anchor), the base prior holding the
+envelope is the sole anti-drift force -- which is exactly why the strong B2 base
+was the prerequisite (as the improve-agpt2b-cot-rl workflow predicted: biggest
+lever is the cold-start, not RL tuning).
+
+**Next:** a longer run on B2 (guardrail: format >= 0.9 hard tripwire; re-eval a
+real merged checkpoint on the shared 200-problem GSM8K metric -- do not trust the
+reward curve).
+
+## 2026-07-22 -- 100-step B2 run: format perfected, accuracy FLAT (RL is not the lever)
+
+Scaled the b2smoke recipe to 100 steps (`rl_grpo_lora_agpt_2b_gsm8k_b2long`,
+lr=2e-6, easy curriculum, group_size=4; job 12471432, rc=0, ckpt every 25).
+Format held 1.000 the entire run -- zero reward-hacking, confirming the B2-base +
+gated-reward architecture is drift-proof.
+
+**Decisive measurement** (step-100 LoRA merged into B2 base via
+merge_and_eval_cot_lora.sh, evaluated on the FULL 200-problem GSM8K CoT metric --
+NOT the noisy 20-sample in-loop val):
+
+| GSM8K CoT (200 problems) | B2 base | B2 + 100-step GRPO |
+| --- | --- | --- |
+| cot_accuracy | 0.205 | 0.215 (+1pp, ~2 problems, within noise) |
+| format_hit_rate | 0.985 | 1.000 |
+
+The in-loop 20-sample validation (reward 0.429 -> 0.425, correct 0.250 -> 0.250)
+agreed: accuracy did not move. **RL is not the accuracy lever for a 2B at ~20%
+GSM8K** -- GRPO can only reweight rollouts the base already samples, and at this
+solve rate the correct-rollout density is too thin (group_size=4 => most groups
+all-wrong, zero advantage) and lr=2e-6 too gentle to shift the task. What GRPO
+delivered cleanly: perfected format (0.985 -> 1.000) with no envelope decay.
+
+**Correction to the earlier b2smoke "+11%" read:** that 0.382 -> 0.425 was on the
+same 20-sample in-loop set (+-0.05/problem) and was within noise, not a real gain.
+The 200-problem metric is the one to trust.
+
+**Fork (next levers, in rough priority):**
+1. Stronger/longer cold-start SFT (the workflow's #1 lever -- accuracy lives here,
+   not in RL). More epochs / better CoT data / STaR-style self-distillation.
+2. If continuing RL: raise lr into the 5e-6-1e-5 band (now SAFE -- format is
+   bulletproof at 1.0, so the conservative lr is no longer needed) AND/OR raise
+   group_size (8-16) for denser gradient on the thin correct-rollout signal, AND
+   drop the easy curriculum's max_steps filter once the base is stronger.
+3. Accept RL as a format-perfecter + move accuracy work upstream to SFT.

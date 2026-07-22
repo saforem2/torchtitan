@@ -20,6 +20,60 @@ was required in ezpz.
 
 ---
 
+## 2026-07-21 — RL cherry-pick sync (2 commits, `git cherry-pick`, NOT a full merge)
+
+Cherry-picked 2 targeted upstream bugfixes into `experiments/rl/` (the Monarch RL
+engine our `experiments/ezpz/` GRPO overlay drives) and the shared attention
+component they depend on. This was **not** a `git merge upstream/main` -- our tree
+is ~1692 commits ahead of `upstream/main` on the `experiments/rl` path, so a full
+merge was not wanted. Instead each fix was applied with `git cherry-pick <sha>`.
+Done in an isolated `git worktree` (`/tmp/rl-upstream-merge-wt`, branch
+`rl-upstream-sync-3950-3937`) off `ezpz` HEAD `4c035d8af` so the live checkout
+(training job 12471247) was never touched.
+
+### Upstream commits
+| Commit (upstream) | Cherry-pick sha | Title | Files | Conflict |
+|-------------------|-----------------|-------|-------|----------|
+| `cadbf3791` | `9d96198d4` | Patch readline-import issue which causes VLLMGenerator hang (#3950) | `experiments/rl/train.py` (+41/-8), `experiments/rl/README.md` (+6/-3) | none (clean) |
+| `5059f32c5` | `6463b0050` | [spmd_types] VarlenAttention: remove hardcoded spmd_types (#3937) | `models/common/attention.py` (+11/-5) | none (clean) |
+
+### #3950 -- readline-import / VLLMGenerator hang (directly relevant to our RL path)
+vLLM nightly (via vllm-project/vllm#46718) now transitively imports `readline`
+during `jit_monitor` kernel warmup through the chain
+`vLLM -> tilelang -> tvm -> tvm/base.py -> import readline`. `readline` calls
+`tcsetattr` on import, which touches the controlling terminal. Monarch spawns
+generator procs in a **background** process group, so that terminal touch makes
+the kernel send `SIGTTOU`, which **stops the generator process** -- i.e. the
+VLLMGenerator hangs at spawn. The fix adds a new `_bootstrap_generator()` proc
+bootstrap that, when stdin is a tty, does a proactive `readline` import warmup
+with `SIGTTOU` temporarily blocked (`signal.pthread_sigmask`); the later tvm
+import then skips the `tcsetattr`. `_spawn_proc_mesh` gains a required
+`bootstrap` kwarg: **trainer** meshes keep `_preimport_torch`, **generator**
+meshes now use `_bootstrap_generator`. README also adds `torchvision` to the
+vllm install line (vllm nightly imports it during warmup). This is the Monarch
+RL generator path our GRPO overlay uses, so we want it.
+
+### #3937 -- VarlenAttention spmd_types
+Removes the hardcoded `spmd.PartitionSpec("dp","tp",None)` / `("tp","dp")` on the
+`varlen_attn` output and LSE; instead derives the type from `q_TNH`'s own local
+type + partition spec (`spmd.get_local_type` / `get_partition_spec`), and derives
+the LSE spec by swapping q's first two axes. Touches core
+`models/common/attention.py` -- allowed here because the cherry-pick *is* that
+core fix (a legitimate upstream sync, not an experiment edit). Only affects the
+`spmd_types` spmd backend under `--debug.spmd_typechecking`; no effect on our
+default runs.
+
+### Divergence check
+Both target files matched upstream's pre-patch structure on the touched hunks,
+so both cherry-picks applied with zero conflicts. `train.py` had one extra
+`bootstrap=_preimport_torch` call site vs upstream (single-node spawn path) that
+cherry-pick left as the trainer default -- correct. `python3 -m py_compile` passes
+on both files. **Not pushed** -- branch left in the worktree for review + merge
+after job 12471247 finishes.
+
+---
+
+
 ## 2026-07-17 — 70th sync (3 commits, `..upstream/main`, merge `412d93fd8`)
 
 Merged 3 new upstream commits (after fast-forwarding a concurrent `origin/ezpz`
