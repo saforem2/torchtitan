@@ -3118,3 +3118,34 @@ its own `q_norm` field on a custom `DeepSeekAttention` config (not `GQAttention`
 **Changes required in ezpz:**
 
 - None. Clean merge.
+
+## 2026-07-22 -- sync upstream/main (15 commits, clean merge)
+
+Merged `upstream/main` into `ezpz` (merge-base fbceec07e). Auto-merged with ZERO
+conflicts; the ezpz tree was untouched by the merge.
+
+**Notable commits:**
+- `cadbf3791` (#3950) -- **readline-import VLLMGenerator-hang fix.** The canonical
+  upstream fix for the exact readline->tcsetattr->SIGTTOU bug we monkeypatched
+  this session (stops Monarch's bg-spawned vLLM generators). Now in
+  `experiments/rl/train.py` as a proactive readline-import. Next GRPO run can drop
+  the ezpz monkeypatch.
+- `0fb45d4ad` (#3894) -- override system allows kwargs from CLI + config
+  (`config/override.py`, +271 lines).
+- `5059f32c5` (#3937) -- [spmd_types] VarlenAttention: remove hardcoded spmd_types.
+- `af35cfb15` (#2679) -- MoE support in the transformers_modeling_backend
+  (experiments/transformers_modeling_backend/, NOT our path).
+- `7463c1646` (#3732), `d93d7d03b` (#3962, transformers 5.9 tokenizer download),
+  `7e3f2ebc2` (#3919 trainer to_dict), qwen3_5 / TPU-flops / CI: tangential.
+
+**Replay (llama3->agpt, deepseek_v3->moe):**
+- `models/llama3/`: NO changes -> no agpt replay.
+- `models/common/attention.py`: NO change -> agpt attention untouched (important:
+  the in-flight B3 SFT pretokenize is unaffected).
+- `models/deepseek_v3/config_registry.py`: +37 lines = MXFP8 quantization
+  (`deepseek_v3_debugmodel_mxfp8` + fused_swiglu override-naming). B200/sm_100
+  CuTeDSL-kernel-specific; NOT applicable to XPU moe. No functional moe replay
+  needed; noted only.
+
+**Re-smoke:** the plan's Task 4 (2N SFT smoke @ 8192) is the natural re-smoke gate
+on the merged code before the 8N B3 run (satisfies the smoke-after-pull rule).
