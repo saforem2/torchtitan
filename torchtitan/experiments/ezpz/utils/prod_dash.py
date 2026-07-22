@@ -264,13 +264,26 @@ def _wandb_ids_from_paths(paths):
     """W&B run-ids parsed from a chain's .o logs, in first-seen order. EVERY
     run logs to W&B (the autoretry scripts print 'View run at .../runs/<id>'),
     so experiment forks discovered from logs -- not trajectories.py -- still
-    get their runs. Ordered by log mtime so the newest run is last."""
+    get their runs. Ordered by log mtime so the newest run is last.
+
+    The 'View run at' banner prints at wandb init (near the top) and again at
+    teardown (near the bottom), so we scan only the head+tail (256KiB each) --
+    autoretry .o logs can be hundreds of MB and reading them whole is slow."""
+    CHUNK = 256 * 1024
     ids, seen = [], set()
     for p in sorted((x for x in paths or [] if os.path.exists(x)),
                     key=lambda x: os.path.getmtime(x)):
         try:
-            txt = ANSI.sub("", open(p, errors="replace").read())
-        except (FileNotFoundError, IsADirectoryError):
+            sz = os.path.getsize(p)
+            with open(p, "rb") as f:
+                head = f.read(CHUNK)
+                if sz > 2 * CHUNK:
+                    f.seek(-CHUNK, os.SEEK_END)
+                    tail = f.read(CHUNK)
+                else:
+                    tail = b""
+            txt = ANSI.sub("", (head + b"\n" + tail).decode("utf-8", "replace"))
+        except (FileNotFoundError, IsADirectoryError, OSError):
             continue
         for m in _WBRUN_RE.finditer(txt):
             rid = m.group(1)
