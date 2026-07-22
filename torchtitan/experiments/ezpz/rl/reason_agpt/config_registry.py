@@ -266,6 +266,28 @@ def rl_grpo_lora_agpt_2b_gsm8k_easy() -> Controller.Config:
     )
 
 
+def rl_grpo_lora_agpt_2b_gsm8k_b2long() -> Controller.Config:
+    """Longer B2 run (100 steps) -- the smoke's proven-safe recipe scaled up.
+
+    Same knobs as rl_grpo_lora_agpt_2b_gsm8k_b2smoke (lr=2e-6, easy curriculum,
+    group_size=4) which lifted held-out validation reward 0.382 -> 0.425 and
+    ThinkFormat 0.950 -> 1.000 over 20 steps with NO envelope decay. Deliberately
+    keeps lr=2e-6 (not the hotter _easy/_long default 2e-5) for an UNATTENDED run:
+    GRPOLoss has no KL anchor, so the base prior holding format is the only
+    restoring force -- a conservative lr keeps it. ckpt every 25 so a walltime
+    kill still leaves resumable + evaluatable checkpoints. Guardrail: format must
+    stay >= 0.9; re-eval a real merged checkpoint on the shared 200-problem GSM8K
+    metric, do not trust the reward curve."""
+    return _agpt_grpo_config(
+        num_training_steps=100,
+        num_groups_per_train_step=8,
+        group_size=4,
+        max_steps=3,
+        lr=2e-6,
+        ckpt_interval=25,
+    )
+
+
 def rl_grpo_lora_agpt_2b_gsm8k_b2smoke() -> Controller.Config:
     """B2 pre-flight smoke on the STRONG cold-start base (checkpoint-93-hf,
     format 0.985, acc 0.205). Audit-recommended SAFE settings for a base we do
