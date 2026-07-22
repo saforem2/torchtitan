@@ -261,9 +261,9 @@ def _kick_detached_refresh():
         open(lock, "w").close()
     except Exception:
         return
-    cmd = ("cd %s && PD_LOCAL=1 PD_FRESH=1 .venv/bin/python3 "
+    cmd = ("cd %%s && PD_LOCAL=1 PD_FRESH=1 .venv/bin/python3 "
            "torchtitan/experiments/ezpz/utils/prod_dash.py --board "
-           ">/tmp/prod_dash_refresh.log 2>&1; rm -f %s" % (REPO, lock))
+           ">/tmp/prod_dash_refresh.log 2>&1; rm -f %%s" %% (REPO, lock))
     try:
         subprocess.Popen(["bash", "-c", cmd], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
