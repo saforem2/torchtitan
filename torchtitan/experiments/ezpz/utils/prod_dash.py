@@ -509,6 +509,10 @@ def draw_curves(payload, wpx, hpx, save_path=None):
     dpi = 100
     fig, ax = plt.subplots(
         figsize=(max(5.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.80 / dpi)), dpi=dpi)
+    # x-axis: "step" (default, faithful to rl_dash3) or "tokens" (every chain
+    # shares the 4.67T olmo-mix target, so tokens = step * gbs * seq_len puts
+    # them on a comparable footing despite very different step counts/batches).
+    xaxis = os.environ.get("PD_XAXIS", "step")
     parts = []
     for key in sorted(chains):
         c = chains[key]
@@ -518,7 +522,11 @@ def draw_curves(payload, wpx, hpx, save_path=None):
             curve = curve + [[tip["step"], tip["loss"]]]
         if len(curve) < 2:
             continue
-        xs = [p[0] for p in curve]
+        toks_per_step = (c.get("gbs") or 0) * (c.get("seq_len") or 0)
+        if xaxis == "tokens" and toks_per_step:
+            xs = [p[0] * toks_per_step / 1e9 for p in curve]  # billions of tokens
+        else:
+            xs = [p[0] for p in curve]
         ys = [p[1] for p in curve]
         is_live = (c.get("queue_state") == "R"
                    or (c.get("log_age") is not None and c["log_age"] <= LIVE_WINDOW))
@@ -533,8 +541,9 @@ def draw_curves(payload, wpx, hpx, save_path=None):
         ax.plot(xs, ys, ls, lw=lw, color=color, alpha=alpha, zorder=z,
                 label=label, rasterized=len(xs) > 2000)
         if is_live:
-            parts.append("%s=%.3f@%d" % (c.get("label", key), ys[-1], xs[-1]))
-    ax.set_xlabel("training step (cumulative across resumes)")
+            parts.append("%s=%.3f@%d" % (c.get("label", key), ys[-1], curve[-1][0]))
+    ax.set_xlabel("tokens seen (billions)" if xaxis == "tokens"
+                  else "training step (cumulative across resumes)")
     ax.set_ylabel("loss (global avg)")
     ax.set_title("AuroraGPT production loss" + ("  --  " + "  ".join(parts) if parts else ""))
     ax.legend(loc="upper right", fontsize=8, ncol=2)
@@ -634,6 +643,8 @@ def main():
         SHOW_ALL = True
     if "--fresh" in argv:          # force a W&B backbone rebuild this call
         os.environ["PD_FRESH"] = "1"
+    if "--tokens" in argv:         # x-axis in tokens instead of steps
+        os.environ["PD_XAXIS"] = "tokens"
     if "--board" in argv:
         print(render_board(fetch()))
         return
