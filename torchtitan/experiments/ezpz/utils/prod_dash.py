@@ -249,14 +249,53 @@ def build_backbone():
     slim_idx = {b: p for b, p in idx.items() if b in tracked}
     return {"chains": chains, "idx": slim_idx, "built_at": time.time()}
 
-def load_backbone():
-    if not FRESH and os.path.exists(CACHE):
+def _kick_detached_refresh():
+    """Spawn a detached FRESH rebuild so the NEXT call is warm. The worker
+    re-enters this same file with PD_FRESH=1 (-> the synchronous build branch),
+    writes the cache, and exits. A lock file (touched here, ~build-duration
+    validity) prevents piling up concurrent rebuilds."""
+    lock = CACHE + ".refreshing"
+    try:
+        if os.path.exists(lock) and (time.time() - os.path.getmtime(lock)) < 900:
+            return  # a refresh is already in flight
+        open(lock, "w").close()
+    except Exception:
+        return
+    cmd = ("cd %s && PD_LOCAL=1 PD_FRESH=1 .venv/bin/python3 "
+           "torchtitan/experiments/ezpz/utils/prod_dash.py --board "
+           ">/tmp/prod_dash_refresh.log 2>&1; rm -f %s" % (REPO, lock))
+    try:
+        subprocess.Popen(["bash", "-c", cmd], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
         try:
-            age = time.time() - os.path.getmtime(CACHE)
-            if age < TTL:
-                return json.load(open(CACHE))
+            os.remove(lock)
         except Exception:
             pass
+
+def load_backbone():
+    # FRESH (the --fresh flag / detached refresh worker) always builds inline.
+    if FRESH:
+        bb = build_backbone()
+        try:
+            json.dump(bb, open(CACHE, "w"))
+        except Exception:
+            pass
+        return bb
+    # Otherwise serve the cache. If it is stale, serve it ANYWAY (marked stale)
+    # and kick a detached rebuild so the next call is warm -- an interactive
+    # call must never block on the ~3-6 min W&B scan_history build.
+    if os.path.exists(CACHE):
+        try:
+            bb = json.load(open(CACHE))
+            age = time.time() - os.path.getmtime(CACHE)
+            if age >= TTL:
+                _kick_detached_refresh()
+                bb["stale"] = True
+            return bb
+        except Exception:
+            pass
+    # No cache at all (first-ever run): unavoidable synchronous build.
     bb = build_backbone()
     try:
         json.dump(bb, open(CACHE, "w"))
@@ -439,10 +478,11 @@ def render_board(payload) -> str:
                 if c.get("queue_state") == "R"
                 or (c.get("log_age") or 1e9) < LIVE_WINDOW)
     bb_age = payload.get("built_age")
+    stale = " (refreshing)" if payload.get("stale") else ""
     out = [
-        "AuroraGPT production loss board  [%s]  %d live / %d chains  (W&B backbone %s)"
+        "AuroraGPT production loss board  [%s]  %d live / %d chains  (W&B backbone %s%s)"
         % (time.strftime("%H:%M:%S", time.localtime(now)), nlive, len(chains),
-           "-" if bb_age is None else "%.0fm old" % (bb_age / 60)),
+           "-" if bb_age is None else "%.0fm old" % (bb_age / 60), stale),
         fmt(header),
         "  ".join("-" * w for w in widths),
     ]
