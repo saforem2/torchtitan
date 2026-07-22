@@ -28,7 +28,8 @@ export TORCHINDUCTOR_MAX_AUTOTUNE=0 VLLM_ENABLE_V1_MULTIPROCESSING=1
 export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 export PATH="/opt/pbs/bin:$PATH"
 
-PY=$REPO/venvs/rl-vllm/bin/python
+PY_MERGE=$REPO/venvs/rl-grpo-lora/bin/python   # has editable torchtitan (2b-rl registry)
+PY_EVAL=$REPO/venvs/rl-vllm/bin/python          # proven vLLM eval path
 DCP="${DCP:?set DCP=<...>/checkpoint/step-N}"
 BASE="${BASE:-$REPO/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93-hf}"
 OUT="${OUT:-$REPO/outputs/evals/cot/$(basename $(dirname $(dirname "$DCP")))_$(basename "$DCP")_merged_hf}"
@@ -36,14 +37,16 @@ LIMIT="${LIMIT:-200}"
 
 echo "MERGE+EVAL START $(date +%T) dcp=$DCP base=$BASE out=$OUT"
 if [ ! -f "$OUT/model.safetensors" ] && [ ! -f "$OUT/model-00001-of-00001.safetensors" ]; then
-    "$PY" torchtitan/experiments/ezpz/scripts/eval/merge_lora_dcp_to_hf.py \
+    PYTHONPATH=$REPO "$PY_MERGE" torchtitan/experiments/ezpz/scripts/eval/merge_lora_dcp_to_hf.py \
         --dcp "$DCP" --base-hf "$BASE" --out "$OUT" \
         --lora-rank 8 --lora-alpha 16 --model-flavor 2b-rl 2>&1 | tail -8
 else
     echo "[merge] $OUT exists, skip"
 fi
-"$PY" torchtitan/experiments/ezpz/scripts/eval/fix_ckpt_eos.py "$OUT" 2>&1 | tail -1
+"$PY_EVAL" torchtitan/experiments/ezpz/scripts/eval/fix_ckpt_eos.py "$OUT" 2>&1 | tail -1
 echo "COT-EVAL $(date +%T) limit=$LIMIT"
-"$PY" torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
-    --model "$OUT" --limit "$LIMIT" --dtype float32 --out /tmp/cot_eval_$(basename "$DCP").jsonl 2>&1 | tail -20
-echo "MERGE+EVAL EXIT rc=$? $(date +%T)"
+"$PY_EVAL" torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+    --model "$OUT" --limit "$LIMIT" --dtype float32 --out /tmp/cot_eval_$(basename "$DCP").jsonl > /tmp/eval_out_$(basename "$DCP").txt 2>&1
+EVAL_RC=$?
+tail -20 /tmp/eval_out_$(basename "$DCP").txt
+echo "MERGE+EVAL EXIT rc=$EVAL_RC $(date +%T)"
