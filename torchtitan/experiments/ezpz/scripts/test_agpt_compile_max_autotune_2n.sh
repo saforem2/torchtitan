@@ -10,9 +10,9 @@
 # Runtime test of the ezpz AGPT_COMPILE_MODE=max-autotune override
 # (agpt/parallelize.py _apply_compile_with_mode). Proves torch.compile
 # mode=max-autotune threads through torchtitan's per-TransformerBlock compile
-# and engages Triton GEMM autotune on XPU. Uses agpt_2b_real (complex-RoPE,
-# compile-lowerable, NON-flex) to isolate GEMM autotune from the FlexAttention
-# backward-autotune OOM. SUCCESS = log shows "(backend=inductor,
+# and engages Triton GEMM autotune on XPU. Uses agpt_debugmodel_local (self-contained: bundled c4_test data + checked-in
+# tokenizer, NO cluster data/network) so the test only exercises the compile path.
+# Small model, but still proves mode= threads through and Triton autotune fires. SUCCESS = log shows "(backend=inductor,
 # mode=max-autotune) [ezpz AGPT_COMPILE_MODE]" + "SingleProcess AUTOTUNE
 # benchmarking ... triton_mm_*". Short (6 steps), no checkpoint.
 # no set -euo (venv activate has unbound vars)
@@ -30,9 +30,8 @@ source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 source .venv/bin/activate
 
-CONFIG="${CONFIG:-agpt_2b_real}"
+CONFIG="${CONFIG:-agpt_debugmodel_local}"
 STEPS="${STEPS:-6}"
-DFL="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/olmo-mix-1124.txt"
 LOG_DIR="logs/test-maxautotune-${PBS_JOBID%%.*}"; mkdir -p "${LOG_DIR}"
 
 echo "=== max-autotune test: config=${CONFIG} AGPT_COMPILE_MODE=${AGPT_COMPILE_MODE} steps=${STEPS} ===" \
@@ -43,8 +42,6 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --config="${CONFIG}" \
     --compile.enable \
     --checkpoint.no-enable \
-    --dataloader.dataset=blendcorpus \
-    --dataloader.dataset-path="${DFL}" \
     --training.steps="${STEPS}" \
     2>&1 | tee -a "${LOG_DIR}/run.log"
 
