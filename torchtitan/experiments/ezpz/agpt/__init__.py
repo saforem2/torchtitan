@@ -183,7 +183,9 @@ class ReLUSquaredFeedForward(FeedForward):
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
-from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
+from torchtitan.experiments.ezpz.agpt.state_dict_adapter import (
+    AgptStateDictAdapter,
+)
 from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
 
 __all__ = [
@@ -649,6 +651,37 @@ agpt_configs["50b_wide"] = agpt_configs["50B_wide"]
 agpt_configs["70b_wide"] = agpt_configs["70B_wide"]
 agpt_configs["80b"] = agpt_configs["80B"]
 agpt_configs["80b_wide"] = agpt_configs["80B_wide"]
+
+
+def _as_cos_sin(config: "AgptModel.Config") -> "AgptModel.Config":
+    """Return a deep copy of ``config`` with every layer's RoPE rebuilt as
+    ``CosSinRoPE`` (the ``_real`` / rotate-half convention).
+
+    The ``_real`` training flavors (see config_registry._set_rope_backend) flip
+    the RoPE backend to cos_sin. For DCP->HF conversion we need a matching
+    model-config flavor so convert_to_hf.py builds a cos_sin model and the
+    RoPE-aware AgptStateDictAdapter skips the (complex-only) Q/K permute. This
+    mirrors _set_rope_backend but operates on an AgptModel.Config directly.
+    """
+    from copy import deepcopy
+    from dataclasses import fields
+
+    cfg = deepcopy(config)
+    for layer in cfg.layers:
+        old_rope = layer.attention.rope
+        if old_rope is None:
+            continue
+        kwargs = {f.name: getattr(old_rope, f.name) for f in fields(old_rope)}
+        layer.attention.rope = CosSinRoPE.Config(**kwargs)
+    return cfg
+
+
+# ``_real`` (cos_sin RoPE) convert-time flavors. Production 2B/20B train with
+# these (submit_agpt_{2b,20b}_autoretry.sh default CONFIG_SUFFIX=_real); pass
+# e.g. ``--model_flavor 20b_real`` to convert_to_hf.py so the exported weights
+# match the trained RoPE convention. See agpt/state_dict_adapter.py.
+agpt_configs["2b_real"] = _as_cos_sin(agpt_configs["2B"])
+agpt_configs["20b_real"] = _as_cos_sin(agpt_configs["20B"])
 agpt_configs["80b_deep"] = agpt_configs["80B_deep"]
 agpt_configs["80b_alt"] = agpt_configs["80B_alt"]
 agpt_configs["80b_deep_alt"] = agpt_configs["80B_deep_alt"]
@@ -685,6 +718,6 @@ def model_registry(
         parallelize_fn=parallelize_llama,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=None,
-        state_dict_adapter=Llama3StateDictAdapter,
+        state_dict_adapter=AgptStateDictAdapter,
         fragment_fn=fragment_llm,
     )
