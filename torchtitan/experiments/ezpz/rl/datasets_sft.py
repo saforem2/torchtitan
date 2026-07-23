@@ -149,6 +149,7 @@ def _materialized_mix_load_or_build(
     weights: list[float],
     seed: int,
     stopping_strategy: str = "all_exhausted",
+    caps: dict[str, int] | None = None,
 ) -> Dataset:
     """Load a pre-materialized interleaved mix from disk if available,
     otherwise build via ``interleave_datasets(...)`` and save to disk.
@@ -184,6 +185,7 @@ def _materialized_mix_load_or_build(
         "weights": [round(w, 8) for w in norm_weights],
         "seed": int(seed),
         "stopping": str(stopping_strategy),
+        "caps": {k: int(v) for k, v in sorted((caps or {}).items())},
         # Bump if the on-disk arrow format changes incompatibly.
         # v2: filter empty/whitespace-only prompt+completion rows (see below).
         "v": 2,
@@ -207,9 +209,16 @@ def _materialized_mix_load_or_build(
         f"[mix-cache] miss {recipe_hash}: building + saving interleaved mix to {cache_dir}"
     )
     t0 = time.monotonic()
-    components_built = [
-        SFT_REGISTRY[n].build() for n in component_names
-    ]
+    components_built = []
+    for n in component_names:
+        comp = SFT_REGISTRY[n].build()
+        cap = (caps or {}).get(n)
+        if cap is not None and len(comp) > cap:
+            # shuffle before capping so we sample across the source, not a
+            # head slice; seed-tied for reproducibility + a stable cache key.
+            comp = comp.shuffle(seed=seed).select(range(cap))
+            log.info(f"[mix-cache] {n}: capped to {cap:,} rows")
+        components_built.append(comp)
 
     # Drop empty / whitespace-only prompt or completion rows -- BEFORE interleave,
     # per source. Some upstream sources carry an empty assistant `completion`;
@@ -921,6 +930,11 @@ def _build_b3_instruct_cot_mix(seed: int = 42):
         ],
         weights=[0.30, 0.25, 0.15, 0.15, 0.15],
         seed=seed,
+        # Cold-start SFT, not pretraining: cap OpenMathInstruct-2 (14M) so the
+        # all_exhausted interleave maxes at a cold-start-appropriate size
+        # (~10-13M rows, not 93M). Keeps tokenize + packed-dataset size
+        # tractable under the tegu user quota; 2M math rows is ample here.
+        caps={"OpenMathInstruct-2": 2_000_000},
     )
 
 

@@ -183,11 +183,16 @@ TRAJECTORIES: list[dict] = [
         # 10vf1mqr=8481647 qttj3l3p=8505124 wjy5pvxm=8505258 cv3wii8x=8505259
         # tu77pzu7=8507197 8vixdfg2=8507200 0pmsn01c=8509393(->step4418)
         # tu1iseu1=8638793 native-autoretry relaunch (4401->5109), added 2026-07-06
+        # 8o2xakm3=8638795 cont (5109->6000), added 2026-07-23
+        # --- 128N debug-scaling sneaks (GAS=4 -> GBS=12288, bit-identical to
+        #     the 512N chain) run to unstick the queue-starved chain, 2026-07-23:
+        # g59v83go=8688010 (6001->6008, walltime-killed pre-save)
+        # jyq4w87d=8689162 (6001->6012, saved step-6005/6010)
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
             "qttj3l3p", "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
-            "tu1iseu1",
+            "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-20b-v2-512n",
