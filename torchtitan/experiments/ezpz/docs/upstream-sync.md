@@ -3149,3 +3149,18 @@ conflicts; the ezpz tree was untouched by the merge.
 
 **Re-smoke:** the plan's Task 4 (2N SFT smoke @ 8192) is the natural re-smoke gate
 on the merged code before the 8N B3 run (satisfies the smoke-after-pull rule).
+
+## 2026-07-24 -- sync upstream/main (#3926 RL rename, clean merge + replay)
+
+Merged upstream/main (1 commit: 725b995d3 "[rl] simple rename changes (#3926)").
+Clean auto-merge, ezpz tree untouched by the merge itself. BUT #3926 renamed two
+AsyncLoopConfig fields our RL overlay passes:
+  - num_groups_per_train_step -> num_prompts_per_train_step
+  - group_size                -> num_samples_per_prompt
+REPLAY: renamed ONLY the kwargs passed to AsyncLoopConfig(...) in
+reason_agpt/config_registry.py and alphabet_sort_agpt/config_registry.py (the
+helper functions' own param names num_groups_per_train_step/group_size are kept
+for minimal churn; they now map to the new kwarg names at the call site). Verified
+by AST: merged controller.py AsyncLoopConfig accepts {num_prompts_per_train_step,
+num_samples_per_prompt}; both overlay files now pass exactly those. Without this
+replay the next GRPO run would fail with an unexpected-kwarg TypeError.
