@@ -465,6 +465,12 @@ _OPENR1_SUFFIX = (
     "answer inside <answer>\\boxed{}</answer>."
 )
 
+# Max <think> trace length (chars) kept from OpenR1. The B3 regression traced to
+# long-form R1 run-on traces (mean gen_len 601, 26/200 never closed </answer>)
+# that taught a verbose style diluting a 2B's short-arithmetic competence. Drop
+# traces above this so only short, useful reasoning is trained. Env-tunable.
+OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "1200"))
+
 
 def _openr1_format_row(ex):
     """Pick a verified-correct generation, extract its <think> trace + boxed
@@ -493,6 +499,8 @@ def _openr1_format_row(ex):
         if not tm:
             continue
         trace = tm.group(1).strip()
+        if len(trace) > OPENR1_MAX_THINK_CHARS:
+            continue  # run-on trace: skip this generation (may fall through to None)
         # boxed answer: prefer the LAST \boxed{} anywhere in the generation
         boxes = _OPENR1_BOXED_RE.findall(gen)
         if not boxes:
@@ -946,6 +954,49 @@ register_sft_dataset(
             "B3 cold-start mix: 30%% tulu-3 + 25%% OpenR1-Math-220k (CoT) + "
             "15%% gsm8k-r1cot + 15%% ultrachat-200k + 15%% OpenMathInstruct-2. "
             "Combined instruction+CoT rebuild from gs138650."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
+# b4_reweight_mix -- reweighted mix fixing the B3 dilution regression
+# (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
+# ---------------------------------------------------------------------------
+
+
+def _build_b4_reweight_mix(seed: int = 42):
+    """B4 reweighted mix -- fixes the B3 dilution regression
+    (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
+      0.40 gsm8k-r1cot        (was 0.15 in b3 -- restore in-distribution short CoT)
+      0.15 OpenR1-Math-220k   (LENGTH-FILTERED via OPENR1_MAX_THINK_CHARS -- short
+                               traces only; the run-on ones caused the regression)
+      0.30 tulu-3-sft-mixture (general instruction-following)
+      0.15 ultrachat-200k     (multi-turn chat)
+    The b3 math-breadth component is dropped here (it added math breadth
+    the 2B could not convert to accuracy). Same materialized-mix cache +
+    all_exhausted interleave as b3.
+    """
+    return _materialized_mix_load_or_build(
+        component_names=[
+            "gsm8k-r1cot",
+            "OpenR1-Math-220k",
+            "tulu-3-sft-mixture",
+            "ultrachat-200k",
+        ],
+        weights=[0.40, 0.15, 0.30, 0.15],
+        seed=seed,
+    )
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="b4_reweight_mix",
+        build=_build_b4_reweight_mix,
+        description=(
+            "B4 reweighted mix: 40%% gsm8k-r1cot + 15%% length-filtered "
+            "OpenR1-Math-220k + 30%% tulu-3 + 15%% ultrachat-200k "
+            "(OpenMathInstruct-2 dropped). Fixes the B3 long-CoT dilution."
         ),
     )
 )

@@ -176,8 +176,8 @@ def _agpt_grpo_config(
         hf_assets_path="outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf",
         async_loop=AsyncLoopConfig(
             num_training_steps=num_training_steps,
-            num_groups_per_train_step=num_groups_per_train_step,
-            group_size=group_size,
+            num_prompts_per_train_step=num_groups_per_train_step,
+            num_samples_per_prompt=group_size,
             validation=ValidationConfig(num_samples=20),
             batcher=Batcher.Config(
                 batch=BatchConfig(local_batch_size=2, seq_len=2048),

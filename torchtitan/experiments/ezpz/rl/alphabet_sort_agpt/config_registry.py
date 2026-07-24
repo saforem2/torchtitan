@@ -149,8 +149,8 @@ def _agpt_grpo_config(
         ),
         async_loop=AsyncLoopConfig(
             num_training_steps=num_training_steps,
-            num_groups_per_train_step=num_groups_per_train_step,
-            group_size=8,
+            num_prompts_per_train_step=num_groups_per_train_step,
+            num_samples_per_prompt=8,
             validation=ValidationConfig(num_samples=20),
             batcher=Batcher.Config(
                 batch=BatchConfig(local_batch_size=2, seq_len=2048),
