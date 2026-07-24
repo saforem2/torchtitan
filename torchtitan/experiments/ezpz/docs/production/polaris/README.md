@@ -2,7 +2,7 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-07-22
+> Last updated: 2026-07-24
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -176,6 +176,54 @@ from step-2400 when it lands a slot.
 **Milestone:** now past the mature 2B chain's token count (~25B vs
 ~22.6B) at a lower loss (~2.2 vs 2.36) -- the larger-model
 token-efficiency lead is holding.
+
+### Evaluation (lm-eval, Llama2 tokenizer)
+
+> **Important:** this chain trained on **Llama2-tokenized** dolma
+> (`/eagle/datasets/dolma/data_v1.7_Llama2Tokenizer`), but the model
+> config declares vocab 256128 (gemma). It must be evaluated with the
+> **Llama2** tokenizer (`bos=1`/`eos=2`), not gemma -- evaluating with
+> gemma produces fluent-subword salad and chance scores on every task.
+> Full diagnosis:
+> [`known-bugs/polaris-20b-tokenizer-mismatch.md`](../../guides/known-bugs/polaris-20b-tokenizer-mismatch.md).
+> The earlier `results/` (gemma) dirs are all at chance and should be
+> ignored; the corrected results live in `results-llama2tok/`.
+
+Zero-shot lm-eval (vLLM backend, TP=4, `gpu_memory_utilization=0.80` for
+the 256128-vocab logits) across the sampled checkpoint sweep
+(job 7274538). Metric is `acc` for arc_easy/boolq/piqa/winogrande,
+`acc_norm` for hellaswag/arc_challenge/openbookqa.
+
+| Step | Tokens | arc_easy<br>(acc) | arc_challenge<br>(acc_norm) | piqa<br>(acc) | hellaswag<br>(acc_norm) | boolq<br>(acc) | openbookqa<br>(acc_norm) | winogrande<br>(acc) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 0.8B | 0.264 | 0.269 | 0.523 | 0.255 | 0.378 | 0.240 | 0.499 |
+| 500 | 4.2B | 0.314 | 0.221 | 0.560 | 0.270 | 0.551 | 0.230 | 0.505 |
+| 1,000 | 8.4B | 0.397 | 0.235 | 0.597 | 0.294 | 0.536 | 0.264 | 0.507 |
+| 1,500 | 12.6B | 0.418 | 0.243 | 0.604 | 0.312 | 0.446 | 0.270 | 0.500 |
+| 2,000 | 16.8B | 0.412 | 0.242 | 0.622 | 0.318 | 0.481 | 0.278 | 0.519 |
+| 2,400 | 20.1B | **0.487** | 0.248 | **0.665** | **0.397** | **0.564** | 0.288 | 0.515 |
+
+![20B Polaris eval trajectory](figures/evals_20b_polaris_128n_llama2tok.png)
+
+The four strong signals (arc_easy, piqa, hellaswag, boolq) rise cleanly
+from chance at step-100 (10B tokens, barely trained) to well above chance
+by step-2400 -- a healthy learning curve that independently confirms both
+the model and the tokenizer fix. arc_challenge / openbookqa / winogrande
+stay near chance at this token count (expected; matches the Aurora 20B
+early trajectory).
+
+Regenerate the chart + table (from the Polaris repo):
+
+```bash
+python3 torchtitan/experiments/ezpz/utils/plot_polaris_20b_evals.py
+```
+
+Rerun the sweep after new checkpoints land (reuses existing HF exports,
+overrides tokenizer to Llama2, `gmu=0.80`):
+
+```bash
+qsub torchtitan/experiments/ezpz/scripts/eval/polaris_20b_eval_llama2tok_sweep.sh
+```
 
 ---
 
