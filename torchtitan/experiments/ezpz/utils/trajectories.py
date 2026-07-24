@@ -122,26 +122,28 @@ TRAJECTORIES: list[dict] = [
         # 8vmrcxqr=8505252 56lkkkh1=8507195 24wfvoje=8507198 bs6tay8l=8508020
         # zrqx75x7=8508977 ied4spbx=8513544 yklnyjd5=8516364 8ujhblrp=8519833
         # a52q40kx=8521626 okyt09kv=8521630 zcmlqbd8=8534293(->step86259)
-        # --- chain COMPLETION (86259->92859), added 2026-07-06: ---
-        # a5h4aaf7=8572612(sneak2h,86201-86674) gx7ph91w=8573619(sneak2h,86675-87146)
-        # mqi69lx2=8558531(cont12,87126->92859 DONE)
+        # --- chain COMPLETION (86201->92859), added 2026-07-06, run-ids
+        #     CORRECTED 2026-07-24 (see note below): ---
+        # 9itxu3pt=8572612(sneak2h,86201-86674) ew4pqb51=8573619(sneak2h,86675-87145)
+        # fm3gzdxt=8558531(cont12,87126->92859 DONE)
         "wandb_run_ids": [
             "lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
             "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
             "56lkkkh1", "24wfvoje", "bs6tay8l",
             "zrqx75x7", "ied4spbx", "yklnyjd5",
             "8ujhblrp", "a52q40kx", "okyt09kv", "zcmlqbd8",
-            "a5h4aaf7", "gx7ph91w", "mqi69lx2",
+            "9itxu3pt", "ew4pqb51", "fm3gzdxt",
         ],
-        # The 3 completion runs logged to a DIFFERENT W&B project
-        # (aurora_gpt/ezpz.examples.test, not torchtitan.ezpz.train), so they
-        # can't be pulled from PROJECT -- recover their trajectory from the .o
-        # logs instead. These carry the chain from step-86259 to 92859 (DONE).
-        "olog_fallbacks": {
-            "a5h4aaf7": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-sneak2h.o8572612"),
-            "gx7ph91w": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-sneak2h.o8573619"),
-            "mqi69lx2": str(RUNS / "agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-v2-cont12.o8558531"),
-        },
+        # NOTE (2026-07-24): these 3 completion jobs each run an
+        # `ezpz.examples.test` preflight smoke FIRST, which opens a wandb run in
+        # the `aurora_gpt/ezpz.examples.test` project. With reinit='default',
+        # the real training `wandb.init(project=torchtitan.ezpz.train)` returns
+        # that already-active smoke run instead of a new one -- so the smoke
+        # run-ids (a5h4aaf7/gx7ph91w/mqi69lx2) hold only the 5-step toy curve.
+        # The REAL training tail (86201->92859) is logged to the correct
+        # project under 9itxu3pt/ew4pqb51/fm3gzdxt (used above); no .o-log
+        # fallback is needed.
+        "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-256n",
         "cls": "live",
     },
@@ -157,15 +159,16 @@ TRAJECTORIES: list[dict] = [
         "token_target": OLMO_MIX_1124_TOKENS,
         # i252kps9=8460301 d4hlr8qe=8463626 1va7zfki=8463627 6op7ozfh=8466847
         # y70rh76h=8479989 logai2xn=8485509 2qqhpcrm=8485511 w78n1akt=8506221
-        # i0ayskft=8507196(empty W&B->olog) 21grc6o7=8507199 nv4qwxc8=8508753
+        # i0ayskft=8507196 21grc6o7=8507199 nv4qwxc8=8508753
+        #   (i0ayskft W&B history was empty when first recorded 2026-07-06 and
+        #   used an .o-log fallback; the run synced later -- 4389 rows,
+        #   steps 16601->20988 -- so the fallback was dropped 2026-07-24.)
         "wandb_run_ids": [
             "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
             "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
             "i0ayskft", "21grc6o7", "nv4qwxc8",
         ],
-        "olog_fallbacks": {
-            "i0ayskft": "/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/agpt-2b-n512-v2-failover-sync-cont.o8507196",
-        },
+        "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-512n",
         "cls": "live",
     },
@@ -214,8 +217,11 @@ TRAJECTORIES: list[dict] = [
         # g6ekeu4j=8505123(->~step500)
         # --- gap 500->3136 filled 2026-07-06: ---
         # kk4h0i7m=8505255(301-1125, in torchtitan.ezpz.train)
-        # dpiog1q7=8558548(1101-2109) auy8wohg=8558549(2101->3136)
-        #   [both in ezpz.examples.test -> .o-log fallbacks]
+        # 17sfemjj=8558548(1101-2107) rugscgjs=8558549(2101->3135)
+        #   run-ids CORRECTED 2026-07-24: the .o-log-noted dpiog1q7/auy8wohg
+        #   were the ezpz.examples.test PREFLIGHT-SMOKE run-ids (reinit-swallow,
+        #   see the 2b_v2_256 note); the real training runs are in
+        #   torchtitan.ezpz.train under 17sfemjj/rugscgjs (no fallback needed).
         # --- 2026-07 continuations, added 2026-07-24: ---
         # 6yr6ivh4=8647385(3101->3603) uvgmafv9=8661054(4201->4375)
         # 5rvusq43=8681340(5101->5860+, live full-throughput resume)
@@ -223,13 +229,10 @@ TRAJECTORIES: list[dict] = [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
-            "kk4h0i7m", "dpiog1q7", "auy8wohg",
+            "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
         ],
-        "olog_fallbacks": {
-            "dpiog1q7": str(RUNS / "agpt-20b-n256/torchtitan-ezpz/agpt-20b-n256-v2.o8558548"),
-            "auy8wohg": str(RUNS / "agpt-20b-n256/torchtitan-ezpz/agpt-20b-n256-v2-cont1.o8558549"),
-        },
+        "olog_fallbacks": None,
         "eval_subdir": None,
         "cls": "live",
     },
