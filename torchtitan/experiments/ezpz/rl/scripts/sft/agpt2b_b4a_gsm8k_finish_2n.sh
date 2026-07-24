@@ -22,6 +22,11 @@ set -o pipefail
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# oneCCL settings from the PROVEN r1cot 2N SFT (aurora2b_gsm8k_r1cot_sft_2n.sh):
+# without these the 2N collective aborts with CCL_ERROR atl_mpi !req.is_completed
+# / SIGABRT (hit on job 12471668). pmix launcher + op-sync match the working run.
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
 export HF_DATASETS_OFFLINE=0   # gsm8k is small + may need download; proxy on
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
