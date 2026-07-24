@@ -55,7 +55,20 @@ step-86,200 in 32s. **No production chain is blocked.** The only cost of
 staying pinned is missing ~4 weeks of upstream (incl. the 80B optimizer
 findings, RoPE refactor, etc.) on the production training code.
 
-## Options to eventually return clones to current code (NOT yet done)
+## Options to eventually return clones to current code
+
+> **Update 2026-07-24:** option 2 is no longer just a hard idea -- a DCP
+> optimizer-state converter (old nested -> new flat, injecting the per-param
+> `fused`/`foreach` flags) has been BUILT and VERIFIED: the converted
+> step-39600 full-state-resumes on HEAD to loss ~2.66 (== the native ~2.74),
+> momentum preserved, and a full 4-link 2B-512 dress rehearsal passed
+> (convert -> load-on-HEAD -> HEAD saves new-format -> HEAD re-resumes its own
+> save). So the migration mechanism exists. **The production clones are still
+> pinned** (no chain migrated yet); option 1 remains the operational default
+> until we choose to migrate a chain via convert-latest-ckpt + resume-on-HEAD
+> (NEVER git-pull the pinned clones). See
+> [prod_dash / converter notes] and the session journal.
+
 
 1. **Stay pinned (current).** Zero risk; clones keep resuming. Revisit only
    if a current-HEAD feature is needed in production training. Cheapest.

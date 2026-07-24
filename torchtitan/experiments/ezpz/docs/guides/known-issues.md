@@ -31,7 +31,7 @@ fine again.
 ```bash
 qsub -l select=522 \
     -v NHOSTS_TRAIN=512,FAILOVER_MAX_RETRIES=2,CHECKPOINT_ASYNC_MODE=disabled \
-    scripts/submit_agpt_20b_aurora_venv_failover.sh
+    scripts/submit_agpt_20b_autoretry.sh   # current path (native --auto-retry); *_aurora_venv_failover.sh is legacy
 ```
 
 Trade-off: sync saves *block* training. At 244 GB / 6,144 shards,

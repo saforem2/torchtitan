@@ -3,9 +3,10 @@
 **Status:** Resolved on upstream `main` as of commit
 [`d64eabcce`](https://github.com/pytorch/torchtitan/commit/d64eabcce)
 ([PR #3159](https://github.com/pytorch/torchtitan/pull/3159), merged
-2026-05-18). Our local ezpz workaround was removed in commit `TBD`
-once the fix had been in our `ezpz` branch via upstream sync long
-enough to be smoke-validated.
+2026-05-18). Our local ezpz workaround is STILL IN PLACE as of 2026-07-24
+(`trainer.py` + `validator.py` still pass `dp_world_size` to the loss reducer)
+-- it is harmless once the upstream fix (PR #3159) is present, and no current
+production run uses TP>1, so removal has not been prioritized.
 
 **Affected window:** All torchtitan runs with `tensor_parallel_degree > 1`
 between upstream commits `1786292d` (2026-04-27) and `d64eabcce`

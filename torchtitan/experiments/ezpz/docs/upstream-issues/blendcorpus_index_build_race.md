@@ -1,5 +1,13 @@
 # blendcorpus per-corpus index build/load race at small dataset sizes
 
+> **SUPERSEDED (2026-07-01):** the one-line `torch.distributed.barrier()` fix
+> proposed below was TRIED (commit c7eb628e) and REVERTED (74b09fd) -- the
+> data-dependent per-corpus barrier count caused a oneCCL participation hang.
+> The fix that actually LANDED is atomic-write + poll
+> (`saforem2/blendcorpus@041d015f`, + a TOCTOU follow-up `@1f7e9c0`). See
+> [blendcorpus-atomic-rename-index-fix.md](./blendcorpus-atomic-rename-index-fix.md).
+> The analysis below is kept as the original diagnosis.
+
 ## TL;DR
 
 `deps/blendcorpus/blendcorpus/data/gpt_dataset.py:_build_index_mappings`

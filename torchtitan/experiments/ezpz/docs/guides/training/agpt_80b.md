@@ -154,7 +154,11 @@ don't burn 256N walltime chasing a stack issue.
 ## Submitting at scale via PBS
 
 The production submit script is
-[`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_80b_aurora_venv_failover.sh).
+[`scripts/submit_agpt_80b_autoretry.sh`](../../../scripts/submit_agpt_80b_autoretry.sh)
+(native `ezpz launch --auto-retry`, the current production path; sets the
+TP=4/LBS=1/AdamW corner + a `dp_degree>186` NaN warning + `--nan-abort-consecutive`).
+The legacy bash-failover wrapper `scripts/submit_agpt_80b_aurora_venv_failover.sh`
+is retained only for reproducing earlier runs.
 It wraps the interactive launcher with the bad-node failover wrapper
 (`failover_lib.sh`): if a node dies mid-init or mid-step, the wrapper
 swaps in a spare from the over-allocated set and retries.

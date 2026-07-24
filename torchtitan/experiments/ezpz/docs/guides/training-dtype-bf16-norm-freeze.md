@@ -12,7 +12,7 @@
 
 When `training.dtype = "bfloat16"` (the default in
 `agpt/config_registry.py` and `moe/config_registry.py` until commit
-`<TBD>`), the master parameter copy is bf16 (no fp32 master). For
+`a52adf709`, 2026-04-30, which flipped the default to `float32`), the master parameter copy is bf16 (no fp32 master). For
 `RMSNorm.weight` initialized to `1.0`, the bf16 ULP at scale 1.0 is
 `2^-7 ≈ 7.8e-3`, but the per-step optimizer update for those
 parameters is much smaller (`lr * exp_avg / sqrt(hessian) ≈ 1.6e-5`
