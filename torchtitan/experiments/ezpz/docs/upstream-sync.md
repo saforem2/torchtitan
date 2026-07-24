@@ -673,7 +673,7 @@ Merged clean (no conflicts) as `2c0daba85`. No replays needed.
 
 | Commit | Title | ezpz impact |
 |---|---|---|
-| `395833a46` | `Make generator actor aware of DP rank layout (#3743)` | None -- touches only `experiments/rl/actors/generator.py` + `rl/tests/test_engine_loop.py`. Fixes a v2-runner DP collective-mismatch hang (DP0 returns early when `total_num_scheduled_tokens == 0`, colliding with DP1's collective). ezpz/rl has its own GRPO loop and does not fork upstream `rl/actors/generator.py`, so nothing to replay. Relevant background for the Monarch port (`docs/rl/history/2026-06-14_monarch-torch213-deep-dive.md`) if/when we wire the upstream generator. |
+| `395833a46` | `Make generator actor aware of DP rank layout (#3743)` | None -- touches only `experiments/rl/actors/generator.py` + `rl/tests/test_engine_loop.py`. Fixes a v2-runner DP collective-mismatch hang (DP0 returns early when `total_num_scheduled_tokens == 0`, colliding with DP1's collective). ezpz/rl has its own GRPO loop and does not fork upstream `rl/actors/generator.py`, so nothing to replay. Relevant background for the Monarch port (`docs/production/rl/history/2026-06-14_monarch-torch213-deep-dive.md`) if/when we wire the upstream generator. |
 
 ### Verification
 

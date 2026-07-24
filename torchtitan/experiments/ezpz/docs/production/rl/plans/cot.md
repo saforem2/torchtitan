@@ -503,3 +503,23 @@ The 200-problem metric is the one to trust.
    group_size (8-16) for denser gradient on the thin correct-rollout signal, AND
    drop the easy curriculum's max_steps filter once the base is stronger.
 3. Accept RL as a format-perfecter + move accuracy work upstream to SFT.
+
+## 2026-07-24 -- B4 both paths FAILED; two-stage structure is the accuracy lever
+
+After B3 regressed (0.05, long-CoT dilution), B4 tried two fixes in parallel. Neither
+recovered B2's 0.205:
+- B4a (short gsm8k-r1cot FINISH on the B3 base): 0.02 acc, format collapsed to 0.26,
+  gen_len ballooned to ~1400 -- a finish CANNOT un-teach the verbose R1 style baked
+  into B3; it destabilizes the envelope. REFUTED.
+- B4b (fresh single SFT from gs138650, gsm8k-r1cot 0.40 + length-filtered OpenR1
+  @4096): 0.065 acc, format 0.86, gen_len 611, unclosed 27. Fixed the run-on SYMPTOM
+  but not accuracy -- landed at ~B3 level.
+
+CONCLUSION: the lever is STRUCTURE, not mix. B2's specific two-stage lineage
+(tulu-math SFT -> gsm8k-r1cot SFT = 0.205) beats every single-stage-from-gs138650
+recipe (B3 0.05, B4b 0.065) regardless of weights/filtering/seq-len. Across the full
+effort (RL flat 0.205->0.215, B3 0.05, B4a 0.02, B4b 0.065) NOTHING beat B2's 0.205.
+~0.2 is near the 2B GSM8K-CoT ceiling for this base. Keep B2 (checkpoint-93) as the
+deliverable; the next real lever is a bigger/math-pretrained base or extending WITHIN
+B2's two-stage recipe -- NOT more single-stage SFT mix-tuning. Full table +
+per-checkpoint metrics: docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md
