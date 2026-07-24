@@ -242,7 +242,17 @@ this in mind for:
 
 ## Known issues
 
-### 256N NaN at step 2 (open, 2026-06-09)
+### 80B NaN at scale (ROOT-CAUSED 2026-07-14, task #21)
+
+> The NaN below was long framed as "open hypotheses"; it is now root-caused as
+> an **optimizer-independent bf16 forward-activation overflow** in the deep
+> (dim=9216 x 84L) residual stream -- SophiaG (512N) and mano (62N) NaN
+> identically. fp32-residual prototype trains clean at 4N but still NaNs at
+> dp=192 (necessary-but-insufficient); no live 80B, work dormant. Full analysis:
+> [production/agpt/80b/README.md](../../production/agpt/80b/README.md). The
+> original hypotheses are kept below as the historical investigation trail.
+
+### 256N NaN at step 2 (historical hypotheses, 2026-06-09)
 
 [8530891](../../production/agpt/80b/n4/README.md) (256N, LR=1e-6,
 GBS=1536, same config as the validated 4N smoke) trained step 1 cleanly

@@ -1,6 +1,6 @@
 # 80B fp32-residual fix — root-cause + prototype
 
-> Last updated: 2026-07-14
+> Last updated: 2026-07-24
 
 ## Root cause (task #21)
 
@@ -134,10 +134,18 @@ capture resolves; it is now clearly warranted (task #29, wiring committed
 36892d672). Run: single bf16 run at 32N/TP=2 (dp=192, NaNs ~step 6), scan
 rank_0_activations.log for the first non-finite Max -> names the op.
 
-### Next (needs a GPU allocation)
-1. Smoke `agpt_80b_fp32res` at small N (e.g. 4-8N) — confirm it trains NaN-free
-   and the loss curve matches the fp32-acts reference (job 8537349).
-2. Scale to dp>186 (the NaN regime) — the real test: does per-block fp32
-   accumulation clear the wall that killed SophiaG@512N and mano@62N?
-3. Measure throughput vs. `mixed-precision-param=float32` — the fp32-residual fix
-   is only worth it if the bf16 GEMMs give materially better TPS.
+### Outcome (RESOLVED -- work now dormant)
+The wall tests above were run (tasks #25-#29):
+1. 4N smoke (job 8671046) -- trains NaN-free, loss matches the fp32-acts
+   reference. PASS.
+2. dp=192 wall test (per-block fp32 residual, job 8671243) -- **STILL NaN'd at
+   step 19**; full-depth fp32 residual (job 8673658) also NaN'd at dp=192. So
+   per-block fp32 accumulation is **necessary but insufficient** -- the true
+   overflow site is elsewhere (attention scores / another activation), needing
+   per-op numerics capture (task #29 wiring committed) to localize.
+3. Not reached (fix not yet working, so TPS comparison moot).
+
+**Status: dormant.** There is no live 80B production; the fp32-residual
+prototype does not yet clear the dp>186 wall, and the effort is paused pending
+a decision to invest in per-op instrumentation. See
+[production/agpt/80b/README.md](../../../production/agpt/80b/README.md) Wall 1.
