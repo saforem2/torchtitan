@@ -37,14 +37,50 @@ from torchtitan.config import (
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
+import os
+
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.compile import apply_compile
+from torchtitan.distributed.compile import (
+    _maybe_regional_inductor_backend,
+    apply_compile,
+)
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.tools.logging import logger
+
+
+# [ezpz] max-autotune (and other torch.compile modes) on XPU.
+# The shared torchtitan apply_compile (distributed/compile.py) calls
+# transformer_block.compile(backend=, fullgraph=True) with NO mode=, and its
+# CompileConfig has no `mode` field. torch.compile mode="max-autotune" IS
+# functional on Sunspot XPU (Triton GEMM autotune runs + selects triton_mm_*
+# kernels), so this ezpz-scoped override threads a mode through WITHOUT editing
+# core. Opt in via env: AGPT_COMPILE_MODE=max-autotune (or reduce-overhead, etc).
+# Unset / "default" -> None -> byte-identical to the core apply_compile path.
+# Reuses the core _maybe_regional_inductor_backend so FlexAttention handling is
+# unchanged (its own inductor_configs still set max_autotune=False for the
+# backward, which OOMs on XPU -- that is per-kernel and independent of this).
+def _apply_compile_with_mode(model, compile_config) -> None:
+    mode = os.environ.get("AGPT_COMPILE_MODE", "").strip() or None
+    if mode in (None, "default"):
+        apply_compile(model, compile_config)
+        return
+    # Mirror apply_compile's dynamo flags + backend resolution, adding mode=.
+    torch._dynamo.config.capture_scalar_outputs = True
+    torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
+    backend = _maybe_regional_inductor_backend(model, compile_config.backend)
+    for _layer_id, transformer_block in model.layers.named_children():
+        transformer_block.compile(backend=backend, mode=mode, fullgraph=True)
+    logger.info(
+        "Compiling each TransformerBlock with torch.compile "
+        "(backend=%s, mode=%s) [ezpz AGPT_COMPILE_MODE]",
+        compile_config.backend,
+        mode,
+    )
+
 
 
 def parallelize_llama(
@@ -100,7 +136,7 @@ def parallelize_llama(
         ac_config.build(dump_folder=dump_folder).apply(model)
 
     if model_compile_enabled:
-        apply_compile(model, compile_config)
+        _apply_compile_with_mode(model, compile_config)
         # apply_compile unconditionally sets capture_scalar_outputs=True
         # (needed for MoE dynamic shapes). For dense models this breaks
         # the separately-compiled loss_fn when loss_parallel + ignore_index
