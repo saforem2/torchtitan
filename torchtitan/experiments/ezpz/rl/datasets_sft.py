@@ -465,6 +465,12 @@ _OPENR1_SUFFIX = (
     "answer inside <answer>\\boxed{}</answer>."
 )
 
+# Max <think> trace length (chars) kept from OpenR1. The B3 regression traced to
+# long-form R1 run-on traces (mean gen_len 601, 26/200 never closed </answer>)
+# that taught a verbose style diluting a 2B's short-arithmetic competence. Drop
+# traces above this so only short, useful reasoning is trained. Env-tunable.
+OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "1200"))
+
 
 def _openr1_format_row(ex):
     """Pick a verified-correct generation, extract its <think> trace + boxed
@@ -493,6 +499,8 @@ def _openr1_format_row(ex):
         if not tm:
             continue
         trace = tm.group(1).strip()
+        if len(trace) > OPENR1_MAX_THINK_CHARS:
+            continue  # run-on trace: skip this generation (may fall through to None)
         # boxed answer: prefer the LAST \boxed{} anywhere in the generation
         boxes = _OPENR1_BOXED_RE.findall(gen)
         if not boxes:
