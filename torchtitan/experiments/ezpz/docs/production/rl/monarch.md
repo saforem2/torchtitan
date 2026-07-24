@@ -20,7 +20,7 @@ reward_mean ~0.16   nonzero ~53%   max 1.0
 
 (job 12471049; matches the fork-based v5 baseline, so the vendored path has the
 same learning dynamics.) A 100-step easy-task run shows a rising reward curve
-(0.167 -> ~0.26); see [Reward study](#reward-study).
+(0.167 -> ~0.26); see [Reward study](#reward-study-task-difficulty-is-the-lever-not-lr).
 
 **Design guarantee:** the entire XPU enablement is a THIN overlay under
 `experiments/ezpz/` -- **zero edits to `experiments/rl/` (upstream) or
