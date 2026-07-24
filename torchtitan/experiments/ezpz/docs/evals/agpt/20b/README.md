@@ -54,6 +54,11 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 
 ## 🏁 Headline finding (2026-06-10)
 
+> **Current (2026-07-24):** 20B-512 is now at step-6,050 (loss ~2.44) and
+> 20B-256 is LIVE at ~step-5,900; both have the modern eval suite (mmlu 5-shot
+> / gsm8k 5-shot / arc_challenge 25-shot) backfilled. The step-4,400-vs-69,900
+> comparison below is the dated 2026-06-10 finding, kept as the record.
+
 **20B 512N sync at step-4,400 beats 2B 256N async at step-69,900 on
 every benchmark per token** — the bigger model continues to outperform
 the smaller one at vastly fewer tokens (442B vs 3.52T, ~8× more
@@ -169,9 +174,8 @@ resume), 8535041 (single step-2400), 8535121 (step-4200 + step-4300).
 | **v2 512N sync** | **5,400** | **543.6** | **0.6103** | **0.6671** | **0.3490** | **0.5706** | **0.7699** | **0.3640** | **0.6104** |
 | **v2 512N sync** | **6,000** | **604.0** | **0.6086** | **0.6481** | **0.3635** | **0.5825** | **0.7563** | **0.3640** | **0.5807** |
 
-**Note on persisted step-4,500** (2026-06-10): the chain advanced
-+100 steps via 8521628 but the next ckpt is still pending HF
-conversion + eval. Will populate in the next refresh.
+**Note (resolved):** the step-4,500 note here is obsolete -- the 20B-512 chain
+has since advanced to step-6,050, evaluated through step-6,010.
 
 ### Δ vs v1 ceiling
 
