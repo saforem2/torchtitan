@@ -481,19 +481,36 @@ def next_jobs(chains):
             out[base] = j["id"]
     return out
 
+# Sibling production clones some chains launch from -- their .o logs live in the
+# clone, NOT the main REPO, so live_layer must search them too or clone-run jobs
+# (e.g. 20b-256 from agpt-20b-n256, 20b-512 resume from agpt-20b-v2) show idle
+# despite running. Discovered from each canonical trajectory's ckpt_dir root.
+_RUNS = "/flare/AuroraGPT/foremans/runs"
+_CLONE_DIRS = [
+    _RUNS + "/agpt-2b-v2/torchtitan-ezpz",
+    _RUNS + "/agpt-20b-v2/torchtitan-ezpz",
+    _RUNS + "/agpt-20b-n256/torchtitan-ezpz",
+    _RUNS + "/agpt-2b-constlr-from9200/torchtitan-ezpz",
+]
+
 def live_layer():
     """Per running job: resolve its ckpt dir + freshest (step, loss). Only the
     handful of logs belonging to CURRENT qstat jobs are read (cheap), unlike the
-    full-repo head scan in build_backbone."""
+    full-repo head scan in build_backbone. Searches the main REPO AND the
+    sibling production clones (chains launched from a clone leave their .o log
+    there, not in REPO)."""
     jobs = qstat_jobs()
     live = {}  # ckpt_base -> {state, jobid, step, loss, tps, mfu, age}
     states = {}  # ckpt_base -> worst-known state (R>Q>H)
     rank = {"R": 3, "Q": 2, "H": 1, "E": 0}
+    search_roots = [REPO] + _CLONE_DIRS
     for j in jobs:
-        cand = glob.glob(os.path.join(REPO, "*.o" + j["id"]))
-        cand += glob.glob(os.path.join(REPO, "logs", "*" + j["id"], "run.log"))
-        cand += glob.glob(os.path.join(
-            REPO, "torchtitan/experiments/ezpz/scripts/oneoff/*.o" + j["id"]))
+        cand = []
+        for root in search_roots:
+            cand += glob.glob(os.path.join(root, "*.o" + j["id"]))
+            cand += glob.glob(os.path.join(root, "logs", "*" + j["id"], "run.log"))
+            cand += glob.glob(os.path.join(
+                root, "torchtitan/experiments/ezpz/scripts/oneoff/*.o" + j["id"]))
         base = None
         for p in cand:
             try:
