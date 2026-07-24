@@ -4,35 +4,28 @@
 >
 > **This is the canonical 2B production chain.**
 >
-> **Status:** chain pinned at step **30,500** since **2026-05-30 07:53**
-> — **stalled ~10 days** waiting on the Aurora `small` queue. The
-> stall is *not* a training-stack failure; the chain is healthy and
-> simply has not held a 512N slot for sustained training since the
-> last R cleared. The one brief R event in the stall window was
-> `8521627` (cont9), which ran for **~8 minutes** on **2026-06-07
-> 21:12 → 21:20** and died in yeet-env before training started:
-> 1 of 522 nodes (`x4112c1s7b0n0`) failed `rsync` with
-> `Connection reset by 10.112.164.235 port 22` after the 120s
-> per-node timeout. The other 521 nodes copied the venv tarball
-> cleanly in ~20s each. No checkpoints were written past
-> step-30,500. Loss **2.71**, tokens **3.07T (65.7% of 4.67T
-> target)**. Sync-mode workaround for the async-cascade continues
-> to hold; the async-mode runs (`8505176` and earlier) had been pinned
-> at step-13,300 for two weeks before the sync-mode pivot.
+> **Status:** chain at step **39,600** (~**3.99T** tokens,
+> **85.3%** of the 4.67T target), loss **2.71**. The chain is
+> advancing again -- it cleared the old step-30,400/30,500 `small`-
+> queue stall through the autoretry continuation chain, plus a
+> HEAD-migration dress rehearsal (`8686135` -> `8686136`) that
+> exercised resuming the on-disk checkpoint frontier on current
+> `HEAD` before handing back to the production venv. The ~10-day
+> gap around 2026-05-30 was queue saturation on Aurora `small`,
+> not a model, venv, or failover-wrapper fault. Sync mode remains
+> the operational workaround for the async-save cascade; the
+> async-mode runs (`8505176` and earlier) had been pinned at
+> step-13,300 for two weeks before the sync-mode pivot.
 >
-> **Next up:** `8521631` (cont10) Q in `small`; will resume from
-> step-30,500 once a 512N slot opens.
->
-> **Mitigation for the yeet-env transient:** ezpz
-> [PR #160](https://github.com/saforem2/ezpz/pull/160)
-> (`yeet-retry-on-rsync-failure`) adds per-target rsync retries
-> gated by `EZPZ_YEET_RSYNC_RETRIES` (default 2). Not yet deployed
-> to the v2 production venv pending PR review — a single bad-node
-> rsync timeout currently kills the whole job.
+> **Next up:** the autoretry continuation chain keeps advancing the
+> chain toward the 46,429-step / 4.67T target as `small`-queue
+> slots open. Aurora `small` stays heavily oversubscribed (prod
+> jobs can wait days between sustained dispatches).
 >
 > **Eval scores:** see [`docs/evals/agpt/2b/`](../../../../evals/agpt/2b/README.md)
-> for the current v2 lm-eval results (last evaluated v2 512N
-> checkpoint is **step-30,000**).
+> for the current v2 lm-eval results, including the modern task
+> ladder (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot)
+> backfilled across the chain on 2026-07-24.
 
 ## v2 — 2B @ 512N — SophiaG LR=2.28e-5 (fp32 master)
 
@@ -116,16 +109,14 @@ training. Default is now 600s + `--train-iters 5`.
 
 ### Recent issues
 
-- **Aurora `small` queue stall (2026-05-30 → present).** Chain has
-  not held a 512N slot for sustained training in ~10 days. There
-  is nothing wrong with the model, the venv, or the failover
-  wrapper — the queue itself has been saturated. `8521631` (cont10)
-  is the next-up afterany continuation and will resume from
-  step-30,500 the moment a slot opens. Cross-chain note: the
-  separately-tracked **256N** 2B chain has its own pair of held
-  continuations (`8521626` / `8521630`) — they belong to that
-  trajectory, not this one. `8521632` (H in `small`) is part of
-  the **20B** chain, also unrelated to this page.
+- **Aurora `small` queue stall (2026-05-30 -> 2026-06-07), since
+  cleared.** The chain spent ~10 days without a sustained 512N
+  slot on the saturated `small` queue -- not a model, venv, or
+  failover-wrapper fault. It has since resumed via the autoretry
+  continuation chain and a HEAD-migration dress rehearsal
+  (`8686135` -> `8686136`), advancing the on-disk frontier to
+  step-39,600. Aurora `small` stays heavily oversubscribed, so
+  sustained 512N dispatches can still be days apart.
 - **yeet-env single-bad-node rsync transient (2026-06-07, job
   `8521627`).** One node out of 522 dropped its incoming rsync
   connection (`Connection reset by 10.112.164.235 port 22`) and

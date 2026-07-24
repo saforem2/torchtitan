@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-07-01
+> Last updated: 2026-07-24
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -19,36 +19,33 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
 
-## Headline (2026-07-01)
+## Headline (2026-07-24)
 
-- **🏁 2B 256N async chain COMPLETE — step 92,859 = 4.674T tokens
-  (100.0%** of target). cont12 [8558531](2b/n256/README.md) finished
-  clean exit-0 (~10.2h) 2026-06-29 03:03, final loss **2.652**. The full
-  v2 2B base pre-training run is done; cont13 [8558532](2b/n256/README.md)
-  Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the
-  final ckpt (blocked on PM maintenance).**
-- **80B launch attempted (2026-07-01) — 2048N crashed at init; 512N + 1024N
-  running.** SophiaG @ 1e-6, **constant-LR** (for CPT), validator on, at
-  **512N+1024N+2048N** ([8574385](80b/README.md)/8574386/8574387 + 3 conts).
-  All 6 queued through the 06-29 PM (no head ran pre-PM); post-PM the **2048N
-  head (8574387) started first** (~15:00 UTC, 5th attempt after 4 exec-server
-  rejects) but **SIGSEGV'd in `set_determinism`** at 24,864 ranks (`F`, rc=143)
-  — the documented init-crash class, now confirmed for 80B at 2048N. 2048N cont
-  `qhold`'d. **512N (proven) + 1024N (untested 80B data point) are live** and
-  will bracket where the 80B init ceiling sits. Also: auto-retry misclassified
-  the SIGSEGV (rc=143) as walltime and skipped its retries. The old AdamW
-  step-2 NaN was a production-batch LR problem (LR-finder: AdamW NaN-cliff at
-  GBS=6144; mano ~3e-6 / sophiag ~1e-6 train clean). **TEAM DECISION OPEN:
-  SophiaG vs mano** for the base. Plan + launch log:
-  [80B SophiaG launch](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
-- **20B 256N** advanced to step **2,100** (105.7B, 2.3%, loss 2.85,
-  ~21.8% MFU); clean exit at the PM boundary, cont1
-  [8558549](20b/n256/README.md) Q to resume post-maintenance.
-- **2B 512N sync chain** still stalled at step **30,400** (loss 2.71,
-  ~3.06T, 65.5%) — no advance since 2026-05-30; cont10 [8521631](2b/n512/README.md) Q.
-- **20B 512N sync chain** at step **4,400** (loss 2.51, ~442.9B, 9.5%) —
-  the step-4,500 dir is a mid-save placeholder (no `.metadata`), so the
-  last finalized ckpt is step-4,400; cont [8521632](20b/n512/README.md) Q.
+- **2B 256N async chain COMPLETE -- step 92,859 = 4.674T tokens (100.0%**
+  of target), final loss **2.652**. The full v2 2B base pre-training run is
+  done. Modern eval suite (mmlu 5-shot ~8 steps + gsm8k 5-shot) backfilled
+  across the chain 2026-07-24. [8558531](2b/n256/README.md).
+- **2B 512N sync chain at step 39,600** (loss **~2.71**, ~3.99T tokens,
+  85.3%). No longer stalled: the chain advanced well past the old
+  30,400/30,500 pin on the native-autoretry umbrella and cleared a
+  HEAD-migration dress rehearsal (8686135 -> 8686136). Modern-eval backfill
+  landed mmlu (~10 steps) + gsm8k here. cont [8521631](2b/n512/README.md).
+- **20B 512N sync chain at step 6,050** (loss **~2.44**, ~609B tokens,
+  13.0%). Advanced from the old step-4,400 finalized ckpt; full modern-eval
+  ladder (mmlu / gsm8k / arc_challenge) backfilled 2026-07-24. cont
+  [8521632](20b/n512/README.md).
+- **20B 256N chain LIVE** -- job [8681340](20b/n256/README.md) running
+  (agpt-20b-n256 clone), ~step 5,900, loss **~2.51**, modern-eval ladder
+  backfilled. This is a live chain, not the old one-shot that ended at
+  step 1,125.
+- **80B: no live production, blocked by two walls.** (1) A bf16
+  forward-activation overflow at scale, root-caused 2026-07-14 and shown to
+  be **optimizer-independent** -- not a SophiaG Hessian bug: SophiaG @ 512N
+  and mano @ 62N NaN identically. An fp32-residual-stream prototype trains
+  clean at 4N but STILL NaNs at dp=192 (necessary but not sufficient), so
+  that work is dormant. (2) A separate, still-open 256N init segfault. There
+  is no pending "SophiaG vs mano" team decision -- the optimizer is not the
+  cause. See [80b/](80b/README.md).
 
 ## Headline (2026-06-10)
 
@@ -223,12 +220,12 @@ diagnosis: [`guides/training-dtype-bf16-norm-freeze.md`](../../guides/training-d
 ![20B v2 512N Tokens vs Time](20b/n512/figures/tokens_vs_time_20b_v2_512n.svg)
 
 <details>
-<summary><strong>2B 256N v2 (active async chain at step 49,900+) — click to expand</strong></summary>
+<summary><strong>2B 256N v2 (async chain COMPLETE at step 92,859) — click to expand</strong></summary>
 
 Separate ckpt trajectory at 256 nodes (`gbs6144`, independent from
-the canonical 512N `gbs12288` chain). Now the **per-token comparator** for
-the 20B 512N sync chain. Running async-mode at step **49,900+, loss 2.68,
-~2.50T tokens (53.5% of target)**. Eval plateau: ARC-Easy ~0.645,
+the canonical 512N `gbs12288` chain). Was the **per-token comparator** for the 20B 512N sync chain; that chain is
+now COMPLETE at step **92,859, loss 2.652, ~4.674T tokens (100.0% of
+target)**. Eval plateau: ARC-Easy ~0.645,
 HellaSwag acc_norm ~0.547 — now beaten by 20B 512N sync on every benchmark
 per token.
 
@@ -237,14 +234,15 @@ per token.
 </details>
 
 <details>
-<summary><strong>20B 256N v2 (one-shot, ended at step 1,125) — click to expand</strong></summary>
+<summary><strong>20B 256N v2 (live chain, ~step 5,900) — click to expand</strong></summary>
 
 Separate ckpt trajectory at 256 nodes (`gbs6144`, independent from
 the canonical 512N `gbs12288` chain). History: 8463659 (NODE_FAIL after
 step 364), 8470102 + 8470103 (gloo TCP timeouts ~3h), 8479581 + 8479582,
-and most recently **8505255** which ran out the 12h walltime ending
-2026-05-26 20:35 at step **1,125**. **No chain continuation queued** —
-256N is the per-token comparator; the canonical 20B chain is 512N.
+and 8505255 (ran out the 12h walltime ending 2026-05-26 20:35 at step
+**1,125**). The 256N chain is now LIVE again: job [8681340](20b/n256/README.md)
+is running (agpt-20b-n256 clone) at ~step 5,900, loss ~2.51, with a
+modern-eval ladder (mmlu / gsm8k / arc_challenge) backfilled 2026-07-24.
 
 ![20B v2 256N Diagnostics](20b/n256/figures/training_diagnostics_20b_v2_256n.svg)
 

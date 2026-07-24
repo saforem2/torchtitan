@@ -4,10 +4,14 @@
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status:** persisted at step **5,100** (~513.7B tokens, 11.0% of
-> 4.67T target), loss ~2.4. **Advanced 2026-07-03** via a native
-> `ezpz --auto-retry` relaunch (`8638793`, resumed step-4,400 ->
-> step-5,109; step-5,100 ckpt persisted). This ended the long stall:
+> **Status:** persisted at step **6,050** (~609.0B tokens, 13.0% of
+> 4.67T target), loss ~2.44. **Advanced 2026-07-03** onward via the
+> native `ezpz --auto-retry` relaunch (`8638793`, resumed step-4,400 ->
+> step-5,109) and its `afterany` continuation `8638795`, which carried
+> the head from step-5,100 through step-5,400 and on to the current
+> step-6,050 (ckpts persisted every 100). The progress table below is
+> detailed through step-5,400; the current persisted head is step-6,050
+> (see the Latest checkpoint line). This ended the long stall:
 > the chain had been stuck at step-4,400 since 2026-05-29 under
 > `small`-queue contention, and its legacy `failover_lib.sh`
 > continuations kept dying to bad-node blind-swap (see the

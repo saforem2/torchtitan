@@ -41,9 +41,10 @@
 > 2B/20B 512N pages. Loss flat ~2.66-2.67 (eval plateau in HSn
 > 0.554-0.558; **step-69900 Winogrande 0.5627 is best yet**, see
 > [`docs/evals/agpt/2b/`](../../../../evals/agpt/2b/README.md) row
-> for step 69,900). Continuation chain stays **+2 deep**: `8521626`
-> (cont9, `afterany:8519833`) is Q for the next 256N slot since
-> 2026-06-03 07:20, with `8521630` H'd behind it.
+> for step 69,900). Continuation chain since drained: cont9 (`8521626`) and cont10
+> (`8521630`) both landed and carried the run through step-80,400;
+> cont12 (`8558531`) then reached the 92,859-step target (clean exit
+> 0 on 2026-06-29).
 >
 > Earlier runs: 8459818 (initial, NODE_FAIL @ 2070), 8470100 / 8470101
 > (chain1/chain2 walltime to step ~10,723). Loss tracking the
@@ -102,7 +103,6 @@
 | **`8572612`** | 2026-06-28 | 2h (sneak) | 86,200 → **86,674** | ~3,400 | ~13% | Done (**clean walltime exit -29 at 07:03**). 2h short-walltime "sneak" (256N, sync, `CKPT_INTERVAL=25`) on the rolled-back pre-fused clone — first run after the fused-optimizer ckpt-resume incident (see [2026-06-26 experiment](../../../../experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md)). Resumed step-86,200 **clean** (no Missing-key), loss **2.65**, grad_norm ~0.13. **+19 ckpts persisted** (step-86,225..step-86,674, every 25 steps). No NaN, no NODE_FAIL. Not a chain continuation — opportunistic advance; cont12/8558531 will resume from step-86,674. |
 | `8558531` | 2026-06-28 → 2026-06-29 | ~10.2h | 86,674 → **92,859** | ~3,400 | ~13% | **Done — TARGET REACHED.** `afterany` cont12, resumed step-86,674 clean. Ran ~10.2h, **clean exit 0** at 03:03 on 2026-06-29, final ckpt **step-92,859 = 4.674T tokens (100.0%** of the 4.67T target). Loss ~2.64. This completes the v2 2B 256N base pre-training run. |
 | `8558532` | — | 12h | (cont13) | — | — | **Queued** behind 8558531, but <1 ckpt-interval (~90 steps) to target — effectively a no-op now that 8558531 reached 92,859. |
-| `8558532` | — | 12h | (cont13) | — | — | Held (`afterany:8558531`). |
 
 **Latest checkpoint:** step-92,859 (FINAL -- target reached; cont12/8558531 finished clean exit 0 on 2026-06-29, ~10.2h)
 
@@ -142,12 +142,15 @@ shifts the four-metric vector by <1pp in any direction now that we're
 
 ### Continuation chain
 
-- **Next up:** `8521626` (cont9, `afterany:8519833`) Q for next 256N
-  slot since 2026-06-03 07:20.
-- **Behind it:** `8521630` (cont10) H'd behind 8521626 — chain stays
-  **+2 deep** so a clean walltime exit on cont9 will immediately
-  release cont10 onto the next available 256N slot.
-- Submit script unchanged: `scripts/submit_agpt_2b_aurora_venv_failover.sh`
+- **Complete.** The chain reached the 92,859-step / 4.67T-token
+  target under cont12 (`8558531`, clean exit 0 on 2026-06-29). cont9
+  (`8521626`) and cont10 (`8521630`) landed and advanced the run
+  through step-80,400 along the way; see the Progress table above.
+  cont13 (`8558532`) remains held behind cont12 as a no-op backstop
+  (<1 ckpt-interval to target). No further base-run dispatches are
+  needed; additional tokens would be continued pre-training (CPT), not
+  the base run.
+- Submit script: `scripts/submit_agpt_2b_aurora_venv_failover.sh`
   with the same env (LBS=2, GBS=6144, SophiaG LR=2.28e-5, fp32 master,
   async ckpt mode, ckpt-interval=100, keep-latest-k=0).
 

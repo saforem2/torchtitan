@@ -1,8 +1,19 @@
 # Production Training — agpt 80B @ 512 nodes
 
-> **First v2 attempt, 2026-05-11.** Uses the `compile=OFF` working
-> path identified in the 4N smoke (job 12466025) on 2026-05-05, plus
-> the bad-node failover wrapper. Production clone is at
+> **DEAD STUB -- never produced a real run.** This v2 80B @ 512N plan
+> (drafted 2026-05-11 on the `compile=OFF` path from the 4N smoke, job
+> 12466025, 2026-05-05) never got past the queue: every job listed
+> below is dead (see Progress and Logs). 80B has NO live production and
+> is blocked at scale by TWO walls, both open as of 2026-07-24:
+>
+> 1. **bf16 forward-activation overflow at scale** (root-caused
+>    2026-07-14). It is OPTIMIZER-INDEPENDENT -- NOT a SophiaG Hessian
+>    bug: SophiaG @ 512N and mano @ 62N NaN identically. An
+>    fp32-residual prototype trains clean at 4N but STILL NaNs at
+>    dp=192 (necessary-but-insufficient); that work is DORMANT.
+> 2. **256N init segfault** (separate, still open).
+>
+> Production clone is at
 > `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/`.
 
 ## v2 — 80B @ 512N — AdamW LR=1e-6 (fp32 master, compile=OFF, TP=2)
@@ -20,7 +31,7 @@
 | Clone | `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/` |
 | Submit script | [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) (failover wrapper, requests N+spare nodes) |
 | Stack | torch 2.13 venv (yeet-env tarball mode, **shared with `agpt-2b-v2`** via symlinks) |
-| Optimizer | **AdamW**, LR=**1e-6** (SophiaG/Muon broken at dim=9216 — bf16 overflow in Hessian/Newton-Schulz) |
+| Optimizer | **AdamW**, LR=**1e-6** (the 80B NaN is an OPTIMIZER-INDEPENDENT bf16 forward-activation overflow at scale, NOT a SophiaG Hessian / Newton-Schulz bug -- see banner) |
 | Compile | **off** (compile + AC + TP=2 crashes on torch 2.13 with `tensors_saved_with_vc_check` AOT autograd assertion) |
 | Activation checkpoint | full (required to fit in tile memory at 80B) |
 | Parallelism | TP=2, FSDP=3072 (DPS=-1 derives, DPR=1) |
@@ -33,8 +44,8 @@
 
 | Job ID | Date | Walltime | Steps | Loss | TPS/GPU | MFU | Status |
 |--------|------|---------:|------:|-----:|--------:|----:|--------|
-| [`8480361`](#log-8480361) | 2026-05-11 | 12h | — | — | — | — | **Queued** (first v2 80B attempt; failover wrapper, 522 nodes) |
-| [`8480362`](#log-8480362) | 2026-05-11 | 12h | (cont.) | — | — | — | Held (`afterany:8480361`) |
+| [`8480361`](#log-8480361) | 2026-05-11 | 12h | — | — | — | — | **Dead** -- never ran (was queued; never scheduled, blocked at scale -- see banner) |
+| [`8480362`](#log-8480362) | 2026-05-11 | 12h | (cont.) | — | — | — | **Dead** -- never ran (was held `afterany:8480361`) |
 
 ### Logs
 
@@ -44,7 +55,7 @@
 | <a id="log-8481301"></a>`8481301` | `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/agpt-80b-failover.o8481301` (DOA — flag-spelling bug, fixed in `603eee961`) |
 | <a id="log-8481319"></a>`8481319` | `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/agpt-80b-failover.o8481319` (8 min, walltime — pre-`e216a2523` zombie-success wrapper) |
 | <a id="log-8485512"></a>`8485512` | `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/agpt-80b-n512-v2-failover-chain1.o8485512` (7 min, walltime — pre-fix wrapper) |
-| <a id="log-8503077"></a>`8503077` | queued — 2058N (2048 active + 10 spare) stress test of fully-fixed wrapper; log will land in `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/` |
+| <a id="log-8503077"></a>`8503077` | **dead** -- never ran (was queued; 2058N wrapper stress test, never scheduled) |
 
 ## Why no v1 here
 

@@ -17,12 +17,13 @@ GBS-different trajectories are directly comparable.
 
 ![All-production eval overlay](figures/all_production_evals.svg)
 
-**Headline (2026-05-27):** the 20B 512N sync chain (green) at
-~322B tokens is **already at the level the 2B chains reach around
+**Headline (2026-07-24):** the 20B 512N sync chain (green) at
+~609B tokens (step 6,050, loss ~2.44, 13.0% of the 4.67T target) is **already at the level the 2B chains reach around
 ~2T tokens** on HellaSwag norm and ARC-Easy. The 2B-MDS reference
 (blue, ~7.77T tokens, SophiaG continuation) sets the upper-bound
-ceiling for the 2B size class — both v2 2B chains (salmon-red 256N,
-dark red 512N) are still climbing toward that ceiling.
+ceiling for the 2B size class — the v2 256N 2B chain (salmon-red)
+has since reached its full 4.67T budget (step-92,859, loss ~2.65)
+and the 512N chain (dark red) is at ~3.99T (step-39,600, 85.3%).
 
 Regenerate with:
 
@@ -34,8 +35,8 @@ Regenerate with:
 
 | Model | Source | Steps Evaluated | Status |
 |-------|--------|-----------------|--------|
-| [agpt 2B](agpt/2b/) | torchtitan DCP (v1 + v2 256N async + v2 512N sync) | v2 256N step-36K–49.5K + v2 512N step-1K–25K | **🏁 Sync-mode workaround validated 2026-05-24** |
-| [agpt 20B](agpt/20b/) | torchtitan DCP (v1 + v2 512N sync + v2 256N) | v2 512N step-900–3,200 + v2 256N step-100–300 | **🏁 20B 512N sync now beats 2B 256N async per token on every benchmark (2026-05-27)** |
+| [agpt 2B](agpt/2b/) | torchtitan DCP (v1 + v2 256N async + v2 512N sync) | v2 256N through step-92,859 + v2 512N through step-39,600 | **🏁 Sync-mode workaround validated 2026-05-24** |
+| [agpt 20B](agpt/20b/) | torchtitan DCP (v1 + v2 512N sync + v2 256N) | v2 512N through step-6,050 + v2 256N through step-5,900 | **🏁 20B 512N sync now beats 2B 256N async per token on every benchmark (2026-05-27)** |
 | [agpt 2B (MDS)](agpt/2b-mds/) | Megatron-DeepSpeed SophiaG | steps 5K–140K (28 unique × 3 replicates) | Done — clean reference baseline |
 
 ## Pipelines

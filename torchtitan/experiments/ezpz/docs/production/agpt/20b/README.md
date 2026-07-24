@@ -1,6 +1,6 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-07-12
+> Last updated: 2026-07-24
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -19,14 +19,14 @@ torchtitan.experiments.ezpz.utils.plot_production_combined`.
 For the cross-model view (2B + 20B together) with per-token efficiency
 comparison, see [`../README.md`](../README.md).
 
-## 🏁 Headline (2026-06-09)
+## 🏁 Headline (2026-07-24)
 
 **20B 512N chain beats 2B 256N async on every benchmark per token.**
-Advanced to step **5,400** / ~543.6B tokens (11.6%) after the native
+Advanced to step **6,050** / ~609.0B tokens (13.0%) after the native
 auto-retry relaunch (8638793 + 8638795) broke the long sync-chain stall on
 2026-07-05..07 (was stuck at step-4,400 since 2026-05-29). The eval headline
-below is the step-100 → step-4,400 window (35+ ckpts; a re-eval of the
-4,400 → 5,400 tail is pending):
+below is the step-100 → step-4,400 window (35+ ckpts); the modern-eval
+ladder (mmlu/gsm8k/arc_challenge) was backfilled across the full chain on 2026-07-24:
 
 - ARC-Easy `acc` 0.463 → **0.664** (+20pp)
 - HellaSwag `acc_norm` 0.296 → **0.635** (+34pp)
@@ -58,9 +58,9 @@ cont (8521628) Q, cont (8521632) H.
 
 ## Per-trajectory detail
 
-- [n512/](n512/README.md) — **canonical v2 512N sync chain** (stalled
-  on queue + persistence-blocked retries)
-- [n256/](n256/README.md) — v2 256N (ended step 1,125; no continuation)
+- [n512/](n512/README.md) — **canonical v2 512N sync chain** (advancing;
+  step 6,050 via native auto-retry relaunch)
+- [n256/](n256/README.md) — v2 256N (live ~step 5,900; job 8681340, agpt-20b-n256 clone)
 - [n1024/](n1024/README.md) — v2 1024N (8463183 crashed at startup,
   std::bad_alloc / SIGSEGV — needs 768N/896N bracket before retry)
 

@@ -2,17 +2,18 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-07-01
+> Last updated: 2026-07-24
 >
-> **NOTE (2026-07-01):** the 2B 256N chain **COMPLETED** at step-92,859 =
-> 4.674T tokens (100%). The scores below run through **step-86,200**; the
-> tail backfill (step-86,500 -> 92,859 at 500-step cadence + the final
-> step-92,859 checkpoint, 14 ckpts) was **submitted post-PM as job
-> 8638581** (`capacity` queue, single node, TP=1; script
-> [`scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh`](../../../scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh)).
-> This page + `figures/eval_overview.svg` need a refresh once it lands.
-> (20B is already caught up to its last valid ckpt step-4,400; step-4,500
-> is an empty/aborted save, nothing to eval.)
+> **NOTE (2026-07-24):** the 2B 256N chain is **DONE** at step-92,859 =
+> 4.674T tokens (100%), loss ~2.65. The scores below now run through the
+> final **step-92,859** -- the tail backfill (step-86,500 -> 92,859 at
+> 500-step cadence + the final step-92,859 checkpoint, 14 ckpts, job
+> 8638581, script
+> [`scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh`](../../../scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh))
+> has landed and is reflected in the canonical table below.
+> The modern eval suite (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot)
+> was backfilled 2026-07-24 across the 2B chains (2B 256N: mmlu ~8 steps +
+> gsm8k; 2B 512N: mmlu ~10 steps + gsm8k).
 >
 > **Training curves:** see [`docs/production/agpt/2b/`](../../../production/agpt/2b/README.md)
 > for loss / throughput / MFU dashboards across the live 2B trajectories
@@ -240,14 +241,14 @@ columns are marked `no DCP`.
 
 The MDS SophiaG 2B continuation (~7.77T tokens, blue in the
 figure) sets the upper-bound for the 2B size class on this benchmark
-set. Latest v2 256N points vs that ceiling:
+set. Final v2 256N points (step-92,859) vs that ceiling:
 
-| Task | MDS final | v2 256N step-52K | Δ |
+| Task | MDS final | v2 256N step-92,859 (final) | Δ |
 |------|----------:|------------------:|--:|
-| HellaSwag (acc_norm) | 0.592 | **0.5528** | -3.9pp |
-| ARC-Easy (acc_norm) | — | **0.5888** | (MDS chart uses acc) |
-| ARC-Challenge (acc_norm) | ~0.37 | **0.3106** | -5.9pp |
-| Winogrande (acc) | ~0.58 | **0.5620** | -1.8pp |
+| HellaSwag (acc_norm) | 0.592 | **0.5610** | -3.1pp |
+| ARC-Easy (acc_norm) | — | **0.6511** | (MDS chart uses acc) |
+| ARC-Challenge (acc_norm) | ~0.37 | **0.3362** | -3.4pp |
+| Winogrande (acc) | ~0.58 | **0.5430** | -3.7pp |
 
 ARC-Challenge and Winogrande are the slowest to lift — both have
 higher random baselines (Winogrande's is 50%) and need more
