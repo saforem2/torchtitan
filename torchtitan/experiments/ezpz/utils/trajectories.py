@@ -216,11 +216,15 @@ TRAJECTORIES: list[dict] = [
         # kk4h0i7m=8505255(301-1125, in torchtitan.ezpz.train)
         # dpiog1q7=8558548(1101-2109) auy8wohg=8558549(2101->3136)
         #   [both in ezpz.examples.test -> .o-log fallbacks]
+        # --- 2026-07 continuations, added 2026-07-24: ---
+        # 6yr6ivh4=8647385(3101->3603) uvgmafv9=8661054(4201->4375)
+        # 5rvusq43=8681340(5101->5860+, live full-throughput resume)
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
             "kk4h0i7m", "dpiog1q7", "auy8wohg",
+            "6yr6ivh4", "uvgmafv9", "5rvusq43",
         ],
         "olog_fallbacks": {
             "dpiog1q7": str(RUNS / "agpt-20b-n256/torchtitan-ezpz/agpt-20b-n256-v2.o8558548"),
