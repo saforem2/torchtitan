@@ -22,7 +22,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-24 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-07-24 | [B4 Cold-Start SFT Fix (finishing-stage + reweighted-mix) Implementation Plan](./production/sft/agpt/2b-mds/b4-finish-and-reweight/implementation-plan.md) |
+| 2026-07-24 | [B4 cold-start SFT fix: recover + beat B2 after the B3 dilution regression](./production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md) |
 | 2026-07-24 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-07-24 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-23 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-07-23 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-07-23 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
@@ -30,8 +34,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-23 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-07-23 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-07-23 | [Polaris 20B "eval gibberish" root cause: training-data / model tokenizer mismatch](./guides/known-bugs/polaris-20b-tokenizer-mismatch.md) |
-| 2026-07-23 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
-| 2026-07-22 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-07-22 | [B3 Cold-Start SFT (instruct + CoT rebuild) Implementation Plan](./production/sft/agpt/2b-mds/b3-instruct-cot-mix/implementation-plan.md) |
 | 2026-07-22 | [B3 cold-start SFT design: combined instruct + CoT rebuild from gs138650](./production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md) |
 | 2026-07-22 | [Teaching agpt-2b Chain-of-Thought Reasoning (plan)](./production/rl/plans/cot.md) |
@@ -45,14 +47,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-19 | [GRPO+LoRA on XPU: Monarch + TorchStore + vLLM](./production/rl/monarch.md) |
 | 2026-07-19 | [GRPO+LoRA on Intel XPU: Sunspot reproduction (Monarch + TorchStore + vLLM)](./production/rl/history/grpo-lora-xpu-repro.md) |
 | 2026-07-19 | [GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900](./production/rl/history/grpo-lora-agpt2b-repro.md) |
-| 2026-07-19 | [RL bring-up history](./production/rl/history/README.md) |
-| 2026-07-19 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-07-19 | [RL bring-up history](./production/rl/history/README.md) |
+| 2026-07-19 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
 | 2026-07-18 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
 | 2026-07-18 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
 | 2026-07-18 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
@@ -76,8 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-12 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-07-12 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/agpt/2b-mds/tulu_math_uc_mix/failover-story.md) |
 | 2026-07-12 | [IFEval — AuroraGPT-2B-sophiag (baseline) vs SFT-step729](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/ifeval.md) |
-| 2026-07-12 | [GRPO smoke — SFT-step729 vs baseline as RL starting point](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md) |
-| 2026-07-12 | [lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline](./production/sft/agpt/2b-mds/tulu_math_uc_mix/evals/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -94,7 +94,7 @@ going?" Tracking is per-model and per-node-count.
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-07-23 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**39600** (3.99T tokens, 85.3% of 4.67T). | 2026-07-23 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,010** (605.0B tokens, 12.9% of 4.67T). | 2026-07-23 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**5,100** (256.7B tokens, 5.5% of 4.67T), loss 3.2631. | 2026-07-23 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**5,800** (291.9B tokens, 6.2% of 4.67T), loss 2.516. | 2026-07-23 |
 | [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-15 |
 | [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
@@ -170,7 +170,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-22 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-07-24 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
