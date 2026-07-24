@@ -1,7 +1,7 @@
 ---
 author: Sam Foreman
 date: 2026-05-24
-status: open
+status: fixed-pending-confirmation
 ---
 
 # Blendcorpus EOFError Race in `_build_index_mappings`

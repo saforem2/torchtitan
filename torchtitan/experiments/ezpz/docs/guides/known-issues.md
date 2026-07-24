@@ -40,7 +40,7 @@ that beats 0% on-disk persistence.
 
 **Investigation status:** sync-mode submits queued 2026-05-23 evening
 (`8505258` 20B 512N, `8505255-57` 20B 256N). Live test of the
-hypothesis is pending dispatch.
+hypothesis is RESOLVED operationally: sync checkpointing is the production default (the autoretry + 80B scripts set async-mode=disabled); async cascades to failure at 512N+ on XPU (gloo subgroup binds a bound_device_id=xpu). See docs/production/agpt/80b guidance.
 
 ## `training.dtype = bfloat16` silently freezes RMSNorm weights
 

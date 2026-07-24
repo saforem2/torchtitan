@@ -1,6 +1,6 @@
 # Teaching agpt-2b Chain-of-Thought Reasoning (plan)
 
-> Status: **in progress** (2026-07-20). Stage 0 (eval) + Stage 1 (cold-start CoT-SFT) DONE and validated; Stage 2 (GRPO-RLVR) next. Staged recipe to take the
+> Status: **Stages 0-2 complete** (2026-07-22). Stage 0 (eval) + Stage 1 (cold-start CoT-SFT) DONE and validated; Stage 2 (GRPO-RLVR) RUN -- gated GRPO on the strong B2 base is drift-proof (format perfected) but RL is NOT the accuracy lever at 2B ~20% GSM8K (accuracy work moves upstream to SFT). See the dated Stage-2 sections below. Staged recipe to take the
 > instruction-tuned AuroraGPT-2B (`checkpoint-900-hf`, full-mix SFT) from "has
 > seen math rationales but does not reliably emit reasoning" to "emits and
 > benefits from an explicit `<think>` scratchpad." Everything lives under
