@@ -960,6 +960,49 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# b4_reweight_mix -- reweighted mix fixing the B3 dilution regression
+# (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
+# ---------------------------------------------------------------------------
+
+
+def _build_b4_reweight_mix(seed: int = 42):
+    """B4 reweighted mix -- fixes the B3 dilution regression
+    (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
+      0.40 gsm8k-r1cot        (was 0.15 in b3 -- restore in-distribution short CoT)
+      0.15 OpenR1-Math-220k   (LENGTH-FILTERED via OPENR1_MAX_THINK_CHARS -- short
+                               traces only; the run-on ones caused the regression)
+      0.30 tulu-3-sft-mixture (general instruction-following)
+      0.15 ultrachat-200k     (multi-turn chat)
+    The b3 math-breadth component is dropped here (it added math breadth
+    the 2B could not convert to accuracy). Same materialized-mix cache +
+    all_exhausted interleave as b3.
+    """
+    return _materialized_mix_load_or_build(
+        component_names=[
+            "gsm8k-r1cot",
+            "OpenR1-Math-220k",
+            "tulu-3-sft-mixture",
+            "ultrachat-200k",
+        ],
+        weights=[0.40, 0.15, 0.30, 0.15],
+        seed=seed,
+    )
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="b4_reweight_mix",
+        build=_build_b4_reweight_mix,
+        description=(
+            "B4 reweighted mix: 40%% gsm8k-r1cot + 15%% length-filtered "
+            "OpenR1-Math-220k + 30%% tulu-3 + 15%% ultrachat-200k "
+            "(OpenMathInstruct-2 dropped). Fixes the B3 long-CoT dilution."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Generic mix-spec parser — `--sft_dataset 'a:0.5,b:0.3,c:0.2'`
 # ---------------------------------------------------------------------------
 
