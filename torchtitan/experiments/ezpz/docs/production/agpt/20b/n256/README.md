@@ -79,13 +79,13 @@
 | `8647385`+ | 2026-07-06..23 | 12h | 3,100 -> 4,375 | ~3.2 -> ~2.5 | ~440 | ~22% | Continuations 8647385 (3101-3603), 8661054 (4201-4375) advanced the chain; interspersed with CCL/gloo crashes + resubmits (transient infra). |
 | `8681340` | 2026-07-23 | 12h | 5,101 -> **5,885**+ | 2.485 -> 2.509 | 40-443 (variable) | ~22% | **RUNNING** (full 260N throughput, resumes real chain). Advancing step-5,100 -> 5,800+; loss steady ~2.49. |
 
-**Latest checkpoint:** step-5,800 (8505255, all of step-100..1,100 have valid `.metadata`)
+**Latest checkpoint:** step-5,900 (8505255, all of step-100..1,100 have valid `.metadata`)
 
-**Cumulative persisted steps:** 5,800
+**Cumulative persisted steps:** 5,900
 
-**Tokens consumed:** 5,800 × 6,144 × 8,192 = **291.9B tokens** (6.2% of 4.67T target)
+**Tokens consumed:** 5,900 × 6,144 × 8,192 = **297.0B tokens** (6.4% of 4.67T target)
 
-**Loss:** 2.516 (8558549 end, step-3,100)
+**Loss:** 2.5116 (8558549 end, step-3,100)
 
 ## v2 -- 20B @ 256N -- job 8661913 (MISLABELED "constlr"; actually from-scratch)
 

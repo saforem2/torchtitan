@@ -26,13 +26,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-24 | [B4 Cold-Start SFT Fix (finishing-stage + reweighted-mix) Implementation Plan](./production/sft/agpt/2b-mds/b4-finish-and-reweight/implementation-plan.md) |
 | 2026-07-24 | [B4 cold-start SFT fix: recover + beat B2 after the B3 dilution regression](./production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md) |
 | 2026-07-24 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-07-24 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-07-24 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-07-24 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-07-23 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-07-23 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-07-23 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-07-23 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-07-23 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-07-23 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-07-23 | [Polaris 20B "eval gibberish" root cause: training-data / model tokenizer mismatch](./guides/known-bugs/polaris-20b-tokenizer-mismatch.md) |
 | 2026-07-22 | [B3 Cold-Start SFT (instruct + CoT rebuild) Implementation Plan](./production/sft/agpt/2b-mds/b3-instruct-cot-mix/implementation-plan.md) |
 | 2026-07-22 | [B3 cold-start SFT design: combined instruct + CoT rebuild from gs138650](./production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md) |
@@ -93,8 +93,8 @@ going?" Tracking is per-model and per-node-count.
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-01 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6511. | 2026-07-23 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**39600** (3.99T tokens, 85.3% of 4.67T). | 2026-07-23 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,010** (605.0B tokens, 12.9% of 4.67T). | 2026-07-23 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**5,800** (291.9B tokens, 6.2% of 4.67T), loss 2.516. | 2026-07-23 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**6,050** (609.0B tokens, 13.0% of 4.67T). | 2026-07-23 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**5,900** (297.0B tokens, 6.4% of 4.67T), loss 2.5116. | 2026-07-24 |
 | [agpt 80B](./production/agpt/80b/README.md) | **SophiaG @ 1e-6 NaN'd** the 512N prod run 2026-07-03 (grad_norm->inf step-14, Hessian overflow; ~12h wasted). Testing **mano @ 1e-6** as the replacement: mechanism probe PASSED (30 steps clean), 256N production-batch verdict (8647521) pending. | 2026-07-15 |
 | [80B optimizer NaN report](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Full SophiaG-NaN diagnosis + why longer-warmup/grad-clip don't fix it + NaN-abort guard. | 2026-07-06 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
