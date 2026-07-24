@@ -100,6 +100,21 @@ def build_prompts(tokenizer, questions: list[str]) -> list[str]:
     return out
 
 
+def summarize(texts, finish_reasons, fmts, corrects):
+    n = len(texts)
+    n_format = sum(int(x) for x in fmts)
+    n_correct = sum(int(x) for x in corrects)
+    n_unclosed = sum(1 for fr in finish_reasons if fr == "length")
+    mean_gen_len = round(sum(len(t) for t in texts) / n, 1) if n else 0.0
+    return {
+        "n": n,
+        "format_hit_rate": round(n_format / n, 4) if n else 0.0,
+        "cot_accuracy": round(n_correct / n, 4) if n else 0.0,
+        "mean_gen_len": mean_gen_len,
+        "n_unclosed": n_unclosed,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="HF checkpoint dir (with chat template)")
@@ -139,30 +154,36 @@ def main() -> None:
     )
     outputs = llm.generate(prompts, sp)
 
-    n = len(outputs)
-    n_format = 0
-    n_correct = 0
+    texts = []
+    finish_reasons = []
+    fmts = []
+    corrects = []
     rows = []
     for i, o in enumerate(outputs):
         text = o.outputs[0].text
+        finish_reason = o.outputs[0].finish_reason
         fmt_ok, ans = extract_cot_answer(text)
         correct = ans is not None and golds[i] is not None and ans == golds[i]
-        n_format += int(fmt_ok)
-        n_correct += int(correct)
+        texts.append(text)
+        finish_reasons.append(finish_reason)
+        fmts.append(fmt_ok)
+        corrects.append(correct)
         rows.append(
             {"idx": i, "format_ok": fmt_ok, "pred": ans, "gold": golds[i],
-             "correct": correct, "gen_len": len(text)}
+             "correct": correct, "gen_len": len(text),
+             "finish_reason": finish_reason}
         )
 
-    print(json.dumps({
+    summary = summarize(
+        texts=texts, finish_reasons=finish_reasons, fmts=fmts, corrects=corrects
+    )
+    summary.update({
         "model": args.model,
-        "n": n,
-        "format_hit_rate": round(n_format / n, 4) if n else 0.0,
-        "cot_accuracy": round(n_correct / n, 4) if n else 0.0,
         "dtype": args.dtype,
         "temperature": args.temperature,
         "max_tokens": args.max_tokens,
-    }, indent=2))
+    })
+    print(json.dumps(summary, indent=2))
 
     if args.out:
         with open(args.out, "w") as f:
