@@ -98,17 +98,22 @@ PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
 os.chdir(REPO)
 
-# --- trajectories.py imported standalone (avoids the torch-importing package) -
-_spec = importlib.util.spec_from_file_location(
-    "traj", os.path.join(REPO, "torchtitan/experiments/ezpz/utils/trajectories.py"))
-traj = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(traj)
+# --- trajectories.py + wandb_fetch.py imported standalone. Both are
+# dependency-light (stdlib + lazy wandb, NO numpy/matplotlib/torch), so
+# spec-loading them by path keeps this remote aggregator off the heavy deps the
+# cluster .venv would otherwise pull. wandb_fetch is the SAME fetch/concat logic
+# the chart plotters use, so the board and the committed charts can't drift.
+def _spec_load(name, relpath):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(REPO, relpath))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+traj = _spec_load("traj", "torchtitan/experiments/ezpz/utils/trajectories.py")
+wf = _spec_load("wandb_fetch", "torchtitan/experiments/ezpz/utils/wandb_fetch.py")
 CANON = [t for t in traj.TRAJECTORIES if t.get("cls") in ("live", "wandb_only")]
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-STEP_RE = re.compile(
-    r"step:\s+(\d+)\s+loss:\s+([\d.]+)\s+grad_norm:\s+([\d.]+)"
-    r".*?tps:\s+([\d,]+).*?mfu:\s+([\d.]+)%%")
 CKPT_RE = re.compile(r"checkpoints/(agpt-[A-Za-z0-9._-]+?)(?:/|\s|$)")
 
 def _downsample(pairs, n=600):
@@ -118,23 +123,11 @@ def _downsample(pairs, n=600):
     return pairs[::k]
 
 def _olog_curve(paths):
-    """Concat (step, loss) from .o logs, dedup by step (later files win)."""
-    by, last = {}, {}
-    for p in sorted(paths):
-        try:
-            for raw in open(p, errors="replace"):
-                m = STEP_RE.search(ANSI.sub("", raw))
-                if not m:
-                    continue
-                s = int(m.group(1))
-                by[s] = float(m.group(2))
-                last = {"step": s, "loss": float(m.group(2)),
-                        "tps": float(m.group(4).replace(",", "")),
-                        "mfu": float(m.group(5))}
-        except (FileNotFoundError, IsADirectoryError):
-            pass
-    xs = sorted(by)
-    return [(x, by[x]) for x in xs], last
+    """Concat (step, loss) from .o logs via the shared parser, plus the final
+    line's tip. Delegates to wandb_fetch.parse_olog (single canonical .o
+    parser); returns ([(step, loss)], last)."""
+    records, last = wf.parse_olog(paths)
+    return [(r["_step"], r["loss_metrics/global_avg_loss"]) for r in records], last
 
 def _all_ologs():
     """Every candidate PBS stdout log in the repo (autoretry + umbrella + logs/)."""
@@ -159,35 +152,19 @@ def _dir_index(logs):
     return idx
 
 def _wandb_curve(run_ids, olog_fallbacks):
-    """Concat W&B loss history across a chain's runs; fall back to .o per run."""
-    try:
-        import wandb
-        api = wandb.Api()
-    except Exception:
-        api = None
+    """Concat a chain's W&B loss history via the shared wandb_fetch.concat_chain
+    (same robust olog-fallback rule the charts use: prefer the .o log when it
+    reaches at least as far as W&B). Returns [(step, loss)]. Only the cheap
+    OLOG_KEYS are fetched -- the board needs step+loss, not the full metric set.
+    """
     olog_fallbacks = olog_fallbacks or {}
-    by = {}
-    for rid in run_ids:
-        rows = []
-        if api is not None:
-            try:
-                run = api.run(PROJECT + "/" + rid)
-                for r in run.scan_history(keys=["_step", "loss_metrics/global_avg_loss"]):
-                    s = r.get("_step")
-                    lv = r.get("loss_metrics/global_avg_loss")
-                    if s is not None and lv is not None:
-                        rows.append((int(s), float(lv)))
-            except Exception:
-                rows = []
-        if not rows and rid in olog_fallbacks:
-            fp = olog_fallbacks[rid]
-            if not os.path.isabs(fp):
-                fp = os.path.join(REPO, fp)
-            rows, _ = _olog_curve([fp])
-        for s, lv in rows:
-            by[s] = lv
-    xs = sorted(by)
-    return [(x, by[x]) for x in xs]
+    # concat_chain resolves relative fallback paths against CWD; the aggregator
+    # chdir's to REPO at startup, but be explicit so it works regardless.
+    fb = {rid: (fp if os.path.isabs(fp) else os.path.join(REPO, fp))
+          for rid, fp in olog_fallbacks.items()}
+    records = wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
+                              project=PROJECT)
+    return [(r["_step"], r["loss_metrics/global_avg_loss"]) for r in records]
 
 def _wandb_summary(run_ids):
     """Cheap per-chain W&B metadata (one api.run + .summary read per tried run,
