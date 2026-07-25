@@ -2,6 +2,40 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-24 (aurora) -- W&B fetch consolidation + preflight-smoke run-id fixes + overlay legend
+
+- **Root-caused the "stuck 2B-256 curve" -- it was a misleading legend + a
+  bookkeeping bug, never lost data.** The all_production_training overlay labelled
+  each curve `(n=<len(loss)>)`; `n=86480` is a row COUNT, not a step, and made
+  the completed 2B-256 chain look stuck while the prod_dash board correctly showed
+  step 92,859 / 100%. Fixed the label to `step 92,859, 100% of 4.67T` so the chart
+  agrees with the board. The curve always reached the 4.67T stage-1 completion.
+- **Preflight-smoke reinit-swallow (the real data bug), swept across ALL chains.**
+  Every production job runs a `python -m ezpz.examples.test` preflight smoke first;
+  it opens a wandb run in the `ezpz.examples.test` project and, with
+  `reinit='default'`, the real `wandb.init(project=torchtitan.ezpz.train)` RETURNS
+  that already-active smoke run. So some recorded run-ids were the 5-step SMOKE
+  runs (0 training rows), forcing .o-log fallbacks / gaps. Corrected across chains:
+  - 2b_v2_256 completion trio: a5h4aaf7/gx7ph91w/mqi69lx2 -> 9itxu3pt/ew4pqb51/fm3gzdxt.
+  - 2b_v2_256 mid-chain: okyt09kv -> jkde9zdg (fills the 74319->80301 gap;
+    chain n 86480 -> 92456, endpoint/loss unchanged).
+  - 20b_v2_256 gap-fill: dpiog1q7/auy8wohg -> 17sfemjj/rugscgjs.
+  - 20b_v2_512: qttj3l3p DROPPED (crashed dud, 0 steps, covered by retry wjy5pvxm).
+  - 2b_v2_512: dropped i0ayskft's stale empty-W&B .o fallback (it synced later).
+  A zero-row sweep over every chain confirms these were the only offenders.
+  Rule for future bookkeeping: take the run-id from the `torchtitan.ezpz.train`
+  View-run line, never the `ezpz.examples.test` one.
+- **Consolidated the two W&B-fetch code paths into one shared module** (the drift
+  above is exactly why the board and charts disagreed). New
+  `utils/wandb_fetch.py` holds the ONE `.o`-log parser + per-chain concat with the
+  robust olog-fallback rule. It is dependency-light BY CONTRACT (stdlib + lazy
+  wandb, NO numpy/matplotlib/torch) so prod_dash's cluster-side `_AGG` can
+  spec-load it by path like `trajectories.py`. `plot_production_wandb.concat_runs`
+  is now a thin numpy adapter over it; `prod_dash._wandb_curve/_olog_curve`
+  delegate to it. Verified behavior-preserving: a golden before/after diff of
+  `concat_runs` over every chain is byte-identical except the intended 2b_v2_256
+  gap-fill. Commits 778e302ca / 2398c8313 / 0433322c0 / 9d46c5c50 / 45eac96ad.
+
 ## 2026-07-18 (sunspot) -- full-mix SFT eval verdict + GRPO validation + 70th sync + RL cleanup
 
 - **Full-mix SFT eval -- COMPLETE on all 3 axes; deliverable is checkpoint-900, NOT 8672.**
