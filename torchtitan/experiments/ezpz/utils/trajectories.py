@@ -121,7 +121,12 @@ TRAJECTORIES: list[dict] = [
         # iekiq5rq=8503506 ni0etxx7=8505118 0fk1bvtt=8505119 3n22a69q=8505175
         # 8vmrcxqr=8505252 56lkkkh1=8507195 24wfvoje=8507198 bs6tay8l=8508020
         # zrqx75x7=8508977 ied4spbx=8513544 yklnyjd5=8516364 8ujhblrp=8519833
-        # a52q40kx=8521626 okyt09kv=8521630 zcmlqbd8=8534293(->step86259)
+        # a52q40kx=8521626 jkde9zdg=8521630(74301->80402) zcmlqbd8=8534293(->step86259)
+        #   [jkde9zdg CORRECTED 2026-07-24 from okyt09kv: okyt09kv was the
+        #    preflight-smoke run-id (0 rows in torchtitan.ezpz.train), which left
+        #    a 74319->80301 gap the plotter bridged with a straight line; the
+        #    real training run for job 8521630 is jkde9zdg -- same swallow as the
+        #    completion trio below.]
         # --- chain COMPLETION (86201->92859), added 2026-07-06, run-ids
         #     CORRECTED 2026-07-24 (see note below): ---
         # 9itxu3pt=8572612(sneak2h,86201-86674) ew4pqb51=8573619(sneak2h,86675-87145)
@@ -131,7 +136,7 @@ TRAJECTORIES: list[dict] = [
             "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
             "56lkkkh1", "24wfvoje", "bs6tay8l",
             "zrqx75x7", "ied4spbx", "yklnyjd5",
-            "8ujhblrp", "a52q40kx", "okyt09kv", "zcmlqbd8",
+            "8ujhblrp", "a52q40kx", "jkde9zdg", "zcmlqbd8",
             "9itxu3pt", "ew4pqb51", "fm3gzdxt",
         ],
         # NOTE (2026-07-24): these 3 completion jobs each run an
@@ -183,7 +188,11 @@ TRAJECTORIES: list[dict] = [
         "seq_len": SEQ_LEN,
         "token_target": OLMO_MIX_1124_TOKENS,
         # 9tsyx5us=8460302 ej3zy5cq=8463628 s6b159xk=8479579 gkzl19dg=8481645
-        # 10vf1mqr=8481647 qttj3l3p=8505124 wjy5pvxm=8505258 cv3wii8x=8505259
+        # 10vf1mqr=8481647 wjy5pvxm=8505258 cv3wii8x=8505259
+        #   [qttj3l3p=8505124 DROPPED 2026-07-24: crashed dud, 0 steps in W&B and
+        #    no step lines in its .o log; its 801->1413 range is fully covered by
+        #    the retry wjy5pvxm=8505258. Not a swallowed-smoke -- nothing to
+        #    recover, so the empty run-id is removed rather than remapped.]
         # tu77pzu7=8507197 8vixdfg2=8507200 0pmsn01c=8509393(->step4418)
         # tu1iseu1=8638793 native-autoretry relaunch (4401->5109), added 2026-07-06
         # 8o2xakm3=8638795 cont (5109->6000), added 2026-07-23
@@ -193,7 +202,7 @@ TRAJECTORIES: list[dict] = [
         # jyq4w87d=8689162 (6001->6012, saved step-6005/6010)
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
-            "qttj3l3p", "wjy5pvxm", "cv3wii8x",
+            "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
         ],
