@@ -27,7 +27,6 @@ Run from the repo root:
 from __future__ import annotations
 
 import argparse
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -93,6 +92,12 @@ from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
     PRODUCTION_RUNS,
 )
 
+# The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
+# dependency-light module (stdlib + lazy wandb; NO numpy/matplotlib/torch) so
+# the chart plotters and the live board can never drift again. This file adapts
+# its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
+from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
+
 MODEL_COLORS = {
     "2b": "#1E88E5",
     "20b": "#D32F2F",
@@ -102,92 +107,47 @@ MODEL_COLORS = {
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 DOCS_BASE = REPO_ROOT / "torchtitan" / "experiments" / "ezpz" / "docs"
 
-METRIC_KEYS = (
-    "_step",
-    "_timestamp",
-    "grad_norm",
-    "lr",
-    "loss_metrics/global_avg_loss",
-    "loss_metrics/global_max_loss",
-    "n_tokens_seen",
-    "throughput(tps)",
-    "mfu(%)",
-)
+# Full metric set the charts consume. Identical to wandb_fetch.ALL_KEYS; the
+# fetch/parse/concat logic lives in that dependency-light shared module (also
+# used by prod_dash.py). The functions below are thin numpy adapters that map
+# its plain-dict records to the {key: np.ndarray} contract the plotters expect.
+METRIC_KEYS = wandb_fetch.ALL_KEYS
+
+
+def _records_to_arrays(records: list[dict]) -> dict[str, np.ndarray]:
+    """Adapt wandb_fetch's plain-dict records to {METRIC_KEYS: np.ndarray}.
+
+    Keys absent from a record (e.g. lr/_timestamp/max_loss/n_tokens_seen when a
+    record came from a .o line) become NaN, so downstream ``~np.isnan(steps)``
+    filtering degrades gracefully.
+    """
+    return {
+        k: np.array([r.get(k, np.nan) for r in records], dtype=float)
+        if k != "_step"
+        else np.array([r.get("_step") for r in records])
+        for k in METRIC_KEYS
+    }
 
 
 def fetch_run(api: wandb.Api, run_id: str) -> dict[str, np.ndarray]:
-    """Pull the full history for the given metric keys from one wandb run.
+    """Pull one wandb run's full history for METRIC_KEYS as numpy arrays.
 
-    Uses ``scan_history`` so we get every logged step, not a downsample.
-
-    Returns empty arrays if the run cannot be found in ``PROJECT`` (e.g. it
-    logged to a different W&B project). concat_runs treats an empty result as
-    a cue to use the run's ``olog_fallbacks`` entry, so a mis-projected run
-    still contributes its trajectory from the PBS .o log.
+    Empty arrays if the run cannot be found in ``PROJECT`` (e.g. it logged to a
+    different project); ``concat_runs`` then uses the run's ``olog_fallbacks``
+    entry. Thin adapter over ``wandb_fetch.fetch_wandb_run``.
     """
-    try:
-        run = api.run(f"{PROJECT}/{run_id}")
-    except Exception as e:  # wandb CommError / not-found
-        print(f"  {run_id}: not in {PROJECT} ({type(e).__name__}) -- will try .o fallback")
-        return {k: np.array([]) for k in METRIC_KEYS}
-    columns: dict[str, list] = {k: [] for k in METRIC_KEYS}
-    for row in run.scan_history(keys=list(METRIC_KEYS)):
-        for k in METRIC_KEYS:
-            columns[k].append(row.get(k))
-    return {k: np.array(v) for k, v in columns.items()}
-
-
-# Per-step metric lines in PBS .o files look like:
-#   [TIMESTAMP][I][.../metrics:526:log] step: 3300  loss:  2.61866  grad_norm:  0.1672
-#   memory: 44.55GiB(69.63%)  tps: 349  tflops: 51.93  mfu: 17.41%
-# ANSI escape codes wrap each field — strip them first. memory shows
-# "GiB(PCT%)"; we only need PCT for the dashboards. We don't have
-# loss_metrics/global_max_loss, lr, or _timestamp from the .o lines, so
-# those columns stay NaN — downstream callers already filter for valid
-# _step + loss via `~np.isnan(steps)` so missing diagnostics degrade
-# gracefully (the max-loss panel will just lack the recovered range).
-_OLOG_STEP_RE = re.compile(
-    r"step:\s+(?P<step>\d+)\s+"
-    r"loss:\s+(?P<loss>[\d.]+)\s+"
-    r"grad_norm:\s+(?P<grad_norm>[\d.]+)\s+"
-    r"memory:\s+[\d.]+GiB\((?P<mem_pct>[\d.]+)%\)\s+"
-    r"tps:\s+(?P<tps>[\d,]+)\s+"
-    r"tflops:\s+(?P<tflops>[\d.]+)\s+"
-    r"mfu:\s+(?P<mfu>[\d.]+)%"
-)
-_OLOG_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+    records = wandb_fetch.fetch_wandb_run(
+        run_id, keys=METRIC_KEYS, project=PROJECT, api=api)
+    return _records_to_arrays(records)
 
 
 def fetch_from_olog(log_path: str) -> dict[str, np.ndarray]:
-    """Parse per-step metric lines from a PBS .o log into the same
-    shape as ``fetch_run``. Used as a fallback when a W&B run's
-    ``history()`` is empty (run crashed mid-sync but the trainer was
-    still printing to stdout). Missing METRIC_KEYS (loss_metrics/*, lr,
-    _timestamp, n_tokens_seen) come back as NaN arrays.
+    """Parse per-step metric lines from a PBS .o log into the ``fetch_run``
+    shape. Thin adapter over ``wandb_fetch.parse_olog``; keys unavailable from
+    stdout (lr, _timestamp, max_loss, n_tokens_seen) come back as NaN.
     """
-    p = Path(log_path)
-    if not p.exists():
-        print(f"    .o-log fallback: {log_path} not found")
-        return {k: np.array([]) for k in METRIC_KEYS}
-    columns: dict[str, list] = {k: [] for k in METRIC_KEYS}
-    with p.open() as f:
-        for raw in f:
-            line = _OLOG_ANSI_RE.sub("", raw)
-            m = _OLOG_STEP_RE.search(line)
-            if not m:
-                continue
-            step = int(m.group("step"))
-            columns["_step"].append(step)
-            columns["loss_metrics/global_avg_loss"].append(float(m.group("loss")))
-            columns["grad_norm"].append(float(m.group("grad_norm")))
-            columns["throughput(tps)"].append(float(m.group("tps").replace(",", "")))
-            columns["mfu(%)"].append(float(m.group("mfu")))
-            # Unavailable from .o lines — leave as NaN
-            columns["_timestamp"].append(np.nan)
-            columns["lr"].append(np.nan)
-            columns["loss_metrics/global_max_loss"].append(np.nan)
-            columns["n_tokens_seen"].append(np.nan)
-    return {k: np.array(v) for k, v in columns.items()}
+    records, _ = wandb_fetch.parse_olog([log_path])
+    return _records_to_arrays(records)
 
 
 def concat_runs(
@@ -195,65 +155,17 @@ def concat_runs(
     run_ids: list[str],
     olog_fallbacks: dict[str, str] | None = None,
 ) -> dict[str, np.ndarray]:
-    """Fetch and concatenate multiple wandb runs by ascending _step.
+    """Fetch and concatenate a chain's wandb runs by ascending _step.
 
-    When a run's W&B history() returns 0 rows AND that run_id appears
-    in ``olog_fallbacks``, parse the corresponding PBS .o file instead.
-    Filled metrics are limited (no lr/max_loss/timestamp/n_tokens_seen
-    available from stdout), but the step+loss+tps+mfu trajectory
-    survives — which is what the main dashboard plots use.
+    Thin numpy adapter over ``wandb_fetch.concat_chain`` (the one canonical
+    concat, shared with prod_dash.py): for a run with an ``olog_fallbacks``
+    entry it prefers the PBS .o log whenever that reaches at least as far as
+    W&B, so a partially/never-synced run's trajectory tail survives.
     """
-    olog_fallbacks = olog_fallbacks or {}
-
-    def _max_step(d):
-        steps = d["_step"]
-        if len(steps) == 0:
-            return -1
-        vals = [int(s) for s in steps if s is not None]
-        return max(vals) if vals else -1
-
-    parts = []
-    for rid in run_ids:
-        data = fetch_run(api, rid)
-        # Runs with an olog_fallbacks entry sync to W&B unreliably (crashed
-        # mid-sync or logged to a different project). W&B may return an
-        # empty OR a partial/truncated history for them, so a plain
-        # "empty?" test silently drops the trajectory tail (the 2B-256
-        # chain lost steps 86,484 -> 92,859 this way). The PBS .o log is
-        # the complete authoritative stdout trace: prefer it whenever it
-        # reaches at least as far as the W&B history.
-        if rid in olog_fallbacks:
-            olog_data = fetch_from_olog(olog_fallbacks[rid])
-            w_max, o_max = _max_step(data), _max_step(olog_data)
-            if o_max >= w_max:
-                if o_max < 0:
-                    print(f"  {rid}: both W&B and .o-log empty, skipping")
-                    continue
-                w_str = str(w_max) if w_max >= 0 else "empty"
-                print(f"  {rid}: .o-log {len(olog_data['_step'])} rows, steps "
-                      f"[{int(olog_data['_step'][0])}, {int(olog_data['_step'][-1])}] "
-                      f"(W&B reached {w_str})")
-                data = olog_data
-            else:
-                print(f"  {rid}: W&B reaches step {w_max} > .o-log {o_max}; keeping W&B")
-        if len(data["_step"]) == 0:
-            print(f"  {rid}: no rows, skipping")
-            continue
-        if rid not in olog_fallbacks:
-            print(f"  {rid}: {len(data['_step'])} rows, steps [{data['_step'][0]}, {data['_step'][-1]}]")
-        parts.append(data)
-
-    # For each step, keep the record from the latest run (resume semantics).
-    by_step: dict[int, dict] = {}
-    for data in parts:
-        for i, s in enumerate(data["_step"]):
-            if s is None:
-                continue
-            by_step[int(s)] = {k: data[k][i] for k in METRIC_KEYS}
-
-    sorted_steps = sorted(by_step)
-    out = {k: np.array([by_step[s][k] for s in sorted_steps]) for k in METRIC_KEYS}
-    return out
+    records = wandb_fetch.concat_chain(
+        run_ids, olog_fallbacks=olog_fallbacks, keys=METRIC_KEYS,
+        project=PROJECT, api=api, log=print)
+    return _records_to_arrays(records)
 
 
 def smooth(values: np.ndarray, window: int = 100) -> np.ndarray:
