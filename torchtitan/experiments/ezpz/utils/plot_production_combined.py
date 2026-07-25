@@ -62,6 +62,11 @@ MDS_CSV = (
 )
 MDS_TOKENS_PER_STEP = 7_770e9 / 140_000  # ~55.5M tokens/step at GBS=3072, seq=8192
 
+# olmo-mix-1124 stage-1 token target, in billions (matches plot_tokens_vs_time's
+# target_b). Used in the loss legend to report each chain's progress as a % of
+# target -- far more meaningful than a raw sample count.
+TARGET_TOKENS_B = 4670
+
 # Canonical per-trajectory palette — keep in sync with
 # eval/plot_evals_combined.py and per-model {2b,20b}/plot_eval_overview.py.
 COLOR_2B_MDS      = "C0"       # matplotlib C0 (ambivalent palette first color — reads well on both light + dark bg)
@@ -214,6 +219,22 @@ def _apply_loss_ylim(ax, series: list[dict]) -> None:
         ax.set_ylim(lo, hi)
 
 
+def _series_label(s: dict) -> str:
+    """Legend label reporting real progress, not a raw sample count.
+
+    ``step <N> (<pct>% of 4.67T)`` -- so the overlay agrees with the prod_dash
+    board (which reports step + % of target) instead of the old ``(n=<rows>)``
+    that read like a step and made a completed chain look stuck. Falls back to
+    the plain label if a series carries no step array.
+    """
+    steps = s.get("steps")
+    if steps is None or len(steps) == 0:
+        return s["label"]
+    max_step = int(np.nanmax(steps))
+    pct = 100.0 * float(np.nanmax(s["tokens_b"])) / TARGET_TOKENS_B
+    return f"{s['label']}  (step {max_step:,}, {pct:.0f}% of 4.67T)"
+
+
 def render_figure(
     series: list[dict],
     *,
@@ -239,7 +260,7 @@ def render_figure(
         ax.plot(
             s["tokens_b"], smooth(s["loss"], window=min(100, max(2, len(s["loss"]) // 20))),
             color=s["color"], linestyle=s["linestyle"], linewidth=1.8,
-            label=f"{s['label']}  (n={len(s['loss'])})",
+            label=_series_label(s),
         )
     ax.set_ylabel("Loss")
     ax.set_title("Training Loss")
@@ -316,12 +337,14 @@ def main() -> None:
             steps, loss, tps, mfu = load_wandb_trajectory(api, traj["key"])
             tokens_b = steps * traj["tokens_per_step"] / 1e9
             print(f"  {len(steps)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
-            series.append({**traj, "tokens_b": tokens_b, "loss": loss, "tps": tps, "mfu": mfu})
+            series.append({**traj, "steps": steps, "tokens_b": tokens_b,
+                           "loss": loss, "tps": tps, "mfu": mfu})
         else:  # mds
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
             print(f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
-            series.append({**traj, "tokens_b": tokens_b, "loss": loss, "tps": tps, "mfu": None})
+            series.append({**traj, "steps": iters, "tokens_b": tokens_b,
+                           "loss": loss, "tps": tps, "mfu": None})
 
     # 1) Combined chart (all models)
     print("\n=== rendering all_production_training ===")
