@@ -7,15 +7,19 @@
 
 > Last updated: 2026-07-26
 >
-> Status: chain at step **3,100** persisted (~156.0B tokens, **3.3%** of
-> 4.67T), advancing. Trajectory since the step-300 stall: `8505255`
-> (sync mode) reached step-1,125; jobs `8558548`/`8558549` carried it
-> 1,101 -> 3,136 (persisted through step-3,100). Now relaunched on native
-> autoretry (`8647385` head + `8647386` cont, both currently qhold'd while
-> a 1h `debug-scaling` **sneak** job `8647907` advances the chain during
-> prod-queue contention). NOTE: the 1,101->3,136 W&B runs logged to the
-> `ezpz.examples.test` project (not `torchtitan.ezpz.train`), so the
-> production charts pull them via .o-log fallback.
+> Status: chain at step **6,000** persisted (~302.0B tokens, **6.5%** of
+> 4.67T), loss ~**2.51**. Trajectory since the step-300 stall: `8505255`
+> (sync mode) reached step-1,125; `8558548`/`8558549` carried it
+> 1,101 -> 3,136; native-autoretry continuations (`8647385`, `8661054`)
+> advanced it 3,101 -> 4,375; `8681340` (260N) resumed the chain to
+> step-6,000. Currently between advances -- the 256N prod resumes
+> (`8698753`/`8698754`) are queue-starved; a 16N `capacity`-queue bridge
+> (`8703284`, GAS=16 -> GBS=6144 bit-identical) is queued to carry it
+> forward from step-6,000. NOTE: the run-ids for the 1,101->3,135 segment
+> were originally recorded as the `ezpz.examples.test` preflight-smoke runs;
+> corrected 2026-07-24 to the real `torchtitan.ezpz.train` run-ids (the
+> metrics were always in the right project), so the charts now source them
+> natively (no .o-log fallback).
 > **Relocated 2026-06-12** to its own clone
 > `agpt-20b-n256/` (metadata-only `mv`, to relieve Lustre dir-size on the
 > `agpt-20b-v2/` subtree) so it can be re-armed independently of the
