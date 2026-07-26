@@ -60,12 +60,29 @@ MDS_CSV = (
     REPO_ROOT
     / "torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/train_metrics.csv"
 )
-MDS_TOKENS_PER_STEP = 7_770e9 / 140_000  # ~55.5M tokens/step at GBS=3072, seq=8192
+# MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
+# (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter. (The old
+# 7770e9/140000 ~= 55.5M constant was wrong -- it mis-scaled the curve to a
+# phantom ~8.57T endpoint instead of the true 7.770T budget.) Verified against
+# the Megatron-DeepSpeed train_aGPT_2B_*.sh TRAIN_TOKENS budgets: this constant
+# reproduces the stage boundaries at exactly iter 92,859 / 140,353 / 154,391.
+MDS_TOKENS_PER_STEP = 6144 * 8192  # 50,331,648 tok/iter (GBS 6144 x seq 8192)
 
 # olmo-mix-1124 stage-1 token target, in billions (matches plot_tokens_vs_time's
 # target_b). Used in the loss legend to report each chain's progress as a % of
 # target -- far more meaningful than a raw sample count.
 TARGET_TOKENS_B = 4670
+
+# MDS reference run's 3 pre-training stages (Megatron-DeepSpeed
+# train_aGPT_2B_{large_batch,sophiag_stage2,sophiag_stage3}.sh), by cumulative
+# token budget in billions. Stage 1 = 0->4.670T (main mix), stage 2 =
+# 4.670->7.064T (constant-LR continuation), stage 3 = 7.064->7.770T. Drawn as
+# vertical boundary lines on the loss panel.
+MDS_STAGE_BOUNDARIES_B = [
+    (4673.780, "stage 1 -> 2"),
+    (7064.156, "stage 2 -> 3"),
+    (7770.766, "stage 3 end"),
+]
 
 # Canonical per-trajectory palette — keep in sync with
 # eval/plot_evals_combined.py and per-model {2b,20b}/plot_eval_overview.py.
@@ -235,6 +252,29 @@ def _series_label(s: dict) -> str:
     return f"{s['label']}  (step {max_step:,}, {pct:.0f}% of 4.67T)"
 
 
+def _draw_stage_boundaries(ax, series: list[dict]) -> None:
+    """Draw the MDS reference run's stage boundaries as dashed verticals.
+
+    Only meaningful when the MDS curve is on this figure (its stages are what
+    the boundaries describe); no-op otherwise, so the 20B-only chart stays
+    clean. Each line gets a small rotated label near the top of the axis. A
+    boundary past the current x-limit is skipped so it never stretches the axis.
+    """
+    has_mds = any(s.get("source") == "mds" for s in series)
+    if not has_mds:
+        return
+    x_lo, x_hi = ax.get_xlim()
+    y_lo, y_hi = ax.get_ylim()
+    for tok_b, label in MDS_STAGE_BOUNDARIES_B:
+        if tok_b > x_hi:
+            continue  # boundary beyond plotted data -- don't extend the axis
+        ax.axvline(tok_b, color="0.45", linestyle=":", linewidth=1.0,
+                   alpha=0.8, zorder=1)
+        ax.text(tok_b, y_hi - 0.02 * (y_hi - y_lo), f" {label}",
+                rotation=90, va="top", ha="left", fontsize=6.5,
+                color="0.35", alpha=0.9)
+
+
 def render_figure(
     series: list[dict],
     *,
@@ -273,6 +313,11 @@ def render_figure(
     # tokens, so the early warmup spike is cropped but the full descent
     # still shows. Falls back to autoscale if data is degenerate.
     _apply_loss_ylim(ax, series)
+    # MDS reference stage boundaries (only meaningful when the MDS curve is on
+    # this figure -- i.e. the 2B/combined charts, not the 20B-only one). Draw a
+    # dashed vertical at each cumulative-token boundary with a rotated label.
+    # AFTER _apply_loss_ylim so the label y-position uses the cropped y-range.
+    _draw_stage_boundaries(ax, series)
 
     # Panel 2: TPS/GPU vs tokens
     ax = axes[1]
