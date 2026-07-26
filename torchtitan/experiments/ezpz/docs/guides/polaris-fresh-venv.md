@@ -1,72 +1,37 @@
-# Fresh, Self-Contained `.venv` on Polaris (no conda inheritance)
+# Installing PyTorch in a Fresh, Self-Contained `.venv` on Polaris
 
 > [!NOTE]
-> This guide builds a **standalone** torchtitan/ezpz environment on Polaris
-> that does NOT layer on top of a conda env: uv-managed CPython 3.12,
-> `include-system-site-packages = false`, `torch 2.13.0+cu129`, `mpi4py`
-> built from source against Cray MPICH, plus ezpz/torchtitan/blendcorpus.
-> Verified end-to-end twice from scratch: 2026-07-01 (`torch 2.12.1+cu129`)
-> and again 2026-07-26 (`torch 2.13.0+cu129`) -- venv init, the mpiexec
-> bcast regression test, ezpz self-test, and an agpt_2b training smoke all
-> green. See the Verification section. (The exact `torch` version tracks
-> whatever the cu129 index currently serves, since step 3 uses `--upgrade`;
-> both patch versions passed every gate.)
+> This guide installs PyTorch into a **standalone** torchtitan/ezpz
+> environment on Polaris that does NOT layer on top of a conda env:
+> uv-managed CPython 3.12, `include-system-site-packages = false`,
+> `torch 2.13.0+cu129`, `mpi4py` built from source against Cray MPICH, plus
+> ezpz/torchtitan/blendcorpus. Verified end-to-end from scratch twice:
+> 2026-07-01 (`torch 2.12.1+cu129`) and 2026-07-26 (`torch 2.13.0+cu129`).
+> See the [Verification](#verification) section. The exact `torch` version
+> tracks whatever the cu129 index currently serves, since step 3 uses
+> `--upgrade`; both patch versions passed every check.
+>
+> If you just want the commands, jump to
+> [All-in-one script](#all-in-one-copy-paste).
 
-## Symptom this fixes
+## Overview
 
-Running `ezpz launch python3 -m ezpz.examples.test` crashes at distributed
-init with every non-zero rank dying on:
+The install has five ordered steps:
 
-```
-master_port = int(_get_env_or_raise("MASTER_PORT"))
-ValueError: invalid literal for int() with base 10: 'None'
-```
+1. Start from a clean shell (no conda active).
+2. Create a standalone uv-managed venv.
+3. Install PyTorch from the CUDA 12.9 (`cu129`) index.
+4. Install ezpz, torchtitan, and blendcorpus.
+5. Build `mpi4py` from source against Cray MPICH -- **last**.
 
-...even though ezpz's own log line shows rank 0 computed a real port
-(`master_port=56465, world_size=4, rank=0`).
-
-## Root cause
-
-`mpi4py` was installed as a **portable PyPI binary wheel** (a
-`manylinux_2_5_x86_64`-tagged wheel that bundles its own generic MPICH)
-instead of being built against Polaris's Cray MPICH.
-
-ezpz derives the rendezvous port on rank 0 and broadcasts it to the other
-ranks with an mpi4py collective:
-
-```python
-# ezpz/distributed.py, _setup_ddp()
-free_port   = str(_get_free_port()) if rank == 0 else None
-master_port = os.environ.get("MASTER_PORT", free_port) if rank == 0 else None
-master_port = broadcast(master_port, root=0)   # <- MPI.COMM_WORLD.bcast
-os.environ["MASTER_PORT"] = str(master_port)
-```
-
-With a non-Cray mpi4py, `mpiexec`/PALS hands each process correct rank IDs
-(so rank numbering looks fine and only rank 0 has a port), but the MPI
-communicator is broken -- every process acts like its own 1-rank world.
-So `broadcast(..., root=0)` never crosses ranks: ranks 1..N-1 keep their
-local `None`, `str(None)` -> `'None'`, and torch's rendezvous chokes on
-`int('None')`.
-
-`--system-site-packages` does not save you here: the venv's own broken
-`mpi4py` wheel shadows anything in the base env, and the conda env may not
-even provide an mpi4py.
-
-## How to tell if you have the bug
-
-```bash
-cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
-```
-
-| Tag | Verdict |
-| --- | --- |
-| `cp312-cp312-linux_x86_64` | native, built on-node -- good |
-| `cp312-cp312-manylinux_*` | portable PyPI wheel -- BROKEN on Polaris |
+The ordering matters: `mpi4py` must be built from source against Polaris's
+Cray MPICH (so MPI collectives work under PALS `mpiexec`), and it must be
+installed **last** because blendcorpus (and other deps) list `mpi4py` and
+would otherwise pull a portable PyPI wheel that overwrites the native build.
 
 ---
 
-## Full recipe: fresh standalone venv
+## Step-by-step
 
 Run these from a **normal Polaris login shell** (interactive `ssh polaris`),
 so the default Cray PE modules are loaded. Substitute your own project path
@@ -115,7 +80,7 @@ uv venv --python 3.12 --python-preference only-managed --no-project .venv
 source .venv/bin/activate
 ```
 
-Verify it did NOT inherit conda:
+Confirm it is standalone (not seeded off a conda interpreter):
 
 ```bash
 grep -E "home|include-system-site-packages" .venv/pyvenv.cfg
@@ -149,19 +114,19 @@ uv pip install --no-cache --link-mode=copy --force-reinstall --upgrade \
 > pip install succeeds even without the module. Load `cuda/12.9` anyway so
 > the system CUDA matches at run time. `--upgrade` pulls the latest cu129
 > wheel, so the exact patch version drifts over time: 2026-07-01 resolved to
-> `2.12.1+cu129`, 2026-07-26 to `2.13.0+cu129`. Both passed every gate. Pin
-> a specific version (`torch==2.13.0`) if you need reproducibility.
+> `2.12.1+cu129`, 2026-07-26 to `2.13.0+cu129`. Pin a specific version
+> (`torch==2.13.0`) if you need reproducibility.
 
 ### 4. Install ezpz, torchtitan, and blendcorpus
 
 > [!IMPORTANT]
 > Install everything that depends on `mpi4py` **before** the mpi4py source
 > build in step 5. `blendcorpus` (and others) list `mpi4py` as a dependency,
-> so `uv pip install` will pull in the portable PyPI wheel and silently
-> overwrite a native build. Do the mpi4py source build **last** so nothing
-> clobbers it. (Symptom if you get the order wrong:
+> so `uv pip install` will pull in the portable PyPI wheel; the source build
+> in step 5 then replaces it. Doing it in this order keeps the native build
+> in place. (If a later install pulls the portable wheel back in, you get
 > `RuntimeError: cannot load MPI library` / `libmpi.so.12: cannot open
-> shared object file` at import -- that is the portable wheel.)
+> shared object file` at import -- rerun step 5.)
 
 ```bash
 # ezpz (editable from git)
@@ -177,16 +142,15 @@ uv pip install --no-cache --link-mode=copy \
     "git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed"
 ```
 
-### 5. Build `mpi4py` from source against Cray MPICH (THE fix) -- do this LAST
+### 5. Build `mpi4py` from source against Cray MPICH -- do this LAST
 
 > [!IMPORTANT]
 > Switch to the **GNU** programming environment first. Polaris defaults to
 > `PrgEnv-nvidia`, which makes `cc` wrap the NVIDIA HPC compiler (`nvc`).
 > The uv-managed CPython was built with GCC, so its `sysconfig` CFLAGS
 > include GCC-only flags (`-fno-strict-overflow`, `-Wunreachable-code`)
-> that `nvc` rejects -- the mpi4py build then dies with
-> `nvc-Error-Unknown switch: -fno-strict-overflow` /
-> `error: Cannot compile MPI programs`. `PrgEnv-gnu` makes `cc` wrap
+> that `nvc` rejects (`nvc-Error-Unknown switch: -fno-strict-overflow` /
+> `error: Cannot compile MPI programs`). `PrgEnv-gnu` makes `cc` wrap
 > `gcc`, which accepts those flags.
 
 ```bash
@@ -200,7 +164,7 @@ MPICC=cc uv pip install --no-cache --no-binary mpi4py --force-reinstall mpi4py
 - `--no-binary mpi4py` forces a source build (no portable wheel).
 - `MPICC=cc` links it against the Cray MPICH compiler wrapper.
 
-Confirm `cc` is GCC, then build. Verify it built native and imports:
+Confirm `cc` is GCC and mpi4py built native:
 
 ```bash
 cc --version | head -1     # -> gcc-14 (SUSE Linux) 14.3.0
@@ -208,6 +172,10 @@ cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
 # WANT: Tag: cp312-cp312-linux_x86_64  (NOT manylinux)
 python3 -c "from mpi4py import MPI; print('mpi4py OK', MPI.COMM_WORLD.rank)"
 ```
+
+A native mpi4py has a `cp312-cp312-linux_x86_64` wheel tag; a portable PyPI
+wheel is `cp312-cp312-manylinux_*` (that one does not work with Cray MPICH
+under PALS `mpiexec`).
 
 ### 6. Download tokenizer assets (if training)
 
@@ -217,37 +185,34 @@ python3 scripts/download_hf_assets.py --repo_id google/gemma-7b --assets tokeniz
 
 ---
 
-## Verify the fix
+## Verify
 
-### 6a. Confirm the MPI collective actually crosses ranks
+Run these on a **compute node** (grab a debug allocation first:
+`qsub -I -A <acct> -q debug -l select=1 -l walltime=00:30:00
+-l filesystems=home:eagle`) with the same environment active
+(`source .venv/bin/activate && module load cuda/12.9 &&
+module swap PrgEnv-nvidia PrgEnv-gnu`).
 
-This is the exact operation that was broken. Run it on a **compute node**
-(grab a debug allocation first: `qsub -I -A <acct> -q debug -l select=1
--l walltime=00:30:00 -l filesystems=home:eagle`) with the same environment
-active (`source .venv/bin/activate && module load cuda/12.9 &&
-module swap PrgEnv-nvidia PrgEnv-gnu`):
+### a. MPI collective crosses ranks
 
 ```bash
 mpiexec -n 4 --ppn 4 python3 -c \
   "from mpi4py import MPI; c=MPI.COMM_WORLD; print(c.rank, c.bcast(56465 if c.rank==0 else None, root=0))"
 ```
 
-- **Fixed:** all 4 ranks print `56465`.
-- **Still broken:** only rank 0 prints `56465`; the rest print `None`
-  (that is the `MASTER_PORT='None'` bug).
+All 4 ranks should print `56465` (a portable-wheel mpi4py prints `56465` on
+rank 0 and `None` on the rest, because its communicator does not cross
+processes under PALS).
 
-### 6b. End-to-end (ezpz self-test)
+### b. ezpz self-test
 
 ```bash
 ezpz launch python3 -m ezpz.examples.test
 ```
 
-Should get past `init_process_group` and run to completion.
+Should get past `init_process_group` and run to completion (exit 0).
 
-### 6c. End-to-end (agpt training smoke)
-
-Exercises the full torchtitan + blendcorpus path -- this is what catches a
-clobbered mpi4py or a missing dataloader dep:
+### c. agpt training smoke (full torchtitan + blendcorpus path)
 
 ```bash
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
@@ -266,44 +231,82 @@ Should build the blendcorpus index and log training steps, ending in
 
 | Step | Reason |
 | --- | --- |
-| `conda deactivate` first | Prevents `uv` from seeding the venv off a conda interpreter (the original mistake) |
+| `conda deactivate` first | Prevents `uv` from seeding the venv off a conda interpreter |
 | `--python-preference only-managed` | Guarantees a standalone CPython, never conda's |
 | no `--system-site-packages` | Nothing from a base env can shadow or leak in |
 | `module swap PrgEnv-nvidia PrgEnv-gnu` | Makes `cc` wrap `gcc` (not `nvc`), so mpi4py's GCC-built CPython CFLAGS compile |
-| mpi4py built **last**, after blendcorpus | blendcorpus depends on mpi4py; installing it after would pull the portable wheel and clobber the native build (`cannot load MPI library`) |
-| `MPICC=cc --no-binary mpi4py` | Compiles against `cray-mpich/9.0.1` so `bcast` actually works under PALS `mpiexec` |
+| mpi4py built **last**, after blendcorpus | blendcorpus depends on mpi4py; installing it after would pull the portable wheel over the native build |
+| `MPICC=cc --no-binary mpi4py` | Compiles against `cray-mpich/9.0.1` so MPI collectives work under PALS `mpiexec` |
 | blendcorpus `@feat/remove-deepspeed` | agpt/moe default to `--dataloader.dataset blendcorpus`; the remove-deepspeed branch drops the unused `deepspeed` transitive import |
 | `cuda/12.9` + torch from the `cu129` index | Matches the system CUDA 12.9 toolkit with the cu129 wheels |
 
 > [!WARNING]
-> Do NOT later run a bare `uv pip install mpi4py` (or a `uv sync` /
-> lockfile resolve) without the `MPICC=cc --no-binary mpi4py` flags -- it
-> will silently swap the native build back to the portable wheel and
-> reintroduce this exact bug.
+> A later bare `uv pip install mpi4py` (or a `uv sync` / lockfile resolve)
+> without the `MPICC=cc --no-binary mpi4py` flags will swap the native build
+> back to the portable wheel. Rerun step 5 if that happens.
 
-## Reference: known-good venv this produces
+---
 
-This exact recipe was run from scratch and produced a working venv twice
-(job 7232069 on 2026-07-01, job 7295306 on 2026-07-26 -- see the
-Verification section below for captured output from both):
+## All-in-one (copy/paste)
 
-- `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
-- `torch 2.13.0+cu129` (2026-07-26; was `2.12.1+cu129` on 2026-07-01 -- see
-  the `--upgrade` note in step 3)
-- `mpi4py 4.1.2`, native `cp312-cp312-linux_x86_64` tag (built from source
-  against Cray MPICH under `PrgEnv-gnu`, **last**, so nothing clobbers it)
-- `ezpz` editable from `github.com/saforem2/ezpz`
-- `blendcorpus` from `github.com/saforem2/blendcorpus@feat/remove-deepspeed`
-  (no `deepspeed` dep)
+Run from a fresh Polaris login shell, with `PROJDIR` pointing at your
+torchtitan checkout. Steps 1-5 run on the login node; run the
+[verification](#verify) commands afterward from a debug compute-node
+allocation.
 
-## Verification
+```bash
+# --- config ---
+export PROJDIR="/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan"   # <- your checkout
 
-This recipe was run end-to-end from scratch in an isolated directory
+# --- proxy (required for any download on Polaris) ---
+export http_proxy="http://proxy.alcf.anl.gov:3128"
+export https_proxy="http://proxy.alcf.anl.gov:3128"
+export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.anl.gov"
+
+# --- 1. clean shell + Cray PE ---
+conda deactivate 2>/dev/null; conda deactivate 2>/dev/null
+module load craype cray-mpich PrgEnv-nvidia
+
+# --- 2. standalone uv venv (no conda, no system site-packages) ---
+cd "$PROJDIR"
+uv venv --python 3.12 --python-preference only-managed --no-project .venv
+source .venv/bin/activate
+grep -E "home|include-system-site-packages" .venv/pyvenv.cfg   # sanity check
+
+# --- 3. PyTorch (cu129) ---
+module load cuda/12.9
+uv pip install --no-cache --link-mode=copy --force-reinstall --upgrade \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu129
+
+# --- 4. ezpz + torchtitan + blendcorpus (all mpi4py-dependent -> BEFORE step 5) ---
+uv pip install --no-cache --link-mode=copy "git+https://github.com/saforem2/ezpz.git"
+uv pip install --no-cache --link-mode=copy -e .
+uv pip install --no-cache --link-mode=copy \
+    "git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed"
+
+# --- 5. mpi4py from source against Cray MPICH -- LAST, under PrgEnv-gnu ---
+module swap PrgEnv-nvidia PrgEnv-gnu
+MPICC=cc uv pip install --no-cache --no-binary mpi4py --force-reinstall mpi4py
+
+# --- 6. tokenizer assets (if training) ---
+python3 scripts/download_hf_assets.py --repo_id google/gemma-7b --assets tokenizer
+
+# --- sanity ---
+python3 -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
+python3 -c "from mpi4py import MPI; print('mpi4py OK', MPI.COMM_WORLD.rank)"
+```
+
+---
+
+## Verification (captured output)
+
+### 2026-07-01 -- `torch 2.12.1+cu129`
+
+Run from scratch in an isolated directory
 (`/eagle/AuroraGPT/foremans/tmp/venv-verify-20260701`) on a Polaris compute
-node on 2026-07-01 (job 7232069, node x3001c0s19b1n0). Actual captured
-output below.
-
-### Environment produced
+node (job 7232069, node x3001c0s19b1n0).
 
 ```console
 $ grep -E "home|include-system-site-packages" .venv/pyvenv.cfg
@@ -315,67 +318,34 @@ torch 2.12.1+cu129
 
 $ cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
 Tag: cp312-cp312-linux_x86_64        # native build, NOT manylinux
-```
 
-### Step 6a -- mpiexec bcast (the regression test)
-
-```console
+# a. mpiexec bcast
 $ mpiexec -n 4 --ppn 4 python3 -c \
     "from mpi4py import MPI; c=MPI.COMM_WORLD; print(c.rank, c.bcast(56465 if c.rank==0 else None, root=0))"
 0 56465
 1 56465
 2 56465
 3 56465
-```
 
-All 4 ranks return `56465` (the broken portable-wheel install prints `56465`
-on rank 0 and `None` on the rest).
-
-### Step 6b -- `ezpz launch python3 -m ezpz.examples.test`
-
-```console
+# b. ezpz self-test
 [I][ezpz/launch:855] Job ID: 7232069
-[I][ezpz/launch:856] nodelist: ['x3001c0s19b1n0']
-[I][ezpz/distributed:1755:_setup_ddp] init_process_group: master_addr=x3001c0s19b1n0.hsn.cm.polaris.alcf.anl.gov, master_port=47949, world_size=4, rank=0, backend=nccl, timeout=1:00:00
-[I][examples/test:403:train_step] iter=10   loss=1.042641 accuracy=0.703125
-[I][examples/test:403:train_step] iter=50   loss=0.354128 accuracy=0.875000
-[I][examples/test:403:train_step] iter=100  loss=0.276477 accuracy=0.898438
+[I][ezpz/distributed:1755:_setup_ddp] init_process_group: master_addr=x3001c0s19b1n0.hsn.cm.polaris.alcf.anl.gov, master_port=47949, world_size=4, rank=0, backend=nccl
 [I][examples/test:403:train_step] iter=150  loss=0.179395 accuracy=0.945312
 [I][ezpz/launch:913] Execution finished with 0.
-```
 
-Gets past `init_process_group` with a real `master_port=47949` on all ranks
-(no `MASTER_PORT='None'`), trains cleanly, and exits 0.
-
-### Step 6c -- agpt_2b training smoke (full torchtitan + blendcorpus path)
-
-```console
-$ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
-    --module=ezpz.agpt --config=agpt_2b --checkpoint.no-enable \
-    --training.local-batch-size=1 --training.seq-len=8192 --training.steps=5
+# c. agpt_2b training smoke
 [I][blendcorpus/blendcorpus_builder:311] Using BlendCorpus dataloader backend
 [I][components/metrics:523] step: 1  loss: 12.94838  grad_norm:  1.9474  memory: 23.57GiB(59.68%)  tps: 172     mfu: 0.62%
-[I][components/metrics:523] step: 2  loss: 12.86991  grad_norm:  5.3677  memory: 27.48GiB(69.59%)  tps: 13,801  mfu: 49.49%
-[I][components/metrics:523] step: 3  loss: 16.68076  grad_norm: 45.1054  memory: 27.48GiB(69.59%)  tps: 15,426  mfu: 55.32%
-[I][components/metrics:523] step: 4  loss: 16.80319  grad_norm: 43.6638  memory: 27.48GiB(69.59%)  tps: 16,003  mfu: 57.39%
 [I][components/metrics:523] step: 5  loss: 13.54631  grad_norm: 30.9798  memory: 27.48GiB(69.59%)  tps: 15,926  mfu: 57.11%
 [I][ezpz/launch:913] Execution finished with 0.
 ```
 
-Builds the blendcorpus index and runs training steps to `Execution finished
-with 0` (~57% MFU on A100 at this small config). This is the step that caught
-(a) blendcorpus missing, (b) the `deepspeed` transitive dep, and (c) the
-mpi4py wheel clobber -- see the install-order warning in step 4.
+### 2026-07-26 -- `torch 2.13.0+cu129`
 
----
-
-## Re-verification 2026-07-26 (torch 2.13.0+cu129)
-
-The full recipe was re-run from scratch in a fresh isolated directory
+Same recipe re-run from scratch in a fresh isolated directory
 (`/eagle/AuroraGPT/foremans/tmp/venv-verify-20260726`) on a Polaris debug
-compute node on 2026-07-26 (job 7295306, node x3002c0s7b0n0). Same recipe,
-still green -- the only change is `torch` resolving to a newer patch
-(`2.13.0+cu129`, since step 3 uses `--upgrade`).
+compute node (job 7295306, node x3002c0s7b0n0). Only change is `torch`
+resolving to a newer patch (`--upgrade`).
 
 ```console
 $ grep -E "home|include-system-site-packages" .venv/pyvenv.cfg
@@ -391,7 +361,7 @@ Tag: cp312-cp312-linux_x86_64        # native build, NOT manylinux
 $ cc --version | head -1
 gcc-14 (SUSE Linux) 14.3.0
 
-# Gate 6a -- mpiexec bcast (the regression test)
+# a. mpiexec bcast
 $ mpiexec -n 4 --ppn 4 python3 -c \
     "from mpi4py import MPI; c=MPI.COMM_WORLD; print(c.rank, c.bcast(56465 if c.rank==0 else None, root=0))"
 0 56465
@@ -399,13 +369,9 @@ $ mpiexec -n 4 --ppn 4 python3 -c \
 2 56465
 3 56465
 
-# Gate 6b -- ezpz self-test
+# b. ezpz self-test
 [I][ezpz/launch:917:launch] Execution finished with 0.
 
-# Gate 6c -- agpt_2b training smoke (full torchtitan + blendcorpus path)
+# c. agpt_2b training smoke
 [I][ezpz/launch:917:launch] Execution finished with 0.
 ```
-
-All three gates pass on the fresh 2026-07-26 build (mpiexec bcast crosses
-all 4 ranks, ezpz self-test and the agpt_2b smoke both exit 0), confirming
-the recipe still works end-to-end with the current cu129 wheel.
