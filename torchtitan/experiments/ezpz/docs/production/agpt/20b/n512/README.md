@@ -1,6 +1,6 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-07-24
+> **Last updated:** 2026-07-26
 >
 > **This is the canonical 20B production chain.**
 >
@@ -83,11 +83,11 @@
 | [`8638793`](#log-8638793) | 2026-07-05 | 12h | 4,400 -> **5,109** | (reload blip 6.03) -> **2.54** | ~365 | ~18.2% | **Native `ezpz launch --auto-retry` relaunch** (torch 2.13 venv, ezpz 0.21.3). Resumed cleanly from step-4,400 after the legacy sync chain stalled; ran to step-5,109. step-4,500..5,100 persisted every 100. First forward progress in ~25 days. |
 | [`8638795`](#log-8638795) | 2026-07-07 | 12h | 5,100 -> **5,400** | 2.52 -> **2.47** | ~376 | ~18.7% | **`afterany` continuation** of 8638793 (native auto-retry). step-5,200..5,400 persisted. Advanced during the multi-umbrella queue wait (umbrella 8648363 never won a slot; this standalone carried the chain). |
 
-**Latest checkpoint:** step-6,050 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
+**Latest checkpoint:** step-6,100 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
 
-**Cumulative steps:** 6,050
+**Cumulative steps:** 6,100
 
-**Tokens consumed:** 6,050 × 12,288 × 8,192 = **609.0B tokens** (13.0% of 4.67T target)
+**Tokens consumed:** 6,100 × 12,288 × 8,192 = **614.0B tokens** (13.1% of 4.67T target)
 
 ### Recovery
 
