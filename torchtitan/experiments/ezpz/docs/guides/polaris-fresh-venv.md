@@ -3,10 +3,14 @@
 > [!NOTE]
 > This guide builds a **standalone** torchtitan/ezpz environment on Polaris
 > that does NOT layer on top of a conda env: uv-managed CPython 3.12,
-> `include-system-site-packages = false`, `torch 2.12.1+cu129`, `mpi4py`
+> `include-system-site-packages = false`, `torch 2.13.0+cu129`, `mpi4py`
 > built from source against Cray MPICH, plus ezpz/torchtitan/blendcorpus.
-> Verified end-to-end on 2026-07-01 (venv init, ezpz self-test, and an
-> agpt_2b training smoke -- see the Verification section).
+> Verified end-to-end twice from scratch: 2026-07-01 (`torch 2.12.1+cu129`)
+> and again 2026-07-26 (`torch 2.13.0+cu129`) -- venv init, the mpiexec
+> bcast regression test, ezpz self-test, and an agpt_2b training smoke all
+> green. See the Verification section. (The exact `torch` version tracks
+> whatever the cu129 index currently serves, since step 3 uses `--upgrade`;
+> both patch versions passed every gate.)
 
 ## Symptom this fixes
 
@@ -143,8 +147,10 @@ uv pip install --no-cache --link-mode=copy --force-reinstall --upgrade \
 > [!NOTE]
 > The cu129 wheels bundle their own CUDA runtime (`nvidia-*-cu12`), so the
 > pip install succeeds even without the module. Load `cuda/12.9` anyway so
-> the system CUDA matches at run time. (Verified 2026-07-01: torch resolves
-> to `2.12.1+cu129`.)
+> the system CUDA matches at run time. `--upgrade` pulls the latest cu129
+> wheel, so the exact patch version drifts over time: 2026-07-01 resolved to
+> `2.12.1+cu129`, 2026-07-26 to `2.13.0+cu129`. Both passed every gate. Pin
+> a specific version (`torch==2.13.0`) if you need reproducibility.
 
 ### 4. Install ezpz, torchtitan, and blendcorpus
 
@@ -277,12 +283,13 @@ Should build the blendcorpus index and log training steps, ending in
 
 ## Reference: known-good venv this produces
 
-This exact recipe was run from scratch and produced a working venv on
-2026-07-01 (job 7232069, node x3001c0s19b1n0 -- see the Verification section
-above for captured output):
+This exact recipe was run from scratch and produced a working venv twice
+(job 7232069 on 2026-07-01, job 7295306 on 2026-07-26 -- see the
+Verification section below for captured output from both):
 
 - `pyvenv.cfg`: uv-managed CPython 3.12.10, `include-system-site-packages = false`
-- `torch 2.12.1+cu129`
+- `torch 2.13.0+cu129` (2026-07-26; was `2.12.1+cu129` on 2026-07-01 -- see
+  the `--upgrade` note in step 3)
 - `mpi4py 4.1.2`, native `cp312-cp312-linux_x86_64` tag (built from source
   against Cray MPICH under `PrgEnv-gnu`, **last**, so nothing clobbers it)
 - `ezpz` editable from `github.com/saforem2/ezpz`
@@ -359,3 +366,46 @@ Builds the blendcorpus index and runs training steps to `Execution finished
 with 0` (~57% MFU on A100 at this small config). This is the step that caught
 (a) blendcorpus missing, (b) the `deepspeed` transitive dep, and (c) the
 mpi4py wheel clobber -- see the install-order warning in step 4.
+
+---
+
+## Re-verification 2026-07-26 (torch 2.13.0+cu129)
+
+The full recipe was re-run from scratch in a fresh isolated directory
+(`/eagle/AuroraGPT/foremans/tmp/venv-verify-20260726`) on a Polaris debug
+compute node on 2026-07-26 (job 7295306, node x3002c0s7b0n0). Same recipe,
+still green -- the only change is `torch` resolving to a newer patch
+(`2.13.0+cu129`, since step 3 uses `--upgrade`).
+
+```console
+$ grep -E "home|include-system-site-packages" .venv/pyvenv.cfg
+home = /home/foremans/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/bin
+include-system-site-packages = false
+
+$ python3 -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+torch 2.13.0+cu129 cuda 12.9
+
+$ cat .venv/lib/python3.12/site-packages/mpi4py-*.dist-info/WHEEL | grep Tag
+Tag: cp312-cp312-linux_x86_64        # native build, NOT manylinux
+
+$ cc --version | head -1
+gcc-14 (SUSE Linux) 14.3.0
+
+# Gate 6a -- mpiexec bcast (the regression test)
+$ mpiexec -n 4 --ppn 4 python3 -c \
+    "from mpi4py import MPI; c=MPI.COMM_WORLD; print(c.rank, c.bcast(56465 if c.rank==0 else None, root=0))"
+0 56465
+1 56465
+2 56465
+3 56465
+
+# Gate 6b -- ezpz self-test
+[I][ezpz/launch:917:launch] Execution finished with 0.
+
+# Gate 6c -- agpt_2b training smoke (full torchtitan + blendcorpus path)
+[I][ezpz/launch:917:launch] Execution finished with 0.
+```
+
+All three gates pass on the fresh 2026-07-26 build (mpiexec bcast crosses
+all 4 ranks, ezpz self-test and the agpt_2b smoke both exit 0), confirming
+the recipe still works end-to-end with the current cu129 wheel.
