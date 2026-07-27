@@ -287,6 +287,73 @@ def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def _set_moe_compute_backend(spec, backend: str) -> None:
+    # Set the expert compute_backend on every MoE layer's inner_experts
+    # config in a built ModelSpec. model_registry() does not expose a
+    # compute_backend arg, and it lives on EzpzGroupedExperts.Config
+    # (routed_experts.inner_experts), so set it here post-build. Setting an
+    # explicit value also survives model.py's grouped_mm->for_loop rewrite,
+    # which only fires when compute_backend == "grouped_mm".
+    for layer_cfg in spec.model.layers:
+        if layer_cfg.moe is not None:
+            layer_cfg.moe.routed_experts.inner_experts.compute_backend = backend
+
+
+def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
+    # EP=1 bmm-expert-backend variant of moe_10b_2b_sdpa. Selects the
+    # batched-bmm expert compute (padded (E, cap, D) -> 3 torch.bmm) instead
+    # of the serial for_loop that grouped_mm auto-falls-back to on XPU.
+    cfg = moe_10b_2b_sdpa()
+    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model_spec, "bmm")
+    return cfg
+
+
+""
+def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
+    # for_loop experts + hybridep comm backend (dispatch/compute overlap) at EP=12.
+    cfg = moe_10b_2b_sdpa()
+    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="hybridep")
+    cfg.parallelism.expert_parallel_degree = 12
+    return cfg
+
+
+def _bmm_ep_cf(cf: float) -> FaultTolerantTrainer.Config:
+    # bmm EP=12 with an explicit capacity_factor, for the throughput sweep.
+    cfg = moe_10b_2b_sdpa()
+    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    for layer_cfg in cfg.model_spec.model.layers:
+        if layer_cfg.moe is not None:
+            ie = layer_cfg.moe.routed_experts.inner_experts
+            ie.compute_backend = "bmm"
+            ie.capacity_factor = cf
+    cfg.parallelism.expert_parallel_degree = 12
+    return cfg
+
+
+def moe_10b_2b_sdpa_bmm_ep_cf100() -> FaultTolerantTrainer.Config:
+    return _bmm_ep_cf(1.0)
+
+
+def moe_10b_2b_sdpa_bmm_ep_cf075() -> FaultTolerantTrainer.Config:
+    return _bmm_ep_cf(0.75)
+
+
+def moe_10b_2b_sdpa_bmm_ep_cf050() -> FaultTolerantTrainer.Config:
+    return _bmm_ep_cf(0.5)
+
+
+def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
+    # EP=12 bmm variant (expert-parallel + batched-bmm compute). Pair with
+    # `activation-checkpoint:none` on the CLI, since EP>1 selective-AC
+    # recompute of the expert all_to_all aborts on the frameworks RC torch.
+    cfg = moe_10b_2b_sdpa()
+    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model_spec, "bmm")
+    cfg.parallelism.expert_parallel_degree = 12
+    return cfg
+
+
 def moe_2b_ep() -> FaultTolerantTrainer.Config:
     """EP=2 variant of moe_2b.
 
