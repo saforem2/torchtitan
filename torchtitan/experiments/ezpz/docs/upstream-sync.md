@@ -1,5 +1,26 @@
 # Upstream Sync Log
 
+## 2026-07-27 -- 71st sync (4 commits, `725b995d3..upstream/main`, merge `e0c9c615e`)
+
+Merged `upstream/main` into `ezpz` (merge commit `e0c9c615e`), 4 upstream commits
+since the 70th sync. No conflicts. Files touched vs ezpz-relevant paths:
+- `d24ae4031` Qwen 3.5 Varlen Attention (#3801) -- touches shared
+  `models/common/attention.py` (+34) but ONLY the varlen/document-masking path
+  (`VarlenMetadata`, `create_varlen_metadata_for_document`): adds an OPTIONAL
+  `include_host_offsets` param (default False). The `ScaledDotProductAttention`
+  SDPA/flash path agpt+moe use is UNTOUCHED (verified: empty diff on the SDPA
+  class). No agpt/moe replay needed.
+- `4c6481182` [cp] PTRR load balancer mask-from-dict (#3972) -- `distributed/
+  context_parallel.py`; we use pure FSDP (no CP), no impact.
+- `fd2776584` [rl] window FIFO scheduling (#3927) + `c30a80008` [rl] fix rl tests
+  (#3981) -- `experiments/rl/` engine + tests. The ezpz RL overlay drives this
+  engine; nice-to-have (window FIFO) when GRPO resumes, no replay needed now.
+Also minor +lines in `components/loss.py`, `config/configs.py`, `trainer.py`,
+`components/validate.py` (upstream plumbing; syntax-checked clean, agpt/moe build
+unaffected). NOTE: components/loss.py touched here -- keep in mind for the planned
+ezpz z-loss addition (rebase that onto the merged loss.py).
+
+
 Tracks changes merged from `upstream/main` (pytorch/torchtitan) into the `ezpz`
 branch, and any modifications required to keep `experiments/ezpz/{agpt,moe,qwen3}`
 compatible.
