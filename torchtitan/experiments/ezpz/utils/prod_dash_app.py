@@ -17,8 +17,9 @@ installed, ``prod_dash.py --app`` falls back to the text board.
 
 Keys: q quit | r refresh | x step<->tokens x-axis | a show-all experiments |
 b/c board/charts pane | t focus run-toggles | T hide/show the run panel |
-z cycle zoom | Z/0 reset zoom | left/right (or the tab bar) switch metric |
-space (in the run list) toggle a run.
+z fit the highlighted run (x+y) | Z/0 reset view | p pan/zoom mode |
++/- zoom x in/out | h/l pan left/right | X set xlim | Y set ylim |
+left/right (or the tab bar) switch metric | space (in the run list) toggle a run.
 """
 from __future__ import annotations
 
@@ -27,9 +28,10 @@ import os
 import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import (
-    Footer, Header, RichLog, Static, Tabs, Tab, TabbedContent, TabPane,
+    Footer, Header, Input, RichLog, Static, Tabs, Tab, TabbedContent, TabPane,
     SelectionList,
 )
 from textual.widgets.selection_list import Selection
@@ -87,24 +89,34 @@ class ProdDashApp(App):
     #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }
     #log { height: 6; display: none; dock: bottom; }
     #log.building { display: block; }
+    #axinput { dock: bottom; display: none; }
+    #axinput.active { display: block; }
     """
+    # priority=True so these app-level keys fire even when a focused child widget
+    # (the SelectionList or the scrollable PlotextPlot) would otherwise consume
+    # them. Capital X/Y are shift-bindings; keep them priority so they reach us.
     BINDINGS = [
-        ("q", "quit", "quit"),
-        ("r", "refresh", "refresh"),
-        ("x", "toggle_xaxis", "step/tokens"),
-        ("a", "toggle_all", "show-all"),
-        ("b", "show_board", "board"),
-        ("c", "show_charts", "charts"),
-        ("t", "focus_runs", "focus runs"),
-        ("T", "toggle_runs_panel", "hide/show runs"),
-        ("z", "cycle_zoom", "zoom"),
-        ("Z", "reset_zoom", "reset zoom"),
-        ("0", "reset_zoom", "reset zoom"),
+        Binding("q", "quit", "quit", priority=True),
+        Binding("r", "refresh", "refresh", priority=True),
+        Binding("x", "toggle_xaxis", "step/tokens", priority=True),
+        Binding("a", "toggle_all", "show-all", priority=True),
+        Binding("b", "show_board", "board", priority=True),
+        Binding("c", "show_charts", "charts", priority=True),
+        Binding("t", "focus_runs", "focus runs", priority=True),
+        Binding("T", "toggle_runs_panel", "hide/show runs", priority=True),
+        Binding("z", "focus_selected", "focus run", priority=True),
+        Binding("Z", "reset_view", "reset view", priority=True),
+        Binding("0", "reset_view", "reset view", priority=True),
+        Binding("p", "pan_zoom_mode", "pan/zoom", priority=True),
+        Binding("X", "set_xlim", "set xlim", priority=True),
+        Binding("Y", "set_ylim", "set ylim", priority=True),
+        # pan/zoom controls:
+        Binding("plus", "zoom_in", "zoom in", priority=True),
+        Binding("equals_sign", "zoom_in", show=False, priority=True),
+        Binding("minus", "zoom_out", "zoom out", priority=True),
+        Binding("h", "pan_left", "pan left", priority=True),
+        Binding("l", "pan_right", "pan right", priority=True),
     ]
-
-    # zoom presets over the x-range (fraction of the full token/step span kept,
-    # anchored at the right/newest end). None = full range (autoscale).
-    _ZOOMS = [None, 0.5, 0.25, 0.1]
 
     def __init__(self):
         super().__init__()
@@ -113,9 +125,15 @@ class ProdDashApp(App):
         self.payload = {"chains": {}}
         self._fresh_kicked = False
         self._hidden = set()      # chain keys toggled OFF
-        self._zoom_i = 0          # index into _ZOOMS (0 = full)
         self._runs_built = False  # whether the SelectionList is populated yet
         self._runs_panel_hidden = False  # whole run-toggle panel collapsed
+        # view state: explicit axis limits (None,None = autoscale on that axis).
+        # xlim clips data in python (plotext xlim IndexErrors when a series has 0
+        # points in-window); ylim uses plt.ylim (verified crash-safe). Focus-run
+        # and pan/zoom just compute + set these limits.
+        self._xlim = (None, None)
+        self._ylim = (None, None)
+        self._focus_key = None     # chain key the view is fitted to, or None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -128,6 +146,7 @@ class ProdDashApp(App):
                     yield PlotextPlot(id="chart")
             with TabPane("Board", id="pane-board"):
                 yield Static("(loading ...)", id="board")
+        yield Input(id="axinput")
         yield RichLog(id="log", highlight=False, markup=False, wrap=True)
         yield Footer()
 
@@ -250,12 +269,8 @@ class ProdDashApp(App):
             or (kc[1].get("log_age") is not None
                 and kc[1]["log_age"] <= pd.LIVE_WINDOW)))
 
-        # Pass 1: gather each visible chain's (xs, ys) to find the global x-span
-        # for the zoom window. We CLIP in python (not plt.xlim) -- plotext's
-        # build_plot IndexErrors when a series has 0 points inside an xlim.
+        # Pass 1: gather each visible chain's (xs, ys).
         prepped = []
-        xmax = None
-        xmin = None
         for key, c in live_last:
             if key in self._hidden:
                 continue
@@ -264,22 +279,28 @@ class ProdDashApp(App):
                 continue
             xs, ys, is_live = got
             prepped.append((key, c, xs, ys, is_live))
-            lo, hi = min(xs), max(xs)
-            xmin = lo if xmin is None else min(xmin, lo)
-            xmax = hi if xmax is None else max(xmax, hi)
 
-        zoom = self._ZOOMS[self._zoom_i]
-        x_lo = None
-        if zoom is not None and xmin is not None and xmax > xmin:
-            x_lo = xmax - (xmax - xmin) * zoom  # keep the rightmost fraction
-
-        # Pass 2: plot, clipping each chain to [x_lo, xmax] when zoomed.
+        xlo, xhi = self._xlim
+        ylo, yhi = self._ylim
+        # Pass 2: plot. BOTH x- and y-limits are applied by CLIPPING in python,
+        # not via plt.xlim/plt.ylim -- plotext's build_plot IndexErrors in its
+        # legend loop whenever a plotted series has 0 points inside the limit
+        # window (confirmed for both axes). Clipping + skipping empty series
+        # sidesteps it entirely; the axes then autoscale to the surviving points,
+        # which visually equals the requested window.
+        xL = xlo if xlo is not None else float("-inf")
+        xH = xhi if xhi is not None else float("inf")
+        yL = ylo if ylo is not None else float("-inf")
+        yH = yhi if yhi is not None else float("inf")
+        clip = (xlo is not None or xhi is not None
+                or ylo is not None or yhi is not None)
         drawn = 0
         for key, c, xs, ys, is_live in prepped:
-            if x_lo is not None:
-                pts = [(x, y) for x, y in zip(xs, ys) if x >= x_lo]
+            if clip:
+                pts = [(x, y) for x, y in zip(xs, ys)
+                       if xL <= x <= xH and yL <= y <= yH]
                 if len(pts) < 2:
-                    continue  # nothing (or a single point) in the zoom window
+                    continue  # nothing (or a single point) in the window
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             color = self._color_for(key)
@@ -293,13 +314,25 @@ class ProdDashApp(App):
             drawn += 1
 
         axis_label = dict(METRICS)[self.metric]
-        zlabel = "" if zoom is None else "  [zoom %g%%]" % (zoom * 100)
-        plt.title("AuroraGPT production -- %s%s%s" % (
-            axis_label, "" if drawn else "  (no data)", zlabel))
+        tags = []
+        if self._focus_key is not None:
+            tags.append("focus: %s" % self._focus_key)
+        if xlo is not None or xhi is not None:
+            tags.append("x[%s,%s]" % (self._fmt(xlo), self._fmt(xhi)))
+        if ylo is not None or yhi is not None:
+            tags.append("y[%s,%s]" % (self._fmt(ylo), self._fmt(yhi)))
+        if not drawn:
+            tags.append("no data")
+        suffix = ("  [" + " ".join(tags) + "]") if tags else ""
+        plt.title("AuroraGPT production -- %s%s" % (axis_label, suffix))
         plt.xlabel("tokens seen (billions)" if self.xaxis == "tokens"
                    else "training step (cumulative)")
         plt.ylabel(axis_label)
         widget.refresh()
+
+    @staticmethod
+    def _fmt(v):
+        return "auto" if v is None else ("%g" % v)
 
     # ---- actions ----
     def action_refresh(self) -> None:
@@ -336,13 +369,167 @@ class ProdDashApp(App):
             self.query_one("#chart", PlotextPlot).focus()
         self._redraw()  # chart reflows to the reclaimed width
 
-    def action_cycle_zoom(self) -> None:
-        self._zoom_i = (self._zoom_i + 1) % len(self._ZOOMS)
+    # ---- view: focus one run, pan/zoom, explicit limits ----
+    def _selected_key(self):
+        """The chain key highlighted in the run list (for focus-run), or the
+        first visible chain if the list has no highlight yet."""
+        sl = self.query_one("#runs", SelectionList)
+        try:
+            opt = sl.get_option_at_index(sl.highlighted)
+            if opt is not None:
+                return opt.value
+        except Exception:
+            pass
+        vis = [k for k, _ in self._chain_order() if k not in self._hidden]
+        return vis[0] if vis else None
+
+    def _chain_extent(self, key):
+        """(xmin,xmax,ymin,ymax) of one chain on the current metric+x-axis."""
+        c = self.payload.get("chains", {}).get(key)
+        if not c:
+            return None
+        got = self._series_xy(key, c)
+        if got is None:
+            return None
+        xs, ys, _ = got
+        return min(xs), max(xs), min(ys), max(ys)
+
+    def action_focus_selected(self) -> None:
+        # Fit the axes to the highlighted run's full x AND y extent (a small
+        # margin), so a single curve fills the frame; other runs stay drawn.
+        key = self._selected_key()
+        ext = self._chain_extent(key) if key else None
+        if ext is None:
+            return
+        xmn, xmx, ymn, ymx = ext
+        xpad = (xmx - xmn) * 0.02 or 1.0
+        ypad = (ymx - ymn) * 0.05 or 0.01
+        self._xlim = (xmn - xpad, xmx + xpad)
+        self._ylim = (ymn - ypad, ymx + ypad)
+        self._focus_key = key
         self._redraw()
 
-    def action_reset_zoom(self) -> None:
-        self._zoom_i = 0
+    def action_reset_view(self) -> None:
+        self._xlim = (None, None)
+        self._ylim = (None, None)
+        self._focus_key = None
         self._redraw()
+
+    def action_pan_zoom_mode(self) -> None:
+        # Seed an explicit x-window from the current data span so +/-/h/l have
+        # something to act on, then the user drives it interactively.
+        if self._xlim == (None, None):
+            span = self._visible_x_span()
+            if span:
+                self._xlim = span
+        self.query_one("#chart", PlotextPlot).focus()
+        self._redraw()
+
+    def _visible_x_span(self):
+        xs_all = []
+        for key, c in self._chain_order():
+            if key in self._hidden:
+                continue
+            got = self._series_xy(key, c)
+            if got:
+                xs_all += got[0]
+        return (min(xs_all), max(xs_all)) if xs_all else None
+
+    def _cur_xwin(self):
+        """Current [lo,hi] x-window, filling autoscale bounds from the data."""
+        span = self._visible_x_span() or (0.0, 1.0)
+        lo = self._xlim[0] if self._xlim[0] is not None else span[0]
+        hi = self._xlim[1] if self._xlim[1] is not None else span[1]
+        return lo, hi
+
+    def action_zoom_in(self) -> None:
+        lo, hi = self._cur_xwin()
+        c = (lo + hi) / 2.0
+        half = (hi - lo) / 2.0 * 0.7   # shrink window to 70%
+        self._xlim = (c - half, c + half)
+        self._focus_key = None
+        self._redraw()
+
+    def action_zoom_out(self) -> None:
+        lo, hi = self._cur_xwin()
+        c = (lo + hi) / 2.0
+        half = (hi - lo) / 2.0 / 0.7   # grow window
+        self._xlim = (c - half, c + half)
+        self._focus_key = None
+        self._redraw()
+
+    def action_pan_left(self) -> None:
+        lo, hi = self._cur_xwin()
+        d = (hi - lo) * 0.25
+        self._xlim = (lo - d, hi - d)
+        self._focus_key = None
+        self._redraw()
+
+    def action_pan_right(self) -> None:
+        lo, hi = self._cur_xwin()
+        d = (hi - lo) * 0.25
+        self._xlim = (lo + d, hi + d)
+        self._focus_key = None
+        self._redraw()
+
+    def action_set_xlim(self) -> None:
+        self._prompt_axis("x")
+
+    def action_set_ylim(self) -> None:
+        self._prompt_axis("y")
+
+    def _prompt_axis(self, axis) -> None:
+        self._axis_target = axis
+        cur = self._xlim if axis == "x" else self._ylim
+        inp = self.query_one("#axinput", Input)
+        inp.value = ""
+        lo = "" if cur[0] is None else "%g" % cur[0]
+        hi = "" if cur[1] is None else "%g" % cur[1]
+        inp.placeholder = ("%slim>  min max   (blank=auto, e.g. '%s %s'; "
+                           "empty line = reset)" % (axis, lo or "auto", hi or "auto"))
+        inp.add_class("active")
+        inp.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "axinput":
+            return
+        raw = event.value.strip()
+        inp = self.query_one("#axinput", Input)
+        inp.remove_class("active")
+        axis = getattr(self, "_axis_target", "x")
+        if not raw:
+            # empty -> reset that axis to autoscale
+            if axis == "x":
+                self._xlim = (None, None)
+            else:
+                self._ylim = (None, None)
+        else:
+            parts = raw.replace(",", " ").split()
+
+            def parse(tok):
+                if tok in ("", "-", "auto", "_"):
+                    return None
+                try:
+                    return float(tok)
+                except ValueError:
+                    return None
+            lo = parse(parts[0]) if len(parts) >= 1 else None
+            hi = parse(parts[1]) if len(parts) >= 2 else None
+            if axis == "x":
+                self._xlim = (lo, hi)
+            else:
+                self._ylim = (lo, hi)
+        self._focus_key = None
+        self.query_one("#chart", PlotextPlot).focus()
+        self._redraw()
+
+    def on_key(self, event) -> None:
+        # Escape cancels an open axis-limit prompt without applying it.
+        inp = self.query_one("#axinput", Input)
+        if event.key == "escape" and inp.has_class("active"):
+            inp.remove_class("active")
+            self.query_one("#chart", PlotextPlot).focus()
+            event.stop()
 
     def on_selection_list_selected_changed(
             self, event: SelectionList.SelectedChanged) -> None:
