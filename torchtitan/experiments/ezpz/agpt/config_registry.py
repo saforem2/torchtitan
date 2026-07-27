@@ -503,6 +503,66 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+# --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
+# The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
+# but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not
+# 256000 like MDS), so it uses the agpt "2b" flavor via agpt_2b_real (cos_sin RoPE,
+# matching how the base was trained). Same anneal mechanism/LR/data as the MDS arms.
+_OLMO_ANNEAL_BASE = os.environ.get(
+    "OLMO_ANNEAL_BASE",
+    str(
+        Path(__file__).resolve().parents[4]
+        / "outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859"
+    ),
+)
+
+
+def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the olmo-mix anneal A/B (schedule set by callers)."""
+    # agpt_2b_real = stock vocab-256128 flavor + cos_sin RoPE (matches the olmo
+    # base's training). seq_len 8192, no AC (2B fits).
+    cfg = agpt_2b_real()
+    cfg.training.seq_len = 8192
+    cfg.activation_checkpoint = None
+    if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
+        raise ValueError(
+            f"olmo anneal base DCP not found or invalid at {_OLMO_ANNEAL_BASE!r} "
+            "(expected a <dir>/.metadata). Set $OLMO_ANNEAL_BASE to the absolute "
+            "path of the step-92859 DCP. A missing base would silently load "
+            "nothing and train from random init."
+        )
+    cfg.checkpoint.initial_load_path = _OLMO_ANNEAL_BASE
+    cfg.checkpoint.initial_load_model_only = True
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
+    cfg.dataloader.dataset_path = None
+    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.training.steps = _MDS_ANNEAL_STEPS
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
+def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
+    """ARM A (control): fork olmo-mix step-92859, CONSTANT low LR (no decay)."""
+    cfg = _agpt_2b_olmo_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
+    return cfg
+
+
+def agpt_2b_olmo_anneal_wsd() -> FaultTolerantTrainer.Config:
+    """ARM B (treatment): fork olmo-mix step-92859, WSD decay-to-0 anneal."""
+    cfg = _agpt_2b_olmo_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 1.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
+    return cfg
+
+
 def ezpz_agpt_2b_flex_attn() -> FaultTolerantTrainer.Config:
     return agpt("2b_flex_attn", local_batch_size=2)
 
