@@ -206,62 +206,87 @@ class ProdDashApp(App):
             os.environ.pop("PD_FRESH", None)  # don't force-rebuild every cycle
 
     # ---- rendering ----
+    def _series_xy(self, key, c):
+        """Return the (xs, ys, is_live) a chain contributes to the current
+        metric on the current x-axis, or None if it can't be drawn. Includes
+        the live-tip point. No zoom clipping here (see _redraw)."""
+        series = (c.get("series") or {}).get(self.metric) or []
+        tip = c.get("live_tip") or {}
+        if tip and self.metric in _METRIC_KEYS:
+            tv = tip.get(self.metric if self.metric != "loss" else "loss")
+            ts = tip.get("step")
+            if tv is not None and ts is not None and (
+                    not series or ts > series[-1][0]):
+                series = series + [[ts, tv]]
+        if len(series) < 2:
+            return None
+        toks_per_step = (c.get("gbs") or 0) * (c.get("seq_len") or 0)
+        if self.xaxis == "tokens":
+            if not toks_per_step:
+                return None  # can't place a no-gbs experiment on a tokens axis
+            xs = [p[0] * toks_per_step / 1e9 for p in series]
+        else:
+            xs = [float(p[0]) for p in series]
+        ys = [p[1] for p in series]
+        is_live = (c.get("queue_state") == "R"
+                   or (c.get("log_age") is not None
+                       and c["log_age"] <= pd.LIVE_WINDOW))
+        return xs, ys, is_live
+
     def _redraw(self) -> None:
         widget = self.query_one("#chart", PlotextPlot)
         plt = widget.plt
         plt.clear_data()
         plt.clear_figure()
 
-        drawn = 0
-        all_x = []
         # draw idle first, live last (so live sits on top); hidden chains skipped
         ordered = self._chain_order()
         live_last = sorted(ordered, key=lambda kc: bool(
             kc[1].get("queue_state") == "R"
             or (kc[1].get("log_age") is not None
                 and kc[1]["log_age"] <= pd.LIVE_WINDOW)))
+
+        # Pass 1: gather each visible chain's (xs, ys) to find the global x-span
+        # for the zoom window. We CLIP in python (not plt.xlim) -- plotext's
+        # build_plot IndexErrors when a series has 0 points inside an xlim.
+        prepped = []
+        xmax = None
+        xmin = None
         for key, c in live_last:
             if key in self._hidden:
                 continue
-            series = (c.get("series") or {}).get(self.metric) or []
-            tip = c.get("live_tip") or {}
-            # append the freshest running-job point for this metric if newer
-            if tip and self.metric in _METRIC_KEYS:
-                tv = tip.get(self.metric if self.metric != "loss" else "loss")
-                ts = tip.get("step")
-                if tv is not None and ts is not None and (
-                        not series or ts > series[-1][0]):
-                    series = series + [[ts, tv]]
-            if len(series) < 2:
+            got = self._series_xy(key, c)
+            if got is None:
                 continue
-            toks_per_step = (c.get("gbs") or 0) * (c.get("seq_len") or 0)
-            if self.xaxis == "tokens":
-                if not toks_per_step:
-                    continue  # can't place a no-gbs experiment on a tokens axis
-                xs = [p[0] * toks_per_step / 1e9 for p in series]
-            else:
-                xs = [p[0] for p in series]
-            ys = [p[1] for p in series]
-            is_live = (c.get("queue_state") == "R"
-                       or (c.get("log_age") is not None
-                           and c["log_age"] <= pd.LIVE_WINDOW))
+            xs, ys, is_live = got
+            prepped.append((key, c, xs, ys, is_live))
+            lo, hi = min(xs), max(xs)
+            xmin = lo if xmin is None else min(xmin, lo)
+            xmax = hi if xmax is None else max(xmax, hi)
+
+        zoom = self._ZOOMS[self._zoom_i]
+        x_lo = None
+        if zoom is not None and xmin is not None and xmax > xmin:
+            x_lo = xmax - (xmax - xmin) * zoom  # keep the rightmost fraction
+
+        # Pass 2: plot, clipping each chain to [x_lo, xmax] when zoomed.
+        drawn = 0
+        for key, c, xs, ys, is_live in prepped:
+            if x_lo is not None:
+                pts = [(x, y) for x, y in zip(xs, ys) if x >= x_lo]
+                if len(pts) < 2:
+                    continue  # nothing (or a single point) in the zoom window
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
             color = self._color_for(key)
             label = ("* " if is_live else "") + c.get("label", key) + (
                 "" if is_live else " (idle)")
-            # braille everywhere: 2x4 sub-cells per char = 8x the resolution of
-            # dot markers. Idle chains are dimmed to keep the live one salient.
+            # braille everywhere (2x4 sub-cells per char = 8x dot resolution);
+            # idle chains dimmed to keep the live one salient.
             if not is_live:
                 color = _dim(color)
             plt.plot(xs, ys, color=color, label=label, marker="braille")
-            all_x += xs
             drawn += 1
-
-        # zoom: keep the rightmost fraction of the x-span (recent-progress view)
-        zoom = self._ZOOMS[self._zoom_i]
-        if zoom is not None and all_x:
-            hi = max(all_x)
-            lo = min(all_x)
-            plt.xlim(hi - (hi - lo) * zoom, hi)
 
         axis_label = dict(METRICS)[self.metric]
         zlabel = "" if zoom is None else "  [zoom %g%%]" % (zoom * 100)
