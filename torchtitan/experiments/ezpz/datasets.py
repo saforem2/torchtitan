@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 from collections.abc import Callable
 from typing import Any
 
@@ -81,24 +80,9 @@ def _rank0_prefetch_then_barrier(dataset_path: str, **kwargs: Any) -> Any:
         dist.barrier()
         return ds
 
-    # Worker ranks wait, then hit the warm cache. Force HF_HUB_OFFLINE for this
-    # load so the 383 worker ranks read the rank-0-warmed cache WITHOUT any hub
-    # calls. Without this, each worker's load_dataset still does an ETag
-    # revalidation against the hub -- 383 concurrent GETs blow the per-IP rate
-    # limit (429 storm), the workers crash, and rank 0 then dies at the next
-    # barrier with "Failed to recv, got 0 bytes" (job 12471851 died exactly so
-    # at 384 ranks even after rank 0 warmed the cache). Restore the prior value
-    # afterward so we don't force offline mode for the rest of the process.
+    # Worker ranks wait, then hit the warm cache.
     dist.barrier()
-    _prev_offline = os.environ.get("HF_HUB_OFFLINE")
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    try:
-        return load_dataset(dataset_path, **kwargs)
-    finally:
-        if _prev_offline is None:
-            os.environ.pop("HF_HUB_OFFLINE", None)
-        else:
-            os.environ["HF_HUB_OFFLINE"] = _prev_offline
+    return load_dataset(dataset_path, **kwargs)
 
 
 def _make_loader(
