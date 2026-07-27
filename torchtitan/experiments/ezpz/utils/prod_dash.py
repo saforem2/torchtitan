@@ -644,7 +644,21 @@ def fetch(stderr_cb=None) -> dict:
             "P=$([ -x .venv/bin/python3 ] && echo .venv/bin/python3 || echo python3); "
             "echo %s | base64 -d | $P" % b64
         )
-        cmd = ["ssh", "-S", SOCK, SSH_TGT, "cd %s && %s" % (REPO, remote)]
+        # SSH hardening so a DEAD ControlMaster socket fails fast instead of
+        # hanging forever: without these, ssh silently falls back to a fresh
+        # connection, hits Aurora's keyboard-interactive MFA, and blocks on the
+        # password prompt on the inherited TTY -- which SSH_TIMEOUT cannot reap
+        # (a process camped on a TTY read is not "done"). BatchMode=yes refuses
+        # every interactive prompt (fail fast with "Permission denied" when the
+        # socket is gone), ConnectTimeout bounds the TCP connect, and -n redirects
+        # stdin from /dev/null so ssh can never grab the terminal. The live master
+        # socket still multiplexes normally (no auth needed) when it is healthy.
+        cmd = [
+            "ssh", "-n",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=%d" % int(os.environ.get("PD_SSH_CONNECT_TIMEOUT", "10")),
+            "-S", SOCK, SSH_TGT, "cd %s && %s" % (REPO, remote),
+        ]
     if stderr_cb is not None:
         # Stream stderr line-by-line to the callback while the JSON accumulates
         # on stdout. Drain BOTH pipes concurrently -- reading stderr to EOF
@@ -696,7 +710,14 @@ def fetch(stderr_cb=None) -> dict:
                 return json.loads(line)
             except Exception:
                 pass
-    sys.stderr.write("prod_dash: no JSON from aggregator\n")
+    if not LOCAL:
+        sys.stderr.write(
+            "prod_dash: no JSON from aggregator. If the ssh master socket %s is "
+            "dead, BatchMode refuses to prompt (fails fast by design) -- recreate "
+            "it with:\n    ssh -MNf -S %s %s\n" % (SOCK, SOCK, SSH_TGT)
+        )
+    else:
+        sys.stderr.write("prod_dash: no JSON from aggregator\n")
     return {"chains": {}}
 
 
