@@ -46,9 +46,15 @@
   Always check XPU compatibility before suggesting optimization strategies.
 - **torch.optim.Muon** is available since PyTorch 2.9 — prefer it over the custom
   Newton-Schulz implementation. The custom `optimizer/muon.py` is 35% slower.
-- **HSDP (`dp_replicate × dp_shard > 1`) is untested for ezpz models** as of
-  2026-05-04 — see "Recent Findings" below for the `aten.normal_.default`
-  failure mode. Stick with pure FSDP (`dp_replicate=1`) until that's fixed.
+- **HSDP works and is FASTEST as of 2026-07-27** (torch 2.13.0.dev20260519+xpu).
+  The old `aten.normal_.default` init crash (2026-05-04) is FIXED on current
+  torch. Measured 2N agpt-2b: HSDP (`dp_shard=NGPU_PER_HOST=12`,
+  `dp_replicate=NHOSTS=2`) = 28.06% MFU / 7478 tps, vs pure FSDP
+  (`dp_shard=24, dp_replicate=1`) 27.33% / 7284 (+2.7%), vs DDP
+  (`dp_replicate=N*12, dp_shard=1`) ~24-26%. Intra-node shard keeps the
+  all-gather on the fast fabric. **Prefer HSDP** (`--data-parallel-shard-degree=
+  NGPU_PER_HOST --data-parallel-replicate-degree=NHOSTS`); the win compounds at
+  20B/80B where DDP won't fit. (Was: "pure FSDP only, HSDP crashes" -- stale.)
 
 ## Environment Setup
 
@@ -367,8 +373,9 @@ that touches one of these areas.
   with zero parameters after sharding.
 - **HF rate limits:** 24 ranks × multiple jobs = hundreds of API requests.
   Stagger PBS submissions by 5+ minutes.
-- **HSDP with `dp_replicate > 1` will crash at init** — see "Recent
-  Findings" above. Use pure FSDP.
+- **HSDP works + is fastest as of 2026-07-27** (the 2026-05-04 init crash is
+  fixed on current torch). Prefer `dp_shard=NGPU_PER_HOST` +
+  `dp_replicate=NHOSTS` (+2.7% MFU vs pure FSDP at 2N). See "Recent Findings".
 - **Don't trust `loss:` from TP > 1 runs** without the `EzpzValidator`/
   `trainer.py` workaround in place — multiply by `dp_world_size` to
   recover the true value. See "Recent Findings" above.
@@ -500,9 +507,11 @@ training in v2. See `docs/guides/training-dtype-bf16-norm-freeze.md`.
 Active issues with workarounds in place. For the full diagnosis +
 empirical evidence, follow the doc link.
 
-- **HSDP init crashes** with `aten.normal_.default: in-place operations
-  that require placement changes are not supported`. Workaround: pure
-  FSDP only.
+- **HSDP init crash — FIXED (2026-07-27).** The `aten.normal_.default:
+  in-place operations that require placement changes` crash (2026-05-04)
+  no longer reproduces on torch 2.13.0.dev20260519+xpu; HSDP trains clean
+  and is +2.7% MFU over pure FSDP. Use HSDP (`dp_shard=NGPU_PER_HOST`,
+  `dp_replicate=NHOSTS`). See "Recent Findings".
 
 - **`compile + AC + TP=2` AOT autograd crash on the agpt 80B family
   (torch 2.13).** `tensors_saved_with_vc_check` AssertionError —
