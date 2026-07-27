@@ -16,8 +16,9 @@ Both are pure-python (NOT torch deps -- safe for the XPU build). If they are not
 installed, ``prod_dash.py --app`` falls back to the text board.
 
 Keys: q quit | r refresh | x step<->tokens x-axis | a show-all experiments |
-b/c board/charts pane | t focus run-toggles | z cycle zoom | Z/0 reset zoom |
-left/right (or the tab bar) switch metric | space (in the run list) toggle a run.
+b/c board/charts pane | t focus run-toggles | T hide/show the run panel |
+z cycle zoom | Z/0 reset zoom | left/right (or the tab bar) switch metric |
+space (in the run list) toggle a run.
 """
 from __future__ import annotations
 
@@ -81,6 +82,7 @@ class ProdDashApp(App):
     #metrictabs { dock: top; }
     #runs { width: 34; border-right: solid $panel; }
     #runs:focus-within { border-right: solid $accent; }
+    #runs.hidden { display: none; }
     #chart { width: 1fr; }
     #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }
     #log { height: 6; display: none; dock: bottom; }
@@ -93,7 +95,8 @@ class ProdDashApp(App):
         ("a", "toggle_all", "show-all"),
         ("b", "show_board", "board"),
         ("c", "show_charts", "charts"),
-        ("t", "focus_runs", "toggle runs"),
+        ("t", "focus_runs", "focus runs"),
+        ("T", "toggle_runs_panel", "hide/show runs"),
         ("z", "cycle_zoom", "zoom"),
         ("Z", "reset_zoom", "reset zoom"),
         ("0", "reset_zoom", "reset zoom"),
@@ -112,6 +115,7 @@ class ProdDashApp(App):
         self._hidden = set()      # chain keys toggled OFF
         self._zoom_i = 0          # index into _ZOOMS (0 = full)
         self._runs_built = False  # whether the SelectionList is populated yet
+        self._runs_panel_hidden = False  # whole run-toggle panel collapsed
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -318,7 +322,19 @@ class ProdDashApp(App):
 
     def action_focus_runs(self) -> None:
         self.query_one("#panes", TabbedContent).active = "pane-charts"
+        if self._runs_panel_hidden:            # un-hide before focusing
+            self.action_toggle_runs_panel()
         self.query_one("#runs", SelectionList).focus()
+
+    def action_toggle_runs_panel(self) -> None:
+        # Collapse/restore the whole run-toggle sidebar so the chart can use the
+        # full width. Hidden chains stay hidden; this only affects the panel.
+        self._runs_panel_hidden = not self._runs_panel_hidden
+        runs = self.query_one("#runs", SelectionList)
+        runs.set_class(self._runs_panel_hidden, "hidden")
+        if self._runs_panel_hidden and runs.has_focus:
+            self.query_one("#chart", PlotextPlot).focus()
+        self._redraw()  # chart reflows to the reclaimed width
 
     def action_cycle_zoom(self) -> None:
         self._zoom_i = (self._zoom_i + 1) % len(self._ZOOMS)
