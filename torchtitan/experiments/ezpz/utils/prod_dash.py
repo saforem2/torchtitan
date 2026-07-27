@@ -12,7 +12,7 @@ qstat); rendering happens LOCAL. The chain list is derived from
 the committed charts. Active experiments (e.g. the constant-LR fork, a HEAD
 migration rehearsal) are auto-discovered by checkpoint dir.
 
-Three modes (the user asked for all three):
+Modes:
 
     # 1. Live kitcat loop (run in a kitty terminal; rl_dash3 twin)
     /tmp/kitcat-venv/bin/python prod_dash.py
@@ -25,6 +25,12 @@ Three modes (the user asked for all three):
 
     # one live frame then exit (curve + board), for a quick look
     python prod_dash.py --once
+
+    # 4. Textual multi-metric TUI (loss / grad_norm / tps / tflops / mfu),
+    #    switchable per-metric tabs, live board, auto-refresh. Opt-in; needs
+    #    `uv pip install textual textual-plotext` (pure-python, torch-safe).
+    #    Falls back to --board if textual isn't installed.
+    python prod_dash.py --app
 
 Env:
     PD_INTERVAL   live-loop poll seconds (default 30)
@@ -131,12 +137,35 @@ def _downsample(pairs, n=600):
     k = (len(pairs) + n - 1) // n
     return pairs[::k]
 
-def _olog_curve(paths):
-    """Concat (step, loss) from .o logs via the shared parser, plus the final
-    line's tip. Delegates to wandb_fetch.parse_olog (single canonical .o
-    parser); returns ([(step, loss)], last)."""
-    records, last = wf.parse_olog(paths)
-    return [(r["_step"], r["loss_metrics/global_avg_loss"]) for r in records], last
+# short chart-name -> W&B/olog metric key. mfu(%%) is %%-escaped because this
+# whole _AGG string is percent-formatted in fetch(). "loss" stays first so the
+# default view + the back-compat "curve" both key off it.
+_METRIC_MAP = {
+    "loss": "loss_metrics/global_avg_loss",
+    "grad_norm": "grad_norm",
+    "tps": "throughput(tps)",
+    "tflops": "tflops",
+    "mfu": "mfu(%%)",
+}
+
+def _series_from_records(records):
+    """Build {short_metric: [[step, value], ...]} from wandb_fetch records.
+
+    Downsamples the record LIST once (all metrics share the same step grid --
+    same W&B row / same .o line), then projects each metric and drops steps
+    where that metric is missing (None). Keeps every metric step-aligned."""
+    sampled = _downsample(records)
+    out = {}
+    for short, key in _METRIC_MAP.items():
+        pairs = [[r["_step"], r[key]] for r in sampled
+                 if r.get("_step") is not None and r.get(key) is not None]
+        out[short] = pairs
+    return out
+
+def _olog_records(paths):
+    """Concat records from .o logs via the shared parser, plus the final line's
+    tip. Delegates to wandb_fetch.parse_olog; returns (records, last)."""
+    return wf.parse_olog(paths)
 
 def _all_ologs():
     """Every candidate PBS stdout log in the repo (autoretry + umbrella + logs/)."""
@@ -160,20 +189,19 @@ def _dir_index(logs):
             idx.setdefault(m.group(1), []).append(p)
     return idx
 
-def _wandb_curve(run_ids, olog_fallbacks):
-    """Concat a chain's W&B loss history via the shared wandb_fetch.concat_chain
+def _wandb_records(run_ids, olog_fallbacks):
+    """Concat a chain's full per-step W&B history via wandb_fetch.concat_chain
     (same robust olog-fallback rule the charts use: prefer the .o log when it
-    reaches at least as far as W&B). Returns [(step, loss)]. Only the cheap
-    OLOG_KEYS are fetched -- the board needs step+loss, not the full metric set.
-    """
+    reaches at least as far as W&B). Returns the list of records keyed by
+    OLOG_KEYS (step + loss + grad_norm + tps + tflops + mfu) -- the caller
+    projects to the per-metric series it needs (via _series_from_records)."""
     olog_fallbacks = olog_fallbacks or {}
     # concat_chain resolves relative fallback paths against CWD; the aggregator
     # chdir's to REPO at startup, but be explicit so it works regardless.
     fb = {rid: (fp if os.path.isabs(fp) else os.path.join(REPO, fp))
           for rid, fp in olog_fallbacks.items()}
-    records = wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
-                              project=PROJECT)
-    return [(r["_step"], r["loss_metrics/global_avg_loss"]) for r in records]
+    return wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
+                           project=PROJECT)
 
 def _wandb_summary(run_ids):
     """Cheap per-chain W&B metadata (one api.run + .summary read per tried run,
@@ -294,7 +322,9 @@ def build_backbone():
         _log("  [%%d/%%d] %%s: pulling %%d W&B run(s) ..." %% (
             i, len(CANON), t.get("key", "?"),
             len(t.get("wandb_run_ids") or [])))
-        curve = _wandb_curve(t.get("wandb_run_ids") or [], t.get("olog_fallbacks"))
+        records = _wandb_records(t.get("wandb_run_ids") or [],
+                                 t.get("olog_fallbacks"))
+        series = _series_from_records(records)
         # Distinguish sibling chains that share model+nodes (e.g. the canonical
         # 2b 512N vs the sqrt2-LR fork "2b_v2_512_lr3.22e-5") by appending the
         # key's suffix beyond the standard "<model>_<version>_<nodes>" form.
@@ -308,7 +338,10 @@ def build_backbone():
             "model": t["model"], "num_nodes": t["num_nodes"],
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
-            "ckpt_base": base, "curve": _downsample(curve),
+            "ckpt_base": base,
+            # series: per-metric [[step, val]] for the Textual app; curve is the
+            # back-compat loss-only alias that render_board/draw_curves/--svg read.
+            "series": series, "curve": series.get("loss", []),
         }
         rec.update(_wandb_summary(t.get("wandb_run_ids") or []))
         # last-job from main-repo .o logs, PLUS the trajectory's olog_fallbacks
@@ -339,15 +372,17 @@ def build_backbone():
             age = None
         if not SHOW_ALL and (age is None or age > EXP_MAX_AGE):
             continue
-        curve, _ = _olog_curve(paths)
-        if len(curve) < 2:
+        records, _ = _olog_records(paths)
+        series = _series_from_records(records)
+        if len(series.get("loss", [])) < 2:
             continue
         exp = {
             "label": base.replace("agpt-", ""),
             "model": "2b" if "-2b-" in base or base.endswith("-2b") else "?",
             "num_nodes": None, "gbs": None, "seq_len": 8192,
             "token_target": None, "kind": "experiment",
-            "ckpt_base": base, "curve": _downsample(curve),
+            "ckpt_base": base,
+            "series": series, "curve": series.get("loss", []),
             "last_job": _last_job_from_paths(paths),
         }
         # Every run logs to W&B -- parse the run-id(s) from the fork's .o logs
@@ -527,7 +562,7 @@ def live_layer():
         if rank.get(j["state"], 0) >= rank.get(states.get(base, "E"), 0):
             states[base] = j["state"]
         if j["state"] == "R" and cand:
-            _, last = _olog_curve(cand)
+            _, last = _olog_records(cand)
             if last:
                 try:
                     age = time.time() - max(os.path.getmtime(p) for p in cand
@@ -586,7 +621,17 @@ print(json.dumps(bb))
 '''
 
 
-def fetch() -> dict:
+def fetch(stderr_cb=None) -> dict:
+    """Run the remote aggregator and return the parsed backbone+live payload.
+
+    stdout carries the single JSON object; the aggregator's stderr is the
+    ``[prod_dash +Ns]`` progress stream (cold build ~3-6 min). Behavior:
+      - stderr_cb given: capture stderr and call stderr_cb(line) per line (the
+        Textual app pipes this into a RichLog); JSON returned at the end.
+      - stderr_cb None, PD_QUIET=1: discard stderr (detached refresh worker).
+      - stderr_cb None otherwise: inherit stderr so progress streams straight
+        to the terminal live (the kitcat/board CLI path).
+    """
     script = _AGG % {"repo": REPO, "ttl": BACKBONE_TTL,
                      "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0,
                      "show_all": 1 if SHOW_ALL else 0,
@@ -600,20 +645,51 @@ def fetch() -> dict:
             "echo %s | base64 -d | $P" % b64
         )
         cmd = ["ssh", "-S", SOCK, SSH_TGT, "cd %s && %s" % (REPO, remote)]
-    # Capture stdout (the JSON payload) but let the aggregator's stderr stream
-    # STRAIGHT to our terminal, so the cold ~3-6 min W&B build shows live
-    # `[prod_dash +Ns] ...` progress instead of sitting silent. (PD_QUIET=1
-    # suppresses it, e.g. for the detached refresh worker.)
-    stderr_dest = subprocess.DEVNULL if os.environ.get("PD_QUIET") == "1" else None
-    try:
-        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_dest,
-                           text=True, timeout=SSH_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        sys.stderr.write(
-            "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
-            "for a cold build)\n" % int(SSH_TIMEOUT))
-        return {"chains": {}}
-    for line in (r.stdout or "").splitlines():
+    if stderr_cb is not None:
+        # Stream stderr line-by-line to the callback while the JSON accumulates
+        # on stdout. Drain BOTH pipes concurrently -- reading stderr to EOF
+        # first would deadlock once the child fills the stdout pipe buffer with
+        # the (large) JSON payload. A background thread collects stdout.
+        import threading
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+        except Exception as e:
+            sys.stderr.write("prod_dash: aggregator launch failed: %s\n" % e)
+            return {"chains": {}}
+        out_chunks = []
+        t_out = threading.Thread(target=lambda: out_chunks.append(p.stdout.read()),
+                                 daemon=True)
+        t_out.start()
+        for line in iter(p.stderr.readline, ""):
+            if line:
+                try:
+                    stderr_cb(line.rstrip("\n"))
+                except Exception:
+                    pass
+        try:
+            p.wait(timeout=SSH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            try:
+                stderr_cb("prod_dash: aggregator timed out after %ds" % int(SSH_TIMEOUT))
+            except Exception:
+                pass
+            return {"chains": {}}
+        t_out.join(timeout=10)
+        stdout_text = out_chunks[0] if out_chunks else ""
+    else:
+        stderr_dest = subprocess.DEVNULL if os.environ.get("PD_QUIET") == "1" else None
+        try:
+            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_dest,
+                               text=True, timeout=SSH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            sys.stderr.write(
+                "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
+                "for a cold build)\n" % int(SSH_TIMEOUT))
+            return {"chains": {}}
+        stdout_text = r.stdout or ""
+    for line in stdout_text.splitlines():
         line = line.strip()
         if line.startswith("{"):
             try:
@@ -898,6 +974,18 @@ def main():
         os.environ["PD_FRESH"] = "1"
     if "--tokens" in argv:         # x-axis in tokens instead of steps
         os.environ["PD_XAXIS"] = "tokens"
+    if "--app" in argv:            # Textual multi-metric TUI (opt-in)
+        try:
+            import prod_dash_app
+        except ImportError:
+            sys.stderr.write(
+                "prod_dash: textual not installed -- run\n"
+                "  uv pip install textual textual-plotext\n"
+                "falling back to --board.\n")
+            print(render_board(fetch()))
+            return
+        prod_dash_app.run_app()
+        return
     if "--board" in argv:
         print(render_board(fetch()))
         return
