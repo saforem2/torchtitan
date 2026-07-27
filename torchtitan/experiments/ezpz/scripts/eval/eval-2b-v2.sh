@@ -61,6 +61,13 @@ LABEL="${LABEL:-512n}"
 
 STEPS="${STEPS:-1000 2000 3000 4000 5000}"
 TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,boolq}"
+# MODEL_FLAVOR / EVAL_CONFIG_JSON select the model shape at convert + eval time.
+# Default = the stock vocab-256128 "2b" flavor (olmo-mix bases). The MDS base is
+# vocab 256000, so its arm MUST pass MODEL_FLAVOR=2b-mds EVAL_CONFIG_JSON=agpt_2b_mds_config.json
+# -- otherwise a 256000-weight model is loaded under a 256128 config = gibberish
+# (the tokenizer-mismatch trap). Each base is evaluated with ITS OWN vocab.
+MODEL_FLAVOR="${MODEL_FLAVOR:-2b}"
+EVAL_CONFIG_JSON="${EVAL_CONFIG_JSON:-agpt_2b_config.json}"
 
 for step in $STEPS; do
     DCP_DIR="${V2_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
@@ -149,10 +156,10 @@ PYCHK
                 "${DCP_DIR}" \
                 "${HF_DIR_ABS}" \
                 --model_name "experiments.ezpz.agpt" \
-                --model_flavor "2b" \
+                --model_flavor "${MODEL_FLAVOR}" \
                 --export_dtype "bfloat16"
         ) || { echo "[1/2] Conversion FAILED — skipping eval for step ${step}"; continue; }
-        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/agpt_2b_config.json" \
+        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/${EVAL_CONFIG_JSON}" \
             "${HF_DIR_ABS}/config.json"
         cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer.{json,model} "${HF_DIR_ABS}/"
         cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer_config.json "${HF_DIR_ABS}/"
