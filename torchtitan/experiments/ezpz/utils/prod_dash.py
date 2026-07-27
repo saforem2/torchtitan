@@ -78,10 +78,49 @@ REPO = os.environ.get(
     "/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz",
 )
 
-COLORS = [
+# Two hue-PARALLEL 12-color palettes. A chain's color index is crc32(key)%12,
+# so the SAME chain keeps the SAME hue family across themes -- only the tone
+# shifts to stay readable against the background. COLORS_LIGHT is the historical
+# palette (Vega category set); COLORS_DARK is a brighter/lighter parallel tuned
+# for a dark terminal. Light mode reuses COLORS_LIGHT verbatim, so it is a strict
+# no-op vs. the pre-theme behavior; only dark mode changes. See draw_curves.
+COLORS_LIGHT = [
     "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2",
     "#ff9da6", "#9d755d", "#bab0ac", "#edc948", "#b07aa1", "#86bcb6",
 ]
+COLORS_DARK = [
+    "#6ea8dc", "#ffa94d", "#7bc96f", "#ff7b7b", "#5fd0c8", "#d29fd8",
+    "#ffc0c8", "#c79a6a", "#d5cfca", "#f6e05e", "#d3a0ce", "#a8ded6",
+]
+# Back-compat alias: any external caller importing COLORS gets the light set,
+# matching the pre-theme default. draw_curves selects the palette at render time.
+COLORS = COLORS_LIGHT
+
+
+def detect_dark_background():
+    """Best-effort: is the terminal/output background dark? Returns True/False.
+
+    Precedence:
+      1. PD_THEME=dark|light  -- explicit override, always wins.
+      2. COLORFGBG='fg;bg'    -- set by many terminals (rxvt, konsole, some
+         iTerm/kitty setups). The trailing field is the background color index;
+         0-6 and 8 are dark, 7/9-15 (and '15' white) are light. If the value is
+         'fg;;bg' (3 fields) the middle is a decoration color -- take the last.
+    Defaults to False (light) when nothing is set -- the historical behavior, so
+    an unconfigured terminal renders exactly as before (COLORS_LIGHT)."""
+    override = os.environ.get("PD_THEME", "").strip().lower()
+    if override in ("dark", "light"):
+        return override == "dark"
+    cfb = os.environ.get("COLORFGBG", "").strip()
+    if cfb:
+        parts = cfb.split(";")
+        try:
+            bg = int(parts[-1])
+        except ValueError:
+            return False
+        # ANSI background index: 0-6 + 8 are dark tones, 7/9-15 are light.
+        return bg <= 6 or bg == 8
+    return False
 
 # ---------------------------------------------------------------------------
 # Remote aggregator: everything that needs cluster-side data lives here. It is
@@ -851,6 +890,18 @@ def draw_curves(payload, wpx, hpx, save_path=None):
     _apply_house_style(plt)
     plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
                          "axes.facecolor": "none"})
+    # Theme: pick the hue-parallel palette for the background, and in dark mode
+    # override the (otherwise dark) ambivalent text/axes color to a light tone so
+    # labels/ticks/legend stay legible against the transparent-over-dark backdrop.
+    # Light mode leaves the stylesheet untouched -- a strict no-op vs. before.
+    dark = detect_dark_background()
+    palette = COLORS_DARK if dark else COLORS_LIGHT
+    if dark:
+        fg = "#d5d5d5"
+        plt.rcParams.update({
+            "text.color": fg, "axes.labelcolor": fg, "axes.titlecolor": fg,
+            "xtick.color": fg, "ytick.color": fg, "axes.edgecolor": fg,
+        })
     chains = payload.get("chains", {})
     dpi = 100
     fig, ax = plt.subplots(
@@ -881,7 +932,7 @@ def draw_curves(payload, wpx, hpx, save_path=None):
         is_live = (c.get("queue_state") == "R"
                    or (c.get("log_age") is not None and c["log_age"] <= LIVE_WINDOW))
         is_exp = c.get("kind") == "experiment"
-        color = COLORS[zlib.crc32(key.encode()) % len(COLORS)]
+        color = palette[zlib.crc32(key.encode()) % len(palette)]
         alpha = 1.0 if is_live else 0.30
         lw = 2.4 if is_live else 1.2
         ls = "--" if is_exp else "-"

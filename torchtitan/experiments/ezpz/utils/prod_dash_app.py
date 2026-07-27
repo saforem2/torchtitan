@@ -52,7 +52,12 @@ _METRIC_KEYS = [m[0] for m in METRICS]
 # Curated high-contrast categorical palette (RGB), assigned by STABLE sorted
 # chain index so consecutive chains get maximally-different hues -- avoids the
 # crc32-hash clustering that made several chains read as the same purple.
-_PALETTE = [
+# Two hue-PARALLEL palettes, indexed the same way, so a chain keeps its hue
+# family when the Textual theme flips -- only the tone shifts for contrast.
+# _PALETTE_DARK is the original bright set (tuned for the default dark theme);
+# _PALETTE_LIGHT darkens/saturates each hue so it stays legible on a light
+# theme background (textual-light etc.). _palette_for() picks per current theme.
+_PALETTE_DARK = [
     (66, 135, 245),   # blue
     (245, 133, 24),   # orange
     (84, 196, 75),    # green
@@ -66,6 +71,22 @@ _PALETTE = [
     (140, 160, 175),  # slate
     (255, 160, 90),   # apricot
 ]
+_PALETTE_LIGHT = [
+    (31, 96, 196),    # blue
+    (196, 96, 8),     # orange
+    (40, 140, 45),    # green
+    (196, 40, 40),    # red
+    (110, 70, 200),   # purple
+    (0, 140, 132),    # teal
+    (200, 50, 130),   # pink
+    (150, 130, 20),   # gold
+    (110, 72, 40),    # brown
+    (50, 150, 90),    # mint
+    (80, 100, 120),   # slate
+    (190, 110, 40),   # apricot
+]
+# Back-compat alias for any external reference to the original name.
+_PALETTE = _PALETTE_DARK
 
 
 def _dim(rgb, f=0.55):
@@ -104,6 +125,7 @@ class ProdDashApp(App):
         Binding("c", "show_charts", "charts", priority=True),
         Binding("t", "focus_runs", "focus runs", priority=True),
         Binding("T", "toggle_runs_panel", "hide/show runs", priority=True),
+        Binding("d", "toggle_theme", "dark/light", priority=True),
         Binding("z", "focus_selected", "focus run", priority=True),
         Binding("Z", "reset_view", "reset view", priority=True),
         Binding("0", "reset_view", "reset view", priority=True),
@@ -186,10 +208,22 @@ class ProdDashApp(App):
                     -(c.get("num_nodes") or 0), k)
         return sorted(self.payload.get("chains", {}).items(), key=order)
 
+    def _palette_for_theme(self):
+        """Pick the hue-parallel palette matching the active Textual theme.
+
+        current_theme.dark is the reliable signal in Textual 8.x (the App.dark
+        bool is deprecated). Falls back to the dark palette if the theme can't be
+        read, matching the app's default (textual-dark)."""
+        try:
+            return _PALETTE_DARK if self.current_theme.dark else _PALETTE_LIGHT
+        except Exception:
+            return _PALETTE_DARK
+
     def _color_for(self, key):
         keys = [k for k, _ in self._chain_order()]
         idx = keys.index(key) if key in keys else 0
-        return _PALETTE[idx % len(_PALETTE)]
+        palette = self._palette_for_theme()
+        return palette[idx % len(palette)]
 
     def _rebuild_runs(self):
         """Populate the run-toggle SelectionList from the current chains (once);
@@ -340,6 +374,13 @@ class ProdDashApp(App):
 
     def action_toggle_xaxis(self) -> None:
         self.xaxis = "step" if self.xaxis == "tokens" else "tokens"
+        self._redraw()
+
+    def action_toggle_theme(self) -> None:
+        """Flip between the default dark theme and textual-light, and redraw so
+        the chart picks up the hue-parallel palette for the new background."""
+        self.theme = ("textual-light" if self.current_theme.dark
+                      else "textual-dark")
         self._redraw()
 
     def action_toggle_all(self) -> None:
