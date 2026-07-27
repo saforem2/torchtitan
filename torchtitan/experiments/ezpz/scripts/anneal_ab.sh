@@ -47,6 +47,27 @@ source /tmp/ezu.sh >/dev/null 2>&1
 ezpz_setup .venv >/dev/null 2>&1
 echo "torch=$(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null)"
 
+# Pre-warm the open-web-math HF hub cache on the HEAD node BEFORE launching the
+# distributed job. The in-training rank-0 prefetch (datasets.py
+# _rank0_prefetch_then_barrier) hits the hub live; a transient HfHubHTTPError
+# there (rate-limit / proxy blip) kills rank 0, and all other ranks then die at
+# the following dist.barrier (job 12471848 died exactly this way at 384 ranks).
+# A serial, retried warm-up here makes the in-training fetch a warm-cache hit.
+export HF_HUB_ENABLE_HF_TRANSFER=0
+_ds="${_MDS_ANNEAL_DATASET:-open-web-math/open-web-math}"
+for attempt in 1 2 3 4 5; do
+  if python3 -c "
+from datasets import load_dataset
+ds = load_dataset('open-web-math/open-web-math', split='train', streaming=True)
+next(iter(ds))
+print('owm cache warm')
+" 2>/dev/null; then
+    echo "prewarm: open-web-math cache warm (attempt $attempt)"; break
+  fi
+  echo "prewarm: attempt $attempt failed (transient hub error); retrying in 30s"
+  sleep 30
+done
+
 # NHOSTS from the PBS nodefile; HSDP shards intra-node (12 tiles) and replicates
 # across nodes. dp_replicate * dp_shard = world size, so dp_replicate = NHOSTS.
 NHOSTS="${NHOSTS:-$(wc -l < "${PBS_NODEFILE:-/dev/null}" 2>/dev/null)}"
@@ -71,8 +92,9 @@ summ() {  # tag logfile
 }
 
 run() {  # tag config
-  local tag=$1 config=$2 log="$LOGDIR/${tag}.log"
-  echo ""; echo "=== $tag ($config), $ANNEAL_STEPS steps, HSDP shard12/rep$NHOSTS ==="
+  local tag="$1" config="$2"
+  local log="$LOGDIR/${tag:-arm}.log"
+  echo ""; echo "=== $tag ($config), $ANNEAL_STEPS steps, HSDP shard12/rep$NHOSTS -> $log ==="
   # NOTE: NO --checkpoint.load-only (it disables ALL saving; that was the v1
   # flaw). The config forks the base via initial_load_path +
   # initial_load_model_only and saves via its own checkpoint.enable/interval;
