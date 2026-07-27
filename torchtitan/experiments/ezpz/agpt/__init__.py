@@ -450,6 +450,23 @@ agpt_configs = {
         # OUT_OF_RESOURCES on the backward.
         attn_backend="flex",
     ),
+    # [ezpz] agpt-2b variant matching the Megatron-DeepSpeed AuroraGPT-2B base
+    # exactly (vocab 256000, the un-padded gemma-7b vocab the MDS run trained
+    # with; the plain "2B" flavor pads to 256128). Plain (non-fused) QKV and the
+    # default sdpa attention -- this is a PRETRAINING/anneal fork target, not an
+    # RL/LoRA one, so it does not carry the "2b-rl" fused-QKV + flex layout.
+    # Used by the mid-training anneal A/B configs (agpt_2b_mds_anneal_*), which
+    # fork the converted MDS gs138650 DCP. Complex RoPE matches the production
+    # "2B" flavor; use the "_real" (cos_sin) convert flavor at HF-export time.
+    "2b-mds": _build_agpt_config(
+        dim=2048,
+        n_layers=12,
+        n_heads=16,
+        n_kv_heads=4,
+        rope_theta=50000,
+        vocab_size=256000,
+        hidden_dim=11008,
+    ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
         n_layers=12,

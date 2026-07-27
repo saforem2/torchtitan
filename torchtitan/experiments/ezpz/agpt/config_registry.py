@@ -3,6 +3,7 @@ import ezpz.distributed
 import json
 import os
 from dataclasses import is_dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from torchtitan.components.checkpoint import CheckpointManager
@@ -360,6 +361,145 @@ def agpt_2b_chunkedce() -> FaultTolerantTrainer.Config:
     """
     cfg = ezpz_agpt_2b()
     cfg.loss = ChunkedLossWrapper.Config(num_chunks=8)
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# MDS mid-training anneal A/B (fork the Megatron-DeepSpeed AuroraGPT-2B base)
+# ---------------------------------------------------------------------------
+#
+# Base: the MDS stage-3-end checkpoint `global_step138650` (val ~2.05),
+# converted to a torchtitan DCP at
+#   outputs/checkpoints/agpt-2b-mds-gs138650/step-0/
+# by a sibling job (referenced by path -- must exist before these run).
+#
+# SCHEDULE FRAMING -- MDS stage-3 was ALREADY a constant-LR phase, not an
+# anneal. The production script train_aGPT_2B_sophiag_stage3.sh sets
+# LR_DECAY_STYLE=constant at LR=2.17e-5; the Megatron scheduler
+# (optimizer_param_scheduler.py get_lr) returns max_lr at every post-warmup
+# step when lr_constant_plus_cooldown is False (confirmed False in the MDS
+# training-config dump). So the val 2.40->2.05 drop over the final 0.706T
+# tokens was a DATA-MIX shift (dolmino stage-2 -> nvidia-math1/code2 stage-3),
+# NOT a learning-rate decay. This A/B is therefore the FIRST true LR anneal on
+# a base that never annealed -- WSD decay-to-0 (ARM B) has never been applied.
+#
+# Both arms fork model weights only (fresh optimizer + LR schedule + step
+# counter) via --checkpoint.initial-load-path, mirroring the CPT recipe
+# (docs/production/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
+# GENTLE (2e-6 constant, warmup 20) -- NOT re-warmed to the 2.17e-5 peak,
+# which disrupted the converged base in the first CPT pilot.
+#
+# Data mix: on-the-fly gemma tokenization of a raw-text HF math dataset via
+# the auto-registering HF dataloader (datasets.py). The pre-tokenized Sunspot
+# math lists are Llama2-vocab and unusable here; streaming a raw-text dataset
+# lets the model's own gemma tokenizer (EZPZTokenizer, vocab 256000) encode it
+# at runtime. open-web-math/open-web-math is gemma-safe: a single default
+# config, a "text" column (the auto-register default), no config_name needed.
+#
+# Everything except the LR schedule is IDENTICAL between the two arms so the
+# A/B isolates the schedule.
+
+# Fork target produced by the sibling DCP-conversion job.
+#
+# MUST be absolute. CheckpointManager.Config.__post_init__ (checkpoint.py:399)
+# rejects a relative initial_load_path -- but ONLY when set at construction
+# time. We assign it AFTER the Config is built (below), so that guard never
+# re-runs and a relative value would slip through. At load time it is then
+# resolved against the process CWD; if that is not the repo root the path does
+# not exist and CheckpointManager.load() takes the "No checkpoint was provided,
+# this is a fresh start." branch (checkpoint.py:879) -- a SILENT no-load that
+# leaves the model random-init. Anchoring to the repo root (this file is at
+# <repo>/torchtitan/experiments/ezpz/agpt/config_registry.py, i.e. parents[4])
+# makes it CWD-independent. An explicit env override is honored for relocated
+# checkpoints.
+_MDS_ANNEAL_BASE = os.environ.get(
+    "MDS_ANNEAL_BASE",
+    str(
+        Path(__file__).resolve().parents[4]
+        / "outputs/checkpoints/agpt-2b-mds-gs138650/step-0"
+    ),
+)
+# Raw-text HF math dataset, streamed + gemma-tokenized on the fly. Default HF
+# config, "text" column -> works through the auto-register fallback with no
+# extra wiring. (HuggingFaceTB/finemath would need an explicit config_name --
+# finemath-4plus -- so open-web-math is the drop-in choice.)
+_MDS_ANNEAL_DATASET = "open-web-math/open-web-math"
+# Gentle constant LR shared by both arms (well below the 2.17e-5 MDS peak).
+_MDS_ANNEAL_LR = 2e-6
+# ~50B-token anneal at GBS=6144 x seq 8192 (GBS*seq ~= 50.3M tok/step).
+_MDS_ANNEAL_STEPS = 1000
+
+
+def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the MDS anneal A/B (schedule set by callers)."""
+    # vocab-256000 flavor, seq_len 8192; no AC (2B fits), matches the 2b path.
+    cfg = agpt("2b-mds", activation_checkpoint_mode="none", seq_len=8192)
+    # Fork the converted MDS base: model weights only, fresh optimizer + step
+    # counter (initial_load_model_only defaults True). Same mechanism the CPT
+    # sweep used to fork the plateaued v2 base.
+    #
+    # Fail loudly at config-build time if the DCP is missing. Otherwise a bad
+    # path is only "discovered" as a SILENT no-load at load time (the model
+    # stays random-init and training starts at loss ~12 instead of ~2), which
+    # is exactly the failure this A/B is meant to avoid. A missing .metadata
+    # means the dir is not a valid DCP (dcp.load would also silently no-op).
+    if not (Path(_MDS_ANNEAL_BASE) / ".metadata").is_file():
+        raise ValueError(
+            f"MDS anneal base DCP not found or invalid at {_MDS_ANNEAL_BASE!r} "
+            "(expected a <dir>/.metadata). Set $MDS_ANNEAL_BASE to the absolute "
+            "path of the converted step-0 DCP, or run the HF->DCP converter "
+            "first. A missing base would otherwise silently load nothing and "
+            "train from random init."
+        )
+    cfg.checkpoint.initial_load_path = _MDS_ANNEAL_BASE
+    cfg.checkpoint.initial_load_model_only = True
+    # Stream a raw-text HF math dataset -> gemma tokenization at runtime. Drop
+    # the blendcorpus data_file_list path so the HF hub path is used.
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
+    cfg.dataloader.dataset_path = None
+    # Fresh optimizer at the gentle anneal LR (SophiaG was the MDS optimizer,
+    # but the fork discards optimizer state; AdamW at a low LR is the safe,
+    # batch-robust choice for a short anneal -- consistent with the CPT gentle
+    # retry, which also used a low constant LR on the same base family).
+    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.training.steps = _MDS_ANNEAL_STEPS
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
+def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
+    """ARM A (control): fork MDS gs138650, CONSTANT low LR (no decay).
+
+    decay_ratio=0.0 -> decay phase is zero steps -> the multiplier is 1.0 at
+    every post-warmup step (see the DECAY_RATIO=0 constant-LR precedent in
+    docs/journal.md). min_lr_factor=1.0 pins the floor at the full LR so even
+    if any decay were computed it would be a no-op. This continues the base at
+    a flat gentle LR -- the null hypothesis for the anneal.
+    """
+    cfg = _agpt_2b_mds_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-flat"
+    return cfg
+
+
+def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
+    """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
+
+    Same base, same gentle peak LR (2e-6), same data + budget as ARM A -- only
+    the schedule differs. decay_ratio=1.0 makes the whole post-warmup run the
+    decay phase; min_lr_factor=0.0 + decay_type="linear" drives LR linearly to
+    0 by the final step (classic Warmup-Stable-Decay with a zero stable
+    window). This is the first true LR anneal applied to the MDS base.
+    """
+    cfg = _agpt_2b_mds_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 1.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
     return cfg
 
 
