@@ -69,21 +69,26 @@ ezpz_setup .venv >/dev/null 2>&1
 echo "torch=$(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null)"
 echo "HF_HOME=$HF_HOME HF_HUB_OFFLINE=$HF_HUB_OFFLINE"
 
-# Verify the offline cache actually resolves BEFORE burning the allocation --
-# fail loud with the precache instructions rather than crash 384 ranks.
+# Verify the corpus resolves to LOCAL parquet BEFORE burning the allocation --
+# fail loud with the precache instructions rather than crash 384 ranks. This
+# exercises the SAME ezpz routing the trainer uses (import datasets ->
+# _validate_dataset_with_fallback -> resolve_precached_parquet_dir), so a pass
+# here means the trainer will load local parquet with zero hub calls.
 if ! python3 -c "
+import torchtitan.experiments.ezpz.datasets as d
+p = d.resolve_precached_parquet_dir('open-web-math/open-web-math')
+assert p, 'not precached'
 from datasets import load_dataset
-ds = load_dataset('open-web-math/open-web-math', split='train', streaming=True)
-next(iter(ds))
-print('offline owm cache OK')
+next(iter(load_dataset('parquet', data_dir=p, split='train', streaming=True)))
+print('local parquet owm resolved at', p)
 " 2>/dev/null; then
-  echo "ERROR: open-web-math not resolvable offline from HF_HOME=$HF_HOME." >&2
+  echo "ERROR: open-web-math not precached to local parquet under HF_HOME=$HF_HOME." >&2
   echo "Run the precache first (login node, proxy on):" >&2
   echo "  export HF_HOME=$HF_HOME" >&2
   echo "  python torchtitan/experiments/ezpz/scripts/precache_hf_dataset.py open-web-math/open-web-math" >&2
   exit 7
 fi
-echo "offline owm cache verified"
+echo "local parquet owm cache verified"
 
 # NHOSTS from the PBS nodefile; HSDP shards intra-node (12 tiles) and replicates
 # across nodes. dp_replicate * dp_shard = world size, so dp_replicate = NHOSTS.
