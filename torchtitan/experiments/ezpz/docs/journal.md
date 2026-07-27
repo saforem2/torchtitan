@@ -2,6 +2,46 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-07-27 (aurora) -- prod_dash: Textual multi-metric TUI + streamed cold-build progress; 20b-256 capacity bridge advancing
+
+- **prod_dash cold-build no longer a silent hang.** The live dashboard sat
+  silent for the full ~6m40s cold W&B backbone build because `fetch()` ran the
+  remote aggregator with `capture_output=True`. The aggregator now emits
+  timestamped `[prod_dash +Ns]` progress to stderr (log-scan, per-chain W&B
+  pull i/N, experiment scan, done); `fetch()` streams it to the terminal;
+  `load_backbone` logs warm-hit/stale-serve/cold-build. `PD_QUIET=1` for the
+  detached refresh worker. Commit ca03546d3.
+- **prod_dash generalized to a Textual multi-metric TUI (`--app`).** New
+  `utils/prod_dash_app.py`: Tabs metric selector (loss / grad_norm / tps /
+  tflops / mfu), a PlotextPlot chart with all chains overlaid (live highlighted,
+  step<->tokens x-axis toggle), the text board, and a RichLog that streams
+  cold-build progress. Threaded `@work` fetch keeps the ~min SSH build off the
+  UI thread; `set_interval` auto-refresh. Opt-in; needs
+  `uv pip install textual textual-plotext` (pure-python, torch-safe), falls back
+  to `--board` if absent.
+  - Data side was nearly free: the backbone already fetched
+    step+loss+grad_norm+tps+mfu via `concat_chain(OLOG_KEYS)` then discarded all
+    but (step,loss). Now `build_backbone` stores per-chain
+    `series{loss,grad_norm,tps,tflops,mfu}` (downsampled once, step-aligned) and
+    KEEPS `curve=series[loss]` so render_board/draw_curves/--svg/kitcat are
+    unchanged. Added `tflops` to `wandb_fetch` OLOG_KEYS (regex already captured
+    it). Verified: all 5 series populate for the live 20b_v2_256 chain (n=591),
+    headless `App.run_test` passes (9 chains, all metrics, board + toggle),
+    `--board` regression clean, `--app`-without-textual falls back. Commits
+    8a6bb61e9 / 6640fc86a / 52c84f767.
+  - Fixed a pipe deadlock in the streamed `fetch(stderr_cb=...)` path: reading
+    stderr to EOF before draining stdout hangs once the child fills the stdout
+    pipe with the (large) JSON -- now drains both concurrently (stdout in a
+    thread).
+- **20b-256 capacity bridge (8703284) advancing.** 16N capacity-queue bridge
+  (GAS=16 -> GBS=6144 bit-identical) resumed the 20b-256 chain from step-6000
+  (loss ~2.46 continuous, MFU ~24.6%); `afterany` continuation 8705325 queued.
+  W&B run `v58n7vam`. First advance past step-6000 since 2026-07-24. 20b-512
+  holds at step-6100. 20B tail eval backfills (8703745 512n done, 8703835/8705119
+  256n) filled the 5300-6100 gaps; a wrong-clone REPO bug in the first 256n
+  attempt (8703746) was fixed. Aurora had a brief 2026-07-27 outage (killed
+  in-flight evals with -29, no ckpt corruption; resubmitted).
+
 ## 2026-07-24 (aurora) -- W&B fetch consolidation + preflight-smoke run-id fixes + overlay legend
 
 - **Root-caused the "stuck 2B-256 curve" -- it was a misleading legend + a
