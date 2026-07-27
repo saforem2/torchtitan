@@ -158,6 +158,16 @@ def agpt_2b_real() -> FaultTolerantTrainer.Config:
     return _set_rope_backend(ezpz_agpt_2b(), "cos_sin")
 
 
+def agpt_2b_tied() -> FaultTolerantTrainer.Config:
+    # agpt_2b_real + tied input/output embeddings. At vocab 256128/dim 2048 the
+    # untied embed+lm_head are ~53%% of a 2B; tying frees that budget. Arch bet #5
+    # validation (tied vs untied loss@fixed-tokens). state_dict_adapter already
+    # handles the tied case (adapter lines 82,103).
+    cfg = agpt_2b_real()
+    cfg.model_spec.model.enable_weight_tying = True
+    return cfg
+
+
 def agpt_2b_flex_attn() -> FaultTolerantTrainer.Config:
     return ezpz_agpt_2b_flex_attn()
 

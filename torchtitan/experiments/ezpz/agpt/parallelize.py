@@ -238,7 +238,27 @@ def apply_fsdp(
         reshard_after_forward_policy, pp_enabled
     )
 
-    if model.tok_embeddings is not None:
+    # [ezpz] When embeddings are tied (enable_weight_tying), tok_embeddings
+    # and lm_head share one weight tensor -- FSDP2 requires shared/tied
+    # parameters to live in the SAME fully_shard group, so group tok_embeddings
+    # + norm + lm_head together here instead of the two separate calls the
+    # untied path below uses. Mirrors
+    # torchtitan.distributed.fsdp.apply_fsdp_to_decoder:151-163. The untied
+    # branch (default, currently working) is unchanged.
+    tied = getattr(model, "enable_weight_tying", False)
+
+    if tied:
+        modules = [
+            m
+            for m in (model.tok_embeddings, model.norm, model.lm_head)
+            if m is not None
+        ]
+        fully_shard(
+            modules,
+            **fsdp_config,
+            reshard_after_forward=reshard_after_forward_policy == "always",
+        )
+    elif model.tok_embeddings is not None:
         fully_shard(
             model.tok_embeddings,
             **fsdp_config,
@@ -252,7 +272,7 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward,
         )
 
-    if model.norm is not None and model.lm_head is not None:
+    if not tied and model.norm is not None and model.lm_head is not None:
         fully_shard(
             [model.norm, model.lm_head],
             **fsdp_config,
