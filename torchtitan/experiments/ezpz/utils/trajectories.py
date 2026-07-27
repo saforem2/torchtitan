@@ -234,12 +234,17 @@ TRAJECTORIES: list[dict] = [
         # --- 2026-07 continuations, added 2026-07-24: ---
         # 6yr6ivh4=8647385(3101->3603) uvgmafv9=8661054(4201->4375)
         # 5rvusq43=8681340(5101->5860+, live full-throughput resume)
+        # --- capacity-queue bridge, added 2026-07-27: ---
+        # v58n7vam=8703284(6001->6037+, 16N GAS=16 GBS=6144 bit-identical
+        #   bridge; single View-run line in torchtitan.ezpz.train, no
+        #   preflight-smoke reinit-swallow ambiguity)
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
             "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
+            "v58n7vam",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,
