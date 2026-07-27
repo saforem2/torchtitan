@@ -26,8 +26,9 @@ import zlib
 import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
-from textual.widgets import Footer, Header, RichLog, Static, Tabs, Tab
+from textual.widgets import (
+    Footer, Header, RichLog, Static, Tabs, Tab, TabbedContent, TabPane,
+)
 from textual.worker import get_current_worker
 from textual import work
 from textual_plotext import PlotextPlot
@@ -52,10 +53,13 @@ class ProdDashApp(App):
     """Live multi-metric production dashboard."""
 
     TITLE = "AuroraGPT production"
+    # Top-level tabs ("Charts" / "Board") so the table gets its own pane and no
+    # longer competes with the chart for vertical space -- the chart fills its
+    # whole pane. #metrictabs is the per-metric selector inside the Charts pane.
     CSS = """
     #chart { height: 1fr; }
-    #board { height: auto; max-height: 40%; overflow-y: auto; color: $text-muted; }
-    #log { height: 6; display: none; }
+    #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }
+    #log { height: 6; display: none; dock: bottom; }
     #log.building { display: block; }
     """
     BINDINGS = [
@@ -63,6 +67,8 @@ class ProdDashApp(App):
         ("r", "refresh", "refresh"),
         ("x", "toggle_xaxis", "step/tokens"),
         ("a", "toggle_all", "show-all"),
+        ("b", "show_board", "board"),
+        ("c", "show_charts", "charts"),
     ]
 
     def __init__(self):
@@ -70,14 +76,18 @@ class ProdDashApp(App):
         self.metric = "loss"
         self.xaxis = "tokens" if os.environ.get("PD_XAXIS") == "tokens" else "step"
         self.payload = {"chains": {}}
+        self._fresh_kicked = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Tabs(*[Tab(label, id=key) for key, label in METRICS])
-        with Vertical():
-            yield PlotextPlot(id="chart")
-            yield Static("(loading ...)", id="board")
-            yield RichLog(id="log", highlight=False, markup=False, wrap=True)
+        with TabbedContent(id="panes"):
+            with TabPane("Charts", id="pane-charts"):
+                yield Tabs(*[Tab(label, id=key) for key, label in METRICS],
+                           id="metrictabs")
+                yield PlotextPlot(id="chart")
+            with TabPane("Board", id="pane-board"):
+                yield Static("(loading ...)", id="board")
+        yield RichLog(id="log", highlight=False, markup=False, wrap=True)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -112,6 +122,20 @@ class ProdDashApp(App):
         self.query_one("#log", RichLog).clear()
         self._redraw()
         self.query_one("#board", Static).update(pd.render_board(self.payload))
+        # Self-heal a STALE pre-`series` cache: an old backbone (built before the
+        # multi-metric change) has `curve` but no `series`, so the board renders
+        # but every chart is blank. If no chain carries a series, force ONE fresh
+        # rebuild so the next payload has the metric series.
+        chains = self.payload.get("chains", {})
+        has_series = any(c.get("series") for c in chains.values())
+        if chains and not has_series and not self._fresh_kicked:
+            self._fresh_kicked = True
+            self._log_line("stale cache (no metric series) -- forcing a fresh "
+                           "backbone rebuild ...")
+            os.environ["PD_FRESH"] = "1"
+            self._refresh_data()
+        elif has_series:
+            os.environ.pop("PD_FRESH", None)  # don't force-rebuild every cycle
 
     # ---- rendering ----
     def _redraw(self) -> None:
@@ -184,7 +208,17 @@ class ProdDashApp(App):
         os.environ["PD_SHOW_ALL"] = "1" if pd.SHOW_ALL else ""
         self._refresh_data()
 
+    def action_show_board(self) -> None:
+        self.query_one("#panes", TabbedContent).active = "pane-board"
+
+    def action_show_charts(self) -> None:
+        self.query_one("#panes", TabbedContent).active = "pane-charts"
+
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        # Only the per-metric selector (#metrictabs) drives the chart; ignore
+        # the top-level Charts/Board TabbedContent's own tab events.
+        if getattr(event.tabs, "id", None) != "metrictabs":
+            return
         if event.tab is not None and event.tab.id in _METRIC_KEYS:
             self.metric = event.tab.id
             self._redraw()
