@@ -457,7 +457,11 @@ agpt_configs = {
     # RL/LoRA one, so it does not carry the "2b-rl" fused-QKV + flex layout.
     # Used by the mid-training anneal A/B configs (agpt_2b_mds_anneal_*), which
     # fork the converted MDS gs138650 DCP. Complex RoPE matches the production
-    # "2B" flavor; use the "_real" (cos_sin) convert flavor at HF-export time.
+    # "2B" flavor AND the Megatron-DeepSpeed base (adjacent-pair rotation), so
+    # convert to HF with --model_flavor 2b-mds (complex): the state_dict_adapter
+    # then APPLIES the Q/K permute, which is correct for a complex-trained base.
+    # Do NOT convert this with a cos_sin ("_real") flavor -- that skips the
+    # permute and corrupts the export.
     "2b-mds": _build_agpt_config(
         dim=2048,
         n_layers=12,

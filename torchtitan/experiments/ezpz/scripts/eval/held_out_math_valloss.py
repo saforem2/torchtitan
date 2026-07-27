@@ -112,6 +112,22 @@ def score(
             "lower --seq-len or add docs to the holdout"
         )
 
+    # The gemma-7b tokenizer has vocab 256128, but the MDS model is vocab 256000.
+    # Any token id in [256000, 256128) (gemma <unused*> extras) is out of range
+    # for the MDS embedding/lm_head -> a device-side index assert mid-run. Rare
+    # in math text, but fail loud + early with a clear message rather than a
+    # cryptic CUDA/XPU assert deep in the forward. (Ids are identical across
+    # checkpoints so this does not affect comparability -- only crash safety.)
+    model_vocab = int(model.get_input_embeddings().weight.shape[0])
+    max_id = max(flat_ids)
+    if max_id >= model_vocab:
+        raise SystemExit(
+            f"holdout contains token id {max_id} >= model vocab {model_vocab}; "
+            "the tokenizer emits ids the model cannot embed (gemma 256128 vs "
+            "MDS 256000). Rebuild the holdout without those tokens, or score a "
+            "model whose vocab covers them."
+        )
+
     total_nll = 0.0
     total_tokens = 0
     loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")

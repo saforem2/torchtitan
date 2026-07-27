@@ -61,7 +61,11 @@ summ() {  # tag logfile
   local loads=$(grep -ac "Finished loading the checkpoint" "$f")
   local first=$(grep -a "step: " "$f" 2>/dev/null | sed -E "s/\x1b\[[0-9;]*m//g" | grep -oE "step: *[0-9]+  loss: *[0-9.]+" | head -1)
   local last=$(grep -a "step: " "$f" 2>/dev/null | sed -E "s/\x1b\[[0-9;]*m//g" | grep -oE "step: *[0-9]+  loss: *[0-9.]+" | tail -1)
-  local saved=$(grep -ac "Saving a checkpoint\|Finished saving the checkpoint" "$f")
+  # Real save-log markers (checkpoint.py): "Saving the checkpoint.",
+  # "Saving a model only checkpoint ...", "Saving a full checkpoint at last
+  # step ...". The v1 flaw this experiment fixes was ZERO saves, so this
+  # counter is the guardrail -- it must match strings the code actually emits.
+  local saved=$(grep -acE "Saving the checkpoint|Saving a (model only|full) checkpoint" "$f")
   local fail=$(grep -acE "OutOfMemory|OUT_OF_RESOURCES|died from signal|Traceback" "$f")
   echo "[$t] base_loaded=$loads saves=$saved | first=$first last=$last | fail=$fail"
 }

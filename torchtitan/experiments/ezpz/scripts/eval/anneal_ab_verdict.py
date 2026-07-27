@@ -55,11 +55,16 @@ def _valloss(path: Path) -> float:
     return _load(path)["mean_nll"]
 
 
-def _metric_and_stderr(results_path: Path, task: str) -> tuple[float, float]:
+def _metric_and_stderr(
+    results_path: Path, task: str, optional: bool = False
+) -> tuple[float, float] | None:
     """Pull (metric, stderr) for a task from an lm-eval results.json.
 
     Prefers acc_norm, then acc, then exact_match (gsm8k). Returns fractions
-    in [0,1] (lm-eval's native scale); callers convert to pp as needed.
+    in [0,1] (lm-eval's native scale); callers convert to pp as needed. When
+    optional=True, returns None if the task/metric is absent instead of
+    exiting (for the confirmatory-only GSM8K, which the default task list
+    omits).
     """
     results = _load(results_path)
     m = results.get(task)
@@ -70,6 +75,11 @@ def _metric_and_stderr(results_path: Path, task: str) -> tuple[float, float]:
                 m = v
                 break
     if m is None:
+        # A confirmatory-only task (gsm8k) may legitimately be absent -- the
+        # default eval-2b-v2.sh task list does not include it. Let the caller
+        # decide (optional=True -> skip) vs a required task (hard error).
+        if optional:
+            return None
         raise SystemExit(f"task {task!r} not in {results_path}")
 
     for metric_key, se_key in (
@@ -81,6 +91,8 @@ def _metric_and_stderr(results_path: Path, task: str) -> tuple[float, float]:
     ):
         if metric_key in m:
             return float(m[metric_key]), float(m.get(se_key, 0.0))
+    if optional:
+        return None
     raise SystemExit(f"no known metric key for task {task!r} in {results_path}")
 
 
@@ -119,22 +131,35 @@ def main() -> int:
           f"delta={wsd_vl - flat_vl:+.5f}  -> {'wsd better' if primary_pass else 'NOT better'}")
 
     # ---- FORGETTING GUARD: HellaSwag(wsd) vs BASE ----
+    # The guard is MANDATORY for a PASS (pre-registered rule), so --wsd-results
+    # is required -- without it we cannot check forgetting and must NOT emit a
+    # PASS by defaulting the guard to True.
+    if args.wsd_results is None:
+        raise SystemExit(
+            "--wsd-results is required: the HellaSwag forgetting guard is "
+            "mandatory for a PASS verdict and cannot be evaluated without it."
+        )
     base_hs, _ = _metric_and_stderr(args.base_hellaswag, "hellaswag")
-    guard_pass = True
-    if args.wsd_results is not None:
-        wsd_hs, _ = _metric_and_stderr(args.wsd_results, "hellaswag")
-        drop_pp = (base_hs - wsd_hs) * 100.0
-        guard_pass = drop_pp <= _HS_MAX_DROP_PP
-        print(f"GUARD    HellaSwag  base={base_hs*100:.2f}pp  wsd={wsd_hs*100:.2f}pp  "
-              f"drop={drop_pp:+.2f}pp  (max {_HS_MAX_DROP_PP}pp)  -> "
-              f"{'ok' if guard_pass else 'REGRESSION'}")
-    else:
-        print("GUARD    HellaSwag  (wsd results not provided -- guard SKIPPED)")
+    wsd_hs, _ = _metric_and_stderr(args.wsd_results, "hellaswag")
+    drop_pp = (base_hs - wsd_hs) * 100.0
+    guard_pass = drop_pp <= _HS_MAX_DROP_PP
+    print(f"GUARD    HellaSwag  base={base_hs*100:.2f}pp  wsd={wsd_hs*100:.2f}pp  "
+          f"drop={drop_pp:+.2f}pp  (max {_HS_MAX_DROP_PP}pp)  -> "
+          f"{'ok' if guard_pass else 'REGRESSION'}")
 
     # ---- SECONDARY (confirmatory only): GSM8K uplift + non-overlapping CI ----
-    if args.flat_results is not None and args.wsd_results is not None:
-        flat_g, flat_se = _metric_and_stderr(args.flat_results, "gsm8k")
-        wsd_g, wsd_se = _metric_and_stderr(args.wsd_results, "gsm8k")
+    # GSM8K is confirmatory-only and MAY be absent (the default eval task list
+    # omits it); a missing GSM8K must NOT abort the decision, so extract it with
+    # optional=True and skip gracefully.
+    flat_g_res = (
+        _metric_and_stderr(args.flat_results, "gsm8k", optional=True)
+        if args.flat_results is not None
+        else None
+    )
+    wsd_g_res = _metric_and_stderr(args.wsd_results, "gsm8k", optional=True)
+    if flat_g_res is not None and wsd_g_res is not None:
+        flat_g, flat_se = flat_g_res
+        wsd_g, wsd_se = wsd_g_res
         uplift_pp = (wsd_g - flat_g) * 100.0
         # Non-overlapping 95% CIs: wsd lower bound > flat upper bound.
         wsd_lo = (wsd_g - _CI_Z * wsd_se) * 100.0
@@ -146,7 +171,7 @@ def main() -> int:
               f"CI-nonoverlap={non_overlap}  -> "
               f"{'CONFIRMS' if sec_confirm else 'inconclusive (near-floor; confirmatory only)'}")
     else:
-        print("SECONDARY GSM8K  (flat/wsd results not provided -- SKIPPED)")
+        print("SECONDARY GSM8K  (not present in results -- SKIPPED, confirmatory only)")
 
     # ---- VERDICT: primary + guard decide; secondary never flips a pass ----
     verdict = primary_pass and guard_pass
