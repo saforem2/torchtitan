@@ -15,7 +15,6 @@ qk_norm.
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
-from torch.distributed.tensor import Replicate
 
 from torchtitan.models.common.decoder_sharding import (
     dense_activation_placement,
@@ -74,11 +73,17 @@ def _set_agpt_layer_sharding(
     if qk_norm is not None:
         # QK-Norm RMSNorms operate on the head_dim of an already-Replicate-d
         # x inside the GQA forward (set_gqa_attention_sharding uses
-        # in_dst_shardings={"x": Replicate}), so the norm itself only needs
-        # its weight distributed across all dims and no activation
-        # redistribution.
+        # in_dst_shardings={"x": Replicate}), so the norm weight is unsharded
+        # on the TP axis -- same pattern as the regular norms (norm_config):
+        # spmd.R when SP is on (FSDP handles the pending backward all-reduce),
+        # else spmd.I. It MUST be an spmd type, not a DTensor Placement:
+        # dense_param_placement feeds it straight into an SpmdLayout, and a
+        # DTensor Replicate() there fails the spmd.Shard isinstance check in
+        # spmd_layout_to_dtensor_placements (crash at parallelize under TP>1).
         qk_norm.sharding_config = ShardingConfig(
-            state_shardings={"weight": dense_param_placement(tp=Replicate())},
+            state_shardings={
+                "weight": dense_param_placement(tp=spmd.R if enable_sp else spmd.I)
+            },
         )
 
     assert layer_cfg.feed_forward is not None
