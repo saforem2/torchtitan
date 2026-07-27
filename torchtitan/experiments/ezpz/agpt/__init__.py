@@ -615,6 +615,47 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=25600,
     ),
+    # 80B + QK-Norm: RMSNorm on Q,K per head before attention. Directly bounds
+    # the attention-score magnitude -- the prime remaining suspect for the
+    # dp>186 bf16 overflow after full-depth fp32 residual proved insufficient
+    # (residual stream was necessary-but-not-sufficient; scores/another
+    # activation still overflow). Near-free at train time; no ckpt-compat cost
+    # (no surviving 80B production checkpoint to preserve).
+    "80B_qknorm": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        qk_norm=True,
+    ),
+    # 80B + logit softcap (Gemma-2 style, tanh score_mod). Caps attention
+    # scores at +/-30 -- an alternative score-bounding lever to QK-Norm.
+    "80B_softcap": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        logit_softcap=30.0,
+    ),
+    # 80B + QK-Norm AND softcap: both score-bounding levers together, for the
+    # wall test if either alone is insufficient at dp=192.
+    "80B_qknorm_softcap": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        qk_norm=True,
+        logit_softcap=30.0,
+    ),
     # ~80.0B: Wider (dim=10752), shallower (48 layers).
     # PP divides 48: {1,2,3,4,6,8,12,16,24}.
     "80B_wide": _build_agpt_config(
@@ -672,6 +713,9 @@ agpt_configs["50b_wide"] = agpt_configs["50B_wide"]
 agpt_configs["70b_wide"] = agpt_configs["70B_wide"]
 agpt_configs["80b"] = agpt_configs["80B"]
 agpt_configs["80b_wide"] = agpt_configs["80B_wide"]
+agpt_configs["80b_qknorm"] = agpt_configs["80B_qknorm"]
+agpt_configs["80b_softcap"] = agpt_configs["80B_softcap"]
+agpt_configs["80b_qknorm_softcap"] = agpt_configs["80B_qknorm_softcap"]
 
 
 def _as_cos_sin(config: "AgptModel.Config") -> "AgptModel.Config":

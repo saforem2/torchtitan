@@ -747,6 +747,33 @@ def agpt_80b_fp32res_depth() -> FaultTolerantTrainer.Config:
     return _set_fp32_residual_depth(ezpz_agpt_80b())
 
 
+def agpt_80b_qknorm() -> FaultTolerantTrainer.Config:
+    """agpt_80b + QK-Norm (task: 80B dp>186 NaN, score-bounding fix).
+
+    RMSNorm on Q,K per head bounds the attention-score magnitude directly --
+    the prime remaining overflow suspect after full-depth fp32 residual proved
+    necessary-but-insufficient (agpt_80b_fp32res_depth still NaN'd at dp=192).
+    Near-free at train time; no ckpt-compat cost (no surviving 80B prod ckpt).
+    Wall test: 4N smoke for numeric sanity, then 64N/dp=192 (the wall that
+    killed the residual protos).
+    """
+    return agpt("80B_qknorm", tensor_parallel_degree=2)
+
+
+def agpt_80b_softcap() -> FaultTolerantTrainer.Config:
+    """agpt_80b + logit softcap (Gemma-2 tanh score_mod, cap +/-30).
+
+    Alternative attention-score-bounding lever to QK-Norm. Same wall-test plan.
+    """
+    return agpt("80B_softcap", tensor_parallel_degree=2)
+
+
+def agpt_80b_qknorm_softcap() -> FaultTolerantTrainer.Config:
+    """agpt_80b + QK-Norm AND logit softcap -- both score-bounding levers, for
+    the dp=192 wall test if either alone is insufficient."""
+    return agpt("80B_qknorm_softcap", tensor_parallel_degree=2)
+
+
 def ezpz_agpt_80b_alt() -> FaultTolerantTrainer.Config:
     return agpt("80B_alt", tensor_parallel_degree=2)
 
