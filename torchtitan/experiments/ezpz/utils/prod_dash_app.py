@@ -89,6 +89,34 @@ _PALETTE_LIGHT = [
 _PALETTE = _PALETTE_DARK
 
 
+# Light<->dark counterparts within a theme FAMILY, so the `d` toggle flips
+# polarity while preserving the user's chosen palette (gruvbox stays gruvbox,
+# solarized stays solarized, etc.) instead of always jumping to textual-*.
+# Bidirectional: each pair is registered both ways at import. Any theme not in a
+# pair falls back to the textual-dark/textual-light default (see _theme_counterpart).
+_THEME_PAIRS = [
+    ("textual-dark", "textual-light"),
+    ("gruvbox", "textual-light"),            # gruvbox has no light sibling in-tree
+    ("solarized-dark", "solarized-light"),
+    ("atom-one-dark", "atom-one-light"),
+    ("rose-pine", "rose-pine-dawn"),
+    ("rose-pine-moon", "rose-pine-dawn"),
+    ("catppuccin-mocha", "catppuccin-latte"),
+    ("catppuccin-macchiato", "catppuccin-latte"),
+    ("catppuccin-frappe", "catppuccin-latte"),
+    ("nord", "textual-light"),               # no in-tree light sibling
+    ("dracula", "textual-light"),
+    ("monokai", "textual-light"),
+    ("tokyo-night", "textual-light"),
+    ("flexoki", "textual-light"),
+    ("ansi-light", "textual-dark"),
+]
+_THEME_COUNTERPART = {}
+for _d, _l in _THEME_PAIRS:
+    _THEME_COUNTERPART.setdefault(_d, _l)
+    _THEME_COUNTERPART.setdefault(_l, _d)
+
+
 def _dim(rgb, f=0.55, bg=(0, 0, 0)):
     """Fade an RGB color toward the background so idle chains recede.
 
@@ -443,10 +471,39 @@ class ProdDashApp(App):
         self._redraw()
 
     def action_toggle_theme(self) -> None:
-        """Flip between the default dark theme and textual-light, and redraw so
-        the chart picks up the hue-parallel palette for the new background."""
-        self.theme = ("textual-light" if self.current_theme.dark
-                      else "textual-dark")
+        """Flip the theme's polarity, then redraw so the chart palette follows
+        the new background.
+
+        Preference order for the target theme:
+          1. The theme we flipped AWAY from last time, if it has the opposite
+             polarity to the current one -- so ANY theme round-trips exactly,
+             including families with no in-tree light sibling (gruvbox, nord: we
+             remember them and come straight back instead of snapping to a
+             textual-* default).
+          2. Otherwise the _THEME_COUNTERPART sibling (solarized-dark<->
+             solarized-light, catppuccin-*<->catppuccin-latte, etc.).
+          3. Otherwise the textual-dark/textual-light default by polarity."""
+        cur = self.theme
+        cur_dark = self._is_dark()
+        prev = getattr(self, "_prev_theme", None)
+
+        def _polarity(name):
+            t = self.available_themes.get(name)
+            return None if t is None else bool(getattr(t, "dark", False))
+
+        cand = None
+        if prev is not None and prev in self.available_themes \
+                and _polarity(prev) == (not cur_dark):
+            cand = prev  # exact round-trip to where we last came from
+        if cand is None:
+            sib = _THEME_COUNTERPART.get(cur)
+            if sib is not None and sib in self.available_themes:
+                cand = sib
+        if cand is None:
+            cand = "textual-light" if cur_dark else "textual-dark"
+
+        self._prev_theme = cur  # remember so the next toggle can return here
+        self.theme = cand
         self._redraw()
 
     def action_toggle_all(self) -> None:
