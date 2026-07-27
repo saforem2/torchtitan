@@ -7,15 +7,16 @@
 
 > Last updated: 2026-07-27
 >
-> Status: chain at step **6,000** persisted (~302.0B tokens, **6.5%** of
-> 4.67T), loss ~**2.51**. Trajectory since the step-300 stall: `8505255`
-> (sync mode) reached step-1,125; `8558548`/`8558549` carried it
-> 1,101 -> 3,136; native-autoretry continuations (`8647385`, `8661054`)
-> advanced it 3,101 -> 4,375; `8681340` (260N) resumed the chain to
-> step-6,000. Currently between advances -- the 256N prod resumes
-> (`8698753`/`8698754`) are queue-starved; a 16N `capacity`-queue bridge
-> (`8703284`, GAS=16 -> GBS=6144 bit-identical) is queued to carry it
-> forward from step-6,000. NOTE: the run-ids for the 1,101->3,135 segment
+> Status: chain at step **6,025** persisted (~303.2B tokens, **6.5%** of
+> 4.67T), loss ~**2.43** (W&B tip step-6,037). Trajectory since the step-300
+> stall: `8505255` (sync mode) reached step-1,125; `8558548`/`8558549`
+> carried it 1,101 -> 3,136; native-autoretry continuations (`8647385`,
+> `8661054`) advanced it 3,101 -> 4,375; `8681340` (260N) resumed the chain
+> to step-6,000. The 256N prod resumes (`8698753`/`8698754`) are
+> queue-starved; a 16N `capacity`-queue bridge (`8703284`, GAS=16 -> GBS=6144
+> bit-identical) is **running**, carrying it forward from step-6,000 (bridge
+> run-id `v58n7vam`; continuation `8705325` held behind it).
+> NOTE: the run-ids for the 1,101->3,135 segment
 > were originally recorded as the `ezpz.examples.test` preflight-smoke runs;
 > corrected 2026-07-24 to the real `torchtitan.ezpz.train` run-ids (the
 > metrics were always in the right project), so the charts now source them
