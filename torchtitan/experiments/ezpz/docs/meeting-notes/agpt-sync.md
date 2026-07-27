@@ -4,6 +4,105 @@
 
 ---
 
+## 2026-07-27 -- catch-up for Venkat (out since 2026-07-11)
+
+### Headline: top items in your absence -- 80B NaN re-root-caused (bf16, not the optimizer), the CoT-teaching front ran to a clear verdict (SFT is the accuracy lever, not RL), full-mix SFT deliverable is checkpoint-900, and Aurora queue starvation + a 2026-07-27 outage are the main drags on production throughput
+
+Digest of the ~16 days since you left. The detailed two-week write-up is the
+[2026-07-20 entry below](#2026-07-20); this is the shortlist + what moved since.
+**Nothing is on fire; the main story is queue starvation, not broken code.**
+
+### 1. Biggest single result -- 80B NaN re-diagnosed (changes the plan)
+
+The 80B production NaN is a **bf16 residual-stream activation overflow, NOT an
+optimizer bug** (the old SophiaG-vs-mano debate is moot -- both NaN identically,
+mano has no Hessian term). The fp32-activations run trains clean and exposes
+true grad_norms of 21K-79K that bf16 was masking to ~5-7. **Only confirmed-clean
+config is fp32 mixed-precision-param at TP=4 (~3-5x slower); no 80B job is
+queued pending your call.** A per-block fp32-residual prototype was built but
+still NaNs at dp=192 -- necessary, not sufficient. Guard added:
+`--nan-abort-consecutive=5` (the last 512N NaN wasted ~6,100 node-h). This is
+**Ask #1 below** and the top decision waiting on you.
+
+### 2. CoT-teaching front -- ran end-to-end to a verdict (new since you left)
+
+The chain-of-thought teaching effort (opened 07-20) is now **Stages 0-2
+complete**, and it produced a clean, actionable finding:
+
+- **Cold-start CoT-SFT is the accuracy lever; GRPO is not, at 2B.** Two-stage
+  SFT (B2: tulu-math -> gsm8k-r1cot) reaches GSM8K **~0.205**, beating every
+  single-stage rebuild. Gated GRPO on that base is **drift-proof** (format
+  perfected 0.985 -> 1.0, no reward-hacking) but **accuracy stays flat**
+  (0.205 -> 0.215 = noise) -- at ~20% GSM8K the correct-rollout density is too
+  thin for RL to bite. **Takeaway: invest in the cold-start SFT / a stronger or
+  math-heavier base, not more RL, to move 2B accuracy.**
+- Enabling infra along the way: the reward-ceiling break (**+168%** from a
+  componentized reward vs a flat ~0.25 wall) and Monarch+TorchStore+vLLM
+  GRPO+LoRA vendored in-tree with **zero edits to core/experiments-rl**.
+
+### 3. Full-mix SFT -- finished, but the deliverable is checkpoint-900
+
+The 12x-more-tokens full-mix SFT **catastrophically forgot** at 1 epoch
+(step-8672: train loss 0.357 but HellaSwag 0.59 -> 0.27). **The deliverable is
+checkpoint-900** (base-LM retained, IFEval prompt-strict 0.253). Root cause: LR
+2e-5 held above 1e-5 through step ~4350. **Lesson (now a guardrail ask): cap
+full-mix SFT at O(1000) steps or drop LR.** More tokens did NOT beat the tiny
+metamathqa-729 SFT.
+
+### 4. Production pre-training -- steady, queue-limited
+
+- **2B 256N: COMPLETE** (4.674T tokens, 100%, loss 2.652) -- unchanged; the base
+  for CPT/SFT. Final-ckpt eval still blocked on PM.
+- **20B 512N: step 6,100** (~614.0B, 13.1%, loss ~2.44); **20B 256N: step 6,000**
+  (~302.0B, 6.5%). Both advancing only via **16N capacity-queue bridges** --
+  the 256N/512N prod jobs have sat queue-starved for days (genuine node scarcity
+  + daily reservations), so a low-contention capacity trickle is what keeps them
+  moving.
+- **Aurora outage 2026-07-27** killed the in-flight eval + a briefly-running
+  512N prod resume (`8696040`, CCL crash) with scheduler code -29. **No
+  checkpoints corrupted, no ckpt-dir collisions**; jobs resubmitted, chains
+  intact.
+- **80B: still blocked** (item 1); no job queued.
+
+### 5. Evaluation -- suite modernized, peer numbers still pending
+
+- New eval-strategy review (07-17): our 7-task commonsense suite is a training
+  thermometer but "nearly useless vs modern peers" -- we had **no MMLU and no
+  GSM8K**. Both (+ ARC-Challenge 25-shot) are now wired and **backfilling** the
+  20B tails; **no AuroraGPT MMLU/GSM8K numbers have landed in the docs yet** (the
+  07-27 outage killed the modern-pass/gsm8k half of the backfill mid-run;
+  resubmitted). **OLMo-2 (7B/13B)** is the named single peer.
+- 20B "no plateau" no longer holds: HellaSwag peaked **0.6339 @ step-4,400**,
+  now oscillating 0.60-0.63.
+
+### 6. Charts / docs -- current
+
+Production dashboard, per-chain READMEs, and the all-production overlay are
+refreshed to disk truth (20B-512 6,100 / 20B-256 6,000). A W&B-fetch
+consolidation (shared `wandb_fetch.py`) fixed a stale-curve bug where the board
+and charts had drifted. The overlay now carries the MDS reference's stage 1/2/3
+boundary lines (4.674T / 7.064T / 7.771T).
+
+### Top asks for Venkat (full list in the 2026-07-20 entry)
+
+1. **80B (the big one):** approve starting the slow-but-stable fp32
+   mixed-precision-param TP=4 run now (only confirmed-clean path, ~3-5x slower),
+   or hold for a full-depth fp32-residual fix? No 80B is training until this is
+   decided.
+2. **2B direction:** the CoT verdict says accuracy lives in cold-start SFT, not
+   RL -- do we invest in a stronger/math-heavier base + the stage-2 anneal the
+   data-strategy memo recommends (50-100B tokens, LR->0, science/math upsample)?
+3. **SFT above 8N:** file an ALCF ticket for the deterministic 384-rank GPU page
+   fault, or accept 8N as the SFT ceiling? (Blocks full-mix 32N + v2-256n-base
+   SFT.)
+4. **Aurora queue starvation:** the prod chains only advance via capacity-queue
+   bridges; is escalating the AuroraGPT allocation's queue priority worth an
+   ALCF conversation, or do we accept the capacity trickle as the steady state?
+5. **2B 512N (83.8%, ~25 days queue-starved):** hold for a slot, or declare the
+   completed 256N chain (4.674T, 100%) the 2B deliverable and abandon 512N?
+
+---
+
 ## 2026-07-20
 
 ### Headline: 80B NaN re-root-caused (bf16 activation overflow, not the optimizer); new clean Polaris A100 20B chain; the bulk of the effort went into RL/GRPO+Monarch on XPU, which seeded a brand-new chain-of-thought teaching front
