@@ -86,7 +86,7 @@ COLORS = [
 # (qstat states + tails of currently-running .o logs) runs every call.
 # ---------------------------------------------------------------------------
 _AGG = r'''
-import json, os, re, glob, time, subprocess, importlib.util, statistics
+import json, os, re, sys, glob, time, subprocess, importlib.util, statistics
 
 REPO = %(repo)r
 TTL = %(ttl)d
@@ -97,6 +97,15 @@ USER = os.environ.get("USER", "foremans")
 PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
 os.chdir(REPO)
+
+# Progress goes to STDERR (stdout is reserved for the single JSON payload the
+# local side parses). The local fetch() streams stderr live so a cold build
+# is no longer a silent multi-minute hang. Each line is timestamped + tagged
+# [prod_dash].
+_T0 = time.time()
+def _log(msg):
+    sys.stderr.write("[prod_dash +%%5.1fs] %%s\n" %% (time.time() - _T0, msg))
+    sys.stderr.flush()
 
 # --- trajectories.py + wandb_fetch.py imported standalone. Both are
 # dependency-light (stdlib + lazy wandb, NO numpy/matplotlib/torch), so
@@ -270,15 +279,21 @@ def _wandb_ids_from_paths(paths):
     return ids
 
 def build_backbone():
+    _log("cold build: scanning PBS .o logs for ckpt-dir index ...")
     logs = _all_ologs()
     idx = _dir_index(logs)
+    _log("indexed %%d log(s); fetching W&B history for %%d canonical chain(s) "
+         "(scan_history, the slow part) ..." %% (len(logs), len(CANON)))
     canon_dirs = set()
     chains = {}
-    for t in CANON:
+    for i, t in enumerate(CANON, 1):
         cd = t.get("ckpt_dir")
         base = os.path.basename(cd) if cd else None
         if base:
             canon_dirs.add(base)
+        _log("  [%%d/%%d] %%s: pulling %%d W&B run(s) ..." %% (
+            i, len(CANON), t.get("key", "?"),
+            len(t.get("wandb_run_ids") or [])))
         curve = _wandb_curve(t.get("wandb_run_ids") or [], t.get("olog_fallbacks"))
         # Distinguish sibling chains that share model+nodes (e.g. the canonical
         # 2b 512N vs the sqrt2-LR fork "2b_v2_512_lr3.22e-5") by appending the
@@ -308,6 +323,7 @@ def build_backbone():
     # canonical. Stale ones (last .o write older than EXP_MAX_AGE seconds) are
     # hidden by default so the board stays focused on the live picture; set
     # SHOW_ALL to include every experiment ever run.
+    _log("canonical chains done; scanning for active experiment forks ...")
     now = time.time()
     for base, paths in idx.items():
         if base in canon_dirs:
@@ -347,6 +363,8 @@ def build_backbone():
     # a tracked chain are kept.
     tracked = {c.get("ckpt_base") for c in chains.values() if c.get("ckpt_base")}
     slim_idx = {b: p for b, p in idx.items() if b in tracked}
+    _log("backbone built: %%d chain(s) total (%%d canonical + experiments)" %% (
+        len(chains), len(CANON)))
     return {"chains": chains, "idx": slim_idx, "built_at": time.time()}
 
 def _kick_detached_refresh():
@@ -361,7 +379,7 @@ def _kick_detached_refresh():
         open(lock, "w").close()
     except Exception:
         return
-    cmd = ("cd %%s && PD_LOCAL=1 PD_FRESH=1 .venv/bin/python3 "
+    cmd = ("cd %%s && PD_LOCAL=1 PD_FRESH=1 PD_QUIET=1 .venv/bin/python3 "
            "torchtitan/experiments/ezpz/utils/prod_dash.py --board "
            ">/tmp/prod_dash_refresh.log 2>&1; rm -f %%s" %% (REPO, lock))
     try:
@@ -390,12 +408,18 @@ def load_backbone():
             bb = json.load(open(CACHE))
             age = time.time() - os.path.getmtime(CACHE)
             if age >= TTL:
+                _log("serving cached backbone (%%dm old, STALE) + kicking a "
+                     "detached refresh for the next call" %% (age // 60))
                 _kick_detached_refresh()
                 bb["stale"] = True
+            else:
+                _log("serving warm cached backbone (%%dm old)" %% (age // 60))
             return bb
         except Exception:
             pass
     # No cache at all (first-ever run): unavoidable synchronous build.
+    _log("no backbone cache -> cold build (this is the ~3-6 min first-run "
+         "wait; subsequent calls are instant from cache)")
     bb = build_backbone()
     try:
         json.dump(bb, open(CACHE, "w"))
@@ -568,19 +592,28 @@ def fetch() -> dict:
                      "show_all": 1 if SHOW_ALL else 0,
                      "exp_max_age": EXP_MAX_AGE}
     if LOCAL:
-        r = subprocess.run([sys.executable, "-c", script],
-                           capture_output=True, text=True, timeout=SSH_TIMEOUT)
+        cmd = [sys.executable, "-c", script]
     else:
         b64 = base64.b64encode(script.encode()).decode()
         remote = (
             "P=$([ -x .venv/bin/python3 ] && echo .venv/bin/python3 || echo python3); "
             "echo %s | base64 -d | $P" % b64
         )
-        r = subprocess.run(
-            ["ssh", "-S", SOCK, SSH_TGT,
-             "cd %s && %s" % (REPO, remote)],
-            capture_output=True, text=True, timeout=SSH_TIMEOUT)
-    for line in r.stdout.splitlines():
+        cmd = ["ssh", "-S", SOCK, SSH_TGT, "cd %s && %s" % (REPO, remote)]
+    # Capture stdout (the JSON payload) but let the aggregator's stderr stream
+    # STRAIGHT to our terminal, so the cold ~3-6 min W&B build shows live
+    # `[prod_dash +Ns] ...` progress instead of sitting silent. (PD_QUIET=1
+    # suppresses it, e.g. for the detached refresh worker.)
+    stderr_dest = subprocess.DEVNULL if os.environ.get("PD_QUIET") == "1" else None
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_dest,
+                           text=True, timeout=SSH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(
+            "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
+            "for a cold build)\n" % int(SSH_TIMEOUT))
+        return {"chains": {}}
+    for line in (r.stdout or "").splitlines():
         line = line.strip()
         if line.startswith("{"):
             try:
@@ -588,8 +621,6 @@ def fetch() -> dict:
             except Exception:
                 pass
     sys.stderr.write("prod_dash: no JSON from aggregator\n")
-    if r.stderr:
-        sys.stderr.write(r.stderr[-2000:] + "\n")
     return {"chains": {}}
 
 
@@ -882,6 +913,9 @@ def main():
         import matplotlib
         matplotlib.use("module://kitcat")
     print("Live production loss dashboard (kitcat+ambivalent). Ctrl-C to stop.")
+    print("  (first frame on a cold cache builds the W&B backbone -- ~3-6 min, "
+          "live progress below; later frames are instant from cache)")
+    sys.stdout.flush()
     while True:
         try:
             payload = fetch()
