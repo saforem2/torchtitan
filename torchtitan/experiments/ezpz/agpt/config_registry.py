@@ -506,8 +506,11 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
 # --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
 # The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
 # but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not
-# 256000 like MDS), so it uses the agpt "2b" flavor via agpt_2b_real (cos_sin RoPE,
-# matching how the base was trained). Same anneal mechanism/LR/data as the MDS arms.
+# 256000 like MDS). It uses the plain "2b" flavor via ezpz_agpt_2b (COMPLEX RoPE),
+# which is how production 2B was trained -- agpt_2b_real (cos_sin) is a
+# compile-throughput TEST flavor only, NEVER production, and forking a complex-
+# trained base with a cos_sin config applies the wrong Q/K rotation (different
+# channel pairing) and corrupts the model. Same anneal mechanism/LR/data as MDS.
 _OLMO_ANNEAL_BASE = os.environ.get(
     "OLMO_ANNEAL_BASE",
     str(
@@ -519,9 +522,11 @@ _OLMO_ANNEAL_BASE = os.environ.get(
 
 def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     """Shared fork config for the olmo-mix anneal A/B (schedule set by callers)."""
-    # agpt_2b_real = stock vocab-256128 flavor + cos_sin RoPE (matches the olmo
-    # base's training). seq_len 8192, no AC (2B fits).
-    cfg = agpt_2b_real()
+    # ezpz_agpt_2b = stock vocab-256128 flavor + COMPLEX RoPE, matching how the
+    # olmo base was actually trained. (Do NOT use agpt_2b_real here: cos_sin RoPE
+    # is a compile-throughput test flavor and mismatches the complex-trained base
+    # -- it rotates a different Q/K channel pairing and corrupts the fork.)
+    cfg = ezpz_agpt_2b()
     cfg.training.seq_len = 8192
     cfg.activation_checkpoint = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
