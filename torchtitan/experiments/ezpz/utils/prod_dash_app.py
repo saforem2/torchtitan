@@ -27,7 +27,7 @@ import os
 
 import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import (
@@ -89,8 +89,16 @@ _PALETTE_LIGHT = [
 _PALETTE = _PALETTE_DARK
 
 
-def _dim(rgb, f=0.55):
-    return tuple(int(c * f) for c in rgb)
+def _dim(rgb, f=0.55, bg=(0, 0, 0)):
+    """Fade an RGB color toward the background so idle chains recede.
+
+    The old version multiplied toward BLACK (rgb*f), which correctly dims on a
+    dark canvas but on a LIGHT canvas makes a color DARKER -- i.e. higher
+    contrast against white, so idle lines stood out MORE, not less. Blending
+    toward the actual background color dims correctly in either theme:
+    result = rgb*f + bg*(1-f). Default bg=black preserves the old dark-theme
+    look; the caller passes the theme background for light mode."""
+    return tuple(int(c * f + b * (1.0 - f)) for c, b in zip(rgb, bg))
 
 
 class ProdDashApp(App):
@@ -172,7 +180,37 @@ class ProdDashApp(App):
         yield RichLog(id="log", highlight=False, markup=False, wrap=True)
         yield Footer()
 
+    def get_system_commands(self, screen):
+        """Surface every app binding in the command palette (Ctrl-P).
+
+        Textual only auto-populates the palette with SYSTEM commands, not a
+        subclass's BINDINGS, so none of q/r/x/z/d/... showed up. Yield one
+        command per binding (skipping hidden ones) with its action wired through
+        run_action, alongside the built-in system commands."""
+        yield from super().get_system_commands(screen)
+        for b in self.BINDINGS:
+            action = getattr(b, "action", None)
+            desc = getattr(b, "description", "") or ""
+            show = getattr(b, "show", True)
+            key = getattr(b, "key", "")
+            if not action or not show:
+                continue
+            title = "%s  (%s)" % (desc or action, key)
+            yield SystemCommand(
+                title, "prod_dash: %s" % (desc or action),
+                (lambda a=action: self.run_action(a)),
+            )
+
     def on_mount(self) -> None:
+        # Transparent plotext canvas so the chart inherits the Textual widget
+        # background (which follows the app theme) instead of the auto-theme
+        # path, which rendered a BLACK canvas under a light theme. "textual-clear"
+        # sets canvas/axes/ticks to "default" (terminal default = transparent +
+        # theme foreground); our explicit per-line colors are unaffected.
+        try:
+            self.query_one("#chart", PlotextPlot).theme = "textual-clear"
+        except Exception:
+            pass
         self._refresh_data()
         # Auto-refresh on the same cadence as the kitcat live loop.
         self.set_interval(pd.INTERVAL, self._refresh_data)
@@ -208,16 +246,30 @@ class ProdDashApp(App):
                     -(c.get("num_nodes") or 0), k)
         return sorted(self.payload.get("chains", {}).items(), key=order)
 
+    def _is_dark(self):
+        """True if the active Textual theme is dark. current_theme.dark is the
+        reliable signal in Textual 8.x (App.dark is deprecated)."""
+        try:
+            return bool(self.current_theme.dark)
+        except Exception:
+            return True  # app default is textual-dark
+
+    def _bg_rgb(self):
+        """The active theme's background (surface) color as an (r,g,b) tuple, so
+        _dim can fade idle chains toward the ACTUAL canvas color (correct in both
+        light and dark). Falls back to black/white by theme if it can't parse."""
+        try:
+            from textual.color import Color
+            return Color.parse(self.theme_variables.get("surface")).rgb
+        except Exception:
+            return (0, 0, 0) if self._is_dark() else (255, 255, 255)
+
     def _palette_for_theme(self):
         """Pick the hue-parallel palette matching the active Textual theme.
 
-        current_theme.dark is the reliable signal in Textual 8.x (the App.dark
-        bool is deprecated). Falls back to the dark palette if the theme can't be
-        read, matching the app's default (textual-dark)."""
-        try:
-            return _PALETTE_DARK if self.current_theme.dark else _PALETTE_LIGHT
-        except Exception:
-            return _PALETTE_DARK
+        Falls back to the dark palette if the theme can't be read, matching the
+        app's default (textual-dark)."""
+        return _PALETTE_DARK if self._is_dark() else _PALETTE_LIGHT
 
     def _color_for(self, key):
         keys = [k for k, _ in self._chain_order()]
@@ -226,8 +278,12 @@ class ProdDashApp(App):
         return palette[idx % len(palette)]
 
     def _rebuild_runs(self):
-        """Populate the run-toggle SelectionList from the current chains (once);
-        preserve on/off state across refreshes."""
+        """Populate the run-toggle SelectionList from the current chains. Doubles
+        as the chart legend: each row carries a color swatch matching that chain's
+        plotted line (the in-canvas plotext legend was dropped because it is
+        pinned to the top-left corner and covered the early-step data). Preserves
+        on/off state across refreshes."""
+        from rich.text import Text
         sl = self.query_one("#runs", SelectionList)
         want = [(k, c) for k, c in self._chain_order()]
         sl.clear_options()
@@ -235,9 +291,15 @@ class ProdDashApp(App):
             live = (c.get("queue_state") == "R"
                     or (c.get("log_age") is not None
                         and c["log_age"] <= pd.LIVE_WINDOW))
-            tag = ("* " if live else "  ") + c.get("label", k)
-            sl.add_option(Selection(tag, k, k not in self._hidden))
-        sl.border_title = "runs (space=toggle)"
+            r, g, b = self._color_for(k)
+            swatch = "rgb(%d,%d,%d)" % (r, g, b)
+            prompt = Text.assemble(
+                ("* " if live else "  "),
+                ("━━ ", swatch),  # heavy-line swatch in the line color
+                c.get("label", k),
+            )
+            sl.add_option(Selection(prompt, k, k not in self._hidden))
+        sl.border_title = "runs / legend (space=toggle)"
         self._runs_built = True
 
     def _apply_payload(self, data: dict) -> None:
@@ -328,6 +390,7 @@ class ProdDashApp(App):
         yH = yhi if yhi is not None else float("inf")
         clip = (xlo is not None or xhi is not None
                 or ylo is not None or yhi is not None)
+        bg = self._bg_rgb()
         drawn = 0
         for key, c, xs, ys, is_live in prepped:
             if clip:
@@ -338,13 +401,16 @@ class ProdDashApp(App):
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             color = self._color_for(key)
-            label = ("* " if is_live else "") + c.get("label", key) + (
-                "" if is_live else " (idle)")
             # braille everywhere (2x4 sub-cells per char = 8x dot resolution);
-            # idle chains dimmed to keep the live one salient.
+            # idle chains faded TOWARD THE THEME BACKGROUND (so they recede in
+            # both light and dark) to keep the live one salient.
             if not is_live:
-                color = _dim(color)
-            plt.plot(xs, ys, color=color, label=label, marker="braille")
+                color = _dim(color, bg=bg)
+            # No plt label=: plotext's legend is hardcoded to the top-left corner
+            # (no reposition/disable API) and covered the early-step points of
+            # interest. The run SelectionList on the left IS the legend now -- it
+            # carries a color swatch per chain (see _rebuild_runs).
+            plt.plot(xs, ys, color=color, marker="braille")
             drawn += 1
 
         axis_label = dict(METRICS)[self.metric]
