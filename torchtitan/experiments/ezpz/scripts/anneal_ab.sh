@@ -37,6 +37,27 @@ mkdir -p "$LOGDIR"
 export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128 no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTORCH_XPU_ALLOC_CONF=expandable_segments:True CCL_LOG_LEVEL=ERROR
 export CHECKPOINT_ASYNC_MODE=disabled
+
+# HF dataset at 384 ranks MUST be served from a fully pre-cached shared HF_HOME
+# in OFFLINE mode -- NOT streamed live from the hub. A live stream (even with a
+# rank-0 prefetch) has all 383 worker ranks re-resolve dataset metadata against
+# the hub API, blowing the per-IP rate limit (429 storm) so workers crash and
+# rank 0 dies at the next barrier ("Failed to recv, got 0 bytes" -- jobs
+# 12471848/51/53 all died this way). The fix is the ezpz precache pattern:
+#   1) ONCE from a login node (with proxy on):
+#        export HF_HOME=/lus/tegu/projects/datasets/hf_cache
+#        python torchtitan/experiments/ezpz/scripts/precache_hf_dataset.py \
+#            open-web-math/open-web-math
+#   2) here, point at that shared cache and force OFFLINE. These MUST be
+#      exported at script top (before any python starts) because
+#      huggingface_hub / datasets read the offline flags into module constants
+#      at IMPORT time -- a runtime os.environ mutation is ignored (proven:
+#      job 12471853 still 429'd with a runtime toggle). Offline => load_dataset
+#      returns from the local snapshot with ZERO hub calls, at any rank count.
+export HF_HOME="${HF_HOME:-/lus/tegu/projects/datasets/hf_cache}"
+export HF_DATASETS_OFFLINE=1
+export HF_HUB_OFFLINE=1
+export HF_HUB_ENABLE_HF_TRANSFER=0
 # Base DCPs (absolute; the config fails loud at build time if these are wrong).
 export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-mds-gs138650/step-0}"
 export OLMO_ANNEAL_BASE="${OLMO_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859}"
@@ -46,27 +67,23 @@ curl -fsSL https://bit.ly/ezpz-utils -o /tmp/ezu.sh 2>/dev/null
 source /tmp/ezu.sh >/dev/null 2>&1
 ezpz_setup .venv >/dev/null 2>&1
 echo "torch=$(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null)"
+echo "HF_HOME=$HF_HOME HF_HUB_OFFLINE=$HF_HUB_OFFLINE"
 
-# Pre-warm the open-web-math HF hub cache on the HEAD node BEFORE launching the
-# distributed job. The in-training rank-0 prefetch (datasets.py
-# _rank0_prefetch_then_barrier) hits the hub live; a transient HfHubHTTPError
-# there (rate-limit / proxy blip) kills rank 0, and all other ranks then die at
-# the following dist.barrier (job 12471848 died exactly this way at 384 ranks).
-# A serial, retried warm-up here makes the in-training fetch a warm-cache hit.
-export HF_HUB_ENABLE_HF_TRANSFER=0
-_ds="${_MDS_ANNEAL_DATASET:-open-web-math/open-web-math}"
-for attempt in 1 2 3 4 5; do
-  if python3 -c "
+# Verify the offline cache actually resolves BEFORE burning the allocation --
+# fail loud with the precache instructions rather than crash 384 ranks.
+if ! python3 -c "
 from datasets import load_dataset
 ds = load_dataset('open-web-math/open-web-math', split='train', streaming=True)
 next(iter(ds))
-print('owm cache warm')
+print('offline owm cache OK')
 " 2>/dev/null; then
-    echo "prewarm: open-web-math cache warm (attempt $attempt)"; break
-  fi
-  echo "prewarm: attempt $attempt failed (transient hub error); retrying in 30s"
-  sleep 30
-done
+  echo "ERROR: open-web-math not resolvable offline from HF_HOME=$HF_HOME." >&2
+  echo "Run the precache first (login node, proxy on):" >&2
+  echo "  export HF_HOME=$HF_HOME" >&2
+  echo "  python torchtitan/experiments/ezpz/scripts/precache_hf_dataset.py open-web-math/open-web-math" >&2
+  exit 7
+fi
+echo "offline owm cache verified"
 
 # NHOSTS from the PBS nodefile; HSDP shards intra-node (12 tiles) and replicates
 # across nodes. dp_replicate * dp_shard = world size, so dp_replicate = NHOSTS.
