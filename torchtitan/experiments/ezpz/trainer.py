@@ -866,6 +866,34 @@ class FaultTolerantTrainer(Trainer):
             nan_abort_n = config.nan_abort_consecutive
             consecutive_nonfinite = 0
 
+            # --- Opt-in per-op numerics capture (80B overflow localization) ---
+            # Inert unless EZPZ_DUMP_NUMERICS=1. Captures one step of per-op
+            # activation stats via DebugMode into {dump_folder}/numerics/ to
+            # name the op that first goes non-finite. An UNFILTERED fp64 capture
+            # over 84L x dim9216 OOMs / exceeds the walltime window at 80B (why
+            # the first attempt was reverted), so restrict to the overflow
+            # suspects via EZPZ_NUMERICS_OPS (comma-separated op-name
+            # substrings, default "mm,bmm,softmax" = attention scores + FFN
+            # gate). EZPZ_NUMERICS_MIN_NUMEL raises the small-tensor cutoff.
+            # See agent_tooling/numerics_debugging/. Revert after diagnosis.
+            _numerics_capture = None
+            if os.environ.get("EZPZ_DUMP_NUMERICS", "0") == "1":
+                from agent_tooling.numerics_debugging.activation_tracer import (
+                    ActivationCaptureProfiler,
+                )
+
+                _ops_env = os.environ.get("EZPZ_NUMERICS_OPS", "mm,bmm,softmax")
+                _op_filter = {o for o in _ops_env.split(",") if o} or None
+                _numerics_capture = ActivationCaptureProfiler(
+                    enabled=True,
+                    model=self.model_parts[0],
+                    dump_dir=os.path.join(config.dump_folder, "numerics"),
+                    capture_step=int(os.environ.get("EZPZ_NUMERICS_STEP", "6")),
+                    op_filter=_op_filter,
+                    min_numel=int(os.environ.get("EZPZ_NUMERICS_MIN_NUMEL", "1000")),
+                )
+                _numerics_capture.__enter__()
+
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
@@ -933,6 +961,8 @@ class FaultTolerantTrainer(Trainer):
                 # signal the profiler that the next profiling step has started
                 profiler.step()
 
+                if _numerics_capture is not None:
+                    _numerics_capture.step()
 
                 # reduce timeout after first train step for faster signal
                 # (assuming lazy init and compilation are finished)
@@ -941,6 +971,9 @@ class FaultTolerantTrainer(Trainer):
                         timeout=timedelta(seconds=config.comm.train_timeout_seconds),
                         parallel_dims=self.parallel_dims,
                     )
+
+            if _numerics_capture is not None:
+                _numerics_capture.__exit__(None, None, None)
 
         if torch.distributed.get_rank() == 0:
             logger.info("Sleeping 2 seconds for other ranks to complete")

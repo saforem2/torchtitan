@@ -833,6 +833,14 @@ class ActivationCaptureProfiler:
         model: The model whose activations to capture.
         dump_dir: Directory for output log files.
         capture_step: The training step to capture (1-indexed).
+        op_filter: Optional set of op-name substrings to restrict capture to
+            (e.g. {"mm", "bmm", "softmax"}). None captures all captureable
+            ops. Restricting the op set is what makes capture VIABLE at 80B:
+            an unfiltered fp64 DebugMode pass over 84 layers x dim 9216 OOMs /
+            exceeds the walltime window, but the two overflow suspects
+            (attention scores = bmm/softmax, FFN gate = mm) are a small set.
+        min_numel: Minimum tensor size to capture (default 1000). Raise it to
+            drop small tensors and further shrink the capture at large scale.
     """
 
     def __init__(
@@ -842,11 +850,15 @@ class ActivationCaptureProfiler:
         model: nn.Module,
         dump_dir: str,
         capture_step: int = 1,
+        op_filter: set[str] | None = None,
+        min_numel: int = 1000,
     ):
         self._enabled = enabled
         self._model = model
         self._dump_dir = dump_dir
         self._capture_step = capture_step
+        self._op_filter = op_filter
+        self._min_numel = min_numel
         self._step = 0
         self._captured = False
         self._tracer: DebugModeTracer | None = None
@@ -874,9 +886,14 @@ class ActivationCaptureProfiler:
         """Enter DebugModeTracer so the next training step is captured."""
         from torchtitan.tools.logging import logger
 
-        logger.info(f"Numerics capture: arming for step {self._capture_step}")
+        logger.info(
+            f"Numerics capture: arming for step {self._capture_step} "
+            f"(op_filter={self._op_filter}, min_numel={self._min_numel})"
+        )
         set_numerics_capture_active(True)
-        self._tracer = DebugModeTracer(self._model)
+        self._tracer = DebugModeTracer(
+            self._model, min_numel=self._min_numel, op_filter=self._op_filter
+        )
         self._captures = self._tracer.__enter__()
 
     def _dump(self) -> None:
