@@ -45,6 +45,7 @@ OLOG_KEYS = (
     "loss_metrics/global_avg_loss",
     "grad_norm",
     "throughput(tps)",
+    "tflops",
     "mfu(%)",
 )
 # Every metric key W&B logs. The extra keys (timestamp/lr/max_loss/n_tokens)
@@ -59,6 +60,7 @@ ALL_KEYS = (
     "loss_metrics/global_max_loss",
     "n_tokens_seen",
     "throughput(tps)",
+    "tflops",
     "mfu(%)",
 )
 
@@ -67,7 +69,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 #   [TS][I][.../metrics:526:log] step: 3300  loss:  2.61866  grad_norm:  0.1672
 #   memory: 44.55GiB(69.63%)  tps: 349  tflops: 51.93  mfu: 17.41%
 # ANSI escapes wrap each field -- strip them first. We keep the fields that map
-# to OLOG_KEYS; memory/tflops are parsed only to anchor the regex.
+# to OLOG_KEYS (loss/grad_norm/tps/tflops/mfu); memory is parsed only to anchor
+# the regex.
 OLOG_STEP_RE = re.compile(
     r"step:\s+(?P<step>\d+)\s+"
     r"loss:\s+(?P<loss>[\d.]+)\s+"
@@ -85,8 +88,8 @@ def parse_olog(paths):
     Returns ``(records, last)`` where ``records`` is a list of dicts keyed by
     OLOG_KEYS, sorted ascending by ``_step`` and deduped so a step seen in a
     later file wins (resume semantics); ``last`` is a dict for the final line
-    encountered (``step``/``loss``/``tps``/``mfu``) or ``{}`` if nothing parsed.
-    Missing/unreadable paths are skipped.
+    encountered (``step``/``loss``/``grad_norm``/``tps``/``tflops``/``mfu``) or
+    ``{}`` if nothing parsed. Missing/unreadable paths are skipped.
     """
     by_step = {}
     last = {}
@@ -104,14 +107,18 @@ def parse_olog(paths):
                 tps = float(m.group("tps").replace(",", ""))
                 mfu = float(m.group("mfu"))
                 loss = float(m.group("loss"))
+                grad_norm = float(m.group("grad_norm"))
+                tflops = float(m.group("tflops"))
                 by_step[step] = {
                     "_step": step,
                     "loss_metrics/global_avg_loss": loss,
-                    "grad_norm": float(m.group("grad_norm")),
+                    "grad_norm": grad_norm,
                     "throughput(tps)": tps,
+                    "tflops": tflops,
                     "mfu(%)": mfu,
                 }
-                last = {"step": step, "loss": loss, "tps": tps, "mfu": mfu}
+                last = {"step": step, "loss": loss, "grad_norm": grad_norm,
+                        "tps": tps, "tflops": tflops, "mfu": mfu}
     records = [by_step[s] for s in sorted(by_step)]
     return records, last
 
