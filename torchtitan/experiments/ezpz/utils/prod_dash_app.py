@@ -15,20 +15,23 @@ Opt-in via ``python prod_dash.py --app`` (which imports this module and calls
 Both are pure-python (NOT torch deps -- safe for the XPU build). If they are not
 installed, ``prod_dash.py --app`` falls back to the text board.
 
-Keys: q quit | r refresh | x toggle step<->tokens x-axis | a toggle show-all
-experiments | left/right (or the tab bar) switch metric.
+Keys: q quit | r refresh | x step<->tokens x-axis | a show-all experiments |
+b/c board/charts pane | t focus run-toggles | z cycle zoom | Z/0 reset zoom |
+left/right (or the tab bar) switch metric | space (in the run list) toggle a run.
 """
 from __future__ import annotations
 
 import os
-import zlib
 
 import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
 from textual.app import App, ComposeResult
+from textual.containers import Horizontal
 from textual.widgets import (
     Footer, Header, RichLog, Static, Tabs, Tab, TabbedContent, TabPane,
+    SelectionList,
 )
+from textual.widgets.selection_list import Selection
 from textual.worker import get_current_worker
 from textual import work
 from textual_plotext import PlotextPlot
@@ -43,10 +46,27 @@ METRICS = [
 ]
 _METRIC_KEYS = [m[0] for m in METRICS]
 
+# Curated high-contrast categorical palette (RGB), assigned by STABLE sorted
+# chain index so consecutive chains get maximally-different hues -- avoids the
+# crc32-hash clustering that made several chains read as the same purple.
+_PALETTE = [
+    (66, 135, 245),   # blue
+    (245, 133, 24),   # orange
+    (84, 196, 75),    # green
+    (228, 87, 86),    # red
+    (162, 122, 255),  # purple
+    (0, 199, 190),    # teal
+    (255, 105, 180),  # pink
+    (214, 197, 45),   # gold
+    (150, 100, 60),   # brown
+    (120, 220, 150),  # mint
+    (140, 160, 175),  # slate
+    (255, 160, 90),   # apricot
+]
 
-def _hex_to_rgb(h):
-    h = h.lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+def _dim(rgb, f=0.55):
+    return tuple(int(c * f) for c in rgb)
 
 
 class ProdDashApp(App):
@@ -54,10 +74,14 @@ class ProdDashApp(App):
 
     TITLE = "AuroraGPT production"
     # Top-level tabs ("Charts" / "Board") so the table gets its own pane and no
-    # longer competes with the chart for vertical space -- the chart fills its
-    # whole pane. #metrictabs is the per-metric selector inside the Charts pane.
+    # longer competes with the chart for vertical space. Inside Charts: a run
+    # SelectionList (left, toggle chains on/off) beside the PlotextPlot (right);
+    # #metrictabs is the per-metric selector above them.
     CSS = """
-    #chart { height: 1fr; }
+    #metrictabs { dock: top; }
+    #runs { width: 34; border-right: solid $panel; }
+    #runs:focus-within { border-right: solid $accent; }
+    #chart { width: 1fr; }
     #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }
     #log { height: 6; display: none; dock: bottom; }
     #log.building { display: block; }
@@ -69,7 +93,15 @@ class ProdDashApp(App):
         ("a", "toggle_all", "show-all"),
         ("b", "show_board", "board"),
         ("c", "show_charts", "charts"),
+        ("t", "focus_runs", "toggle runs"),
+        ("z", "cycle_zoom", "zoom"),
+        ("Z", "reset_zoom", "reset zoom"),
+        ("0", "reset_zoom", "reset zoom"),
     ]
+
+    # zoom presets over the x-range (fraction of the full token/step span kept,
+    # anchored at the right/newest end). None = full range (autoscale).
+    _ZOOMS = [None, 0.5, 0.25, 0.1]
 
     def __init__(self):
         super().__init__()
@@ -77,6 +109,9 @@ class ProdDashApp(App):
         self.xaxis = "tokens" if os.environ.get("PD_XAXIS") == "tokens" else "step"
         self.payload = {"chains": {}}
         self._fresh_kicked = False
+        self._hidden = set()      # chain keys toggled OFF
+        self._zoom_i = 0          # index into _ZOOMS (0 = full)
+        self._runs_built = False  # whether the SelectionList is populated yet
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -84,7 +119,9 @@ class ProdDashApp(App):
             with TabPane("Charts", id="pane-charts"):
                 yield Tabs(*[Tab(label, id=key) for key, label in METRICS],
                            id="metrictabs")
-                yield PlotextPlot(id="chart")
+                with Horizontal():
+                    yield SelectionList(id="runs")
+                    yield PlotextPlot(id="chart")
             with TabPane("Board", id="pane-board"):
                 yield Static("(loading ...)", id="board")
         yield RichLog(id="log", highlight=False, markup=False, wrap=True)
@@ -116,10 +153,41 @@ class ProdDashApp(App):
     def _log_line(self, line: str) -> None:
         self.query_one("#log", RichLog).write(line)
 
+    def _chain_order(self):
+        """Chains in stable display order (canonical first, then by model/nodes).
+        The index into this list drives the color assignment so hues stay stable
+        and maximally separated across refreshes."""
+        def order(item):
+            k, c = item
+            return (c.get("kind") != "canonical", c.get("model") or "z",
+                    -(c.get("num_nodes") or 0), k)
+        return sorted(self.payload.get("chains", {}).items(), key=order)
+
+    def _color_for(self, key):
+        keys = [k for k, _ in self._chain_order()]
+        idx = keys.index(key) if key in keys else 0
+        return _PALETTE[idx % len(_PALETTE)]
+
+    def _rebuild_runs(self):
+        """Populate the run-toggle SelectionList from the current chains (once);
+        preserve on/off state across refreshes."""
+        sl = self.query_one("#runs", SelectionList)
+        want = [(k, c) for k, c in self._chain_order()]
+        sl.clear_options()
+        for k, c in want:
+            live = (c.get("queue_state") == "R"
+                    or (c.get("log_age") is not None
+                        and c["log_age"] <= pd.LIVE_WINDOW))
+            tag = ("* " if live else "  ") + c.get("label", k)
+            sl.add_option(Selection(tag, k, k not in self._hidden))
+        sl.border_title = "runs (space=toggle)"
+        self._runs_built = True
+
     def _apply_payload(self, data: dict) -> None:
         self.payload = data or {"chains": {}}
         self._log_show(False)
         self.query_one("#log", RichLog).clear()
+        self._rebuild_runs()
         self._redraw()
         self.query_one("#board", Static).update(pd.render_board(self.payload))
         # Self-heal a STALE pre-`series` cache: an old backbone (built before the
@@ -143,21 +211,18 @@ class ProdDashApp(App):
         plt = widget.plt
         plt.clear_data()
         plt.clear_figure()
-        chains = self.payload.get("chains", {})
-
-        def order(item):
-            k, c = item
-            return (c.get("kind") != "canonical", c.get("model") or "z",
-                    -(c.get("num_nodes") or 0), k)
 
         drawn = 0
-        # draw idle first, live last (so live sits on top)
-        items = sorted(chains.items(), key=order)
-        live_last = sorted(items, key=lambda kc: bool(
+        all_x = []
+        # draw idle first, live last (so live sits on top); hidden chains skipped
+        ordered = self._chain_order()
+        live_last = sorted(ordered, key=lambda kc: bool(
             kc[1].get("queue_state") == "R"
             or (kc[1].get("log_age") is not None
                 and kc[1]["log_age"] <= pd.LIVE_WINDOW)))
         for key, c in live_last:
+            if key in self._hidden:
+                continue
             series = (c.get("series") or {}).get(self.metric) or []
             tip = c.get("live_tip") or {}
             # append the freshest running-job point for this metric if newer
@@ -180,20 +245,28 @@ class ProdDashApp(App):
             is_live = (c.get("queue_state") == "R"
                        or (c.get("log_age") is not None
                            and c["log_age"] <= pd.LIVE_WINDOW))
-            color = _hex_to_rgb(pd.COLORS[zlib.crc32(key.encode()) % len(pd.COLORS)])
+            color = self._color_for(key)
             label = ("* " if is_live else "") + c.get("label", key) + (
                 "" if is_live else " (idle)")
             # braille everywhere: 2x4 sub-cells per char = 8x the resolution of
-            # dot markers. live vs idle is carried by the label + color, so no
-            # marker distinction is needed. Idle chains are dimmed via color.
+            # dot markers. Idle chains are dimmed to keep the live one salient.
             if not is_live:
-                color = tuple(int(ch * 0.6) for ch in color)  # dim idle chains
+                color = _dim(color)
             plt.plot(xs, ys, color=color, label=label, marker="braille")
+            all_x += xs
             drawn += 1
 
+        # zoom: keep the rightmost fraction of the x-span (recent-progress view)
+        zoom = self._ZOOMS[self._zoom_i]
+        if zoom is not None and all_x:
+            hi = max(all_x)
+            lo = min(all_x)
+            plt.xlim(hi - (hi - lo) * zoom, hi)
+
         axis_label = dict(METRICS)[self.metric]
-        plt.title("AuroraGPT production -- %s%s" % (
-            axis_label, "" if drawn else "  (no data)"))
+        zlabel = "" if zoom is None else "  [zoom %g%%]" % (zoom * 100)
+        plt.title("AuroraGPT production -- %s%s%s" % (
+            axis_label, "" if drawn else "  (no data)", zlabel))
         plt.xlabel("tokens seen (billions)" if self.xaxis == "tokens"
                    else "training step (cumulative)")
         plt.ylabel(axis_label)
@@ -217,6 +290,27 @@ class ProdDashApp(App):
 
     def action_show_charts(self) -> None:
         self.query_one("#panes", TabbedContent).active = "pane-charts"
+
+    def action_focus_runs(self) -> None:
+        self.query_one("#panes", TabbedContent).active = "pane-charts"
+        self.query_one("#runs", SelectionList).focus()
+
+    def action_cycle_zoom(self) -> None:
+        self._zoom_i = (self._zoom_i + 1) % len(self._ZOOMS)
+        self._redraw()
+
+    def action_reset_zoom(self) -> None:
+        self._zoom_i = 0
+        self._redraw()
+
+    def on_selection_list_selected_changed(
+            self, event: SelectionList.SelectedChanged) -> None:
+        # the SelectionList holds the set of VISIBLE chain keys -> hidden is the
+        # complement. Recompute + redraw on every toggle.
+        selected = set(event.selection_list.selected)
+        all_keys = {k for k, _ in self._chain_order()}
+        self._hidden = all_keys - selected
+        self._redraw()
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         # Only the per-metric selector (#metrictabs) drives the chart; ignore
