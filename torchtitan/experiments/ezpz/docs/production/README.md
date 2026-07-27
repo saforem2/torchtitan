@@ -30,7 +30,7 @@ in the linked pages.
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
 | [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 39,600 | 2.71 | 85.3% | 🟡 queue-starved |
-| [20B 256N](agpt/20b/n256/README.md) | advancing | **6,000** | 2.68 | 6.5% | 🟢 carried to 3,100 via relocated n256 clone chain |
+| [20B 256N](agpt/20b/n256/README.md) | advancing | **6,025** | 2.68 | 6.5% | 🟢 carried to 3,100 via relocated n256 clone chain |
 | [20B 512N](agpt/20b/n512/README.md) | advancing | **6,100** | 2.47 | 13.1% | 🟢 native auto-retry (8638793+8638795) broke the stall, 4,400→5,400 |
 | [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
 
@@ -114,7 +114,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the final ckpt (blocked on PM).** |
-| 20B | 256 | **6,000** (persisted) | **2.68** | **302.0B** (6.5%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
+| 20B | 256 | **6,025** (persisted) | **2.68** | **303.2B** (6.5%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
 
 ### Other jobs
 
