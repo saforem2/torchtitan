@@ -183,8 +183,12 @@ class ProdDashApp(App):
             color = _hex_to_rgb(pd.COLORS[zlib.crc32(key.encode()) % len(pd.COLORS)])
             label = ("* " if is_live else "") + c.get("label", key) + (
                 "" if is_live else " (idle)")
-            marker = "braille" if is_live else "dot"
-            plt.plot(xs, ys, color=color, label=label, marker=marker)
+            # braille everywhere: 2x4 sub-cells per char = 8x the resolution of
+            # dot markers. live vs idle is carried by the label + color, so no
+            # marker distinction is needed. Idle chains are dimmed via color.
+            if not is_live:
+                color = tuple(int(ch * 0.6) for ch in color)  # dim idle chains
+            plt.plot(xs, ys, color=color, label=label, marker="braille")
             drawn += 1
 
         axis_label = dict(METRICS)[self.metric]
