@@ -83,18 +83,106 @@ consolidation (shared `wandb_fetch.py`) fixed a stale-curve bug where the board
 and charts had drifted. The overlay now carries the MDS reference's stage 1/2/3
 boundary lines (4.674T / 7.064T / 7.771T).
 
+### Appendix A -- 80B NaN: the explicit runs + what they narrow it to
+
+Full write-up: [`2026-07-14-80b-fp32-residual-fix`](../experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md).
+Arch: dim=9216, 84 layers, ffn=25600, vocab 256128. The wall is **LBS>1 AND
+dp_degree (=NGPUS/TP) > ~186**; the safe corner (TP=4, LBS=1, dp<=186, batch via
+GAS) trains clean but can't reach production GBS.
+
+The run ladder (this is what makes it diagnosable):
+
+| Run | Config | Scale | Result |
+|---|---|---|---|
+| `8574385` | SophiaG | 510N | flat grad_norm ~6.17, step-14 inf, **NaN step-18** |
+| `8661293` | **mano** (no Hessian term) | 62N, dp~186 | flat grad_norm ~6.0, **NaN step-17** -- identical signature -> **optimizer-independent** |
+| `8537349` | **fp32 mixed-precision-param** (all activations fp32) | TP=4 | **CLEAN** 20 steps; exposes true grad_norms **21K-79K** that bf16 masked to ~5-7 |
+| `8671046` | `agpt_80b_fp32res` (per-block fp32 residual add, bf16 GEMMs) | 4N | CLEAN (loss 12.79->9.24) -- proves the add-masking was real |
+| `8671243` | `agpt_80b_fp32res` | 64N, **dp=192** | **still NaN step-19** -- per-block fp32 add necessary but NOT sufficient |
+| `8673658` | `agpt_80b_fp32res_depth` (fp32 residual across all 84 layers) | 64N, **dp=192** | **still NaN ~step-37** -- full-depth residual ALSO insufficient |
+
+**What the ladder narrows it to (the useful new signal):** the *only* delta
+between `8673658` (full-depth fp32 residual, **NaN**) and `8537349` (fp32 params,
+**clean**) is the **bf16 compute inside the sublayers** (attention QK^T scores +
+FFN SwiGLU intermediate). So the overflow site is **inside a sublayer's bf16
+matmul, not the residual accumulation** -- which contradicts the original
+"deep residual stream" framing and points at two cheap, standard fixes we have
+in-tree but the 80B flavor does NOT use: **attention softcap** (`*_softcap`
+flavors exist) and **QK-Norm** (`attention.py` supports `qk_norm`). Ruled out in
+code: loss softmax (CE upcasts to fp32), grad reduction (FSDP reduce_dtype=fp32,
+loss dp-invariant). No converged 80B checkpoint exists (`80b/README` shows
+`[no ckpts]`), so we can change the architecture freely -- no DCP-resume
+constraint.
+
+Recommended cheapest-first ladder (details in the doc):
+1. **Per-op numerics capture at dp=192** (task #29, wired but paused) -- logs
+   per-op max-abs to name the exact op that hits ~3e38 first (attention scores
+   vs FFN gate). Cheap (~32N, tens of steps); turns the next step from guess to
+   targeted fix.
+2. **Enable QK-Norm and/or attention softcap** (near-free, no ckpt-compat cost)
+   -- 4N smoke, then the dp=192 wall test (64N) that killed the residual protos.
+3. If FFN is the culprit: fp32 **just the FFN** (targeted autocast), far cheaper
+   than full fp32-params.
+4. Guaranteed interim: **fp32 mixed-precision-param at TP=4** (`8537349`, only
+   confirmed-clean, ~3-5x slower) -- start in parallel so 80B isn't idle.
+
+"Wall 2" (separate, scale/init): 256N/dp=768 GPU `NotPresent` init segfault;
+2048N SIGSEGV in `set_determinism` at 24,864 ranks; **1024N (dp=3066, `8574386`)
+is the untested bracket** that would settle the practical 80B max.
+
+### Appendix B -- SFT above 8N: the 384-rank scale fault (verified reproducer)
+
+Full write-up: [`2026-07-10-sft-2b-gs138650-big-mix-32n`](../experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md#blocked-384-rank-gpu-page-fault-at-step-1-2-scale-fault-unsolved).
+Memory: `project_sft_v2_base_oom_badnode`.
+
+Every 32N (= 384-rank) SFT attempt dies at **step 1-2** with a GPU page fault
+during an oneCCL collective (`libccl.so` backtrace):
+
+```
+Segmentation fault from GPU ... ctx_id: 5 (CCS) type: 0 (NotPresent), access: 1 (Write) ... aborting
+-> rank 221 died from signal 6 (SIGABRT)
+```
+
+Evidence (all ruled-out-in-full, not guessed):
+
+- **Deterministic**: jobs `12470336` / `12470338` / `12470339` (+ the afterany
+  chain) all die identically at step 1-2. Earlier big-mix interleave attempts
+  `12468348` / `12468371` / `12468398` hit the same barrier.
+- **Not a bad node**: the fault lands on **rank 221 across two different
+  physical nodes** (`x1921c4s0b0n0` AND `x1922c2s3b0n0`); fresh PBS allocation
+  per retry, yet it follows the rank -> scale, not hardware.
+- **Not bad data / OOV**: full columnar scan of all 53,276,203 rows (2160
+  shards) -> global max token id **255998 < vocab 256000**.
+- **VERIFIED CLEAN REPRODUCER at 2N**: `_diag_bigmix_2n_len1024.sh`
+  (job `12470343`) ran the **same** pretokenized dataset + **same** bsz2/gas8 at
+  **24 ranks** for 20 steps clean (loss 1.25->1.12). Identical data+config
+  trains at 24 ranks, GPU-faults at 384 -> it is purely a scale fault.
+  Scale-sweep harness: `_diag_bigmix_scale_len1024.sh`
+  (both under `rl/scripts/sft/`).
+- **Base-independent**: moving v2-256n-base -> gs138650 did not dodge it; the
+  completed metamathqa-729 SFT dodged it by luck (never hit 384 ranks).
+
+Onset sits near the **same ~186-192 dp boundary as the 80B NaN wall** -- plausibly
+the same oneCCL/Level-Zero scale class, so a facility-side fix for one may inform
+the other (worth filing them as related).
+
+**Impact**: pins SFT to <=8N (~4x slower) and blocks (a) the full-mix 32N run and
+(b) the first SFT on the completed v2-256n base. It's a Level-Zero/oneCCL runtime
+fault below our code -- hence the "file an ALCF ticket" ask (attach the 2N clean
+repro + the three failing 32N job IDs), or accept 8N as the SFT ceiling.
+
 ### Top asks for Venkat (full list in the 2026-07-20 entry)
 
 1. **80B (the big one):** approve starting the slow-but-stable fp32
    mixed-precision-param TP=4 run now (only confirmed-clean path, ~3-5x slower),
    or hold for a full-depth fp32-residual fix? No 80B is training until this is
-   decided.
+   decided. (Evidence + a cheaper QK-Norm/softcap path: **Appendix A**.)
 2. **2B direction:** the CoT verdict says accuracy lives in cold-start SFT, not
    RL -- do we invest in a stronger/math-heavier base + the stage-2 anneal the
    data-strategy memo recommends (50-100B tokens, LR->0, science/math upsample)?
 3. **SFT above 8N:** file an ALCF ticket for the deterministic 384-rank GPU page
    fault, or accept 8N as the SFT ceiling? (Blocks full-mix 32N + v2-256n-base
-   SFT.)
+   SFT. Verified 2N-clean repro + failing 32N job IDs: **Appendix B**.)
 4. **Aurora queue starvation:** the prod chains only advance via capacity-queue
    bridges; is escalating the AuroraGPT allocation's queue priority worth an
    ALCF conversation, or do we accept the capacity trickle as the steady state?
