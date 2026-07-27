@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -241,6 +242,78 @@ def register_hf_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Precached HF dataset -> local parquet resolution
+# ---------------------------------------------------------------------------
+
+
+def resolve_precached_parquet_dir(repo_id: str) -> str | None:
+    """Return the local ``data/`` parquet dir of a snapshot_download'd HF
+    dataset under ``$HF_HOME/hub``, or None if not fully cached.
+
+    HF-hub STREAMING at many ranks 429-storms the metadata API, and OFFLINE
+    ``load_dataset(<repo_id>)`` fails for script/parquet datasets because it
+    still tries to resolve the loader against the hub. But once
+    ``precache_hf_dataset.py`` has snapshot_download'd the repo, the parquet
+    shards live locally at
+    ``$HF_HOME/hub/datasets--<org>--<name>/snapshots/<rev>/data`` and can be
+    read with ``load_dataset("parquet", data_dir=...)`` -- zero hub calls, at
+    any rank count. This resolves that dir so callers can register the corpus
+    as a LOCAL parquet dataset instead of a hub-streaming one.
+    """
+    hf_home = os.environ.get("HF_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache", "huggingface"
+    )
+    cache_key = "datasets--" + repo_id.replace("/", "--")
+    snapshots = os.path.join(hf_home, "hub", cache_key, "snapshots")
+    if not os.path.isdir(snapshots):
+        return None
+    # Prefer the revision pointed to by refs/main; else the first snapshot dir.
+    revs = sorted(
+        d for d in os.listdir(snapshots) if os.path.isdir(os.path.join(snapshots, d))
+    )
+    for rev in revs:
+        data_dir = os.path.join(snapshots, rev, "data")
+        if os.path.isdir(data_dir) and any(
+            f.endswith(".parquet") for f in os.listdir(data_dir)
+        ):
+            return data_dir
+    return None
+
+
+def register_precached_or_hf(
+    name: str,
+    repo_id: str,
+    *,
+    config_name: str | None = None,
+    text_column: str = "text",
+) -> DatasetConfig:
+    """Register ``name`` as a LOCAL parquet dataset if ``repo_id`` is fully
+    precached under ``$HF_HOME``, else fall back to HF-hub streaming.
+
+    Use this for corpora consumed at large rank counts (the anneal's
+    open-web-math at 384 ranks): a precache turns it into a local-parquet
+    load with no hub interaction, dodging the 429 storm; without a precache it
+    still works (streaming) for small-scale / interactive runs.
+    """
+    data_dir = resolve_precached_parquet_dir(repo_id)
+    if data_dir is not None:
+        log.info(
+            f"[ezpz/datasets] {name!r} ({repo_id}) resolved to LOCAL parquet "
+            f"at {data_dir} (precached; no hub calls)"
+        )
+        return register_local_dataset(
+            name, data_dir, text_column=text_column, format="parquet"
+        )
+    log.info(
+        f"[ezpz/datasets] {name!r} ({repo_id}) not precached -- registering as "
+        f"HF-hub streaming (fine for small scale; precache for 100+ ranks)"
+    )
+    return register_hf_dataset(
+        name, repo_id, config_name=config_name, text_column=text_column
+    )
+
+
+# ---------------------------------------------------------------------------
 # Auto-registration fallback: treat unknown dataset names as HF hub paths
 # ---------------------------------------------------------------------------
 
@@ -260,6 +333,15 @@ def _validate_dataset_with_fallback(
     """
     if dataset_name in DATASETS:
         return _original_validate_dataset(dataset_name, dataset_path)
+
+    # Precache-first: if the name looks like an HF repo id (<org>/<name>) and
+    # it has been snapshot_download'd under $HF_HOME, register it as a LOCAL
+    # parquet dataset (zero hub calls, safe at 384 ranks) instead of hub
+    # streaming (which 429-storms at scale). Falls through to hub streaming if
+    # not precached. This is what lets the anneal's open-web-math run at 32N.
+    if "/" in dataset_name and resolve_precached_parquet_dir(dataset_name):
+        register_precached_or_hf(dataset_name, dataset_name)
+        return _original_validate_dataset(dataset_name, dataset_path=None)
 
     # Auto-register: treat the dataset name as a HF hub path.
     # Force dataset_path=None so the registered hub path is used
