@@ -72,7 +72,17 @@ summ() {
 run() {
   local tag="$1" config="$2"
   local log="$LOGDIR/${tag:-arm}.log"
-  echo ""; echo "=== $tag ($config), $MIX_STEPS steps, HSDP shard12/rep$NHOSTS -> $log ==="
+  # MIX_FOLDER_SUFFIX isolates a run's checkpoints from other runs of the SAME
+  # config (e.g. a 2N smoke vs a 32N prod both use agpt_2b_mds_mix_edu whose
+  # config folder is checkpoints/agpt-2b-mds-mix-<arm>). Without a suffix the
+  # prod run AUTO-RESUMES the smoke's checkpoint, which has the WRONG dataloader
+  # rank count (24 vs 384) -> "Missing key ... dataloader.dp_rank_80" crash at
+  # load (job 12471928 died exactly so). Set MIX_FOLDER_SUFFIX=-smoke for smokes.
+  local folder_override=""
+  if [ -n "${MIX_FOLDER_SUFFIX:-}" ]; then
+    folder_override="--checkpoint.folder=checkpoints/agpt-2b-mds-mix-${arm}${MIX_FOLDER_SUFFIX}"
+  fi
+  echo ""; echo "=== $tag ($config), $MIX_STEPS steps, HSDP shard12/rep$NHOSTS -> $log ${folder_override} ==="
   ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt --config="$config" \
     --training.steps="$MIX_STEPS" --training.local-batch-size="$MIX_LBS" \
@@ -82,6 +92,7 @@ run() {
     --parallelism.data-parallel-replicate-degree="$NHOSTS" \
     --checkpoint.interval=100 --checkpoint.async-mode=disabled \
     --dataloader.num-workers=0 \
+    ${folder_override} \
     > "$log" 2>&1
   summ "$tag" "$log"
 }
