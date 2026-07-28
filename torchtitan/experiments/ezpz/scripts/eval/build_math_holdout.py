@@ -130,6 +130,13 @@ def main() -> int:
         default=256,
         help="min-chars for the wikitext holdout (docs are short; default 256).",
     )
+    parser.add_argument(
+        "--wikitext-num-docs",
+        type=int,
+        default=1500,
+        help="docs for the wikitext holdout (test split has only ~1656 docs "
+        ">=256 chars, so this defaults BELOW the math --num-docs 2000).",
+    )
     args = parser.parse_args()
 
     fm_path, fm_cfg, fm_split, fm_col = _FINEMATH
@@ -155,7 +162,8 @@ def main() -> int:
     if args.wikitext:
         wt_path, wt_cfg, wt_split, wt_col = _WIKITEXT
         wikitext = _take_docs(
-            wt_path, wt_cfg, wt_split, wt_col, args.num_docs, args.wikitext_min_chars
+            wt_path, wt_cfg, wt_split, wt_col,
+            args.wikitext_num_docs, args.wikitext_min_chars,
         )
         _write_jsonl(
             wikitext,
