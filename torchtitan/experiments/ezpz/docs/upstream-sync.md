@@ -1,5 +1,27 @@
 # Upstream Sync Log
 
+## 2026-07-29 -- 72nd sync (2 commits, `1c40dd26a..upstream/main`, merge `e5841d611`)
+
+Merged `upstream/main` into `ezpz` (merge commit `e5841d611`), 2 upstream commits
+since the 71st sync. No conflicts. Files touched vs ezpz-relevant paths:
+- `b3cf840ce` Fix float8 filter_fqns to exclude lm_head, not output (#4008) --
+  touches `models/deepseek_v3/config_registry.py` (+llama3). REPLAYED onto
+  `experiments/ezpz/moe/config_registry.py` (commit `2db11d18c`): our 671B float8
+  config had the SAME stale `filter_fqns=["output", ...]`. `filter_fqns` is an
+  EXCLUDE-list, and the head module is named `lm_head`, so `output` matched
+  nothing and the precision-sensitive LM head was silently fp8-quantized. Changed
+  to `["lm_head", "router.gate"]`. Only affects the float8 671B MoE path (no live
+  run uses it), but the fix is correct hygiene. agpt has no float8 config, so no
+  agpt replay needed.
+- `4bed50210` Select FA4 varlen attention on Blackwell (#4012) -- touches shared
+  `models/common/attention.py` (+ `tools/utils.py`, unit test). The change swaps
+  the Hopper-only `has_cuda_capability(9,0)`->FA3 branch for a generic
+  `get_cuda_flash_attention_impl()` that also selects FA4 on Blackwell (SM 10.0).
+  This is a CUDA-capability-gated path: on XPU `get_cuda_flash_attention_impl()`
+  returns None and the whole block is skipped, so the agpt/moe SDPA path is
+  UNAFFECTED (verified). No replay needed.
+
+
 ## 2026-07-27 -- 71st sync (4 commits, `725b995d3..upstream/main`, merge `e0c9c615e`)
 
 Merged `upstream/main` into `ezpz` (merge commit `e0c9c615e`), 4 upstream commits
