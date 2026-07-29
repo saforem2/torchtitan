@@ -604,6 +604,16 @@ def agpt_2b_mds_mix_owm_edu_5050() -> FaultTolerantTrainer.Config:
     return _agpt_2b_mds_mix_blend(0.50, 0.50, "checkpoints/agpt-2b-mds-mix-owm50-edu50")
 
 
+def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
+    """BLEND math-heaviest: 90% open-web-math / 10% fineweb-edu. Probes the
+    math-heavy EDGE past the 75/25 winner -- 75/25 already captured ~all of
+    edu's wikitext (general) gain at zero FineMath (math) cost, so this arm
+    asks whether an even smaller edu slot retains that general gain while
+    giving back more of the math corpus. Brackets the ratio axis on the
+    more-math side of 75/25."""
+    return _agpt_2b_mds_mix_blend(0.90, 0.10, "checkpoints/agpt-2b-mds-mix-owm90-edu10")
+
+
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
 # 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
 # DOE-mission version). Same recipe (MDS fork, constant LR, 10B tok, 75/25),
