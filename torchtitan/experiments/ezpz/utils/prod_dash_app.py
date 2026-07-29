@@ -39,7 +39,11 @@ from textual.worker import get_current_worker
 from textual import work
 from textual_plotext import PlotextPlot
 
-# (short key, axis label) in tab order. Matches prod_dash._METRIC_MAP shorts.
+# SSH-fallback metric set (short key, axis label) -- the 5 the remote aggregator
+# ships in the payload `series` dict. Used only when the local wandb_cache is
+# unavailable. When the cache IS available, the metric list is DISCOVERED
+# dynamically from the cached DataFrames (all ~24 W&B metrics) -- see
+# _refresh_data / _rebuild_metric_tabs.
 METRICS = [
     ("loss", "loss (global avg)"),
     ("grad_norm", "grad norm"),
@@ -48,6 +52,41 @@ METRICS = [
     ("mfu", "MFU (%)"),
 ]
 _METRIC_KEYS = [m[0] for m in METRICS]
+
+# Map the SSH-fallback short names to the full W&B metric keys the local cache
+# uses, so the SAME selected-metric string works whether data came from the
+# cache (full keys) or the SSH series (short keys). When the cache is active the
+# selector holds full W&B keys directly and this map is bypassed.
+_SHORT_TO_WANDB = {
+    "loss": "loss_metrics/global_avg_loss",
+    "grad_norm": "grad_norm",
+    "tps": "throughput(tps)",
+    "tflops": "tflops",
+    "mfu": "mfu(%)",
+}
+
+
+def _metric_label(key: str) -> str:
+    """Human axis label for a metric key (full W&B key or short fallback)."""
+    for short, lab in METRICS:
+        if key == short:
+            return lab
+    # full W&B key: strip the group prefix for a compact tab label
+    return key
+
+
+# Textual Tab ids must be valid Python identifiers, but W&B metric keys contain
+# '/', '(', ')', '%'. Encode to a safe id and keep a reverse map so a tab
+# activation resolves back to the real metric key.
+import re as _re
+
+_TAB_ID_TO_METRIC: dict = {}
+
+
+def _tab_id(metric_key: str) -> str:
+    tid = "m_" + _re.sub(r"[^0-9A-Za-z]", "_", metric_key)
+    _TAB_ID_TO_METRIC[tid] = metric_key
+    return tid
 
 # Curated high-contrast categorical palette (RGB), assigned by STABLE sorted
 # chain index so consecutive chains get maximally-different hues -- avoids the
@@ -254,8 +293,55 @@ class ProdDashApp(App):
                 self.call_from_thread(self._log_line, line)
 
         data = pd.fetch(stderr_cb=cb)
+        # Enrich with the LOCAL all-metric cache (W&B-direct, bypasses SSH). This
+        # is best-effort: if wandb_cache / creds / network fail, chains simply
+        # keep only the SSH `series` (5 metrics) and the selector stays on the
+        # fallback set. On success each chain gains a `metrics` dict
+        # {wandb_key: [[step, val], ...]} spanning all ~24 logged metrics.
+        if not worker.is_cancelled:
+            try:
+                self._enrich_from_cache(data, cb)
+            except Exception as e:
+                cb("wandb_cache enrich skipped: %s: %s" % (type(e).__name__, e))
         if not worker.is_cancelled:
             self.call_from_thread(self._apply_payload, data)
+
+    def _enrich_from_cache(self, data, cb):
+        """Attach all-metric series to each payload chain from the local cache.
+
+        Runs on the worker thread. Maps each payload chain (keyed by trajectory
+        key) to its cached DataFrame via trajectories.py's run-id lists, then
+        stores a `metrics` dict of [[step, value]] pairs per metric column. The
+        union of columns seen becomes the dynamic selector set."""
+        import wandb_cache as wc
+        from torchtitan.experiments.ezpz.utils import trajectories as traj
+        chains = (data or {}).get("chains", {})
+        if not chains:
+            return
+        by_key = {t["key"]: t for t in traj.TRAJECTORIES}
+        discovered = set()
+        for key, c in chains.items():
+            t = by_key.get(key)
+            ids = (t or {}).get("wandb_run_ids") or []
+            if not ids:
+                continue
+            cb("cache: %s (%d runs)" % (key, len(ids)))
+            df = wc.fetch_chain(ids, log=cb)
+            if df is None or df.empty or "_step" not in df.columns:
+                continue
+            steps = df["_step"].tolist()
+            metrics = {}
+            for col in wc.metric_columns(df):
+                vals = df[col].tolist()
+                pairs = [[int(s), float(v)] for s, v in zip(steps, vals)
+                         if v == v and s == s]  # drop NaN steps/values
+                if len(pairs) >= 2:
+                    metrics[col] = pairs
+                    discovered.add(col)
+            if metrics:
+                c["metrics"] = metrics
+        if discovered:
+            data["_metric_keys"] = sorted(discovered)
 
     def _log_show(self, building: bool) -> None:
         log = self.query_one("#log", RichLog)
@@ -330,10 +416,32 @@ class ProdDashApp(App):
         sl.border_title = "runs / legend (space=toggle)"
         self._runs_built = True
 
+    def _rebuild_metric_tabs(self):
+        """Populate the metric selector from the payload's discovered metric set
+        (all ~24 cached W&B metrics) when the cache is active, else the 5 SSH
+        fallback metrics. Only rebuilds when the set actually changed, and
+        preserves the current selection if it survives."""
+        keys = self.payload.get("_metric_keys") or _METRIC_KEYS
+        if keys == getattr(self, "_metric_tab_keys", None):
+            return  # unchanged -> don't churn the Tabs widget
+        self._metric_tab_keys = list(keys)
+        try:
+            tabs = self.query_one("#metrictabs", Tabs)
+        except Exception:
+            return
+        tabs.clear()
+        for k in keys:
+            # Tab ids must be valid identifiers; W&B keys have '/', '(', '%'.
+            tabs.add_tab(Tab(_metric_label(k), id=_tab_id(k)))
+        # keep the current metric if still present, else default to first
+        if self.metric not in keys:
+            self.metric = keys[0] if keys else "loss"
+
     def _apply_payload(self, data: dict) -> None:
         self.payload = data or {"chains": {}}
         self._log_show(False)
         self.query_one("#log", RichLog).clear()
+        self._rebuild_metric_tabs()
         self._rebuild_runs()
         self._redraw()
         self.query_one("#board", Static).update(pd.render_board(self.payload))
@@ -357,10 +465,27 @@ class ProdDashApp(App):
         """Return the (xs, ys, is_live) a chain contributes to the current
         metric on the current x-axis, or None if it can't be drawn. Includes
         the live-tip point. No zoom clipping here (see _redraw)."""
-        series = (c.get("series") or {}).get(self.metric) or []
+        # Prefer the local all-metric cache (metrics keyed by full W&B name);
+        # fall back to the SSH `series` (5 short-named metrics). self.metric holds
+        # a full W&B key when the cache is active, else a short fallback name.
+        cache_metrics = c.get("metrics") or {}
+        series = cache_metrics.get(self.metric)
+        if series is None:
+            # try the short<->wandb mapping in either direction
+            series = cache_metrics.get(_SHORT_TO_WANDB.get(self.metric, ""))
+        if series is None:
+            series = (c.get("series") or {}).get(self.metric) or []
+        series = list(series)
+        # Live-tip augmentation only applies to the 5 SSH short metrics the tip
+        # carries (loss/tps/mfu/...). For cache-only metrics there is no tip.
         tip = c.get("live_tip") or {}
-        if tip and self.metric in _METRIC_KEYS:
-            tv = tip.get(self.metric if self.metric != "loss" else "loss")
+        tip_metric = self.metric
+        if self.metric not in _METRIC_KEYS:
+            # map a full W&B key back to a short tip key if one exists
+            inv = {v: k for k, v in _SHORT_TO_WANDB.items()}
+            tip_metric = inv.get(self.metric, "")
+        if tip and tip_metric in _METRIC_KEYS:
+            tv = tip.get(tip_metric if tip_metric != "loss" else "loss")
             ts = tip.get("step")
             if tv is not None and ts is not None and (
                     not series or ts > series[-1][0]):
@@ -441,7 +566,7 @@ class ProdDashApp(App):
             plt.plot(xs, ys, color=color, marker="braille")
             drawn += 1
 
-        axis_label = dict(METRICS)[self.metric]
+        axis_label = _metric_label(self.metric)
         tags = []
         if self._focus_key is not None:
             tags.append("focus: %s" % self._focus_key)
@@ -709,8 +834,16 @@ class ProdDashApp(App):
         # the top-level Charts/Board TabbedContent's own tab events.
         if getattr(event.tabs, "id", None) != "metrictabs":
             return
-        if event.tab is not None and event.tab.id in _METRIC_KEYS:
-            self.metric = event.tab.id
+        if event.tab is None:
+            return
+        tid = event.tab.id
+        # Cache-active tabs use encoded ids (m_<sanitized>); fallback tabs use
+        # the short metric name directly as the id.
+        if tid in _TAB_ID_TO_METRIC:
+            self.metric = _TAB_ID_TO_METRIC[tid]
+            self._redraw()
+        elif tid in _METRIC_KEYS:
+            self.metric = tid
             self._redraw()
 
 
