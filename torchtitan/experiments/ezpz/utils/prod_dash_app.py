@@ -18,8 +18,9 @@ installed, ``prod_dash.py --app`` falls back to the text board.
 Keys: q quit | r refresh | x step<->tokens x-axis | a show-all experiments |
 b/c board/charts pane | t focus run-toggles | T hide/show the run panel |
 z fit the highlighted run (x+y) | Z/0 reset view | p pan/zoom mode |
-+/- zoom x in/out | h/l pan left/right | X set xlim | Y set ylim |
-left/right (or the tab bar) switch metric | space (in the run list) toggle a run.
++/- zoom x in/out | h/l pan left/right | j/k pan down/up | X set xlim |
+Y set ylim | left/right (or the tab bar) switch metric | d dark/light |
+space (in the run list) toggle a run.
 """
 from __future__ import annotations
 
@@ -213,6 +214,8 @@ class ProdDashApp(App):
         Binding("minus", "zoom_out", "zoom out", priority=True),
         Binding("h", "pan_left", "pan left", priority=True),
         Binding("l", "pan_right", "pan right", priority=True),
+        Binding("j", "pan_down", "pan down", priority=True),
+        Binding("k", "pan_up", "pan up", priority=True),
     ]
 
     def __init__(self):
@@ -236,7 +239,11 @@ class ProdDashApp(App):
         yield Header(show_clock=True)
         with TabbedContent(id="panes"):
             with TabPane("Charts", id="pane-charts"):
-                yield Tabs(*[Tab(label, id=key) for key, label in METRICS],
+                # Initial fallback tabs (the 5 SSH metrics); _rebuild_metric_tabs
+                # diffs against these once the cache discovers the full set. Use
+                # _tab_id() so ids match the rebuild's encoding (else the diff
+                # can't dedup them).
+                yield Tabs(*[Tab(lab, id=_tab_id(k)) for k, lab in METRICS],
                            id="metrictabs")
                 with Horizontal():
                     yield SelectionList(id="runs")
@@ -320,13 +327,15 @@ class ProdDashApp(App):
             return
         by_key = {t["key"]: t for t in traj.TRAJECTORIES}
         discovered = set()
+        counters = {}  # shared -> one cache-hit summary instead of per-run spam
+        total_runs = 0
         for key, c in chains.items():
             t = by_key.get(key)
             ids = (t or {}).get("wandb_run_ids") or []
             if not ids:
                 continue
-            cb("cache: %s (%d runs)" % (key, len(ids)))
-            df = wc.fetch_chain(ids, log=cb)
+            total_runs += len(ids)
+            df = wc.fetch_chain(ids, log=cb, counters=counters)
             if df is None or df.empty or "_step" not in df.columns:
                 continue
             steps = df["_step"].tolist()
@@ -340,6 +349,9 @@ class ProdDashApp(App):
                     discovered.add(col)
             if metrics:
                 c["metrics"] = metrics
+        if counters.get("hit"):
+            cb("cache: %d/%d runs served from disk (terminal); rest fetched"
+               % (counters["hit"], total_runs))
         if discovered:
             data["_metric_keys"] = sorted(discovered)
 
@@ -417,10 +429,13 @@ class ProdDashApp(App):
         self._runs_built = True
 
     def _rebuild_metric_tabs(self):
-        """Populate the metric selector from the payload's discovered metric set
-        (all ~24 cached W&B metrics) when the cache is active, else the 5 SSH
-        fallback metrics. Only rebuilds when the set actually changed, and
-        preserves the current selection if it survives."""
+        """Sync the metric selector to the payload's discovered metric set (all
+        ~24 cached W&B metrics) when the cache is active, else the 5 SSH fallback
+        metrics. DIFFS the tabs (remove stale, add missing) rather than
+        clear()+add: Textual's Tabs.clear() is async (removal happens next pump
+        cycle), so a clear()+add in the same call races -- a later rebuild then
+        re-adds an id whose old tab is still mounted -> DuplicateIds. Diffing is
+        idempotent and race-safe. Preserves the current selection if it lives."""
         keys = self.payload.get("_metric_keys") or _METRIC_KEYS
         if keys == getattr(self, "_metric_tab_keys", None):
             return  # unchanged -> don't churn the Tabs widget
@@ -429,10 +444,16 @@ class ProdDashApp(App):
             tabs = self.query_one("#metrictabs", Tabs)
         except Exception:
             return
-        tabs.clear()
-        for k in keys:
-            # Tab ids must be valid identifiers; W&B keys have '/', '(', '%'.
-            tabs.add_tab(Tab(_metric_label(k), id=_tab_id(k)))
+        want_ids = {_tab_id(k): k for k in keys}       # id -> metric key
+        have_ids = {t.id for t in tabs.query(Tab)}
+        for tid in have_ids - set(want_ids):           # remove stale
+            try:
+                tabs.remove_tab(tid)
+            except Exception:
+                pass
+        for tid, k in want_ids.items():                # add missing
+            if tid not in have_ids:
+                tabs.add_tab(Tab(_metric_label(k), id=tid))
         # keep the current metric if still present, else default to first
         if self.metric not in keys:
             self.metric = keys[0] if keys else "loss"
@@ -731,6 +752,23 @@ class ProdDashApp(App):
         hi = self._xlim[1] if self._xlim[1] is not None else span[1]
         return lo, hi
 
+    def _visible_y_span(self):
+        ys_all = []
+        for key, c in self._chain_order():
+            if key in self._hidden:
+                continue
+            got = self._series_xy(key, c)
+            if got:
+                ys_all += got[1]
+        return (min(ys_all), max(ys_all)) if ys_all else None
+
+    def _cur_ywin(self):
+        """Current [lo,hi] y-window, filling autoscale bounds from the data."""
+        span = self._visible_y_span() or (0.0, 1.0)
+        lo = self._ylim[0] if self._ylim[0] is not None else span[0]
+        hi = self._ylim[1] if self._ylim[1] is not None else span[1]
+        return lo, hi
+
     def action_zoom_in(self) -> None:
         lo, hi = self._cur_xwin()
         c = (lo + hi) / 2.0
@@ -758,6 +796,20 @@ class ProdDashApp(App):
         lo, hi = self._cur_xwin()
         d = (hi - lo) * 0.25
         self._xlim = (lo + d, hi + d)
+        self._focus_key = None
+        self._redraw()
+
+    def action_pan_up(self) -> None:
+        lo, hi = self._cur_ywin()
+        d = (hi - lo) * 0.25
+        self._ylim = (lo + d, hi + d)
+        self._focus_key = None
+        self._redraw()
+
+    def action_pan_down(self) -> None:
+        lo, hi = self._cur_ywin()
+        d = (hi - lo) * 0.25
+        self._ylim = (lo - d, hi - d)
         self._focus_key = None
         self._redraw()
 

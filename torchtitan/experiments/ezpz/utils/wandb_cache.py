@@ -133,7 +133,7 @@ def _scan_full(run, start_step=None) -> pd.DataFrame:
 
 
 def fetch_run(run_id: str, api=None, project: str = PROJECT,
-              force: bool = False, log=None) -> pd.DataFrame:
+              force: bool = False, log=None, counters=None) -> pd.DataFrame:
     """Return one run's full-metric history (cache-first, incremental).
 
     - Cached + run was terminal when cached + not ``force`` -> serve disk as-is.
@@ -142,6 +142,11 @@ def fetch_run(run_id: str, api=None, project: str = PROJECT,
     - Not cached -> full fetch.
     Returns an empty DataFrame if the run can't be loaded from W&B and nothing
     is cached.
+
+    ``counters`` (optional dict): a terminal cache-hit increments
+    ``counters['hit']`` SILENTLY (no per-run log line) so the caller can print
+    one summary instead of one line per run. Interesting events (new fetches,
+    new steps on live runs, unreachable/errors) always log via ``log``.
     """
     def _emit(m):
         if log:
@@ -150,8 +155,12 @@ def fetch_run(run_id: str, api=None, project: str = PROJECT,
     cached_df, cached_state = _load_cached(run_id)
     if (cached_df is not None and not force
             and cached_state in _TERMINAL_STATES):
-        _emit("  %s: cache hit (terminal=%s, %d rows)" % (
-            run_id, cached_state, len(cached_df)))
+        # Silent terminal cache-hit: count it, don't spam a line every refresh.
+        if counters is not None:
+            counters["hit"] = counters.get("hit", 0) + 1
+        else:
+            _emit("  %s: cache hit (terminal=%s, %d rows)" % (
+                run_id, cached_state, len(cached_df)))
         return cached_df
 
     if api is None:
@@ -193,17 +202,27 @@ def fetch_run(run_id: str, api=None, project: str = PROJECT,
 
 
 def fetch_chain(run_ids, api=None, project: str = PROJECT,
-                force: bool = False, log=None) -> pd.DataFrame:
+                force: bool = False, log=None, counters=None) -> pd.DataFrame:
     """Concat a chain's run-ids into one frame, deduped by ``_step``.
 
     Runs are fetched in listed order; on a shared step the LATER run wins
     (resume semantics), matching ``wandb_fetch.concat_chain``.
+
+    Terminal cache-hits are summarized, not logged per-run: pass a shared
+    ``counters`` dict to accumulate across chains (caller prints the total), or
+    omit it and this emits a single ``"N/M runs cache-hit"`` line per chain.
     """
+    own_counter = counters is None
+    counters = counters if counters is not None else {}
     frames = []
     for rid in run_ids or []:
-        df = fetch_run(rid, api=api, project=project, force=force, log=log)
+        df = fetch_run(rid, api=api, project=project, force=force, log=log,
+                       counters=counters)
         if df is not None and not df.empty:
             frames.append(df)
+    if own_counter and log and counters.get("hit"):
+        log("  %d/%d runs cache-hit (terminal, served from disk)" % (
+            counters["hit"], len(run_ids or [])))
     if not frames:
         return pd.DataFrame()
     out = pd.concat(frames, ignore_index=True)
@@ -228,16 +247,21 @@ def fetch_all(trajectories=None, project: str = PROJECT,
     import wandb
     api = wandb.Api(timeout=30)
     out = {}
+    counters = {}  # shared across all chains -> one grand-total summary
+    total_runs = 0
     for e in trajectories:
         ids = e.get("wandb_run_ids") or []
         if not ids:
             continue
+        total_runs += len(ids)
         key = e["key"]
-        if log:
-            log("%s: %d run(s)" % (key, len(ids)))
-        df = fetch_chain(ids, api=api, project=project, force=force, log=log)
+        df = fetch_chain(ids, api=api, project=project, force=force, log=log,
+                         counters=counters)
         if not df.empty:
             out[key] = df
+    if log and counters.get("hit"):
+        log("%d/%d runs cache-hit (terminal, served from disk); rest fetched"
+            % (counters["hit"], total_runs))
     return out
 
 
