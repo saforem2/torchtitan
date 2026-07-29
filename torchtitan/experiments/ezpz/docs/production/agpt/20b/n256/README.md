@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-07-27
+> Last updated: 2026-07-29
 >
 > Status: chain at step **6,025** persisted (~303.2B tokens, **6.5%** of
 > 4.67T), loss ~**2.43** (W&B tip step-6,037). Trajectory since the step-300
@@ -84,13 +84,13 @@
 | `8647385`+ | 2026-07-06..23 | 12h | 3,100 -> 4,375 | ~3.2 -> ~2.5 | ~440 | ~22% | Continuations 8647385 (3101-3603), 8661054 (4201-4375) advanced the chain; interspersed with CCL/gloo crashes + resubmits (transient infra). |
 | `8681340` | 2026-07-23 | 12h | 5,101 -> **5,885**+ | 2.485 -> 2.509 | 40-443 (variable) | ~22% | **RUNNING** (full 260N throughput, resumes real chain). Advancing step-5,100 -> 5,800+; loss steady ~2.49. |
 
-**Latest checkpoint:** step-6,025 (8505255, all of step-100..1,100 have valid `.metadata`)
+**Latest checkpoint:** step-6,800 (8505255, all of step-100..1,100 have valid `.metadata`)
 
-**Cumulative persisted steps:** 6,025
+**Cumulative persisted steps:** 6,800
 
-**Tokens consumed:** 6,025 × 6,144 × 8,192 = **303.2B tokens** (6.5% of 4.67T target)
+**Tokens consumed:** 6,800 × 6,144 × 8,192 = **342.3B tokens** (7.3% of 4.67T target)
 
-**Loss:** 2.5227 (8558549 end, step-3,100)
+**Loss:** 2.4394 (8558549 end, step-3,100)
 
 ## v2 -- 20B @ 256N -- job 8661913 (MISLABELED "constlr"; actually from-scratch)
 
