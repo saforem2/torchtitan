@@ -554,6 +554,56 @@ def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+# --- Phase 2: weighted math/edu BLENDS. Wave 1 showed the extremes bracket the
+# space: owm-100 holds math (FineMath 1.804); edu-100 CATASTROPHICALLY forgets it
+# (+0.308) for a tiny general gain (-0.024). The math-loss curve is steep, the
+# general-gain curve flat -> the optimal mix is math-HEAVY. These arms find where.
+# They REPLACE cfg.dataloader wholesale with an InterleavedHuggingFaceTextDataLoader
+# (setting .sources on the inherited BlendCorpusDataLoader.Config silently no-ops);
+# all sources infinite=True (post_init guard requires uniform infinite). Weights
+# are token-mixture ratios.
+
+
+def _agpt_2b_mds_mix_blend(
+    owm_weight: float, edu_weight: float, folder: str
+) -> FaultTolerantTrainer.Config:
+    """Shared builder for owm/edu weighted-blend mix arms."""
+    from torchtitan.hf_datasets.text_datasets import (
+        HFDataSource,
+        InterleavedHuggingFaceTextDataLoader,
+    )
+
+    cfg = _agpt_2b_mds_mix_base()
+    # Replace the whole dataloader Config -- the base is a BlendCorpusDataLoader
+    # .Config whose .sources field does not exist, so setting it would no-op.
+    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
+        sources=[
+            HFDataSource(
+                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+            ),
+            HFDataSource(
+                dataset="fineweb_edu_local", weight=edu_weight, infinite=True
+            ),
+        ],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+    cfg.checkpoint.folder = folder
+    return cfg
+
+
+def agpt_2b_mds_mix_owm_edu_7525() -> FaultTolerantTrainer.Config:
+    """BLEND math-heavy: 75% open-web-math / 25% fineweb-edu. The predicted
+    winner -- keeps most math (steep loss) while adding a little general."""
+    return _agpt_2b_mds_mix_blend(0.75, 0.25, "checkpoints/agpt-2b-mds-mix-owm75-edu25")
+
+
+def agpt_2b_mds_mix_owm_edu_5050() -> FaultTolerantTrainer.Config:
+    """BLEND balanced: 50% open-web-math / 50% fineweb-edu. Brackets the ratio
+    axis on the more-general side of the math-heavy arm."""
+    return _agpt_2b_mds_mix_blend(0.50, 0.50, "checkpoints/agpt-2b-mds-mix-owm50-edu50")
+
+
 # --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
 # The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
 # but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not

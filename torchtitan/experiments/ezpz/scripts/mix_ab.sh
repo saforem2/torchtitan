@@ -41,19 +41,28 @@ echo "NHOSTS=$NHOSTS steps=$MIX_STEPS lbs=$MIX_LBS arms='$MIX_ARMS'"
 # Preflight: verify each arm's data source resolves BEFORE burning the alloc.
 # owm must be precached local parquet; edu is a local dir (register_local_dataset).
 preflight_ok=1
-for arm in $MIX_ARMS; do
-  case "$arm" in
-    owm)
-      python3 -c "
+# Per-source resolvers (reused across single-corpus and blend arms).
+_check_owm() {
+  python3 -c "
 import torchtitan.experiments.ezpz.datasets as d
 p=d.resolve_precached_parquet_dir('open-web-math/open-web-math'); assert p, 'owm not precached'
 from datasets import load_dataset; next(iter(load_dataset('parquet',data_dir=p,split='train',streaming=True)))
-print('owm OK')" 2>/dev/null || { echo "PREFLIGHT FAIL: owm"; preflight_ok=0; } ;;
-    edu)
-      python3 -c "
+print('owm OK')" 2>/dev/null
+}
+_check_edu() {
+  python3 -c "
 from datasets import load_dataset
 next(iter(load_dataset('parquet',data_dir='/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT/',split='train',streaming=True)))
-print('edu OK')" 2>/dev/null || { echo "PREFLIGHT FAIL: edu"; preflight_ok=0; } ;;
+print('edu OK')" 2>/dev/null
+}
+for arm in $MIX_ARMS; do
+  case "$arm" in
+    owm) _check_owm || { echo "PREFLIGHT FAIL: owm"; preflight_ok=0; } ;;
+    edu) _check_edu || { echo "PREFLIGHT FAIL: edu"; preflight_ok=0; } ;;
+    owm_edu_*)  # blend arms: BOTH sources must resolve
+      _check_owm || { echo "PREFLIGHT FAIL: $arm (owm source)"; preflight_ok=0; }
+      _check_edu || { echo "PREFLIGHT FAIL: $arm (edu source)"; preflight_ok=0; } ;;
+    *) echo "PREFLIGHT WARN: unknown arm '$arm', skipping source check" ;;
   esac
 done
 [ "$preflight_ok" = 1 ] || { echo "ERROR: a data source did not resolve; aborting before alloc burn." >&2; exit 7; }
