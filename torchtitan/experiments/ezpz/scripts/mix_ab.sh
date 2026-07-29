@@ -28,7 +28,27 @@ export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-mds
 cd "$REPO" || exit 9
 curl -fsSL https://bit.ly/ezpz-utils -o /tmp/ezu.sh 2>/dev/null
 source /tmp/ezu.sh >/dev/null 2>&1
+
+# Env-setup guard: ezpz_setup can transiently fail on a compute node (Lustre /
+# network hiccup under heavy queue contention), leaving torch un-importable. If
+# that happens EVERY downstream "import datasets" preflight also fails, and the
+# script would abort with a MISLEADING "data source did not resolve" error while
+# the real cause is a broken venv (job 12472037 died exactly so: torch= blank,
+# both owm AND edu "failed" together). Retry setup once, then hard-fail LOUDLY
+# with the real torch import error rather than cascading into the data checks.
+_torch_ok() { python3 -c 'import torch' >/dev/null 2>&1; }
 ezpz_setup .venv >/dev/null 2>&1
+if ! _torch_ok; then
+  echo "WARN: torch import failed after first ezpz_setup; retrying setup once..." >&2
+  sleep 5
+  ezpz_setup .venv >/dev/null 2>&1
+fi
+if ! _torch_ok; then
+  echo "FATAL: torch does not import after ezpz_setup .venv -- broken env on this" >&2
+  echo "node, NOT a data problem. Real error:" >&2
+  python3 -c 'import torch' 2>&1 | tail -5 >&2
+  exit 8
+fi
 echo "torch=$(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null)"
 
 NHOSTS="${NHOSTS:-$(wc -l < "${PBS_NODEFILE:-/dev/null}" 2>/dev/null)}"
