@@ -160,6 +160,15 @@ TRAINERS=(
     # (gentler LR / data audit) but removed from the production umbrella.
 #    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144|olmo50-dolmino50|2e-6|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2391000000000"
     "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+    # 2B-512 constant-LR fork (from base step-9200, right before LR decay).
+    # Own prod dir already holds the full step-9200 (model+optim); plain
+    # resume-from-latest, decay_ratio=0.0 => constant LR (no decay phase).
+    "2b|512|29700|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710"
+    # 2B-256 constant-LR fork. Native 256N step-9500 (full model+optim, 3072
+    # shards) copied into this dir; plain resume, decay_ratio=0.0 => constant
+    # LR. (The 256N pre-decay knee ~step-18400 was not retained on disk; 9500
+    # is the highest surviving pre-decay 256N checkpoint.)
+    "2b|256|29900|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710"
 )
 
 # Shared training defaults (match submit_agpt_{2b,20b}_autoretry.sh).
