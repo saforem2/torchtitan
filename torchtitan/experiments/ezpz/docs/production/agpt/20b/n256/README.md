@@ -7,15 +7,19 @@
 
 > Last updated: 2026-07-29
 >
-> Status: chain at step **6,025** persisted (~303.2B tokens, **6.5%** of
-> 4.67T), loss ~**2.43** (W&B tip step-6,037). Trajectory since the step-300
-> stall: `8505255` (sync mode) reached step-1,125; `8558548`/`8558549`
-> carried it 1,101 -> 3,136; native-autoretry continuations (`8647385`,
-> `8661054`) advanced it 3,101 -> 4,375; `8681340` (260N) resumed the chain
-> to step-6,000. The 256N prod resumes (`8698753`/`8698754`) are
-> queue-starved; a 16N `capacity`-queue bridge (`8703284`, GAS=16 -> GBS=6144
-> bit-identical) is **running**, carrying it forward from step-6,000 (bridge
-> run-id `v58n7vam`; continuation `8705325` held behind it).
+> Status: chain at step **6,800** persisted (~342.3B tokens, **7.3%** of
+> 4.67T), loss ~**2.4**. Trajectory since the step-300 stall: `8505255`
+> (sync mode) reached step-1,125; `8558548`/`8558549` carried it
+> 1,101 -> 3,136; native-autoretry continuations (`8647385`, `8661054`)
+> advanced it 3,101 -> 4,375; `8681340` (260N) resumed to step-6,000; a 16N
+> `capacity`-queue bridge (`8703284`, run `v58n7vam`) then carried it
+> 6,000 -> 6,800. **Bridge retired 2026-07-29** after it collided with a
+> concurrently-scheduled umbrella trainer on the shared ckpt dir (corrupted
+> step-6,200 + step-6,300, both quarantined; latest CLEAN ckpt = step-6,800).
+> The chain is now owned by the **5-chain ~2,098N umbrella** (`8714502`,
+> resumes step-6,800) with a small `8698753` (260N) resume as queue backfill;
+> individual + umbrella are mutually guarded (handoff-kill on umbrella start)
+> so they never co-write the dir again.
 > NOTE: the run-ids for the 1,101->3,135 segment
 > were originally recorded as the `ezpz.examples.test` preflight-smoke runs;
 > corrected 2026-07-24 to the real `torchtitan.ezpz.train` run-ids (the
