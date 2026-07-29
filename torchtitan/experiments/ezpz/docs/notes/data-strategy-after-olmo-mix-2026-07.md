@@ -2,6 +2,19 @@
 
 > Last updated: 2026-07-18
 
+> **[2026-07-29 UPDATE -- section 1 prediction partially OVERTURNED by experiment.]**
+> This memo predicted the primary lever is a "LR-decayed-to-zero (annealing)
+> stage." The 2B MDS mid-training A/B
+> ([sunspot/20260728-2b-mds-anneal-and-datamix.md](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md))
+> found the LR SCHEDULE is NOT the lever at 10B: constant-LR (flat) BEAT
+> WSD-decay-to-0 on both the MDS and olmo bases (held-out FineMath NLL). What DOES
+> move the needle is the DATA MIX: pure edu-web forgets math catastrophically
+> (+0.308 nats), while a 75% math / 25% edu blend keeps ~all the math and captures
+> ~all of edu's general gain. So the memo's "quality-upsampled mid-training" thesis
+> is right that STAGE-2 DATA is high-ROI, but the "decay-to-zero" mechanism is not
+> the source of the gain -- run stage-2 at constant LR and spend the effort on the
+> mix (75/25 math/general validated; science-corpus blend is the next step).
+
 Decision memo: where to get more pretraining data, and what to do once the
 4.67T olmo-mix-1124 budget is consumed -- tailored to the AuroraGPT 2B/20B/80B
 chains (Dolma-family mix, DOE science mission).
