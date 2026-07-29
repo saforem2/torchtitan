@@ -28,6 +28,10 @@ This **overturns** the `docs/notes/data-strategy-after-olmo-mix-2026-07.md`
 prediction that the "LR-decayed-to-zero annealing stage" is the primary lever --
 empirically the *data mix*, not the decay schedule, is what moves the needle.
 
+![Anneal schedule A/B: flat beats WSD on both bases](figures/anneal_flat_vs_wsd.svg)
+
+![Data-mix trade-off: 75/25 math/edu is the sweet spot](figures/datamix_tradeoff.svg)
+
 ## Experiment 1: anneal schedule A/B (flat vs WSD-decay-to-0)
 
 Two bases x two schedules, 10B tok each, identical data (open-web-math) + seed;
