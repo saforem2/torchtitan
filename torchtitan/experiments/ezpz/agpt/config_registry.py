@@ -503,6 +503,107 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+# --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
+# lever, not the schedule. These arms fork the SAME MDS base at the SAME winning
+# CONSTANT LR 2e-6 and differ ONLY in the training data mix. The MDS base is
+# already math+code-saturated (stage-3), so the highest-value axis is DIVERSITY /
+# anti-forgetting: does swapping math-web for general/edu web forget math or
+# improve general ability? Eval reserves FineMath-4+ + wikitext as FROZEN
+# holdouts that NO arm trains on (disjoint by construction). Wave 1 = these two
+# single-corpus arms (zero new dataloader code); weighted blends are a phase 2.
+
+
+def _agpt_2b_mds_mix_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the data-mix arms: MDS base, constant LR 2e-6
+    (the anneal winner), same budget -- caller sets the dataset + folder."""
+    cfg = _agpt_2b_mds_anneal_base()
+    # Flat / constant-LR schedule (the anneal-proven winner).
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    return cfg
+
+
+def agpt_2b_mds_mix_owm() -> FaultTolerantTrainer.Config:
+    """CONTROL arm: open-web-math 100% (== the anneal flat winner's data).
+
+    Identical to agpt_2b_mds_anneal_flat by construction -- kept as its own name
+    so the data-mix matrix reads uniformly and its checkpoints/eval land in the
+    mix output tree. Anchors the mix experiment to the anneal result.
+    """
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET  # open-web-math/open-web-math
+    cfg.dataloader.dataset_path = None
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-owm"
+    return cfg
+
+
+def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
+    """DIVERSITY-extreme arm: fineweb-edu 100% (general/edu web, no math).
+
+    Tests the core anti-forgetting question: does replacing math-web with edu-web
+    forget math (FineMath holdout rises) or improve general ability (wikitext
+    holdout falls)? fineweb_edu_local is a registered LOCAL parquet dir (140
+    files, ~280GB, verified 'text' column) -- no HF hub, no 429 at 384 ranks.
+    """
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader.dataset = "fineweb_edu_local"
+    cfg.dataloader.dataset_path = None
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-edu"
+    return cfg
+
+
+# --- Phase 2: weighted math/edu BLENDS. Wave 1 showed the extremes bracket the
+# space: owm-100 holds math (FineMath 1.804); edu-100 CATASTROPHICALLY forgets it
+# (+0.308) for a tiny general gain (-0.024). The math-loss curve is steep, the
+# general-gain curve flat -> the optimal mix is math-HEAVY. These arms find where.
+# They REPLACE cfg.dataloader wholesale with an InterleavedHuggingFaceTextDataLoader
+# (setting .sources on the inherited BlendCorpusDataLoader.Config silently no-ops);
+# all sources infinite=True (post_init guard requires uniform infinite). Weights
+# are token-mixture ratios.
+
+
+def _agpt_2b_mds_mix_blend(
+    owm_weight: float, edu_weight: float, folder: str
+) -> FaultTolerantTrainer.Config:
+    """Shared builder for owm/edu weighted-blend mix arms."""
+    from torchtitan.hf_datasets.text_datasets import (
+        HFDataSource,
+        InterleavedHuggingFaceTextDataLoader,
+    )
+
+    cfg = _agpt_2b_mds_mix_base()
+    # Replace the whole dataloader Config -- the base is a BlendCorpusDataLoader
+    # .Config whose .sources field does not exist, so setting it would no-op.
+    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
+        sources=[
+            HFDataSource(
+                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+            ),
+            HFDataSource(
+                dataset="fineweb_edu_local", weight=edu_weight, infinite=True
+            ),
+        ],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+    cfg.checkpoint.folder = folder
+    return cfg
+
+
+def agpt_2b_mds_mix_owm_edu_7525() -> FaultTolerantTrainer.Config:
+    """BLEND math-heavy: 75% open-web-math / 25% fineweb-edu. The predicted
+    winner -- keeps most math (steep loss) while adding a little general."""
+    return _agpt_2b_mds_mix_blend(0.75, 0.25, "checkpoints/agpt-2b-mds-mix-owm75-edu25")
+
+
+def agpt_2b_mds_mix_owm_edu_5050() -> FaultTolerantTrainer.Config:
+    """BLEND balanced: 50% open-web-math / 50% fineweb-edu. Brackets the ratio
+    axis on the more-general side of the math-heavy arm."""
+    return _agpt_2b_mds_mix_blend(0.50, 0.50, "checkpoints/agpt-2b-mds-mix-owm50-edu50")
+
+
 # --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
 # The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
 # but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not

@@ -45,6 +45,11 @@ from datasets import load_dataset
 # FineMath-4+ needs its config_name; open-web-math has a single default config.
 _FINEMATH = ("HuggingFaceTB/finemath", "finemath-4plus", "train", "text")
 _OWM = ("open-web-math/open-web-math", None, "train", "text")
+# General-domain anti-forgetting holdout for the data-mix experiment: NO arm
+# trains on wikitext, so it is a clean disjoint judge of whether a stage-2 mix
+# forgets general ability. wikitext-103 docs are short (articles split into
+# lines), so it uses a lower min-chars via --wikitext-min-chars.
+_WIKITEXT = ("Salesforce/wikitext", "wikitext-103-raw-v1", "test", "text")
 
 
 def _take_docs(
@@ -113,6 +118,25 @@ def main() -> int:
         default=512,
         help="Skip documents shorter than this many characters (default 512).",
     )
+    parser.add_argument(
+        "--wikitext",
+        action="store_true",
+        help="Also build a wikitext general-domain anti-forgetting holdout "
+        "(for the data-mix experiment). Uses --wikitext-min-chars.",
+    )
+    parser.add_argument(
+        "--wikitext-min-chars",
+        type=int,
+        default=256,
+        help="min-chars for the wikitext holdout (docs are short; default 256).",
+    )
+    parser.add_argument(
+        "--wikitext-num-docs",
+        type=int,
+        default=1500,
+        help="docs for the wikitext holdout (test split has only ~1656 docs "
+        ">=256 chars, so this defaults BELOW the math --num-docs 2000).",
+    )
     args = parser.parse_args()
 
     fm_path, fm_cfg, fm_split, fm_col = _FINEMATH
@@ -134,6 +158,23 @@ def main() -> int:
         args.out_dir / "owm_holdout.jsonl",
         {"dataset": owm_path, "config": owm_cfg, "split": owm_split, "role": "secondary"},
     )
+
+    if args.wikitext:
+        wt_path, wt_cfg, wt_split, wt_col = _WIKITEXT
+        wikitext = _take_docs(
+            wt_path, wt_cfg, wt_split, wt_col,
+            args.wikitext_num_docs, args.wikitext_min_chars,
+        )
+        _write_jsonl(
+            wikitext,
+            args.out_dir / "wikitext_holdout.jsonl",
+            {
+                "dataset": wt_path,
+                "config": wt_cfg,
+                "split": wt_split,
+                "role": "anti-forgetting",
+            },
+        )
     return 0
 
 

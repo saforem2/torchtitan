@@ -3185,3 +3185,13 @@ for minimal churn; they now map to the new kwarg names at the call site). Verifi
 by AST: merged controller.py AsyncLoopConfig accepts {num_prompts_per_train_step,
 num_samples_per_prompt}; both overlay files now pass exactly those. Without this
 replay the next GRPO run would fail with an unexpected-kwarg TypeError.
+
+## Sync 2026-07-29 (aa0d9ca63) -- 2 commits, both low-relevance, clean
+
+Merged upstream/main (was 2 behind). Both commits touch NOTHING on our XPU/dense-agpt path:
+- `1c40dd26a` Fix AMD 8-GPU CI (#3896): the distributed/utils.py set_determinism change is
+  GATED on `torch.version.hip is not None` (ROCm only) -- the else branch (XPU/CUDA) is
+  byte-identical to before, so it's a no-op for us. + ROCm loss test fixtures.
+- `b3a13eed9` MinimalAsyncEP int32 overflow fix in top-k kernels (#3969): MoE expert-parallel
+  kernel; we run dense agpt-2b, not MoE -- irrelevant to current work, harmless hygiene.
+Merge clean (5 files, zero ezpz files touched, zero conflicts). Now 0 behind upstream.
