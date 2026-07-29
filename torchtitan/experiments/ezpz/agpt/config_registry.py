@@ -604,6 +604,60 @@ def agpt_2b_mds_mix_owm_edu_5050() -> FaultTolerantTrainer.Config:
     return _agpt_2b_mds_mix_blend(0.50, 0.50, "checkpoints/agpt-2b-mds-mix-owm50-edu50")
 
 
+# --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
+# 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
+# DOE-mission version). Same recipe (MDS fork, constant LR, 10B tok, 75/25),
+# only the 25% source changes. Decided (arm-vs-arm) on a DISJOINT science judge:
+# held-out common-pile/peS2o NLL (no arm trains on it) + MMLU-STEM confirmatory;
+# FineMath + wikitext stay as retention guards.
+
+
+def _agpt_2b_mds_mix_blend_src(
+    owm_weight: float, src_dataset: str, src_weight: float, folder: str
+) -> FaultTolerantTrainer.Config:
+    """Generalized owm/<science-src> weighted-blend builder (mirrors
+    _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
+    from torchtitan.hf_datasets.text_datasets import (
+        HFDataSource,
+        InterleavedHuggingFaceTextDataLoader,
+    )
+
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
+        sources=[
+            HFDataSource(
+                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+            ),
+            HFDataSource(dataset=src_dataset, weight=src_weight, infinite=True),
+        ],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+    cfg.checkpoint.folder = folder
+    return cfg
+
+
+def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
+    """SCIENCE arm: 75% open-web-math / 25% cosmopedia-science (synthetic STEM
+    textbooks: auto_math_text+khanacademy+openstax+stanford+wikihow). Tests
+    whether synthetic-science textbooks in the 25% slot beat generic edu."""
+    return _agpt_2b_mds_mix_blend_src(
+        0.75, "cosmopedia_science_local", 0.25,
+        "checkpoints/agpt-2b-mds-mix-owm75-cosmo25",
+    )
+
+
+def agpt_2b_mds_mix_owm_nemotron_7525() -> FaultTolerantTrainer.Config:
+    """SCIENCE arm: 75% open-web-math / 25% Nemotron-CC-Math-4+ (layout-aware
+    CC math+science web). The memo's #1 science lever. GATED corpus -- requires
+    HF access granted for nvidia/Nemotron-CC-Math-v1 + precache of config 4plus
+    registered as nemotron_cc_math_4plus_local."""
+    return _agpt_2b_mds_mix_blend_src(
+        0.75, "nemotron_cc_math_4plus_local", 0.25,
+        "checkpoints/agpt-2b-mds-mix-owm75-nemotron25",
+    )
+
+
 # --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
 # The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
 # but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not

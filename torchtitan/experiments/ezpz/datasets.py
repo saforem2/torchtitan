@@ -436,3 +436,14 @@ register_local_dataset(
     "/lus/tegu/projects/datasets/hf_cache/hub/datasets--allenai--olmo-mix-1124/snapshots/99ee6aaace88779d1ef099d36251b91101c1679b/data/wiki/",
     format="json",
 )
+
+# Cosmopedia synthetic-science-TEXTBOOK slice for the data-mix Wave 3 blend:
+# the 5 curated STEM/textbook subsets (auto_math_text, khanacademy, openstax,
+# stanford, wikihow), symlinked flat into one dir (36 parquet) so a single
+# local-parquet load covers them all -- excludes cosmopedia's stories +
+# web_samples (generic web/fiction). Built by symlinking the precached
+# HuggingFaceTB/cosmopedia snapshot subdirs; 'text' column confirmed.
+register_local_dataset(
+    "cosmopedia_science_local",
+    "/lus/tegu/projects/datasets/cosmopedia-science/data/",
+)

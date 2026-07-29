@@ -50,6 +50,12 @@ _OWM = ("open-web-math/open-web-math", None, "train", "text")
 # forgets general ability. wikitext-103 docs are short (articles split into
 # lines), so it uses a lower min-chars via --wikitext-min-chars.
 _WIKITEXT = ("Salesforce/wikitext", "wikitext-103-raw-v1", "test", "text")
+# Scientific-paper holdout for the Wave 3 SCIENCE blend: the DISJOINT science
+# judge. peS2o is in olmo-mix (so it is off-limits as a stage-2 ADD) yet NO
+# stage-2 arm trains on it -> clean arm-vs-arm science signal. allenai/peS2o is
+# a dead loading-script repo; common-pile/peS2o is the working parquet mirror
+# (cleaner license, 'text' column). Config None (single default config).
+_PES2O = ("common-pile/peS2o", None, "train", "text")
 
 
 def _take_docs(
@@ -137,6 +143,12 @@ def main() -> int:
         help="docs for the wikitext holdout (test split has only ~1656 docs "
         ">=256 chars, so this defaults BELOW the math --num-docs 2000).",
     )
+    parser.add_argument(
+        "--pes2o",
+        action="store_true",
+        help="Also build a common-pile/peS2o scientific-paper holdout (the "
+        "Wave 3 science-blend disjoint judge). Uses --num-docs / --min-chars.",
+    )
     args = parser.parse_args()
 
     fm_path, fm_cfg, fm_split, fm_col = _FINEMATH
@@ -173,6 +185,22 @@ def main() -> int:
                 "config": wt_cfg,
                 "split": wt_split,
                 "role": "anti-forgetting",
+            },
+        )
+
+    if args.pes2o:
+        pe_path, pe_cfg, pe_split, pe_col = _PES2O
+        pes2o = _take_docs(
+            pe_path, pe_cfg, pe_split, pe_col, args.num_docs, args.min_chars
+        )
+        _write_jsonl(
+            pes2o,
+            args.out_dir / "pes2o_holdout.jsonl",
+            {
+                "dataset": pe_path,
+                "config": pe_cfg,
+                "split": pe_split,
+                "role": "science-primary",
             },
         )
     return 0

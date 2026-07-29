@@ -55,6 +55,15 @@ from datasets import load_dataset
 next(iter(load_dataset('parquet',data_dir='/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT/',split='train',streaming=True)))
 print('edu OK')" 2>/dev/null
 }
+_check_local() {  # $1 = registered local-parquet dataset name
+  python3 -c "
+import torchtitan.experiments.ezpz.datasets as d
+from torchtitan.hf_datasets.text_datasets import DATASETS
+cfg = DATASETS['$1']
+from datasets import load_dataset
+next(iter(load_dataset('parquet', data_dir=cfg.path, split='train', streaming=True)))
+print('$1 OK')" 2>/dev/null
+}
 for arm in $MIX_ARMS; do
   case "$arm" in
     owm) _check_owm || { echo "PREFLIGHT FAIL: owm"; preflight_ok=0; } ;;
@@ -62,6 +71,12 @@ for arm in $MIX_ARMS; do
     owm_edu_*)  # blend arms: BOTH sources must resolve
       _check_owm || { echo "PREFLIGHT FAIL: $arm (owm source)"; preflight_ok=0; }
       _check_edu || { echo "PREFLIGHT FAIL: $arm (edu source)"; preflight_ok=0; } ;;
+    owm_cosmo_*)  # science blend: owm + cosmopedia-science local parquet
+      _check_owm || { echo "PREFLIGHT FAIL: $arm (owm source)"; preflight_ok=0; }
+      _check_local cosmopedia_science_local || { echo "PREFLIGHT FAIL: $arm (cosmo source)"; preflight_ok=0; } ;;
+    owm_nemotron_*)  # science blend: owm + Nemotron-CC-Math-4+ local parquet (GATED corpus)
+      _check_owm || { echo "PREFLIGHT FAIL: $arm (owm source)"; preflight_ok=0; }
+      _check_local nemotron_cc_math_4plus_local || { echo "PREFLIGHT FAIL: $arm (nemotron source -- gated/precached?)"; preflight_ok=0; } ;;
     *) echo "PREFLIGHT WARN: unknown arm '$arm', skipping source check" ;;
   esac
 done
