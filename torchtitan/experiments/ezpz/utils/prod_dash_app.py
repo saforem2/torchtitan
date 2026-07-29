@@ -15,11 +15,13 @@ Opt-in via ``python prod_dash.py --app`` (which imports this module and calls
 Both are pure-python (NOT torch deps -- safe for the XPU build). If they are not
 installed, ``prod_dash.py --app`` falls back to the text board.
 
-Keys: q quit | r refresh | x step<->tokens x-axis | a show-all experiments |
+Keys: q quit | r refresh (live tails) | ctrl+r force full W&B re-pull |
+x step<->tokens x-axis | a show-all experiments |
 b/c board/charts pane | t focus run-toggles | T hide/show the run panel |
-z fit the highlighted run (x+y) | Z/0 reset view | p pan/zoom mode |
-+/- zoom x in/out | h/l pan left/right | j/k pan down/up | X set xlim |
-Y set ylim | left/right (or the tab bar) switch metric | d dark/light |
+z cycle focus through runs (bright + fit; wraps to reset) | Z/0 reset view |
+p pan/zoom mode | +/- zoom x in/out | h/l pan left/right | j/k pan down/up |
+L y-axis log/linear | s zen mode (chart only) | X set xlim | Y set ylim |
+left/right (or the tab bar) switch metric | d dark/light |
 space (in the run list) toggle a run.
 """
 from __future__ import annotations
@@ -188,13 +190,20 @@ class ProdDashApp(App):
     #log.building { display: block; }
     #axinput { dock: bottom; display: none; }
     #axinput.active { display: block; }
+    /* Zen mode: hide all chrome so only the chart remains. */
+    App.zen #metrictabs { display: none; }
+    App.zen #runs { display: none; }
+    App.zen Header { display: none; }
+    App.zen Footer { display: none; }
+    App.zen #log { display: none; }
     """
     # priority=True so these app-level keys fire even when a focused child widget
     # (the SelectionList or the scrollable PlotextPlot) would otherwise consume
     # them. Capital X/Y are shift-bindings; keep them priority so they reach us.
     BINDINGS = [
         Binding("q", "quit", "quit", priority=True),
-        Binding("r", "refresh", "refresh", priority=True),
+        Binding("r", "refresh", "refresh (live tails)", priority=True),
+        Binding("ctrl+r", "force_refresh", "force full re-pull", priority=True),
         Binding("x", "toggle_xaxis", "step/tokens", priority=True),
         Binding("a", "toggle_all", "show-all", priority=True),
         Binding("b", "show_board", "board", priority=True),
@@ -216,6 +225,8 @@ class ProdDashApp(App):
         Binding("l", "pan_right", "pan right", priority=True),
         Binding("j", "pan_down", "pan down", priority=True),
         Binding("k", "pan_up", "pan up", priority=True),
+        Binding("L", "toggle_ylog", "y log/linear", priority=True),
+        Binding("s", "toggle_zen", "zen mode", priority=True),
     ]
 
     def __init__(self):
@@ -234,6 +245,10 @@ class ProdDashApp(App):
         self._xlim = (None, None)
         self._ylim = (None, None)
         self._focus_key = None     # chain key the view is fitted to, or None
+        self._focus_idx = -1       # z-cycle position into the visible-chain list
+        self._ylog = False         # y-axis log scale (L toggles)
+        self._zen = False          # zen mode: only the chart, no panels/chrome
+        self._force_next = False   # ctrl+r: force a full cache re-pull next fetch
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -335,7 +350,8 @@ class ProdDashApp(App):
             if not ids:
                 continue
             total_runs += len(ids)
-            df = wc.fetch_chain(ids, log=cb, counters=counters)
+            df = wc.fetch_chain(ids, log=cb, counters=counters,
+                                force=self._force_next)
             if df is None or df.empty or "_step" not in df.columns:
                 continue
             steps = df["_step"].tolist()
@@ -349,9 +365,13 @@ class ProdDashApp(App):
                     discovered.add(col)
             if metrics:
                 c["metrics"] = metrics
-        if counters.get("hit"):
+        if self._force_next:
+            cb("cache: FORCE re-pull -- refetched all %d runs from W&B"
+               % total_runs)
+        elif counters.get("hit"):
             cb("cache: %d/%d runs served from disk (terminal); rest fetched"
                % (counters["hit"], total_runs))
+        self._force_next = False  # one-shot: only the ctrl+r fetch forces
         if discovered:
             data["_metric_keys"] = sorted(discovered)
 
@@ -574,11 +594,29 @@ class ProdDashApp(App):
                     continue  # nothing (or a single point) in the window
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
+            if self._ylog:
+                # Do the log transform OURSELVES (plot log10(y) on a linear axis)
+                # rather than plt.yscale("log"): plotext's log path runs log10 over
+                # auto-generated y-ticks/limits, not just the data, and raises
+                # math-domain on any <=0 it synthesizes. Transforming here (after
+                # dropping y<=0) keeps plotext on a plain linear axis it can't
+                # choke on; the y-tick labels read as log10 values (see y:log tag).
+                import math
+                lp = [(x, math.log10(y)) for x, y in zip(xs, ys) if y > 0]
+                if len(lp) < 2:
+                    continue
+                xs = [p[0] for p in lp]
+                ys = [p[1] for p in lp]
             color = self._color_for(key)
-            # braille everywhere (2x4 sub-cells per char = 8x dot resolution);
-            # idle chains faded TOWARD THE THEME BACKGROUND (so they recede in
-            # both light and dark) to keep the live one salient.
-            if not is_live:
+            # braille everywhere (2x4 sub-cells per char = 8x dot resolution).
+            # Dimming rule: when a chain is FOCUSED (z-cycle), it alone stays
+            # bright and every other chain is dimmed toward the background;
+            # otherwise the usual idle-dims-vs-live-bright rule applies. Fading
+            # toward the theme bg makes dimmed lines recede in light + dark.
+            if self._focus_key is not None:
+                if key != self._focus_key:
+                    color = _dim(color, bg=bg)
+            elif not is_live:
                 color = _dim(color, bg=bg)
             # No plt label=: plotext's legend is hardcoded to the top-left corner
             # (no reposition/disable API) and covered the early-step points of
@@ -588,7 +626,13 @@ class ProdDashApp(App):
             drawn += 1
 
         axis_label = _metric_label(self.metric)
+        if self._ylog:
+            axis_label = "log10(%s)" % axis_label
         tags = []
+        if self._ylog:
+            tags.append("y:log")
+        if self._zen:
+            tags.append("zen")
         if self._focus_key is not None:
             tags.append("focus: %s" % self._focus_key)
         if xlo is not None or xhi is not None:
@@ -610,6 +654,15 @@ class ProdDashApp(App):
 
     # ---- actions ----
     def action_refresh(self) -> None:
+        # Incremental: SSH board/live-tip + cache re-fetch of LIVE runs' new
+        # steps only (terminal runs served from disk). Fast, the common case.
+        self._refresh_data()
+
+    def action_force_refresh(self) -> None:
+        # Full re-pull: ignore the parquet cache and re-scan every run's history
+        # from W&B. Use when a crashed run resumed under the same id, or you
+        # suspect the cache is stale. Slower (~30-40s for all runs).
+        self._force_next = True
         self._refresh_data()
 
     def action_toggle_xaxis(self) -> None:
@@ -705,10 +758,26 @@ class ProdDashApp(App):
         return min(xs), max(xs), min(ys), max(ys)
 
     def action_focus_selected(self) -> None:
-        # Fit the axes to the highlighted run's full x AND y extent (a small
-        # margin), so a single curve fills the frame; other runs stay drawn.
-        key = self._selected_key()
-        ext = self._chain_extent(key) if key else None
+        # Repeated `z` CYCLES focus through the visible chains: each press
+        # advances to the next one, fits the view to its x+y extent, and marks it
+        # as the focus (so _redraw draws it BRIGHT and dims the rest). After the
+        # last chain it wraps to reset-view (all runs, autoscale).
+        vis = [k for k, _ in self._chain_order() if k not in self._hidden]
+        if not vis:
+            return
+        # start the cycle from the list-highlighted run on the very first press
+        if self._focus_key is None:
+            sel = self._selected_key()
+            self._focus_idx = vis.index(sel) if sel in vis else 0
+        else:
+            self._focus_idx += 1
+        if self._focus_idx >= len(vis):
+            # wrapped past the end -> clear focus, show everything
+            self._focus_idx = -1
+            self.action_reset_view()
+            return
+        key = vis[self._focus_idx]
+        ext = self._chain_extent(key)
         if ext is None:
             return
         xmn, xmx, ymn, ymx = ext
@@ -719,10 +788,32 @@ class ProdDashApp(App):
         self._focus_key = key
         self._redraw()
 
+    def action_toggle_ylog(self) -> None:
+        """Toggle the y-axis between linear and log scale. Log needs positive
+        values; if the current metric has non-positive points we still set it
+        (plotext drops the bad points) but flag it in the title tag."""
+        self._ylog = not self._ylog
+        self._redraw()
+
+    def action_toggle_zen(self) -> None:
+        """Zen mode: hide the run panel, metric tabs, header, footer, and log --
+        just the chart. Toggle back to restore. Uses a CSS class on the app so
+        the layout reflows to give the chart the whole frame."""
+        self._zen = not self._zen
+        self.set_class(self._zen, "zen")
+        # in zen we also collapse the run panel so the chart spans full width
+        try:
+            runs = self.query_one("#runs", SelectionList)
+            runs.set_class(self._zen or self._runs_panel_hidden, "hidden")
+        except Exception:
+            pass
+        self._redraw()
+
     def action_reset_view(self) -> None:
         self._xlim = (None, None)
         self._ylim = (None, None)
         self._focus_key = None
+        self._focus_idx = -1
         self._redraw()
 
     def action_pan_zoom_mode(self) -> None:
