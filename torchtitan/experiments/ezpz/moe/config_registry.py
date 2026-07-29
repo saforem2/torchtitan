@@ -266,7 +266,13 @@ def moe_671b() -> FaultTolerantTrainer.Config:
     cfg.model_spec = model_registry(
         "671B",
         quantization=[
-            Float8LinearConverter.Config(filter_fqns=["output", "router.gate"]),
+            # filter_fqns is an EXCLUDE-list: matched Linears stay bf16 (not fp8).
+            # The head module is named `lm_head`; the old `output` name matches
+            # nothing, so the precision-sensitive LM head was silently quantized
+            # to fp8. Replayed from upstream deepseek_v3 fix #4008 (2026-07-29).
+            Float8LinearConverter.Config(
+                filter_fqns=["lm_head", "router.gate"]
+            ),
             Float8GroupedExpertsConverter.Config(),
         ],
     )
