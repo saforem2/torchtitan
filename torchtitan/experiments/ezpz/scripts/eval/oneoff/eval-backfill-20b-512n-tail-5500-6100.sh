@@ -12,7 +12,7 @@
 # present tasks are skipped. capacity queue, 1 node.
 cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
 # commonsense-7 (0-shot) across the full tail incl 6000/6010 (fills their gap)
-STEPS="5500 5600 5700 5800 5900 6000 6010 6100" \
+STEPS="5500 5600 5700 5800 5900 6000 6100 6200 6300 6400 6500" \
 CKPT_NAME=agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288 \
 LABEL=512n \
 bash torchtitan/experiments/ezpz/scripts/eval/eval-20b-v2.sh
