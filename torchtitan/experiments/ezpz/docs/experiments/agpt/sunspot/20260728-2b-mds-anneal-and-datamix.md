@@ -62,9 +62,9 @@ DISJOINT from every training arm (no arm trains on FineMath or wikitext):
 
 | arm | FineMath (math) | wikitext (general) | note |
 |-----|-----------------|--------------------|------|
-| owm-100 (control) | 1.8039 | 2.6828 | == anneal flat winner |
-| **owm75 / edu25** | **1.8089** | **2.6597** | **WINNER** |
-| owm50 / edu50 | (pending, job 12472037) | | |
+| owm-100 (control) | **1.8039** | 2.6828 | == anneal flat winner |
+| **owm75 / edu25** | 1.8089 | 2.6597 | **WINNER (sweet spot)** |
+| owm50 / edu50 | 1.8155 | **2.6519** | best general, 1:1 math cost past the knee |
 | edu-100 | 2.1122 | 2.6585 | catastrophic math forgetting |
 
 - **edu-100 (Wave 1):** swapping math-web -> edu-web forgets math by **+0.308 nats**
@@ -72,12 +72,21 @@ DISJOINT from every training arm (no arm trains on FineMath or wikitext):
 - **owm75/edu25 (Phase 2):** math essentially intact (FineMath +0.005 vs owm) AND
   ~95% of edu-100's entire general gain captured (wikitext 2.6597 vs edu's 2.6585).
   25% edu buys almost the full general improvement for almost no math cost.
-- **Shape:** the math-loss curve is steep, the general-gain curve flat -> a
-  math-heavy blend is near-free diversity. 50/50 (pending) is expected to erode
-  math for little extra general, confirming 75/25 as the sweet spot (no 90/10
-  Wave 3 needed -- 75/25 already ~= owm on math).
+- **owm50/edu50 (Phase 2, confirmatory):** the marginal trade past 75/25 flips to
+  ~1:1. owm->75/25 traded FineMath +0.005 for wikitext -0.023 (~4.6:1 favorable);
+  75/25->50/50 trades FineMath +0.007 more for wikitext only -0.008 more (~1:1).
+  Note 50/50's wikitext 2.6519 is the BEST of any arm -- it out-generalizes even
+  pure edu-100 (2.6585) while staying near-owm on math. So if general were weighted
+  >= math, 50/50 is defensible; for a MATH-focused continued-pretrain, 75/25 wins.
+- **Shape:** the math-loss curve is steep, the general-gain curve flat with a clean
+  knee at 75/25 -> a math-heavy blend is near-free diversity. 50/50 CONFIRMS 75/25
+  as the sweet spot; **no 90/10 Wave 3 needed** -- 75/25's math cost (+0.005) is
+  already noise, so backing off to 90/10 would protect math that is not being hurt.
 - Jobs: Wave 1 owm-control (free re-score of anneal flat) + edu-100 (12471929);
-  Phase 2 blends 12472036 (75/25) + 12472037 (50/50), evals 12471930 / 12472040.
+  Phase 2 blends 12472036 (75/25) + 12472175 (50/50; first two 50/50 attempts
+  12472037/12472139/12472163 died -- transient env, then a tegu project-quota
+  crash at step-100 fixed by a quota bump to soft 20T), evals 12471930 / 12472040
+  (75/25) + 12472203 (50/50).
 
 ## Method / infra notes (reusable)
 
@@ -100,7 +109,11 @@ DISJOINT from every training arm (no arm trains on FineMath or wikitext):
 
 ## Open / next
 
-- 50/50 eval pending (confirmatory).
+- **COMPLETE (2026-07-30):** 50/50 eval landed (1.8155 / 2.6519), confirming the
+  diminishing-returns knee at 75/25. Data-mix experiment closed; 90/10 not worth a
+  Wave 3.
 - The 75/25 recipe is the actionable output for the flagship continued-pretraining
   stage. A science-corpus blend (per the data-strategy memo section 2) is the
-  natural follow-on: replace the generic edu 25% with science/math-dense sources.
+  natural follow-on: replace the generic edu 25% with science/math-dense sources
+  (cosmopedia-science + Nemotron-CC-Math arms built + staged; peS2o science-judge
+  holdout ready).

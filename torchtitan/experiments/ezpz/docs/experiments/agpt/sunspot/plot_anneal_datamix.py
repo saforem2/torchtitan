@@ -47,7 +47,7 @@ ANNEAL = {
 DATAMIX = {
     "owm-100\n(control)": (1.8039, 2.6828, True),
     "owm75/edu25": (1.8089, 2.6597, True),
-    "owm50/edu50": (1.850, 2.658, False),  # PREDICTED until job 12472037 evals
+    "owm50/edu50": (1.8155, 2.6519, True),  # measured (job 12472203, 2026-07-30)
     "edu-100": (2.1122, 2.6585, True),
 }
 
