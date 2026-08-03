@@ -71,24 +71,18 @@ def _set_agpt_layer_sharding(
 
     qk_norm = getattr(layer_cfg.attention, "qk_norm", None)
     if qk_norm is not None:
-        # QK-Norm RMSNorms operate PER HEAD on head_dim, so the activation is
-        # head-dim sharded S(2) (heads live on the TP axis) -- independent of
-        # SP. Declare the FULL boundary (weight + in/out activations), mirroring
-        # the qwen3 reference (models/qwen3/sharding.py). Declaring ONLY the
-        # weight (as before) leaves out_src/out_dst None, so
-        # Module._redistribute_outputs returns the qk_norm output un-anchored
-        # (no DTensor mesh boundary); under AC=full the block forward is
-        # recomputed in backward and that un-anchored output loses its
-        # device/mesh -> "tensor does not have a device" (+ the DeviceMesh-in-
-        # saved-tensors assert on other ranks) at TP>1. The explicit S(2)
-        # output boundary re-anchors it, like every other sharded module in the
-        # block. weight -> spmd.R (== I after layout resolution).
+        # QK-Norm uses LocalShardRMSNorm (agpt/local_rmsnorm.py): a drop-in
+        # RMSNorm subclass whose forward runs the per-head norm on the local TP
+        # shard and re-anchors its own DTensor output boundary. So this config
+        # only needs to declare the replicated weight; the module handles input
+        # unwrap / output re-wrap and the gradient placements itself. The prior
+        # attempt to fix the TP>1 backward crash by declaring the full S(2)
+        # in/out activation boundary here (mirroring qwen3) was a NO-OP: matched
+        # src/dst placements insert no redistribute autograd node, so DTensor's
+        # native (crashing) RMSNorm backward was unchanged. weight -> spmd.R
+        # (== I after layout resolution).
         qk_norm.sharding_config = ShardingConfig(
             state_shardings={"weight": dense_param_placement(tp=spmd.R)},
-            in_src_shardings={"input": dense_activation_placement(tp=spmd.S(2))},
-            in_dst_shardings={"input": dense_activation_placement(tp=spmd.S(2))},
-            out_src_shardings=dense_activation_placement(tp=spmd.S(2)),
-            out_dst_shardings=dense_activation_placement(tp=spmd.S(2)),
         )
 
     assert layer_cfg.feed_forward is not None

@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.models.common import (
     ComplexRoPE,
@@ -281,7 +282,17 @@ def _build_agpt_layers(
         inner_attention = _ezpz_get_attention_config(attn_backend)
     linear_init = _linear_init(dim)
     head_dim = dim // n_heads
-    qk_norm_config = RMSNorm.Config(normalized_shape=head_dim, param_init=_NORM_INIT) if qk_norm else None
+    # QK-Norm uses LocalShardRMSNorm (a drop-in RMSNorm subclass) so the
+    # per-head norm runs on the local TP shard, bypassing the native DTensor
+    # RMSNorm backward that crashes on a Shard(2) 4-D tensor under AC=full
+    # recompute at TP=4 ("tensor does not have a device"). Bit-identical:
+    # head_dim and the norm weight are both unsharded/replicated on TP.
+    # See local_rmsnorm.py.
+    qk_norm_config = (
+        LocalShardRMSNorm.Config(normalized_shape=head_dim, param_init=_NORM_INIT)
+        if qk_norm
+        else None
+    )
     layers = []
     for layer_id in range(n_layers):
         if relu_squared:
