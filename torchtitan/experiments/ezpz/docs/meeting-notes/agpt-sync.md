@@ -9,10 +9,10 @@
 > [!IMPORTANT]
 > **Headline:** both 20B production chains advanced (256N step 6,000 -> 7,600;
 > 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
-> the 2B continued-pretrain data-mix experiment closed with a clean verdict
-> (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B
-> tokens) and SFT on the 2b-mds stage-3 base landed its own verdict (two-stage
-> STRUCTURE is the lever -- B2 0.205 GSM8K-CoT beats every single-stage rebuild);
+> SFT on the 2b-mds stage-3 base landed a clear verdict (two-stage STRUCTURE is
+> the lever -- B2 0.205 GSM8K-CoT beats every single-stage rebuild), and the 2B
+> continued-pretrain data-mix experiment closed with its own (75/25 owm/edu is
+> the sweet spot on val-loss, but downstream-neutral at 10B tokens);
 > and on 80B, **no change to the July root-cause** -- the bf16
 > activation-overflow diagnosis and the confirmed-stable TP=4/LBS=1/bf16/GAS
 > corner both still stand; this window only adds a standing constraint (**run
