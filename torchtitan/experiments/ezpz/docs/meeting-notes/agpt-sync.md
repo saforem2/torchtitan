@@ -110,10 +110,35 @@ can train.
 4. Operational guard in place: `--nan-abort-consecutive=5` (the 512N NaN burned
    ~6,100 node-h before this existed).
 
-**Wall 2 -- init crash at scale (separate, still open).** 256N/dp=768 hits a GPU
-`NotPresent` segfault during init; 2048N SIGSEGV'd in `set_determinism` at 24,864
-ranks. 1024N is the untested bracket. This is independent of the NaN and would
-still block 2000N even with a perfect Wall-1 fix.
+**Wall 2 -- init crash at high RANK COUNT (separate from the NaN, still open).**
+Careful, these are two different things and an earlier version of this entry
+wrongly merged them:
+- **`set_determinism` SIGSEGV/bad_alloc is the real init wall, and it is
+  RANK-COUNT-driven, not 80B-specific.** It killed **2B (`8463182`, bad_alloc)
+  and 20B (`8463183`, SIGSEGV) at 1024N = 12,288 ranks** (2026-05-04), and
+  **80B at 2048N = 24,864 ranks** (`8574387`). Same call site
+  (`utils.py:231`, a `torch.distributed.broadcast`). Because it is
+  model-independent it can and should be debugged on **2B**, which is far
+  cheaper per attempt.
+- **The 256N `NotPresent` segfault was NOT a scaling wall** -- job `8505222` was
+  a **bad-node cascade**: the failover wrapper correctly identified each bad
+  node and swapped in a spare, but every spare drawn was also bad (3 of 6 were
+  spatially clustered), exhausting 5 retries. That is Aurora hardware
+  availability + a blind-swap spare picker, not a dp=768 code limit. 256N is
+  not proven broken.
+- **80B at 1024N has never run.** The bracket was submitted (`8574386`) but sat
+  on `Not enough free nodes available` and never started, so there is no 80B
+  data point at 1024N -- only the 2B/20B crashes at that same rank count.
+
+**Practical ceiling today: ~62N.** The stable corner is confirmed 4/4 clean only
+to dp~186 (~62N at TP=4); dp=372 NaNs (`12469492`). So Wall 1's true boundary is
+somewhere in **(186, 372]** and has never been bracketed. Going to 1024N needs
+BOTH walls solved: at 1024N/TP=4 dp = 12,288/4 = **3,072** (~16x past
+last-known-good, ~8x past known-NaN), and 12,288 ranks is exactly where
+`set_determinism` already kills 2B/20B. Note also the batch geometry: GBS is held
+~6144 via GAS, but at dp=3072/LBS=1 you are at GBS>=3072 before any GAS, i.e.
+almost no headroom to tune batch down -- an argument that 1024N may be the wrong
+shape for 80B regardless of the two walls (512N -> dp=1536 leaves more room).
 
 **This window's contribution: a standing constraint, plus a self-inflicted
 detour.** CONSTRAINT: **run all 80B experiments at >=4N** -- 80B peaks 88.94% at
@@ -265,9 +290,17 @@ See: [SFT index](../production/sft/README.md) ·
    SwiGLU); softcap is disqualified on XPU (compile-coupled FlexAttention), so
    QK-Norm is the remaining score-bounding candidate. Retesting at 4N now
    (`12472459`). Worth pursuing, or go with fp32-params and stop?
-3. **80B Wall 2 (init at scale)** is untouched and independent: 256N/dp=768 GPU
-   `NotPresent` init segfault, 2048N `set_determinism` SIGSEGV, 1024N untested.
-   Even a perfect Wall-1 fix does not get us to 2000N without this. Who owns it?
+3. **80B Wall 2 (`set_determinism` init crash) -- debug it on 2B, not 80B.** It
+   is rank-count-driven and model-independent (killed 2B + 20B at 12,288 ranks,
+   80B at 24,864), so the cheap path is to reproduce and fix it at 2B/1024N.
+   A perfect Wall-1 fix still does not reach 1024N+ without this. Who owns it?
+4. **Bracket Wall 1's real boundary before proposing any large-N 80B run.** The
+   stable corner is validated to dp~186 and NaNs at dp=372; the gap has never
+   been tested. Run the corner at ~64N -> 96N -> 128N to find the actual break
+   point. That turns "~62N is the ceiling" into a measured number and tells us
+   whether large-N 80B needs fp32-params (confirmed clean, ~3-5x slower) or a
+   working score-bounding fix. Proposed sequencing: Wall 2 on 2B (cheap, hard
+   gate) -> Wall 1 bracket -> only then decide 512N vs 1024N.
 4. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
    mix (val-loss-validated, downstream-neutral at 10B), and decide whether to
    launch the science-dense Wave 3 (cosmopedia / nemotron-math) 32N to test
