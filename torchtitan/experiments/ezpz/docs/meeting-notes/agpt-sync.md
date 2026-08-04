@@ -113,13 +113,18 @@ can train.
 **Wall 2 -- init crash at high RANK COUNT (separate from the NaN, still open).**
 Careful, these are two different things and an earlier version of this entry
 wrongly merged them:
-- **`set_determinism` SIGSEGV/bad_alloc is the real init wall, and it is
-  RANK-COUNT-driven, not 80B-specific.** It killed **2B (`8463182`, bad_alloc)
-  and 20B (`8463183`, SIGSEGV) at 1024N = 12,288 ranks** (2026-05-04), and
-  **80B at 2048N = 24,864 ranks** (`8574387`). Same call site
-  (`utils.py:231`, a `torch.distributed.broadcast`). Because it is
-  model-independent it can and should be debugged on **2B**, which is far
-  cheaper per attempt.
+- **`set_determinism` bad_alloc/SIGSEGV is model-independent and RANK-count
+  related, but it is INTERMITTENT, not a hard gate.** It killed 2B (`8463182`,
+  bad_alloc) and 20B (`8463183`, SIGSEGV) at 1024N = 12,288 ranks (2026-05-04)
+  and 80B at 2048N = 24,864 ranks (`8574387`) -- but it has ALSO fired at
+  **512N = 6,144 ranks** (`8466848`), while the previous 20B 512N run
+  (`8463628`) and the immediate resubmit (`8479579`) both succeeded at the
+  *same* scale and script. So: it fires unpredictably at **512N+**, and is
+  frequently resubmit-survivable. The old "1024N only" framing is stale.
+  Same call site each time (`utils.py:231`, a `torch.distributed.broadcast`).
+  Being model-independent, it is cheapest to debug on **2B**.
+  *(Note: this is a RANK count. It has nothing to do with global batch size --
+  GBS 6,144 / 12,288 are healthy production values.)*
 - **The 256N `NotPresent` segfault was NOT a scaling wall** -- job `8505222` was
   a **bad-node cascade**: the failover wrapper correctly identified each bad
   node and swapped in a spare, but every spare drawn was also bad (3 of 6 were
@@ -130,15 +135,22 @@ wrongly merged them:
   on `Not enough free nodes available` and never started, so there is no 80B
   data point at 1024N -- only the 2B/20B crashes at that same rank count.
 
-**Practical ceiling today: ~62N.** The stable corner is confirmed 4/4 clean only
-to dp~186 (~62N at TP=4); dp=372 NaNs (`12469492`). So Wall 1's true boundary is
-somewhere in **(186, 372]** and has never been bracketed. Going to 1024N needs
-BOTH walls solved: at 1024N/TP=4 dp = 12,288/4 = **3,072** (~16x past
-last-known-good, ~8x past known-NaN), and 12,288 ranks is exactly where
-`set_determinism` already kills 2B/20B. Note also the batch geometry: GBS is held
-~6144 via GAS, but at dp=3072/LBS=1 you are at GBS>=3072 before any GAS, i.e.
-almost no headroom to tune batch down -- an argument that 1024N may be the wrong
-shape for 80B regardless of the two walls (512N -> dp=1536 leaves more room).
+**Practical ceiling today: ~62N, and Wall 1 is the binding constraint -- not
+Wall 2.** The stable corner is confirmed 4/4 clean only to dp~186 (~62N at TP=4);
+dp=372 NaNs (`12469492`). Wall 1's true boundary is somewhere in **(186, 372]**
+and has never been bracketed -- that is the number that decides how far 80B can
+go. Wall 2, by contrast, is an intermittent init OOM that 512N production already
+survives routinely (resubmit clears it), so it is an operational nuisance at
+1024N, not a gate.
+
+For 1024N specifically the hard problem is numerics + batch geometry, not init:
+at 1024N/TP=4, dp = 12,288/4 = **3,072** -- ~16x past last-known-good and ~8x
+past known-NaN. And with LBS=1 that is already **GBS >= 3,072 before any GAS**,
+so there is almost no headroom to tune the batch DOWN if it proves unstable
+(GBS is normally held ~6144 via GAS). 512N (dp=1536) leaves real room. So the
+open question for large-N 80B is "where does the stable corner actually break,
+and does the fix cost throughput (fp32-params) or not (score-bounding)" -- with
+1024N plausibly the wrong shape regardless.
 
 **This window's contribution: a standing constraint, plus a self-inflicted
 detour.** CONSTRAINT: **run all 80B experiments at >=4N** -- 80B peaks 88.94% at
@@ -290,10 +302,11 @@ See: [SFT index](../production/sft/README.md) ·
    SwiGLU); softcap is disqualified on XPU (compile-coupled FlexAttention), so
    QK-Norm is the remaining score-bounding candidate. Retesting at 4N now
    (`12472459`). Worth pursuing, or go with fp32-params and stop?
-3. **80B Wall 2 (`set_determinism` init crash) -- debug it on 2B, not 80B.** It
-   is rank-count-driven and model-independent (killed 2B + 20B at 12,288 ranks,
-   80B at 24,864), so the cheap path is to reproduce and fix it at 2B/1024N.
-   A perfect Wall-1 fix still does not reach 1024N+ without this. Who owns it?
+3. **80B Wall 2 (`set_determinism` init OOM) -- low priority, and NOT a gate.**
+   It is intermittent and model-independent, fires unpredictably at 512N+, and
+   512N production already survives it routinely via resubmit. Treat it as an
+   operational nuisance to harden (retry-on-init-OOM) rather than a blocker;
+   if anyone does chase the root cause, do it on 2B, which is far cheaper.
 4. **Bracket Wall 1's real boundary before proposing any large-N 80B run.** The
    stable corner is validated to dp~186 and NaNs at dp=372; the gap has never
    been tested. Run the corner at ~64N -> 96N -> 128N to find the actual break
