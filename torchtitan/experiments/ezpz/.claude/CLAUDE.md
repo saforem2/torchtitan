@@ -460,6 +460,13 @@ easily mistaken for sharding/DTensor bugs. **Any 80B conclusion drawn from a
 way 2026-08-03: a full implement->review->smoke cycle chased a "qk_norm TP=4
 DTensor bug" that was 2N memory pressure; see the 2026-08-03 agpt-sync entry.)
 
+**80B @ 4N/TP=4 is CLEAN and is the roomiest corner** (job 12472452,
+2026-08-03, 10/10 steps): loss 12.98 -> 11.30, **memory plateaus at 70.25%**
+(step 1 50.68% -> steady 44.95GiB/70.25%), no device/NotPresent/OOM errors.
+That is ~19 points more headroom than 4N/TP=2's 88.94%, because TP=4 shards
+params over 4 ranks instead of 2. **There is no TP=4 bug** — the earlier
+"TP=4 is broken" reading came entirely from 2N runs. Prefer TP=4 at 80B.
+
 **Working path identified 2026-05-05** (job 12466025, 4N smoke, 20
 steps, see `logs/agpt-80b-no-compile-t213-12466025/run.log`):
 

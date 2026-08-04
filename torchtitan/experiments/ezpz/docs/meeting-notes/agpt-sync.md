@@ -87,8 +87,15 @@ The sequence:
   allocation, 84% peak mem at step 1). A TP=2 control at 2N then hit an explicit
   `UR_RESULT_ERROR_OUT_OF_RESOURCES` (OOM) before step 1.
 - **All three failures are consistent with 80B being under-resourced at 2N**, so
-  none of them isolates a code bug. The experiment that would actually answer the
-  question -- plain 80B at **4N/TP=4**, with real headroom -- has not been run.
+  none of them isolates a code bug.
+- **RESOLVED -- there is no TP=4 bug.** Ran the missing experiment (job
+  `12472452`, plain 80B at **4N/TP=4**): **10/10 steps clean**, loss 12.98 ->
+  11.30, **memory plateaus at 70.25%** (44.95 GiB), no device / NotPresent / OOM
+  error of any kind. TP=4 is in fact the ROOMIEST corner -- 70.25% vs the 88.94%
+  that 4N/TP=2 hits -- because params shard over 4 ranks instead of 2. Every
+  "TP=4 is broken" symptom was 2N memory pressure. Corollary: the earlier
+  "`LocalShardRMSNorm` fix FAILED" verdict was also drawn at 2N and is therefore
+  **void**; qk_norm is being retested at 4N (job `12472459`).
 - **Process lesson:** run the cheap discriminating experiment (plain-vs-feature,
   TP=2-vs-TP=4) **at a resourcing where the model fits**, and check peak memory /
   the boring OOM explanation, BEFORE building any fix. Two workflow "root causes"
