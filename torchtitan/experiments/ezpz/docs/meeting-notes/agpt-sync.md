@@ -199,13 +199,44 @@ wikitext (anti-forgetting), both DISJOINT from every training arm.
   **No 90/10 Wave 3 needed** (75/25's math cost is already noise).
 - edu-100 confirms the failure mode: swapping math-web for edu-web forgets math
   by +0.308 nats (~22x the anneal effect) for a tiny general gain.
-- **Important caveat -- val-loss verdict does NOT transfer to downstream
-  accuracy at this scale.** The lm-eval sweep (gsm8k/mmlu/mmlu_stem/hellaswag/
-  arc/winogrande/piqa/openbookqa) across all three arms came back
-  **downstream-indistinguishable** (every delta within noise at 2B / 10B tokens;
-  if anything edu-100 edges ahead on arc_easy/openbookqa). Takeaway: at 10B
-  tokens val-loss NLL is the sensitive instrument; **75/25 is a val-loss win,
-  downstream-neutral** -- do not oversell it as a downstream win.
+- **The 50/50 confirmatory arm took four attempts to land** (`12472037` ->
+  `12472139` -> `12472163` -> `12472175`, eval `12472203`), and the failures were
+  all infrastructure, not science: a transient `ezpz_setup` failure that left
+  torch un-importable (which surfaced as a *misleading* "data source did not
+  resolve" preflight abort, since every `import datasets` check then failed
+  too), then two crashes in `dcp_save` at step-100 when the tegu **project quota**
+  hit its hard cap (11T used / 10T soft / 11T hard -- raw disk had 1.1P free, so
+  `df` looked fine and only `lfs quota` showed it). Cleared when the quota was
+  raised to 20T soft / 22T hard. Hardened `mix_ab.sh` accordingly: retry
+  `ezpz_setup` once, then hard-fail loudly with the real torch traceback instead
+  of cascading into the confusing data-source message.
+- **Important caveat -- the val-loss verdict does NOT transfer to downstream
+  accuracy at this scale.** Ran a full lm-eval sweep over all three arms
+  (jobs `12472403`/`12472407`, 1N; gsm8k + mmlu 5-shot, hellaswag/arc-e/arc-c/
+  winogrande/piqa/openbookqa 0-shot), scoring the pre-converted HF checkpoints:
+
+  | task | owm-100 | owm75/edu25 | edu-100 |
+  |---|---|---|---|
+  | gsm8k | 0.026 | **0.033** | 0.026 |
+  | mmlu | 0.248 | 0.239 | 0.248 |
+  | mmlu_stem | 0.221 | 0.225 | **0.234** |
+  | hellaswag | 0.569 | 0.571 | **0.574** |
+  | arc_easy | 0.638 | 0.643 | **0.662** |
+  | arc_challenge | **0.370** | 0.358 | 0.363 |
+  | winogrande | 0.576 | **0.580** | 0.572 |
+  | piqa | 0.739 | 0.740 | 0.740 |
+  | openbookqa | 0.360 | 0.374 | **0.386** |
+
+  The three arms are **downstream-indistinguishable** -- every delta is within
+  noise at 2B / 10B tokens, and the faint trend actually runs *against* the
+  val-loss ordering (edu-100 edges ahead on arc_easy, openbookqa, mmlu_stem,
+  hellaswag; 75/25 leads only gsm8k, by 0.007 = 2-3 questions). Takeaway: at 10B
+  tokens **val-loss NLL is the sensitive instrument and downstream benchmarks
+  are not** -- so **75/25 is a val-loss win that is downstream-neutral**; do not
+  oversell it as a downstream win. Enabling work: there was no lm_eval anywhere
+  on Sunspot (the existing recipe was Aurora-only), so a `venvs/sunspot-lm-eval`
+  was built on the frameworks module -- torch stayed the XPU build (verified
+  `version.cuda=None`), transformers 4.50.1 (the lm-eval-compatible version).
 - Also settled earlier in this window: the **anneal A/B** (WSD LR-decay vs flat
   constant-LR) showed **flat >= wsd on both MDS and olmo bases** -- i.e. the
   LR-schedule is NOT the lever, DATA is. That result is what motivated the
@@ -272,11 +303,33 @@ See: [SFT index](../production/sft/README.md) ·
 
 ### 6. Smaller items
 
-- **Upstream synced (72nd, merge `e5841d611`, 2 commits).** Replayed the float8
-  `filter_fqns` fix (#4008) onto `ezpz/moe`: our 671B float8 config filtered on
-  `output` (old head name) not `lm_head`, silently fp8-quantizing the LM head --
-  only affects the float8 MoE path, now fixed. #4012 (FA4 Blackwell) is
-  CUDA-gated, XPU-inert.
+- **Pipeline parallelism now works in the ezpz trainer (new capability).** A
+  first-ever ezpz PP run died at step 0 on `assert isinstance(input_dict, list)`:
+  `ezpz/trainer.py.train_step` had **no `pp_enabled` branch at all** -- it
+  flat-looped microbatches for gradient accumulation and passed one dict per
+  call, while upstream's contract hands the WHOLE microbatch list to
+  `forward_backward_step` so the pipeline schedule can drive the stages. This
+  was a **pre-existing gap, not a regression** (no `pipeline_parallel_degree>1`
+  anywhere in `experiments/ezpz`, so it had never been exercised). Fixed by
+  mirroring the base Trainer: set `num_pipeline_parallel_microbatches` in
+  `__init__` (it is 1 when PP is off) and nest the PP-microbatch loop inside the
+  existing GAS loop, passing the group as a list under PP and unwrapping to a
+  single dict otherwise. **The non-PP regression arm passes 20/20 steps** (loss
+  12.87 -> 6.87), confirming the change is a no-op for every production job.
+  PP=2 itself now reaches torch's own pipeline schedule and fails there on a
+  microbatch-count mismatch (`Expecting 2 arg_mbs but got 1`) -- one layer
+  deeper, still being localized (probe job `12472464`).
+- **Upstream synced twice (72nd `e5841d611`, 2 commits; 73rd `23b4000dd`, 11
+  commits).** 72nd: replayed the float8 `filter_fqns` fix (#4008) onto
+  `ezpz/moe` -- our 671B float8 config filtered on `output` (old head name) not
+  `lm_head`, silently fp8-quantizing the LM head; now fixed (float8 MoE path
+  only). #4012 (FA4 Blackwell) is CUDA-gated, XPU-inert. **73rd was NOT inert:**
+  one conflict (`experiments/torchft/trainer.py`, complementary dataloader
+  kwargs -- kept both sides) and one required replay -- #3856 "Always Pre-Split
+  Microbatches for PP" changed the dataloader to serve microbatches under PP, so
+  `ezpz/trainer.py` needed the same `pipeline_parallel_microbatch_size` logic.
+  No replay needed for #3558 mxfp8 (SM100 + CUDA + compile only -> inapplicable
+  on XPU; adds an opt-in config fn), kimi_k2_7, or the 8 CI-only commits.
 - **RC venv (`2026.1.0-rc0`, torch 2.14) import failure fixed:** the masked
   "Cannot import config_registry" was `libpti_view.so.0` missing (needs
   `module load pti-gpu`); permanently fixed by symlinking the system-module lib
