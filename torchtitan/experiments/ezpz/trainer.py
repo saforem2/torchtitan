@@ -250,12 +250,25 @@ class FaultTolerantTrainer(Trainer):
         )
 
         # build dataloader
+        # Under PP the dataloader must serve MICROBATCHES, not the full local
+        # batch -- upstream #3856 ("Always Pre-Split Microbatches for PP")
+        # moved the split to the dataloader. Mirror the base Trainer
+        # (torchtitan/trainer.py): feed pipeline_parallel_microbatch_size when
+        # PP is on, else the plain local batch size. Without this, a PP run
+        # would receive full-size batches and mis-shape every microbatch.
+        # (The validator build below intentionally keeps local_batch_size --
+        # upstream did not change the validator path.)
+        dataloader_batch_size = (
+            config.parallelism.pipeline_parallel_microbatch_size
+            if parallel_dims.pp_enabled
+            else config.training.local_batch_size
+        )
         self.dataloader = config.dataloader.build(
             dp_world_size=batch_degree,
             dp_rank=batch_rank,
             tokenizer=self.tokenizer,
             seq_len=config.training.seq_len,
-            local_batch_size=config.training.local_batch_size,
+            local_batch_size=dataloader_batch_size,
             training_steps=config.training.steps,
             global_batch_size=config.training.global_batch_size,
             parallel_dims=parallel_dims,
