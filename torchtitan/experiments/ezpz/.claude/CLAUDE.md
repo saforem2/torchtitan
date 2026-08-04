@@ -450,6 +450,16 @@ chain. Both jobs Q/H for 4+ days now.
 
 ### v2 — 80B
 
+**RUN ALL 80B EXPERIMENTS AT >=4N.** 80B peaks at **88.94% memory at
+4N/TP=2** — it barely fits there, so **2N is below the model's memory
+floor**. At 2N you get OOM-class failures (`UR_RESULT_ERROR_OUT_OF_RESOURCES`
+before step 1 at TP=2; a `GPU NotPresent/banned` fault at the step-1->2
+optimizer-state allocation at TP=4, after peaking 84% at step 1) that are
+easily mistaken for sharding/DTensor bugs. **Any 80B conclusion drawn from a
+2N run is void — re-run at 4N+ before believing it.** (Learned the expensive
+way 2026-08-03: a full implement->review->smoke cycle chased a "qk_norm TP=4
+DTensor bug" that was 2N memory pressure; see the 2026-08-03 agpt-sync entry.)
+
 **Working path identified 2026-05-05** (job 12466025, 4N smoke, 20
 steps, see `logs/agpt-80b-no-compile-t213-12466025/run.log`):
 

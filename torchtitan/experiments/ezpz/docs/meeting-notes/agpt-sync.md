@@ -11,9 +11,10 @@
 > 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
 > the 2B continued-pretrain data-mix experiment closed with a clean verdict
 > (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B
-> tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like --
-> it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread
-> is unconfirmed and 80B-at-scale is still an open corner
+> tokens); and a standing constraint for 80B work -- **all 80B experiments run
+> at >=4N** (80B peaks ~89% memory at 4N, so 2N runs OOM and every failure there
+> is uninterpretable), which invalidates this window's 2N-based "TP=4 is broken"
+> conclusion and leaves 80B-at-scale still an open corner
 
 Covers the ~1 week since 2026-07-27. Production kept advancing (both 20B chains,
 umbrella built + queued at 2,098N) and two research fronts moved: the **anneal +
@@ -57,13 +58,17 @@ wikitext (anti-forgetting), both DISJOINT from every training arm.
   data-mix experiment.
 - Report: [`20260728-2b-mds-anneal-and-datamix`](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md).
 
-### 2. 80B TP=4 training crash -- a diagnosis correction, not a fix (read this one carefully)
+### 2. 80B: run every experiment at >=4N (standing constraint), and the TP=4 crash is still unexplained
 
-Chased the 80B qk_norm "tensor does not have a device" TP=4 backward crash to a
-proposed fix, then a discriminating experiment overturned the whole framing.
-Honest status: **no confirmed 80B TP=4 training path, and the "qk_norm is the
-bug" story is unconfirmed -- most 80B crashes this window are consistent with
-memory pressure at 2N, not the exotic DTensor/sharding bugs first diagnosed.**
+**CONSTRAINT: all 80B experiments must run at >=4N.** 80B peaks at **88.94%
+memory at 4N/TP=2** (job 12466025) -- it barely fits there, so **2N is below the
+model's memory floor** and any 2N failure is uninterpretable (you cannot tell an
+OOM artifact from a real bug). Anything already concluded from a 2N 80B run
+should be treated as void and re-run at 4N+.
+
+That constraint invalidates this window's 80B debugging, which was all done at
+2N: **no confirmed 80B TP=4 training path, and the "qk_norm is the bug" story is
+unconfirmed.**
 
 The sequence:
 - A parallel code investigation root-caused the crash to DTensor's native
@@ -81,15 +86,14 @@ The sequence:
   DIFFERENT one** (`GPU NotPresent/banned` memory fault at the step 1->2 optimizer
   allocation, 84% peak mem at step 1). A TP=2 control at 2N then hit an explicit
   `UR_RESULT_ERROR_OUT_OF_RESOURCES` (OOM) before step 1.
-- **The through-line: all three are consistent with 80B not fitting at 2N.** The
-  documented-good 80B smoke (job 12466025) was **4N/TP=2 at 88.94% peak** -- i.e.
-  80B barely fits at 4N. Every crash this window was run at **2N**, under-resourced.
-  The clean experiment (plain 80B at **4N**/TP=4, real headroom) has not been run.
-- **Process lesson (owned):** for an opaque distributed crash, run the cheap
-  discriminating experiment (plain-vs-feature, TP=2-vs-TP=4, and check peak
-  memory / the boring OOM cause) BEFORE building any fix. Two workflow "root
-  causes" this window were plausible-but-unverified hypotheses; the code review
-  was flawless but aimed at the wrong target.
+- **All three failures are consistent with 80B being under-resourced at 2N**, so
+  none of them isolates a code bug. The experiment that would actually answer the
+  question -- plain 80B at **4N/TP=4**, with real headroom -- has not been run.
+- **Process lesson:** run the cheap discriminating experiment (plain-vs-feature,
+  TP=2-vs-TP=4) **at a resourcing where the model fits**, and check peak memory /
+  the boring OOM explanation, BEFORE building any fix. Two workflow "root causes"
+  this window were plausible-but-unverified hypotheses; the code review was sound
+  but aimed at a target chosen from invalid data.
 - **Where 80B stands:** `LocalShardRMSNorm` is committed + review-correct but
   UNVALIDATED (parked until a memory-clean TP=4 baseline exists). The real open
   question is whether 80B trains at TP=4 with adequate nodes (4N+) at all -- and
