@@ -301,7 +301,7 @@ See: [SFT index](../production/sft/README.md) ·
    whether large-N 80B needs fp32-params (confirmed clean, ~3-5x slower) or a
    working score-bounding fix. Proposed sequencing: Wall 2 on 2B (cheap, hard
    gate) -> Wall 1 bracket -> only then decide 512N vs 1024N.
-4. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
+5. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
    mix (val-loss-validated, downstream-neutral at 10B), and decide whether to
    launch the science-dense Wave 3 (cosmopedia / nemotron-math) 32N to test
    whether science sources beat generic edu on a science judge.
