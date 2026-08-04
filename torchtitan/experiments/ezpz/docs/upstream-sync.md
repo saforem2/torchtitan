@@ -1,5 +1,63 @@
 # Upstream Sync Log
 
+## 2026-08-03 -- 73rd sync (11 commits, `4bed50210..upstream/main`, merge `23b4000dd`)
+
+Merged `upstream/main` into `ezpz` (merge commit `23b4000dd`), 11 upstream commits
+since the 72nd sync. **One real conflict + one required replay** -- this sync was
+NOT inert, unlike the last few.
+
+**CONFLICT (resolved): `experiments/torchft/trainer.py`.** Both sides edited the
+dataloader-build kwargs since the merge base: ours added `training_steps` /
+`global_batch_size` / `parallel_dims`; upstream (#3856) changed
+`local_batch_size=config.training.local_batch_size` ->
+`local_batch_size=dataloader_batch_size`. The two are COMPLEMENTARY, so the
+resolution takes upstream's `dataloader_batch_size` and keeps our three kwargs
+(`dataloader_batch_size` is defined just above in the same function; identical
+pattern to the base `trainer.py`).
+
+**REPLAY (required, done): `922856452` "Always Pre-Split Microbatches for PP"
+(#3856)** -- rewrote base `trainer.py` (+184) so the DATALOADER serves
+microbatches under PP instead of the trainer splitting a full local batch.
+`experiments/ezpz/trainer.py` builds its OWN dataloader (it overrides the base
+Trainer), so it needed the same change or a PP run would receive full-size
+batches and mis-shape every microbatch. Mirrored the base exactly:
+```python
+dataloader_batch_size = (
+    config.parallelism.pipeline_parallel_microbatch_size
+    if parallel_dims.pp_enabled
+    else config.training.local_batch_size
+)
+```
+Scope note: applied to the TRAINING dataloader only. The ezpz VALIDATOR build
+intentionally keeps `local_batch_size` -- upstream did not change its validator
+path either (`trainer.py:589`). Also in #3856: `common/decoder.py` (-11) merely
+DROPPED a PP-incompatible-with-VarlenAttention guard (now unnecessary since
+microbatches are pre-split); agpt/moe use neither PP nor VarlenAttention, so
+nothing to mirror there.
+
+**NO replay needed:**
+- `95e42269f` graph trainer + mxfp8 composability (#3558) -- touches
+  `llama3/config_registry.py` (+20), but only ADDS a new opt-in `llama3_8b_mxfp8()`
+  config fn; changes nothing existing. `MXFP8LinearConverter` hard-raises
+  "MXFP8 is only supported on SM100 or later" (`has_cuda_capability(10,0)` =
+  NVIDIA Blackwell) AND requires `torch.compile` -- doubly inapplicable on Intel
+  XPU (and 80B runs compile=OFF). Touched 0 lines of `deepseek_v3/__init__.py`.
+- `85c549b93` kimi_k2_7 (#3532) -- an entire new vision/MoE model (+1800);
+  self-contained, no shared-path edits.
+- `qwen3_5` multimodal / `flux/trainer` / `gpt_oss/moe` / `overrides/fused_swiglu`
+  (+8) -- other models' own code.
+- CI/test/pin-only, zero runtime impact: `b175497ea` (#4053), `681fd4b50` (#4048),
+  `d84e54ef9` (#4046), `df51ae9ca` (#4036), `c91448d20` DeepEP pin (#4033),
+  `20f12e3bf` ROCm CI (#4002), `b5eb9d92f` llama3 CUDA loss golden (#4024),
+  `1ac465391` HF cache in H100 CI (#4006).
+
+**Verification:** no conflict markers remain; `experiments/ezpz/trainer.py` and
+`experiments/torchft/trainer.py` both parse clean (`ast.parse`). The PP replay is
+untested at runtime -- we run no PP today (`pipeline_parallel_degree=1`
+everywhere), so the changed branch is inert for current production; it matters
+the first time PP is enabled.
+
+
 ## 2026-07-29 -- 72nd sync (2 commits, `1c40dd26a..upstream/main`, merge `e5841d611`)
 
 Merged `upstream/main` into `ezpz` (merge commit `e5841d611`), 2 upstream commits
