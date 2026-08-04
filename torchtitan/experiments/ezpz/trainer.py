@@ -384,6 +384,19 @@ class FaultTolerantTrainer(Trainer):
         )
         assert self.gradient_accumulation_steps > 0
 
+        # How many pipeline microbatches make up one local batch. This is 1
+        # whenever PP is off, so the extra loop it drives in train_step is a
+        # no-op for every non-PP run. Mirrors the base Trainer
+        # (torchtitan/trainer.py); FaultTolerantTrainer does not call
+        # super().__init__(), so it must be set here explicitly or the PP
+        # branch would AttributeError.
+        self.num_pipeline_parallel_microbatches = (
+            config.training.local_batch_size
+            // config.parallelism.pipeline_parallel_microbatch_size
+            if parallel_dims.pp_enabled
+            else 1
+        )
+
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
         self.batch_ramp_start_gas = config.batch_ramp_start_gas
@@ -706,13 +719,22 @@ class FaultTolerantTrainer(Trainer):
         # Equals self.gradient_accumulation_steps unless the ramp is on.
         gas = self._effective_gas()
 
-        # Collect all microbatches on CPU and count total valid tokens
-        microbatches = []
+        # Collect all microbatches on CPU and count total valid tokens.
+        # Two nested levels, mirroring the base Trainer: the OUTER level is
+        # gradient accumulation (one optimizer step per `gas` groups), the
+        # INNER level is pipeline microbatches (the PP schedule consumes a
+        # whole group at once). `num_pipeline_parallel_microbatches` is 1
+        # whenever PP is off, so with PP disabled this is exactly the old
+        # flat `gas` loop -- one (input_dict, labels) pair per group.
+        microbatch_groups: list[list[tuple[dict[str, torch.Tensor], torch.Tensor]]] = []
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
-            input_dict, labels = next(data_iterator)
-            local_valid_tokens += (labels != IGNORE_INDEX).sum()
-            microbatches.append((input_dict, labels))
+            microbatches = []
+            for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
+                input_dict, labels = next(data_iterator)
+                local_valid_tokens += (labels != IGNORE_INDEX).sum()
+                microbatches.append((input_dict, labels))
+            microbatch_groups.append(microbatches)
 
         # All-reduce to get global token count across DP ranks
         # Move to GPU for distributed communication
@@ -729,18 +751,36 @@ class FaultTolerantTrainer(Trainer):
             # consumer (BaseLoss.__call__) accepts either at runtime.
             global_valid_tokens = float(local_valid_tokens.item())
 
-        # Process each microbatch: move to GPU, forward/backward, then free
+        # Process each group: move to GPU, forward/backward, then free.
+        # Under PP the WHOLE group (the microbatch list) goes to
+        # forward_backward_step in one call -- the pipeline schedule drives the
+        # microbatches through the stages itself, so handing it one dict at a
+        # time trips `assert isinstance(input_dict, list)` in the base Trainer.
+        # Without PP each group holds exactly one pair and this unwraps to the
+        # original per-microbatch call.
         accumulated_losses = []
-        for input_dict, labels in microbatches:
-            # Move tensors to GPU
-            for k, v in input_dict.items():
-                if isinstance(v, torch.Tensor):
-                    input_dict[k] = v.to(self.device)
-            labels = labels.to(self.device)
+        for microbatches in microbatch_groups:
+            input_dict_mbs = []
+            label_mbs = []
+            for input_dict, labels in microbatches:
+                # Move tensors to GPU
+                for k, v in input_dict.items():
+                    if isinstance(v, torch.Tensor):
+                        input_dict[k] = v.to(self.device)
+                input_dict_mbs.append(input_dict)
+                label_mbs.append(labels.to(self.device))
+
+            if parallel_dims.pp_enabled:
+                fwd_bwd_input_dict = input_dict_mbs
+                fwd_bwd_labels = label_mbs
+            else:
+                assert len(input_dict_mbs) == len(label_mbs) == 1
+                fwd_bwd_input_dict = input_dict_mbs[0]
+                fwd_bwd_labels = label_mbs[0]
 
             loss = self.forward_backward_step(
-                input_dict=input_dict,
-                labels=labels,
+                input_dict=fwd_bwd_input_dict,
+                labels=fwd_bwd_labels,
                 # pyrefly: ignore [bad-argument-type]
                 global_valid_tokens=global_valid_tokens,
             )
