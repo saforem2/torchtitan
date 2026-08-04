@@ -11,10 +11,12 @@
 > 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
 > the 2B continued-pretrain data-mix experiment closed with a clean verdict
 > (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B
-> tokens); and a standing constraint for 80B work -- **all 80B experiments run
-> at >=4N** (80B peaks ~89% memory at 4N, so 2N runs OOM and every failure there
-> is uninterpretable), which invalidates this window's 2N-based "TP=4 is broken"
-> conclusion and leaves 80B-at-scale still an open corner
+> tokens); and on 80B, **no change to the July root-cause** -- the bf16
+> activation-overflow diagnosis and the confirmed-stable TP=4/LBS=1/bf16/GAS
+> corner both still stand; this window only adds a standing constraint (**run
+> all 80B experiments at >=4N**; 2N is below the memory floor, so 2N failures
+> are artifacts) after a self-inflicted 2N detour, and re-confirms 80B trains
+> clean at 4N/TP=4 (70.25% peak memory)
 
 Covers the ~1 week since 2026-07-27. Production kept advancing (both 20B chains,
 umbrella built + queued at 2,098N) and two research fronts moved: the **anneal +
@@ -58,44 +60,69 @@ wikitext (anti-forgetting), both DISJOINT from every training arm.
   data-mix experiment.
 - Report: [`20260728-2b-mds-anneal-and-datamix`](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md).
 
-### 2. 80B: run every experiment at >=4N (standing constraint), and the TP=4 crash is still unexplained
+### 2. 80B: state of the long-running instability (nothing here supersedes the July root-cause)
 
-**CONSTRAINT: all 80B experiments must run at >=4N.** 80B peaks at **88.94%
-memory at 4N/TP=2** (job 12466025) -- it barely fits there, so **2N is below the
-model's memory floor** and any 2N failure is uninterpretable (you cannot tell an
-OOM artifact from a real bug). Anything already concluded from a 2N 80B run
-should be treated as void and re-run at 4N+.
+Nothing this window changed the 80B diagnosis. Restating it so the status is not
+mistaken for an open question -- **the 80B NaN is root-caused and there IS a
+confirmed-stable corner**; what is missing is a fix that survives production
+scale, not a diagnosis.
 
-That constraint invalidates this window's 80B debugging, which was all done at
-2N: **no confirmed 80B TP=4 training path, and the "qk_norm is the bug" story is
-unconfirmed.**
+**Wall 1 -- bf16 forward-activation overflow (root-caused 2026-07-14).** NOT an
+optimizer bug: SophiaG (512N, step-14) and **mano** (62N/dp~186, step-17) NaN
+with the *identical* signature (grad_norm dead-flat ~6.0, then sudden inf/nan, no
+runup), and mano has no Hessian term -> optimizer-independent. Ruled out in code:
+loss softmax (CE upcasts to fp32), grad reduction (FSDP `reduce_dtype` fp32,
+loss dp-invariant). Mechanism: the 84-layer pre-norm residual stream accumulates
+in bf16 and, at 80B's width x depth (dim 9216 x 84L x ffn 25600), reaches the
+precision regime 2B/20B never hit. **Smoking gun:** the fp32-activations run
+(job `8537349`) trains clean and reveals TRUE grad_norms of **21K-79K** that bf16
+masks down to ~5-7. dp-dependence is indirect: larger dp -> larger effective GBS
+-> weights reach the overflow state sooner (LR / seed / master-dtype / clip all
+proven non-causal in the 7-job factorial).
 
-The sequence:
-- A parallel code investigation root-caused the crash to DTensor's native
-  RMSNorm backward through a `Shard(2)` tensor under AC=full recompute, and built
-  a `LocalShardRMSNorm` fix (compute the per-head norm on the local shard,
-  bit-identical since head_dim is unsharded). Code committed (`77a0009f3`) and
-  independently reviewed CORRECT on gradient placements (the DP-double-count risk
-  is impossible under the default backend -- the weight DTensor is TP-only).
-- **The fix FAILED validation** (2N/TP=4): identical crash, zero steps. So
-  qk_norm's RMSNorm backward was not the (sole) device-loser -- the "root cause"
-  was a hypothesis routed around an unpinned mechanism (the two investigators on
-  the actual TP=2-vs-TP=4 asymmetry died on API errors and returned null).
-- The discriminating experiment that should have run FIRST -- plain `agpt_80b`
-  (no qk_norm) at the same TP=4/2N corner -- **reproduced a crash too, but a
-  DIFFERENT one** (`GPU NotPresent/banned` memory fault at the step 1->2 optimizer
-  allocation, 84% peak mem at step 1). A TP=2 control at 2N then hit an explicit
-  `UR_RESULT_ERROR_OUT_OF_RESOURCES` (OOM) before step 1.
-- **All three failures are consistent with 80B being under-resourced at 2N**, so
-  none of them isolates a code bug.
-- **RESOLVED -- there is no TP=4 bug.** Ran the missing experiment (job
-  `12472452`, plain 80B at **4N/TP=4**): **10/10 steps clean**, loss 12.98 ->
-  11.30, **memory plateaus at 70.25%** (44.95 GiB), no device / NotPresent / OOM
-  error of any kind. TP=4 is in fact the ROOMIEST corner -- 70.25% vs the 88.94%
-  that 4N/TP=2 hits -- because params shard over 4 ranks instead of 2. Every
-  "TP=4 is broken" symptom was 2N memory pressure. Corollary: the earlier
-  "`LocalShardRMSNorm` fix FAILED" verdict was also drawn at 2N and is therefore
-  **void**; qk_norm is being retested at 4N (job `12472459`).
+**The two triggers, and the corner that avoids them.** The NaN tracks **LBS>1**
+and **large dp_degree** (= NGPUS/TP), not raw GBS. Keeping LBS=1 and holding
+dp_degree down (TP=4 halves it: 744/4=186 vs 744/2=372) stays in the safe regime
+*in pure bf16*. **CONFIRMED STABLE 4/4** (jobs `12469494`/`509`/`510`/`511`,
+20-30 steps each, 0 NaN, three landing at identical loss 9.69-9.70) -->
+**production recommendation: TP=4, LBS=1, bf16, batch via GAS** -- cheaper than
+fp32-activations (~3-5x) and than `--debug.deterministic` (~50%, and it does NOT
+scale past n=32: job `8540102` NaN'd at n=64). Validated only to ~62N, so the
+open question is whether this corner holds at production scale, not whether 80B
+can train.
+
+**Attempted fixes, ranked by what the evidence supports:**
+1. `--training.mixed-precision-param=float32` @ TP=4 -- the one config with
+   confirmed-clean training (`8537349`), ~3-5x slower. The guaranteed unblock.
+2. **fp32 residual stream** (the Llama3-405B remedy): per-block prototype trains
+   clean at 4N but **still NaNs at dp=192** (job `8671243`, step 19); full-depth
+   also NaNs (`8673658`, ~step 37). Necessary, not sufficient -- which narrows
+   the overflow to a **bf16 sublayer GEMM** (attention QK^T scores or the FFN
+   SwiGLU intermediate) rather than the residual add.
+3. **Score-bounding (softcap / QK-Norm)** -- follows directly from (2). Softcap
+   is disqualified on this stack: it hard-codes `torch.compile(flex_attention)`,
+   which `--compile.no-enable` cannot switch off and which is broken/eager on XPU.
+   QK-Norm remains the live candidate.
+4. Operational guard in place: `--nan-abort-consecutive=5` (the 512N NaN burned
+   ~6,100 node-h before this existed).
+
+**Wall 2 -- init crash at scale (separate, still open).** 256N/dp=768 hits a GPU
+`NotPresent` segfault during init; 2048N SIGSEGV'd in `set_determinism` at 24,864
+ranks. 1024N is the untested bracket. This is independent of the NaN and would
+still block 2000N even with a perfect Wall-1 fix.
+
+**This window's contribution: a standing constraint, plus a self-inflicted
+detour.** CONSTRAINT: **run all 80B experiments at >=4N** -- 80B peaks 88.94% at
+4N/TP=2, so 2N is below the memory floor and 2N failures are uninterpretable.
+I violated that this week and spent an implement->review->smoke cycle chasing a
+"qk_norm TP=4 DTensor bug" that was 2N OOM: `LocalShardRMSNorm` (`77a0009f3`,
+review-correct) "failed" at 2N, plain 80B "failed" at 2N differently
+(`GPU NotPresent` at the step-1->2 optimizer allocation, 84% peak), and a 2N TP=2
+control OOM'd outright. Re-run at 4N/TP=4 (job `12472452`): **10/10 clean, loss
+12.98 -> 11.30, memory plateaus at 70.25%** -- TP=4 is the roomiest corner
+(70.25% vs 88.94% at TP=2), consistent with the long-standing TP=4 recommendation
+above. Net: **no new 80B bug; the 2N results were artifacts and are void**,
+including the "qk_norm fix failed" verdict (retesting at 4N, job `12472459`).
 - **Process lesson:** run the cheap discriminating experiment (plain-vs-feature,
   TP=2-vs-TP=4) **at a resourcing where the model fits**, and check peak memory /
   the boring OOM explanation, BEFORE building any fix. Two workflow "root causes"
@@ -183,18 +210,24 @@ is built + smoke-passed + queued at >2k nodes.
 
 ### Top asks / open decisions
 
-1. **80B TP=4:** run the memory-clean plain-80B at **4N/TP=4** to settle whether
-   any TP=4 crash was ever a real code bug vs. pure 2N OOM. If 4N/TP=4 trains
-   clean -> retest the (committed) qk_norm fix at 4N; if it still crashes with
-   headroom -> genuine TP=4 bug. Until then 80B-at-scale has no confirmed path.
-2. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
+1. **80B -- scale the known-stable corner, or buy stability with throughput?**
+   The corner (**TP=4 / LBS=1 / bf16 / batch via GAS**) is confirmed 4/4 clean
+   but only validated to ~62N (dp~186). Two paths: (a) push that corner up the
+   dp ladder and find where it breaks, or (b) start the guaranteed-clean
+   fp32-mixed-precision-param TP=4 run now and accept ~3-5x slower. No 80B job
+   is training today, so this is the decision that unblocks 80B.
+2. **80B Wall 1 fix -- is QK-Norm worth finishing?** The fp32-residual ladder
+   narrowed the overflow to a bf16 sublayer GEMM (attention scores or FFN
+   SwiGLU); softcap is disqualified on XPU (compile-coupled FlexAttention), so
+   QK-Norm is the remaining score-bounding candidate. Retesting at 4N now
+   (`12472459`). Worth pursuing, or go with fp32-params and stop?
+3. **80B Wall 2 (init at scale)** is untouched and independent: 256N/dp=768 GPU
+   `NotPresent` init segfault, 2048N `set_determinism` SIGSEGV, 1024N untested.
+   Even a perfect Wall-1 fix does not get us to 2000N without this. Who owns it?
+4. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
    mix (val-loss-validated, downstream-neutral at 10B), and decide whether to
    launch the science-dense Wave 3 (cosmopedia / nemotron-math) 32N to test
    whether science sources beat generic edu on a science judge.
-3. **80B TP=2 vs TP=4 tension:** TP=2 is memory-good but NaNs at production GBS;
-   TP=4 was wanted for that but has no confirmed training path here. Is the
-   near-term 80B plan the fp32-mixed-precision-param TP=4 interim (only
-   confirmed-clean at 4N, ~3-5x slower), pending the above?
 
 ---
 
