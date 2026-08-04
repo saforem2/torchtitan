@@ -4,7 +4,129 @@
 
 ---
 
-## 2026-07-27 -- catch-up for Venkat (out since 2026-07-11)
+## 2026-08-03
+
+### Headline: the 2B continued-pretrain data-mix experiment closed with a clean verdict (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like -- it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread is unconfirmed and 80B-at-scale is still an open corner
+
+Covers the ~1 week since 2026-07-27. Two fronts moved: the **anneal + data-mix**
+experiment ran to a full verdict (actionable recipe for the flagship stage-2
+continued-pretrain), and a deep dive on the **80B TP=4 crash** that ended in a
+process correction rather than a fix. Also: upstream synced (72nd), RC-venv
+`libpti` import bug fixed, science-corpus Wave 3 built + smoke-passed.
+
+### 1. Data-mix continued-pretrain experiment -- CLOSED, 75/25 is the recipe
+
+The stage-2 continued-pretrain data question (per the data-strategy memo) is
+answered. All arms fork the MDS base at constant LR 2e-6, 10B tokens, differing
+ONLY in the data mix; scored on held-out FineMath (math generalization) +
+wikitext (anti-forgetting), both DISJOINT from every training arm.
+
+| arm | FineMath (math) | wikitext (general) |
+|---|---|---|
+| owm-100 (control) | **1.8039** | 2.6828 |
+| **owm75 / edu25 (WINNER)** | 1.8089 | 2.6597 |
+| owm50 / edu50 | 1.8155 | **2.6519** |
+| edu-100 | 2.1122 | 2.6585 |
+
+- **75/25 owm/edu is the sweet spot** for a math-focused continued-pretrain: it
+  holds math at owm-level (FineMath +0.005 = noise) while capturing ~all of the
+  general-ability gain (wikitext 2.6597 vs edu's 2.6585). The marginal trade has
+  a clean knee -- owm->75/25 is ~4.6:1 favorable, 75/25->50/50 flips to ~1:1.
+  **No 90/10 Wave 3 needed** (75/25's math cost is already noise).
+- edu-100 confirms the failure mode: swapping math-web for edu-web forgets math
+  by +0.308 nats (~22x the anneal effect) for a tiny general gain.
+- **Important caveat -- val-loss verdict does NOT transfer to downstream
+  accuracy at this scale.** The lm-eval sweep (gsm8k/mmlu/mmlu_stem/hellaswag/
+  arc/winogrande/piqa/openbookqa) across all three arms came back
+  **downstream-indistinguishable** (every delta within noise at 2B / 10B tokens;
+  if anything edu-100 edges ahead on arc_easy/openbookqa). Takeaway: at 10B
+  tokens val-loss NLL is the sensitive instrument; **75/25 is a val-loss win,
+  downstream-neutral** -- do not oversell it as a downstream win.
+- Also settled earlier in this window: the **anneal A/B** (WSD LR-decay vs flat
+  constant-LR) showed **flat >= wsd on both MDS and olmo bases** -- i.e. the
+  LR-schedule is NOT the lever, DATA is. That result is what motivated the
+  data-mix experiment.
+- Report: [`20260728-2b-mds-anneal-and-datamix`](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md).
+
+### 2. 80B TP=4 training crash -- a diagnosis correction, not a fix (read this one carefully)
+
+Chased the 80B qk_norm "tensor does not have a device" TP=4 backward crash to a
+proposed fix, then a discriminating experiment overturned the whole framing.
+Honest status: **no confirmed 80B TP=4 training path, and the "qk_norm is the
+bug" story is unconfirmed -- most 80B crashes this window are consistent with
+memory pressure at 2N, not the exotic DTensor/sharding bugs first diagnosed.**
+
+The sequence:
+- A parallel code investigation root-caused the crash to DTensor's native
+  RMSNorm backward through a `Shard(2)` tensor under AC=full recompute, and built
+  a `LocalShardRMSNorm` fix (compute the per-head norm on the local shard,
+  bit-identical since head_dim is unsharded). Code committed (`77a0009f3`) and
+  independently reviewed CORRECT on gradient placements (the DP-double-count risk
+  is impossible under the default backend -- the weight DTensor is TP-only).
+- **The fix FAILED validation** (2N/TP=4): identical crash, zero steps. So
+  qk_norm's RMSNorm backward was not the (sole) device-loser -- the "root cause"
+  was a hypothesis routed around an unpinned mechanism (the two investigators on
+  the actual TP=2-vs-TP=4 asymmetry died on API errors and returned null).
+- The discriminating experiment that should have run FIRST -- plain `agpt_80b`
+  (no qk_norm) at the same TP=4/2N corner -- **reproduced a crash too, but a
+  DIFFERENT one** (`GPU NotPresent/banned` memory fault at the step 1->2 optimizer
+  allocation, 84% peak mem at step 1). A TP=2 control at 2N then hit an explicit
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES` (OOM) before step 1.
+- **The through-line: all three are consistent with 80B not fitting at 2N.** The
+  documented-good 80B smoke (job 12466025) was **4N/TP=2 at 88.94% peak** -- i.e.
+  80B barely fits at 4N. Every crash this window was run at **2N**, under-resourced.
+  The clean experiment (plain 80B at **4N**/TP=4, real headroom) has not been run.
+- **Process lesson (owned):** for an opaque distributed crash, run the cheap
+  discriminating experiment (plain-vs-feature, TP=2-vs-TP=4, and check peak
+  memory / the boring OOM cause) BEFORE building any fix. Two workflow "root
+  causes" this window were plausible-but-unverified hypotheses; the code review
+  was flawless but aimed at the wrong target.
+- **Where 80B stands:** `LocalShardRMSNorm` is committed + review-correct but
+  UNVALIDATED (parked until a memory-clean TP=4 baseline exists). The real open
+  question is whether 80B trains at TP=4 with adequate nodes (4N+) at all -- and
+  separately, TP=2 is memory-good but NaNs at production GBS (the original reason
+  TP=4 was wanted). 80B-at-2000N (dp~6000) remains the hard, unsolved corner.
+
+### 3. Smaller items
+
+- **Upstream synced (72nd, merge `e5841d611`, 2 commits).** Replayed the float8
+  `filter_fqns` fix (#4008) onto `ezpz/moe`: our 671B float8 config filtered on
+  `output` (old head name) not `lm_head`, silently fp8-quantizing the LM head --
+  only affects the float8 MoE path, now fixed. #4012 (FA4 Blackwell) is
+  CUDA-gated, XPU-inert.
+- **RC venv (`2026.1.0-rc0`, torch 2.14) import failure fixed:** the masked
+  "Cannot import config_registry" was `libpti_view.so.0` missing (needs
+  `module load pti-gpu`); permanently fixed by symlinking the system-module lib
+  into `torch/lib` (found via `$ORIGIN` RUNPATH on every rank, no env needed).
+- **Science-corpus Wave 3 built + smoke-passed:** `owm_cosmo_7525` (75%
+  open-web-math / 25% cosmopedia-science) 2N smoke trained clean (loss
+  4.02->3.42); the nemotron-CC-math arm + peS2o science-judge holdout are staged.
+  32N prod not yet launched. This is the science-dense variant of the 75/25
+  recipe (swap generic edu for science sources).
+- **Ops drags this window:** persistent Aurora/Sunspot `at_queue` starvation +
+  intermittent SSH/API outages; a transient tegu **project-quota** exhaustion
+  (11T/10T) crashed a blend run mid-checkpoint (since raised to 20T soft / 22T
+  hard); the mix launcher hardened to retry venv setup + hard-fail loud on a
+  broken env instead of a misleading "data source did not resolve".
+
+### Top asks / open decisions
+
+1. **80B TP=4:** run the memory-clean plain-80B at **4N/TP=4** to settle whether
+   any TP=4 crash was ever a real code bug vs. pure 2N OOM. If 4N/TP=4 trains
+   clean -> retest the (committed) qk_norm fix at 4N; if it still crashes with
+   headroom -> genuine TP=4 bug. Until then 80B-at-scale has no confirmed path.
+2. **2B stage-2 recipe:** adopt **75/25 owm/edu** as the continued-pretrain data
+   mix (val-loss-validated, downstream-neutral at 10B), and decide whether to
+   launch the science-dense Wave 3 (cosmopedia / nemotron-math) 32N to test
+   whether science sources beat generic edu on a science judge.
+3. **80B TP=2 vs TP=4 tension:** TP=2 is memory-good but NaNs at production GBS;
+   TP=4 was wanted for that but has no confirmed training path here. Is the
+   near-term 80B plan the fp32-mixed-precision-param TP=4 interim (only
+   confirmed-clean at 4N, ~3-5x slower), pending the above?
+
+---
+
+## 2026-07-27
 
 ### Headline: top items in your absence -- 80B NaN re-root-caused (bf16, not the optimizer), the CoT-teaching front ran to a clear verdict (SFT is the accuracy lever, not RL), full-mix SFT deliverable is checkpoint-900, and Aurora queue starvation + a 2026-07-27 outage are the main drags on production throughput
 
