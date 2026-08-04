@@ -11,54 +11,58 @@
 > 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
 > the 2B continued-pretrain data-mix experiment closed with a clean verdict
 > (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B
-> tokens); and on 80B, **no change to the July root-cause** -- the bf16
+> tokens) and SFT on the 2b-mds stage-3 base landed its own verdict (two-stage
+> STRUCTURE is the lever -- B2 0.205 GSM8K-CoT beats every single-stage rebuild);
+> and on 80B, **no change to the July root-cause** -- the bf16
 > activation-overflow diagnosis and the confirmed-stable TP=4/LBS=1/bf16/GAS
 > corner both still stand; this window only adds a standing constraint (**run
 > all 80B experiments at >=4N**; 2N is below the memory floor, so 2N failures
 > are artifacts) after a self-inflicted 2N detour, and re-confirms 80B trains
 > clean at 4N/TP=4 (70.25% peak memory)
 
-Covers the ~1 week since 2026-07-27. Production kept advancing (both 20B chains,
-umbrella built + queued at 2,098N) and two research fronts moved: the **anneal +
-data-mix** experiment ran to a full verdict (actionable recipe for the flagship
-stage-2 continued-pretrain), and a deep dive on the **80B TP=4 crash** that ended
-in a process correction rather than a fix. Also: commonsense eval complete to
-tip + modern block backfilling, upstream synced (72nd), RC-venv `libpti` import
-bug fixed, science-corpus Wave 3 built + smoke-passed.
+Covers the ~1 week since 2026-07-27. **Production pre-training is the headline
+and leads below** (both 20B chains advanced; the 2,098N 5-chain umbrella is built
+and queued). Then the standing **80B** instability status, and the research
+fronts: the **anneal + data-mix** experiment ran to a full verdict (an actionable
+recipe for the flagship stage-2 continued-pretrain), and **SFT on the 2b-mds
+stage-3 base** produced the clearest post-training result we have (two-stage
+structure is the lever). Also: commonsense eval complete to tip + modern block
+backfilling, upstream synced (72nd + 73rd), RC-venv `libpti` import bug fixed,
+science-corpus Wave 3 built + smoke-passed.
 
-### 1. Data-mix continued-pretrain experiment -- CLOSED, 75/25 is the recipe
+### 1. Production pre-training -- both 20B chains advanced, ~2k-node umbrella staged
 
-The stage-2 continued-pretrain data question (per the data-strategy memo) is
-answered. All arms fork the MDS base at constant LR 2e-6, 10B tokens, differing
-ONLY in the data mix; scored on held-out FineMath (math generalization) +
-wikitext (anti-forgetting), both DISJOINT from every training arm.
+The flagship v2 chains kept moving this window despite persistent `at_queue`
+starvation, and the multi-chain umbrella (one PBS job driving all live chains)
+is built + smoke-passed + queued at >2k nodes.
 
-| arm | FineMath (math) | wikitext (general) |
-|---|---|---|
-| owm-100 (control) | **1.8039** | 2.6828 |
-| **owm75 / edu25 (WINNER)** | 1.8089 | 2.6597 |
-| owm50 / edu50 | 1.8155 | **2.6519** |
-| edu-100 | 2.1122 | 2.6585 |
+| chain | window start (07-27) | now (08-03) | delta | loss | tokens | MFU |
+|---|---|---|---|---|---|---|
+| **20B 256N** | step 6,000 | **step 7,600** | +1,600 | 2.467 | ~382B (8.2%) | ~22% |
+| **20B 512N** | step 6,100 | **step 6,850** | +750 | 2.248 | ~685B (14.7%) | ~19% |
+| **2B 256N** | COMPLETE (4.674T) | unchanged | -- | 2.652 | 100% | -- |
 
-- **75/25 owm/edu is the sweet spot** for a math-focused continued-pretrain: it
-  holds math at owm-level (FineMath +0.005 = noise) while capturing ~all of the
-  general-ability gain (wikitext 2.6597 vs edu's 2.6585). The marginal trade has
-  a clean knee -- owm->75/25 is ~4.6:1 favorable, 75/25->50/50 flips to ~1:1.
-  **No 90/10 Wave 3 needed** (75/25's math cost is already noise).
-- edu-100 confirms the failure mode: swapping math-web for edu-web forgets math
-  by +0.308 nats (~22x the anneal effect) for a tiny general gain.
-- **Important caveat -- val-loss verdict does NOT transfer to downstream
-  accuracy at this scale.** The lm-eval sweep (gsm8k/mmlu/mmlu_stem/hellaswag/
-  arc/winogrande/piqa/openbookqa) across all three arms came back
-  **downstream-indistinguishable** (every delta within noise at 2B / 10B tokens;
-  if anything edu-100 edges ahead on arc_easy/openbookqa). Takeaway: at 10B
-  tokens val-loss NLL is the sensitive instrument; **75/25 is a val-loss win,
-  downstream-neutral** -- do not oversell it as a downstream win.
-- Also settled earlier in this window: the **anneal A/B** (WSD LR-decay vs flat
-  constant-LR) showed **flat >= wsd on both MDS and olmo bases** -- i.e. the
-  LR-schedule is NOT the lever, DATA is. That result is what motivated the
-  data-mix experiment.
-- Report: [`20260728-2b-mds-anneal-and-datamix`](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md).
+- **20B 256N is the mover:** +1,600 steps (persisted head step-7,600, loss
+  2.467, 22% MFU / 442 tps-per-gpu / 65.8 TFLOP/s). Kept alive across the window
+  by a 260N `prod` resume (`8698754`, walltime-finished clean at step-7,600 after
+  12h02m) plus a 16N capacity bridge earlier; a fresh 260N continuation
+  (`8730438`) is queued to carry it to the umbrella handoff.
+- **20B 512N** advanced +750 steps to step-6,850 (loss 2.248, 19% MFU); the
+  current persisted head is step-6,800. Its constant-LR individual (`8687863`) is
+  held for a 512N slot.
+- **Umbrella job (`8714502`): 2,098 nodes, 24h walltime, 5 chains in one PBS
+  allocation** via `ezpz launch --auto-retry` -- {2B-512, 20B-512, 20B-256,
+  2B-512-const-LR, 2B-256-const-LR (fork @ step-9,500)}. Smoke-validated at 15N
+  (`8714337`), submitted to `large`, currently Q with PBS estimated start
+  **Tue Aug 4 ~15:20** (node scarcity, not a fault); `afterany` continuation
+  `8714503` chained. This is the first umbrella slotted to actually run -- prior
+  2,098N attempts were terminated while queued (walltime bump to 24h, ghost
+  cleanup). A collision guard is armed to retire the running individual chains
+  the instant the umbrella seats, since they share checkpoint dirs.
+- **No corruption, no collisions** this window; the earlier bridge/umbrella
+  shared-ckpt-dir hazard was cleaned up (corrupt 256 step-6,200/6,300 + poisoned
+  2B-const step-9,250/9,260 quarantined via `backup`).
+- **80B: still no production job** (see item 2); the at-scale corner is unsolved.
 
 ### 2. 80B: state of the long-running instability (nothing here supersedes the July root-cause)
 
@@ -134,41 +138,81 @@ including the "qk_norm fix failed" verdict (retesting at 4N, job `12472459`).
   separately, TP=2 is memory-good but NaNs at production GBS (the original reason
   TP=4 was wanted). 80B-at-2000N (dp~6000) remains the hard, unsolved corner.
 
-### 3. Production pre-training -- both 20B chains advanced, ~2k-node umbrella staged
+### 3. Data-mix continued-pretrain experiment -- CLOSED, 75/25 is the recipe
 
-The flagship v2 chains kept moving this window despite persistent `at_queue`
-starvation, and the multi-chain umbrella (one PBS job driving all live chains)
-is built + smoke-passed + queued at >2k nodes.
+The stage-2 continued-pretrain data question (per the data-strategy memo) is
+answered. All arms fork the MDS base at constant LR 2e-6, 10B tokens, differing
+ONLY in the data mix; scored on held-out FineMath (math generalization) +
+wikitext (anti-forgetting), both DISJOINT from every training arm.
 
-| chain | window start (07-27) | now (08-03) | delta | loss | tokens | MFU |
-|---|---|---|---|---|---|---|
-| **20B 256N** | step 6,000 | **step 7,600** | +1,600 | 2.467 | ~382B (8.2%) | ~22% |
-| **20B 512N** | step 6,100 | **step 6,850** | +750 | 2.248 | ~685B (14.7%) | ~19% |
-| **2B 256N** | COMPLETE (4.674T) | unchanged | -- | 2.652 | 100% | -- |
+| arm | FineMath (math) | wikitext (general) |
+|---|---|---|
+| owm-100 (control) | **1.8039** | 2.6828 |
+| **owm75 / edu25 (WINNER)** | 1.8089 | 2.6597 |
+| owm50 / edu50 | 1.8155 | **2.6519** |
+| edu-100 | 2.1122 | 2.6585 |
 
-- **20B 256N is the mover:** +1,600 steps (persisted head step-7,600, loss
-  2.467, 22% MFU / 442 tps-per-gpu / 65.8 TFLOP/s). Kept alive across the window
-  by a 260N `prod` resume (`8698754`, walltime-finished clean at step-7,600 after
-  12h02m) plus a 16N capacity bridge earlier; a fresh 260N continuation
-  (`8730438`) is queued to carry it to the umbrella handoff.
-- **20B 512N** advanced +750 steps to step-6,850 (loss 2.248, 19% MFU); the
-  current persisted head is step-6,800. Its constant-LR individual (`8687863`) is
-  held for a 512N slot.
-- **Umbrella job (`8714502`): 2,098 nodes, 24h walltime, 5 chains in one PBS
-  allocation** via `ezpz launch --auto-retry` -- {2B-512, 20B-512, 20B-256,
-  2B-512-const-LR, 2B-256-const-LR (fork @ step-9,500)}. Smoke-validated at 15N
-  (`8714337`), submitted to `large`, currently Q with PBS estimated start
-  **Tue Aug 4 ~15:20** (node scarcity, not a fault); `afterany` continuation
-  `8714503` chained. This is the first umbrella slotted to actually run -- prior
-  2,098N attempts were terminated while queued (walltime bump to 24h, ghost
-  cleanup). A collision guard is armed to retire the running individual chains
-  the instant the umbrella seats, since they share checkpoint dirs.
-- **No corruption, no collisions** this window; the earlier bridge/umbrella
-  shared-ckpt-dir hazard was cleaned up (corrupt 256 step-6,200/6,300 + poisoned
-  2B-const step-9,250/9,260 quarantined via `backup`).
-- **80B: still no production job** (see item 2); the at-scale corner is unsolved.
+- **75/25 owm/edu is the sweet spot** for a math-focused continued-pretrain: it
+  holds math at owm-level (FineMath +0.005 = noise) while capturing ~all of the
+  general-ability gain (wikitext 2.6597 vs edu's 2.6585). The marginal trade has
+  a clean knee -- owm->75/25 is ~4.6:1 favorable, 75/25->50/50 flips to ~1:1.
+  **No 90/10 Wave 3 needed** (75/25's math cost is already noise).
+- edu-100 confirms the failure mode: swapping math-web for edu-web forgets math
+  by +0.308 nats (~22x the anneal effect) for a tiny general gain.
+- **Important caveat -- val-loss verdict does NOT transfer to downstream
+  accuracy at this scale.** The lm-eval sweep (gsm8k/mmlu/mmlu_stem/hellaswag/
+  arc/winogrande/piqa/openbookqa) across all three arms came back
+  **downstream-indistinguishable** (every delta within noise at 2B / 10B tokens;
+  if anything edu-100 edges ahead on arc_easy/openbookqa). Takeaway: at 10B
+  tokens val-loss NLL is the sensitive instrument; **75/25 is a val-loss win,
+  downstream-neutral** -- do not oversell it as a downstream win.
+- Also settled earlier in this window: the **anneal A/B** (WSD LR-decay vs flat
+  constant-LR) showed **flat >= wsd on both MDS and olmo bases** -- i.e. the
+  LR-schedule is NOT the lever, DATA is. That result is what motivated the
+  data-mix experiment.
+- Report: [`20260728-2b-mds-anneal-and-datamix`](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md).
 
-### 4. Evaluation -- commonsense complete to tip; modern block backfilling
+### 4. SFT on the 2b-mds stage-3 base -- the live post-training thread
+
+Post-training work runs on **`agpt/2b-mds` = the MDS stage-3 base
+(`global_step138650`)**, and this is where the useful results are. (The earlier
+CPT mixing-ratio sweep -- dolmino-100 / olmo50-dolmino50 -- is largely
+superseded: it showed loss improving while downstream eval DEGRADED, and the
+data-mix experiment in item 3 answers the "what data for stage 2" question more
+directly. Keeping the gentle-LR arms as reference, not as an active front.)
+
+Status of the recipes on this base:
+
+- **The CoT ladder produced a clean, negative-result-driven verdict: two-stage
+  STRUCTURE is the lever, not the mix.** On a 200-problem GSM8K CoT eval (fp32
+  vLLM, identical harness): **B2 two-stage (tulu-math -> gsm8k-r1cot) = 0.205
+  cot_accuracy / 0.985 format** is the best result and the target. Every
+  single-stage rebuild lost to it -- B3 (broad mix @8192) **0.05** (long-CoT
+  dilution), B4a (gsm8k-r1cot finish on the B3 base) **0.02** (WORSE: the
+  verbose bias is baked in, a light finish destabilizes the envelope), B4b
+  (reweight + length filter @4096) **0.065** (fixed the run-on symptom, not the
+  accuracy). Conclusion recorded: **do not pursue single-stage rebuilds; you
+  cannot rehabilitate a verbose-poisoned base.** Jobs B4a `12471671`, B4b
+  `12471672`.
+- **`tulu_math_uc_mix` (3 epochs, 32N, GBS=6144): complete**, final loss 0.77,
+  4.5B tokens -> `checkpoint-729-hf`. This is the deliverable feeding GRPO.
+- **`tulu_math_uc_mix_full` (the 12x-tokens FULL mix, ~54B): complete at 8N but
+  catastrophically forgot** at 1 epoch (train loss 0.357 while HellaSwag
+  0.59 -> 0.27) -- **the deliverable is checkpoint-900**, and the lesson is a
+  guardrail: cap full-mix SFT at O(1000) steps or drop LR. More tokens did NOT
+  beat the small metamathqa SFT. It runs at 8N only because 32N hits the
+  384-rank GPU page fault (bisect: 8N clean / 12N fault).
+- Cross-checks with item 3: the CoT verdict ("accuracy lives in cold-start SFT,
+  not RL, at 2B") and the data-mix verdict ("75/25 owm/edu, but
+  downstream-neutral at 10B") point the same direction -- **the lever for 2B
+  quality is the base and the SFT structure, not more RL and not the LR
+  schedule.**
+
+See: [SFT index](../production/sft/README.md) ·
+[B4 results](../production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md) ·
+[full-mix SFT evals](../production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md).
+
+### 5. Evaluation -- commonsense complete to tip; modern block backfilling
 
 - **Commonsense-7 ladder is complete to each chain's live tip:** 256N through
   step-6,800, 512N through step-6,500, all fresh this window. Headline
@@ -186,7 +230,7 @@ is built + smoke-passed + queued at >2k nodes.
 - **HellaSwag plateau holds:** peaked ~0.63, now oscillating 0.60-0.63 -- as
   before, not yet climbing out at this token count.
 
-### 5. Smaller items
+### 6. Smaller items
 
 - **Upstream synced (72nd, merge `e5841d611`, 2 commits).** Replayed the float8
   `filter_fqns` fix (#4008) onto `ezpz/moe`: our 671B float8 config filtered on
