@@ -189,11 +189,11 @@ is built + smoke-passed + queued at >2k nodes.
 
 ## 2026-07-27
 
-### Headline: top items in your absence -- 80B NaN re-root-caused (bf16, not the optimizer), the CoT-teaching front ran to a clear verdict (SFT is the accuracy lever, not RL), full-mix SFT deliverable is checkpoint-900, and Aurora queue starvation + a 2026-07-27 outage are the main drags on production throughput
+### Headline: 80B NaN re-root-caused (bf16, not the optimizer), the CoT-teaching front ran to a clear verdict (SFT is the accuracy lever, not RL), full-mix SFT deliverable is checkpoint-900, and Aurora queue starvation + a 2026-07-27 outage are the main drags on production throughput
 
-Digest of the ~16 days since you left. The detailed two-week write-up is the
-[2026-07-20 entry below](#2026-07-20); this is the shortlist + what moved since.
-**Nothing is on fire; the main story is queue starvation, not broken code.**
+Shortlist of the top items over the ~2 weeks to 2026-07-27; the detailed
+write-up is the [2026-07-20 entry below](#2026-07-20). **Nothing is on fire; the
+main story is queue starvation, not broken code.**
 
 ### 1. Biggest single result -- 80B NaN re-diagnosed (changes the plan)
 
@@ -202,12 +202,12 @@ optimizer bug** (the old SophiaG-vs-mano debate is moot -- both NaN identically,
 mano has no Hessian term). The fp32-activations run trains clean and exposes
 true grad_norms of 21K-79K that bf16 was masking to ~5-7. **Only confirmed-clean
 config is fp32 mixed-precision-param at TP=4 (~3-5x slower); no 80B job is
-queued pending your call.** A per-block fp32-residual prototype was built but
-still NaNs at dp=192 -- necessary, not sufficient. Guard added:
+queued pending a direction call.** A per-block fp32-residual prototype was built
+but still NaNs at dp=192 -- necessary, not sufficient. Guard added:
 `--nan-abort-consecutive=5` (the last 512N NaN wasted ~6,100 node-h). This is
-**Ask #1 below** and the top decision waiting on you.
+**Ask #1 below** and the top open decision.
 
-### 2. CoT-teaching front -- ran end-to-end to a verdict (new since you left)
+### 2. CoT-teaching front -- ran end-to-end to a verdict
 
 The chain-of-thought teaching effort (opened 07-20) is now **Stages 0-2
 complete**, and it produced a clean, actionable finding:
@@ -354,7 +354,7 @@ the other (worth filing them as related).
 fault below our code -- hence the "file an ALCF ticket" ask (attach the 2N clean
 repro + the three failing 32N job IDs), or accept 8N as the SFT ceiling.
 
-### Top asks for Venkat (full list in the 2026-07-20 entry)
+### Top asks / open decisions (full list in the 2026-07-20 entry)
 
 1. **80B (the big one):** approve starting the slow-but-stable fp32
    mixed-precision-param TP=4 run now (only confirmed-clean path, ~3-5x slower),
