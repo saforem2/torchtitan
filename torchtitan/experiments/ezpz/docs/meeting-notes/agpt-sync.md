@@ -6,7 +6,14 @@
 
 ## 2026-08-03
 
-### Headline: both 20B production chains advanced (256N step 6,000 -> 7,600; 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue; the 2B continued-pretrain data-mix experiment closed with a clean verdict (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like -- it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread is unconfirmed and 80B-at-scale is still an open corner
+> [!IMPORTANT]
+> **Headline:** both 20B production chains advanced (256N step 6,000 -> 7,600;
+> 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
+> the 2B continued-pretrain data-mix experiment closed with a clean verdict
+> (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B
+> tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like --
+> it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread
+> is unconfirmed and 80B-at-scale is still an open corner
 
 Covers the ~1 week since 2026-07-27. Production kept advancing (both 20B chains,
 umbrella built + queued at 2,098N) and two research fronts moved: the **anneal +
