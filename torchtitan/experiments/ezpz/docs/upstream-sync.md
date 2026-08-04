@@ -52,10 +52,34 @@ nothing to mirror there.
   `1ac465391` HF cache in H100 CI (#4006).
 
 **Verification:** no conflict markers remain; `experiments/ezpz/trainer.py` and
-`experiments/torchft/trainer.py` both parse clean (`ast.parse`). The PP replay is
-untested at runtime -- we run no PP today (`pipeline_parallel_degree=1`
-everywhere), so the changed branch is inert for current production; it matters
-the first time PP is enabled.
+`experiments/torchft/trainer.py` both parse clean (`ast.parse`).
+
+**PP SMOKE RUN -> ezpz does NOT support PP at all (pre-existing gap, not a
+regression).** Ran the first-ever ezpz PP test (job `12472451`, agpt-2b, 2N,
+PP=2, microbatch 1 / LBS 2). It fails at step 0:
+```
+torchtitan/trainer.py:742 in forward_backward_step
+    assert isinstance(input_dict, list)
+AssertionError
+```
+Cause: upstream's PP contract is to hand `forward_backward_step` the **whole
+microbatch list** so the pipeline schedule can drive the stages
+(`trainer.py:742-748` -> `pp_forward_backward_step`, `trainer.py:767`). But
+`experiments/ezpz/trainer.py.train_step` has **no `pp_enabled` branch**: it
+unconditionally loops microbatches for gradient accumulation and calls
+`forward_backward_step` once per microbatch (a `dict`, not a `list`).
+
+This is NOT caused by the #3856 replay -- the replay only fixed the dataloader's
+batch SIZE. The trainer's ITERATION contract was never PP-aware. Confirmed
+pre-existing: `grep` finds no `pipeline_parallel_degree>1` anywhere in
+`experiments/ezpz/`, i.e. PP has never been exercised here.
+
+To actually support PP, `ezpz/trainer.py.train_step` needs a `pp_enabled`
+branch that passes the microbatch list through in one call (mirroring the base
+Trainer) instead of looping. Not done -- no current workload needs PP, and the
+gradient-accumulation loop is load-bearing for everything that does run. Filed
+here so the next person who enables PP knows the shape of the work rather than
+rediscovering it from the assert.
 
 
 ## 2026-07-29 -- 72nd sync (2 commits, `1c40dd26a..upstream/main`, merge `e5841d611`)
