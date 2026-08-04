@@ -258,6 +258,12 @@ class FaultTolerantTrainer(Trainer):
         # would receive full-size batches and mis-shape every microbatch.
         # (The validator build below intentionally keeps local_batch_size --
         # upstream did not change the validator path.)
+        _num_pp_microbatches = (
+            config.training.local_batch_size
+            // config.parallelism.pipeline_parallel_microbatch_size
+            if parallel_dims.pp_enabled
+            else 1
+        )
         dataloader_batch_size = (
             config.parallelism.pipeline_parallel_microbatch_size
             if parallel_dims.pp_enabled
@@ -269,7 +275,17 @@ class FaultTolerantTrainer(Trainer):
             tokenizer=self.tokenizer,
             seq_len=config.training.seq_len,
             local_batch_size=dataloader_batch_size,
-            training_steps=config.training.steps,
+            # train_step pulls gas * num_pipeline_parallel_microbatches batches
+            # per optimizer step, so the dataloader must be sized for that many
+            # -- not the raw step count. Without the PP factor the iterator runs
+            # dry mid-run ("Ran out of data") and a later microbatch group comes
+            # up short, which the pipeline schedule reports as
+            # "Expecting N arg_mbs but got M". The factor is 1 when PP is off,
+            # so this is unchanged for every non-PP run. (Upstream applies the
+            # same product to snapshot_every_n_steps, torchtitan/trainer.py.)
+            # (computed locally: self.num_pipeline_parallel_microbatches is not
+            # assigned until later in __init__, after the dataloader is built.)
+            training_steps=config.training.steps * _num_pp_microbatches,
             global_batch_size=config.training.global_batch_size,
             parallel_dims=parallel_dims,
         )
@@ -390,12 +406,7 @@ class FaultTolerantTrainer(Trainer):
         # (torchtitan/trainer.py); FaultTolerantTrainer does not call
         # super().__init__(), so it must be set here explicitly or the PP
         # branch would AttributeError.
-        self.num_pipeline_parallel_microbatches = (
-            config.training.local_batch_size
-            // config.parallelism.pipeline_parallel_microbatch_size
-            if parallel_dims.pp_enabled
-            else 1
-        )
+        self.num_pipeline_parallel_microbatches = _num_pp_microbatches
 
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
