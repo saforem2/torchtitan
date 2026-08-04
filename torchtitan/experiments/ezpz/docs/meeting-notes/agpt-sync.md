@@ -9,8 +9,13 @@
 > [!IMPORTANT]
 > **Headline:** both 20B production chains advanced (256N step 6,000 -> 7,600;
 > 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue;
-> SFT on the 2b-mds stage-3 base landed a clear verdict (two-stage STRUCTURE is
-> the lever -- B2 0.205 GSM8K-CoT beats every single-stage rebuild), and the 2B
+> SFT on the 2b-mds stage-3 base landed a clear verdict: **teaching CoT in two
+> separate SFT stages (general math -> then GSM8K chain-of-thought) beats doing
+> it in one combined SFT run** -- the two-stage "B2" model scores 0.205 on
+> GSM8K-CoT while every single-stage rebuild lands at 0.02-0.065, so the
+> *sequencing* matters more than the data mix
+> ([details](../production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md));
+> and the 2B
 > continued-pretrain data-mix experiment closed with its own (75/25 owm/edu is
 > the sweet spot on val-loss, but downstream-neutral at 10B tokens);
 > and on 80B, **no change to the July root-cause** -- the bf16
@@ -254,25 +259,41 @@ directly. Keeping the gentle-LR arms as reference, not as an active front.)
 
 Status of the recipes on this base:
 
-- **The CoT ladder produced a clean, negative-result-driven verdict: two-stage
-  STRUCTURE is the lever, not the mix.** On a 200-problem GSM8K CoT eval (fp32
-  vLLM, identical harness): **B2 two-stage (tulu-math -> gsm8k-r1cot) = 0.205
-  cot_accuracy / 0.985 format** is the best result and the target. Every
-  single-stage rebuild lost to it -- B3 (broad mix @8192) **0.05** (long-CoT
-  dilution), B4a (gsm8k-r1cot finish on the B3 base) **0.02** (WORSE: the
-  verbose bias is baked in, a light finish destabilizes the envelope), B4b
-  (reweight + length filter @4096) **0.065** (fixed the run-on symptom, not the
-  accuracy). Conclusion recorded: **do not pursue single-stage rebuilds; you
-  cannot rehabilitate a verbose-poisoned base.** Jobs B4a `12471671`, B4b
-  `12471672`.
+- **The CoT ladder's verdict: HOW you sequence the SFT matters more than what
+  data you put in it.** The question was how to teach the model to show its
+  reasoning (emit `<think>...</think><answer>` and get the answer right). Two
+  approaches were compared on a 200-problem GSM8K CoT eval (fp32 vLLM, identical
+  harness):
+  - **Two-stage ("B2") -- the winner, 0.205 cot_accuracy / 0.985 format.** Train
+    on general math instruction data (tulu-math) FIRST, then do a *second,
+    separate* SFT pass on GSM8K chain-of-thought data (gsm8k-r1cot). Each stage
+    teaches one thing.
+  - **Single-stage rebuilds -- all lost, badly.** Putting everything in one
+    combined SFT run: B3 (broad mix @8192) **0.05**, hurt by long-CoT dilution;
+    B4a (adding a short gsm8k-r1cot "finish" on top of the B3 base) **0.02**,
+    i.e. *worse* -- B3's verbose bias is already baked in and a light finish
+    just destabilizes the output envelope (gen_len blew up 601 -> ~1400-2000,
+    format collapsed to 0.26); B4b (reweight + length-filter @4096) **0.065**,
+    which fixed the run-on symptom but not the accuracy.
+
+  So the actionable rule is **use two separate stages, and do not try to
+  rehabilitate a base that was already trained verbose** -- no amount of
+  reweighting or finishing recovered B2's number. Jobs B4a `12471671`, B4b
+  `12471672`; full results table:
+  [b4-finish-and-reweight](../production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md)
+  (design + plan for the earlier stages:
+  [b3-instruct-cot-mix](../production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)).
 - **`tulu_math_uc_mix` (3 epochs, 32N, GBS=6144): complete**, final loss 0.77,
   4.5B tokens -> `checkpoint-729-hf`. This is the deliverable feeding GRPO.
+  [trajectory](../production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md)
 - **`tulu_math_uc_mix_full` (the 12x-tokens FULL mix, ~54B): complete at 8N but
   catastrophically forgot** at 1 epoch (train loss 0.357 while HellaSwag
   0.59 -> 0.27) -- **the deliverable is checkpoint-900**, and the lesson is a
   guardrail: cap full-mix SFT at O(1000) steps or drop LR. More tokens did NOT
   beat the small metamathqa SFT. It runs at 8N only because 32N hits the
   384-rank GPU page fault (bisect: 8N clean / 12N fault).
+  [trajectory](../production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) ·
+  [evals](../production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md)
 - Cross-checks with item 3: the CoT verdict ("accuracy lives in cold-start SFT,
   not RL, at 2B") and the data-mix verdict ("75/25 owm/edu, but
   downstream-neutral at 10B") point the same direction -- **the lever for 2B

@@ -1,9 +1,13 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-07-14
+> Last updated: 2026-08-03
 
-> **🔴 80B production is BLOCKED at scale -- two independent walls above ~62N,
-> no viable production run exists yet (as of 2026-07-12).** No 80B job is
+> **🔴 80B production is BLOCKED at scale -- the bf16 NaN (Wall 1) above ~62N;
+> no viable production run exists yet.** The stable corner (TP=4/LBS=1/bf16/GAS)
+> is confirmed clean only to dp~186 (~62N); dp=372 NaNs, and the gap between has
+> never been bracketed. 80B trains clean at 4N/TP=4 (70.25% peak mem, job
+> `12472452`), and **all 80B experiments must run at >=4N** -- 2N is below the
+> model's memory floor, so 2N failures are uninterpretable artifacts. No 80B job is
 > currently queued or running; every 80B checkpoint dir on disk is empty or
 > holds only a handful of probe/smoke steps. The deepest 80B checkpoints
 > (`AdamW-n256-gbs1536` step-800, `AdamW-n512-gbs3072` step-400) are **v1
@@ -35,12 +39,20 @@
 >   reveals TRUE grad_norms of **21K-79K** that bf16 silently masks down to ~5-7.
 > - **dp-dependence** is just: larger dp -> larger effective GBS -> weights reach
 >   the overflow state faster (LR/seed/master-dtype/clip all proven non-causal in
->   the [7-job factorial](../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md)).
+>   the [7-job factorial](../../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md)).
 >
-> **Wall 2 -- init crash at 256N.** The 256N/dp=768 production config hits a GPU
-> "NotPresent" segfault during init (separate from the optimizer NaN). The 2048N
-> head also SIGSEGV'd in `set_determinism` at 24,864 ranks (2026-07-01). 1024N is
-> the untested dp bracket.
+> **Wall 2 -- RETIRED as a "wall" (2026-08-03).** Two separate things were being
+> merged here. (a) The 256N "NotPresent" segfault was a **bad-node cascade**
+> (`8505222`): the failover wrapper correctly swapped spares but every spare it
+> drew was also bad (3 of 6 spatially clustered), exhausting 5 retries -- Aurora
+> hardware availability, NOT a dp=768 code limit. 256N is not proven broken.
+> (b) The `set_determinism` bad_alloc IS real but **intermittent, not a gate**:
+> it has fired at 512N = 6,144 ranks (`8466848`) as well as 1024N/2048N, while
+> the run before it (`8463628`) and the immediate resubmit (`8479579`) both
+> succeeded at the same scale and script. Treat it as an operational nuisance to
+> harden (retry-on-init-OOM), not a scaling blocker. Note also **80B at 1024N has
+> never actually run** -- `8574386` never cleared `Not enough free nodes
+> available`. **Wall 1 is the binding constraint on 80B scale.**
 >
 > **Fixes (ranked).** (1) `--training.mixed-precision-param=float32` @ TP=4 --
 > the one config with confirmed clean training (job `8537349`, 20 steps), but
@@ -53,9 +65,38 @@
 > autoretry script now sets `--nan-abort-consecutive=5` so a diverged run bails
 > instead of burning full walltime (the 512N NaN wasted ~6,100 node-h). Wall 2
 > (256N init segfault) is a separate, still-open blocker. History:
-> [20260703-80b-512n-sophiag-nan.md](../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md),
-> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
-> LR-finder: [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+> [20260703-80b-512n-sophiag-nan.md](../../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md),
+> [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+> LR-finder: [lr-finder/agpt/80b](../../../experiments/lr-finder/agpt/80b/README.md).
+
+## Every 80B experiment, in one place
+
+The 80B reports were scattered across `experiments/agpt/{aurora,sunspot}/` and
+most were not reachable from this page. Full index, newest first:
+
+### Wall 1 -- the NaN (diagnosis + fix attempts)
+
+| Date | Report | What it established |
+|---|---|---|
+| 2026-08-03 | *(this window, see [agpt-sync 2026-08-03](../../../meeting-notes/agpt-sync.md))* | **80B trains clean at 4N/TP=4** (`12472452`, 10/10 steps, 70.25% peak mem) -- TP=4 is the roomiest corner, and every "TP=4 is broken" symptom was 2N memory pressure. **qk_norm is genuinely broken in TP>1 backward** (`12472459` at 4N: `tensor does not have a device`), and `LocalShardRMSNorm` does NOT fix it -> the whole score-bounding branch is blocked. Amax hooks (`12472477`) give the first per-site activation ranking. **Standing constraint: run all 80B experiments at >=4N.** |
+| 2026-07-14 | [80b-fp32-residual-fix](../../../experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md) | **THE root-cause report.** bf16 forward-activation overflow, optimizer-independent. fp32-params clean (`8537349`, true grad_norms 21K-79K masked to ~5-7); per-block fp32 residual NaNs at dp=192 (`8671243`); full-depth also NaNs (`8673658`) -> overflow is in a bf16 sublayer GEMM, not the residual add. |
+| 2026-07-03 | [80b-512n-sophiag-nan](../../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | 512N SophiaG NaN at step 14; ~6,100 node-h burned -> motivated `--nan-abort-consecutive=5`. |
+| 2026-06-30 | [80b-convergence-gbs6144](../../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md) | All 3 optimizers NaN at production GBS past warmup -- a corner instability, not tuning. |
+| 2026-06-27 | [80b-lr-finder-production-batch](../../../experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md) | AdamW is on a NaN cliff at GBS=6144 (usable LR ~7e-7); mano/sophiag preferred. |
+| 2026-06-11 | [80b-n32-nan-diagnosis](../../../experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) | The 7-job factorial. Triggers are **LBS>1** and **large dp_degree**, not raw GBS. **Confirmed-stable corner: TP=4/LBS=1/bf16/GAS, 4/4 clean** (`12469494`/`509`/`510`/`511`). LR/seed/dtype/clip all non-causal. |
+
+### Scale / throughput / infrastructure
+
+| Date | Report | What it established |
+|---|---|---|
+| 2026-06-28 | [sophiag-constant-lr-512-1024-2048](../../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md) | The scale brackets. 2048N SIGSEGV'd in `set_determinism`; **80B at 1024N never ran** (`8574386` never cleared the queue). |
+| 2026-06-28 | [autoretry-blendcorpus-race-fix](../../../experiments/agpt/aurora/20260628-80b-autoretry-blendcorpus-race-fix.md) | Cold-cache index race fixed at source; 80B no longer needs a manual prewarm. |
+| 2026-06-26 | [gbs5952-2048N-sim](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs5952-2048N-sim.md) · [gbs2976-1024N-sim](../../../experiments/agpt/sunspot/2026-06-26-80b-gbs2976-1024N-sim.md) · [gbs1488-512N-sim](../../../experiments/agpt/sunspot/2026-06-25-80b-gbs1488-512N-sim.md) | GAS-based large-N simulations at small node counts. |
+| 2026-06-26 | [lr-batch-dpdegree-findings](../../../experiments/agpt/sunspot/2026-06-26-80b-lr-batch-dpdegree-findings.md) | How LR ceiling moves with batch and dp_degree. |
+| 2026-06-25 | [tp4-100step-validation](../../../experiments/agpt/sunspot/2026-06-25-80b-tp4-100step-validation.md) | 100-step TP=4 validation of the stable corner. |
+| 2026-06-02 | [smoke-n4-tp2-xccl-workaround](../../../experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) | The XCCL split-group workaround needed for 80B TP. |
+| 2026-05-24 | [256n-sigsegv-cascade](../../../experiments/agpt/aurora/20260524-80b-256n-sigsegv-cascade-8505222.md) | The 256N `NotPresent` event was a **bad-node cascade** (every spare also bad), NOT a dp=768 scaling limit. |
+| 2026-04-18 | [tp2-restored](../../../experiments/agpt/aurora/20260418-80b-tp2-restored.md) · [throughput-n2](../../../experiments/agpt/aurora/20260412-193100-throughput-80b-n2.md) · [throughput-leaderboard](../../../experiments/agpt/aurora/80b-throughput-leaderboard.md) | Early TP=2 restoration + throughput baselines. |
 
 <details>
 <summary>Earlier status (2026-07-06): SophiaG-NaN + "probe mano next" (superseded)</summary>
