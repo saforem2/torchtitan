@@ -6,13 +6,15 @@
 
 ## 2026-08-03
 
-### Headline: the 2B continued-pretrain data-mix experiment closed with a clean verdict (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like -- it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread is unconfirmed and 80B-at-scale is still an open corner
+### Headline: both 20B production chains advanced (256N step 6,000 -> 7,600; 512N 6,100 -> 6,850) and the ~2k-node 5-chain umbrella is staged to run Tue; the 2B continued-pretrain data-mix experiment closed with a clean verdict (75/25 owm/edu is the sweet spot on val-loss, but downstream-neutral at 10B tokens); the 80B TP=4 training crash is NOT the qk_norm bug it looked like -- it re-diagnosed to memory pressure at 2N, so the whole "TP=4 is broken" thread is unconfirmed and 80B-at-scale is still an open corner
 
-Covers the ~1 week since 2026-07-27. Two fronts moved: the **anneal + data-mix**
-experiment ran to a full verdict (actionable recipe for the flagship stage-2
-continued-pretrain), and a deep dive on the **80B TP=4 crash** that ended in a
-process correction rather than a fix. Also: upstream synced (72nd), RC-venv
-`libpti` import bug fixed, science-corpus Wave 3 built + smoke-passed.
+Covers the ~1 week since 2026-07-27. Production kept advancing (both 20B chains,
+umbrella built + queued at 2,098N) and two research fronts moved: the **anneal +
+data-mix** experiment ran to a full verdict (actionable recipe for the flagship
+stage-2 continued-pretrain), and a deep dive on the **80B TP=4 crash** that ended
+in a process correction rather than a fix. Also: commonsense eval complete to
+tip + modern block backfilling, upstream synced (72nd), RC-venv `libpti` import
+bug fixed, science-corpus Wave 3 built + smoke-passed.
 
 ### 1. Data-mix continued-pretrain experiment -- CLOSED, 75/25 is the recipe
 
@@ -87,7 +89,59 @@ The sequence:
   separately, TP=2 is memory-good but NaNs at production GBS (the original reason
   TP=4 was wanted). 80B-at-2000N (dp~6000) remains the hard, unsolved corner.
 
-### 3. Smaller items
+### 3. Production pre-training -- both 20B chains advanced, ~2k-node umbrella staged
+
+The flagship v2 chains kept moving this window despite persistent `at_queue`
+starvation, and the multi-chain umbrella (one PBS job driving all live chains)
+is built + smoke-passed + queued at >2k nodes.
+
+| chain | window start (07-27) | now (08-03) | delta | loss | tokens | MFU |
+|---|---|---|---|---|---|---|
+| **20B 256N** | step 6,000 | **step 7,600** | +1,600 | 2.467 | ~382B (8.2%) | ~22% |
+| **20B 512N** | step 6,100 | **step 6,850** | +750 | 2.248 | ~685B (14.7%) | ~19% |
+| **2B 256N** | COMPLETE (4.674T) | unchanged | -- | 2.652 | 100% | -- |
+
+- **20B 256N is the mover:** +1,600 steps (persisted head step-7,600, loss
+  2.467, 22% MFU / 442 tps-per-gpu / 65.8 TFLOP/s). Kept alive across the window
+  by a 260N `prod` resume (`8698754`, walltime-finished clean at step-7,600 after
+  12h02m) plus a 16N capacity bridge earlier; a fresh 260N continuation
+  (`8730438`) is queued to carry it to the umbrella handoff.
+- **20B 512N** advanced +750 steps to step-6,850 (loss 2.248, 19% MFU); the
+  current persisted head is step-6,800. Its constant-LR individual (`8687863`) is
+  held for a 512N slot.
+- **Umbrella job (`8714502`): 2,098 nodes, 24h walltime, 5 chains in one PBS
+  allocation** via `ezpz launch --auto-retry` -- {2B-512, 20B-512, 20B-256,
+  2B-512-const-LR, 2B-256-const-LR (fork @ step-9,500)}. Smoke-validated at 15N
+  (`8714337`), submitted to `large`, currently Q with PBS estimated start
+  **Tue Aug 4 ~15:20** (node scarcity, not a fault); `afterany` continuation
+  `8714503` chained. This is the first umbrella slotted to actually run -- prior
+  2,098N attempts were terminated while queued (walltime bump to 24h, ghost
+  cleanup). A collision guard is armed to retire the running individual chains
+  the instant the umbrella seats, since they share checkpoint dirs.
+- **No corruption, no collisions** this window; the earlier bridge/umbrella
+  shared-ckpt-dir hazard was cleaned up (corrupt 256 step-6,200/6,300 + poisoned
+  2B-const step-9,250/9,260 quarantined via `backup`).
+- **80B: still no production job** (see item 2); the at-scale corner is unsolved.
+
+### 4. Evaluation -- commonsense complete to tip; modern block backfilling
+
+- **Commonsense-7 ladder is complete to each chain's live tip:** 256N through
+  step-6,800, 512N through step-6,500, all fresh this window. Headline
+  accuracies at the tips (~610-680B tokens): 256N step-6,800 = arc_e 0.662 /
+  arc_c(n) 0.348 / hellaswag(n) 0.597 / winogrande 0.574; 512N step-6,500 =
+  arc_e 0.677 / arc_c(n) 0.354 / hellaswag(n) 0.609 / winogrande 0.579. Both far
+  above v1's flat ~0.27 arc baseline; 512N edges 256N on shared metrics.
+- **Modern block (MMLU-57 + gsm8k) is backfilling now.** The first tail pass had
+  the modern half die on the old 12h walltime cap mid-MMLU; resubmitted as two
+  `capacity`-queue jobs at **48h** (`8729921` 256N running, `8731413` 512N
+  running) so the slow ~56k-request/step MMLU pass can't be walltime-killed. Fill
+  targets: 256N modern on steps 5,900-6,800, 512N modern on 6,200-6,500 (+gsm8k
+  on each tip). Content-aware skip-guard merges into existing `results.json` and
+  reuses cached HF conversions.
+- **HellaSwag plateau holds:** peaked ~0.63, now oscillating 0.60-0.63 -- as
+  before, not yet climbing out at this token count.
+
+### 5. Smaller items
 
 - **Upstream synced (72nd, merge `e5841d611`, 2 commits).** Replayed the float8
   `filter_fqns` fix (#4008) onto `ezpz/moe`: our 671B float8 config filtered on
