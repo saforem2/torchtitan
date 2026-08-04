@@ -103,37 +103,40 @@ can train.
    also NaNs (`8673658`, ~step 37). Necessary, not sufficient -- which narrows
    the overflow to a **bf16 sublayer GEMM** (attention QK^T scores or the FFN
    SwiGLU intermediate) rather than the residual add.
-3. **Score-bounding (softcap / QK-Norm)** -- follows directly from (2). Softcap
-   is disqualified on this stack: it hard-codes `torch.compile(flex_attention)`,
-   which `--compile.no-enable` cannot switch off and which is broken/eager on XPU.
-   QK-Norm remains the live candidate.
-4. Operational guard in place: `--nan-abort-consecutive=5` (the 512N NaN burned
+3. **Score-bounding (softcap / QK-Norm) -- BOTH now blocked on this stack.**
+   Softcap hard-codes `torch.compile(flex_attention)`, which
+   `--compile.no-enable` cannot switch off and which is broken/eager on XPU.
+   **QK-Norm is now also blocked, and this is new (2026-08-03):** `agpt_80b_qknorm`
+   crashes in BACKWARD with `RuntimeError: tensor does not have a device`, and
+   that is now established on a VALID baseline -- job `12472459` at **4N/TP=4**,
+   the exact config where plain `agpt_80b` trains 10/10 clean (`12472452`). So it
+   is a real qk_norm TP>1 backward bug, not the 2N memory artifact I first
+   mistook it for. The `LocalShardRMSNorm` fix (`77a0009f3`, local-shard norm,
+   review-correct on grad placements) **does not fix it** -- that verdict was
+   2N-invalid before and is now validly established at 4N. **Net: the entire
+   score-bounding branch of the fix ladder is currently unavailable**, which
+   leaves fp32-params (item 1) as the only working lever and promotes item 4.
+4. **Targeted fp32 on the suspect sublayer (the main untried lever).** The
+   fp32-residual ladder already localized the overflow to a bf16 sublayer GEMM
+   -- attention QK^T scores or the FFN SwiGLU intermediate. With score-bounding
+   blocked, the remaining cheap-ish option is autocasting just that one site to
+   fp32 (far less costly than whole-model fp32-params). Prerequisite: decide
+   WHICH of the two, which is what the per-op numerics capture at dp=192 was
+   for -- it is wired but paused (DebugMode is broken on torch 2.13-dev; a
+   lightweight forward-hook amax logger would substitute).
+5. Operational guard in place: `--nan-abort-consecutive=5` (the 512N NaN burned
    ~6,100 node-h before this existed).
 
-**Wall 2 -- init crash at high RANK COUNT (separate from the NaN, still open).**
-Careful, these are two different things and an earlier version of this entry
-wrongly merged them:
-- **`set_determinism` bad_alloc/SIGSEGV is model-independent and RANK-count
-  related, but it is INTERMITTENT, not a hard gate.** It killed 2B (`8463182`,
-  bad_alloc) and 20B (`8463183`, SIGSEGV) at 1024N = 12,288 ranks (2026-05-04)
-  and 80B at 2048N = 24,864 ranks (`8574387`) -- but it has ALSO fired at
-  **512N = 6,144 ranks** (`8466848`), while the previous 20B 512N run
-  (`8463628`) and the immediate resubmit (`8479579`) both succeeded at the
-  *same* scale and script. So: it fires unpredictably at **512N+**, and is
-  frequently resubmit-survivable. The old "1024N only" framing is stale.
-  Same call site each time (`utils.py:231`, a `torch.distributed.broadcast`).
-  Being model-independent, it is cheapest to debug on **2B**.
-  *(Note: this is a RANK count. It has nothing to do with global batch size --
-  GBS 6,144 / 12,288 are healthy production values.)*
-- **The 256N `NotPresent` segfault was NOT a scaling wall** -- job `8505222` was
-  a **bad-node cascade**: the failover wrapper correctly identified each bad
-  node and swapped in a spare, but every spare drawn was also bad (3 of 6 were
-  spatially clustered), exhausting 5 retries. That is Aurora hardware
-  availability + a blind-swap spare picker, not a dp=768 code limit. 256N is
-  not proven broken.
-- **80B at 1024N has never run.** The bracket was submitted (`8574386`) but sat
-  on `Not enough free nodes available` and never started, so there is no 80B
-  data point at 1024N -- only the 2B/20B crashes at that same rank count.
+*(Retiring "Wall 2": the intermittent `set_determinism` init OOM fires
+unpredictably at 512N+ but 512N production survives it routinely via resubmit
+(`8466848` crashed; `8463628` before it and `8479579` right after both succeeded
+at the same scale/script). It is an operational nuisance to harden with
+retry-on-init-OOM, not a scaling wall, and it does not belong beside Wall 1.
+Two related corrections while removing it: the 256N `NotPresent` event
+(`8505222`) was a **bad-node cascade** -- every spare the failover wrapper drew
+was also bad, 3 of 6 spatially clustered -- not a dp=768 limit, so 256N is not
+proven broken; and **80B at 1024N has never actually run** (`8574386` never left
+`Not enough free nodes available`).)*
 
 **Practical ceiling today: ~62N, and Wall 1 is the binding constraint -- not
 Wall 2.** The stable corner is confirmed 4/4 clean only to dp~186 (~62N at TP=4);
@@ -297,16 +300,22 @@ See: [SFT index](../production/sft/README.md) ·
    dp ladder and find where it breaks, or (b) start the guaranteed-clean
    fp32-mixed-precision-param TP=4 run now and accept ~3-5x slower. No 80B job
    is training today, so this is the decision that unblocks 80B.
-2. **80B Wall 1 fix -- is QK-Norm worth finishing?** The fp32-residual ladder
-   narrowed the overflow to a bf16 sublayer GEMM (attention scores or FFN
-   SwiGLU); softcap is disqualified on XPU (compile-coupled FlexAttention), so
-   QK-Norm is the remaining score-bounding candidate. Retesting at 4N now
-   (`12472459`). Worth pursuing, or go with fp32-params and stop?
-3. **80B Wall 2 (`set_determinism` init OOM) -- low priority, and NOT a gate.**
-   It is intermittent and model-independent, fires unpredictably at 512N+, and
-   512N production already survives it routinely via resubmit. Treat it as an
-   operational nuisance to harden (retry-on-init-OOM) rather than a blocker;
-   if anyone does chase the root cause, do it on 2B, which is far cheaper.
+2. **QK-Norm: keep debugging the TP>1 backward, or drop score-bounding?**
+   ANSWERED at 4N and the answer is bad: `agpt_80b_qknorm` crashes in backward
+   (`tensor does not have a device`) at 4N/TP=4 where plain 80B is 10/10 clean
+   (`12472459` vs `12472452`), so it is a real bug and `LocalShardRMSNorm` does
+   not fix it. With softcap also disqualified on XPU, **score-bounding is
+   entirely blocked**. Decision needed: invest in a proper DTensor-backward
+   debug of qk_norm at TP>1 (unbounded -- prior root-cause attempts were wrong
+   twice), or drop that branch and pursue targeted fp32 (ask 3) / fp32-params?
+3. **Localize the overflow site so a targeted fp32 fix is possible.** With
+   score-bounding blocked (softcap compile-coupled on XPU; QK-Norm now
+   confirmed-broken in TP>1 backward at 4N), the only lever short of
+   whole-model fp32-params is autocasting the single offending sublayer.
+   That needs the per-op amax capture at dp=192 revived (DebugMode is broken on
+   torch 2.13-dev -> use a forward-hook amax logger) to say whether it is the
+   attention scores or the FFN SwiGLU intermediate. Small, and it unblocks the
+   cheapest real fix.
 4. **Bracket Wall 1's real boundary before proposing any large-N 80B run.** The
    stable corner is validated to dp~186 and NaNs at dp=372; the gap has never
    been tested. Run the corner at ~64N -> 96N -> 128N to find the actual break
