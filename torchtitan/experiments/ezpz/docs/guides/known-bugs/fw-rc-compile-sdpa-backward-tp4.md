@@ -1,5 +1,32 @@
 # frameworks-RC torch: `torch.compile` at TP=4 crashes in the SDPA flash-backward
 
+> [!IMPORTANT]
+> **FIXED in frameworks RC4 (verified 2026-08-05, job 12472578).** The patched
+> build `torch 2.13.0a0+gitcf30153` / `pytorch_2.13.0_patched_08_02_2026`
+> (conda env `RC4_..._rel_one_2026.1.0_python_3.12.12`) trains **clean at TP=4**:
+> 10/10 steps, loss 12.98 -> 8.47, finite grad_norms, and **zero**
+> `assert_size_stride` occurrences in any rung. The full ladder on that build
+> (2N, agpt-2b, seq 4096, LBS 1):
+>
+> | rung | loss step 1 -> 10 | MFU | assert_size_stride |
+> | --- | --- | --- | --- |
+> | eager | 12.98 -> 8.38 | 19.36% | 0 |
+> | compile TP=1 | 12.92 -> 9.30 | 21.31% | 0 |
+> | compile TP=2 | 12.95 -> 8.65 | 13.31% | 0 |
+> | compile TP=4 | 12.98 -> 8.47 | 7.83% | 0 |
+>
+> Note the base git hash is UNCHANGED (`cf30153`) -- only the patch level
+> differs, so identify the build by `patched_08_02_2026`, not by the hash.
+>
+> Caveats: verified at 2N / 10 steps / agpt-2b only. That is enough to falsify
+> the assert (the original fired within ~30s at this scale) but not to certify
+> production; confirm at scale before relying on it. Separately, MFU degrades
+> sharply with TP on this build (21% -> 13% -> 7.8%) -- do not adopt TP=4 for
+> throughput without measuring.
+>
+> Everything below documents the ORIGINAL (pre-RC4) failure and remains the
+> reference for the older fw-RC conda stack.
+
 **Status (2026-07-26): reproduced + scoped.** On the "frameworks" RC conda torch
 (`2.13.0a0+gitcf30153`, oneAPI 2026.1.0, XPU) any `torch.compile` agpt run at
 **tensor-parallel degree 4** aborts in the compiled backward with an
