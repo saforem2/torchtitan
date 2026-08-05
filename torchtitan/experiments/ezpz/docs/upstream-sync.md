@@ -1,5 +1,31 @@
 # Upstream Sync Log
 
+## 2026-08-05 -- 74th sync (2 commits, merge `ddb41730a`)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- this
+sync is inert for ezpz.
+
+The two commits:
+
+- **`bcc09297a` "Add an NVFP4 quantization converter (#3914)"** -- new
+  `torchtitan/components/quantization/nvfp4.py` plus `NVFP4LinearConverter`
+  entries in `llama3/config_registry.py` (+73) and `qwen3/config_registry.py`
+  (+77), and 3-line additions to `quantization/__init__.py` and
+  `quantization/utils.py`.
+- **`d905f735d`** -- dependabot bump of `pypa/gh-action-pypi-publish` in
+  `.github/workflows/release.yml`. CI only.
+
+**Why no replay onto `ezpz/agpt`.** The sync protocol replays `llama3/` changes
+onto `ezpz/agpt/`, so `bcc09297a` was checked line by line. It is **purely
+additive**: `git show bcc09297a -- torchtitan/models/llama3/config_registry.py`
+has ZERO removed or modified lines, and the two shared `quantization/` files gain
+3 lines each with nothing existing changed. No behavior our configs depend on
+moved.
+
+NVFP4 is also **NVIDIA-only** (it targets Blackwell FP4 tensor cores and requires
+every GEMM dim divisible by 128), so the converter itself is inapplicable on
+Intel XPU regardless. Nothing to port; the new flavors simply go unused here.
+
 ## 2026-08-03 -- 73rd sync (11 commits, `4bed50210..upstream/main`, merge `23b4000dd`)
 
 Merged `upstream/main` into `ezpz` (merge commit `23b4000dd`), 11 upstream commits
