@@ -78,7 +78,7 @@
 
 **Tokens consumed:** 41,300 × 12,288 × 8,192 = **4.16T tokens** (89.0% of 4.67T target)
 
-**Loss:** 2.6972 (vtumb5cb end, step-41,300 -- umbrella 8714502)
+**Loss:** 2.6913 (vtumb5cb end, step-41,300 -- umbrella 8714502)
 
 ### Recovery
 
