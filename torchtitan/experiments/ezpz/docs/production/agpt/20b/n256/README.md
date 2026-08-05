@@ -94,7 +94,7 @@
 
 **Tokens consumed:** 7,800 × 6,144 × 8,192 = **392.6B tokens** (8.4% of 4.67T target)
 
-**Loss:** 2.4394 (8558549 end, step-3,100)
+**Loss:** 2.3694 (2ktrz29u end, step-7,897 -- umbrella 8714502)
 
 ## v2 -- 20B @ 256N -- job 8661913 (MISLABELED "constlr"; actually from-scratch)
 
