@@ -28,7 +28,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan")
+# Resolve the repo from this file's location, not a hardcoded machine path:
+# the plotter is authored on Sunspot but refresh_all.sh runs it on Aurora too,
+# where /lus/tegu does not exist (it failed every Aurora refresh until 2026-08-05).
+REPO = Path(__file__).resolve().parents[11]
 EVALS = REPO / "outputs" / "evals"
 
 # Load plot_style DIRECTLY by file path. Importing it via the package

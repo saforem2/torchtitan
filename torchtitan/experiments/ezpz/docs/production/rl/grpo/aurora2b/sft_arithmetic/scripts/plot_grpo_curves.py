@@ -19,7 +19,10 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 apply_style()
 
-ROOT = Path("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan")
+# Resolve the repo from this file's location, not a hardcoded machine path:
+# authored on Sunspot, but refresh_all.sh also runs this on Aurora where
+# /lus/tegu does not exist (the run then silently plotted nothing).
+ROOT = Path(__file__).resolve().parents[10]
 TRAINER_STATE = ROOT / "outputs/grpo/aurora2b-sft-arithmetic-8n/checkpoint-1000/trainer_state.json"
 OUT_DIR = Path(__file__).resolve().parent.parent / "charts"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
