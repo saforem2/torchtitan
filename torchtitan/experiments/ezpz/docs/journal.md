@@ -137,9 +137,17 @@ Running log of what's happening, session by session. Most recent first.
   8731758 (20B-512 native, 516N) all Q; both tail evals R on capacity. The
   umbrella overlaps BOTH individuals -- if it seats, kill 8730438 + 8731758
   first. The two individuals do NOT collide with each other (different repo
-  clones, different ckpt dirs). Also retired the zombie 512-chain bridge
-  8687863: held since 07-29 AND carrying `-W depend=afterany:8687862` on a job
-  PBS has since purged, so it could never be released.
+  clones, different ckpt dirs). The zombie 512-chain bridge 8687863 is still
+  parked in H and needs a manual `qdel`: held since 07-29 AND carrying
+  `-W depend=afterany:8687862` on a job PBS has since purged, so `qrls` alone
+  can never satisfy it. Inert, but clutter.
+- **Watch out for false `GONE` events from the qstat watcher.** Its presence
+  check keys on the job id appearing in an awk-parsed snapshot, and the field
+  offsets shift when some rows carry an elapsed time (`R 02:16`) and others do
+  not (`--`). That drops a line and looks like a job left the queue -- it fired
+  three times today on jobs that were still sitting there. The `Q -> R`
+  transitions compare states rather than presence and are unaffected, so the
+  collision alerts are trustworthy; always confirm a `GONE` against live qstat.
 
 ## 2026-07-27 (aurora) -- prod_dash: Textual multi-metric TUI + streamed cold-build progress; 20b-256 capacity bridge advancing
 
