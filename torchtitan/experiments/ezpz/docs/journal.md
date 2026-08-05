@@ -2,6 +2,153 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP fix REFUTED by first real run
+
+- **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and
+  reported `failed: 5 / 5` -- but three chains genuinely advanced.** The summary
+  banner is exit-code-driven and badly misleading here:
+
+  | trainer | chain | steps | ckpt head | loss |
+  |---------|-------|-------|-----------|------|
+  | 1 | 20B-512 | 6801 -> 7149 | 7,100 | 2.415 |
+  | 2 | 20B-256 | 7501 -> 7897 | 7,800 | 2.3694 |
+  | 0 | 2B-512 | 39601 -> 41300 | 41,300 | 2.6913 |
+  | 3 | 2B-512 (dup) | never started | -- | -- |
+  | 4 | 2B-256 | never started | -- | -- |
+
+  Two independent causes, neither numerical: trainer 0 hit a clean
+  `FAILOVER STOP: walltime` (rc=143, working as designed); trainer 1 died rc=127
+  at 05:50:21 when a node went unresponsive (`No reply from x4410c7s1b0n0 after
+  97s`), auto-retry correctly rotated it out, and the RELAUNCH hit the known
+  Aurora pals RPC fault (`Couldn't forward RPC launch ... Resource temporarily
+  unavailable`) -> `FAILOVER STOP: stuck_pre_training`. The umbrella then
+  SIGTERM'd trainers 2/3/4 at that same second. So: 1 clean walltime exit, 1
+  infra fault, 3 collateral kills.
+- **Ckpt heads trail the logged steps by design.** Trainers log every step but
+  save every 50, and all were SIGTERM'd mid-interval: logged 7,897 / 7,149 vs
+  resumable 7,800 / 7,100. Always take the head from disk, not the last log line.
+- **Four SILENT failures in the doc-refresh machinery -- every one reported
+  success while skipping its work.** This is why the production docs had drifted
+  a week despite a catch-all built to prevent exactly that:
+  1. **Loss was looked up from a run-id list frozen at 2026-07-27.**
+     `_wandb_latest_loss` walks `wandb_run_ids` and returns the newest loss it
+     KNOWS about. 20B-256's list ended at `v58n7vam`=8703284 (~step-6037), whose
+     loss is 2.68 -- exactly the stale number the dashboard kept reporting. The
+     function was working perfectly on a stale input. Added the missing
+     segments: 20b_v2_256 += cxlt0tpe=8698125 (6151->6897) + 2ktrz29u=8714502
+     (7501->7897); 20b_v2_512 += 9d1g9zsw=8714502; 2b_v2_512 += vtumb5cb=8714502.
+  2. **`LOSS_RE` needs a `**Loss:**` line and 20b/n512 + 2b/n512 never had one**,
+     so their loss field was skipped forever with no warning. Added.
+  3. **Five plotters hardcoded the Sunspot repo root** (`/lus/tegu/...`). Two
+     failed loudly on Aurora (PermissionError / FileNotFoundError); the other
+     THREE failed silently -- they guard on the missing Sunspot trainer_state and
+     "skip cleanly", so they exited 0 having plotted nothing and the catch-all
+     looked green. All now resolve via `Path(__file__).resolve().parents[N]`.
+  4. **Stale `Last updated:` markers were detected but unfixable** -- phase 2 of
+     `check_stale_docs.sh` is read-only and the markers are hand-written prose,
+     so the punch-list only grew (9 stale). New `utils/refresh_last_updated.py`,
+     wired as `refresh_all.sh` stage 2b, stamps each doc with its LAST-COMMIT
+     date (not today -- stamping today would claim a freshness the content lacks
+     and permanently silence the check) and skips dirty files.
+
+  Commits 598c7c1bf / 097dfd8e1 (plot_b4.py was the last [UNWIRED] plotter) /
+  3858d730b / 87382f971 / 10fb962f0, plus the refresh output itself (96153a497)
+  and the rollup Loss/State/Trend prose (f7f3aba35).
+- **Verified the loss fix end-to-end**: 20B-256 moved off a value pinned at
+  step-3,100 (2.4394 -> 2.3694) and the two 512N chains produced a loss for the
+  first time. The W&B values differ slightly from the console lines transcribed
+  by hand (2.6913 vs 2.6972, 2.415 vs 2.4145) -- W&B is authoritative, which is
+  itself the argument for automating this.
+- **The 20B ARC-Challenge decline is REAL, not a tokenizer artifact.** Modern-block
+  backfills 8729921/8731413 completed (48h capacity, after two 12h walltime
+  kills) and show ARC-C falling 0.4138 at step-4000 -> 0.2875 at step-6500,
+  approaching the 0.25 chance floor, while MMLU sits at chance throughout
+  (.249-.267) and train loss keeps improving. Ruled out the Polaris-style
+  tokenizer mismatch (Llama2-tokenized data scored with a gemma eval tokenizer):
+  the driver copies gemma-7b assets and olmo-mix-1124 IS gemma-tokenized; model
+  vocab 256128 vs tokenizer
+  256000 is standard 128-alignment padding, and the harness produces non-random
+  commonsense scores, which a scrambled tokenizer could not. Remaining
+  hypotheses: constant LR (`decay-ratio=0.0`; the decline starts near when both
+  chains went constant) or data mix. Tail evals 8735716/8735717 submitted over
+  the uncovered 6900-7800 / 6550-7100 to see whether it bottoms out.
+- **frameworks RC4 FIXES the TP=4 SDPA-backward compile assert** (Sunspot
+  12472578 2N, confirmed 12472582 at 4N/30 steps): 0 `assert_size_stride` at
+  every TP degree, continuous descent 13.00 -> 6.71. The
+  ".venv for compiled TP=4, or stay at TP<=2" workaround is obsolete. A control
+  run on the production .venv (12472583) shows both stacks agree within ~1.5% at
+  every rung, so the ~7% TP=4 MFU is the intrinsic cost of TP=4 for this model at
+  2N -- **RC4 is performance-neutral, not a regression**. Commits eecb2fdc9 /
+  00f49ebe9 / 61dbe409f.
+- **74th upstream sync** (merge ddb41730a): 2 commits, inert for ezpz. The NVFP4
+  converter (#3914) was checked line-by-line -- purely additive, and NVIDIA-only
+  (Blackwell FP4) so inapplicable on XPU. Nothing to replay. Commit 3f32a1aed.
+- **The PP fix (7e2975dc3) DOES NOT WORK -- correcting an earlier claim.** It was
+  committed on reasoning alone and had never been run. First actual verification
+  (12472586) at PP=2 / `pp_microbatch_size=1` / LBS=2 still dies with
+  `ValueError: Expecting 2 arg_mbs but got 1` and **zero steps**. The PP=1
+  regression rung passes (step 10), so the commit is harmless to every non-PP
+  run -- but the bug it targeted is still open.
+  **The original diagnosis was wrong.** I fixed dataloader SIZING on the theory
+  that the iterator exhausted mid-run. This run dies at step 1 with **no "Ran out
+  of data"** anywhere in the log; a dry iterator fails late and says so. So the
+  microbatch group is short from the very first step, and sizing was never the
+  cause.
+  Instrumented probe 12472588 then falsified all four follow-up candidates at
+  once: `PPDIAG[init-post] num_pp_mb=2 pp_enabled=True cls=FaultTolerantTrainer
+  lbs_now=2` and `PPDIAG[train_step] num_pp_mb=2`, dataloader-dry count 0. So our
+  side genuinely builds groups of 2, the schedule genuinely wants 2
+  (`Expecting 2 arg_mbs`), and it still receives 1 -- the loss happens BETWEEN
+  `train_step`'s group construction and the schedule call, not in the config, the
+  attribute, the class, or the dataloader. Next: read how `arg_mbs` is passed
+  into `_check_inputs` (a `pp_has_first_stage` filter is the leading suspect,
+  since upstream nulls `arg_mbs` on non-first stages).
+- **B4 SFT page expanded with charts** (5bd4c1ecd): `plot_b4.py` +
+  `cot_ladder.svg` / `accuracy_vs_genlen.svg` on the two-stage-vs-single-stage
+  result, plus a TL;DR, per-arm hypotheses, and a note on why the gen_len /
+  n_unclosed guardrails earned their keep. No numbers changed.
+- **RC4 env recipe (for anyone repeating the frameworks-RC test).** The RC4 conda
+  env is READ-ONLY and owned by another user, and ships no ezpz/torchtitan stack.
+  `venvs/fw-2026.1-rc2` needed 4 packages + 11 transitive deps before a rank
+  could start: `tensorboard`(+data-server), `blendcorpus@feat/remove-deepspeed`,
+  `tyro`, `spmd_types`, a `_torchtitan_repo.pth`, then typeguard /
+  eval-type-backport / protobuf / pyyaml / absl-py / markdown / pillow /
+  werkzeug / hydra-core / omegaconf / antlr4 (all `--no-deps`; `grpcio`
+  deliberately EXCLUDED as a compiled ext). **Every one of these surfaced as the
+  same generic `Cannot import config_registry`** because
+  `torchtitan/config/manager.py:120` swallows the real exception -- worth a
+  `raise ... from` upstream. Gate on importing
+  `...agpt.config_registry` with `PYTHONPATH` UNSET from a neutral cwd; gating on
+  `import agpt` gives FALSE PASSES (it never reaches metrics.py). By contrast the
+  canonical `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`
+  worked first try -- prefer it.
+- **Node `x1921c4s3b0n0` is persistently broken** -- `mounts=2` where healthy
+  nodes have 3, so the project path is invisible and any rank landing there exits
+  127, killing the whole job. Failed 5/5 appearances (12472558, 12472560,
+  12472573, excluded by probe 12472563, `repo=FAIL` in 12472561), never passed.
+  `c4s5`/`c4s6` additionally FLAP (passed in 12472563, failed in 12472564);
+  c2 and c7 have been clean throughout, so this looks c4-localized. **Worth an
+  ALCF ticket** -- it will silently break anyone who lands on it. Workaround now
+  in the probe scripts: request N+1 nodes and drop any that cannot see $REPO,
+  running the probe from `/tmp` (from $REPO the bad node fails the chdir and
+  tears down the probe itself, reporting 0 healthy).
+- **Queue state at end of session.** Nothing training: 8714503 (umbrella
+  successor, 2098N, auto-released from hold), 8730438 (20B-256 native, 260N) and
+  8731758 (20B-512 native, 516N) all Q; both tail evals R on capacity. The
+  umbrella overlaps BOTH individuals -- if it seats, kill 8730438 + 8731758
+  first. The two individuals do NOT collide with each other (different repo
+  clones, different ckpt dirs). The zombie 512-chain bridge 8687863 is still
+  parked in H and needs a manual `qdel`: held since 07-29 AND carrying
+  `-W depend=afterany:8687862` on a job PBS has since purged, so `qrls` alone
+  can never satisfy it. Inert, but clutter.
+- **Watch out for false `GONE` events from the qstat watcher.** Its presence
+  check keys on the job id appearing in an awk-parsed snapshot, and the field
+  offsets shift when some rows carry an elapsed time (`R 02:16`) and others do
+  not (`--`). That drops a line and looks like a job left the queue -- it fired
+  three times today on jobs that were still sitting there. The `Q -> R`
+  transitions compare states rather than presence and are unaffected, so the
+  collision alerts are trustworthy; always confirm a `GONE` against live qstat.
+
 ## 2026-07-27 (aurora) -- prod_dash: Textual multi-metric TUI + streamed cold-build progress; 20b-256 capacity bridge advancing
 
 - **prod_dash cold-build no longer a silent hang.** The live dashboard sat
