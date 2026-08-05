@@ -2,7 +2,7 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP fix REFUTED by first real run
+## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; the ARC-C "decline" is a shot-count collision; RC4 retires the TP=4 workaround; PP fix REFUTED by first real run
 
 - **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and
   reported `failed: 5 / 5` -- but three chains genuinely advanced.** The summary
@@ -59,19 +59,32 @@ Running log of what's happening, session by session. Most recent first.
   first time. The W&B values differ slightly from the console lines transcribed
   by hand (2.6913 vs 2.6972, 2.415 vs 2.4145) -- W&B is authoritative, which is
   itself the argument for automating this.
-- **The 20B ARC-Challenge decline is REAL, not a tokenizer artifact.** Modern-block
-  backfills 8729921/8731413 completed (48h capacity, after two 12h walltime
-  kills) and show ARC-C falling 0.4138 at step-4000 -> 0.2875 at step-6500,
-  approaching the 0.25 chance floor, while MMLU sits at chance throughout
-  (.249-.267) and train loss keeps improving. Ruled out the Polaris-style
-  tokenizer mismatch (Llama2-tokenized data scored with a gemma eval tokenizer):
-  the driver copies gemma-7b assets and olmo-mix-1124 IS gemma-tokenized; model
-  vocab 256128 vs tokenizer
-  256000 is standard 128-alignment padding, and the harness produces non-random
-  commonsense scores, which a scrambled tokenizer could not. Remaining
-  hypotheses: constant LR (`decay-ratio=0.0`; the decline starts near when both
-  chains went constant) or data mix. Tail evals 8735716/8735717 submitted over
-  the uncovered 6900-7800 / 6550-7100 to see whether it bottoms out.
+- **RETRACTED mid-session: the 20B "ARC-Challenge decline" is a shot-count
+  collision, not a capability trend.** The story ran: modern-block backfills
+  8729921/8731413 completed (48h capacity, after two 12h walltime kills) and
+  appeared to show ARC-C falling 0.4138 at step-4000 -> 0.2875 at step-6500,
+  toward the 0.25 chance floor, while train loss kept improving. The
+  tokenizer was correctly ruled out (the driver copies gemma-7b assets,
+  olmo-mix-1124 IS gemma-tokenized, model vocab 256128 vs tokenizer 256000 is
+  standard 128-alignment padding) -- that part stands. But the column itself
+  was not a single measurement: **arc_challenge is scored twice per step,
+  0-shot in the commonsense block and 25-shot in the modern block, and both
+  wrote the same `arc_challenge` key**, so whichever phase finished last won.
+  lm-eval's `n-shot` block was dropped, leaving nothing to disambiguate. The
+  "peak" and the "floor" are not comparable numbers, and the apparent
+  +7-to-9pp "recovery" first seen at 256n step-6900 / 512n step-6550 was just
+  fresh 0-shot values sitting beside 25-shot neighbours. Fixed in 3e1877170
+  (`<task>@<N>shot` keys + preserved n-shot); applies to steps evaluated from
+  here on, so already-written files stay ambiguous until re-run.
+  - What survives: **MMLU is genuinely at chance** across every step measured
+    (.249-.267, single source, 5-shot only, no collision), and HellaSwag
+    ~0.60 / ARC-Easy ~0.66 are real and steady -- both appear once each.
+  - Tail evals 8735716/8735717 are running over 6900-7800 / 6550-7100. Their
+    arc_challenge will still collide (they predate the fix); their MMLU and
+    commonsense numbers are trustworthy.
+  - Lesson: before reading any eval column as a time series, confirm every
+    point in it was produced by the same task config. A silent key collision
+    looks exactly like a trend.
 - **frameworks RC4 FIXES the TP=4 SDPA-backward compile assert** (Sunspot
   12472578 2N, confirmed 12472582 at 4N/30 steps): 0 `assert_size_stride` at
   every TP degree, continuous descent 13.00 -> 6.71. The
