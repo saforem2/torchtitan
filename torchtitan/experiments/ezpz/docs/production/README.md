@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-07-29
+> Last updated: 2026-08-05
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -29,10 +29,10 @@ in the linked pages.
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [2B 512N](agpt/2b/n512/README.md) sync | stalled (Q ~25d) | 41,300 | 2.71 | 89.0% | 🟡 queue-starved |
-| [20B 256N](agpt/20b/n256/README.md) | advancing | **7,800** | 2.68 | 8.4% | 🟢 carried to 3,100 via relocated n256 clone chain |
-| [20B 512N](agpt/20b/n512/README.md) | advancing | **7,100** | 2.47 | 15.3% | 🟢 native auto-retry (8638793+8638795) broke the stall, 4,400→5,400 |
-| [**80B**](agpt/80b/README.md) | **NaN'd** (needs new optimizer) | — | nan | — | 🔴 512N ran 12h but SophiaG diverged @ step-14; mano probe (8647404) running |
+| [2B 512N](agpt/2b/n512/README.md) sync | advancing | 41,300 | 2.697 | 89.0% | 🟢 umbrella 8714502 carried 39,600→41,300 on 2026-08-05 |
+| [20B 256N](agpt/20b/n256/README.md) | advancing | **7,800** | 2.371 | 8.4% | 🟢 umbrella 8714502 carried 7,500→7,800 on 2026-08-05; native 8730438 queued |
+| [20B 512N](agpt/20b/n512/README.md) | advancing | **7,100** | 2.415 | 15.3% | 🟢 umbrella 8714502 carried 6,800→7,100 on 2026-08-05; native 8731758 queued |
+| [**80B**](agpt/80b/README.md) | **blocked** (dp wall) | — | nan | — | 🔴 optimizer-independent grad-path overflow at dp>~186; not a SophiaG bug |
 
 ### Post-training stages (CPT / SFT / RL)
 
