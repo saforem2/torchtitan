@@ -29,9 +29,23 @@
 > times the steps of the first pass. No NaN/Inf (an earlier "nan/inf" grep hit
 > was `INFO` log lines and an `"infinite"` config key, not numerics).
 >
-> Remaining caveat is PERFORMANCE, not correctness: MFU at TP=4 is ~7% (2N 7.83%,
-> 4N 6.98%) against ~21% at TP=1. Correctness is settled; do not adopt TP=4 for
-> throughput without understanding that gap.
+> **The low TP=4 MFU is NOT an RC4 regression** (control run, job 12472583). The
+> same four rungs on the production `.venv` stack (torch
+> `2.13.0.dev20260519+xpu`, oneAPI 2025.3.1, via
+> `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`) land
+> within ~1.5% of RC4 everywhere:
+>
+> | rung | .venv MFU | RC4 MFU | delta |
+> | --- | --- | --- | --- |
+> | eager | 19.08% | 19.36% | +0.28 |
+> | compile TP=1 | 21.20% | 21.31% | +0.11 |
+> | compile TP=2 | 13.46% | 13.31% | -0.15 |
+> | compile TP=4 | 7.85% | 7.83% | -0.02 |
+>
+> So ~7% at TP=4 is simply what TP=4 costs for agpt-2b at 2N (TP splits a small
+> per-rank workload and adds collectives), not something RC4 introduced. RC4 is
+> performance-neutral against the production stack. Nothing to report upstream on
+> throughput; the TP=4 MFU cost is pre-existing and independent of the build.
 >
 > Everything below documents the ORIGINAL (pre-RC4) failure and remains the
 > reference for the older fw-RC conda stack.
