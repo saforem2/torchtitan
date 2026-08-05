@@ -2,7 +2,7 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround
+## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP fix REFUTED by first real run
 
 - **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and
   reported `failed: 5 / 5` -- but three chains genuinely advanced.** The summary
@@ -83,6 +83,55 @@ Running log of what's happening, session by session. Most recent first.
 - **74th upstream sync** (merge ddb41730a): 2 commits, inert for ezpz. The NVFP4
   converter (#3914) was checked line-by-line -- purely additive, and NVIDIA-only
   (Blackwell FP4) so inapplicable on XPU. Nothing to replay. Commit 3f32a1aed.
+- **The PP fix (7e2975dc3) DOES NOT WORK -- correcting an earlier claim.** It was
+  committed on reasoning alone and had never been run. First actual verification
+  (12472586) at PP=2 / `pp_microbatch_size=1` / LBS=2 still dies with
+  `ValueError: Expecting 2 arg_mbs but got 1` and **zero steps**. The PP=1
+  regression rung passes (step 10), so the commit is harmless to every non-PP
+  run -- but the bug it targeted is still open.
+  **The original diagnosis was wrong.** I fixed dataloader SIZING on the theory
+  that the iterator exhausted mid-run. This run dies at step 1 with **no "Ran out
+  of data"** anywhere in the log; a dry iterator fails late and says so. So the
+  microbatch group is short from the very first step, and sizing was never the
+  cause.
+  Instrumented probe 12472588 then falsified all four follow-up candidates at
+  once: `PPDIAG[init-post] num_pp_mb=2 pp_enabled=True cls=FaultTolerantTrainer
+  lbs_now=2` and `PPDIAG[train_step] num_pp_mb=2`, dataloader-dry count 0. So our
+  side genuinely builds groups of 2, the schedule genuinely wants 2
+  (`Expecting 2 arg_mbs`), and it still receives 1 -- the loss happens BETWEEN
+  `train_step`'s group construction and the schedule call, not in the config, the
+  attribute, the class, or the dataloader. Next: read how `arg_mbs` is passed
+  into `_check_inputs` (a `pp_has_first_stage` filter is the leading suspect,
+  since upstream nulls `arg_mbs` on non-first stages).
+- **B4 SFT page expanded with charts** (5bd4c1ecd): `plot_b4.py` +
+  `cot_ladder.svg` / `accuracy_vs_genlen.svg` on the two-stage-vs-single-stage
+  result, plus a TL;DR, per-arm hypotheses, and a note on why the gen_len /
+  n_unclosed guardrails earned their keep. No numbers changed.
+- **RC4 env recipe (for anyone repeating the frameworks-RC test).** The RC4 conda
+  env is READ-ONLY and owned by another user, and ships no ezpz/torchtitan stack.
+  `venvs/fw-2026.1-rc2` needed 4 packages + 11 transitive deps before a rank
+  could start: `tensorboard`(+data-server), `blendcorpus@feat/remove-deepspeed`,
+  `tyro`, `spmd_types`, a `_torchtitan_repo.pth`, then typeguard /
+  eval-type-backport / protobuf / pyyaml / absl-py / markdown / pillow /
+  werkzeug / hydra-core / omegaconf / antlr4 (all `--no-deps`; `grpcio`
+  deliberately EXCLUDED as a compiled ext). **Every one of these surfaced as the
+  same generic `Cannot import config_registry`** because
+  `torchtitan/config/manager.py:120` swallows the real exception -- worth a
+  `raise ... from` upstream. Gate on importing
+  `...agpt.config_registry` with `PYTHONPATH` UNSET from a neutral cwd; gating on
+  `import agpt` gives FALSE PASSES (it never reaches metrics.py). By contrast the
+  canonical `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`
+  worked first try -- prefer it.
+- **Node `x1921c4s3b0n0` is persistently broken** -- `mounts=2` where healthy
+  nodes have 3, so the project path is invisible and any rank landing there exits
+  127, killing the whole job. Failed 5/5 appearances (12472558, 12472560,
+  12472573, excluded by probe 12472563, `repo=FAIL` in 12472561), never passed.
+  `c4s5`/`c4s6` additionally FLAP (passed in 12472563, failed in 12472564);
+  c2 and c7 have been clean throughout, so this looks c4-localized. **Worth an
+  ALCF ticket** -- it will silently break anyone who lands on it. Workaround now
+  in the probe scripts: request N+1 nodes and drop any that cannot see $REPO,
+  running the probe from `/tmp` (from $REPO the bad node fails the chdir and
+  tears down the probe itself, reporting 0 healthy).
 - **Queue state at end of session.** Nothing training: 8714503 (umbrella
   successor, 2098N, auto-released from hold), 8730438 (20B-256 native, 260N) and
   8731758 (20B-512 native, 516N) all Q; both tail evals R on capacity. The
