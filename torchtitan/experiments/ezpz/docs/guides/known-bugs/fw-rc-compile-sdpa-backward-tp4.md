@@ -18,11 +18,20 @@
 > Note the base git hash is UNCHANGED (`cf30153`) -- only the patch level
 > differs, so identify the build by `patched_08_02_2026`, not by the hash.
 >
-> Caveats: verified at 2N / 10 steps / agpt-2b only. That is enough to falsify
-> the assert (the original fired within ~30s at this scale) but not to certify
-> production; confirm at scale before relying on it. Separately, MFU degrades
-> sharply with TP on this build (21% -> 13% -> 7.8%) -- do not adopt TP=4 for
-> throughput without measuring.
+> **Scale + duration confirmed (job 12472582, 4N/48 ranks):**
+>
+> | rung | loss | MFU | assert_size_stride |
+> | --- | --- | --- | --- |
+> | TP=4, 4N, 10 steps | 12.94 -> 8.15 | 6.98% | 0 |
+> | TP=4, 4N, 30 steps | 13.00 -> 6.71 | 6.99% | 0 |
+>
+> 30 steps of continuous descent with zero asserts, at twice the nodes and three
+> times the steps of the first pass. No NaN/Inf (an earlier "nan/inf" grep hit
+> was `INFO` log lines and an `"infinite"` config key, not numerics).
+>
+> Remaining caveat is PERFORMANCE, not correctness: MFU at TP=4 is ~7% (2N 7.83%,
+> 4N 6.98%) against ~21% at TP=1. Correctness is settled; do not adopt TP=4 for
+> throughput without understanding that gap.
 >
 > Everything below documents the ORIGINAL (pre-RC4) failure and remains the
 > reference for the older fw-RC conda stack.
