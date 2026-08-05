@@ -1,6 +1,6 @@
 # SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix
 
-> **Last updated: 2026-07-06.**
+> **Last updated: 2026-07-12.**
 > **Status: in progress.** First production SFT on the COMPLETED v2 2B base
 > (step-92,859 = 4.674T tokens, 256N chain). Full 32N run is job **12470088**
 > (Sunspot, launched 2026-07-06). Prior production SFT used the older
