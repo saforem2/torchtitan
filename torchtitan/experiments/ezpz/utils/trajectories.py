@@ -168,10 +168,14 @@ TRAJECTORIES: list[dict] = [
         #   (i0ayskft W&B history was empty when first recorded 2026-07-06 and
         #   used an .o-log fallback; the run synced later -- 4389 rows,
         #   steps 16601->20988 -- so the fallback was dropped 2026-07-24.)
+        # --- umbrella 8714502 trainer-0, added 2026-08-05: ---
+        # vtumb5cb=8714502 (39601->41300; clean walltime FAILOVER STOP, so
+        #   unlike the 20B trainers this one saved at its logged tip)
         "wandb_run_ids": [
             "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
             "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
             "i0ayskft", "21grc6o7", "nv4qwxc8",
+            "vtumb5cb",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-512n",
@@ -200,11 +204,15 @@ TRAJECTORIES: list[dict] = [
         #     the 512N chain) run to unstick the queue-starved chain, 2026-07-23:
         # g59v83go=8688010 (6001->6008, walltime-killed pre-save)
         # jyq4w87d=8689162 (6001->6012, saved step-6005/6010)
+        # --- umbrella 8714502 trainer-1, added 2026-08-05: ---
+        # 9d1g9zsw=8714502 (6801->7149; ckpt head 7,100 -- SIGTERM'd
+        #   mid-interval when trainer-1 hit the Aurora pals RPC failure)
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
             "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
+            "9d1g9zsw",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-20b-v2-512n",
@@ -238,13 +246,17 @@ TRAJECTORIES: list[dict] = [
         # v58n7vam=8703284(6001->6037+, 16N GAS=16 GBS=6144 bit-identical
         #   bridge; single View-run line in torchtitan.ezpz.train, no
         #   preflight-smoke reinit-swallow ambiguity)
+        # --- umbrella continuations, added 2026-08-05: ---
+        # cxlt0tpe=8698125 trainer-2 (6151->6897)
+        # 2ktrz29u=8714502 trainer-2 (7501->7897; ckpt head 7,800 -- SIGTERM'd
+        #   mid-interval when a sibling trainer hit the pals RPC failure)
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
             "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
-            "v58n7vam",
+            "v58n7vam", "cxlt0tpe", "2ktrz29u",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,

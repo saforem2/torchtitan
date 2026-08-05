@@ -91,6 +91,8 @@
 
 **Tokens consumed:** 7,100 × 12,288 × 8,192 = **714.7B tokens** (15.3% of 4.67T target)
 
+**Loss:** 2.4145 (9d1g9zsw end, step-7,149 -- umbrella 8714502)
+
 ### Recovery
 
 From 2026-05-03 (after `8463628`) through 2026-05-22, every 20B
