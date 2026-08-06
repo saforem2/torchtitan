@@ -53,6 +53,14 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 # baseline (gs138650) is in 12470365 under label "baseline-gs138650".
 SWEEP_365 = EVALS / "fullmix-8n-sweep-12470365"
 SWEEP_886 = EVALS / "fullmix-8n-sweep-12470886"
+
+# The eval sweeps this reads live under outputs/evals/ on SUNSPOT. Without
+# them the series are empty and plotting raises IndexError on x[-1]; skip
+# cleanly so the catch-all refresh does not fail on an absent-data host.
+if not (SWEEP_365.is_dir() and SWEEP_886.is_dir()):
+    print(f"skip: fullmix-8n sweeps not found under {EVALS} -- nothing to plot")
+    raise SystemExit(0)
+
 TASKS = [
     "hellaswag",
     "arc_easy",
