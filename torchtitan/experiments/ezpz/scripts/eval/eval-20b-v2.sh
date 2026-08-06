@@ -184,6 +184,7 @@ else:
     groups = [(0, os.environ["TASKS"].split(","))]
 
 merged = {}
+n_shot = {}
 for shots, tset in groups:
     if not tset:
         continue
@@ -197,7 +198,20 @@ for shots, tset in groups:
         device="xpu:0",
         limit=eval_limit,
     )
-    merged.update(r["results"])
+    # A task can appear in more than one shot group (arc_challenge runs 0-shot
+    # in the commonsense block AND 25-shot in the modern block). Writing both
+    # to the bare task key makes the later group silently overwrite the
+    # earlier, producing a column that mixes shot counts with no way to tell
+    # which is which. Namespace every task by its shot count, and keep the
+    # bare key pointing at the LAST write so older readers/plotters still work.
+    for _task, _metrics in r["results"].items():
+        merged[f"{_task}@{shots}shot"] = _metrics
+        merged[_task] = _metrics
+    # lm-eval reports the shots actually used per task; preserve it so a
+    # results.json is self-describing even for the bare keys.
+    for _task, _n in (r.get("n-shot") or {}).items():
+        n_shot[_task] = _n
+        n_shot[f"{_task}@{shots}shot"] = _n
 
 # Merge into any existing results.json so the 0-shot dashboard and the modern
 # suite coexist (a step may be re-run to ADD tasks, not replace them).
@@ -209,9 +223,15 @@ if os.path.exists(out_path):
     except Exception:
         existing = {}
 existing.update(merged)
+if n_shot:
+    _prev = existing.get("n-shot") or {}
+    _prev.update(n_shot)
+    existing["n-shot"] = _prev
 with open(out_path, "w") as f:
     json.dump(existing, f, indent=2)
 for task, metrics in merged.items():
+    if not isinstance(metrics, dict):
+        continue
     # prefer acc_norm, then acc, then exact_match (gsm8k), then flexible EM
     val = (metrics.get("acc_norm,none")
            or metrics.get("acc,none")

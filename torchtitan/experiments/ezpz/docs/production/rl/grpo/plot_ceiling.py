@@ -124,6 +124,14 @@ ax.set_title("agpt-2b GRPO+LoRA on XPU -- breaking the reward-shape ceiling")
 ax.legend(loc="upper left", fontsize=8)
 fig.tight_layout()
 
+# The RL runs this reads live under outputs/grpo/ on SUNSPOT. On a host
+# without them every series is empty, and writing anyway REPLACES a good
+# committed chart with a blank one (it did, 2026-08-05). Skip instead.
+if not finals:
+    print("skip: no GRPO run data found under "
+          f"{BASE} -- leaving existing charts untouched")
+    raise SystemExit(0)
+
 OUT = str(Path(__file__).resolve().parent / "aurora2b" / "charts")
 os.makedirs(OUT, exist_ok=True)
 for ext in ("png", "svg"):

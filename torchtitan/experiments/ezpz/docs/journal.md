@@ -2,7 +2,7 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP "bug" turns out to be a torch version floor (PR retracted)
+## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; MMLU flatline traced to DATA not the harness; four SILENT refresh failures found and fixed; the ARC-C "decline" is a shot-count collision; RC4 retires the TP=4 workaround; PP "bug" turns out to be a torch version floor (PR retracted)
 
 - **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and
   reported `failed: 5 / 5` -- but three chains genuinely advanced.** The summary
@@ -59,19 +59,70 @@ Running log of what's happening, session by session. Most recent first.
   first time. The W&B values differ slightly from the console lines transcribed
   by hand (2.6913 vs 2.6972, 2.415 vs 2.4145) -- W&B is authoritative, which is
   itself the argument for automating this.
-- **The 20B ARC-Challenge decline is REAL, not a tokenizer artifact.** Modern-block
-  backfills 8729921/8731413 completed (48h capacity, after two 12h walltime
-  kills) and show ARC-C falling 0.4138 at step-4000 -> 0.2875 at step-6500,
-  approaching the 0.25 chance floor, while MMLU sits at chance throughout
-  (.249-.267) and train loss keeps improving. Ruled out the Polaris-style
-  tokenizer mismatch (Llama2-tokenized data scored with a gemma eval tokenizer):
-  the driver copies gemma-7b assets and olmo-mix-1124 IS gemma-tokenized; model
-  vocab 256128 vs tokenizer
-  256000 is standard 128-alignment padding, and the harness produces non-random
-  commonsense scores, which a scrambled tokenizer could not. Remaining
-  hypotheses: constant LR (`decay-ratio=0.0`; the decline starts near when both
-  chains went constant) or data mix. Tail evals 8735716/8735717 submitted over
-  the uncovered 6900-7800 / 6550-7100 to see whether it bottoms out.
+- **RETRACTED mid-session: the 20B "ARC-Challenge decline" is a shot-count
+  collision, not a capability trend.** The story ran: modern-block backfills
+  8729921/8731413 completed (48h capacity, after two 12h walltime kills) and
+  appeared to show ARC-C falling 0.4138 at step-4000 -> 0.2875 at step-6500,
+  toward the 0.25 chance floor, while train loss kept improving. The
+  tokenizer was correctly ruled out (the driver copies gemma-7b assets,
+  olmo-mix-1124 IS gemma-tokenized, model vocab 256128 vs tokenizer 256000 is
+  standard 128-alignment padding) -- that part stands. But the column itself
+  was not a single measurement: **arc_challenge is scored twice per step,
+  0-shot in the commonsense block and 25-shot in the modern block, and both
+  wrote the same `arc_challenge` key**, so whichever phase finished last won.
+  lm-eval's `n-shot` block was dropped, leaving nothing to disambiguate. The
+  "peak" and the "floor" are not comparable numbers, and the apparent
+  +7-to-9pp "recovery" first seen at 256n step-6900 / 512n step-6550 was just
+  fresh 0-shot values sitting beside 25-shot neighbours. Fixed in 3e1877170
+  (`<task>@<N>shot` keys + preserved n-shot); applies to steps evaluated from
+  here on, so already-written files stay ambiguous until re-run.
+  - What survives: **MMLU is genuinely at chance** across every step measured
+    (.249-.267, single source, 5-shot only, no collision), and HellaSwag
+    ~0.60 / ARC-Easy ~0.66 are real and steady -- both appear once each.
+  - Tail evals 8735716/8735717 are running over 6900-7800 / 6550-7100. Their
+    arc_challenge will still collide (they predate the fix); their MMLU and
+    commonsense numbers are trustworthy.
+  - Lesson: before reading any eval column as a time series, confirm every
+    point in it was produced by the same task config. A silent key collision
+    looks exactly like a trend.
+- **MMLU never leaves chance on ANY AuroraGPT checkpoint -- and the harness is
+  fine, so it is the DATA.** Chased this to a conclusion tonight:
+
+  | model | tokens | MMLU | note |
+  |-------|--------|------|------|
+  | 20B-256 | 0.39T | 0.2599 | |
+  | 20B-512 | 0.71T | 0.2655 | |
+  | 2B-512 | 3.99T | 0.2473 | |
+  | 2B-256 | 4.674T | 0.2437 | **COMPLETE run, 100% of target** |
+  | 2B MDS stage-3 | 7.77T | 0.2413 | job 8736655; best-ever ARC-C 0.3968 |
+
+  A 20x token span, two model scales, no upward trend -- the most-trained model
+  scores LOWEST. Meanwhile the same checkpoints improve monotonically on
+  everything else (hellaswag 0.405 -> 0.561 across the completed 2B run).
+  - Killed "not enough tokens yet": a COMPLETED 4.674T run finished at chance.
+  - Killed "2B is below MMLU scale": 7.77T with our best ARC-C is still 0.2413.
+  - Killed "the harness is broken" (job 8736838): three cached public models
+    through our EXACT path -- same tt-lm-eval venv, same
+    `simple_evaluate(num_fewshot=5, device="xpu:0")` -- reproduce their
+    published numbers. **Llama-3.2-1B = 0.3121** (published ~0.32) and
+    **Llama-3.1-8B = 0.6530** (published ~0.66). A 1B model clears chance on
+    this path; our 2B at 7.77T does not. (Llama-3.2-3B errored with "not a
+    string", a loading issue, not a scoring one.)
+  - Tokenizer was already ruled out earlier (gemma-7b assets vs gemma-tokenized
+    olmo-mix-1124; vocab 256128 vs 256000 is 128-alignment padding).
+
+  What is left is the training mix. `olmo-mix-1124` appears to contain little
+  of what MMLU tests -- multiple-choice academic knowledge across 57 subjects.
+  The models learn language modelling well and never acquire that. Llama's
+  pretraining is known to carry substantial textbook/exam-style content; ours
+  may simply not. **If MMLU-style performance matters for AuroraGPT it has to
+  be trained for -- a data intervention, not more tokens.** Probe scripts:
+  `scripts/eval/oneoff/eval-mds-mmlu-7770B.sh`, `.../eval-mmlu-harness-check.sh`.
+  - Note `eval_mds_sweep.sh` never ran MMLU on the MDS chain at all: it
+    hardcodes `tasks=[hellaswag,arc_easy,arc_challenge,winogrande]` at
+    `num_fewshot=0`, predating the modern block. That is why the 7.77T gap
+    existed.
+
 - **frameworks RC4 FIXES the TP=4 SDPA-backward compile assert** (Sunspot
   12472578 2N, confirmed 12472582 at 4N/30 steps): 0 `assert_size_stride` at
   every TP degree, continuous descent 13.00 -> 6.71. The
