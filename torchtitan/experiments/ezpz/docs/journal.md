@@ -2,7 +2,7 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP fix REFUTED by first real run
+## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; four SILENT refresh failures found and fixed; ARC-C decline is real; RC4 retires the TP=4 workaround; PP "bug" turns out to be a torch version floor (PR retracted)
 
 - **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and
   reported `failed: 5 / 5` -- but three chains genuinely advanced.** The summary
@@ -103,6 +103,31 @@ Running log of what's happening, session by session. Most recent first.
   attribute, the class, or the dataloader. Next: read how `arg_mbs` is passed
   into `_check_inputs` (a `pp_has_first_stage` filter is the leading suspect,
   since upstream nulls `arg_mbs` on non-first stages).
+- **RESOLVED same day, and it is NOT a torchtitan bug: PP needs a newer torch.**
+  I traced the above to `trainer.py` calling `pp_schedule.step(arg_mbs=...)` when
+  `step()` (I believed) took only whole-batch input, opened
+  [pytorch/torchtitan#4071](https://github.com/pytorch/torchtitan/pull/4071), and
+  verified it on XPU *and* on an A100 (parent reproduced the error, patch reached
+  step 10, loss 8.14 -> 4.34). Maintainer @tianyu-l then asked whether I had tried
+  a current PyTorch nightly -- and that was the whole thing. PyTorch `main`'s
+  `step()` now takes pre-split microbatches directly (`arg_mbs`/`kwarg_mbs`,
+  @sanketpurandare's change), so the torchtitan call site is CORRECT and my patch
+  was unnecessary. **PR closed with a retraction.**
+  The real, useful finding: **PP is blocked on a torch version floor.** Every
+  torch we tested predates that change (`2.13.0.dev20260519+xpu` on Sunspot,
+  `2.13.0.dev20260611+cu126` on Polaris, 2.11, 2.8), so `arg_mbs` falls into
+  `**kwargs`, `_split_inputs` re-chunks it, and `_check_inputs` sees 1 instead of
+  N. Gate on this before attempting PP anywhere:
+  `"arg_mbs" in inspect.signature(PipelineScheduleSingle.step).parameters`.
+  Commit `7e2975dc3` (dataloader sizing) stays in the tree -- inert for non-PP
+  (PP=1 reaches step 10) but never the fix; revert when PP is revisited.
+  Two process lessons: (1) I checked pytorch `main` before filing the `fork_rng`
+  issue, which correctly prevented a redundant report (already fixed by
+  pytorch#180512) -- I did not apply that same check to my own patch, and it cost
+  maintainer review time. (2) I explained away a strong disconfirming signal:
+  upstream runs PP integration tests in 8-GPU CI, so a universally broken PP path
+  would have been red. I called it "a 5-day-old regression nobody noticed"
+  instead of treating it as evidence I was wrong.
 - **B4 SFT page expanded with charts** (5bd4c1ecd): `plot_b4.py` +
   `cot_ladder.svg` / `accuracy_vs_genlen.svg` on the two-stage-vs-single-stage
   result, plus a TL;DR, per-arm hypotheses, and a note on why the gen_len /
