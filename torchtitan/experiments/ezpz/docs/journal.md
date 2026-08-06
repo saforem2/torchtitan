@@ -13,8 +13,8 @@ Running log of what's happening, session by session. Most recent first.
   | 1 | 20B-512 | 6801 -> 7149 | 7,100 | 2.415 |
   | 2 | 20B-256 | 7501 -> 7897 | 7,800 | 2.3694 |
   | 0 | 2B-512 | 39601 -> 41300 | 41,300 | 2.6913 |
-  | 3 | 2B-512 (dup) | never started | -- | -- |
-  | 4 | 2B-256 | never started | -- | -- |
+  | 3 | 2B-512 **constlr-from9200** | never started | -- | -- |
+  | 4 | 2B-256 **constlr-from9500** | never started | -- | -- |
 
   Full dispatch report:
   [`docs/experiments/agpt/aurora/20260805-umbrella-8714502.md`](experiments/agpt/aurora/20260805-umbrella-8714502.md)
@@ -24,6 +24,13 @@ Running log of what's happening, session by session. Most recent first.
   is ~3-9% against 17-20% for the 20B trainers; and trainers 3/4 report
   "FAILOVER STOP: walltime" after 618s/1109s having never trained a step, so
   the failover taxonomy is mislabelling setup failures as benign walltime exits.
+  Trainers 3/4 are **not** spare or duplicate slots -- they are the two
+  constant-LR fork experiments (from9200 / from9500), and both died in
+  `checkpointer.load()` with a `CheckpointException` before step 1, so the
+  umbrella delivered them zero compute. Seed ckpts look structurally sound
+  (6144 / 3072 shards, both with `.metadata`); trainer 3's log references
+  `step-9260`, a 24-entry fragment, rather than the full `step-9200`, so a
+  stale "latest" resolution is the leading suspect.
 
   Two independent causes, neither numerical: trainer 0 hit a clean
   `FAILOVER STOP: walltime` (rc=143, working as designed); trainer 1 died rc=127
