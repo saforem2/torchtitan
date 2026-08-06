@@ -16,6 +16,15 @@ Running log of what's happening, session by session. Most recent first.
   | 3 | 2B-512 (dup) | never started | -- | -- |
   | 4 | 2B-256 | never started | -- | -- |
 
+  Full dispatch report:
+  [`docs/experiments/agpt/aurora/20260805-umbrella-8714502.md`](experiments/agpt/aurora/20260805-umbrella-8714502.md)
+  -- per-trainer detail plus three follow-ups it surfaced: 20B-512's loss ROSE
+  2.18 -> 2.41 across the run (256N on the same constant-LR config stayed flat,
+  and now reports a LOWER loss than 512N despite ~half the tokens); 2B-512 MFU
+  is ~3-9% against 17-20% for the 20B trainers; and trainers 3/4 report
+  "FAILOVER STOP: walltime" after 618s/1109s having never trained a step, so
+  the failover taxonomy is mislabelling setup failures as benign walltime exits.
+
   Two independent causes, neither numerical: trainer 0 hit a clean
   `FAILOVER STOP: walltime` (rc=143, working as designed); trainer 1 died rc=127
   at 05:50:21 when a node went unresponsive (`No reply from x4410c7s1b0n0 after
