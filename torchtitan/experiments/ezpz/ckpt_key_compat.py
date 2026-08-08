@@ -125,3 +125,52 @@ def install_flat_attention_compat(checkpointer: Any) -> None:
 
     checkpointer.dcp_load = dcp_load
     checkpointer._flat_attention_compat = True
+
+
+def maybe_install_flat_attention_compat(
+    checkpointer: Any, folder: str, load_step: int = -1
+) -> bool:
+    """Install the remap only if the checkpoint about to be loaded needs it.
+
+    `folder` is the checkpoint folder (dump_folder-relative, as configured);
+    `load_step` is the step being resumed, or -1 for "latest". Resolves the
+    step directory the same way the checkpointer will, inspects its metadata,
+    and installs the shim only for a pre-refactor flat-attention checkpoint.
+
+    Returns whether the shim was installed. Never raises: a resume that is
+    going to fail should fail in the checkpointer with its own error, not
+    here in the detector.
+    """
+    import logging  # noqa: PLC0415
+    import os  # noqa: PLC0415
+
+    log = logging.getLogger(__name__)
+    try:
+        base = folder if os.path.isabs(folder) else os.path.join(os.getcwd(), folder)
+        if load_step is not None and load_step >= 0:
+            step_dir = os.path.join(base, f"step-{load_step}")
+        else:
+            steps = [
+                int(d.split("-", 1)[1])
+                for d in os.listdir(base)
+                if d.startswith("step-") and d.split("-", 1)[1].isdigit()
+            ]
+            if not steps:
+                return False
+            step_dir = os.path.join(base, f"step-{max(steps)}")
+
+        if not needs_flat_attention_compat(step_dir):
+            return False
+
+        install_flat_attention_compat(checkpointer)
+        log.warning(
+            "%s holds PRE-REFACTOR flat attention keys "
+            "(layers.N.attention.{wq,wk,wv}); installing the qkv_linear remap "
+            "so it can be loaded by current code. This is a key rename only -- "
+            "no tensor is altered.",
+            step_dir,
+        )
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("flat-attention compat detection skipped: %r", e)
+        return False

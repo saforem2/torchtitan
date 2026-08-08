@@ -22,6 +22,9 @@ from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
+from torchtitan.experiments.ezpz.ckpt_key_compat import (
+    maybe_install_flat_attention_compat,
+)
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
     TorchFTManager as FTManager,
@@ -866,6 +869,17 @@ class FaultTolerantTrainer(Trainer):
     def train(self):
         config = self.config
 
+        # Checkpoints written before the attention QKV wrapper refactor store
+        # layers.N.attention.{wq,wk,wv} flat, while current code asks for
+        # layers.N.attention.qkv_linear.{wq,wk,wv} and dcp.load matches by
+        # exact key. Install the remap ONLY for such a checkpoint -- the
+        # detector reads the on-disk metadata, so a current-format checkpoint
+        # is left completely untouched. Without this, resuming an old ckpt
+        # dies with "Missing key in checkpoint state_dict" before step 1
+        # (it burned two umbrella slots three dispatches running).
+        maybe_install_flat_attention_compat(
+            self.checkpointer, config.checkpoint.folder, config.checkpoint.load_step
+        )
         self.checkpointer.load(step=config.checkpoint.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
 
