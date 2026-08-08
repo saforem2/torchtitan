@@ -1,5 +1,31 @@
 # Upstream Sync Log
 
+## 2026-08-08 -- 75th sync (4 commits)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
+unlike the last few syncs this one carries a REAL CORRECTNESS FIX we inherit.
+
+- **`ecae62f15` "[MoE] fix: pass the computed `in_grad_placements` without EP too"
+  (#4054)** -- the important one. Without EP the experts run replicated on the TP
+  axis, so each rank's gradient w.r.t. the `local_map` inputs is one contribution
+  to a sum, not the finished value. Leaving `in_grad_placements=None` let it
+  default to the input placement (Replicate), which keeps one rank's share and
+  discards the rest: **the router gate's gradient came back a factor of ~sqrt(tp)
+  short on every MoE layer.** Applies to `moe` runs at TP>1 with EP disabled.
+- `96276d865` exclude fake-backed axes from `get_all_one_dimensional_meshes` (#4068)
+- `57cfb2745` pass correct fsdp mesh for `backend=spmd_types` (kimi2.7) (#4070)
+- `a6948f508` enable varlen full cudagraph (#3893) -- CUDA-only, inert on XPU.
+
+**Why no replay onto `ezpz/moe`.** The protocol replays `deepseek_v3/` changes
+onto `ezpz/moe/`, and #4054 touches shared
+`torchtitan/models/common/moe_sharding.py`. Checked directly:
+`ezpz/moe/sharding.py:37` imports `set_moe_sharding_config` from that module and
+`ezpz/moe/` defines **zero** occurrences of `in_grad_placements` /
+`experts_in_grad_layout` of its own. So the fix is inherited at the import, not
+copied -- nothing to port.
+
+Nothing touched `llama3/`, so `ezpz/agpt` is unaffected.
+
 ## 2026-08-05 -- 74th sync (2 commits, merge `ddb41730a`)
 
 Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- this
