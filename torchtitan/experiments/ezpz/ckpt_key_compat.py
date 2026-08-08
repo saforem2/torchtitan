@@ -1,0 +1,127 @@
+"""Load checkpoints written before the attention QKV wrapper refactor.
+
+Older AuroraGPT checkpoints store the attention projections flat::
+
+    layers.0.attention.wq.weight
+    layers.0.attention.wk.weight
+    layers.0.attention.wv.weight
+
+Current model code wraps them in a ``qkv_linear`` submodule
+(``self.qkv_linear = config.qkv_linear.build()`` in
+``torchtitan/models/common/attention.py``), so the state dict it asks for is::
+
+    layers.0.attention.qkv_linear.wq.weight
+    ...
+
+`dcp.load` matches by exact key, so loading an old checkpoint with new code
+dies on the first mismatch::
+
+    RuntimeError: Missing key in checkpoint state_dict:
+      layers.0.attention.qkv_linear.wk.weight
+
+That is what killed the 2B-256 constant-LR fork (trainer 4) in umbrella
+8714502: it never reached step 1 and burned its slot of a 2098-node job.
+Its seed, ``...-constlr-from9500/step-9500``, is the highest surviving
+PRE-DECAY 256N checkpoint, so reseeding from anything newer would defeat the
+experiment.
+
+This module renames the requested keys down to the on-disk spelling before
+`dcp.load`, then renames them back so the model sees what it expects. It is a
+pure key remap -- no tensor is read, reshaped, or reinterpreted -- so it cannot
+change numerics. The wrapper only moved where the parameters live in the module
+tree; the tensors themselves are unchanged.
+
+Optimizer state is remapped too: those keys embed the parameter FQN
+(``optimizer.param_groups.layers.0.attention.wk.weight.betas``), so a
+model-only remap would leave the optimizer half-translated.
+
+Usage -- call once before the trainer loads, and only for a run whose seed
+predates the refactor::
+
+    from torchtitan.experiments.ezpz.ckpt_key_compat import (
+        install_flat_attention_compat,
+    )
+    install_flat_attention_compat(checkpointer)
+
+`needs_flat_attention_compat(path)` reads a checkpoint's DCP metadata and
+reports whether the shim is required, so callers can install it conditionally
+rather than guessing.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+# layers.<N>.attention.<wq|wk|wv>.<rest>  ->  ...attention.qkv_linear.<w?>.<rest>
+# Anchored on the attention prefix so nothing else in the tree can match, and
+# scoped to the three projections the wrapper actually absorbed (wo stayed put).
+_NEW_TO_OLD = re.compile(r"(layers\.\d+\.attention\.)qkv_linear\.(w[qkv]\.)")
+_OLD_TO_NEW = re.compile(r"(layers\.\d+\.attention\.)(w[qkv]\.)")
+
+
+def to_flat(key: str) -> str:
+    """Rewrite a current-code key to its pre-refactor spelling.
+
+    A key that is already flat is returned unchanged. Without that guard a
+    second application would strip ``qkv_linear`` off a key that legitimately
+    carries it, silently corrupting a load against a current-format
+    checkpoint.
+    """
+    if "qkv_linear." not in key:
+        return key
+    return _NEW_TO_OLD.sub(r"\1\2", key)
+
+
+def to_nested(key: str) -> str:
+    """Rewrite a pre-refactor key to its current-code spelling."""
+    # Guard against double-application: a key already carrying qkv_linear is
+    # left alone.
+    if "qkv_linear." in key:
+        return key
+    return _OLD_TO_NEW.sub(r"\1qkv_linear.\2", key)
+
+
+def needs_flat_attention_compat(checkpoint_dir: str) -> bool:
+    """True if `checkpoint_dir` holds pre-refactor flat attention keys.
+
+    Reads only the DCP metadata, so it is cheap and safe to call on a path
+    that may not exist (returns False rather than raising).
+    """
+    from torch.distributed.checkpoint import FileSystemReader  # noqa: PLC0415
+
+    try:
+        md = FileSystemReader(checkpoint_dir).read_metadata()
+    except Exception:
+        return False
+    keys = md.state_dict_metadata.keys()
+    has_nested = any("attention.qkv_linear." in k for k in keys)
+    has_flat = any(_OLD_TO_NEW.search(k) for k in keys)
+    return has_flat and not has_nested
+
+
+def install_flat_attention_compat(checkpointer: Any) -> None:
+    """Wrap `checkpointer.dcp_load` so flat-attention checkpoints load.
+
+    Idempotent: installing twice is a no-op.
+    """
+    if getattr(checkpointer, "_flat_attention_compat", False):
+        return
+
+    original = checkpointer.dcp_load
+
+    def dcp_load(state_dict: dict[str, Any], *args: Any, **kwargs: Any) -> None:
+        renamed = {to_flat(k): v for k, v in state_dict.items()}
+        # Nothing to do if the model's keys already match the old spelling.
+        if renamed.keys() == state_dict.keys():
+            return original(state_dict, *args, **kwargs)
+
+        original(renamed, *args, **kwargs)
+
+        # dcp.load fills the dict in place, so copy the loaded values back
+        # under the keys the caller (and the model) expects.
+        state_dict.clear()
+        state_dict.update({to_nested(k): v for k, v in renamed.items()})
+
+    checkpointer.dcp_load = dcp_load
+    checkpointer._flat_attention_compat = True
