@@ -110,13 +110,13 @@ Running log of what's happening, session by session. Most recent first.
   | 20B-512 | 0.71T | 0.2655 | |
   | 2B-512 | 3.99T | 0.2473 | |
   | 2B-256 | 4.674T | 0.2437 | **COMPLETE run, 100% of target** |
-  | 2B MDS stage-3 | 7.77T | 0.2413 | job 8736655; best-ever ARC-C 0.3968 |
+  | 2B MDS dolmino | **7.06T** | 0.2413 | job 8736655; best-ever ARC-C 0.3968 |
 
   A 20x token span, two model scales, no upward trend -- the most-trained model
   scores LOWEST. Meanwhile the same checkpoints improve monotonically on
   everything else (hellaswag 0.405 -> 0.561 across the completed 2B run).
   - Killed "not enough tokens yet": a COMPLETED 4.674T run finished at chance.
-  - Killed "2B is below MMLU scale": 7.77T with our best ARC-C is still 0.2413.
+  - Killed "2B is below MMLU scale": 7.06T with our best ARC-C is still 0.2413.
   - Killed "the harness is broken" (job 8736838): three cached public models
     through our EXACT path -- same tt-lm-eval venv, same
     `simple_evaluate(num_fewshot=5, device="xpu:0")` -- reproduce their
@@ -126,6 +126,17 @@ Running log of what's happening, session by session. Most recent first.
     string", a loading issue, not a scoring one.)
   - Tokenizer was already ruled out earlier (gemma-7b assets vs gemma-tokenized
     olmo-mix-1124; vocab 256128 vs 256000 is 128-alignment padding).
+
+  **CORRECTED 2026-08-08:** this checkpoint is **7.064T tokens on
+  dolmino-mix-1124-fused**, not 7.77T. `ntok7770B` in the directory name is a
+  TARGET baked into the naming convention, not what was consumed -- W&B run
+  bklwz5oh/rk3uudzf at the same global_step140352 report
+  consumed_train_tokens = 7,064,147,460,096 and lm loss 2.424. The two runs
+  that really reached 7.771T are Feb-2026 branches (stage-mix and
+  nvidia-math1-code2) that POSTDATE this checkpoint. The finding is unchanged
+  and if anything cleaner: 7.06T is still ~1.5x the entire v2 budget, and the
+  mix is general-purpose, so "a math-finished model would obviously miss MMLU"
+  does not apply.
 
   What is left is the training mix. `olmo-mix-1124` appears to contain little
   of what MMLU tests -- multiple-choice academic knowledge across 57 subjects.
