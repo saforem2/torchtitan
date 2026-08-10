@@ -57,6 +57,29 @@ Running log of what's happening, session by session. Most recent first.
   what MMLU tests, and no amount of tokens or finishing-mix reshuffling fixes
   it.** It needs academic multiple-choice content, deliberately added.
 
+- **The three MDS cooldown forks: no capability jump** (job 8747311). These
+  had never been evaluated. `automate-cooldown/` also holds ~310 ws24/gb48
+  dev-scale checkpoints, which are NOT production geometry and were excluded;
+  only cooldown-3/4/5 are ws3072.
+
+  | fork | step | ~tokens | mmlu | arc_c@25 | hellaswag | arc_easy | gsm8k |
+  |------|------|---------|------|----------|-----------|----------|-------|
+  | cooldown-3 | 52,650 | 2.65T | 0.2404 | 0.3746 | 0.5734 | 0.6549 | 0.0045 |
+  | cooldown-4 | 72,500 | 3.65T | 0.2438 | 0.3797 | 0.5897 | 0.6713 | 0.0045 |
+  | cooldown-5 | 92,400 | 4.65T | 0.2373 | 0.3780 | 0.5913 | 0.6772 | 0.0030 |
+
+  Commonsense rises smoothly with tokens (hellaswag 0.573 -> 0.591, arc_easy
+  0.655 -> 0.677) with **no discontinuity at any cooldown**, and arc_c@25 is
+  flat at ~0.377. This **corroborates the 2026-07-28 anneal A/B at 5-9x the
+  token count it was tested at**: that experiment concluded the LR schedule is
+  not the lever at 10B tokens, and these cooldowns say the same at 2.65-4.65T.
+  The recommendation now rests on two independent horizons.
+
+  MMLU adds three more chance values, bringing the count to **eight
+  configurations at chance spanning 0.42T -> 7.771T**, two model scales, and
+  five data treatments including three LR cooldowns. Schedule does not move it
+  either.
+
 - Eval coverage audit while chasing this: modern-block (mmlu/arc_c-25/gsm8k)
   coverage is 90% on 20B-256, 43% on 20B-512, 31% on 2B-512, and **4% on the
   COMPLETED 2B-256 chain** (8 of 193 steps). The MDS stages had ~none, which
