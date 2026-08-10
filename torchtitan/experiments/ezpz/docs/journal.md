@@ -2,6 +2,68 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-10 (aurora) -- the two 7.771T MDS checkpoints found and evaluated; MMLU settled by controlled experiment
+
+- **The genuine 7.771T checkpoints existed all along, in directories nothing
+  had searched.** Every MDS sweep looked under
+  `optimizer-experiments/Megatron-DeepSpeed/checkpoints/`, which stops at
+  `global_step140352`. W&B's per-run `working_directory` showed the two Feb-2026
+  branches wrote elsewhere:
+
+  | arm | dir | ckpts | tip | data | loss |
+  |-----|-----|-------|-----|------|------|
+  | stage3-mix | `optimizer-experiments/stage3-mix/` | 295 | step-154391 | stage1-33-stage2-33-stage3-34 | 2.033 |
+  | stage3 | `optimizer-experiments/stage3/` | 283 | step-154391 | nvidia-math1-code2 | 0.880 |
+
+  Neither had EVER been evaluated -- not MMLU, not gsm8k, not commonsense --
+  despite being the most-trained models in the project at ~1.66x the entire v2
+  token budget. Job 8747067 ran the full ladder on both.
+
+- **The finishing mix is a controlled experiment, and it is decisive.** Same
+  architecture, same optimizer/LR, same 7.771T tokens; only the last ~0.6T of
+  data differs:
+
+  | metric | stage3-mix | stage3 (math/code) |
+  |--------|-----------|--------------------|
+  | mmlu | 0.2463 | 0.2591 |
+  | arc_challenge@25 | **0.4164** | 0.3703 |
+  | hellaswag | **0.5874** | 0.4215 |
+  | arc_easy | **0.7138** | 0.6216 |
+  | gsm8k | 0.0167 | **0.0303** |
+
+  The general mix wins every commonsense task by a wide margin (HellaSwag
+  0.587 vs 0.422 -- 16 points). Math/code wins gsm8k but 0.0303 is still
+  effectively zero and it costs heavily elsewhere: **catastrophic forgetting
+  from a narrow finishing mix**, the same effect the 07-28 anneal A/B found
+  when pure edu-web wiped out math. stage3-mix is now the best 2B we have on
+  ARC-Easy (0.7138) and ARC-C@25 (0.4164), beating the 7.064T dolmino ckpt.
+
+- **MMLU: settled.** 0.2463 and 0.2591 -- both chance, on the two most-trained
+  models in the project, one of which is our best on every other benchmark.
+
+  | model | tokens | best commonsense | mmlu |
+  |-------|--------|------------------|------|
+  | 20B-256 | 0.39T | -- | 0.2599 |
+  | 2B-256 COMPLETE | 4.674T | hellaswag 0.561 | 0.2437 |
+  | MDS dolmino | 7.06T | arc_c 0.3968 | 0.2413 |
+  | MDS stage3-mix | 7.771T | **arc_e 0.7138** | 0.2463 |
+  | MDS math/code | 7.771T | -- | 0.2591 |
+
+  Five configurations, a 20x token span, two model scales, four finishing
+  mixes -- and a validated harness (Llama-3.2-1B = 0.3121, Llama-3.1-8B =
+  0.6530 on this exact path). A 1B public model clears chance where our best
+  7.771T model does not. Capability is real and rising on everything else, so
+  this is not a training failure: **the pretraining corpus does not contain
+  what MMLU tests, and no amount of tokens or finishing-mix reshuffling fixes
+  it.** It needs academic multiple-choice content, deliberately added.
+
+- Eval coverage audit while chasing this: modern-block (mmlu/arc_c-25/gsm8k)
+  coverage is 90% on 20B-256, 43% on 20B-512, 31% on 2B-512, and **4% on the
+  COMPLETED 2B-256 chain** (8 of 193 steps). The MDS stages had ~none, which
+  is why the 7.771T gap went unnoticed: `eval_mds_sweep.sh` hardcodes four
+  commonsense tasks at `num_fewshot=0`.
+
+
 ## 2026-08-05 (aurora + sunspot) -- umbrella finally seats and advances all 3 chains; MMLU flatline traced to DATA not the harness; four SILENT refresh failures found and fixed; the ARC-C "decline" is a shot-count collision; RC4 retires the TP=4 workaround; PP "bug" turns out to be a torch version floor (PR retracted)
 
 - **The ~2k-node umbrella (8714502) seated after ~6 days queued, ran 8h01m, and

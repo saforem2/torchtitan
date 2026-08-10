@@ -4,6 +4,136 @@
 
 ---
 
+## 2026-08-10
+
+> [!IMPORTANT]
+> **Headline:** **MMLU is settled, and it is a data problem, not a training
+> problem.** Two 7.771T-token MDS checkpoints that had never been evaluated
+> (they sat in directories no sweep had searched) give a controlled test --
+> identical architecture, optimizer, LR and token count, differing only in the
+> final ~0.6T of data -- and **both score at chance on MMLU (0.2463, 0.2591)
+> while one of them posts our best-ever ARC-Easy (0.7138) and ARC-C@25
+> (0.4164)**. With the harness independently validated (it reproduces
+> Llama-3.2-1B 0.3121 and Llama-3.1-8B 0.6530 on our exact path), a 1B public
+> model clears chance where our most capable 2B does not: **the pretraining
+> corpus does not contain what MMLU tests, and neither more tokens nor a
+> different finishing mix fixes that.** The same comparison shows a narrow
+> math/code finisher causes **catastrophic forgetting** (HellaSwag 0.587 ->
+> 0.422) to buy gsm8k that is still ~0 -- independently reproducing the
+> 07-28 anneal finding at 7.771T instead of 10B. On production: **2B-512 is at
+> 94.3% of target** and both 20B chains are at step-8,300, carried by two full
+> umbrella runs; but the umbrella is only converting **1-3 of 5 slots** into
+> work, and an unresolved init `std::bad_alloc` is the main cause.
+
+Covers the week since 2026-08-03. The headline is an **eval/data** result
+rather than a training one. Production ran entirely on the ~2,098N umbrella
+(two completed runs plus one in flight), which exposed how much of that
+allocation is being wasted; a new [dispatch
+log](../production/dispatch-log.md) now tracks every job against a production
+chain, including per-slot umbrella outcomes that were previously invisible.
+
+### 1. MMLU: settled by controlled experiment
+
+Chased to a conclusion this window. MMLU never leaves the 4-way chance floor on
+any AuroraGPT checkpoint:
+
+| model | tokens | best commonsense | mmlu |
+|---|---|---|---|
+| 20B-256 | 0.42T | -- | 0.2599 |
+| 2B-256 **COMPLETE** | 4.674T | hellaswag 0.561 | 0.2437 |
+| MDS dolmino | 7.06T | arc_c@25 0.3968 | 0.2413 |
+| **MDS stage3-mix** | **7.771T** | **arc_e 0.7138** | **0.2463** |
+| **MDS math/code** | **7.771T** | -- | **0.2591** |
+
+Eliminated in order: **tokens** (a completed 4.674T run finished at chance),
+**scale** (7.771T with our best commonsense is still 0.2463), **tokenizer**
+(gemma assets against gemma-tokenized data; the 256128-vs-256000 vocab gap is
+alignment padding), and **the harness** -- job 8736838 ran three cached public
+models through the identical `simple_evaluate(num_fewshot=5, device="xpu:0")`
+path and reproduced their published numbers.
+
+**Implication for the program:** MMLU-style performance needs academic
+multiple-choice content *deliberately added* to pretraining. This is a
+data-acquisition decision and belongs in the data-strategy discussion, not the
+training-config one.
+
+### 2. The finishing mix: a controlled forgetting result
+
+The two 7.771T arms differ only in their last ~0.6T of data:
+
+| metric | stage3-mix | stage3 (nvidia-math1-code2) |
+|---|---|---|
+| arc_challenge@25 | **0.4164** | 0.3703 |
+| hellaswag | **0.5874** | 0.4215 |
+| arc_easy | **0.7138** | 0.6216 |
+| gsm8k | 0.0167 | **0.0303** |
+| mmlu | 0.2463 | 0.2591 |
+
+The narrow math/code finisher trades ~16 points of HellaSwag for a gsm8k gain
+that is still effectively zero. This is the **same effect the 07-28 anneal A/B
+found** when pure edu-web forgot math -- now reproduced at 7.771T on a
+different corpus, which makes "keep the finishing mix broad" a much more solid
+recommendation than it was a week ago. A step ladder across both arms
+(8747310) is running to establish *when* the forgetting happens.
+
+### 3. Production -- 2B-512 at 94.3%, both 20B chains at 8,300
+
+| chain | 08-03 | now | delta | loss | tokens |
+|---|---|---|---|---|---|
+| **2B 512N** | 41,300 | **43,800** | +2,500 | 2.69 | **4.41T (94.3%)** |
+| **20B 256N** | 7,600 | **8,300** | +700 | 2.386 | 417.8B (8.9%) |
+| **20B 512N** | 6,850 | **8,300** | +1,450 | 2.470 | 835.5B (17.9%) |
+
+20B-512 was the mover (+1,450), and the two chains have converged to the same
+step from opposite directions. 2B-512 is ~500 steps from its 4.674T target --
+worth deciding now what happens when it lands.
+
+### 4. The umbrella is wasting most of its allocation
+
+Two umbrellas completed (8714502 8h01m, 8714503 a full 24h) and 8744245 is in
+flight. Productive slots per run: **3/5, 3/5, 1/5**.
+
+| cause | slots | status |
+|---|---|---|
+| `std::bad_alloc` at init | 6 across 3 runs | **OPEN** -- [known-bug](../guides/known-bugs/umbrella-bad-alloc-init.md) |
+| ckpt "latest" resolving to a renamed partial save | 1 | fixed |
+| pre-refactor flat attention keys | 1 | shim written + tested; clone delivery unsolved |
+| ImportError | 2 | self-inflicted, reverted |
+
+The `bad_alloc` lands in `set_determinism`-broadcast and CCL KVS bootstrap --
+both known single-job crash sites at 12,288 and 6,144 ranks. The umbrella puts
+**24,576 ranks** into bootstrap inside 80 seconds. That is a plausible cause but
+**not proven**: the same config gave three different outcomes. A falsifiable
+test (`LAUNCH_STAGGER=180`, ~1% of a 24h job) is the next step.
+
+Two reporting problems worth fixing regardless: the umbrella banner reports
+`failed: N/5` on **exit code**, so a trainer that ran productively for hours and
+was then SIGTERM'd is indistinguishable from one that never started; and
+**three different failure modes all print `FAILOVER STOP: walltime`**, including
+one that died 29 minutes into a 24-hour job.
+
+### 5. Smaller items
+
+- **Eval integrity:** `arc_challenge` was being scored at both 0-shot and
+  25-shot into one JSON key, the later phase silently overwriting the earlier.
+  A reported ARC-C "decline" was retracted as an artifact of this. Results are
+  now shot-namespaced (`<task>@<N>shot`); the fix immediately exposed a
+  consistent ~7-9pp gap between the two on both 20B chains.
+- **Doc-refresh integrity:** four separate silent failures in `refresh_all.sh`,
+  each reporting success while skipping work -- stale W&B run-ids (loss frozen
+  at a July value), a missing field anchor, five plotters hardcoding a Sunspot
+  path (three of which exited 0 having plotted nothing), and unfixable date
+  markers.
+- **frameworks RC4 fixes the TP=4 SDPA-backward compile assert** -- the
+  ".venv for compiled TP=4" workaround is obsolete, and a control run shows RC4
+  is performance-neutral.
+- **DAOS:** first contact submitted (8747000). The client, module, ALCF helper
+  scripts and example jobs are all already installed; the blocker is that
+  `daos pool list` cannot run on a login node, so **whether an AuroraGPT pool
+  exists is itself an open question** pending that job. Queue access is
+  group-gated -- only `alcf_daos_cn` admits us, via `aurora_daos_test`.
+- Upstream synced (74th + 75th; the 75th inherits a real MoE gradient fix).
+
 ## 2026-08-03
 
 > [!IMPORTANT]
