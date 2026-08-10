@@ -198,7 +198,19 @@ Running log of what's happening, session by session. Most recent first.
   N. Gate on this before attempting PP anywhere:
   `"arg_mbs" in inspect.signature(PipelineScheduleSingle.step).parameters`.
   Commit `7e2975dc3` (dataloader sizing) stays in the tree -- inert for non-PP
-  (PP=1 reaches step 10) but never the fix; revert when PP is revisited.
+  (PP=1 reaches step 10) but never the fix for the `arg_mbs` error.
+  **CORRECTION 2026-08-10: do NOT revert it.** I had recommended reverting it as
+  a "non-fix"; checking the arithmetic before doing so shows it is CORRECT and
+  fixes a real, separate bug. Under PP the dataloader is built with
+  `local_batch_size = pipeline_parallel_microbatch_size` (trainer.py:270), i.e.
+  1 instead of 2 in the test config, and blendcorpus sizes its sample budget
+  from `train_iters` (`blendcorpus_builder.py:150`). Without the
+  `* _num_pp_microbatches` the budget is short by exactly that factor
+  (10 iters x lbs 1 = 10 samples, vs 20 for the same non-PP run) and the
+  iterator runs dry mid-run. Upstream passes plain `training_steps`
+  (`torchtitan/trainer.py:510`) because its dataloader does not derive a sample
+  budget this way -- so the product is an ezpz/blendcorpus necessity, not a
+  divergence. Reverting would introduce a bug.
   Two process lessons: (1) I checked pytorch `main` before filing the `fork_rng`
   issue, which correctly prevented a redundant report (already fixed by
   pytorch#180512) -- I did not apply that same check to my own patch, and it cost
