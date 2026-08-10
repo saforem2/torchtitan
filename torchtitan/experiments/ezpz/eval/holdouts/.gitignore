@@ -1,0 +1,7 @@
+# The holdout jsonls are 85MB (peS2o alone is 60MB) against a repo whose largest
+# tracked file is 4.6MB and which has no git-lfs, so they stay untracked.
+# MANIFEST.sha256 IS tracked -- rebuild with build_math_holdout.py and run
+# 'sha256sum -c MANIFEST.sha256' to prove a rebuild matches the files the
+# recorded Wave 2/3 numbers were scored on.
+*.jsonl
+*.meta.json
