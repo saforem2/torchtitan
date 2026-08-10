@@ -116,6 +116,15 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the final ckpt (blocked on PM).** |
 | 20B | 256 | **7,800** (persisted) | **2.68** | **392.6B** (8.4%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
 
+### Every dispatch (individual + umbrella)
+
+[**dispatch-log.md**](dispatch-log.md) -- one table per umbrella showing what
+each of the five trainer slots actually did, plus the individual chain jobs and
+the eval jobs. The per-chain READMEs below only record jobs that advanced THEIR
+chain, so umbrella slots that failed were invisible everywhere until now; the
+umbrella's own `failed: N/5` banner is exit-code-based and calls a trainer that
+ran for hours "failed" if it was later SIGTERM'd.
+
 ### Other jobs
 
 | Job ID | Date | Model | Nodes | Walltime | Status |
