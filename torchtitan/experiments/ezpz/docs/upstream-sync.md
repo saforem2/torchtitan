@@ -1,5 +1,22 @@
 # Upstream Sync Log
 
+## 2026-08-10 -- 76th sync (2 commits)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay, inert for ezpz.**
+
+- **`e06102808` "Decouple memory snapshot frequency from profiler" (#4092)** --
+  adds `Profiler.Config.memory_snapshot_freq: int | None = None`, defaulting to
+  `profile_freq` when unset, plus a positive-value guard. Backward-compatible by
+  construction.
+- **`95007d217`** -- TitanRL README + a pipeline diagram asset. Docs only.
+
+**Why no replay.** Nothing touched `llama3/` or `deepseek_v3/`, so neither
+`ezpz/agpt` nor `ezpz/moe` has a counterpart to update. The only code file is
+`torchtitan/tools/profiler.py`; `ezpz/trainer.py:39` imports `Profiler` for a
+type reference and never sets `profile_freq`, and the numerics path uses an
+unrelated `ActivationCaptureProfiler` (trainer.py:960-965). The new field
+defaults to the old behaviour, so ezpz is unaffected either way.
+
 ## 2026-08-08 -- 75th sync (4 commits)
 
 Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
