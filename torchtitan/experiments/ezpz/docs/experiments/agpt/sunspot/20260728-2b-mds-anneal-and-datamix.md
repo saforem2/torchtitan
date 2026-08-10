@@ -60,12 +60,13 @@ All arms fork the MDS base at constant LR 2e-6, 10B tok; differ ONLY in the mix.
 FineMath-4+ (math generalization) + wikitext (anti-forgetting) held-out NLL, both
 DISJOINT from every training arm (no arm trains on FineMath or wikitext):
 
-| arm | FineMath (math) | wikitext (general) | note |
-|-----|-----------------|--------------------|------|
-| owm-100 (control) | **1.8039** | 2.6828 | == anneal flat winner |
-| **owm75 / edu25** | 1.8089 | 2.6597 | **WINNER (sweet spot)** |
-| owm50 / edu50 | 1.8155 | **2.6519** | best general, 1:1 math cost past the knee |
-| edu-100 | 2.1122 | 2.6585 | catastrophic math forgetting |
+| arm | FineMath (math) | wikitext (general) | peS2o (science) | note |
+|-----|-----------------|--------------------|-----------------|------|
+| owm-100 (control) | **1.8039** | 2.6828 | -- | == anneal flat winner |
+| **owm75 / edu25** | 1.8089 | 2.6597 | **2.1469** | **WINNER (sweet spot)** |
+| owm50 / edu50 | 1.8155 | 2.6519 | -- | best general, 1:1 math cost past the knee |
+| owm75 / cosmo25 | 1.8237 | **2.6471** | 2.1486 | Wave 3 science blend -- REFUTED |
+| edu-100 | 2.1122 | 2.6585 | -- | catastrophic math forgetting |
 
 - **edu-100 (Wave 1):** swapping math-web -> edu-web forgets math by **+0.308 nats**
   (~22x the entire anneal effect) for a tiny general gain (-0.024). Lopsided ~13:1.
@@ -75,9 +76,50 @@ DISJOINT from every training arm (no arm trains on FineMath or wikitext):
 - **owm50/edu50 (Phase 2, confirmatory):** the marginal trade past 75/25 flips to
   ~1:1. owm->75/25 traded FineMath +0.005 for wikitext -0.023 (~4.6:1 favorable);
   75/25->50/50 trades FineMath +0.007 more for wikitext only -0.008 more (~1:1).
-  Note 50/50's wikitext 2.6519 is the BEST of any arm -- it out-generalizes even
-  pure edu-100 (2.6585) while staying near-owm on math. So if general were weighted
-  >= math, 50/50 is defensible; for a MATH-focused continued-pretrain, 75/25 wins.
+  Note 50/50's wikitext 2.6519 out-generalizes even pure edu-100 (2.6585) while
+  staying near-owm on math. So if general were weighted >= math, 50/50 is
+  defensible; for a MATH-focused continued-pretrain, 75/25 wins. (Wave 3's cosmo
+  arm later took the wikitext crown outright at 2.6471 -- see below.)
+
+### Wave 3 (2026-08-08, job 12472766): the science blend is REFUTED
+
+Hypothesis: swap the 25% diversity corpus from fineweb-edu to
+cosmopedia-SCIENCE and the science holdout (peS2o) should improve, ideally
+without giving back the 75/25 math gains. Same MDS base, same constant LR 2e-6,
+same 1600 steps, same recipe -- the ONLY variable is the 25% corpus.
+
+**Both halves fail.**
+
+- **No science gain.** peS2o 2.1486 vs edu25's 2.1469 = **+0.0017**, i.e.
+  indistinguishable from zero. A science-targeted corpus did not move the
+  science judge at all.
+- **Real math cost.** FineMath 1.8237 vs 1.8089 = **+0.0148**, ~9x the size of
+  the science non-effect and worse on math than EVERY Wave 2 arm, including
+  50/50 past the knee (1.8155).
+
+So the trade is strictly bad: pay 0.0148 nats of math, receive nothing.
+**owm75/edu25 remains the recommended mix.**
+
+The one real positive: cosmo posts the **best wikitext of any arm (2.6471)**,
+beating 50/50 (2.6519) and edu-100 (2.6585). That is consistent with the Wave 2
+finding that general-text gains come cheaply from ANY diversity corpus -- but
+here the math price is steeper than edu's, so it is not a good way to buy them.
+
+Two readings of the flat peS2o that this data CANNOT separate: (a) 25%
+cosmopedia-science is too dilute to shift peS2o at 10B tokens, or (b) peS2o
+(real papers) is too far from cosmopedia (synthetic textbook prose) for the
+transfer to land. (b) feels likelier given +0.0017 is pure noise, but that is a
+hypothesis, not a finding. Testing it would need either a higher cosmo fraction
+or a real-paper science corpus (peS2o-train itself, keeping the holdout
+disjoint).
+
+**Holdout-provenance note.** `eval/holdouts/` was untracked and got cleaned
+between waves, and the sidecar meta records dataset/config/split/num_docs but
+NOT the HF revision -- so there was no way to verify a rebuild by metadata. The
+rebuild was validated EMPIRICALLY instead: re-scoring owm75-edu25/step-1600 on
+the rebuilt files reproduced FineMath 1.8089 and wikitext 2.6597 exactly (job
+12472786), which is what makes the Wave 3 row comparable to the Wave 2 rows
+above. Consider committing the holdout jsonls so this cannot recur.
 - **Shape:** the math-loss curve is steep, the general-gain curve flat with a clean
   knee at 75/25 -> a math-heavy blend is near-free diversity. 50/50 CONFIRMS 75/25
   as the sweet spot; **no 90/10 Wave 3 needed** -- 75/25's math cost (+0.005) is

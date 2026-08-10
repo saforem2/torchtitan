@@ -113,19 +113,25 @@ _PALETTE_DARK = [
     (140, 160, 175),  # slate
     (255, 160, 90),   # apricot
 ]
+# Fully-saturated, mid-dark hues. The previous light set was desaturated
+# (grey mixed in) to soften it against white, which made blue/purple/slate and
+# green/teal/mint read as the same muddy tone in a plotext scatter where each
+# series is only a few sparse dots. Chroma is what separates sparse dots, so
+# each entry is now near-max saturation with lightness held low enough to stay
+# legible on white, and neighbouring indices are pushed far apart in hue.
 _PALETTE_LIGHT = [
-    (31, 96, 196),    # blue
-    (196, 96, 8),     # orange
-    (40, 140, 45),    # green
-    (196, 40, 40),    # red
-    (110, 70, 200),   # purple
-    (0, 140, 132),    # teal
-    (200, 50, 130),   # pink
-    (150, 130, 20),   # gold
-    (110, 72, 40),    # brown
-    (50, 150, 90),    # mint
-    (80, 100, 120),   # slate
-    (190, 110, 40),   # apricot
+    (0, 90, 220),     # blue
+    (220, 95, 0),     # orange
+    (0, 150, 40),     # green
+    (215, 0, 40),     # red
+    (130, 0, 220),    # purple
+    (0, 150, 160),    # teal
+    (230, 0, 140),    # magenta
+    (170, 130, 0),    # gold/olive
+    (130, 65, 10),    # brown
+    (0, 175, 110),    # emerald
+    (60, 70, 160),    # indigo
+    (200, 60, 90),    # rose
 ]
 # Back-compat alias for any external reference to the original name.
 _PALETTE = _PALETTE_DARK
@@ -181,8 +187,14 @@ class ProdDashApp(App):
     # #metrictabs is the per-metric selector above them.
     CSS = """
     #metrictabs { dock: top; }
-    #runs { width: 34; border-right: solid $panel; }
-    #runs:focus-within { border-right: solid $accent; }
+    /* The legend box was width:34 with only a border-right, so with short
+       labels the right edge floated well inside the widget and the box read
+       as misaligned. width:auto shrinks it to its content and a full border
+       closes all four sides; max-width stops a long experiment-fork name
+       from eating the chart. */
+    #runs { width: auto; max-width: 40; border: solid $panel; }
+    #runs:focus-within { border: solid $accent; }
+    #runs > .selection-list--option { width: 1fr; }
     #runs.hidden { display: none; }
     #chart { width: 1fr; }
     #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }

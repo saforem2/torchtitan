@@ -8,7 +8,12 @@
 #PBS -j oe
 #
 # Does MMLU EVER leave chance in this stack? Run MMLU-5 on the most-trained
-# 2B checkpoint we have: MDS stage-3 at 7.77T tokens (step-140352).
+# 2B checkpoint we have: MDS at step-140352.
+#
+# CORRECTION 2026-08-08: this is 7.064T tokens on dolmino-mix-1124-fused,
+# NOT 7.77T. ntok7770B in the dir name is a naming-convention TARGET, not
+# consumed tokens; W&B bklwz5oh/rk3uudzf at global_step140352 report
+# consumed_train_tokens=7,064,147,460,096. Still ~1.5x the v2 budget.
 #
 # Why this checkpoint. MMLU sits at 4-way chance (~0.25) on every 20B and 2B
 # checkpoint measured so far, including the COMPLETE 2B-256 v2 chain at its
