@@ -42,9 +42,25 @@ The job died 7 seconds after launch. Our launcher's auto-retry then rotated a
 It rotated the wrong node because the error is a generic `chdir` failure on
 every rank, which gives automatic failover nothing to attribute.
 
-**Control:** the immediately following job **12472829**, identical in every
-respect except that we removed `x1921c4s3b0n0` from the node file, no longer
-produced any `exited with code 127`.
+**Correction (2026-08-10, after the email was sent):** an earlier version of
+this doc claimed job **12472829** was a clean control -- that the same run with
+the node removed produced no exit-127. **That claim is wrong and should be
+disregarded.** 12472829 hit the identical failure:
+
+```
+x1921c4s3b0n0-hsn0...: rank 228 exited with code 127
+```
+
+The exclusion did work at our level (`grep -c '^x1921c4s3b0n0'` on our cleaned
+nodefile = 0) but `ezpz launch` rebuilds its own `active.hostfile` from
+`$PBS_NODEFILE` and re-added the node (same grep on
+`logs/failover-12472829/active.hostfile` = 1). So exporting a filtered
+`PBS_NODEFILE` is not sufficient -- the exclusion has to be passed to the
+launcher itself.
+
+This does not weaken the report: it means the node has now failed **7/7**, and
+that routing around it is harder than expected. There is simply no verified
+control run yet.
 
 ## Direct measurement of the mount difference
 
