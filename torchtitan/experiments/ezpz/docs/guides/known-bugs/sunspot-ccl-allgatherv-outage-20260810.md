@@ -1,3 +1,34 @@
+# RETRACTED -- this was NOT a cluster fault
+
+> [!CAUTION]
+> **Retracted 2026-08-11. Do NOT send the email below.** It blames the Sunspot
+> fabric for an FSDP failure; a minimal reproducer disproves that.
+>
+> Job **12473017** ran bare `torch.distributed.all_gather_into_tensor` -- the
+> exact primitive failing at `distributed_c10d.py:4381` -- with no torchtitan
+> involved, on `x1922c5s0/c5s2/c5s6/c5s7`, i.e. INCLUDING the two hosts that
+> every failing job had drawn:
+>
+> ```
+> CCLMIN init OK world=48 torch=2.13.0.dev20260519+xpu
+> CCLMIN A_TINY OK sum=9024.0
+> CCLMIN B_LARGE OK (64 MiB/rank)
+> ```
+>
+> Tiny AND FSDP-scale (64 MiB/rank) all-gathers both succeed, so the collective
+> layer is healthy and **the fault is in the torchtitan/FSDP path**.
+>
+> What I got wrong: I treated "three FSDP jobs failed on different nodes" as
+> proof of a fabric fault without ever testing the primitive directly. All three
+> ran the full stack -- blendcorpus, W&B, checkpointing, a large model -- before
+> reaching any collective, so any of those could have been the cause. The
+> cross-chassis spread ruled out ONE bad node; it did not rule out our own code.
+>
+> The symptom description and job IDs below remain accurate and useful. Only the
+> cluster-fault CONCLUSION is withdrawn. Repro script: `tmp/ccl_minimal.pbs`.
+
+---
+
 **To:** support@alcf.anl.gov
 **Subject:** Sunspot: all multi-node PyTorch training failing in oneCCL allgatherv_ring (both chassis)
 
