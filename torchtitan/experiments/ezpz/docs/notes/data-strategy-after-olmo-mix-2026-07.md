@@ -1,6 +1,6 @@
 # Data Strategy After 4.67T olmo-mix-1124 Tokens
 
-> Last updated: 2026-07-29
+> Last updated: 2026-08-05
 
 > **[2026-07-29 UPDATE -- section 1 prediction partially OVERTURNED by experiment.]**
 > This memo predicted the primary lever is a "LR-decayed-to-zero (annealing)

@@ -57,6 +57,57 @@ Running log of what's happening, session by session. Most recent first.
   what MMLU tests, and no amount of tokens or finishing-mix reshuffling fixes
   it.** It needs academic multiple-choice content, deliberately added.
 
+- **The forgetting curve: immediate, then relentless** (job 8747310, a
+  matched ladder every ~2000 steps across both stage-3 arms). The endpoint
+  comparison said math/code trades ~16 points of HellaSwag for ~0 gsm8k; the
+  ladder says WHEN.
+
+  | step | mix hellaswag | m/code hellaswag | mix arc_c@25 | m/code arc_c@25 |
+  |------|---------------|------------------|--------------|-----------------|
+  | 140400 | 0.5869 | **0.5636** | 0.4249 | **0.4249** |
+  | 142400 | 0.5884 | 0.4842 | 0.4121 | 0.3899 |
+  | 144400 | 0.5861 | 0.4614 | 0.4130 | 0.3746 |
+  | 146400 | 0.5872 | 0.4519 | 0.4096 | 0.3737 |
+  | 148400 | 0.5868 | 0.4415 | 0.4078 | 0.3712 |
+  | 150400 | 0.5881 | 0.4338 | 0.4155 | 0.3669 |
+  | 152400 | 0.5854 | 0.4307 | 0.4138 | 0.3609 |
+
+  Both arms start IDENTICAL at the branch point (arc_c 0.4249 on both), then
+  math/code drops **8 points of HellaSwag in the first 2,000 steps** and keeps
+  bleeding monotonically to 0.431 -- no plateau, no recovery. So it is neither
+  a pure cliff nor a slow drift: a sharp initial hit followed by continuous
+  decay. Meanwhile stage3-mix is flat on HellaSwag and arc_c and **still
+  IMPROVING on arc_easy (0.687 -> 0.722)**, so the gap widens with every step
+  spent on the narrow mix. Total purchase: gsm8k 0.0152 -> 0.0334.
+
+  **Operational lesson:** the damage was measurable 2,000 steps in. A
+  broad-capability metric checked during a narrow-data phase would have caught
+  this and stopped the run 12,000 steps earlier. Endpoint-only evaluation is
+  what let it run to completion.
+
+- **The three MDS cooldown forks: no capability jump** (job 8747311). These
+  had never been evaluated. `automate-cooldown/` also holds ~310 ws24/gb48
+  dev-scale checkpoints, which are NOT production geometry and were excluded;
+  only cooldown-3/4/5 are ws3072.
+
+  | fork | step | ~tokens | mmlu | arc_c@25 | hellaswag | arc_easy | gsm8k |
+  |------|------|---------|------|----------|-----------|----------|-------|
+  | cooldown-3 | 52,650 | 2.65T | 0.2404 | 0.3746 | 0.5734 | 0.6549 | 0.0045 |
+  | cooldown-4 | 72,500 | 3.65T | 0.2438 | 0.3797 | 0.5897 | 0.6713 | 0.0045 |
+  | cooldown-5 | 92,400 | 4.65T | 0.2373 | 0.3780 | 0.5913 | 0.6772 | 0.0030 |
+
+  Commonsense rises smoothly with tokens (hellaswag 0.573 -> 0.591, arc_easy
+  0.655 -> 0.677) with **no discontinuity at any cooldown**, and arc_c@25 is
+  flat at ~0.377. This **corroborates the 2026-07-28 anneal A/B at 5-9x the
+  token count it was tested at**: that experiment concluded the LR schedule is
+  not the lever at 10B tokens, and these cooldowns say the same at 2.65-4.65T.
+  The recommendation now rests on two independent horizons.
+
+  MMLU adds three more chance values, bringing the count to **eight
+  configurations at chance spanning 0.42T -> 7.771T**, two model scales, and
+  five data treatments including three LR cooldowns. Schedule does not move it
+  either.
+
 - Eval coverage audit while chasing this: modern-block (mmlu/arc_c-25/gsm8k)
   coverage is 90% on 20B-256, 43% on 20B-512, 31% on 2B-512, and **4% on the
   COMPLETED 2B-256 chain** (8 of 193 steps). The MDS stages had ~none, which

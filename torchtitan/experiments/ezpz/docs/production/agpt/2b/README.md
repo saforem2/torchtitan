@@ -24,7 +24,7 @@ For the cross-model view (2B + 20B together), see
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
 | [**v2 256N (async)**](n256/README.md) (per-token comparator) | **COMPLETE** 2026-06-29 (step-92,859 = 100% of 4.67T target); finished by cont12 (8558531). Now the base for CPT ([../../cpt/](../../cpt/README.md)) + SFT. | **92,859** | **2.6524** | **~4.674T (100.0%)** |
-| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **LIVE** -- past the old step-30,400/30,500 stall via the autoretry chain + a HEAD-migration dress rehearsal (8686135 -> 8686136); not pinned/queue-blocked | **41,300** | **2.6913** | **~3.99T (89.0%)** |
+| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **LIVE** -- past the old step-30,400/30,500 stall via the autoretry chain + a HEAD-migration dress rehearsal (8686135 -> 8686136); not pinned/queue-blocked | **43,800** | **2.6907** | **~3.99T (94.3%)** |
 | [v2 1024N](n1024/README.md) | Crashed at startup (12,288-rank init OOM/SIGSEGV); not retried | — | — | — |
 | v2 512N sqrt(2)-LR fork | 8467141 → 8467142 (separate ckpt dir `gbs12288-lr3.22e-5`) | 200 | — | ~20B |
 
