@@ -63,3 +63,23 @@ currently blocks all of our multi-node work on Sunspot.
 Thanks,
 Sam Foreman (foremans)
 Project: datascience
+
+## Update: the PBS server is also unresponsive (2026-08-10, later)
+
+After the CCL failures above, the scheduler itself stopped answering. Every PBS
+client call hangs indefinitely -- `qstat -u $USER`, `qstat -Q workq`,
+`pbsnodes -a`, and even a bare `qstat -B` all exceeded 120 s with no output,
+across four separate attempts over ~15 minutes.
+
+This is **not** login-node contention. Plain `ssh` returns instantly and the
+login node is idle:
+
+```
+04:22:53  up 21 days,  5 users,  load average: 0.03, 0.01, 0.00
+```
+
+So the clients are blocking on the PBS server, not on local CPU. We cannot
+submit, query, or cancel jobs at present.
+
+Whether this is related to the oneCCL failures above is unknown -- we only note
+that both appeared the same day, after the `x1921c4s3b0n0` mount repair.
