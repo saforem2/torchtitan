@@ -1,7 +1,7 @@
 # TorchTitan + 🍋 `ezpz`
 
 Pre-training AuroraGPT (dense + MoE) on ALCF systems
-(Aurora / Sunspot / Polaris) with PyTorch ≥ 2.10. This folder is
+(Aurora / Sunspot / Polaris) with **PyTorch >= 2.13**. This folder is
 an opinionated experiment harness on top of upstream `torchtitan`
 that adds:
 
@@ -20,6 +20,30 @@ specific pages linked below.
 > This is the [`saforem2/torchtitan@ezpz`](https://github.com/saforem2/torchtitan/tree/ezpz)
 > fork. Upstream is [`pytorch/torchtitan`](https://github.com/pytorch/torchtitan)
 > and we [resync against it regularly](docs/upstream-sync.md).
+
+> [!IMPORTANT]
+> **torch 2.10 (the `frameworks/2025.3.1` module) no longer works.** Upstream
+> `torchtitan/distributed/fsdp.py` imports `DataParallelMeshDims` from
+> `torch.distributed.fsdp`, which does not exist before 2.13:
+>
+> ```
+> ImportError: cannot import name 'DataParallelMeshDims' from 'torch.distributed.fsdp'
+> ```
+>
+> Verified on Aurora 2026-08-11: torch 2.13.0.dev20260428+xpu has the symbol,
+> torch 2.10.0a0+git449b176 (frameworks/2025.3.1) does not. This is CORE
+> torchtitan, not ezpz -- it arrives via `agpt/parallelize.py` -> `distributed/fsdp.py`
+> and came in with upstream #3159. Use the torch 2.13 venv (step 3 below), not a
+> bare `module load frameworks/2025.3.1`.
+>
+> `ConfigManager._load_config` catches the `ImportError` and re-raises the
+> generic `Cannot import config_registry for module 'ezpz.agpt'`, which hides
+> this and every other missing-dependency cause. To see the real error, from the
+> repo root run:
+>
+> ```bash
+> python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry"
+> ```
 
 ## Quickstart (2B dense training, 2 nodes)
 
