@@ -57,6 +57,34 @@ Running log of what's happening, session by session. Most recent first.
   what MMLU tests, and no amount of tokens or finishing-mix reshuffling fixes
   it.** It needs academic multiple-choice content, deliberately added.
 
+- **The forgetting curve: immediate, then relentless** (job 8747310, a
+  matched ladder every ~2000 steps across both stage-3 arms). The endpoint
+  comparison said math/code trades ~16 points of HellaSwag for ~0 gsm8k; the
+  ladder says WHEN.
+
+  | step | mix hellaswag | m/code hellaswag | mix arc_c@25 | m/code arc_c@25 |
+  |------|---------------|------------------|--------------|-----------------|
+  | 140400 | 0.5869 | **0.5636** | 0.4249 | **0.4249** |
+  | 142400 | 0.5884 | 0.4842 | 0.4121 | 0.3899 |
+  | 144400 | 0.5861 | 0.4614 | 0.4130 | 0.3746 |
+  | 146400 | 0.5872 | 0.4519 | 0.4096 | 0.3737 |
+  | 148400 | 0.5868 | 0.4415 | 0.4078 | 0.3712 |
+  | 150400 | 0.5881 | 0.4338 | 0.4155 | 0.3669 |
+  | 152400 | 0.5854 | 0.4307 | 0.4138 | 0.3609 |
+
+  Both arms start IDENTICAL at the branch point (arc_c 0.4249 on both), then
+  math/code drops **8 points of HellaSwag in the first 2,000 steps** and keeps
+  bleeding monotonically to 0.431 -- no plateau, no recovery. So it is neither
+  a pure cliff nor a slow drift: a sharp initial hit followed by continuous
+  decay. Meanwhile stage3-mix is flat on HellaSwag and arc_c and **still
+  IMPROVING on arc_easy (0.687 -> 0.722)**, so the gap widens with every step
+  spent on the narrow mix. Total purchase: gsm8k 0.0152 -> 0.0334.
+
+  **Operational lesson:** the damage was measurable 2,000 steps in. A
+  broad-capability metric checked during a narrow-data phase would have caught
+  this and stopped the run 12,000 steps earlier. Endpoint-only evaluation is
+  what let it run to completion.
+
 - **The three MDS cooldown forks: no capability jump** (job 8747311). These
   had never been evaluated. `automate-cooldown/` also holds ~310 ws24/gb48
   dev-scale checkpoints, which are NOT production geometry and were excluded;

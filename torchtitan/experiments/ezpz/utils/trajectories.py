@@ -171,11 +171,15 @@ TRAJECTORIES: list[dict] = [
         # --- umbrella 8714502 trainer-0, added 2026-08-05: ---
         # vtumb5cb=8714502 (39601->41300; clean walltime FAILOVER STOP, so
         #   unlike the 20B trainers this one saved at its logged tip)
+                # --- 08-07 umbrella, added 2026-08-11: ---
+        # nowkdepb=8714503 t0 (41301->43820)
         "wandb_run_ids": [
             "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
             "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
             "i0ayskft", "21grc6o7", "nv4qwxc8",
             "vtumb5cb",
+        
+            "nowkdepb",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-512n",
@@ -207,12 +211,17 @@ TRAJECTORIES: list[dict] = [
         # --- umbrella 8714502 trainer-1, added 2026-08-05: ---
         # 9d1g9zsw=8714502 (6801->7149; ckpt head 7,100 -- SIGTERM'd
         #   mid-interval when trainer-1 hit the Aurora pals RPC failure)
+                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # 2lxurmes+iozc8x9n=8714503 t1 (7251->7654, two ids = an auto-retry
+        #   relaunch mid-job)  c8zwrlqw=8744245 t1 (7601->8800, still running)
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
             "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
             "9d1g9zsw",
+        
+            "2lxurmes", "iozc8x9n", "c8zwrlqw",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-20b-v2-512n",
@@ -250,6 +259,9 @@ TRAJECTORIES: list[dict] = [
         # cxlt0tpe=8698125 trainer-2 (6151->6897)
         # 2ktrz29u=8714502 trainer-2 (7501->7897; ckpt head 7,800 -- SIGTERM'd
         #   mid-interval when a sibling trainer hit the pals RPC failure)
+                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # 82e1jewm=8714503 t2 (7801->8334)  pne9uj4w=8744245 t2 (8301->8324,
+        #   died on the init std::bad_alloc after 23 steps)
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
@@ -257,6 +269,8 @@ TRAJECTORIES: list[dict] = [
             "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
             "v58n7vam", "cxlt0tpe", "2ktrz29u",
+        
+            "82e1jewm", "pne9uj4w",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,
