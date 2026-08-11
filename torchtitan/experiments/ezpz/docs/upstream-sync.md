@@ -1,5 +1,45 @@
 # Upstream Sync Log
 
+## 2026-08-11 -- 77th sync (6 commits, 31 files)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
+this is the largest sync in a while and it DID need checking, because three of
+the six touch code `ezpz/moe` imports.
+
+- **`45ea2f093` "Experimenting MoE new sharding" (#3996)** -- the one that
+  mattered. Rewrites `models/common/moe_sharding.py` (+325/-170) and
+  `models/common/moe.py`.
+- **`f59c215e8` "[MTP] Add MTP module for deepseek_v3" (#3392)** -- new
+  `deepseek_v3/mtp.py` plus edits across that model folder.
+- **`547b0b481` "[CP] Move context parallel code into a context_parallel
+  package" (#3977)**, `5de7d1150` Muse Glimmer 30B (new model folder),
+  `f4f7cf717` inference MoE expert SP padding (#4080), `5c0b804ce` fake process
+  groups (#4018).
+
+**Why no replay onto `ezpz/moe`.** The protocol replays `deepseek_v3/` changes
+onto `ezpz/moe/`, so this was checked rather than assumed:
+
+1. `ezpz/moe` imports `MoE`, `RoutedExperts`, `TokenChoiceTopKRouter` (from
+   `models/common/moe.py`) and `GroupedExperts` -- all four still exist after
+   the rewrite (verified by AST, not grep).
+2. `#3996` changed **no** class or `__init__`/`forward` signatures in
+   `common/moe.py`; the 325-line churn in `moe_sharding.py` is internal.
+3. Our only direct call into the changed sharding code is
+   `set_moe_sharding_config` at `ezpz/moe/sharding.py:167`. Current upstream
+   signature is `(moe_cfg, *, enable_ep, enable_sp, expert_param_layout)` and
+   our call passes exactly those four as keywords -- unchanged.
+4. `ezpz/moe/*.py` and the three rewritten shared modules all parse.
+
+Nothing touched `llama3/`, so `ezpz/agpt` is unaffected. The MTP module and Muse
+Glimmer are additive new code we do not import.
+
+**Caveat:** this is a static check. `ezpz/moe` could not be smoke-tested because
+Sunspot is down (see
+[known-bugs/sunspot-ccl-allgatherv-outage-20260810](known-bugs/sunspot-ccl-allgatherv-outage-20260810.md)
+-- all multi-node FSDP fails in oneCCL `allgatherv_ring`, and PBS returns empty
+result sets). Given #3996 rewrote MoE sharding internals, **run a MoE smoke
+before trusting an EP/SP run on this sync.**
+
 ## 2026-08-10 -- 76th sync (2 commits)
 
 Merged `upstream/main` into `ezpz`. **No conflicts, no replay, inert for ezpz.**
