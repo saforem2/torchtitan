@@ -81,5 +81,26 @@ login node is idle:
 So the clients are blocking on the PBS server, not on local CPU. We cannot
 submit, query, or cancel jobs at present.
 
+**Correction / refinement.** The clients later stopped hanging, which briefly
+looked like recovery -- but they now return **`rc=0` with completely empty
+output**, which is worse than a hang because it reads as success:
+
+```
+qstat -B          -> (no output)  rc=0
+pbsnodes -a       -> (no output)  rc=0
+qstat -x 12472874 -> (no output)  rc=0     # a job we ran hours ago
+```
+
+`pbsnodes -a | grep -c 'state = free'` therefore reports **0 free nodes**, which
+is indistinguishable from a full cluster unless you notice that the *node list
+itself* is empty. `/etc/pbs.conf` still points at
+`sunspot-pbs-0001.head.cm.sunspot.alcf.anl.gov`, and the login node is idle
+(load 0.03), so this is the PBS server returning empty result sets rather than a
+client or contention problem.
+
+Practical consequence: **do not trust a low "free nodes" count on Sunspot right
+now** -- verify the query returns any rows at all before acting on it. We
+briefly misread the empty result as "cluster is full".
+
 Whether this is related to the oneCCL failures above is unknown -- we only note
 that both appeared the same day, after the `x1921c4s3b0n0` mount repair.
