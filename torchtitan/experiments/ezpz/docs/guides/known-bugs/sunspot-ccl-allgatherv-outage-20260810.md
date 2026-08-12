@@ -135,3 +135,47 @@ briefly misread the empty result as "cluster is full".
 
 Whether this is related to the oneCCL failures above is unknown -- we only note
 that both appeared the same day, after the `x1921c4s3b0n0` mount repair.
+
+
+---
+
+## Leading hypothesis (2026-08-11): upstream #4068 vs our XCCL timeout patch
+
+Not yet tested -- recorded so it is not lost.
+
+`96276d865` "Exclude fake-backed axes from `get_all_one_dimensional_meshes`"
+(#4068) entered our branch in merge `5de204e6b` on **08-08 11:14**. The last
+known-good multi-node run (Wave 3 cosmo 8N, job 12472766, 1600 steps) was
+**08-08**; the first `allgatherv_ring` failure was **08-10**. So the change is
+on the right side of the timeline, though the exact hour of Wave 3 vs the merge
+is still unconfirmed.
+
+What it changed: the function now filters axes to those where
+`self._mesh_exist(k, v.size())`. Its own docstring shows the result shrinking:
+
+```
+- dict_keys(['dp_replicate', 'fsdp', 'tp', 'batch', 'loss', 'efsdp'])
++ dict_keys(['dp_replicate', 'fsdp', 'tp', 'batch', 'loss'])
+```
+
+Why that could matter to us specifically: `ezpz/trainer.py` consumes that
+function **twice** (lines 89 and 104) in our XCCL timeout monkeypatch --
+`_set_pg_timeout` over every returned mesh, then `ProcessGroupXCCL.set_timeout`
+over the same set. If an axis FSDP actually collectives on is now excluded, that
+group keeps a default timeout our patch previously overrode, which is a
+plausible route to a hang/abort inside `allgatherv_ring` -- the error is
+`atl_comm->wait(...)`, i.e. a wait that did not complete.
+
+**Consistent with the evidence:** bare `all_gather_into_tensor` on the default
+group works fine (job 12473017), and the default group is the one entry our
+patch always covers via the explicit `+ [None]`.
+
+### How to test (cheap, 2N)
+
+1. `git stash` nothing -- instead run the 2N smoke at the merge's PARENT
+   (`5de204e6b^`) and at `ezpz` HEAD. If the parent trains and HEAD fails, this
+   is confirmed and the fix is ours, not upstream's.
+2. If confirmed: make the patch iterate the pre-filter axis set, or add the
+   FSDP/efsdp groups explicitly rather than relying on the returned dict.
+
+Do NOT re-open the cluster-fault theory: 12473017 already disproved it.
