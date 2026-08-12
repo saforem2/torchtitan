@@ -72,7 +72,28 @@ cd "${PBS_O_WORKDIR:-$(pwd)}"
 # covers active + spare, so any swapped-in spare already has /tmp/.venv.
 ezpz_load_modules
 ezpz_setup_job
+# ezpz_setup_job exports MPICH_GPU_SUPPORT_ENABLED=1, but Polaris has no
+# runtime GTL (GPU Transport Layer) linked for our prebuilt torch, so GPU-aware
+# MPI is *requested* and unsatisfiable -- EVERY mpiexec aborts with:
+#   MPIDI_CRAY_init: GPU_SUPPORT_ENABLED is requested, but GTL library is not linked
+# That kills the `ezpz yeet` broadcast -> no /tmp/.venv -> the job dies in
+# seconds (exit 127). This killed legs 7405953-56 on 2026-08-12.
+#
+# We do GPU collectives through NCCL; MPI is only the rendezvous bootstrap, so
+# GPU-aware MPICH buys us nothing here. Disabling it is the fix.
+# Verified job 7434816 (2N): yeet OK, node-local import OK, 5 training steps
+# logged to W&B (run fanciful-cherry-3334), exit 0, no GTL error.
+# NOTE: craype-accel-nvidia80 does NOT fix this -- it only sets compile-time
+# vars (CRAY_ACCEL_TARGET / CRAYPE_LINK_TYPE), not runtime GTL linkage.
+export MPICH_GPU_SUPPORT_ENABLED=0
 source .venv/bin/activate
+# Clear any STALE node-local venv before broadcasting. Nodes can carry a
+# /tmp/.venv from an earlier job (e.g. the old conda-seeded one); if the yeet
+# does not overwrite it, ranks import the stale venv and die on
+# `No module named importlib.metadata`. Cheap insurance at 130 nodes.
+_nnodes_all=$(wc -l < "${PBS_NODEFILE}")
+mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
+unset _nnodes_all
 if [[ -f .venv.tar.gz ]]; then
     ezpz yeet --src .venv.tar.gz
 else
