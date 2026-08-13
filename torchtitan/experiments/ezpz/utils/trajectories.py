@@ -272,7 +272,35 @@ TRAJECTORIES: list[dict] = [
         
             "82e1jewm", "pne9uj4w",
         ],
-        "olog_fallbacks": None,
+        # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
+        # hitting walltime), and a crashed run's final steps often never sync --
+        # W&B keeps history only to the last successful flush. The successor
+        # resumes from the CHECKPOINT, which is ahead of the synced history, so
+        # the chart shows a hole between "last synced step" and "first step the
+        # successor logged". Training was continuous; only the record is not.
+        #
+        # concat_chain prefers the .o log whenever it reaches at least as far as
+        # W&B, so pointing at the boundary runs' logs recovers those tails.
+        # Measured coverage (parse_olog, 2026-08-13) vs the three gaps:
+        #   6891->7506  o8698754 covers 6801..7600  -> CLOSED
+        #   4372->5109  o8661054 covers 4201..4375  -> partial (4375..5101 open)
+        #   3598->4207  o8647385 covers 3101..3603  -> partial (3603..4201 open)
+        # No log on disk covers 3603-4201 or 4375-5101; those steps ran (the
+        # checkpoints exist) but neither W&B nor a .o log retained them.
+        "olog_fallbacks": {
+            "cxlt0tpe": str(
+                RUNS / "agpt-20b-n256/torchtitan-ezpz"
+                / "agpt-20b-n256-resume-cont.o8698754"
+            ),
+            "uvgmafv9": str(
+                RUNS / "agpt-20b-n256/torchtitan-ezpz"
+                / "agpt-20b-n256-short3h.o8661054"
+            ),
+            "6yr6ivh4": str(
+                RUNS / "agpt-20b-n256/torchtitan-ezpz"
+                / "agpt-20b-n256-autoretry-resume.o8647385"
+            ),
+        },
         "eval_subdir": None,
         "cls": "live",
     },
