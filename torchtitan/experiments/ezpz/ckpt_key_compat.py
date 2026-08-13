@@ -128,25 +128,47 @@ def install_flat_attention_compat(checkpointer: Any) -> None:
 
 
 def maybe_install_flat_attention_compat(
-    checkpointer: Any, folder: str, load_step: int = -1
+    checkpointer: Any, folder: str, load_step: int = -1, dump_folder: str = ""
 ) -> bool:
     """Install the remap only if the checkpoint about to be loaded needs it.
 
-    `folder` is the checkpoint folder (dump_folder-relative, as configured);
-    `load_step` is the step being resumed, or -1 for "latest". Resolves the
-    step directory the same way the checkpointer will, inspects its metadata,
-    and installs the shim only for a pre-refactor flat-attention checkpoint.
+    `folder` is `checkpoint.folder` (dump_folder-relative, as configured);
+    `dump_folder` is `job.dump_folder`, which the checkpointer PREPENDS to
+    `folder` -- pass it or the detector looks in the wrong place. `load_step`
+    is the step being resumed, or -1 for "latest". Resolves the step directory
+    the same way the checkpointer will, inspects its metadata, and installs
+    the shim only for a pre-refactor flat-attention checkpoint.
 
     Returns whether the shim was installed. Never raises: a resume that is
     going to fail should fail in the checkpointer with its own error, not
     here in the detector.
+
+    The `dump_folder` argument is NOT optional in practice. Omitting it in
+    job 8744247 made the detector stat `<cwd>/checkpoints/...` while the real
+    tree is `<cwd>/outputs/checkpoints/...`; `read_metadata()` raised, the
+    blanket `except` returned False, and trainer 4 died on all 3,072 ranks
+    with `Missing key in checkpoint state_dict: layers.0.attention.qkv_linear...`
+    -- the exact failure this shim exists to prevent. A wrong path must be
+    loud, so a non-existent resolved directory now warns.
     """
     import logging  # noqa: PLC0415
     import os  # noqa: PLC0415
 
     log = logging.getLogger(__name__)
     try:
-        base = folder if os.path.isabs(folder) else os.path.join(os.getcwd(), folder)
+        rel = os.path.join(dump_folder, folder) if dump_folder else folder
+        base = rel if os.path.isabs(rel) else os.path.join(os.getcwd(), rel)
+        if not os.path.isdir(base):
+            log.warning(
+                "flat-attention compat: checkpoint folder %r does not exist, so "
+                "the pre-refactor key check CANNOT run. If this resume is from an "
+                "old checkpoint it will fail with 'Missing key in checkpoint "
+                "state_dict'. Check that dump_folder=%r + folder=%r is correct.",
+                base,
+                dump_folder,
+                folder,
+            )
+            return False
         if load_step is not None and load_step >= 0:
             step_dir = os.path.join(base, f"step-{load_step}")
         else:
