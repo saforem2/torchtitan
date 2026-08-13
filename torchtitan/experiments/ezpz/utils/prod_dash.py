@@ -36,7 +36,10 @@ Env:
     PD_INTERVAL   live-loop poll seconds (default 30)
     PD_LOCAL=1    read the local FS instead of SSH (run this ON the cluster)
     PD_SSH        ssh target (default 'aurora')
-    PD_SOCK       ssh ControlPath (default /tmp/aurora-master.sock)
+    PD_SOCK       ssh ControlPath. EMPTY by default so ssh uses the
+                  ControlMaster/ControlPath from ~/.ssh/config (which has
+                  ControlPersist, i.e. it revives a dead master). Only set
+                  this to pin a specific socket.
     PD_BACKBONE_TTL  cluster-side W&B backbone cache TTL, seconds (default 900)
     PD_FRESH=1    force a W&B backbone rebuild this call
     PD_LIVE_WINDOW  seconds since last .o-log write to count a chain "live"
@@ -59,7 +62,11 @@ PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 INTERVAL = float(os.environ.get("PD_INTERVAL", "30"))
 LOCAL = os.environ.get("PD_LOCAL") == "1"
 SSH_TGT = os.environ.get("PD_SSH", "aurora")
-SOCK = os.environ.get("PD_SOCK", "/tmp/aurora-master.sock")
+# Empty by default: let ssh resolve ControlMaster/ControlPath from ~/.ssh/config
+# so a dead master is transparently re-established. Hardcoding
+# -S /tmp/aurora-master.sock overrode the config and, once that hand-started
+# master died, every call fell through to Aurora MFA and the dashboard broke.
+SOCK = os.environ.get("PD_SOCK", "")
 # Backbone = per-chain loss history from W&B. Completed steps never change, so
 # a long TTL is safe; the live tip (moving step/loss of a running job) comes
 # from the cheap per-call live layer, not the backbone. Default 1h.
@@ -696,8 +703,19 @@ def fetch(stderr_cb=None) -> dict:
             "ssh", "-n",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=%d" % int(os.environ.get("PD_SSH_CONNECT_TIMEOUT", "10")),
-            "-S", SOCK, SSH_TGT, "cd %s && %s" % (REPO, remote),
         ]
+        # Do NOT pass -S by default. An explicit -S OVERRIDES the ControlPath in
+        # ~/.ssh/config, so `ControlPersist yes` does not apply to it: when a
+        # hand-started `ssh -M -S /tmp/aurora-master.sock` master dies, nothing
+        # revives it and every call here falls through to a fresh connection ->
+        # Aurora MFA -> BatchMode refuses -> the dashboard just breaks, while the
+        # config-managed master sits alive the whole time. Letting ssh resolve
+        # ControlMaster/ControlPath from the config means a dead master is
+        # transparently re-established. Set PD_SOCK to opt back in to a specific
+        # socket.
+        if SOCK:
+            cmd += ["-S", SOCK]
+        cmd += [SSH_TGT, "cd %s && %s" % (REPO, remote)]
     if stderr_cb is not None:
         # Stream stderr line-by-line to the callback while the JSON accumulates
         # on stdout. Drain BOTH pipes concurrently -- reading stderr to EOF
