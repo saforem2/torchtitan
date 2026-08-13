@@ -55,6 +55,52 @@ _TERMINAL_STATES = frozenset({"finished", "crashed", "failed", "killed"})
 _NON_METRIC = frozenset({"_step", "_timestamp", "_runtime", "_wandb"})
 
 
+def _api(timeout: int = 30):
+    """Return a ``wandb.Api()`` that can NEVER block on an interactive prompt.
+
+    With no credentials (no ``~/.netrc`` entry for api.wandb.ai, no
+    ``WANDB_API_KEY``), the wandb client asks for an API key on stdin. Inside
+    prod_dash_app that read happens on a background worker thread, so the TUI
+    just hangs with an invisible prompt until the user interrupts -- and the
+    caller's ``try/except`` does not help, because blocking on stdin is not an
+    exception. Raise instead, so the caller's existing "enrich skipped" path
+    runs and the dashboard degrades to the SSH-sourced 5 metrics.
+
+    Two layers, because the credential check alone is only a heuristic (a
+    malformed or expired ~/.netrc entry still looks present):
+
+    1. Refuse up front when no credential source exists at all.
+    2. Redirect stdin to /dev/null around the construction, so any prompt the
+       client still attempts hits EOF and raises instead of blocking forever.
+    """
+    import netrc  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    if not os.environ.get("WANDB_API_KEY"):
+        has_netrc = False
+        try:
+            hosts = netrc.netrc().hosts
+            has_netrc = any("wandb" in h for h in hosts)
+        except Exception:
+            has_netrc = False
+        if not has_netrc:
+            raise RuntimeError(
+                "no W&B credentials (WANDB_API_KEY unset and no api.wandb.ai "
+                "entry in ~/.netrc) -- refusing to let the client prompt on "
+                "stdin. Run `wandb login` once to enable the all-metric cache."
+            )
+    import wandb  # noqa: PLC0415
+    # Point stdin at /dev/null for the construction only: a prompt then reads
+    # EOF and raises instead of blocking a background thread forever.
+    saved = sys.stdin
+    with open(os.devnull) as devnull:
+        sys.stdin = devnull
+        try:
+            return wandb.Api(timeout=timeout)
+        finally:
+            sys.stdin = saved
+
+
 def _run_parquet(run_id: str) -> str:
     return os.path.join(CACHE_DIR, run_id + ".parquet")
 
@@ -164,8 +210,7 @@ def fetch_run(run_id: str, api=None, project: str = PROJECT,
         return cached_df
 
     if api is None:
-        import wandb
-        api = wandb.Api(timeout=30)
+        api = _api()
     try:
         run = api.run(project + "/" + run_id)
     except Exception as e:
@@ -244,8 +289,7 @@ def fetch_all(trajectories=None, project: str = PROJECT,
     if trajectories is None:
         from torchtitan.experiments.ezpz.utils import trajectories as _t
         trajectories = _t.TRAJECTORIES
-    import wandb
-    api = wandb.Api(timeout=30)
+    api = _api()
     out = {}
     counters = {}  # shared across all chains -> one grand-total summary
     total_runs = 0
