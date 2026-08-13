@@ -235,19 +235,25 @@ def _dir_index(logs):
             idx.setdefault(m.group(1), []).append(p)
     return idx
 
-def _wandb_records(run_ids, olog_fallbacks):
+def _wandb_records(run_ids, olog_fallbacks, project=None, key_aliases=None):
     """Concat a chain's full per-step W&B history via wandb_fetch.concat_chain
     (same robust olog-fallback rule the charts use: prefer the .o log when it
     reaches at least as far as W&B). Returns the list of records keyed by
     OLOG_KEYS (step + loss + grad_norm + tps + tflops + mfu) -- the caller
-    projects to the per-metric series it needs (via _series_from_records)."""
+    projects to the per-metric series it needs (via _series_from_records).
+
+    ``project``/``key_aliases`` default to the torchtitan project and no
+    renaming. The v1 MDS chain overrides both: it lives in a different W&B
+    project and logs Megatron key names, which concat_chain maps back to the
+    canonical ones so every downstream consumer is unchanged."""
     olog_fallbacks = olog_fallbacks or {}
     # concat_chain resolves relative fallback paths against CWD; the aggregator
     # chdir's to REPO at startup, but be explicit so it works regardless.
     fb = {rid: (fp if os.path.isabs(fp) else os.path.join(REPO, fp))
           for rid, fp in olog_fallbacks.items()}
     return wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
-                           project=PROJECT)
+                           project=project or PROJECT,
+                           key_aliases=key_aliases)
 
 def _wandb_summary(run_ids):
     """Cheap per-chain W&B metadata (one api.run + .summary read per tried run,
@@ -369,7 +375,9 @@ def build_backbone():
             i, len(CANON), t.get("key", "?"),
             len(t.get("wandb_run_ids") or [])))
         records = _wandb_records(t.get("wandb_run_ids") or [],
-                                 t.get("olog_fallbacks"))
+                                 t.get("olog_fallbacks"),
+                                 project=t.get("wandb_project"),
+                                 key_aliases=t.get("wandb_key_aliases"))
         series = _series_from_records(records)
         # Distinguish sibling chains that share model+nodes (e.g. the canonical
         # 2b 512N vs the sqrt2-LR fork "2b_v2_512_lr3.22e-5") by appending the

@@ -64,6 +64,26 @@ ALL_KEYS = (
     "mfu(%)",
 )
 
+# ---------------------------------------------------------------------------
+# Non-torchtitan producers log the same QUANTITIES under different key names.
+# The v1 MDS (Megatron-DeepSpeed) chain is the live example: it predates
+# torchtitan and its runs sit in a different W&B project. Rather than teach
+# every consumer a second vocabulary, fetch a run with its OWN key names and
+# rename them to the canonical torchtitan ones on the way out, so
+# concat_chain / prod_dash / the plotters need no per-source branching.
+#
+# Keys are {canonical: source}. A canonical key absent from a map is simply
+# absent from those records (callers already tolerate missing metrics).
+MDS_KEY_ALIASES = {
+    "_step": "lm-loss-training/iteration",
+    "loss_metrics/global_avg_loss": "lm-loss-training/lm loss",
+    "grad_norm": "loss/grad_norm",
+    "tflops": "throughput/tflops-lm",
+    "n_tokens_seen": "lm-loss-training/consumed_train_tokens",
+}
+# MDS runs live in their own W&B project, not aurora_gpt/torchtitan.ezpz.train.
+MDS_PROJECT = "aurora_gpt/AuroraGPT"
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # Per-step metric lines in PBS .o files look like:
 #   [TS][I][.../metrics:526:log] step: 3300  loss:  2.61866  grad_norm:  0.1672
@@ -123,13 +143,19 @@ def parse_olog(paths):
     return records, last
 
 
-def fetch_wandb_run(run_id, keys=OLOG_KEYS, project=PROJECT, api=None):
+def fetch_wandb_run(run_id, keys=OLOG_KEYS, project=PROJECT, api=None,
+                    key_aliases=None):
     """Return one W&B run's history as a list of dicts for the given keys.
 
     ``keys`` controls cost: pass OLOG_KEYS for a cheap loss curve, ALL_KEYS for
     the full metric set. Returns ``[]`` if the run cannot be found (e.g. it
     logged to a different project) -- callers treat that as a cue to fall back
     to the .o log. Pass an existing ``api`` to reuse one ``wandb.Api()``.
+
+    ``key_aliases`` ({canonical: source}, e.g. MDS_KEY_ALIASES) fetches a run
+    that logs the same quantities under other names and renames them to the
+    canonical keys, so a non-torchtitan producer needs no downstream special
+    casing. Canonical keys with no alias entry are requested as-is.
     """
     if api is None:
         import wandb
@@ -139,9 +165,16 @@ def fetch_wandb_run(run_id, keys=OLOG_KEYS, project=PROJECT, api=None):
     except Exception:
         return []
     keys = list(keys)
+    if not key_aliases:
+        out = []
+        for row in run.scan_history(keys=keys):
+            out.append({k: row.get(k) for k in keys})
+        return out
+    # Ask W&B for the SOURCE names, emit the canonical ones.
+    src_of = {k: key_aliases.get(k, k) for k in keys}
     out = []
-    for row in run.scan_history(keys=keys):
-        out.append({k: row.get(k) for k in keys})
+    for row in run.scan_history(keys=list(src_of.values())):
+        out.append({k: row.get(s) for k, s in src_of.items()})
     return out
 
 
@@ -157,6 +190,7 @@ def concat_chain(
     project=PROJECT,
     api=None,
     log=None,
+    key_aliases=None,
 ):
     """Concatenate a chain's W&B runs into one trajectory (list of dicts).
 
@@ -170,6 +204,11 @@ def concat_chain(
     ``print`` diagnostics the chart plotters emit. ``keys`` is passed through to
     the W&B fetch; the .o fallback always yields OLOG_KEYS (a subset), so absent
     keys stay absent for callers to fill.
+
+    ``key_aliases`` (see ``fetch_wandb_run``) lets a chain whose producer logs
+    other key names -- the v1 MDS chain, ``MDS_KEY_ALIASES`` -- come back under
+    the canonical names. It applies to the W&B fetch only: a Megatron run has
+    no torchtitan-format .o line to parse.
     """
     olog_fallbacks = olog_fallbacks or {}
     if api is None:
@@ -185,7 +224,11 @@ def concat_chain(
 
     by_step = {}
     for rid in run_ids:
-        rows = fetch_wandb_run(rid, keys=keys, project=project, api=api) if api else []
+        rows = (
+            fetch_wandb_run(rid, keys=keys, project=project, api=api,
+                            key_aliases=key_aliases)
+            if api else []
+        )
         if rid in olog_fallbacks:
             fp = olog_fallbacks[rid]
             orows, _ = parse_olog([fp])
