@@ -32,7 +32,7 @@ import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Vertical
 from textual.widgets import (
     Footer, Header, Input, RichLog, Static, Tabs, Tab, TabbedContent, TabPane,
     SelectionList,
@@ -183,20 +183,29 @@ class ProdDashApp(App):
     TITLE = "AuroraGPT production"
     # Top-level tabs ("Charts" / "Board") so the table gets its own pane and no
     # longer competes with the chart for vertical space. Inside Charts: a run
-    # SelectionList (left, toggle chains on/off) beside the PlotextPlot (right);
-    # #metrictabs is the per-metric selector above them.
+    # SelectionList (full-width legend strip, toggle chains on/off) stacked
+    # ABOVE the PlotextPlot; #metrictabs is the per-metric selector above both.
     CSS = """
     #metrictabs { dock: top; }
-    /* The legend box was width:34 with only a border-right, so with short
-       labels the right edge floated well inside the widget and the box read
-       as misaligned. width:auto shrinks it to its content and a full border
-       closes all four sides; max-width stops a long experiment-fork name
-       from eating the chart. */
-    #runs { width: auto; max-width: 40; border: solid $panel; }
+    /* Legend is a full-width STRIP above the chart, not a left sidebar: as a
+       sidebar it reserved a fixed column for the entire height, leaving ~1/3
+       of the terminal blank below a 5-row legend. Now it is docked top, sized
+       to its content (height:auto), and its options flow left-to-right so the
+       chains read as one row of swatches. The plot then gets the full width. */
+    #runs {
+        dock: top;
+        width: 100%;
+        height: auto;
+        max-height: 7;
+        layout: horizontal;
+        border: solid $panel;
+    }
     #runs:focus-within { border: solid $accent; }
-    #runs > .selection-list--option { width: 1fr; }
+    /* width:auto so each entry is only as wide as its label; without it every
+       option stretched to 1fr (full row) and they stacked vertically again. */
+    #runs > .selection-list--option { width: auto; padding: 0 2 0 0; }
     #runs.hidden { display: none; }
-    #chart { width: 1fr; }
+    #chart { width: 1fr; height: 1fr; }
     #board { height: 1fr; overflow-y: auto; color: $text-muted; padding: 0 1; }
     #log { height: 6; display: none; dock: bottom; }
     #log.building { display: block; }
@@ -272,7 +281,11 @@ class ProdDashApp(App):
                 # can't dedup them).
                 yield Tabs(*[Tab(lab, id=_tab_id(k)) for k, lab in METRICS],
                            id="metrictabs")
-                with Horizontal():
+                # Legend ABOVE the chart, not beside it: as a left sidebar it
+                # claimed a fixed column for its whole height, so ~1/3 of the
+                # width was blank under a 5-row legend. Stacked, it costs a few
+                # rows and the plot spans the full terminal.
+                with Vertical():
                     yield SelectionList(id="runs")
                     yield PlotextPlot(id="chart")
             with TabPane("Board", id="pane-board"):
@@ -437,10 +450,11 @@ class ProdDashApp(App):
 
     def _rebuild_runs(self):
         """Populate the run-toggle SelectionList from the current chains. Doubles
-        as the chart legend: each row carries a color swatch matching that chain's
-        plotted line (the in-canvas plotext legend was dropped because it is
-        pinned to the top-left corner and covered the early-step data). Preserves
-        on/off state across refreshes."""
+        as the chart legend: each entry carries a color swatch matching that
+        chain's plotted line (the in-canvas plotext legend was dropped because it
+        is pinned to the top-left corner and covered the early-step data). It
+        renders as a full-width strip above the chart. Preserves on/off state
+        across refreshes."""
         from rich.text import Text
         sl = self.query_one("#runs", SelectionList)
         want = [(k, c) for k, c in self._chain_order()]
