@@ -233,17 +233,26 @@ def concat_chain(
             fp = olog_fallbacks[rid]
             orows, _ = parse_olog([fp])
             w_max, o_max = _max_step(rows), _max_step(orows)
-            if o_max >= w_max:
-                if o_max < 0:
-                    _emit("  %s: both W&B and .o-log empty, skipping" % rid)
-                    continue
-                _emit("  %s: .o-log %d rows, steps [%d, %d] (W&B reached %s)" % (
-                    rid, len(orows), orows[0]["_step"], orows[-1]["_step"],
-                    str(w_max) if w_max >= 0 else "empty"))
-                rows = orows
-            else:
-                _emit("  %s: W&B reaches step %d > .o-log %d; keeping W&B" % (
-                    rid, w_max, o_max))
+            if w_max < 0 and o_max < 0:
+                _emit("  %s: both W&B and .o-log empty, skipping" % rid)
+                continue
+            # UNION, not replace. This used to do `rows = orows` whenever the
+            # .o log reached at least as far as W&B, which DISCARDED any W&B
+            # history below the log's first step: pointing 20b-256's cxlt0tpe
+            # (W&B 6151..6896) at a log covering 6801..7600 closed one gap and
+            # opened a new 510-step one at 6295..6805. The two sources describe
+            # the same steps of the same run, and the by_step dict below already
+            # dedups, so keeping both is strictly better -- each covers what the
+            # other missed. W&B wins on a shared step (it is the synced record).
+            if orows:
+                merged = {int(r["_step"]): r for r in orows
+                          if r.get("_step") is not None}
+                merged.update({int(r["_step"]): r for r in rows
+                               if r.get("_step") is not None})
+                _emit("  %s: %d W&B + %d .o-log rows -> %d union [%d, %d]" % (
+                    rid, len(rows), len(orows), len(merged),
+                    min(merged), max(merged)))
+                rows = [merged[s] for s in sorted(merged)]
         elif rows:
             _emit("  %s: %d rows, steps [%s, %s]" % (
                 rid, len(rows), rows[0].get("_step"), rows[-1].get("_step")))

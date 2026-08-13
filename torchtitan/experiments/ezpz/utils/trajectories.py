@@ -279,26 +279,31 @@ TRAJECTORIES: list[dict] = [
         # the chart shows a hole between "last synced step" and "first step the
         # successor logged". Training was continuous; only the record is not.
         #
-        # concat_chain prefers the .o log whenever it reaches at least as far as
-        # W&B, so pointing at the boundary runs' logs recovers those tails.
-        # Measured coverage (parse_olog, 2026-08-13) vs the three gaps:
-        #   6891->7506  o8698754 covers 6801..7600  -> CLOSED
-        #   4372->5109  o8661054 covers 4201..4375  -> partial (4375..5101 open)
-        #   3598->4207  o8647385 covers 3101..3603  -> partial (3603..4201 open)
-        # No log on disk covers 3603-4201 or 4375-5101; those steps ran (the
-        # checkpoints exist) but neither W&B nor a .o log retained them.
+        # concat_chain UNIONs a run's .o log with its W&B history (it used to
+        # replace, which cost more than it recovered -- see the note below).
+        #
+        # Measured W&B coverage of the runs around the real hole:
+        #   cxlt0tpe  746 rows  6151..6896
+        #   2ktrz29u  396 rows  7501..7896
+        # so the actual gap is 6896->7501, and o8698754 (6801..7600) spans it.
+        # Attached to 2ktrz29u, the run that OWNS the far side: with the union
+        # merge both sources survive, so cxlt0tpe keeps 6151..6896 and the log
+        # supplies 6896..7501.
+        #
+        # NOT attached to cxlt0tpe (tried 2026-08-13, reverted): under the old
+        # replace semantics the log's 7600 tip beat cxlt0tpe's 6896, so its 746
+        # W&B rows were thrown away and a NEW 510-step hole opened at 6295-6805.
+        # Net effect was one gap traded for another, +9 points.
+        #
+        # The other two gaps (3598->4206, 4371->5107) have no usable log:
+        # o8661054 covers only 4201..4375 and o8647385 only 3101..3603, both
+        # ENTIRELY INSIDE their runs' W&B range, so they add no new steps.
+        # Those steps ran (the checkpoints exist) but neither W&B nor any .o
+        # log on disk retained them; the gaps are permanent.
         "olog_fallbacks": {
-            "cxlt0tpe": str(
+            "2ktrz29u": str(
                 RUNS / "agpt-20b-n256/torchtitan-ezpz"
                 / "agpt-20b-n256-resume-cont.o8698754"
-            ),
-            "uvgmafv9": str(
-                RUNS / "agpt-20b-n256/torchtitan-ezpz"
-                / "agpt-20b-n256-short3h.o8661054"
-            ),
-            "6yr6ivh4": str(
-                RUNS / "agpt-20b-n256/torchtitan-ezpz"
-                / "agpt-20b-n256-autoretry-resume.o8647385"
             ),
         },
         "eval_subdir": None,
