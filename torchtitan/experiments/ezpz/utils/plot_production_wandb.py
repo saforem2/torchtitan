@@ -98,11 +98,15 @@ from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
 # its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
 from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
 
-MODEL_COLORS = {
-    "2b": "#1E88E5",
-    "20b": "#D32F2F",
-    "80b": "#388E3C",
-}
+# Family mid-tones from the shared palette. The local copy here said
+# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
+# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
+# in the overlay. utils/palette.py is now the only definition.
+from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
+    alpha_for as _pal_alpha,
+    CHAIN_COLORS as _pal_chain_colors,
+    MODEL_COLORS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 DOCS_BASE = REPO_ROOT / "torchtitan" / "experiments" / "ezpz" / "docs"
@@ -451,14 +455,16 @@ def plot_overlay(
     return output_path
 
 
-# Color/alpha presets per PRODUCTION_RUNS key. Lower alpha for the
-# v1 (bf16-tainted) entries so v2 reads as the "real" curve.
+# Color/alpha per PRODUCTION_RUNS key, derived from the shared palette so a
+# chain renders identically here and in the combined overlay. Lower alpha for
+# the v1 (bf16-tainted) entries so v2 reads as the "real" curve.
+#
+# Built from palette.CHAIN_COLORS rather than listed by hand: the old literal
+# table omitted 20b_v2_256 and 2b_v2_512_lr3.22e-5 entirely, so those two fell
+# through to a default and drew in whatever the model mid-tone happened to be.
 OVERLAY_STYLE: dict[str, dict] = {
-    "2b_v1_256":  {"color": "#94a3b8", "alpha": 0.55},  # slate, faded
-    "2b_v2_256":  {"color": "#1E88E5", "alpha": 1.00},
-    "2b_v2_512":  {"color": "#0d47a1", "alpha": 1.00},
-    "20b_v1_256": {"color": "#94a3b8", "alpha": 0.55},
-    "20b_v2_512": {"color": "#D32F2F", "alpha": 1.00},
+    _k: {"color": _c, "alpha": _pal_alpha(_k)}
+    for _k, _c in _pal_chain_colors.items()
 }
 
 

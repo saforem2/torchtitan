@@ -47,15 +47,19 @@ OUT_PATH = (
 
 # Tokens-per-step for each trajectory (computed from GBS × SEQ_LEN where
 # SEQ_LEN=8192 across the board).
-# Canonical per-trajectory palette — shared across all production
-# charts (eval + training). Keep these consistent with
-# plot_production_combined.py and the per-model {2b,20b}/plot_eval_overview.py
-# scripts so a given trajectory always renders the same color.
-COLOR_2B_MDS      = "C0"       # matplotlib C0 (ambivalent palette first color — reads well on both light + dark bg)
-COLOR_2B_TT_256N  = "#ef5350"  # salmon-red
-COLOR_2B_TT_512N  = "#b71c1c"  # dark red
-COLOR_20B_TT_512N = "#1b8a3a"  # green
-COLOR_RANDOM      = "#808080"  # gray
+# Canonical per-trajectory palette, shared across eval + training charts.
+# Single source of truth in utils/palette.py -- this used to be a hand-copied
+# block under a "keep these consistent with ..." comment, and it drifted: it
+# never even defined COLOR_20B_TT_256N, so the 20B family had no consistent
+# color at all.
+from torchtitan.experiments.ezpz.utils import palette as _pal  # noqa: E402
+
+COLOR_2B_MDS      = _pal.COLOR_MDS
+COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
+COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
+COLOR_20B_TT_256N = _pal.COLOR_20B_256N
+COLOR_20B_TT_512N = _pal.COLOR_20B_512N
+COLOR_RANDOM      = _pal.COLOR_RANDOM
 
 TRAJECTORIES: list[dict] = [
     {

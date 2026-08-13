@@ -84,13 +84,18 @@ MDS_STAGE_BOUNDARIES_B = [
     (7770.766, "stage 3 end"),
 ]
 
-# Canonical per-trajectory palette — keep in sync with
-# eval/plot_evals_combined.py and per-model {2b,20b}/plot_eval_overview.py.
-COLOR_2B_MDS      = "C0"       # matplotlib C0 (ambivalent palette first color — reads well on both light + dark bg)
-COLOR_2B_TT_256N  = "#ef5350"  # salmon-red
-COLOR_2B_TT_512N  = "#b71c1c"  # dark red
-COLOR_20B_TT_256N = "#fb8c00"  # orange (20B 256N: one-off NODE_FAIL run; no canonical color)
-COLOR_20B_TT_512N = "#1b8a3a"  # green
+# Canonical per-trajectory palette. Single source of truth in utils/palette.py
+# (hue per model family, lightness per scale) -- the old copy here carried a
+# "keep in sync with ..." comment and did not: only 2B got the lightness
+# treatment, while 20B-256 was given an unrelated orange next to 20B-512's
+# green, so one model family read as two.
+from torchtitan.experiments.ezpz.utils import palette as _pal  # noqa: E402
+
+COLOR_2B_MDS      = _pal.COLOR_MDS
+COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
+COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
+COLOR_20B_TT_256N = _pal.COLOR_20B_256N
+COLOR_20B_TT_512N = _pal.COLOR_20B_512N
 
 TRAJECTORIES: list[dict] = [
     {
