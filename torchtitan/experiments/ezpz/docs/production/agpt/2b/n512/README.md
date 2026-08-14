@@ -33,9 +33,32 @@
 > another chain. Post-training work (eval, SFT, forks) should start
 > from `step-46429`.
 >
-> **Eval scores:** see [`docs/evals/agpt/2b/`](../../../../evals/agpt/2b/README.md)
-> for the current v2 lm-eval results, including the modern task
-> ladder (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot)
+> **Eval scores (final, job `8754664`, 2026-08-14):** the last 6,800
+> steps were unevaluated (coverage had stopped at 39,600), so the tail
+> plus the endpoint were run on the full modern ladder:
+>
+> | step | tokens | mmlu | arc_c | hellaswag | arc_e | wino | piqa | obqa | boolq | gsm8k |
+> |------|--------|------|-------|-----------|-------|------|------|------|-------|-------|
+> | 41,000 | 4.13T | 0.2501 | 0.2474 | 0.4785 | 0.6048 | 0.5359 | 0.7018 | 0.3160 | 0.5560 | 0.0000 |
+> | 43,000 | 4.33T | 0.2516 | 0.2389 | 0.4775 | 0.5993 | 0.5193 | 0.7024 | 0.3240 | 0.5630 | 0.0000 |
+> | 45,000 | 4.53T | 0.2498 | 0.2398 | 0.4764 | 0.5985 | 0.5288 | 0.6980 | 0.3260 | 0.5489 | 0.0000 |
+> | **46,429** | **4.674T** | **0.2511** | **0.2381** | **0.4753** | **0.6006** | **0.5233** | **0.6997** | **0.3220** | **0.5538** | **0.0000** |
+>
+> Two things to take from this. **The final 500B tokens bought nothing
+> measurable** -- every metric is flat within noise from 41,000 on, which
+> is what a run that has saturated its data mix looks like, and is worth
+> weighing when sizing the next chain's budget.
+>
+> And **MMLU finished at chance (0.2511)**. A COMPLETED full-budget run at
+> the 4-way floor is the strongest version of a result that now spans a
+> dozen configurations, 0.42T->7.771T tokens, two model scales and five
+> data treatments -- against a harness validated on the same code path
+> (Llama-3.2-1B 0.3121, Llama-3.1-8B 0.6530). The chance-floor is
+> **data-limited, not token-limited**: more olmo-mix-1124 will not move
+> it. See [`docs/evals/agpt/2b/`](../../../../evals/agpt/2b/README.md) and
+> the 2026-08-05 journal entry.
+>
+> Earlier coverage (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot) was
 > backfilled across the chain on 2026-07-24.
 
 ## v2 — 2B @ 512N — SophiaG LR=2.28e-5 (fp32 master)
