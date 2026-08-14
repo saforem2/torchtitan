@@ -94,6 +94,24 @@ Identical. The venv is also untouched since 2026-06-02
 (`torch 2.13.0.dev20260519+xpu`, py 3.14.2). So neither our code nor the torch
 build changed between the clean run and now.
 
+## When it started
+
+The last Sunspot job that produced training steps is **2026-08-08** (job
+`12472766`, mix-cosmo, 1600 clean steps). Every job since is one of my own
+80B/diagnostic runs, all of which fail.
+
+Two things that does NOT establish, and should not be read as establishing:
+
+- **It does not date the fault to 08-08.** Nobody ran a non-80B training job
+  on Sunspot in that window, so the absence of successes is an absence of
+  attempts, not evidence of breakage. The `/tegu/` mounts were also down for
+  part of it.
+- **It does not prove all training is broken.** Only that *these* jobs are.
+  Whether `all_reduce` / `all_gather` still work -- i.e. whether plain
+  FSDP/DDP without TP is still viable on Sunspot -- is being measured
+  separately (job `12473134` controls). Until that reports, the safe claim is
+  narrow: **`reduce_scatter_tensor` is broken, therefore TP>1 is broken.**
+
 ## Environment
 
 - torch `2.13.0.dev20260519+xpu`, python 3.14.2, `.venv` unchanged since 2026-06-02
