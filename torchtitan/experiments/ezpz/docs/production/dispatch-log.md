@@ -31,6 +31,7 @@ Reading rules:
 | `8714503` | 08-07 | 2B-512 41,301->43,820 | 20B-512 7,251->7,654 | 20B-256 7,801->8,334 | **bad_alloc** | **bad_alloc** | 3/5 |
 | `8744245` | 08-09 | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
 | `8744247` | 08-13 | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
+| `8756070` | 08-14 | **2B-512 STAGE 2** (dolmino CPT, seed step-46429) | 20B-512 | 20B-256 | 2B-512 constlr | 2B-256 constlr | queued |
 
 Slot map for the 5-trainer umbrellas: t0=2B-512, t1=20B-512, t2=20B-256,
 t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
@@ -54,7 +55,14 @@ t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
 | `8730438` | 08-03 | 20B-256 | 260 | Q, never seated; superseded by umbrella |
 | `8731654` | 08-04 | 20B-512 chain via 256N | 260 | qdel'd -- bridge arrangement rejected in favour of native |
 | `8731758` | 08-04 | 20B-512 | 516 | ran before 8744245; carried the chain to 7,251 |
-| `8687863` | 07-29 | 20B-512 chain via 256N | 260 | **zombie**: held, and `afterany:8687862` targets a purged job. Needs a manual `qdel`. |
+| `8687863` | 07-29 | 20B-512 chain via 256N | 260 | **zombie**: held, and `afterany:8687862` targets a purged job. Needs a manual `qdel`
+| `8748010` | 08-11 | 20B-512 | 516 | Q; qdel'd 08-13 when umbrella 8744247 seated (shared ckpt dir) |
+| `8748011` | 08-11 | 2B-512 constlr | 516 | Q; qdel'd 08-13 with 8748010, same reason |
+| `8752939` | 08-13 | 20B-512 | 522 | **Q.** Replaces umbrella t1, which the idle watchdog killed. Carries `IDLE_TIMEOUT=5400` |
+| `8752824` | 08-13 | 2B-256 constlr | 266 | **Q.** Replaces umbrella t4 (ckpt-key bug, fixed `ae880c32d`) |
+| `8754664` | 08-14 | eval, 2B-512 final | 1 | **Done.** Steps 41k/43k/45k/46,429 on the modern ladder. MMLU flat at chance (0.2511 at the endpoint); last 500B tokens moved no metric |
+| `8756071` | 08-14 | 20B-256 | 266 | **Q.** Continuation from step-9,800 (umbrella 8744247 ended at walltime) |
+| `8756072` | 08-14 | 2B-512 constlr | 522 | **Q.** Continuation from step-16,900 (umbrella t3 lost a node at 16,984) |. |
 
 ## Evals (capacity queue)
 
