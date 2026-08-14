@@ -176,6 +176,19 @@ Same node, same 12 ranks, same probe -- only the software stack differs:
 
 All five buffer sizes to 144 MiB/rank, rc=0, zero segfaults.
 
+**End-to-end confirmation (job `12473139`):** 80B at 4N/TP=4/LBS=1 -- the exact
+config that SIGSEGVs on the `.venv` -- trains on the RC:
+
+```
+step:  1  loss: 12.93393  grad_norm: 9.8457  memory: 32.43GiB(50.68%)
+step:  2  loss: 12.90509  grad_norm: 8.6538  memory: 44.95GiB(70.25%)
+step:  3  loss: 12.80237  grad_norm: 8.5700  memory: 44.95GiB(70.25%)
+step:  4  loss: 12.64922  grad_norm: 8.1765  memory: 44.95GiB(70.25%)
+```
+
+Loss descends, zero segfaults, and memory plateaus at **70.25%** -- matching
+the known-good 4N/TP=4 profile from job `12472452` (2026-08-03) exactly.
+
 **How to use it** (the `frameworks/2026.1.0` module alone has NO torch -- that
 is what aborted job `12473137`):
 
