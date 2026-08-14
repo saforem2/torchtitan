@@ -100,6 +100,29 @@ Two consequences:
   at loss 12.39 vs bf16 12.76, and accelerating. If bf16 merely mis-reported a
   correct gradient, both would descend identically.
 
+### It CLEARS the wall (step 30+)
+
+bf16 died at step 30 at this dp. fp32 walked straight through it:
+
+```
+step: 28  loss: 10.55757  grad_norm: 15.6207
+step: 29  loss: 10.39867  grad_norm: 11.2650
+step: 30  loss: 10.28401  grad_norm:  7.8810   <- bf16 NaN'd here
+step: 31  loss: 10.17815  grad_norm:  9.0314
+step: 32  loss: 10.08726  grad_norm:  9.7592
+```
+
+**And it does so at a HIGHER learning rate.** The fp32 run uses warmup=40, so at
+step 30 it is at LR 7.5e-7; the bf16 run used warmup=200 and failed at only
+1.5e-7 -- 5x lower. The comparison is therefore conservative: fp32 survives a
+strictly harder condition than the one that killed bf16. (The two runs are not
+LR-matched, so this is not a controlled A/B on LR; it is a one-sided result --
+fp32 clears a bar bf16 could not, with margin to spare.)
+
+Note also that the grad_norm spikes decay as training settles: 17K-91K over
+steps 2-12, then 13-180 by step 20, then single digits by step 30. The early
+spikes are a startup transient, not a persistent regime.
+
 Cost, measured at dp=192: memory 36.5 GiB (57%) vs bf16 20.5 GiB (32%);
 throughput **16 tps vs 54 -- a 3.4x slowdown**, matching the documented 3-5x.
 
