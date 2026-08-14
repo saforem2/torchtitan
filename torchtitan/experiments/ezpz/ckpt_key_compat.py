@@ -133,9 +133,12 @@ def maybe_install_flat_attention_compat(
     """Install the remap only if the checkpoint about to be loaded needs it.
 
     `folder` is `checkpoint.folder` (dump_folder-relative, as configured);
-    `dump_folder` is `job.dump_folder`, which the checkpointer PREPENDS to
-    `folder` -- pass it or the detector looks in the wrong place. `load_step`
-    is the step being resumed, or -1 for "latest". Resolves the step directory
+    `dump_folder` is `config.dump_folder`, which the checkpointer PREPENDS to
+    `folder` -- pass it or the detector looks in the wrong place. It is a FLAT
+    field on `Trainer.Config`; there is no `config.job` namespace, and reaching
+    for one raises AttributeError at the top of `train()`, before step 1.
+    `load_step` is the step being resumed, or -1 for "latest". Resolves the step
+    directory
     the same way the checkpointer will, inspects its metadata, and installs
     the shim only for a pre-refactor flat-attention checkpoint.
 

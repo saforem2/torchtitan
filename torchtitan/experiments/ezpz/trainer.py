@@ -881,7 +881,7 @@ class FaultTolerantTrainer(Trainer):
             self.checkpointer,
             config.checkpoint.folder,
             config.checkpoint.load_step,
-            dump_folder=config.job.dump_folder,
+            dump_folder=config.dump_folder,
         )
         self.checkpointer.load(step=config.checkpoint.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
