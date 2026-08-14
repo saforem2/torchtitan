@@ -19,12 +19,18 @@ treatment:
   These are what the cheap experiments below attack.
 - **Untested** -- the central data hypothesis. Needs a real run (exp03).
 
-The tiering is set by *discriminating power*, not by cost. A toy model cannot
-answer the MMLU question at all: MMLU has a capability floor around 1-3B
-params, so a 20M or 500M model returns ~0.25 on **any** data and a null result
-cannot separate "bad mix" from "model too small". Tier 0 experiments are cheap
-*because* the questions they ask are scale-free, not because we are economising
-on the important one.
+The tiering is set by *discriminating power*, not by cost. Tier 0 experiments
+are cheap *because* the questions they ask are scale-free, not because we are
+economising on the important one.
+
+> **Amended after exp03.** This section originally justified the tiering with
+> "MMLU has a capability floor around 1-3B params, so a 20M or 500M model
+> returns ~0.25 on **any** data." [exp03](exp03-1b-proxy-design.md) found no
+> published support for that floor and two datapoints against it (Qwen2.5-0.5B
+> at 47.5; TinyLlama-1.1B at 3T tokens at 25.3) -- **the binding constraint
+> looks like data, not scale.** The tiering still holds, but on the narrower
+> and defensible ground that a 21M debugmodel cannot say anything about a
+> *data mix*, whatever the true floor is. See exp03's open question 1.
 
 ## Tier 0 -- scale-free, no production allocation
 
