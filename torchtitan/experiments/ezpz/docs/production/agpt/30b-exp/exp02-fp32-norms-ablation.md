@@ -11,7 +11,9 @@
 > Prior investigation:
 > [`training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md).
 >
-> Status: **SETTLED** (2026-08-14). Job 8757151, Aurora, agpt debugmodel.
+> Status: **SETTLED** (2026-08-14). Aurora, agpt debugmodel; jobs 8757151
+> (correctness), 8757216 (throughput), 8757243 (visited-row control),
+> 8757254 (QK-norm arm). All four complete.
 
 ## Verdict
 
@@ -21,14 +23,20 @@ above is wrong.** Arm B (fp32 master for norm params only) does unfreeze all
 `tok_embeddings.weight` frozen at **frac_changed = 0.000345** versus
 **1.000000** under full fp32 -- because agpt initializes the embedding at
 `std=1.0` (`_EMBEDDING_INIT`, `agpt/__init__.py:202`), the *same* scale as
-`RMSNorm.weight`, and therefore with the same ~7.8e-3 bf16 ULP. Across the
-whole model, **38.36% of all parameter elements never move in arm B** (8.25M
-of 21.5M) against **0.000%** in arm C. The prior investigation's "why other
-parameters update fine" section reasoned only about *linear* layers at
-std~0.005-0.02; it did not check the embedding, which is not a linear layer
-and does not sit at that scale. So the shipped full-fp32 default is not
-over-broad -- it is load-bearing, and for a second reason nobody had
-identified. (All numbers MEASURED, 300 steps, single XPU tile, job 8757151.)
+`RMSNorm.weight`, and therefore with the same ~7.8e-3 bf16 ULP. This is not a
+vocabulary-coverage artifact: restricted to the 91 rows that actually
+received gradient, arm B moved **14.7%** of elements against arm C's
+**100%**. Across the whole model **38.36% of all parameter elements never
+move in arm B** (8.25M of 21.5M, 99.3% of it the embedding) against
+**0.000%** in arm C -- and arm B is also the *slowest* arm at 24 ranks
+(39.0 tps vs C's 54.0), because FSDP2 forbids mixed dtypes in a shard group
+so the norms must be split into their own groups. The prior investigation's
+"why other parameters update fine" section reasoned only about *linear*
+layers at std~0.005-0.02; it did not check the embedding, which is neither a
+linear layer nor at that scale. **The shipped full-fp32 default is not
+over-broad -- it is load-bearing, for a reason nobody had identified, and it
+is also the fastest option measured here.** (All numbers MEASURED on Aurora,
+300 steps: jobs 8757151, 8757216, 8757243.)
 
 ## Method
 
@@ -78,6 +86,12 @@ Implementation (all inside `experiments/ezpz/`, opt-in, default-off):
   recurrence claim.
 - `scripts/oneoff/fp32_norms_ablation.py` -- the driver.
 - `scripts/oneoff/compare_fp32_norms_ablation.py` -- the comparison.
+- `scripts/oneoff/scale_ulp_probe.py` -- the CPU-only mechanism probe
+  (Section 3a); no cluster needed, useful as a standing regression check.
+- `scripts/oneoff/submit_fp32_norms_ablation.sh` (correctness),
+  `submit_fp32_norms_throughput.sh` (throughput),
+  `submit_fp32_norms_qknorm.sh` (QK-norm arm),
+  `submit_emb_freeze_probe.sh` + `emb_visited_probe.py` (visited-row control).
 
 ### Jobs
 
@@ -86,8 +100,11 @@ Implementation (all inside `experiments/ezpz/`, opt-in, default-off):
 | 8757151 | debug | 1 | 3 arms x 300 steps, correctness | **COMPLETE -- the main result** |
 | 8757164 | debug-scaling | 2 | throughput | FAILED (`~/.venv` shadowed the repo venv: `libsycl.so.8: undefined symbol urEnqueueCooperativeKernelLaunchE`). Fixed by activating the repo venv before `ezpz_setup_job`; resubmitted as 8757216 |
 | 8757216 | debug-scaling | 2 | throughput at FSDP degree 24 | **COMPLETE -- Section 5** |
-| 8757215 | debug | 1 | embedding visited-row control | FAILED (probe bug: `touched` mask on CPU vs params on `xpu:0`); fixed, resubmitted as 8757238 |
-| 8757238 | debug | 1 | embedding visited-row control | submitted; had not returned at time of writing |
+| 8757215 | debug | 1 | embedding visited-row control | FAILED (probe run as a path, not a module: `No module named 'torchtitan'`) |
+| 8757229 | debug | 1 | embedding visited-row control | FAILED (probe bug: `touched` mask on CPU vs params on `xpu:0`) |
+| 8757238 | debug | 1 | embedding visited-row control | FAILED (probe bug: indexing a plain tensor with DTensor params) |
+| 8757243 | debug | 1 | embedding visited-row control | **COMPLETE -- Section 3a, the decisive control** |
+| 8757254 | debug | 1 | QK-norm arm, 3 arms x 300 steps | **COMPLETE -- Section 3b** |
 
 Reproduce:
 
@@ -175,16 +192,37 @@ Whole-model aggregate:
 | C | 0 / 21,499,136 | **0.000%** |
 
 Arm B recovers only **0.009 percentage points** of the 38.372% that arm A
-freezes. Nearly all of the frozen mass is the embedding table, not the norms.
+freezes. The embedding accounts for **99.27%** of all frozen elements
+(8,189,169 of 8,249,554); the 13 norm weights are 3,328 elements, 0.04% of the
+frozen mass. Norms-only fp32 fixes the part of the bug that was *noticed*, not
+the part that dominates.
 
 ### 3. The mechanism is scale, not vocabulary coverage
 
 An obvious objection: most vocab rows are never visited in 300 steps, so of
-course they do not move. Two controls rule this out.
+course they do not move. Three controls rule this out.
 
-**(a) Isolated optimizer probe** (MEASURED, `/tmp/fp32abl/emb_test.py`, CPU) --
-identical synthetic gradients applied to every row, 20 AdamW steps, so
-coverage is not a factor:
+**(a) Visited-row control on the real model** (MEASURED, job 8757243,
+`scripts/oneoff/emb_visited_probe.py`). This re-runs all three arms while
+recording which vocab rows actually received a nonzero embedding gradient,
+then computes `frac_changed` over **only those rows** -- coverage is
+eliminated by construction:
+
+| Arm | master dtype | rows touched | frac moved, **touched rows only** | max abs delta |
+|-----|--------------|--------------|-----------------------------------|---------------|
+| A | bfloat16 | 91 / 32000 | **0.1464** | 5.91e-02 |
+| B | bfloat16 | 91 / 32000 | **0.1471** | 6.03e-02 |
+| C | float32 | 91 / 32000 | **1.0000** | 9.02e-02 |
+
+All three arms touch exactly the same 91 rows (same seed, same data). Among
+those rows, full fp32 moves **every** element while bf16 master and
+norms-only fp32 move ~15%. **This is the decisive control**: it is not
+coverage, and arm B is indistinguishable from the fully broken arm A here.
+
+**(b) Isolated optimizer probe** (MEASURED --
+`scripts/oneoff/scale_ulp_probe.py`, runs on CPU in seconds) -- identical
+synthetic gradients applied to *every* element, 20 AdamW steps, so coverage
+cannot be a factor:
 
 | Parameter shape | init scale | master dtype | fraction of elements that moved |
 |-----------------|-----------|--------------|-------------------------------|
@@ -196,7 +234,7 @@ coverage is not a factor:
 Scale alone reproduces the effect. At std=1.0 a bf16 master drops ~80% of
 updates even when every element receives one; at std=0.02 it drops none.
 
-**(b) bf16 ULP vs init scale** (derived):
+**(c) bf16 ULP vs init scale** (derived):
 
 | init scale | bf16 ULP | relative |
 |-----------|----------|----------|
@@ -209,12 +247,40 @@ is above the ULP at 0.005 and 100x below it at 1.0. The vulnerability is a
 function of *parameter scale*, and both `RMSNorm.weight` and
 `tok_embeddings.weight` sit at 1.0.
 
-A per-arm visited-row control on the real model (job 8757215, restricting
-`frac_changed` to embedding rows that actually received nonzero gradient) was
-submitted to close this off on the real data path; the two controls above
-already establish the mechanism.
+Taken together: the effect survives when coverage is removed on the real
+model (a), reproduces from scale alone with no model at all (b), and follows
+directly from the bf16 ULP at the init scale (c).
 
-### 3b. You cannot detect this from a checkpoint's stored dtype
+### 3b. QK-norm gains freeze too -- Section 6's prediction, confirmed
+
+Section 6 predicted the vulnerability "recurs for any future parameter
+initialized near 1.0 -- QK-norm gains being exactly that". The production
+`debugmodel` has no QK-norm, so `debugmodel_qknorm` /
+`agpt_debugmodel_qknorm_local` were added (12 extra `RMSNorm(head_dim)`
+weights at init 1.0, 25 affine norms total).
+
+MEASURED, full 300-step three-arm run on Aurora (job 8757254):
+
+| Arm | master dtype | frozen norms | mean variance |
+|-----|--------------|--------------|---------------|
+| A | bfloat16 | **25 / 25** (incl. all 12 QK-norms) | 0.000e+00 |
+| B | float32 | 0 / 25 | 7.766e-05 |
+| C | float32 | 0 / 25 | 7.804e-05 |
+
+Every `q_norm` / `k_norm` weight is frozen at exactly 1.0 under bf16 master.
+Arm B promotes all 25 (block norms + QK-norms) and unfreezes them, since
+`promote_norms_to_fp32` matches any affine `nn.RMSNorm`. **So the Section 6
+prediction was correct: QK-norm gains are affected, and the 30B plan's intent
+to add QK-norm would have walked straight into this had the default been bf16
+master.**
+
+Note that the QK-norm model shows the same overall picture: arm B still
+leaves `tok_embeddings.weight` at `frac_changed` 0.000 vs arm C's 1.000, and
+the loss curves stay indistinguishable (A 2.77974, B 2.77776, C 2.78855 at
+step 300). Adding QK-norm does not change the verdict; it adds 12 more
+parameters to the set that norms-only fp32 saves and full fp32 also saves.
+
+### 3c. You cannot detect this from a checkpoint's stored dtype
 
 Worth recording because it is a trap for anyone trying to audit existing runs.
 DCP writes the **model** state dict, which is the bf16 all-gathered parameter,
@@ -232,15 +298,23 @@ is the **wrong question** -- it is always bf16 on disk. The v1 detection
 recipe in the prior guide works because it tests *values* (`norm.weight`
 exactly 1.0), not dtypes.
 
-One caution learned here: `norm.weight` was also all-ones in the v2
-`n512-gbs12288` checkpoints at step-100 and step-1000. That is not the v1 bug
-resurfacing -- 1000 steps of a 2B at these LRs moves the norms by less than
-one bf16 ULP at 1.0 (7.8e-3), so the bf16 *stored* copy still rounds back to
-exactly 1.0 even though the fp32 master has moved. The known-good v2 evidence
-in the prior guide is at **step 5000**, where the accumulated change clears
-the storage ULP. **Do not conclude "the bug is back" from an early v2
-checkpoint** -- check a late one, or check the master copy in the optimizer
-state.
+One caution learned here, MEASURED on three production checkpoints:
+
+| Checkpoint | step | `norm.weight` std | all ones? | range |
+|---|---|---|---|---|
+| v2 `...n512-gbs12288` | 100 | 0.000e+00 | **yes** | [1.0, 1.0] |
+| v2 `...n512-gbs12288` | 1000 | 0.000e+00 | **yes** | [1.0, 1.0] |
+| v2 `...cpt-dolmino100-n256-gbs6144` | 5960 | 1.007e-01 | no | [1.0898, 1.9447] |
+
+An *early* fp32-master checkpoint is indistinguishable from a bf16-master one:
+1000 steps at production LRs move the norms by less than one bf16 storage ULP
+at scale 1.0 (7.8e-3), so the stored bf16 copy rounds back to exactly 1.0 even
+though the fp32 master has moved. By step 5960 the accumulated change clears
+the storage ULP and the signal is unmistakable. **Do not conclude "the bug is
+back" from an early v2 checkpoint** -- check a late one, or inspect the master
+copy in the optimizer state. (This also means the prior guide's v1 detection
+recipe needs a *sufficiently late* checkpoint to be conclusive; the v1
+evidence there is at step 17,400+, which is comfortably past this threshold.)
 
 ### 4. Loss does not reveal any of this
 
@@ -315,11 +389,19 @@ argument favors A or B at this scale.
 
 ## Implications for the 30B proposal
 
-- **README Section 6's fp32 bullet should be corrected.** The sentence
-  "norms-only fp32 would have fixed the observed bug" is false as written:
-  it would have fixed the *observed* symptom (norm weights) while leaving a
-  larger frozen parameter -- the embedding table -- undetected. Keep full
-  fp32 master, but the justification is now a measurement, not risk asymmetry.
+- **README Section 6's fp32 bullet has been corrected** (done, 2026-08-14).
+  The sentence "norms-only fp32 would have fixed the observed bug" is false
+  as written: it would have fixed the *observed* symptom (norm weights) while
+  leaving a larger frozen parameter -- the embedding table -- undetected.
+  Full fp32 master stays, and the justification moves from risk asymmetry to
+  measurement.
+- **The `_EMBEDDING_INIT` std=1.0 choice is worth revisiting on its own
+  merits.** It is what puts the embedding in the danger zone, and it is
+  unusual -- most implementations init embeddings near the linear-layer scale
+  (e.g. `std = dim**-0.5`, which is what agpt's own `_output_linear_init`
+  uses for `lm_head`, giving 0.022 at dim=2048). A smaller embedding init
+  would remove the precision exposure *and* is a live question for the 30B
+  run independent of dtype. Not tested here; flagged as follow-up.
 - **The Section 6 recurrence argument was right and under-stated.** It
   predicted the vulnerability recurs "for any parameter initialized near 1.0,
   QK-norm gains being exactly that." It already *had* recurred, in the
@@ -336,18 +418,23 @@ argument favors A or B at this scale.
   is confirmed by the isolated optimizer probe, but the exact fractions
   (38.36%, 3,168x) are debugmodel-specific. The embedding's share of total
   params differs by model: 38% here, ~26% at 2B.
-- **Single rank, degree-1 FSDP.** Correct for the correctness question (the
-  MixedPrecisionPolicy is installed at degree 1) but it means the throughput
-  numbers in Section 5 are a lower bound on collective overhead and should
-  not be quoted as production throughput. Job 8757216 addresses this.
-- **The visited-row control on the real model (8757215) had not returned at
-  the time of writing.** The mechanism is established by the isolated probe
-  (which has no coverage confound at all) and by the fact that arm C moves
-  100.000% of the same embedding under the same data and step count -- if
-  coverage were the explanation, arm C could not have moved unvisited rows
-  either. Weight decay does move unvisited rows, which is precisely the
-  point: those decay updates are ~1e-5 against a 7.8e-3 ULP and round to zero
-  in bf16.
+- **Single rank for the correctness arms.** Correct for the question asked
+  (the `MixedPrecisionPolicy` is installed at degree 1), but it means the
+  degree-1 timings are not production throughput. The 24-rank job 8757216
+  covers the multi-rank case and gives the same ordering.
+- **Why unvisited rows move at all in arm C.** Weight decay (0.1) updates
+  every element every step regardless of gradient, which is why arm C reaches
+  `frac_changed` 1.000000 across the full 256k-row table. Those decay updates
+  are ~1e-5 against a 7.8e-3 ULP at scale 1.0, so in bf16 they round to zero
+  forever. This is the same failure as the norms, and it means the embedding
+  is *doubly* affected: no decay anywhere, and no gradient updates on ~85% of
+  the elements in the rows it does visit (Section 3a).
+- **The 91 touched rows in the visited-row control are few** because the
+  offline `c4_test` fixture at LBS=2 / seq_len=512 sees only ~5k token
+  positions over 300 steps with heavy repetition. That is a small sample of
+  the vocabulary, but it is the *same* sample in all three arms, so the
+  A/B/C comparison is valid; it just should not be read as "only 91 rows
+  matter at production scale".
 - **`lm_head` is not affected** (std ~0.06, `frac_changed` 0.996 even in arm
   A), so this is specifically about the input embedding, which agpt does not
   tie to the output head in these configs.
@@ -355,9 +442,19 @@ argument favors A or B at this scale.
   investigation measured the ~1.6e-5 update magnitude under SophiaG and the
   same ULP argument applies, but the exact frozen fraction under SophiaG at
   2B was not re-measured in this experiment.
-- **Not committed to git.** The code changes listed under Method are in the
-  working tree locally and copied to the Aurora checkout; they are opt-in and
-  default-off, so the production path is unchanged either way.
+- **v1 embedding damage was not directly confirmed on a production
+  checkpoint.** The mechanism plus the identical `_EMBEDDING_INIT` across all
+  agpt flavors makes it near-certain that every v1 run has a badly
+  under-trained embedding table, but Section 3c explains why a DCP checkpoint
+  cannot show this directly (everything is stored bf16). Confirming it would
+  mean comparing a v1 checkpoint's embedding against its own init, or reading
+  the optimizer master state. Those runs are already discarded, so this was
+  not pursued.
+- **The ablation code is opt-in and default-off.** `EZPZ_FP32_NORMS` unset
+  (the normal case) leaves the FSDP grouping and every production code path
+  byte-for-byte unchanged; verified by running `agpt_debugmodel_local` with
+  no env var and seeing neither the promotion nor the extra-group log line.
+  The same files were copied to the Aurora checkout to run the jobs.
 
 ## Related
 

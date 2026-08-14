@@ -72,9 +72,18 @@ Measured on the debugmodel over 300 steps (Aurora job 8757151, see
 | bf16 master | bfloat16 | **0.000346** | 3.44e-06 |
 | fp32 master | float32   | **1.000000** | 1.09e-02 |
 
+This is *not* explained by "most vocab rows were never visited". Restricting
+to the rows that actually received a nonzero embedding gradient (identical
+91 rows in both arms, same seed and data, job 8757243):
+
+| | rows touched | frac moved, touched rows only |
+|---|---|---|
+| bf16 master | 91 | **0.1464** |
+| fp32 master | 91 | **1.0000** |
+
 Across the whole model, bf16 master leaves **38.4% of all parameter
 elements never updated**, and the norms are only 0.009pp of that — the
-overwhelming majority is the embedding table.
+embedding table is **99.3%** of the frozen mass.
 
 The practical consequence: **`training.dtype = float32` (fp32 master for
 everything) is doing more work than this document originally credited it

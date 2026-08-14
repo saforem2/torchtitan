@@ -120,13 +120,19 @@ reason had gone unnoticed for the entire campaign.
    about *linear* layers at std~0.005-0.02. The embedding is neither a linear
    layer nor at that scale, and nobody checked it.
 
-3. **Mechanism confirmed as scale, not vocab coverage.** The obvious objection
-   -- most vocab rows are unvisited in 300 steps -- is ruled out two ways. An
-   isolated optimizer probe applying identical gradients to *every* row:
-   std=1.0 bf16 moves 19.81% of elements, std=1.0 fp32 moves 100%, std=0.02
-   bf16 moves 100%. And arm C moves 100.000% of the *same* embedding under the
-   *same* data -- if coverage were the explanation, arm C could not have moved
-   unvisited rows either.
+3. **Mechanism confirmed as scale, not vocab coverage -- three controls.**
+   The obvious objection is that most vocab rows are unvisited in 300 steps.
+   **(a) The decisive one (job 8757243):** restrict `frac_changed` to only
+   the embedding rows that actually received a nonzero gradient. All three
+   arms touch **exactly the same 91/32,000 rows** (same seed, same data);
+   among those rows full fp32 moves **1.0000** of elements while arm B moves
+   **0.1471** and the fully broken arm A moves 0.1464. **Arm B is
+   indistinguishable from the broken arm once coverage is eliminated by
+   construction.** (b) An isolated optimizer probe applying identical
+   gradients to every element: std=1.0 bf16 moves 19.81%, std=1.0 fp32 moves
+   100%, std=0.02 bf16 moves 100% -- scale alone reproduces it. (c) Arm C
+   moves 100.000% of the same embedding under the same data, which coverage
+   cannot explain.
 
 4. **Loss cannot see any of this.** All three arms land within 0.005 nats at
    step 300, and **the broken arm has the numerically lowest final loss.**
@@ -134,24 +140,46 @@ reason had gone unnoticed for the entire campaign.
    anyone using loss as the acceptance signal for a precision change will
    accept a broken configuration.
 
-5. **The old bullet's recurrence prediction was right and under-stated.** It
-   warned the vulnerability would recur "for any parameter initialized near
-   1.0." It already *had* recurred -- in the shipped 2B/20B/80B configs, on
-   the embedding -- and went unnoticed because the v1 post-mortem only
-   checked the norms.
+5. **The QK-norm recurrence prediction: CONFIRMED (job 8757254).** Section 6
+   warned the vulnerability recurs "for any parameter initialized near 1.0,
+   QK-norm gains being exactly that." With QK-norm enabled, arm A freezes
+   **25/25 norms including all 12 QK-norms.** The 30B plan's intent to add
+   QK-norm would have walked straight into this had the default been bf16.
+   The prediction was also *under-stated*: it had already recurred in the
+   shipped 2B/20B/80B configs, on the embedding, unnoticed because the v1
+   post-mortem only checked norms.
 
-**Net effect on the proposal: full fp32 master stays, but the justification
-upgrades from risk-asymmetry judgment to measurement.** Section 6 amended.
-Incidental finding: FSDP2 asserts a uniform original param dtype per
-`fully_shard` group, so arm B was not expressible as a config flag -- it
-needed opt-in, default-off code. Worth keeping as a scale-free regression
-test: 300 steps on a 21M model, ~20s per arm, catches a class of bug that
-cost a full production restart.
+6. **Arm B is also the SLOWEST arm, so it has no remaining advantage**
+   (job 8757216, 2 nodes / 24 ranks / FSDP degree 24). tps: **A 29.8,
+   B 39.0, C 54.0** -- full fp32 is 38% faster than norms-only and 81%
+   faster than bf16 master, at identical memory. FSDP2 forbids mixed dtypes
+   in a shard group, so norms-only *requires* splitting each of the 13 norms
+   into its own `fully_shard` group and its own collectives. **Arm B loses on
+   correctness, throughput, and complexity simultaneously.**
 
-**Caveats:** debugmodel scale with AdamW (production uses SophiaG); single
-rank at FSDP degree 1, so the throughput numbers are not production figures;
-the embedding's parameter share is 38% here vs ~26% at 2B; `lm_head`
-(std~0.06) is unaffected.
+**Net effect on the proposal: full fp32 master stays, and the justification
+upgrades from risk-asymmetry judgment to measurement -- it is load-bearing,
+for a reason nobody had identified, and it is also the fastest option
+measured.** Section 6 amended; a correction added to
+`docs/guides/training-dtype-bf16-norm-freeze.md`. Worth keeping as a
+scale-free regression test: 300 steps on a 21M model, ~20s per arm, catches a
+class of bug that cost a full production restart.
+
+**Operational trap documented:** DCP stores bf16 regardless of master dtype,
+and an *early* fp32-master checkpoint is indistinguishable from a broken one
+(v2 norms are still all-ones at step 1000, clearly moved by step 5960). Never
+judge a precision fix from an early checkpoint.
+
+**Open follow-up, independent of dtype:** `_EMBEDDING_INIT` at `std=1.0` is
+what puts the embedding in the danger zone at all, and is unusual against the
+`dim**-0.5` agpt already uses for `lm_head`. Worth revisiting for 30B on its
+own merits.
+
+**Caveats:** debugmodel scale with AdamW (production uses SophiaG); the
+absolute tps figures are from a 21M model at 24 ranks, communication-bound at
+~1-2% MFU, so the *ordering* is the result, not the numbers; the embedding's
+parameter share is 38% here vs ~26% at 2B; `lm_head` (std~0.06) is
+unaffected.
 
 ### exp04 -- does fp32 master force fp32 inference? (2026-08-14)
 
