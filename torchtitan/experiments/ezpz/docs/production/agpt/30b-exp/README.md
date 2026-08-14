@@ -82,8 +82,15 @@ but it means ~500B tokens of 512-node time produced no measurable capability.
 | 4 | 7,068 | 27.3% |
 | 16 | 6,995 | 27.0% |
 | 64 | 6,702 | 25.9% |
-| 256 | 2,500 | 9.5% |
+| 256 | 2,500 | 9.5% (torch 2.10; **18.77% on current 2.13** -- see below) |
 | **512 (production)** | **~1,478** | **~9-11%** |
+
+> **Correction ([exp03](exp03-1b-proxy-design.md)).** The 256N row is a
+> **torch 2.10** measurement. The current torch-2.13 stack measures 256N at
+> **18.77% MFU**, so this table overstates the mid-scale collapse by ~2x. The
+> 512N ~9-11% figure is current and real, and 64N is still the efficiency
+> knee -- the argument below survives, but on a 512N-vs-64N gap, not a
+> 256N cliff.
 
 Live from the completed chain's last steps: `tps: 1,478 tflops: 26.22
 mfu: 8.79%`. We ran a 2B model at dp=6144 -- per-rank work small enough
@@ -194,11 +201,33 @@ not.** Every finding in Section 1 was reachable on a 1B proxy in ~a day.
 
 Proposed gate, before any mix touches a production chain:
 
-1. **1B proxy, ~50B tokens** on the candidate mix (~1 day at 64N).
+1. **1B proxy, ~50B tokens** on the candidate mix (~3h at 64N).
 2. Decontaminated eval on the full modern ladder, shot-namespaced.
 3. **Hard gate: MMLU must clear 0.28** (above the 4-way floor) on the proxy.
    If it does not, the mix does not go to production. Full stop.
 4. Only then commit production tokens.
+
+> **Two revisions from [exp03](exp03-1b-proxy-design.md), which specified this
+> gate and checked it against the repo:**
+>
+> 1. **There is no "1B proxy" to build -- we are already running it.** Our
+>    production 2B has **0.937B non-embedding parameters**, *below*
+>    Llama-3.2-1B's 0.973B: the 256,128-entry gemma vocab puts 525M in the
+>    embedding and 525M more in the untied lm_head, so 53% of the parameter
+>    budget does no depth-of-computation work. Every smaller config lands
+>    below the floor. The proxy is `agpt_2b` unchanged, which also keeps the
+>    arms comparable to the 12 existing datapoints.
+> 2. **The absolute 0.28 gate is the wrong *shape*.** A one-arm absolute
+>    threshold assumes the null is exactly 0.25 and that harness, tokenizer,
+>    and prompt format contribute nothing -- all three of which are live
+>    hypotheses here. A gate cannot assume away what it exists to test. 0.28
+>    is 8.2 binomial SE above chance but only **1.45 pp above the highest
+>    near-chance value we have ever recorded** (0.2655), and our
+>    across-config null is **2.4x overdispersed**. exp03 keeps 0.28 as a
+>    secondary conjunct and makes the primary rule **control-referenced and
+>    paired**: McNemar on discordant pairs, +0.030 arm-vs-control, with a
+>    same-mix reseed arm measuring the noise floor before the candidate is
+>    unblinded.
 
 Also worth institutionalizing from this campaign: eval the tail *as it is
 produced*, not at the end (coverage on the completed chain stopped at 39,600
@@ -235,6 +264,15 @@ Stated separately so nobody cites it as evidence.
 - Comparisons to other ~1-3B models clearing MMLU at ~2-11T tokens are
   recalled from published results and should be re-verified before being
   cited in a proposal or paper.
+- **The "MMLU capability floor at 1-3B params" premise appears to be false.**
+  [exp03](exp03-1b-proxy-design.md) found Qwen2.5-**0.5B** at 47.5 against
+  TinyLlama-1.1B at 25.3 *with 3T tokens* -- which says the binding constraint
+  is data, not scale, and that no published parameter threshold for MMLU
+  emergence could be located. This **weakens the stated motivation** for the
+  proxy gate while strengthening the gate's design: a null result at 0.937B
+  non-embedding params is more informative than assumed, not less. (Those
+  literature rows are themselves recalled, with differing harnesses and shot
+  counts.)
 
 ## 7. What would falsify this
 

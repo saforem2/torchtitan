@@ -37,14 +37,62 @@ on the important one.
 
 | # | Experiment | Question | Cost | Status |
 |---|---|---|---|---|
-| [03](exp03-1b-proxy-design.md) | 1B proxy design | Can a 1B on a candidate mix clear the MMLU floor, and is the 0.28 gate statistically defensible? | design only | RUNNING |
+| [03](exp03-1b-proxy-design.md) | 1B proxy design | Can a 1B on a candidate mix clear the MMLU floor, and is the 0.28 gate statistically defensible? | design only | **DONE** -- gate redesigned |
 
 ## Findings
 
 Filled in as experiments land. Each entry states whether it **supports**,
 **undermines**, or **does not settle** the corresponding proposal claim.
 
-_(none yet -- experiments in flight)_
+### exp03 -- 1B proxy design (2026-08-14)
+
+Four findings, three of which **undermine** the proposal as written. The
+proposal has been amended in place; the originals are preserved here.
+
+1. **UNDERMINES Section 5 ("1B proxy").** There is no 1B to build -- our
+   production `agpt_2b` has **0.937B non-embedding params**, *below*
+   Llama-3.2-1B's 0.973B. The 256,128-entry gemma vocab puts 525M in the
+   embedding and 525M in the untied lm_head; **52.8% of the parameter budget
+   does no depth-of-computation work.** Every smaller candidate costed
+   (dim1536 L24 = 0.604B, dim2048 L16 = 0.721B) lands *below* the floor. The
+   proxy is the production config, unchanged. *(Measured from
+   `agpt/__init__.py:434`.)*
+
+2. **UNDERMINES Section 5 ("hard gate 0.28").** Correct arithmetic, wrong
+   shape. 0.28 is 8.2 binomial SE above chance at N=14,042 -- but only
+   **1.45 pp above the highest near-chance MMLU we have ever recorded**
+   (0.2655), and our across-config null is **2.4x overdispersed** (sd 0.00873,
+   n=8), making 0.28 a 3.2 sigma gate under the empirical null. Structurally
+   worse: a one-arm absolute threshold assumes the null is 0.25 and that
+   harness/tokenizer/prompt-format contribute nothing -- all live hypotheses.
+   Replaced with a **paired, control-referenced** rule (McNemar, +0.030 vs
+   control, plus a same-mix reseed arm that measures the noise floor first).
+
+3. **UNDERMINES Section 6's motivation, STRENGTHENS the design.** The "MMLU
+   capability floor at 1-3B" premise appears **false**: Qwen2.5-0.5B scores
+   47.5 while TinyLlama-1.1B at 3T tokens scores 25.3. Constraint is data, not
+   scale. No published parameter threshold for MMLU emergence was located. A
+   null at 0.937B is therefore *more* informative than the proposal assumed.
+   *(Recalled, mixed harnesses -- not reproduced on ours.)*
+
+4. **CORRECTS Section 1.3.** The 256N = 9.5% MFU row is a **torch 2.10**
+   number; the current 2.13 stack measures **18.77%**. The table overstates
+   the mid-scale collapse by ~2x. 512N ~9-11% is current; 64N is still the
+   knee.
+
+**Cost finding (supports feasibility):** FineWeb-Edu is *already on Aurora,
+already gemma-tokenized, already in blendcorpus format* (1.551T tokens),
+plus dolmino `flan` (17.1B) and `math` (11.7B). An arm is a weighted text
+file, not a tokenization campaign. Four arms = **~771 node-hours = 0.14% of a
+single 512N x 12h production job.** Counter-finding: the `_local` dataset
+registrations in `datasets.py` point at `/lus/tegu/` (**Sunspot**), and
+Aurora's `Nemotron-CC-Math-v1/4plus` is an **empty directory** -- a Nemotron
+arm on Aurora would be planned against data that is not there.
+
+**Provisional:** the 2.4x overdispersion estimate rests on n=8 spanning two
+model sizes and five data treatments, so some spread may be real capability
+difference. The reseed arm replaces it with a measurement; until then +0.030
+is provisional.
 
 ## Rules for this directory
 
