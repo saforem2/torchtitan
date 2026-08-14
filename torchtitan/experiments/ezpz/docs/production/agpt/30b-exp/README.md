@@ -269,19 +269,23 @@ keep `arc_challenge@Nshot` shot-namespaced -- a bare key silently overwrote
 
 Stated separately so nobody cites it as evidence.
 
-- **fp32 master for ALL parameters.** What was *measured* is narrower: bf16
-  master freezes `RMSNorm.weight` because those params sit at 1.0, where the
-  bf16 ULP is ~7.8e-3 against ~1.6e-5 updates. Every other parameter sits
-  near 0.005 where the ULP is ~3.8e-5, and the investigation explicitly
-  confirmed they update fine ("Why other parameters update fine"). So
-  **norms-only fp32 would have fixed the observed bug.** I still recommend
-  full fp32 master because: the compute dtype is bf16 either way (the policy
-  is `param_dtype=bf16` with fp32 master, so there is no throughput cost);
-  the memory saving is ~10 GB at 20B, negligible against 88% peak; the
-  failure is silent and cost a full restart; and the vulnerability is
-  scale-dependent, so it recurs for any future parameter initialized near
-  1.0 -- QK-norm gains being exactly that. That is a risk-asymmetry
-  argument, not a measurement.
+- ~~**fp32 master for ALL parameters** is a risk-asymmetry judgment;
+  norms-only fp32 would have fixed the observed bug.~~ **RETRACTED
+  2026-08-14 -- this is now MEASURED, and the "norms-only would have
+  sufficed" half was wrong.** [exp02](exp02-fp32-norms-ablation.md) ran the
+  three-arm ablation (bf16 master / norms-only fp32 / full fp32) on the
+  debugmodel: norms-only fp32 does unfreeze all 13 RMSNorm weights, but it
+  leaves `tok_embeddings.weight` frozen at `frac_changed` **0.000345 vs
+  1.000000** under full fp32, because agpt initializes the embedding at
+  `std=1.0` (`_EMBEDDING_INIT`) -- the *same* scale as `RMSNorm.weight`, so
+  the same ~7.8e-3 ULP. **38.36% of all parameter elements never move under
+  norms-only, against 0.000% under full fp32.** The earlier reasoning ("every
+  other parameter sits near 0.005") holds for *linear* layers only; the
+  embedding is neither a linear layer nor at that scale. Full fp32 master
+  stays, now on evidence rather than caution. The recurrence prediction in
+  the old bullet was correct and under-stated: the vulnerability had
+  *already* recurred in the shipped 2B/20B/80B configs, on the embedding, and
+  went unnoticed because the v1 post-mortem only checked the norms.
 - **~30B and ~10T** are round numbers chosen from scaling-law reasoning and
   the stability envelope, not from a fitted scaling study on this stack.
 - **The corpus token counts** in Section 2 are curator estimates

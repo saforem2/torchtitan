@@ -46,12 +46,41 @@ Even at step 17,400 the same tensor is uniform 1.0. By contrast,
 
 ## Why other parameters update fine
 
+> **INCOMPLETE — see the correction below.** This section is right about
+> *linear* layers and wrong by omission about `tok_embeddings`.
+
 Linear layers initialize at small scales (`std ≈ 0.02` for q/k/v,
 `std ≈ 0.005` for o). A bf16 ULP at scale `0.005` is `~3.8e-5`,
 roughly the same magnitude as the per-step update — so updates can
 register, especially after a few steps of accumulation. RMSNorm
 weights are 100x larger (1.0 vs 0.01), so their ULP is 100x coarser
 relative to the same update size.
+
+### Correction (2026-08-14): `tok_embeddings` is affected too
+
+`RMSNorm.weight` is **not** the only parameter at scale 1.0. agpt
+initializes the token embedding with `normal_(std=1.0)`
+(`_EMBEDDING_INIT`, `agpt/__init__.py:202`) for every flavor, so it
+carries the same ~7.8e-3 bf16 ULP and the same freeze exposure. The
+section above only considered linear layers and missed it.
+
+Measured on the debugmodel over 300 steps (Aurora job 8757151, see
+[`exp02-fp32-norms-ablation.md`](../production/agpt/30b-exp/exp02-fp32-norms-ablation.md)):
+
+| `tok_embeddings.weight` | master dtype | frac_changed | mean abs delta |
+|---|---|---|---|
+| bf16 master | bfloat16 | **0.000346** | 3.44e-06 |
+| fp32 master | float32   | **1.000000** | 1.09e-02 |
+
+Across the whole model, bf16 master leaves **38.4% of all parameter
+elements never updated**, and the norms are only 0.009pp of that — the
+overwhelming majority is the embedding table.
+
+The practical consequence: **`training.dtype = float32` (fp32 master for
+everything) is doing more work than this document originally credited it
+with, and a "just make the norms fp32" optimization is NOT safe.** The
+v1 checkpoints are more degenerate than the norm-freeze framing implies,
+which further supports the restart-from-scratch decision recorded below.
 
 ## Why optimizer state shows non-zero exp_avg / hessian
 

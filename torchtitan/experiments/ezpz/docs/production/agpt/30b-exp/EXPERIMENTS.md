@@ -31,7 +31,8 @@ on the important one.
 | # | Experiment | Question | Cost | Status |
 |---|---|---|---|---|
 | [01](exp01-tokenizer-analysis.md) | Tokenizer analysis | Does gemma-7b's 256k vocab actually hurt us -- embedding cost, digit splitting, fertility, vocab utilisation? | CPU, minutes | **DONE** -- 2 claims refuted |
-| [02](exp02-fp32-norms-ablation.md) | fp32 norms-only ablation | Is fp32 for *norm params only* sufficient, or does full fp32 master do real work? | debugmodel, ~2N | RUNNING |
+| [02](exp02-fp32-norms-ablation.md) | fp32 norms-only ablation | Is fp32 for *norm params only* sufficient, or does full fp32 master do real work? | debugmodel, ~2N | **DONE** -- norms-only is NOT sufficient; Section 6 claim refuted |
+| [04](exp04-fp32-inference-investigation.md) | fp32 master vs fp32 inference | Does training with fp32 master weights force fp32 serving and double deployment cost? | CPU + cluster probes | **DONE** -- NO; vLLM cause not isolated |
 
 ## Tier 1 -- the gate
 
@@ -94,6 +95,126 @@ produced "42.6% never used". A randomised re-run roughly **doubled** every
 domain's distinct-ID count, so that figure was demoted to an upper bound and
 the ~64k argument rests on the sampling-robust mass-concentration statistic
 instead. Partial data in the report's Section 5b.
+
+### exp02 -- norms-only fp32 ablation (2026-08-14)
+
+**Refutes the Section 6 concession, in the opposite direction from the one
+proposed.** The question was whether full fp32 master is over-broad -- whether
+fp32 on the *norm params only* would have sufficed. It would not, and the
+reason had gone unnoticed for the entire campaign.
+
+1. **REFUTES "norms-only fp32 would have fixed the observed bug."** Three
+   arms, identical seed/data/steps, differing only in the master copy
+   (job 8757151, agpt debugmodel, 300 steps). Arm A (bf16) reproduces v1
+   exactly: **13/13 RMSNorm weights bit-identical to their 1.0 init**,
+   variance identically zero. Arm B (norms-only fp32) fully fixes the norms
+   -- statistically indistinguishable from full fp32 on them. **But it leaves
+   `tok_embeddings.weight` frozen at `frac_changed` = 0.000345 against
+   1.000000 under full fp32.** Across the model, **38.36% of all parameter
+   elements never move under norms-only, vs 0.000% under full fp32.**
+
+2. **The cause: agpt initializes the embedding at `std=1.0`
+   (`_EMBEDDING_INIT`, `agpt/__init__.py:202`) -- the same scale as
+   `RMSNorm.weight`, hence the same ~7.8e-3 bf16 ULP.** The prior
+   investigation's "why other parameters update fine" section reasoned only
+   about *linear* layers at std~0.005-0.02. The embedding is neither a linear
+   layer nor at that scale, and nobody checked it.
+
+3. **Mechanism confirmed as scale, not vocab coverage.** The obvious objection
+   -- most vocab rows are unvisited in 300 steps -- is ruled out two ways. An
+   isolated optimizer probe applying identical gradients to *every* row:
+   std=1.0 bf16 moves 19.81% of elements, std=1.0 fp32 moves 100%, std=0.02
+   bf16 moves 100%. And arm C moves 100.000% of the *same* embedding under the
+   *same* data -- if coverage were the explanation, arm C could not have moved
+   unvisited rows either.
+
+4. **Loss cannot see any of this.** All three arms land within 0.005 nats at
+   step 300, and **the broken arm has the numerically lowest final loss.**
+   This reproduces the campaign's central lesson at 1/1000th the scale:
+   anyone using loss as the acceptance signal for a precision change will
+   accept a broken configuration.
+
+5. **The old bullet's recurrence prediction was right and under-stated.** It
+   warned the vulnerability would recur "for any parameter initialized near
+   1.0." It already *had* recurred -- in the shipped 2B/20B/80B configs, on
+   the embedding -- and went unnoticed because the v1 post-mortem only
+   checked the norms.
+
+**Net effect on the proposal: full fp32 master stays, but the justification
+upgrades from risk-asymmetry judgment to measurement.** Section 6 amended.
+Incidental finding: FSDP2 asserts a uniform original param dtype per
+`fully_shard` group, so arm B was not expressible as a config flag -- it
+needed opt-in, default-off code. Worth keeping as a scale-free regression
+test: 300 steps on a 21M model, ~20s per arm, catches a class of bug that
+cost a full production restart.
+
+**Caveats:** debugmodel scale with AdamW (production uses SophiaG); single
+rank at FSDP degree 1, so the throughput numbers are not production figures;
+the embedding's parameter share is 38% here vs ~26% at 2B; `lm_head`
+(std~0.06) is unaffected.
+
+### exp04 -- does fp32 master force fp32 inference? (2026-08-14)
+
+**Answers a direct objection to Section 6: no, and the two are structurally
+decoupled.** Also refutes the documented explanation for a real operational
+bug, and turns up three unrelated defects.
+
+1. **SUPPORTS Section 6 (the fp32-master recommendation survives).** Two
+   independent reasons. Training forward/backward compute is bf16 *either
+   way* -- `training.dtype` controls only the optimizer-side master copy,
+   while `mixed_precision_param=bfloat16` governs every GEMM
+   (`parallelize.py:177`, `configs.py:55,62,70`). And **MEASURED:** the
+   exported safetensors are uniformly **BF16, 111/111 tensors** -- the fp32
+   master never reaches the served checkpoint at all. Even a fully
+   fp32-master run ships bf16 weights. The serving-dtype cost cannot be
+   charged against the training-dtype decision.
+
+2. **MEASURED, the key result:** the completed 2B (step-92,859) at bf16 is
+   **byte-identical to fp32 over a 200-token greedy decode**. The model is
+   not bf16-fragile. bf16 *does* flip ~5% of argmaxes (top1-top2 gap median
+   0.82 vs max logit diff 2.75), so the mechanism is real in the small -- but
+   it yields a different fluent continuation, never word salad.
+
+3. **REFUTES the recorded root cause of the vLLM gibberish.** Four docs state
+   that vocab 256000 + ffn 11008 accumulate enough bf16 error to flip greedy
+   argmax. **MEASURED:** that exact architecture (`global_step138650`, direct
+   ancestor of the ckpt-900 that gibberished) generates **coherently in bf16**
+   through HF. The blamed property is present and produces no gibberish.
+
+4. **Real cause: NOT established.** By elimination the failure is inside
+   vLLM, not the model -- but that is an **inference, not a measurement**.
+   ckpt-900's safetensors are deleted (dangling symlink) and vLLM will not
+   init on a login node, so the A/B could not be re-run. All generation tests
+   ran on **CPU**, which exonerates the weights and architecture but not the
+   XPU kernels. Keep `--generator.model-dtype=float32` as a workaround, but
+   re-label it "cause not isolated" rather than "agpt models need fp32,"
+   which would wrongly tax every future deployment.
+
+**Three unrelated bugs found:**
+
+- **No `torch_dtype` in any of 40 exported `config.json`.** vLLM's resolver
+  then falls back to safetensors metadata and finally to `torch.float32`,
+  before down-casting by platform preference -- so serving dtype is decided
+  by fallback logic rather than by us. One-line fix, highest value.
+- **RoPE flavor mismatch (H3) -- exposure resolved separately, see below.**
+- bos/eos swapped vs the tokenizer (confirmed; ruled out as a bf16 trigger).
+
+**H3 exposure, resolved by follow-up (MEASURED).** The agent left this
+inferred from main-repo script defaults; reading the **pinned clones** settles
+it. `runs/agpt-2b-v2` -- which produced both completed 4.674T chains -- is
+pinned at `f319e3fa`, *predating* the `_real` default (`5ffb850a1`,
+2026-06-25). It has no `*_autoretry.sh` at all, and its legacy script's
+`${CONFIG_SUFFIX:-}` has **no assignment anywhere in the file**, so those
+chains trained **complex** RoPE -- exactly what `MODEL_FLAVOR=2b` converts.
+**Every 2B eval in the campaign was converted correctly**, independently
+corroborated by HellaSwag rising monotonically 0.405 -> 0.561 (scrambled Q/K
+cannot produce a clean learning curve). So near-chance MMLU is **not** a
+conversion artifact.
+
+But `runs/agpt-20b-v2` and `runs/agpt-2b-constlr-from9200` both default
+`CONFIG_SUFFIX=_real` while `eval-2b-v2.sh:69` still defaults to the complex
+flavor -- **the trap is live for every chain newer than the completed 2B.**
+Tracked as task #73.
 
 ### exp03 -- 1B proxy design (2026-08-14)
 
