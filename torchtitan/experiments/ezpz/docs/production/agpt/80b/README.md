@@ -1,6 +1,32 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-14
+
+> [!IMPORTANT]
+> **2026-08-14 -- Wall 1 reproduces on the frameworks RC.** The RC
+> (oneAPI 2026.1.0 + torch `2.13.0a0+gitcf30153`) fixes a Sunspot oneCCL
+> reducing-collective SIGSEGV and the `torch.compile` TP=4 regression, and 80B
+> trains clean at 4N/TP=4 on it -- but bf16 at **dp=192 still NaN'd at step 30**
+> (job `12473142`: grad_norm nan @30, loss nan @31, nan-abort @35). Step 30 lands
+> in the historical 14/17/19/38 ladder, so **Wall 1 is stack-independent** and
+> the deep-bf16-residual root cause stands.
+>
+> One signature detail differs from what is recorded below: grad_norm was
+> **rising** into the failure (8.06 -> 8.29 -> 8.46 -> 8.64 -> nan), not
+> dead-flat then instant-NaN. LR was only ~1.5e-7 (warmup 200), so this is not
+> an LR-ceiling effect.
+>
+> **The decisive open test is running now** (job `12473149`):
+> `--training.mixed-precision-param=float32` at dp=192, 120 steps. fp32-acts is
+> the only 80B config with confirmed clean training, but job `8537349` validated
+> it at **n32 / GBS=96 -- inside the region where plain bf16 also works**, so it
+> has never been shown to hold at production dp. Its own diagnosis doc flagged
+> that gap and the follow-up was never run. If it holds, there is a viable (if
+> ~3-5x slower) production path; if it NaNs, fp32-residual becomes the critical
+> path.
+>
+> Stack status + what the RC does and does not fix:
+> [frameworks-rc-validation](../../../guides/frameworks-rc-validation.md).
 
 > **🔴 80B production is BLOCKED at scale -- the bf16 NaN (Wall 1) above ~62N;
 > no viable production run exists yet.** The stable corner (TP=4/LBS=1/bf16/GAS)
