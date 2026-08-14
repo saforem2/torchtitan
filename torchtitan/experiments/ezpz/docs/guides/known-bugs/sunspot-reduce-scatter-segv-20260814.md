@@ -303,3 +303,36 @@ failures without testing the primitive.
 This one is the opposite case -- the primitive itself was tested first, and it
 is what fails. The claim here is deliberately limited to what the probe shows:
 bare `reduce_scatter_tensor`, 48 ranks, smallest buffer, three allocations.
+
+## Operational landmines hit while re-enabling 80B (2026-08-14)
+
+Recorded because each cost a job and each will recur.
+
+**1. `--checkpoint.enable` with no `--checkpoint.folder` resumes a STALE tree.**
+Job `12473140` (66 nodes) died before step 1:
+
+```
+RuntimeError: Missing key in checkpoint state_dict: layers.0.attention.wk.weight
+```
+
+`wk.weight` is the *pre-refactor flat-attention* key. With checkpointing on and
+no folder given, the run resolved an old 80B checkpoint directory and tried to
+resume from it. **Always pass an explicit, fresh `--checkpoint.folder` for a
+new experiment.** (The flat-attention compat shim exists for exactly this
+failure but did not fire -- the resolved directory was not the one it inspects.)
+
+**2. Auto-retry misreads a config error as a bad node.** After the crash above,
+`launch_autoretry` logged `blind rotation: x1921c1s0b0n0 -> x1922c2s1b0n0` and
+burned a spare. Nothing was wrong with that host. A deterministic pre-step-1
+crash will exhaust spares and then stop, with node-swap messages that suggest
+hardware. **Read the first traceback, not the rotation log.**
+
+**3. GAS is derived, not a flag.** There is no
+`--training.gradient-accumulation-steps`. `trainer.py:384` computes
+`GAS = global_batch_size / (local_batch_size * batch_degree)`, so to get GAS=32
+at 8N/TP=4 (dp=24, LBS=1) you set `--training.global-batch-size=768`.
+
+**4. `CKPT_INTERVAL=0` is rejected.** The config validator requires
+`>= 1 step`; the 80B submit script hardcodes `--checkpoint.enable`, so there is
+no env knob to disable checkpointing. To write no checkpoint in a short smoke,
+set the interval above the step count.
