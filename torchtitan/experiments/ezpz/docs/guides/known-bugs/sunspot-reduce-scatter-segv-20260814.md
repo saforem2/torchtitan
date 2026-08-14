@@ -157,13 +157,62 @@ written with short names after the FQDN was stripped. `-ppn` needs no hostfile
 and works. Mentioned only so the `rc=127` lines in those job outputs are not
 mistaken for evidence.
 
+## It is the REDUCTION, not collectives in general (job `12473135`)
+
+Same node, same 12 ranks, same buffer sizes, same harness -- only the op differs:
+
+| collective | result |
+|---|---|
+| `all_gather_into_tensor` | **PASSES** all 5 sizes to 144 MiB/rank, rc=0 |
+| `reduce_scatter_tensor` | SIGSEGV, 0 collectives |
+| `all_reduce` | SIGSEGV, 0 collectives |
+
+The two that fail both perform an **on-device reduction**; `all_gather` only
+moves bytes. That points at the reduction kernel / its Level-Zero dispatch,
+not at the transport, the fabric, or CCL's communicator setup -- consistent with
+`all_gather` exercising the same transport successfully at 144 MiB/rank.
+
+**Scope for us:** this is worse than TP-only. `all_reduce` is what DDP and
+FSDP's gradient reduction use, so **all multi-rank training on Sunspot is
+affected**, not just TP>1. It is not merely an 80B problem.
+
+## No workaround among the standard CCL knobs (job `12473135`)
+
+All ten variants still segfault:
+
+| variant | result |
+|---|---|
+| baseline | segv |
+| `CCL_ATL_TRANSPORT=ofi` / `=mpi` | segv |
+| `CCL_ZE_IPC_EXCHANGE=sockets` / `=pidfd` | segv |
+| `SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=0` | segv |
+| `CCL_REDUCE_SCATTER_MONOLITHIC_KERNEL=0` | segv |
+| `CCL_WORKER_COUNT=1` | segv |
+| `CCL_ZE_ENABLE=0` | not a pass -- refuses to build a communicator at all (`ze_data was not initialized`) |
+| `ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE` | **not actually tested** -- COMPOSITE exposes 6 devices/node, so the 12-rank request was rejected (`ngpus must be > 0 and <= 6`) before any collective ran. Retested separately at 6 ranks (job `12473136`). |
+
 ## Draft ALCF ticket
 
-> **Subject:** Sunspot: `reduce_scatter_tensor` SIGSEGVs on XPU, single node, 12 ranks
+> **Subject:** Sunspot: reducing collectives (`reduce_scatter`, `all_reduce`)
+> SIGSEGV on XPU -- single node, 12 ranks; `all_gather` is fine
 >
-> On Sunspot, `torch.distributed.reduce_scatter_tensor` segfaults on a 1 KiB
-> bf16 buffer with 12 ranks on a single node. No fabric is involved; it
-> reproduces intra-node.
+> On Sunspot, `torch.distributed.reduce_scatter_tensor` and
+> `torch.distributed.all_reduce` both segfault on a 1 KiB bf16 buffer with 12
+> ranks on a single node. No fabric is involved; it reproduces intra-node.
+>
+> **`all_gather_into_tensor` on the identical harness passes all sizes up to
+> 144 MiB/rank.** The two failing ops perform an on-device reduction; the
+> passing one only moves bytes -- which suggests the reduction kernel or its
+> Level Zero dispatch rather than the transport or communicator setup.
+>
+> This blocks **all** multi-rank training on Sunspot, since `all_reduce` is
+> what DDP and FSDP gradient reduction rely on -- not only tensor-parallel jobs.
+>
+> None of the usual knobs help: `CCL_ATL_TRANSPORT=ofi|mpi`,
+> `CCL_ZE_IPC_EXCHANGE=sockets|pidfd`,
+> `SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=0`,
+> `CCL_REDUCE_SCATTER_MONOLITHIC_KERNEL=0`, `CCL_WORKER_COUNT=1` all still
+> segfault (job `12473135`).
 >
 > Reproducer (torch only, ~10s, attached / at
 > `torchtitan/experiments/ezpz/tests/repro_reduce_scatter_segv.py`):
