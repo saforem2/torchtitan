@@ -154,17 +154,47 @@ DCLM backbone and expect the totals to shrink.
 
 ## 3. Tokenizer
 
-Drop gemma-7b's 256,128-entry vocab. At 2B it is **525M params (~26% of the
-model) in embeddings**; at 30B the same vocab is a much smaller fraction, so
-this matters most if we keep training small models -- but the other reasons
-stand at any size:
+> **Substantially revised by [exp01](exp01-tokenizer-analysis.md).** Two of the
+> four bullets below were **wrong** and have been struck; the embedding cost was
+> understated by 2x. The conclusion (shrink the vocab) survives, but for
+> different reasons than I originally gave.
 
-- **~64-100k custom BPE** trained on the actual mix, not on someone else's.
-- **Single-digit tokenization.** We score exactly 0.0000 on GSM8K at every
-  checkpoint ever evaluated. Digit handling is a known contributor.
-- Explicit handling for LaTeX, units, and code indentation -- our corpus is
-  science-heavy and the general-purpose tokenizer wastes tokens on all three.
+Drop gemma-7b's 256,128-entry vocab. At 2B it is **1,049M params (52.8% of the
+model)** -- production agpt has weight tying *off*, so the 256128x2048 matrix is
+instantiated **twice**, as embedding and as untied `lm_head`. (My original
+"525M / ~26%" counted one matrix; `config_registry.py:163` already said ~53%.)
+At 30B (dim 6144) the same vocab is only 10.5%, so this is a small-model
+argument, and the reasons that survive are cost, code, and concentration:
+
+- **~64k custom BPE** trained on the actual mix. Justified by measurement:
+  **99% of all token mass sits in the top 62,108 IDs, and 129 IDs cover 50%.**
+- **Code fertility.** gemma is within 2-4% of Llama-3.1 on every prose/science
+  domain measured (it *beats* Llama on peS2o at 0.983x) but costs **+17% on
+  starcoder and +26% on Python**. Qwen3 matches Llama on code at 151k vocab,
+  so this is gemma's merges, not vocab size.
 - Keep 128-alignment (the 256128-vs-256000 gap is padding, worth preserving).
+
+- ~~**Single-digit tokenization.**~~ **FALSE as applied to gemma.** exp01
+  measured 9,999/9,999 integers splitting one-token-per-digit with **zero
+  exceptions**. The sharpest probe: prepending a `0` leaves gemma's
+  segmentation untouched (`2024` -> `2 0 2 4` becomes `0 2 0 2 4`), while
+  **Llama-3.1 re-segments the whole number** (`202`,`4` -> `020`,`24`). Gemma
+  is perfectly compositional; the pathology I described is Llama's, not ours.
+  **A custom tokenizer cannot buy this, and digit handling cannot explain
+  GSM8K = 0.0000.** That failure needs a different explanation.
+- ~~**Explicit handling for LaTeX, units, indentation.**~~ **Not supported.**
+  gemma encodes a 24-space run as a single token and beats Llama-3.1 on
+  `\begin{equation}`, `kPa`, and `\nabla^2`.
+
+**Internal contradiction exp01 caught:** the original section asked for
+single-digit tokenization *and* fewer wasted tokens. The +16% GSM8K fertility
+*is the price of* single digits -- any tokenizer preserving that property pays
+it. The two bullets were in tension.
+
+**Do this first, before any re-tokenization: turn on weight tying.** It
+recovers **525M params at 2B for free** -- no re-tokenization of the
+4.674T-token corpus, no loss of checkpoint comparability. `agpt_2b_tied`
+already exists.
 
 ## 4. Model + training
 

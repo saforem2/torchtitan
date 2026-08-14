@@ -30,7 +30,7 @@ on the important one.
 
 | # | Experiment | Question | Cost | Status |
 |---|---|---|---|---|
-| [01](exp01-tokenizer-analysis.md) | Tokenizer analysis | Does gemma-7b's 256k vocab actually hurt us -- embedding cost, digit splitting, fertility, vocab utilisation? | CPU, minutes | RUNNING |
+| [01](exp01-tokenizer-analysis.md) | Tokenizer analysis | Does gemma-7b's 256k vocab actually hurt us -- embedding cost, digit splitting, fertility, vocab utilisation? | CPU, minutes | **DONE** -- 2 claims refuted |
 | [02](exp02-fp32-norms-ablation.md) | fp32 norms-only ablation | Is fp32 for *norm params only* sufficient, or does full fp32 master do real work? | debugmodel, ~2N | RUNNING |
 
 ## Tier 1 -- the gate
@@ -43,6 +43,57 @@ on the important one.
 
 Filled in as experiments land. Each entry states whether it **supports**,
 **undermines**, or **does not settle** the corresponding proposal claim.
+
+### exp01 -- tokenizer analysis (2026-08-14)
+
+**Undermines the proposal's stated rationale; strengthens a different one.**
+Section 3's conclusion (shrink the vocab) survives, but two of its four
+supporting bullets were measurably false and the headline cost figure was
+understated by 2x.
+
+1. **REFUTES "single-digit tokenization" as a reason.** gemma **already**
+   tokenizes every numeral into individual digits -- 9,999/9,999 integers,
+   one token per digit, **zero exceptions**, context-independent. The
+   decisive probe: prepending a `0` leaves gemma's segmentation untouched
+   (`2024` -> `2 0 2 4` becomes `0 2 0 2 4`), while **Llama-3.1 re-segments
+   the entire number** (`202`,`4` -> `020`,`24`). The pathology the proposal
+   described is Llama's, not ours. **A custom tokenizer cannot buy this, and
+   digit handling cannot explain GSM8K = 0.0000** -- that failure needs a
+   different explanation. *(Measured, 3,000 random numerals.)*
+
+2. **REFUTES "LaTeX / units / indentation" as a reason.** gemma encodes a
+   24-space run as one token and *beats* Llama-3.1 on `\begin{equation}`,
+   `kPa`, `\nabla^2`. *(Measured.)*
+
+3. **CORRECTS the embedding cost, in the proposal's favour, by 2x.** Not 525M
+   / ~26% but **1,049M / 52.8%** -- production agpt has `enable_weight_tying`
+   **off**, so the 256128x2048 matrix is instantiated twice (embedding +
+   untied `lm_head`). `config_registry.py:163` already said ~53%; the
+   proposal cited one matrix. At 30B (dim 6144) it is 10.5%, confirming this
+   is a small-model argument.
+
+4. **SUPPORTS the ~64k target, on a different statistic.** **99% of all token
+   mass sits in the top 62,108 IDs; 129 IDs cover 50%.** Fertility is within
+   2-4% of Llama-3.1 on every prose/science domain (gemma *wins* peS2o at
+   0.983x); the only real penalty is code, **+17% starcoder / +26% Python**.
+   Qwen3 matches Llama on code at 151k vocab, so that is gemma's merges, not
+   vocab size.
+
+5. **Internal contradiction caught.** The section wanted single-digit
+   tokenization *and* fewer wasted tokens. The +16% GSM8K fertility **is the
+   price of** single digits; any tokenizer keeping that property pays it.
+
+**Cheapest actionable finding: turn on weight tying.** Recovers 525M params
+at 2B for free -- no re-tokenization of the 4.674T corpus, no loss of
+checkpoint comparability. `agpt_2b_tied` already exists and should be tried
+before any tokenizer work.
+
+**Self-flagged caveat (good practice, recorded):** the agent's first
+vocab-utilisation pass sampled sequentially from each domain's first shard and
+produced "42.6% never used". A randomised re-run roughly **doubled** every
+domain's distinct-ID count, so that figure was demoted to an upper bound and
+the ~64k argument rests on the sampling-robust mass-concentration statistic
+instead. Partial data in the report's Section 5b.
 
 ### exp03 -- 1B proxy design (2026-08-14)
 
