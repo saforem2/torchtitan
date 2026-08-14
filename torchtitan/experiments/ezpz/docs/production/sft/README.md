@@ -1,5 +1,25 @@
 # Production SFT
 
+> [!IMPORTANT]
+> **Start here: [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** --
+> the complete SFT + RL picture in one page.
+>
+> Headline: **accuracy lives in SFT structure, not mix tuning and not RL.**
+> Two-stage SFT (general math -> then GSM8K CoT) scores **0.205** GSM8K-CoT;
+> every single-stage rebuild lands **0.02-0.065**. 100 steps of GRPO on top
+> moved accuracy **0.205 -> 0.215** -- noise. ~0.2 is near this base's ceiling.
+>
+> **Deliverables:** `checkpoint-93` (B2) for CoT, `checkpoint-900-hf` for
+> general instruct.
+>
+> **Do NOT use `checkpoint-8672`** -- it catastrophically forgot (hellaswag
+> 0.593 -> 0.273, arc_easy 0.694 -> 0.298, at/near chance). The
+> `tulu_math_uc_mix_full` header still calls it "the deliverable"; that line is
+> wrong and its own body says "NOT 8672".
+>
+> This index is also incomplete: the **B3/B4 experiments are not listed below**
+> at all. The status page covers them.
+
 > SFT'd checkpoints derived from pre-trained AuroraGPT models. These
 > are the inputs to downstream alignment work (GRPO, DPO, …) and the
 > deliverables for instruction-tuned model releases.
