@@ -30,7 +30,7 @@ Reading rules:
 | `8714502` | 08-05 | 2B-512 39,601->41,300 | 20B-512 6,801->7,149 | 20B-256 7,501->7,897 | ckpt-path | ckpt-key | 3/5 |
 | `8714503` | 08-07 | 2B-512 41,301->43,820 | 20B-512 7,251->7,654 | 20B-256 7,801->8,334 | **bad_alloc** | **bad_alloc** | 3/5 |
 | `8744245` | 08-09 | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
-| `8744247` | -- | H, `afterany:8744245` | | | | | queued |
+| `8744247` | 08-13 | **2B-512 43,801->46,429 DONE** | watchdog-kill | 20B-256 8,301->9,400+ | 2B-512clr 9,201->14,500+ | ckpt-key | 3/5 |
 
 Slot map for the 5-trainer umbrellas: t0=2B-512, t1=20B-512, t2=20B-256,
 t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
@@ -39,9 +39,10 @@ t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
 
 | Cause | Slots hit | Status |
 |-------|-----------|--------|
-| `std::bad_alloc` at init | 8698125 t0/t1, 8714503 t3/t4, 8744245 t0/t2 | **OPEN** -- [known-bugs/umbrella-bad-alloc-init.md](../guides/known-bugs/umbrella-bad-alloc-init.md) |
+| `std::bad_alloc` at init | 8698125 t0/t1, 8714503 t3/t4, 8744245 t0/t2 | **OPEN** -- [known-bugs/umbrella-bad-alloc-init.md](../guides/known-bugs/umbrella-bad-alloc-init.md). Falsifiable next test: `qsub -v LAUNCH_STAGGER=180` (~1% of a 24h job). Did NOT recur in 8744247. |
+| idle-watchdog kill during a silent ckpt load | 8744247 t1 | **FIXED by config 08-13.** Not a crash -- the 1800s `IDLE_TIMEOUT` SIGTERM'd a HEALTHY 20B-512 30 min into loading 6,144 DCP shards (a load prints nothing while it works). Control in the same job: 20B-256 = 3,072 shards, loaded in 545s, survived. Auto-retry then blind-rotated a node and attempt 2 lost the CCL KVS race. Reported as `FAILOVER STOP: walltime` 45 min into a 24h job. Replacement `8752939` carries `IDLE_TIMEOUT=5400`. |
 | ckpt-path (latest resolved to an aborted fragment) | 8714502 t3 | FIXED 08-06 (fragments moved out of the ckpt tree) |
-| ckpt-key (pre-refactor flat attention keys) | 8714502 t4 | shim written + tested (`d83b4f767`), **delivery to the pinned clone still unsolved** |
+| ckpt-key (pre-refactor flat attention keys) | 8714502 t4, 8744247 t4 | **FIXED 08-13** (`ae880c32d`). The shim shipped but silently never fired: it resolved `<cwd>/<checkpoint.folder>` while the checkpointer PREPENDS `dump_folder`, so it stat'd a path that does not exist, the blanket `except` returned False, and 3,072 ranks died on `Missing key in checkpoint state_dict`. Now takes `dump_folder=` and WARNS on a non-existent dir. Verified against the real step-9500 metadata (False -> True). |
 | ImportError (`config_registry`) | 8744245 t3/t4 | **self-inflicted 08-08, reverted** -- main-repo `trainer.py` copied over a pinned clone that runs older code. Do not copy whole files into pinned clones. |
 
 ## Individual chain jobs (recent)

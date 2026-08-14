@@ -5,7 +5,7 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-14
 >
 > Status: **COMPLETE — target reached.** Chain at step **92,859** =
 > **4.674T tokens (100.0%** of the 4.67T target). The final dispatch

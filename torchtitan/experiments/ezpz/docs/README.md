@@ -22,39 +22,40 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
-| 2026-08-10 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-08-13 | ['Config' object has no attribute 'job' (ezpz branch, 2026-08-13)](./guides/known-bugs/config-job-dump-folder-attributeerror.md) |
+| 2026-08-12 | [RETRACTED -- this was NOT a cluster fault](./guides/known-bugs/sunspot-ccl-allgatherv-outage-20260810.md) |
+| 2026-08-11 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-08-11 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
+| 2026-08-11 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
+| 2026-08-11 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
+| 2026-08-11 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
+| 2026-08-11 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
+| 2026-08-11 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
+| 2026-08-11 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
+| 2026-08-11 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-08-11 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-08-11 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
+| 2026-08-11 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-08-11 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
+| 2026-08-11 | [Development Journal](./journal.md) |
+| 2026-08-11 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
+| 2026-08-11 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
+| 2026-08-11 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-10 | [Summaries](./summaries/README.md) |
 | 2026-08-10 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](./summaries/2026-07-26_to_2026-08-10.md) |
 | 2026-08-10 | [Production dispatch log](./production/dispatch-log.md) |
-| 2026-08-10 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-08-10 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
-| 2026-08-10 | [Development Journal](./journal.md) |
 | 2026-08-10 | [Umbrella std::bad_alloc at init -- intermittent, not yet root-caused](./guides/known-bugs/umbrella-bad-alloc-init.md) |
 | 2026-08-10 | [sunspot-x1921c4s3b0n0-bad-mount](./guides/known-bugs/sunspot-x1921c4s3b0n0-bad-mount.md) |
-| 2026-08-10 | [sunspot-ccl-allgatherv-outage-20260810](./guides/known-bugs/sunspot-ccl-allgatherv-outage-20260810.md) |
-| 2026-08-08 | [2B MDS mid-training: anneal-schedule A/B + data-mix experiment (Sunspot)](./experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md) |
-| 2026-08-06 | [2026-08-05 -- umbrella 8714502: 8h01m, "failed: 5/5", three chains actually advanced](./experiments/agpt/aurora/20260805-umbrella-8714502.md) |
-| 2026-08-05 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
-| 2026-08-05 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
-| 2026-08-05 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
-| 2026-08-05 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
-| 2026-08-05 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
-| 2026-08-05 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
-| 2026-08-05 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
-| 2026-08-05 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-08-05 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-08-05 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-08-05 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
-| 2026-08-05 | [frameworks-RC torch: torch.compile at TP=4 crashes in the SDPA flash-backward](./guides/known-bugs/fw-rc-compile-sdpa-backward-tp4.md) |
-| 2026-08-05 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
-| 2026-08-05 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
-| 2026-08-05 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-08-08 | [2B MDS mid-training: anneal-schedule A/B + data-mix experiment (Sunspot)](./experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md) |
+| 2026-08-06 | [2026-08-05 -- umbrella 8714502: 8h01m, "failed: 5/5", three chains actually advanced](./experiments/agpt/aurora/20260805-umbrella-8714502.md) |
+| 2026-08-05 | [frameworks-RC torch: torch.compile at TP=4 crashes in the SDPA flash-backward](./guides/known-bugs/fw-rc-compile-sdpa-backward-tp4.md) |
 | 2026-08-04 | [B4 results -- both paths FAILED to recover B2; two-stage structure is the lever](./production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md) |
 | 2026-07-29 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-07-26 | [2026-07-10 to 2026-07-26 -- ~16-Day Summary](./summaries/2026-07-10_to_2026-07-26.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-07-24 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
 | 2026-07-24 | [Blendcorpus EOFError Race in _build_index_mappings](./guides/known-bugs/blendcorpus-eoferror-race.md) |
 | 2026-07-24 | [80B 512N production run NaN'd: SophiaG unstable at production batch](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) |
-| 2026-07-24 | [80B fp32-residual fix — root-cause + prototype](./experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,17 +89,17 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-08-10 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-08-11 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-07-24 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-08-05 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**43800** (4.41T tokens, 94.3% of 4.67T), loss 2.6907. | 2026-08-05 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-05 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**8,300** (417.8B tokens, 8.9% of 4.67T), loss 2.2682. | 2026-08-05 |
-| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-05 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-08-11 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6907. | 2026-08-11 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-11 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**9,400** (473.1B tokens, 10.1% of 4.67T), loss 2.2682. | 2026-08-11 |
+| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-11 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-05 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-11 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-07-10 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
@@ -112,7 +112,7 @@ ARC-Challenge / Winogrande vs the (frozen-norm) v1 baseline.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [agpt 2B evals](./evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-07-24 |
-| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-05 |
+| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-11 |
 | [agpt 2B-MDS evals](./evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-07-09 |
 | [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-07-24 |
 
@@ -133,7 +133,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-10 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-11 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-10 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-06-28 |
@@ -170,7 +170,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-08-10 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-08-11 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 

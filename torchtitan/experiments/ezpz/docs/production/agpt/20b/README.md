@@ -42,7 +42,7 @@ per-task table.
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
 | [**v2 512N**](n512/README.md) (canonical chain) | Advancing — native auto-retry relaunch (8638793 resume + 8638795 cont) broke the sync-chain stall, carried step-4,400 → 5,400 (2026-07-05..07). step-100..5,400 persisted every 100. cont chained. | **8,700** (persisted) | **2.4635** | **~875.8B (18.7%)** |
-| [v2 256N](n256/README.md) | Advancing — carried to step **3,100** (156.0B, 3.3%) via the relocated `agpt-20b-n256` clone chain (8558548/8558549 + sneaks). Per-token comparator to the canonical 512N. | 8,300 | 2.2682 | ~156.0B (8.9%) |
+| [v2 256N](n256/README.md) | Advancing — carried to step **3,100** (156.0B, 3.3%) via the relocated `agpt-20b-n256` clone chain (8558548/8558549 + sneaks). Per-token comparator to the canonical 512N. | 9,400 | 2.2682 | ~156.0B (10.1%) |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode

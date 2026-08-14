@@ -1,26 +1,37 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-08-11.**
+> **Last updated: 2026-08-14.**
 >
 > **This is the canonical 2B production chain.**
 >
-> **Status:** chain at step **39,600** (~**3.99T** tokens,
-> **85.3%** of the 4.67T target), loss **2.71**. The chain is
-> advancing again -- it cleared the old step-30,400/30,500 `small`-
-> queue stall through the autoretry continuation chain, plus a
-> HEAD-migration dress rehearsal (`8686135` -> `8686136`) that
-> exercised resuming the on-disk checkpoint frontier on current
-> `HEAD` before handing back to the production venv. The ~10-day
-> gap around 2026-05-30 was queue saturation on Aurora `small`,
-> not a model, venv, or failover-wrapper fault. Sync mode remains
-> the operational workaround for the async-save cascade; the
-> async-mode runs (`8505176` and earlier) had been pinned at
-> step-13,300 for two weeks before the sync-mode pivot.
+> **Status: COMPLETE.** The chain finished its full olmo-mix-1124
+> budget on **2026-08-13 19:11 UTC** at step **46,429 / 46,429**
+> (**4.6737T** tokens, **100%** of the 4.67T target), final loss
+> **2.68687**. It exited cleanly -- `FAILOVER STOP: success`,
+> rc=0 -- as trainer 0 of the ~2098-node multi-chain umbrella
+> `8744247`, having entered that job at step 43,800. The final
+> checkpoint `step-46429` is on disk with all 6,144 shards plus
+> `.metadata`.
 >
-> **Next up:** the autoretry continuation chain keeps advancing the
-> chain toward the 46,429-step / 4.67T target as `small`-queue
-> slots open. Aurora `small` stays heavily oversubscribed (prod
-> jobs can wait days between sustained dispatches).
+> Getting here took the whole v2 recovery arc: the old
+> step-30,400/30,500 `small`-queue stall cleared through the
+> autoretry continuation chain, plus a HEAD-migration dress
+> rehearsal (`8686135` -> `8686136`) that exercised resuming the
+> on-disk checkpoint frontier on current `HEAD` before handing back
+> to the production venv. The ~10-day gap around 2026-05-30 was
+> queue saturation on Aurora `small`, not a model, venv, or
+> failover-wrapper fault. Sync mode remained the operational
+> workaround for the async-save cascade; the async-mode runs
+> (`8505176` and earlier) had been pinned at step-13,300 for two
+> weeks before the sync-mode pivot.
+>
+> **Next up:** nothing -- the chain has no budget left. Do NOT
+> submit continuations against this checkpoint dir; a resume would
+> either no-op or need an explicitly raised `TRAIN_TOKENS`, which
+> would no longer be the 4.67T olmo-mix-1124 run this page
+> documents. The 512N slot it occupied in the umbrella is free for
+> another chain. Post-training work (eval, SFT, forks) should start
+> from `step-46429`.
 >
 > **Eval scores:** see [`docs/evals/agpt/2b/`](../../../../evals/agpt/2b/README.md)
 > for the current v2 lm-eval results, including the modern task
@@ -72,13 +83,13 @@
 | (~5–9 day Q wait — Aurora `small` queue saturated) | 2026-05-30 → 2026-06-07 | — | — | — | — | — | **No R events.** Chain pinned at step-30,500 since 2026-05-30 07:53. |
 | [`8521627`](#log-8521627) | 2026-06-07 | ~8 min | (none) | (none) | — | — | **Failed in yeet-env preflight, no training.** `afterany` cont9. R 21:12 → E 21:20. 1 of 522 nodes (`x4112c1s7b0n0`) tripped a 120s rsync timeout with `Connection reset by 10.112.164.235 port 22`; the other 521 nodes finished the tarball copy in ~20s each. yeet-env reported `1/522 node(s) failed`, the failover wrapper bailed (exit 1), and no checkpoints were written past step-30,500. See **Recent issues** below. |
 
-**Latest checkpoint:** step-43800 (8508753 last persisted; cont9 wrote nothing past it)
+**Latest checkpoint:** step-46429 -- FINAL (umbrella `8744247` trainer 0, 6,144 shards + `.metadata`)
 
-**Cumulative steps:** 43,800 (chain pinned since 2026-05-30 07:53)
+**Cumulative steps:** 46,429 / 46,429 -- **target reached 2026-08-13 19:11 UTC**
 
-**Tokens consumed:** 43,800 × 12,288 × 8,192 = **4.41T tokens** (94.3% of 4.67T target)
+**Tokens consumed:** 46,429 × 12,288 × 8,192 = **4.67T tokens** (100.0% of 4.67T target)
 
-**Loss:** 2.6907 (nowkdepb end, step-43,820 -- umbrella 8714503)
+**Loss:** 2.68687 (final, step-46,429 -- umbrella 8744247 trainer 0)
 
 ### Recovery
 

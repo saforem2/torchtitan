@@ -1,6 +1,6 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-11
 
 > **🔴 80B production is BLOCKED at scale -- the bf16 NaN (Wall 1) above ~62N;
 > no viable production run exists yet.** The stable corner (TP=4/LBS=1/bf16/GAS)
