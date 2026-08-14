@@ -68,6 +68,41 @@ The RC is a collectives/compiler fix. It does **not** touch the numerics walls:
 - **QK-norm TP=4 backward** (`tensor does not have a device`) -- not retested.
 - **Pipeline parallelism** -- a torch version floor, unrelated; not retested.
 
+## fp32 activations at dp=192 -- what it revealed (job `12473149`)
+
+Running the SAME config with `--training.mixed-precision-param=float32` at the
+dp where bf16 dies exposes how different the two numerically are:
+
+| step | bf16 grad_norm | fp32 grad_norm | bf16 loss | fp32 loss |
+|---:|---:|---:|---:|---:|
+| 5 | 8.33 | **17,418** | 15.46 | 12.84 |
+| 6 | 8.01 | **80,210** | 12.88 | 12.79 |
+| 7 | 7.86 | **91,467** | 12.90 | 12.75 |
+| 11 | 8.05 | **80,065** | 12.76 | **12.39** |
+
+**bf16 is not mis-reporting a large gradient -- it is computing a different,
+smaller one.** bf16 has fp32's full exponent range (max ~3.4e38), so 18,000 is
+trivially representable; the 65504 ceiling is *fp16*. What bf16 loses is its
+**7-bit mantissa**, which destroys the small-magnitude contributions whose
+accumulation across an 84-layer residual stream produces these spikes. This is
+exactly the mantissa-not-exponent mechanism the root-cause report describes.
+
+Two consequences:
+
+- **"grad_norm ~= 8" in every historical 80B bf16 log is a real value for a
+  degraded gradient**, not a masked reading of the true one. Treat those logs as
+  measuring a different optimization problem than the one we intend to solve.
+- **Gradient clipping is not broken.** `max_norm=1.0` scales by `1/total_norm`
+  using the norm computed *in that run*; the bf16 run genuinely has norm ~8. The
+  gradients are wrong, not the clipping. (An earlier draft of this page claimed
+  clipping was misbehaving by ~2000x -- that was wrong and is corrected here.)
+- **fp32 learns faster**, which is independent corroboration: at step 11 fp32 is
+  at loss 12.39 vs bf16 12.76, and accelerating. If bf16 merely mis-reported a
+  correct gradient, both would descend identically.
+
+Cost, measured at dp=192: memory 36.5 GiB (57%) vs bf16 20.5 GiB (32%);
+throughput **16 tps vs 54 -- a 3.4x slowdown**, matching the documented 3-5x.
+
 ## Every performance number in our docs is stale
 
 The dp=192/264 clean runs, the NaN step numbers, the MFU and throughput tables,
