@@ -249,6 +249,19 @@ Stated separately so nobody cites it as evidence.
 - **EP gets fixed** -> the MoE option dominates dense and this plan should be
   revisited.
 
+## Experiments
+
+Claims in Sections 2-4 are being tested rather than asserted. See
+**[EXPERIMENTS.md](EXPERIMENTS.md)** for the live tracking table -- what has
+been run, what it found, and which proposal claims it supports or undermines.
+
+Note on scope: a toy-scale model **cannot** settle the central MMLU question.
+MMLU has a capability floor around 1-3B params, so a 20M or 500M model returns
+~0.25 on *any* data and a null result cannot distinguish "the mix is bad" from
+"the model is too small". Tier 0 experiments are cheap because their questions
+are scale-free (tokenizer statistics, precision ablation), not because the
+important question is being economised on -- that one needs the 1B proxy.
+
 ## Related
 
 - [`2b/n512/README.md`](../2b/n512/README.md) -- the completed chain
