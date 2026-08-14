@@ -42,7 +42,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-11 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-08-11 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-10 | [Summaries](./summaries/README.md) |
-| 2026-08-10 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](./summaries/2026-07-26_to_2026-08-10.md) |
+| 2026-08-10 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](./summaries/2026-08-10.md) |
 | 2026-08-10 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-08-10 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-08-10 | [Umbrella std::bad_alloc at init -- intermittent, not yet root-caused](./guides/known-bugs/umbrella-bad-alloc-init.md) |
@@ -58,7 +58,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-05 | [frameworks-RC torch: torch.compile at TP=4 crashes in the SDPA flash-backward](./guides/known-bugs/fw-rc-compile-sdpa-backward-tp4.md) |
 | 2026-08-04 | [B4 results -- both paths FAILED to recover B2; two-stage structure is the lever](./production/sft/agpt/2b-mds/b4-finish-and-reweight/README.md) |
 | 2026-07-29 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-07-26 | [2026-07-10 to 2026-07-26 -- ~16-Day Summary](./summaries/2026-07-10_to_2026-07-26.md) |
+| 2026-07-26 | [2026-07-10 to 2026-07-26 -- ~16-Day Summary](./summaries/2026-07-26.md) |
 | 2026-07-26 | [Installing PyTorch in a Fresh, Self-Contained .venv on Polaris](./guides/polaris-fresh-venv.md) |
 | 2026-07-24 | [moe_debugmodel_ep LBS=2 step-41 stall — transient, not reproducible](./upstream-issues/moe_ep_step41_hang.md) |
 | 2026-07-24 | [blendcorpus per-corpus index build/load race at small dataset sizes](./upstream-issues/blendcorpus_index_build_race.md) |
@@ -136,7 +136,7 @@ relevant guide before suggesting work that touches one of these.
 | [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-11 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-10 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
-| [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-12_to_2026-04-27.md) | 2-week retrospective | 2026-06-28 |
+| [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-06-28 |
 | [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-08-10 |
 
 ## Setup & Reference
