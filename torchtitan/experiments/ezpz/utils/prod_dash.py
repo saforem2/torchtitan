@@ -145,6 +145,11 @@ TTL = %(ttl)d
 FRESH = %(fresh)d
 SHOW_ALL = %(show_all)d
 EXP_MAX_AGE = %(exp_max_age)d
+# Injected: this aggregator runs REMOTELY as a standalone string, so it cannot
+# see the local module's constants. Referencing LIVE_WINDOW without this line
+# raises NameError inside live_layer and the whole payload is lost (the board
+# then renders "0 live / 0 chains").
+LIVE_WINDOW = %(live_window)f
 USER = os.environ.get("USER", "foremans")
 PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
@@ -601,29 +606,53 @@ def live_layer():
             cand += glob.glob(os.path.join(root, "logs", "*" + j["id"], "run.log"))
             cand += glob.glob(os.path.join(
                 root, "torchtitan/experiments/ezpz/scripts/oneoff/*.o" + j["id"]))
-        base = None
+            # UMBRELLA JOBS: one PBS job runs N trainers, each with its OWN ckpt
+            # dir, writing to logs/multi-autoretry-<jobid>/trainer-*.console.log.
+            # Without these the only log found is the umbrella .o, whose FIRST
+            # ckpt-dir match wins -- so job 8744247 (5 trainers) marked exactly
+            # one chain live and showed the other four "idle" while they were
+            # actively stepping.
+            cand += glob.glob(os.path.join(
+                root, "logs", "*" + j["id"], "trainer-*.console.log"))
+        # A log maps to ONE ckpt dir; a job may map to several (umbrella).
+        bases = []
         for p in cand:
             try:
                 head = ANSI.sub("", open(p, errors="replace").read(200000))
             except (FileNotFoundError, IsADirectoryError):
                 continue
             m = CKPT_RE.search(head)
-            if m:
-                base = m.group(1)
-                break
-        if not base:
+            if m and (m.group(1), p) not in bases:
+                bases.append((m.group(1), p))
+        if not bases:
             continue
-        if rank.get(j["state"], 0) >= rank.get(states.get(base, "E"), 0):
-            states[base] = j["state"]
-        if j["state"] == "R" and cand:
-            _, last = _olog_records(cand)
-            if last:
-                try:
-                    age = time.time() - max(os.path.getmtime(p) for p in cand
-                                            if os.path.exists(p))
-                except Exception:
-                    age = None
-                live[base] = dict(last, jobid=j["id"], age=age)
+        # Group each chain's logs so a chain's tip is read only from ITS OWN
+        # log, never from a sibling trainer's.
+        per_base = {}
+        for b, p in bases:
+            per_base.setdefault(b, []).append(p)
+        for base, paths in per_base.items():
+            if rank.get(j["state"], 0) >= rank.get(states.get(base, "E"), 0):
+                states[base] = j["state"]
+            if j["state"] != "R":
+                continue
+            _, last = _olog_records(paths)
+            if not last:
+                continue
+            try:
+                age = time.time() - max(os.path.getmtime(p) for p in paths
+                                        if os.path.exists(p))
+            except Exception:
+                age = None
+            # A trainer can finish (or hang) while its umbrella job keeps
+            # running. Its console log then stops advancing, and a stale tip
+            # would report the chain live forever. Label it "stale" -- what we
+            # actually observed (log not advancing) rather than "done", which
+            # would assert a clean finish we cannot see from here.
+            if age is not None and age > LIVE_WINDOW:
+                states[base] = "stale"
+                continue
+            live[base] = dict(last, jobid=j["id"], age=age)
     return states, live
 
 bb = load_backbone()
@@ -667,6 +696,32 @@ for key, ch in bb["chains"].items():
         ch["pct_target"] = None
         ch["tokens"] = None
     chains_out[key] = ch
+
+# A chain can be TRAINING RIGHT NOW and still be absent from the backbone: the
+# backbone is a cached W&B/trajectory snapshot, so a chain whose first steps
+# postdate the last rebuild (or that no trajectory lists) has no entry to
+# annotate, and the loop above -- which only iterates backbone chains -- drops
+# it silently. That is how the constlr-from9200 fork stayed invisible while
+# trainer-3 of umbrella job 8744247 was actively stepping it.
+# Synthesize a minimal row from the live tip so "what is running" is never a
+# function of cache freshness. Marked kind=live-only: no curve/gbs, so it shows
+# on the board but is skipped by the (curve-requiring) plot.
+_known = {c.get("ckpt_base") for c in chains_out.values() if c.get("ckpt_base")}
+for base, lv in live.items():
+    if base in _known:
+        continue
+    chains_out["live:" + base] = {
+        "label": base.replace("agpt-", ""),
+        "model": "2b" if "-2b-" in base else ("20b" if "-20b-" in base else "?"),
+        "num_nodes": None, "gbs": None, "seq_len": None, "token_target": None,
+        "kind": "live-only", "ckpt_base": base,
+        "series": {}, "curve": [],
+        "queue_state": states.get(base), "live_tip": lv,
+        "latest_step": lv.get("step"), "latest_loss": lv.get("loss"),
+        "pct_target": None, "tokens": None,
+        "log_age": lv.get("age"), "last_job": lv.get("jobid"), "next_job": None,
+    }
+
 bb["chains"] = chains_out
 bb.pop("idx", None)  # don't ship the path index to the client
 bb["built_age"] = round(now - bb["built_at"], 1)
@@ -689,7 +744,8 @@ def fetch(stderr_cb=None) -> dict:
     script = _AGG % {"repo": REPO, "ttl": BACKBONE_TTL,
                      "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0,
                      "show_all": 1 if SHOW_ALL else 0,
-                     "exp_max_age": EXP_MAX_AGE}
+                     "exp_max_age": EXP_MAX_AGE,
+                     "live_window": LIVE_WINDOW}
     if LOCAL:
         cmd = [sys.executable, "-c", script]
     else:
@@ -908,7 +964,10 @@ def _apply_house_style(plt):
         pass
 
 
-def draw_curves(payload, wpx, hpx, save_path=None):
+def draw_curves(payload, figsize, save_path=None):
+    """Render the overlay. ``figsize`` is (width_in, height_in) from
+    size_figure() -- already fitted to the terminal window and clamped to the
+    kitcat cell limit, so this function does no sizing math of its own."""
     import matplotlib
     if save_path:
         matplotlib.use("Agg")
@@ -930,8 +989,7 @@ def draw_curves(payload, wpx, hpx, save_path=None):
         })
     chains = payload.get("chains", {})
     dpi = 100
-    fig, ax = plt.subplots(
-        figsize=(max(5.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.80 / dpi)), dpi=dpi)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     # x-axis: "step" (default, faithful to rl_dash3) or "tokens" (every chain
     # shares the 4.67T olmo-mix target, so tokens = step * gbs * seq_len puts
     # them on a comparable footing despite very different step counts/batches).
@@ -986,18 +1044,100 @@ def draw_curves(payload, wpx, hpx, save_path=None):
     plt.close(fig)
 
 
-def terminal_pixels():
+def terminal_cells():
+    """(cols, rows, cell_w_px, cell_h_px) from TIOCGWINSZ.
+
+    Cells -- not pixels -- are the unit that actually constrains us: kitcat
+    renders the figure to a PNG and lays it out as a grid of
+    ceil(img_px / cell_px) terminal cells, and the kitty unicode-placeholder
+    protocol can address at most 297 cells per axis. Sizing from pixels made
+    that grid an uncontrolled derived quantity (see size_figure)."""
+    cols, rows, xp, yp = 100, 30, 0, 0
     try:
+        import array
         import fcntl
-        import struct
         import termios
-        buf = fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, b"\0" * 8)
-        _, _, xp, yp = struct.unpack("HHHH", buf)
-        if xp and yp:
-            return xp, yp
+        buf = array.array("H", [0, 0, 0, 0])
+        fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, buf)
+        rows, cols, xp, yp = buf
     except Exception:
         pass
-    return 1200, 720
+    cols = cols or 100
+    rows = rows or 30
+    # ws_xpixel/ws_ypixel are 0 in tmux and over plain SSH; kitcat falls back to
+    # an 8x16 cell scaled by the device-pixel ratio, so mirror that exactly --
+    # if we assume a different cell size than kitcat uses, our cell budget is
+    # wrong in precisely the situation that overflows.
+    cw = int(xp // cols) if (xp and cols) else 0
+    chh = int(yp // rows) if (yp and rows) else 0
+    if not cw or not chh:
+        scale = 1.0
+        try:
+            from kitcat.terminal_query import get_dpi_scale
+            scale = float(get_dpi_scale()) or 1.0
+        except Exception:
+            if sys.platform == "darwin":
+                scale = 2.0
+        cw = cw or max(1, round(8 * scale))
+        chh = chh or max(1, round(16 * scale))
+    return cols, rows, cw, chh
+
+
+# kitty unicode placeholders can address at most len(_DIACRITICS)==297 cells per
+# axis. Exceeding it is a hard ValueError, not a clipped image.
+KITCAT_MAX_CELLS = 297
+
+
+def size_figure(reserved_rows=0, dpi=100):
+    """Figure (width_in, height_in) that fits the CURRENT terminal window.
+
+    Replaces the old pixel-based sizing, which had two failure modes:
+
+      1. It fed TIOCGWINSZ *logical* pixels into figsize, but kitcat re-renders
+         at dpi*device_pixel_ratio -- so on a HiDPI display the PNG came out ~2x
+         larger than the window in each axis. The resulting placeholder grid
+         overflowed both the pane (image wider than the window; the x tick
+         wrapped to its own line) and, at wide window sizes, the 297-cell
+         protocol limit outright:
+             ValueError: image too large for unicode placeholders:
+                         needs 76x402 cells, max is 297x297
+      2. hpx*0.80 budgeted 80% of the window height for the plot while the
+         status board above it is ~10 rows -- so figure + board exceeded the
+         window and the terminal scrolled, carrying the title and legend off
+         the top. (That is why neither was visible in the reported frame.)
+
+    Sizing from cells fixes both: subtract what the board occupies, convert the
+    remaining cells to device pixels, then to inches at the SAME dpi*scale
+    kitcat will render with. Clamped to the 297-cell limit so the protocol
+    error is unreachable by construction."""
+    cols, rows, cw, chh = terminal_cells()
+    scale = 1.0
+    try:
+        from kitcat.terminal_query import get_dpi_scale
+        scale = float(get_dpi_scale()) or 1.0
+    except Exception:
+        if sys.platform == "darwin":
+            scale = 2.0
+    scale = max(1.0, min(3.0, scale))
+    # Leave a 1-col right margin and 1 row of breathing room under the figure so
+    # the next prompt/frame does not butt against it.
+    # min() only -- a max() floor here has the same defect as a figsize floor:
+    # it can request more cells than exist. Clamp at >=1 purely to keep the
+    # arithmetic valid when the board fills the window.
+    avail_cols = max(1, min(cols - 1, KITCAT_MAX_CELLS))
+    avail_rows = max(1, min(rows - reserved_rows - 1, KITCAT_MAX_CELLS))
+    # cells -> device px -> inches. kitcat renders at dpi*scale, so dividing the
+    # device-pixel extent by (dpi*scale) yields a figsize whose rendered PNG is
+    # exactly avail_cols x avail_rows cells.
+    win = float(avail_cols * cw) / (dpi * scale)
+    hin = float(avail_rows * chh) / (dpi * scale)
+    # NO minimum-size floor. An earlier version clamped to max(4.0, w) /
+    # max(2.5, h) "for readability"; a unit test over terminal geometries showed
+    # that silently re-overflows an ordinary 80x24 SSH window (6.3x2.5in -> 79x16
+    # cells requested against 80x14 available). A floor here defeats the entire
+    # point of fitting: whatever number we invent is by definition not what fits.
+    # A small window gets a small plot.
+    return win, hin
 
 
 def _init_kitcat():
@@ -1090,7 +1230,9 @@ def main():
     if "--svg" in argv:
         i = argv.index("--svg")
         path = argv[i + 1]
-        draw_curves(fetch(), *terminal_pixels(), save_path=path)
+        # Headless SVG/PNG: no terminal to fit, so use a fixed print-friendly
+        # size rather than whatever window happens to be attached.
+        draw_curves(fetch(), (12.0, 6.5), save_path=path)
         return
     once = "--once" in argv
     if not once:
@@ -1110,8 +1252,14 @@ def main():
             payload = {"chains": {}}
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
-        print(render_board(payload))
-        draw_curves(payload, *terminal_pixels())
+        board = render_board(payload)
+        print(board)
+        # Reserve the rows the board ACTUALLY occupies (it grows with the chain
+        # count) plus 1 for the trailing newline kitcat emits. Hardcoding a
+        # guess here is what let figure+board exceed the window and scroll the
+        # title/legend off the top.
+        reserved = board.count("\n") + 2
+        draw_curves(payload, size_figure(reserved_rows=reserved))
         if once:
             break
         try:
