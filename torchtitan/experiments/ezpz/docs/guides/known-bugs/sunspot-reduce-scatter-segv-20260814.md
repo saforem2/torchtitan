@@ -288,6 +288,20 @@ All ten variants still segfault:
 > reporting `free` in PBS with no Level-Zero/UR device errors in the logs.
 > The venv is unchanged since 2026-06-02.
 >
+> **The frameworks RC does NOT have this bug**, which localizes it to the
+> oneCCL build rather than the hardware or the driver. On
+> `frameworks/2026.1.0` (`CCL_ROOT=/opt/aurora/26.181.0/oneapi/ccl/latest`,
+> torch `2.13.0a0+gitcf30153`) the identical probe passes all three collectives
+> on the same nodes (job `12473138`), and 80B training runs clean there.
+> So the regression appears to be confined to the **oneAPI 2025.3.1 oneCCL**
+> that `/opt/aurora/default` currently points at -- which is what a default
+> `module load frameworks` gives users today.
+>
+> We are unblocked by switching to the RC, so this is **not urgent for us**.
+> Filing because that default stack is presumably still what other Sunspot
+> users get, and a silent SIGSEGV in `all_reduce` is a hard failure for any
+> multi-rank job.
+>
 > Impact: this blocks all tensor-parallel training on Sunspot, including our
 > 80B AuroraGPT runs -- DTensor's redistribute calls `reduce_scatter_tensor`,
 > so any TP>1 job dies in the first forward pass. The same 80B config trained
