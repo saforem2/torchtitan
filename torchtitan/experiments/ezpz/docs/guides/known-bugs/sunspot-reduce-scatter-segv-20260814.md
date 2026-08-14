@@ -40,7 +40,34 @@ Execution finished with 139.
 **Zero collectives complete** -- it dies on the smallest probe, before any
 success line prints.
 
-Repro script: `tmp/rs_probe.py` (in the Sunspot checkout).
+## Reproducer (verified, torch-only)
+
+[`tests/repro_reduce_scatter_segv.py`](../../../tests/repro_reduce_scatter_segv.py)
+-- no ezpz, no torchtitan, no model. One node, ~10 seconds:
+
+```bash
+mpiexec -n 12 -ppn 12 python3 repro_reduce_scatter_segv.py
+```
+
+Verified to reproduce (job `12473121`):
+
+```
+node: x1922c6s0b0n0
+world=12 torch=2.13.0.dev20260519+xpu dev=xpu:0
+x1922c6s0b0n0-hsn0: rank 4 died from signal 11 and dumped core
+rc=139
+```
+
+A healthy stack prints five `OK reduce_scatter` lines then `ALL_PASSED`. Here
+**no OK line is ever reached** -- it dies on the first 1 KiB collective.
+
+The script aborts loudly if it cannot detect the rank environment
+(`world <= 1`). That guard exists because an earlier version read
+`PMI_RANK`/`PMI_SIZE`, which PALS does **not** set: every process silently came
+up as its own 1-rank job, they collided on the rendezvous port, and the run
+failed with `EADDRINUSE` having executed no cross-rank collective at all --
+a failure that superficially resembled a result. PALS sets `PALS_RANKID`,
+`PALS_LOCAL_RANKID`, and `PALS_LOCAL_SIZE` (confirmed in job `12473120`).
 
 ## Reproduced 3x, different rank each time -- NOT a bad node
 
@@ -76,14 +103,82 @@ build changed between the clean run and now.
 - nodes drawn from `x1922c6s*` and `x1922c7s*`; all reported `free` in PBS, and
   the crash logs contain **no** Level-Zero / UR device error
 
-## Still open
+## It is NODE-LOCAL, not a fabric problem
 
-**Does it reproduce on a single node (12 ranks, intra-node, no fabric?)** The
-sub-tests meant to answer this (A: 1 node; C: each node solo) have returned
-`rc=127` with no log file across two attempts -- an `ezpz launch` invocation
-problem on my side, not a result. That answer decides whether this is a fabric
-issue or a node-local oneCCL/driver bug, and it is the first thing ALCF will
-ask, so it is worth getting before filing.
+Job `12473118`, all 12 ranks pinned to a single node (`-ppn 12`, no inter-node
+traffic whatsoever):
+
+```
+RESULT A-1node-x1922c6s0b0n0  rc=143  collectives_ok=0  segv=1  rank 8 died from signal 11
+RESULT B-4node-48r            rc=139  collectives_ok=0  segv=1  rank 18 died from signal 11
+```
+
+**A single node reproduces it.** The HSN fabric, inter-node routing, and
+multi-node CCL transport are all excluded. This is a node-local oneCCL / Level
+Zero / driver fault in `reduce_scatter_tensor` on XPU, reproducible with 12
+ranks on one machine and a 1 KiB buffer.
+
+That also makes the repro cheap for ALCF: **1 node, 1 file, ~10 seconds.**
+
+Full reproduction tally -- 5 allocations, 5 different failing ranks:
+
+| job | scale | failing rank |
+|---|---|---|
+| `12473114` | 4 nodes / 48 ranks | 34 |
+| `12473115` | 4 nodes / 48 ranks | 12 |
+| `12473116` | 4 nodes / 48 ranks | 33 |
+| `12473117` | 4 nodes / 48 ranks | 18 |
+| `12473118` | **1 node / 12 ranks** | **8** |
+| `12473121` | **1 node / 12 ranks, standalone torch-only repro** | **4** |
+
+## Note on the `--hostfile` void runs
+
+Sub-tests that passed `--hostfile` returned `rc=127` with no log across jobs
+`12473115/116/117`. That was mine, not a cluster symptom: the hostfiles were
+written with short names after the FQDN was stripped. `-ppn` needs no hostfile
+and works. Mentioned only so the `rc=127` lines in those job outputs are not
+mistaken for evidence.
+
+## Draft ALCF ticket
+
+> **Subject:** Sunspot: `reduce_scatter_tensor` SIGSEGVs on XPU, single node, 12 ranks
+>
+> On Sunspot, `torch.distributed.reduce_scatter_tensor` segfaults on a 1 KiB
+> bf16 buffer with 12 ranks on a single node. No fabric is involved; it
+> reproduces intra-node.
+>
+> Reproducer (torch only, ~10s, attached / at
+> `torchtitan/experiments/ezpz/tests/repro_reduce_scatter_segv.py`):
+>
+> ```bash
+> mpiexec -n 12 -ppn 12 python3 repro_reduce_scatter_segv.py
+> ```
+>
+> Output (job `12473121`, node `x1922c6s0b0n0`):
+>
+> ```
+> world=12 torch=2.13.0.dev20260519+xpu dev=xpu:0
+> x1922c6s0b0n0-hsn0: rank 4 died from signal 11 and dumped core
+> ```
+>
+> Expected: five `OK reduce_scatter` lines, then `ALL_PASSED`. Observed: dies
+> on the first, smallest collective; no OK line is reached.
+>
+> Reproduced in 6 independent allocations (jobs `12473114`, `12473115`,
+> `12473116`, `12473117`, `12473118`, `12473121`) with a different failing rank
+> each time (34, 12, 33, 18, 8, 4), at both 48 ranks / 4 nodes and 12 ranks /
+> 1 node -- so it is not a single bad node.
+>
+> Environment: torch `2.13.0.dev20260519+xpu`, python 3.14.2, XCCL backend,
+> oneAPI CCL `/opt/aurora/default/oneapi/ccl/latest`,
+> `ZE_FLAT_DEVICE_HIERARCHY=FLAT`. Nodes seen: `x1922c6s*`, `x1922c7s*`, all
+> reporting `free` in PBS with no Level-Zero/UR device errors in the logs.
+> The venv is unchanged since 2026-06-02.
+>
+> Impact: this blocks all tensor-parallel training on Sunspot, including our
+> 80B AuroraGPT runs -- DTensor's redistribute calls `reduce_scatter_tensor`,
+> so any TP>1 job dies in the first forward pass. The same 80B config trained
+> cleanly on 2026-08-03 (job `12472452`).
 
 ## Why this is stated carefully
 
