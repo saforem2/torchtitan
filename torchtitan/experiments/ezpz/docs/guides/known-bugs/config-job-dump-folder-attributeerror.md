@@ -40,16 +40,33 @@ dump_folder=config.dump_folder,   # was config.job.dump_folder
 
 ## Verified on hardware
 
-Aurora job **8754490** (debug, 1N, agpt-2b, 3 steps), A/B on one node:
+Aurora job **8754591** (debug, 1N/12 ranks, agpt-2b, seq 4096, 3 steps), both
+refs on the same node, back to back:
 
-| ref | line 884 | result |
-|---|---|---|
-| `057eb8c0a` (broken) | `config.job.dump_folder` | AttributeError, zero steps |
-| `388a2bcbf` (fixed) | `config.dump_folder` | trains, zero AttributeError |
+| ref | line 884 (echoed by the job) | steps | AttributeError | rc |
+|---|---|---:|---:|---:|
+| `057eb8c0a` (broken) | `dump_folder=config.job.dump_folder,` | 0 | **11** | 143 |
+| `388a2bcbf` (fixed) | `dump_folder=config.dump_folder,` | **3** | 0 | 0 |
 
-The A/B is guarded: the broken half only counts if the AttributeError string
-itself appears, so a run that died for an unrelated reason (bad env, missing
-tokenizer) is reported VOID rather than misread as "the bug reproduced."
+Fixed half: `Training starts at step 1`, then loss 12.94 -> 13.54 -> 20.95 at
+22.9% MFU. (Loss rising over 3 steps is expected -- warmup was compressed from
+200 steps to 3, so the LR is far too high. Irrelevant here: the question was
+whether `train()` is reachable at all.)
+
+Broken half: 11 of 12 ranks raised at `trainer.py:884` before step 1; no rank
+reached `Training starts`.
+
+The A/B is guarded two ways: the job aborts if `torch` does not import (so a
+setup failure cannot masquerade as the broken ref failing), and the broken half
+only counts if the AttributeError string itself appears.
+
+> [!NOTE]
+> Job **8754490** was an earlier attempt that produced **no verdict** -- the
+> scratch clone had no `.venv` (untracked, so `git clone` did not bring it) and
+> `ezpz_setup` bailed before either half ran. The torch gate above was added in
+> response. A first pass at 8754591 also mis-scored the fixed half as a failure:
+> the scoring regex expected `step: N | loss:` but the real metrics format is
+> `step:  1  loss: ...` with no pipe. The run was fine; the grep was wrong.
 
 Static confirmation, independent of the run: parsing `Trainer.Config` lists
 `dump_folder` as a field and contains no `job` field, and no `config.job.`
