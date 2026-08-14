@@ -1,7 +1,15 @@
 # Sunspot: bare `reduce_scatter_tensor` SIGSEGVs at 48 ranks (2026-08-14)
 
 > [!IMPORTANT]
-> **This blocks all 80B work on Sunspot.** Any TP>1 config crashes in the first
+> **RESOLVED by switching stacks (2026-08-14). Use the frameworks RC.** The
+> fault is in the oneAPI **2025.3.1** oneCCL that the June `.venv` links
+> against. On `frameworks/2026.1.0` (oneCCL 26.181.0 + torch
+> `2.13.0a0+gitcf30153`, the RC4 wheelforge conda env) all three collectives
+> run clean -- see "The RC fixes it" below. Everything after that point is the
+> diagnosis of the broken stack, kept because the underlying oneCCL bug is
+> still real and worth reporting.
+>
+> **This blocks all 80B work on Sunspot when using the June `.venv`.** Any TP>1 config crashes in the first
 > forward pass, because DTensor's redistribute calls `reduce_scatter_tensor`.
 > The fault is in the collective itself, NOT in torchtitan, NOT in the ezpz
 > experiment code, and NOT the bf16 NaN (Wall 1) we were trying to study.
@@ -156,6 +164,31 @@ Sub-tests that passed `--hostfile` returned `rc=127` with no log across jobs
 written with short names after the FQDN was stripped. `-ppn` needs no hostfile
 and works. Mentioned only so the `rc=127` lines in those job outputs are not
 mistaken for evidence.
+
+## The RC fixes it (job `12473138`)
+
+Same node, same 12 ranks, same probe -- only the software stack differs:
+
+| stack | reduce_scatter | all_gather | all_reduce |
+|---|---|---|---|
+| `.venv` (torch `2.13.0.dev20260519+xpu`, oneAPI 2025.3.1) | **SIGSEGV** | passes | **SIGSEGV** |
+| RC (torch `2.13.0a0+gitcf30153`, oneAPI 2026.1.0) | **passes** | passes | **passes** |
+
+All five buffer sizes to 144 MiB/rank, rc=0, zero segfaults.
+
+**How to use it** (the `frameworks/2026.1.0` module alone has NO torch -- that
+is what aborted job `12473137`):
+
+```bash
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0          # provides oneAPI 2026.1.0 + oneCCL
+source venvs/fw-2026.1-rc2/bin/activate  # RC4 wheelforge conda env + torchtitan deps
+unset PYTHONPATH
+```
+
+Gate on `import torchtitan.experiments.ezpz.agpt.config_registry`, never on
+`import agpt` -- `config/manager.py` masks every missing dependency as one
+generic error, so the latter is a false pass.
 
 ## It is the REDUCTION, not collectives in general (job `12473135`)
 
