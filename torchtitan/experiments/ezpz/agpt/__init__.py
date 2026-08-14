@@ -411,6 +411,20 @@ agpt_configs = {
         vocab_size=32000,
         hidden_dim=compute_ffn_hidden_dim(256, multiple_of=256),
     ),
+    # QK-norm adds 2 more RMSNorms per layer on head_dim, also initialized at
+    # 1.0. Used by the master-weight-dtype ablation to test whether the
+    # bf16 norm-freeze recurs for QK-norm gains -- the specific recurrence
+    # risk cited in docs/production/agpt/30b-exp/README.md Section 6.
+    "debugmodel_qknorm": _build_agpt_config(
+        dim=256,
+        n_layers=6,
+        n_heads=16,
+        n_kv_heads=None,
+        rope_theta=500000,
+        vocab_size=32000,
+        hidden_dim=compute_ffn_hidden_dim(256, multiple_of=256),
+        qk_norm=True,
+    ),
     "debugmodel_flex_attn": _build_agpt_config(
         dim=256,
         n_layers=6,

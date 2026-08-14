@@ -151,6 +151,26 @@ def parallelize_llama(
 
     names = ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
     dp_mesh = parallel_dims.get_mesh(names)
+
+    # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
+    # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16
+    # master everywhere): promote the affine norm weights to an fp32 master
+    # while the bulk stays bf16. FSDP2 rejects mixed dtypes inside one
+    # fully_shard group, so the promoted norms must also be sharded
+    # separately -- see agpt/fp32_norms.py. Settles whether the shipped
+    # full-fp32 master is over-broad.
+    fp32_norm_modules: list[nn.Module] = []
+    if os.environ.get("EZPZ_FP32_NORMS", "0").strip() not in ("", "0", "false"):
+        from torchtitan.experiments.ezpz.agpt.fp32_norms import promote_norms_to_fp32
+
+        if training.dtype != "bfloat16":
+            logger.warning(
+                "EZPZ_FP32_NORMS=1 with training.dtype=%s: the master copy is "
+                "already float32, so promoting norms is a no-op.",
+                training.dtype,
+            )
+        fp32_norm_modules = promote_norms_to_fp32(model)
+
     apply_fsdp(
         model,
         dp_mesh,
@@ -159,6 +179,7 @@ def parallelize_llama(
         pp_enabled=parallel_dims.pp_enabled,
         cpu_offload=training.enable_cpu_offload,
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
+        separate_fsdp_modules=fp32_norm_modules,
     )
 
     if parallel_dims.dp_replicate_enabled:
@@ -217,6 +238,7 @@ def apply_fsdp(
     pp_enabled: bool,
     cpu_offload: bool = False,
     reshard_after_forward_policy: str = "default",
+    separate_fsdp_modules: list[nn.Module] | None = None,
 ):
     """FSDP2 with the same per-block grouping as upstream llama3.
 
@@ -224,6 +246,13 @@ def apply_fsdp(
     `reshard_after_forward=reshard_after_forward_policy == "always"`
     (last layers don't reshard after forward by default — FSDP would
     prefetch them immediately).
+
+    `separate_fsdp_modules` (ezpz, ablation arm B) each get their OWN
+    `fully_shard` group, applied before the enclosing block/model groups so
+    the inner wrap wins. This exists because FSDP2 asserts a uniform
+    `orig_dtype` per group: the norms-only-fp32 arm has fp32 norm weights
+    inside otherwise-bf16 blocks, which is only expressible by regrouping.
+    Empty (the default) leaves the production grouping untouched.
     """
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -238,6 +267,21 @@ def apply_fsdp(
         reshard_after_forward_policy, pp_enabled
     )
 
+    # [ezpz] Wrap the dtype-divergent modules first so each owns its group;
+    # the enclosing block/model wraps below then only see the remaining
+    # (uniformly bf16) parameters.
+    for module in separate_fsdp_modules or ():
+        fully_shard(
+            module,
+            **fsdp_config,
+            reshard_after_forward=reshard_after_forward,
+        )
+    if separate_fsdp_modules:
+        logger.info(
+            "Applied %d separate FSDP groups (dtype-divergent modules)",
+            len(separate_fsdp_modules),
+        )
+
     # [ezpz] When embeddings are tied (enable_weight_tying), tok_embeddings
     # and lm_head share one weight tensor -- FSDP2 requires shared/tied
     # parameters to live in the SAME fully_shard group, so group tok_embeddings
@@ -247,12 +291,17 @@ def apply_fsdp(
     # branch (default, currently working) is unchanged.
     tied = getattr(model, "enable_weight_tying", False)
 
+    # [ezpz] Modules already given their own group above must not appear in a
+    # second fully_shard call ("can only be applied to a module once").
+    # Nesting inside an enclosing block/model wrap is fine -- that is how the
+    # per-layer norms keep their own group -- but a DIRECT re-wrap is not.
+    _separate = {id(m) for m in (separate_fsdp_modules or ())}
+
+    def _not_separate(modules):
+        return [m for m in modules if m is not None and id(m) not in _separate]
+
     if tied:
-        modules = [
-            m
-            for m in (model.tok_embeddings, model.norm, model.lm_head)
-            if m is not None
-        ]
+        modules = _not_separate([model.tok_embeddings, model.norm, model.lm_head])
         fully_shard(
             modules,
             **fsdp_config,
@@ -273,11 +322,13 @@ def apply_fsdp(
         )
 
     if not tied and model.norm is not None and model.lm_head is not None:
-        fully_shard(
-            [model.norm, model.lm_head],
-            **fsdp_config,
-            reshard_after_forward=reshard_after_forward_policy == "always",
-        )
+        tail_modules = _not_separate([model.norm, model.lm_head])
+        if tail_modules:
+            fully_shard(
+                tail_modules,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward_policy == "always",
+            )
 
     fully_shard(model, **fsdp_config)
     disable_fsdp_gradient_division(model)

@@ -347,6 +347,21 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
+    """``agpt_debugmodel_local`` plus QK-Norm.
+
+    QK-Norm adds two more RMSNorms per layer (on head_dim), also initialized
+    at 1.0, so it has the same bf16-master freeze exposure as the pre/post
+    block norms. Used by the master-weight-dtype ablation
+    (scripts/oneoff/fp32_norms_ablation.py) to test the "this recurs for any
+    parameter initialized near 1.0, QK-norm gains being exactly that" claim
+    in docs/production/agpt/30b-exp/README.md Section 6.
+    """
+    cfg = agpt_debugmodel_local()
+    cfg.model_spec = model_registry("debugmodel_qknorm")
+    return cfg
+
+
 def ezpz_agpt_2b() -> FaultTolerantTrainer.Config:
     return agpt("2b", activation_checkpoint_mode="none")
 
