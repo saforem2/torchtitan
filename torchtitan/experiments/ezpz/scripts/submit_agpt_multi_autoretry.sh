@@ -152,7 +152,28 @@ if [[ -n "${NAN_ABORT_CONSECUTIVE}" ]]; then
 fi
 
 TRAINERS=(
-    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288"
+    # t0 -- 2B STAGE 2 (continued pre-training on dolmino-mix-1124).
+    # The stage-1 512N chain COMPLETED 2026-08-13 at step 46,429 = 4.6737T
+    # tokens, so its old slot here would have had no budget left. Replaced
+    # with stage 2, seeded from that finished endpoint.
+    #
+    # Recipe mirrors MDS train_aGPT_2B_sophiag_stage2.sh:
+    #   DATA_FILE_LIST=dolmino-mix-1124 (fused)   LR=2.17e-5
+    #   LR_DECAY_STYLE=constant -> decay_ratio 0.0, min_lr_factor 1.0
+    #   OPT=sophiag   TRAIN_TOKENS=7064155541716 (CUMULATIVE through stage 2,
+    #   i.e. 4.674T stage-1 + ~2.39T stage-2)
+    #
+    # Motivation: the 2026-08-14 eval of the finished stage-1 endpoint showed
+    # the last 500B tokens moved NO metric and MMLU ended at chance (0.2511).
+    # More olmo-mix is demonstrably not the lever; a different mix might be.
+    #
+    # NOT the 2026-07-18 config that NaN'd (job 8663177, step 3801): that was
+    # olmo50-dolmino50 at LR 2e-6 -- a TENTH of this LR -- so its LR was not
+    # the cause; it was a single-step overflow on a dolmino batch. This run
+    # matches MDS (pure dolmino, 2.17e-5), which survived the full stage, and
+    # relies on NAN_ABORT_CONSECUTIVE to bail early instead of NaN-writing to
+    # step 6600 the way that attempt did.
+    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429|0.0|1.0|7064155541716"
     "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
     # DROPPED 2026-07-18: this 50/50 dolmino CPT trainer NaN-diverged at
     # step 3801 in job 8663177 (single-step overflow on a dolmino batch)
