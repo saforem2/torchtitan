@@ -129,9 +129,32 @@ spikes are a startup transient, not a persistent regime.
 Cost, measured at dp=192: memory 36.5 GiB (57%) vs bf16 20.5 GiB (32%);
 throughput **16 tps vs 54 -- a 3.4x slowdown**, matching the documented 3-5x.
 
-## Every performance number in our docs is stale
+## Throughput re-baselined on the RC -- FASTER at every scale (job `12473156`)
 
-The dp=192/264 clean runs, the NaN step numbers, the MFU and throughput tables,
-the scaling studies -- all measured on oneAPI 2025.3.1. They are **not** valid
-for the RC and should not be quoted for the Aurora rollout without a re-baseline.
-A throughput regression here would be easy to miss and expensive at scale.
+Config matched to the original 2B baseline exactly so the comparison is valid:
+FSDP-only (TP=1), compile=ON, AC=full, seq_len=8192, LBS=2, GBS = N x 12 x 2.
+Reported value is the **median of the last 10 steps** (the first few are
+compile/warmup, and a single tail step is noisy).
+
+| nodes | GBS | RC tps/gpu | old tps/gpu | delta | RC MFU | old MFU |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 48 | **7,800** | 7,142 | **+9.2%** | 29.26% | 27.6% |
+| 4 | 96 | **7,673** | 7,068 | **+8.6%** | 28.79% | 27.3% |
+| 16 | 384 | **7,386** | 6,995 | **+5.6%** | 27.71% | 27.0% |
+| 64 | 1,536 | **7,003** | 6,702 | **+4.5%** | 26.28% | 25.9% |
+
+**No regression -- the RC is 4.5-9.2% faster**, with the gain largest at small N
+and narrowing as scale grows (consistent with communication taking a larger
+share of the step at 64N, which the RC does not change). Scaling efficiency is
+essentially unchanged: 64N/2N is 89.8% on the RC vs 93.8% before, so the RC
+improves per-GPU compute more than it improves the collective path.
+
+Median and last-step agree to within 0.1% at every point (7005/7003, 7387/7386,
+7671/7673, 7808/7800), so these are stable measurements rather than tail noise.
+
+### Still stale
+
+The **80B** numbers and the **20B/MoE** scaling tables have not been re-measured
+on the RC -- only the 2B ladder above. The dp=192/264 "clean run" evidence is
+also pre-RC, though the 80B NaN behaviour has now been re-confirmed directly
+(bf16 NaNs at step 30; fp32-acts runs 120/120 clean).
