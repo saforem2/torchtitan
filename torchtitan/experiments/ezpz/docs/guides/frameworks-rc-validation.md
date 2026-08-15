@@ -100,7 +100,10 @@ Two consequences:
   at loss 12.39 vs bf16 12.76, and accelerating. If bf16 merely mis-reported a
   correct gradient, both would descend identically.
 
-### It CLEARS the wall (step 30+)
+### It CLEARS the wall -- 120/120 steps, zero NaN (COMPLETE)
+
+**Final: `rc=0, steps=120, nan_lines=0`, loss 12.95 -> 8.098.** The run
+completed its full budget at production dp with no NaN, through full LR.
 
 bf16 died at step 30 at this dp. fp32 walked straight through it:
 

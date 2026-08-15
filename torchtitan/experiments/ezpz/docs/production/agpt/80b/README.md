@@ -16,7 +16,14 @@
 > dead-flat then instant-NaN. LR was only ~1.5e-7 (warmup 200), so this is not
 > an LR-ceiling effect.
 >
-> **The decisive open test is running now** (job `12473149`):
+> **RESOLVED (job `12473149`): fp32 activations hold at production dp.**
+> 120/120 steps, **zero NaN**, loss 12.95 -> 8.098, through full LR 1e-6
+> (warmup 40). bf16 NaN'd at step 30 in the identical config. Measured cost:
+> **3.4x slower** (16 vs 54 tps) and 57% vs 32% memory. Caveat: the runs are
+> not LR-matched -- fp32 was at 7.5e-7 when bf16 died at 1.5e-7, so fp32
+> cleared a strictly *harder* bar, but this is not a controlled LR A/B.
+>
+> Original framing of that test:
 > `--training.mixed-precision-param=float32` at dp=192, 120 steps. fp32-acts is
 > the only 80B config with confirmed clean training, but job `8537349` validated
 > it at **n32 / GBS=96 -- inside the region where plain bf16 also works**, so it
