@@ -1,5 +1,91 @@
 # Upstream Sync Log
 
+## 2026-08-16 -- 78th sync (31 commits)
+
+Merged `upstream/main` into `ezpz`. Conflict-free and it touched **no** ezpz
+file -- and it still broke the branch **twice**. Both breaks were deleted or
+added symbols in files the merge never opened, which no conflict marker can
+catch.
+
+### Break 1: `maybe_enable_async_tp` deleted (#4045)
+
+[#4045](https://github.com/pytorch/torchtitan/pull/4045) removed
+`maybe_enable_async_tp` from `distributed/tensor_parallel.py` (async TP moved
+*inside* `apply_compile`, which gained a keyword-only `parallel_dims`). Both
+`ezpz/agpt/parallelize.py` and `ezpz/moe/parallelize.py` imported it, so
+post-merge they died at **import**.
+
+Replay (commit `87e061714`):
+- `agpt`: thread `parallel_dims` through `_apply_compile_with_mode` into
+  `apply_compile`; drop the standalone call.
+- `moe`: drop import + call. This file compiles per-block rather than via
+  `apply_compile`, so async TP is simply unavailable there now. Not a
+  regression -- the call only ran under `tp_enabled` and MoE+async-TP was never
+  validated on XPU.
+
+### Break 2: `fwd_bwd_fn` added (#3559 + #4146)
+
+[#3559](https://github.com/pytorch/torchtitan/pull/3559) (CUDA-graph capture) and
+[#4146](https://github.com/pytorch/torchtitan/pull/4146) (in-place loss
+accumulation) added a `self.fwd_bwd_fn` indirection to `Trainer.__init__`, and
+`forward_backward_step` now dispatches through it. `FaultTolerantTrainer` does
+**not** call `super().__init__()`, so the assignment never ran:
+
+```
+AttributeError: 'FaultTolerantTrainer' object has no attribute 'fwd_bwd_fn'
+```
+
+Job `12473170`: 3/3 arms rc=143, **zero** steps. Fixed in `ef1736618` by binding
+`self._forward_backward_body` directly (NOT the CUDA-graph wrapper -- that is a
+CUDA capture path, `disable_cuda_graphs` defaults True, and no XPU run has
+exercised it, so behaviour is unchanged from pre-merge).
+
+This is the **second** time an upstream `__init__` attribute has gone missing
+this way (`num_pipeline_parallel_microbatches` was the first). Added
+[`tests/test_trainer_init_parity.py`](../../tests/test_trainer_init_parity.py)
+-- a static AST diff of what each `__init__` sets. Pure stdlib, no torch
+needed, mutation-tested. **Run it on every sync.**
+
+### Verification (jobs `12473171`, `12473172`, frameworks RC, 2N)
+
+| arm | result |
+|---|---|
+| 2B compile TP=4 (post) | PASS, 10 steps |
+| MoE EP=1 (post) | PASS, 10 steps -- covers the token_dispatcher +333 rewrite |
+| loss A/B pre vs post | **no change attributable to the merge** (see below) |
+
+### The loss A/B needed a control -- and `--debug.deterministic` is BROKEN here
+
+The first A/B reported "DIFFERS -- the merge CHANGED numerics": identical for
+steps 1-7, diverging from step 8. That verdict was **wrong**, and the run that
+produced it was invalid. Re-running the *same* pre-merge commit twice gives:
+
+| step | pre-vs-**pre** (same commit) | pre-vs-post |
+|---:|---:|---:|
+| 1-7 | 0.00000 | 0.00000 |
+| 8 | 0.00106 | 0.00106 |
+| 9 | 0.00260 | 0.00259 |
+| 10 | 0.01201 | 0.01206 |
+
+The merge difference is **indistinguishable from the run's own noise** -- same
+onset step, same magnitude to three decimals. So: the 78th sync does not change
+numerics.
+
+> [!WARNING]
+> **`--debug.seed=42 --debug.deterministic` does NOT give bit-identical runs on
+> the frameworks RC.** CLAUDE.md requires that two such runs "produce bit-wise
+> identical loss and grad_norm"; they do not. Any future "identical loss"
+> verification on this stack is currently unable to detect a real regression
+> smaller than ~0.012 at step 10 -- today that produced a false positive, but
+> the same blind spot could hide a true one.
+>
+> Steps 1-7 being *exactly* identical is a clue: the divergence has a specific
+> onset rather than being immediate, which points at a particular op or a
+> reduction-order effect rather than general float chaos. Candidates: an XPU
+> kernel with no deterministic implementation (there is a known `_histc_xpu`
+> gap) or nondeterminism entering via the collectives. Untriaged; a 1-rank vs
+> multi-rank and TP=1 vs TP=4 split would separate kernel from collective.
+
 ## 2026-08-11 -- 77th sync (6 commits, 31 files)
 
 Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
