@@ -223,7 +223,49 @@ TRAJECTORIES: list[dict] = [
         
             "2lxurmes", "iozc8x9n", "c8zwrlqw",
         ],
-        "olog_fallbacks": None,
+        # Backfill for the 5399->6801 hole, added 2026-08-16.
+        #
+        # 16 of 18 runs on this chain ended `crashed`, and a crashed run never
+        # syncs its buffered W&B tail. The visible gap is where a crash was
+        # followed by two runs that died almost immediately: g59v83go logged 7
+        # steps and jyq4w87d logged 10, so ~1,400 trained steps have almost no
+        # cloud record. The training DID happen -- checkpoints exist at every
+        # 100-step interval from 5400 through 6800.
+        #
+        # Each log is attached to the run that OWNS its steps, matched by job
+        # id, not to whichever run is nearest. Getting that wrong is what broke
+        # the 20b-256 attempt on 08-13 (see this file's 20b_v2_256 note): the
+        # merge is a UNION now, but a log attached to the wrong run still
+        # mislabels which run trained which steps.
+        #
+        #   g59v83go = job 8688010, W&B 6001..6008  (walltime-killed pre-save)
+        #   jyq4w87d = job 8689162, W&B 6001..6012
+        #   9d1g9zsw = job 8714502, W&B 6801..7148
+        #
+        # o8647383 (6001..6086) is the autoretry-cont2 run that actually
+        # carried 6001->6086; g59v83go/jyq4w87d are the 128N sneaks over the
+        # same window. Attaching it to g59v83go recovers 6013..6086, which no
+        # W&B run holds. o8687862 (6101..6585) + o8696040 (6551..6884) cover
+        # the rest up to 9d1g9zsw's 6801 start.
+        #
+        # STILL PERMANENTLY MISSING: 5400..6000. No .o log on disk reaches into
+        # that window (o8638795 stops at 5400, the next starts at 6001) and no
+        # W&B run holds it. Those ~600 steps ran and checkpointed, but neither
+        # record survives. Do not try to interpolate them.
+        "olog_fallbacks": {
+            "g59v83go": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-autoretry-cont2.o8647383"
+            ),
+            "jyq4w87d": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512chain-256Nprod.o8687862"
+            ),
+            "9d1g9zsw": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-resume.o8696040"
+            ),
+        },
         "eval_subdir": "agpt-20b-v2-512n",
         "cls": "live",
     },
