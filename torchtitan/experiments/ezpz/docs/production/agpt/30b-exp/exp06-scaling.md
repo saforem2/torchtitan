@@ -6,16 +6,24 @@
 
 ## What this establishes
 
-**The 30B holds ~26% MFU from 2 to 64 nodes.** It loses **1.75% of MFU per
+**The 30B holds ~26% MFU from 2 to 64 nodes.** It loses **1.42% of MFU per
 doubling**, against the 2B's **13.96%**. That 8x difference in decay rate is
 the first direct evidence for the 30B-exp proposal's central claim.
 
 | nodes | ranks | tps/GPU | MFU | memory | vs 2N |
 |---:|---:|---:|---:|---|---:|
-| 2 | 24 | 466 | 27.89% | 78.50% | 100% |
-| 16 | 192 | 445 | 26.67% | 57.33% | 95.5% |
-| 32 | 384 | 440 | 26.36% | 56.08% | 94.4% |
-| 64 | 768 | 426 | 25.54% | 64.81% | 91.6% |
+| 2 | 24 | 458 | 27.45% | 78.50% | 100% |
+| 4 | 48 | 451 | 27.03% | 72.28% | 98.5% |
+| 8 | 96 | 443 | 26.53% | 68.00% | 96.7% |
+| 16 | 192 | 445 | 26.67% | 57.33% | 97.2% |
+| 32 | 384 | 440 | 26.36% | 56.08% | 96.1% |
+| 64 | 768 | 426 | 25.54% | 64.81% | 93.0% |
+
+All six points come from one job, so they share a stack, a build and an
+allocation. The ladder's own 2N (458 tps / 27.45%) sits ~1.6% under exp05's
+466 / 27.89% for the same config -- a separate-job difference at the edge of
+the <1% within-job noise floor, and the reason the ratios above are computed
+against the ladder's own 2N rather than exp05's.
 
 Smooth and shallow. No cliff anywhere in the measured range.
 
@@ -28,7 +36,7 @@ effective-compute multiplier."
 | model | 2N | far point | retention | decay/doubling |
 |---|---:|---:|---:|---:|
 | 2B | 29.26% | 8.79% at 512N | 30.0% | **13.96%** |
-| 30B | 27.89% | 25.54% at 64N | 91.6% | **1.75%** |
+| 30B | 27.45% | 25.54% at 64N | 93.0% | **1.42%** |
 
 The mechanism the proposal names is the right one: the 2B collapses because
 per-rank work is too small to hide communication, and a 14x larger model gives

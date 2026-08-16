@@ -2,6 +2,45 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-16 (sunspot) -- the 30B goes from proposal to measured model: 27.89% MFU at 2N, 25.54% at 64N, HSDP ceiling found between 20B and 30B
+
+- **`agpt_configs["30B"]` did not exist.** `30b-exp/` was a design document
+  whose performance claims could not be tested at all. Interpolated the family
+  (the proposal fixes only `dim=6144`) -> dim 6144 / 64L / 48H / 8kv /
+  ffn 16384 / head_dim 128, 28.1B params. It trains.
+- **Tuned at 2N to 466 tps / 27.89% MFU** (LBS=3, compiled, TP=1). TP hurts
+  monotonically (TP=2 -26%, TP=4 -55%) -- it only earns its keep when the
+  model does not otherwise fit. Activation checkpointing is load-bearing;
+  `ac=none` is a genuine OOM.
+- **LBS=3 is faster AND cheaper in memory than LBS=2** (78.5% vs 80.6%).
+  Larger batches amortize the activation peak, so "bigger batch costs more
+  memory" inverts across that step.
+- **Scaling ladder 2N -> 64N: 27.45 / 27.03 / 26.53 / 26.67 / 26.36 / 25.54%.**
+  1.42% MFU lost per doubling vs the 2B's 13.96% -- 8x better. No cliff in the
+  measured range. Caveats kept in the doc: 512N is 3 doublings further out and
+  the 2B's collapse was a cliff, not a slope; and at 64N the 2B is itself still
+  at 25.9%, so this range does not yet separate the two models.
+- **The batch ceiling is the proposal's blind spot.** LBS=3 at 512N implies
+  GBS 18,432 / 75M tokens per step, and the 2B already measured a ceiling
+  below that (GBS 12,288 lost 3-8pp per token against 6,144, with per-step
+  parity proving the architecture was fine).
+- **HSDP fails on the 30B but works on the 20B.** Not an OOM -- it dies at
+  71.68% memory with 18 GiB free, inside `clip_grad_norm_` ->
+  `clip_grad.py:106 torch.stack`, `UR_RESULT_ERROR_OUT_OF_RESOURCES`. That is
+  level_zero resource exhaustion. Four arms settled it: 20B passes 12/12,
+  `foreach=False` fails identically (so the fused clip is exonerated), tensor
+  count is identical at 579 for both models. Size is the axis.
+- **`agpt_30b_llama3tok` had never produced a step**, for two bugs both mine:
+  gemma's `hf_assets_path` under a 128,256 embedding, and a docstring telling
+  callers to pass `--tokenizer.path` (not a flag). Fixed; it now runs, and its
+  freed HBM buys **LBS=4 -> 497 tps / 28.99% MFU**, a batch step the gemma
+  variant cannot reach.
+- **Corrections to my own earlier claims this session:** "HSDP OOM'd" (twice);
+  "model size is probably not the axis"; "the 128k is the better config
+  outright" (it is a tie at matched LBS -- MFU is FLOP-normalized); and
+  run-to-run noise is <1%, not the ~6% I had assumed, which had caused a real
+  +5.9% compile effect to be dismissed.
+
 ## 2026-08-10 (aurora) -- the two 7.771T MDS checkpoints found and evaluated; MMLU settled by controlled experiment
 
 - **The genuine 7.771T checkpoints existed all along, in directories nothing

@@ -253,3 +253,52 @@ TORCH_DEVICE=cpu LOCAL_RANK=0 RANK=0 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 \
   traceback (a user hit it just from running in the wrong dir).
 - Pulled the local Mac mirror forward 23 commits to `cf99e127e` (stash-pull-pop;
   preserved 9 pre-existing WIP tracked edits).
+
+## 2026-08-16 (30B campaign: config, tuning, scaling, tokenizer, HSDP)
+
+Took the 30B-exp proposal from a design document with no config to a measured
+model. Six jobs on Sunspot (`12473195`-`12473202`), all on the frameworks RC.
+
+- **The 30B trains.** 28.1B params (dim 6144, 64L, 48H, head_dim 128). Best
+  with the production gemma vocab: **466 tps / 27.89% MFU** at LBS=3, 2N.
+  TP hurts monotonically (TP=4 costs 55%). AC is load-bearing -- `ac=none` is
+  a real OOM.
+- **Batch size is the dominant lever** (+30% from LBS 1->3), and LBS=3 is
+  faster AND cheaper in memory than LBS=2 -- larger batches amortize the
+  activation peak, so the usual intuition inverts across that step.
+- **Scaling holds:** 25.54% MFU at 64N/768 ranks, **1.42% lost per doubling
+  against the 2B's 13.96%**. First real support for the proposal's "go bigger,
+  not wider" claim -- but 64N is 3 doublings short of 512N, and at 64N the 2B
+  itself is still at 25.9%, so the measured range does not yet separate them.
+- **The proposal's blind spot:** LBS=3 at 512N implies GBS 18,432 / 75M tokens
+  per step. The 2B already measured a batch ceiling BELOW that (GBS 12,288 lost
+  3-8pp per token vs 6,144). MFU and the batch ceiling point opposite ways.
+- **`agpt_30b_llama3tok` had never run once**, for two bugs both mine: it
+  inherited gemma's `hf_assets_path` under a 128,256 embedding, and its
+  docstring told callers to pass `--tokenizer.path`, which is not a flag. Every
+  invocation died in arg parsing, invisibly -- the harness never created the
+  log file. Creating the log FIRST is what made it diagnosable.
+- **The 128k vocab wins via memory, not directly.** At matched LBS it is a tie
+  in MFU (+0.09pp -- MFU is FLOP-normalized, so a smaller model gets no free
+  bump). But it frees 11-19 points of HBM, which buys **LBS=4: 497 tps /
+  28.99%**, a step gemma cannot reach at 78.5%. Best-vs-best +1.10pp MFU.
+- **HSDP: the 20B works, the 30B does not.** Failure is at 71.68% memory with
+  18 GiB free, inside `clip_grad_norm_` -> `torch.stack`, with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES` -- level_zero RESOURCE exhaustion, not an
+  OOM (I recorded it as an OOM twice). Size is the axis; `foreach=True` is
+  exonerated (unfused fails identically); tensor count is identical (579 both).
+
+**Method lessons:**
+- **A refuted mechanism is not evidence against an unrelated hypothesis.** From
+  "not an OOM" I argued "so not model size either, and a bisect would waste
+  nodes." The 20B arm refuted that in one run.
+- **Log which branch actually executed.** `EZPZ_CLIP_NO_FOREACH` logs
+  `foreach=<bool>` once per run, which is the only reason the negative result
+  is trustworthy rather than "maybe the env var never reached the ranks."
+- **`--training.max-norm=0` does not bypass clipping** -- `get_total_norm` runs
+  unconditionally at `distributed/utils.py:651`. That arm was a duplicate
+  control that I labelled as a bypass.
+- **Run-to-run noise here is <1%, not ~6%.** The wrong assumption had caused a
+  real +5.9% compile effect to be written off as noise.
+- **`git stash pop` with nothing stashed** pops an unrelated older stash. Mine
+  restored an 11-day-old autostash and conflicted a generated SVG.
