@@ -66,34 +66,48 @@ TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,bool
 # vocab 256000, so its arm MUST pass MODEL_FLAVOR=2b-mds EVAL_CONFIG_JSON=agpt_2b_mds_config.json
 # -- otherwise a 256000-weight model is loaded under a 256128 config = gibberish
 # (the tokenizer-mismatch trap). Each base is evaluated with ITS OWN vocab.
-# RoPE FLAVOR -- read this before overriding.
+# RoPE FLAVOR -- MODEL_FLAVOR IS REQUIRED. There is no safe default.
 #
 # The flavor selects the RoPE convention at convert time, and the checkpoint
 # does NOT record which one it was trained with (both rope caches are
 # persistent=False, so nothing lands on disk). Pass the wrong one and the
 # adapter applies (or skips) the Q/K permute: the export loads fine and only
-# fails as gibberish at generation. See
-# docs/guides/known-bugs/rope-flavor-mismatch.md
+# fails as gibberish at generation.
 #
-# Which chains are which -- VERIFIED 2026-08-16 from actual `--config=` launch
-# lines (see docs/guides/known-bugs/rope-flavor-mismatch.md, "Registry").
-# Do NOT infer this from a clone's script defaults; that is how the first
-# version of this block got it exactly backwards.
+# Why there is no default: THE CHAINS SWITCHED CONVENTION MID-FLIGHT. Commit
+# 5ffb850a1 (2026-06-25) flipped CONFIG_SUFFIX to _real, and the running chains
+# picked it up on their next resume. W&B run metadata (the authoritative record
+# of what each run actually executed) shows:
 #
-#   EVERY agpt 2B/20B chain on Aurora  -> COS_SIN ("2b_real" / "20b_real")
-#       Confirmed across all six umbrellas back to 8663177 (2026-07-17),
-#       INCLUDING the two completed 4.674T chains. The umbrella script has
-#       defaulted CONFIG_SUFFIX=_real since 5ffb850a1 (2026-06-25) and every
-#       logged launch reads --config=agpt_2b_real.
-#   agpt 80B                            -> COMPLEX ("80b")
-#       Runs compile OFF, so the _real (inductor-lowering) win is moot.
-#   MDS / Megatron-DeepSpeed bases      -> not this script (see 2b-mds arms)
+#   20b_v2_256   agpt_20b  -> agpt_20b_real  at 2026-07-10  (loss 2.69 -> 6.14)
+#   20b_v2_512   agpt_20b  -> agpt_20b_real  at 2026-07-05  (loss 2.57 -> 6.03)
+#   2b_v2_512    agpt_2b   -> agpt_2b_real   at 2026-08-05  (no spike)
+#   2b_v2_256    agpt_2b   throughout                        (never switched)
 #
-# The default is therefore cos_sin for everything this script evaluates.
-MODEL_FLAVOR="${MODEL_FLAVOR:-2b_real}"
-echo "[eval-2b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' -- cos_sin RoPE is correct for"
-echo "[eval-2b-v2]   every agpt 2B chain trained on Aurora. Override only if you"
-echo "[eval-2b-v2]   have a launch line showing --config=agpt_2b (complex)."
+# So the correct flavor depends on WHICH STEP you are converting, not on which
+# chain. A per-chain constant is wrong for at least one step of most chains.
+#
+# To find the right value for a given step, ask W&B for the run that produced
+# it (see scripts/eval/rope_flavor_for_step.py), or read the registry table in
+# docs/guides/known-bugs/rope-flavor-mismatch.md.
+if [[ -z "${MODEL_FLAVOR:-}" ]]; then
+    cat >&2 <<'ERRMSG'
+[eval-2b-v2] ERROR: MODEL_FLAVOR is required and has no default.
+
+  The agpt chains changed RoPE convention mid-flight (2026-06-25 onward), so
+  the correct flavor depends on the STEP being converted. Guessing silently
+  corrupts the export -- it loads fine and only fails as gibberish.
+
+  Find it:
+    python3 torchtitan/experiments/ezpz/scripts/eval/rope_flavor_for_step.py \
+        --chain <2b_v2_512|2b_v2_256|20b_v2_512|20b_v2_256> --step <N>
+
+  Then re-run with e.g.  MODEL_FLAVOR=2b_real  or  MODEL_FLAVOR=2b
+  Details: docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
+echo "[eval-2b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default exists -- see rope-flavor-mismatch.md)"
 EVAL_CONFIG_JSON="${EVAL_CONFIG_JSON:-agpt_2b_config.json}"
 
 for step in $STEPS; do

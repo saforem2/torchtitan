@@ -44,12 +44,21 @@ def convert_to_hf(
     # the run used. The adapter reads it from the flavor passed on the command
     # line, and picking the wrong one applies (or skips) the Q/K permute --
     # which loads without error and only shows up as gibberish at generation
-    # time. EVERY agpt 2B/20B chain on Aurora trained cos_sin ("_real") --
-    # verified 2026-08-16 from `--config=` launch lines across all six
-    # umbrellas back to 8663177, INCLUDING the two completed 4.674T chains. So
-    # a bare "2b"/"20b" is wrong for every Aurora agpt chain except 80B, which
-    # runs compile OFF and stays complex. Registry:
-    # docs/guides/known-bugs/rope-flavor-mismatch.md
+    # time.
+    #
+    # There is NO safe per-chain default: the chains changed convention
+    # MID-FLIGHT when 5ffb850a1 (2026-06-25) flipped CONFIG_SUFFIX to _real and
+    # the running chains picked it up on their next resume. Per W&B run
+    # metadata (the authoritative record of what each run executed):
+    #
+    #   20b_v2_256  agpt_20b -> agpt_20b_real  2026-07-10  (loss 2.69 -> 6.14)
+    #   20b_v2_512  agpt_20b -> agpt_20b_real  2026-07-05  (loss 2.57 -> 6.03)
+    #   2b_v2_512   agpt_2b  -> agpt_2b_real   2026-08-05
+    #   2b_v2_256   agpt_2b  throughout
+    #
+    # So the right flavor depends on WHICH STEP is being converted. Resolve it
+    # with scripts/eval/rope_flavor_for_step.py; do not guess, and do not infer
+    # from a submit script's default.
     #
     # Announce the convention loudly and write it next to the weights, so a
     # mismatch is visible in the log and auditable afterwards.
@@ -58,18 +67,11 @@ def convert_to_hf(
     print(
         f"[convert_to_hf] flavor={model_flavor!r} -> RoPE={rope_name} "
         f"(Q/K permute {'SKIPPED' if rope_is_cos_sin else 'APPLIED'}). "
-        "If this does not match how the checkpoint was TRAINED, the export is "
-        "silently corrupt -- see docs/guides/known-bugs/rope-flavor-mismatch.md"
+        "The checkpoint does not record its convention -- if this does not "
+        "match how it was TRAINED, the export is silently corrupt. Resolve "
+        "with scripts/eval/rope_flavor_for_step.py; see "
+        "docs/guides/known-bugs/rope-flavor-mismatch.md"
     )
-    # Complex is expected ONLY for 80B (compile OFF, so the cos_sin
-    # inductor-lowering win is moot). Every other Aurora agpt chain is cos_sin.
-    if rope_is_cos_sin is False and not str(model_flavor).startswith("80b"):
-        print(
-            f"[convert_to_hf] WARNING: flavor {model_flavor!r} selects the "
-            "COMPLEX RoPE, but every Aurora agpt 2B/20B chain trained cos_sin. "
-            f"Did you mean {model_flavor + '_real'!r}? Ignore this only if you "
-            f"have a launch line showing --config=agpt_{model_flavor}."
-        )
 
     # allocate state dict memory with empty weights to load checkpoint
     state_dict = model._get_state_dict()
@@ -144,7 +146,20 @@ if __name__ == "__main__":
         default="experiments.ezpz.agpt",
     )
     parser.add_argument(
-        "--model_flavor", type=str, nargs="?", default="2b"
+        # REQUIRED, deliberately no default. This selects the RoPE convention,
+        # the chains switched convention mid-flight, and a wrong value produces
+        # an export that loads cleanly and generates gibberish. The old default
+        # of "2b" was silently wrong for every post-2026-07 20B checkpoint.
+        # Resolve with scripts/eval/rope_flavor_for_step.py.
+        "--model_flavor",
+        type=str,
+        required=True,
+        help=(
+            "Model flavor, e.g. 2b / 2b_real / 20b / 20b_real / 80b. REQUIRED: "
+            "this picks the RoPE convention and there is no safe default -- "
+            "the chains switched mid-flight. Resolve a specific step with "
+            "scripts/eval/rope_flavor_for_step.py --chain <k> --step <N>."
+        ),
     )
     parser.add_argument(
         "--export_dtype",
