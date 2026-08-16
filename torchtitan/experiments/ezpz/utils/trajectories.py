@@ -370,27 +370,42 @@ TRAJECTORIES: list[dict] = [
         # W&B rows were thrown away and a NEW 510-step hole opened at 6295-6805.
         # Net effect was one gap traded for another, +9 points.
         #
-        # The other two gaps (3602->4201, 4374->5101) have no usable log.
-        # RE-TESTED EMPIRICALLY 2026-08-16 rather than taken on faith, after
-        # the same exercise on 20b_v2_512 recovered 776 steps. Every .o log in
-        # the 256N clone was scanned and each candidate wired in turn:
+        # The other two gaps (3602->4201, 4374->5101) are CLOSED as of
+        # 2026-08-16. Both were twice declared permanent, and both times that
+        # was a search failure, not a fact:
         #
-        #   baseline                    7009 steps  gaps (3602,4201) (4374,5101)
-        #   +o8647385 on 6yr6ivh4       7010        gaps (3603,4201) (4374,5101)
-        #   +o8661054 on uvgmafv9       7010        gaps (3602,4201) (4375,5101)
-        #   +o8681340 on 5rvusq43       7009        unchanged
+        #   pass 1  searched the 256N clone only              -> "no usable log"
+        #   pass 2  re-tested the same clone's logs, measured -> "at most 1 step"
+        #   pass 3  searched EVERY file at any depth          -> both gaps fill
         #
-        # Each adds AT MOST ONE step, because each log sits entirely inside its
-        # own run's W&B range (o8647385 3101..3603 vs 6yr6ivh4's 3101..3602;
-        # o8661054 4201..4375 vs uvgmafv9's 4201..4374). Not worth wiring for
-        # a single step. The full clone inventory, for anyone re-checking:
-        #   1..435, 1101..2109, 2101..3136, 3101..3603, 4201..4375,
-        #   5101..6048, 6001..6302, 6801..7600, 7801..8000
-        # -- nothing covers 3604..4200 or 4376..5100.
+        # Passes 1 and 2 were both correct about the clone. The logs are not in
+        # the clone. They are in the MAIN REPO's umbrella log dirs, because
+        # this chain has been carried by multi-trainer umbrella jobs as well as
+        # standalone ones, and an umbrella writes per-trainer console logs to
+        # its own directory:
         #
-        # Those steps ran (the checkpoints exist) but neither W&B nor any .o
-        # log on disk retained them; the gaps are PERMANENT. Do not interpolate.
+        #   gap 3602->4201 (598)  multi-autoretry-8648363/trainer-3  3401..4297
+        #   gap 4374->5101 (726)  multi-autoretry-8663177/trainer-3  4351..5200
+        #
+        # Measured, cumulative:
+        #   baseline                       7009 steps  gaps (3602,4201) (4374,5101)
+        #   +8648363 on 6yr6ivh4           7607        gaps (4374,5101)
+        #   +8663177 on uvgmafv9           8333        gaps NONE
+        #
+        # Note the trainer index is 3, not 2 -- slot assignment varies per
+        # umbrella, so match on the ckpt-dir string inside the file rather than
+        # on the filename. (A filename-based filter is what made pass 1 miss
+        # these; a config= filter excludes even known-good logs, since these
+        # console logs record the ckpt folder but not the --config flag.)
         "olog_fallbacks": {
+            "6yr6ivh4": str(
+                REPO_ROOT / "logs/multi-autoretry-8648363"
+                / "trainer-3-20b-n256.console.log"
+            ),
+            "uvgmafv9": str(
+                REPO_ROOT / "logs/multi-autoretry-8663177"
+                / "trainer-3-20b-n256.console.log"
+            ),
             "2ktrz29u": str(
                 RUNS / "agpt-20b-n256/torchtitan-ezpz"
                 / "agpt-20b-n256-resume-cont.o8698754"
