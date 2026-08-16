@@ -587,6 +587,25 @@ agpt_configs = {
         hidden_dim=compute_ffn_hidden_dim(5120, multiple_of=1024),
         attn_backend="flex",
     ),
+    # 30B-exp: the proposed next flagship (docs/production/agpt/30b-exp/).
+    # The proposal fixes only dim=6144; the rest is sized to sit consistently
+    # between 20B (dim 5120, L=64) and 80B (dim 9216, L=84):
+    #   dim=6144, L=64, H=48 (head_dim 128, matching 20B/80B), kv=8 GQA,
+    #   ffn via the standard 2/3*4*dim rounded to 1024 -> 16384.
+    # That lands at 28.1B params with the current 256,128 gemma vocab. NOTE the
+    # proposal argues for a ~64k custom vocab, which would cut ~2.5B of
+    # embedding; this config keeps gemma so it is directly comparable to the
+    # existing 2B/20B/80B runs. Add a separate entry when the new tokenizer
+    # exists rather than changing this one.
+    "30B": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -732,6 +751,7 @@ agpt_configs["2b_flex_attn"] = agpt_configs["2B_flex_attn"]
 agpt_configs["7b"] = agpt_configs["7B"]
 agpt_configs["8b"] = agpt_configs["8B"]
 agpt_configs["20b"] = agpt_configs["20B"]
+agpt_configs["30b"] = agpt_configs["30B"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]

@@ -856,6 +856,25 @@ def agpt_20b_real() -> FaultTolerantTrainer.Config:
     return _set_rope_backend(ezpz_agpt_20b(), "cos_sin")
 
 
+def ezpz_agpt_30b() -> FaultTolerantTrainer.Config:
+    return agpt("30b")
+
+
+def agpt_30b() -> FaultTolerantTrainer.Config:
+    """The proposed next flagship. See docs/production/agpt/30b-exp/.
+
+    28.1B params: dim=6144, 64 layers, 48 heads (head_dim 128), 8 KV heads,
+    ffn 16384, gemma 256,128 vocab. Geometry is interpolated between 20B and
+    80B -- the proposal fixes only dim=6144.
+    """
+    return agpt("30b")
+
+
+def agpt_30b_real() -> FaultTolerantTrainer.Config:
+    """agpt_30b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
+    return _set_rope_backend(ezpz_agpt_30b(), "cos_sin")
+
+
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
     return agpt("50b")
 
