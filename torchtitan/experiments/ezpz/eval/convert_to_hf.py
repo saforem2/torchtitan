@@ -39,6 +39,32 @@ def convert_to_hf(
         sd_adapter is not None
     ), "trying to convert checkpoint from DCP to HF safetensors format, but sd_adapter is not provided."
 
+    # RoPE convention is NOT recoverable from the checkpoint: both rope caches
+    # are registered with persistent=False, so nothing on disk says which one
+    # the run used. The adapter reads it from the flavor passed on the command
+    # line, and picking the wrong one applies (or skips) the Q/K permute --
+    # which loads without error and only shows up as gibberish at generation
+    # time. Production 2B/20B default to the cos_sin ("_real") flavor via
+    # CONFIG_SUFFIX since 5ffb850a1 (2026-06-25), so a bare "2b"/"20b" here is
+    # usually wrong for anything trained after that date.
+    #
+    # Announce the convention loudly and write it next to the weights, so a
+    # mismatch is visible in the log and auditable afterwards.
+    rope_is_cos_sin = getattr(sd_adapter, "_is_cos_sin", None)
+    rope_name = {True: "cos_sin", False: "complex", None: "unknown"}[rope_is_cos_sin]
+    print(
+        f"[convert_to_hf] flavor={model_flavor!r} -> RoPE={rope_name} "
+        f"(Q/K permute {'SKIPPED' if rope_is_cos_sin else 'APPLIED'}). "
+        "If this does not match how the checkpoint was TRAINED, the export is "
+        "silently corrupt -- see docs/guides/known-bugs/rope-flavor-mismatch.md"
+    )
+    if rope_is_cos_sin is False and not str(model_flavor).endswith("_real"):
+        print(
+            f"[convert_to_hf] WARNING: flavor {model_flavor!r} selects the "
+            "COMPLEX RoPE. Chains trained after 2026-06-25 default to cos_sin "
+            f"-- did you mean '{model_flavor}_real'?"
+        )
+
     # allocate state dict memory with empty weights to load checkpoint
     state_dict = model._get_state_dict()
     dcp.load(
@@ -66,6 +92,29 @@ def convert_to_hf(
         hf_state_dict,
         storage_writer=storage_writer,
     )
+
+    # Provenance for the export: which flavor produced it, and therefore which
+    # RoPE convention the weights are in. Without this there is no way to audit
+    # an existing HF dir after the fact -- the weights look identical either way.
+    try:
+        import json
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        with open(Path(output_dir) / "ezpz_export.json", "w") as fh:
+            json.dump(
+                {
+                    "source_dcp": str(input_dir),
+                    "model_name": model_name,
+                    "model_flavor": model_flavor,
+                    "rope": rope_name,
+                    "export_dtype": export_dtype,
+                },
+                fh,
+                indent=2,
+            )
+    except OSError as exc:
+        # Provenance is a nicety; never fail a good conversion over it.
+        print(f"[convert_to_hf] WARNING: could not write ezpz_export.json: {exc}")
 
 
 if __name__ == "__main__":

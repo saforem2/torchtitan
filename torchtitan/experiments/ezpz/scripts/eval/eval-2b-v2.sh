@@ -66,7 +66,37 @@ TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,bool
 # vocab 256000, so its arm MUST pass MODEL_FLAVOR=2b-mds EVAL_CONFIG_JSON=agpt_2b_mds_config.json
 # -- otherwise a 256000-weight model is loaded under a 256128 config = gibberish
 # (the tokenizer-mismatch trap). Each base is evaluated with ITS OWN vocab.
-MODEL_FLAVOR="${MODEL_FLAVOR:-2b}"
+# RoPE FLAVOR -- read this before overriding.
+#
+# The flavor selects the RoPE convention at convert time, and the checkpoint
+# does NOT record which one it was trained with (both rope caches are
+# persistent=False, so nothing lands on disk). Pass the wrong one and the
+# adapter applies (or skips) the Q/K permute: the export loads fine and only
+# fails as gibberish at generation. See
+# docs/guides/known-bugs/rope-flavor-mismatch.md
+#
+# Which chains are which:
+#   agpt-2b-sophiag-olmo-mix-1124-n{256,512}-*  -> COMPLEX ("2b")
+#       Produced by the runs/agpt-2b-v2 clone, pinned at f319e3fa which
+#       PREDATES the _real default (5ffb850a1, 2026-06-25) and has no
+#       CONFIG_SUFFIX assignment at all, so it launched --config=agpt_2b.
+#   everything trained after 2026-06-25                -> COS_SIN ("2b_real")
+#       The autoretry scripts default CONFIG_SUFFIX=_real, so the constlr
+#       forks and the stage-2 dolmino chain are all cos_sin.
+#
+# Default by ckpt name rather than a blind constant, and say which was chosen.
+if [[ -z "${MODEL_FLAVOR:-}" ]]; then
+    case "$V2_CKPT_NAME" in
+        agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144|agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288)
+            MODEL_FLAVOR="2b" ;;      # pre-_real clone: complex
+        *)
+            MODEL_FLAVOR="2b_real" ;; # everything newer: cos_sin
+    esac
+    echo "[eval-2b-v2] MODEL_FLAVOR not set; inferred '${MODEL_FLAVOR}' from CKPT_NAME='${V2_CKPT_NAME}'."
+    echo "[eval-2b-v2]   complex=2b (pre-2026-06-25 chains) / cos_sin=2b_real (after). Override with MODEL_FLAVOR= if wrong."
+else
+    echo "[eval-2b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit)."
+fi
 EVAL_CONFIG_JSON="${EVAL_CONFIG_JSON:-agpt_2b_config.json}"
 
 for step in $STEPS; do
