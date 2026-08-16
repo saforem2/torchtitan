@@ -160,8 +160,16 @@ TRAINERS=(
     # Recipe mirrors MDS train_aGPT_2B_sophiag_stage2.sh:
     #   DATA_FILE_LIST=dolmino-mix-1124 (fused)   LR=2.17e-5
     #   LR_DECAY_STYLE=constant -> decay_ratio 0.0, min_lr_factor 1.0
-    #   OPT=sophiag   TRAIN_TOKENS=7064155541716 (CUMULATIVE through stage 2,
-    #   i.e. 4.674T stage-1 + ~2.39T stage-2)
+    #   OPT=sophiag
+    #
+    # TRAIN_TOKENS here is the STAGE-2 INCREMENT (2.390375382006T), NOT MDS's
+    # cumulative 7064155541716. Fixed 2026-08-16 after job 8756070: stage 2
+    # writes to a NEW ckpt dir, so its step counter starts at 0 and the
+    # umbrella's steps = tok/(gbs*seq_len) turns a cumulative figure into
+    # 70,176 steps of pure dolmino (7.06T) -- 2.96x the intended 2.39T.
+    # Harmless to the LR shape (constant LR: decay_ratio 0, min_lr_factor 1),
+    # so it only moved the stopping point, but it was still wrong.
+    #   2390375382006 / (12288 * 8192) = 23,742 steps  <- intended
     #
     # Motivation: the 2026-08-14 eval of the finished stage-1 endpoint showed
     # the last 500B tokens moved NO metric and MMLU ended at chance (0.2511).
@@ -173,7 +181,7 @@ TRAINERS=(
     # matches MDS (pure dolmino, 2.17e-5), which survived the full stage, and
     # relies on NAN_ABORT_CONSECUTIVE to bail early instead of NaN-writing to
     # step 6600 the way that attempt did.
-    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429|0.0|1.0|7064155541716"
+    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429|0.0|1.0|2390375382006"
     "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
     # DROPPED 2026-07-18: this 50/50 dolmino CPT trainer NaN-diverged at
     # step 3801 in job 8663177 (single-step overflow on a dolmino batch)
