@@ -1,8 +1,30 @@
 # XPU graphs cannot capture oneCCL collectives (2026-08-16)
 
+> [!WARNING]
+> **PARTIALLY SUPERSEDED (2026-08-16, same day).** The collective finding below
+> is real and reproducible, but it is **not the only** capture blocker and it is
+> **not** what stops the trainer. A **1-rank** run -- which issues no
+> collectives at all -- fails too (job `12473181`), from inside
+> `loss.backward()` -> the autograd engine, not from `all_gather_single`. And a
+> bare `nn.Linear` **forward** fails to capture with a different error entirely
+> (job `12473182`):
+>
+> ```
+> forward matmul       CAPTURES OK
+> nn.Linear forward    FAILS -> it->second->use_count > 0 INTERNAL ASSERT FAILED
+> ```
+>
+> That is an INTERNAL ASSERT (a torch bug, not a documented restriction), and it
+> may yet prove to be **my** fault -- the wrapper reuses one
+> `graph_pool_handle` across captures, and `use_count > 0` reads like allocator
+> refcounting. Job `12473184` is separating pool-reuse vs `nn.Module` vs
+> backward. **Do not file the Intel ticket at the bottom of this page until
+> that returns** -- as written it blames the wrong subsystem for the failure we
+> actually hit.
+
 > [!IMPORTANT]
-> **XPU graph capture works, oneCCL collectives work, but a collective inside
-> a capture region fails.** Since every distributed config issues collectives
+> **XPU graph capture works for a bare matmul, oneCCL collectives work outside
+> capture, but a collective inside a capture region fails.** Since every distributed config issues collectives
 > inside the step (FSDP all-gather, DDP/FSDP all-reduce), XPU graphs are
 > currently **unusable for any multi-rank training** -- which is all of our
 > production work. Single-rank capture is fine.
