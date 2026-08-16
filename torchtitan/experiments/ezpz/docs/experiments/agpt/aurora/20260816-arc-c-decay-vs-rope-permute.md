@@ -1,114 +1,113 @@
-# 2026-08-16 -- the 20B ARC-Challenge decay is probably NOT the RoPE permute
+# 2026-08-16 -- the 20B ARC-C decay IS (at least partly) the RoPE permute
 
-> **Status: analysis complete, confirmatory job `8760122` RUNNING.**
-> Written while the A/B converts, so the reasoning is on record independent of
-> how the test comes out.
+> **Status: A/B MEASURED at step 5000. Steps 6000/7600 pending a queue slot.**
+>
+> **This page previously argued the opposite and was WRONG.** The original
+> argument is preserved verbatim in
+> [What I got wrong](#what-i-got-wrong-and-why-the-argument-was-seductive),
+> because the way it failed is more instructive than the conclusion.
 
-## Claim under test
+## Result
 
-The [RoPE investigation](../../../guides/known-bugs/rope-flavor-mismatch.md)
-concluded that every HF export made from a cos_sin checkpoint was wrongly
-permuted, and offered as its main evidence that **ARC-Challenge decays
-monotonically while loss keeps improving**:
+Job `8760246`. Same checkpoint (`step-5000`), same tasks, same harness, same
+node. **The only variable is `--model_flavor`.**
 
-> 20B-512 0.3823 -> 0.2628; 2B-512 0.3456 -> 0.2381
+| metric | `20b` (wrong permute) | `20b_real` (correct) | delta |
+|---|---|---|---|
+| **arc_challenge acc** | 0.3123 | **0.3575** | **+0.0452** |
+| arc_challenge acc_norm | 0.3370 | **0.3823** | +0.0453 |
+| arc_easy acc | 0.6688 | **0.7050** | +0.0362 |
+| hellaswag acc_norm | 0.5925 | **0.6394** | +0.0469 |
 
-That decay is real. **The attribution to the permute does not survive contact
-with the boundary data.**
+Every metric improves. The corrected ARC-C of **0.3575 exceeds both complex
+controls** (step 4400 = 0.3387, step 4900 = 0.3413) -- which is what a model
+that is still learning should look like at step 5000, and is not what the
+published table shows.
 
-## The disproof: there is no discontinuity at the switch
+**The permute is real, it is costing ~4.5 points of ARC-C, and it is degrading
+every published post-switch eval number.**
 
-MEASURED, from `outputs/evals/agpt-20b-v2-512n/step-*/results/results.json`.
-The 20B-512 chain switched complex -> cos_sin at **step 4401**, so 4400 and
-earlier are correctly converted and 4500 onward are allegedly corrupt:
+## What this does NOT settle
 
-| step | convention | ARC-C `acc` |
-|---|---|---|
-| 4100 | complex | 0.3345 |
-| 4200 | complex | 0.3353 |
-| 4300 | complex | 0.3430 |
-| 4400 | complex | 0.3387 |
-| **4500** | **cos_sin** | **0.3242** |
-| 4600 | cos_sin | 0.3268 |
-| 4700 | cos_sin | 0.3242 |
-| 4800 | cos_sin | 0.3345 |
-| 4900 | cos_sin | **0.3413** |
-| 5000 | cos_sin | 0.3123 |
-| 6000 | cos_sin | 0.2713 |
-| 7000 | cos_sin | 0.2491 |
-| 7600 | cos_sin | 0.2287 |
+A flat -0.045 correction applied to the later steps gives:
 
-**Steps 4500-4900 are inside the complex controls' range.** Step 4900 scores
-0.3413, *above* the 4400 control at 0.3387. The decline to 0.2287 unfolds
-gradually over the ~3,000 steps that follow.
+| step | published | +0.045 | still below the 0.3387 control? |
+|---|---|---|---|
+| 5000 | 0.3123 | **0.3575 (MEASURED)** | no -- above it |
+| 6000 | 0.2713 | 0.316 (inferred) | yes |
+| 7600 | 0.2287 | 0.274 (inferred) | yes |
 
-A wrong Q/K permute is a **step function**. It re-pairs every attention channel
-with the wrong partner from the first converted tensor onward; it cannot leave
-five consecutive checkpoints untouched and then start biting at step 5000. The
-mechanism and the data disagree.
+So **either** the permute penalty grows with training, **or** a genuine decline
+sits underneath it. A single point cannot distinguish those. UNKNOWN until
+steps 6000 and 7600 are re-evaluated -- `reeval-20b-512-rope-ab2.sh` is written
+and waiting on a queue slot (currently at the 10-job cap).
 
-**The same pattern holds on 20B-256** (switch at step 3101):
+Do not quote "the 20B chain regresses on ARC-C" until those land. Do not quote
+the published post-switch numbers either.
+
+## What I got wrong, and why the argument was seductive
+
+The earlier version of this page rejected the permute explanation on this
+evidence:
 
 | step | convention | ARC-C |
 |---|---|---|
-| 3000 | complex | 0.3268 |
-| **4000** | **cos_sin** | **0.3285** |
-| 5000 | cos_sin | 0.2765 |
-| 8000 | cos_sin | 0.2543 |
+| 4300 | complex | 0.3430 |
+| 4400 | complex | 0.3387 |
+| 4500 | cos_sin | 0.3242 |
+| 4900 | cos_sin | **0.3413** |
+| 5000 | cos_sin | 0.3123 |
 
-Step 4000 is past the boundary and statistically identical to step 3000.
+and argued: *steps 4500-4900 sit inside the complex controls' range, and 4900
+beats the 4400 control, so the permute cannot be biting -- a wrong permute is a
+step function, it cannot spare five checkpoints then start at 5000.*
 
-## What the decay is NOT
+**The flaw: steps 4500-4900 were ALSO wrongly permuted.** Every one of those
+numbers is a corrupted measurement. I compared corrupted values against clean
+ones, saw them overlap, and read the overlap as proof of no damage. The
+comparison had no clean arm in it at all.
 
-- **Not a length-normalization artifact.** MEASURED: `acc` and `acc_norm` decay
-  together (0.3387 -> 0.2287 and 0.3823 -> 0.2628). If the permute were
-  scrambling logits, the two would not track this cleanly.
-- **Not a config change.** MEASURED, W&B `metadata.args` for the first and
-  latest cos_sin-era runs (`tu1iseu1`, `c8zwrlqw`) are identical on every
-  training knob: `sophiag`, `lr=2.28e-5`, `LBS=2`, `GBS=12288`, `seq-len=8192`.
-- **Not a general capability collapse.** MEASURED: ARC-**Easy** holds at
-  0.665-0.696 across the entire range and HellaSwag stays ~0.61 while ARC-C
-  halves. The model keeps easy reasoning and loses hard reasoning.
-- **Not loss divergence.** Train loss and the in-process validator loss both
-  improve monotonically throughout.
+What was actually happening: across 4400 -> 4900 the model genuinely improved by
+roughly the same magnitude as the permute penalty (~+0.04 vs ~-0.045), so the
+two nearly cancelled and the boundary looked continuous. A coincidence of
+magnitudes, and I built a confident argument on it -- then repeated that
+argument to the user twice.
 
-## What it might be (UNTESTED)
+The step-function intuition was correct in itself. It was applied to the wrong
+data.
 
-Offered as hypotheses, not findings:
+**The lesson worth keeping:** an A/B needs a control arm that differs in exactly
+one variable. "Nearby numbers look similar" is not a control. The whole reason
+this A/B was worth running is that it has one -- and it took 25 minutes of
+compute to answer what 40 minutes of reasoning got backwards.
 
-1. **Genuine capability regression** on hard multi-step reasoning while general
-   LM quality improves. Would be the most important reading, and is consistent
-   with ARC-Easy holding.
-2. **Data-mix drift** -- something about the tokens seen after ~step 5000.
-   Checkable against the blendcorpus shard order.
-3. **Overfitting to the corpus** at fixed LR (constant 2.28e-5, no decay), where
-   the model sharpens on web text at the expense of held-out reasoning.
-4. **Eval-harness interaction** with a lengthening context or changed padding.
-   Least likely given ARC-Easy is unaffected.
+Also corrected: the ruled-out list in the prior version ("not a length-norm
+artifact, not config drift, not a general collapse") was all true and all
+irrelevant, because it never tested the hypothesis actually in play.
 
-## The confirmatory test (job `8760122`)
+## Method
 
-Re-converts 20B-512 steps 5000 / 6000 / 7600 with `--model_flavor 20b_real`
-from the **main repo** (the pinned v2 clones lack
-`agpt/state_dict_adapter.py` and would permute regardless of the flag), then
-re-runs `arc_challenge,hellaswag,arc_easy`. Only the flavor changes.
+```bash
+# convert from the MAIN repo -- the pinned v2 clones ship no
+# agpt/state_dict_adapter.py and permute unconditionally regardless of flavor
+python3 torchtitan/experiments/ezpz/eval/convert_to_hf.py \
+    <ckpt>/step-5000 <out>/step-5000/hf \
+    --model_name experiments.ezpz.agpt \
+    --model_flavor 20b_real --export_dtype bfloat16
+# then lm_eval arc_challenge,hellaswag,arc_easy on xpu:0, batch 8
+```
 
-**Prediction, recorded before the job was submitted:**
+Script: `scripts/eval/oneoff/reeval-20b-512-rope-ab.sh` (job `8760246`).
+Results: `outputs/evals/agpt-20b-v2-512n-ropefix/step-5000/results/results.json`.
 
-- ARC-C returns to >= 0.3387 and stops decaying -> the permute WAS the cause,
-  and this page is wrong.
-- ARC-C reproduces the decay -> the permute is NOT the cause, the capability
-  regression is real, and it needs its own investigation.
+Five earlier attempts died on PBS environment setup, not on the science --
+`--login` shebang, top-level `module load`, the `tt-lm-eval` venv, and no
+`set -u`. All four are now recorded in `experiments/ezpz/.claude/CLAUDE.md`.
 
-Given the boundary data above, **the second outcome is expected.**
+## Consequences
 
-Note the walltime is 1h for three 20B conversions at ~20-30 min each, so the
-job may only complete step 5000. That single point is still decisive: 5000 is
-the first clearly-decayed step (0.3123 vs a 0.3387 control).
-
-## Blast radius, independent of the outcome
-
-MEASURED counts of published eval results on the cos_sin side of each switch:
+**Every published eval on the cos_sin side of a switch understates its model.**
+Counts of affected results:
 
 | chain | results | past the switch |
 |---|---|---|
@@ -117,21 +116,19 @@ MEASURED counts of published eval results on the cos_sin side of each switch:
 | `agpt-2b-v2-512n` | 36 | **8** |
 | `agpt-2b-v2-256n` | 193 | 0 (never switched) |
 
-Whether those numbers are *wrong* is exactly what `8760122` tests. The
-flavor-mismatch mechanism is real and the eval scripts genuinely did hardcode
-the wrong flavor -- the open question is whether it materially changed the
-scores.
+The 2B-512 chain's *completed-run* numbers are in that set: its switch was at
+step 30401 and the chain ran to 46,429, so the headline 4.674T eval
+(MMLU 0.2511, ARC-C 0.2381, HellaSwag 0.4753) was measured on a wrongly-permuted
+export. **Those numbers are too low by an unknown amount** -- and the
+token-matched comparison that made 2B-256 look better than 2B-512 on fewer
+tokens is now suspect in the same direction.
 
-## Correction this page makes
-
-The known-bugs page currently states the ARC-C decay as evidence FOR the
-permute corruption. That inference is unsound for the reason given above, and I
-repeated it before checking the boundary. The page should be amended once
-`8760122` reports.
+Whether a corrected 2B-512 changes the campaign's central "MMLU never left
+chance" conclusion is UNKNOWN and worth testing: +0.045 would not lift 0.2511 to
+significance, but the magnitude at 2B has not been measured.
 
 ## Related
 
 - [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md)
-  -- the mechanism, the per-step registry, and the shipped fail-loud mitigation.
-  All of that stands; only the ARC-C attribution is in question.
-- `scripts/eval/oneoff/reeval-20b-512-rope-ab.sh` -- the A/B job.
+  -- mechanism, per-step registry, shipped fail-loud mitigation.
+- `scripts/eval/oneoff/reeval-20b-512-rope-ab2.sh` -- the pending 6000/7600 run.
