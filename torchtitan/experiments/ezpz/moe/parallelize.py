@@ -49,7 +49,13 @@ from torchtitan.distributed import ParallelDims
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
-from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
+# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
+# now enabled inside apply_compile from parallel_dims. Importing it is an
+# ImportError. This file compiles per-block directly (see the compile block
+# below) rather than calling apply_compile, so there is nothing to thread
+# parallel_dims into here; async TP simply is not available on this path.
+# That is not a regression: the call below only ran under tp_enabled, and the
+# MoE path has never been validated with async TP on XPU.
 from torchtitan.experiments.ezpz.moe import moeModel
 from torchtitan.tools.logging import logger
 
@@ -136,10 +142,8 @@ def parallelize_moe(
     if parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         model.parallelize(parallel_dims)
 
-    if parallel_dims.tp_enabled:
-        maybe_enable_async_tp(
-            parallelism, compile_config, parallel_dims.get_mesh("tp")
-        )
+    # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
+    # gone -- see the import-site note above.
 
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components

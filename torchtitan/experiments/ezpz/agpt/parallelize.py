@@ -47,7 +47,10 @@ from torchtitan.distributed.compile import (
 )
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
-from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
+# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED from
+# distributed/tensor_parallel.py -- async TP now happens inside apply_compile,
+# which gained a keyword-only `parallel_dims`. Importing the old symbol is an
+# ImportError, so this replay is mandatory, not cosmetic.
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.tools.logging import logger
 
@@ -63,10 +66,14 @@ from torchtitan.tools.logging import logger
 # Reuses the core _maybe_regional_inductor_backend so FlexAttention handling is
 # unchanged (its own inductor_configs still set max_autotune=False for the
 # backward, which OOMs on XPU -- that is per-kernel and independent of this).
-def _apply_compile_with_mode(model, compile_config) -> None:
+def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
     mode = os.environ.get("AGPT_COMPILE_MODE", "").strip() or None
     if mode in (None, "default"):
-        apply_compile(model, compile_config)
+        # 78th sync (#4045): apply_compile is keyword-only now and takes
+        # parallel_dims, because async TP moved inside it.
+        apply_compile(
+            model, compile_config=compile_config, parallel_dims=parallel_dims
+        )
         return
     # Mirror apply_compile's dynamo flags + backend resolution, adding mode=.
     torch._dynamo.config.capture_scalar_outputs = True
@@ -120,9 +127,10 @@ def parallelize_llama(
     # bare tp_mesh) so each Module can resolve its own SPMD submesh.
     if parallel_dims.tp_enabled:
         model.parallelize(parallel_dims)
-        maybe_enable_async_tp(
-            parallelism, compile_config, parallel_dims.get_mesh("tp")
-        )
+        # 78th sync (#4045): the maybe_enable_async_tp call that used to live
+        # here is gone -- apply_compile now enables async TP itself from
+        # parallel_dims. Calling it here would be an ImportError (the symbol
+        # was deleted upstream) and, if it still existed, a double-enable.
 
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components
@@ -136,7 +144,7 @@ def parallelize_llama(
         ac_config.build(dump_folder=dump_folder).apply(model)
 
     if model_compile_enabled:
-        _apply_compile_with_mode(model, compile_config)
+        _apply_compile_with_mode(model, compile_config, parallel_dims)
         # apply_compile unconditionally sets capture_scalar_outputs=True
         # (needed for MoE dynamic shapes). For dense models this breaks
         # the separately-compiled loss_fn when loss_parallel + ignore_index
