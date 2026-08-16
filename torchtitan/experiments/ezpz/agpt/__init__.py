@@ -606,6 +606,29 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
     ),
+    # 30B-exp with the Llama-3 128k vocab instead of gemma's 256,128.
+    #
+    # The proposal asks for "~64k custom BPE", but we have no 64k tokenizer and
+    # training one is its own project. Llama-3.1/3.2 (128k) is already vendored
+    # in assets/hf/ and satisfies BOTH surviving arguments in the proposal:
+    #   - cost: halves the embedding, 3.15B -> 1.57B params (11.2% -> 5.9% of
+    #     the model). A 64k vocab would save only ~0.8B beyond this.
+    #   - code fertility: the proposal's own table has gemma costing +17% on
+    #     starcoder and +26% on Python vs Llama-3.1, and attributes that to
+    #     gemma's merges rather than to vocab size.
+    # 26.5B params. Needs assets/hf/Llama-3.1-8B (or 3.2-1B) as the tokenizer.
+    #
+    # NOT a drop-in swap for a gemma-trained checkpoint -- different vocab means
+    # retokenizing the corpus. This is for the NEXT flagship, not a continuation.
+    "30B_llama3tok": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=128256,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -752,6 +775,7 @@ agpt_configs["7b"] = agpt_configs["7B"]
 agpt_configs["8b"] = agpt_configs["8B"]
 agpt_configs["20b"] = agpt_configs["20B"]
 agpt_configs["30b"] = agpt_configs["30B"]
+agpt_configs["30b_llama3tok"] = agpt_configs["30B_llama3tok"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]

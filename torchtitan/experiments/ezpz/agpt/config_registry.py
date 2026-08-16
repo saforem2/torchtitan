@@ -875,6 +875,17 @@ def agpt_30b_real() -> FaultTolerantTrainer.Config:
     return _set_rope_backend(ezpz_agpt_30b(), "cos_sin")
 
 
+def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
+    """30B with the Llama-3 128k vocab -- see docs/production/agpt/30b-exp/.
+
+    26.5B params vs 28.1B for the gemma-vocab variant. Halves the embedding
+    (3.15B -> 1.57B) using a tokenizer we already vendor, and the proposal's
+    own fertility table prefers Llama on code. Requires the Llama-3 tokenizer:
+        --tokenizer.path assets/hf/Llama-3.1-8B
+    """
+    return agpt("30b_llama3tok")
+
+
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
     return agpt("50b")
 
