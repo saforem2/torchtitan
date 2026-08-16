@@ -147,6 +147,25 @@ per-rank compute, which is the entire argument for going bigger rather than
 wider.** Recovering 27% MFU is a ~3x effective-compute multiplier, larger
 than any data change proposed below.
 
+> **Measured, partially ([exp06](exp06-scaling.md), job `12473198`).** The 30B
+> holds **25.54% MFU at 64N** and decays **1.75% per doubling** against the
+> 2B's **13.96%** -- an 8x better rate, supporting the mechanism above.
+>
+> Two honest caveats this section should carry:
+>
+> 1. **64N is not 512N.** Three doublings separate them, and the 2B's collapse
+>    was a cliff, not a slope -- extrapolating through a smooth region cannot
+>    locate a cliff. Confirming 512N needs Aurora.
+> 2. **At 64N the 2B is not collapsed either** (25.9% in the table above vs
+>    the 30B's 25.54%). So the measured range does not yet separate the two
+>    models; it establishes that the 30B does not degrade *earlier*, which is
+>    necessary but not sufficient for the 512N claim.
+>
+> exp06 also raises a constraint this section omits: holding LBS=3 to 512N
+> implies **GBS 18,432 sequences / 75M tokens per step**, far past the batch
+> size that still converts tokens into learning. The MFU argument and the
+> batch ceiling push in opposite directions.
+
 ### 1.4 Catastrophic forgetting is real and fast
 
 MDS stage-3 ladder, both arms branching from ~140,300 and running to

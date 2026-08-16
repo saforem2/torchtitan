@@ -39,6 +39,8 @@ economising on the important one.
 | [01](exp01-tokenizer-analysis.md) | Tokenizer analysis | Does gemma-7b's 256k vocab actually hurt us -- embedding cost, digit splitting, fertility, vocab utilisation? | CPU, minutes | **DONE** -- 2 claims refuted |
 | [02](exp02-fp32-norms-ablation.md) | fp32 norms-only ablation | Is fp32 for *norm params only* sufficient, or does full fp32 master do real work? | debugmodel, ~2N | **DONE** -- norms-only is NOT sufficient; Section 6 claim refuted |
 | [04](exp04-fp32-inference-investigation.md) | fp32 master vs fp32 inference | Does training with fp32 master weights force fp32 serving and double deployment cost? | CPU + cluster probes | **DONE** -- NO; vLLM cause not isolated |
+| [05](exp05-2n-performance.md) | 30B at 2N | Does the proposed 30B train at all, and what is its best per-GPU config? | 2N, ~2h x3 | **DONE** -- 466 tps / 27.89% MFU at LBS=3; TP hurts; HSDP fails |
+| [06](exp06-scaling.md) | 30B weak scaling | Does the 30B hold its MFU as node count grows, as the proposal's "3x effective compute" claim requires? | 64N, 3h | **DONE** -- 25.54% at 64N; 1.75%/doubling vs the 2B's 13.96% |
 
 ## Tier 1 -- the gate
 
