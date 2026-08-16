@@ -1,7 +1,10 @@
 # `--debug.deterministic` is not bit-reproducible on XPU (2026-08-16)
 
 > [!IMPORTANT]
-> **It takes BOTH multi-rank AND seq >= 4096.** Neither alone reproduces it.
+> **It takes BOTH inter-node (>1 NODE) AND seq >= 4096.** Neither alone
+> reproduces it, and *multi-rank within one node is not enough* -- 12 ranks on
+> a single node is deterministic at every sequence length tested, including
+> 4096.
 > CLAUDE.md requires that two runs with `--debug.seed=42 --debug.deterministic`
 > produce bit-identical loss and grad_norm; at production sequence lengths they
 > do not. Until this is understood, an "identical loss" check on this stack
@@ -22,7 +25,21 @@ compile off, each config run **twice and compared with itself**:
 | `12473177` | 24 | **4096** | 0 | **NONDETERMINISTIC** |
 | `12473177` | 24 | **4096** | 2 | **NONDETERMINISTIC** |
 | `12473187` | **1** | 4096 | 0 | deterministic |
+| `12473188` | 1 | 2048 / 4096 | 0 | deterministic |
+| `12473188` | **12** | 2048 / 3072 / 3584 / **4096** | 0 | **deterministic** |
 | `12473172` | 24 | **4096** | 2 | **NONDETERMINISTIC** |
+
+Sorted by what actually separates the cases:
+
+| ranks | nodes | seq | result |
+|---:|---:|---:|---|
+| 1 | 1 | 2048, 4096 | deterministic |
+| 12 | **1** | 2048, 3072, 3584, **4096** | **deterministic** |
+| 24 | **2** | 2048 | deterministic |
+| 24 | **2** | **4096** | **NONDETERMINISTIC** |
+
+Only the bottom row fails. It needs **inter-node** collectives *and* the larger
+payload -- 24 ranks at seq=2048 is clean, and 12 ranks at seq=4096 is clean.
 
 Divergence, when it happens, is identical in shape every time: **steps 1-7
 bit-identical, first difference at step 8**, growing to ~0.012 by step 10.
@@ -39,21 +56,26 @@ convincing on partial data:
   -- worker prefetch reordering batches -- and it is simply wrong here.
 - **Not sequence length alone.** seq=4096 at 1 rank is deterministic
   (job `12473187`), as are 2560 / 3072 / 3584.
+- **Not multi-rank + seq=4096 either.** This was my fourth wrong answer, and
+  it was committed before the confirming run finished: **12 ranks at seq=4096
+  is deterministic** (job `12473188`). What distinguishes the failing case is
+  that 24 ranks spans **two nodes**.
 
 ## Working hypothesis
 
-The two required factors together point at **collective payload size**. At
-larger sequence length the per-step gradient/activation collective crosses a
-size threshold and oneCCL selects a different reduction algorithm; some of
-those algorithms do not have a fixed reduction order, so the floating-point
-accumulation order varies run to run. That fits the "identical until step 8"
-signature -- the weights stay identical until the first reordered reduction,
-then diverge and amplify.
+**Inter-node reduction order.** Intra-node collectives (12 ranks, one node)
+are deterministic at every size tested; only crossing to a second node, at
+sufficient payload, breaks it. That is consistent with oneCCL selecting a
+different multi-node algorithm above a size threshold -- ring vs tree, or a
+scatter/gather decomposition -- where the accumulation order across nodes is
+not fixed. It fits the "identical until step 8" signature: weights stay
+identical until the first reordered inter-node reduction, then diverge and
+amplify.
 
-**Not yet confirmed.** Job `12473188` runs 1-rank controls (2048/4096/8192) and
-a 12-rank ladder (2048/3072/3584/4096) in one job to find where the interaction
-switches on. If it tracks a byte threshold rather than a token count, that is
-strong support.
+**Still not confirmed.** The obvious next test is 24 ranks at 3072 and 3584 to
+find the payload threshold, and 36/48 ranks (3-4 nodes) to check whether it
+worsens with node count. Given that four hypotheses have already failed here,
+that grid should be collected in ONE job before any further claim.
 
 ## Method note (the actual mistake)
 
