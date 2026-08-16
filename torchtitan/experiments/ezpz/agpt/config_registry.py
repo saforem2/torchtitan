@@ -879,11 +879,20 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
     """30B with the Llama-3 128k vocab -- see docs/production/agpt/30b-exp/.
 
     26.5B params vs 28.1B for the gemma-vocab variant. Halves the embedding
-    (3.15B -> 1.57B) using a tokenizer we already vendor, and the proposal's
-    own fertility table prefers Llama on code. Requires the Llama-3 tokenizer:
-        --tokenizer.path assets/hf/Llama-3.1-8B
+    (3.15B -> 1.58B) using a tokenizer we already vendor, and the proposal's
+    own fertility table prefers Llama on code.
+
+    The Llama-3 assets are set HERE rather than left to the caller. This
+    function previously inherited the family default (gemma-7b, vocab 256,128)
+    while its model declares vocab_size=128,256, which is an inconsistent
+    config: the tokenizer can emit ids the embedding cannot index. Its
+    docstring also told callers to pass ``--tokenizer.path``, which is not a
+    real flag -- the field is top-level ``hf_assets_path`` (``--hf-assets-path``).
+    Every run of this config had in fact died at argument parsing with
+    "Unrecognized options: --tokenizer.path", which is why it never produced a
+    single step (jobs 12473195, 12473200).
     """
-    return agpt("30b_llama3tok")
+    return agpt("30b_llama3tok", hf_assets_path="./assets/hf/Llama-3.1-8B")
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
