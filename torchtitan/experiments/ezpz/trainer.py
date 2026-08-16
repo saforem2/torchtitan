@@ -41,6 +41,29 @@ from torchtitan.tools.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
+_CLIP_FOREACH_LOGGED = False
+
+
+def _clip_foreach() -> bool:
+    """Whether to use the fused multi-tensor path in ``clip_grad_norm_``.
+
+    Defaults to True, matching upstream. ``EZPZ_CLIP_NO_FOREACH=1`` selects the
+    unfused loop, which exists to test whether the fused path is what exhausts
+    level_zero resources under HSDP on XPU (30B dies in
+    ``clip_grad.py:106 torch.stack([norm.to(first_device) ...])`` with
+    UR_RESULT_ERROR_OUT_OF_RESOURCES at 71.68% memory -- resource exhaustion,
+    not an OOM). Logged once so a run's own output proves which path it took,
+    rather than the caller assuming the env var reached the ranks.
+    """
+    global _CLIP_FOREACH_LOGGED
+    foreach = os.environ.get("EZPZ_CLIP_NO_FOREACH", "0") != "1"
+    if not _CLIP_FOREACH_LOGGED:
+        _CLIP_FOREACH_LOGGED = True
+        logger.info("EZPZ_CLIP_NO_FOREACH active: clip_grad foreach=%s", foreach)
+    return foreach
+
+
+
 def _set_pg_timeouts_xpu_aware(
     timeout: timedelta,
     parallel_dims: ParallelDims,
@@ -816,10 +839,17 @@ class FaultTolerantTrainer(Trainer):
             )
             accumulated_losses.append(loss.detach())
 
+        # foreach=True fuses the per-parameter norms into one multi-tensor op.
+        # Under HSDP on XPU that path exhausts level_zero resources -- the 30B
+        # dies in clip_grad.py:106 `torch.stack([norm.to(first_device) ...])`
+        # with UR_RESULT_ERROR_OUT_OF_RESOURCES at only 71.68% memory, so it is
+        # device-resource exhaustion (events/command-lists), not an OOM.
+        # EZPZ_CLIP_NO_FOREACH=1 falls back to the unfused loop to test that.
+        # Default is unchanged (foreach=True) -- this is opt-in diagnosis.
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,
-            foreach=True,
+            foreach=_clip_foreach(),
             pp_mesh=parallel_dims.get_optional_mesh("pp"),
             ep_enabled=parallel_dims.ep_enabled,
         )
