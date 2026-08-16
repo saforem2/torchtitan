@@ -40,11 +40,26 @@ logger = logging.getLogger(__name__)
 
 
 def xpu_graphs_available() -> bool:
-    """Whether this torch build exposes the XPU graph API we need."""
-    return all(
-        hasattr(torch, "xpu") and hasattr(torch.xpu, attr)
-        for attr in ("XPUGraph", "graph", "graph_pool_handle", "Stream")
-    )
+    """Whether the XPU graph API is present AND functional.
+
+    Deliberately CALLS `graph_pool_handle()` rather than testing `hasattr`.
+    torch installs dummy placeholder classes that satisfy `hasattr` and only
+    raise "Tried to instantiate dummy base class" when invoked -- so a
+    presence check reports a working API on builds that have none. That false
+    positive is what let job 12473173 reach a runtime failure instead of
+    falling back cleanly.
+    """
+    if not (hasattr(torch, "xpu") and torch.xpu.is_available()):
+        return False
+    for attr in ("XPUGraph", "graph", "graph_pool_handle", "Stream"):
+        if not hasattr(torch.xpu, attr):
+            return False
+    try:
+        torch.xpu.graph_pool_handle()
+    except Exception as e:  # dummy stub, or a build without real support
+        logger.warning("XPU graph API present but not functional: %s", e)
+        return False
+    return True
 
 
 def xpu_graphs_enabled() -> bool:
@@ -83,85 +98,114 @@ class _XPUGraphManager:
 _manager = _XPUGraphManager()
 
 
-def _base_wrapper_cls():
-    """Core's CUDAGraphWrapper, imported lazily.
+class XPUGraphWrapper:
+    """Capture/replay a callable with an XPU graph.
 
-    Lazy because importing `torchtitan.distributed.cudagraph` at module scope
-    would drag CUDA-oriented imports into every ezpz run, including ones that
-    never touch graphs.
+    STANDALONE, not a subclass of core's CUDAGraphWrapper. Subclassing was the
+    first attempt and it does not work: core's `__init__` calls
+    `_manager.maybe_initialize()` (cudagraph.py:243 -> :148), which
+    unconditionally calls `torch.cuda.graph_pool_handle()`. On an XPU-only
+    build that is a dummy stub, so construction dies before any override can
+    take effect:
+
+        cudagraph.py:148 maybe_initialize
+          torch/cuda/graphs.py:74 graph_pool_handle
+            RuntimeError: Tried to instantiate dummy base class
+                          _graph_pool_handle
+
+    (Confirmed job 12473176. `torch.xpu.graph_pool_handle()` itself is fine --
+    it returns (0, 1); the problem is core reaching for the CUDA one.)
+
+    The capture/replay logic below mirrors core's so the semantics match:
+    one eager warmup call, then capture, then replay with inputs copied into
+    the captured buffers.
+
+    Like core's, the returned output ALIASES graph-owned storage and is
+    overwritten by the next replay -- callers must clone anything they keep.
     """
-    from torchtitan.distributed.cudagraph import CUDAGraphWrapper
 
-    return CUDAGraphWrapper
+    def __init__(
+        self,
+        fn: Callable,
+        example_inputs: Sequence[Any],
+        static_input_indices: tuple[int, ...] | None = None,
+    ) -> None:
+        self._fn = fn
+        self._static_input_indices = set(static_input_indices or ())
+        # Every non-static tensor input must be copied into the captured
+        # buffer before each replay; non-tensors are frozen at capture.
+        self._input_indices_to_copy = [
+            i
+            for i, inp in enumerate(example_inputs)
+            if isinstance(inp, torch.Tensor) and i not in self._static_input_indices
+        ]
+        self._non_tensor_inputs = {
+            i: inp
+            for i, inp in enumerate(example_inputs)
+            if not isinstance(inp, torch.Tensor)
+        }
+        self._graph: Any = None
+        self._warmup_remaining = 1
+        self._args: tuple | None = None
+        self._output: Any = None
+
+    def _validate_inputs(self, args: tuple) -> None:
+        """Non-tensor inputs are baked into the graph; they must not change."""
+        for i, expected in self._non_tensor_inputs.items():
+            actual = args[i]
+            if type(actual) is not type(expected) or actual != expected:
+                raise ValueError(
+                    "XPU graph non-tensor inputs must remain constant, but "
+                    f"input {i} changed from {expected!r} to {actual!r}"
+                )
+
+    def __call__(self, *args):
+        self._validate_inputs(args)
+
+        # Warmup on the side stream, same as core: the first call runs eagerly
+        # so allocator state settles before capture.
+        if self._warmup_remaining > 0:
+            self._warmup_remaining -= 1
+            current_stream = torch.xpu.current_stream()
+            _manager.stream.wait_stream(current_stream)
+            with torch.xpu.stream(_manager.stream):
+                output = self._fn(*args)
+            current_stream.wait_stream(_manager.stream)
+            return output
+
+        if self._graph is None:
+            self._args = args
+            self._graph = torch.xpu.XPUGraph()
+            # NOTE: no capture_error_mode -- torch.xpu.graph does not accept it
+            # (CUDA's does; core passes "thread_local"). Verified against the
+            # RC signature: (xpu_graph, pool=None, stream=None).
+            with torch.xpu.graph(
+                self._graph,
+                pool=_manager.graph_pool,
+                stream=_manager.stream,
+            ):
+                self._output = self._fn(*args)
+            logger.info("Recorded XPU graph")
+
+        assert self._args is not None
+        for i in self._input_indices_to_copy:
+            self._args[i].copy_(args[i])
+        self._graph.replay()
+        return self._output
+
+    def teardown(self) -> None:
+        self._graph = None
+        self._args = None
+        self._output = None
+        self._non_tensor_inputs.clear()
 
 
 def make_xpu_graph_wrapper(
     fn: Callable,
     example_inputs: Sequence[Any],
     static_input_indices: tuple[int, ...] | None = None,
-    should_check_address: bool = False,
-):
-    """Build an XPU-backed graph wrapper by subclassing core's CUDA one.
-
-    Constructed dynamically so the base class is resolved at call time (see
-    `_base_wrapper_cls`).
-    """
-    base = _base_wrapper_cls()
-
-    class XPUGraphWrapper(base):  # type: ignore[misc, valid-type]
-        """CUDAGraphWrapper with the torch.cuda calls swapped for torch.xpu.
-
-        Overrides only `__call__` -- the one method that names a device
-        namespace. Capture/replay semantics, and therefore the requirement that
-        the loss aliases graph-owned storage, are unchanged from core.
-        """
-
-        def __call__(self, *args):
-            self._validate_inputs(args)
-
-            # Warmup on the side stream, same as core: the first call runs
-            # eagerly so allocator state settles before capture.
-            if self._warmup_remaining > 0:
-                self._warmup_remaining -= 1
-                current_stream = torch.xpu.current_stream()
-                _manager.stream.wait_stream(current_stream)
-                with torch.xpu.stream(_manager.stream):
-                    output = self._fn(*args)
-                current_stream.wait_stream(_manager.stream)
-                return output
-
-            if self._graph is None:
-                self._args = args
-                self._record_static_input_addresses(args)
-                self._graph = torch.xpu.XPUGraph()
-                # NOTE: no capture_error_mode -- torch.xpu.graph does not take
-                # it (CUDA's does; core passes "thread_local"). Verified
-                # against the RC's signature:
-                #   (xpu_graph, pool=None, stream=None)
-                with torch.xpu.graph(
-                    self._graph,
-                    pool=_manager.graph_pool,
-                    stream=_manager.stream,
-                ):
-                    self._output = self._fn(*args)
-                logger.info("Recorded XPU graph")
-
-            if self._should_check_address:
-                self._check_static_input_addresses(args)
-
-            assert self._args is not None
-            assert self._graph is not None
-            for i in self._input_indices_to_copy:
-                self._args[i].copy_(args[i])
-            self._graph.replay()
-            return self._output
-
-    return XPUGraphWrapper(
-        fn,
-        example_inputs,
-        static_input_indices=static_input_indices,
-        should_check_address=should_check_address,
-    )
+) -> XPUGraphWrapper:
+    return XPUGraphWrapper(fn, example_inputs, static_input_indices)
 
 
 def maybe_wrap_with_xpu_graph(fwd_bwd_fn: Callable) -> Callable:
