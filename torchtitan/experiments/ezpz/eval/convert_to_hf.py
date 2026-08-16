@@ -44,9 +44,12 @@ def convert_to_hf(
     # the run used. The adapter reads it from the flavor passed on the command
     # line, and picking the wrong one applies (or skips) the Q/K permute --
     # which loads without error and only shows up as gibberish at generation
-    # time. Production 2B/20B default to the cos_sin ("_real") flavor via
-    # CONFIG_SUFFIX since 5ffb850a1 (2026-06-25), so a bare "2b"/"20b" here is
-    # usually wrong for anything trained after that date.
+    # time. EVERY agpt 2B/20B chain on Aurora trained cos_sin ("_real") --
+    # verified 2026-08-16 from `--config=` launch lines across all six
+    # umbrellas back to 8663177, INCLUDING the two completed 4.674T chains. So
+    # a bare "2b"/"20b" is wrong for every Aurora agpt chain except 80B, which
+    # runs compile OFF and stays complex. Registry:
+    # docs/guides/known-bugs/rope-flavor-mismatch.md
     #
     # Announce the convention loudly and write it next to the weights, so a
     # mismatch is visible in the log and auditable afterwards.
@@ -58,11 +61,14 @@ def convert_to_hf(
         "If this does not match how the checkpoint was TRAINED, the export is "
         "silently corrupt -- see docs/guides/known-bugs/rope-flavor-mismatch.md"
     )
-    if rope_is_cos_sin is False and not str(model_flavor).endswith("_real"):
+    # Complex is expected ONLY for 80B (compile OFF, so the cos_sin
+    # inductor-lowering win is moot). Every other Aurora agpt chain is cos_sin.
+    if rope_is_cos_sin is False and not str(model_flavor).startswith("80b"):
         print(
             f"[convert_to_hf] WARNING: flavor {model_flavor!r} selects the "
-            "COMPLEX RoPE. Chains trained after 2026-06-25 default to cos_sin "
-            f"-- did you mean '{model_flavor}_real'?"
+            "COMPLEX RoPE, but every Aurora agpt 2B/20B chain trained cos_sin. "
+            f"Did you mean {model_flavor + '_real'!r}? Ignore this only if you "
+            f"have a launch line showing --config=agpt_{model_flavor}."
         )
 
     # allocate state dict memory with empty weights to load checkpoint
