@@ -1,6 +1,6 @@
 # SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)
 
-> **Last updated: 2026-08-11.**
+> **Last updated: 2026-08-14.**
 > **Status: COMPLETE at 8N -- step 8672/8672, epoch 1.0, final loss 0.357,
 > mean_token_accuracy 0.902** (finished 2026-07-16). Head job **12470350**
 > (2026-07-12) + a 10-link afterany chain (... -> 12470478 -> 12470479 final);

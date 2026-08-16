@@ -1,6 +1,6 @@
 # SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix
 
-> **Last updated: 2026-08-11.**
+> **Last updated: 2026-08-14.**
 > **Status: complete.** Final checkpoint at
 > `outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf/`,
 > ready for downstream alignment work.
