@@ -252,7 +252,30 @@ TRAJECTORIES: list[dict] = [
         # that window (o8638795 stops at 5400, the next starts at 6001) and no
         # W&B run holds it. Those ~600 steps ran and checkpointed, but neither
         # record survives. Do not try to interpolate them.
+        # Two MORE gaps closed 2026-08-16 after widening the search from the
+        # per-model clone to every log on the filesystem (236 files with step
+        # lines, indexed by range). The first sweep only looked at logs whose
+        # NAME matched the chain, which missed both of these.
+        #
+        # 3269->3801 (531 steps): o8508214 covers 3201..3806. Its embedded W&B
+        # run is `oqqhoxz6`, which is NOT in wandb_run_ids and returns
+        # CommError from the API -- that run never synced or was purged, so
+        # the .o log is the ONLY surviving record of those steps. Same for
+        # d00iszlc/sn4q74lc in sibling logs. Attached to 8vixdfg2, the run
+        # whose W&B tail (2601..3269) ends at the gap.
+        #
+        # 7148->7251 (102 steps): o8731758 covers 7101..7254, attached to
+        # 2lxurmes (W&B 7301..7653, the run whose job wrote it). iozc8x9n
+        # gives an identical result; 2lxurmes is the owner.
         "olog_fallbacks": {
+            "8vixdfg2": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-v2-failover-sync-cont3.o8508214"
+            ),
+            "2lxurmes": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-native-cont.o8731758"
+            ),
             "g59v83go": str(
                 RUNS / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-autoretry-cont2.o8647383"
@@ -264,6 +287,16 @@ TRAJECTORIES: list[dict] = [
             "9d1g9zsw": str(
                 RUNS / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-resume.o8696040"
+            ),
+            # 5399->6001 (600 steps), closed 2026-08-16. This one was called
+            # PERMANENT twice before, because both earlier searches only looked
+            # in the per-model CLONE. The log lives in the main repo's umbrella
+            # log dir instead: logs/multi-autoretry-8648363/trainer-1, covering
+            # 5401..6071. Attached to 8o2xakm3 (W&B 5101..5399), the run whose
+            # tail ends at the gap.
+            "8o2xakm3": str(
+                REPO_ROOT / "logs/multi-autoretry-8648363"
+                / "trainer-1-20b-n512.console.log"
             ),
         },
         "eval_subdir": "agpt-20b-v2-512n",
