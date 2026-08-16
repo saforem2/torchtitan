@@ -1,7 +1,32 @@
 # XPU graphs cannot capture oneCCL collectives (2026-08-16)
 
-> [!WARNING]
-> **PARTIALLY SUPERSEDED (2026-08-16, same day).** The collective finding below
+> [!NOTE]
+> **RESOLVED (2026-08-16): the collective framing is CORRECT after all.** The
+> detour below is kept because the reasoning matters.
+>
+> The "1 rank fails too, so it cannot be collectives" objection was **wrong**:
+> `apply_fsdp` is called unconditionally in
+> `ezpz/agpt/parallelize.py:182`, so even at `nproc=1` the model is
+> `fully_shard`-wrapped on a one-rank mesh and STILL issues collectives. There
+> is no collective-free path through the trainer.
+>
+> Two separate bugs were tangled together, and both are now settled:
+>
+> | error | cause | status |
+> |---|---|---|
+> | `it->second->use_count > 0 INTERNAL ASSERT` | **mine** -- shared `graph_pool_handle` across captures | FIXED (`feac16acd`), each graph owns its pool |
+> | `wait method cannot be used for an event associated with a command graph` | oneCCL collectives are not capturable | stands; this is the Intel ask |
+>
+> With fresh pools, capture handles everything **except** collectives
+> (job 12473186): `nn.Linear` forward CAPTURES, raw forward+backward CAPTURES,
+> `nn.Linear` forward+backward CAPTURES. So forward, backward, autograd and
+> Modules are all fine -- the collective is the single remaining blocker, and
+> the ticket at the bottom of this page is accurate as written.
+
+<details>
+<summary>Superseded intermediate reading (kept for the reasoning)</summary>
+
+> **PARTIALLY SUPERSEDED (intermediate, later retracted).** The collective finding below
 > is real and reproducible, but it is **not the only** capture blocker and it is
 > **not** what stops the trainer. A **1-rank** run -- which issues no
 > collectives at all -- fails too (job `12473181`), from inside
@@ -21,6 +46,8 @@
 > backward. **Do not file the Intel ticket at the bottom of this page until
 > that returns** -- as written it blames the wrong subsystem for the failure we
 > actually hit.
+
+</details>
 
 > [!IMPORTANT]
 > **XPU graph capture works for a bare matmul, oneCCL collectives work outside
