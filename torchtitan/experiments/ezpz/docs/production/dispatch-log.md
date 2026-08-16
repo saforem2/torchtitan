@@ -21,18 +21,31 @@ Reading rules:
 
 ## Umbrellas (multi-chain, ~2098N)
 
-| Job | Date | t0 | t1 | t2 | t3 | t4 | Productive |
-|-----|------|----|----|----|----|----|-----------:|
-| `8663177` | 07-?? | 2B-512 35,001->39,604 | 20B-512 no-start | 2B-256 10->6,621 | 20B-256 4,351->5,200 | -- | 3/4 |
-| `8680578` | 07-?? | no-start | no-start | no-start | -- | -- | 0/3 |
-| `8698125` | 08-04 | **bad_alloc** | **bad_alloc** | 20B-256 6,151->6,897 | -- | -- | 1/3 |
-| `8714337` | 08-05 | smoke 2N | smoke 2N | smoke 2N | smoke 2N | smoke 2N | 5/5 (smoke) |
-| `8714502` | 08-05 | 2B-512 39,601->41,300 | 20B-512 6,801->7,149 | 20B-256 7,501->7,897 | ckpt-path | ckpt-key | 3/5 |
-| `8714503` | 08-07 | 2B-512 41,301->43,820 | 20B-512 7,251->7,654 | 20B-256 7,801->8,334 | **bad_alloc** | **bad_alloc** | 3/5 |
-| `8744245` | 08-09 | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
-| `8744247` | 08-13 | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
-| `8756070` | 08-16 | **2B-512 STAGE 2 1->3,312** (dolmino CPT, seed step-46429) | 20B-512 8,701->9,109 | 20B-256 9,801->10,381 | `Config.job` AttributeError | `Config.job` AttributeError | 3/5 |
-| `8756957` | 08-16 | (12h umbrella, `IDLE_TIMEOUT=5400`, released from hold 08-16) | | | | | queued |
+| Job | Date | Walltime used/req | t0 | t1 | t2 | t3 | t4 | Productive |
+|-----|------|------------------|----|----|----|----|----|-----------:|
+| `8663177` | 07-17 | 1h21m / 24h (6%) | 2B-512 35,001->39,604 | 20B-512 no-start | 2B-256 10->6,621 | 20B-256 4,351->5,200 | -- | 3/4 |
+| `8680578` | 07-21 | 1h13m / 24h (5%) | no-start | no-start | no-start | -- | -- | 0/3 |
+| `8698125` | 07-28 | 1h16m / 24h (5%) | **bad_alloc** | **bad_alloc** | 20B-256 6,151->6,897 | -- | -- | 1/3 |
+| `8714337` | 07-29 | 0h19m / 1h (smoke) | smoke 2N | smoke 2N | smoke 2N | smoke 2N | smoke 2N | 5/5 (smoke) |
+| `8714502` | 08-05 | 8h01m / 24h (33%) | 2B-512 39,601->41,300 | 20B-512 6,801->7,149 | 20B-256 7,501->7,897 | ckpt-path | ckpt-key | 3/5 |
+| `8714503` | 08-07 | 1h51m / 24h (8%) | 2B-512 41,301->43,820 | 20B-512 7,251->7,654 | 20B-256 7,801->8,334 | **bad_alloc** | **bad_alloc** | 3/5 |
+| `8744245` | 08-09 | 1h41m / 24h (7%) | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
+| `8744247` | 08-13 | **23h18m / 24h (97%)** | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
+| `8756070` | 08-16 | 9h14m / 24h (38%) | **2B-512 STAGE 2 1->3,312** (dolmino CPT, seed step-46429) | 20B-512 8,701->9,109 | 20B-256 9,801->10,381 | `Config.job` AttributeError | `Config.job` AttributeError | 3/5 |
+| `8756957` | 08-16 | -- / 12h | (12h umbrella, `IDLE_TIMEOUT=5400`, released from hold 08-16) | | | | | queued |
+
+**Walltime column.** `8744247` and `8756070` are `resources_used.walltime` from
+`qstat -xf` (authoritative). The rest predate PBS history retention and are
+derived from the first/last `[multi HH:MM:SS]` banner in the `.o` log, so they
+are a **lower bound** -- the banner stops when the umbrella script stops, which
+can precede the job's own end. `8744247` shows the gap: its log spans 12h30m
+against PBS's true 23h18m.
+
+Read the percentage as *allocation actually used*, not as success -- `8714502`
+burned 67% of a 24h slot on nothing, and six of nine umbrellas used under 40%.
+That is the single largest source of wasted 2,098-node allocation in this
+table, and it is almost entirely startup faults and infra kills rather than
+training problems.
 
 Slot map for the 5-trainer umbrellas: t0=2B-512, t1=20B-512, t2=20B-256,
 t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
