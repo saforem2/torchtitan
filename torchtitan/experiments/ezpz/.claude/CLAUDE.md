@@ -61,9 +61,25 @@
 - **torch 2.13 venv:** `.venv/` in repo root, copy to compute with `ezpz yeet-env`
 - **torch 2.10 conda env:** `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env`
   Loads `frameworks/2025.3.1` module + user venv overlay. Has lm_eval, vllm, transformers.
-- **PBS scripts must NOT use `set -euo pipefail`** — venv activate has unbound vars
+- **PBS scripts must NOT use `set -euo pipefail`** — venv activate has unbound vars,
+  and `-u` also kills lmod (`ZSH_EVAL_CONTEXT: unbound variable`). Use
+  `set -o pipefail` alone.
+- **PBS scripts that run lm-eval need ALL FOUR of these**, and missing any one
+  fails differently and confusingly. Copy the working recipe from
+  `scripts/eval/eval-20b-v2.sh` rather than reassembling it:
+  1. `#!/bin/bash --login` — **without `--login` a batch shell has no `module`
+     function at all**; the load silently no-ops with `module: command not found`.
+  2. `module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1` at
+     **top level**, not inside a subshell (a subshell load does not persist).
+  3. `source venvs/aurora/tt-lm-eval/bin/activate` — the frameworks module alone
+     has no `lm_eval`; the venv alone has no MKL
+     (`OSError: libmkl_intel_lp64.so.2`).
+  4. `set -o pipefail` only, per the rule above.
 - **Compute nodes need proxy:** `export http_proxy=http://proxy.alcf.anl.gov:3128`
   (also `https_proxy`, `ftp_proxy`). Required before any `curl`, `pip`, or HF download.
+- **Verify a new job's environment with a 10-minute `debug`-queue smoke** before
+  spending a real allocation on it. A script that just loads the env and imports
+  the libraries costs nothing and catches all four traps above at once.
 
 ## Aurora-Specific
 
