@@ -337,11 +337,26 @@ TRAJECTORIES: list[dict] = [
         # W&B rows were thrown away and a NEW 510-step hole opened at 6295-6805.
         # Net effect was one gap traded for another, +9 points.
         #
-        # The other two gaps (3598->4206, 4371->5107) have no usable log:
-        # o8661054 covers only 4201..4375 and o8647385 only 3101..3603, both
-        # ENTIRELY INSIDE their runs' W&B range, so they add no new steps.
+        # The other two gaps (3602->4201, 4374->5101) have no usable log.
+        # RE-TESTED EMPIRICALLY 2026-08-16 rather than taken on faith, after
+        # the same exercise on 20b_v2_512 recovered 776 steps. Every .o log in
+        # the 256N clone was scanned and each candidate wired in turn:
+        #
+        #   baseline                    7009 steps  gaps (3602,4201) (4374,5101)
+        #   +o8647385 on 6yr6ivh4       7010        gaps (3603,4201) (4374,5101)
+        #   +o8661054 on uvgmafv9       7010        gaps (3602,4201) (4375,5101)
+        #   +o8681340 on 5rvusq43       7009        unchanged
+        #
+        # Each adds AT MOST ONE step, because each log sits entirely inside its
+        # own run's W&B range (o8647385 3101..3603 vs 6yr6ivh4's 3101..3602;
+        # o8661054 4201..4375 vs uvgmafv9's 4201..4374). Not worth wiring for
+        # a single step. The full clone inventory, for anyone re-checking:
+        #   1..435, 1101..2109, 2101..3136, 3101..3603, 4201..4375,
+        #   5101..6048, 6001..6302, 6801..7600, 7801..8000
+        # -- nothing covers 3604..4200 or 4376..5100.
+        #
         # Those steps ran (the checkpoints exist) but neither W&B nor any .o
-        # log on disk retained them; the gaps are permanent.
+        # log on disk retained them; the gaps are PERMANENT. Do not interpolate.
         "olog_fallbacks": {
             "2ktrz29u": str(
                 RUNS / "agpt-20b-n256/torchtitan-ezpz"
