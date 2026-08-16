@@ -51,11 +51,11 @@ was taking 4.674T tokens to discover the mix was wrong.
 > uncorrected (job `8760307` covers 41,000-46,429 only).
 >
 > One earlier claim retracted: I wrote that the corrected endpoint "remains
-> below `MDS stage3 math/code` at 0.2591". Step 45,000 corrects to **0.2592**,
-> i.e. fractionally *above* it. Both are ~0.006 from the 0.25 floor with
-> binomial SE ~0.0037 at N=14,042, so **neither ordering is meaningful** --
-> the honest statement is that every configuration sits at chance and they
-> cannot be ranked against each other.
+> below `MDS stage3 math/code` at 0.2591". Corrected MMLU across the four
+> steps spans **0.2579-0.2625**, straddling that value. Everything here is
+> ~0.008-0.013 from the 0.25 floor against a binomial SE of ~0.0037 at
+> N=14,042, so **no ordering among these configurations is meaningful** --
+> the honest statement is that they all sit at chance and cannot be ranked.
 
 ~12 configurations, a 20x token span, two model scales, five data
 treatments. No upward trend -- the most-trained model scores among the
@@ -82,20 +82,22 @@ mix: `olmo-mix-1124` carries little multiple-choice academic content.
 > weights. MEASURED correction at the endpoint (job `8760307`, same
 > checkpoint, correct `2b_real` flavor):
 >
-> | step | metric | published | corrected | delta |
-> |---|---|---|---|---|
-> | 45,000 | MMLU | 0.2498 | **0.2592** | +0.009 |
-> | 45,000 | ARC-C | 0.2398 | **0.3012** | **+0.061** |
-> | 45,000 | HellaSwag | 0.4764 | **0.5386** | **+0.062** |
-> | 46,429 | MMLU | 0.2511 | **0.2579** | +0.007 |
-> | 46,429 | ARC-C | 0.2381 | **0.2978** | **+0.060** |
-> | 46,429 | HellaSwag | 0.4753 | **0.5384** | **+0.063** |
+> **CORRECTED table, all four steps** (job `8760307`, `--model_flavor 2b_real`,
+> same checkpoints and harness). Published values in parentheses:
 >
-> **The corrected numbers are flat between 45,000 and 46,429 too** (ARC-C
-> 0.3012 -> 0.2978, HellaSwag 0.5386 -> 0.5384), so this section's finding is
-> now confirmed directly on corrected data rather than resting on the
-> bias-cancellation argument below. The last 500B tokens really did buy
-> nothing.
+> | step | tokens | MMLU | ARC-C | HellaSwag |
+> |---|---|---|---|---|
+> | 41,000 | 4.13T | **0.2617** (0.2501) | **0.2892** (0.2474) | **0.5344** (0.4785) |
+> | 43,000 | 4.33T | **0.2625** (0.2516) | **0.2961** (0.2389) | **0.5376** (0.4775) |
+> | 45,000 | 4.53T | **0.2592** (0.2498) | **0.3012** (0.2398) | **0.5386** (0.4764) |
+> | **46,429** | **4.674T** | **0.2579** (0.2511) | **0.2978** (0.2381) | **0.5384** (0.4753) |
+>
+> Mean correction: MMLU **+0.009**, ARC-C **+0.059**, HellaSwag **+0.060**.
+>
+> **The section's finding is confirmed on corrected data across the whole
+> window**, not merely preserved by shared bias: HellaSwag moves 0.004 across
+> ~550B tokens, ARC-C 0.012 (and non-monotonically), MMLU drifts *down*
+> 0.2617 -> 0.2579. The last 500B tokens really did buy nothing.
 >
 > **The section's conclusion survives** -- MMLU is still at chance (0.2579 is
 > inside noise of 0.25), and the flatness across the final 11% of the budget
