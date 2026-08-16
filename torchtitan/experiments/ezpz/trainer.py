@@ -411,6 +411,19 @@ class FaultTolerantTrainer(Trainer):
         # branch would AttributeError.
         self.num_pipeline_parallel_microbatches = _num_pp_microbatches
 
+        # 78th sync (#3559 CUDA-graph capture + #4146 in-place loss accum):
+        # the base Trainer.__init__ now builds a `fwd_bwd_fn` indirection and
+        # forward_backward_step dispatches through it. Same reason as above --
+        # we do not call super().__init__() -- so without this every run dies
+        # with "'FaultTolerantTrainer' object has no attribute 'fwd_bwd_fn'"
+        # at step 1 (job 12473170: 3/3 arms rc=143, 0 steps).
+        #
+        # CUDA graphs are NOT wrapped here: wrap_with_cuda_graph is a CUDA
+        # capture path, `disable_cuda_graphs` defaults True, and no XPU run has
+        # ever exercised it. Bind the plain body so behaviour is unchanged from
+        # pre-merge; revisit only if CUDA graphs are ever wanted on XPU.
+        self.fwd_bwd_fn = self._forward_backward_body
+
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
         self.batch_ramp_start_gas = config.batch_ramp_start_gas
