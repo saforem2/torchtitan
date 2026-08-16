@@ -260,26 +260,52 @@ resolved it by reading the **pinned production clones** rather than the
 main-repo scripts, which is where the answer actually lives. **The fleet is
 split, and the split is why nothing has broken yet.**
 
+> [!CAUTION]
+> **SUPERSEDED 2026-08-16 -- the table and reasoning below are WRONG.**
+> They infer each chain's RoPE from its clone's submit-script defaults. W&B
+> run metadata (`metadata.args`, the literal argv each run executed) shows
+> that is not what happened: **the chains switched convention MID-FLIGHT**
+> when `5ffb850a1` flipped the default and each chain picked it up on its
+> next resume.
+>
+> | chain | transition | loss |
+> |---|---|---|
+> | `20b_v2_256` | `agpt_20b` -> `agpt_20b_real`, 2026-07-10 | 2.6854 -> **6.1367** |
+> | `20b_v2_512` | `agpt_20b` -> `agpt_20b_real`, 2026-07-05 | 2.5669 -> **6.0298** |
+> | `2b_v2_512` | `agpt_2b` -> `agpt_2b_real`, 2026-08-05 | no spike |
+> | `2b_v2_256` | `agpt_2b` throughout | never switched |
+>
+> So there is **no per-chain answer** -- the correct flavor depends on which
+> STEP is being converted. Canonical account:
+> [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md).
+> Resolver: `scripts/eval/rope_flavor_for_step.py`.
+>
+> Retained below unedited because the *mechanism* description is still
+> correct and because the wrong inference is worth seeing: never derive a
+> run's config from a submit script, only from what the run recorded.
+
 | clone | `CONFIG_SUFFIX` default | trained RoPE | eval default `MODEL_FLAVOR=2b` |
 |---|---|---|---|
-| `runs/agpt-2b-v2` (the completed 4.674T chains) | **absent** -- `${CONFIG_SUFFIX:-}` expands empty | **complex** | **correct** |
-| `runs/agpt-20b-v2` | `${CONFIG_SUFFIX-_real}` | **cos_sin** | **WRONG** |
-| `runs/agpt-2b-constlr-from9200` | `${CONFIG_SUFFIX-_real}` | **cos_sin** | **WRONG** |
+| `runs/agpt-2b-v2` (the completed 4.674T chains) | **absent** -- `${CONFIG_SUFFIX:-}` expands empty | ~~complex~~ **see caution** | ~~correct~~ |
+| `runs/agpt-20b-v2` | `${CONFIG_SUFFIX-_real}` | ~~cos_sin~~ **switched mid-flight** | -- |
+| `runs/agpt-2b-constlr-from9200` | `${CONFIG_SUFFIX-_real}` | cos_sin | -- |
 
-**MEASURED.** `runs/agpt-2b-v2/torchtitan-ezpz` is pinned at `f319e3fa`,
-predating `5ffb850a1` (2026-06-25, the commit that made `_real` the default).
-It carries only the *legacy* `*_aurora_venv_failover.sh` scripts -- no
-`*_autoretry.sh` exists in it -- and its line 182 is
-`--config="agpt_${MODEL}${CONFIG_SUFFIX:-}"` with **no assignment anywhere in
-the file**. So the completed 2B chains launched as `--config=agpt_2b`:
-**complex RoPE, which is exactly what `MODEL_FLAVOR=2b` converts.**
+**MEASURED at the time, but the inference drawn from it was wrong.**
+`runs/agpt-2b-v2/torchtitan-ezpz` is pinned at `f319e3fa`, predating
+`5ffb850a1`, and carries only the *legacy* `*_aurora_venv_failover.sh` scripts
+whose line 182 is `--config="agpt_${MODEL}${CONFIG_SUFFIX:-}"` with no
+assignment. All of that is true. **The error was concluding the chain therefore
+ran complex** -- those chains ran under the *umbrella* script, not the per-model
+one, and W&B shows `2b_v2_512` running `--config=agpt_2b` up to 2026-08-05 and
+`agpt_2b_real` after.
 
-**Every 2B eval in the campaign was therefore converted correctly.** This is
-independently corroborated by the eval curves themselves: HellaSwag rises
-monotonically 0.405 -> 0.561 across the completed chain. Scrambled Q/K pairing
-does not produce a clean monotone learning curve -- it produces gibberish. The
-near-chance MMLU is **not** a conversion artifact, which closes off an
-attractive but wrong explanation for Section 1.1.
+**The eval-correctness conclusion still stands, on the evidence that does not
+depend on the broken inference:** HellaSwag rises monotonically 0.405 -> 0.561
+across the completed chain. Scrambled Q/K pairing does not produce a clean
+monotone learning curve -- it produces gibberish. So near-chance MMLU is **not**
+a conversion artifact, which closes off an attractive but wrong explanation for
+Section 1.1. Right conclusion; the clone-defaults argument offered for it was
+not.
 
 **The trap is live for everything newer.** Both clones pinned after
 `5ffb850a1` train cos_sin while `eval-2b-v2.sh:69` still defaults to the
