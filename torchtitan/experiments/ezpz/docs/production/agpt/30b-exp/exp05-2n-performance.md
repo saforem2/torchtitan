@@ -164,12 +164,12 @@ hand.** What `assets/hf/` actually holds on Sunspot:
 | tokenizer | vocab | embedding at dim=6144 |
 |---|---:|---:|
 | gemma-7b (current) | 256,128 | 3.15B (11.2%) |
-| Llama-3.1-8B / 3.2-1B | 128,256 | 1.57B (5.9%) |
-| llama-2-7b-hf | 32,000 | 0.39B (1.4%) |
+| Llama-3.1-8B / 3.2-1B | 128,256 | 1.58B (5.9%) |
+| llama-2-7b-hf | 32,000 | 0.39B (1.6%) |
 
 So "use an existing 64k" is not available -- it would mean training one.
 `agpt_30b_llama3tok` uses the 128k Llama-3 vocab as the closest real option:
-it captures most of the saving (3.15B -> 1.57B), and the proposal's own
+it captures most of the saving (3.15B -> 1.58B; 28.1B -> 26.5B total), and the proposal's own
 fertility table already prefers Llama-3 on code (gemma costs +17% on
 starcoder, +26% on Python). A true 64k would save only ~0.8B beyond that,
 which is a thin return for training and validating a new tokenizer.
