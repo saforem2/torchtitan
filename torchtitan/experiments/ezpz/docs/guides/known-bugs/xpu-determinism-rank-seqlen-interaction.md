@@ -1,14 +1,18 @@
 # `--debug.deterministic` is not bit-reproducible on XPU (2026-08-16)
 
 > [!IMPORTANT]
-> **It takes BOTH inter-node (>1 NODE) AND seq >= 4096.** Neither alone
-> reproduces it, and *multi-rank within one node is not enough* -- 12 ranks on
-> a single node is deterministic at every sequence length tested, including
-> 4096.
-> CLAUDE.md requires that two runs with `--debug.seed=42 --debug.deterministic`
-> produce bit-identical loss and grad_norm; at production sequence lengths they
-> do not. Until this is understood, an "identical loss" check on this stack
-> cannot detect a regression smaller than **~0.012 at step 10**.
+> **Multi-NODE runs are nondeterministic at seq >= 2560. Single-node is
+> deterministic at every size tested, and seq=2048 is deterministic even
+> multi-node.**
+>
+> CLAUDE.md requires two runs with `--debug.seed=42 --debug.deterministic` to
+> produce bit-identical loss and grad_norm. At production sequence lengths on
+> more than one node, they do not.
+>
+> **Use `--training.seq-len=2048` for any bit-exact verification.** That is not
+> a guess: 24 ranks / 2 nodes / seq=2048 was run **six times** and all **15
+> pairwise comparisons are identical** (job `12473191`). Every larger sequence
+> length on >1 node fails.
 
 ## The evidence table
 
@@ -29,20 +33,29 @@ compile off, each config run **twice and compared with itself**:
 | `12473188` | **12** | 2048 / 3072 / 3584 / **4096** | 0 | **deterministic** |
 | `12473172` | 24 | **4096** | 2 | **NONDETERMINISTIC** |
 
-Sorted by what actually separates the cases:
+### The complete grid
 
-| ranks | nodes | seq | result |
-|---:|---:|---:|---|
-| 1 | 1 | 2048, 4096 | deterministic |
-| 12 | **1** | 2048, 3072, 3584, **4096** | **deterministic** |
-| 24 | **2** | 2048 | deterministic |
-| 24 | **2** | **4096** | **NONDETERMINISTIC** |
+| ranks | nodes | seq | result | first diff |
+|---:|---:|---:|---|---:|
+| 1 | 1 | 2048, 4096 | deterministic | -- |
+| 12 | 1 | 2048, 3072, 3584, 4096 | deterministic | -- |
+| 24 | 2 | **2048** | **deterministic** (6 runs, 15/15 pairs) | -- |
+| 24 | 2 | 2560 | NONDETERMINISTIC | step 10 |
+| 24 | 2 | 3072 | NONDETERMINISTIC | step 11 |
+| 24 | 2 | 3584 | NONDETERMINISTIC | step 9 |
+| 24 | 2 | 4096 | NONDETERMINISTIC | step 8 |
+| 36 | 3 | 4096 | NONDETERMINISTIC | step 8 |
+| 48 | 4 | 4096 | NONDETERMINISTIC | step 8 |
 
-Only the bottom row fails. It needs **inter-node** collectives *and* the larger
-payload -- 24 ranks at seq=2048 is clean, and 12 ranks at seq=4096 is clean.
+Two clean separations:
 
-Divergence, when it happens, is identical in shape every time: **steps 1-7
-bit-identical, first difference at step 8**, growing to ~0.012 by step 10.
+- **Nodes, not ranks.** 12 ranks on ONE node is deterministic at every size,
+  including 4096. Cross a node boundary and it breaks. Adding more nodes does
+  not make it worse -- 2N, 3N and 4N all diverge at step 8.
+- **A real boundary between 2048 and 2560.** seq=2048 survived six runs and 15
+  pairwise comparisons at 24 ranks; 2560 fails. The divergence step wanders
+  (8/9/10/11) at the failing sizes, so *when* it shows is probabilistic even
+  though *whether* it shows is not.
 
 ## What it is NOT
 
@@ -63,19 +76,18 @@ convincing on partial data:
 
 ## Working hypothesis
 
-**Inter-node reduction order.** Intra-node collectives (12 ranks, one node)
-are deterministic at every size tested; only crossing to a second node, at
-sufficient payload, breaks it. That is consistent with oneCCL selecting a
-different multi-node algorithm above a size threshold -- ring vs tree, or a
-scatter/gather decomposition -- where the accumulation order across nodes is
-not fixed. It fits the "identical until step 8" signature: weights stay
-identical until the first reordered inter-node reduction, then diverge and
-amplify.
+**Inter-node reduction order, above a payload threshold near 2048-2560.**
+Intra-node collectives are deterministic at every size; crossing a node
+boundary with a large enough message is not. That fits oneCCL switching to a
+different multi-node algorithm above a size cutoff -- ring vs tree, or a
+scatter/gather decomposition -- where the cross-node accumulation order is not
+pinned. The wandering onset step (8/9/10/11) fits too: each step is a fresh
+chance to reorder, and larger messages reorder sooner.
 
-**Still not confirmed.** The obvious next test is 24 ranks at 3072 and 3584 to
-find the payload threshold, and 36/48 ranks (3-4 nodes) to check whether it
-worsens with node count. Given that four hypotheses have already failed here,
-that grid should be collected in ONE job before any further claim.
+The threshold is bracketed to **(2048, 2560]** at 24 ranks and is a *message
+size* boundary, not a token count -- so the safe sequence length will differ
+for other model sizes and parallelism layouts. Re-measure rather than assuming
+2048 is safe elsewhere.
 
 ## Method note (the actual mistake)
 
