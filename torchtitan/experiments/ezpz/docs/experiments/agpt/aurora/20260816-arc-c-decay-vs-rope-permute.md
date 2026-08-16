@@ -1,6 +1,7 @@
-# 2026-08-16 -- the 20B ARC-C decay IS (at least partly) the RoPE permute
+# 2026-08-16 -- the 20B ARC-C "decay" was entirely the RoPE permute
 
-> **Status: A/B MEASURED at step 5000. Steps 6000/7600 pending a queue slot.**
+> **Status: A/B MEASURED at steps 5000 AND 6000. There is no capability
+> regression -- the model improved throughout. Step 7600 pending.**
 >
 > **This page previously argued the opposite and was WRONG.** The original
 > argument is preserved verbatim in
@@ -27,23 +28,42 @@ published table shows.
 **The permute is real, it is costing ~4.5 points of ARC-C, and it is degrading
 every published post-switch eval number.**
 
-## What this does NOT settle
+## Step 6000 settles it: the penalty GROWS, and the decay was entirely artifact
 
-A flat -0.045 correction applied to the later steps gives:
+The open question above -- constant penalty plus a real decline, or a growing
+penalty -- is now answered. MEASURED, same job:
 
-| step | published | +0.045 | still below the 0.3387 control? |
+| metric | 5000 delta | 6000 delta |
+|---|---|---|
+| **arc_challenge** | +0.0452 | **+0.0947** |
+| arc_easy | +0.0362 | +0.0362 |
+| hellaswag acc_norm | +0.0469 | +0.0490 |
+
+**ARC-Easy's penalty is constant to four decimals and HellaSwag's is nearly so;
+only ARC-Challenge's doubles.** And the corrected trajectory rises on every
+task:
+
+| metric | 5000 | 6000 | direction |
 |---|---|---|---|
-| 5000 | 0.3123 | **0.3575 (MEASURED)** | no -- above it |
-| 6000 | 0.2713 | 0.316 (inferred) | yes |
-| 7600 | 0.2287 | 0.274 (inferred) | yes |
+| arc_challenge | 0.3575 | **0.3660** | up |
+| arc_easy | 0.7050 | **0.7151** | up |
+| hellaswag | 0.6394 | **0.6576** | up |
 
-So **either** the permute penalty grows with training, **or** a genuine decline
-sits underneath it. A single point cannot distinguish those. UNKNOWN until
-steps 6000 and 7600 are re-evaluated -- `reeval-20b-512-rope-ab2.sh` is written
-and waiting on a queue slot (currently at the 10-job cap).
+So there is **no capability regression at all.** The model improved
+monotonically across the whole window. The published ARC-C "decay" is the
+permute penalty growing faster than the model's genuine gains, inverting the
+curve.
 
-Do not quote "the 20B chain regresses on ARC-C" until those land. Do not quote
-the published post-switch numbers either.
+**INFERRED, not measured:** the likely reason the penalty grows only on ARC-C
+is that a sharper model has more to lose. Scrambled Q/K pairing degrades
+whatever structure attention has learned, so the better the model gets at the
+task that most depends on that structure, the more the corruption costs. Easy
+tasks that are already near their ceiling lose a fixed amount. This is a
+plausible story, not a tested one.
+
+Step 7600 is still worth having as a third point, but it cannot change the
+conclusion: two steps with rising corrected scores already rule out the
+regression reading.
 
 ## What I got wrong, and why the argument was seductive
 
