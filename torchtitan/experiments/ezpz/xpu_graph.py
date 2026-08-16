@@ -12,15 +12,21 @@ mirror of the CUDA graph surface -- verified on-device:
     torch.xpu.XPUGraph  graph  graph_pool_handle  Stream
     make_graphed_callables  is_current_stream_capturing
 
-Only the *device namespace* differs, not the capture/replay algorithm, so this
-subclasses core's `CUDAGraphWrapper` and overrides the handful of methods that
-touch `torch.cuda`. Everything else -- input validation, static-address
-checking, the copy-in list, teardown -- is inherited, so upstream fixes to that
-logic reach XPU for free.
+This is a STANDALONE reimplementation, not a subclass of core's
+`CUDAGraphWrapper`. Subclassing was tried first and cannot work: core's
+`__init__` calls `_manager.maybe_initialize()`, which unconditionally calls
+`torch.cuda.graph_pool_handle()` -- a dummy stub on an XPU build -- so
+construction dies before any override runs (job 12473176).
 
-One genuine API difference: `torch.xpu.graph` has **no `capture_error_mode`**
-parameter (CUDA's does; core passes `capture_error_mode="thread_local"`). It is
-simply omitted here.
+Two XPU-specific differences from the CUDA path, both found the hard way:
+
+1. `torch.xpu.graph` has **no `capture_error_mode`** (CUDA's does; core passes
+   `"thread_local"`). Signature: `(xpu_graph, pool=None, stream=None)`.
+2. **Each graph gets its OWN memory pool.** Core shares one pool across
+   wrappers; on XPU that trips `it->second->use_count > 0 INTERNAL ASSERT
+   FAILED` as soon as the captured region owns persistent parameters
+   (job 12473184: nn.Linear captures with a fresh pool, fails with a shared
+   one).
 
 Enable with `EZPZ_XPU_GRAPHS=1`. Off by default: graph capture requires static
 shapes and stable input addresses, and a violation is silently wrong rather
@@ -84,11 +90,9 @@ class _XPUGraphManager:
             self._stream = torch.xpu.Stream()
         return self._stream
 
-    @property
-    def graph_pool(self) -> Any:
-        if self._graph_pool is None:
-            self._graph_pool = torch.xpu.graph_pool_handle()
-        return self._graph_pool
+    # NOTE: no graph_pool property. Sharing one pool across captures is what
+    # broke module capture on XPU (job 12473184); each graph now allocates its
+    # own. Kept out entirely so it cannot be reintroduced by habit.
 
     def reset(self) -> None:
         self._stream = None
@@ -179,11 +183,19 @@ class XPUGraphWrapper:
             # NOTE: no capture_error_mode -- torch.xpu.graph does not accept it
             # (CUDA's does; core passes "thread_local"). Verified against the
             # RC signature: (xpu_graph, pool=None, stream=None).
-            with torch.xpu.graph(
-                self._graph,
-                pool=_manager.graph_pool,
-                stream=_manager.stream,
-            ):
+            # NO SHARED POOL. Core's CUDA manager hands every wrapper one
+            # graph_pool_handle and that is safe on CUDA; copying it here was
+            # MY bug. On XPU, capturing a module that owns persistent
+            # parameters into a SHARED pool trips an allocator refcount assert:
+            #     it->second->use_count > 0 INTERNAL ASSERT FAILED
+            # Isolated in job 12473184, which is unambiguous:
+            #     matmul    + fresh pool  OK     matmul    + shared pool  OK
+            #     nn.Linear + fresh pool  OK     nn.Linear + shared pool  FAILS
+            # Only shared-pool + module breaks. Omitting `pool` gives this
+            # graph its own. The cost is that graphs cannot share memory with
+            # each other -- irrelevant here, since we capture exactly one
+            # region per wrapper and have nothing to share with.
+            with torch.xpu.graph(self._graph, stream=_manager.stream):
                 self._output = self._fn(*args)
             logger.info("Recorded XPU graph")
 
