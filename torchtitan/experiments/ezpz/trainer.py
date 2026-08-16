@@ -22,6 +22,7 @@ from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
+from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
@@ -418,11 +419,13 @@ class FaultTolerantTrainer(Trainer):
         # with "'FaultTolerantTrainer' object has no attribute 'fwd_bwd_fn'"
         # at step 1 (job 12473170: 3/3 arms rc=143, 0 steps).
         #
-        # CUDA graphs are NOT wrapped here: wrap_with_cuda_graph is a CUDA
-        # capture path, `disable_cuda_graphs` defaults True, and no XPU run has
-        # ever exercised it. Bind the plain body so behaviour is unchanged from
-        # pre-merge; revisit only if CUDA graphs are ever wanted on XPU.
-        self.fwd_bwd_fn = self._forward_backward_body
+        # Core's wrap_with_cuda_graph is a CUDA-only path (it hard-gates on
+        # device_type=="cuda"), so it is never applied here. Instead, opt in to
+        # the XPU twin via EZPZ_XPU_GRAPHS=1 -- the frameworks RC exposes the
+        # full torch.xpu graph API. Default OFF returns the plain body, so
+        # behaviour is identical to pre-merge unless explicitly enabled.
+        # See experiments/ezpz/xpu_graph.py.
+        self.fwd_bwd_fn = maybe_wrap_with_xpu_graph(self._forward_backward_body)
 
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
