@@ -300,11 +300,27 @@ corpus, same optimizer, both at ~4.674T tokens:
 |---|---|---|---|---|
 | `2b_v2_256` (complex throughout) | 76,100 | 3.83e12 | **0.5591** | **0.3302** |
 | `2b_v2_512` (cos_sin after 30400) | 46,429 | 4.67e12 | 0.4753 | 0.2381 |
+| `2b_v2_512` **re-converted `2b_real`** | 46,429 | 4.67e12 | **0.5384** | **0.2978** |
 
-The complex-only chain scores ~8pp HellaSwag and ~9pp ARC-C **higher on fewer
-tokens** -- while the switched chain's own train loss (2.69) and validator loss
-(2.698, still falling) say it is the healthier-trained model. **Loss fine +
-converted-eval depressed = the damage is in the conversion, not the weights.**
+The complex-only chain appeared to score ~8pp HellaSwag and ~9pp ARC-C **higher
+on fewer tokens** -- while the switched chain's own train loss (2.69) and
+validator loss (2.698, still falling) said it was the healthier-trained model.
+**Loss fine + converted-eval depressed = the damage is in the conversion, not
+the weights.**
+
+**CONFIRMED 2026-08-16 (job `8760307`, MEASURED).** Re-converting that exact
+checkpoint with `2b_real` recovers **+0.063 HellaSwag and +0.060 ARC-C**,
+closing roughly three quarters of the apparent gap (8.4pp -> 2.1pp on
+HellaSwag, 9.2pp -> 3.2pp on ARC-C). The residual is expected and does not
+need a bug to explain it: 2B-256 has a 2x smaller global batch at the same
+token count, which the campaign already measured as a per-token advantage
+(see `project_2b_large_batch_undertraining`). **This row should no longer be
+cited as evidence that 2B-256 beat 2B-512** -- most of that gap was the
+permute.
+
+MMLU moved much less: 0.2511 -> **0.2579** (+0.007), still inside noise of the
+0.25 floor. The asymmetry is consistent with the 20B result -- corruption costs
+most on tasks the model actually learned, and MMLU was never learned.
 
 Cadence caveat: on **20B-256** the eval cadence around the switch is 1,000 steps
 (3000 then 4000), so the recovery window there is **UNRESOLVED** -- no

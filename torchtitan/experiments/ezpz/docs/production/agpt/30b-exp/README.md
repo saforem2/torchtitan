@@ -30,16 +30,26 @@ was taking 4.674T tokens to discover the mix was wrong.
 
 ### 1.1 MMLU never left chance -- and it is the DATA
 
-| model | tokens | MMLU |
-|---|---|---|
-| 20B-256 | 0.39T | 0.2599 |
-| 20B-512 | 0.71T | 0.2655 |
-| 2B-512 | 3.99T | 0.2473 |
-| 2B-256 **complete** | 4.674T | 0.2437 |
-| **2B-512 complete** | **4.674T** | **0.2511** |
-| 2B MDS dolmino | 7.064T | 0.2413 |
-| MDS stage3-mix | 7.771T | 0.2463 |
-| MDS stage3 math/code | 7.771T | 0.2591 |
+| model | tokens | MMLU | RoPE-corrected? |
+|---|---|---|---|
+| 20B-256 | 0.39T | 0.2599 | complex-era, clean |
+| 20B-512 | 0.71T | 0.2655 | complex-era, clean |
+| 2B-512 | 3.99T | 0.2473 | **wrong permute** |
+| 2B-256 **complete** | 4.674T | 0.2437 | never switched, clean |
+| **2B-512 complete** | **4.674T** | ~~0.2511~~ **0.2579** | **MEASURED corrected** |
+| 2B MDS dolmino | 7.064T | 0.2413 | different codebase, clean |
+| MDS stage3-mix | 7.771T | 0.2463 | clean |
+| MDS stage3 math/code | 7.771T | 0.2591 | clean |
+
+> **RoPE correction (2026-08-16).** Only the two 2B-512 rows were affected --
+> that chain switched convention at step 30,401 and its evals were converted
+> with the complex flavor. The corrected endpoint is **0.2579**, up 0.007.
+> Every other row is either from a complex-era checkpoint (converted
+> correctly), a chain that never switched, or a different codebase.
+> **The conclusion is unchanged and now rests on a corrected number**: 0.2579
+> is still inside noise of the 0.25 four-way floor, and it remains below
+> `MDS stage3 math/code` at 0.2591 on 1.7x fewer tokens. The 3.99T row is
+> still uncorrected (job `8760307` covers 41,000-46,429 only).
 
 ~12 configurations, a 20x token span, two model scales, five data
 treatments. No upward trend -- the most-trained model scores among the
@@ -58,6 +68,27 @@ assets against gemma-tokenized data), harness (above). What remains is the
 mix: `olmo-mix-1124` carries little multiple-choice academic content.
 
 ### 1.2 The last 500B tokens bought nothing
+
+> [!CAUTION]
+> **The numbers in this table were measured on WRONGLY-PERMUTED exports.**
+> The 2B-512 chain switched RoPE convention at step 30,401, and every eval
+> after that was converted with `--model_flavor 2b` (complex) against cos_sin
+> weights. MEASURED correction at the endpoint (job `8760307`, same
+> checkpoint, correct `2b_real` flavor):
+>
+> | metric | published | corrected | delta |
+> |---|---|---|---|
+> | MMLU | 0.2511 | **0.2579** | +0.007 |
+> | ARC-C | 0.2381 | **0.2978** | **+0.060** |
+> | HellaSwag | 0.4753 | **0.5384** | **+0.063** |
+>
+> **The section's conclusion survives** -- MMLU is still at chance (0.2579 is
+> inside noise of 0.25), and the flatness across the final 11% of the budget
+> is a within-table comparison where every row carries the same bias. But the
+> absolute capability numbers are ~6 points too low on the tasks the model
+> actually learned. Full account:
+> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
+> Corrected rows for 41,000 / 43,000 / 45,000 pending in job `8760307`.
 
 Final eval of the completed chain (job 8754664, 2026-08-14):
 
