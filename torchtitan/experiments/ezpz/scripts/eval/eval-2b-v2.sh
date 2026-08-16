@@ -107,6 +107,25 @@ if [[ -z "${MODEL_FLAVOR:-}" ]]; then
 ERRMSG
     exit 2
 fi
+# The conversion runs inside V2_REPO, and the pinned v2 clones do NOT ship
+# agpt/state_dict_adapter.py -- they fall back to the bare
+# Llama3StateDictAdapter, which applies the Q/K permute UNCONDITIONALLY. In
+# that clone a cos_sin flavor is silently ignored, so passing 2b_real there
+# does not help. Refuse rather than emit a corrupt export.
+if [[ "$MODEL_FLAVOR" == *_real ]] \
+   && [[ ! -e "${V2_REPO}/torchtitan/experiments/ezpz/agpt/state_dict_adapter.py" ]]; then
+    cat >&2 <<ERRMSG
+[eval-2b-v2] ERROR: MODEL_FLAVOR='${MODEL_FLAVOR}' (cos_sin) but the clone
+  ${V2_REPO}
+  has no agpt/state_dict_adapter.py, so it would use the bare
+  Llama3StateDictAdapter and permute anyway -- producing exactly the corrupt
+  export this flag is meant to avoid.
+
+  Convert from a checkout that HAS the adapter, or update the clone.
+  See docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
 echo "[eval-2b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default exists -- see rope-flavor-mismatch.md)"
 EVAL_CONFIG_JSON="${EVAL_CONFIG_JSON:-agpt_2b_config.json}"
 
