@@ -93,19 +93,44 @@ from level_zero is device-**resource** exhaustion (events, command lists), not
 device memory. The LBS=1 retry -- which existed only to give HSDP "more room"
 -- failed identically, which is itself evidence the memory framing was wrong.
 
-Prime suspect: `foreach=True`, hardcoded at `trainer.py:822`. It fuses the
-~500 per-parameter norms into one multi-tensor op; under HSDP each is a
-DTensor needing a partial-reduce, so the fused stack claims far more
-level_zero handles than the pure-FSDP path does.
+## HSDP: the ceiling is between 20B and 30B (job `12473199`)
 
-If that is the cause, **model size is the wrong axis** -- a smaller model
-would fail the same way. Job `12473199` tests it directly: 20B+HSDP (is it
-size?), 30B+HSDP with `foreach=False` (is it the fused clip?), 30B+HSDP with
-clipping bypassed (diagnostic), and a 30B+HSDP control. `EZPZ_CLIP_NO_FOREACH`
-was added for this (commit `74f17090d`); the default is unchanged.
+Four arms, same 2-node HSDP mesh (`dp_shard=12`, `dp_replicate=2`):
 
-Note this contradicts the guide's "+2.7% MFU, prefer HSDP" advice
-(`exp03-1b-proxy-design.md:56`) at 30B scale on XPU.
+| arm | steps | tps | MFU | memory | verdict |
+|---|---:|---:|---:|---|---|
+| **20B + HSDP** | **12/12** | **488** | **21.72%** | 76.29% | **works** |
+| 30B + HSDP, `foreach=False` | 1 | 101 | 6.08% | 71.68% | fails |
+| 30B + HSDP, `max-norm=0` | 1 | 104 | 6.25% | 71.68% | fails (bad test, below) |
+| 30B + HSDP (control) | 1 | 105 | 6.32% | 71.68% | fails |
+
+**The 20B runs HSDP fine.** So HSDP is not broken on XPU, and the failure is
+specific to the 30B. Model size IS the axis -- which is the opposite of what
+the "not an OOM, so probably not size" reasoning above predicted.
+
+**`foreach=True` is exonerated.** The unfused path fails identically, same
+frame, same error. The one-time log line confirms `foreach=False` really
+reached the ranks (`clip_grad foreach=False` in the arm log, `foreach=True`
+in every other arm), so this is a genuine negative rather than a flag that
+never landed.
+
+**It is not tensor count.** 20B and 30B have the *same* 579 parameter
+tensors (both are 64 layers); only their sizes differ -- largest tensor 2,623M
+vs 3,147M elements. So the level_zero limit being hit is a per-allocation or
+per-size ceiling, not a count ceiling. That is consistent with a threshold
+sitting between the two models.
+
+### Where the ceiling is, and whether it is worth finding
+
+`dim=5632` (44 heads at head_dim 128, ffn 15360, ~24B params) is the clean
+midpoint and the obvious bisect point.
+
+**But HSDP may not be worth the node hours.** Measured here, HSDP on the 20B
+gives **21.72% MFU** -- well below the 30B's **27.89%** on plain FSDP at
+LBS=3. The guide's "+2.7% MFU, prefer HSDP" claim
+(`exp03-1b-proxy-design.md:56`) does not reproduce at this scale on XPU. A
+bisect would find the ceiling, but the prize behind it looks smaller than the
+batch-size lever already delivered. Sequence the scaling results first.
 
 
 ## On the proposal's central claim
@@ -137,6 +162,18 @@ That run fits entirely on Sunspot and is the obvious next step.
   those two jobs are not directly comparable. My "compile" arm was a no-op
   against an already-compiled base, and the 340->360 gap I first dismissed as
   run-to-run noise was in fact the compile effect.
+- **`--training.max-norm=0` does not bypass gradient clipping.** I built an
+  arm around that assumption. `clip_grad_norm_` computes `get_total_norm`
+  unconditionally at `distributed/utils.py:651`; `max_norm` is only consumed
+  by the *scaling* call at line 675. So the arm was a second copy of the
+  control, and the "clipping bypassed" label on it was wrong. To actually
+  skip the norm the callsite has to not be reached at all.
+- **I talked myself out of the right answer.** From "this is not an OOM" I
+  concluded "so model size is probably not the axis, and a bisect would waste
+  nodes." Both halves of that were wrong: not-an-OOM was correct, but the
+  20B arm ran clean and the 30B did not, so size is exactly the axis. The
+  error was treating one refuted mechanism as evidence against an unrelated
+  hypothesis.
 - **Duplicate flags.** Round 1 appended overrides onto a base array that
   already set them (`--local-batch-size=1 --local-batch-size=2`). Later-wins
   made it work by accident. Round 2 spells out each arm in full.
