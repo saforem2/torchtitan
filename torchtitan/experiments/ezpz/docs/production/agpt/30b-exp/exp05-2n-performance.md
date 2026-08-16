@@ -182,10 +182,7 @@ That run fits entirely on Sunspot and is the obvious next step.
 
 - **Scaling run** at 8/32/64N -- the only way to test the proposal's actual
   claim about 512N behaviour.
-- **The Llama-3 128k vocab variant** (`agpt_30b_llama3tok`, 26.5B) has not run
-  successfully yet. Job `12473200` retries it at the best-known config
-  (TP=1, LBS=2) instead of the TP=2 / LBS=1 it first used -- which is the
-  *slowest* layout measured here -- and captures the failure properly.
+- **The Llama-3 128k vocab variant now runs** -- see below.
 
 ## Tokenizer: what we use, and what "64k" would cost
 
@@ -217,3 +214,28 @@ standards and would hurt fertility on everything except English prose.
 **Neither is a drop-in swap.** Changing vocab means retokenizing the corpus
 and invalidates every gemma-trained checkpoint, so this decision belongs to a
 fresh flagship, not a continuation of the existing base.
+
+### Measured: 128k vocab at 2N (job `12473201`)
+
+`agpt_30b_llama3tok` had never produced a single step. Two bugs, both mine,
+fixed in `4275bdb9b`: it inherited the family's gemma `hf_assets_path` (a
+256k tokenizer feeding a 128,256 embedding -- ids the model cannot index),
+and its docstring told callers to pass `--tokenizer.path`, which is not a
+flag. Every invocation died in argument parsing; the earlier arm's log file
+was never created, so the parser error was invisible.
+
+With that fixed, at identical settings (TP=1, LBS=2, seq=4096, compiled, 2N):
+
+| | params | tps/GPU | MFU | memory |
+|---|---:|---:|---:|---|
+| gemma 256k | 28.1B | 434 | 25.99% | 51.59 GiB (80.63%) |
+| **Llama-3 128k** | **26.5B** | **449** | **26.17%** | **39.51 GiB (61.75%)** |
+
+The throughput delta (+3.5% tps, +0.18pp MFU) is roughly what a 5.7% smaller
+model should give -- not a per-GPU efficiency win.
+
+**The memory is the real result: 12.08 GiB freed, 80.63% -> 61.75%.** exp05
+established batch size as the dominant lever here (LBS 1->3 was worth +30%),
+and the gemma variant runs out of room at LBS=3 / 78.5%. Job `12473202` tests
+whether the 128k variant reaches LBS=4 or 5 -- if it does, the vocab change
+is worth considerably more than its parameter count suggests.
