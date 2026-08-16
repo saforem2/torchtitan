@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-16
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -31,7 +31,8 @@ Reading rules:
 | `8714503` | 08-07 | 2B-512 41,301->43,820 | 20B-512 7,251->7,654 | 20B-256 7,801->8,334 | **bad_alloc** | **bad_alloc** | 3/5 |
 | `8744245` | 08-09 | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
 | `8744247` | 08-13 | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
-| `8756070` | 08-14 | **2B-512 STAGE 2** (dolmino CPT, seed step-46429) | 20B-512 | 20B-256 | 2B-512 constlr | 2B-256 constlr | queued |
+| `8756070` | 08-16 | **2B-512 STAGE 2 1->3,312** (dolmino CPT, seed step-46429) | 20B-512 8,701->9,109 | 20B-256 9,801->10,381 | `Config.job` AttributeError | `Config.job` AttributeError | 3/5 |
+| `8756957` | 08-16 | (12h umbrella, `IDLE_TIMEOUT=5400`, released from hold 08-16) | | | | | queued |
 
 Slot map for the 5-trainer umbrellas: t0=2B-512, t1=20B-512, t2=20B-256,
 t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
@@ -46,6 +47,9 @@ t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
 | ckpt-path (latest resolved to an aborted fragment) | 8714502 t3 | FIXED 08-06 (fragments moved out of the ckpt tree) |
 | ckpt-key (pre-refactor flat attention keys) | 8714502 t4, 8744247 t4 | **FIXED 08-13** (`ae880c32d`). The shim shipped but silently never fired: it resolved `<cwd>/<checkpoint.folder>` while the checkpointer PREPENDS `dump_folder`, so it stat'd a path that does not exist, the blanket `except` returned False, and 3,072 ranks died on `Missing key in checkpoint state_dict`. Now takes `dump_folder=` and WARNS on a non-existent dir. Verified against the real step-9500 metadata (False -> True). |
 | ImportError (`config_registry`) | 8744245 t3/t4 | **self-inflicted 08-08, reverted** -- main-repo `trainer.py` copied over a pinned clone that runs older code. Do not copy whole files into pinned clones. |
+| `AttributeError: 'Config' object has no attribute 'job'` | 8756070 t3/t4 | **FIXED 08-16 in the clone.** Both constlr slots died on every rank at `trainer.py:671`, `dump_folder=config.job.dump_folder`. The `agpt-2b-constlr-from9200` clone carried a DIVERGENT, older form of the ckpt-key shim fix: its Config has no `.job` node, and the other three clones all read the flat `config.dump_folder` at their line 238. Fixed in place (user-approved, backup `trainer.py.bak-20260816-121850`). Auto-retry had already exhausted its attempts, so the two slots stayed dead for that run -- the fix only helps the next submission. NOTE both slots ALSO hit `std::bad_alloc` on attempt 1 and recovered; the `Config.job` error is what actually killed them, and both surfaced as the usual misleading `FAILOVER STOP: walltime`. |
+| **PBS `Exit_status = -14` at 9h13m of 24h (whole job)** | 8756070 (all slots) | **UNEXPLAINED -- external kill, worth an ALCF ticket.** Not a training fault: all three live trainers logged clean steps at 07:35:16-07:35:49 local with healthy grad norms (0.14-0.51) and normal throughput, then stopped simultaneously. The umbrella's own log ends at `all 5 trainers launched; waiting...` with no stop line, i.e. the script was terminated from outside rather than exiting. Ruled out by direct check: head node `x4305c0s2b0n0` healthy (already `job-exclusive` on another job); allocation fine (1,429,777 node-hours left); `large` queue `enabled/started = True`; no NaN/OOM/CCL error anywhere; the two visible reservations are Mon and Wed. PBS exposes no user-visible record of who issued the kill. **Second anomaly for this same job** -- see the seat-time row below. All three chains checkpointed minutes before (worst-case loss 81 steps). |
+| six `Execution server rejected request` seat bounces | 8756070 | **Infra.** `run_count` reached 6 before the job held. Every attempt was assigned the same `x4305c0s*` rack whose lead node `x4305c0s1b0n0` was `offline / EXECJOB_BEGIN: skipped execjob_end found via tmpfs check; reboot required`. **Correcting an earlier reading in this log's own history:** this was NOT our job breaking nodes one per attempt -- only that single node names 8756070, while 13 other `reboot required` nodes at the same time belonged to nine other users' jobs (`8712340`, `8753544`, `8757432`, ...). It is a cluster-wide condition; PBS simply kept picking a set with a sick lead node. Attempt 6 landed on a healthy set and ran. |
 
 ## Individual chain jobs (recent)
 
@@ -58,6 +62,45 @@ t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
 | `8687863` | 07-29 | 20B-512 chain via 256N | 260 | **zombie**: held, and `afterany:8687862` targets a purged job. Needs a manual `qdel`
 | `8748010` | 08-11 | 20B-512 | 516 | Q; qdel'd 08-13 when umbrella 8744247 seated (shared ckpt dir) |
 | `8748011` | 08-11 | 2B-512 constlr | 516 | Q; qdel'd 08-13 with 8748010, same reason |
+
+### 2026-08-16: five jobs put on HOLD rather than qdel'd
+
+When umbrella `8756070` seated, the five other queued jobs all targeted
+checkpoint dirs it owns. They were `qhold`'d, not `qdel`'d -- reversible with
+`qrls`, and it preserves queue positions some of which date to Aug 14. After
+`8756070` died, `8756957` (12h umbrella) was released; the other four stay held:
+
+| Job | Nodes | Chain | Why still held |
+|-----|------:|-------|----------------|
+| `8752939` | 522 | 20B-512 | same ckpt dir as umbrella t1 |
+| `8752824` | 266 | 2B-256 constlr | same ckpt dir as umbrella t4 |
+| `8756071` | 266 | 20B-256 | same ckpt dir as umbrella t2 |
+| `8756072` | 522 | 2B-512 constlr | same ckpt dir as umbrella t3 |
+| `8687863` | 260 | 20B-512 via 256N | pre-existing zombie, needs manual `qdel` |
+
+Note `8756957` was submitted 08-14 with `IDLE_TIMEOUT=5400` already set, but
+PBS snapshots the script at submit time, so it still carries the **old** t0
+`TRAIN_TOKENS` (see below). Harmless under constant LR -- it changes only the
+stopping point, and no chain approaches it in a 12h window.
+
+### 2026-08-16: t0 stage-2 token budget was 2.96x too large
+
+`8756070` launched t0 with `--training.steps=70176` = 7.06T tokens of pure
+dolmino, against an intended 2.39T. Cause: `TRAIN_TOKENS=7064155541716` was
+copied from MDS `train_aGPT_2B_sophiag_stage2.sh`, where it is the
+**cumulative** budget through stage 2 (4.674T stage-1 + ~2.39T stage-2). But
+stage 2 writes to a NEW ckpt dir, so its step counter starts at zero and the
+umbrella's `steps = tok/(gbs*seq_len)` has no notion of tokens already spent.
+
+```
+7064155541716 / (12288*8192) = 70,176 steps = 7.06T   (what ran)
+2390375382006 / (12288*8192) = 23,742 steps = 2.39T   (intended)
+```
+
+Not destructive: with `LR_DECAY_STYLE=constant` (decay_ratio 0.0,
+min_lr_factor 1.0) the budget sets only the stopping point, not the schedule
+shape, so the 3,312 steps that ran are valid stage-2 progress and step-3300 is
+resumable as-is. Fixed in `cc4e22cfa`.
 | `8752939` | 08-13 | 20B-512 | 522 | **Q.** Replaces umbrella t1, which the idle watchdog killed. Carries `IDLE_TIMEOUT=5400` |
 | `8752824` | 08-13 | 2B-256 constlr | 266 | **Q.** Replaces umbrella t4 (ckpt-key bug, fixed `ae880c32d`) |
 | `8754664` | 08-14 | eval, 2B-512 final | 1 | **Done.** Steps 41k/43k/45k/46,429 on the modern ladder. MMLU flat at chance (0.2511 at the endpoint); last 500B tokens moved no metric |
