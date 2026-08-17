@@ -28,6 +28,14 @@ Also flagged, in decreasing severity:
 Read-only. Never deletes or renames -- reclaiming 906 GB of orphan shards is a
 human decision, and the project rule is `backup`, not `rm`.
 
+COST: this stats every shard file, and the production tree is ~1,500 step dirs
+holding up to 3,072 files each -- order 1.5M stat calls on Lustre. A single 20B
+chain (120 dirs) took ~40 minutes; `--all-chains` is a multi-hour job. Run it
+detached, scoped to one chain, or on a schedule -- not interactively while
+waiting. Progress is printed per chain and every 25 dirs, and stdout is
+flushed, because the first version printed only on completion and a 1h41m run
+was indistinguishable from a hang.
+
 Usage:
     python3 -m torchtitan.experiments.ezpz.utils.audit_ckpt_dirs <ckpt_dir>
     python3 -m torchtitan.experiments.ezpz.utils.audit_ckpt_dirs --all-chains
@@ -137,7 +145,11 @@ def audit(ckpt_dir: str) -> int:
     counts, empties, no_meta, mixed, gapped = Counter(), [], [], [], []
     last_mtime, out_of_order = None, []
 
-    for d in step_dirs:
+    for i, d in enumerate(step_dirs):
+        # Heartbeat every 25 dirs: each holds up to 3072 files to stat, so a
+        # single chain can run for tens of minutes with nothing to show.
+        if i and i % 25 == 0:
+            print(f"    ... {i}/{len(step_dirs)} dirs scanned", flush=True)
         full = os.path.join(ckpt_dir, d)
         info = scan_dir(full)
         if info.get("error"):
@@ -160,7 +172,10 @@ def audit(ckpt_dir: str) -> int:
         last_mtime = mt
 
     mode = counts.most_common(1)[0][0] if counts else 0
-    print(f"  {len(step_dirs)} step dir(s); dominant shard count = {mode}")
+    print(
+        f"  {len(step_dirs)} step dir(s); dominant shard count = {mode}",
+        flush=True,
+    )
     for n, c in sorted(counts.items()):
         tag = "" if n == mode else "   <-- DIFFERENT SHARD COUNT (scale change?)"
         print(f"    {c:>4} dir(s) with {n} shards{tag}")
@@ -209,8 +224,11 @@ def main() -> int:
         ap.error("pass a ckpt_dir or --all-chains")
 
     total = 0
-    for name, path in targets:
-        print(f"\n=== {name}")
+    for i, (name, path) in enumerate(targets, 1):
+        # Announce BEFORE the scan and flush: a chain with thousands of step
+        # dirs takes many minutes to stat on Lustre, and printing only on
+        # completion made a 1h41m run look identical to a hang (measured).
+        print(f"\n=== [{i}/{len(targets)}] {name}", flush=True)
         total += audit(path)
 
     if total:
