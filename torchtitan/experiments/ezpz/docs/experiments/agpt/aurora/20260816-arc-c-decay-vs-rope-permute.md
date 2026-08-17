@@ -84,6 +84,34 @@ Two things this adds beyond the earlier spot-checks:
 The 2B-512 arm shows the same shape at its own scale -- ARC-Easy 0.6465 ->
 0.6507 and HellaSwag 0.5295 -> 0.5344 across steps 35,000-39,600, both rising.
 
+### Replicated on 20B-256: the corrupted series FALLS where the corrected one RISES
+
+The strongest single piece of evidence, because it is an independent chain (a
+different node count, a different job history) reaching the same conclusion:
+
+| step | ARC-C corrupted -> corrected | delta |
+|---|---|---|
+| 4000 | 0.3481 -> 0.3635 | +0.0154 |
+| 4200 | 0.3234 -> 0.3652 | +0.0418 |
+| 4400 | 0.3217 -> 0.3626 | +0.0410 |
+| 4600 | 0.3319 -> 0.3712 | +0.0392 |
+| 4800 | 0.3319 -> 0.3686 | +0.0367 |
+
+Read the two columns as trajectories rather than as five separate deltas:
+
+- **corrupted: 0.3481 -> 0.3234 -> 0.3217 -> 0.3319 -> 0.3319** -- opens with a
+  0.026 drop and never recovers to its starting value. On its own this is a
+  textbook "the model is regressing on ARC-C" curve.
+- **corrected: 0.3635 -> 0.3652 -> 0.3626 -> 0.3712 -> 0.3686** -- flat-to-up,
+  no drop anywhere, ending above where it began.
+
+Same checkpoints, same harness; only the RoPE convention used at export
+differs. A decay that exists in one and not the other is not a property of the
+model. This is what makes the artifact explanation conclusive rather than
+merely consistent: the earlier 20B-512 evidence showed correction *helping
+everywhere*, which a real-decay-plus-constant-penalty story could survive; a
+sign flip in the trend itself, on a second chain, it cannot.
+
 **INFERRED, not measured:** the likely reason the penalty grows only on ARC-C
 is that a sharper model has more to lose. Scrambled Q/K pairing degrades
 whatever structure attention has learned, so the better the model gets at the
