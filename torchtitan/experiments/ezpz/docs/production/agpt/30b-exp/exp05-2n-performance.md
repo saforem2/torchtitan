@@ -65,8 +65,13 @@ memory (49.16GiB/76.83%) confirming it is the same run shape.
 
 | comparison | spread |
 |---|---:|
-| same config, same job | **< 1%** |
+| same config, same job | **~0.1%** |
 | same config, different jobs | **~3%** |
+
+The within-job figure is tighter than the "<1%" first recorded here: job
+`12473210` ran LBS=4 twice inside one job and got **499 tps both times**, to
+the digit (28.92% / 28.94% MFU). That precision is what makes small effects
+decidable -- LBS=5's +13 tps is ~26x the within-job spread.
 
 **So any cross-job difference under ~3% is not evidence.** Same-job A/B is
 mandatory below that threshold -- which is what the tokenizer comparisons here
