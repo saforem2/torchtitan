@@ -91,6 +91,12 @@ MDS_STAGE_BOUNDARIES_B = [
 # green, so one model family read as two.
 from torchtitan.experiments.ezpz.utils import palette as _pal  # noqa: E402
 
+# Stage-1's full token budget, imported rather than retyped: it is the x-axis
+# offset for the stage-2 chain, which restarts its step counter at 1.
+from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    OLMO_MIX_1124_TOKENS as STAGE1_2B_TOKENS,
+)
+
 COLOR_2B_MDS      = _pal.COLOR_MDS
 COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
 COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
@@ -125,6 +131,23 @@ TRAJECTORIES: list[dict] = [
         "key": "2b_v2_512",
         "tokens_per_step": 12288 * 8192,
         "color": COLOR_2B_TT_512N,
+        "linestyle": "-",
+        "marker": None,
+    },
+    {
+        # Stage-2 continued pre-training on dolmino-mix-1124, seeded from the
+        # stage-1 n512 endpoint. Its W&B step numbering RESTARTS at 1, so on a
+        # tokens axis it would otherwise draw back over the early stage-1 curve.
+        # token_offset_b shifts it to where it actually sits: after the 4.674T
+        # its base already consumed. Only this chain needs the offset; every
+        # other trajectory starts from scratch at step 0.
+        "model": "2b",
+        "label": "2B-TT v2 stage-2 (n512, dolmino-mix)",
+        "source": "wandb",
+        "key": "2b_v2_512_stage2_dolmino",
+        "tokens_per_step": 12288 * 8192,
+        "token_offset_b": STAGE1_2B_TOKENS / 1e9,
+        "color": _pal.COLOR_STAGE2,
         "linestyle": "-",
         "marker": None,
     },
@@ -376,7 +399,38 @@ def render_figure(
     print(f"  saved: {png_path}")
 
 
+def _assert_no_missing_live_chains() -> None:
+    """Fail if a live chain in trajectories.py is absent from TRAJECTORIES.
+
+    This module keeps its own display list (labels, colors, linestyles, the
+    stage-2 x-offset -- presentation choices that do not belong in the data
+    module). The cost is that adding a chain to trajectories.py does NOT add it
+    to this chart, and nothing used to say so: the stage-2 dolmino chain was
+    registered on 2026-08-16, regenerated cleanly, and simply was not on the
+    figure. "0 scripts failed" looked like success.
+
+    So the two lists are reconciled here instead of trusted to stay in sync.
+    Only ``cls == "live"`` chains are required -- historical/smoke/wandb_only
+    entries are deliberately not overlaid.
+    """
+    from torchtitan.experiments.ezpz.utils.trajectories import TRAJECTORIES as _ALL
+
+    live = {t["key"] for t in _ALL if t.get("cls") == "live"}
+    shown = {t.get("key") for t in TRAJECTORIES if t.get("source") == "wandb"}
+    missing = sorted(live - shown)
+    if missing:
+        raise SystemExit(
+            "Live chains missing from this chart's TRAJECTORIES list:\n"
+            + "".join(f"  - {k}\n" for k in missing)
+            + "\nThey are registered in utils/trajectories.py but will not be\n"
+            "drawn. Add an entry here (label, color, linestyle -- plus\n"
+            "token_offset_b if the chain restarts its step counter), or set\n"
+            'cls to something other than "live" if it is not meant to appear.'
+        )
+
+
 def main() -> None:
+    _assert_no_missing_live_chains()
     api = wandb.Api()
 
     # Pull all trajectories once and cache results.
@@ -385,7 +439,17 @@ def main() -> None:
         print(f"\n=== loading {traj['label']} ===")
         if traj["source"] == "wandb":
             steps, loss, tps, mfu = load_wandb_trajectory(api, traj["key"])
-            tokens_b = steps * traj["tokens_per_step"] / 1e9
+            if len(steps) == 0:
+                # A chain in the display list that fetched nothing is a wiring
+                # bug (wrong key, unsynced run), not an empty chart -- say so
+                # here rather than silently dropping the curve.
+                print(f"  WARNING: no rows for {traj['key']} -- curve omitted")
+                continue
+            # Stage-2 chains restart step numbering, so shift them past the
+            # tokens their base already consumed (0 for from-scratch chains).
+            tokens_b = (
+                steps * traj["tokens_per_step"] / 1e9 + traj.get("token_offset_b", 0.0)
+            )
             print(f"  {len(steps)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
             series.append({**traj, "steps": steps, "tokens_b": tokens_b,
                            "loss": loss, "tps": tps, "mfu": mfu})
