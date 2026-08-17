@@ -96,6 +96,34 @@ Running log of what's happening, session by session. Most recent first.
   `Exit_status = -29` = clean expiry) -- the first to use its whole allocation,
   beating 8744247's 97%. Both are 12h asks rather than the 24h dispatches that
   kept dying young. Successor `8760249` released itself from its system hold.
+- **Three collision-writeup recommendations closed, and the naive version of
+  one would have been wrong.** `.owner` claims the checkpoint dir so two
+  concurrent jobs are loud instead of silent (warns rather than refuses -- a
+  crashed predecessor always leaves a stale claim, and a job cannot tell stale
+  from live from the inside, so refusing would convert every crash into a
+  failed resume). `audit_ckpt_dirs.py` finds collisions already on disk. The
+  design lesson: **an mtime gap is not the signal.** Three dirs in the affected
+  tree gap 108-121s purely from straggler ranks, so a gap check raises five
+  alarms of which three are false. The discriminator is that a collision's
+  split falls exactly on a *shard index*, because one job overwrote a
+  contiguous prefix. Validated: finds both known-mixed dirs, silent on all
+  three stragglers.
+- **The ARC-C artifact now has a mechanism, not just a correlation.** Extending
+  the 20B-256 sweep to seven points caught the two curves moving in OPPOSITE
+  directions at the same checkpoint: at step 5000 the corrupted series posts
+  its lowest value of the run (0.3046) while the corrected posts among its
+  highest (0.3737). And the penalty GROWS with training (+0.015 at 4000 ->
+  +0.069 at 5000), independently reproducing the 20B-512 result that ARC-C's
+  penalty doubles between 5000 and 6000 while ARC-Easy's stays flat. That is
+  why the artifact impersonates a late-training decay rather than a constant
+  offset: a permute error costs more as the model's answers sharpen, because
+  there is more signal to scramble.
+- **Corrected myself on the incident doc's shard size.** I read
+  `252,561,448 B` as wrong because my spot-check of shards 0-3 showed ~1.31 GB.
+  The doc cites shard *191* specifically and is exact. What I had missed is
+  that sizes vary by an order of magnitude WITHIN one writer's cluster, which
+  is why the audit tool reports a median and its comment says not to read
+  either number as "the shard size".
 
 ## 2026-08-16 (sunspot) -- the 30B goes from proposal to measured model: 27.89% MFU at 2N, 25.54% at 64N, HSDP ceiling found between 20B and 30B
 
