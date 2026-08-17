@@ -308,13 +308,15 @@ Llama-3**, worth +0.73pp MFU over the LBS=4 pick (29.67% vs 28.94%).
 
 At 29.67% the 30B now exceeds the 2B's small-N 29.26%, on a model 14x larger.
 
-**Recommendation: OLMo-2 (100,352).** The batch size is settled separately
-below -- the LBS=5 figure above does not survive scrutiny.
+**Recommendation: OLMo-2 (100,352) at LBS=5.** See the batch-size section
+below for how that was measured.
 
-### The freed memory is worth having as MARGIN, not as batch
+### How far to push batch: LBS=5, measured properly
 
-The obvious follow-on was "spend the headroom on a bigger batch". The full
-ladder (job `12473208`, all one job so directly comparable) says do not:
+The obvious follow-on was "spend the headroom on a bigger batch". Answering it
+took two attempts, because the first was built on a bad noise estimate.
+
+The full ladder (job `12473208`, one job) shows the lever flattening at the top:
 
 | LBS | tps | MFU | memory |
 |---:|---:|---:|---:|
@@ -322,22 +324,33 @@ ladder (job `12473208`, all one job so directly comparable) says do not:
 | 6 | 504 | 29.23% | 87.69% |
 | 7 | 507 | 29.38% | **94.88%** |
 
-**LBS 5 -> 7 buys +1.8% tps for +18 points of HBM.** The batch lever has
-already flattened by LBS=4-5; past that it is nearly free throughput-wise and
-very expensive memory-wise. 94.88% leaves nothing for checkpoint saves, eval
-allocations, or fragmentation over a long chain, so LBS=6 and 7 are out on
-headroom regardless of anything else.
+LBS 5 -> 7 buys +1.8% tps for +18 points of HBM, and 94.88% leaves nothing for
+checkpoint saves, eval allocations, or fragmentation over a long chain.
+**LBS=6 and 7 are out on headroom.**
 
-This corrects the framing earlier in this page. OLMo-2's value is **not** that
-it unlocks a bigger batch -- it is that it delivers Llama-3's throughput with
-~9 more points of headroom, and that headroom is worth keeping as margin.
+I then extrapolated that flattening *downward* and predicted 4 vs 5 would be
+indistinguishable too, which would have made LBS=4 the pick on headroom.
+**That was wrong.** Job `12473210` measured the pair interleaved
+(4,5,4,5,4,5), three repeats each, in one job:
 
-**LBS=4 vs LBS=5 is unresolved here** and the numbers above cannot settle it:
-the LBS=4 point comes from a different job than LBS=5/6/7, and cross-job
-spread is ~3% (see exp05). Job `12473210` re-measures the pair interleaved
-(4,5,4,5,4,5), 3 repeats each, inside one job. If they are indistinguishable
--- which the flattening above suggests -- **LBS=4 wins on the 8.7 points of
-headroom it keeps.**
+| arm | rep 1 | rep 2 |
+|---|---:|---:|
+| LBS=4 | 499 tps / 28.92% | 499 tps / 28.94% |
+| LBS=5 | **512 tps / 29.68%** | **512 tps / 29.65%** |
+
+Within-job repeatability is **~0.1%** -- LBS=4 returns 499 tps to the digit on
+independent runs. Against that baseline LBS=5's **+2.6% tps / +0.74pp MFU** is
+far outside noise. The flattening is real but starts *after* LBS=5:
+
+| step | gain | memory cost | verdict |
+|---|---:|---:|---|
+| 4 -> 5 | **+2.6% tps, +0.74pp** | +8.7pp | **worth it** |
+| 5 -> 6 | +1.2% | +10.9pp | marginal |
+| 6 -> 7 | +0.6% | +7.2pp | no |
+
+**Production pick: LBS=5 at 76.83%.** A real gain with comfortable headroom --
+and precisely the configuration OLMo-2's smaller vocab makes reachable, since
+Llama-3 needs 85.84% for the same batch.
 
 ## Relation to the other tokenizer findings
 
