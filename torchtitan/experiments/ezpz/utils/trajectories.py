@@ -404,18 +404,28 @@ TRAJECTORIES: list[dict] = [
             "f1p8nyxh", "g6ekeu4j",
             "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
-            "v58n7vam", "cxlt0tpe", "2ktrz29u",
-        
+            "v58n7vam", "cxlt0tpe",
+            # ORDER IS SIGNIFICANT. concat_chain does `by_step[step] = row`
+            # walking this list in order, so on a step two runs both logged,
+            # the LAST one listed wins. Keep these in chronological order: a
+            # crashed run's overlapping steps get re-trained by its relaunch,
+            # and the relaunch's values are the real trajectory.
+            #
+            # djmhgmmq (Aug 3) therefore has to sit BEFORE 2ktrz29u (Aug 5).
+            # Appending it at the end instead -- which is what I did first --
+            # silently overwrote steps 7,510-7,590 with the crashed Aug-3 run's
+            # values, moving loss ~2.33 -> ~2.47 with no error anywhere.
+            "djmhgmmq",  # +604  [6897, 7500]  (Aug 3)
+            "2ktrz29u",  # (Aug 5) re-trains 7,501+ after djmhgmmq crashed
             "82e1jewm", "pne9uj4w",
             # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
-            # These three carry 2,699 steps no registered run covers, 2,095 of
-            # them PAST the previous registered head of 8,333 -- so this chain
-            # was under-reporting its own progress by ~25%. Their redundant
-            # siblings (w3ocr60z, tu2se4cv) are deliberately NOT listed, and
-            # qam6bmbi / qxysuuqk / pmart5d6 logged nothing.
-            "djmhgmmq",  # +604  [6897, 7500]
-            "t9vly2u8",  # +1515 [8334, 9848]
-            "lc9oukel",  # +580  [9801, 10380]
+            # 2,699 steps no registered run covered, 2,095 of them PAST the
+            # previous head of 8,333 -- this chain was under-reporting its own
+            # progress by ~25%. Redundant siblings (w3ocr60z, tu2se4cv) are
+            # deliberately NOT listed; qam6bmbi / qxysuuqk / pmart5d6 logged
+            # nothing.
+            "t9vly2u8",  # +1515 [8334, 9848]  (Aug 13)
+            "lc9oukel",  # +580  [9801, 10380] (Aug 16)
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --
