@@ -272,6 +272,14 @@ or multi-cluster step dirs.
 | **`20b_v2_256`** | 118 | **1** | **6** | **2** |
 | `2b_v2_512_lr3.22e-5` | n/a (W&B only) | 0 | - | - |
 
+**Re-verified 2026-08-17** with the independent `utils/audit_ckpt_dirs.py`
+detector. `20b_v2_512` re-scanned (116 dirs): **0 mixed, 0 out-of-order**, and
+exactly the four documented shard counts -- 6144 (93 dirs), 3072 (9), 1536
+(10), 192 (2). `20b_v2_256` re-scanned (120 dirs): both mixed dirs found, and
+all three benign straggler dirs correctly NOT flagged. So the new tool
+reproduces this table's result on a known-clean chain and on the known-bad one,
+which is what makes it trustworthy going forward.
+
 **Total: 2 collision episodes, both on `20b_v2_256`.** The W&B detector
 finds only episode 2 (`v58n7vam` x `cxlt0tpe`, 150 steps / 16.6h overlap);
 episode 1 is invisible to it because the second participant
