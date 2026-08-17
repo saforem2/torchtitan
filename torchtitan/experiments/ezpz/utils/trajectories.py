@@ -274,6 +274,15 @@ TRAJECTORIES: list[dict] = [
             # the seat was writing steps every second, its CURRENT run just
             # was not in this list.
             "ctbs1be4",
+            # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
+            # All crashed relaunch attempts whose steps NO registered run
+            # covers; the redundant siblings (enijw8tc, njaadnhu) are
+            # deliberately NOT listed, and 5x5vx12y logged nothing.
+            "jb5ox6u9",  # +211 [6551, 6761]
+            "zow5scry",  # +100 [6701, 6800]
+            "dn8br6kh",  # +51  [7149, 7199]
+            "2g2ig6hb",  # +50  [7201, 7250]
+            "ctc3hehv",  # +400 [8701, 9100]
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
@@ -398,6 +407,15 @@ TRAJECTORIES: list[dict] = [
             "v58n7vam", "cxlt0tpe", "2ktrz29u",
         
             "82e1jewm", "pne9uj4w",
+            # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
+            # These three carry 2,699 steps no registered run covers, 2,095 of
+            # them PAST the previous registered head of 8,333 -- so this chain
+            # was under-reporting its own progress by ~25%. Their redundant
+            # siblings (w3ocr60z, tu2se4cv) are deliberately NOT listed, and
+            # qam6bmbi / qxysuuqk / pmart5d6 logged nothing.
+            "djmhgmmq",  # +604  [6897, 7500]
+            "t9vly2u8",  # +1515 [8334, 9848]
+            "lc9oukel",  # +580  [9801, 10380]
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --
@@ -553,6 +571,13 @@ TRAJECTORIES: list[dict] = [
         "gbs": 12288,
         "seq_len": SEQ_LEN,
         "token_target": OLMO_MIX_1124_TOKENS,
+        # Checked against find_missing_runs.py 2026-08-17: four other runs wrote
+        # this ckpt dir and NONE belong here. b078m3vr is fully redundant;
+        # 0bkxtmhl / li914bqf / 78u19g1r logged nothing; and v46mecdx looks
+        # like a gain (50 "new" steps) but is a smoke test -- its steps are
+        # 1-50, and this fork BEGINS at 9,200, so they cannot be its steps.
+        # That is the exact trap the detector warns about: writing the same
+        # ckpt dir does not make a run part of the trajectory.
         "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"],
         "olog_fallbacks": None,
         "eval_subdir": None,
