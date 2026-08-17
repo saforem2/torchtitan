@@ -32,7 +32,7 @@ Reading rules:
 | `8744245` | 08-09 | 1h41m / 24h (7%) | **bad_alloc** | 20B-512 7,601->8,000+ | 20B-256 8,301->8,324 **bad_alloc** | ImportError | ImportError | 1/5 |
 | `8744247` | 08-13 | **23h18m / 24h (97%)** | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
 | `8756070` | 08-16 | 9h14m / 24h (38%) | **2B-512 STAGE 2 1->3,312** (dolmino CPT, seed step-46429) | 20B-512 8,701->9,109 | 20B-256 9,801->10,381 | `Config.job` AttributeError | `Config.job` AttributeError | 3/5 |
-| `8756957` | 08-16 | 10h53m+ / 12h (**running**) | **2B-512 STAGE 2 3,301->7,259+** (dolmino CPT) | 20B-512 9,101->9,614+ | CCL KVS timeout at init | 2B-512clr 16,901->20,831+ | **ckpt-key (3rd time)** | 3/5 so far |
+| `8756957` | 08-16 | **12h00m / 12h (100%)** | **2B-512 STAGE 2 3,301->7,731** (dolmino CPT) | 20B-512 9,101->9,695 | CCL KVS timeout at init | 2B-512clr 16,901->21,309 | **ckpt-key (3rd time)** | 3/5 |
 
 **Walltime column.** `8744247` and `8756070` are `resources_used.walltime` from
 `qstat -xf` (authoritative). The rest predate PBS history retention and are
@@ -46,6 +46,14 @@ burned 67% of a 24h slot on nothing, and six of nine umbrellas used under 40%.
 That is the single largest source of wasted 2,098-node allocation in this
 table, and it is almost entirely startup faults and infra kills rather than
 training problems.
+
+**`8756957` is the first umbrella to use 100% of its allocation** (12h00m23s of
+12h, `Exit_status = -29` = walltime expiry, not a fault), beating `8744247`'s
+97%. Both are the two longest-surviving umbrellas and both ran shorter requests
+than the 24h dispatches that kept dying young -- the 12h ask appears easier to
+schedule and survive than 24h. Its three live seats all ran the full window;
+the two dead ones failed at init and never held a slot productively, which is
+the remaining waste and is per-seat, not per-job.
 
 Slot map for the 5-trainer umbrellas: t0=2B-512, t1=20B-512, t2=20B-256,
 t3=2B-512 constlr-from9200, t4=2B-256 constlr-from9500.
