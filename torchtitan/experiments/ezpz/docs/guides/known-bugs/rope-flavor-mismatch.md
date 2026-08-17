@@ -433,6 +433,19 @@ covaries with the spike on every chain.** The RoPE story survives the challenge.
   "20B-512 beats 2B-256 per token" and any post-switch capability comparison
   between `2b_v2_512` and `2b_v2_256`, which is confounded by conversion.
 
+**Verified CLEAN (checked 2026-08-17, do not re-litigate):**
+- The **Q2 INCITE report** (`summaries/2026-Q2-incite.md`). Its headline
+  per-token claim -- "20B beats the 2B on every downstream benchmark, ARC-Easy
+  0.46 -> 0.66 over the first ~440B tokens" -- rests on **step-4,400**, exactly
+  one checkpoint before the 4,401 switch (443.0B tokens). Every eval number in
+  that report is pre-switch. An external report came within a single checkpoint
+  of publishing corrupted results, which is luck, not process.
+- The **2B eval README**: zero rows at or past `2b_v2_512`'s step-30,401
+  switch. (A `0.2969` in it coincidentally equals the 20B's corrupted endpoint;
+  unrelated.)
+- `evals/agpt/2b-mds/README.md`, `evals/eval-landscape-2026-07.md`: no
+  post-switch citations.
+
 **Merely discontinuous -- usable with a footnote:**
 - The training-loss curves of all three switched chains. There is a real
   300-500 step spike-and-recovery at the switch step. Plots should mark it;
