@@ -102,13 +102,21 @@ def find_split(shards: list[tuple[int, float, int]]) -> dict | None:
     aligned = early_idx == prefix or {s[0] for s in late} == set(
         range(len({s[0] for s in late}))
     )
+    # Report the MEDIAN size, not the mode. Shard sizes are far from uniform
+    # WITHIN a single writer's cluster: in the real collision the 192-rank
+    # writer ranges from ~1.31 GB (shard 0) down to 252 MB (shard 191), and the
+    # 3072-rank writer from ~98 MB to ~10 MB. A mode is then whichever exact
+    # byte count happens to repeat, which is arbitrary. The median still
+    # separates the two writers by an order of magnitude, which is all this
+    # column needs to do -- but do NOT read either number as "the shard size".
+    # The mtime split and index alignment are the evidence; size is a hint.
     return {
         "gap_seconds": gap,
         "n_early": len(early),
         "n_late": len(late),
         "index_aligned": aligned,
-        "early_size": statistics.mode([s[2] for s in early]) if early else 0,
-        "late_size": statistics.mode([s[2] for s in late]) if late else 0,
+        "early_size": int(statistics.median([s[2] for s in early])) if early else 0,
+        "late_size": int(statistics.median([s[2] for s in late])) if late else 0,
     }
 
 
