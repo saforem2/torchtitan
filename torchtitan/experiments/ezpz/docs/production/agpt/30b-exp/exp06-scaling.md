@@ -52,34 +52,102 @@ through a smooth region cannot predict where a cliff sits. The honest claim is
 
 Sunspot cannot settle it. Confirming 512N needs Aurora.
 
-## The batch-size ceiling is the real constraint
 
-LBS is fixed at 3, so this is **weak scaling** -- global batch grows with node
-count:
+## Second ladder: the best config, and the price of a pinned global batch
 
-| nodes | ranks | GBS (sequences) | tokens/step |
-|---:|---:|---:|---:|
-| 2 | 24 | 72 | 0.3M |
-| 16 | 192 | 576 | 2.4M |
-| 32 | 384 | 1152 | 4.7M |
-| 64 | 768 | 2304 | 9.4M |
-| *512* | *6144* | *18,432* | *75M* |
+> Job `12473204`, 64 nodes. `agpt_30b_llama3tok` (the 128k vocab, which exp05
+> established as the better config), TP=1, compiled, seq=4096, 20 steps,
+> median of the last 10. Two arms at every node count.
 
-That last row is extrapolated, and it is the problem. **A 75M-token step is
-far past the batch size where more tokens still buy proportional learning.**
-So "the 30B holds 26% MFU at 512N" would not by itself mean 512N is a good
-place to train it -- past some GBS the extra ranks buy throughput that does
-not convert into progress per token.
+The first ladder measured gemma at LBS=3 and let global batch float with node
+count. Both of those are wrong for a production decision: exp05 showed the
+128k vocab at LBS=4 is the best config, and `global_batch_size` is a config
+field, not a consequence of node count. This ladder fixes both.
 
-Two ways out, neither tested here:
+| nodes | GBS | tps (LBS=4) | MFU | | GBS | tps (LBS=1) | MFU | gap |
+|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| 2 | 96 | 489 | **28.49%** | | -- | -- | -- | -- |
+| 4 | 192 | 481 | 28.06% | | 48 | 362 | 21.09% | +6.97pp |
+| 8 | 384 | 472 | 27.54% | | 96 | 350 | 20.41% | +7.13pp |
+| 16 | 768 | 473 | 27.58% | | 192 | 355 | 20.71% | +6.87pp |
+| 32 | 1536 | 468 | 27.27% | | 384 | 341 | 19.89% | +7.38pp |
+| 64 | 3072 | 456 | 26.57% | | 768 | 322 | 18.77% | +7.80pp |
 
-- **Fewer nodes, same model.** If the 30B holds ~26% at 64-128N, the
-  efficiency argument is already won at a node count with a sane GBS.
-- **LBS=1 at high N.** Cuts GBS 3x at the cost of the batch-size lever that
-  won +30% at 2N. Whether that trade nets out at 512N is unmeasured.
+**LBS=4 beats the gemma LBS=3 ladder by ~1pp at every point** (+0.91, +0.91,
++1.03pp at 16/32/64N), confirming exp05's 2N result holds at scale.
 
-The MFU curve and the batch ceiling push in opposite directions, and the
-proposal currently only argues the first.
+**LBS=1 costs a stable 7-8pp of MFU** -- 29% of throughput at 64N -- and
+decays more than twice as fast (2.87%/doubling against 1.35%), because there
+is less per-rank work to hide the same collectives.
+
+### Why LBS=1 is the number that matters
+
+`GAS = GBS / (LBS * dp_degree)`, so a *pinned* global batch forces LBS down as
+nodes grow. Holding GBS at the 2B's known-good **6,144**:
+
+| nodes | max LBS at GBS 6,144 |
+|---:|---:|
+| 64 | 8 |
+| **128** | **4** |
+| 256 | 2 |
+| 512 | **1** |
+
+So the two arms above are not alternatives at 512N -- **LBS=1 is the only one
+available there**, and LBS=4 is only available up to 128N.
+
+### Extrapolated, with the constraint applied
+
+| nodes | LBS=4 | its GBS | LBS=1 | its GBS |
+|---:|---:|---:|---:|---:|
+| 128 | 26.21% | **6,144** | 18.23% | 1,536 |
+| 256 | 25.85% | 12,288 | 17.71% | 3,072 |
+| 512 | 25.50% | 24,576 | **17.20%** | **6,144** |
+
+Two rows are simultaneously feasible and sane: **128N at LBS=4 (GBS 6,144,
+~26%)** and **512N at LBS=1 (GBS 6,144, ~17%)**. Everything else either blows
+the batch budget or wastes the hardware.
+
+**128N is ~1.5x better per GPU, on a quarter of the machine.**
+
+### What this does to the proposal's claim
+
+The proposal argues that recovering ~27% MFU from the 2B's 8.79% at 512N is a
+"~3x effective-compute multiplier".
+
+- **At 512N the 30B gets ~17%, not ~27%** -- because a sane global batch forces
+  LBS=1 there. That is **~2x** the 2B, not 3x.
+- **~27% is real, but it lives at 128N**, where the batch budget still allows
+  LBS=4.
+
+So the efficiency argument survives and the mechanism is confirmed, but it
+argues for **a bigger model on fewer nodes**, not for the same node count.
+Going wider than 128N with a fixed global batch gives back more MFU than the
+extra ranks return.
+
+**Caveat on the extrapolations:** they walk three doublings past the last
+measured point using rates fitted over 4-64N. An earlier version of this
+analysis used only the 32->64 doubling for LBS=1, got 5.63%/doubling, and
+projected 15.8% at 512N -- the full-span fit gives 2.87% and 17.2%. Two-point
+rates at the small end are unreliable because the curve is not monotonic
+there (16N is the peak; 8N sits below it). Treat 17-18% as the bracket.
+
+## The batch-size ceiling: how the first ladder got it wrong
+
+The first ladder held LBS=3 and let GBS float, which made it look as though
+global batch *necessarily* grows with node count -- 18,432 sequences / 75M
+tokens per step at 512N, far past any useful batch size.
+
+**That framing was wrong.** `global_batch_size` is a config field
+(`configs.py:35`) and gradient accumulation is derived from it
+(`trainer.py:425`). It only appears to track node count because the default
+`-1` falls back to `LBS * dp_degree` (`trainer.py:410-414`) -- which is exactly
+what the first ladder left it at.
+
+The real constraint is the one measured above: pinning GBS does not blow up
+the batch, it **forces LBS down**, and LBS is the lever that produced the MFU
+in the first place. The 2B's own measurement is what sets the budget -- at
+GBS 12,288 it lost 3-8pp per token against 6,144, with per-step parity
+confirming the architecture was healthy.
 
 ## Method notes
 
