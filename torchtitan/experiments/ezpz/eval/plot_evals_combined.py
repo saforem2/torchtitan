@@ -172,6 +172,14 @@ def main() -> None:
     fig, axes = plt.subplots(nrows, ncols, figsize=(16, 5.5 * nrows))
     axes = axes.flatten()
 
+    # Guard against the silent-empty-chart failure. EVALS_DIR holds results
+    # that live on Aurora, NOT in the repo -- so running this on a laptop
+    # (or anywhere the evals are not mounted) used to emit a clean, plausible
+    # chart containing only axes and the gray random-chance lines. One such
+    # figure was committed and pushed on 2026-08-16 before anyone noticed.
+    # Count what actually gets drawn and fail loudly if the answer is nothing.
+    n_series = 0
+
     for ax, (task, metric, title) in zip(axes, PANELS):
         for traj in TRAJECTORIES:
             loader = load_mds if traj["layout"] == "mds" else load_dcp
@@ -179,6 +187,7 @@ def main() -> None:
             if not pts:
                 print(f"  [{title}] no data for {traj['label']}")
                 continue
+            n_series += 1
             steps, accs = zip(*pts)
             tokens_b = [s * traj["tokens_per_step"] / 1e9 for s in steps]
             ax.plot(
@@ -231,10 +240,27 @@ def main() -> None:
     )
     plt.tight_layout()
 
+    if n_series == 0:
+        plt.close()
+        raise SystemExit(
+            "REFUSING to write an empty chart: not one trajectory yielded a\n"
+            f"single point. Looked under: {EVALS_DIR}\n"
+            "\n"
+            "Eval results live on Aurora, not in the repo. Regenerate there:\n"
+            "  ssh aurora; cd .../torchtitan-ezpz\n"
+            "  ./.venv/bin/python3 torchtitan/experiments/ezpz/eval/"
+            "plot_evals_combined.py\n"
+            "\n"
+            "The previous behaviour was to emit axes plus the gray\n"
+            "random-chance lines and exit 0, which is indistinguishable from a\n"
+            "real chart at a glance -- that is how an empty figure reached the\n"
+            "branch on 2026-08-16. Do not 'fix' this by removing the check."
+        )
+
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(OUT_PATH, dpi=150, bbox_inches="tight", transparent=True)
     plt.close()
-    print(f"\nSaved: {OUT_PATH}")
+    print(f"\nSaved: {OUT_PATH}  ({n_series} series drawn)")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-08-17T00:37:19+0000",
+  "exported_at": "2026-08-17T03:06:24+0000",
   "exported_from": "/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz",
   "full_store_dir": "/flare/AuroraGPT/foremans/production-metrics",
   "columns": [
@@ -100,11 +100,11 @@
       "cls": "live",
       "gbs": 6144,
       "seq_len": 8192,
-      "rows": 92456,
+      "rows": 92778,
       "step_min": 1,
       "step_max": 92859,
       "rows_from_wandb": 92456,
-      "rows_from_olog": 0,
+      "rows_from_olog": 322,
       "wandb_run_ids": [
         "lytjeegk",
         "0t4h0kuw",
@@ -129,23 +129,19 @@
         "ew4pqb51",
         "fm3gzdxt"
       ],
-      "olog_fallbacks": {},
-      "gaps": [
-        {
-          "after_step": 25178,
-          "before_step": 25501,
-          "missing_steps": 322
-        }
-      ],
+      "olog_fallbacks": {
+        "0fk1bvtt": "/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/agpt-2b-n256-v2-failover-cont4.o8505119"
+      },
+      "gaps": [],
       "full_file": "2b_v2_256.csv",
-      "full_bytes": 16451003,
-      "full_sha256": "6f2eb6529624cd6dcf4b84d69dc9457940ad89bb8b1d0c986784fd99635646ec",
+      "full_bytes": 16466580,
+      "full_sha256": "175a60719d638cb903219059213a4a88e77b2f42538039c5aae20fc4d393a835",
       "full_verified": true,
       "summary_file": "2b_v2_256.csv",
-      "summary_rows": 1851,
+      "summary_rows": 2173,
       "summary_step_stride": 50,
-      "summary_bytes": 329103,
-      "summary_sha256": "e246169b19ed1d49ffa07623742d705b5a08eee7d7462f198ac4cf93f7e491bc",
+      "summary_bytes": 344680,
+      "summary_sha256": "65337445f1d526794402a374853457f8cea2b079659d1be9c3b8bb00bc7251af",
       "summary_verified": true
     },
     {
@@ -155,10 +151,10 @@
       "cls": "live",
       "gbs": 12288,
       "seq_len": 8192,
-      "rows": 34676,
+      "rows": 43786,
       "step_min": 1,
       "step_max": 43818,
-      "rows_from_wandb": 34676,
+      "rows_from_wandb": 43786,
       "rows_from_olog": 0,
       "wandb_run_ids": [
         "i252kps9",
@@ -172,26 +168,22 @@
         "i0ayskft",
         "21grc6o7",
         "nv4qwxc8",
+        "9d10mqwb",
+        "n887c3lk",
         "vtumb5cb",
         "nowkdepb"
       ],
       "olog_fallbacks": {},
-      "gaps": [
-        {
-          "after_step": 30483,
-          "before_step": 39601,
-          "missing_steps": 9117
-        }
-      ],
+      "gaps": [],
       "full_file": "2b_v2_512.csv",
-      "full_bytes": 6121242,
-      "full_sha256": "5f1cba634930d52a49d927d0656aef8a6894be80ba6d09ea8c704f6c6f0ba111",
+      "full_bytes": 7760165,
+      "full_sha256": "48087ed6d05e0db2dca8e712a9c44099e4d8151ec12bd07d2d9dd59199cb5889",
       "full_verified": true,
       "summary_file": "2b_v2_512.csv",
-      "summary_rows": 1388,
+      "summary_rows": 1753,
       "summary_step_stride": 25,
-      "summary_bytes": 245010,
-      "summary_sha256": "5b0fab6b91297711897a7b4efa289e24eb46643fe3f0e3bebcf02b5ab2f82c6d",
+      "summary_bytes": 310662,
+      "summary_sha256": "75221d64f5fa7e889869e63a56f889792a35fc56c1980ad63724ec93665c4d84",
       "summary_verified": true
     },
     {

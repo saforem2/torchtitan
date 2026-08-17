@@ -36,17 +36,24 @@ from __future__ import annotations
 # Family mid-tones, for charts that plot one model and need a single color.
 MODEL_COLORS: dict[str, str] = {
     "2b": "#1E88E5",   # blue 600
-    "20b": "#FB8C00",  # orange 600
-    "80b": "#43A047",  # green 600
+    "20b": "#43A047",  # green 600
+    "80b": "#FB8C00",  # orange 600
 }
 
 # Per-scale shades: light = fewer nodes, dark = more nodes.
+#
+# 20B moved orange -> green on 2026-08-16 (user request: the orange/yellow pair
+# read as washed-out next to the blues). 80B took orange in the swap rather
+# than a new hue: it has no plotted chain today (`80b_v2_4_smoke` carries no
+# run-ids), so nothing re-colored, and orange keeps the three families
+# maximally separated. Revisit if 80B ever plots alongside a fork curve, since
+# COLOR_FORK is purple and orange/purple are the weakest pair here.
 COLOR_2B_256N = "#64B5F6"   # blue 300
 COLOR_2B_512N = "#0D47A1"   # blue 900
-COLOR_20B_256N = "#FFB74D"  # orange 300
-COLOR_20B_512N = "#E65100"  # orange 900
-COLOR_80B_256N = "#81C784"  # green 300
-COLOR_80B_512N = "#1B5E20"  # green 900
+COLOR_20B_256N = "#81C784"  # green 300
+COLOR_20B_512N = "#1B5E20"  # green 900
+COLOR_80B_256N = "#FFB74D"  # orange 300
+COLOR_80B_512N = "#E65100"  # orange 900
 
 # Non-torchtitan / non-scale entries.
 COLOR_MDS = "#78909C"     # blue-grey 400 -- the v1 MDS reference curve
