@@ -1,7 +1,8 @@
-# exp07 -- would a custom ~64k tokenizer pay, and what does retokenizing cost?
+# exp07 -- a custom ~64k tokenizer does NOT pay (measured)
 
-> **2026-08-16.** Desk study on Aurora against the real `olmo-mix-1124` trees.
-> No training runs. Follows
+> **2026-08-16.** Corpus study on Aurora against the real `olmo-mix-1124`
+> trees, plus a measured fertility comparison on Sunspot (job `12473205`).
+> Follows
 > [exp01](exp01-tokenizer-analysis.md) (which measured vocab utilisation) and
 > [exp05](exp05-2n-performance.md) (which measured the 128k alternative).
 
@@ -10,9 +11,17 @@
 1. Is it worth training our own tokenizer on `olmo-mix-1124`?
 2. What do we do about the corpus already being tokenized on disk?
 
-**Short answers: probably yes, and the second is much less of an obstacle than
-it sounds -- the raw text is still on disk, and a <=65,535 vocab would HALVE
-the tokenized corpus rather than cost extra storage.**
+**Short answers: NO on the first, and the second is moot as a result.**
+
+The feasibility argument below held up on every term except the one that
+matters most, and that term was then **measured and came out negative**: a
+candidate 64k trained on our own corpus is **2.5% WORSE than gemma and 5.9%
+worse than Llama-3** in tokens per byte. See
+[the measurement](#measured-the-custom-tokenizer-loses-job-12473205), which
+supersedes the recommendation this page originally carried.
+
+**Use the vendored Llama-3 128k.** It measured best on fertility here, exp05
+already measured it at +1.12pp MFU on the 30B, and it needs no new artifact.
 
 ## The corpus, measured
 
@@ -79,9 +88,11 @@ content means the same knowledge for less compute:
 | 10% | 3.57T |
 | 15% | 3.38T |
 
-**This is an assumption, not a measurement** -- 5-15% is the usual range for
-in-domain versus general-purpose tokenizers, but we have not measured what
-*our* corpus would give. See "cheap next step" below.
+> **MEASURED AND REFUTED.** This whole table was built on "5-15% is the usual
+> range for in-domain versus general-purpose tokenizers." That assumption is
+> wrong for this corpus -- the measured number is **-2.5%** (i.e. the custom
+> tokenizer needs MORE tokens, not fewer). The section below has the data; the
+> table above is retained only to show what the argument rested on.
 
 **2. Embedding size.** At dim=6144 with untied embeddings:
 
@@ -125,19 +136,78 @@ a scratch directory outside the dataset root.
 - **The fertility gain is unmeasured.** It is also the single largest term in
   the argument.
 
-## Cheap next step, before anything expensive
+## The decision rule this page set itself (and then failed)
 
-Train a candidate 64k BPE on a stratified sample and **measure** fertility
-against gemma-256k and Llama-3-128k on held-out text from each domain. CPU
-only, hours not days, no cluster allocation. That converts the one unmeasured
-term into a number, and the decision follows from it:
+Before measuring, the rule was:
 
-- **>= 8-10% better fertility:** compelling. Compute saving alone justifies the
-  retokenization job, before counting the 2.36B freed params and 8 TB.
-- **~5%:** marginal. The embedding and storage wins still stand, but they are
-  available at lower risk from the already-vendored 128k.
-- **< 5%:** do not train one. Use Llama-3 128k, which exp05 already measured at
-  +1.12pp MFU over gemma and needs no new artifact.
+- **>= 8-10% better fertility:** compelling, retokenize.
+- **~5%:** marginal, prefer the vendored 128k.
+- **< 5%:** do not train one.
+
+The measured result is **-2.5%** -- not merely under the threshold but on the
+wrong side of zero. Recording the rule in advance is what makes that a clean
+answer rather than an argument.
+
+
+## Measured: the custom tokenizer loses (job `12473205`)
+
+Candidate byte-level BPEs trained on a **705 MB stratified sample** of
+`olmo-mix-1124` (7 domains, equal bytes each), measured on **176 MB of
+held-out text from disjoint source shards**. Tokens per MB, lower is better:
+
+| domain | custom 64k | gemma 256k | Llama-3 128k | winner |
+|---|---:|---:|---:|---|
+| algebraic-stack | 263,564 | 268,075 | **256,752** | Llama-3 |
+| arxiv | **266,802** | 282,694 | 267,074 | custom |
+| **dclm** (94.8% of corpus) | 238,298 | 232,014 | **224,782** | Llama-3 |
+| open-web-math | 260,205 | 265,404 | **253,468** | Llama-3 |
+| pes2o | **213,881** | 221,057 | 220,296 | custom |
+| starcoder | 297,499 | 296,945 | **241,110** | Llama-3 |
+| wiki | 235,275 | 233,309 | **226,916** | Llama-3 |
+| **corpus-weighted** | **239,695** | 233,944 | **225,539** | **Llama-3** |
+
+| comparison | result |
+|---|---:|
+| custom 64k vs gemma | **+2.5% (WORSE)** |
+| custom 64k vs Llama-3 | **+5.9% (WORSE)** |
+| Llama-3 vs gemma | **-3.6% (better)** |
+
+A 32k candidate is worse still (**+7.8%** vs gemma), so this is a direction,
+not a vocab-size accident.
+
+**The custom tokenizer beats gemma on 4 of 7 domains and still loses**, because
+it loses on dclm -- and dclm is 94.8% of the corpus. This is exactly why the
+report weights by real token share: the unweighted table looks like a close
+contest, and the weighted one is not close. A stratified sample flatters
+whatever wins on the small specialist domains.
+
+### Why the assumption was wrong
+
+Two reasons, both of which should have been obvious in advance:
+
+1. **705 MB is far too little.** Production tokenizers are fit on hundreds of
+   GB. The candidate is undertrained rather than badly designed.
+2. **dclm is generic web text, which is precisely what Llama-3's tokenizer was
+   fit on**, at vastly greater scale. There is no in-domain advantage to
+   capture when the dominant domain IS the generic domain. The "train on your
+   own data" argument only pays when your data is unusual, and 94.8% of ours
+   is not.
+
+**This is a lower bound.** A 64k trained on the full 6.9 TB could beat this
+candidate. But it must close 5.9% and then beat Llama-3 on top, against a
+threshold that was set at 8-10% -- a far larger ask than the argument
+assumed, for a benefit (0.79B vs 1.58B embedding, uint16 storage) that would
+be paid for with more tokens on every step forever.
+
+### Verdict
+
+**Do not train a custom tokenizer. Use the vendored Llama-3 128k.**
+
+It wins fertility outright here, exp05 measured it at +1.12pp MFU on the 30B
+(its freed HBM buys LBS=4), and it requires no new artifact, no tokenizer
+validation, and no retokenization gamble. The uint16 corpus halving is
+genuinely lost by this choice -- 128k does not fit in 16 bits -- and that is
+the real price of the decision.
 
 ## Relation to the other tokenizer findings
 
