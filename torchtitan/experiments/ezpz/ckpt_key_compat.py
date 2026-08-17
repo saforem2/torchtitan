@@ -1,4 +1,25 @@
-"""Load checkpoints written before the attention QKV wrapper refactor.
+"""Load checkpoints written before two upstream key renames.
+
+TWO renames are handled, and an old enough checkpoint needs both in the same
+load:
+
+1. the attention QKV wrapper refactor (below), and
+2. ``output.weight`` -> ``lm_head.weight``, when upstream renamed the LM head
+   (``self.lm_head = config.lm_head.build()`` in
+   ``torchtitan/models/common/decoder.py``).
+
+The head rename was found on 2026-08-17 the same way as the first: the 2B-256
+constant-LR fork died on all 3,072 ranks with ``Missing key in checkpoint
+state_dict: lm_head.weight`` and sat dead for ~9 hours holding a 256-node seat
+of umbrella 8756957. Its seed (``...-constlr-from9500/step-9500``) predates
+BOTH renames; the same fork's own step-20600, written by current code, needs
+neither -- which is why one fork could half-work. Note that EVERY production
+2B/20B checkpoint still on disk spells the head ``output.weight``; the live
+chains only avoid this because their clones are pinned to older code.
+
+Original motivation follows.
+
+Load checkpoints written before the attention QKV wrapper refactor.
 
 Older AuroraGPT checkpoints store the attention projections flat::
 
@@ -59,6 +80,13 @@ from typing import Any
 _NEW_TO_OLD = re.compile(r"(layers\.\d+\.attention\.)qkv_linear\.(w[qkv]\.)")
 _OLD_TO_NEW = re.compile(r"(layers\.\d+\.attention\.)(w[qkv]\.)")
 
+# output.<rest>  <->  lm_head.<rest>  (the second rename, see module docstring).
+# Anchored at the start of the FQN so it cannot touch a nested `.output.`
+# anywhere deeper in the tree, and applied to the optimizer's embedded-FQN
+# keys too via the same _remap_all pass.
+_HEAD_NEW_TO_OLD = re.compile(r"(^|(?<=\.))lm_head\.")
+_HEAD_OLD_TO_NEW = re.compile(r"(^|(?<=\.))output\.")
+
 
 def to_flat(key: str) -> str:
     """Rewrite a current-code key to its pre-refactor spelling.
@@ -82,6 +110,34 @@ def to_nested(key: str) -> str:
     return _OLD_TO_NEW.sub(r"\1qkv_linear.\2", key)
 
 
+def head_to_old(key: str) -> str:
+    """Rewrite ``lm_head.*`` to the pre-rename ``output.*``."""
+    return _HEAD_NEW_TO_OLD.sub(r"\1output.", key)
+
+
+def head_to_new(key: str) -> str:
+    """Rewrite ``output.*`` to the current ``lm_head.*``."""
+    return _HEAD_OLD_TO_NEW.sub(r"\1lm_head.", key)
+
+
+def needs_output_head_compat(checkpoint_dir: str) -> bool:
+    """True if `checkpoint_dir` spells the head ``output.weight``.
+
+    Independent of the attention check: a checkpoint can need either rename,
+    both, or neither. The 2B-256 constant-LR seed (step-9500) needs both --
+    it predates the qkv wrapper AND the head rename -- while the same fork's
+    own step-20600, written by current code, needs neither.
+    """
+    from torch.distributed.checkpoint import FileSystemReader  # noqa: PLC0415
+
+    try:
+        md = FileSystemReader(checkpoint_dir).read_metadata()
+    except Exception:
+        return False
+    keys = md.state_dict_metadata.keys()
+    return "output.weight" in keys and "lm_head.weight" not in keys
+
+
 def needs_flat_attention_compat(checkpoint_dir: str) -> bool:
     """True if `checkpoint_dir` holds pre-refactor flat attention keys.
 
@@ -100,8 +156,16 @@ def needs_flat_attention_compat(checkpoint_dir: str) -> bool:
     return has_flat and not has_nested
 
 
-def install_flat_attention_compat(checkpointer: Any) -> None:
-    """Wrap `checkpointer.dcp_load` so flat-attention checkpoints load.
+def install_flat_attention_compat(
+    checkpointer: Any, *, attention: bool = True, head: bool = False
+) -> None:
+    """Wrap `checkpointer.dcp_load` so pre-rename checkpoints load.
+
+    ``attention`` handles the qkv_linear wrapper; ``head`` handles
+    ``output`` -> ``lm_head``. They compose: a checkpoint old enough to
+    predate both (the 2B-256 constant-LR seed) needs both passes in the same
+    load, so this is one wrapper applying whichever renames were requested
+    rather than two shims fighting over ``dcp_load``.
 
     Idempotent: installing twice is a no-op.
     """
@@ -110,8 +174,24 @@ def install_flat_attention_compat(checkpointer: Any) -> None:
 
     original = checkpointer.dcp_load
 
+    def _down(key: str) -> str:
+        """Current-code spelling -> on-disk spelling."""
+        if attention:
+            key = to_flat(key)
+        if head:
+            key = head_to_old(key)
+        return key
+
+    def _up(key: str) -> str:
+        """On-disk spelling -> current-code spelling."""
+        if attention:
+            key = to_nested(key)
+        if head:
+            key = head_to_new(key)
+        return key
+
     def dcp_load(state_dict: dict[str, Any], *args: Any, **kwargs: Any) -> None:
-        renamed = {to_flat(k): v for k, v in state_dict.items()}
+        renamed = {_down(k): v for k, v in state_dict.items()}
         # Nothing to do if the model's keys already match the old spelling.
         if renamed.keys() == state_dict.keys():
             return original(state_dict, *args, **kwargs)
@@ -121,7 +201,7 @@ def install_flat_attention_compat(checkpointer: Any) -> None:
         # dcp.load fills the dict in place, so copy the loaded values back
         # under the keys the caller (and the model) expects.
         state_dict.clear()
-        state_dict.update({to_nested(k): v for k, v in renamed.items()})
+        state_dict.update({_up(k): v for k, v in renamed.items()})
 
     checkpointer.dcp_load = dcp_load
     checkpointer._flat_attention_compat = True
@@ -184,16 +264,28 @@ def maybe_install_flat_attention_compat(
                 return False
             step_dir = os.path.join(base, f"step-{max(steps)}")
 
-        if not needs_flat_attention_compat(step_dir):
+        want_attention = needs_flat_attention_compat(step_dir)
+        want_head = needs_output_head_compat(step_dir)
+        if not (want_attention or want_head):
             return False
 
-        install_flat_attention_compat(checkpointer)
+        install_flat_attention_compat(
+            checkpointer, attention=want_attention, head=want_head
+        )
+        needed = []
+        if want_attention:
+            needed.append(
+                "flat attention keys (layers.N.attention.{wq,wk,wv} -> "
+                "...qkv_linear.{wq,wk,wv})"
+            )
+        if want_head:
+            needed.append("the pre-rename head (output.weight -> lm_head.weight)")
         log.warning(
-            "%s holds PRE-REFACTOR flat attention keys "
-            "(layers.N.attention.{wq,wk,wv}); installing the qkv_linear remap "
-            "so it can be loaded by current code. This is a key rename only -- "
-            "no tensor is altered.",
+            "%s holds PRE-REFACTOR keys: %s. Installing the remap so it can be "
+            "loaded by current code. This is a key rename only -- no tensor is "
+            "altered.",
             step_dir,
+            " and ".join(needed),
         )
         return True
     except Exception as e:  # noqa: BLE001

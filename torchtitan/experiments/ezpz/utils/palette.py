@@ -62,9 +62,11 @@ COLOR_RANDOM = "#808080"  # gray -- random-chance lines on eval charts
 COLOR_FORK = "#8E24AA"    # purple 600 -- LR/schedule forks off a base chain
 # Stage-2 continued pre-training on a DIFFERENT corpus. Deliberately not a 2B
 # blue: it seeds from the 2B stage-1 endpoint but trains on dolmino-mix-1124,
-# so reading it as "more of the same curve" would be wrong. Teal sits away
-# from both the blues and the 20B greens.
-COLOR_STAGE2 = "#00897B"  # teal 600
+# so reading it as "more of the same curve" would be wrong. Pink is unused by
+# every other family (blues / greens / oranges / slate / purple), so the
+# corpus change reads instantly. Was teal 600 until 2026-08-17; teal sat close
+# enough to the 20B greens to be mistaken for one at a glance.
+COLOR_STAGE2 = "#EC407A"  # pink 400
 
 # Keyed by utils/trajectories.py trajectory keys.
 CHAIN_COLORS: dict[str, str] = {

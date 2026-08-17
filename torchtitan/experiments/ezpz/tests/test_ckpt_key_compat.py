@@ -8,12 +8,16 @@ import sys
 sys.path.insert(0, ".")
 from torchtitan.experiments.ezpz.ckpt_key_compat import (  # noqa: E402
     to_flat, to_nested, needs_flat_attention_compat,
+    head_to_old, head_to_new, needs_output_head_compat,
 )
 from torch.distributed.checkpoint import FileSystemReader  # noqa: E402
 
 BASE = "outputs/checkpoints"
 FLAT = f"{BASE}/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500/step-9500"
 NESTED = f"{BASE}/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200/step-9200"
+# Written by CURRENT code, so it needs neither rename -- the negative control
+# proving the shims stay off when they should.
+CURRENT = f"{BASE}/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200/step-20600"
 
 fails = []
 
@@ -79,7 +83,45 @@ for label, path, expect_flat in (("from9500", FLAT, True), ("from9200", NESTED, 
           expect_flat == (not any("qkv_linear" in k for k in keys)))
 
 print()
+print("=== unit: head rename (output <-> lm_head) ===")
+check("lm_head->output model", head_to_old("lm_head.weight") == "output.weight")
+check("output->lm_head model", head_to_new("output.weight") == "lm_head.weight")
+check("head rename is anchored: a nested .output. is NOT touched",
+      head_to_new("layers.0.moe.output.weight")
+      == "layers.0.moe.output.weight")
+check("head rename reaches optimizer FQNs",
+      head_to_new("optimizer.param_groups.output.weight.betas")
+      == "optimizer.param_groups.lm_head.weight.betas")
+check("head round-trip",
+      head_to_old(head_to_new("output.weight")) == "output.weight")
+check("a key with neither spelling is untouched",
+      head_to_new("norm.weight") == "norm.weight")
+
+print()
+print("=== head detection on the real checkpoints ===")
+check("from9500 needs the head remap", needs_output_head_compat(FLAT))
+check("missing path returns False (no raise)",
+      not needs_output_head_compat("/nonexistent/step-1"))
+
+print()
+print("=== the two renames are INDEPENDENT ===")
+# from9500 predates both; a current-code checkpoint predates neither. If these
+# ever collapse into one flag, an old-attention/new-head checkpoint silently
+# gets the wrong remap.
+import os  # noqa: E402
+for label, path in (("from9500", FLAT), ("from9200-20600", CURRENT)):
+    if not os.path.isdir(path):
+        print(f"  [skip] {label}: {path} not on this host")
+        continue
+    a, h = needs_flat_attention_compat(path), needs_output_head_compat(path)
+    print(f"        {label}: attention={a} head={h}")
+    if label == "from9500":
+        check("from9500 needs BOTH remaps", a and h)
+    else:
+        check("a current-code checkpoint needs NEITHER", not a and not h)
+
+print()
 if fails:
     print(f"FAILED: {fails}")
     sys.exit(1)
-print("ALL PASS -- the remap covers both seeds' real key sets")
+print("ALL PASS -- both remaps cover the real key sets")
