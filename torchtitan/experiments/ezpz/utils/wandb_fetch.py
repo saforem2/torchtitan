@@ -296,6 +296,17 @@ def concat_chain(
         if not rows:
             _emit("  %s: no rows, skipping" % rid)
             continue
+        # LAST RUN LISTED WINS a contested step. This is deliberate -- a
+        # crashed run's overlapping steps get re-trained by its relaunch, and
+        # the relaunch's values are the surviving trajectory -- but it means
+        # `run_ids` ORDER IS SEMANTIC, not cosmetic. The lists in
+        # trajectories.py are chronological; keep them that way.
+        #
+        # MEASURED consequence (2026-08-17): appending the older run djmhgmmq
+        # (Aug 3) to the END of 20b_v2_256 put its crashed values on top of
+        # 2ktrz29u's (Aug 5) re-trained ones, moving loss at steps 7,510-7,590
+        # from ~2.33 to ~2.47. Nothing errored; it surfaced only by diffing a
+        # re-exported store against the committed one.
         for r in rows:
             s = r.get("_step")
             if s is not None:
