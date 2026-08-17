@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-08-14
+> Last updated: 2026-08-16
 >
 > **Training curves:** see [`docs/production/agpt/20b/`](../../../production/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
@@ -58,6 +58,38 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 > 20B-256 is LIVE at ~step-5,900; both have the modern eval suite (mmlu 5-shot
 > / gsm8k 5-shot / arc_challenge 25-shot) backfilled. The step-4,400-vs-69,900
 > comparison below is the dated 2026-06-10 finding, kept as the record.
+
+> [!CAUTION]
+> **RoPE-permute correction (2026-08-16): every 20B eval past the switch is
+> too LOW, but the headline tables on this page are NOT affected.**
+>
+> Both 20B chains changed RoPE convention mid-flight and the eval scripts kept
+> converting with the complex flavor, so those exports were wrongly permuted.
+> Switch points: **20B-512 at step 4,401**, **20B-256 at step 3,101**.
+>
+> The two comparison tables immediately below cite **step-4,400** and
+> **step-900** -- both *before* the 512N switch -- so they are clean and stand
+> as written. The affected numbers are in the per-step trajectory tables
+> further down.
+>
+> MEASURED correction (same checkpoint, same harness, only `--model_flavor`
+> differing -- job `8760246`):
+>
+> | step | metric | published | corrected |
+> |---|---|---|---|
+> | 5000 | arc_challenge acc | 0.3123 | **0.3575** |
+> | 6000 | arc_challenge acc | 0.2713 | **0.3660** |
+>
+> Note the penalty GROWS with training (+0.045 -> +0.095 on ARC-C) while
+> ARC-Easy's stays flat at +0.036. **The apparent post-4,400 ARC-C decay is
+> entirely an artifact** -- corrected, the model improves monotonically.
+> 74 affected results are being re-run (jobs `8760920`/`8760921`/`8760922`);
+> this page will be updated from them. Until then, treat any 20B-512 number at
+> step >= 4,401 and any 20B-256 number at step >= 3,101 as a lower bound.
+>
+> Full account:
+> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
+> and [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md).
 
 **20B 512N sync at step-4,400 beats 2B 256N async at step-69,900 on
 every benchmark per token** — the bigger model continues to outperform
