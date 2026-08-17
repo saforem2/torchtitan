@@ -54,6 +54,36 @@ monotonically across the whole window. The published ARC-C "decay" is the
 permute penalty growing faster than the model's genuine gains, inverting the
 curve.
 
+## Confirmed across a 5-point series, not just two spot-checks (2026-08-17)
+
+The re-eval sweep has since covered steps 4500-4900 continuously, turning the
+two-point A/B into a series. Every step, every metric, same direction:
+
+| step | ARC-C corrupted -> corrected | ARC-Easy corrupted -> corrected |
+|---|---|---|
+| 4500 | 0.3422 -> 0.3601 (+0.0179) | 0.6679 -> 0.6894 (+0.0215) |
+| 4600 | 0.3456 -> 0.3626 (+0.0171) | 0.6738 -> 0.6995 (+0.0257) |
+| 4700 | 0.3396 -> 0.3763 (+0.0367) | 0.6582 -> 0.6965 (+0.0383) |
+| 4800 | 0.3601 -> 0.3788 (+0.0188) | 0.6662 -> 0.7024 (+0.0362) |
+| 4900 | 0.3601 -> 0.3763 (+0.0162) | 0.6692 -> 0.7016 (+0.0324) |
+
+Two things this adds beyond the earlier spot-checks:
+
+1. **The corrected ARC-C series rises monotonically** across 4500-4800 (0.3601
+   -> 0.3626 -> 0.3763 -> 0.3788) where the corrupted one wanders
+   (0.3422 -> 0.3456 -> 0.3396 -> 0.3601). The corrupted series was noisy
+   enough that a downward stretch of it could be read as a trend; the corrected
+   one has no such stretch in this window.
+2. **The penalty is not constant even before step 5000** -- it ranges 0.016 to
+   0.037 across five adjacent checkpoints. Earlier framing treated ARC-C's
+   penalty as roughly flat until it doubled by 6000; it is noisier than that.
+   The conclusion is unchanged (correcting the permute helps everywhere, and
+   there is no regression), but "the penalty grows smoothly" would be
+   over-reading five points.
+
+The 2B-512 arm shows the same shape at its own scale -- ARC-Easy 0.6465 ->
+0.6507 and HellaSwag 0.5295 -> 0.5344 across steps 35,000-39,600, both rising.
+
 **INFERRED, not measured:** the likely reason the penalty grows only on ARC-C
 is that a sharper model has more to lose. Scrambled Q/K pairing degrades
 whatever structure attention has learned, so the better the model gets at the
