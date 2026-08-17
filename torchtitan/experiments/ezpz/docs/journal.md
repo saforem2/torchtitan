@@ -2,6 +2,58 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-17 (aurora) -- a second key rename kills the same seat for the 3rd time; two chains were registered but never drawn; cot-long was measurable all along
+
+- **`output.weight` -> `lm_head.weight` is the second upstream rename to break
+  the 2B-256 constlr seat.** It died on all 3,072 ranks with `Missing key in
+  checkpoint state_dict: lm_head.weight`, then sat dead ~9 hours holding 256
+  nodes of umbrella 8756957. Its log labels the death `exit 127`, which reads
+  as the known pals RPC launch failure and is not -- the real error is
+  thousands of rank-lines deep. That is the third umbrella (8714502, 8744247,
+  8756957) this seat has lost to a key rename.
+- **Two wrong diagnoses before the right one.** "The checkpoint is missing" --
+  no, the clone lives under `/flare/AuroraGPT/foremans/runs/`, not the main
+  repo, and the checkpoint is intact (3,072 shards, 13 GB, valid `.metadata`).
+  "The clone is on stale code" -- no, it is the same commit as `agpt-2b-v2`,
+  which resumes fine. The discriminator is checkpoint VINTAGE: the fork's own
+  step-20600 (written by current code) has `lm_head.weight`; the copied-in
+  step-9500 predates both renames.
+- **Every production 2B/20B checkpoint on disk still spells the head
+  `output.weight`.** The live chains survive only because their clones are
+  pinned to pre-rename code, so pulling a prod clone to HEAD is a deliberate
+  act. `ckpt_key_compat.py` now composes both remaps in one `dcp_load` wrapper
+  with independent detection (`e1320edf9`).
+- **The head regex was wrong in a way the unit test caught.** Anchoring on
+  "start of string or after ANY dot" also rewrites `layers.0.moe.output.weight`
+  -- a real MoE key. Re-anchored to start-of-string or an explicit optimizer
+  prefix; all 8 cases pass, and the real step-9500 is confirmed to need BOTH
+  remaps.
+- **Two chains were registered, data-backed, and silently absent from the
+  charts.** Both plotters keep display lists separate from `trajectories.py`,
+  and a regen that omits a curve still prints "0 scripts failed". The stage-2
+  dolmino chain never reached the training chart (and needs an x-offset, since
+  its step counter restarts at 1); `agpt-20b-v2-256n` was excluded from the
+  eval chart as "a noisy 3-pt cluster" and stayed excluded after growing into
+  a full production chain with 43 eval points. Both plotters now reconcile
+  against `trajectories.py` at startup and exit naming what is missing. The
+  eval chart went 24 -> 32 series.
+- **cot-long did NOT drift -- and it was measurable the whole time.** It was
+  written off as unevaluable because its LoRA checkpoints are gone, but
+  `rollout_samples.jsonl` survived with 6,337 scored rollouts carrying
+  `AnswerCorrectReward` per sample. Accuracy ROSE 0.069 -> ~0.17 over the first
+  ~120 steps then held flat to step 400 (held-out validation 0/20 -> 5/20).
+  The apparent format collapse was `ThinkFormatReward` reading only `content`
+  while vLLM had split `<think>` into `reasoning_content` -- the same bug that
+  once zeroed the reward, now zeroing the analysis. Added
+  `rl/scripts/score_rollouts.py`.
+- **All six known doc inconsistencies closed.** Four were real; two were not
+  errors -- there is no "B1" (the series legitimately starts at B2), and
+  cot-long's entry was wrong in the opposite direction from what it recorded.
+  v2-256n was settled by checking disk (zero `checkpoint-*` dirs) rather than
+  picking a side.
+- **Stage-2 curve is pink**, not teal -- teal sat close enough to the new 20B
+  greens to be misread as one of them.
+
 ## 2026-08-16 (sunspot) -- the 30B goes from proposal to measured model: 27.89% MFU at 2N, 25.54% at 64N, HSDP ceiling found between 20B and 30B
 
 - **`agpt_configs["30B"]` did not exist.** `30b-exp/` was a design document
