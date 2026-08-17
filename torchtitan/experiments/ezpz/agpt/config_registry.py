@@ -895,6 +895,24 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_llama3tok", hf_assets_path="./assets/hf/Llama-3.1-8B")
 
 
+def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
+
+    exp07's nine-tokenizer bake-off measured OLMo-2 tied with Llama-3.1 on
+    fertility (225,749 vs 225,539 tok/MB on held-out olmo-mix-1124 text) while
+    using a 22% smaller vocab. At dim=6144 that is 1.23B of embedding against
+    Llama-3's 1.58B -- 0.34B freed for the same token cost, and exp05 showed
+    freed HBM converts into batch size, the dominant throughput lever here.
+
+    OLMo-2's tokenizer is also the only one tested that was fit on our own
+    corpus family (dolma/olmo-mix) at production scale.
+
+    26.2B params. Sets the OLMo-2 assets explicitly, as agpt_30b_llama3tok
+    does, so the tokenizer and the embedding cannot disagree.
+    """
+    return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
     return agpt("50b")
 

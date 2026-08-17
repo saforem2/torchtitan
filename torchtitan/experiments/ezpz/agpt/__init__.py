@@ -629,6 +629,23 @@ agpt_configs = {
         vocab_size=128256,
         hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
     ),
+    # 30B-exp with OLMo-2's 100,352 vocab. exp07's nine-tokenizer bake-off
+    # measured this as tied with Llama-3 on fertility (225,749 vs 225,539
+    # tok/MB, +0.09%) with a 22% smaller vocab, so it should cost 0.34B fewer
+    # embedding params at dim=6144 (1.23B vs 1.58B) for the same tokens.
+    # 100,352 (not the tokenizer's 100,278) matches OLMo-2's own config.json,
+    # which pads to a multiple of 128; max added-token id is 100,277 so the
+    # embedding covers the tokenizer with room to spare.
+    # Needs assets/hf/OLMo-2-1124-7B as the tokenizer.
+    "30B_olmo2tok": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -776,6 +793,7 @@ agpt_configs["8b"] = agpt_configs["8B"]
 agpt_configs["20b"] = agpt_configs["20B"]
 agpt_configs["30b"] = agpt_configs["30B"]
 agpt_configs["30b_llama3tok"] = agpt_configs["30B_llama3tok"]
+agpt_configs["30b_olmo2tok"] = agpt_configs["30B_olmo2tok"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]
