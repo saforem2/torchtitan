@@ -66,7 +66,7 @@ field, not a consequence of node count. This ladder fixes both.
 
 | nodes | GBS | tps (LBS=4) | MFU | | GBS | tps (LBS=1) | MFU | gap |
 |---:|---:|---:|---:|---|---:|---:|---:|---:|
-| 2 | 96 | 489 | **28.49%** | | -- | -- | -- | -- |
+| 2 | 96 | 489 | **28.49%** | | 24 | 375 | 21.86% | +6.63pp |
 | 4 | 192 | 481 | 28.06% | | 48 | 362 | 21.09% | +6.97pp |
 | 8 | 384 | 472 | 27.54% | | 96 | 350 | 20.41% | +7.13pp |
 | 16 | 768 | 473 | 27.58% | | 192 | 355 | 20.71% | +6.87pp |
@@ -77,8 +77,9 @@ field, not a consequence of node count. This ladder fixes both.
 +1.03pp at 16/32/64N), confirming exp05's 2N result holds at scale.
 
 **LBS=1 costs a stable 7-8pp of MFU** -- 29% of throughput at 64N -- and
-decays more than twice as fast (2.87%/doubling against 1.35%), because there
-is less per-rank work to hide the same collectives.
+decays more than twice as fast (**3.00%/doubling against 1.39%** over the full
+2-64N span), because there is less per-rank work to hide the same
+collectives.
 
 ### Why LBS=1 is the number that matters
 
@@ -99,23 +100,24 @@ available there**, and LBS=4 is only available up to 128N.
 
 | nodes | LBS=4 | its GBS | LBS=1 | its GBS |
 |---:|---:|---:|---:|---:|
-| 128 | 26.21% | **6,144** | 18.23% | 1,536 |
-| 256 | 25.85% | 12,288 | 17.71% | 3,072 |
-| 512 | 25.50% | 24,576 | **17.20%** | **6,144** |
+| 128 | 26.20% | **6,144** | 18.21% | 1,536 |
+| 256 | 25.84% | 12,288 | 17.66% | 3,072 |
+| 512 | 25.48% | 24,576 | **17.13%** | **6,144** |
 
 Two rows are simultaneously feasible and sane: **128N at LBS=4 (GBS 6,144,
 ~26%)** and **512N at LBS=1 (GBS 6,144, ~17%)**. Everything else either blows
 the batch budget or wastes the hardware.
 
-**128N is ~1.5x better per GPU, on a quarter of the machine.**
+**128N is 1.53x better per GPU, on a quarter of the machine.**
 
 ### What this does to the proposal's claim
 
 The proposal argues that recovering ~27% MFU from the 2B's 8.79% at 512N is a
 "~3x effective-compute multiplier".
 
-- **At 512N the 30B gets ~17%, not ~27%** -- because a sane global batch forces
-  LBS=1 there. That is **~2x** the 2B, not 3x.
+- **At 512N the 30B gets ~17.1%, not ~27%** -- because a sane global batch
+  forces LBS=1 there. Against the 2B's measured 8.79% that is **1.95x**, not
+  3x.
 - **~27% is real, but it lives at 128N**, where the batch budget still allows
   LBS=4.
 
@@ -127,7 +129,8 @@ extra ranks return.
 **Caveat on the extrapolations:** they walk three doublings past the last
 measured point using rates fitted over 4-64N. An earlier version of this
 analysis used only the 32->64 doubling for LBS=1, got 5.63%/doubling, and
-projected 15.8% at 512N -- the full-span fit gives 2.87% and 17.2%. Two-point
+projected 15.8% at 512N -- the full 2-64N fit over all six points gives 3.00%
+and 17.1%. Two-point
 rates at the small end are unreliable because the curve is not monotonic
 there (16N is the peak; 8N sits below it). Treat 17-18% as the bracket.
 
