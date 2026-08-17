@@ -20,6 +20,14 @@ python3 -c "import vllm; print(f'vllm: {vllm.__version__}')" 2>&1
 python3 -c "import torchtitan; print(f'torchtitan: {torchtitan.__file__}')"
 
 echo ""
+# RoPE flavor is hardcoded `2b` below and that is CORRECT for this checkpoint:
+# the 2B n256 chain used the complex convention end-to-end and never switched
+# (verified with scripts/eval/rope_flavor_for_step.py --all). Do NOT copy this
+# line to another chain -- 2b_v2_512, 20b_v2_512 and 20b_v2_256 all switched
+# mid-flight, and using the wrong flavor produces a model that loads fine and
+# scores several points low with no error anywhere. Resolve the flavor per
+# step with that script instead of assuming. See
+# docs/guides/known-bugs/rope-flavor-mismatch.md.
 echo "=== Converting 2B step-5000 DCP → HF ==="
 time python3 torchtitan/experiments/ezpz/eval/convert_to_hf.py \
     outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs3072/step-5000 \
