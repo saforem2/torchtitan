@@ -269,6 +269,11 @@ TRAJECTORIES: list[dict] = [
             "9d1g9zsw",
         
             "2lxurmes", "iozc8x9n", "c8zwrlqw",
+            # ctbs1be4=8756957 t1 (9101->9647+). Found 2026-08-17 when the
+            # board showed this chain "R" with a 6-day-old W&B heartbeat:
+            # the seat was writing steps every second, its CURRENT run just
+            # was not in this list.
+            "ctbs1be4",
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
@@ -513,6 +518,48 @@ TRAJECTORIES: list[dict] = [
         "olog_fallbacks": None,
         "eval_subdir": None,
         "cls": "live",
+    },
+    {
+        # 2B-512 CONSTANT-LR fork, branched off the canonical chain at
+        # step-9200 (right before LR decay begins) to answer whether the decay
+        # phase is what earned the final loss, or whether a constant LR would
+        # have gotten there too. Same corpus and GBS as stage-1, so unlike the
+        # stage-2 chain it IS directly comparable step-for-step -- it just
+        # never decays.
+        #
+        # Registered 2026-08-17, ~21k steps in. It had been running across
+        # three umbrellas with NO trajectory entry at all, which is why the
+        # live board showed it as a raw truncated checkpoint-dir name
+        # ("2b-sophiag-olmo-mix-1124-n512-gbs1") with no target and no W&B
+        # link, and why none of its 11.8k steps past the fork point appear on
+        # any chart.
+        #
+        # Its checkpoints live in the fork's OWN clone under
+        # /flare/AuroraGPT/foremans/runs/, not the main repo tree.
+        #
+        # ww88slec = 8744247 t3 (9201..16984, ended in node death)
+        # ijfo395o = 8756070 t3
+        # xii94czx = 8756957 t3 (16901..21028+, live)
+        "key": "2b_v2_512_constlr_from9200",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": (
+            "/flare/AuroraGPT/foremans/runs/agpt-2b-constlr-from9200"
+            "/torchtitan-ezpz/outputs/checkpoints"
+            "/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200"
+        ),
+        "readme": f"{_DOCS}/2b/n512/README.md",
+        "gbs": 12288,
+        "seq_len": SEQ_LEN,
+        "token_target": OLMO_MIX_1124_TOKENS,
+        "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        # wandb_only: it is a deliberate LR ablation, not a production chain,
+        # so it belongs on the board and in prod_dash but is not required on
+        # the canonical overlay charts (which the live-chain guard enforces).
+        "cls": "wandb_only",
     },
     {
         "key": "80b_v2_4_smoke",
