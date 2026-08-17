@@ -26,6 +26,7 @@ from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
+from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
     TorchFTManager as FTManager,
@@ -929,6 +930,23 @@ class FaultTolerantTrainer(Trainer):
             config.checkpoint.load_step,
             dump_folder=config.dump_folder,
         )
+
+        # Two concurrent jobs writing one checkpoint.folder is silent and it
+        # physically mixes their shards -- it left two 453 GB dirs holding
+        # 3,072 files where 192 belong. Record a claim and say so loudly if
+        # someone else already holds one. Advisory only: a crashed predecessor
+        # leaves a stale claim behind, and refusing to start on one would turn
+        # every crash into a failed resume.
+        check_and_claim(
+            config.checkpoint.folder,
+            dump_folder=config.dump_folder,
+            world_size=int(os.environ.get("WORLD_SIZE", -1)),
+            is_rank_zero=(
+                not torch.distributed.is_initialized()
+                or torch.distributed.get_rank() == 0
+            ),
+        )
+
         self.checkpointer.load(step=config.checkpoint.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
 
