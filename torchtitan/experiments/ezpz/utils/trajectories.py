@@ -223,8 +223,12 @@ TRAJECTORIES: list[dict] = [
             # the run finished, the DATA just stopped 2,611 steps short -- so
             # it read as a rendering quirk rather than a missing run. Spotted
             # by the user noticing the curve did not reach the right edge.
-            "ud8t6d3t",
+            # Chronological: vtumb5cb (Aug 5, 39601..41299) precedes ud8t6d3t
+            # (Aug 13, 43801..46429). They share no steps, so the order was
+            # harmless here -- but concat_chain's last-listed-wins merge makes
+            # order semantic, and a mis-ordered list traps the next append.
             "vtumb5cb",
+            "ud8t6d3t",
         
             "nowkdepb",
         ],
@@ -268,21 +272,28 @@ TRAJECTORIES: list[dict] = [
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
             "9d1g9zsw",
         
-            "2lxurmes", "iozc8x9n", "c8zwrlqw",
-            # ctbs1be4=8756957 t1 (9101->9647+). Found 2026-08-17 when the
+            # ORDER IS SEMANTIC -- see the note in concat_chain: on a step two
+            # runs both logged, the LAST listed wins. Keep this chronological.
+            # The five run-ids below were found 2026-08-17 by
+            # find_missing_runs.py + a coverage-gain check (all crashed
+            # relaunch attempts covering steps no registered run had); they are
+            # interleaved by creation date rather than appended, because
+            # appending an older run is what corrupted 20b_v2_256. None of
+            # these overlaps another run here, so the placement is currently
+            # cosmetic -- but a mis-ordered list traps the NEXT append.
+            "jb5ox6u9",  # Jul 30  +211 [6551, 6761]
+            "zow5scry",  # Jul 30  +100 [6701, 6800]
+            "dn8br6kh",  # Aug 07  +51  [7149, 7199]
+            "2g2ig6hb",  # Aug 07  +50  [7201, 7250]
+            "iozc8x9n",  # Aug 07 17:46  [7251, 7299]
+            "2lxurmes",  # Aug 08 03:15  [7301, 7653]
+            "c8zwrlqw",  # Aug 09  (8744245 t1)
+            "ctc3hehv",  # Aug 16  +400 [8701, 9100]
+            # ctbs1be4=8756957 t1 (9101->9694). Found 2026-08-17 when the
             # board showed this chain "R" with a 6-day-old W&B heartbeat:
             # the seat was writing steps every second, its CURRENT run just
             # was not in this list.
-            "ctbs1be4",
-            # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
-            # All crashed relaunch attempts whose steps NO registered run
-            # covers; the redundant siblings (enijw8tc, njaadnhu) are
-            # deliberately NOT listed, and 5x5vx12y logged nothing.
-            "jb5ox6u9",  # +211 [6551, 6761]
-            "zow5scry",  # +100 [6701, 6800]
-            "dn8br6kh",  # +51  [7149, 7199]
-            "2g2ig6hb",  # +50  [7201, 7250]
-            "ctc3hehv",  # +400 [8701, 9100]
+            "ctbs1be4",  # Aug 16 20:20
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
