@@ -53,6 +53,49 @@ Running log of what's happening, session by session. Most recent first.
   picking a side.
 - **Stage-2 curve is pink**, not teal -- teal sat close enough to the new 20B
   greens to be misread as one of them.
+- **20B-256 was under-reporting its own progress by ~25%.** Three W&B runs
+  carrying 2,699 steps were never registered, so every chart, the live board,
+  and the exported store stopped at 8,333 while training had reached 10,300 on
+  disk. Its README carried three mutually inconsistent step counts (6,800 /
+  9,400 / 8,334) and the 8,334 was the honest one -- it was the true head of
+  the *plotted* data. Added `find_missing_runs.py`, which asks W&B which runs
+  wrote each ckpt dir instead of trusting a hand-maintained list; all four
+  wrong outputs this month traced to that list and each was found by accident.
+- **Unregistered is not the same as missing data.** The first scan flagged 29
+  runs; only 8 were real. The rest are crashed relaunches whose ranges a later
+  run re-covers, runs that died before logging, or -- the instructive one --
+  `v46mecdx`, which looks like a clean 50-step gain but logs steps 1-50 for a
+  fork that BEGINS at 9,200. A smoke test sharing a ckpt dir. Auto-adding
+  "gains" would have injected foreign data.
+- **I then corrupted the store myself and caught it by diffing.** Appending
+  `djmhgmmq` (Aug 3) to the END of `20b_v2_256` put its crashed values on top
+  of `2ktrz29u`'s (Aug 5) re-trained ones, moving loss ~0.1 nats across nine
+  steps with no error anywhere. `concat_chain` does `by_step[step] = row` in
+  list order, so **run-id order is semantic** -- last listed wins. Documented
+  at the merge site and enforced by `audit_run_order.py`.
+- **Sorting took three passes.** Fixing adjacent inversions is not sorting;
+  each pass just exposed the next neighbour. The third pulled every run's
+  `created_at` and sorted outright. Along the way my first rewrite silently
+  deleted 20 lines of provenance comments (reverted), and trailing per-id
+  annotations stayed with their line while ids moved (realigned). All nine
+  chains now verify chronological.
+- **The one surviving value change was a genuine correction.** Step 8,330 in
+  `20b_v2_256` moves 2.3892 -> 2.2599 because `t9vly2u8` (Aug 13) now wins it
+  over `82e1jewm` (Aug 7). Checkpoint mtimes settle it: the chain persists
+  step-8300 on Aug 8 then nothing until step-8400 on Aug 13, so `82e1jewm`
+  logged 8,330 without ever persisting weights past 8,300 -- an orphan tail --
+  while `t9vly2u8` owns the surviving checkpoints.
+- **The RoPE A/B is now a 5-point series, not two spot-checks.** Correcting the
+  permute lifts every metric at every step (ARC-C +0.016 to +0.037, ARC-Easy
+  +0.022 to +0.038), and the corrected ARC-C rises monotonically across
+  4500-4800 where the corrupted one wanders -- which is how a downward stretch
+  read as decay. One correction to the earlier framing: the penalty is NOT
+  roughly flat before step 5000, it ranges 0.016-0.037 across five adjacent
+  checkpoints.
+- **Umbrella 8756957 finished at 100% of walltime** (12h00m23s / 12h,
+  `Exit_status = -29` = clean expiry) -- the first to use its whole allocation,
+  beating 8744247's 97%. Both are 12h asks rather than the 24h dispatches that
+  kept dying young. Successor `8760249` released itself from its system hold.
 
 ## 2026-08-16 (sunspot) -- the 30B goes from proposal to measured model: 27.89% MFU at 2N, 25.54% at 64N, HSDP ceiling found between 20B and 30B
 
