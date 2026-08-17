@@ -408,8 +408,27 @@ covaries with the spike on every chain.** The RoPE story survives the challenge.
   `20b_v2_512` steps >= 4401, `20b_v2_256` steps >= 3101, `2b_v2_512`
   steps >= 30401. On disk under
   `outputs/evals/{agpt-20b-v2-512n,agpt-20b-v2-256n,agpt-2b-v2-512n}/step-*`.
-  These understate the models by an amount that is **UNKNOWN** but is
-  at least several points on ARC-C and HellaSwag.
+  These understate the models by an amount **now MEASURED** (2026-08-17,
+  re-eval sweep). On `20b_v2_256`, 13 matched checkpoint pairs over steps
+  4000-5800:
+
+  | | step 4000 | step 5800 | net |
+  |---|---|---|---|
+  | corrupted export | 0.3481 | 0.2969 | **-0.0512** |
+  | corrected export | 0.3635 | 0.3857 | **+0.0222** |
+
+  ARC-C penalty grows +0.015 -> +0.089 (mean +0.041 first half, +0.075
+  second); ARC-Easy runs +0.021 to +0.045 and does NOT grow. `20b_v2_512`
+  agrees independently over steps 4000-6000.
+
+  **The penalty is monotone in training progress**, which is worse than a
+  constant offset: it inverts the trend. By step 5800 the corrupted export
+  reads 0.2969 -- within noise of the 0.25 ARC-C random baseline -- while the
+  same weights read 0.3857 exported correctly. A reader of the corrupted
+  curve concludes the model lost most of its ARC-C ability; it gained. No
+  amount of care reading those numbers recovers the truth, because a monotone
+  corruption is indistinguishable from a trend. Full series:
+  [`20260816-arc-c-decay-vs-rope-permute.md`](../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
 - Any downstream claim resting on those numbers -- in particular
   "20B-512 beats 2B-256 per token" and any post-switch capability comparison
   between `2b_v2_512` and `2b_v2_256`, which is confounded by conversion.
