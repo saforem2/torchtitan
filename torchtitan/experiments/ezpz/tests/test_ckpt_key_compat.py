@@ -12,7 +12,18 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (  # noqa: E402
 )
 from torch.distributed.checkpoint import FileSystemReader  # noqa: E402
 
-BASE = "outputs/checkpoints"
+# The constant-LR fork's checkpoints live in ITS clone, not the main repo.
+# CKPT_BASE overrides the default so this can run from the main checkout --
+# running from inside the clone instead makes the clone's own (pinned, older)
+# ckpt_key_compat.py shadow the one under test, which silently tests the wrong
+# code.
+import os  # noqa: E402
+
+BASE = os.environ.get(
+    "CKPT_BASE",
+    "/flare/AuroraGPT/foremans/runs/agpt-2b-constlr-from9200"
+    "/torchtitan-ezpz/outputs/checkpoints",
+)
 FLAT = f"{BASE}/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500/step-9500"
 NESTED = f"{BASE}/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200/step-9200"
 # Written by CURRENT code, so it needs neither rename -- the negative control
@@ -108,7 +119,6 @@ print("=== the two renames are INDEPENDENT ===")
 # from9500 predates both; a current-code checkpoint predates neither. If these
 # ever collapse into one flag, an old-attention/new-head checkpoint silently
 # gets the wrong remap.
-import os  # noqa: E402
 for label, path in (("from9500", FLAT), ("from9200-20600", CURRENT)):
     if not os.path.isdir(path):
         print(f"  [skip] {label}: {path} not on this host")
