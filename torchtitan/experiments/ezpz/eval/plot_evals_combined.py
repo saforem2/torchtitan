@@ -89,9 +89,21 @@ TRAJECTORIES: list[dict] = [
         "linestyle": "-",
         "marker": "s",
     },
-    # 20B 256N (8463659) was a one-off 364-step NODE_FAIL run, 18.3B tokens.
-    # Production is consolidated on 20B 512N — dropping the 256N from the
-    # combined chart removes a noisy 3-pt cluster that crowded the legend.
+    # 20B-256 was excluded here with the note "a one-off 364-step NODE_FAIL
+    # run, 18.3B tokens ... a noisy 3-pt cluster that crowded the legend."
+    # That was true when written and has not been true for months: it is a
+    # full production chain (cls="live" in trajectories.py, 8,333 steps) with
+    # 43 eval points on disk. The exclusion silently kept all of them off the
+    # chart. Restored 2026-08-16.
+    {
+        "label": "20B 256N (GBS=3072)",
+        "eval_subdir": "agpt-20b-v2-256n",
+        "layout": "dcp",
+        "tokens_per_step": 3072 * 8192,
+        "color": COLOR_20B_TT_256N,
+        "linestyle": "--",
+        "marker": "^",
+    },
     {
         "label": "20B 512N sync (GBS=12288)",
         "eval_subdir": "agpt-20b-v2-512n",
@@ -164,7 +176,38 @@ def load_mds(subdir: str, task: str, metric: str) -> list[tuple[int, float]]:
     return sorted((s, sum(v) / len(v)) for s, v in by_step.items())
 
 
+def _assert_no_missing_live_chains() -> None:
+    """Fail if a live chain with an eval_subdir is absent from TRAJECTORIES.
+
+    Same failure mode as the training chart: this module keeps its own display
+    list, so a chain can be fully registered in trajectories.py, have results
+    sitting on disk, and simply never appear. 20B-256 was excluded here as "a
+    noisy 3-pt cluster" and stayed excluded after it grew into a full
+    production chain with 43 eval points -- an exclusion that was correct when
+    written and silently wrong for months afterward. Reconcile the two lists
+    rather than trusting them to stay in sync.
+    """
+    from torchtitan.experiments.ezpz.utils.trajectories import TRAJECTORIES as _ALL
+
+    want = {
+        t["eval_subdir"]
+        for t in _ALL
+        if t.get("cls") == "live" and t.get("eval_subdir")
+    }
+    have = {t["eval_subdir"] for t in TRAJECTORIES}
+    missing = sorted(want - have)
+    if missing:
+        raise SystemExit(
+            "Live chains with eval results missing from this chart:\n"
+            + "".join(f"  - {k}\n" for k in missing)
+            + "\nAdd an entry to TRAJECTORIES here, or clear that chain's\n"
+            "eval_subdir in utils/trajectories.py if it is intentionally\n"
+            "not plotted. Do not leave it registered-but-undrawn."
+        )
+
+
 def main() -> None:
+    _assert_no_missing_live_chains()
     # Grid: 2 columns, enough rows to fit every panel. With 7 panels
     # that's a 4x2 (one empty cell, hidden below).
     ncols = 2

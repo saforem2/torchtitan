@@ -458,7 +458,8 @@ TRAJECTORIES: list[dict] = [
                 / "agpt-20b-n256-resume-cont.o8698754"
             ),
         },
-        "eval_subdir": None,
+        "eval_subdir": "agpt-20b-v2-256n",  # 43 results on disk; was None,
+        # which kept this chain off the combined eval chart entirely.
         "cls": "live",
     },
     {
