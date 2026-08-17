@@ -99,11 +99,31 @@ different node count, a different job history) reaching the same conclusion:
 | 5000 | 0.3046 -> 0.3737 | **+0.0691** |
 | 5100 | 0.3200 -> 0.3874 | **+0.0674** |
 
-(Extended to steps 5000-5100 as the sweep progressed. Those two points are the
-sharpest in the whole investigation: the corrupted series posts its LOWEST
-value of the run at step 5000, 0.3046, while the corrected series posts among
-its highest, 0.3737 -- the two curves are moving in opposite directions at the
-same checkpoint.)
+| 5300 | 0.3413 -> 0.3874 | +0.0461 |
+| 5400 | 0.3020 -> 0.3951 | +0.0930 |
+| 5500 | 0.3106 -> 0.3788 | +0.0683 |
+| 5600 | 0.3114 -> 0.3908 | +0.0794 |
+| 5700 | 0.2961 -> 0.3771 | +0.0811 |
+| 5800 | 0.2969 -> 0.3857 | +0.0887 |
+
+**Across all 13 points (steps 4000-5800) the two series move in OPPOSITE
+directions over the same checkpoints:**
+
+| series | step 4000 | step 5800 | net |
+|---|---|---|---|
+| corrupted | 0.3481 | 0.2969 | **-0.0512** |
+| corrected | 0.3635 | 0.3857 | **+0.0222** |
+
+Mean penalty grows +0.0405 (first half) -> +0.0748 (second half), ending at
++0.0887. By step 5800 the corrupted export reads 0.2969 -- within noise of the
+0.25 random baseline -- while the same weights, exported correctly, read
+0.3857.
+
+That is the whole artifact in one table. A reader of the corrupted curve would
+conclude the 20B had lost most of its ARC-C ability by step 5800; the model had
+in fact gained. No amount of care reading the corrupted numbers would have
+recovered the truth, because the corruption is monotone in training progress
+and therefore indistinguishable from a trend.
 
 Read the two columns as trajectories rather than as five separate deltas:
 
