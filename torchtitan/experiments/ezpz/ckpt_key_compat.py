@@ -81,11 +81,20 @@ _NEW_TO_OLD = re.compile(r"(layers\.\d+\.attention\.)qkv_linear\.(w[qkv]\.)")
 _OLD_TO_NEW = re.compile(r"(layers\.\d+\.attention\.)(w[qkv]\.)")
 
 # output.<rest>  <->  lm_head.<rest>  (the second rename, see module docstring).
-# Anchored at the start of the FQN so it cannot touch a nested `.output.`
-# anywhere deeper in the tree, and applied to the optimizer's embedded-FQN
-# keys too via the same _remap_all pass.
-_HEAD_NEW_TO_OLD = re.compile(r"(^|(?<=\.))lm_head\.")
-_HEAD_OLD_TO_NEW = re.compile(r"(^|(?<=\.))output\.")
+#
+# The head is a TOP-LEVEL module, so the FQN is either `output.weight` or an
+# optimizer key that embeds it after a known optimizer prefix
+# (`optimizer.param_groups.output.weight.betas`). Anchoring on "start of
+# string, or after any dot" is too loose: it would also rewrite
+# `layers.0.moe.output.weight`, a different module that legitimately contains
+# `output`. MoE configs have exactly such a key, so this is not hypothetical --
+# the unit test caught it.
+#
+# So: match at the start of the string, or immediately after an optimizer
+# prefix segment, and nowhere else.
+_OPT_PREFIX = r"(?:^|^(?:optimizer|optimizers)\.(?:[A-Za-z_]+\.)*?)"
+_HEAD_NEW_TO_OLD = re.compile(_OPT_PREFIX + r"lm_head\.")
+_HEAD_OLD_TO_NEW = re.compile(_OPT_PREFIX + r"output\.")
 
 
 def to_flat(key: str) -> str:
@@ -112,12 +121,12 @@ def to_nested(key: str) -> str:
 
 def head_to_old(key: str) -> str:
     """Rewrite ``lm_head.*`` to the pre-rename ``output.*``."""
-    return _HEAD_NEW_TO_OLD.sub(r"\1output.", key)
+    return _HEAD_NEW_TO_OLD.sub(lambda m: m.group(0)[: -len("lm_head.")] + "output.", key)
 
 
 def head_to_new(key: str) -> str:
     """Rewrite ``output.*`` to the current ``lm_head.*``."""
-    return _HEAD_OLD_TO_NEW.sub(r"\1lm_head.", key)
+    return _HEAD_OLD_TO_NEW.sub(lambda m: m.group(0)[: -len("output.")] + "lm_head.", key)
 
 
 def needs_output_head_compat(checkpoint_dir: str) -> bool:
