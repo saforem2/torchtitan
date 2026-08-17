@@ -83,9 +83,25 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 > Note the penalty GROWS with training (+0.045 -> +0.095 on ARC-C) while
 > ARC-Easy's stays flat at +0.036. **The apparent post-4,400 ARC-C decay is
 > entirely an artifact** -- corrected, the model improves monotonically.
+>
+> **Updated 2026-08-17: confirmed on 13 matched pairs, not two.** The re-eval
+> sweep has covered 20B-256 steps 4000-5800 continuously, and the two series
+> net in OPPOSITE directions over the same checkpoints:
+>
+> | series | step 4000 | step 5800 | net |
+> |---|---|---|---|
+> | published (corrupted) | 0.3481 | 0.2969 | **-0.0512** |
+> | corrected | 0.3635 | 0.3857 | **+0.0222** |
+>
+> By step 5800 the published number sits within noise of the 0.25 ARC-C random
+> baseline for a model actually at 0.3857. "Lower bound" understates the
+> problem: because the penalty is monotone in training progress, the published
+> TREND is inverted, not merely depressed.
+>
 > 74 affected results are being re-run (jobs `8760920`/`8760921`/`8760922`);
 > this page will be updated from them. Until then, treat any 20B-512 number at
-> step >= 4,401 and any 20B-256 number at step >= 3,101 as a lower bound.
+> step >= 4,401 and any 20B-256 number at step >= 3,101 as a lower bound whose
+> direction is also unreliable.
 >
 > Full account:
 > [`20260816-arc-c-decay-vs-rope-permute.md`](../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
