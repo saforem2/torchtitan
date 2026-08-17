@@ -333,24 +333,32 @@ indistinguishable too, which would have made LBS=4 the pick on headroom.
 **That was wrong.** Job `12473210` measured the pair interleaved
 (4,5,4,5,4,5), three repeats each, in one job:
 
-| arm | rep 1 | rep 2 |
-|---|---:|---:|
-| LBS=4 | 499 tps / 28.92% | 499 tps / 28.94% |
-| LBS=5 | **512 tps / 29.68%** | **512 tps / 29.65%** |
+| arm | rep 1 | rep 2 | rep 3 | mean | spread |
+|---|---:|---:|---:|---:|---:|
+| LBS=4 | 499 / 28.92% | 499 / 28.94% | 500 / 28.99% | **499.3 / 28.95%** | 0.2% |
+| LBS=5 | 512 / 29.68% | 512 / 29.65% | 510 / 29.55% | **511.3 / 29.63%** | 0.4% |
 
-Within-job repeatability is **~0.1%** -- LBS=4 returns 499 tps to the digit on
-independent runs. Against that baseline LBS=5's **+2.6% tps / +0.74pp MFU** is
-far outside noise. The flattening is real but starts *after* LBS=5:
+Within-job repeatability is **0.2-0.4%** (sd 0.47 tps for LBS=4), so
+LBS=5's **+2.4% tps / +0.68pp MFU** is ~27x the spread. The flattening is
+real but starts *after* LBS=5:
 
 | step | gain | memory cost | verdict |
 |---|---:|---:|---|
-| 4 -> 5 | **+2.6% tps, +0.74pp** | +8.7pp | **worth it** |
+| 4 -> 5 | **+2.4% tps, +0.68pp** | +8.7pp | **worth it** |
 | 5 -> 6 | +1.2% | +10.9pp | marginal |
 | 6 -> 7 | +0.6% | +7.2pp | no |
 
 **Production pick: LBS=5 at 76.83%.** A real gain with comfortable headroom --
 and precisely the configuration OLMo-2's smaller vocab makes reachable, since
 Llama-3 needs 85.84% for the same batch.
+
+**Method note.** The first version of this claim (+0.73pp) came from comparing
+two *different* jobs, and the controlled answer is +0.68pp -- so the number was
+right but the evidence for it was not, and a later cross-job run (498 tps)
+made it look refuted. Interleaving both arms inside one job turned an
+undecidable comparison into a 27-sigma one. **At this scale, cross-job spread
+(~3%) exceeds most effects worth measuring; run competing arms in the same
+job, alternating, or the allocation becomes the variable.**
 
 ## Relation to the other tokenizer findings
 
