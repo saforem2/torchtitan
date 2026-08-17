@@ -466,6 +466,41 @@ TRAJECTORIES: list[dict] = [
         "cls": "wandb_only",
     },
     {
+        # 2B stage-2 continued pre-training on dolmino-mix-1124, launched
+        # 2026-08-16 as t0 of umbrella 8756070 and continued by 8756957.
+        # REGISTERED 2026-08-16 -- it was training for a day before anyone
+        # noticed it was absent from every chart, because a chain that is not
+        # in this file is invisible to all of them. Register a new chain HERE
+        # at launch, not after someone asks why the plot looks wrong.
+        #
+        # Distinct from the stage-1 chain in every way that matters to a plot:
+        # its own ckpt dir, its own step counter starting at 1 (it seeds from
+        # stage-1 step-46429 via --checkpoint.initial-load-path, which loads
+        # WEIGHTS ONLY -- optimizer moments do not carry over), a different
+        # corpus, and constant LR 2.17e-5 rather than a decay. Plotting it as a
+        # continuation of stage-1 would be wrong; it is a sibling curve.
+        #
+        # token_target is the STAGE-2 INCREMENT (2.390T), not MDS's cumulative
+        # 7.064T -- see the note in submit_agpt_multi_autoretry.sh, where using
+        # the cumulative figure produced a 2.96x-too-large step budget.
+        #
+        # hllpaq4g = 8756070 t0 (steps 1..3312, killed by the PBS -14)
+        # 6321d2hh = 8756957 t0 (3301..6520, live)
+        "key": "2b_v2_512_stage2_dolmino",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": str(_2B_V2 / "agpt-2b-stage2-dolmino-n512-gbs12288"),
+        "readme": f"{_DOCS}/2b/n512/README.md",
+        "gbs": 12288,
+        "seq_len": SEQ_LEN,
+        "token_target": 2_390_375_382_006,
+        "wandb_run_ids": ["hllpaq4g", "6321d2hh"],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
+    },
+    {
         "key": "80b_v2_4_smoke",
         "model": "80b",
         "version": "v2",

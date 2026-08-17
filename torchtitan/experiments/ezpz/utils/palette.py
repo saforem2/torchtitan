@@ -60,12 +60,18 @@ COLOR_MDS = "#78909C"     # blue-grey 400 -- the v1 MDS reference curve
 COLOR_V1 = "#94A3B8"      # slate -- bf16-tainted v1 chains (drawn faded)
 COLOR_RANDOM = "#808080"  # gray -- random-chance lines on eval charts
 COLOR_FORK = "#8E24AA"    # purple 600 -- LR/schedule forks off a base chain
+# Stage-2 continued pre-training on a DIFFERENT corpus. Deliberately not a 2B
+# blue: it seeds from the 2B stage-1 endpoint but trains on dolmino-mix-1124,
+# so reading it as "more of the same curve" would be wrong. Teal sits away
+# from both the blues and the 20B greens.
+COLOR_STAGE2 = "#00897B"  # teal 600
 
 # Keyed by utils/trajectories.py trajectory keys.
 CHAIN_COLORS: dict[str, str] = {
     "2b_v2_256": COLOR_2B_256N,
     "2b_v2_512": COLOR_2B_512N,
     "2b_v2_512_lr3.22e-5": COLOR_FORK,
+    "2b_v2_512_stage2_dolmino": COLOR_STAGE2,
     "20b_v2_256": COLOR_20B_256N,
     "20b_v2_512": COLOR_20B_512N,
     "80b_v2_256": COLOR_80B_256N,
