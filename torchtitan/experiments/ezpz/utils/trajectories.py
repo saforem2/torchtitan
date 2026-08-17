@@ -228,9 +228,9 @@ TRAJECTORIES: list[dict] = [
             # harmless here -- but concat_chain's last-listed-wins merge makes
             # order semantic, and a mis-ordered list traps the next append.
             "vtumb5cb",
-            "ud8t6d3t",
-        
             "nowkdepb",
+        
+            "ud8t6d3t",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-512n",
@@ -270,7 +270,7 @@ TRAJECTORIES: list[dict] = [
             "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
-            "9d1g9zsw",
+            "jb5ox6u9",  # Jul 30  +211 [6551, 6761]
         
             # ORDER IS SEMANTIC -- see the note in concat_chain: on a step two
             # runs both logged, the LAST listed wins. Keep this chronological.
@@ -281,8 +281,8 @@ TRAJECTORIES: list[dict] = [
             # appending an older run is what corrupted 20b_v2_256. None of
             # these overlaps another run here, so the placement is currently
             # cosmetic -- but a mis-ordered list traps the NEXT append.
-            "jb5ox6u9",  # Jul 30  +211 [6551, 6761]
             "zow5scry",  # Jul 30  +100 [6701, 6800]
+            "9d1g9zsw",  # Aug 05  (pre-existing)
             "dn8br6kh",  # Aug 07  +51  [7149, 7199]
             "2g2ig6hb",  # Aug 07  +50  [7201, 7250]
             "iozc8x9n",  # Aug 07 17:46  [7251, 7299]
