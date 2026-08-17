@@ -133,17 +133,49 @@ never converged); the 32N oneCCL scale fault that blocks the v2-256n base.
 
 ## Known doc inconsistencies
 
-Recorded 2026-08-13 so nobody is misled by them:
+Recorded 2026-08-13 so nobody is misled by them. **All six were addressed
+2026-08-16** -- each is struck through below with what was actually done, kept
+rather than deleted so the audit trail survives. Two of the six turned out not
+to be errors at all (the missing "B1", and cot-long's status, which was an error
+in the opposite direction from the one recorded here).
 
-- `tulu_math_uc_mix_full/README.md` calls `checkpoint-8672` "the deliverable" in
-  its header (line 7) and "NOT 8672" in its body (line 177). **The body is
-  right.**
-- The [SFT index](sft/README.md) does not list B3 or B4 at all, and its
-  checkpoint column points at the forgotten 8672.
-- v2-256n is "blocked" in the SFT index and "in progress" in its own README,
-  both dated the same day. **Treat it as not delivered.**
-- `rl/trl.md` still says the Monarch path is "blocked" (2026-07-06); it was
-  verified working 2026-07-19.
-- "B1" is never defined -- the B-series labels start at B2.
-- The 400-step `cot-long` run was **never evaluated** on the real metric; its
-  "likely drifting" status is an inference, not a measurement.
+- ~~`tulu_math_uc_mix_full/README.md` calls `checkpoint-8672` "the deliverable"
+  in its header (line 7) and "NOT 8672" in its body (line 177).~~
+  **RESOLVED 2026-08-16** -- the header now says 8672 is NOT the deliverable
+  (hellaswag 0.593 -> 0.273, catastrophic forgetting) and points at
+  `checkpoint-900-hf`. The body was right.
+- ~~The [SFT index](sft/README.md) does not list B3 or B4 at all, and its
+  checkpoint column points at the forgotten 8672.~~
+  **RESOLVED 2026-08-16** -- the index's warning block now records the 8672 fix
+  and explains why B3/B4 stay documented here rather than in that table: they
+  are ablations off a single base, not base->recipe pairs, so they do not fit
+  its row shape.
+- ~~v2-256n is "blocked" in the SFT index and "in progress" in its own README,
+  both dated the same day.~~
+  **RESOLVED 2026-08-16 by checking disk, not by picking a side**:
+  `outputs/sft/agpt-2b-v2-256n-tulu-mix-32n-gbs6144/` contains **zero**
+  `checkpoint-*` dirs, so the "checkpoint-100 saved" note did not survive. Its
+  README now reads NOT DELIVERED (blocked), matching the index.
+- ~~`rl/trl.md` still says the Monarch path is "blocked" (2026-07-06)~~
+  **RESOLVED 2026-08-16** -- corrected in place at
+  [`rl/trl.md`](rl/trl.md#what-this-does-not-solve); the bullet now records that
+  the Monarch path was verified working 2026-07-19.
+- ~~"B1" is never defined~~ **RESOLVED 2026-08-16: there is no B1, and that is
+  correct, not a gap.** Searched every SFT doc and design file -- no B1 exists.
+  The B-series labels the *CoT* experiments, and B2 (two-stage) was the first
+  of them; the single-stage runs above it in the results table
+  (`tulu_math_uc_mix`, `full big-mix`, `v2-256n`) predate the naming and are
+  referred to by recipe, not by B-number. Nothing is missing -- the series
+  simply starts at 2. Left as-is rather than renumbering, which would break
+  every existing cross-reference to B2/B3/B4.
+- ~~The 400-step `cot-long` run was **never evaluated** on the real metric; its
+  "likely drifting" status is an inference, not a measurement.~~
+  **RESOLVED 2026-08-16 -- measured, and the inference was wrong.** Its LoRA
+  checkpoints are gone, but `rollout_samples.jsonl` survived with 6,337 scored
+  rollouts carrying `AnswerCorrectReward` per sample. Accuracy **rose** 0.069 ->
+  ~0.17 over the first ~120 steps then held flat to step 400 (held-out
+  validation 0/20 -> 5/20); format stayed 0.88-0.99. cot-long did not drift.
+  The apparent format collapse was `ThinkFormatReward` reading only `content`
+  while vLLM had split `<think>` into `reasoning_content`. Full table in
+  [`rl/plans/cot.md`](rl/plans/cot.md); scorer at
+  [`rl/scripts/score_rollouts.py`](../../rl/scripts/score_rollouts.py).
