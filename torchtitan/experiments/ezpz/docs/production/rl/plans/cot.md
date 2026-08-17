@@ -363,9 +363,51 @@ BECAUSE the SFT held it there -- once its reward weight dropped to 0.05 and
 closeness rewarded bare numbers, GRPO had little pressure to keep the envelope, so
 formatting decayed. The "anti-saturation" rebalance removed the guardrail.
 
-The 400-step run (cot-long) shows the same reward-up pattern (0.130 -> 0.231) and is
-therefore likely drifting the same way, further -- reward is NOT a proxy for the
-eval here.
+~~The 400-step run (cot-long) shows the same reward-up pattern (0.130 -> 0.231)
+and is therefore likely drifting the same way, further.~~
+
+**MEASURED 2026-08-16 -- the inference above was wrong. cot-long did NOT drift.**
+The run was written off as unmeasurable because its LoRA checkpoints are gone
+(`outputs/rl_lora_agpt2b_cot_long/` has none). But `rollout_samples.jsonl`
+survived -- 6,337 scored rollouts, each carrying `AnswerCorrectReward` (the task
+metric, not the shaped reward) and a policy version. That IS the real metric,
+recorded at generation time. Scored with
+[`rl/scripts/score_rollouts.py`](../../../../rl/scripts/score_rollouts.py):
+
+| policy versions | n | acc | format_ok | reward |
+|---|---:|---:|---:|---:|
+| 0-39 | 686 | 0.069 | 0.985 | 0.143 |
+| 120-159 | 639 | **0.174** | 0.989 | 0.220 |
+| 240-279 | 635 | 0.161 | 0.948 | 0.209 |
+| 320-359 | 608 | **0.178** | 0.959 | 0.227 |
+| 360-400 | 579 | 0.155 | 0.884 | 0.203 |
+
+Held-out validation, same log: **0/20 correct at pv 0-39 -> 5/20 (0.25) at pv
+360-400**, format_ok 1.000 at both ends.
+
+Accuracy rose 0.069 -> ~0.17 over the first ~120 steps and then sat flat inside
+noise for the remaining 280; it never fell back toward the cold start. Format
+held 0.88-0.99 throughout, with only a mild sag in the last bin. This is the
+same "RL is not the accuracy lever at 2B, but it is drift-proof" shape the gated
+B2 run showed -- **not** the reward-hacking collapse the shorter run had.
+
+Two things made the earlier reading wrong:
+
+1. **`ThinkFormatReward` is identically 0.0 on all 6,337 rollouts** -- not
+   format collapse, the vLLM `reasoning_content` split. vLLM moves
+   `<think>...</think>` out of `content` into a separate field, so a component
+   that greps `content` scores 0 no matter how well-formed the output is. The
+   `format_ok` column above reads both fields and shows the envelope was intact
+   the whole time. Also documented at
+   `memory/project_grpo_vllm_reasoning_content_split.md`, where it was found the
+   first time -- there it zeroed the CoT-format *reward*; here it zeroed the same
+   component in *analysis*, months later. Any code reading `content` alone for
+   reasoning output has this bug.
+2. **Reward really is not a proxy for the eval** -- that part of the original
+   claim stands, and is exactly why "reward went up, therefore it must be
+   drifting" was no more valid than "reward went up, therefore it must be
+   learning." Both directions need the metric. Here the metric says it learned a
+   little and then stopped.
 
 **Fixes to try next (not yet run):**
 1. Keep format weight HIGH (0.2+) so GRPO cannot trade away the envelope; or make
