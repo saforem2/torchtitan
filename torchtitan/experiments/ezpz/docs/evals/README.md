@@ -36,8 +36,20 @@ Regenerate with:
 | Model | Source | Steps Evaluated | Status |
 |-------|--------|-----------------|--------|
 | [agpt 2B](agpt/2b/) | torchtitan DCP (v1 + v2 256N async + v2 512N sync) | v2 256N through step-92,859 + v2 512N through step-39,600 | **🏁 Sync-mode workaround validated 2026-05-24** |
-| [agpt 20B](agpt/20b/) | torchtitan DCP (v1 + v2 512N sync + v2 256N) | v2 512N through step-6,050 + v2 256N through step-5,900 | **🏁 20B 512N sync now beats 2B 256N async per token on every benchmark (2026-05-27)** |
+| [agpt 20B](agpt/20b/) | torchtitan DCP (v1 + v2 512N sync + v2 256N) | v2 512N through step-6,050 + v2 256N through step-5,900 | **🏁 20B 512N sync beats 2B 256N async per token on every benchmark (2026-05-27)** -- see the RoPE note below |
 | [agpt 2B (MDS)](agpt/2b-mds/) | Megatron-DeepSpeed SophiaG | steps 5K–140K (28 unique × 3 replicates) | Done — clean reference baseline |
+
+> **RoPE note on the 20B row (added 2026-08-17).** Both step figures above
+> (512N step-6,050, 256N step-5,900) sit past those chains' RoPE-convention
+> switches (4,401 and 3,101), so the numbers behind that headline came from
+> wrongly-permuted exports. The direction is favourable -- corrupted exports
+> UNDERSTATE the model, measured at up to -0.089 on ARC-C and growing with
+> training -- so the "20B beats 2B per token" claim is if anything
+> conservative. But it was made on data now known to be unreliable, and
+> `rope-flavor-mismatch.md` names this specific comparison as confounded, so
+> it should be re-derived from the corrected exports rather than assumed to
+> survive. The re-eval sweep is producing them now; the 2B-256 side needs no
+> redo (that chain never switched).
 
 ## Pipelines
 
