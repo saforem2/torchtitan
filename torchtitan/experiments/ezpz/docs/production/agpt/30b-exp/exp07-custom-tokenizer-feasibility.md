@@ -1,4 +1,4 @@
-# exp07 -- tokenizer bake-off: a custom 64k does NOT pay, and OLMo-2 wins on vocab size
+# exp07 -- tokenizer bake-off: custom 64k does NOT pay; OLMo-2 wins and is confirmed on hardware
 
 > **2026-08-16.** Corpus study on Aurora against the real `olmo-mix-1124`
 > trees, plus a measured fertility comparison on Sunspot (job `12473205`).
@@ -275,6 +275,42 @@ is 0.35B params -- worth a 2N A/B before switching, not worth assuming.
 Neither fits uint16, so the corpus stays int32 either way. **The only vocabs
 that halve the corpus cost 6-15% in fertility**, which is a bad trade at
 3.97T tokens.
+
+
+## Confirmed on hardware: OLMo-2 frees 9pp of HBM at identical speed (job `12473207`)
+
+Fertility said OLMo-2 should match Llama-3 on tokens while costing 0.34B fewer
+embedding params. Both halves were tested on the 30B at 2N (TP=1, compiled,
+seq=4096, all four arms in ONE job so there is no cross-allocation drift):
+
+| tokenizer | LBS | tps | MFU | memory |
+|---|---:|---:|---:|---|
+| Llama-3 128k | 4 | 496 | 28.94% | 48.62 GiB (75.98%) |
+| **OLMo-2 100k** | 4 | **499** | **28.94%** | **43.58 GiB (68.11%)** |
+| Llama-3 128k | 5 | 507 | 29.58% | 85.84% |
+| **OLMo-2 100k** | 5 | **512** | **29.67%** | **49.16 GiB (76.83%)** |
+
+**MFU is identical to the digit at LBS=4** (28.94% both) -- exactly what a
+fertility tie predicts, and a useful confirmation that the tokens-per-MB
+measurement transfers to real training. The difference is entirely memory:
+**7.9 points of HBM at LBS=4, 9.0 points at LBS=5.**
+
+That is larger than the raw parameter delta (0.34B params = 0.69 GB at bf16)
+because fp32 master weights plus optimizer state multiply the embedding saving
+several times over.
+
+### Why this decides it
+
+exp05 rejected LBS=5 under Llama-3: 85.84% leaves nothing for checkpoint and
+eval allocations. Under OLMo-2 the same batch runs at **76.83%**, which is
+comfortable -- so **LBS=5 is production-viable with OLMo-2 and was not with
+Llama-3**, worth +0.73pp MFU over the LBS=4 pick (29.67% vs 28.94%).
+
+At 29.67% the 30B now exceeds the 2B's small-N 29.26%, on a model 14x larger.
+
+**Recommendation: OLMo-2 (100,352), LBS=5.** Llama-3 remains a safe fallback
+at LBS=4 -- the two are indistinguishable in throughput and the entire case
+for OLMo-2 is the headroom.
 
 ## Relation to the other tokenizer findings
 
