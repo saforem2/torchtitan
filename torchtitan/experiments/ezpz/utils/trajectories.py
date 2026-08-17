@@ -148,7 +148,20 @@ TRAJECTORIES: list[dict] = [
         # The REAL training tail (86201->92859) is logged to the correct
         # project under 9itxu3pt/ew4pqb51/fm3gzdxt (used above); no .o-log
         # fallback is needed.
-        "olog_fallbacks": None,
+        #
+        # ADDED 2026-08-16, closing the 25,178->25,501 gap (322 steps).
+        # Another concurrent-job collision: ni0etxx7 (25001..25056) and
+        # 0fk1bvtt (25001..25178) both ran and both crashed within ~20 min on
+        # 05-23, then 3n22a69q resumed at 25501 -- AHEAD of where either died,
+        # so the intervening steps were trained by a job neither W&B run
+        # captured. o8505119 (25001..25522) spans the whole thing.
+        # MEASURED: 92,456 steps / 1 gap -> 92,778 / 0 gaps.
+        "olog_fallbacks": {
+            "0fk1bvtt": str(
+                RUNS / "agpt-2b-v2/torchtitan-ezpz"
+                / "agpt-2b-n256-v2-failover-cont4.o8505119"
+            ),
+        },
         "eval_subdir": "agpt-2b-v2-256n",
         "cls": "live",
     },
@@ -177,6 +190,27 @@ TRAJECTORIES: list[dict] = [
             "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
             "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
             "i0ayskft", "21grc6o7", "nv4qwxc8",
+            # ADDED 2026-08-16. These two were missing, and their absence was
+            # the ENTIRE 30,483->39,601 "gap" (9,117 steps) in this chain --
+            # not lost data, just an incomplete list. Both have full synced
+            # W&B history and together cover 30,401..39,603 exactly:
+            #   9d10mqwb  30401..35046  4647 rows  2026-07-10
+            #   n887c3lk  35001..39603  4603 rows  2026-07-17
+            # Adding them takes the chain from 34,676 steps / 1 gap to
+            # 43,786 / 0 gaps (MEASURED).
+            #
+            # Independently flagged by the RoPE investigation the same day:
+            # docs/guides/known-bugs/rope-flavor-mismatch.md notes the
+            # step->flavor resolver misreports this chain's cos_sin switch as
+            # 2026-08-05/vtumb5cb when it was really 2026-07-10/9d10mqwb at
+            # step 30401 -- because of this same omission. Two investigations,
+            # one root cause.
+            #
+            # Why they were missed: nine short runs all restart at 30401
+            # (49-200 steps, 05-30 through 07-01) -- the chain spent a month
+            # failing to get past its resume point, and the two runs that
+            # finally carried it were never recorded.
+            "9d10mqwb", "n887c3lk",
             "vtumb5cb",
         
             "nowkdepb",
