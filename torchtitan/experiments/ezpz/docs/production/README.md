@@ -12,6 +12,14 @@
 > Aurora/Sunspot (Intel XPU) only.
 
 > [!NOTE]
+> **The per-step metrics behind these tables and charts are stored locally:**
+> [**production/metrics/**](metrics/README.md). Committed summaries (all
+> `.o`-recovered rows plus a ~2,000-point backbone per chain) read offline with
+> no W&B credentials; the full-fidelity store lives on flare outside git.
+> Regenerate with `utils/export_ground_truth.py` **on Aurora** -- the `.o`-log
+> fallbacks exist only there.
+
+> [!NOTE]
 > **Post-training (SFT + RL) for the 2B model has its own status page:**
 > [**POST-TRAINING-2B.md**](POST-TRAINING-2B.md). This page covers
 > *pre-training* trajectories. Headline from that page: accuracy lives in SFT

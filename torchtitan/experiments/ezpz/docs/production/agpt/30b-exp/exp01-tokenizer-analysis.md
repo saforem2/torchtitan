@@ -420,7 +420,7 @@ job completes.
 | Section 3 claim | verdict |
 |---|---|
 | 256k vocab is expensive at 2B | **SUPPORTED, and understated** -- 1,049M / 52.8%, not 525M / 26% |
-| Vocab is oversized for our corpus | **SUPPORTED** -- 99% of mass in top 62,108 IDs, 50% in 129. (The "42.6% never used" figure is an upper bound; see 5b) |
+| Vocab is oversized for our corpus | **SUPPORTED** -- 99% of mass in top 62,108 IDs, 50% in 129. (The "42.6% never used" figure is an upper bound; see 5b)  **Qualified by [exp07](exp07-custom-tokenizer-feasibility.md):** the mass concentration is real, but a custom 64k fitted to it measures 2.5% WORSE than gemma on fertility -- the oversizing costs embedding params, not tokens. Shrink by adopting Llama-3 128k, not by training a 64k. |
 | Single-digit tokenization needed | **REFUTED** -- gemma already does it, perfectly and consistently |
 | Digit handling contributes to GSM8K=0 | **REFUTED as stated** -- cannot be improved on this axis |
 | Wastes tokens on LaTeX / units | **NOT SUPPORTED** -- at parity or better vs Llama-3.1 |

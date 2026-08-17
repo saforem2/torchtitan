@@ -40,7 +40,8 @@ economising on the important one.
 | [02](exp02-fp32-norms-ablation.md) | fp32 norms-only ablation | Is fp32 for *norm params only* sufficient, or does full fp32 master do real work? | debugmodel, ~2N | **DONE** -- norms-only is NOT sufficient; Section 6 claim refuted |
 | [04](exp04-fp32-inference-investigation.md) | fp32 master vs fp32 inference | Does training with fp32 master weights force fp32 serving and double deployment cost? | CPU + cluster probes | **DONE** -- NO; vLLM cause not isolated |
 | [05](exp05-2n-performance.md) | 30B at 2N | Does the proposed 30B train at all, and what is its best per-GPU config? | 2N, ~2h x3 | **DONE** -- 466 tps / 27.89% MFU at LBS=3; TP hurts; HSDP fails |
-| [06](exp06-scaling.md) | 30B weak scaling | Does the 30B hold its MFU as node count grows, as the proposal's "3x effective compute" claim requires? | 64N, 3h | **DONE** -- 25.54% at 64N; 1.75%/doubling vs the 2B's 13.96% |
+| [06](exp06-scaling.md) | 30B weak scaling | Does the 30B hold its MFU as node count grows, as the proposal's "3x effective compute" claim requires? | 64N, 3h | **DONE** -- 25.54% at 64N; 1.42%/doubling vs the 2B's 13.96% |
+| [07](exp07-custom-tokenizer-feasibility.md) | Custom 64k tokenizer | Should we train our own tokenizer on olmo-mix-1124, and what does the already-tokenized corpus cost us? | 1N CPU, ~1h | **DONE** -- NO. Custom 64k measures 2.5% WORSE than gemma and 5.9% worse than Llama-3; use the vendored Llama-3 128k |
 
 ## Tier 1 -- the gate
 
