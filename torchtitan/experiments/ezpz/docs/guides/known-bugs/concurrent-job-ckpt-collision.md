@@ -351,10 +351,11 @@ Contributing factors, all MEASURED:
    collision. Claims older than 36h are labelled likely-stale so the warning
    keeps its signal. Verified by 16 assertions in
    `tests/test_ckpt_owner_claim.py` (stdlib-only; runs without torch).
-3. **Assert shard count on resume.** A job that finds a `.metadata` whose
-   shard count differs from what it is about to write should say so
-   explicitly in the log. It is legal (DCP reshards) but it is exactly the
-   signature of a scale change, and it should never be silent.
+3. ~~**Assert shard count on resume.**~~ **DONE 2026-08-17** as part of the
+   audit tool below, which reports any dir whose shard count differs from the
+   tree's dominant one. On this tree it correctly flags the 10 dirs at 192
+   shards against 107 at 3072. (Still worth adding to the resume path itself
+   so it fires in-job, not only on demand.)
 4. **Fix the collision detector to union W&B with `.o` logs.** A
    W&B-only scan misses episode 1 entirely. Whatever check gets
    institutionalized must read both sources, since 17 of this chain's 20
@@ -362,10 +363,27 @@ Contributing factors, all MEASURED:
 
 ### Optional
 
-5. Add a periodic audit that flags (a) out-of-order mtimes and (b) step
-   dirs whose internal mtimes split into two clusters. Both detectors found
-   real problems here, are cheap, and would have caught episode 2 the same
-   day rather than 18 days later.
+5. ~~Add a periodic audit...~~ **DONE 2026-08-17**:
+   `utils/audit_ckpt_dirs.py` (`python3 -m ...audit_ckpt_dirs <dir>` or
+   `--all-chains`; exits 1 on any MIXED dir so it can gate a resume).
+
+   **The mtime gap alone is not the signal** -- that was the design lesson.
+   Three dirs in this very tree (`step-6250`, `step-6700`, `step-7100`) gap
+   108-121s from straggler ranks and are benign, so a naive gap check raises
+   five alarms of which three are false. The discriminator is **index
+   alignment**: a collision's split falls exactly on a shard index, because one
+   job overwrote a contiguous prefix. Stragglers scatter. The tool only says
+   MIXED when the split is index-aligned, and labels the rest as stragglers.
+
+   VALIDATED against this tree: it finds both known-mixed dirs
+   (`step-6200-*`, `step-6300-*`) and stays silent on all three straggler
+   dirs.
+
+   Caveat on the size column: shard sizes vary by more than an order of
+   magnitude *within* a single writer's cluster (192-rank writer: 1.31 GB at
+   shard 0, 252 MB at shard 191). The tool reports a median purely to make the
+   two writers visually distinct -- the mtime split and index alignment are the
+   evidence, size is a hint.
 6. When a capacity-bridge job is launched for a chain that already has a
    queued full-scale job, make one of them a dependency of the other
    (`-W depend=afterany:`) so they cannot be seated concurrently.
