@@ -328,18 +328,29 @@ Contributing factors, all MEASURED:
 
 ### Must
 
-1. **Do not delete the two mixed dirs blind.** They are 906 GB combined and
+1. **Do not delete the two mixed dirs blind.** (Still pending a decision;
+   re-verified on disk 2026-08-17 -- both present, 453 GB and 3,072 files
+   each.) They are 906 GB combined and
    ~560 GB of that is orphan bytes, but each still holds a *coherent
    192-shard checkpoint* for steps 6200/6300. If those steps have any
    archival value, extract the 192 referenced shards plus `.metadata`
    first; then the 2880 orphans can go. If they have no value, both dirs
    can be dropped wholesale. Either way this is a reclaim decision, not a
    correctness one. (Per project convention use `backup`, not `rm`.)
-2. **Add a checkpoint-directory claim.** Before the first save, write a
-   small `.owner` file recording jobid + rank count + start time, and have
-   a starting job refuse -- or at minimum log a loud warning -- when it
-   finds a live claim from a different jobid. This single change turns both
-   episodes into a startup error instead of silent damage.
+2. ~~**Add a checkpoint-directory claim.**~~ **DONE 2026-08-17** (`bae88a1f6`,
+   `ezpz/ckpt_owner_claim.py`). Rank 0 writes a `.owner` file (jobid, rank
+   count, start time) before the checkpointer loads, and reports loudly when a
+   different jobid already holds one.
+
+   It **warns rather than refuses**, which is a deliberate departure from the
+   "refuse" option written above. A job killed by walltime, a node fault, or a
+   PBS `-14` leaves its claim behind, and a starting job cannot tell a stale
+   claim from a live one from the inside -- PBS state is not visible there and
+   jobids get recycled. Refusing would convert every crashed predecessor into a
+   failed resume, which is a worse and far more frequent failure than the
+   collision. Claims older than 36h are labelled likely-stale so the warning
+   keeps its signal. Verified by 16 assertions in
+   `tests/test_ckpt_owner_claim.py` (stdlib-only; runs without torch).
 3. **Assert shard count on resume.** A job that finds a `.metadata` whose
    shard count differs from what it is about to write should say so
    explicitly in the log. It is legal (DCP reshards) but it is exactly the
