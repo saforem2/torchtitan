@@ -191,6 +191,7 @@ def concat_chain(
     api=None,
     log=None,
     key_aliases=None,
+    olog_wins=None,
 ):
     """Concatenate a chain's W&B runs into one trajectory (list of dicts).
 
@@ -209,6 +210,12 @@ def concat_chain(
     other key names -- the v1 MDS chain, ``MDS_KEY_ALIASES`` -- come back under
     the canonical names. It applies to the W&B fetch only: a Megatron run has
     no torchtitan-format .o line to parse.
+
+    ``olog_wins`` is an iterable of run-ids for which the .o log, not W&B, is
+    authoritative on steps both sources hold. Only needed when two jobs for one
+    chain trained the same steps CONCURRENTLY and W&B kept the run whose
+    checkpoints did not survive -- see the block below for the measured
+    20b_v2_256 case. Default (empty) keeps W&B winning everywhere.
     """
     olog_fallbacks = olog_fallbacks or {}
     if api is None:
@@ -243,15 +250,45 @@ def concat_chain(
             # opened a new 510-step one at 6295..6805. The two sources describe
             # the same steps of the same run, and the by_step dict below already
             # dedups, so keeping both is strictly better -- each covers what the
-            # other missed. W&B wins on a shared step (it is the synced record).
+            # other missed.
+            #
+            # WHICH SOURCE WINS ON A SHARED STEP is per-run, not global. The
+            # default is W&B (it is the synced record, and normally the .o log
+            # is the same process's stdout -- identical values, so the choice
+            # is moot). But when two jobs for one chain both seat and train the
+            # SAME steps concurrently, the two sources describe DIFFERENT
+            # TRAJECTORIES, and the correct answer is whichever one wrote the
+            # checkpoints that survived on disk. That is not knowable from W&B.
+            #
+            # MEASURED case, 20b_v2_256 2026-07-10: W&B run 6yr6ivh4 (steps
+            # 3101..3602, 12:09-18:01) and the job behind
+            # multi-autoretry-8648363 (3401..4297, 11:07-22:50) both ran. Their
+            # loss disagrees on the 3401..3602 overlap by up to 0.0415, mean
+            # 0.023, and the SIGN FLIPS -- two diverging trajectories, not
+            # rounding. Checkpoint mtimes (step-3600 18:40 ... step-4200
+            # Jul11 02:42) continue long past 6yr6ivh4's 18:01 death, so the
+            # .o run owns the surviving weights and W&B holds the orphan.
+            #
+            # `olog_wins` names the run-ids where the .o log is authoritative.
+            # Keep it EMPTY unless checkpoint mtimes prove the W&B run is the
+            # loser; the default is right everywhere else.
             if orows:
-                merged = {int(r["_step"]): r for r in orows
-                          if r.get("_step") is not None}
-                merged.update({int(r["_step"]): r for r in rows
-                               if r.get("_step") is not None})
-                _emit("  %s: %d W&B + %d .o-log rows -> %d union [%d, %d]" % (
+                prefer_olog = rid in (olog_wins or ())
+                lo = {int(r["_step"]): r for r in orows
+                      if r.get("_step") is not None}
+                hi = {int(r["_step"]): r for r in rows
+                      if r.get("_step") is not None}
+                if prefer_olog:
+                    merged = dict(hi)
+                    merged.update(lo)
+                else:
+                    merged = dict(lo)
+                    merged.update(hi)
+                _emit("  %s: %d W&B + %d .o-log rows -> %d union [%d, %d]%s" % (
                     rid, len(rows), len(orows), len(merged),
-                    min(merged), max(merged)))
+                    min(merged), max(merged),
+                    "  (.o WINS overlap: concurrent-job collision)"
+                    if prefer_olog else ""))
                 rows = [merged[s] for s in sorted(merged)]
         elif rows:
             _emit("  %s: %d rows, steps [%s, %s]" % (
