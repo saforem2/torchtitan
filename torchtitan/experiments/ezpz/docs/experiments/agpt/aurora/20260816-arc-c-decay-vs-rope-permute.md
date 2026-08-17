@@ -96,14 +96,29 @@ different node count, a different job history) reaching the same conclusion:
 | 4400 | 0.3217 -> 0.3626 | +0.0410 |
 | 4600 | 0.3319 -> 0.3712 | +0.0392 |
 | 4800 | 0.3319 -> 0.3686 | +0.0367 |
+| 5000 | 0.3046 -> 0.3737 | **+0.0691** |
+| 5100 | 0.3200 -> 0.3874 | **+0.0674** |
+
+(Extended to steps 5000-5100 as the sweep progressed. Those two points are the
+sharpest in the whole investigation: the corrupted series posts its LOWEST
+value of the run at step 5000, 0.3046, while the corrected series posts among
+its highest, 0.3737 -- the two curves are moving in opposite directions at the
+same checkpoint.)
 
 Read the two columns as trajectories rather than as five separate deltas:
 
-- **corrupted: 0.3481 -> 0.3234 -> 0.3217 -> 0.3319 -> 0.3319** -- opens with a
-  0.026 drop and never recovers to its starting value. On its own this is a
-  textbook "the model is regressing on ARC-C" curve.
-- **corrected: 0.3635 -> 0.3652 -> 0.3626 -> 0.3712 -> 0.3686** -- flat-to-up,
-  no drop anywhere, ending above where it began.
+- **corrupted: 0.3481 -> 0.3234 -> 0.3217 -> 0.3319 -> 0.3319 -> 0.3046 ->
+  0.3200** -- opens with a 0.026 drop, never recovers to its starting value,
+  and bottoms out at step 5000. On its own this is a textbook "the model is
+  regressing on ARC-C" curve.
+- **corrected: 0.3635 -> 0.3652 -> 0.3626 -> 0.3712 -> 0.3686 -> 0.3737 ->
+  0.3874** -- rises across the window, no drop anywhere, ending at its maximum.
+
+The penalty also **grows with training** on this chain (+0.015 at 4000 to
++0.069 at 5000), matching the 20B-512 finding that ARC-C's penalty roughly
+doubles between steps 5000 and 6000 while ARC-Easy's stays flat. A permute
+error costs more as the model's answers get sharper: there is more signal to
+scramble.
 
 Same checkpoints, same harness; only the RoPE convention used at export
 differs. A decay that exists in one and not the other is not a property of the
