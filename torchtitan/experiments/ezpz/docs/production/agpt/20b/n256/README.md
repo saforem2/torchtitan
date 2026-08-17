@@ -7,8 +7,8 @@
 
 > Last updated: 2026-08-14
 >
-> Status: chain at step **6,800** persisted (~342.3B tokens, **7.3%** of
-> 4.67T), loss ~**2.4**. Trajectory since the step-300 stall: `8505255`
+> Status: chain at step **10,300** persisted (**518.4B tokens, 11.1%** of
+> 4.67T), loss ~**2.38**. Trajectory since the step-300 stall: `8505255`
 > (sync mode) reached step-1,125; `8558548`/`8558549` carried it
 > 1,101 -> 3,136; native-autoretry continuations (`8647385`, `8661054`)
 > advanced it 3,101 -> 4,375; `8681340` (260N) resumed to step-6,000; a 16N
@@ -88,13 +88,29 @@
 | `8647385`+ | 2026-07-06..23 | 12h | 3,100 -> 4,375 | ~3.2 -> ~2.5 | ~440 | ~22% | Continuations 8647385 (3101-3603), 8661054 (4201-4375) advanced the chain; interspersed with CCL/gloo crashes + resubmits (transient infra). |
 | `8681340` | 2026-07-23 | 12h | 5,101 -> **5,885**+ | 2.485 -> 2.509 | 40-443 (variable) | ~22% | **RUNNING** (full 260N throughput, resumes real chain). Advancing step-5,100 -> 5,800+; loss steady ~2.49. |
 
-**Latest checkpoint:** step-9,400 (8505255, all of step-100..1,100 have valid `.metadata`)
+**Latest checkpoint:** step-10,300 (120 step dirs on disk, 117 with valid
+`.metadata`)
 
-**Cumulative persisted steps:** 9,400
+**Cumulative persisted steps:** 10,300
 
-**Tokens consumed:** 9,400 × 6,144 × 8,192 = **473.1B tokens** (10.1% of 4.67T target)
+**Tokens consumed:** 10,300 x 6,144 x 8,192 = **518.4B tokens** (11.1% of 4.67T
+target)
 
-**Loss:** 2.2682 (pne9uj4w/82e1jewm end, step-8,334 -- umbrellas 8714503+8744245)
+**Loss:** ~2.38 (lc9oukel, step-10,380)
+
+> **Corrected 2026-08-17.** This page previously carried three different step
+> counts -- 6,800 in the header, 9,400 here, and a loss quoted at step-8,334 --
+> none of which matched the 10,300 on disk. The 8,334 figure was not a typo: it
+> was the true head of the chain's *plotted* data, because three W&B runs
+> (`djmhgmmq`, `t9vly2u8`, `lc9oukel`) carrying 2,699 steps were never
+> registered in `trajectories.py`. Every chart, the live board, and the
+> exported metric store stopped at 8,334 while training had reached 10,300 --
+> the chain was under-reporting its own progress by roughly 25%. Registered in
+> `777941c64`; see
+> [unregistered W&B runs](../../../../guides/known-bugs/unregistered-wandb-runs.md).
+>
+> Note the checkpoints live in this chain's OWN clone under
+> `/flare/AuroraGPT/foremans/runs/agpt-20b-n256/`, not the main repo tree.
 
 ## v2 -- 20B @ 256N -- job 8661913 (MISLABELED "constlr"; actually from-scratch)
 
