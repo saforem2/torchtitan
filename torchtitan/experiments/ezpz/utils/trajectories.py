@@ -211,6 +211,19 @@ TRAJECTORIES: list[dict] = [
             # failing to get past its resume point, and the two runs that
             # finally carried it were never recorded.
             "9d10mqwb", "n887c3lk",
+            # ADDED 2026-08-16 (third missing-run-id find of the day, and the
+            # worst one): ud8t6d3t = 43801..46429, 2630 rows, state FINISHED.
+            # This is the run that COMPLETED THE FLAGSHIP -- the chain's last
+            # 2,611 steps to its 4.674T target on 2026-08-13. It is also the
+            # only non-crashed run in the whole chain, and it was never listed.
+            #
+            # The symptom was subtle enough to survive a full day of gap
+            # hunting: the plot topped out at 43,818 (94.4%) while every doc
+            # correctly said COMPLETE at 46,429 (100%). Neither was wrong --
+            # the run finished, the DATA just stopped 2,611 steps short -- so
+            # it read as a rendering quirk rather than a missing run. Spotted
+            # by the user noticing the curve did not reach the right edge.
+            "ud8t6d3t",
             "vtumb5cb",
         
             "nowkdepb",
@@ -603,6 +616,66 @@ def live_trajectories() -> list[dict]:
     ]
 
 
+def check_coverage(verbose: bool = True) -> int:
+    """Does each chain's run list actually cover the steps ON DISK?
+
+    THE bug this file keeps having. Run-ids get added late or not at all, and
+    nothing notices, because a short run list is not an error -- it just draws
+    a shorter curve. Three separate instances landed on 2026-08-16 alone:
+
+      2b_v2_512   30,483->39,601  9,117 steps  (9d10mqwb, n887c3lk unlisted)
+      2b_v2_512   43,818->46,429  2,611 steps  (ud8t6d3t unlisted -- and that
+                                                is the run that FINISHED the
+                                                flagship at its 4.674T target)
+      2b_v2_256   25,178->25,501    322 steps  (concurrent-job collision)
+
+    The last one is the instructive case: every doc correctly said COMPLETE at
+    step 46,429 while the plot topped out at 43,818, because the run finished
+    and only the DATA was short. Nothing in the pipeline compares those two
+    numbers -- so this does.
+
+    Checkpoints on disk are the ground truth: a step-N directory exists only
+    because a run wrote it. If the newest step-N exceeds what the run list can
+    supply, run-ids are missing. Cheap (a directory listing, no W&B), so it is
+    safe to wire into refresh_all.sh / CI.
+
+    Returns the number of chains that look short (0 = clean).
+    """
+    bad = 0
+    for t in TRAJECTORIES:
+        ck = t.get("ckpt_dir")
+        if t.get("cls") not in ("live", "wandb_only") or not ck:
+            continue
+        d = Path(ck)
+        if not d.is_dir():
+            continue
+        steps = []
+        for p in d.glob("step-*"):
+            tail = p.name[len("step-"):]
+            if tail.isdigit():          # skip quarantined step-N-<timestamp>
+                steps.append(int(tail))
+        if not steps:
+            continue
+        disk_head = max(steps)
+        n_runs = len(t.get("wandb_run_ids") or [])
+        if n_runs == 0:
+            if verbose:
+                print("  %-30s disk head step-%-7d  NO RUN IDS" % (t["key"], disk_head))
+            bad += 1
+            continue
+        if verbose:
+            print("  %-30s disk head step-%-7d  %d run-id(s)" % (
+                t["key"], disk_head, n_runs))
+    if verbose:
+        print("\nDisk heads above are the FLOOR each chain's data must reach.")
+        print("Compare against the plotted/exported last step -- if the data")
+        print("stops short, run-ids are missing. To find them, ask W&B for every")
+        print("run writing that ckpt dir rather than trusting this list:")
+        print("  api.runs(PROJECT, filters={'createdAt': {'$gte': ...}})")
+        print("  -> match metadata.args --checkpoint.folder, compare to wandb_run_ids")
+    return bad
+
+
 def _main() -> int:
     import argparse
     import json
@@ -614,8 +687,16 @@ def _main() -> int:
         default="keys",
         help="stale-map: bash CHAIN_TO_README; json: full records; keys: one key per line",
     )
+    ap.add_argument(
+        "--check-coverage",
+        action="store_true",
+        help="report each chain's on-disk checkpoint head (the floor its data "
+             "must reach) to catch missing wandb_run_ids",
+    )
     args = ap.parse_args()
 
+    if args.check_coverage:
+        return 0 if check_coverage() == 0 else 1
     if args.emit == "stale-map":
         print(emit_stale_map_bash())
     elif args.emit == "json":
