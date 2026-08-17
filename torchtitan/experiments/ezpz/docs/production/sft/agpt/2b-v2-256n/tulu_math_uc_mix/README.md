@@ -1,7 +1,15 @@
 # SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix
 
 > **Last updated: 2026-08-14.**
-> **Status: in progress.** First production SFT on the COMPLETED v2 2B base
+> **Status: NOT DELIVERED (blocked).** Corrected 2026-08-16: this page said
+> "in progress" while the SFT index said "blocked", both dated the same
+> day. Disk settles it -- the output dir
+> `outputs/sft/agpt-2b-v2-256n-tulu-mix-32n-gbs6144/` contains **zero**
+> `checkpoint-*` directories, so the `checkpoint-100 saved` note in the run
+> table below did not survive. Blocked on the v2-base oneCCL scale crash at
+> 32N (jobs 12470254/258/262, unsolved; 2N smoke is green).
+>
+> Originally: First production SFT on the COMPLETED v2 2B base
 > (step-92,859 = 4.674T tokens, 256N chain). Full 32N run is job **12470088**
 > (Sunspot, launched 2026-07-06). Prior production SFT used the older
 > `AuroraGPT-2B-sophiag-gs138650` base; this one uses the actual completed v2

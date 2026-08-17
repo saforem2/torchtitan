@@ -113,9 +113,14 @@ ccl` correctly resolves to the system path. Reproducible via
 
 ## What this does NOT solve
 
-1. **The Monarch+oneCCL architecture mismatch** -- still blocked; `xpu_overrides`
-   is necessary-but-not-sufficient (the `spawn_procs` vs PMIx issue is below it).
-   See [`history/upstream-rl-port-status.md`](history/upstream-rl-port-status.md).
+1. ~~**The Monarch+oneCCL architecture mismatch** -- still blocked~~
+   **RESOLVED 2026-07-19** (this line was written 2026-07-06 and went stale;
+   corrected 2026-08-16). The Monarch path was verified working -- see
+   [POST-TRAINING-2B](../POST-TRAINING-2B.md), which records MONARCH as the
+   working GRPO path. `xpu_overrides` alone was indeed not sufficient, which is
+   what this bullet got right; the `spawn_procs` vs PMIx issue beneath it was
+   subsequently solved. Historical context:
+   [`history/upstream-rl-port-status.md`](history/upstream-rl-port-status.md).
 2. **Production-grade XCCL performance** for the trainer's intra-mesh group
    (TCP fabric everywhere; CXI would be faster -- see perf caveat).
 3. **vLLM-XPU TP>1** (multi-tile server) -- unexercised by this work.

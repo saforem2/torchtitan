@@ -14,11 +14,17 @@
 >
 > **Do NOT use `checkpoint-8672`** -- it catastrophically forgot (hellaswag
 > 0.593 -> 0.273, arc_easy 0.694 -> 0.298, at/near chance). The
-> `tulu_math_uc_mix_full` header still calls it "the deliverable"; that line is
-> wrong and its own body says "NOT 8672".
+> `tulu_math_uc_mix_full` header used to call it "the deliverable"; **fixed
+> 2026-08-16** -- that header now says NOT the deliverable and points at
+> `checkpoint-900-hf`, matching its own body.
 >
-> This index is also incomplete: the **B3/B4 experiments are not listed below**
-> at all. The status page covers them.
+> **B3/B4 are still not in the table below.** They are single-base CoT
+> experiments whose results live in
+> [POST-TRAINING-2B](../POST-TRAINING-2B.md): B3 (instruct+CoT mix) and B4
+> (finish-and-reweight) both FAILED to recover B2, which is why B2's
+> `checkpoint-93` remains the CoT deliverable. Listing them here would need a
+> row shape this table does not have (they are ablations off one base, not
+> base->recipe pairs), so the status page stays their home.
 
 > SFT'd checkpoints derived from pre-trained AuroraGPT models. These
 > are the inputs to downstream alignment work (GRPO, DPO, …) and the

@@ -54,10 +54,24 @@ memory" intuition does not hold across this step. Compile is worth ~6%.
 At 27.89% MFU the 30B has essentially caught the 2B's small-N 29.26% on a
 model 17x larger.
 
-**Run-to-run noise is under 1%, not the ~6% I assumed.** Round 2 re-ran the
-LBS=2 arm as a control: 434 tps / 25.96% against round 1's 434 / 25.99%. An
-earlier note in this file dismissed a real +5.9% compile effect as noise on
-the strength of that wrong assumption.
+**Noise has two scales, and they differ by 3x.** Round 2 re-ran the LBS=2 arm
+as a control: 434 tps / 25.96% against round 1's 434 / 25.99% -- 0.1%. That
+looked like a flat "<1% noise floor" and this file said so.
+
+It is not flat. Later runs of the *same* olmo2tok LBS=5 config in two
+different jobs gave **512 tps / 29.67%** (job `12473207`) and **498 / 28.85%**
+(job `12473208`) -- a **2.8% tps / 0.82pp MFU** spread, with byte-identical
+memory (49.16GiB/76.83%) confirming it is the same run shape.
+
+| comparison | spread |
+|---|---:|
+| same config, same job | **< 1%** |
+| same config, different jobs | **~3%** |
+
+**So any cross-job difference under ~3% is not evidence.** Same-job A/B is
+mandatory below that threshold -- which is what the tokenizer comparisons here
+used, and why their ~1pp results stand. Memory, by contrast, reproduces
+byte-for-byte across jobs and can be compared freely.
 
 `seq=8192` gives fewer tokens/sec but nearly the same MFU -- longer sequences
 do more work per token, so the two roughly cancel. Use whichever the data
