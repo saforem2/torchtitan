@@ -78,21 +78,54 @@ def train_candidate(sample_dir: str, vocab_size: int, out_path: str) -> str:
     return out_path
 
 
-def load_tokenizers(candidate_path: str, gemma: str | None, llama3: str | None):
+def load_tokenizers(
+    candidate_path: str | None,
+    gemma: str | None,
+    llama3: str | None,
+    extra: list[str] | None = None,
+):
+    """Load every tokenizer to compare.
+
+    `extra` entries are `name=path`, where path is either a directory holding
+    tokenizer.json or the tokenizer.json itself -- so HF cache snapshot paths
+    work directly without copying anything.
+    """
     from tokenizers import Tokenizer
 
+    def load(path: str):
+        f = path if path.endswith(".json") else os.path.join(path, "tokenizer.json")
+        if not os.path.exists(f):
+            return None
+        return Tokenizer.from_file(f)
+
     toks = {}
-    toks["custom64k"] = Tokenizer.from_file(candidate_path)
+    if candidate_path:
+        toks["custom64k"] = Tokenizer.from_file(candidate_path)
     for name, path in (("gemma256k", gemma), ("llama3-128k", llama3)):
         if not path:
             continue
-        f = os.path.join(path, "tokenizer.json")
-        if not os.path.exists(f):
+        t = load(path)
+        if t is None:
             print(f"  warn: no tokenizer.json under {path}, skipping {name}",
                   file=sys.stderr)
             continue
-        toks[name] = Tokenizer.from_file(f)
+        toks[name] = t
+    for spec in extra or ():
+        if "=" not in spec:
+            print(f"  warn: --tokenizer wants name=path, got {spec!r}", file=sys.stderr)
+            continue
+        name, _, path = spec.partition("=")
+        t = load(path)
+        if t is None:
+            print(f"  warn: no tokenizer.json at {path}, skipping {name}",
+                  file=sys.stderr)
+            continue
+        toks[name] = t
     return toks
+
+
+def vocab_sizes(toks: dict) -> dict:
+    return {n: t.get_vocab_size() for n, t in toks.items()}
 
 
 def measure(toks: dict, sample_dir: str) -> dict:
@@ -121,7 +154,7 @@ def measure(toks: dict, sample_dir: str) -> dict:
     return results
 
 
-def report(results: dict, out_dir: str) -> None:
+def report(results: dict, out_dir: str, vocabs: dict | None = None) -> None:
     domains = sorted({d for r in results.values() for d in r})
     names = list(results)
     # The baseline must be an INCUMBENT, never the candidate. Falling back to
@@ -136,6 +169,8 @@ def report(results: dict, out_dir: str) -> None:
     print("=" * 78)
     hdr = f"{'domain':18s}" + "".join(f"{n:>14s}" for n in names)
     print(hdr)
+    if vocabs:
+        print(f"{'(vocab size)':18s}" + "".join(f"{vocabs.get(n,0):14,d}" for n in names))
     for d in domains:
         row = f"{d:18s}"
         for n in names:
@@ -146,6 +181,8 @@ def report(results: dict, out_dir: str) -> None:
     print("\n" + "-" * 78)
     print("CORPUS-WEIGHTED (weights = real token share, dclm is 94.8%)")
     print("-" * 78)
+    print("  (vocab size matters independently: it sets embedding params and")
+    print("   whether the corpus fits uint16 at <=65,535)")
     weighted = {}
     for n in names:
         num = den = 0.0
@@ -184,7 +221,10 @@ def report(results: dict, out_dir: str) -> None:
 
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "fertility.json"), "w") as fh:
-        json.dump({"tokens_per_mb": results, "weighted": weighted}, fh, indent=2)
+        json.dump(
+            {"tokens_per_mb": results, "weighted": weighted, "vocab": vocabs or {}},
+            fh, indent=2,
+        )
     print(f"\nwrote {os.path.join(out_dir, 'fertility.json')}")
 
 
@@ -197,16 +237,27 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--candidate", default=None,
                     help="skip training, use this tokenizer.json")
+    ap.add_argument("--no-train", action="store_true",
+                    help="compare only the --tokenizer entries; train nothing")
+    ap.add_argument("--tokenizer", action="append", default=[], metavar="NAME=PATH",
+                    help="extra tokenizer to compare; repeatable. PATH is a dir "
+                         "or a tokenizer.json (HF cache snapshots work directly)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    cand = args.candidate or train_candidate(
-        args.sample_dir, args.vocab_size,
-        os.path.join(args.out, f"custom{args.vocab_size//1000}k.json"),
-    )
-    toks = load_tokenizers(cand, args.gemma, args.llama3)
+    if args.no_train:
+        cand = args.candidate
+    else:
+        cand = args.candidate or train_candidate(
+            args.sample_dir, args.vocab_size,
+            os.path.join(args.out, f"custom{args.vocab_size//1000}k.json"),
+        )
+    toks = load_tokenizers(cand, args.gemma, args.llama3, args.tokenizer)
     print(f"\nmeasuring {len(toks)} tokenizers: {', '.join(toks)}")
-    report(measure(toks, args.sample_dir), args.out)
+    vsz = vocab_sizes(toks)
+    for n, v in vsz.items():
+        print(f"  {n:16s} vocab {v:,}")
+    report(measure(toks, args.sample_dir), args.out, vsz)
     return 0
 
 

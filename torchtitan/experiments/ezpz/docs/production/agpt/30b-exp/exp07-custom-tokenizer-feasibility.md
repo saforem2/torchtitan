@@ -1,4 +1,4 @@
-# exp07 -- a custom ~64k tokenizer does NOT pay (measured)
+# exp07 -- tokenizer bake-off: a custom 64k does NOT pay, and OLMo-2 wins on vocab size
 
 > **2026-08-16.** Corpus study on Aurora against the real `olmo-mix-1124`
 > trees, plus a measured fertility comparison on Sunspot (job `12473205`).
@@ -208,6 +208,73 @@ It wins fertility outright here, exp05 measured it at +1.12pp MFU on the 30B
 validation, and no retokenization gamble. The uint16 corpus halving is
 genuinely lost by this choice -- 128k does not fit in 16 bits -- and that is
 the real price of the decision.
+
+
+## Nine tokenizers compared (job `12473206`)
+
+Same 176 MB held-out sample, no training -- pure measurement. Corpus-weighted
+tokens per MB, lower is better, sorted best first:
+
+| tokenizer | vocab | tok/MB | vs gemma | embedding @dim=6144 | fits uint16 |
+|---|---:|---:|---:|---:|:---:|
+| SmolLM3 | 128,256 | 225,534 | -3.6% | 1.58B | no |
+| **Llama-3.1** | 128,256 | 225,539 | -3.6% | 1.58B | no |
+| **OLMo-2** | **100,278** | **225,749** | **-3.5%** | **1.23B** | no |
+| DeepSeek-V3 | 128,815 | 226,651 | -3.1% | 1.58B | no |
+| Qwen3 | 151,669 | 230,702 | -1.4% | 1.86B | no |
+| gemma-7b (incumbent) | 256,000 | 233,944 | -- | 3.15B | no |
+| custom 64k (ours) | 64,000 | 239,695 | +2.5% | 0.79B | **yes** |
+| Mistral v0.3 | 32,768 | 262,190 | +12.1% | 0.40B | **yes** |
+| Llama-2 | 32,000 | 269,327 | +15.1% | 0.39B | **yes** |
+
+### Three findings
+
+**1. SmolLM3 is the Llama-3 tokenizer.** Identical to five significant digits
+on all seven domains (225,534 vs 225,539). Not an independent datapoint --
+worth noting so nobody counts it as corroboration.
+
+**2. OLMo-2 settles the in-domain question.** Its tokenizer was fit on
+dolma/olmo-mix at production scale -- *our corpus, done properly*, which is
+exactly what my 705 MB candidate could not be. It lands at **225,749 tok/MB,
+0.09% behind Llama-3.1** -- a tie -- **with a 22% smaller vocab**.
+
+So training on our own data buys **no fertility advantage over a good general
+tokenizer**. It buys a *smaller vocab at the same fertility*. That is a real
+but different benefit from the one the proposal claimed, and it confirms the
+diagnosis in the section above: my candidate lost on training scale, not on
+the idea, and the idea's actual payoff is vocab size rather than tokens.
+
+**3. Fertility saturates above ~100k; the knee is 64k-100k.**
+
+| step | fertility cost |
+|---|---:|
+| 128k -> 100k | **+0.09%** |
+| 100k -> 64k | **+6.2%** |
+| 64k -> 32k | +12.4% |
+
+Below ~100k the trade turns sharply bad. This is the quantitative reason the
+proposal's "~64k" target is the wrong number: it sits just past the knee. The
+`exp01` mass-concentration argument (99% of mass in the top 62,108 ids) does
+correctly identify that *most ids are rare*, but rare ids are cheap to keep and
+expensive to drop -- fertility depends on the tail, not the head.
+
+### Revised recommendation
+
+**OLMo-2 (100,278) is the best-supported choice**, narrowly ahead of Llama-3
+on the merits:
+
+- fertility tied with the best measured (+0.09%, far inside noise)
+- **0.34B fewer embedding params** than Llama-3 at dim=6144 (1.23B vs 1.58B),
+  which by exp05's mechanism is more HBM for batch
+- trained on our own corpus family, so its merges match our text distribution
+
+**Llama-3.1 remains the safe choice**: already vendored, already measured on
+the 30B end-to-end at +1.12pp MFU (exp05), no new artifact. The gap to OLMo-2
+is 0.35B params -- worth a 2N A/B before switching, not worth assuming.
+
+Neither fits uint16, so the corpus stays int32 either way. **The only vocabs
+that halve the corpus cost 6-15% in fertility**, which is a bad trade at
+3.97T tokens.
 
 ## Relation to the other tokenizer findings
 
