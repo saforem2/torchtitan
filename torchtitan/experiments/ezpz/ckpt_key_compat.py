@@ -71,6 +71,7 @@ rather than guessing.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -92,7 +93,15 @@ _OLD_TO_NEW = re.compile(r"(layers\.\d+\.attention\.)(w[qkv]\.)")
 #
 # So: match at the start of the string, or immediately after an optimizer
 # prefix segment, and nowhere else.
-_OPT_PREFIX = r"(?:^|^(?:optimizer|optimizers)\.(?:[A-Za-z_]+\.)*?)"
+# The composite spelling `optimizer.state.<fqn>...` is what DCP produces AFTER
+# flattening. But the OptimizersContainer's own state_dict() emits
+# CONTAINER-level keys with no `optimizer.` prefix -- `state.<fqn>.<name>`
+# and `param_groups.<fqn>.<key>` (torchtitan/components/checkpoint_utils.py).
+# The optimizer swap below sees that spelling, so the head remap has to match
+# it too. Purely additive: every previously-matching and previously-
+# non-matching shape (composite keys, bare model keys, the
+# `layers.0.moe.output.weight` trap) is unchanged.
+_OPT_PREFIX = r"(?:^|^(?:optimizer|optimizers)\.(?:[A-Za-z_]+\.)*?|^(?:state|param_groups)\.)"
 _HEAD_NEW_TO_OLD = re.compile(_OPT_PREFIX + r"lm_head\.")
 _HEAD_OLD_TO_NEW = re.compile(_OPT_PREFIX + r"output\.")
 
@@ -199,18 +208,72 @@ def install_flat_attention_compat(
             key = head_to_new(key)
         return key
 
+    @contextlib.contextmanager
+    def _optimizer_keys_remapped(state_dict: dict[str, Any]):
+        """Temporarily make the optimizer container emit on-disk key spellings.
+
+        The wrapper below can only rename what it is HANDED, and for the
+        optimizer it is handed the live container object under the single key
+        "optimizer" -- not FQN strings. torchtitan only expands the MODEL to
+        flat keys (`_flattened_model_states_sd`); the optimizer's real keys
+        (`state.<fqn>.<name>`, `param_groups.<fqn>.<key>`) are produced INSIDE
+        `dcp.load`, when it calls `state_dict()` on that container. By then the
+        wrapper has already run, which is why a checkpoint whose model half
+        loaded fine still died on
+        `optimizer.state.layers.0.attention.qkv_linear.wq.weight.step`.
+
+        So intercept one level lower: swap the container's `state_dict` for the
+        duration of the load, renaming its output down to the on-disk spelling.
+
+        SCOPED, never permanent. The SAVE path also calls `state_dict()` on
+        every Stateful, so a permanently-installed wrapper would write NEW
+        checkpoints in the OLD spelling -- turning a read-compat shim into a
+        corruption source. The finally is load-bearing.
+
+        `load_state_dict` is deliberately NOT wrapped: it must receive
+        current-code keys, because `_unflatten_optim_state_dict` looks each one
+        up against the LIVE optimizer's param_names.
+        """
+        opt = state_dict.get("optimizer")
+        real = getattr(opt, "state_dict", None)
+        if opt is None or real is None or not callable(real):
+            yield
+            return
+
+        def _renamed_state_dict(*a: Any, **kw: Any) -> dict[str, Any]:
+            return {_down(k): v for k, v in real(*a, **kw).items()}
+
+        try:
+            opt.state_dict = _renamed_state_dict  # type: ignore[method-assign]
+            yield
+        finally:
+            # Restore by DELETING the instance attribute so the class method is
+            # visible again; assigning `real` back would leave a bound-method
+            # shadow that survives into the save path.
+            try:
+                del opt.state_dict  # type: ignore[attr-defined]
+            except (AttributeError, TypeError):
+                opt.state_dict = real  # type: ignore[method-assign]
+
     def dcp_load(state_dict: dict[str, Any], *args: Any, **kwargs: Any) -> None:
         renamed = {_down(k): v for k, v in state_dict.items()}
-        # Nothing to do if the model's keys already match the old spelling.
-        if renamed.keys() == state_dict.keys():
-            return original(state_dict, *args, **kwargs)
 
-        original(renamed, *args, **kwargs)
+        # The swap must wrap BOTH exits. The early return below fires whenever
+        # `_down` is a no-op on every TOP-LEVEL key -- and the top-level keys
+        # are model FQNs plus the bare literals "optimizer"/"lr_scheduler"/
+        # "dataloader"/"train_state". A checkpoint needing ONLY the
+        # optimizer-side rename takes that path, so installing the swap after
+        # it would silently skip exactly the case this exists for.
+        with _optimizer_keys_remapped(state_dict):
+            if renamed.keys() == state_dict.keys():
+                return original(state_dict, *args, **kwargs)
 
-        # dcp.load fills the dict in place, so copy the loaded values back
-        # under the keys the caller (and the model) expects.
-        state_dict.clear()
-        state_dict.update({_up(k): v for k, v in renamed.items()})
+            original(renamed, *args, **kwargs)
+
+            # dcp.load fills the dict in place, so copy the loaded values back
+            # under the keys the caller (and the model) expects.
+            state_dict.clear()
+            state_dict.update({_up(k): v for k, v in renamed.items()})
 
     checkpointer.dcp_load = dcp_load
     checkpointer._flat_attention_compat = True
