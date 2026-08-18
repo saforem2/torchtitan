@@ -16,7 +16,14 @@ R=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
 printf "%-14s %-8s %-6s %-6s %s\n" arm switch need have status
 while read -r a sw; do
   [ -z "$a" ] && continue
-  need=$(ls "$R/outputs/evals/agpt-$a" 2>/dev/null | grep '^step-' | sed 's/step-//' | awk -v s="$sw" '$1>=s' | wc -l)
+  # Count post-switch steps that actually HAVE a results.json, not step dirs.
+  # A dir can exist with no eval in it (20b-256 step-5200 is one: healthy
+  # 3072-shard checkpoint, never evaluated), and counting dirs reported the
+  # sweep one step short forever.
+  need=0
+  for st in $(ls "$R/outputs/evals/agpt-$a" 2>/dev/null | grep '^step-' | sed 's/step-//' | awk -v s="$sw" '$1>=s'); do
+    [ -f "$R/outputs/evals/agpt-$a/step-$st/results/results.json" ] && need=$((need+1))
+  done
   have=$(ls "$R/outputs/evals/agpt-$a-ropefix" 2>/dev/null | grep -c '^step-')
   if [ "$have" -ge "$need" ]; then st=COMPLETE; else st="pending ($((need-have)) left)"; fi
   printf "%-14s %-8s %-6s %-6s %s\n" "$a" "$sw" "$need" "$have" "$st"
