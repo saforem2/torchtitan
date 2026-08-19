@@ -77,6 +77,22 @@ RANDOM_BASELINE = {
 }
 
 
+def _task_metrics(results: dict, task: str) -> dict | None:
+    """Metrics for `task`, pinned to SHOTS when the file records shot counts.
+
+    Returns None when shot-tagged keys exist but not at SHOTS, rather than
+    falling back to the bare key -- that alias holds whichever shot group ran
+    LAST, so trusting it splices two different measurements into one curve.
+    """
+    tagged = results.get(f"{task}@{SHOTS}")
+    if isinstance(tagged, dict):
+        return tagged
+    if any(k.startswith(f"{task}@") for k in results):
+        return None
+    m = results.get(task)
+    return m if isinstance(m, dict) else None
+
+
 def _acc(metrics: dict) -> float | None:
     for k in ("acc_norm,none", "acc,none"):
         if k in metrics:
