@@ -1,6 +1,6 @@
 # SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix
 
-> **Last updated: 2026-08-14.**
+> **Last updated: 2026-08-16.**
 > **Status: NOT DELIVERED (blocked).** Corrected 2026-08-16: this page said
 > "in progress" while the SFT index said "blocked", both dated the same
 > day. Disk settles it -- the output dir

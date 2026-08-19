@@ -5,7 +5,7 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-17
 >
 > Status: chain at step **10,300** persisted (**518.4B tokens, 11.1%** of
 > 4.67T), loss ~**2.38**. Trajectory since the step-300 stall: `8505255`
