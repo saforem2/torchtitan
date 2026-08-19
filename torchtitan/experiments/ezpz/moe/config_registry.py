@@ -232,6 +232,46 @@ def moe_small() -> FaultTolerantTrainer.Config:
     return moe("small", local_batch_size=8)
 
 
+def moe_small_noac() -> FaultTolerantTrainer.Config:
+    """moe_small with AC off -- isolates the FullAC recompute mismatch.
+
+    With flex attention now receiving a BlockMask (blendcorpus emits
+    per-document positions), moe_small reaches step 1 and then dies in
+    FullAC recompute: the MoE router assigns a different number of routed
+    tokens on the recompute pass than on the forward (560 vs 559), so the
+    saved and recomputed activations disagree and CheckpointError fires.
+    AC off removes recompute entirely, so this arm says whether routing
+    nondeterminism is the whole remaining story.
+    """
+    return moe("small", local_batch_size=8, activation_checkpoint_mode="none")
+
+
+def moe_small_selac() -> FaultTolerantTrainer.Config:
+    """moe_small with MoeSelectiveAC instead of FullAC.
+
+    SelectiveAC keeps aten.topk.default as MUST_SAVE ("topk can be
+    non-deterministic; save to keep MoE expert assignments stable between
+    forward and recompute" -- activation_checkpoint.py:52), which is exactly
+    the property FullAC lacks. If this passes while `full` fails, the save
+    list is the fix and the production MoE configs should not use FullAC.
+    """
+    return moe("small", local_batch_size=8, activation_checkpoint_mode="selective")
+
+
+def moe_10b_2b_noac() -> FaultTolerantTrainer.Config:
+    """moe_10b_2b with AC off. See moe_small_noac."""
+    cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="none")
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    return cfg
+
+
+def moe_10b_2b_selac() -> FaultTolerantTrainer.Config:
+    """moe_10b_2b with MoeSelectiveAC. See moe_small_selac."""
+    cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="selective")
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    return cfg
+
+
 def moe_small_hf() -> FaultTolerantTrainer.Config:
     cfg = moe("small", local_batch_size=8)
     cfg.dataloader.dataset_path = None
