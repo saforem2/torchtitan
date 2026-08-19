@@ -227,6 +227,24 @@ def load_dcp(
         return sorted(original.items())
 
     corrected = _series(corrected_subdir)
+
+    # The corrected sweep only re-ran arc_challenge, arc_easy and hellaswag.
+    # For any OTHER task the corrected dir is empty, so splicing would silently
+    # delete the whole post-switch history -- MEASURED: 36 winogrande points on
+    # 20b_v2_512 and 31 on 20b_v2_256. Falling back to the original would be
+    # worse (those numbers are the wrongly-permuted ones this exists to remove),
+    # so drop them, but say so on stderr. A silent gap in a published chart is
+    # exactly the failure this workstream started from.
+    post_original = {s for s in original if s >= switch_step}
+    post_corrected = {s for s in corrected if s >= switch_step}
+    if post_original and not post_corrected:
+        print(
+            f"  NOTE [{subdir}/{task}]: {len(post_original)} post-switch point(s) "
+            f"dropped -- the corrected sweep did not cover this task, and the "
+            f"original values are wrongly permuted. Re-run the sweep with "
+            f"{task} to restore them.",
+        )
+
     # Pre-switch from the original; at/after the switch, corrected only. A
     # post-switch step with no corrected result is DROPPED rather than back-
     # filled from the original -- showing a known-wrong point would defeat the
