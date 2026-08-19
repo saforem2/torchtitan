@@ -283,8 +283,12 @@ def _wandb_records(run_ids, olog_fallbacks, project=None, key_aliases=None):
                 v = by_step.get(r.get("_step"))
                 if v is not None:
                     r["lr"] = v
-    except Exception:
-        pass  # lr is a nice-to-have; never fail the whole backbone for it
+    except Exception as e:
+        # Report, do NOT swallow. A bare `pass` here turned a diagnosable
+        # failure into "lr is silently absent from every chain", which cost
+        # several rebuild cycles to even localize (2026-08-19). lr stays
+        # non-fatal, but it must say why it is missing.
+        _log("  lr fetch failed (chart will omit it): %%r" %% (e,))
     return records
 
 def _wandb_summary(run_ids):
