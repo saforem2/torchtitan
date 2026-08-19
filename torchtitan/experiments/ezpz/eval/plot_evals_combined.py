@@ -184,6 +184,16 @@ def _read_metric(path: Path, task: str, metric: str) -> float | None:
         # produces a spliced curve.
         return None
 
+    # UNTAGGED few-shot results. Some batches ran SHOTS_SPEC="5:mmlu;25:arc_challenge"
+    # WITHOUT writing @Nshot keys, so the file looks 0-shot by key shape while
+    # holding 25-shot numbers. The tell is the company it keeps: that spec always
+    # pulls mmlu in alongside, and a plain 0-shot commonsense pass never does.
+    # MEASURED on 2b_v2_256: the 8 mmlu-bearing files average 0.3638 on ARC-C
+    # against 0.320-0.333 for the 185 without -- a ~4pp step that read as the
+    # curve "oscillating" between two levels across the whole plateau.
+    if task == "arc_challenge" and any(k.startswith("mmlu") for k in d):
+        return None
+
     t = d.get(task)
     if not isinstance(t, dict):
         return None

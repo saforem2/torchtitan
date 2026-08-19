@@ -89,6 +89,12 @@ def _task_metrics(results: dict, task: str) -> dict | None:
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
         return None
+    # Untagged few-shot: SHOTS_SPEC="5:mmlu;25:arc_challenge" batches wrote no
+    # @Nshot keys, so they look 0-shot by key shape while holding 25-shot
+    # numbers. mmlu's presence is the tell -- a plain 0-shot commonsense pass
+    # never includes it. Measured ~4pp high on 2b_v2_256's ARC-C.
+    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+        return None
     m = results.get(task)
     return m if isinstance(m, dict) else None
 
