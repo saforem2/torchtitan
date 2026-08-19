@@ -50,16 +50,38 @@ Error: expected all tensors_saved_with_vc_check to be Tensors,
        got types: [<class 'torch.Tensor' ...
 ```
 
-That is the known compile + AC AOT autograd bug, appearing here on the
-resume path. Two things worth being precise about:
+**CORRECTION (later the same day): resuming was NOT the trigger. I was.**
+
+The original reading here was that resuming causes this, because diffing the
+two job scripts showed the only functional difference was
+`--checkpoint.interval` 250 -> 100. That comparison was sound but incomplete:
+it compared the scripts and not the tree. The passing run (12473304) started
+at 13:06; my blendcorpus `positions` commit landed at 13:38. The two jobs ran
+different code.
+
+What actually broke it: blendcorpus began yielding `positions` for every
+consumer, not just the flex MoE configs it was written for. agpt subclasses
+Decoder (`AgptModel -> Llama3Model -> Decoder`), so core forwards positions
+into agpt as well. SDPA builds no mask but still receives positions for RoPE,
+and `rope._maybe_wrap_positions` does
+`DTensor.from_local(positions, x.device_mesh, ...)` when the query is a
+DTensor -- putting a `DeviceMesh` in the saved-for-backward set, which is
+exactly what the assertion names.
+
+Confirmed by a user report of the same assertion on a **fresh** `agpt_20b`
+run (`--checkpoint.no-enable`), which resume cannot explain, and reproduced
+directly on `agpt_20b` at HEAD (job 12473391, 0/3 steps).
+
+Fixed in `2fa5d123c` by gating emission behind an explicit
+`dataloader.emit_positions` flag, default off, set only on the two flex MoE
+configs.
+
+Still true and independently useful:
 
 - **The DCP load itself SUCCEEDED** -- "Finished loading the checkpoint in
-  65.64 seconds". The checkpoint is valid and readable. The crash is strictly
-  in the first compiled backward afterwards.
-- **The config did not change.** Diffing the two job scripts shows the only
-  functional difference is `--checkpoint.interval` 250 -> 100. Fresh-start
-  compiled runs are fine (12473304 did 482 steps), so resuming is what trips
-  it, not compile alone.
+  65.64 seconds". The checkpoint is valid and readable.
+- The uncompiled resume below genuinely works and genuinely continues the
+  trajectory, so the round trip is verified regardless of the above.
 
 **Job 12473387** (resume, `--compile.no-enable`) works:
 
