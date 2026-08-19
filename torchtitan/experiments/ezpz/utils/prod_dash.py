@@ -197,6 +197,10 @@ _METRIC_MAP = {
     "tps": "throughput(tps)",
     "tflops": "tflops",
     "mfu": "mfu(%%)",
+    # lr is W&B-ONLY: the .o per-step line has no LR field, so parse_olog can
+    # never supply it. It is fetched as a SEPARATE scan_history call rather
+    # than added to OLOG_KEYS -- see _wandb_records.
+    "lr": "lr",
 }
 
 def _series_from_records(records):
@@ -256,9 +260,32 @@ def _wandb_records(run_ids, olog_fallbacks, project=None, key_aliases=None):
     # chdir's to REPO at startup, but be explicit so it works regardless.
     fb = {rid: (fp if os.path.isabs(fp) else os.path.join(REPO, fp))
           for rid, fp in olog_fallbacks.items()}
-    return wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
-                           project=project or PROJECT,
-                           key_aliases=key_aliases)
+    records = wf.concat_chain(run_ids, olog_fallbacks=fb, keys=wf.OLOG_KEYS,
+                              project=project or PROJECT,
+                              key_aliases=key_aliases)
+    # lr rides in a SEPARATE pass, merged by step. It must NOT join OLOG_KEYS:
+    # scan_history(keys=[...]) returns only rows where EVERY key is present, so
+    # one absent key drops the whole row. Measured 2026-08-19: all 6 synthetic
+    # backfill runs have no `lr`, so folding lr into OLOG_KEYS returns 0 rows
+    # for them -- deleting 3,408 backfilled points from every OTHER metric too
+    # and silently reopening the chart gaps those runs exist to close.
+    # A separate call means a run lacking lr loses only lr.
+    try:
+        by_step = {}
+        for rid in run_ids or []:
+            for row in wf.fetch_wandb_run(rid, keys=("_step", "lr"),
+                                          project=project or PROJECT):
+                st, lr = row.get("_step"), row.get("lr")
+                if st is not None and lr is not None:
+                    by_step[st] = lr          # later run wins, as elsewhere
+        if by_step:
+            for r in records:
+                v = by_step.get(r.get("_step"))
+                if v is not None:
+                    r["lr"] = v
+    except Exception:
+        pass  # lr is a nice-to-have; never fail the whole backbone for it
+    return records
 
 def _wandb_summary(run_ids):
     """Cheap per-chain W&B metadata (one api.run + .summary read per tried run,

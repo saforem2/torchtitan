@@ -221,7 +221,11 @@ const LIGHT = ["#4c78a8","#f58518","#54a24b","#e45756","#72b7b2","#b279a2",
 const DARK  = ["#6ea8dc","#ffa94d","#7bc96f","#ff7b7b","#5fd0c8","#d29fd8",
                "#ffc0c8","#c79a6a","#d5cfca","#f6e05e","#d3a0ce","#a8ded6"];
 const METRICS = [["loss","loss (global avg)"],["grad_norm","grad norm"],
-                 ["tps","tokens / sec / GPU"],["tflops","TFLOPs"],["mfu","MFU (%)"]];
+                 ["tps","tokens / sec / GPU"],["tflops","TFLOPs"],["mfu","MFU (%)"],
+                 ["lr","learning rate"]];
+// LR values are ~2e-5, so the default axis formatter renders every tick as
+// "0.00". Force exponential notation for this metric only.
+const SCI = v => (v == null ? "" : v.toExponential(2));
 
 let payload = null, metric = "loss", hidden = new Set(), chart = null;
 const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
@@ -249,8 +253,10 @@ function chainOrder() {
 }
 const colorFor = key => palette()[chainOrder().indexOf(key) % palette().length];
 
-// Series for one chain on the current metric, with the live tip appended (the
-// tip carries the 5 short metric names, same as the TUI).
+// Series for one chain on the current metric, with the live tip appended when
+// the tip HAS that metric. The tip is parsed from the .o per-step line, which
+// carries loss/grad_norm/tps/tflops/mfu but NOT lr -- so the lr curve simply
+// ends at the last W&B-synced step rather than being extended with undefined.
 function seriesFor(key, c) {
   let s = ((c.series || {})[metric] || []).slice();
   const tip = c.live_tip;
@@ -346,7 +352,9 @@ function draw() {
         stroke: dark() ? "#d5d5d5" : "#333",
         grid: { stroke: dark() ? "#262b33" : "#eee" } },
       { label, stroke: dark() ? "#d5d5d5" : "#333",
-        grid: { stroke: dark() ? "#262b33" : "#eee" } },
+        grid: { stroke: dark() ? "#262b33" : "#eee" },
+        // ~2e-5 values would all print as "0.00" under the default formatter.
+        ...(metric === "lr" ? { values: (u, ts) => ts.map(SCI), size: 70 } : {}) },
     ],
     legend: { show: false },
     series,
