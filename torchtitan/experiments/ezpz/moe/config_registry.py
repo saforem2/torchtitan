@@ -14,7 +14,10 @@ import ezpz.distributed
 
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
-from torchtitan.components.lr_scheduler import LRSchedulersContainer
+# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
+# a re-export shim when the optimizer components were grouped into a package
+# by #4140). LRSchedulersContainer now lives in components.optimizer.
+from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.components.quantization.float8 import (
