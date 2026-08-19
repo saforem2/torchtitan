@@ -552,6 +552,13 @@ TRAJECTORIES: list[dict] = [
         #
         # hllpaq4g = 8756070 t0 (steps 1..3312, killed by the PBS -14)
         # 6321d2hh = 8756957 t0 (3301..6520, live)
+        # prior_tokens: stage-2 seeds from stage-1 step-46429, so these weights
+        # have ALREADY absorbed the full 4.674T olmo-mix run before this chain's
+        # step 1. Its step counter restarts at 1 (correct -- steps are per-chain),
+        # but "tokens seen" is CUMULATIVE, so plotting it from 0 claims the model
+        # saw its first token alongside stage-1. Plotters that use a tokens x-axis
+        # must add this offset; step-axis plots ignore it.
+        "prior_tokens": OLMO_MIX_1124_TOKENS,
         "key": "2b_v2_512_stage2_dolmino",
         "model": "2b",
         "version": "v2",

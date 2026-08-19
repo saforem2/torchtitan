@@ -397,6 +397,10 @@ def build_backbone():
             "model": t["model"], "num_nodes": t["num_nodes"],
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
+            # Cumulative tokens already absorbed before this chain's step 1
+            # (stage-2 chains seed from a finished chain's weights). Only the
+            # tokens x-axis uses it; step axes are per-chain by definition.
+            "prior_tokens": t.get("prior_tokens") or 0,
             "ckpt_base": base,
             # series: per-metric [[step, val]] for the Textual app; curve is the
             # back-compat loss-only alias that render_board/draw_curves/--svg read.
@@ -1009,7 +1013,12 @@ def draw_curves(payload, figsize, save_path=None):
             # plotting their step count on a tokens axis -- mixing scales.
             if not toks_per_step:
                 continue
-            xs = [p[0] * toks_per_step / 1e9 for p in curve]  # billions of tokens
+            # Offset by tokens seen BEFORE this chain's step 1. A stage-2 chain
+            # restarts its step counter at 1 but its weights already carry the
+            # parent run's tokens; starting it at 0 on a CUMULATIVE axis claims
+            # it saw its first token alongside the parent.
+            prior_b = (c.get("prior_tokens") or 0) / 1e9
+            xs = [prior_b + p[0] * toks_per_step / 1e9 for p in curve]  # billions
         else:
             xs = [p[0] for p in curve]
         ys = [p[1] for p in curve]

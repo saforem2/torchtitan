@@ -262,7 +262,13 @@ function seriesFor(key, c) {
   const tps = (c.gbs || 0) * (c.seq_len || 0);
   if (document.getElementById("tokens").checked) {
     if (!tps) return null;          // no gbs -> can't place on a tokens axis
-    return s.map(p => [p[0] * tps / 1e9, p[1]]);
+    // A stage-2 chain restarts its step counter at 1, but its weights already
+    // carry the parent run's tokens (dolmino seeds from stage-1 step-46429).
+    // "tokens seen" is CUMULATIVE, so it must start where the parent ended --
+    // plotting from 0 claims it saw its first token alongside stage-1.
+    // Steps stay per-chain, which is why only this branch offsets.
+    const prior = (c.prior_tokens || 0) / 1e9;
+    return s.map(p => [prior + p[0] * tps / 1e9, p[1]]);
   }
   return s;
 }
@@ -310,8 +316,8 @@ function draw() {
     series.push({
       label: ch[k].label || k,
       stroke: colorFor(k),
-      width: live ? 2 : 1,
-      alpha: live ? 1 : 0.45,
+      width: live ? 3 : 2,
+      alpha: live ? 1 : 0.55,
       // spanGaps MUST be true. Chains sit on DIFFERENT step grids, so the
       // union x-axis is ~3.5k values of which any one chain occupies ~600 --
       // the other ~83% are nulls meaning "this chain has no sample HERE",
