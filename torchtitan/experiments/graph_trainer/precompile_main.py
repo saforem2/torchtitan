@@ -102,6 +102,7 @@ def _common_setup(config):
         pp=pp,
         ep=parallelism.expert_parallel_degree,
         world_size=world_size,
+        spmd_backend=parallelism.spmd_backend,
     )
     parallel_dims.build_mesh()
 
@@ -229,16 +230,20 @@ def _precompile_aot_fx_trace(
         attn_config = model_config.layers[0].attention
         inner_attention = attn_config.inner_attention
 
+        # Match Trainer.post_dataloading_process: dataloader positions are
+        # torch.long contiguous [B, L], and full precompile bakes dtype/stride.
         positions = torch.arange(
-            0, dummy_inputs.shape[1], dtype=torch.int32, device=dummy_inputs.device
-        ).expand(dummy_inputs.shape)
+            0, dummy_inputs.shape[1], dtype=torch.long, device=dummy_inputs.device
+        ).repeat(local_batch_size, 1)
+
+        # Match Trainer.post_dataloading_process insertion order:
+        # dataloader kwargs first, then attention_masks added below.
+        extra_kwargs["positions"] = positions
 
         if isinstance(inner_attention, (FlexAttention.Config, VarlenAttention.Config)):
             extra_kwargs["attention_masks"] = cast(Decoder, model).get_attention_masks(
                 positions=positions,
             )
-
-        extra_kwargs["positions"] = positions
 
     # TODO: Add CP support — call prepare_context_parallel_input here
     # to shard dummy_inputs/dummy_labels/extra_kwargs along the sequence
