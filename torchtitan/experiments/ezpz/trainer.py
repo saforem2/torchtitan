@@ -937,15 +937,24 @@ class FaultTolerantTrainer(Trainer):
         # someone else already holds one. Advisory only: a crashed predecessor
         # leaves a stale claim behind, and refusing to start on one would turn
         # every crash into a failed resume.
-        check_and_claim(
-            config.checkpoint.folder,
-            dump_folder=config.dump_folder,
-            world_size=int(os.environ.get("WORLD_SIZE", -1)),
-            is_rank_zero=(
-                not torch.distributed.is_initialized()
-                or torch.distributed.get_rank() == 0
-            ),
-        )
+        #
+        # Only claim if this job will actually WRITE. A --checkpoint.no-enable
+        # run (smoke tests, config sweeps, bisects) never creates a file, so
+        # claiming would be a pure false positive: it leaves a claim on the
+        # default folder that then warns the next job -- which may be the one
+        # legitimately using that directory. Observed 2026-08-19, where a
+        # throwaway sweep spooked a live 12h run into a shard-mixing warning
+        # about a collision that could not happen.
+        if getattr(config.checkpoint, "enable", True):
+            check_and_claim(
+                config.checkpoint.folder,
+                dump_folder=config.dump_folder,
+                world_size=int(os.environ.get("WORLD_SIZE", -1)),
+                is_rank_zero=(
+                    not torch.distributed.is_initialized()
+                    or torch.distributed.get_rank() == 0
+                ),
+            )
 
         self.checkpointer.load(step=config.checkpoint.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
