@@ -2,6 +2,77 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-19 (local + aurora) -- a browser dashboard; the dolmino tokens-axis offset finally landed; a matched-pair eval needs TWO RoPE flavors
+
+- **`prod_dash.py` hung for 8m20s and blamed SSH.** It was not SSH (0.2 s
+  round-trip, warm cache). `parse_olog` was line-scanning **8.3 GB** of trainer
+  console logs on every refresh -- 3.1G/2.6G/2.0G files that are almost entirely
+  the constlr seat's ~745k-line crash spew. `grep` finds **zero** step lines in
+  the 2.6 GB one. Capped at 256 MiB per file (`EZPZ_OLOG_MAX_BYTES`); `--board`
+  went 8m20s -> **24.9 s**. The error message pointing at a dead ControlMaster
+  is misleading and sent the first diagnosis the wrong way.
+- **The TFLOPs "gaps" are not gaps.** Every metric has exactly the same point
+  count as loss (570/570, 577/577, 599/599) and 20b_v2_256's step spacing is
+  min==median==max==18 -- not one sample missing. The picket-fence is real
+  throughput variance: checkpoint saves inflate a step's wall-clock, so tps and
+  tflops collapse for that step. 20b_v2_256's dips land at 901/1801/2701, dead
+  regular. (The 900-step interval is INFERRED from that spacing; `CKPT_INTERVAL`
+  was not read.) 512N is genuinely wider: 22% of samples < 50 TFLOPs vs 5%.
+- **New `prod_dash_web.py` -- browser view, loopback only** (`fcc3a40f4`).
+  Calls `prod_dash.fetch()` and serves the payload verbatim, so the web view,
+  the TUI, and the committed charts share one data layer. stdlib `http.server`;
+  uPlot vendored (51 KB, no CDN). `--host` refuses non-loopback unless
+  `PD_WEB_ALLOW_PUBLIC=1` -- unauthenticated production telemetry, so remote
+  viewing goes through `ssh -L 8712:127.0.0.1:8712 aurora`.
+- **Driving it in a real browser was load-bearing.** curl returned 200 on every
+  endpoint and the JSON had all 7 chains x 5 metrics, and the page was still
+  broken four ways: uPlot defaults x to a TIME scale (steps rendered as
+  "12/31/69"); `spanGaps:false` drew ONE chain of seven (chains sit on different
+  step grids, so the union x-axis is ~3.5k values and any chain is ~83% nulls --
+  a null means "no sample HERE", not "training gapped"); the "no data"
+  placeholder persisted under the canvas; favicon 404'd every load. A JSON-level
+  check cannot see any of these.
+- **The dolmino tokens-axis offset, flagged as a todo on 08-17, is now fixed**
+  (`4d2895f30`). Its step counter restarting at 1 is CORRECT (steps are
+  per-chain; it seeds weights-only from stage-1 step-46429). But "tokens seen"
+  is cumulative, so plotting from 0 claimed it saw its first token alongside
+  stage-1. New optional `prior_tokens` in `trajectories.py` -- the single source
+  of truth, so every plotter inherits it. Verified: dolmino now spans
+  **4.674T -> 5.452T**.
+  - **Checked per chain rather than pattern-matching on "is it a fork":** only
+    dolmino needs it. `constlr_from9200` also branches mid-run but KEPT the
+    parent's step numbering (series starts at 9201), so its tokens are already
+    cumulative and an offset would double-count. The discriminator is the first
+    logged step.
+  - **`pct_target` deliberately NOT offset:** dolmino's `token_target` is the
+    stage-2 increment (2.390T), so `step*gbs*seq` correctly measures progress
+    through stage 2. Offsetting it would report >100% instantly.
+- **Matched-pair eval at step 21,000 submitted** (`8766898`, capacity,
+  `a94fb88f9`). The constant-LR fork tracks canonical within +0.001..+0.008 nats
+  -- inside noise -- and loss is not the deliverable, so this asks the eval
+  question at the current frontier instead of waiting on step ~30k (gated on the
+  stalled umbrella).
+  - **The two arms need DIFFERENT RoPE flavors**, which is why this is a bespoke
+    script: canonical step-21000 -> run 21grc6o7 (2026-05-26) -> `2b` complex;
+    fork step-21000 -> run xii94czx (2026-08-16) -> `2b_real` cos_sin. They
+    crossed the 2026-06-25 switch at different times. One flavor for both -- the
+    natural move for a "matched pair" -- scrambles Q/K on one arm and reads as a
+    large fake regression. Flavors resolved from W&B argv, not guessed.
+  - **`CONVERT_REPO` must be the main repo:** neither pinned clone ships
+    `agpt/state_dict_adapter.py`, so both fall back to the bare
+    `Llama3StateDictAdapter`, which permutes unconditionally -- making a
+    `2b_real` request a silent no-op producing exactly the corrupt export the
+    flag guards against.
+  - **Confound to carry into the writeup:** the fork differs from canonical in
+    BOTH the LR schedule and the RoPE convention.
+- **Umbrella `8764675` still queued** behind the `at_queue=lustre_scaling`
+  stall; the 20B constant-LR fix (`b08fccfd1`) rides on it.
+- Still open: the 906 GB reclaim decision on the two mixed ckpt dirs (no
+  pressure -- /lus/flare is 67% used with 31 PB free), and the fork re-check at
+  ~30k/~46k.
+
+---
+
 ## 2026-08-17 (aurora) -- a second key rename kills the same seat for the 3rd time; two chains were registered but never drawn; cot-long was measurable all along
 
 - **`output.weight` -> `lm_head.weight` is the second upstream rename to break
