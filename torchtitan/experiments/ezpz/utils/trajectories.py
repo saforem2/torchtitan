@@ -340,6 +340,14 @@ TRAJECTORIES: list[dict] = [
         # 2lxurmes (W&B 7301..7653, the run whose job wrote it). iozc8x9n
         # gives an identical result; 2lxurmes is the owner.
         "olog_fallbacks": {
+            # c8zwrlqw was registered as a run-id but never given an .o
+            # fallback, so the steps its W&B history never flushed (8600-8700)
+            # were invisible everywhere -- charts, store, and W&B alike. Found
+            # 2026-08-19 by checking what the gap-backfill did NOT cover.
+            "c8zwrlqw": str(
+                REPO_ROOT / "logs/multi-autoretry-8744245"
+                / "trainer-1-20b-n512.console.log"
+            ),
             "8vixdfg2": str(
                 RUNS / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-v2-failover-sync-cont3.o8508214"
