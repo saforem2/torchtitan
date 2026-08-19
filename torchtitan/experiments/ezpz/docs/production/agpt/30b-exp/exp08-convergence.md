@@ -72,15 +72,29 @@ Step 251, loss 4.540 -- picking up from the step-250 checkpoint whose loss
 was 4.61, not restarting from ~12. Loss continues descending (4.44 by step
 263). **Save -> resume -> continue is verified.**
 
-But uncompiled is not a production answer:
+The cost of dropping compile, measured over the full run rather than off
+the first step:
 
 | arm | tps | memory |
 |---|---:|---:|
 | compiled (fresh) | 489 | 62.79% |
-| uncompiled (resume) | 174 | 93.80% |
+| uncompiled (resume) | 455 | 93.80% |
 
-2.8x slower and 31 points more memory -- compile is doing real work here on
-both axes. Uncompiled resume is a diagnostic, not a workaround to ship.
+Throughput is only ~7% down, which is less than expected. **Memory is the
+real cost: 93.80% vs 62.79%**, 31 points, leaving almost no headroom. At
+that occupancy the run is one allocation spike away from a level_zero
+failure, so uncompiled is not something to ship at this size even though it
+is nearly as fast.
+
+(An earlier reading of 174 tps was the first post-resume step, before
+throughput settled -- not representative.)
+
+This run ended at step 299, one step short of its step-300 checkpoint,
+because it was submitted with a 2h walltime. So the resume LOAD is verified
+and 49 steps of continued descent are verified; a post-resume SAVE has not
+been directly observed yet. The step-250 checkpoint it loaded was itself
+written by the compiled run, so the save path is not in doubt -- but
+confirming it end-to-end wants a longer walltime.
 
 ## Verdict
 
