@@ -66,7 +66,45 @@ def _acc(metrics: dict) -> float | None:
     return None
 
 
-def load_v2_trajectory(results_base: Path) -> dict[int, dict[str, float]]:
+def load_v2_trajectory(
+    results_base: Path,
+    corrected_base: Path | None = None,
+    switch_step: int | None = None,
+) -> dict[int, dict[str, float]]:
+    """Load a chain's evals, splicing corrected results over the post-switch half.
+
+    Chains that never switched convention pass corrected_base=None and read one
+    dir unchanged -- which is the 256N case here, deliberately.
+    """
+    out = _load_one(results_base)
+    if corrected_base is None or switch_step is None:
+        return out
+    corrected = _load_one(corrected_base)
+    dropped: dict[str, int] = {}
+    merged: dict[int, dict[str, float]] = {}
+    for step, scores in out.items():
+        if step < switch_step:
+            merged[step] = scores
+            continue
+        fixed = corrected.get(step, {})
+        for t in scores:
+            if t not in fixed:
+                dropped[t] = dropped.get(t, 0) + 1
+        if fixed:
+            merged[step] = dict(fixed)
+    for step, scores in corrected.items():
+        if step >= switch_step:
+            merged.setdefault(step, scores)
+    for t, n in sorted(dropped.items()):
+        print(
+            f"  NOTE [{results_base.name}/{t}]: {n} post-switch point(s) dropped"
+            " -- corrected sweep did not cover this task; original values are"
+            " wrongly permuted."
+        )
+    return merged
+
+
+def _load_one(results_base: Path) -> dict[int, dict[str, float]]:
     out: dict[int, dict[str, float]] = {}
     if not results_base.exists():
         return out
@@ -106,7 +144,8 @@ def load_mds() -> dict[int, dict[str, float]]:
             payload = json.load(f)
         results = payload.get("results", payload)
         for task in TASKS:
-            if task in results and (acc := _acc(results[task])) is not None:
+            m = _task_metrics(results, task)
+            if m is not None and (acc := _acc(m)) is not None:
                 by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
         step: {task: sum(vs) / len(vs) for task, vs in d.items()}
@@ -228,7 +267,8 @@ def main() -> None:
     v2_by_nodes = {}
     v2_gbs = {}
     for nodes, (path, gbs) in V2_TRAJECTORIES.items():
-        traj = load_v2_trajectory(path)
+        corrected_path, switch = V2_CORRECTED.get(nodes, (None, None))
+        traj = load_v2_trajectory(path, corrected_path, switch)
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs
         print(f"loaded v2 {nodes}N: {len(traj)} steps from {path}")
