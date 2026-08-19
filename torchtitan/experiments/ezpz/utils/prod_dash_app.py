@@ -165,6 +165,13 @@ for _d, _l in _THEME_PAIRS:
     _THEME_COUNTERPART.setdefault(_l, _d)
 
 
+# plotext marker for every chain curve. `hd` (half-block glyphs) over the
+# previous `braille`: braille's 2x4 dot grid is finer but its dots are thin and
+# wash out once a chain is dimmed toward the background. Override with
+# PD_MARKER=braille to get the fine grid back without editing this file.
+_MARKER = os.environ.get("PD_MARKER", "hd")
+
+
 def _dim(rgb, f=0.55, bg=(0, 0, 0)):
     """Fade an RGB color toward the background so idle chains recede.
 
@@ -634,7 +641,12 @@ class ProdDashApp(App):
                 xs = [p[0] for p in lp]
                 ys = [p[1] for p in lp]
             color = self._color_for(key)
-            # braille everywhere (2x4 sub-cells per char = 8x dot resolution).
+            # `hd` markers (user preference, 2026-08-19). plotext's braille
+            # gives 2x4 sub-cells per char, but its dots are thin and can wash
+            # out at low contrast, especially once a chain is dimmed toward the
+            # background; `hd` draws denser half-block glyphs that stay legible
+            # dimmed. Switch back by setting marker="braille" here if you want
+            # the finer dot grid.
             # Dimming rule: when a chain is FOCUSED (z-cycle), it alone stays
             # bright and every other chain is dimmed toward the background;
             # otherwise the usual idle-dims-vs-live-bright rule applies. Fading
@@ -648,7 +660,7 @@ class ProdDashApp(App):
             # (no reposition/disable API) and covered the early-step points of
             # interest. The run SelectionList on the left IS the legend now -- it
             # carries a color swatch per chain (see _rebuild_runs).
-            plt.plot(xs, ys, color=color, marker="braille")
+            plt.plot(xs, ys, color=color, marker=_MARKER)
             drawn += 1
 
         axis_label = _metric_label(self.metric)
