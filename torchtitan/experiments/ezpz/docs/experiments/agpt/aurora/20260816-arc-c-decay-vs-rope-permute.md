@@ -54,6 +54,43 @@ monotonically across the whole window. The published ARC-C "decay" is the
 permute penalty growing faster than the model's genuine gains, inverting the
 curve.
 
+## The chart now plots the corrected data (2026-08-19)
+
+`all_production_evals.svg` reads corrected results for the three affected
+chains. ARC-Challenge ends at **0.390** (20B-512) and **0.362** (20B-256),
+where the corrupted exports fell to ~0.27 and ~0.297.
+
+How it works, and the two traps in it:
+
+- **Union, not replacement.** Pre-switch points come from the original eval
+  dirs (correct: exported with the matching convention); at/after the switch
+  step they come from `-ropefix`. Neither source alone is right. A post-switch
+  step with no corrected result is DROPPED, never backfilled -- a gap is
+  visible, a wrong point is not.
+- **`agpt-2b-v2-256n` is untouched.** It never switched convention, so it has
+  no corrected dir and needs none.
+- **Shot pinning.** The eval scripts write `<task>@<N>shot` keys plus a bare
+  `<task>` alias for whichever group ran LAST. On 14 of 36 post-switch steps
+  (20B-512) and 15 of 37 (20B-256), the bare `arc_challenge` IS the 25-shot
+  number, with an unused `@0shot` beside it. The corrected sweep ran 0-shot
+  throughout. Reading bare keys would have spliced 25-shot pre-switch onto
+  0-shot post-switch **in the ARC-C panel specifically** -- a union that looked
+  right by step coverage and was wrong by measurement. The reader now demands
+  `<task>@0shot` and returns nothing rather than substituting another shot
+  count.
+
+**Known gap, reported loudly.** The corrected sweep covered only
+`arc_challenge`, `hellaswag`, `arc_easy`. Winogrande, PIQA, OpenBookQA and
+BoolQ therefore lose their post-switch history on both 20B chains -- 268 points
+in total. The chart run prints a NOTE naming each chain, task and count. Jobs
+`8766059` / `8766061` are queued to close it.
+
+**Provenance note:** the regenerated SVG landed in commit `7858d406c`, whose
+message belongs to unrelated work. A heredoc to `/tmp` failed on a login node
+where that path is not writable, and the `git add -A -- "*figures*"` in the
+same command had already staged the figure. The chart content is correct; only
+its commit message is misattributed.
+
 ## Confirmed across a 5-point series, not just two spot-checks (2026-08-17)
 
 The re-eval sweep has since covered steps 4500-4900 continuously, turning the
