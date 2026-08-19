@@ -216,6 +216,14 @@ def agpt(
 ) -> FaultTolerantTrainer.Config:
     cfg = _base_config(flavor)
     cfg.hf_assets_path = hf_assets_path
+    # 79th sync (#4085): upstream flipped the DEFAULT spmd_backend to
+    # "spmd_types". Every ezpz config fails under it at both TP=1 and TP=2:
+    #   ValueError: When dp_mesh_dims is provided, all parameters must be
+    #   DTensors on the full SPMD mesh ... Got plain tensor for parameter
+    # Measured on job 12473350: full_dtensor runs 4/4 steps, spmd_types 0.
+    # Pin the backend that works until the spmd_types path is understood --
+    # this keeps every ezpz config runnable without guessing at annotations.
+    cfg.parallelism.spmd_backend = "full_dtensor"
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
     # 57th sync: PR #3674 replaced the `mode` string with a policy class

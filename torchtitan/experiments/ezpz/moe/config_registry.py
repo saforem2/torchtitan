@@ -143,6 +143,11 @@ def moe(
 ) -> FaultTolerantTrainer.Config:
     cfg = _base_config(flavor)
     cfg.hf_assets_path = hf_assets_path
+    # 79th sync (#4085): pin the working SPMD backend. Upstream flipped the
+    # default to "spmd_types", under which every ezpz config dies with
+    # "all parameters must be DTensors on the full SPMD mesh". full_dtensor
+    # runs clean (job 12473350). Same pin as agpt/config_registry.py.
+    cfg.parallelism.spmd_backend = "full_dtensor"
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
