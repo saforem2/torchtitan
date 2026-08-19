@@ -35,11 +35,17 @@ run's value for a shared step (resume semantics).
 """
 from __future__ import annotations
 
+import os
 import re
 
 PROJECT = "aurora_gpt/torchtitan.ezpz.train"
 
 # Metric keys recoverable from a PBS .o per-step stdout line (see OLOG_STEP_RE).
+# Cap on bytes read per .o log by parse_olog. Guards against crash-spew logs
+# (multi-GB, near-zero step lines) stalling every consumer. 256 MiB holds far
+# more step lines than any chart or board displays.
+OLOG_MAX_BYTES = int(os.environ.get("EZPZ_OLOG_MAX_BYTES", str(256 * 1024 * 1024)))
+
 OLOG_KEYS = (
     "_step",
     "loss_metrics/global_avg_loss",
@@ -118,8 +124,22 @@ def parse_olog(paths):
             f = open(p, errors="replace")
         except (FileNotFoundError, IsADirectoryError):
             continue
+        # A crashed rank storm can make a console log ENORMOUS while containing
+        # almost no step lines: the 20B constlr seat failed four times and wrote
+        # ~745k traceback lines per crash, leaving 3.1G/2.6G/2.0G logs whose
+        # step-line count is ZERO. Line-parsing all of that on every dashboard
+        # refresh is what made prod_dash --app hang for 8+ minutes and time out
+        # (8.3G total across the trainer logs; even a bare grep is 7s each).
+        #
+        # Step lines are emitted throughout training, so a prefix is
+        # representative: read at most OLOG_MAX_BYTES and stop. Raise
+        # EZPZ_OLOG_MAX_BYTES to parse more of a genuinely long healthy run.
+        budget = OLOG_MAX_BYTES
         with f:
             for raw in f:
+                budget -= len(raw)
+                if budget < 0:
+                    break
                 m = OLOG_STEP_RE.search(_ANSI_RE.sub("", raw))
                 if not m:
                     continue
