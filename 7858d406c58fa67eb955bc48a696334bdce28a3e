@@ -1,0 +1,17 @@
+MESSAGE IS WRONG -- belongs to unrelated OCSR work, not to this change.
+
+This commit contains ONLY:
+  docs/evals/figures/all_production_evals.svg
+
+which is the eval chart regenerated to plot the CORRECTED (RoPE-ropefix) data:
+union of pre-switch originals with post-switch corrected results, pinned to
+0-shot. ARC-Challenge ends 0.390 (20B-512) / 0.362 (20B-256) instead of the
+corrupted ~0.27 / ~0.297.
+
+Cause: I ran `git commit -F /tmp/m.txt` after a heredoc to that path failed.
+/tmp/m.txt already existed on the login node, owned by another user, holding
+their commit message -- my write was denied but the read succeeded, so their
+text became my commit message. Nothing of theirs was modified.
+
+Not amended because the commit was already pushed to the shared ezpz branch.
+See docs/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md.
