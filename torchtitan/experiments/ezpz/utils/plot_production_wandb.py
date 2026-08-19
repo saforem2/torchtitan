@@ -380,7 +380,11 @@ def plot_tokens_vs_time(
     ax.set_title(
         f"AuroraGPT {model_name.upper()} — Tokens vs Wall Clock  |  "
         f"{num_nodes} nodes  |  "
-        f"{final_tokens_b:,.1f}B tokens ({pct:.1f}% of 4.67T target)",
+        # The "of X target" label MUST be derived from target_b, not written
+        # as a literal: a second hardcoded 4.67T survived the first fix here
+        # and printed "77.2% of 4.67T" while dividing by 7.06T -- a percentage
+        # and a denominator that disagreed, in the same sentence.
+        f"{final_tokens_b:,.1f}B tokens ({pct:.1f}% of {target_b / 1000:.2f}T target)",
         fontsize=14,
         fontweight="bold",
     )
