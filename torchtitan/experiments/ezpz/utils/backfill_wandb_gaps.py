@@ -117,6 +117,20 @@ def main() -> int:
         )
         have = {int(r["_step"]) for r in merged if r.get("_step") is not None}
 
+        # Steps a PREVIOUS backfill already published. Without this the tool is
+        # not idempotent: re-running after registering one new .o fallback
+        # would recreate every earlier synthetic run and double-publish their
+        # points. The trajectory's wandb_run_ids do not list synthetic runs, so
+        # concat_chain above cannot see them -- they have to be queried by tag.
+        for prev in api.runs(
+            PROJECT, filters={"config.backfill": True, "config.backfill_chain": key}
+        ):
+            have |= {
+                int(x["_step"])
+                for x in prev.scan_history(keys=["_step"])
+                if x.get("_step") is not None
+            }
+
         olog_records, _ = parse_olog(list(fallbacks.values()))
         missing = [r for r in olog_records
                    if r.get("_step") is not None and int(r["_step"]) not in have]
