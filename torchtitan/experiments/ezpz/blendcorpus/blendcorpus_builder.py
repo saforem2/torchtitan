@@ -326,7 +326,58 @@ class BlendCorpusDataLoader(BaseDataLoader):
             tokens = batch["text"].long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
-            yield {"input": input_ids}, labels
+            out: dict[str, torch.Tensor] = {"input": input_ids}
+            positions = self._document_positions(input_ids)
+            if positions is not None:
+                out["positions"] = positions
+            yield out, labels
+
+    def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
+        """Per-document position ids, or None when we cannot derive them.
+
+        Flex/Varlen attention needs these: core builds the BlockMask in
+        `Trainer._prepare_inputs` only `if positions is not None`
+        (trainer.py:738), and `Decoder.get_attention_masks` uses them to find
+        document boundaries. blendcorpus never yielded `positions`, so every
+        flex-attention MoE config died with
+
+            AssertionError: attention_masks must be instance of BlockMask,
+                            got <class 'NoneType'>
+
+        while the SDPA sibling of the same model trained fine (it relies on
+        is_causal and ignores masks).
+
+        blendcorpus PACKS multiple documents into one sequence separated by
+        EOD, so a plain arange would be wrong -- it would let attention cross
+        document boundaries, which is exactly what the mask exists to prevent.
+        Positions restart at 0 after each EOD token, matching the HF loader's
+        convention of emitting `range(len(sample_tokens) - 1)` per document.
+
+        Returns None when the EOD id is unknown, so the caller omits the key
+        and the maskless (SDPA) path behaves exactly as before rather than
+        silently receiving wrong positions.
+        """
+        # The loader keeps the blendcorpus config as _bc_cfg (line ~260);
+        # there is no _eod_token_id attribute. Read it from there.
+        eod = getattr(getattr(self, "_bc_cfg", None), "eod_token_id", None)
+        if eod is None:
+            return None
+
+        # positions = index since the last EOD, computed per row without a
+        # python loop over the sequence dimension.
+        is_eod = input_ids == int(eod)
+        # doc_id increments AFTER an EOD, so the EOD token itself ends the
+        # document it belongs to.
+        doc_id = is_eod.cumsum(dim=1) - is_eod.long()
+        idx = torch.arange(input_ids.shape[1], device=input_ids.device)
+        idx = idx.unsqueeze(0).expand_as(input_ids)
+        # first index of each document, broadcast back over its span
+        doc_start = torch.zeros_like(idx)
+        doc_start.scatter_reduce_(
+            1, doc_id, idx, reduce="amin", include_self=False
+        )
+        starts = doc_start.gather(1, doc_id)
+        return (idx - starts).contiguous()
 
     def set_consumed_by_global_step(self, global_step: int, global_batch_size: int):
         if self._delegate is not None:
