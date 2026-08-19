@@ -34,6 +34,24 @@ V2_TRAJECTORIES = {
     256: (REPO_ROOT / "outputs" / "evals" / "agpt-2b-v2-256n", 6_144),   # LBS=2 × 256N × 12 GPUs
     512: (REPO_ROOT / "outputs" / "evals" / "agpt-2b-v2-512n", 12_288),  # LBS=2 × 512N × 12 GPUs
 }
+
+# Only the 512N chain changed RoPE convention (at step 30,401); evals exported
+# at or after that used the wrong convention and understate the model.
+# Corrected re-exports live in a parallel `-ropefix` dir.
+#
+# 256N is DELIBERATELY ABSENT: it used the complex convention end to end across
+# all 22 runs, so its evals were never corrupted. Giving it a corrected source
+# would be the bug, not the fix.
+#
+# node_count -> (corrected dir, switch step)
+V2_CORRECTED = {
+    512: (REPO_ROOT / "outputs" / "evals" / "agpt-2b-v2-512n-ropefix", 30401),
+}
+
+# Pin every number to one shot count -- the eval scripts write a bare `<task>`
+# alias for whichever shot group ran LAST, so mixing sources can splice two
+# different measurements into one curve.
+SHOTS = "0shot"
 # 2B-MDS reference baseline (pre-torchtitan SophiaG, 140K steps / 7.77T tokens).
 # Three stage dirs all symlink to the same physical ckpt dir — same step
 # can appear up to 3 times; we average across replicates.
