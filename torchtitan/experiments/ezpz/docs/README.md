@@ -54,6 +54,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-08-19 | [Flex attention on MoE: two stacked bugs, both fixed](./guides/known-bugs/moe-flex-attention-blockmask.md) |
+| 2026-08-19 | [hybridep on XPU: not a version floor, not portable](./guides/known-bugs/hybridep-is-nvidia-only.md) |
 | 2026-08-16 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-08-16 | [Plan: reorganize experiments/ezpz/docs/](./notes/docs-reorg-plan.md) |
 | 2026-08-16 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
