@@ -182,13 +182,34 @@ TRAINERS=(
     # relies on NAN_ABORT_CONSECUTIVE to bail early instead of NaN-writing to
     # step 6600 the way that attempt did.
     "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429|0.0|1.0|2390375382006"
-    "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
+    # 20B-512 CONSTANT-LR FORK from step-9000.
+    #
+    # This row used to stop after the ckpt dir. An EMPTY decay_ratio field does
+    # NOT inherit the constant-LR default -- launch_one only passes
+    # --lr-scheduler.decay-ratio when T_DECAY is non-empty, so an omitted field
+    # silently falls through to torchtitan's OWN default of 0.8. The chain
+    # therefore ran warmup-stable-decay when constant LR was intended.
+    #
+    # decay_ratio=0.8 means decay occupies the LAST 80% of training, i.e. it
+    # STARTS at 20%: round(46429*0.8)=37143 decay steps, so stable ends at
+    # 46429+1-200-37143 = step 9087. The chain reached 10,200 before this was
+    # caught, so ~1,200 steps ran on a decaying LR (2.28e-5 -> 2.22389e-5).
+    #
+    # Fork from step-9000 (last checkpoint before onset; 6144 shards, valid
+    # .metadata, 244G) into its own dir so the canonical chain is untouched,
+    # exactly as the 2B constlr forks do. Now passes 0.0/1.0 EXPLICITLY.
+    "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000|olmo-mix-1124|2.28e-5|$RUNS/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288/step-9000|0.0|1.0|4673780159710"
     # DROPPED 2026-07-18: this 50/50 dolmino CPT trainer NaN-diverged at
     # step 3801 in job 8663177 (single-step overflow on a dolmino batch)
     # and NaN-wrote to step 6600. Config preserved for a fixed retry
     # (gentler LR / data audit) but removed from the production umbrella.
 #    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144|olmo50-dolmino50|2e-6|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2391000000000"
-    "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+    # 20B-256: same missing-decay_ratio bug, but NO FORK NEEDED. Its onset is
+    # 92859+1-200-round(92859*0.8) = step 18373 and the chain is at ~11,100, so
+    # its LR is still flat at 2.28e-5. Passing 0.0/1.0 now means it simply never
+    # decays -- no restart from an earlier checkpoint, nothing discarded.
+    # Fixing this before step 18373 is what avoids a second fork.
+    "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710"
     # 2B-512 constant-LR fork (from base step-9200, right before LR decay).
     # Own prod dir already holds the full step-9200 (model+optim); plain
     # resume-from-latest, decay_ratio=0.0 => constant LR (no decay phase).
@@ -402,11 +423,26 @@ launch_trainer() {
     # Optional fork (initial-load) + constant/decayed-LR schedule overrides.
     local xtra=()
     [[ -n "${T_INITLOAD[$idx]}" ]] && xtra+=(--checkpoint.initial-load-path="${T_INITLOAD[$idx]}")
-    if [[ -n "${T_DECAY[$idx]}" ]]; then
-        xtra+=(--lr-scheduler.decay-ratio="${T_DECAY[$idx]}"
-               --lr-scheduler.min-lr-factor="${T_MINLR[$idx]:-1.0}"
-               --lr-scheduler.warmup-steps=20)
+    # An OMITTED decay_ratio is a bug, not a default. Leaving the field empty
+    # skips the flag entirely, and the run then inherits torchtitan's own
+    # decay_ratio=0.8 -- the OPPOSITE of the constant-LR schedule every
+    # production chain here wants. That silently put both 20B chains on
+    # warmup-stable-decay; 20b_v2_512 ran ~1,200 steps of unintended decay
+    # before it was caught, and needed a fork from step-9000 to undo.
+    #
+    # So refuse to launch a seat whose decay_ratio was not stated. Being
+    # explicit costs one field; being wrong costs a fork.
+    if [[ -z "${T_DECAY[$idx]}" ]]; then
+        echo "FATAL: trainer $idx ($model|$nnodes) has no decay_ratio field." >&2
+        echo "  An empty field does NOT mean 'constant LR' -- it means the flag" >&2
+        echo "  is never passed and torchtitan defaults to 0.8 (warmup-stable-" >&2
+        echo "  decay). State it: append |<dfl>|<lr>|<init>|0.0|1.0|<tokens>" >&2
+        echo "  to the row (0.0/1.0 == constant LR)." >&2
+        exit 96
     fi
+    xtra+=(--lr-scheduler.decay-ratio="${T_DECAY[$idx]}"
+           --lr-scheduler.min-lr-factor="${T_MINLR[$idx]:-1.0}"
+           --lr-scheduler.warmup-steps=20)
 
     local val_flags
     if [[ "$PROFILE" == "tiny" ]]; then
