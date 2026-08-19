@@ -198,6 +198,26 @@ def _scatter_add_1d_forward_or_autograd(
 
 
 @dataclass(frozen=True, kw_only=True)
+
+def _tp_axis_present(ep_mesh) -> bool:
+    """Whether the mesh this dispatcher was wired with sits under a TP axis.
+
+    Used only to tell the benign case (TP=1, where the sp_size=1/sp_rank=0
+    defaults are correct) from the broken one (TP>1 with no tp_mesh passed).
+    Reads the mesh already in hand rather than any global state, and returns
+    False if the topology cannot be inspected -- a missing warning is better
+    than a crash inside parallelize().
+    """
+    if ep_mesh is None:
+        return False
+    try:
+        root = getattr(ep_mesh, "_root_mesh", None) or ep_mesh
+        names = getattr(root, "mesh_dim_names", None) or ()
+        return "tp" in tuple(names)
+    except Exception:
+        return False
+
+
 class LocalDispatchMetadata:
     """Metadata returned by LocalTokenDispatcher.dispatch() for use in combine()."""
 
@@ -242,7 +262,13 @@ class LocalTokenDispatcher(Configurable):
         self,
         *,
         ep_mesh: DeviceMesh | None,
-        tp_mesh: DeviceMesh | None,
+        # Upstream #3996 removed tp_mesh from MoE.parallelize()'s call
+        # (models/common/moe.py passes ep_mesh only), so this MUST have a
+        # default or every ezpz MoE config dies at init with
+        # "wire_meshes() missing 1 required keyword-only argument: 'tp_mesh'".
+        # Kept in the signature because the SP coordinates it carries are
+        # still used below when a caller supplies it.
+        tp_mesh: DeviceMesh | None = None,
     ) -> None:
         """No-op for the EP=1 dispatcher. Subclasses override."""
         del ep_mesh, tp_mesh
@@ -443,7 +469,13 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
         self,
         *,
         ep_mesh: DeviceMesh | None,
-        tp_mesh: DeviceMesh | None,
+        # Upstream #3996 removed tp_mesh from MoE.parallelize()'s call
+        # (models/common/moe.py passes ep_mesh only), so this MUST have a
+        # default or every ezpz MoE config dies at init with
+        # "wire_meshes() missing 1 required keyword-only argument: 'tp_mesh'".
+        # Kept in the signature because the SP coordinates it carries are
+        # still used below when a caller supplies it.
+        tp_mesh: DeviceMesh | None = None,
     ) -> None:
         """Install the EP mesh and SP coordinates used by dispatch / combine.
 
@@ -455,6 +487,20 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
         if tp_mesh is not None:
             self.sp_size = tp_mesh.size()
             self.sp_rank = tp_mesh._sym_get_coordinate(0)
+        elif _tp_axis_present(ep_mesh):
+            # tp_mesh omitted while the mesh topology says TP is on:
+            # sp_size/sp_rank keep their TP=1 defaults (1/0) and combine()
+            # would expand to the wrong sequence length. Upstream #3996
+            # stopped passing tp_mesh (models/common/moe.py), so this path is
+            # reachable -- make it loud instead of silently wrong.
+            logger.warning(
+                "wire_meshes() got tp_mesh=None but the device mesh has a "
+                "'tp' axis; sequence-parallel coordinates stay at the TP=1 "
+                "defaults (sp_size=1, sp_rank=0) and MoE combine() output "
+                "length will be wrong. Upstream PR #3996 dropped tp_mesh from "
+                "MoE.parallelize()'s wire_meshes call; ezpz must pass it "
+                "explicitly to run MoE under TP>1."
+            )
 
         # Sample the TT_MOE_NORMAL_EQUAL_A2A_PADDING env var once per
         # dispatcher construction and reduce across the EP mesh so every
@@ -1159,7 +1205,13 @@ class DeepEPTokenDispatcher(LocalTokenDispatcher):
         self,
         *,
         ep_mesh: DeviceMesh | None,
-        tp_mesh: DeviceMesh | None,
+        # Upstream #3996 removed tp_mesh from MoE.parallelize()'s call
+        # (models/common/moe.py passes ep_mesh only), so this MUST have a
+        # default or every ezpz MoE config dies at init with
+        # "wire_meshes() missing 1 required keyword-only argument: 'tp_mesh'".
+        # Kept in the signature because the SP coordinates it carries are
+        # still used below when a caller supplies it.
+        tp_mesh: DeviceMesh | None = None,
     ) -> None:
         """Install the EP mesh used by DeepEP dispatch / combine.
 
@@ -1170,6 +1222,20 @@ class DeepEPTokenDispatcher(LocalTokenDispatcher):
         if tp_mesh is not None:
             self.sp_size = tp_mesh.size()
             self.sp_rank = tp_mesh._sym_get_coordinate(0)
+        elif _tp_axis_present(ep_mesh):
+            # tp_mesh omitted while the mesh topology says TP is on:
+            # sp_size/sp_rank keep their TP=1 defaults (1/0) and combine()
+            # would expand to the wrong sequence length. Upstream #3996
+            # stopped passing tp_mesh (models/common/moe.py), so this path is
+            # reachable -- make it loud instead of silently wrong.
+            logger.warning(
+                "wire_meshes() got tp_mesh=None but the device mesh has a "
+                "'tp' axis; sequence-parallel coordinates stay at the TP=1 "
+                "defaults (sp_size=1, sp_rank=0) and MoE combine() output "
+                "length will be wrong. Upstream PR #3996 dropped tp_mesh from "
+                "MoE.parallelize()'s wire_meshes call; ezpz must pass it "
+                "explicitly to run MoE under TP>1."
+            )
 
     # pyrefly: ignore [bad-override]
     def dispatch(
@@ -1315,7 +1381,13 @@ class HybridEPTokenDispatcher(LocalTokenDispatcher):
         self,
         *,
         ep_mesh: DeviceMesh | None,
-        tp_mesh: DeviceMesh | None,
+        # Upstream #3996 removed tp_mesh from MoE.parallelize()'s call
+        # (models/common/moe.py passes ep_mesh only), so this MUST have a
+        # default or every ezpz MoE config dies at init with
+        # "wire_meshes() missing 1 required keyword-only argument: 'tp_mesh'".
+        # Kept in the signature because the SP coordinates it carries are
+        # still used below when a caller supplies it.
+        tp_mesh: DeviceMesh | None = None,
     ) -> None:
         """Install the EP mesh used by HybridEP dispatch / combine.
 
@@ -1326,6 +1398,20 @@ class HybridEPTokenDispatcher(LocalTokenDispatcher):
         if tp_mesh is not None:
             self.sp_size = tp_mesh.size()
             self.sp_rank = tp_mesh._sym_get_coordinate(0)
+        elif _tp_axis_present(ep_mesh):
+            # tp_mesh omitted while the mesh topology says TP is on:
+            # sp_size/sp_rank keep their TP=1 defaults (1/0) and combine()
+            # would expand to the wrong sequence length. Upstream #3996
+            # stopped passing tp_mesh (models/common/moe.py), so this path is
+            # reachable -- make it loud instead of silently wrong.
+            logger.warning(
+                "wire_meshes() got tp_mesh=None but the device mesh has a "
+                "'tp' axis; sequence-parallel coordinates stay at the TP=1 "
+                "defaults (sp_size=1, sp_rank=0) and MoE combine() output "
+                "length will be wrong. Upstream PR #3996 dropped tp_mesh from "
+                "MoE.parallelize()'s wire_meshes call; ezpz must pass it "
+                "explicitly to run MoE under TP>1."
+            )
 
     # pyrefly: ignore [bad-override]
     def dispatch(
