@@ -81,6 +81,25 @@ class BlendCorpusDataLoader(BaseDataLoader):
         append_eod: bool = True
         provide_attention_mask: bool = False
         eod_token_id: int | None = None
+
+        emit_positions: bool = False
+        """Yield a per-document ``positions`` key alongside ``input``.
+
+        Required by flex/varlen attention: core builds the BlockMask in
+        ``Trainer._prepare_inputs`` only ``if positions is not None``.
+
+        OFF by default, and deliberately so. ``positions`` is not free for
+        configs that do not need a mask: core still forwards it into the
+        model for RoPE, and ``rope._maybe_wrap_positions`` then calls
+        ``DTensor.from_local(positions, x.device_mesh, ...)`` whenever the
+        query is a DTensor. That puts a ``DeviceMesh`` into the
+        saved-for-backward set, which AOT autograd rejects with
+        ``expected all tensors_saved_with_vc_check to be Tensors``. Turning
+        this on unconditionally broke every compiled agpt config on
+        2026-08-19.
+
+        Set it only on configs whose attention backend is flex or varlen.
+        """
         data_cache_path: str = ".cache/blendcorpus"
 
         train_iters: int | None = None
@@ -107,6 +126,11 @@ class BlendCorpusDataLoader(BaseDataLoader):
     ):
         self._mode = "hf"
         self._delegate: BaseDataLoader | None = None
+        # Set here too: the HF-delegate branch below returns before the
+        # blendcorpus setup that normally assigns this. The delegate path
+        # never reaches the reader that uses it, but leaving the attribute
+        # undefined is a trap for the next edit.
+        self._emit_positions = False
 
         if config.dataset != "blendcorpus":
             hf_cfg = HuggingFaceTextDataLoader.Config(
@@ -177,6 +201,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
         self._eod_token_id = (
             int(_resolved_eod) if _resolved_eod is not None else None
         )
+        self._emit_positions = bool(config.emit_positions)
 
         bc_cfg = SimpleNamespace(
             data_file_list=config.dataset_path,
@@ -337,9 +362,10 @@ class BlendCorpusDataLoader(BaseDataLoader):
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
             out: dict[str, torch.Tensor] = {"input": input_ids}
-            positions = self._document_positions(input_ids)
-            if positions is not None:
-                out["positions"] = positions
+            if self._emit_positions:
+                positions = self._document_positions(input_ids)
+                if positions is not None:
+                    out["positions"] = positions
             yield out, labels
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:

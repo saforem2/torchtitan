@@ -235,7 +235,13 @@ def moe_small() -> FaultTolerantTrainer.Config:
     # MoeSelectiveAC keeps aten.topk.default as MUST_SAVE, which is exactly
     # the invariant that keeps expert assignments stable. Measured 2N:
     # full 0/5, none 2/5 (89% mem -> level_zero 40), selective 5/5 at 72.73%.
-    return moe("small", local_batch_size=8, activation_checkpoint_mode="selective")
+    cfg = moe("small", local_batch_size=8, activation_checkpoint_mode="selective")
+    # flex attention needs a BlockMask, and core only builds one when the
+    # dataloader yields positions. Opt in per-config: emitting positions
+    # everywhere puts a DeviceMesh in the saved-for-backward set via
+    # rope._maybe_wrap_positions and breaks every compiled agpt run.
+    cfg.dataloader.emit_positions = True
+    return cfg
 
 
 def moe_small_noac() -> FaultTolerantTrainer.Config:
@@ -423,6 +429,7 @@ def moe_10b_2b() -> FaultTolerantTrainer.Config:
     # none 0/5, selective 5/5 at 79.95%. The _sdpa siblings keep the "full"
     # default -- they pass with it, so they are left alone.
     cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="selective")
+    cfg.dataloader.emit_positions = True  # flex attention; see moe_small
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
