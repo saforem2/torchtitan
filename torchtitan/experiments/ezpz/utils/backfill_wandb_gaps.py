@@ -18,6 +18,14 @@ while missing `parallelism`, `optimizer.lr`, `torch_version`, and so on. So we
 copy the config of a REAL run from the same chain and override only what is
 genuinely gap-specific.
 
+NOT EVERY METRIC IS RECOVERABLE. A `.o` step line carries only
+`loss / grad_norm / tps / tflops / mfu`. `n_tokens_seen` is derived here
+(step * gbs * seq_len) because several workspace panels use it as their
+x-axis, and points without it simply do not plot. But
+`loss_metrics/global_max_loss` exists nowhere outside W&B -- a backfilled
+range will stay blank on that panel, and no amount of log parsing changes
+that.
+
 Every synthetic run is marked `backfill: true` in config and tagged
 `backfill` + `synthetic`. No filter in the production view references either,
 so the view is unaffected -- but nobody later has to guess which curves were
@@ -87,6 +95,11 @@ def main() -> int:
                     help="step jump above which a gap is split in two")
     ap.add_argument("--execute", action="store_true",
                     help="actually create runs (default is a dry run)")
+    ap.add_argument("--redo", action="store_true",
+                    help="DELETE existing backfill runs for the selected chain "
+                         "first, so they can be recreated with a corrected "
+                         "metric set. Only ever touches runs carrying "
+                         "config.backfill=true -- it cannot reach a real run.")
     args = ap.parse_args()
 
     import wandb  # noqa: PLC0415
@@ -102,6 +115,23 @@ def main() -> int:
 
     api = wandb.Api()
     total_runs = total_pts = 0
+
+    if args.redo:
+        # Deleting is irreversible, so the filter is deliberately narrow: only
+        # runs this tool created (config.backfill=true), optionally scoped to
+        # one chain. A real training run cannot match.
+        doomed = list(api.runs(PROJECT, filters={
+            "config.backfill": True,
+            **({"config.backfill_chain": args.chain} if args.chain else {}),
+        }))
+        print(f"--redo: deleting {len(doomed)} existing backfill run(s)")
+        for r in doomed:
+            assert dict(r.config).get("backfill") is True, f"refusing: {r.name}"
+            print(f"   delete {r.name}")
+            if args.execute:
+                r.delete()
+        if not args.execute:
+            print("   (dry run -- nothing deleted)")
 
     for traj in TRAJECTORIES:
         key = traj["key"]
@@ -166,11 +196,21 @@ def main() -> int:
                 ),
                 reinit=True,
             )
+            # n_tokens_seen is the x-axis of several workspace panels, and a
+            # .o line never carries it -- so a backfill without it logs points
+            # that HAVE no x-coordinate on those panels. The curve then still
+            # looks broken even though the y-values are present, which is
+            # exactly what the user saw on global_max_loss/grad_norm after the
+            # first backfill. It is pure arithmetic, so derive it.
+            gbs = traj["gbs"]
+            seq = traj["seq_len"]
             for rec in g:
+                step = int(rec["_step"])
                 payload = {k: v for k, v in rec.items()
                            if k != "_step" and v is not None}
+                payload["n_tokens_seen"] = step * gbs * seq
                 if payload:
-                    run.log(payload, step=int(rec["_step"]))
+                    run.log(payload, step=step)
             run.finish()
 
     verb = "created" if args.execute else "WOULD create"
