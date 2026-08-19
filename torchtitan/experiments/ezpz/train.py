@@ -482,7 +482,17 @@ def main(args: list[str] | None = None) -> None:
                 # wbconfig |= {"config": asdict(config)}
                 wbconfig |= {"dist": ezpz.distributed.get_dist_info()}
                 if run is not None:
-                    run.config.update(wbconfig)
+                    # allow_val_change=True is REQUIRED, not optional tidying.
+                    # Core's MetricsProcessor already called wandb.init()
+                    # (components/metrics.py:149), which seeds run.config with
+                    # the optimizer block. This update then re-sends the same
+                    # keys with a fuller payload (ours carries the extra
+                    # 'optimizer_factory_kwargs_by_name'), and W&B refuses to
+                    # overwrite an existing key unless told to. Without the
+                    # flag every run logs an alarming ConfigError traceback
+                    # that is caught below and changes nothing -- noise that
+                    # looks exactly like a real failure in the logs.
+                    run.config.update(wbconfig, allow_val_change=True)
             except Exception as e:
                 logger.warning("Unable to update `wandb.run.config`, continuing!")
                 if ezpz.distributed.get_rank() == 0:
