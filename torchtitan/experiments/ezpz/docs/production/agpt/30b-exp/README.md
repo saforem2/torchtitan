@@ -1,11 +1,19 @@
 # agpt 30B-exp -- a proposed next flagship
 
-> **Last updated: 2026-08-14.**
+> **Last updated: 2026-08-19.**
 >
-> **Status: PROPOSAL. Nothing here has been submitted or run.** This is a
-> design document, written the day the 2B-512 canonical chain completed its
-> full 4.674T olmo-mix-1124 budget. It argues for what the *next* flagship
-> should be, given what that campaign actually measured.
+> **Status: PROPOSAL, now partly MEASURED.** This began as a design document
+> written the day the 2B-512 canonical chain completed its full 4.674T
+> olmo-mix-1124 budget, arguing for what the *next* flagship should be given
+> what that campaign measured. Since then exp05-exp08 have actually run, so
+> the argument below is no longer purely a priori -- see
+> [EXPERIMENTS.md](./EXPERIMENTS.md) for what is settled and what is not.
+>
+> Headline results so far: the config trains (482 steps, loss 12.03 -> 3.37,
+> ~28% MFU held), checkpoints round-trip, the OLMo-2 tokenizer beats a
+> custom 64k, and weak scaling is far better than the 2B's (1.42% vs 13.96%
+> loss per doubling). Open: HSDP fails at this size, and compiled resume hits
+> the vc_check bug.
 >
 > Read the [Evidence](#1-evidence-what-this-campaign-actually-measured)
 > section first. Every claim there is a measurement from our own runs with a
