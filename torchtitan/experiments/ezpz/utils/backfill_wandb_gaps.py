@@ -115,6 +115,12 @@ def main() -> int:
 
     api = wandb.Api()
     total_runs = total_pts = 0
+    # Runs --redo removed. W&B deletion is ASYNCHRONOUS: the api.runs() query
+    # below can still return a just-deleted run, and the idempotency guard
+    # would then skip recreating it -- leaving the points deleted and NOT
+    # replaced. Tracking the ids locally makes the guard correct regardless of
+    # when the backend catches up.
+    deleted_ids: set[str] = set()
 
     if args.redo:
         # Deleting is irreversible, so the filter is deliberately narrow: only
@@ -128,6 +134,7 @@ def main() -> int:
         for r in doomed:
             assert dict(r.config).get("backfill") is True, f"refusing: {r.name}"
             print(f"   delete {r.name}")
+            deleted_ids.add(r.id)
             if args.execute:
                 r.delete()
         if not args.execute:
@@ -155,6 +162,8 @@ def main() -> int:
         for prev in api.runs(
             PROJECT, filters={"config.backfill": True, "config.backfill_chain": key}
         ):
+            if prev.id in deleted_ids:
+                continue          # just deleted by --redo; must be recreated
             have |= {
                 int(x["_step"])
                 for x in prev.scan_history(keys=["_step"])
