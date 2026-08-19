@@ -112,6 +112,21 @@ def _set_moe_layer_sharding(
         else dense_activation_placement(tp=spmd.R)
     )
 
+    # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
+    # set_gqa_attention_sharding (decoder_sharding.py:201-203) as
+    # state_shardings={"cache": ...}, but the MLA path below REPLACES
+    # attention.sharding_config wholesale, so nothing was annotating rope for
+    # MoE. Under full_dtensor/spmd_types that leaves `cache` a plain tensor
+    # while activations are DTensors, and the forward dies in rope.py:263:
+    #   RuntimeError: aten.mul.Tensor got mixed torch.Tensor and DTensor
+    # The buffer is named "cache" (rope.py:114 register_buffer), NOT
+    # "freqs_cis" -- the in_src/in_dst entries below use the ARGUMENT name,
+    # which is a different thing from the module's own state.
+    if getattr(attention, "rope", None) is not None:
+        attention.rope.sharding_config = ShardingConfig(
+            state_shardings={"cache": dense_param_placement(tp=Replicate())},
+        )
+
     # MLA attention input: x is gathered to Replicate; freqs_cis always Replicate.
     attention.sharding_config = ShardingConfig(
         in_src_shardings={
