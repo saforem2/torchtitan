@@ -58,6 +58,54 @@ TEMPLATE_RUN = {
 PER_RUN_KEYS = ("jobid", "hostname", "tstamp", "dist")
 
 
+def _lr_at_step(step, *, base_lr, total_steps, warmup_steps=200,
+                decay_ratio=None, decay_type="linear", min_lr_factor=0.0):
+    """LR the scheduler WOULD have produced at `step`.
+
+    Mirrors `linear_warmup_stable_decay` in
+    torchtitan/components/optimizer/lr_scheduler.py. LR is a pure function of
+    the step and the schedule config, so a gap's LR is reconstructable exactly
+    -- unlike `global_max_loss`, which is a measurement and is simply gone.
+
+    Reconstruct the schedule THE RUN ACTUALLY USED, from the template run's
+    own config. Do not substitute the schedule we are switching to: several
+    gaps sit before their chain's decay onset (flat) but 2b_v2_256's
+    25179-25500 sits AFTER it, where LR was genuinely decaying. Assuming flat
+    everywhere would silently invent wrong values for that range.
+
+    Verified against W&B: predicted 2.25496e-05 vs 2.25502e-05 observed at
+    step 9694 of ctbs1be4 -- agreement to five significant figures, the
+    residual being the resume-step off-by-one.
+    """
+    import math  # noqa: PLC0415
+
+    if decay_ratio is not None:
+        decay_steps = round(total_steps * decay_ratio)
+        if warmup_steps + decay_steps > total_steps:
+            decay_steps = total_steps - warmup_steps
+    else:
+        decay_steps = total_steps - warmup_steps
+    stable_steps = total_steps + 1 - warmup_steps - decay_steps
+    warmup_stable = warmup_steps + stable_steps
+
+    if step < warmup_steps:
+        adj = float((step + 1) / warmup_steps)
+    elif step < warmup_stable:
+        adj = 1.0
+    else:
+        progress = float((step + 1) - warmup_stable) / decay_steps
+        if decay_type == "linear":
+            adj = 1 - progress
+        elif decay_type == "sqrt":
+            adj = 1 - math.sqrt(progress)
+        elif decay_type == "cosine":
+            adj = 0.5 * (1.0 + math.cos(math.pi * progress))
+        else:
+            raise ValueError(f"unknown decay_type: {decay_type}")
+        adj = min_lr_factor + (1 - min_lr_factor) * adj
+    return base_lr * adj
+
+
 def _gap_runs(records, max_stride):
     """Split .o-only records into contiguous gaps.
 
@@ -213,11 +261,27 @@ def main() -> int:
             # first backfill. It is pure arithmetic, so derive it.
             gbs = traj["gbs"]
             seq = traj["seq_len"]
+            tcfg = dict(template.config)
+            sched = tcfg.get("lr_scheduler", {})
+            lr_args = dict(
+                base_lr=tcfg.get("optimizer", {}).get("lr"),
+                total_steps=tcfg.get("training", {}).get("steps"),
+                warmup_steps=sched.get("warmup_steps", 200),
+                decay_ratio=sched.get("decay_ratio"),
+                decay_type=sched.get("decay_type", "linear"),
+                min_lr_factor=sched.get("min_lr_factor", 0.0),
+            )
+            can_lr = lr_args["base_lr"] and lr_args["total_steps"]
+            if not can_lr:
+                print("    (no lr: template lacks optimizer.lr/training.steps)")
+
             for rec in g:
                 step = int(rec["_step"])
                 payload = {k: v for k, v in rec.items()
                            if k != "_step" and v is not None}
                 payload["n_tokens_seen"] = step * gbs * seq
+                if can_lr:
+                    payload["lr"] = _lr_at_step(step, **lr_args)
                 if payload:
                     run.log(payload, step=step)
             run.finish()

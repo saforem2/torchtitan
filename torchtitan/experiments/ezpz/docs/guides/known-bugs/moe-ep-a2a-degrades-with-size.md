@@ -1,10 +1,27 @@
 # MoE under EP aborts in `all_to_all_single`, worse with model size (2026-08-19)
 
 > [!IMPORTANT]
-> **Every EP config degrades monotonically with model size, and it is NOT
-> memory.** `moe_2b_ep` fails at 48% device memory while the *larger*
-> `moe_10b_2b_sdpa` passes clean at 74%. The failure is in the expert-parallel
-> a2a dispatch path, not an allocation ceiling.
+> **No EP config above `debugmodel` completes, and the failures split into
+> TWO causes -- do not attribute them all to a2a.** Per-arm signatures
+> (`12473367`):
+>
+> | config | steps | mem | a2a in dump | signal / error |
+> |---|---|---|:--:|---|
+> | `debugmodel_ep` | 5/5 | 44% | -- | pass |
+> | `2b_ep` | 3/5 | 48% | **yes** | SIGABRT |
+> | `10b_2b_sdpa_ep` | 2/5 | 80% | **yes** | SIGABRT |
+> | `10b_2b_sdpa_bmm_ep` | 1/5 | 86% | no | `UR_RESULT_ERROR_OUT_OF_RESOURCES` |
+> | `7b_ep` | 1/5 | 94% | no | SIGTERM only |
+> | `hybridep` | 0/5 | -- | no | never trained |
+>
+> **The a2a SIGABRT is real but covers only `2b_ep` and `10b_2b_sdpa_ep`.**
+> For those two the claim holds strongly: `2b_ep` dies at 48% memory while the
+> *larger* `moe_10b_2b_sdpa` passes at 74% and `bmm` passes at 94.5%, so an
+> allocation ceiling cannot explain it. `bmm_ep` and `7b_ep` show no a2a frame
+> and look like the same resource ceiling as non-EP `7b`.
+>
+> An earlier version of this page asserted "EP failure is NOT memory" across
+> all arms. That overstated a result drawn from `2b_ep` alone.
 
 Measured on the post-79th-sync tree (job `12473367`, 2N, LBS=1, 5 steps,
 compile off):
