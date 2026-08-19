@@ -2,6 +2,67 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-19 (sunspot) -- flex MoE was two stacked bugs; the 30B trains and resumes; hybridep is not ours to fix
+
+- **Every flex-attention MoE config was dying on a missing BlockMask, and it
+  took two fixes, not one.** Core builds the mask in `_prepare_inputs` only
+  `if positions is not None` (trainer.py:738), and blendcorpus never yielded
+  that key -- only the HF loader did. Fix 1 emits per-document positions
+  (restarting at 0 after each EOD, because blendcorpus PACKS documents and a
+  plain arange would let attention cross document boundaries). I unit-tested
+  the tensor logic against the HF semantics on four cases before running it
+  anywhere. It passed, and the real run **failed identically**. Fix 2 was the
+  actual bug: `_document_positions` read the EOD id back off `_bc_cfg`, which
+  is blendcorpus's own config object and is not guaranteed to carry the
+  field, so `getattr(..., None)` silently yielded None. Now resolved once in
+  `__init__` and owned on `self`. A red herring cost time here: the dumped
+  config shows `"eod_token_id": null`, which looks like the smoking gun but
+  is the user-facing field, legitimately null when the value comes from the
+  tokenizer fallback -- measured separately that gemma resolves `eos_id = 1`.
+
+- **The mask fix exposed a second, unrelated bug underneath: MoE routing is
+  not recompute-stable under FullAC.** With the mask built, `moe_small`
+  reached a real backward and died on
+  `CheckpointError: Recomputed values ... 560 vs 559`. Ran three AC arms on
+  both flex configs: full fails, AC-off fails at 89-94% memory on level_zero
+  error 40, **selective passes 5/5**. Not luck -- `SelectiveAC` keeps
+  `aten.topk.default` as MUST_SAVE precisely to hold expert assignments
+  stable across recompute. Changed both flex configs to selective; verified
+  all four configs (2 flex + 2 SDPA controls) pass 5/5 on defaults. The
+  controls report the same memory as before any of this work (74.05% /
+  94.54%), which is what shows the maskless path was not perturbed.
+
+- **The 30B config trains, and its checkpoints round-trip.** 482 steps, loss
+  12.03 -> 3.37 monotone, grad_norm 0.7-1.0, memory flat at 62.79%, ~28% MFU
+  held (matching exp05's 12-step number). Compiled resume dies on the
+  `tensors_saved_with_vc_check` AOT bug -- but the **DCP load itself
+  succeeded** (65.64s) and diffing the job scripts showed the only change was
+  the checkpoint interval, so resuming is the trigger, not config drift.
+  Uncompiled resume works: step 251 at loss 4.540 against the step-250
+  checkpoint's 4.61, descending to 4.235 by step 299. I misreported the
+  uncompiled cost as "2.8x slower" from a warmup step; over the run it is
+  ~7% (455 vs 489 tps). The real cost is memory: 93.80% vs 62.79%.
+
+- **The EP a2a abort has a name, and it is not ours.**
+  `ur_die: urEventWait must not be called for an internal event` -- Intel's
+  Unified Runtime, not a torchtitan assertion. EP is not the trigger
+  (`moe_debugmodel_ep` runs 5/5). Grepping all 15 sweep configs, `ur_die`
+  appears in exactly the two arms whose dumps contain the a2a frame, so the
+  two-cause split now rests on two independent signals. Memory separates them
+  cleanly: the ur_die arms sit at 47.77% / 79.74%, the others at 86-95%, and
+  non-EP `moe_7b` fails the same way at 95.40% -- the control showing EP is
+  irrelevant to that second mode.
+
+- **hybridep is closed WONTFIX.** I had called it "blocked on a torch version
+  floor", which implies a bump would fix it. Two blockers sit behind the
+  import error, each sufficient: `deep_ep` is not installed, and `deep_ep` is
+  CUDA-only -- the docstring says "GB200 NVLink72 Systems", it is
+  TMA-optimized, and it calls `cudaStreamSynchronize`. Exclude from XPU
+  sweeps rather than carrying it as an open bug.
+
+- **sft migration finished cleanly.** 4 directories, 0 failures, datascience
+  back to 16.53T of 20T (was 20.48T, over quota).
+
 ## 2026-08-19 (local + aurora) -- a browser dashboard; the dolmino tokens-axis offset finally landed; a matched-pair eval needs TWO RoPE flavors
 
 - **`prod_dash.py` hung for 8m20s and blamed SSH.** It was not SSH (0.2 s
