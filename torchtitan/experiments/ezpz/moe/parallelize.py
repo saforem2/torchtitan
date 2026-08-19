@@ -352,10 +352,29 @@ def apply_fsdp(
                     FSDPMeshInfo,
                     ShardPlacementResult,
                 )
+                from torch.distributed.fsdp._fully_shard._fsdp_init import (
+                    _get_mesh_info,
+                )
 
                 assert edp_mesh is not None
-                edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
-                dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+
+                # 79th sync: build the mesh infos via FSDP2's own builder
+                # rather than FSDPMeshInfo(mesh=..., shard_mesh_dim=0).
+                # Under full_dtensor/spmd_types the meshes handed in are FULL
+                # SPMD meshes; _get_mesh_info EXTRACTS AND FLATTENS the DP
+                # submesh out of them using mesh_dims. Constructing
+                # FSDPMeshInfo directly leaves both at full width, so the
+                # dense and sparse infos both present as dp_shard and
+                # fully_shard rejects them:
+                #   RuntimeError: Cannot concatenate overlapping meshes:
+                #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
+                # Core: distributed/fsdp.py:274-279.
+                edp_mesh_info = _get_mesh_info(edp_mesh, edp_mesh_dims)
+                dp_mesh_info = _get_mesh_info(dp_mesh, dp_mesh_dims)
+                # _get_mesh_info is typed to the DataParallelMeshInfo base;
+                # with a shard dim it always yields FSDPMeshInfo/HSDPMeshInfo.
+                assert isinstance(edp_mesh_info, FSDPMeshInfo)
+                assert isinstance(dp_mesh_info, FSDPMeshInfo)
 
                 def _shard_placement_fn(
                     param: nn.Parameter,
