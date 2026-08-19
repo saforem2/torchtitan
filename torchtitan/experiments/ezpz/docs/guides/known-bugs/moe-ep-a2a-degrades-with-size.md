@@ -23,6 +23,48 @@
 > An earlier version of this page asserted "EP failure is NOT memory" across
 > all arms. That overstated a result drawn from `2b_ep` alone.
 
+## Update 2026-08-19: the abort is an Intel UR fault, not our dispatch code
+
+The two a2a arms abort with a specific runtime message, visible just above
+the faulthandler dump:
+
+```
+ur_die: urEventWait must not be called for an internal event
+terminate called without an active exception
+Fatal Python error: Aborted
+```
+
+That is Intel's Unified Runtime aborting the process, not a torchtitan
+assertion and not a CCL error. Three things follow:
+
+1. **EP is not the trigger.** `moe_debugmodel_ep` runs 5/5 with EP enabled.
+   Only the larger EP configs abort.
+
+2. **`ur_die` correlates exactly with the a2a arms.** Grepping all 15 sweep
+   configs, `ur_die` appears in `2b_ep` and `10b_2b_sdpa_ep` and nowhere
+   else -- the same two arms whose faulthandler dumps contain the a2a frame.
+   The split in the table above is therefore backed by two independent
+   signals, not one.
+
+3. **It is not our code path.** The same `ur_die` string shows up in an
+   unrelated non-MoE `ezpz fsdp_tp` multi-node context (ezpz issue #214), so
+   this is a stack-level fault that MoE's a2a happens to provoke.
+
+Memory confirms the separation cleanly. The two `ur_die` arms sit at
+**47.77%** and **79.74%** -- nowhere near a ceiling -- while the arms without
+`ur_die` sit at **86.53%** (`bmm_ep`) and **93.98%** (`7b_ep`). Non-EP
+`moe_7b` fails the same way at **95.40%**, which is the control that shows
+EP has nothing to do with that second failure mode.
+
+`hybridep` is a third, unrelated thing and is now closed as WONTFIX -- it is
+NVIDIA-only by design. See
+[hybridep-is-nvidia-only.md](./hybridep-is-nvidia-only.md).
+
+**Actionable:** report the `ur_die: urEventWait must not be called for an
+internal event` signature to Intel with the a2a repro; it is far more
+specific than "SIGABRT in all_to_all_single" and is the right thing to put
+in the ticket.
+
 Measured on the post-79th-sync tree (job `12473367`, 2N, LBS=1, 5 steps,
 compile off):
 
