@@ -83,6 +83,8 @@ TRAJECTORIES: list[dict] = [
     {
         "label": "2B 512N sync (GBS=12288)",
         "eval_subdir": "agpt-2b-v2-512n",
+        "corrected_subdir": "agpt-2b-v2-512n-ropefix",
+        "switch_step": 30401,
         "layout": "dcp",
         "tokens_per_step": 12288 * 8192,
         "color": COLOR_2B_TT_512N,
@@ -98,6 +100,8 @@ TRAJECTORIES: list[dict] = [
     {
         "label": "20B 256N (GBS=3072)",
         "eval_subdir": "agpt-20b-v2-256n",
+        "corrected_subdir": "agpt-20b-v2-256n-ropefix",
+        "switch_step": 3101,
         "layout": "dcp",
         "tokens_per_step": 3072 * 8192,
         "color": COLOR_20B_TT_256N,
@@ -107,6 +111,8 @@ TRAJECTORIES: list[dict] = [
     {
         "label": "20B 512N sync (GBS=12288)",
         "eval_subdir": "agpt-20b-v2-512n",
+        "corrected_subdir": "agpt-20b-v2-512n-ropefix",
+        "switch_step": 4401,
         "layout": "dcp",
         "tokens_per_step": 12288 * 8192,
         "color": COLOR_20B_TT_512N,
@@ -136,27 +142,98 @@ RANDOM_BASELINE = {
 }
 
 
+# Every number on this chart must be the SAME shot count, or the curve compares
+# two different measurements. That is not hypothetical here: the eval scripts
+# write `<task>@<N>shot` keys AND a bare `<task>` alias for whichever group ran
+# last, so on steps where a 25-shot ARC-C pass followed the 0-shot pass, the
+# bare key IS the 25-shot number. MEASURED on the affected chains: 14 of 36
+# post-switch steps on 20b_v2_512 and 15 of 37 on 20b_v2_256 have a bare
+# arc_challenge equal to arc_challenge@25shot, with an unused @0shot alias
+# sitting right beside it.
+#
+# The corrected (-ropefix) sweep ran plain 0-shot throughout. So reading the
+# bare key would have spliced a 25-shot pre-switch segment onto a 0-shot
+# post-switch one -- in the ARC-Challenge panel, the exact panel this work
+# exists to fix.
+SHOTS = "0shot"
+
+
 def _read_metric(path: Path, task: str, metric: str) -> float | None:
+    """Read one metric, pinned to SHOTS when the file records shot counts.
+
+    Prefers the explicit `<task>@<SHOTS>` key. Falls back to the bare key ONLY
+    when no `<task>@` variant exists at all -- i.e. the file predates shot
+    tagging and is unambiguous. If shot-tagged keys exist but not the one we
+    want, returns None rather than silently substituting a different shot
+    count: a missing point is visible, a wrong point is not.
+    """
     try:
         with open(path) as f:
             d = json.load(f)
     except Exception:
         return None
+
+    tagged = f"{task}@{SHOTS}"
+    if tagged in d:
+        t = d[tagged]
+        return t.get(metric) if isinstance(t, dict) else None
+
+    if any(k.startswith(f"{task}@") for k in d):
+        # Shot-tagged results exist for this task, but not at SHOTS. The bare
+        # key aliases whichever group ran last, so trusting it here is what
+        # produces a spliced curve.
+        return None
+
     t = d.get(task)
     if not isinstance(t, dict):
         return None
     return t.get(metric)
 
 
-def load_dcp(subdir: str, task: str, metric: str) -> list[tuple[int, float]]:
-    base = EVALS_DIR / subdir
-    out: list[tuple[int, float]] = []
-    for p in sorted(base.glob("step-*/results/results.json")):
-        step = int(p.parent.parent.name.split("-")[1])
-        val = _read_metric(p, task, metric)
-        if val is not None:
-            out.append((step, val))
-    return sorted(out)
+def load_dcp(
+    subdir: str,
+    task: str,
+    metric: str,
+    corrected_subdir: str | None = None,
+    switch_step: int | None = None,
+) -> list[tuple[int, float]]:
+    """Load a chain's eval series, splicing in corrected results if it has any.
+
+    A chain that changed RoPE convention mid-flight has TWO valid sources: its
+    original dir is correct BELOW ``switch_step`` and wrongly-permuted at or
+    above it, while ``corrected_subdir`` holds re-exported results for exactly
+    the post-switch steps. Neither alone is right -- the original loses the
+    corrected numbers, and the corrected dir alone throws away all pre-switch
+    history. So take pre-switch from the original and post-switch from the
+    corrected dir.
+
+    Chains that never switched pass ``corrected_subdir=None`` and read one dir,
+    unchanged. ``agpt-2b-v2-256n`` is deliberately in that group: it used the
+    complex convention end to end, so its results were never corrupted and
+    there is nothing to correct.
+    """
+    def _series(d: str) -> dict[int, float]:
+        base = EVALS_DIR / d
+        out: dict[int, float] = {}
+        for p in sorted(base.glob("step-*/results/results.json")):
+            step = int(p.parent.parent.name.split("-")[1])
+            val = _read_metric(p, task, metric)
+            if val is not None:
+                out[step] = val
+        return out
+
+    original = _series(subdir)
+    if corrected_subdir is None or switch_step is None:
+        return sorted(original.items())
+
+    corrected = _series(corrected_subdir)
+    # Pre-switch from the original; at/after the switch, corrected only. A
+    # post-switch step with no corrected result is DROPPED rather than back-
+    # filled from the original -- showing a known-wrong point would defeat the
+    # entire exercise, and a gap is at least visible.
+    merged = {s: v for s, v in original.items() if s < switch_step}
+    merged.update({s: v for s, v in corrected.items() if s >= switch_step})
+    return sorted(merged.items())
 
 
 def load_mds(subdir: str, task: str, metric: str) -> list[tuple[int, float]]:
@@ -225,8 +302,16 @@ def main() -> None:
 
     for ax, (task, metric, title) in zip(axes, PANELS):
         for traj in TRAJECTORIES:
-            loader = load_mds if traj["layout"] == "mds" else load_dcp
-            pts = loader(traj["eval_subdir"], task, metric)
+            if traj["layout"] == "mds":
+                pts = load_mds(traj["eval_subdir"], task, metric)
+            else:
+                pts = load_dcp(
+                    traj["eval_subdir"],
+                    task,
+                    metric,
+                    traj.get("corrected_subdir"),
+                    traj.get("switch_step"),
+                )
             if not pts:
                 print(f"  [{title}] no data for {traj['label']}")
                 continue
