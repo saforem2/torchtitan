@@ -47,7 +47,7 @@ from torchtitan.config import (
 )
 from torchtitan.distributed import ParallelDims
 from torch.distributed.fsdp import DataParallelMeshDims
-from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh
+from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh, validate_config
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
@@ -141,7 +141,15 @@ def parallelize_moe(
     # dense (attention, dense FFN) and MoE (router, shared/routed experts)
     # submodules. ``GroupedExperts.parallelize`` additionally wires the
     # EP/TP meshes onto the token dispatcher.
-    if parallel_dims.tp_enabled or parallel_dims.ep_enabled:
+    # 79th sync (#4085): under full_dtensor/spmd_types this must run
+    # UNCONDITIONALLY -- it is what makes the params DTensors on the SPMD mesh,
+    # which resolve_fsdp_mesh's DataParallelMeshDims then requires. Gating on
+    # tp/ep (right for the legacy backend) leaves plain tensors when both are
+    # off. Core: llama3/parallelize.py:42-53.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        validate_config(parallel_dims, model)
+        model.parallelize(parallel_dims)
+    elif parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         model.parallelize(parallel_dims)
 
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is

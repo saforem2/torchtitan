@@ -41,7 +41,7 @@ import os
 
 from torchtitan.distributed import ParallelDims
 from torch.distributed.fsdp import DataParallelMeshDims
-from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh
+from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh, validate_config
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
@@ -117,18 +117,29 @@ def parallelize_llama(
 
     # CP: wrap inner attention forward BEFORE parallelize() so CP logic
     # runs inside the local_map boundary on local tensors.
-    if parallel_dims.cp_enabled:
-        apply_cp_to_forward(
-            [block.attention.inner_attention for block in model.layers.values()],
-            parallel_dims.get_mesh("cp"),
-        )
-
-    # TP via the config-based sharding API. The model's sharding_config
-    # declarations were filled in by update_from_config (see model.py).
-    # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
-    # bare tp_mesh) so each Module can resolve its own SPMD submesh.
-    if parallel_dims.tp_enabled:
+    # 79th sync (#4085): under full_dtensor/spmd_types, model.parallelize()
+    # must run UNCONDITIONALLY -- it is what turns the parameters into DTensors
+    # on the SPMD mesh. Gating it on tp_enabled (correct for the legacy
+    # backend) leaves plain tensors at TP=1, and resolve_fsdp_mesh's
+    # DataParallelMeshDims then rejects them:
+    #   ValueError: When dp_mesh_dims is provided, all parameters must be
+    #   DTensors on the full SPMD mesh ... Got plain tensor for param
+    # Core does exactly this split (llama3/parallelize.py:42-53).
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        validate_config(parallel_dims, model)
         model.parallelize(parallel_dims)
+    else:
+        if parallel_dims.cp_enabled:
+            apply_cp_to_forward(
+                [block.attention.inner_attention for block in model.layers.values()],
+                parallel_dims.get_mesh("cp"),
+            )
+        # TP via the config-based sharding API. The model's sharding_config
+        # declarations were filled in by update_from_config (see model.py).
+        # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
+        # bare tp_mesh) so each Module can resolve its own SPMD submesh.
+        if parallel_dims.tp_enabled:
+            model.parallelize(parallel_dims)
         # 78th sync (#4045): the maybe_enable_async_tp call that used to live
         # here is gone -- apply_compile now enables async TP itself from
         # parallel_dims. Calling it here would be an ImportError (the symbol
