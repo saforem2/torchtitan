@@ -570,7 +570,15 @@ class ProdDashApp(App):
         if self.xaxis == "tokens":
             if not toks_per_step:
                 return None  # can't place a no-gbs experiment on a tokens axis
-            xs = [p[0] * toks_per_step / 1e9 for p in series]
+            # Offset by tokens consumed BEFORE this chain's step 1. A stage-2
+            # chain restarts its step counter at 1 (correct -- steps are
+            # per-chain) but its weights already carry the seed run's tokens,
+            # so on a CUMULATIVE axis it must start where the parent ended.
+            # `or 0` leaves every other chain bit-identical, including the
+            # constlr fork, which kept the parent's step numbering and would
+            # DOUBLE-COUNT if offset. Same expression as prod_dash.draw_curves.
+            prior_b = (c.get("prior_tokens") or 0) / 1e9
+            xs = [prior_b + p[0] * toks_per_step / 1e9 for p in series]
         else:
             xs = [float(p[0]) for p in series]
         ys = [p[1] for p in series]

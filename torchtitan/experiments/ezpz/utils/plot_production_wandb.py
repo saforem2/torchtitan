@@ -89,7 +89,9 @@ def _savefig_both(fig, svg_path, dpi=200):
 # trajectories.py — that single edit updates the charts, the stale-doc
 # map, the field-filler, and the eval plots together.
 from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    OLMO_MIX_1124_TOKENS,
     PRODUCTION_RUNS,
+    by_key,
 )
 
 # The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
@@ -326,6 +328,8 @@ def plot_tokens_vs_time(
     model_name: str,
     num_nodes: int,
     output_path: Path,
+    prior_tokens: float = 0.0,
+    token_target: float = OLMO_MIX_1124_TOKENS,
 ) -> Path:
     """Cumulative tokens vs wall-clock datetime.
 
@@ -351,6 +355,12 @@ def plot_tokens_vs_time(
     # up to the previous best produce dips. Take the running max so the
     # curve stays monotonic non-decreasing.
     tokens = np.maximum.accumulate(tokens)
+    # A stage-2 chain's logged `n_tokens_seen` ALSO restarts at 0: the trainer
+    # zeroes it and only train_state persists it, while
+    # --checkpoint.initial-load-path defaults to initial_load_model_only=True,
+    # so the seed run's count is never restored. Shift past what the seed
+    # checkpoint already consumed. Non-stage-2 chains pass 0 and are unchanged.
+    tokens = tokens + prior_tokens
 
     times = [datetime.fromtimestamp(t, tz=timezone.utc) for t in ts]
 
@@ -358,7 +368,11 @@ def plot_tokens_vs_time(
     ax.plot(times, tokens / 1e9, color=color, linewidth=1.8)
 
     final_tokens_b = tokens[-1] / 1e9
-    target_b = 4670  # 4.67T tokens
+    # Was a hardcoded `4670`, a drifting duplicate of OLMO_MIX_1124_TOKENS that
+    # was ALSO wrong for stage-2 chains: it divided an increment-frame numerator
+    # by a cumulative-frame denominator (dolmino read "14.7%", correct in
+    # neither frame). Both sides are now cumulative and per-chain.
+    target_b = (prior_tokens + token_target) / 1e9
     pct = 100 * final_tokens_b / target_b
 
     ax.set_xlabel("Date")
@@ -583,11 +597,17 @@ def main() -> None:
             cfg["num_nodes"],
             out_dir / f"training_diagnostics_{key}n.svg",
         )
+        # PRODUCTION_RUNS is a legacy projection that drops prior_tokens /
+        # token_target (and is asserted byte-for-byte in tests), so read the
+        # full trajectory record for them.
+        _traj = by_key(key)
         plot_tokens_vs_time(
             data,
             model_name,
             cfg["num_nodes"],
             out_dir / f"tokens_vs_time_{key}n.svg",
+            prior_tokens=_traj.get("prior_tokens") or 0,
+            token_target=_traj.get("token_target") or OLMO_MIX_1124_TOKENS,
         )
 
 
