@@ -836,10 +836,33 @@ def fetch(stderr_cb=None) -> dict:
             except Exception:
                 pass
     if not LOCAL:
+        # Report what we OBSERVED, then rank causes by likelihood -- do not
+        # assert one. The previous text blamed a dead ControlMaster socket
+        # unconditionally, which sent a real 8m20s diagnosis (2026-08-19) off
+        # after `ssh -MNf` while the socket was healthy the whole time and the
+        # actual cause was multi-GB crash-spew .o logs stalling parse_olog.
+        # It also interpolated SOCK, which is EMPTY by default, emitting the
+        # broken command `ssh -MNf -S  aurora`.
+        tail = (stdout_text or "").strip()
+        detail = ("  (aggregator stdout was empty)" if not tail
+                  else "  last stdout line: %s" % tail.splitlines()[-1][:200])
+        sock_hint = ("    ssh -MNf -S %s %s\n" % (SOCK, SSH_TGT) if SOCK
+                     else "    ssh -O check %s   # then: ssh -fN %s\n"
+                          % (SSH_TGT, SSH_TGT))
         sys.stderr.write(
-            "prod_dash: no JSON from aggregator. If the ssh master socket %s is "
-            "dead, BatchMode refuses to prompt (fails fast by design) -- recreate "
-            "it with:\n    ssh -MNf -S %s %s\n" % (SOCK, SOCK, SSH_TGT)
+            "prod_dash: no JSON from aggregator.\n"
+            "%s\n"
+            "Likely causes, cheapest check first:\n"
+            "  1. The aggregator is SLOW, not broken -- a huge .o log makes\n"
+            "     parse_olog scan for minutes. Find the big ones:\n"
+            "       ssh %s \"du -sh %s/logs/*/trainer-*.console.log | sort -h | tail -3\"\n"
+            "     Current per-file cap: EZPZ_OLOG_MAX_BYTES=%d bytes.\n"
+            "  2. Cold backbone build exceeded PD_SSH_TIMEOUT=%ds -- raise it.\n"
+            "  3. SSH really is down. Verify before assuming:\n"
+            "%s"
+            % (detail, SSH_TGT, REPO,
+               int(os.environ.get("EZPZ_OLOG_MAX_BYTES", 256 * 1024 * 1024)),
+               int(SSH_TIMEOUT), sock_hint)
         )
     else:
         sys.stderr.write("prod_dash: no JSON from aggregator\n")
