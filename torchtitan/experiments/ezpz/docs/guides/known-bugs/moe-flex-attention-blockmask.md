@@ -99,7 +99,23 @@ list, so it re-runs the router and is free to route differently.
 AC-off is not a workaround: it pushes memory to 89% and dies on level_zero
 error 40 (resource exhaustion -- events/command lists, not memory).
 
-**Guidance: flex MoE configs should use `MoeSelectiveAC`, not `FullAC`.**
+**This is now the shipped default** (`8a8847c56`): `moe_small` and
+`moe_10b_2b` pass `activation_checkpoint_mode="selective"`. The `_sdpa`
+siblings keep `full`, because they pass 5/5 with it -- they were not changed
+for symmetry.
+
+## Final state (job 12473388, 2N, 5 steps, defaults only)
+
+| config | steps | memory | |
+|---|---|---|---|
+| `moe_small` | 5/5 | 72.64% | **PASS** |
+| `moe_10b_2b` | 5/5 | 79.95% | **PASS** |
+| `moe_10b_2b_sdpa` | 5/5 | 74.05% | PASS (control) |
+| `moe_10b_2b_sdpa_bmm` | 5/5 | 94.54% | PASS (control) |
+
+Both flex configs now work with no flags. The two SDPA controls report the
+same memory as before the change (74.05% and 94.54%), which is the evidence
+that the maskless path was not perturbed.
 
 ## Verifying
 
