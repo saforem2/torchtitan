@@ -197,8 +197,6 @@ def _scatter_add_1d_forward_or_autograd(
     return deterministic_scatter_add_(out, scatter_index, src)
 
 
-@dataclass(frozen=True, kw_only=True)
-
 def _tp_axis_present(ep_mesh) -> bool:
     """Whether the mesh this dispatcher was wired with sits under a TP axis.
 
@@ -218,6 +216,7 @@ def _tp_axis_present(ep_mesh) -> bool:
         return False
 
 
+@dataclass(frozen=True, kw_only=True)
 class LocalDispatchMetadata:
     """Metadata returned by LocalTokenDispatcher.dispatch() for use in combine()."""
 
