@@ -126,6 +126,41 @@ Running log of what's happening, session by session. Most recent first.
     flag guards against.
   - **Confound to carry into the writeup:** the fork differs from canonical in
     BOTH the LR schedule and the RoPE convention.
+- **The offset audit found 2 MORE plotters, and one was on a Y axis.** Fixing
+  prod_dash + the web view was not enough. A fan-out over all 6 tokens-axis
+  files (`8f4a60d8d`): `prod_dash_app.py` (the TUI) read the same payload as the
+  SVG path and never used `prior_tokens`; `plot_production_wandb.py` plots
+  cumulative tokens on the **Y** axis vs wall-clock, which a grep for x-axis
+  token math never surfaces. `plot_production_combined.py` was already correct
+  via its own `token_offset_b`; both `plot_eval_overview.py` omit dolmino.
+  - That file's bug has a DIFFERENT mechanism, same outcome: it never derives
+    tokens from steps, it reads the logged `n_tokens_seen` -- which ALSO
+    restarts at 0 for stage 2, because the trainer zeroes it, only
+    `train_state` persists it, and `--checkpoint.initial-load-path` defaults to
+    `initial_load_model_only=True`.
+  - It also hardcoded `target_b = 4670`, a drifting duplicate of
+    `OLMO_MIX_1124_TOKENS`. For dolmino that divided an increment-frame
+    numerator by a cumulative-frame denominator: the committed SVG read
+    "684.4B (14.7% of 4.67T)", correct in NEITHER frame.
+  - A SECOND hardcoded 4.67T then survived in the title f-string, so the chart
+    briefly read "77.2% of 4.67T" while dividing by 7.06T -- worse than the
+    original, because it looks self-consistent (`038a670e5`).
+  - Final, verified per chart (`97fa40ed0`): dolmino **5,451.9B (77.2% of
+    7.06T)** = 778.1B logged + 4,673.8B prior. The two COMPLETED 2B chains also
+    moved **100.1% -> 100.0%**; that 0.1 was the 4670 literal being ~3.8B short
+    of the real constant, and "100.1% of target" on a finished run invites the
+    wrong question.
+- **Three false readings today, one root cause: a verifier that under-matches.**
+  (1) `[0-9.]*B` against "5,451.9B" captured "451.9B" -- no comma in the class
+  -- so a correct fix looked like it had made the number SMALLER, and several
+  turns went into hunting a bug in working code. (2) Grepping
+  `outputs/evals/agpt-2b-ropefix-*` when the dirs are `agpt-20b-*` returned zero
+  and got two healthy jobs called "concerning". (3) A regen that died with
+  `ModuleNotFoundError` (needs `PYTHONPATH=$PWD`) still exited 0; only the
+  unchanged SVG title revealed it. Rule: confirm the checker matches a string
+  you have SEEN before trusting the number it returns.
+- **Capacity is 70 queued / 16 running**, which is why `8766898` has not
+  started -- not the two ropefix jobs, as first guessed.
 - **Umbrella `8764675` still queued** behind the `at_queue=lustre_scaling`
   stall; the 20B constant-LR fix (`b08fccfd1`) rides on it.
 - Still open: the 906 GB reclaim decision on the two mixed ckpt dirs (no
