@@ -40,6 +40,8 @@ from torchtitan.config import (
 import os
 
 from torchtitan.distributed import ParallelDims
+from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
@@ -157,8 +159,22 @@ def parallelize_llama(
     if skip_dp:
         return model
 
-    names = ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-    dp_mesh = parallel_dims.get_mesh(names)
+    # 79th sync: upstream #4085 made spmd_types the DEFAULT spmd_backend, and
+    # under spmd_types/full_dtensor there IS no flattened "fsdp" mesh axis --
+    # the dense mesh is ["pp", "dp", "cp", "tp"] and dp_shard is the DP storage
+    # axis (parallel_dims.py:236-238). Asking for "fsdp" now raises
+    #   ValueError: Invalid mesh dim: 'fsdp'
+    # which VOIDed every ezpz arm post-merge. Core added resolve_fsdp_mesh()
+    # for exactly this and branches on the backend (llama3/parallelize.py:71);
+    # mirror that here rather than hardcoding either name.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+    else:
+        names = (
+            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
+        )
+        dp_mesh = parallel_dims.get_mesh(names)
+        dp_mesh_dims = None
 
     # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
     # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16
@@ -182,6 +198,7 @@ def parallelize_llama(
     apply_fsdp(
         model,
         dp_mesh,
+        dp_mesh_dims=dp_mesh_dims,
         param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
         reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
         pp_enabled=parallel_dims.pp_enabled,
@@ -247,6 +264,7 @@ def apply_fsdp(
     cpu_offload: bool = False,
     reshard_after_forward_policy: str = "default",
     separate_fsdp_modules: list[nn.Module] | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     """FSDP2 with the same per-block grouping as upstream llama3.
 
@@ -268,6 +286,12 @@ def apply_fsdp(
         cast_forward_inputs=False,
     )
     fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+    # Under full_dtensor/spmd_types the storage mesh is multi-axis, so
+    # fully_shard needs to be told WHICH axes are data-parallel; core passes
+    # the same thing (distributed/fsdp.py:106). None under the legacy backend,
+    # where the flattened fsdp axis already encodes it.
+    if dp_mesh_dims is not None:
+        fsdp_config["dp_mesh_dims"] = dp_mesh_dims
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
 

@@ -46,6 +46,8 @@ from torchtitan.config import (
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
+from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
@@ -168,10 +170,18 @@ def parallelize_moe(
             block.compile(backend=compile_config.backend)
             model.layers.register_module(layer_id, block)
 
-    dp_mesh_names = (
-        ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-    )
-    dp_mesh = parallel_dims.get_mesh(dp_mesh_names)
+    # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
+    # spmd_types/full_dtensor there is no flattened "fsdp" mesh axis -- asking
+    # for it raises ValueError: Invalid mesh dim: 'fsdp'. Mirror core's
+    # backend branch (llama3/parallelize.py:71) instead of hardcoding a name.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+    else:
+        dp_mesh_names = (
+            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
+        )
+        dp_mesh = parallel_dims.get_mesh(dp_mesh_names)
+        dp_mesh_dims = None
 
     edp_mesh = None
     if parallel_dims.ep_enabled:
@@ -192,6 +202,7 @@ def parallelize_moe(
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
         ep_degree=parallel_dims.ep,
         edp_mesh=edp_mesh,
+        dp_mesh_dims=dp_mesh_dims,
     )
 
     if parallel_dims.dp_replicate_enabled:
@@ -226,6 +237,7 @@ def apply_fsdp(
     reshard_after_forward_policy: str = "default",
     ep_degree: int = 1,
     edp_mesh: DeviceMesh | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -233,6 +245,12 @@ def apply_fsdp(
         cast_forward_inputs=False,
     )
     fsdp_config: dict[str, Any] = {"mesh": dp_mesh, "mp_policy": mp_policy}
+    if dp_mesh_dims is not None:
+        # Multi-axis storage mesh under full_dtensor/spmd_types: fully_shard
+        # must be told which axes are data-parallel (core does the same, see
+        # distributed/fsdp.py:106). None under the legacy backend, where the
+        # flattened "fsdp" axis already encodes it.
+        fsdp_config["dp_mesh_dims"] = dp_mesh_dims
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
 
