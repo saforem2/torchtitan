@@ -229,45 +229,35 @@ def moe_debugmodel_flex_attn_hf() -> FaultTolerantTrainer.Config:
 
 
 def moe_small() -> FaultTolerantTrainer.Config:
-    return moe("small", local_batch_size=8)
+    # Selective, not the "full" default: this is a flex-attention config, and
+    # FullAC re-runs the MoE router on the recompute pass, which reassigns
+    # tokens (560 vs 559) and trips CheckpointError before step 1.
+    # MoeSelectiveAC keeps aten.topk.default as MUST_SAVE, which is exactly
+    # the invariant that keeps expert assignments stable. Measured 2N:
+    # full 0/5, none 2/5 (89% mem -> level_zero 40), selective 5/5 at 72.73%.
+    return moe("small", local_batch_size=8, activation_checkpoint_mode="selective")
 
 
 def moe_small_noac() -> FaultTolerantTrainer.Config:
-    """moe_small with AC off -- isolates the FullAC recompute mismatch.
+    """moe_small with AC OFF -- the control for the AC comparison.
 
-    With flex attention now receiving a BlockMask (blendcorpus emits
-    per-document positions), moe_small reaches step 1 and then dies in
-    FullAC recompute: the MoE router assigns a different number of routed
-    tokens on the recompute pass than on the forward (560 vs 559), so the
-    saved and recomputed activations disagree and CheckpointError fires.
-    AC off removes recompute entirely, so this arm says whether routing
-    nondeterminism is the whole remaining story.
+    moe_small itself now uses selective AC, which is what actually works.
+    This arm exists to show that AC-off is not an alternative: with no
+    recompute the memory goes to 89.31% and the run dies at step 2 on
+    level_zero error 40 (resource exhaustion), versus selective's 5/5 at
+    72.73%. Keep it so the next person does not "simplify" the flex configs
+    by turning AC off.
     """
     return moe("small", local_batch_size=8, activation_checkpoint_mode="none")
 
 
-def moe_small_selac() -> FaultTolerantTrainer.Config:
-    """moe_small with MoeSelectiveAC instead of FullAC.
-
-    SelectiveAC keeps aten.topk.default as MUST_SAVE ("topk can be
-    non-deterministic; save to keep MoE expert assignments stable between
-    forward and recompute" -- activation_checkpoint.py:52), which is exactly
-    the property FullAC lacks. If this passes while `full` fails, the save
-    list is the fix and the production MoE configs should not use FullAC.
-    """
-    return moe("small", local_batch_size=8, activation_checkpoint_mode="selective")
-
-
 def moe_10b_2b_noac() -> FaultTolerantTrainer.Config:
-    """moe_10b_2b with AC off. See moe_small_noac."""
+    """moe_10b_2b with AC OFF -- control. See moe_small_noac.
+
+    Same story at production shape: 0/5 with AC off versus 5/5 with
+    selective.
+    """
     cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="none")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    return cfg
-
-
-def moe_10b_2b_selac() -> FaultTolerantTrainer.Config:
-    """moe_10b_2b with MoeSelectiveAC. See moe_small_selac."""
-    cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="selective")
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     return cfg
 
@@ -428,7 +418,11 @@ def moe_2b_ep() -> FaultTolerantTrainer.Config:
 
 
 def moe_10b_2b() -> FaultTolerantTrainer.Config:
-    cfg = moe("10B_2B", local_batch_size=1)
+    # selective AC for the same reason as moe_small: this is the flex variant,
+    # and FullAC's router recompute is not stable. Measured 2N: full 2/5,
+    # none 0/5, selective 5/5 at 79.95%. The _sdpa siblings keep the "full"
+    # default -- they pass with it, so they are left alone.
+    cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="selective")
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
