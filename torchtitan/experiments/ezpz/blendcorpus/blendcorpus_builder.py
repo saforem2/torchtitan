@@ -164,6 +164,20 @@ class BlendCorpusDataLoader(BaseDataLoader):
                 )
                 train_iters = 1
 
+        # Resolve the EOD id ONCE, here, and keep it on self. Reading it back
+        # off the round-tripped blendcorpus config (bc_get_config()) is not
+        # reliable: that object is owned by the blendcorpus library and is not
+        # guaranteed to carry this field, in which case a getattr default
+        # silently yields None and flex attention loses its BlockMask.
+        _resolved_eod = (
+            int(config.eod_token_id)
+            if config.eod_token_id is not None
+            else getattr(tokenizer, "eos_id", None)
+        )
+        self._eod_token_id = (
+            int(_resolved_eod) if _resolved_eod is not None else None
+        )
+
         bc_cfg = SimpleNamespace(
             data_file_list=config.dataset_path,
             seq_length=seq_len,
@@ -190,11 +204,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
             blend_sample_in_corpus=bool(config.blend_sample_in_corpus),
             append_eod=bool(config.append_eod),
             provide_attention_mask=bool(config.provide_attention_mask),
-            eod_token_id=(
-                int(config.eod_token_id)
-                if config.eod_token_id is not None
-                else getattr(tokenizer, "eos_id", None)
-            ),
+            eod_token_id=_resolved_eod,
             data_cache_path=os.path.abspath(config.data_cache_path),
         )
         os.makedirs(bc_cfg.data_cache_path, exist_ok=True)
@@ -355,11 +365,12 @@ class BlendCorpusDataLoader(BaseDataLoader):
 
         Returns None when the EOD id is unknown, so the caller omits the key
         and the maskless (SDPA) path behaves exactly as before rather than
-        silently receiving wrong positions.
+        silently receiving wrong positions. The id is resolved once in
+        __init__ and stored on self, because the blendcorpus config object
+        this loader gets back from bc_get_config() is not guaranteed to
+        carry the field.
         """
-        # The loader keeps the blendcorpus config as _bc_cfg (line ~260);
-        # there is no _eod_token_id attribute. Read it from there.
-        eod = getattr(getattr(self, "_bc_cfg", None), "eod_token_id", None)
+        eod = getattr(self, "_eod_token_id", None)
         if eod is None:
             return None
 
