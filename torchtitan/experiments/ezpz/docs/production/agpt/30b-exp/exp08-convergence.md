@@ -128,6 +128,28 @@ been directly observed yet. The step-250 checkpoint it loaded was itself
 written by the compiled run, so the save path is not in doubt -- but
 confirming it end-to-end wants a longer walltime.
 
+## Update 2026-08-20: past the old ceiling, on the repinned backend
+
+Job 12473476 resumed from step-400 and is the first 30B run under the
+`partial_dtensor` repin (`b2ff09632`), which also makes it the first
+production-length validation of that change.
+
+| step | loss |
+|-----:|-----:|
+| 401 | 3.698 |
+| 441 | 3.523 |
+| 481 | 3.332 |
+| 521 | 3.208 |
+| 541 | 3.127 |
+
+Monotone, no plateau, grad_norm 0.48-0.79, memory flat at 59.84%. It is past
+the previous 531-step ceiling with a step-500 checkpoint on disk, so the
+save path works under the new pin too.
+
+The config dump confirms `"spmd_backend": "partial_dtensor"` -- the same code
+path every earlier trajectory ran under its old name `"default"`, so this is
+continuity rather than a new regime.
+
 ## Verdict
 
 The 30B config trains and its checkpoints are sound. The open item is
