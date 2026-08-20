@@ -85,8 +85,21 @@ spmd_dense_mesh dims=('dp','cp','tp') sizes=[12, 1, 1]
 `dp` is 12, but it is declared `Replicate` for this parameter, so it is not
 in `axis_shard_dims` and does not save the conversion.
 
-Reproduced on stock `llama3 debugmodel` with no custom model code, so this is
-not specific to a downstream model.
+### Clean A/B on core llama3, core trainer, no downstream code
+
+`torchtitan.train --module llama3 --config llama3_debugmodel`, FSDP-only
+(TP=1), 8 ranks, same binary and launcher, changing ONLY the backend
+(job 12473444):
+
+| backend | steps | result |
+|---|---|---|
+| `partial_dtensor` | 8 | **PASS** |
+| `spmd_types` | 0 | `Got plain tensor for parameter 'weight'` |
+
+This is upstream's own default model config in its FSDP-only shape -- the
+same shape `tests/integration_tests/run_tests.py` uses by default
+(`--module` defaults to `llama3_debugmodel`) and that `features.py` covers
+with tests like `1d_compile` and `fsdp_reshard_always`.
 
 ### Suggested fix
 
@@ -103,8 +116,26 @@ caller could wrap when the result is not already a DTensor.
 - #4085, which made `spmd_types` the default, touched deepseek_v3 /
   kimi_k2_7 / qwen3_5 but not llama3
 
-TP>1 configurations would not hit it for `tok_embeddings` (the `tp` axis is
-then live), which may be why it survives the sharded test paths.
+Note the `models.py` suite is entirely `+tp` / `+ep` -- every entry
+(`deepseek_v3_hsdp+ep`, `qwen3_5_moe_fsdp+tp+ep+pp`,
+`muse_glimmer_mm_fsdp+tp+sp`, ...) has a live shard axis, so
+`tok_embeddings.weight` converts there. The FSDP-only coverage lives in
+`features.py`, which is where this should surface.
+
+Also checked and NOT the explanation:
+
+- **Activation checkpointing.** `_configure_spmd_backend_and_typechecking`
+  appends `activation-checkpoint:none` to spmd_types runs, so I tested AC
+  none / full / selective at TP=1 and TP=2 (job 12473441). All five arms fail
+  identically. AC is irrelevant here.
+- **A newer PyTorch.** The raise is at
+  `torch/distributed/fsdp/_fully_shard/_fsdp_param.py`, introduced by
+  pytorch `da19cbd78` (#181519, 2026-06-23). **pytorch main still contains
+  the identical check** (verified against the current file on main), and the
+  only commit touching that file since our 2026-08-02 build is `f0152d66f`
+  (#194114, all-gather output release), which is unrelated. So this is not
+  something a torch nightly fixes -- the check is deliberate, and the
+  expectation is that torchtitan hands FSDP DTensors.
 
 ---
 
