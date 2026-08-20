@@ -224,17 +224,31 @@ def _series_from_records(records):
     return out
 
 # The v1 MDS (Megatron-DeepSpeed) reference chain. It is FROZEN -- 154,391
-# iterations, finished long ago -- and lives in a DIFFERENT W&B project, so it
-# is read from the committed CSV instead of a cross-project scan_history. That
-# also means it costs no W&B calls on every backbone rebuild.
+# iterations, finished long ago -- and lives in a DIFFERENT W&B project
+# (MDS_PROJECT = aurora_gpt/AuroraGPT, keys renamed by MDS_KEY_ALIASES:
+# `lm-loss-training/lm loss` etc). It is read from the committed CSV instead
+# of a cross-project scan_history: that project holds 8,098 runs and this
+# chain spans 42 of them, for a curve that can never change again.
+#
+# The CSV is a FAITHFUL dump, not an approximation -- verified 2026-08-20
+# against W&B run ov1dn10t: 1242/1242 loss values identical to the last bit,
+# 0 differing, 0 missing. Prefer W&B only if the CSV is ever suspected stale.
 MDS_CSV = os.path.join(
     REPO, "torchtitan/experiments/ezpz/docs/production/agpt/2b-mds",
     "loss_data/train_metrics.csv")
 # tokens/iter is CONSTANT across all 3 MDS stages: GBS 6144 x seq 8192.
-# Do NOT use the 7770e9/140000 (~55.5M) figure that still appears in
-# docs/evals/agpt/2b/plot_eval_overview.py -- it mis-scales the curve to a
-# phantom 8.569T endpoint. 6144*8192 reproduces the real stage boundaries
-# exactly: iter 92,859 -> 4.674T and 154,391 -> 7.771T.
+#
+# CONFIRMED BIT-EXACT against W&B's own logged `consumed_train_tokens`
+# (aurora_gpt/AuroraGPT, alias `lm-loss-training/consumed_train_tokens`):
+# at step 154,391 W&B logs 7,770,753,466,368 tokens, and
+# 154391 * 6144 * 8192 == 7,770,753,466,368 exactly. Sampled across three runs
+# spanning the whole chain (jmxwb00s step 1-172, 5w7wqr9n 149751-153150,
+# ov1dn10t 153151-154391) the implied tokens/step is 50,331,648.0 at EVERY
+# point. Not an inference -- the run logged it.
+#
+# Do NOT use the 7770e9/140000 (~55.5M) figure: it divides the budget by
+# 140,000 steps when the run reached it at 154,391, overshooting the endpoint
+# by 798B. (Fixed in the three eval plotters, commit aec112640.)
 MDS_GBS, MDS_SEQ = 6144, 8192
 # CSV column -> canonical metric key. mfu is absent from the CSV (Megatron did
 # not log it), so the MFU tab simply has no MDS curve; lr likewise.
