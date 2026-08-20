@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | -- | pending (first attempt void) |
+| TP=2 | 20/20 | **spmd_types CRASHES** -- see below |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -188,8 +188,40 @@ on the same build are fully deterministic. A dedicated sweep
 build, recording the first divergent step per cell so that "data/init
 differs" (step 1) and "kernels accumulate" (later) can be told apart.
 
-Conclusion so far: the backends agree wherever the comparison is resolvable,
-which is not yet everywhere.
+### `spmd_types` + TP>1 is broken upstream (second, independent bug)
+
+At TP=2 both `partial_dtensor` controls run 20/20, and `spmd_types` produces
+**zero steps**:
+
+```
+TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'
+  torchtitan/components/loss.py:134, in _LossParallelCrossEntropy.forward
+```
+
+`cross_entropy_loss` has two branches that both call
+`_LossParallelCrossEntropy.apply`, and they are not equivalent
+(`components/loss.py:42-57`):
+
+```python
+if isinstance(pred, DTensor):            # partial_dtensor
+    ...apply(..., pred.shape[-1], "sum")             # vocab size computed inline
+elif get_spmd_backend() == "spmd_types" and spmd_mesh_size("tp") > 1:
+    ...apply(..., global_vocab_size)                 # forwarded, and never set
+```
+
+`global_vocab_size` defaults to `None` and **no caller in the tree passes
+it**, so the spmd branch hands `None` into
+`chunk_size = (global_vocab_size + tp_world_size - 1) // tp_world_size`.
+The DTensor branch is fine only because it never uses the parameter. (The
+spmd branch also omits the `"sum"` reduction the other passes.)
+
+Confirmed present on `upstream/main`, so a sync does not fix it. This is
+**independent of the missing-FSDP-consumer problem** -- that one needs a
+newer torch, this one is a torchtitan bug that would bite on any torch.
+
+Conclusion so far: where `spmd_types` runs at all, it is numerically
+identical to `partial_dtensor`. But it does not yet run at TP>1 on any torch,
+and multi-node remains unresolved.
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
