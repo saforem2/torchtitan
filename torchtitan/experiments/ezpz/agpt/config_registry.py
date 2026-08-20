@@ -236,6 +236,25 @@ def agpt(
     # partial_dtensor is the supported fallback and what upstream itself
     # pins for its rl+hf CI suites (b64d3f6a9, #4228).
     cfg.parallelism.spmd_backend = "partial_dtensor"
+
+    # spmd_types loss-parallel CE needs the full vocab size, and it is the
+    # caller's job to supply it: CrossEntropyLoss.Config declares
+    #   global_vocab_size: int | None = None
+    #   """Full vocabulary size, needed for spmd_types loss-parallel CE."""
+    # The partial_dtensor/DTensor branch derives it from pred.shape[-1] and
+    # never reads the field, which is why leaving it unset has been harmless
+    # so far. Under spmd_types at TP>1 the unset None reaches
+    #   chunk_size = (global_vocab_size + tp_world_size - 1) // tp_world_size
+    # and the run dies with "unsupported operand type(s) for +: NoneType and
+    # int" (components/loss.py:134) before step 1.
+    #
+    # Read it off the model spec rather than hardcoding, so the flavors that
+    # differ (gemma 256128, Llama-3 128256, OLMo-2 100352) stay correct and
+    # cannot drift from the model. Guarded because not every loss Config has
+    # the field -- ChunkedLossWrapper, set by some configs below, does not.
+    _vocab = getattr(getattr(cfg.model_spec, "model", None), "vocab_size", None)
+    if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
+        cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
