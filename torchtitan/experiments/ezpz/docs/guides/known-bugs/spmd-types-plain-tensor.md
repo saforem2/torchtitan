@@ -45,11 +45,19 @@ Confusingly, `torch.distributed._is_spmd_types_available` DOES exist in our
 build (`distributed/__init__.py:31`) -- the availability hook shipped, the
 FSDP consumer did not. So "the symbol exists" is not evidence the path does.
 
-**Consequence:** `spmd_types` cannot work on this stack regardless of what
-torchtitan or ezpz do. It needs a torch containing `da19cbd78`. Our build is
-`pytorch_2.13.0_patched_08_02_2026` -- Aug 2, which should postdate a Jun 23
-commit, so the patched Aurora build is presumably branched from an older base
-than its name suggests. Worth confirming with whoever builds it.
+**Consequence:** `spmd_types` cannot work on the shipped stack regardless of
+what torchtitan or ezpz do. It needs a torch containing `da19cbd78`.
+
+**PROVEN 2026-08-20** (job 12473463): with `torch 2.14.0.dev20260722+xpu` in
+an otherwise identical venv, `spmd_types` runs **3/3** where the shipped
+2.13 gives 0/3 with `params-not-DTensors`. See
+[spmd-types-newer-torch-attempt.md](./spmd-types-newer-torch-attempt.md) for
+the working recipe and the narrow window of usable nightlies.
+
+Note our build is named `pytorch_2.13.0_patched_08_02_2026` -- Aug 2, which
+should postdate a Jun 23 commit -- so the patched Aurora build is presumably
+branched from an older base than its name suggests. Worth raising with
+whoever builds it, since it likely affects more than this one path.
 
 **Nothing to file upstream.** The draft issue at
 `docs/upstream-issues/spmd-types-plain-tensor-issue.md` should NOT be filed:

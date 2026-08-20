@@ -1,8 +1,55 @@
 # Trying a newer XPU torch against `spmd_types` (2026-08-20)
 
-**Outcome: INCONCLUSIVE.** The nightly installs and runs, but I did not get a
-clean A/B. Recording it so the next attempt starts from the working parts
-instead of rediscovering them.
+**Outcome: CONFIRMED.** A newer XPU torch fixes `spmd_types`. Same venv, same
+config, same command -- only torch differs:
+
+| torch | backend | steps | result |
+|---|---|---|---|
+| **2.14.0.dev20260722+xpu** | `spmd_types` | **3/3** | **PASS** |
+| 2.14.0.dev20260722+xpu | `partial_dtensor` | 3/3 | PASS |
+| 2.13.0a0+gitcf30153 (shipped) | `spmd_types` | 0/3 | `params-not-DTensors` |
+
+Job 12473463. The version hypothesis is proven: `spmd_types` needs the FSDP
+consumer added by pytorch `da19cbd78` (2026-06-23), which our build lacks.
+
+## How to reproduce the working env
+
+`venvs/rc-plus-nightly` is a byte copy of `venvs/fw-2026.1-rc2` with the
+nightly installed INTO it. Three things had to be right:
+
+1. **Clone the working venv, do not build one.** The working venv has
+   `include-system-site-packages = true` and inherits torch from the RC4
+   conda env; a from-scratch venv loses the launcher wiring and dies with
+   mpiexec `error parsing parameters`. Cloning keeps ezpz 0.24.3 and every
+   dep intact.
+2. **Repoint the console-script shebangs** (45 of them) at the clone's
+   python, or every launched command silently runs the old venv.
+3. **`pip install --ignore-installed`**, since pip otherwise sees the
+   inherited conda torch as already satisfying the requirement and no-ops.
+
+## Picking the nightly: three constraints, not one
+
+Not every nightly works. The usable window is narrow:
+
+| nightly | imports | consumer | inductor | |
+|---|---|---|---|---|
+| dev20260701 | yes | yes | broken | no |
+| dev20260708 | yes | yes | broken | no |
+| dev20260715 | yes | yes | broken | no |
+| **dev20260722** | **yes** | **yes** | **ok** | **USABLE** |
+| dev20260729+ | -- | yes | -- | needs `libpti_view.so.1` |
+| dev20260820 | -- | yes | -- | needs `libpti_view.so.1` |
+
+- **Too old** (before 2026-06-23): no FSDP consumer, same failure as ours.
+- **Too new** (2026-07-29 onward): links `libpti_view.so.1`, and this system
+  has only `.so.0` (checked everywhere under `/opt/aurora`). `libtorch_cpu.so`
+  hard-links it, so torch will not import at all.
+- **Mid-July**: an inductor regression -- `torch._inductor` imports
+  `tensorssa_reduction` from one of its own modules that lacks it.
+
+The old "no newer torch on Aurora" blocker (nightlies need `libsycl.so.9`,
+oneAPI 2025.3.1 had only `.so.8`) is genuinely stale -- the RC4 stack is
+oneAPI 2026.1.0 and `/opt/aurora/26.181.0/.../libsycl.so.9` exists.
 
 ## What is now known good
 
@@ -31,7 +78,7 @@ no `--system-site-packages` so it resolves its own torch.
 | `get_local_type` | 0 | 1 | 1 |
 | `_fsdp_param.py` lines | 1095 | 1329 | 1373 |
 
-## Why it is inconclusive
+## Why the FIRST attempts were inconclusive (kept: the traps are reusable)
 
 Two separate scaffolding failures, neither about torch:
 
@@ -47,7 +94,10 @@ Two separate scaffolding failures, neither about torch:
    while the same invocation works from `fw-2026.1-rc2`. Something in the
    nightly venv's launcher/MPI wiring differs; I did not chase it.
 
-So the honest status: **the version hypothesis is untested, not disproven.**
+A fourth trap, found later: my nightly-selection probe ran on the LOGIN
+node, where `libsycl.so.9` is not on the library path, so `import torch`
+failed and every candidate scored "inductor broken". All five verdicts were
+false. Nightly selection has to run inside the job.
 
 ## What the next attempt should do
 
