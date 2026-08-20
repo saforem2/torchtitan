@@ -1,9 +1,60 @@
 # Why `spmd_types` leaves parameters unconverted
 
-**Status:** UPSTREAM BUG. Reproduces on core llama3 with no ezpz code involved.
+**Status:** RESOLVED (2026-08-20). Not a torchtitan bug -- our PyTorch build
+predates the FSDP code that consumes spmd_types annotations. Nothing to fix in
+torchtitan or ezpz; needs a torch newer than `pytorch_2.13.0_patched_08_02_2026`.
 **Affects:** `parallelism.spmd_backend = "spmd_types"` -- which is upstream's
 DEFAULT as of #4085 (`5ab3a0fd1`, 2026-08-18).
 **Jobs:** 12473427-12473433
+
+## ROOT CAUSE: our torch predates the FSDP consumer (2026-08-20)
+
+Everything below traced torchtitan's side and concluded the plain tensor was
+the defect. It is not -- handing FSDP a plain-but-ANNOTATED tensor is exactly
+what upstream's design expects. The missing piece is on the PyTorch side.
+
+pytorch `da19cbd78` (#181519, 2026-06-23) added to `FSDPParam.__init__`:
+
+```python
+self.is_spmd_types = (
+    dist._is_spmd_types_available()
+    and bool(spmd_local_type := spmd.get_local_type(param))
+    and not isinstance(param, DTensor)
+)
+if self.is_spmd_types:
+    param = self._resolve_spmd_types_for_storage(...)   # plain -> DTensor
+```
+
+That block converts the annotated tensor into a DTensor *before* the
+`is_spmd_mesh and not is_dtensor` check can fire.
+
+Our build does not have it:
+
+| symbol | our torch | pytorch main |
+|---|---:|---:|
+| `_is_spmd_types_available` | 0 | 2 |
+| `_resolve_spmd_types_for_storage` | 0 | 2 |
+| `get_local_type` | 0 | 1 |
+| `_fsdp_param.py` length | 1095 | 1373 |
+
+Our `FSDPParam.__init__` goes straight from `self.grad_offload_event = None`
+to `self._init_sharded_param(...)` with no `is_spmd_types` branch at all, so
+an annotated plain tensor falls through to the raise.
+
+Confusingly, `torch.distributed._is_spmd_types_available` DOES exist in our
+build (`distributed/__init__.py:31`) -- the availability hook shipped, the
+FSDP consumer did not. So "the symbol exists" is not evidence the path does.
+
+**Consequence:** `spmd_types` cannot work on this stack regardless of what
+torchtitan or ezpz do. It needs a torch containing `da19cbd78`. Our build is
+`pytorch_2.13.0_patched_08_02_2026` -- Aug 2, which should postdate a Jun 23
+commit, so the patched Aurora build is presumably branched from an older base
+than its name suggests. Worth confirming with whoever builds it.
+
+**Nothing to file upstream.** The draft issue at
+`docs/upstream-issues/spmd-types-plain-tensor-issue.md` should NOT be filed:
+it argues torchtitan should wrap the tensor, but upstream deliberately leaves
+that to FSDP, and their CI is green because their torch has the consumer.
 
 ## Symptom
 

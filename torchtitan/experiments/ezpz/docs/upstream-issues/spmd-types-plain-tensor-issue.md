@@ -1,7 +1,25 @@
 # DRAFT upstream issue: `spmd_types` yields plain tensors when every Shard axis is size 1
 
-Ready to file, pending your review. Not filed -- I do not have your GitHub
-account, and the confidence caveats at the bottom are yours to weigh.
+> [!CAUTION]
+> **DO NOT FILE. This draft is wrong.** Kept only as a record of the
+> investigation.
+>
+> Resolved 2026-08-20: the plain tensor is not a torchtitan defect. Handing
+> FSDP a plain-but-ANNOTATED tensor is what upstream's design expects --
+> pytorch `da19cbd78` (#181519, 2026-06-23) added the code in
+> `FSDPParam.__init__` that converts it. **Our torch build does not contain
+> that commit** (`_resolve_spmd_types_for_storage`, `get_local_type`, and
+> `_is_spmd_types_available` all appear 0 times in our `_fsdp_param.py`;
+> pytorch main has all three).
+>
+> So upstream CI is green because their torch has the consumer, and every
+> "suggested fix" below -- wrapping in `spmd_distribute_tensor`, making the
+> `resolve_fsdp_mesh` guard per-parameter -- would be patching the wrong
+> layer. `spmd_types` needs a newer torch, not a torchtitan change.
+>
+> See [spmd-types-plain-tensor.md](../guides/known-bugs/spmd-types-plain-tensor.md).
+
+Original draft follows, unedited.
 
 ---
 
