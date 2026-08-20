@@ -16,7 +16,7 @@ from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.distributed.activation_checkpoint import FullAC
+from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.config.configs import CompileConfig
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
@@ -197,7 +197,7 @@ def agpt_8b() -> FaultTolerantTrainer.Config:
 def agpt(
     flavor: str,
     local_batch_size: int = 1,
-    activation_checkpoint_mode: Literal["none", "full"] = "full",
+    activation_checkpoint_mode: Literal["none", "full", "selective"] = "full",
     seq_len: int = 8192,
     # IMPORTANT: bfloat16 master weights silently freeze RMSNorm.weight.
     # Norm weights init to 1.0 (bf16 ulp = 7.8e-3); per-step updates
@@ -229,9 +229,15 @@ def agpt(
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
     # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
     # is the agpt default (was mode="full").
-    cfg.activation_checkpoint = (
-        None if activation_checkpoint_mode == "none" else FullAC.Config()
-    )
+    if activation_checkpoint_mode == "none":
+        cfg.activation_checkpoint = None
+    elif activation_checkpoint_mode == "selective":
+        # Plain upstream SelectiveAC, not the MoE subclass: MoeSelectiveAC
+        # exists only to drop all_to_all_single from the save list, which is
+        # an EP concern agpt does not have.
+        cfg.activation_checkpoint = SelectiveAC.Config()
+    else:
+        cfg.activation_checkpoint = FullAC.Config()
     cfg.training.seq_len = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
@@ -873,6 +879,19 @@ def agpt_20b_noac() -> FaultTolerantTrainer.Config:
     If not, the only lever is avoiding model.parallelize().
     """
     return agpt("20b", activation_checkpoint_mode="none")
+
+
+def agpt_20b_selac() -> FaultTolerantTrainer.Config:
+    """agpt_20b with selective AC instead of FullAC.
+
+    The vc_check assertion needs all three of compile + AC + model.parallelize
+    (job 12473421: AC=none does not fire it, no-compile does not fire it).
+    Selective AC saves a chosen op set instead of recomputing whole blocks, so
+    it may avoid whatever DeviceMesh-bearing value FullAC stashes -- the same
+    move that fixed the MoE router recompute bug earlier today. If it works,
+    we keep compile AND TP instead of surrendering one of them.
+    """
+    return agpt("20b", activation_checkpoint_mode="selective")
 
 
 def agpt_20b_chunkedce() -> FaultTolerantTrainer.Config:
