@@ -1,5 +1,51 @@
 # `--debug.deterministic` is not bit-reproducible on XPU (2026-08-16)
 
+## fp32 COMPUTE makes multi-node deterministic (2026-08-20)
+
+**The multi-node nondeterminism is a bf16 precision artifact, and setting
+`training.mixed_precision_param=float32` eliminates it.** Job 12473503,
+agpt_20b, seq 2048, 10 steps, `--debug.seed=42 --debug.deterministic`,
+comparing two identical `partial_dtensor` runs:
+
+| cell | control | spmd vs partial |
+| --- | --- | --- |
+| 1 node, bfloat16 | 10/10 | bit-identical |
+| 1 node, float32 | 10/10 | bit-identical |
+| 2 nodes, **bfloat16** | **0/10**, diverges step 1 | -- |
+| 2 nodes, **float32** | **10/10** | **bit-identical** |
+
+Note what is already fp32 and what is not: agpt sets
+`training.dtype=float32` (fp32 master weights) and
+`mixed_precision_reduce=float32`, but `mixed_precision_param` defaults to
+**bfloat16**, so the forward/backward compute is bf16. That is the knob.
+
+Two consequences:
+
+1. **Multi-node backend parity is answerable after all.** `spmd_types` is
+   bit-identical to `partial_dtensor` at 2 nodes under fp32 compute -- the
+   last open cell in the parity matrix.
+2. **Recipe for any future numerics comparison on this stack:** add
+   `--training.mixed-precision-param=float32`. It turns a 0/10 control into
+   10/10, which is the difference between a test that can resolve something
+   and one that cannot. Diagnostic only -- fp32 compute roughly doubles
+   activation memory and costs throughput, so it is not a production setting.
+
+### Correction to the section below
+
+That section says the 2N divergence is a loss-reduction effect because
+`grad_norm` was identical while loss differed. That held for the one cell
+measured (2N seq4096) but does NOT generalize -- at 2N seq2048, grad_norm
+differs too:
+
+```
+step 1   A  loss=12.90793  grad_norm=6.1255
+         B  loss=12.90795  grad_norm=6.1249
+```
+
+So the divergence is not confined to the loss all-reduce; the gradients
+differ as well. The safe statement is the one at the top: it is a bf16
+precision effect that fp32 compute removes.
+
 ## Re-measured 2026-08-20 on torch 2.14.0.dev20260722+xpu
 
 The note below was taken on the shipped torch 2.13. Re-measured on the
