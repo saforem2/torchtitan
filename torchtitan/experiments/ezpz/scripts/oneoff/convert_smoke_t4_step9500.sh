@@ -74,8 +74,17 @@ fi
 
 echo ""
 echo "### STEP 1/2: convert old -> new optimizer format"
-.venv/bin/python3 torchtitan/experiments/ezpz/scripts/convert_step9200_optim_flags.py
-rc=$?
+# Resumable: the conversion is deterministic and takes ~15 min, so a re-run
+# after a LATER stage failed (the first attempt died in step 2 on a missing
+# venv) should not redo it. Skip only when DST is actually usable, not merely
+# present -- a half-written DST is exactly what would make the smoke lie.
+if [[ -f "$DST/.metadata" ]] && [[ $(ls "$DST" 2>/dev/null | grep -c distcp) -ge 1 ]]; then
+    echo "[t4] DST already converted -- skipping (delete it to force a redo)"
+    rc=0
+else
+    .venv/bin/python3 torchtitan/experiments/ezpz/scripts/convert_step9200_optim_flags.py
+    rc=$?
+fi
 echo "[t4] converter exit=$rc"
 # Exit code is not the artifact -- verify the DST actually materialized. The
 # converter writing nothing and returning 0 is the failure mode this repo
@@ -94,6 +103,11 @@ echo ""
 echo "### STEP 2/2: smoke-resume the CONVERTED seed (8 steps)"
 echo "### PASS = loss ~2.7 / grad_norm ~0.7   FAIL = loss ~6.5 / grad_norm ~18"
 SMOKE_OUT="$MAIN/outputs/checkpoints/_convert/t4-smoke-9500"
+# `ezpz` is a venv entry point, NOT on PATH in a bare PBS shell -- the first
+# run of this script converted fine (it calls .venv/bin/python3 explicitly)
+# and then died here with "ezpz: command not found", exit 127, wasting the
+# allocation after the useful work was already done. Activate first.
+source "$MAIN/.venv/bin/activate" || { echo "[t4] FATAL: cannot activate venv" >&2; exit 2; }
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config ezpz_agpt_2b \
     --job.dump-folder "$SMOKE_OUT" \
