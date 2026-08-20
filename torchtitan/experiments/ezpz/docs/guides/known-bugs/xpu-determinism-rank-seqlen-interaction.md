@@ -1,5 +1,47 @@
 # `--debug.deterministic` is not bit-reproducible on XPU (2026-08-16)
 
+## Re-measured 2026-08-20 on torch 2.14.0.dev20260722+xpu
+
+The note below was taken on the shipped torch 2.13. Re-measured on the
+nightly, with `--debug.seed=42 --debug.deterministic`, agpt_20b, comparing
+PRINTED loss and grad_norm between two identical `partial_dtensor` runs:
+
+| config | control | first divergence |
+| --- | --- | --- |
+| 1 node, seq 1024 / 2048 / 4096 | **10/10 identical** | never |
+| 2 nodes, TP=1, seq 4096 | 0/10 | **step 1**, loss only |
+| 2 nodes, TP=2, seq 2048 | 11/20 | step 12, 1 ulp of printed precision |
+
+Single-node determinism holds at every size tested, confirming the original
+note's claim on this build too.
+
+**The multi-node step-1 divergence is a reduction-order effect, not
+data/init.** At 2N seq4096:
+
+```
+step 1:  A  loss=12.90411  grad_norm=5.2182
+         B  loss=12.90394  grad_norm=5.2182
+```
+
+`grad_norm` is IDENTICAL while loss differs in the 4th decimal. Same
+gradients means the model, the data, and the backward all agree; what differs
+is the cross-node all-reduce ordering of the loss itself. An init or
+data-ordering difference would move grad_norm too.
+
+The TP=2 2-node case is different again -- deterministic for 11 steps, then
+one-ulp drift -- which is ordinary accumulation rather than a per-step
+reduction difference.
+
+### Caveats on the numbers above
+
+The 2N rows come from the last cell of a sweep whose earlier cells were
+overwritten by a filename bug (all cells wrote `ns<seq>` instead of
+`n<nodes>s<seq>`), so only `2N seq4096` survived with its logs intact. The
+1N rows were computed before any overwrite and are sound. 2N at seq 1024 and
+2048 were NOT measured -- an earlier version of this section claimed they
+were, on verdicts my harness produced from empty step sets.
+
+
 > [!IMPORTANT]
 > **Multi-NODE runs are nondeterministic at seq >= 2560. Single-node is
 > deterministic at every size tested, and seq=2048 is deterministic even
