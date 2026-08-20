@@ -1,6 +1,20 @@
 # SPMD backends on XPU: what works, what does not, and why
 
-**Last updated:** 2026-08-20 (Sunspot, frameworks RC4 / oneAPI 2026.1.0)
+**Last updated:** 2026-08-20 (Sunspot, `frameworks/2026.1.0` / oneAPI 2026.1.0)
+
+The reference environment throughout is the official module plus its ezpz
+venv:
+
+```bash
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+# -> venvs/sunspot/torchtitan-aurora_frameworks-2026.1.0
+```
+
+Load the module **first**. `ezpz_setup_env` on its own prints
+`[OK] Finished` and activates nothing, leaving `python3` as
+`/usr/bin/python3` ([ezpz#216](https://github.com/saforem2/ezpz/issues/216)).
 
 Upstream torchtitan flipped the default `parallelism.spmd_backend` to
 `spmd_types` in [#4085][pr4085], and is removing `full_dtensor` in
@@ -44,15 +58,20 @@ if self.is_spmd_types:
 
 Our build does not have it:
 
-| symbol in `_fsdp_param.py` | ours (2.13) | 2.14 nightly | pytorch main |
+| symbol in `_fsdp_param.py` | `frameworks/2026.1.0` | 2.14 nightly | pytorch main |
 | --- | ---: | ---: | ---: |
 | `_is_spmd_types_available` | 0 | 2 | 2 |
 | `_resolve_spmd_types_for_storage` | 0 | 2 | 2 |
 | `get_local_type` | 0 | 1 | 1 |
 | file length | 1095 | 1329 | 1373 |
 
-**Proven by A/B** (job 12473463) -- same venv, same config, same command,
-only torch differs:
+The packaged torch is `2.13.0a0+gitcf30153` at
+`/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0/lib/python3.12/site-packages/torch`
+(`_fsdp_param.py` md5 `0fcb55157796`). The earlier RC4 wheelforge conda ships
+the **same** build, so neither packaged environment has the consumer.
+
+**Proven by A/B** (jobs 12473463, 12473469) -- same venv, same config, same
+command, only torch differs:
 
 | torch | backend | steps | result |
 | --- | --- | ---: | --- |
@@ -75,14 +94,24 @@ against oneAPI 2025.3.1, which shipped only `.so.8`.
 
 Recipe that works (`venvs/rc-plus-nightly`):
 
-1. **Clone the working venv, do not build a fresh one.**
-   `venvs/fw-2026.1-rc2` has `include-system-site-packages = true` and
-   inherits torch from the RC4 conda env. A from-scratch venv loses the
-   launcher wiring and dies with mpiexec `error parsing parameters`.
+1. **Clone the venv, do not build a fresh one.**
+   `venvs/sunspot/torchtitan-aurora_frameworks-2026.1.0` has
+   `include-system-site-packages = true` and inherits torch from the
+   frameworks conda. A from-scratch venv loses the launcher wiring and dies
+   with mpiexec `error parsing parameters`. (That failure is a property of
+   hand-built venvs, not of ezpz -- the shipped ezpz 0.26.0 launches fine.)
 2. **Repoint the console-script shebangs** (45 of them) at the clone's
    python, or launched commands silently run the original venv.
 3. **`pip install --ignore-installed`** -- otherwise pip sees the inherited
    conda torch as satisfying the requirement and no-ops.
+
+> **Install into the CLONE, never the shipped venv.** Because torch is
+> inherited rather than vendored, a stray `pip install` puts a `torch/` inside
+> `venvs/sunspot/torchtitan-aurora_frameworks-2026.1.0/lib/python3.12/site-packages/`
+> that shadows the conda one for every later job. I did this by accident and
+> it produced a convincing false positive -- `spmd_types` "passing" on the
+> shipped stack -- until I checked `torch.__file__` and found the nightly.
+> Check that path if a result looks too good.
 
 The usable nightly window is narrow:
 
