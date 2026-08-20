@@ -76,10 +76,16 @@ LIVE_WINDOW = float(os.environ.get("PD_LIVE_WINDOW", "300"))
 # PD_SHOW_ALL=1 shows every experiment ever run.
 EXP_MAX_AGE = int(os.environ.get("PD_EXP_MAX_AGE", str(7 * 86400)))
 SHOW_ALL = os.environ.get("PD_SHOW_ALL") == "1"
-# Cold W&B backbone build takes ~3 min (scan_history over ~60 runs); the cheap
-# cache-hit path is ~4 s. Give the SSH call room for a cold build so a first
+# Cold W&B backbone build takes ~14 min (scan_history over ~90 runs: one pass
+# for the shared metrics + one for lr); the cheap cache-hit path is ~25 s. Give the SSH call room for a cold build so a first
 # call doesn't die at the finish line, then cache-hits are instant.
-SSH_TIMEOUT = float(os.environ.get("PD_SSH_TIMEOUT", "600"))
+# Must exceed the COLD-BUILD time, not the warm one. Measured 2026-08-20: a
+# full 7-chain build takes ~825 s now that lr is fetched in its own
+# scan_history pass per run (it was ~400 s before). The old 600 s default sat
+# BELOW that, so every cold rebuild over SSH was killed at the 10-minute mark
+# and silently produced "0 live / 0 chains" -- which reads as a data problem
+# and is really a stopwatch. Warm cache hits are ~25 s and unaffected.
+SSH_TIMEOUT = float(os.environ.get("PD_SSH_TIMEOUT", "1800"))
 REPO = os.environ.get(
     "PD_REPO",
     "/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz",
@@ -604,7 +610,7 @@ def load_backbone():
         return bb
     # Otherwise serve the cache. If it is stale, serve it ANYWAY (marked stale)
     # and kick a detached rebuild so the next call is warm -- an interactive
-    # call must never block on the ~3-6 min W&B scan_history build.
+    # call must never block on the ~14 min W&B scan_history build.
     if os.path.exists(CACHE):
         try:
             bb = json.load(open(CACHE))
@@ -620,7 +626,7 @@ def load_backbone():
         except Exception:
             pass
     # No cache at all (first-ever run): unavoidable synchronous build.
-    _log("no backbone cache -> cold build (this is the ~3-6 min first-run "
+    _log("no backbone cache -> cold build (this is the ~14 min first-run "
          "wait; subsequent calls are instant from cache)")
     bb = build_backbone()
     try:
@@ -842,7 +848,7 @@ def fetch(stderr_cb=None) -> dict:
     """Run the remote aggregator and return the parsed backbone+live payload.
 
     stdout carries the single JSON object; the aggregator's stderr is the
-    ``[prod_dash +Ns]`` progress stream (cold build ~3-6 min). Behavior:
+    ``[prod_dash +Ns]`` progress stream (cold build ~14 min). Behavior:
       - stderr_cb given: capture stderr and call stderr_cb(line) per line (the
         Textual app pipes this into a RichLog); JSON returned at the end.
       - stderr_cb None, PD_QUIET=1: discard stderr (detached refresh worker).
