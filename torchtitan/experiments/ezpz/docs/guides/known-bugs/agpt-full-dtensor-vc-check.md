@@ -184,6 +184,38 @@ headroom on 2N. Note the FullAC control still fails with vc_check at the same
 settings, so this is not selective being worse -- it is selective trading one
 failure mode for a different, well-understood one.
 
+## RESOLVED 2026-08-20: repinned to partial_dtensor
+
+Both config registries now pin `partial_dtensor` (`b2ff09632`). Verified on
+committed defaults with NO backend flag (job 12473451):
+
+| config | steps | memory | |
+|---|---|---|---|
+| `agpt_20b` (the originally-failing command) | 5/5 | 84.86% | **PASS** |
+| `moe_small` | 5/5 | 72.55% | PASS |
+| `moe_10b_2b` | 5/5 | 79.97% | PASS |
+| `moe_10b_2b_sdpa` | 5/5 | 73.98% | PASS |
+
+The MoE arms are the ones that mattered: they were green on `full_dtensor`
+and had to stay green. They did, at memory within 0.1pp of their previous
+values.
+
+This was forced regardless of the vc_check analysis: upstream is DELETING
+`full_dtensor` (`601cf4d23`, #4217) and the file is already gone from
+upstream/main, so the next sync would have removed what our parallelize.py
+imports.
+
+Also fixed: the venv had `spmd_types==0.2.1` against a pinned `0.2.3`. Now
+0.2.3, torch untouched. That was NOT the cause of the spmd_types failure
+(0.2.3 tested in an overlay first, job 12473448, fails identically) but the
+divergence would have confounded the next investigation.
+
+**Process note.** One arm of the pre-change verification (12473450) reported
+a bogus `cannot import name 'no_typecheck'`. I had run the pip install six
+seconds before that arm started, so it read a half-swapped package. 0.2.3
+does export `no_typecheck` (`runtime.py:984`). Do not install into the shared
+venv while jobs are live -- the failure looks like a real result.
+
 ## What to do now
 
 Use `--parallelism.spmd-backend=partial_dtensor` for compiled agpt runs.
