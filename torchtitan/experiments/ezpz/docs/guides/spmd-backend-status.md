@@ -157,10 +157,10 @@ Detail: [`known-bugs/agpt-full-dtensor-vc-check.md`](known-bugs/agpt-full-dtenso
 #4085 renamed the enum values *and* changed the default:
 
 ```diff
--    spmd_backend: Literal["default", "full_dtensor", "spmd_types"] = "default"
-+        "partial_dtensor", "full_dtensor", "spmd_types"  ] = "spmd_types"
--    - "default": use the existing TorchTitan parallelism paths.
-+    - "partial_dtensor": use DTensor for model-parallel axes only.
+-spmd_backend: Literal["default", "full_dtensor", "spmd_types"] = "default"
++spmd_backend: Literal["partial_dtensor", "full_dtensor", "spmd_types"] = "spmd_types"
+-  - "default": use the existing TorchTitan parallelism paths.
++  - "partial_dtensor": use DTensor for model-parallel axes only.
 ```
 
 `"default"` and `partial_dtensor` are the same code path under two names. Old

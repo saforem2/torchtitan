@@ -98,11 +98,11 @@ The 482-step run reported `"spmd_backend": "default"`, which is not one of
 today's three legal values -- the validator rejects it. Upstream #4085
 (`5ab3a0fd1`, 2026-08-18) RENAMED the values:
 
-```
--    spmd_backend: Literal["default", "full_dtensor", "spmd_types"] = "default"
-+        "partial_dtensor", "full_dtensor", "spmd_types"  ] = "spmd_types"
--    - "default": use the existing TorchTitan parallelism paths.
-+    - "partial_dtensor": use DTensor for model-parallel axes only.
+```diff
+-spmd_backend: Literal["default", "full_dtensor", "spmd_types"] = "default"
++spmd_backend: Literal["partial_dtensor", "full_dtensor", "spmd_types"] = "spmd_types"
+-  - "default": use the existing TorchTitan parallelism paths.
++  - "partial_dtensor": use DTensor for model-parallel axes only.
 ```
 
 `"default"` and `partial_dtensor` are the same code path under two names. So
