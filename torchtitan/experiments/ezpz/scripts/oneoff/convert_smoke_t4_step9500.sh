@@ -108,18 +108,31 @@ SMOKE_OUT="$MAIN/outputs/checkpoints/_convert/t4-smoke-9500"
 # and then died here with "ezpz: command not found", exit 127, wasting the
 # allocation after the useful work was already done. Activate first.
 source "$MAIN/.venv/bin/activate" || { echo "[t4] FATAL: cannot activate venv" >&2; exit 2; }
+# Flags copied VERBATIM from t4's own invocation in umbrella 8764675, not
+# adapted from the docs. Attempt 2 died in arg parsing because I guessed
+# `--optimizer.name sophiag` (it is `--optimizer=sophiag`) and used
+# space-separated flags where this build wants `=`. Reading the working
+# command line off the running job is the only reliable source for these.
+#   --config is agpt_2b_real (cos_sin RoPE), NOT ezpz_agpt_2b
+#   GBS 6144 / LBS 2 / seq 8192 matches the 256N seat this seed belongs to
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
-    --module ezpz.agpt --config ezpz_agpt_2b \
-    --job.dump-folder "$SMOKE_OUT" \
-    --checkpoint.initial-load-path "$DST" \
-    --training.steps 8 \
+    --module=ezpz.agpt \
+    --config=agpt_2b_real \
+    --job.dump-folder="$SMOKE_OUT" \
+    --checkpoint.initial-load-path="$DST" \
     --checkpoint.no-enable \
-    --optimizer.name sophiag \
-    --optimizer.lr 2.28e-5 \
-    --lr-scheduler.decay-ratio 0.0 \
-    --lr-scheduler.min-lr-factor 1.0 \
-    --lr-scheduler.warmup-steps 0 \
-    2>&1 | tail -60
+    --dataloader.dataset=blendcorpus \
+    --dataloader.dataset-path=torchtitan/experiments/ezpz/data-lists/aurora/olmo-mix-1124.txt \
+    --optimizer=sophiag \
+    --optimizer.lr=2.28e-5 \
+    --lr-scheduler.decay-ratio=0.0 \
+    --lr-scheduler.min-lr-factor=1.0 \
+    --lr-scheduler.warmup-steps=0 \
+    --training.local-batch-size=2 \
+    --training.global-batch-size=6144 \
+    --training.seq-len=8192 \
+    --training.steps=8 \
+    2>&1 | tail -70
 echo "[t4] smoke exit=$?"
 
 echo ""
