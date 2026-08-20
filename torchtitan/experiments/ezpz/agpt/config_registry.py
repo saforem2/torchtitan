@@ -217,13 +217,25 @@ def agpt(
     cfg = _base_config(flavor)
     cfg.hf_assets_path = hf_assets_path
     # 79th sync (#4085): upstream flipped the DEFAULT spmd_backend to
-    # "spmd_types". Every ezpz config fails under it at both TP=1 and TP=2:
+    # "spmd_types", under which every ezpz config dies with
     #   ValueError: When dp_mesh_dims is provided, all parameters must be
     #   DTensors on the full SPMD mesh ... Got plain tensor for parameter
-    # Measured on job 12473350: full_dtensor runs 4/4 steps, spmd_types 0.
-    # Pin the backend that works until the spmd_types path is understood --
-    # this keeps every ezpz config runnable without guessing at annotations.
-    cfg.parallelism.spmd_backend = "full_dtensor"
+    # That is an UPSTREAM gap, not ours: core llama3 through core's own
+    # trainer fails identically (job 12473444), while partial_dtensor passes
+    # in the same job. resolve_fsdp_mesh already guards this shape but only
+    # when the WHOLE storage mesh is size 1; at TP=1 with FSDP>1 a param whose
+    # only non-Replicate axis is tp still loses its annotation. See
+    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
+    #
+    # This pin was "full_dtensor" until 2026-08-20. Two reasons it moved:
+    #   1. upstream is REMOVING full_dtensor (601cf4d23, #4217) -- it is a
+    #      dead end, and the next sync deletes the file it depends on
+    #   2. the original pin cited job 12473350 as evidence full_dtensor
+    #      works, but that probe ran --compile.no-enable; compiled agpt on
+    #      full_dtensor hits the vc_check DeviceMesh assertion
+    # partial_dtensor is the supported fallback and what upstream itself
+    # pins for its rl+hf CI suites (b64d3f6a9, #4228).
+    cfg.parallelism.spmd_backend = "partial_dtensor"
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
