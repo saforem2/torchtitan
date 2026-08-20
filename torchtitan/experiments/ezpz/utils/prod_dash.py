@@ -742,21 +742,41 @@ def live_layer():
             # actively stepping.
             cand += glob.glob(os.path.join(
                 root, "logs", "*" + j["id"], "trainer-*.console.log"))
-        # A log maps to ONE ckpt dir; a job may map to several (umbrella).
+        # A per-trainer console log names ONE ckpt dir, but the umbrella .o
+        # names ALL of them (it prints every trainer's config at startup), so
+        # scan for EVERY match, not just the first.
+        #
+        # search() took only the first, which meant an umbrella job marked
+        # exactly one arbitrary seat live and the other four idle -- even
+        # though a running umbrella means every seat under it is running.
+        # The per-trainer glob above was supposed to cover this, but those
+        # console logs do not exist until the trainers actually start; during
+        # the venv prestage (minutes, at 2.7 GB x 1310 nodes) the umbrella .o
+        # is the ONLY log, and first-match-wins reappeared. Measured on job
+        # 8764675: the .o names all 5 ckpt dirs; search() returned just
+        # dolmino. finditer() returns all 5.
         bases = []
         for p in cand:
             try:
                 head = ANSI.sub("", open(p, errors="replace").read(200000))
             except (FileNotFoundError, IsADirectoryError):
                 continue
-            m = CKPT_RE.search(head)
-            if m and (m.group(1), p) not in bases:
-                bases.append((m.group(1), p))
+            for m in CKPT_RE.finditer(head):
+                if (m.group(1), p) not in bases:
+                    bases.append((m.group(1), p))
         if not bases:
             continue
         # Group each chain's logs so a chain's tip is read only from ITS OWN
         # log, never from a sibling trainer's.
         per_base = {}
+        # A log that names MORE THAN ONE ckpt dir is a multiplexed log (the
+        # umbrella .o, which prints every trainer's config). It is authoritative
+        # for STATE -- the job is running, so every chain it lists is running --
+        # but NOT for the per-step tip: its step lines are interleaved across
+        # trainers, so reading a tip from it would attribute one trainer's
+        # step/loss to all of them. Track those separately.
+        shared = {p for p in {q for _, q in bases}
+                  if len({b for b, q in bases if q == p}) > 1}
         for b, p in bases:
             per_base.setdefault(b, []).append(p)
         for base, paths in per_base.items():
@@ -764,9 +784,17 @@ def live_layer():
                 states[base] = j["state"]
             if j["state"] != "R":
                 continue
-            _, last = _olog_records(paths)
+            own = [p for p in paths if p not in shared]
+            if not own:
+                # Only a multiplexed log so far -- the trainers have not written
+                # their own console logs yet (venv prestage takes minutes at
+                # 1310 nodes). The chain IS running; we just cannot say at which
+                # step. Leave state=R with no tip rather than inventing one.
+                continue
+            _, last = _olog_records(own)
             if not last:
                 continue
+            paths = own
             try:
                 age = time.time() - max(os.path.getmtime(p) for p in paths
                                         if os.path.exists(p))
