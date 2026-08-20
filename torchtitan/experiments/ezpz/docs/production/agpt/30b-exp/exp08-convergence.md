@@ -50,7 +50,17 @@ Error: expected all tensors_saved_with_vc_check to be Tensors,
        got types: [<class 'torch.Tensor' ...
 ```
 
-**CORRECTION (later the same day): resuming was NOT the trigger. I was.**
+**CORRECTION (2026-08-20): neither resuming NOR my commit was the trigger.**
+
+Superseded twice. The trigger is `compile + AC + model.parallelize()` under
+`full_dtensor`, which the ezpz configs were pinned to. They are now pinned to
+`partial_dtensor` (`b2ff09632`) and this config runs clean. Full analysis:
+[agpt-full-dtensor-vc-check.md](../../../guides/known-bugs/agpt-full-dtensor-vc-check.md).
+
+The intermediate (also wrong) reading is kept below, because the mistake --
+diffing job scripts while the tree moved underneath -- is the reusable part.
+
+**Intermediate correction, now also superseded: resuming was NOT the trigger.**
 
 The original reading here was that resuming causes this, because diffing the
 two job scripts showed the only functional difference was
