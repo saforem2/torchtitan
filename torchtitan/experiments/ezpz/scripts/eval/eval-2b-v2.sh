@@ -107,16 +107,23 @@ if [[ -z "${MODEL_FLAVOR:-}" ]]; then
 ERRMSG
     exit 2
 fi
-# The conversion runs inside V2_REPO, and the pinned v2 clones do NOT ship
-# agpt/state_dict_adapter.py -- they fall back to the bare
-# Llama3StateDictAdapter, which applies the Q/K permute UNCONDITIONALLY. In
-# that clone a cos_sin flavor is silently ignored, so passing 2b_real there
-# does not help. Refuse rather than emit a corrupt export.
+# The pinned v2 clones do NOT ship agpt/state_dict_adapter.py -- they fall back
+# to the bare Llama3StateDictAdapter, which applies the Q/K permute
+# UNCONDITIONALLY, so a cos_sin flavor is silently ignored there. Refuse rather
+# than emit a corrupt export.
+#
+# CHECK CONVERT_REPO, NOT V2_REPO. The conversion imports torchtitan from
+# CONVERT_REPO (see step 1 below: "venv from CONVERT_REPO, DCP from V2_REPO"),
+# so that is the checkout whose adapter decides whether the permute happens.
+# V2_REPO only supplies the DCP bytes. This guard tested V2_REPO and therefore
+# refused a CORRECT invocation: the matched-pair eval (job 8766898) passed
+# CONVERT_REPO=<main repo>, which HAS the adapter, and was blocked anyway --
+# losing the fork arm while the canonical arm completed fine.
 if [[ "$MODEL_FLAVOR" == *_real ]] \
-   && [[ ! -e "${V2_REPO}/torchtitan/experiments/ezpz/agpt/state_dict_adapter.py" ]]; then
+   && [[ ! -e "${CONVERT_REPO}/torchtitan/experiments/ezpz/agpt/state_dict_adapter.py" ]]; then
     cat >&2 <<ERRMSG
-[eval-2b-v2] ERROR: MODEL_FLAVOR='${MODEL_FLAVOR}' (cos_sin) but the clone
-  ${V2_REPO}
+[eval-2b-v2] ERROR: MODEL_FLAVOR='${MODEL_FLAVOR}' (cos_sin) but the CONVERT_REPO
+  ${CONVERT_REPO}
   has no agpt/state_dict_adapter.py, so it would use the bare
   Llama3StateDictAdapter and permute anyway -- producing exactly the corrupt
   export this flag is meant to avoid.
