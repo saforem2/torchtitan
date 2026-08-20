@@ -1,5 +1,30 @@
 # Upstream Sync Log
 
+
+## HEADS-UP for the 80th sync: `full_dtensor.py` is deleted upstream
+
+`601cf4d23` (#4217, 2026-08-19) removes `torchtitan/distributed/full_dtensor.py`
+entirely. Two ezpz files import from it and will fail at import time:
+
+- `agpt/parallelize.py:44` -- `resolve_fsdp_mesh, validate_config`
+- `moe/parallelize.py:50` -- `resolve_fsdp_mesh, resolve_sparse_fsdp_mesh, ...`
+
+Where things went:
+
+| symbol | upstream/main |
+|---|---|
+| `resolve_fsdp_mesh` | moved to `distributed/fsdp.py:32`, logic unchanged |
+| `resolve_sparse_fsdp_mesh` | moved to `distributed/fsdp.py:65`, logic unchanged |
+| `validate_config` | **GONE** -- no definition anywhere in `distributed/` |
+
+So this is not a pure import rewrite. The `validate_config(parallel_dims, model)`
+call sites need to be dropped or reimplemented ezpz-side; check what upstream's
+own `llama3/parallelize.py` does in its place at sync time.
+
+Also: `"full_dtensor"` stops being a legal `spmd_backend` value, so any config
+or CLI flag still passing it fails validation. Our pins already moved to
+`partial_dtensor` (`b2ff09632`).
+
 ## 2026-08-16 -- 78th sync (31 commits)
 
 Merged `upstream/main` into `ezpz`. Conflict-free and it touched **no** ezpz
