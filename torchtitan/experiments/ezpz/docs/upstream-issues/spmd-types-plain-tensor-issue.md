@@ -139,6 +139,60 @@ Also checked and NOT the explanation:
 
 ---
 
+## Upstream already knows about this shape -- the guard is just too coarse
+
+`torchtitan/distributed/fsdp.py`, `resolve_fsdp_mesh` (upstream/main):
+
+```python
+if storage_mesh.size() == 1:
+    # ``assert_type`` filters out inactive size-1 axes, so params get no
+    # annotations under a size-1 full mesh. That leaves ``fully_shard()``
+    # with no SPMD annotations to translate to DTensor params, so do not
+    # pass a DataParallelMeshDims object to FSDP.
+    return storage_mesh, None
+```
+
+That comment describes exactly this failure. But the guard triggers only when
+the WHOLE dense storage mesh (`dp_replicate, dp_shard, cp, tp`) is size 1. At
+TP=1 with FSDP>1 the mesh is size 12, so `DataParallelMeshDims` IS passed --
+while a parameter whose only non-Replicate axis is `tp` still ends up with no
+surviving annotation.
+
+Suggested refinement: the check wants to be per-parameter (does this param
+retain any annotation on the live mesh?) rather than per-mesh.
+
+Correspondingly, the proximate trigger is more precisely the missing
+**annotation**, not the missing shard. In
+`torch/.../fsdp/_fully_shard/_fsdp_param.py`, a plain-but-annotated tensor is
+still converted (`spmd.get_local_type(param)` -> `_resolve_spmd_types_for_storage`);
+the raise fires only when the param is plain AND carries no annotation.
+
+## Checked and ruled out
+
+- **A newer `spmd_types` package.** Our venv had `spmd_types==0.2.1` while
+  `requirements.txt` (ours and upstream's) pins `0.2.3` -- a real divergence,
+  and a good candidate since that package owns `assert_type`. Tested by
+  installing 0.2.3 into a throwaway overlay: **fails identically** (job
+  12473448). Not the cause. (Worth fixing the venv anyway.)
+- **Activation checkpointing.** none / full / selective x TP=1 / TP=2, all
+  five arms fail identically (12473441).
+- **A torch nightly.** pytorch main still contains the same check; the only
+  commit touching that file since our build is unrelated.
+- **Unmerged upstream fixes.** No open PR touches `spmd_distribute_tensor`,
+  `spmd_types.py`, or `_spmd_distribute_state`. No open issue matches this
+  error. PR #4085 contains no statement that spmd_types requires TP>1 or
+  AC-off.
+
+## Related upstream movement worth knowing
+
+- **`full_dtensor` is being REMOVED** (`601cf4d23`, #4217, 2026-08-19).
+  `partial_dtensor` is the supported fallback. Our agpt configs are currently
+  pinned to `full_dtensor`, which is a dead end -- that pin should move to
+  `partial_dtensor`.
+- `b64d3f6a9` (#4228) pins the rl+hf CI suites to `partial_dtensor`.
+- `801fe175f` (#3913, 2026-08-11) "fix spmd->DTensor translation on partial
+  mesh" is the same family of size-1-axis bug, fixed earlier.
+
 ## Confidence, stated honestly
 
 **Solid:**
@@ -150,6 +204,14 @@ Also checked and NOT the explanation:
   is still not a DTensor afterwards (12473429). So the conversion is
   attempted and no-ops -- this is not a missing declaration or a skipped walk.
 - The code path above is short and unambiguous on inspection.
+
+**Unresolved, and a maintainer should be told:** upstream's own CI defaults
+`--module` to `llama3_debugmodel` and `features.py` carries FSDP-only tests
+(`1d_compile`, `fsdp_reshard_always`) that get `spmd_types` applied -- which
+is the exact shape that fails here. If those are green upstream, something in
+our environment differs and this may not be a universal bug. I could not
+determine what from the sources; the A/B above is the strongest evidence I
+have that it is not our model code.
 
 **Not proven:**
 - I never got a standalone unit-level repro calling `spmd_distribute_tensor`
