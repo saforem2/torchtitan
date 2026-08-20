@@ -81,6 +81,40 @@ production configs, where `full_dtensor` does not work. The pin's own
 reasoning ("pin the backend that works until the spmd_types path is
 understood") is sound; the evidence just did not cover the compiled case.
 
+## Was full_dtensor ever green? No -- and the rename is why it looked that way
+
+The user pushed back that they remembered a successful full_dtensor run.
+Worth checking, and the check is decisive. Scanning every log on disk for
+{compile enabled} AND {>2 real step lines}, then reading each one's backend:
+
+| steps | backend | run |
+|---:|---|---|
+| 482 | `"default"` | 12473304 (30B convergence) |
+| 3 | `partial_dtensor` | 12473418 bisect, both arms |
+
+**No compiled `full_dtensor` run has ever produced a single step.**
+
+The 482-step run reported `"spmd_backend": "default"`, which is not one of
+today's three legal values -- the validator rejects it. Upstream #4085
+(`5ab3a0fd1`, 2026-08-18) RENAMED the values:
+
+```
+-    spmd_backend: Literal["default", "full_dtensor", "spmd_types"] = "default"
++        "partial_dtensor", "full_dtensor", "spmd_types"  ] = "spmd_types"
+-    - "default": use the existing TorchTitan parallelism paths.
++    - "partial_dtensor": use DTensor for model-parallel axes only.
+```
+
+`"default"` and `partial_dtensor` are the same code path under two names. So
+the remembered successful run WAS on partial_dtensor -- the label changed
+underneath it, not the behavior. Consistent with everything above.
+
+One near-miss worth recording: job 12473387 shows `full_dtensor` and 153
+steps, which looks like a counterexample until you check `compile.enable`,
+which is `false`. Its log also contains the string "torch.compile" -- from a
+pytree warning path, not from compiling. Grepping for that string as a proxy
+for "was it compiled" gives the wrong answer; read the dumped config instead.
+
 ## What to do now
 
 Use `--parallelism.spmd-backend=partial_dtensor` for compiled agpt runs.
