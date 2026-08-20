@@ -41,7 +41,7 @@ import os
 
 from torchtitan.distributed import ParallelDims
 from torch.distributed.fsdp import DataParallelMeshDims
-from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh, validate_config
+from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
@@ -125,8 +125,11 @@ def parallelize_llama(
     #   ValueError: When dp_mesh_dims is provided, all parameters must be
     #   DTensors on the full SPMD mesh ... Got plain tensor for param
     # Core does exactly this split (llama3/parallelize.py:42-53).
+    # Upstream #4217 removed validate_config outright and collapsed this to
+    # `spmd_backend == "spmd_types" or tp_enabled` (llama3/parallelize.py:40).
+    # "full_dtensor" is kept in the tuple only until the sync lands, since it
+    # is still a legal value on this tree.
     if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        validate_config(parallel_dims, model)
         model.parallelize(parallel_dims)
     else:
         if parallel_dims.cp_enabled:

@@ -47,10 +47,9 @@ from torchtitan.config import (
 )
 from torchtitan.distributed import ParallelDims
 from torch.distributed.fsdp import DataParallelMeshDims
-from torchtitan.distributed.full_dtensor import (
+from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
-    validate_config,
 )
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
@@ -150,8 +149,10 @@ def parallelize_moe(
     # which resolve_fsdp_mesh's DataParallelMeshDims then requires. Gating on
     # tp/ep (right for the legacy backend) leaves plain tensors when both are
     # off. Core: llama3/parallelize.py:42-53.
+    # Upstream #4217 removed validate_config outright; deepseek_v3 (our base)
+    # now just calls model.parallelize. "full_dtensor" stays in the tuple only
+    # until the sync lands, since it is still a legal value on this tree.
     if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        validate_config(parallel_dims, model)
         model.parallelize(parallel_dims)
     elif parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         model.parallelize(parallel_dims)
