@@ -115,6 +115,75 @@ which is `false`. Its log also contains the string "torch.compile" -- from a
 pytree warning path, not from compiling. Grepping for that string as a proxy
 for "was it compiled" gives the wrong answer; read the dumped config instead.
 
+## ROOT CAUSE (2026-08-19, jobs 12473420 / 12473421 / 12473422)
+
+The framing above -- "full_dtensor is broken" -- is wrong. Running all three
+backends x TP=1,2 (job 12473420) shows the failure does not track the backend
+at all:
+
+| | TP=1 | TP=2 |
+|---|---|---|
+| `partial_dtensor` | **PASS** | vc_check |
+| `full_dtensor` | vc_check | vc_check |
+| `spmd_types` | params-not-DTensors | params-not-DTensors |
+
+vc_check fires in exactly the cells where `model.parallelize()` ran:
+
+- `partial_dtensor` TP=1 -- gated on `tp_enabled`, so SKIPPED -> PASS
+- `partial_dtensor` TP=2 -- `tp_enabled` true, so RAN -> vc_check
+- `full_dtensor` TP=1/2 -- unconditional, so RAN -> vc_check
+
+The trigger is the new `Module.parallelize` + `sharding_config` path, which
+is exactly what CLAUDE.md says this bug requires. `partial_dtensor` at TP=1
+is not "the backend that works" -- it is the one cell that skips the call.
+
+Job 12473421 isolated the other two legs:
+
+| arm | result |
+|---|---|
+| FullAC + compile | vc_check |
+| AC=none + compile | no vc_check (hits a separate capacity wall) |
+| FullAC + no compile | **3/3 PASS** |
+
+So all three are required: **compile + AC + model.parallelize**. Remove any
+one and the assertion does not fire.
+
+## Selective AC avoids it
+
+Because AC is load-bearing, the AC *policy* is a real lever. agpt previously
+offered only `none` and `full`; `selective` was added (`68946110a`) and
+tested (job 12473422, seq=4096):
+
+| AC | backend | TP | steps | memory | result |
+|---|---|---|---|---|---|
+| **selective** | full_dtensor | 2 | **3/3** | 73.47% | **PASS** |
+| full | full_dtensor | 1 | 0/3 | 6.99% | vc_check |
+| full | partial_dtensor | 2 | 0/3 | 6.99% | vc_check |
+
+The FullAC controls reproduce the assertion in the same job, so the selective
+pass is a real contrast and not a lucky run. **No selective arm has ever
+produced the vc_check assertion.**
+
+Selective keeps compile, AC and TP together -- the only configuration so far
+that does.
+
+### Its limit is memory, not the bug
+
+At seq=8192 (job 12473423) the selective arms fail on capacity instead:
+
+| arm | steps | memory | result |
+|---|---|---|---|
+| selac TP1 LBS2 seq8192 | 0/5 | 7.27% | XPU OOM (320 MiB alloc) |
+| selac TP1 LBS1 seq8192 | 1/5 | 93.99% | level_zero 40 |
+| selac TP2 LBS2 seq8192 | 0/5 | 7.27% | level_zero 40 |
+| FullAC TP1 LBS2 seq8192 | 0/5 | 7.27% | vc_check |
+
+That is the expected trade: selective AC saves more activations than FullAC
+by design, buying speed with memory. The 20B at seq=8192 does not have the
+headroom on 2N. Note the FullAC control still fails with vc_check at the same
+settings, so this is not selective being worse -- it is selective trading one
+failure mode for a different, well-understood one.
+
 ## What to do now
 
 Use `--parallelism.spmd-backend=partial_dtensor` for compiled agpt runs.
