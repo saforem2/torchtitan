@@ -32,6 +32,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-19 | [MoE under EP aborts in all_to_all_single, worse with model size (2026-08-19)](./guides/known-bugs/moe-ep-a2a-degrades-with-size.md) |
 | 2026-08-19 | [--debug.deterministic costs ~27% device memory on the MoE path (2026-08-19)](./guides/known-bugs/moe-deterministic-memory.md) |
 | 2026-08-19 | [hybridep on XPU: not a version floor, not portable](./guides/known-bugs/hybridep-is-nvidia-only.md) |
+| 2026-08-19 | [agpt on full_dtensor: vc_check/DeviceMesh, and a pin justified uncompiled](./guides/known-bugs/agpt-full-dtensor-vc-check.md) |
 | 2026-08-19 | [2026-08-16 -- the 20B ARC-C "decay" was entirely the RoPE permute](./experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md) |
 | 2026-08-19 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-17 | [Production dispatch log](./production/dispatch-log.md) |
