@@ -248,10 +248,34 @@ let payload = null, metric = "loss", hidden = new Set(), chart = null;
 const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 const palette = () => dark() ? DARK : LIGHT;
 
-const isLive = c =>
-  c.queue_state === "R" ||
-  (c.log_age !== null && c.log_age !== undefined &&
-   c.log_age <= (payload.live_window ?? 300));
+// Liveness comes from the CURRENT job, never from `log_age`.
+//
+// `log_age` is the mtime of this chain's HISTORICAL .o logs, taken from the
+// cached path index -- for a chain resuming after days idle it is days old
+// even while the chain trains right now. Gating on it reported 0 live while
+// four chains were running (measured). It is a "when did we last see this
+// chain at all" figure, not a heartbeat.
+//
+// The real heartbeat is `live_tip.age`: live_layer computes it from the
+// RUNNING job's own log and already marks a quiet seat "stale" (an umbrella
+// keeps running after one trainer dies). So:
+//   - queue_state "stale"/Q/H/E  -> not live, whatever else says
+//   - queue_state R + fresh tip  -> live
+//   - queue_state R + no tip yet -> live (venv prestage: started, nothing
+//     written yet -- this is the window the umbrella fix addresses)
+//   - no queue_state             -> fall back to log_age, which is all we have
+//     for a chain the live layer never matched.
+const STALE_STATES = new Set(["stale", "Q", "H", "E"]);
+const isLive = c => {
+  if (STALE_STATES.has(c.queue_state)) return false;
+  const win = payload.live_window ?? 300;
+  if (c.queue_state === "R") {
+    const tip = c.live_tip;
+    if (tip && tip.age !== null && tip.age !== undefined) return tip.age <= win;
+    return true;                    // running, no tip observed yet
+  }
+  return c.log_age !== null && c.log_age !== undefined && c.log_age <= win;
+};
 
 // Sorted chain keys: canonical first, then by model/nodes -- same ordering rule
 // as render_board so the legend, the table, and the colors all agree.
