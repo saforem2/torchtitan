@@ -217,6 +217,57 @@ def _series_from_records(records):
         out[short] = pairs
     return out
 
+# The v1 MDS (Megatron-DeepSpeed) reference chain. It is FROZEN -- 154,391
+# iterations, finished long ago -- and lives in a DIFFERENT W&B project, so it
+# is read from the committed CSV instead of a cross-project scan_history. That
+# also means it costs no W&B calls on every backbone rebuild.
+MDS_CSV = os.path.join(
+    REPO, "torchtitan/experiments/ezpz/docs/production/agpt/2b-mds",
+    "loss_data/train_metrics.csv")
+# tokens/iter is CONSTANT across all 3 MDS stages: GBS 6144 x seq 8192.
+# Do NOT use the 7770e9/140000 (~55.5M) figure that still appears in
+# docs/evals/agpt/2b/plot_eval_overview.py -- it mis-scales the curve to a
+# phantom 8.569T endpoint. 6144*8192 reproduces the real stage boundaries
+# exactly: iter 92,859 -> 4.674T and 154,391 -> 7.771T.
+MDS_GBS, MDS_SEQ = 6144, 8192
+# CSV column -> canonical metric key. mfu is absent from the CSV (Megatron did
+# not log it), so the MFU tab simply has no MDS curve; lr likewise.
+MDS_COLS = {
+    "lm_loss": "loss_metrics/global_avg_loss",
+    "grad_norm": "grad_norm",
+    "tflops": "tflops",
+    "tps_per_gpu": "throughput(tps)",
+}
+
+def _mds_records():
+    """Parse the frozen MDS CSV into the same record shape as W&B/olog.
+
+    Returns [] when the file is absent so a checkout without it degrades to
+    "no MDS curve" rather than breaking the whole backbone."""
+    if not os.path.exists(MDS_CSV):
+        return []
+    import csv  # noqa: PLC0415  (stdlib, only needed on this path)
+    out = []
+    try:
+        with open(MDS_CSV, newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    rec = {"_step": int(row["iteration"])}
+                except (KeyError, TypeError, ValueError):
+                    continue
+                for col, key in MDS_COLS.items():
+                    v = row.get(col)
+                    if v not in (None, ""):
+                        try:
+                            rec[key] = float(v)
+                        except ValueError:
+                            pass
+                out.append(rec)
+    except OSError as e:
+        _log("  MDS csv unreadable (%%r) -- chain omitted" %% (e,))
+        return []
+    return out
+
 def _olog_records(paths):
     """Concat records from .o logs via the shared parser, plus the final line's
     tip. Delegates to wandb_fetch.parse_olog; returns (records, last)."""
@@ -446,6 +497,28 @@ def build_backbone():
             (t.get("olog_fallbacks") or {}).values())
         rec["last_job"] = _last_job_from_paths(lj_paths)
         chains[t["key"]] = rec
+    # MDS: a frozen v1 reference read from CSV, not W&B. Added last among the
+    # non-experiment chains so it sorts after the live ones. It has no ckpt_base
+    # and no PBS job, so the live layer never touches it -- it is permanently
+    # idle by construction, which is correct: it finished in 2026.
+    _log("adding the frozen MDS reference chain from CSV ...")
+    mds_recs = _mds_records()
+    if mds_recs:
+        mds_series = _series_from_records(mds_recs)
+        chains["2b_v1_mds"] = {
+            "label": "2b MDS (v1 ref)",
+            "model": "2b", "num_nodes": 256,
+            "gbs": MDS_GBS, "seq_len": MDS_SEQ,
+            # 7.771T = 154391 * 6144 * 8192, its own completed budget.
+            "token_target": 154391 * MDS_GBS * MDS_SEQ,
+            "kind": "canonical", "ckpt_base": None,
+            "prior_tokens": 0,
+            "series": mds_series, "curve": mds_series.get("loss", []),
+            "last_job": None,
+        }
+        _log("  MDS: %%d rows -> %%d plotted points" %% (
+            len(mds_recs), len(mds_series.get("loss", []))))
+
     # active experiments: agpt-* ckpt dirs with a referencing .o log, not
     # canonical. Stale ones (last .o write older than EXP_MAX_AGE seconds) are
     # hidden by default so the board stays focused on the live picture; set
