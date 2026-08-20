@@ -159,6 +159,38 @@ Do NOT use `--debug.deterministic_warn_only` to force a pass here: it
 downgrades nondeterministic ops to warnings and would produce a fake
 bit-identical result.
 
+### Coverage: what is settled and what is not
+
+Bit-identical means every printed loss AND grad_norm matched, under
+`--debug.seed=42 --debug.deterministic`, against a same-backend control run
+in the same job.
+
+| config | control | spmd vs partial |
+| --- | --- | --- |
+| TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
+| TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
+| **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
+| TP=2 | -- | pending (first attempt void) |
+| 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
+
+TP=1 single-node is the configuration LEAST able to expose a difference --
+no real tp axis, no cross-node collective -- so the MoE row (different model
+family, expert sharding) carries more weight than the two agpt rows.
+
+The TP>1 arms of the first attempt are void: every ezpz TP>1 run was dying on
+a stale `get_spmd_backend()` global (fixed in `9c6073273`), the
+`partial_dtensor` control included, so those cells tested nothing.
+
+The 2-node cell is genuinely open. Its control -- two identical
+`partial_dtensor` runs -- matched at 0 of 20 steps, while single-node cells
+on the same build are fully deterministic. A dedicated sweep
+({1,2} nodes x seq {1024, 2048, 4096}) is measuring the envelope on this
+build, recording the first divergent step per cell so that "data/init
+differs" (step 1) and "kernels accumulate" (later) can be told apart.
+
+Conclusion so far: the backends agree wherever the comparison is resolvable,
+which is not yet everywhere.
+
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
 Symptom:
