@@ -42,17 +42,39 @@ return tensor          # <-- UNCHANGED, still a plain tensor, if nothing fired
 untouched.** It never wraps the tensor as a DTensor, and it reports no error.
 FSDP then rejects the plain tensor it gets back.
 
-Measured live (job 12473430) by wrapping `spmd_distribute_tensor`:
+Note `axis_shard_dims` is built from `Shard` axes ONLY -- `Replicate` axes
+never enter the loop:
+
+```python
+axis_shard_dims = [
+    (axis_name, axis_type.dim)
+    for axis_name, axis_type in shard_types.items()
+    if isinstance(axis_type, spmd.Shard)      # <-- Replicate axes excluded
+]
+```
+
+`tok_embeddings.weight` declares `dp:R, cp:R, tp:S(0)`. Its only Shard axis
+is `tp`. At TP=1 that axis has size 1, the loop body never runs, and the bare
+input tensor is returned.
+
+Measured at 12 real ranks (job 12473437):
 
 ```
-[MESH] NOT-CONVERTED shape=(256128, 5120) shard_axes=['tp']
-       mesh_dims=('dp','cp','tp') sizes=[1, 1, 1]
+[MD] world=12 dp_shard=12 dp_replicate=1 tp=1 cp=1
+[MD] spmd_dense_mesh dims=('dp','cp','tp') sizes=[12, 1, 1]
+Got plain tensor for parameter 'weight'
 ```
 
-The mesh at `parallelize` time is all-ones on every axis, so nothing shards.
-`dp` is legitimately 1 there -- FSDP shards that axis later -- but the
-function has no "otherwise replicate" branch, so the result is a plain tensor
-rather than a DTensor with `Replicate()` placements.
+**Correction to an earlier draft of this page**, which claimed the mesh was
+all-ones. It is not -- `dp` is 12. That reading came from a probe run as a
+bare `python3 -c` with no launcher, i.e. world_size=1, where every axis is
+size 1 by construction. The mechanism survives with the premise fixed: what
+matters is that every *Shard* axis is size 1, and `dp=12` is declared
+Replicate, so it is irrelevant to this loop.
+
+The function has no "otherwise replicate" branch, so instead of a DTensor
+with `Replicate()` on dp/cp and a trivial shard on tp, the caller gets a
+plain tensor.
 
 ## What it is NOT
 
