@@ -174,8 +174,13 @@ h1 { font-size:14px; margin:0; font-weight:600; }
 .meta { color:var(--muted); font-size:12px; }
 main { display:flex; gap:12px; padding:12px; align-items:flex-start;
        flex-wrap:wrap; }
+/* min-width:0 on BOTH flex children is load-bearing: a flex item defaults to
+   min-width:auto, i.e. it refuses to shrink below its content's intrinsic
+   width. The board table is nowrap, so its 396px intrinsic width pushed the
+   280px aside 116px past its own box and overflowed the document by 104px
+   (measured). Letting the items shrink is what actually stops that. */
 #chartwrap { flex:1 1 640px; min-width:340px; }
-aside { width:280px; flex:0 0 auto; }
+aside { flex:0 1 380px; min-width:0; max-width:100%; }
 .legend { border:1px solid var(--line); border-radius:5px; overflow:hidden; }
 .legend div { display:flex; gap:8px; align-items:center; padding:5px 9px;
               cursor:pointer; border-bottom:1px solid var(--line); }
@@ -184,10 +189,22 @@ aside { width:280px; flex:0 0 auto; }
 .sw { width:11px; height:11px; border-radius:2px; flex:0 0 auto }
 .nm { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
 .live { color:#2ea043; font-weight:600 }
-table { border-collapse:collapse; width:100%; margin-top:12px; font-size:12px }
-th,td { text-align:left; padding:3px 8px; border-bottom:1px solid var(--line);
+/* The table scrolls INSIDE its own box rather than widening the page. The
+   numeric columns stay nowrap (a wrapped "92772" is unreadable); only the
+   chain-name column is allowed to ellipsize, since the legend directly above
+   already spells every name out in full. */
+.boardwrap { margin-top:12px; overflow-x:auto; max-width:100% }
+table { border-collapse:collapse; width:100%; font-size:12px }
+th,td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line);
         white-space:nowrap }
 th { color:var(--muted); font-weight:600 }
+/* first column = chain label: the only one that may be trimmed */
+td:first-child, th:first-child {
+  max-width:190px; overflow:hidden; text-overflow:ellipsis }
+/* right-align the numbers so columns read as columns */
+td:nth-child(n+2), th:nth-child(n+2) { text-align:right }
+/* a live chain's row, matching the legend badge */
+tr.r-live td:first-child { color:#2ea043; font-weight:600 }
 #err { color:#e45756; padding:0 14px }
 label.ctl { color:var(--muted); cursor:pointer; user-select:none }
 </style>
@@ -207,7 +224,7 @@ label.ctl { color:var(--muted); cursor:pointer; user-select:none }
   <div id="chartwrap"><div id="chart"></div></div>
   <aside>
     <div class="legend" id="legend"></div>
-    <table id="board"></table>
+    <div class="boardwrap"><table id="board"></table></div>
   </aside>
 </main>
 
@@ -391,14 +408,19 @@ function drawBoard() {
     const c = ch[k], tip = c.live_tip || {};
     const st = c.queue_state || (isLive(c) ? "run" : "idle");
     const f = (v, d = 0) => (v === null || v === undefined) ? "-" : (+v).toFixed(d);
-    return `<tr><td>${c.label || k}</td><td>${st}</td>` +
+    const nm = c.label || k;
+    // `st` is dropped from the table: the legend directly above already shows
+    // live/idle as a badge, and at 6 columns the aside clipped %tgt and tps.
+    // title= keeps the full name readable when the column ellipsizes.
+    return `<tr class="${isLive(c) ? "r-live" : ""}">` +
+           `<td title="${nm}">${nm}</td>` +
            `<td>${c.latest_step ?? "-"}</td>` +
            `<td>${f(c.latest_loss, 4)}</td>` +
            `<td>${c.pct_target == null ? "-" : c.pct_target.toFixed(1) + "%"}</td>` +
            `<td>${f(tip.tps ?? c.wb_tps)}</td></tr>`;
   }).join("");
   document.getElementById("board").innerHTML =
-    "<tr><th>chain</th><th>st</th><th>step</th><th>loss</th><th>%tgt</th><th>tps</th></tr>" + rows;
+    "<tr><th>chain</th><th>step</th><th>loss</th><th>%tgt</th><th>tps</th></tr>" + rows;
 }
 
 function drawTabs() {
