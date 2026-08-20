@@ -66,7 +66,11 @@ TRAJECTORIES: list[dict] = [
         "label": "2B-MDS (SophiaG, n256)",
         "eval_subdir": "agpt-2b-mds",
         "layout": "mds",
-        "tokens_per_step": 7_770e9 / 140_000,
+        # 6144 x 8192 = 50,331,648. NOT 7_770e9/140_000 (~55.5M), which was
+        # wrong by +10.3%: the 7.770T budget was reached at iteration 154,391,
+        # not 140,000, so that figure stretched the MDS curve right and ended
+        # it at a phantom 7.790T. See utils/plot_production_combined.py:69.
+        "tokens_per_step": 6144 * 8192,
         "color": COLOR_2B_MDS,
         "linestyle": "--",
         "marker": "x",

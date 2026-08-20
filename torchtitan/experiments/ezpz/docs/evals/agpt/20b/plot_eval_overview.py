@@ -62,7 +62,20 @@ SHOTS = "0shot"
 # (pre-torchtitan SophiaG, 140K steps / 7.77T tokens). Same trajectory
 # overlay used on the 2B eval page.
 MDS_RESULTS_BASE = REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds"
-MDS_TOKENS_PER_STEP = 7_770e9 / 140_000  # ~55.5M tokens/step
+# MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
+# (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter.
+#
+# The old 7_770e9/140_000 (~55.5M) figure was WRONG by +10.3%: it divided the
+# 7.770T budget by 140,000 steps, but the run reached that budget at iteration
+# 154,391, not 140,000. It stretched the MDS curve right, drawing the eval
+# point at iter 92,859 some 480B too far along and ending the curve at a
+# phantom 7.790T. On a v1-vs-v2 chart that systematically flatters v2.
+#
+# 6144*8192 is corroborated three ways: iter 92,859 -> 4.674T (exactly the
+# olmo-mix stage-1 target), iter 140,353 -> 7.064T (exactly the dolmino
+# cumulative), and iter 154,391 -> 7.771T (the real MDS budget). Verified
+# against the Megatron-DeepSpeed train_aGPT_2B_*.sh TRAIN_TOKENS budgets.
+MDS_TOKENS_PER_STEP = 6144 * 8192  # 50,331,648 tok/iter (GBS 6144 x seq 8192)
 FIG_DIR = Path(__file__).parent / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
