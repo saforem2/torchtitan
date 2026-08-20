@@ -60,6 +60,37 @@ EP has nothing to do with that second failure mode.
 NVIDIA-only by design. See
 [hybridep-is-nvidia-only.md](./hybridep-is-nvidia-only.md).
 
+## CCL_OP_SYNC / CCL_ATL_SYNC_COLL: keep them at 1 (2026-08-20)
+
+Both are set to `1` in the standard recipe. Since the abort is an
+event-handling fault, turning them off looked like a plausible lever -- and it
+is, in the wrong direction. Job 12473471, 2N, 5 steps:
+
+| config | setting | steps | memory | tps | result |
+|---|---|---|---|---|---|
+| `moe_2b_ep` | `=1` | 3/5 | 47.72% | 2417 | `ur_die` abort at step 3 |
+| `moe_2b_ep` | `=0` | 0/5 | 0.89% | -- | **hangs before step 1** |
+| `moe_2b_ep` | unset | 0/5 | 0.89% | -- | **hangs before step 1** |
+| `moe_10b_2b_sdpa` | `=1` | 5/5 | 74.06% | 997 | PASS |
+| `moe_10b_2b_sdpa` | `=0` | 5/5 | 74.08% | 995 | PASS |
+| `moe_10b_2b_sdpa` | unset | 5/5 | 74.03% | 998 | PASS |
+
+Two conclusions:
+
+1. **Turning sync off makes the EP config worse, not better.** With `=1` it at
+   least trains 3 steps before aborting; with `=0` or unset it deadlocks
+   during init -- zero step lines, 0.89% memory, killed at the timeout with a
+   libc backtrace and *no* `ur_die` in the log. Different failure, earlier.
+   `=0` and unset behave identically here.
+2. **They are free on healthy configs.** `moe_10b_2b_sdpa` is within 0.3% on
+   throughput (997 / 995 / 998 tps) and 0.05pp on memory across all three
+   settings. So the sync flags are not costing measurable performance, and
+   there is no reason to drop them.
+
+Control: `agpt_20b` under `spmd_types` fails identically with the flags on and
+unset, as expected -- that is a missing FSDP code path, unrelated to
+collectives.
+
 **Actionable:** report the `ur_die: urEventWait must not be called for an
 internal event` signature to Intel with the a2a repro; it is far more
 specific than "SIGABRT in all_to_all_single" and is the right thing to put
