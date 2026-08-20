@@ -436,6 +436,19 @@ class FaultTolerantTrainer(Trainer):
         # branch would AttributeError.
         self.num_pipeline_parallel_microbatches = _num_pp_microbatches
 
+        # Same reason again (third instance of this in this file): core's
+        # Trainer.__init__ calls dist_utils.set_spmd_backend(
+        # config.parallelism.spmd_backend) at trainer.py:319, and we never
+        # reach it. Without this the module-level default -- currently
+        # "spmd_types" -- stays live no matter what the config or CLI says,
+        # and components/loss.py:43 then fires a bare
+        #   assert get_spmd_backend() == "partial_dtensor"
+        # on any TP>1 run whose pred is a DTensor. Observed as an
+        # unexplained AssertionError with no message in job 12473496, on the
+        # partial_dtensor CONTROL arm, i.e. a config that should trivially
+        # satisfy the assert.
+        dist_utils.set_spmd_backend(config.parallelism.spmd_backend)
+
         # 78th sync (#3559 CUDA-graph capture + #4146 in-place loss accum):
         # the base Trainer.__init__ now builds a `fwd_bwd_fn` indirection and
         # forward_backward_step dispatches through it. Same reason as above --
