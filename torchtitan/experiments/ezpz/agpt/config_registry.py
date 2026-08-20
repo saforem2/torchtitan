@@ -855,6 +855,26 @@ def agpt_20b() -> FaultTolerantTrainer.Config:
     return agpt("20b")
 
 
+def agpt_20b_noac() -> FaultTolerantTrainer.Config:
+    """agpt_20b with activation checkpointing OFF.
+
+    Diagnostic for the vc_check/DeviceMesh assertion. The backend matrix
+    (job 12473420) showed the failure correlates with whether
+    model.parallelize() ran, not with the spmd backend:
+
+                        TP=1                  TP=2
+        partial         PASS (skipped)        vc_check (ran)
+        full_dtensor    vc_check (ran)        vc_check (ran)
+
+    CLAUDE.md describes the bug as "compile + AC + TP". compile and
+    parallelize are both confirmed necessary; AC is the untested leg and the
+    one that decides the remedy. If AC is required, selective AC may dodge it
+    (as it did for the MoE router recompute bug) and we keep compile AND TP.
+    If not, the only lever is avoiding model.parallelize().
+    """
+    return agpt("20b", activation_checkpoint_mode="none")
+
+
 def agpt_20b_chunkedce() -> FaultTolerantTrainer.Config:
     """agpt_20b with ChunkedLossWrapper. See agpt_2b_chunkedce for rationale."""
     cfg = ezpz_agpt_20b()
