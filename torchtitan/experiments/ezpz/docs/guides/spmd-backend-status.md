@@ -125,6 +125,56 @@ The usable nightly window is narrow:
 Detail: [`known-bugs/spmd-types-plain-tensor.md`](known-bugs/spmd-types-plain-tensor.md),
 [`known-bugs/spmd-types-newer-torch-attempt.md`](known-bugs/spmd-types-newer-torch-attempt.md).
 
+## 1b. Does the backend change the numerics? No.
+
+You would expect the backend to change floating-point *results* -- the two lay
+parameters out differently, so all-reduce/all-gather happen in a different
+order and round differently. What must NOT change is the math.
+
+Checked on `2.14.0.dev20260722+xpu`, agpt_20b, seed 42, 1 node, TP=1:
+
+**Step 1, one forward+backward, almost no accumulation:**
+
+| backend | loss | grad_norm |
+| --- | --- | --- |
+| `spmd_types` | 12.91428 | **7.2898** |
+| `partial_dtensor` | 12.91430 | **7.2898** |
+
+Identical grad_norm to all printed digits, loss differing by 2e-5. The
+gradients are the same, so the math is the same.
+
+**Over 40 steps, with a same-backend control** (job 12473489):
+
+| comparison | max abs delta |
+| --- | ---: |
+| `partial` vs `partial` (identical runs, same seed) | **2.31** |
+| `spmd` vs `partial` | 11.31 |
+
+The raw maxima suggest spmd drifts ~5x more, but both are dominated by a
+single spike and the per-step picture says otherwise:
+
+| step | spmd vs partial | control (partial vs partial) |
+| ---: | ---: | ---: |
+| 8 | -0.0018 | **-0.0045** |
+| 24 | -0.0837 | -0.0121 |
+| 32 | +0.1044 | **+0.1252** |
+| 40 | -0.1094 | **-0.1271** |
+
+At three of four sampled steps the **same-backend control differs more** than
+the cross-backend comparison. The maxima diverge because one loss spike near
+step 16 landed differently, not because `spmd_types` trends away.
+
+**The real finding is the control:** two identical runs, same backend, same
+seed, differ by up to 2.31 nats. This stack is not reproducible run-to-run
+(consistent with `--debug.deterministic` not being bit-reproducible here --
+see [known-bugs/](known-bugs/)). Any backend comparison on it can only be
+made at that resolution, and a 0.1-nat difference is far below the noise
+floor.
+
+Conclusion: the backends agree. Loss-curve comparison at this scale cannot
+resolve them, so do not use short-run loss deltas as a backend acceptance
+test -- compare step-1 gradients instead.
+
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
 Symptom:
