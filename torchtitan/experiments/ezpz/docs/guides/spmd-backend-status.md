@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 20/20 | **spmd_types CRASHES** -- see below |
+| TP=2 | 20/20 | needs `loss.global_vocab_size` -- see below |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -188,7 +188,7 @@ on the same build are fully deterministic. A dedicated sweep
 build, recording the first divergent step per cell so that "data/init
 differs" (step 1) and "kernels accumulate" (later) can be told apart.
 
-### `spmd_types` + TP>1 is broken upstream (second, independent bug)
+### `spmd_types` + TP>1 needs `loss.global_vocab_size` set (OUR config gap)
 
 At TP=2 both `partial_dtensor` controls run 20/20, and `spmd_types` produces
 **zero steps**:
@@ -209,15 +209,29 @@ elif get_spmd_backend() == "spmd_types" and spmd_mesh_size("tp") > 1:
     ...apply(..., global_vocab_size)                 # forwarded, and never set
 ```
 
-`global_vocab_size` defaults to `None` and **no caller in the tree passes
-it**, so the spmd branch hands `None` into
-`chunk_size = (global_vocab_size + tp_world_size - 1) // tp_world_size`.
-The DTensor branch is fine only because it never uses the parameter. (The
-spmd branch also omits the `"sum"` reduction the other passes.)
+**This is not an upstream bug -- it is a config we never set.**
+`CrossEntropyLoss.Config` exposes the field explicitly:
 
-Confirmed present on `upstream/main`, so a sync does not fix it. This is
-**independent of the missing-FSDP-consumer problem** -- that one needs a
-newer torch, this one is a torchtitan bug that would bite on any torch.
+```python
+class Config(BaseLoss.Config):
+    global_vocab_size: int | None = None
+    """Full vocabulary size, needed for spmd_types loss-parallel CE."""
+```
+
+The DTensor/`partial_dtensor` branch derives the vocab size from
+`pred.shape[-1]` and never reads the field, which is why our configs have got
+away with leaving it unset. The `spmd_types` branch requires it, and no ezpz
+config sets it, so `None` reaches
+`chunk_size = (global_vocab_size + tp_world_size - 1) // tp_world_size`.
+
+I initially wrote this up as a second upstream bug. That was wrong: I checked
+that no *caller* passes the argument, but not whether the loss *config*
+exposes it. It does, with a docstring naming this exact use case. Upstream
+also has a unit test covering the path
+(`tests/unit_tests/test_loss.py:808`).
+
+Fix on our side: set `cfg.loss.global_vocab_size = <model vocab_size>` in the
+ezpz registries, needed only when running `spmd_types` at TP>1.
 
 Conclusion so far: where `spmd_types` runs at all, it is numerically
 identical to `partial_dtensor`. But it does not yet run at TP>1 on any torch,
