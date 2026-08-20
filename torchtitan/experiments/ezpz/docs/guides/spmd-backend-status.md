@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 20/20 | needs `loss.global_vocab_size` -- see below |
+| TP=2 | 10/10 | **bit-identical** (after `584fb3d83`) |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -230,12 +230,31 @@ exposes it. It does, with a docstring naming this exact use case. Upstream
 also has a unit test covering the path
 (`tests/unit_tests/test_loss.py:808`).
 
-Fix on our side: set `cfg.loss.global_vocab_size = <model vocab_size>` in the
-ezpz registries, needed only when running `spmd_types` at TP>1.
+Fixed in `584fb3d83`: both ezpz registries now read the value off the model
+spec, so the flavors that differ stay correct and cannot drift
+(gemma 256128, Llama-3 128256, OLMo-2 100352).
 
-Conclusion so far: where `spmd_types` runs at all, it is numerically
-identical to `partial_dtensor`. But it does not yet run at TP>1 on any torch,
-and multi-node remains unresolved.
+Verified (job 12473502):
+
+```
+agpt_20b           loss.global_vocab_size=256128  model.vocab_size=256128  OK
+agpt_30b_olmo2tok  loss.global_vocab_size=100352  model.vocab_size=100352  OK
+moe_small          loss.global_vocab_size=256128  model.vocab_size=256128  OK
+```
+
+and at TP=2, 10 steps, deterministic: control 10/10, `spmd_types` vs
+`partial_dtensor` **10/10 identical**. TP>1 parity is now answered.
+
+Conclusion: `spmd_types` is numerically identical to `partial_dtensor`
+everywhere the comparison is resolvable -- TP=1 and TP=2, dense and MoE, at
+three sequence lengths. It remains unusable on the shipped torch (missing
+FSDP consumer); the parity question is settled for whenever that floor
+clears.
+
+Multi-node parity is not resolvable by this method: the same-backend control
+is itself nondeterministic across nodes (a cross-node loss all-reduce
+ordering effect -- grad_norm matches while loss does not). See
+[known-bugs/xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
