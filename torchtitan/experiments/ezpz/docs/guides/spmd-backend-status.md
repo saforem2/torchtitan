@@ -27,7 +27,7 @@ along the way, and what to run today.
 | --- | --- | --- |
 | **`partial_dtensor`** | **use this** | what every production trajectory has always run -- upstream renamed `"default"` to this name in #4085 |
 | `full_dtensor` | do not use | being deleted upstream (#4217); compiled agpt hits a `DeviceMesh` assertion |
-| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical too ([1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
+| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical through TP=4 and across nodes, and all three AC modes run backend-independently ([1e](#1e-ac-and-tp-on-the-nightly-both-close-jobs-12473592-12473593)) |
 
 Both ezpz config registries pin `partial_dtensor` as of `b2ff09632`.
 
@@ -170,7 +170,11 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 10/10 | **bit-identical** (job 12473502, with `584fb3d83` active -- see [1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
+| TP=2 | 10/10 | **bit-identical** (job 12473502) |
+| **TP=4, 1 node** | 10/10 | **bit-identical** (job 12473593) |
+| **TP=2, 2 nodes** (fp32) | 10/10 | **bit-identical** (job 12473593) |
+| **TP=4, 2 nodes** (fp32) | 10/10 | **bit-identical** (job 12473593) |
+| **AC none / full / selective** | -- | all 3 run, backend-independent; not seeded, see [1e](#1e-ac-and-tp-on-the-nightly-both-close-jobs-12473592-12473593) |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -391,6 +395,81 @@ failure mode to chase.
 Generalizes past this one field: when a result hinges on whether some
 config/fix was live, find the value in the run's own dump. It is evidence the
 run produced about itself, and it does not care what time it was.
+
+## 1e. AC and TP on the nightly: both close (jobs 12473592, 12473593)
+
+Two gaps closed. Neither had ever been measured on 2.14: activation
+checkpointing had never been VARIED there (the only AC sweep, job 12473441,
+was entirely on 2.13, and every 2.14 datapoint was FullAC because that is the
+agpt default), and every TP>1 claim rested on a single cell.
+
+### AC: all three modes run, and AC is backend-independent
+
+Job 12473592, agpt_20b, 2N, TP=1, seq=2048, compiled, 10 steps.
+
+| AC | backend | steps | mem | tps |
+| --- | --- | ---: | ---: | ---: |
+| none | `partial_dtensor` | 10/10 | 80.14% | 412 |
+| none | `spmd_types` | 10/10 | 80.14% | 415 |
+| full | `partial_dtensor` | 10/10 | 53.51% | 384 |
+| full | `spmd_types` | 10/10 | 53.51% | 387 |
+| selective | `partial_dtensor` | 10/10 | 62.41% | 402 |
+| selective | `spmd_types` | 10/10 | 62.41% | 402 |
+
+**Memory matches to the decimal within each AC mode**, so the backend does not
+touch the AC path at all. Ordering is the expected none > selective > full on
+memory with tps inverted; selective buys ~5% throughput over full for ~9pp
+memory.
+
+**Scope limit, stated because the table invites over-reading.** This job
+passes no `--debug.seed` / `--debug.deterministic`, so its arms are NOT
+expected to match numerically and they do not (max |d| 4.8-8.9 between
+backends, against 13.6-15.8 between AC modes -- both ordinary unseeded
+spread). It establishes that **all three AC modes RUN on 2.14 and cost what
+they should**, not that they are numerically equivalent. A seeded AC
+comparison is still owed.
+
+### TP: bit-identical at TP=4 and across a node boundary
+
+Job 12473593, agpt_20b, seq=2048, compiled, 10 steps. Each cell runs
+`partial_dtensor` twice (self-control) plus `spmd_types` once.
+
+| cell | TP | nodes | dtype | control | spmd vs partial |
+| --- | ---: | ---: | --- | ---: | ---: |
+| tp2-n1 | 2 | 1 | bf16 | 10/10 | **10/10** |
+| tp4-n1 | 4 | 1 | bf16 | 10/10 | **10/10** |
+| tp2-n2 | 2 | 2 | fp32 | 10/10 | **10/10** |
+| tp4-n2 | 4 | 2 | fp32 | 10/10 | **10/10** |
+
+All four with `"global_vocab_size": 256128` confirmed in the dump. **TP=4 and
+cross-node TP>1 had never been run with `spmd_types` before**; both are
+bit-identical. Every control passed, so every cell was resolvable.
+
+The 2-node cells use `--training.mixed-precision-param=float32` deliberately:
+bf16 multi-node is nondeterministic, so the control fails 0/10 and no
+comparison is possible. fp32 makes the cell resolvable and is diagnostic only.
+1-node cells stay bf16, which is what we ship.
+
+TP=4 being correct is not an argument for using it -- exp05 measured TP=4
+costing 55% of throughput on the 30B. This establishes correctness, not value.
+
+### A harness bug worth recording
+
+The job's own summary printed the selective arm's AC class as "FullAC". The
+RUNS were right; the classifier was wrong -- it searched the dumped
+`activation_checkpoint` block for the substring `selective`, which does not
+appear. The field that actually discriminates is
+`force_recompute_mm_shapes_by_fqns: ["moe.router.gate"]`:
+
+```
+full       "activation_checkpoint": { "preserve_rng_state": true, ... }
+selective  "activation_checkpoint": { ..., "force_recompute_mm_shapes_by_fqns": [...] }
+none       "activation_checkpoint": null
+```
+
+Same shape as the torch-path grep in [1c](#verifying-the-arm-actually-ran-the-torch-you-think):
+matching a convenient string instead of the field that discriminates. Confirm
+what a field looks like in a real dump before keying a verdict on it.
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
