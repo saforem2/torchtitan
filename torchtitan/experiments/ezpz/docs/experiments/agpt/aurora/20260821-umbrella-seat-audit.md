@@ -130,8 +130,14 @@ restarts at 0 -> 46,429 steps ON TOP of the 9,000 already done, +19.4%). Same bu
 class as the t0 fix in cc4e22cfa.
 
 **Resolution: pre-copy** (matches how t3/t4 were bootstrapped, and preserves the
-SophiaG optimizer state that a model-only seed discards). Copying `step-9000`
+SophiaG optimizer state that a model-only seed discards). Copied `step-9000`
 (6144 shards, 244G) into the fork dir.
+
+**DONE and verified.** 6144 shards, `.metadata` byte-exact at 1,252,226,661,
+filename sets identical, zero zero-byte shards on either side. `du -sb` reports
+a 20,480-byte delta (261,514,348,761 vs 261,514,328,281) -- that is directory
+inode overhead (5 x 4096), not data: a per-file size comparison across all 6145
+entries returns ZERO differences.
 
 `step-9000` is the right source, not the current tip: decay onset for this chain
 is `46429 + 1 - 200 - round(46429*0.8) = 9087`, so step-9000 is the last
@@ -222,21 +228,29 @@ It tracks the source, so a later prewarm cannot leave the 256N view stale.
 
 | # | seat | N | dfl | rope | tokens | state |
 |---|---|---|---|---|---|---|
-| t0 | 2b-512 stage-2 dolmino | 512 | dolmino-mix-1124 | `_real` | 2390375382006 | step 7700; cache pre-warm queued |
-| t1 | 20b-512 constlr from9000 | 512 | olmo-mix-1124 | `_real` | 4673780159710 | seed pre-copy in progress |
+| t0 | 2b-512 stage-2 dolmino | 512 | dolmino-mix-1124 | `_real` | 2390375382006 | step 7700; cache pre-warmed (30 -> 42 corpus entries) |
+| t1 | 20b-512 constlr from9000 | 512 | olmo-mix-1124 | `_real` | 4673780159710 | seed pre-copied (6144 shards, verified) |
 | t2 | 20b-256 canonical | 256 | olmo-mix-1124 | `_real` | 4673780159710 | healthy, step 11800 |
 | t3 | 2b-512 constlr from9200 | 512 | olmo-mix-1124 | `_real` **(FIXED)** | 4673780159710 | step 21300 |
 | t4 | 2b-256 stage-2 dolmino | 256 | dolmino-mix-1124 | `complex` | 2390375382006 | **NEW**, smoke-validated 2.591 |
 
-Node need unchanged at 2098 (both the retired and new t4 are 256N).
+Node need unchanged at 2098 (both the retired and new t4 are 256N). Queued as
+**8773440**.
 
 ## Still open
 
-- **8769730 carries the pre-fix script.** PBS snapshots at qsub; it was
-  submitted 2026-08-20 21:55:44, ~61 s after the RoPE commit efcae5419, so it
-  captured the `complex` t3 row. It must be replaced before it runs, or t3 will
-  train under the wrong flavor. Note PBS does not expose the snapshotted bytes,
-  so this is inferred from timing, not read directly.
+- ~~**8769730 carries the pre-fix script.**~~ **RESOLVED 2026-08-21.** It was
+  submitted 21:55:44, ~61 s after the RoPE commit efcae5419, and PBS snapshots
+  the script at qsub -- so it very likely captured the `complex` t3 row and
+  would have corrupted that chain. PBS does not expose the snapshotted bytes,
+  so this could not be read directly; with a live 122-checkpoint chain at stake
+  the 61-second margin was not worth betting on.
+
+  Replaced with **8773440** (same 2098 nodes, `large` queue, submitted from
+  ee80b89b9). Order mattered: the successor was submitted and confirmed `Q`
+  BEFORE `qdel 8769730`, so there was never a window with no successor queued.
+  Its dependency 8764675 had already finished, so 8769730 was waiting only on
+  nodes and could have started at any moment.
 - **t2 decay onset.** The table comment says 9087; commit b08fccfd1's own W&B
   cross-check (predicted 2.25496e-05 vs observed 2.25502e-05 at step 9694) is
   reproducible only with **9287**. The chain is at ~11,800 either way, so this
