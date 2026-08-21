@@ -1,0 +1,148 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=4
+#PBS -l walltime=02:30:00
+#PBS -l filesystems=tegu:home
+#PBS -N tpscale214
+#PBS -j oe
+set -o pipefail
+
+# How far does TP>1 + spmd_types actually hold on the 2.14 nightly?
+#
+# Everything we claim about TP>1 rests on ONE cell: job 12473502, TP=2,
+# 1 node, 10 steps, bit-identical. That was enough to retract "TP>1 is
+# broken" and is not enough to call TP>1 supported. Nothing has ever run
+# TP=4 with spmd_types, and nothing has run TP>1 with spmd_types across a
+# node boundary.
+#
+# Three axes, deliberately small:
+#   tp2-n1   TP=2, 1 node   -- reproduces the known-good cell (control)
+#   tp2-n2   TP=2, 2 nodes  -- first cross-node TP>1 on spmd_types
+#   tp4-n1   TP=4, 1 node   -- first TP=4 on spmd_types at all
+#   tp4-n2   TP=4, 2 nodes  -- both at once
+#
+# Each cell runs THREE arms: partial_dtensor twice (a self-control) and
+# spmd_types once. The control is the point -- without it a spmd-vs-partial
+# difference cannot be told from run-to-run noise, and at 2 nodes that
+# distinction is not academic: multi-node is nondeterministic in bf16
+# (known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+#
+# Hence --training.mixed-precision-param=float32 on the 2-node cells ONLY.
+# fp32 compute is what turns the 2N control from 0/10 to 10/10 and makes the
+# comparison resolvable at all (job 12473503). It roughly doubles activation
+# memory and is a DIAGNOSTIC setting, never production. The 1-node cells stay
+# bf16 because they are already deterministic and bf16 is what we ship.
+#
+# seq=2048 throughout: determinism holds there at every rank count tested,
+# and TP=4 at 4096 would confound a TP finding with a capacity one.
+#
+# Note TP=4 is expected to be SLOW, not broken -- exp05 measured TP=4 costing
+# 55% of throughput on the 30B. This job asks whether it is CORRECT, not
+# whether it is worth using. It is not.
+#
+# 4 nodes requested so the 2-node cells get real cross-node collectives while
+# leaving room; each arm uses 12 or 24 ranks, never all four nodes at once.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/rc-plus-nightly/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+
+WANT=2.14.0.dev20260722
+GOT=$(python3 -c "import torch;print(torch.__version__)" 2>/dev/null)
+WHERE=$(python3 -c "import torch,os;print(os.path.dirname(torch.__file__))" 2>/dev/null)
+echo "torch: ${GOT:-<import failed>}"
+echo "from:  ${WHERE:-<none>}"
+case "$GOT" in
+  $WANT*) echo "  gate OK" ;;
+  *) echo "  ABORT: wanted ${WANT}*, got '${GOT:-nothing}'"; echo "TPSCALE_DONE"; exit 1 ;;
+esac
+echo ""
+
+export LOGD="$PWD/outputs/logs/tpscale214/$PBS_JOBID"; mkdir -p "$LOGD"
+
+run() {  # run <label> <nproc> <tp> <backend> <mp_param>
+  timeout 1500 ezpz launch --nproc "$2" -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_20b \
+      --checkpoint.no-enable --dataloader.num-workers=0 \
+      --training.steps=10 --training.local-batch-size=1 \
+      --training.seq-len=2048 \
+      --parallelism.tensor-parallel-degree="$3" \
+      --parallelism.spmd-backend="$4" \
+      --training.mixed-precision-param="$5" \
+      --debug.seed=42 --debug.deterministic \
+      > "$LOGD/$1.log" 2>&1
+  echo "  [$1] rc=$?"
+}
+
+cell() {  # cell <tag> <nproc> <tp> <mp>
+  run "$1-pA"   "$2" "$3" partial_dtensor "$4"
+  run "$1-pB"   "$2" "$3" partial_dtensor "$4"
+  run "$1-spmd" "$2" "$3" spmd_types      "$4"
+}
+
+cell tp2-n1 12 2 bfloat16
+cell tp4-n1 12 4 bfloat16
+cell tp2-n2 24 2 float32
+cell tp4-n2 24 4 float32
+
+echo ""
+echo "########## TP scaling: spmd_types vs partial_dtensor on torch 2.14 ##########"
+python3 - <<'PY'
+import os, re
+d = os.environ["LOGD"]
+
+def rows(p):
+    try: t = re.sub(r"\x1b\[[0-9;]*m", "", open(p, errors="ignore").read())
+    except OSError: return None, ""
+    r = {int(m[0]): (m[1], m[2]) for m in
+         re.findall(r"step: *(\d+) +loss: *([\d.]+) +grad_norm: *([\d.]+)", t)}
+    return r, t
+
+def why(t):
+    for pat, lbl in (("must be DTensors","DTensor(old torch)"),
+                     ("NoneType' and 'int","vocab TypeError -- fix NOT active"),
+                     ("tensors_saved_with_vc_check","vc_check"),
+                     ("level_zero","level_zero 40"),
+                     ("out of memory","XPU OOM"),
+                     ("ur_die","ur_die abort")):
+        if pat in t: return lbl
+    return "no steps, unrecognized"
+
+print(f"  {'cell':<9}{'TP':<4}{'nodes':<7}{'dtype':<10}{'control':<12}{'spmd vs partial':<18}{'vocab':<9}{'note'}")
+for tag, tp, nodes, mp in (("tp2-n1",2,1,"bf16"), ("tp4-n1",4,1,"bf16"),
+                           ("tp2-n2",2,2,"fp32"), ("tp4-n2",4,2,"fp32")):
+    pA, tA = rows(f"{d}/{tag}-pA.log")
+    pB, _  = rows(f"{d}/{tag}-pB.log")
+    sp, tS = rows(f"{d}/{tag}-spmd.log")
+    if not pA or not pB or not sp:
+        print(f"  {tag:<9}{tp:<4}{nodes:<7}{mp:<10}(a log is missing)"); continue
+    # the fix must be ACTIVE or the cell tests nothing -- check the dump, not the clock
+    gv = re.search(r'"global_vocab_size": (\w+)', tS)
+    gv = gv.group(1) if gv else "?"
+    ks = sorted(set(pA) & set(pB) & set(sp))
+    if not ks:
+        note = why(tS) if not sp else why(tA)
+        print(f"  {tag:<9}{tp:<4}{nodes:<7}{mp:<10}{'--':<12}{'--':<18}{gv:<9}{note}")
+        continue
+    ctrl = sum(pA[k] == pB[k] for k in ks)
+    test = sum(sp[k] == pA[k] for k in ks)
+    verdict = f"{test}/{len(ks)}"
+    if ctrl < len(ks):
+        note = "CONTROL FAILED -- cell not resolvable"
+    elif test == len(ks):
+        note = "bit-identical"
+    else:
+        note = f"DIVERGES (first step {next(k for k in ks if sp[k]!=pA[k])})"
+    print(f"  {tag:<9}{tp:<4}{nodes:<7}{mp:<10}{str(ctrl)+'/'+str(len(ks)):<12}{verdict:<18}{gv:<9}{note}")
+print()
+print("  vocab must be 256128 (gemma). 'null' means 584fb3d83 was not active and the")
+print("  cell tested nothing -- that is what made every earlier TP>1 arm look broken.")
+print("  fp32 on the 2-node cells is diagnostic: bf16 multi-node is nondeterministic,")
+print("  so the control would fail and no comparison could be made.")
+PY
+echo "TPSCALE_DONE"
