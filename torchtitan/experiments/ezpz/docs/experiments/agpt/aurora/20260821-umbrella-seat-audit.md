@@ -154,10 +154,30 @@ steps 70,176 -> 23,746 (2.9553x). Every dataset hash changed with it, so the 84G
 of Aug-16 cache is permanently unreachable. Do NOT "fix" this by reverting the
 budget -- the cache is the disposable artifact.
 
-Current state: 325 new-budget per-dataset descriptors exist, but only **1 of 7**
-corpus-level entries. Pre-warming with `prewarm_blendcorpus_singlerank.sh`
-(job 8773399), which is the right tool since the corpus build is serialized on
-rank 0 anyway.
+Current state before the fix: 325 new-budget per-dataset descriptors existed,
+but only **1 of 7** corpus-level entries. Pre-warmed with
+`prewarm_blendcorpus_singlerank.sh` (job 8773399) -- the right tool, since the
+corpus build is serialized on rank 0 anyway, so a single rank has no concurrent
+readers to race.
+
+**RESOLVED.** The run built the 5 missing corpora (flan, math, pes2o,
+stackexchange, wiki; dclm already had its Aug-18 entry) plus the blendable
+index, in under a second each:
+
+```
+finished saving pes2o corpus index map files in 0.208 seconds
+finished saving stackexchange corpus index map files in 0.019 seconds
+finished saving wiki corpus index map files in 0.026 seconds
+finished saving index map files in 2.894 seconds   <- blendable
+```
+
+Corpus-level entries went 30 -> 42. Note how cheap this is: it undercuts the
+theory that a cold corpus build is what times out the 60 s CCL KVS barrier at
+6144 ranks. That failure mode is still unexplained -- the cache was a real
+blocker, but it may not have been the whole story.
+
+The script had to be copied into the clone first (clones are pinned; copy infra
+files, never `git pull` them).
 
 Note on a false alarm: the audit flagged the Aug-18 corpus entry as "torn" for
 missing `_doc_idx/_sample_idx/_shuffle_idx`. The verifier refuted this -- the
@@ -180,8 +200,23 @@ The 324 VALID descriptors will MISS -- `eval_samples = gbs * eval_iters` does
 not cancel (614,400 vs 1,228,800). That is a one-time ~0.25G rebuild at startup,
 expected, not a misconfiguration.
 
-Symlinked 3,933 entries into the 256N seat's cache dir; 648 train `.dsc`
-reachable, 0 broken links.
+Symlink the DIRECTORY, not its contents. I first created 3,933 per-file
+symlinks, then ran the t0 prewarm -- which wrote 18 new entries into the source
+that the 256N view could not see, because per-file links only capture the files
+that existed at link time. A 256N launch would have missed exactly the corpus
+entries the prewarm had just built, and the failure would look like a cold
+cache rather than a stale link set.
+
+Now a single directory symlink:
+
+```
+.../agpt-2b-stage2-dolmino-n256-gbs6144/.cache/dolmino-mix-1124/index-cache
+  -> .../agpt-2b-stage2-dolmino-n512-gbs12288/.cache/dolmino-mix-1124/index-cache
+```
+
+3,951 entries visible, 42 corpus `_index.npy`, 648 train `.dsc`, 0 broken.
+It tracks the source, so a later prewarm cannot leave the 256N view stale.
+(The superseded per-file dir was moved aside, not deleted.)
 
 ## Final seat table
 
