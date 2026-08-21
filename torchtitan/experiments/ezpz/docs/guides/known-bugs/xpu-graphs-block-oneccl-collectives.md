@@ -43,9 +43,22 @@
 > may yet prove to be **my** fault -- the wrapper reuses one
 > `graph_pool_handle` across captures, and `use_count > 0` reads like allocator
 > refcounting. Job `12473184` is separating pool-reuse vs `nn.Module` vs
-> backward. **Do not file the Intel ticket at the bottom of this page until
-> that returns** -- as written it blames the wrong subsystem for the failure we
-> actually hit.
+> backward.
+>
+> **GATE CLEARED 2026-08-20.** Job `12473184` returned (exit 0, 8s) and the
+> suspicion was right -- the assert is OURS:
+>
+> ```
+> matmul,        fresh pool   OK
+> nn.Linear fwd, fresh pool   OK
+> matmul,        shared pool  OK
+> nn.Linear fwd, shared pool  FAILS -> use_count > 0 INTERNAL ASSERT
+> ```
+>
+> Pool reuse is the trigger, and it is already fixed (one pool per graph,
+> `xpu_graph.py:25`). So the `use_count` assert is excluded from the Intel
+> ticket, and the collective finding -- which reproduces with fresh pools --
+> is the whole of it. The ticket is filable.
 
 </details>
 
@@ -141,6 +154,11 @@ future re-test should measure rather than assume -- but it is not worth
 scheduling until collectives are capturable.
 
 ## Draft Intel ticket
+
+> [!NOTE]
+> **Filable version lives at**
+> [`upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md`](../../upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md).
+> That is the copy to send; the text below is the original draft.
 
 > **Subject:** XPU graphs cannot capture oneCCL collectives (torch
 > 2.13.0a0+gitcf30153, oneAPI 2026.1.0)
