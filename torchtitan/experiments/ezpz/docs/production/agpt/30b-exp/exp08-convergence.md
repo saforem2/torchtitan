@@ -117,6 +117,11 @@ the first step:
 | compiled (fresh) | 489 | 62.79% |
 | uncompiled (resume) | 455 | 93.80% |
 
+> **Do not quote 93.80% as a current 30B number.** It measures a path that
+> was abandoned once compiled resume was shown to work -- the live chain runs
+> compiled at 59.84%. This row is the historical cost of the workaround, not
+> the occupancy of anything in production.
+
 Throughput is only ~7% down, which is less than expected. **Memory is the
 real cost: 93.80% vs 62.79%**, 31 points, leaving almost no headroom. At
 that occupancy the run is one allocation spike away from a level_zero

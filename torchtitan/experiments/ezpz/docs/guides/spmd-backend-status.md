@@ -290,10 +290,29 @@ are identical at 56.56%; A and D are identical at 50.31%. 2.14 costs 6.25pp
 whichever backend you choose. This is not noise -- A and D agree to the
 decimal, so the measurement is exact.
 
-That is free at 50% occupancy and is not free near the ceiling. The 20B at
-seq=8192 already runs 84.86%, and the uncompiled 30B path sits at 93.80%:
-**+6.25pp on top of 93.80% does not fit.** Check headroom before bumping torch
-on anything running hot.
+Free at 50% occupancy; the question is what it does to a config running hot.
+
+Do NOT reach for the uncompiled 30B's 93.80% as the ceiling here. That number
+is a historical artifact of a path we no longer run -- it came from job
+12473387, the uncompiled resume that existed only while vc_check was thought
+to block the compiled one. Compiled resume works
+([exp08](../../production/agpt/30b-exp/exp08-convergence.md)), and the live
+30B chain (12473515 / 12473545) runs compiled at **59.84%**. +6.25pp there is
+~66%: comfortable.
+
+The config with real exposure is the 20B at seq=8192, which runs 84.86%
+compiled -- +6.25pp would put it near 91%. Tight, not obviously fatal.
+
+Two limits on that arithmetic, both untested:
+
+- The delta was measured at **50% occupancy**. Whether it is a fixed
+  percentage-point offset or scales with the activation working set is
+  unknown, so adding 6.25 to an 85% config is an extrapolation, not a
+  prediction.
+- It is a **fraction of device memory**, so it only transfers between configs
+  on identical hardware.
+
+Measure the bump on the target config before adopting it there.
 
 Caveat on absolute numbers: 21.8% MFU here is agpt_20b at LBS=2/seq=2048, not
 a production shape -- exp05's 27.89% is the 30B at LBS=3. These four arms are
