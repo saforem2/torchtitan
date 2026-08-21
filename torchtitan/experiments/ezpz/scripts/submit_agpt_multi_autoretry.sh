@@ -91,6 +91,10 @@
 #   CKPT_INTERVAL   checkpoint every N steps (default 100).
 #   MULTI_TINY_NNODES (default 2), MULTI_TINY_SPARES (default 1),
 #   MULTI_TINY_STEPS (default 20) -- tiny-profile sizing.
+#   MULTI_ONLY      comma-separated trainer indices to run (default: all).
+#                   Keeps each seat's REAL ckpt/config/dataset/RoPE, unlike
+#                   MULTI_PROFILE=tiny which rewrites them to throwaways.
+#   MULTI_NNODES_OVERRIDE  force every selected seat to N nodes (smoke sizing).
 #
 # NOTE: deliberately NO `set -euo pipefail`. venv activation trips unbound
 # vars, and the umbrella must survive a single child failing without aborting
@@ -233,6 +237,48 @@ TRAIN_TOKENS="${TRAIN_TOKENS:-4673780159710}"
 CONFIG_SUFFIX="${CONFIG_SUFFIX-_real}"
 VALIDATOR_FREQ="${VALIDATOR_FREQ:-100}"
 VALIDATOR_STEPS="${VALIDATOR_STEPS:-10}"
+
+# ---- Optional: run a SUBSET of the seats, optionally shrunk -------------------
+#
+# MULTI_ONLY="4"    -> run only trainer index 4
+# MULTI_ONLY="1,4"  -> run trainers 1 and 4
+# MULTI_NNODES_OVERRIDE=4 -> force every selected seat to 4 nodes
+#
+# This exists so a single seat can be smoke-tested THROUGH THIS LAUNCHER rather
+# than by hand-reconstructing its `ezpz launch` invocation. Three attempts at
+# the latter (2026-08-20) burned three allocations on: a missing venv
+# activation, `--optimizer.name` when the build wants `--optimizer=`, and
+# finally "Optimizer SophiaG not added" because `ezpz launch` needs
+# --nproc/--nproc_per_node/--hostfile and a `--` separator and must run from
+# the NODE-LOCAL venv. Reconstructing the shape is the bug; reuse the launcher.
+#
+# Unlike MULTI_PROFILE=tiny this keeps each seat's REAL ckpt dir, config,
+# dataset and RoPE flavor -- tiny rewrites those to throwaway values, which is
+# right for a plumbing smoke and wrong for "does THIS seed actually resume".
+# The filter runs BEFORE the node-budget loop so every downstream calculation
+# (need, slicing, offsets) sees only the selected seats.
+if [[ -n "${MULTI_ONLY:-}" ]]; then
+    _sel=()
+    IFS=',' read -ra _want <<< "$MULTI_ONLY"
+    for _i in "${_want[@]}"; do
+        _i="${_i// /}"
+        [[ "$_i" =~ ^[0-9]+$ ]] || die "MULTI_ONLY: '$_i' is not an index"
+        (( _i < ${#TRAINERS[@]} )) || die "MULTI_ONLY: index $_i >= ${#TRAINERS[@]} trainers"
+        _sel+=( "${TRAINERS[$_i]}" )
+        log "MULTI_ONLY: selected trainer $_i"
+    done
+    TRAINERS=( "${_sel[@]}" )
+fi
+if [[ -n "${MULTI_NNODES_OVERRIDE:-}" ]]; then
+    _shrunk=()
+    for _row in "${TRAINERS[@]}"; do
+        IFS='|' read -r _m _n _rest <<< "$_row"
+        # rebuild with field 2 replaced, preserving all other fields verbatim
+        _shrunk+=( "$(awk -v n="$MULTI_NNODES_OVERRIDE" 'BEGIN{FS=OFS="|"}{$2=n;print}' <<< "$_row")" )
+    done
+    TRAINERS=( "${_shrunk[@]}" )
+    log "MULTI_NNODES_OVERRIDE: every selected seat forced to $MULTI_NNODES_OVERRIDE nodes"
+fi
 
 # ---- Validate allocation ------------------------------------------------------
 [[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] \
