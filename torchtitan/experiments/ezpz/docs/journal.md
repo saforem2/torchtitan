@@ -63,6 +63,39 @@ Running log of what's happening, session by session. Most recent first.
 - **sft migration finished cleanly.** 4 directories, 0 failures, datascience
   back to 16.53T of 20T (was 20.48T, over quota).
 
+## 2026-08-21 (sunspot) -- the 30B RAN OUT: 2000/2000, 12.028 -> 2.115, zero NaN
+
+- **The 30B finished its full config.** Step 2000 of 2000, `rc=0`, in 2h58 of
+  a 6h allocation -- an actual completion, not a timeout. Four jobs, one
+  continuous trajectory: 12473304 (1->482, 12.028->3.357), 12473476
+  (401->871, ->2.617), 12473515 (801->1781, ->2.246), 12473545 (1751->2000,
+  ->**2.115**). Zero NaN/inf in any of them. Nine checkpoints, 2.6 T. Steady
+  state to the last step: 496 tps, 28.3% MFU, memory flat at 59.84%,
+  grad_norm falling 0.26 -> 0.074. That answers all three questions exp08 was
+  opened for -- loss descends, grad_norm stays bounded, checkpoints
+  round-trip -- and the last two resumes were COMPILED.
+
+- **Three corrections today, all the same shape: reusing a stale fact without
+  re-checking it.** Worth naming together because the pattern is the lesson.
+  (1) I claimed every nightly job had secretly run on torch 2.13; my
+  path-grep took the first `site-packages/torch` in each log, which is a
+  `_pytree` warning from the inherited conda torch before the venv's torch
+  loads. (2) I claimed TP>1 hit "a third, unidentified failure" on the
+  nightly -- I compared a CDT commit time against UTC mtimes AND grepped for
+  only one of the two known errors. (3) I used the uncompiled 30B's 93.80%
+  memory as the ceiling for the 2.14 bump, hours after retiring the caveat
+  that made that path exist. Nothing runs uncompiled; the live chain is
+  59.84%.
+
+- **The instrument that fixed all three: ask the run, not the clock or the
+  filename.** Every run dumps its resolved config.
+  `grep -ao '"global_vocab_size": [^,]*'` separates fix-active from
+  fix-inactive with no timezone reasoning at all, and every failing TP>1 arm
+  dumps `null` -- so no failing arm ever had the fix and there was no mystery.
+  Same for torch identity: `spmd_types` cannot produce one step on 2.13, so
+  steps>0 IS the proof of which torch ran. Behavioral discriminators beat
+  metadata.
+
 ## 2026-08-21 (sunspot) -- the 30B compiled resume works after all; a chain that actually reaches 2000
 
 - **Compiled resume is not broken; `full_dtensor` was.** exp08 had carried a
