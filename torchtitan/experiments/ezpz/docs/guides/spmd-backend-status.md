@@ -1,6 +1,6 @@
 # SPMD backends on XPU: what works, what does not, and why
 
-**Last updated:** 2026-08-20 (Sunspot, `frameworks/2026.1.0` / oneAPI 2026.1.0)
+**Last updated:** 2026-08-21 (Sunspot, `frameworks/2026.1.0` / oneAPI 2026.1.0)
 
 The reference environment throughout is the official module plus its ezpz
 venv:
@@ -27,7 +27,7 @@ along the way, and what to run today.
 | --- | --- | --- |
 | **`partial_dtensor`** | **use this** | what every production trajectory has always run -- upstream renamed `"default"` to this name in #4085 |
 | `full_dtensor` | do not use | being deleted upstream (#4217); compiled agpt hits a `DeviceMesh` assertion |
-| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one |
+| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 still unresolved ([1d](#1d-tp1-on-the-nightly-is-not-settled)) |
 
 Both ezpz config registries pin `partial_dtensor` as of `b2ff09632`.
 
@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 10/10 | **bit-identical** (after `584fb3d83`) |
+| TP=2 | 10/10 | bit-identical in the cell measured (after `584fb3d83`) -- but see [1d](#1d-tp1-on-the-nightly-is-not-settled): other TP>1 arms still produce 0 steps for an unidentified reason |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -255,6 +255,88 @@ Multi-node parity is not resolvable by this method: the same-backend control
 is itself nondeterministic across nodes (a cross-node loss all-reduce
 ordering effect -- grad_norm matches while loss does not). See
 [known-bugs/xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+
+## 1c. Is the nightly PERFORMANT? Throughput yes, memory costs 6.25pp
+
+Ten jobs had run on `venvs/rc-plus-nightly` and every one was
+correctness-only -- grep all ten for `mfu:` and you get zero lines. The
+nightly was proven to produce the RIGHT numbers and had never been shown to
+produce them at an acceptable RATE, which matters because 2.14 is the only
+way to run `spmd_types` and upstream has made it the default.
+
+Job 12473548, agpt_20b, 2N, TP=1, LBS=2, seq=2048, compiled, 30 steps.
+Steps 1-10 discarded (torchtitan reports a CUMULATIVE average tps, so early
+steps carry compile and warmup); the table is the mean of steps 11-30.
+
+| arm | torch | backend | tps | MFU | mem |
+| --- | --- | --- | ---: | ---: | ---: |
+| A (reference) | 2.13.0a0+gitcf30153 | `partial_dtensor` | 521.6 | 21.80% | 50.31% |
+| B | 2.14.0.dev20260722 | `partial_dtensor` | 522.9 | 21.86% | **56.56%** |
+| C | 2.14.0.dev20260722 | `spmd_types` | 521.1 | 21.78% | **56.56%** |
+| D (control) | 2.13.0a0+gitcf30153 | `partial_dtensor` | 527.8 | 22.06% | 50.31% |
+
+**Throughput: no cost.** Torch bump alone (B vs A) +0.25% tps. Backend on top
+of the bump (C vs B) -0.34%. Total cost of adopting upstream's default
+(C vs A) **-0.10% tps / -0.020pp MFU**.
+
+D is why those numbers mean anything. It re-runs A's exact configuration at
+the end of the same job, and measures a **1.19% tps / 0.261pp noise floor**.
+Every delta above is well inside it. exp05 separately measured 2.8% tps
+across *different* jobs for one config, so treat anything under ~3% as
+unattributable regardless.
+
+**Memory: +6.25pp, and it tracks the TORCH BUMP, not the backend.** B and C
+are identical at 56.56%; A and D are identical at 50.31%. 2.14 costs 6.25pp
+whichever backend you choose. This is not noise -- A and D agree to the
+decimal, so the measurement is exact.
+
+That is free at 50% occupancy and is not free near the ceiling. The 20B at
+seq=8192 already runs 84.86%, and the uncompiled 30B path sits at 93.80%:
+**+6.25pp on top of 93.80% does not fit.** Check headroom before bumping torch
+on anything running hot.
+
+Caveat on absolute numbers: 21.8% MFU here is agpt_20b at LBS=2/seq=2048, not
+a production shape -- exp05's 27.89% is the 30B at LBS=3. These four arms are
+a valid *relative* A/B and not an absolute throughput claim.
+
+### Verifying the arm actually ran the torch you think
+
+Each arm gates on `torch.__version__` AND prints `torch.__file__`:
+
+```
+[B-t214-partial] torch=2.14.0.dev20260722+xpu
+[B-t214-partial] from=.../venvs/rc-plus-nightly/lib/python3.12/site-packages/torch
+[A-t213-partial] torch=2.13.0a0+gitcf30153
+[A-t213-partial] from=.../conda_envs/RC4_.../lib/python3.12/site-packages/torch
+```
+
+The version string alone is not sufficient -- a stray install into the shipped
+venv shadows the conda torch and has already produced one false positive here.
+Print the path.
+
+> **A grep that does NOT work for this.** Auditing which torch an arm used by
+> taking the first `site-packages/torch` path out of its log gives the WRONG
+> answer, and reports every nightly arm as having run on 2.13. Every log
+> contains BOTH paths: a `_pytree.py` deprecation warning is emitted from the
+> inherited conda torch before the venv's torch loads. The sound discriminator
+> is behavioral -- `spmd_types` cannot produce a single step on 2.13, so any
+> `spmd_types` arm with steps > 0 was necessarily on the nightly.
+
+## 1d. TP>1 on the nightly is NOT settled
+
+The coverage table below records TP=2 as bit-identical "after `584fb3d83`".
+That is true of the cell it was measured in and should not be read as TP>1
+being green on the nightly generally.
+
+`584fb3d83` (the `loss.global_vocab_size` fix) landed 16:38. Job 12473484 ran
+at 20:04, AFTER it, and its TP=2 arm still produced **0/5 steps** -- with **no**
+`params must be DTensors` error and no `TypeError` from the vocab path. Both
+known TP>1 failure modes are excluded, so this is a third, unidentified one.
+The `tp2` and `tp2n2` `spmd_types` arms of jobs 12473496 and 12473499 show the
+same signature: zero steps, no recognized error.
+
+Not yet diagnosed. Do not treat TP>1 + `spmd_types` on the nightly as working
+until it is.
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 

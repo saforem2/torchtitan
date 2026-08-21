@@ -1,0 +1,189 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N nightlyperf
+#PBS -j oe
+set -o pipefail
+
+# Is the 2.14 nightly PERFORMANT, not just correct?
+#
+# Ten jobs have run on venvs/rc-plus-nightly (torch 2.14.0.dev20260722+xpu)
+# and every one was correctness-only: parity, determinism, vocab-size. Grep
+# them for "mfu:" and you get zero lines across all ten. So the nightly is
+# proven to produce the RIGHT numbers and has never been shown to produce
+# them at an acceptable RATE.
+#
+# That gap matters because 2.14 is the only way to run spmd_types (our 2.13
+# lacks pytorch da19cbd78, the FSDP consumer), and upstream has made
+# spmd_types the default. If adopting it costs throughput, that is a cost we
+# would be taking blind.
+#
+# The A/B is clean: venvs/rc-plus-nightly is a byte copy of
+# venvs/fw-2026.1-rc2 with the nightly installed into it. fw-2026.1-rc2
+# vendors no torch at all (include-system-site-packages=true, inherits
+# 2.13.0a0+gitcf30153 from the RC4 conda); rc-plus-nightly vendors 2.14.
+# 191 vs 187 packages, same lineage. Torch is the variable.
+#
+# Four arms, all agpt_20b, 2N, TP=1, LBS=2, seq=2048, compiled, 30 steps:
+#
+#   A  2.13 + partial_dtensor   the shipped production path (reference)
+#   B  2.14 + partial_dtensor   isolates the TORCH BUMP alone
+#   C  2.14 + spmd_types        isolates the BACKEND on top of the bump
+#   D  2.13 + partial_dtensor   same-stack control, run last
+#
+# D is the point of the design. exp05 measured two noise scales on this
+# hardware that differ by 3x: 0.1% for a re-run inside one job, but 2.8% tps
+# / 0.82pp MFU for the SAME config across different jobs. Without D, any
+# A-vs-B delta under ~3% is unattributable. D makes the floor measurable in
+# the same job rather than assumed.
+#
+# 20B not 30B: the 30B needs ~3.5 min of compile before step 1 (measured on
+# 12473515: 22:49:38 job start -> 22:53:08 first step) and 294 G checkpoints.
+# The 20B answers the same question about the torch bump for a fraction of
+# the walltime, and it is the config every existing nightly datapoint used,
+# so the correctness results carry over directly.
+#
+# seq=2048 not 4096: seq >= 2560 is nondeterministic multi-node
+# (known-bugs/xpu-determinism-rank-seqlen-interaction.md). This job measures
+# throughput rather than bits, so that is not strictly binding -- but staying
+# in the deterministic regime means a surprising loss delta is a real signal
+# instead of documented noise.
+#
+# Steps 1-10 are DISCARDED from every arm. torchtitan reports a cumulative
+# average tps, so early steps carry compile and warmup; the 30B run shows
+# 139/295 immediately post-resume settling to 489. Reporting the mean of
+# steps 11-30 is what makes the arms comparable.
+#
+# --checkpoint.no-enable: measuring throughput, not I/O, and the filesystem
+# has better uses than 4 more 20B checkpoints.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+
+export LOGD="$PWD/outputs/logs/nightlyperf/$PBS_JOBID"; mkdir -p "$LOGD"
+echo "logs: $LOGD"
+echo ""
+
+# run <label> <venv> <backend> <want_torch_prefix>
+run() {
+  local label="$1" venv="$2" backend="$3" want="$4"
+  ( set +u
+    source "venvs/$venv/bin/activate"
+    unset PYTHONPATH
+    got=$(python3 -c "import torch;print(torch.__version__)" 2>/dev/null)
+    # Guard the shadowing trap: a stray install into the shipped venv puts a
+    # torch/ in its site-packages that silently overrides the conda one.
+    where=$(python3 -c "import torch,os;print(os.path.dirname(torch.__file__))" 2>/dev/null)
+    echo "[$label] torch=${got:-<none>}"
+    echo "[$label] from=${where:-<none>}"
+    case "$got" in
+      "$want"*) : ;;
+      *) echo "[$label] ABORT: wanted ${want}*, got ${got:-<none>}"; exit 1 ;;
+    esac
+    timeout 1500 ezpz launch --nproc 24 -ppn 12 -- \
+      python3 -m torchtitan.experiments.ezpz.train \
+        --module ezpz.agpt --config agpt_20b \
+        --checkpoint.no-enable --dataloader.num-workers=0 \
+        --training.steps=30 --training.local-batch-size=2 \
+        --training.seq-len=2048 \
+        --parallelism.tensor-parallel-degree=1 \
+        --parallelism.spmd-backend="$backend" \
+        > "$LOGD/$label.log" 2>&1
+    echo "[$label] rc=$?"
+  )
+}
+
+run A-t213-partial fw-2026.1-rc2   partial_dtensor 2.13.0a0
+run B-t214-partial rc-plus-nightly partial_dtensor 2.14.0.dev20260722
+run C-t214-spmd    rc-plus-nightly spmd_types      2.14.0.dev20260722
+run D-t213-control fw-2026.1-rc2   partial_dtensor 2.13.0a0
+
+echo ""
+echo "########## steady-state throughput (steps 11-30) ##########"
+python3 - <<'PY'
+import os, re, glob, statistics as st
+
+d = os.environ["LOGD"]
+pat = re.compile(
+    r"step:\s*(\d+)\s+loss:\s*([\d.]+)\s+grad_norm:\s*([\d.]+)\s+"
+    r"memory:\s*([\d.]+)GiB\(([\d.]+)%\)\s+tps:\s*([\d,]+)\s+"
+    r"tflops:\s*([\d.]+)\s+mfu:\s*([\d.]+)%"
+)
+
+def parse(p):
+    try:
+        t = open(p, errors="ignore").read()
+    except OSError:
+        return None
+    t = re.sub(r"\x1b\[[0-9;]*m", "", t)
+    rows = []
+    for m in pat.finditer(t):
+        rows.append(dict(
+            step=int(m.group(1)), loss=float(m.group(2)),
+            mem=float(m.group(5)), tps=float(m.group(6).replace(",", "")),
+            tflops=float(m.group(7)), mfu=float(m.group(8)),
+        ))
+    return rows
+
+order = ["A-t213-partial", "B-t214-partial", "C-t214-spmd", "D-t213-control"]
+res = {}
+print(f"  {'arm':<18} {'steps':>6} {'tps':>7} {'MFU':>8} {'TFLOPs':>8} {'mem%':>7} {'loss@30':>9}")
+for a in order:
+    rows = parse(f"{d}/{a}.log")
+    if not rows:
+        print(f"  {a:<18} {'0':>6}  -- NO STEPS (see {a}.log)")
+        continue
+    warm = [r for r in rows if r["step"] >= 11]
+    if not warm:
+        print(f"  {a:<18} {len(rows):>6}  -- fewer than 11 steps, cannot report steady state")
+        continue
+    tps = st.mean(r["tps"] for r in warm)
+    mfu = st.mean(r["mfu"] for r in warm)
+    tfl = st.mean(r["tflops"] for r in warm)
+    mem = max(r["mem"] for r in warm)
+    res[a] = dict(tps=tps, mfu=mfu, mem=mem, loss=warm[-1]["loss"], n=len(rows))
+    print(f"  {a:<18} {len(rows):>6} {tps:>7.1f} {mfu:>7.2f}% {tfl:>8.2f} {mem:>6.2f}% {warm[-1]['loss']:>9.5f}")
+
+print()
+A, B, C, D = (res.get(k) for k in order)
+
+if A and D:
+    floor = abs(D["tps"] - A["tps"]) / A["tps"] * 100
+    print(f"  NOISE FLOOR (D vs A, same stack, same job): {floor:.2f}% tps, "
+          f"{abs(D['mfu']-A['mfu']):.3f}pp MFU")
+    print(f"    Any delta below this is not attributable. exp05 saw 2.8% tps")
+    print(f"    across jobs for one config, so treat <3% as suspect regardless.")
+else:
+    floor = None
+    print("  NOISE FLOOR: not measurable (A or D missing)")
+
+def cmp(lbl, x, base):
+    if not (x and base):
+        print(f"  {lbl}: not measurable"); return
+    dt = (x["tps"] - base["tps"]) / base["tps"] * 100
+    dm = x["mfu"] - base["mfu"]
+    verdict = "WITHIN NOISE" if (floor is not None and abs(dt) <= max(floor, 3.0)) else "REAL"
+    print(f"  {lbl}: {dt:+.2f}% tps, {dm:+.3f}pp MFU, "
+          f"{x['mem']-base['mem']:+.2f}pp mem  -> {verdict}")
+
+print()
+print("  torch bump alone  (B vs A):")
+cmp("    2.14 vs 2.13, both partial_dtensor", B, A)
+print("  backend on top of the bump (C vs B):")
+cmp("    spmd_types vs partial_dtensor, both 2.14", C, B)
+print("  total cost of adopting upstream's default (C vs A):")
+cmp("    2.14+spmd_types vs shipped 2.13+partial", C, A)
+PY
+
+echo ""
+echo "  per-arm failures:"
+for f in "$LOGD"/*.log; do
+  n=$(sed 's/\x1b\[[0-9;]*m//g' "$f" | grep -acE "Traceback|Error 40|level_zero|ur_die|params must be DTensors")
+  [ "$n" -gt 0 ] && echo "    $(basename "$f"): $n fault lines"
+done
+echo "NIGHTLYPERF_DONE"
