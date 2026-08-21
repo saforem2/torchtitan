@@ -96,6 +96,11 @@ internal event` signature to Intel with the a2a repro; it is far more
 specific than "SIGABRT in all_to_all_single" and is the right thing to put
 in the ticket.
 
+> [!NOTE]
+> **Written up and ready to file:**
+> [`upstream-issues/intel-ur-die-urEventWait-a2a.md`](../../upstream-issues/intel-ur-die-urEventWait-a2a.md)
+> (2026-08-20). Needs an ALCF/Intel account to submit.
+
 Measured on the post-79th-sync tree (job `12473367`, 2N, LBS=1, 5 steps,
 compile off):
 
