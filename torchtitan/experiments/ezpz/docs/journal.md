@@ -63,6 +63,96 @@ Running log of what's happening, session by session. Most recent first.
 - **sft migration finished cleanly.** 4 directories, 0 failures, datascience
   back to 16.53T of 20T (was 20.48T, over quota).
 
+## 2026-08-20/21 (aurora) -- MDS + lr in the dashboard; TWO seats were loading complex weights as cos_sin; a fix that never reached the queue
+
+- **The umbrella finally ran after ~44 h queued, on the PRE-FIX script.** PBS
+  snapshots the submit script at `qsub`, so the 20B constant-LR fix
+  (`b08fccfd1`, Aug 19 12:23) never reached job `8764675` (queued Aug 18 20:03).
+  It trained a full 12 h cycle on the decaying config -- clean walltime finish
+  (`Exit_status=-29`, 12:00:31), t1 20b-512 -> step 10,699 / ckpt 10600,
+  t2 20b-256 -> 11,800. Held successors are submitted at the same time as their
+  predecessor, so they are pre-fix too: replaced `8764677` -> `8768759` ->
+  (after the RoPE fix) `8769730`. **Check `qstat -f <id> | grep ctime` against
+  the fix commit date whenever a script fix lands with jobs already queued.**
+- **TWO of five seats were loading COMPLEX-trained weights under a cos_sin
+  config** (`efcae5419`). `CONFIG_SUFFIX` was one global `_real` for all five,
+  but each chain crossed the 2026-06-25 switch at a different step and
+  `2b_v2_256` never crossed it at all. Audited per seat at its real resume/seed
+  step:
+
+  | seat | parent @ step | trained | was |
+  |---|---|---|---|
+  | t0 dolmino | 2b_v2_512 @46429 | `_real` | ok |
+  | t1 20b-512 | 20b_v2_512 @9000 | `_real` | ok |
+  | t2 20b-256 | 20b_v2_256 @10369 | `_real` | ok |
+  | t3 2b-512 constlr | 2b_v2_512 @21307 | **complex** | WRONG |
+  | t4 2b-256 constlr | 2b_v2_256 @9500 | **complex** | WRONG |
+
+  t3 is a 512N PRODUCTION seat resuming IN PLACE -- it only avoided corrupting
+  a live chain because it dies on `std::bad_alloc` first. Now a per-seat 12th
+  TRAINERS field; the guard tests for UNSET rather than empty, because empty is
+  a meaningful value here (complex). Same trap as the `decay_ratio` field.
+  **Found because the user asked "why is it using agpt_2b_real" about a smoke
+  script that had copied the flavor verbatim from the umbrella.**
+- **The t4 seat's failure peeled back three layers.** `lm_head.weight`
+  (fixed earlier) -> `optimizer.state...` because the CLONE ran a stale
+  `ckpt_key_compat.py` with **zero** optimizer-namespace handling while main's
+  had it (commit `40ffc9215` never propagated; the file being PRESENT is not
+  evidence the fix is IN it) -> now `AttributeError: 'dict' object has no
+  attribute 'mul_'` in SophiaG, i.e. the pre-#3623 nested->flat optim format.
+  Converted step-9500 successfully (1110 subkeys / 111 params, momentum live:
+  `exp_avg` 67.5, `hessian` 0.053) but the smoke has yet to run -- see below.
+- **MDS and `lr` are both in the dashboard now** (`f87b77372`, `712b46ba0`).
+  MDS reads the committed CSV (154,391 rows, 0 W&B calls) rather than a
+  cross-project scan over 8,098 runs; verified a faithful dump (1242/1242 loss
+  values bit-identical to run `ov1dn10t`). Its tokens/step is confirmed
+  BIT-EXACT against W&B's own `consumed_train_tokens`: 154391*6144*8192 ==
+  7,770,753,466,368 exactly. `lr` rides in a SEPARATE scan_history pass --
+  folding it into `OLOG_KEYS` returns 0 rows for all 6 backfill runs
+  (scan_history intersects keys) and would have deleted 3,408 backfilled points
+  from every other metric.
+- **The matched-pair eval says no meaningful separation at step 21,000.** Mean
+  delta -0.0033 across 7 tasks, fork ahead on 5/7. Two tasks exceed 1 sigma in
+  OPPOSITE directions (arc_easy +0.0144 to the fork, boolq -0.0409 to
+  canonical). **boolq is confounded**: the fork trained under cos_sin from
+  complex-derived weights, and boolq is calibration-sensitive. The clean
+  version of this experiment needs a correctly-flavored fork.
+- **Own-goals worth recording.** Three allocations lost to my scripting errors
+  on one smoke script (no venv activation; guessed `--optimizer.name` when the
+  build wants `--optimizer=`; then `SophiaG not added` because `ezpz launch`
+  needs `--nproc`/`--hostfile`/`--` and the node-local venv -- I had
+  reconstructed the wrong command SHAPE instead of copying the umbrella's).
+  Separately, the `_real` adapter guard in `eval-2b-v2.sh` tested `V2_REPO`
+  when the conversion imports from `CONVERT_REPO`, so it refused a CORRECT
+  matched-pair invocation and cost one arm of that eval (`ab32015a2`).
+- **`prod_dash` liveness and the umbrella.** A running umbrella marked exactly
+  ONE seat live: `CKPT_RE.search()` takes the first match, and the umbrella
+  `.o` names all five ckpt dirs. Now `finditer()`, with the shared log
+  authoritative for STATE but never for the per-step tip (`9e7dc63b8`).
+  `isLive` also trusted `queue_state=="R"` with no freshness check; keyed on
+  `live_tip.age` now -- a first attempt gated on `log_age` and reported 0 live
+  while four chains trained, because `log_age` is the mtime of HISTORICAL logs
+  (`246c01faa`).
+- **A silent under-count with an honest counter.** The 20b-512 ropefix sweep
+  reported "34 ok, 0 skipped, 0 failed" while 2 of 36 checkpoints had no
+  winogrande. Nothing failed -- the STEPS list itself omitted 5000 and 6000
+  (jumping 4900->5100, 5900->6010) while the 256n list had both. No
+  artifact-check downstream could catch this; only diffing the two arms' lists
+  did (`32b94a9ea`). Winogrande is now 72/72; a follow-up (`8770286`) is making
+  512n uniform across all four tasks after my gap-fill created the two new dirs
+  with `TASKS=winogrande` only.
+- Also: stage-2 token offset now honored in the TUI and the tokens-vs-time
+  chart (`8f4a60d8d`), the MDS tokens/step constant corrected in all three eval
+  plotters (`aec112640`, figures regenerated `97fa40ed0`), `SSH_TIMEOUT`
+  600->1800 s because the cold build grew to ~915 s (`a67c8cb65`), and the web
+  board no longer overflows horizontally (`27eac13be`).
+- Open: `8769730` queued with 0 prod-reachable free nodes; the t4 smoke needs
+  rewriting to reuse the umbrella's launcher; t3's `std::bad_alloc` has a fresh
+  512N reproduction (note it died while t1 ran fine at the SAME 522 nodes in
+  the same job, which argues against pure rank count); #76 906 GB reclaim.
+
+---
+
 ## 2026-08-19 (local + aurora) -- a browser dashboard; the dolmino tokens-axis offset finally landed; a matched-pair eval needs TWO RoPE flavors
 
 - **`prod_dash.py` hung for 8m20s and blamed SSH.** It was not SSH (0.2 s
