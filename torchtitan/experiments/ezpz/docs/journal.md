@@ -63,6 +63,71 @@ Running log of what's happening, session by session. Most recent first.
 - **sft migration finished cleanly.** 4 directories, 0 failures, datascience
   back to 16.53T of 20T (was 20.48T, over quota).
 
+## 2026-08-21 (sunspot) -- the 30B compiled resume works after all; a chain that actually reaches 2000
+
+- **Compiled resume is not broken; `full_dtensor` was.** exp08 had carried a
+  caveat for days -- "resume uncompiled for one interval, or wait for the
+  upstream fix" -- and job 12473515 retires it. It resumed from step-800
+  COMPILED on the `partial_dtensor` pin, loaded in 40.38 s with no vc_check,
+  and has run 800+ steps since: 2.712 -> 2.263, zero NaN, 489 tps, 28.3% MFU,
+  memory flat at 59.84%. The memory number is the whole point. The uncompiled
+  workaround cost 93.80% occupancy to save ~7% throughput, which was never
+  shippable at this size; the compiled resume costs nothing. This also closes
+  the last hole in the round trip -- the earlier uncompiled resume ran out of
+  walltime one step before its checkpoint, so a post-resume SAVE had never
+  actually been observed. Three now (1000/1250/1500), ~27 s each.
+
+- **That answers open question 1 on the vc_check page,** which had asked for
+  exactly this before trusting the pin ("`partial_dtensor` is the legacy path
+  and this session has only smoke-tested it, 3/3 steps"). 1589 steps is not a
+  smoke test. Status header moved from OPEN to OPEN-upstream/not-blocking.
+
+- **`--checkpoint.interval` is a capacity decision at 30B, not a granularity
+  knob.** The preceding job set interval=100 reasoning that restart points
+  are cheap. At 294 G per checkpoint, 2000 steps / 100 = 5.9 T against 1.5 T
+  free; it died with `Errno 28` mid-write. Worth being precise that this was
+  a *checkpoint write* failure, not a training fault -- the model was fine.
+  The fix was interval=250, deliberately NOT `keep-latest-k`: deleting
+  history to buy space trades a permanent asset for a temporary one. The
+  partial step-900 dir left behind is harmless, since `_find_load_step`
+  (dcp.py:640-684) only counts a step dir holding `.metadata` or
+  `model.safetensors.index.json`.
+
+- **Queued `30b_long4.pbs` (12473545) `afterany` the live job.** At 42 s/step
+  the inner `timeout 41400` lands near step 1770, ~230 short of the 2000-step
+  config, so the chain needed a continuation -- there was none. long4 scales
+  BOTH clocks together (walltime 6h, `timeout 19800`), which is the entire
+  lesson from `30b_long.pbs`: that one had its PBS walltime raised 6h -> 12h
+  while the inner timeout stayed at 20400, and took an `rc=124` at step 871
+  with half its allocation unused. Also committed the whole chain
+  (`30b_converge` through `30b_long4`), which had been running from
+  uncommitted scripts sitting in the repo root.
+
+- **A loss bump that was not one.** Step 1300 reads 2.434 against 1200's
+  2.377 and looks like a regression. It is batch noise: loss oscillates in a
+  +/-0.05 band about a descending mean while grad_norm falls monotonically
+  0.26 -> 0.13. Divergence has the opposite signature -- grad_norm rising.
+  Two arbitrary 50-step samples will disagree at this amplitude, so sample
+  denser before calling a bump.
+
+- **Two watcher bugs worth naming, both mine.** First: `qstat` is not on
+  `PATH` for non-interactive ssh here, so `ssh sunspot "qstat ..."` fails
+  with `command not found` -- and with `2>/dev/null` attached that is
+  indistinguishable from an empty queue. Use `/opt/pbs/bin/qstat`. Second:
+  the first monitor I armed globbed `outputs/logs/30b-converge/*/train.log`
+  and immediately fired `Errno 28 / No space left / Traceback`. Those came
+  from 12473509's *old* disk-full log; the live log has zero. A health
+  watcher must scope to the job it is watching, or it will keep re-reporting
+  history as news.
+
+- **Also: never guess a PBS job's log path.** Three probes were burned
+  globbing `~/torchtitan*` and `/lus/tegu/projects/*/foremans/torchtitan*`
+  before reading `Output_Path` and `PBS_O_WORKDIR` out of `qstat -f`. The
+  checkout is at `/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan`
+  -- two levels deeper than every glob assumed. Related zsh trap: an unmatched
+  glob aborts the whole command line with `no matches found`, and `2>/dev/null`
+  does NOT suppress it, because the shell emits it before the command runs.
+
 ## 2026-08-20/21 (aurora) -- MDS + lr in the dashboard; TWO seats were loading complex weights as cos_sin; a fix that never reached the queue
 
 - **The umbrella finally ran after ~44 h queued, on the PRE-FIX script.** PBS
