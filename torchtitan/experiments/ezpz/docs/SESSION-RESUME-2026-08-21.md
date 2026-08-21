@@ -38,26 +38,44 @@ cluster backbone 1 h), so no manual refresh is needed. NOTE: the server holds
 `prod_dash.py` in memory -- after a code change it must be restarted, not
 refreshed.
 
-## 4. The open thread: t4 smoke `8771637` FAILED, and the reason is a lead
+## 4. RESOLVED: t4 smoke `8771637` -- precedence, not a dropped flag
 
 Ran through the umbrella launcher (`MULTI_ONLY=4 MULTI_NNODES_OVERRIDE=4`) and
 still died with the same pre-existing error:
 
     AttributeError: 'dict' object has no attribute 'mul_'
 
-**The wrapper reported "injected initial-load-path into the t4 row", but
-grepping the trainer's actual launch shows NO `--checkpoint.initial-load-path`
-flag.** So the converted seed was never used and this run re-tested the
-old-format checkpoint -- the result says nothing about whether step-9500 is
-corrupt.
+An earlier revision of this section claimed the `--checkpoint.initial-load-path`
+flag never reached the trainer. **That was wrong.** It reached the trainer
+intact; torchtitan then declined to use it:
 
-Leading hypothesis, NOT yet verified: t4's own ckpt dir already contains a
-resumable `step-9500`, and a resume-from-latest takes precedence over
-`initial-load-path` (that flag seeds a FRESH chain). If so the fix is to point
-the smoke at an empty ckpt dir so there is nothing to resume from.
+    [W] components/checkpoint:686: checkpoint.initial_load_path is provided but
+        the checkpoint.folder exists. Checkpointer will use the checkpoints
+        from the checkpoint.folder .../constlr-from9500.
+    [I] components/checkpoint:706: Loading the checkpoint from
+        .../constlr-from9500/step-9500
 
-Next step is a log read, not an allocation: find where `initial-load-path` is
-dropped between the rewritten TRAINERS row and the `ezpz launch` line.
+`initial_load_path` SEEDS A FRESH CHAIN; it never overrides a resumable
+checkpoint already sitting in `checkpoint.folder`. t4's real ckpt dir holds the
+OLD-format step-9500, so the smoke re-tested the very checkpoint it was meant
+to bypass. The hypothesis in the earlier revision was right; the evidence cited
+for it was not.
+
+**Why the wrong reading happened, and how to avoid repeating it:** the grep was
+against the umbrella's `.o` file, which carries only the wrapper's stdout. The
+resolved launch line and that warning live in
+`logs/multi-autoretry-<jobid>/trainer-0-*.console.log`. Always grep the
+trainer console, not the `.o`.
+
+FIXED in `c2131f3f2`: the smoke now rewrites field 5 (ckpt_dir) to an empty
+scratch dir as well as field 8, symlinks the warm blendcorpus index cache
+(field 5 also drives `data-cache-path`, and the two resolve differently --
+`checkpoint.folder` gets `./outputs/` prepended, `data-cache-path` does not),
+bounds the run with a new `MULTI_STEPS_OVERRIDE` (a prod seat derives
+`training.steps` from train_tokens: attempt 4 launched with 5,943,018), and
+greps the console for the override warning so an invalid run reports itself.
+
+Re-submitted as `8771774`.
 
 ## 5. Everything else still open
 
@@ -73,7 +91,7 @@ dropped between the rewritten TRAINERS row and the `ezpz launch` line.
   fork -- the step-21000 matched pair (job `8769743`) came back with no
   meaningful separation (mean delta -0.0033, fork ahead 5/7) but boolq
   (-0.0409) is confounded by the RoPE mismatch.
-- **#85** the t4 question itself, blocked on section 4.
+- **#85** the t4 question itself -- unblocked; `8771774` is the re-run.
 
 ## 6. Landed today (all pushed)
 
