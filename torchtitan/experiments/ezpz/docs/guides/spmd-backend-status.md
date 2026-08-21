@@ -301,6 +301,14 @@ Within this job the measurement is exact -- A and D agree to the decimal.
 > because the DELTA IS CONFIG-DEPENDENT, not because either is wrong.
 > "+6.25pp" is a property of agpt_20b at LBS=2/24 ranks, not of the torch
 > bump. Measure it on the config you intend to run.
+>
+> Four FullAC datapoints now, and only the first is large:
+>
+> | config | 2.13 | 2.14 | delta |
+> | --- | ---: | ---: | ---: |
+> | LBS=2, 24 ranks (12473548) | 50.31% | 56.56% | **+6.25pp** |
+> | LBS=1, 12 ranks (12473608) | 71.62% | 71.51% | -0.11pp |
+> | LBS=1, 24 ranks (12473611) | 53.19% | 53.51% | +0.32pp |
 
 Free at 50% occupancy; the question is what it does to a config running hot.
 
@@ -434,8 +442,20 @@ passes no `--debug.seed` / `--debug.deterministic`, so its arms are NOT
 expected to match numerically and they do not (max |d| 4.8-8.9 between
 backends, against 13.6-15.8 between AC modes -- both ordinary unseeded
 spread). It establishes that **all three AC modes RUN on 2.14 and cost what
-they should**, not that they are numerically equivalent. A seeded AC
-comparison is still owed.
+they should**, not that they are numerically equivalent.
+
+**Seeded follow-up (jobs 12473608, 12473611): FullAC is bit-identical;
+none/selective are NOT MEASURABLE this way.** FullAC seeded at 12 ranks /
+1 node gives control 10/10 and `spmd_types` vs `partial_dtensor` 10/10 --
+that cell is closed. The other two modes cannot be run seeded at this size:
+`--debug.deterministic` adds enough memory that AC=none (80.14% unseeded)
+and selective (62.41%) both die with `level_zero 40`, while FullAC (53.51%)
+is unaffected. Going to 2 nodes does not help -- there the same-backend
+CONTROL itself fails at seq=2048 on the 20B, so the cell is unresolvable
+regardless. Both effects are written up in
+[xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+Closing none/selective needs a smaller model or more nodes, not a retry of
+this shape.
 
 ### TP: bit-identical at TP=4 and across a node boundary
 
