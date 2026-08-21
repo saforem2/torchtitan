@@ -1,0 +1,86 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=8
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 30b-long4
+#PBS -j oe
+set -o pipefail
+
+# CHAIN CONTINUATION of 30b-long3 (12473515). Queued -W depend=afterany so it
+# starts whether that job exits clean or is killed by its own inner timeout.
+#
+# 30b-long3 resumes from step-800 and, at the observed 42 s/step, reaches
+# roughly step 1770 when its 41400 s inner timeout fires -- about 230 steps
+# short of the 2000-step config. This job finishes the run.
+#
+# Deltas vs 30b_long3.pbs:
+#   walltime 12h -> 6h        (250 steps at 42 s/step is ~2h55m; 5h30m inner)
+#   timeout 41400 -> 19800    (scaled WITH the walltime -- 30b-long ate a
+#                              rc=124 at step 871 because only walltime moved)
+#   ckpt interval 250 -> 100  (final stretch: cheap restart points. 294 G per
+#                              checkpoint, 3 more writes, ~4.8 T left after)
+#
+# Resume is COMPILED and that is deliberate. The vc_check DeviceMesh assertion
+# in docs/guides/known-bugs/agpt-full-dtensor-vc-check.md is a full_dtensor
+# failure; this inherits the partial_dtensor pin from b2ff09632, and 30b-long3
+# already proved a compiled resume works on it -- loaded step-800 in 40.38 s
+# and has run 780+ steps at 28.3% MFU since.
+#
+# No --checkpoint.keep-latest-k change: 0 means keep all, and that stays.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+# Gate on the config actually importing, with PYTHONPATH unset -- manager.py
+# masks every import error as one generic "Cannot import config_registry".
+CFG_OK=0
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_30b_olmo2tok" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: agpt_30b_olmo2tok does not import"; exit 1; }
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-converge"
+LOGD="$PWD/outputs/logs/30b-converge/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+echo "ckpt dir: $CKPT"
+echo "log:      $LOG"
+echo ""
+
+# W&B on, always (every run, no exceptions).
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
+
+timeout 19800 ezpz launch --nproc 96 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok \
+    --training.steps=2000 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --parallelism.tensor-parallel-degree=1 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=3e-4 \
+    --lr-scheduler.warmup-steps=100 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=100 \
+    --checkpoint.keep-latest-k=0 \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## convergence ##########"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" \
+  | awk 'NR==1||NR%100==0{print "  "$0}' | head -25
+echo ""
+echo "  first/last:"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | head -1 | sed 's/^/    /'
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | tail -1 | sed 's/^/    /'
+echo ""
+echo "  NaN/inf in loss or grad_norm: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE 'loss: *(nan|inf)|grad_norm: *(nan|inf)')"
+echo "  steps completed: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE 'step: *[0-9]+ +loss:')"
+echo "  checkpoints written: $(ls -d "$CKPT"/step-* 2>/dev/null | wc -l)"
+echo "  W&B: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
+echo "  rc=$rc"
+echo "30B_CONVERGE_DONE"
