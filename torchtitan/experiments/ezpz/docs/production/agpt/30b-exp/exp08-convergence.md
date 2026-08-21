@@ -150,6 +150,41 @@ The config dump confirms `"spmd_backend": "partial_dtensor"` -- the same code
 path every earlier trajectory ran under its old name `"default"`, so this is
 continuity rather than a new regime.
 
+## Long run: 471 steps, loss 3.698 -> 2.617 (job 12473476)
+
+Resumed from step-400 and ran to step 871 of the 2000-step config.
+
+| step | loss | grad_norm |
+|-----:|-----:|----------:|
+| 401 | 3.698 | -- |
+| 501 | 3.265 | -- |
+| 601 | 3.03 | -- |
+| 750 | 2.755 | -- |
+| 871 | **2.617** | 0.21 |
+
+Monotone throughout, no plateau, no spikes. **Zero NaN/inf** in loss or
+grad_norm across all 471 steps. Memory flat at 38.29GiB (59.84%) start to
+finish. Seven checkpoints written (250 through 800).
+
+grad_norm fell from ~0.7 early to ~0.21 by step 871, which is the expected
+shape as the model settles rather than a sign of stalling -- loss is still
+descending at the same rate at the end.
+
+W&B: https://wandb.ai/aurora_gpt/agpt-30b/runs/ul9l3nd6
+
+This is also the first production-length validation of the
+`partial_dtensor` repin (`b2ff09632`).
+
+### Why it stopped at 871 and not 2000
+
+`rc=124` -- the script's own `timeout 20400` (5h40) fired. Not a crash, not
+PBS walltime: when this script was derived from the 6h original I raised the
+PBS walltime to 12h but left the inner `timeout` at its old value, so the run
+was capped at less than half the allocation it had. Elapsed was 5h40:58
+against `timeout 20400`, which matches to the second.
+
+Scale the inner `timeout` with the PBS walltime when deriving these scripts.
+
 ## Verdict
 
 The 30B config trains and its checkpoints are sound. The open item is
