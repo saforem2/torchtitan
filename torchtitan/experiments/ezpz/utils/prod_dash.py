@@ -26,6 +26,11 @@ Modes:
     # one live frame then exit (curve + board), for a quick look
     python prod_dash.py --once
 
+    # markers on the curves (any mode above): one shape per chain, or a
+    # single shape for all of them
+    python prod_dash.py --marker auto
+    python prod_dash.py --svg out.svg --marker circle
+
     # 4. Textual multi-metric TUI (loss / grad_norm / tps / tflops / mfu),
     #    switchable per-metric tabs, live board, auto-refresh. Opt-in; needs
     #    `uv pip install textual textual-plotext` (pure-python, torch-safe).
@@ -45,6 +50,12 @@ Env:
     PD_LIVE_WINDOW  seconds since last .o-log write to count a chain "live"
                     (default 300)
     PD_REPO       cluster repo path (default the AuroraGPT flare checkout)
+    PD_MARKER     marker style for the curves: none (default) | auto | dot |
+                  circle | square | triangle | diamond | x | plus | star.
+                  "auto" gives each chain its own marker, cycled in the same
+                  order as its color. Also settable with --marker <style>.
+    PD_MARKER_EVERY  approx. markers drawn per curve (default 24). Only
+                  applies when a marker style is active.
 """
 from __future__ import annotations
 
@@ -108,6 +119,32 @@ COLORS_DARK = [
 # Back-compat alias: any external caller importing COLORS gets the light set,
 # matching the pre-theme default. draw_curves selects the palette at render time.
 COLORS = COLORS_LIGHT
+
+# Marker styles. Default is "none" (pure lines) -- the historical behavior and
+# still the right choice for a dense canonical chain, where a marker per point
+# would be a solid bar. The others earn their keep when curves overlap in
+# color-ambiguous ways, or when a chain is so sparse the line reads as a
+# near-flat segment and you want to see where the samples actually are.
+#
+# Cycled per chain in the same crc32 order as the palette, so a given chain
+# keeps the same marker across refreshes and across step/tokens axes.
+MARKERS_CYCLE = ["o", "s", "^", "D", "v", "P", "X", "*"]
+MARKER_MODES = {
+    "none": None,          # lines only (default)
+    "auto": "cycle",       # per-chain marker from MARKERS_CYCLE
+    "dot": ".",
+    "circle": "o",
+    "square": "s",
+    "triangle": "^",
+    "diamond": "D",
+    "x": "X",
+    "plus": "P",
+    "star": "*",
+}
+# Points drawn per curve when markers are on. A canonical chain carries ~600
+# downsampled points; drawing all of them as markers hides the line under ink,
+# so matplotlib's markevery thins them to roughly this many.
+MARKER_TARGET = int(os.environ.get("PD_MARKER_EVERY", "24"))
 
 
 def detect_dark_background():
@@ -1143,6 +1180,63 @@ def _apply_house_style(plt):
         pass
 
 
+def _auto_marker_map(keys):
+    """Assign a DISTINCT marker per chain, deterministically.
+
+    Preference comes from crc32 (same hashing the palette uses, so a chain
+    keeps its shape across refreshes), but a bare `crc32 % len(MARKERS_CYCLE)`
+    collides readily: with 8 shapes and 7 live chains it is more likely than
+    not, and it did -- 20b_v2_512 and 20b_v2_256 both drew "X", which defeats
+    the point of `auto`. So probe forward to the next free shape.
+
+    Iterating `sorted(keys)` keeps the outcome independent of dict order.
+    Beyond len(MARKERS_CYCLE) chains some reuse is unavoidable; color still
+    separates those.
+    """
+    n = len(MARKERS_CYCLE)
+    out, used = {}, set()
+    for key in sorted(keys):
+        start = zlib.crc32(key.encode()) % n
+        for off in range(n):
+            cand = MARKERS_CYCLE[(start + off) % n]
+            if cand not in used:
+                break
+        else:                      # more chains than shapes -- accept a repeat
+            cand = MARKERS_CYCLE[start]
+        used.add(cand)
+        out[key] = cand
+    return out
+
+
+def _resolve_marker(mode, key, npts, auto_map=None):
+    """Marker kwargs for one chain, or {} when markers are off.
+
+    ``mode`` is a MARKER_MODES key; an unknown value falls back to "none"
+    rather than raising, so a typo degrades to the historical rendering
+    instead of killing a live dashboard loop.
+
+    ``auto_map`` is the result of _auto_marker_map() over the full chain set;
+    it is only consulted in "auto" mode. Passing it is what makes shapes
+    distinct -- without it, "auto" falls back to the raw hash and may collide.
+
+    ``markevery`` thins the drawn markers to ~MARKER_TARGET per curve. Without
+    it a 600-point canonical chain draws 600 markers and the line disappears
+    under them; with it a sparse 12-point fork still shows every point,
+    because the stride floors at 1.
+    """
+    style = MARKER_MODES.get(mode)
+    if style is None:
+        return {}
+    if style == "cycle":
+        if auto_map and key in auto_map:
+            style = auto_map[key]
+        else:
+            style = MARKERS_CYCLE[zlib.crc32(key.encode()) % len(MARKERS_CYCLE)]
+    every = max(1, npts // MARKER_TARGET) if npts > MARKER_TARGET else 1
+    return {"marker": style, "markevery": every, "markersize": 4.5,
+            "markeredgewidth": 0.0}
+
+
 def draw_curves(payload, figsize, save_path=None):
     """Render the overlay. ``figsize`` is (width_in, height_in) from
     size_figure() -- already fitted to the terminal window and clamped to the
@@ -1173,6 +1267,16 @@ def draw_curves(payload, figsize, save_path=None):
     # shares the 4.67T olmo-mix target, so tokens = step * gbs * seq_len puts
     # them on a comparable footing despite very different step counts/batches).
     xaxis = os.environ.get("PD_XAXIS", "step")
+    marker_mode = os.environ.get("PD_MARKER", "none")
+    if marker_mode not in MARKER_MODES:
+        _log("unknown PD_MARKER=%r; valid: %s. Falling back to 'none'."
+             % (marker_mode, ", ".join(sorted(MARKER_MODES))))
+        marker_mode = "none"
+    # Assign over ALL chains, not just the ones that survive the len<2 /
+    # missing-gbs filters below: a chain dropping out for one frame would
+    # otherwise reshuffle everyone else's shapes on the next refresh.
+    auto_map = (_auto_marker_map(chains.keys())
+                if MARKER_MODES.get(marker_mode) == "cycle" else None)
     parts = []
     for key in sorted(chains):
         c = chains[key]
@@ -1207,8 +1311,9 @@ def draw_curves(payload, figsize, save_path=None):
         z = 5 if is_live else 2
         label = ("* " if is_live else "") + c.get("label", key) + (
             "" if is_live else " (idle)")
+        mk = _resolve_marker(marker_mode, key, len(xs), auto_map)
         ax.plot(xs, ys, ls, lw=lw, color=color, alpha=alpha, zorder=z,
-                label=label, rasterized=len(xs) > 2000)
+                label=label, rasterized=len(xs) > 2000, **mk)
         if is_live:
             parts.append("%s=%.3f@%d" % (c.get("label", key), ys[-1], curve[-1][0]))
     ax.set_xlabel("tokens seen (billions)" if xaxis == "tokens"
@@ -1396,6 +1501,18 @@ def main():
         os.environ["PD_FRESH"] = "1"
     if "--tokens" in argv:         # x-axis in tokens instead of steps
         os.environ["PD_XAXIS"] = "tokens"
+    if "--marker" in argv:         # marker style on the curves
+        i = argv.index("--marker")
+        if i + 1 >= len(argv):
+            sys.stderr.write("prod_dash: --marker needs a style: %s\n"
+                             % ", ".join(sorted(MARKER_MODES)))
+            return
+        style = argv[i + 1]
+        if style not in MARKER_MODES:
+            sys.stderr.write("prod_dash: unknown marker %r; valid: %s\n"
+                             % (style, ", ".join(sorted(MARKER_MODES))))
+            return
+        os.environ["PD_MARKER"] = style
     if "--app" in argv:            # Textual multi-metric TUI (opt-in)
         try:
             import prod_dash_app

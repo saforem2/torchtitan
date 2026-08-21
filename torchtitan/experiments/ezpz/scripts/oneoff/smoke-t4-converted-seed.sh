@@ -170,6 +170,21 @@ if [[ -n "$CONSOLE" && -f "$CONSOLE" ]]; then
     else
         echo "  ok: no override warning; the converted seed was used."
     fi
+    # Second failure mode (job 8771774): the seed IS used, but the key-compat
+    # shim skipped because it probed the (empty) ckpt folder instead of the
+    # seed. The load then dies on a missing qkv_linear key. Fixed in
+    # 2e24fdbe9; assert it stays fixed, because the symptom looks like a
+    # corrupt seed rather than a tooling gap.
+    if grep -q "the pre-refactor key check CANNOT run" "$CONSOLE"; then
+        echo "  RESULT: INVALID -- key-compat shim did not run."
+        echo "  It must fall back to initial_load_path when checkpoint.folder is"
+        echo "  empty. Is this clone missing 2e24fdbe9? A 'Missing key in"
+        echo "  checkpoint state_dict' below is that gap, NOT a corrupt seed."
+    elif grep -q "Missing key in checkpoint state_dict" "$CONSOLE"; then
+        echo "  RESULT: INVALID -- missing-key failure with the shim active."
+        echo "  Read the traceback; this is a key-schema mismatch, not a loss"
+        echo "  verdict."
+    fi
     echo ""
     echo "[smoke-t4] loaded-from line:"
     grep -m1 "Loading the checkpoint from" "$CONSOLE" | sed 's/^/  /'
