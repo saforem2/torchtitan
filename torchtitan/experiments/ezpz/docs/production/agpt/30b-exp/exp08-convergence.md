@@ -38,7 +38,12 @@ Throughput held at the tuned numbers rather than degrading: 480-490 tps,
 measured in exp05 over 12 steps. The config does not get slower once it is
 actually training.
 
-## 3: the checkpoint round trip works, but not under compile
+## 3: the checkpoint round trip works
+
+> **Superseded below.** This section's title used to end "but not
+> under compile". Compiled resume works on the `partial_dtensor` pin --
+> see [Compiled resume WORKS](#compiled-resume-works-on-partial_dtensor-job-12473515).
+> The history is kept because the two wrong readings are the reusable part.
 
 This is the part that needed two jobs to answer, because the first attempt
 failed in a misleading way.
@@ -185,13 +190,98 @@ against `timeout 20400`, which matches to the second.
 
 Scale the inner `timeout` with the PBS walltime when deriving these scripts.
 
+## Compiled resume WORKS on partial_dtensor (job 12473515)
+
+The section above concluded that compiled resume was the open item. That is
+no longer true, and the reason is the same repin that fixed everything else:
+the vc_check assertion is a `full_dtensor` failure, and the ezpz configs have
+been pinned to `partial_dtensor` since `b2ff09632`.
+
+Job 12473515 resumed from step-800 **compiled**, on the pin:
+
+```
+Loading the checkpoint from .../agpt-30b-olmo2tok-converge/step-800.
+Finished loading the checkpoint in 40.38 seconds.
+step: 801  loss:  2.71221
+```
+
+No vc_check. Loss 2.712 at step 801 continues the 2.617 the previous job left
+at step 871 (the resume is from step-800, so a small step back is expected,
+not a restart). It has since run 789 steps:
+
+| step | loss | grad_norm |
+|-----:|-----:|----------:|
+| 801 | 2.71221 | 0.2647 |
+| 900 | 2.58695 | 0.2782 |
+| 1000 | 2.50868 | 0.1841 |
+| 1100 | 2.39879 | 0.2459 |
+| 1200 | 2.37702 | 0.2263 |
+| 1300 | 2.43408 | 0.1998 |
+| 1400 | 2.38148 | 0.1630 |
+| 1500 | 2.32552 | 0.1403 |
+| 1589 | **2.26308** | 0.1255 |
+
+Zero NaN/inf across all 789 steps. Memory flat at 38.29GiB (59.84%), 489 tps,
+28.3% MFU, unchanged from the fresh compiled run -- so the resume costs
+nothing in throughput or occupancy, unlike the uncompiled workaround's 93.80%.
+
+Three checkpoints written post-resume (1000, 1250, 1500), each in ~27 s. That
+also closes the last gap in the round trip: a **post-resume SAVE** is now
+directly observed, which the 2h job above could not reach.
+
+The step-1300 row is worth naming because it reads like a regression and is
+not. Loss oscillates in a +/-0.05 band about a descending mean while
+grad_norm falls monotonically (0.26 -> 0.13). Divergence shows the opposite
+signature -- grad_norm rising. Two arbitrary 50-step samples will disagree at
+this amplitude; sample denser before calling a bump.
+
+### Checkpoint interval is a capacity decision at this size
+
+The preceding job (`30b_long2.pbs`) set `--checkpoint.interval=100` on the
+reasoning that more restart points are cheap. At 30B they are not:
+
+  294 G per checkpoint x 20 checkpoints (2000 steps / 100) = 5.9 T
+
+against 1.5 T free at the time. It filled the filesystem and the run died
+with `Errno 28` **during a checkpoint write**, not from any training fault.
+The partial step-900 directory it left behind is harmless -- `_find_load_step`
+(`components/checkpointer/dcp.py:640-684`) only counts a step directory that
+holds `.metadata` or `model.safetensors.index.json`, so an incomplete one is
+skipped rather than loaded.
+
+The fix was `interval=250`, **not** `--checkpoint.keep-latest-k`. Deleting
+history to buy space trades a permanent asset for a temporary one; widening
+the interval only costs resume granularity. `keep-latest-k` stays 0.
+
+Rule: at 30B, budget `interval` against free space before treating it as a
+resume-granularity knob. 294 G x (steps / interval) must fit.
+
+### Chain continuation
+
+At 42 s/step the `timeout 41400` lands near step 1770, ~230 short of 2000, so
+`30b_long4.pbs` is queued `afterany:12473515` as **12473545** (6h walltime,
+`timeout 19800`, interval back to 100 for the short final stretch -- 3 writes,
+~880 G against 6.0 T free).
+
+Both clocks move together in that script. `30b_long.pbs` is the counterexample:
+its PBS walltime went 6h -> 12h while the inner `timeout` stayed at 20400, and
+it took an `rc=124` at step 871 with half its allocation unused.
+
 ## Verdict
 
-The 30B config trains and its checkpoints are sound. The open item is
-narrow and well-localized: **compiled resume** hits the vc_check bug. Options
-are (a) resume uncompiled for one interval then restart compiled, (b) find
-the workaround, (c) wait for the upstream fix. This does not block using the
-config, but it does mean a long chained run needs a plan for restarts.
+The 30B config trains, its checkpoints are sound, and the round trip is
+verified end to end **under compile**: save -> resume -> continue -> save
+again, with no throughput or memory penalty. Loss has descended 12.03 -> 2.263
+over 1589 steps with zero NaN.
+
+The compiled-resume caveat this section used to carry is **retired**. It was a
+`full_dtensor` failure, and the configs are pinned to `partial_dtensor`
+(`b2ff09632`); job 12473515 resumed compiled on that pin and has run 789
+steps. A chained run needs no special restart plan beyond scaling the inner
+`timeout` with the PBS walltime.
+
+What remains open is not convergence but capacity: at 294 G per checkpoint,
+`--checkpoint.interval` has to be budgeted against free space (see above).
 
 ## Cross-references
 

@@ -1,6 +1,11 @@
 # agpt on full_dtensor: vc_check/DeviceMesh, and a pin that was justified uncompiled
 
-**Status:** OPEN. Workaround: `--parallelism.spmd-backend=partial_dtensor`.
+**Status:** OPEN upstream; NOT BLOCKING us. Every ezpz config is pinned to
+`partial_dtensor` (`b2ff09632`), which is production-validated at 30B --
+1589 steps and a compiled resume, see the answer to open question 1 below.
+The assertion itself is still unexplained under `full_dtensor`, and upstream
+is deleting that backend anyway (`601cf4d23`, #4217).
+
 **Affects:** every agpt config (20B and 30B both confirmed) at TP=1, compiled.
 **Jobs:** 12473394, 12473398, 12473403, 12473417, 12473418, 12473419
 
@@ -221,10 +226,14 @@ venv while jobs are live -- the failure looks like a real result.
 Use `--parallelism.spmd-backend=partial_dtensor` for compiled agpt runs.
 
 Open questions, in order:
-1. Should the agpt pin be `partial_dtensor` rather than `full_dtensor`? That
-   is the only configuration measured green for compiled runs. It needs a
-   convergence check first -- `partial_dtensor` is the legacy path and this
-   session has only smoke-tested it (3/3 steps).
+1. ~~Should the agpt pin be `partial_dtensor`? It needs a convergence check
+   first -- this session has only smoke-tested it (3/3 steps).~~
+   **ANSWERED 2026-08-21.** The pin landed (`b2ff09632`) and the convergence
+   check is done: job 12473515 has run the 30B to step 1589 on it, loss
+   12.03 -> 2.263, zero NaN, 28.3% MFU. It also resumed COMPILED from
+   step-800 without vc_check and wrote three checkpoints since -- so the
+   compiled round trip is verified on this pin, not merely smoke-tested.
+   See [exp08](../../production/agpt/30b-exp/exp08-convergence.md).
 2. Where exactly does the `DeviceMesh` enter saved-for-backward under
    `full_dtensor`? Not yet localized.
 3. Separately: the uncompiled level_zero 40 in `cross_entropy` at seq=8192 is
