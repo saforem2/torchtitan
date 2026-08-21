@@ -86,6 +86,17 @@ ezpz_setup_job
 # NOTE: craype-accel-nvidia80 does NOT fix this -- it only sets compile-time
 # vars (CRAY_ACCEL_TARGET / CRAYPE_LINK_TYPE), not runtime GTL linkage.
 export MPICH_GPU_SUPPORT_ENABLED=0
+# Polaris maintenance (2026-08-19) bumped Cray MPICH 9.0.1 -> 9.1.0, which
+# DELETED libmpi_gnu_123.so.12. darshan/3.4.4 (auto-linked by the Cray `cc`
+# wrapper, so it is baked into our mpi4py as NEEDED + RPATH) still requires that
+# soname, so every `import mpi4py` dies with:
+#   ImportError: libmpi_gnu_123.so.12: cannot open shared object file
+# -> ezpz cannot start -> no yeet -> no /tmp/.venv -> exit 127 in seconds.
+# This burned the whole 5-deep chain (7458292 + 7484829-32) in ~3 minutes.
+# The ABI is unchanged, only the soname was renamed, so a compat symlink to the
+# real 9.1.0 library resolves it. Scrubbing darshan from LD_LIBRARY_PATH does
+# NOT work -- the craype wrapper links it regardless.
+export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 source .venv/bin/activate
 # Clear any STALE node-local venv before broadcasting. Nodes can carry a
 # /tmp/.venv from an earlier job (e.g. the old conda-seeded one); if the yeet
@@ -277,6 +288,7 @@ ezpz launch \
     --spare-nodes auto \
     --timeout "${IDLE_TIMEOUT:-1800}" \
     "${mfr_args[@]}" \
+    --no-transfer \
     -- \
     python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt \
