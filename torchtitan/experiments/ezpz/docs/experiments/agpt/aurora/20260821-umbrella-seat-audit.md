@@ -185,6 +185,40 @@ blocker, but it may not have been the whole story.
 The script had to be copied into the clone first (clones are pinned; copy infra
 files, never `git pull` them).
 
+**The prewarm job then crashed, and it does not matter.** After the cache was
+written it proceeded into its throwaway debugmodel training step and died on an
+Intel GPU fault:
+
+```
+[blendcorpus_builder:275] Rank 0: blendcorpus datasets ready.   <- cache DONE
+...
+[trainer:659] Training starts at step 1
+Segmentation fault from GPU at 0xff000000263ad000, ctx_id: 1 (CCS)
+  type: 0 (NotPresent) ... banned: 1, aborting.
+Fatal Python error: Aborted
+```
+
+Training is only the vehicle; the cache is the artifact, and it was complete
+before the fault. Verified after the crash: **21 corpus entries, 0 incomplete**
+(6 written today -- the 5 rebuilt corpora plus the blendable index -- alongside
+14 from Aug-16 and 1 from Aug-18).
+
+The warm cache is keyed to the CORRECT budget, proven rather than assumed. The
+on-disk descriptor `00cd57d0923ee2d18c00de17296b194f.dsc` reads
+`Number of samples 941148` for `dclm/fused_0185_of_0286`, whose data-list weight
+is `0.0032093698`:
+
+```
+ceil(291790848 * 0.0032093698 * 1.005) = 941148   <- 23746 steps, MATCHES
+ceil(862444032 * 0.0032093698 * 1.005) = 2781742  <- 70176 steps, old budget
+```
+
+A COUNTING TRAP worth recording: a completeness check globbing `*_index.npy`
+also matches `*_sample_index.npy`, strips to `<hash>_sample`, and then looks for
+a nonexistent `<hash>_sample_sample_index.npy`. That reports exactly half the
+entries as INCOMPLETE and looks like real corruption. Exclude the
+`_sample_index.npy` form explicitly.
+
 Note on a false alarm: the audit flagged the Aug-18 corpus entry as "torn" for
 missing `_doc_idx/_sample_idx/_shuffle_idx`. The verifier refuted this -- the
 corpus layer's artifact set is `{.dsc, _index.npy, _sample_index.npy}`; those
