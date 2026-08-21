@@ -47,7 +47,13 @@ case "$CHAIN" in
     CKPT=$RUNS/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288
     OUT=$MAIN/outputs/evals/agpt-20b-v2-512n-ropefix
     FLAVOR=20b_real; CFG=agpt_20b_config.json
-    STEPS="${STEPS:-4500 4600 4700 4800 4900 5100 5200 5300 5400 5500 5600 5700 5800 5900 6010 6100 6200 6300 6400 6500 6550 6600 6700 6800 6900 7000 7100 7150 7200 7250 7300 7400 7500 7600}"
+    # 5000 and 6000 were MISSING from this list (it jumped 4900->5100 and
+    # 5900->6010) while the 20b-256 list below has both. The sweep therefore
+    # reported "34 ok, 0 skipped, 0 failed" and was complete FOR THE LIST IT
+    # WAS GIVEN -- the list was the bug, so nothing flagged it. Both
+    # checkpoints exist (6144 shards each) and had already been arc/hellaswag
+    # evaluated, so only winogrande was absent. Added 2026-08-21.
+    STEPS="${STEPS:-4500 4600 4700 4800 4900 5000 5100 5200 5300 5400 5500 5600 5700 5800 5900 6000 6010 6100 6200 6300 6400 6500 6550 6600 6700 6800 6900 7000 7100 7150 7200 7250 7300 7400 7500 7600}"
     TASKS="${TASKS:-arc_challenge,hellaswag,arc_easy}" ;;
   20b-256)
     CKPT=$RUNS/agpt-20b-n256/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144
