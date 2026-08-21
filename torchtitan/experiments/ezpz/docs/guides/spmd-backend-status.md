@@ -27,7 +27,7 @@ along the way, and what to run today.
 | --- | --- | --- |
 | **`partial_dtensor`** | **use this** | what every production trajectory has always run -- upstream renamed `"default"` to this name in #4085 |
 | `full_dtensor` | do not use | being deleted upstream (#4217); compiled agpt hits a `DeviceMesh` assertion |
-| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 still unresolved ([1d](#1d-tp1-on-the-nightly-is-not-settled)) |
+| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical too ([1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
 
 Both ezpz config registries pin `partial_dtensor` as of `b2ff09632`.
 
@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 10/10 | bit-identical in the cell measured (after `584fb3d83`) -- but see [1d](#1d-tp1-on-the-nightly-is-not-settled): other TP>1 arms still produce 0 steps for an unidentified reason |
+| TP=2 | 10/10 | **bit-identical** (job 12473502, with `584fb3d83` active -- see [1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -322,21 +322,56 @@ Print the path.
 > is behavioral -- `spmd_types` cannot produce a single step on 2.13, so any
 > `spmd_types` arm with steps > 0 was necessarily on the nightly.
 
-## 1d. TP>1 on the nightly is NOT settled
+## 1d. TP>1 on the nightly works (a retracted scare, and how to check)
 
-The coverage table below records TP=2 as bit-identical "after `584fb3d83`".
-That is true of the cell it was measured in and should not be read as TP>1
-being green on the nightly generally.
+An earlier version of this section claimed TP>1 hit "a third, unidentified
+failure" on the nightly. **That was wrong and is retracted.** TP=2 on the
+nightly is bit-identical, and the mistake is worth keeping because the
+verification method it got wrong is the reusable part.
 
-`584fb3d83` (the `loss.global_vocab_size` fix) landed 16:38. Job 12473484 ran
-at 20:04, AFTER it, and its TP=2 arm still produced **0/5 steps** -- with **no**
-`params must be DTensors` error and no `TypeError` from the vocab path. Both
-known TP>1 failure modes are excluded, so this is a third, unidentified one.
-The `tp2` and `tp2n2` `spmd_types` arms of jobs 12473496 and 12473499 show the
-same signature: zero steps, no recognized error.
+Job 12473502, agpt_20b, TP=2, torch `2.14.0.dev20260722+xpu`, 10 steps, with
+`global_vocab_size` actually set:
 
-Not yet diagnosed. Do not treat TP>1 + `spmd_types` on the nightly as working
-until it is.
+| comparison | identical loss + grad_norm |
+| --- | ---: |
+| `partial` vs `partial` (control) | **10/10** |
+| `spmd_types` vs `partial_dtensor` | **10/10** |
+
+Scope: one job, 10 steps, TP=2, single node. That is enough to refute
+"TP>1 is broken" and NOT enough to claim TP>1 at production scale.
+
+### The two errors behind the retraction
+
+1. **Timezone.** The fix (`584fb3d83`) is stamped 16:38 **CDT**; the job
+   `.o` mtimes read 20:04 and 21:13, which are **UTC** -- 15:04 and 16:13
+   CDT, i.e. BEFORE the fix, not after. Comparing a local-time commit against
+   UTC file times inverted the whole conclusion.
+2. **A grep scoped to one failure mode.** Searching only for
+   `must be DTensors`, finding none, and concluding both known modes were
+   excluded. The real error was in the log the whole time:
+   `chunk_size = (global_vocab_size + tp_world_size - 1)` ->
+   `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'`,
+   which IS the vocab bug.
+
+### Check the dumped config, not the clock
+
+Timestamps are the wrong instrument for "did this run have my fix?" -- they
+depend on timezone, on whether an mtime is a start or a finish, and on when
+the job read the working tree rather than when it was submitted. Every run
+dumps its own resolved config, so ask the run:
+
+```bash
+grep -ao '"global_vocab_size": [^,]*' <arm>.log | head -1
+```
+
+`null` means the fix was NOT active in that arm; `256128` (gemma) or `100352`
+(OLMo-2) means it was. Every TP>1 arm that ever failed dumps `null`. **No
+failing TP>1 arm has ever run with the fix**, so there is no unexplained
+failure mode to chase.
+
+Generalizes past this one field: when a result hinges on whether some
+config/fix was live, find the value in the run's own dump. It is evidence the
+run produced about itself, and it does not care what time it was.
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 
