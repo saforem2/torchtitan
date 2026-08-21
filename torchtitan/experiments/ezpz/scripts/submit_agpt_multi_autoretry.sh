@@ -200,7 +200,13 @@ TRAINERS=(
     #
     # decay_ratio=0.8 means decay occupies the LAST 80% of training, i.e. it
     # STARTS at 20%: round(46429*0.8)=37143 decay steps, so stable ends at
-    # 46429+1-200-37143 = step 9087. The chain reached 10,200 before this was
+    # 46429+1-200-37143 = step 9087 by the prose formula -- but the OBSERVED
+    # onset is 9287. Commit b08fccfd1's own W&B cross-check settles it:
+    # predicted 2.25496e-05 vs observed 2.25502e-05 at step 9694 reproduces
+    # ONLY with onset=9287 (9087 gives 2.2429e-05, off in the 3rd digit).
+    # The 200-step warmup is evidently not subtracted the way the formula
+    # assumes. Use 9287 when reasoning about this chain; the formula is a
+    # lower bound, not the scheduler. The chain reached 10,200 before this was
     # caught, so ~1,200 steps ran on a decaying LR (2.28e-5 -> 2.22389e-5).
     #
     # Fork from step-9000 (last checkpoint before onset; 6144 shards, valid
