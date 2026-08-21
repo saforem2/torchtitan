@@ -289,10 +289,18 @@ Every delta above is well inside it. exp05 separately measured 2.8% tps
 across *different* jobs for one config, so treat anything under ~3% as
 unattributable regardless.
 
-**Memory: +6.25pp, and it tracks the TORCH BUMP, not the backend.** B and C
-are identical at 56.56%; A and D are identical at 50.31%. 2.14 costs 6.25pp
-whichever backend you choose. This is not noise -- A and D agree to the
-decimal, so the measurement is exact.
+**Memory: +6.25pp in THIS config, and it tracks the TORCH BUMP, not the
+backend.** B and C are identical at 56.56%; A and D are identical at 50.31%.
+Within this job the measurement is exact -- A and D agree to the decimal.
+
+> **It does not generalize, and the correction is worth reading before you
+> quote the number.** Job 12473608 re-ran the same 2.13-vs-2.14 comparison at
+> agpt_20b / FullAC / **LBS=1 / 12 ranks** and measured
+> **71.62% -> 71.51%, i.e. -0.11pp** -- no cost at all. Same config on both
+> sides, only torch differs, so both A/Bs are internally valid; they disagree
+> because the DELTA IS CONFIG-DEPENDENT, not because either is wrong.
+> "+6.25pp" is a property of agpt_20b at LBS=2/24 ranks, not of the torch
+> bump. Measure it on the config you intend to run.
 
 Free at 50% occupancy; the question is what it does to a config running hot.
 
