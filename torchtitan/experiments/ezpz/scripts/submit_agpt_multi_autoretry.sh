@@ -95,6 +95,10 @@
 #                   Keeps each seat's REAL ckpt/config/dataset/RoPE, unlike
 #                   MULTI_PROFILE=tiny which rewrites them to throwaways.
 #   MULTI_NNODES_OVERRIDE  force every selected seat to N nodes (smoke sizing).
+#   MULTI_STEPS_OVERRIDE   force every selected seat to N training steps. Only
+#                   useful with MULTI_ONLY: the prod step count is derived from
+#                   train_tokens and is ~6M, so a seed-validation smoke would
+#                   otherwise run until walltime instead of exiting on its own.
 #
 # NOTE: deliberately NO `set -euo pipefail`. venv activation trips unbound
 # vars, and the umbrella must survive a single child failing without aborting
@@ -461,6 +465,11 @@ launch_trainer() {
     local training_steps
     if [[ "$PROFILE" == "tiny" ]]; then
         training_steps="$TINY_STEPS"
+    elif [[ -n "${MULTI_STEPS_OVERRIDE:-}" ]]; then
+        # A prod seat's step count comes from train_tokens (~6M steps). A smoke
+        # that only needs to answer "does this seed resume to a sane loss" must
+        # be able to stop on its own rather than at walltime.
+        training_steps="$MULTI_STEPS_OVERRIDE"
     else
         training_steps=$(( tok / (gbs * SEQ_LEN) ))
     fi
