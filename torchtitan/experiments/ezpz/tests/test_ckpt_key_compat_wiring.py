@@ -31,6 +31,33 @@ CASES = [
     ("nonexistent folder", "/nonexistent/checkpoints/nope", -1, False),
 ]
 
+MAIN = "/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
+# The converter rewrote OPTIMIZER format only; the model keys in the t4 seed
+# are still pre-refactor, so a seeded fresh chain needs the shim just as much
+# as an in-place resume does.
+T4_SEED = f"{MAIN}/outputs/checkpoints/_convert/t4-step9500-newfmt/step-9500"
+CURRENT_FMT_SEED = (
+    f"{RUNS}/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/"
+    "agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429"
+)
+# (label, folder, initial_load_path, expect_shim)
+SEED_CASES = [
+    # The 8771774 failure: empty folder + pre-refactor seed. Probing only
+    # `folder` found nothing and the load died on a missing qkv_linear key.
+    ("empty folder + pre-refactor seed",
+     "/nonexistent/checkpoints/_smoke/fresh", T4_SEED, True),
+    # False positive guard: a current-format seed must be left alone.
+    ("empty folder + current-format seed",
+     "/nonexistent/checkpoints/_smoke/fresh", CURRENT_FMT_SEED, False),
+    # Precedence: a resumable folder WINS over the seed (checkpoint.py:686), so
+    # the verdict must come from the folder. Here the folder is current-format
+    # and the seed is pre-refactor -- reading the seed would wrongly install.
+    ("resumable current-format folder beats pre-refactor seed",
+     f"{RUNS}/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/"
+     "agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288", T4_SEED, False),
+    ("no folder, no seed", "/nonexistent/checkpoints/nope", "", False),
+]
+
 
 class FakeCheckpointer:
     """Minimal stand-in: only needs a dcp_load attribute to wrap."""
@@ -49,6 +76,20 @@ for label, folder, step, expect in CASES:
     wrapped = getattr(ck, "_flat_attention_compat", False)
     ok = (got == expect) and (wrapped == expect)
     print(f"  [{'ok  ' if ok else 'FAIL'}] {label:38s} shim={'ON ' if got else 'off'} "
+          f"(expected {'ON' if expect else 'off'})")
+    if not ok:
+        fails.append(label)
+
+print()
+print("seed (initial_load_path) cases:")
+for label, folder, seed, expect in SEED_CASES:
+    ck = FakeCheckpointer()
+    got = maybe_install_flat_attention_compat(
+        ck, folder, -1, initial_load_path=seed
+    )
+    wrapped = getattr(ck, "_flat_attention_compat", False)
+    ok = (got == expect) and (wrapped == expect)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52s} shim={'ON ' if got else 'off'} "
           f"(expected {'ON' if expect else 'off'})")
     if not ok:
         fails.append(label)

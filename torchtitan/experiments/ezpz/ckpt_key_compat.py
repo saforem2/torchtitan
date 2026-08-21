@@ -280,7 +280,11 @@ def install_flat_attention_compat(
 
 
 def maybe_install_flat_attention_compat(
-    checkpointer: Any, folder: str, load_step: int = -1, dump_folder: str = ""
+    checkpointer: Any,
+    folder: str,
+    load_step: int = -1,
+    dump_folder: str = "",
+    initial_load_path: str = "",
 ) -> bool:
     """Install the remap only if the checkpoint about to be loaded needs it.
 
@@ -298,6 +302,17 @@ def maybe_install_flat_attention_compat(
     going to fail should fail in the checkpointer with its own error, not
     here in the detector.
 
+    `initial_load_path` is the SEED path (`checkpoint.initial_load_path`). It
+    is consulted only when `folder` holds no resumable step, because that is
+    the only condition under which the checkpointer honors it -- with a
+    resumable checkpoint present it logs "initial_load_path is provided but
+    the checkpoint.folder exists" and loads from `folder` instead. Passing it
+    matters because a seeded FRESH chain is exactly the case where `folder` is
+    empty: probing only `folder` there means probing a directory that does not
+    exist yet, so the shim never installs and the load dies with the very
+    "Missing key in checkpoint state_dict" this exists to prevent (job
+    8771774, seeding t4 from a converted pre-refactor checkpoint).
+
     The `dump_folder` argument is NOT optional in practice. Omitting it in
     job 8744247 made the detector stat `<cwd>/checkpoints/...` while the real
     tree is `<cwd>/outputs/checkpoints/...`; `read_metadata()` raised, the
@@ -313,28 +328,50 @@ def maybe_install_flat_attention_compat(
     try:
         rel = os.path.join(dump_folder, folder) if dump_folder else folder
         base = rel if os.path.isabs(rel) else os.path.join(os.getcwd(), rel)
-        if not os.path.isdir(base):
-            log.warning(
-                "flat-attention compat: checkpoint folder %r does not exist, so "
-                "the pre-refactor key check CANNOT run. If this resume is from an "
-                "old checkpoint it will fail with 'Missing key in checkpoint "
-                "state_dict'. Check that dump_folder=%r + folder=%r is correct.",
-                base,
-                dump_folder,
-                folder,
-            )
-            return False
-        if load_step is not None and load_step >= 0:
-            step_dir = os.path.join(base, f"step-{load_step}")
-        else:
-            steps = [
-                int(d.split("-", 1)[1])
-                for d in os.listdir(base)
-                if d.startswith("step-") and d.split("-", 1)[1].isdigit()
-            ]
-            if not steps:
+
+        # Resolve the step dir the checkpointer will ACTUALLY load, which is
+        # not always under `folder`: a resumable step there wins, otherwise the
+        # seed at initial_load_path is used (and `folder` may not even exist).
+        step_dir = ""
+        if os.path.isdir(base):
+            if load_step is not None and load_step >= 0:
+                cand = os.path.join(base, f"step-{load_step}")
+                if os.path.isdir(cand):
+                    step_dir = cand
+            else:
+                steps = [
+                    int(d.split("-", 1)[1])
+                    for d in os.listdir(base)
+                    if d.startswith("step-") and d.split("-", 1)[1].isdigit()
+                ]
+                if steps:
+                    step_dir = os.path.join(base, f"step-{max(steps)}")
+
+        if not step_dir:
+            if initial_load_path and os.path.isdir(initial_load_path):
+                # initial_load_path names the step dir itself, not its parent.
+                step_dir = initial_load_path
+                log.info(
+                    "flat-attention compat: %r holds no resumable step, so the "
+                    "checkpointer will load the seed at %r. Checking that "
+                    "instead.",
+                    base,
+                    initial_load_path,
+                )
+            else:
+                if not os.path.isdir(base):
+                    log.warning(
+                        "flat-attention compat: checkpoint folder %r does not "
+                        "exist and no usable initial_load_path was given, so "
+                        "the pre-refactor key check CANNOT run. If this resume "
+                        "is from an old checkpoint it will fail with 'Missing "
+                        "key in checkpoint state_dict'. Check that "
+                        "dump_folder=%r + folder=%r is correct.",
+                        base,
+                        dump_folder,
+                        folder,
+                    )
                 return False
-            step_dir = os.path.join(base, f"step-{max(steps)}")
 
         want_attention = needs_flat_attention_compat(step_dir)
         want_head = needs_output_head_compat(step_dir)

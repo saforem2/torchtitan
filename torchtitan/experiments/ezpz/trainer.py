@@ -937,11 +937,19 @@ class FaultTolerantTrainer(Trainer):
         # is left completely untouched. Without this, resuming an old ckpt
         # dies with "Missing key in checkpoint state_dict" before step 1
         # (it burned two umbrella slots three dispatches running).
+        # initial_load_path matters here: when checkpoint.folder holds no
+        # resumable step the checkpointer loads the SEED instead, and a seed
+        # can just as easily be pre-refactor. Probing only `folder` in that
+        # case probes a directory that does not exist yet (job 8771774).
         maybe_install_flat_attention_compat(
             self.checkpointer,
             config.checkpoint.folder,
             config.checkpoint.load_step,
             dump_folder=config.dump_folder,
+            initial_load_path=getattr(
+                config.checkpoint, "initial_load_path", ""
+            )
+            or "",
         )
 
         # Two concurrent jobs writing one checkpoint.folder is silent and it
