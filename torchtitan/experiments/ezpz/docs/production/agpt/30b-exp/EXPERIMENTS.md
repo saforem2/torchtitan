@@ -42,7 +42,7 @@ economising on the important one.
 | [05](exp05-2n-performance.md) | 30B at 2N | Does the proposed 30B train at all, and what is its best per-GPU config? | 2N, ~2h x3 | **DONE** -- 466 tps / 27.89% MFU at LBS=3; TP hurts; HSDP fails |
 | [06](exp06-scaling.md) | 30B weak scaling | Does the 30B hold its MFU as node count grows, as the proposal's "3x effective compute" claim requires? | 64N, 3h | **DONE** -- 25.54% at 64N; 1.42%/doubling vs the 2B's 13.96% |
 | [07](exp07-custom-tokenizer-feasibility.md) | Custom 64k tokenizer | Should we train our own tokenizer on olmo-mix-1124, and what does the already-tokenized corpus cost us? | 1N CPU, ~1h | **DONE** -- NO. Custom 64k measures 2.5% WORSE than gemma and 5.9% worse than Llama-3; use the vendored Llama-3 128k |
-| [08](exp08-convergence.md) | 30B convergence + DCP resume | Does loss actually descend over hundreds of steps, and does save -> resume -> continue work? | 8N, 6h + 2h | **DONE** -- 1589 steps, loss 12.03 -> 2.263 monotone, zero NaN, ~28% MFU held; save -> resume -> continue -> save verified **under compile** on the `partial_dtensor` pin (job 12473515). Chain continues as 12473545 |
+| [08](exp08-convergence.md) | 30B convergence + DCP resume | Does loss actually descend over hundreds of steps, and does save -> resume -> continue work? | 8N, 6h + 2h | **DONE** -- **COMPLETE at 2000/2000 steps**, loss 12.028 -> 2.115, zero NaN, ~28% MFU held throughout; save -> resume -> continue -> save verified **under compile** on the `partial_dtensor` pin. Four-job chain, finished by 12473545 (rc=0) |
 
 ## Tier 1 -- the gate
 

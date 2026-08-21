@@ -1,6 +1,6 @@
 # SPMD backends on XPU: what works, what does not, and why
 
-**Last updated:** 2026-08-20 (Sunspot, `frameworks/2026.1.0` / oneAPI 2026.1.0)
+**Last updated:** 2026-08-21 (Sunspot, `frameworks/2026.1.0` / oneAPI 2026.1.0)
 
 The reference environment throughout is the official module plus its ezpz
 venv:
@@ -27,7 +27,7 @@ along the way, and what to run today.
 | --- | --- | --- |
 | **`partial_dtensor`** | **use this** | what every production trajectory has always run -- upstream renamed `"default"` to this name in #4085 |
 | `full_dtensor` | do not use | being deleted upstream (#4217); compiled agpt hits a `DeviceMesh` assertion |
-| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one |
+| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical too ([1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
 
 Both ezpz config registries pin `partial_dtensor` as of `b2ff09632`.
 
@@ -170,7 +170,7 @@ in the same job.
 | TP=1, 1 node, seq 2048 | 30/30 | **bit-identical** |
 | TP=1, 1 node, seq 1024 | 10/10 | **bit-identical** |
 | **MoE** (`moe_small`), TP=1 | 20/20 | **bit-identical** |
-| TP=2 | 10/10 | **bit-identical** (after `584fb3d83`) |
+| TP=2 | 10/10 | **bit-identical** (job 12473502, with `584fb3d83` active -- see [1d](#1d-tp1-on-the-nightly-works-a-retracted-scare-and-how-to-check)) |
 | 2 nodes | **0/20 -- control itself failed** | not resolvable yet |
 
 TP=1 single-node is the configuration LEAST able to expose a difference --
@@ -255,6 +255,142 @@ Multi-node parity is not resolvable by this method: the same-backend control
 is itself nondeterministic across nodes (a cross-node loss all-reduce
 ordering effect -- grad_norm matches while loss does not). See
 [known-bugs/xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+
+## 1c. Is the nightly PERFORMANT? Throughput yes, memory costs 6.25pp
+
+Ten jobs had run on `venvs/rc-plus-nightly` and every one was
+correctness-only -- grep all ten for `mfu:` and you get zero lines. The
+nightly was proven to produce the RIGHT numbers and had never been shown to
+produce them at an acceptable RATE, which matters because 2.14 is the only
+way to run `spmd_types` and upstream has made it the default.
+
+Job 12473548, agpt_20b, 2N, TP=1, LBS=2, seq=2048, compiled, 30 steps.
+Steps 1-10 discarded (torchtitan reports a CUMULATIVE average tps, so early
+steps carry compile and warmup); the table is the mean of steps 11-30.
+
+| arm | torch | backend | tps | MFU | mem |
+| --- | --- | --- | ---: | ---: | ---: |
+| A (reference) | 2.13.0a0+gitcf30153 | `partial_dtensor` | 521.6 | 21.80% | 50.31% |
+| B | 2.14.0.dev20260722 | `partial_dtensor` | 522.9 | 21.86% | **56.56%** |
+| C | 2.14.0.dev20260722 | `spmd_types` | 521.1 | 21.78% | **56.56%** |
+| D (control) | 2.13.0a0+gitcf30153 | `partial_dtensor` | 527.8 | 22.06% | 50.31% |
+
+**Throughput: no cost.** Torch bump alone (B vs A) +0.25% tps. Backend on top
+of the bump (C vs B) -0.34%. Total cost of adopting upstream's default
+(C vs A) **-0.10% tps / -0.020pp MFU**.
+
+D is why those numbers mean anything. It re-runs A's exact configuration at
+the end of the same job, and measures a **1.19% tps / 0.261pp noise floor**.
+Every delta above is well inside it. exp05 separately measured 2.8% tps
+across *different* jobs for one config, so treat anything under ~3% as
+unattributable regardless.
+
+**Memory: +6.25pp, and it tracks the TORCH BUMP, not the backend.** B and C
+are identical at 56.56%; A and D are identical at 50.31%. 2.14 costs 6.25pp
+whichever backend you choose. This is not noise -- A and D agree to the
+decimal, so the measurement is exact.
+
+Free at 50% occupancy; the question is what it does to a config running hot.
+
+Do NOT reach for the uncompiled 30B's 93.80% as the ceiling here. That number
+is a historical artifact of a path we no longer run -- it came from job
+12473387, the uncompiled resume that existed only while vc_check was thought
+to block the compiled one. Compiled resume works
+([exp08](../../production/agpt/30b-exp/exp08-convergence.md)), and the live
+30B chain (12473515 / 12473545) runs compiled at **59.84%**. +6.25pp there is
+~66%: comfortable.
+
+The config with real exposure is the 20B at seq=8192, which runs 84.86%
+compiled -- +6.25pp would put it near 91%. Tight, not obviously fatal.
+
+Two limits on that arithmetic, both untested:
+
+- The delta was measured at **50% occupancy**. Whether it is a fixed
+  percentage-point offset or scales with the activation working set is
+  unknown, so adding 6.25 to an 85% config is an extrapolation, not a
+  prediction.
+- It is a **fraction of device memory**, so it only transfers between configs
+  on identical hardware.
+
+Measure the bump on the target config before adopting it there.
+
+Caveat on absolute numbers: 21.8% MFU here is agpt_20b at LBS=2/seq=2048, not
+a production shape -- exp05's 27.89% is the 30B at LBS=3. These four arms are
+a valid *relative* A/B and not an absolute throughput claim.
+
+### Verifying the arm actually ran the torch you think
+
+Each arm gates on `torch.__version__` AND prints `torch.__file__`:
+
+```
+[B-t214-partial] torch=2.14.0.dev20260722+xpu
+[B-t214-partial] from=.../venvs/rc-plus-nightly/lib/python3.12/site-packages/torch
+[A-t213-partial] torch=2.13.0a0+gitcf30153
+[A-t213-partial] from=.../conda_envs/RC4_.../lib/python3.12/site-packages/torch
+```
+
+The version string alone is not sufficient -- a stray install into the shipped
+venv shadows the conda torch and has already produced one false positive here.
+Print the path.
+
+> **A grep that does NOT work for this.** Auditing which torch an arm used by
+> taking the first `site-packages/torch` path out of its log gives the WRONG
+> answer, and reports every nightly arm as having run on 2.13. Every log
+> contains BOTH paths: a `_pytree.py` deprecation warning is emitted from the
+> inherited conda torch before the venv's torch loads. The sound discriminator
+> is behavioral -- `spmd_types` cannot produce a single step on 2.13, so any
+> `spmd_types` arm with steps > 0 was necessarily on the nightly.
+
+## 1d. TP>1 on the nightly works (a retracted scare, and how to check)
+
+An earlier version of this section claimed TP>1 hit "a third, unidentified
+failure" on the nightly. **That was wrong and is retracted.** TP=2 on the
+nightly is bit-identical, and the mistake is worth keeping because the
+verification method it got wrong is the reusable part.
+
+Job 12473502, agpt_20b, TP=2, torch `2.14.0.dev20260722+xpu`, 10 steps, with
+`global_vocab_size` actually set:
+
+| comparison | identical loss + grad_norm |
+| --- | ---: |
+| `partial` vs `partial` (control) | **10/10** |
+| `spmd_types` vs `partial_dtensor` | **10/10** |
+
+Scope: one job, 10 steps, TP=2, single node. That is enough to refute
+"TP>1 is broken" and NOT enough to claim TP>1 at production scale.
+
+### The two errors behind the retraction
+
+1. **Timezone.** The fix (`584fb3d83`) is stamped 16:38 **CDT**; the job
+   `.o` mtimes read 20:04 and 21:13, which are **UTC** -- 15:04 and 16:13
+   CDT, i.e. BEFORE the fix, not after. Comparing a local-time commit against
+   UTC file times inverted the whole conclusion.
+2. **A grep scoped to one failure mode.** Searching only for
+   `must be DTensors`, finding none, and concluding both known modes were
+   excluded. The real error was in the log the whole time:
+   `chunk_size = (global_vocab_size + tp_world_size - 1)` ->
+   `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'`,
+   which IS the vocab bug.
+
+### Check the dumped config, not the clock
+
+Timestamps are the wrong instrument for "did this run have my fix?" -- they
+depend on timezone, on whether an mtime is a start or a finish, and on when
+the job read the working tree rather than when it was submitted. Every run
+dumps its own resolved config, so ask the run:
+
+```bash
+grep -ao '"global_vocab_size": [^,]*' <arm>.log | head -1
+```
+
+`null` means the fix was NOT active in that arm; `256128` (gemma) or `100352`
+(OLMo-2) means it was. Every TP>1 arm that ever failed dumps `null`. **No
+failing TP>1 arm has ever run with the fix**, so there is no unexplained
+failure mode to chase.
+
+Generalizes past this one field: when a result hinges on whether some
+config/fix was live, find the value in the run's own dump. It is evidence the
+run produced about itself, and it does not care what time it was.
 
 ## 2. `full_dtensor`: dead end, and it broke compiled agpt
 

@@ -117,6 +117,11 @@ the first step:
 | compiled (fresh) | 489 | 62.79% |
 | uncompiled (resume) | 455 | 93.80% |
 
+> **Do not quote 93.80% as a current 30B number.** It measures a path that
+> was abandoned once compiled resume was shown to work -- the live chain runs
+> compiled at 59.84%. This row is the historical cost of the workaround, not
+> the occupancy of anything in production.
+
 Throughput is only ~7% down, which is less than expected. **Memory is the
 real cost: 93.80% vs 62.79%**, 31 points, leaving almost no headroom. At
 that occupancy the run is one allocation spike away from a level_zero
@@ -267,12 +272,56 @@ Both clocks move together in that script. `30b_long.pbs` is the counterexample:
 its PBS walltime went 6h -> 12h while the inner `timeout` stayed at 20400, and
 it took an `rc=124` at step 871 with half its allocation unused.
 
+## COMPLETE: 2000/2000 steps, 12.028 -> 2.115 (job 12473545)
+
+The run finished. Not a timeout -- step 2000 of a 2000-step config, `rc=0`,
+`Exit_status=0`, 2h58 of a 6h allocation.
+
+Four jobs, one continuous trajectory, **zero NaN/inf in any of them**:
+
+| job | steps | loss | note |
+|---|---|---|---|
+| 12473304 | 1 -> 482 | 12.028 -> 3.357 | fresh start |
+| 12473476 | 401 -> 871 | 3.698 -> 2.617 | `rc=124`, inner timeout unscaled |
+| 12473515 | 801 -> 1781 | 2.712 -> 2.246 | first COMPILED resume |
+| 12473545 | 1751 -> 2000 | 2.248 -> **2.115** | finished it |
+
+Nine checkpoints on disk (400 through 2000), 2.6 T total. Steady state held
+to the end: 496 tps, 28.3% MFU, memory flat at 38.29GiB (59.84%), grad_norm
+descending 0.26 -> 0.074.
+
+W&B: https://wandb.ai/aurora_gpt/agpt-30b/runs/dso9al26
+
+### What this settles
+
+The three questions exp08 was opened to answer are all answered YES:
+
+1. **Loss descends over hundreds of steps** -- 1999 of them, monotone in the
+   mean, no plateau and no divergence.
+2. **grad_norm stays bounded** -- 0.7-1.0 early, 0.074 at the end, falling
+   throughout.
+3. **Checkpoints round-trip** -- three separate resumes, the last two
+   compiled, each continuing the trajectory rather than restarting it.
+
+The chain also demonstrates the operational shape a long run needs: each job
+resumes the previous one's last checkpoint, and the replayed steps between
+that checkpoint and the previous job's exit are the cost of the interval
+(31 steps at interval=250, 1 step at interval=100).
+
+### The one process lesson worth repeating
+
+Two of the four jobs ended on their inner `timeout`, and one of those --
+12473476 -- ended EARLY because only the PBS walltime was raised (6h -> 12h)
+while `timeout 20400` stayed put. It died at step 871 with half its
+allocation unused. Scale both clocks together or the shorter one silently
+wins.
+
 ## Verdict
 
-The 30B config trains, its checkpoints are sound, and the round trip is
-verified end to end **under compile**: save -> resume -> continue -> save
-again, with no throughput or memory penalty. Loss has descended 12.03 -> 2.263
-over 1589 steps with zero NaN.
+**The 30B config trains to completion.** 2000/2000 steps, loss
+12.028 -> 2.115, zero NaN, nine checkpoints, and a round trip verified end to
+end **under compile**: save -> resume -> continue -> save again, with no
+throughput or memory penalty.
 
 The compiled-resume caveat this section used to carry is **retired**. It was a
 `full_dtensor` failure, and the configs are pinned to `partial_dtensor`
