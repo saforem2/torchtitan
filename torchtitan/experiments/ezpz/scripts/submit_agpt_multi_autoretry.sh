@@ -221,12 +221,89 @@ TRAINERS=(
     # 2B-512 constant-LR fork (from base step-9200, right before LR decay).
     # Own prod dir already holds the full step-9200 (model+optim); plain
     # resume-from-latest, decay_ratio=0.0 => constant LR (no decay phase).
-    "2b|512|29700|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|complex"
-    # 2B-256 constant-LR fork. Native 256N step-9500 (full model+optim, 3072
-    # shards) copied into this dir; plain resume, decay_ratio=0.0 => constant
-    # LR. (The 256N pre-decay knee ~step-18400 was not retained on disk; 9500
-    # is the highest surviving pre-decay 256N checkpoint.)
-    "2b|256|29900|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|complex"
+    #
+    # RoPE=_real, CORRECTED 2026-08-21 (was `complex`, which would have
+    # corrupted this live 122-checkpoint chain). The `complex` value came from
+    # resolving the flavor against the PARENT chain at the SEED step -- the
+    # wrong rule for a fork that plain-resumes.
+    #
+    # THE RULE: for a fork with an EMPTY field 8, resolve RoPE against the
+    # flavor that wrote the FORK'S OWN latest checkpoint, not the parent's at
+    # the branch point. The seed's flavor governs only the very first launch
+    # into an empty dir; after that the fork has its own history.
+    #
+    # Evidence: every t3 run launched --config=agpt_2b_real (verified across
+    # umbrellas 8756957 and 8764675), and the fork's step-21300 was written
+    # 2026-08-17, well after the 2026-06-25 cos_sin switch (5ffb850a1).
+    # The fork DID pay the transition once: at its first resume (job 8744247)
+    # step 9201 logged loss 6.51705 / grad_norm 18.4066 -- the complex-weights-
+    # under-cos_sin signature -- then re-converged to 2.93 by step 9300. It has
+    # been a cos_sin chain ever since. (That spike is also the true origin of
+    # the "step-9200 resumes at ~6.5" note: step-9200 is NOT corrupt -- it is
+    # fp32 with cos 0.999 to its parent. The 6.5 was the flavor transition.)
+    "2b|512|29700|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|_real"
+    # RETIRED 2026-08-21 -- 2B-256 constant-LR fork "from step-9500".
+    # Its seed was never a trained checkpoint. The file at
+    # .../n256-gbs6144-constlr-from9500/step-9500 is near-random-init weights
+    # mislabeled step-9500. Verified three independent ways:
+    #   - dtype: bfloat16 throughout (13G). EVERY healthy 2B ckpt is float32
+    #     only (24G, exactly 2x). No key rename can change a dtype.
+    #   - stats: layers.0.attention_norm.weight is exactly 1.0 with std 0.0
+    #     (RMSNorm gains never updated; parent is 0.921 +/- 0.0177);
+    #     tok_embeddings std 0.99999 (unit normal); absmax exactly 2.0000 on
+    #     every projection (truncation artifact).
+    #   - cosine to parent ~ ZERO: wq +0.000663, wk -0.000178, wv +0.001649,
+    #     tok_embeddings -0.000011, head +0.003091. All 6 off-diagonal
+    #     wq/wk/wv pairings were also tested -- nothing above 0.9, so it is
+    #     not a permuted/mis-mapped tensor either.
+    # Its own train_state self-reports ntokens_seen=155,648,000 where step 9500
+    # at gbs 6144 x 8192 should be ~478e9 -- 325x too few. The checkpoint
+    # contradicts its own label. It resumed at loss 5.97 (not 12.45 = ln(vocab)
+    # only because output.weight retains a weak unigram prior) and went flat:
+    # that run was pretraining from scratch at a fine-tuning LR.
+    # No genuine 256N step-9500 exists anywhere on the filesystem -- the
+    # surviving agpt-2b-v2 n256 chain starts at step 35600 -- so the seat could
+    # not be repaired, only redefined. Seven attempts, zero real steps.
+#    "2b|256|29900|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|complex"
+    # 2B-256 STAGE-2 DOLMINO -- the 256N twin of t0, added 2026-08-21 in the
+    # retired seat's place.
+    #
+    # Seeds (weights-only) from the COMPLETED 256N stage-1 chain at step-92859.
+    # That chain finished: it exited cleanly 2026-07-03 with "Training starts
+    # at step 92860 / Training completed", having hit its token budget
+    # (92859 * 6144 * 8192 = 4.6737T vs the 4.673780159710T target). The seed
+    # is intact: 3072 shards (256 nodes x 12 ranks), .metadata 108,980,217 B,
+    # 24G, fp32. Its 16 zero-byte tail-rank shards are normal -- step-92800 has
+    # 16 too, and the known-good 512N seed has 39 of 6144 in like proportion.
+    #
+    # AN EARLIER ATTEMPT AT THIS SEAT NaN'd, AND IT WAS NOT THE DATA OR THE LR.
+    # Job 8663177 (2026-07-18, dropped from the umbrella) launched this same
+    # seed under --config=agpt_2b_real -- cos_sin against COMPLEX-trained
+    # weights. It resumed at loss 7.23840 / grad_norm 46.4271 where the
+    # correct-flavor 512N twin resumed at 2.60254 / 0.2505. The load itself
+    # succeeded, which is the documented flavor-mismatch signature. It spent
+    # 3800 steps re-learning the scrambled Q/K pairing back to 2.63 and NaN'd
+    # at 3801 on a model driven through a large recovery excursion. The
+    # umbrella comment blaming the 50/50 mix or the 2e-6 LR was wrong on both:
+    # the 512N seat runs PURE dolmino at a 10x HIGHER LR and is clean past
+    # step 7700. Field 12 = complex closes that failure mode.
+    #
+    # rope=complex VERIFIED, not assumed: rope_flavor_for_step.py --chain
+    # 2b_v2_256 --step 92859 -> `2b`, and all 22 runs of that chain (2026-05-01
+    # through 2026-06-28) report `2b`. It never crossed the cos_sin switch.
+    # Contrast 2b_v2_512 @46429 -> `2b_real`, which is why t0 carries _real.
+    # (Unlike t3 above, the seed's flavor IS the right resolution here: this
+    # dir is empty, so the first launch loads the seed.)
+    #
+    # Token budget is DELIBERATELY the same 2390375382006 as t0, not half.
+    # Field 11 is tokens and steps = tok/(gbs*seq_len), so the same value
+    # yields 47,492 steps at gbs 6144 vs 23,746 at 12288 -- identical token
+    # exposure (291,790,848 samples both ways), which is what makes the 256N
+    # and 512N arms comparable.
+    #
+    # Port 30000: 29700 (used by the dead commented row above) now belongs to
+    # t3. Do not revive the old row verbatim -- it would collide.
+    "2b|256|30000|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n256-gbs6144|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2390375382006|complex"
 )
 
 # Shared training defaults (match submit_agpt_{2b,20b}_autoretry.sh).
