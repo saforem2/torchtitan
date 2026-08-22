@@ -63,7 +63,7 @@ Running log of what's happening, session by session. Most recent first.
 - **sft migration finished cleanly.** 4 directories, 0 failures, datascience
   back to 16.53T of 20T (was 20.48T, over quota).
 
-## 2026-08-21 (sunspot, later) -- production was applying NaN gradients
+## 2026-08-21 (sunspot, later) -- production had no defense against a NaN gradient
 
 - **The NaN guard ran AFTER the optimizer step and only looked at loss.** Guard
   at `trainer.py:1085`, step at `:871` -- so a NaN gradient was written into
@@ -74,6 +74,11 @@ Running log of what's happening, session by session. Most recent first.
   ~370 NaN steps unbounded. Worse than "off by default": production omits
   `--nan-abort-consecutive` ENTIRELY, because the pinned pre-#3623 clones have
   no such field and passing it crashes every rank (killed umbrella 8680578).
+  SCOPE (corrected 2026-08-22): no canonical chain was observed doing this --
+  all five seats of umbrella 8764675 log ZERO non-finite loss/grad_norm lines.
+  Both cited jobs are experiments (12473142 is an 80B bf16 RC validation run,
+  8663177 is the dolmino CPT attempt that was a RoPE-flavor mismatch). The
+  defect is that nothing WOULD have caught it, not that it happened in prod.
   Fixed with a host-side isfinite check on grad_norm before the step:
   non-finite -> zero_grad, log, skip the step, still advance the lr scheduler.
   No new collective -- grad_norm is already rank-reduced inside
