@@ -66,13 +66,26 @@
 # 100,352 moves embedding+head from 1.23B to 3.15B params, so this optimum is
 # for THIS geometry.
 #
-# COMPILE IS OFF. CLAUDE.md: "torch.compile OOM at 512N: 2B OOMs on GPU, 80B
-# OOMs on CPU. Use --compile.no-enable for 512N jobs." That is recorded for 2B
-# and 80B and NOT established for 30B -- but the failure mode is an OOM at
-# launch, which would cost all four seats at once, and compile also costs
-# 7-15 min per seat against only ~150 finder steps. Uncompiled is ~27% slower
-# (exp05: 340 vs 466 tps) and that is the cheaper risk. All four seats share
-# the setting, so the comparison BETWEEN optimizers stays fair either way.
+# COMPILE IS ON, which is the production default and worth ~27% here
+# (exp05: 340 tps uncompiled vs 466 compiled).
+#
+# An earlier revision of this script disabled it, citing docs/production's
+# "torch.compile OOM at 512N -- 2B OOMs on GPU, 80B OOMs on CPU. Use
+# --compile.no-enable for 512+ node jobs." THAT NOTE IS STALE. Every live 512N
+# production seat runs compiled: grepping umbrella 8764675's trainer logs for
+# `compile.no-enable` returns 0 occurrences for trainer-0 (2b-n512),
+# trainer-1 (20b-n512) and trainer-3 (2b-n512). The 2B the note says OOMs at
+# 512N has in fact been training compiled at 512N continuously.
+#
+# Disabling it pre-emptively also corrupted the experiment, not just the speed:
+# an LR calibrated uncompiled is not necessarily the LR you want for a compiled
+# production run, so the sweep would have answered a slightly different
+# question than the one being asked.
+#
+# The doubt is handled the right way instead -- a debug-queue smoke that
+# exercises exactly this corner (30B, compiled, full AC, GBS=6144 shape) before
+# the 2088-node allocation. LRF_NO_COMPILE=1 remains as an escape hatch if that
+# smoke ever fails.
 #
 # READ THE SUGGESTED LR PER SEAT, NOT THE EXIT CODE. A seat that NaNs early
 # still exits 0 through the finder; a seat whose curve never turns over has
@@ -117,6 +130,10 @@ INIT_LR="${LRF_INIT_LR:-1e-8}"
 MAX_LR="${LRF_MAX_LR:-1e-3}"
 IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"
 DFL_NAME="${LRF_DFL_NAME:-olmo-mix-1124}"
+# Escape hatch only. Compile is ON by default -- see the header. Set
+# LRF_NO_COMPILE=1 to fall back if a smoke ever shows 30B cannot compile at
+# this scale.
+NO_COMPILE_FLAG="${LRF_NO_COMPILE:-}"
 DFL="torchtitan/experiments/ezpz/data-lists/aurora/${DFL_NAME}.txt"
 
 # The finder writes its CSV/plot/npz under <dump>/lr_finder/ezpz.agpt/<flavor>/
@@ -241,7 +258,7 @@ for idx in "${!SEATS[@]}"; do
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
             --validator.no-enable \
-            --compile.no-enable \
+            ${NO_COMPILE_FLAG:+--compile.no-enable} \
             --dataloader.dataset blendcorpus \
             --dataloader.dataset_path "$DFL" \
             --dataloader.data-cache-path "${DUMP_BASE}/${opt}/.cache/${DFL_NAME}/index-cache" \
