@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N ndimsmoke
+#PBS -j oe
+set -o pipefail
+
+# Confirm the 4D attention asserts are inert.
+#
+# They pass by construction today, but "by construction" is what I would have
+# said about several things that turned out otherwise, and these sit in the
+# per-layer hot path of every forward. Two configs so both guarded files are
+# exercised: agpt_20b hits agpt/__init__.py, moe_small hits moe/__init__.py.
+#
+# Bar: the run trains and the assert never fires. Not bit-identity against a
+# baseline -- an added assert cannot change numerics if it does not raise, and
+# the nanguard job (12473623) already established the bit-identity method for
+# a change that COULD have.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/rc-plus-nightly/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export LOGD="$PWD/outputs/logs/ndimsmoke/$PBS_JOBID"; mkdir -p "$LOGD"
+echo "torch: $(python3 -c 'import torch;print(torch.__version__)')"
+
+run() {  # run <label> <module> <config> [extra...]
+  local l="$1" m="$2" c="$3"; shift 3
+  timeout 900 ezpz launch --nproc 12 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module "$m" --config "$c" \
+      --checkpoint.no-enable --dataloader.num-workers=0 \
+      --training.steps=10 --training.local-batch-size=1 \
+      --parallelism.spmd-backend=partial_dtensor "$@" \
+      > "$LOGD/$l.log" 2>&1
+  echo "  [$l] rc=$?"
+}
+
+run agpt ezpz.agpt agpt_20b  --training.seq-len=2048 --parallelism.tensor-parallel-degree=1
+run moe  ezpz.moe  moe_small --compile.no-enable
+
+echo ""
+echo "########## 4D assert must be inert ##########"
+for a in agpt moe; do
+  c=$(sed 's/\x1b\[[0-9;]*m//g' "$LOGD/$a.log")
+  s=$(printf '%s' "$c" | grep -acE "step: *[0-9]+ +loss:")
+  f=$(printf '%s' "$c" | grep -acE "expected 4D \[B, L, N, H\]")
+  m=$(printf '%s' "$c" | grep -aoE "memory: [0-9.]+GiB\([0-9.]+%\)" | tail -1)
+  printf "  %-6s steps=%-4s assert_fired=%-3s %s\n" "$a" "$s" "$f" "${m:-}"
+done
+echo "  (want: steps=10, assert_fired=0 for both)"
+echo "NDIMSMOKE_DONE"

@@ -88,6 +88,63 @@ overwritten by a filename bug (all cells wrote `ns<seq>` instead of
 were, on verdicts my harness produced from empty step sets.
 
 
+## COUNTEREXAMPLE 2026-08-21: seq=2048 at 24 ranks is NOT always safe
+
+The IMPORTANT box below says "seq=2048 is deterministic even multi-node",
+backed by six runs and 15 pairwise comparisons at 24 ranks (job 12473191).
+Job 12473611 contradicts it at exactly that point.
+
+agpt_20b, torch 2.14.0.dev20260722, 24 ranks / 2 nodes, seq=2048, LBS=1,
+compiled, `--debug.seed=42 --debug.deterministic`, two IDENTICAL
+`partial_dtensor` runs:
+
+```
+step 1:  pA loss=12.90782  grad_norm=6.1250
+         pB loss=12.90781  grad_norm=6.1249
+```
+
+Diverges at step 1, control 0/10. The same comparison at 12 ranks / 1 node
+(job 12473608) passes 10/10.
+
+What differs from the original evidence: that was the **2B on torch 2.13**;
+this is the **20B on 2.14**. Both at seq=2048 / 24 ranks. So the safe
+sequence length is not a property of seq alone -- which the working
+hypothesis below already predicts, since it calls the threshold a MESSAGE
+SIZE boundary rather than a token count. A 20B has ~10x the per-layer
+message volume of a 2B at the same seq, so it crosses the same cutoff at a
+shorter sequence.
+
+**Practical:** do not assume seq=2048 is bit-safe multi-node for a model
+larger than the one it was measured on. Verify with a same-backend control
+IN THE SAME JOB, and if the control fails the cell is not resolvable --
+report that rather than reading the test arm's result.
+
+Single-node remains deterministic at every size tested, including here.
+
+## `--debug.deterministic` costs enough memory to change what fits
+
+Not a numerics finding, but it lands in the same trap. Jobs 12473592
+(unseeded) and 12473611 (seeded) ran byte-identical configs -- agpt_20b,
+24 ranks, LBS=1, seq=2048, 10 steps, torch 2.14 -- differing ONLY in
+`--debug.seed=42 --debug.deterministic`:
+
+| AC mode | unseeded | seeded |
+| --- | --- | --- |
+| none | 51.28GiB (80.14%) | **level_zero 40 (OUT_OF_RESOURCES)** |
+| full | 34.24GiB (53.51%) | 34.24GiB (53.51%) |
+| selective | 39.94GiB (62.41%) | **level_zero 40** |
+
+FullAC reproduces to the decimal; the two modes above ~60% both die.
+Deterministic mode selects deterministic kernel variants and extra
+workspace, and that overhead is enough to cross the ceiling.
+
+**Budget for it.** A config that runs at 80% unseeded may not run at all
+under `--debug.deterministic`, and the failure arrives as a driver-level
+`level_zero 40` rather than a clean `torch.OutOfMemoryError` -- at 12 ranks
+the same shortfall surfaced as the latter (job 12473608), so the two error
+strings are the same problem seen from different layers.
+
+
 > [!IMPORTANT]
 > **Multi-NODE runs are nondeterministic at seq >= 2560. Single-node is
 > deterministic at every size tested, and seq=2048 is deterministic even

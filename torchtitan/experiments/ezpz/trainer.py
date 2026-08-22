@@ -867,8 +867,39 @@ class FaultTolerantTrainer(Trainer):
             pp_mesh=parallel_dims.get_optional_mesh("pp"),
             ep_enabled=parallel_dims.ep_enabled,
         )
+        # Refuse to apply a non-finite update.
+        #
+        # The nan_abort_consecutive guard below runs AFTER this step and only
+        # inspects the loss, so a NaN gradient is written into the weights
+        # before anything notices. Job 12473142 shows why that ordering
+        # matters: grad_norm went nan at step 30 and loss only at step 31, so
+        # the earliest available signal was one full step ahead of the one we
+        # were watching -- and five more updates landed before the abort.
+        #
+        # grad_norm is already reduced across ranks by clip_grad_norm_ (and
+        # across pp when pp_mesh is passed), so every rank sees the same value
+        # and this branches identically everywhere. No extra collective.
+        #
+        # Deliberately NOT torch._assert_async, which upstream uses in #4226:
+        # on CUDA a failed device-side assert invalidates the process, which
+        # our failover machinery would see as a crash rather than a clean
+        # stop, and its XPU behavior is undocumented. A host-side check costs
+        # one already-materialized .item() -- grad_norm is read for logging at
+        # the metrics call below regardless.
+        # Staging is a checkpoint concern, not an optimizer one -- it must run
+        # whether or not we take the step, or a skipped step would leave an
+        # async save un-awaited.
         self.checkpointer.maybe_wait_for_staging()
-        self.optimizers.step()
+        if not math.isfinite(float(grad_norm.item())):
+            self.optimizers.zero_grad()
+            logger.error(
+                f"non-finite grad_norm ({grad_norm}) at step {self.step}: "
+                "SKIPPING the optimizer step to avoid writing NaN into the "
+                "weights. The model is unchanged; the loss guard decides "
+                "whether to abort."
+            )
+        else:
+            self.optimizers.step()
         self.lr_schedulers.step()
 
         # Reduce the data collected over gradient accumulation steps.

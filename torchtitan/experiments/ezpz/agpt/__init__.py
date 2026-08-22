@@ -63,6 +63,16 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # local_map contract check (protocols/module.py:_maybe_wrap_local_map)
         # matches by positional-arg name, and asserts under TP>1 if a
         # mapped input name is missing from in_dst_shardings.
+        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
+        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
+        # layout, and if that ever reaches here the tensors arrive 3D --
+        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
+        # ACCEPTS the result. The failure is a quietly degraded loss curve,
+        # not a traceback. Assert the rank so it is loud instead.
+        assert q_BLNH.ndim == 4, (
+            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
+            "fold-batch-dim token layout landed, this wrapper needs updating"
+        )
         q, k, v = (
             q_BLNH.transpose(1, 2),
             k_BLNH.transpose(1, 2),
@@ -151,6 +161,16 @@ class SoftcappedFlexAttention(Module):
     ) -> torch.Tensor:
         # 57th sync: shape-suffixed positional names required to match
         # set_gqa_inner_attention_local_map's in_dst_shardings under TP>1.
+        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
+        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
+        # layout, and if that ever reaches here the tensors arrive 3D --
+        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
+        # ACCEPTS the result. The failure is a quietly degraded loss curve,
+        # not a traceback. Assert the rank so it is loud instead.
+        assert q_BLNH.ndim == 4, (
+            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
+            "fold-batch-dim token layout landed, this wrapper needs updating"
+        )
         q, k, v = (
             q_BLNH.transpose(1, 2),
             k_BLNH.transpose(1, 2),

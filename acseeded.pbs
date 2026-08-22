@@ -1,0 +1,146 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=02:30:00
+#PBS -l filesystems=tegu:home
+#PBS -N acseeded
+#PBS -j oe
+set -o pipefail
+
+# The AC cell job 12473592 left open: are the backends NUMERICALLY equivalent
+# under each AC mode, or do we only know they all run?
+#
+# 12473592 showed all three AC modes running on 2.14 with memory matching to
+# the decimal across backends. But it passed no --debug.seed, so its arms were
+# never expected to match and did not (max |d| 4.8-8.9 between backends --
+# ordinary unseeded spread, comparable to the 13.6-15.8 between AC modes).
+# It established "AC runs and costs what it should", NOT bit-identity.
+#
+# This is the seeded version. Per AC mode: two partial_dtensor runs (a
+# self-control) plus one spmd_types, with --debug.seed=42 --debug.deterministic.
+# Without the control a mismatch cannot be told from stack nondeterminism.
+#
+# 24 ranks / 2 nodes, seq=2048. The first attempt (12473608) used 12 ranks /
+# 1 node and OOMed 4 of 6 arms: fewer ranks means more FSDP shard per rank, and
+# AC=none (80.14% at 24 ranks) and selective (62.41%) do not fit on 12. Only
+# FullAC survived. 2N/seq2048 is still inside the deterministic regime -- the
+# determinism boundary is seq >= 2560 at 24 ranks, not the node count -- so the
+# seeded comparison stays valid at 24.
+#
+# seq=2048 is the deterministic regime. Multi-node bf16 is
+# nondeterministic and would fail the control (see
+# known-bugs/xpu-determinism-rank-seqlen-interaction.md); seq >= 2560 fails
+# multi-node too. This asks a numerics question, so it runs where numerics
+# are answerable.
+#
+# NEVER --debug.deterministic_warn_only: it downgrades nondeterministic ops to
+# warnings and would manufacture a fake bit-identical result.
+#
+# Second question, same job: does the +6.25pp torch-bump memory cost hold
+# under every AC mode? That number was measured at FullAC only (job 12473548).
+# 12473592 showed AC modes spanning 27pp (53.51 full -> 80.14 none), so
+# assuming a FullAC-derived delta transfers to none is exactly the kind of
+# extrapolation that has misled us before. Arms 7-9 re-run the three AC modes
+# on 2.13 + partial_dtensor so the delta can be computed PER MODE rather than
+# assumed constant.
+#
+# AC mode comes from the CONFIG NAME, not a flag: agpt_20b -> FullAC,
+# agpt_20b_noac -> None, agpt_20b_selac -> SelectiveAC. There is no
+# --activation-checkpoint flag; passing one would silently do nothing.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export LOGD="$PWD/outputs/logs/acseeded/$PBS_JOBID"; mkdir -p "$LOGD"
+echo "logs: $LOGD"; echo ""
+
+# run <label> <venv> <config> <backend> <want_torch>
+run() {
+  ( set +u
+    source "venvs/$2/bin/activate"; unset PYTHONPATH
+    got=$(python3 -c "import torch;print(torch.__version__)" 2>/dev/null)
+    case "$got" in
+      "$5"*) ;;
+      *) echo "  [$1] ABORT: wanted ${5}*, got ${got:-<none>}"; return 1 ;;
+    esac
+    [ -f "$LOGD/.torchline" ] || {
+      echo "torch(nightly gate): $got"
+      python3 -c "import torch,os;print('from:',os.path.dirname(torch.__file__))"
+      : > "$LOGD/.torchline"; }
+    timeout 1200 ezpz launch --nproc 24 -ppn 12 -- \
+      python3 -m torchtitan.experiments.ezpz.train \
+        --module ezpz.agpt --config "$3" \
+        --checkpoint.no-enable --dataloader.num-workers=0 \
+        --training.steps=10 --training.local-batch-size=1 \
+        --training.seq-len=2048 \
+        --parallelism.tensor-parallel-degree=1 \
+        --parallelism.spmd-backend="$4" \
+        --debug.seed=42 --debug.deterministic \
+        > "$LOGD/$1.log" 2>&1
+    echo "  [$1] rc=$?" )
+}
+
+N=2.14.0.dev20260722
+O=2.13.0a0
+
+# Part A: seeded backend parity per AC mode, on the nightly
+for m in none:agpt_20b_noac full:agpt_20b selective:agpt_20b_selac; do
+  ac=${m%%:*}; cfg=${m##*:}
+  run "n-$ac-pA"   rc-plus-nightly "$cfg" partial_dtensor "$N"
+  run "n-$ac-pB"   rc-plus-nightly "$cfg" partial_dtensor "$N"
+  run "n-$ac-spmd" rc-plus-nightly "$cfg" spmd_types      "$N"
+done
+
+# Part B: same three AC modes on 2.13, to get the memory delta PER MODE
+for m in none:agpt_20b_noac full:agpt_20b selective:agpt_20b_selac; do
+  ac=${m%%:*}; cfg=${m##*:}
+  run "o-$ac-partial" fw-2026.1-rc2 "$cfg" partial_dtensor "$O"
+done
+
+echo ""
+echo "########## A: seeded backend parity per AC mode (torch 2.14) ##########"
+python3 - <<'PY'
+import os, re
+d = os.environ["LOGD"]
+def R(n):
+    try: t = re.sub(r"\x1b\[[0-9;]*m","",open(f"{d}/{n}",errors="ignore").read())
+    except OSError: return None, ""
+    return {int(m[0]):(m[1],m[2]) for m in
+            re.findall(r"step: *(\d+) +loss: *([\d.]+) +grad_norm: *([\d.]+)",t)}, t
+def ac_of(t):
+    if '"activation_checkpoint": null' in t: return "null"
+    i=t.find('"activation_checkpoint"'); b=t[i:i+260] if i>0 else ""
+    # the field that DISCRIMINATES -- "selective" never appears in the dump
+    return "SelectiveAC" if "force_recompute_mm_shapes_by_fqns" in b else ("FullAC" if i>0 else "?")
+print(f"  {'AC':<11}{'AC in dump':<14}{'control':<10}{'spmd vs partial':<18}{'verdict'}")
+for ac in ("none","full","selective"):
+    pA,tA=R(f"n-{ac}-pA.log"); pB,_=R(f"n-{ac}-pB.log"); sp,tS=R(f"n-{ac}-spmd.log")
+    if not(pA and pB and sp): print(f"  {ac:<11}(a log is missing)"); continue
+    ks=sorted(set(pA)&set(pB)&set(sp))
+    if not ks: print(f"  {ac:<11}{ac_of(tA):<14}no comparable steps"); continue
+    c=sum(pA[k]==pB[k] for k in ks); t=sum(sp[k]==pA[k] for k in ks)
+    v=("CONTROL FAILED -- not resolvable" if c<len(ks)
+       else "bit-identical" if t==len(ks)
+       else f"DIVERGES at step {next(k for k in ks if sp[k]!=pA[k])}")
+    print(f"  {ac:<11}{ac_of(tA):<14}{str(c)+'/'+str(len(ks)):<10}{str(t)+'/'+str(len(ks)):<18}{v}")
+
+print()
+print("########## B: does +6.25pp hold per AC mode? (2.13 -> 2.14) ##########")
+def mem(n):
+    try: t=re.sub(r"\x1b\[[0-9;]*m","",open(f"{d}/{n}",errors="ignore").read())
+    except OSError: return None
+    m=re.findall(r"memory: *[\d.]+GiB\(([\d.]+)%\)",t)
+    return float(m[-1]) if m else None
+print(f"  {'AC':<11}{'2.13':>8}{'2.14':>8}{'delta':>9}")
+for ac in ("none","full","selective"):
+    o,n = mem(f"o-{ac}-partial.log"), mem(f"n-{ac}-pA.log")
+    if o is None or n is None: print(f"  {ac:<11}{'--':>8}{'--':>8}{'(missing)':>9}"); continue
+    print(f"  {ac:<11}{o:>7.2f}%{n:>7.2f}%{n-o:>+8.2f}pp")
+print()
+print("  Reference: job 12473548 measured +6.25pp at FullAC/LBS=2 (50.31 -> 56.56).")
+print("  If the deltas above differ by mode, that number does NOT generalize and")
+print("  the memory cost of the bump has to be measured on the target config.")
+PY
+echo "ACSEEDED_DONE"
