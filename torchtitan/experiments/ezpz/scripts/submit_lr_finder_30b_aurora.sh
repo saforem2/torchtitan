@@ -40,9 +40,24 @@
 # double the wall clock for no calibration benefit, while doubling activation
 # memory at a size where exp05 already found AC=none OOMs.
 #
-# CONFIG: agpt_30b_olmo2tok, NOT agpt_30b. The bare name is the gemma-256k-vocab
-# 28.1B variant; the converged chain and every recent measurement use the olmo2
-# 26.2B one. run_lr_finder.sh would have composed the wrong one from LRF_MODELS.
+# CONFIG: agpt_30b (gemma 256k vocab, 28.1B) -- and this is a DEPARTURE from the
+# converged chain, made deliberately because of where the assets live.
+#
+# The Sunspot convergence chain used agpt_30b_olmo2tok (26.2B), which exp07
+# picked on fertility-per-vocab-byte. But that config sets
+# hf_assets_path=./assets/hf/OLMo-2-1124-7B, and AURORA DOES NOT HAVE IT --
+# `ls assets/hf/` here returns only DeepSeek-v3.2, gemma-7b, llama-2-7b-hf. The
+# whole 30B campaign ran on Sunspot, where the OLMo-2 assets live. Launching
+# olmo2tok on Aurora would die at tokenizer load.
+#
+# Using the gemma variant instead is defensible beyond mere availability: it is
+# the tokenizer every 2B/20B production chain already uses, so an LR calibrated
+# on it transfers directly to an Aurora 30B run built the same way. The cost is
+# that vocab differs from the converged chain (256,128 vs 100,352), which moves
+# the embedding/head parameter count (3.15B vs 1.23B) -- so the optimum found
+# here is for THIS geometry. If the OLMo-2 assets are staged to Aurora later,
+# re-run with LRF_CONFIG=agpt_30b_olmo2tok to calibrate that geometry directly;
+# the knob exists precisely for that.
 #
 # LR WINDOW: the script default 1e-6 -> 1.0 is wrong for this problem in two
 # ways. The finder probes ONE LR PER STEP (lr_finder.py:118-192: mult =
@@ -69,7 +84,7 @@ set -o pipefail
 cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
 
 export LRF_MODELS="30b"
-export LRF_CONFIG="agpt_30b_olmo2tok"
+export LRF_CONFIG="agpt_30b"   # see the CONFIG note above (olmo2 assets absent on Aurora)
 export LRF_OPTIMIZERS="adamw mano sophiag"
 
 # GBS=6144 = dp(3072) * LBS(2) * GAS(1) at 256 nodes, TP=1.
