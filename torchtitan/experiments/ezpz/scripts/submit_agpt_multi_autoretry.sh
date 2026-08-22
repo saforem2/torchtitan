@@ -460,6 +460,43 @@ if [[ -n "$dupes" ]]; then
 fi
 log "slices are disjoint (no shared nodes)"
 
+# ---- Per-seat cwd for auto-retry state ---------------------------------------
+# `ezpz launch --auto-retry` derives its state dir as
+#     _auto_retry_log_dir(jobid) -> Path.cwd()/"logs"/f"failover-{jobid}"
+# (ezpz/launch.py:768) -- keyed on cwd + jobid ONLY, with no seat/port/rank
+# component and no env override. Two seats sharing a workdir therefore share
+# one logs/failover-<jobid>/active.hostfile. NodeAllocation REWRITES that file
+# on every spare swap and the launcher re-reads it each attempt, so one seat
+# swapping a bad node can hand the other a hostfile naming the wrong nodes --
+# silently cross-wiring two multi-thousand-rank launches.
+#
+# This became live on 2026-08-21 when t4 was re-pointed from the constlr clone
+# to the 2b-v2 clone (the 256N stage-2 dolmino seat), which t0 already used.
+# Before that every seat had a distinct workdir and the bug was latent.
+#
+# Fix: when two seats share a workdir, give each a private cwd that symlinks
+# the clone's contents. The torchtitan source stays byte-identical (that is
+# what makes the pinned clones pinned); only Path.cwd() differs.
+declare -a T_CWD
+declare -A _wd_seen
+for idx in "${!TRAINERS[@]}"; do
+    wd="${T_WORKDIR[$idx]}"
+    if [[ -n "${_wd_seen[$wd]:-}" ]]; then
+        priv="$MULTI_LOG_DIR/cwd-${idx}"
+        mkdir -p "$priv/logs"
+        # Symlink every top-level entry so imports, assets and outputs resolve
+        # exactly as they would from the clone root.
+        for e in "$wd"/* "$wd"/.venv "$wd"/.venv.tar.gz; do
+            [[ -e "$e" ]] && ln -sfn "$e" "$priv/$(basename "$e")"
+        done
+        T_CWD[$idx]="$priv"
+        log "trainer $idx shares a workdir with trainer ${_wd_seen[$wd]}; using private cwd $priv"
+    else
+        _wd_seen[$wd]="$idx"
+        T_CWD[$idx]="$wd"
+    fi
+done
+
 # ---- Existence checks ---------------------------------------------------------
 for idx in "${!TRAINERS[@]}"; do
     [[ -d "${T_WORKDIR[$idx]}" ]] || die "trainer $idx workdir missing: ${T_WORKDIR[$idx]}"
@@ -633,7 +670,10 @@ launch_trainer() {
     [[ -n "${MAX_FAILOVER_RETRIES:-}" ]] && mfr=(--max-failover-retries "${MAX_FAILOVER_RETRIES}")
 
     (
-        cd "$workdir" || { echo "cd failed: $workdir"; exit 97; }
+        # T_CWD == workdir unless this seat shares a workdir with another,
+        # in which case it is a private symlink dir -- see the auto-retry
+        # state-collision note above.
+        cd "${T_CWD[$idx]}" || { echo "cd failed: ${T_CWD[$idx]}"; exit 97; }
         # Import torchtitan from THIS clone's (pinned) source tree; run the
         # driver from the node-local per-model venv.
         # shellcheck disable=SC1090
