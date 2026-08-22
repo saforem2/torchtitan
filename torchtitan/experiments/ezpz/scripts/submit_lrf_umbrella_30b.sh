@@ -82,10 +82,18 @@
 # production run, so the sweep would have answered a slightly different
 # question than the one being asked.
 #
-# The doubt is handled the right way instead -- a debug-queue smoke that
-# exercises exactly this corner (30B, compiled, full AC, GBS=6144 shape) before
-# the 2088-node allocation. LRF_NO_COMPILE=1 remains as an escape hatch if that
-# smoke ever fails.
+# SMOKE-CONFIRMED. Job 8775220 (64N, debug-scaling, 2026-08-22) ran agpt_30b
+# COMPILED at LBS=1 / seq=4096 / full AC for 5 steps and completed cleanly:
+#     step 1  loss 12.94494  memory 27.65GiB (43.21%)
+#     step 5  loss 13.07868  memory 27.65GiB (43.21%)
+# 43.21% flat is 57 points of headroom -- not remotely an OOM -- at ~16.4-17.3%
+# MFU. That does not prove 6144 ranks behaves like 768, but it removes the
+# likely failure (the graph cannot compile at LBS=1) for one debug hour.
+# LRF_NO_COMPILE=1 remains as an escape hatch.
+#
+# (The smoke's grad_norm climbs 3.5 -> 93.1 over its 5 steps. That is a fresh
+# model at a fixed lr=1e-5 with no warmup -- exactly the divergence this finder
+# exists to map -- not a compile problem.)
 #
 # READ THE SUGGESTED LR PER SEAT, NOT THE EXIT CODE. A seat that NaNs early
 # still exits 0 through the finder; a seat whose curve never turns over has
