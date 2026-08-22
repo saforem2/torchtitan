@@ -63,6 +63,56 @@ Running log of what's happening, session by session. Most recent first.
 - **sft migration finished cleanly.** 4 directories, 0 failures, datascience
   back to 16.53T of 20T (was 20.48T, over quota).
 
+## 2026-08-21 (sunspot, later) -- production was applying NaN gradients
+
+- **The NaN guard ran AFTER the optimizer step and only looked at loss.** Guard
+  at `trainer.py:1085`, step at `:871` -- so a NaN gradient was written into
+  the weights before anything noticed. Our own 80B report is the proof:
+  `grad_norm nan @30, loss nan @31, nan-abort @35`. grad_norm went bad a full
+  step BEFORE the loss, so the earliest signal was one ahead of the one we
+  watched, and five more updates landed on top. Job 8663177 separately ran
+  ~370 NaN steps unbounded. Worse than "off by default": production omits
+  `--nan-abort-consecutive` ENTIRELY, because the pinned pre-#3623 clones have
+  no such field and passing it crashes every rank (killed umbrella 8680578).
+  Fixed with a host-side isfinite check on grad_norm before the step:
+  non-finite -> zero_grad, log, skip the step, still advance the lr scheduler.
+  No new collective -- grad_norm is already rank-reduced inside
+  `clip_grad_norm_`, so every rank branches identically.
+
+- **Deliberately not upstream's mechanism.** #4226 fixes the same ordering bug
+  with `torch._assert_async`, where a failed device-side assert invalidates
+  the process -- our failover would read that as a crash rather than a clean
+  stop, and its XPU behavior is undocumented. It also lands in
+  `Trainer.train_step`, which `FaultTolerantTrainer` overrides wholesale, so
+  merging it would have given us NOTHING. That is the useful shape of the
+  finding: the most valuable commit in the sync was valuable only as a
+  hand-port.
+
+- **Smoked both changes rather than reasoning about them.** nanguard (12473623):
+  10/10 bit-identical against the parent commit, guard fired 0 times, tps
+  337-338 vs 338-340. Being honest about resolution -- ~0.3% is BELOW what a
+  single-shot 10-step comparison can resolve (exp05 measured a 2.8% cross-job
+  floor), so bit-identity is the real result and "costs nothing" is not yet
+  earned. And the smoke proves the guard is INERT, not that it FIRES; that
+  path needs a divergent config and is still owed.
+
+- **Also added a 4D rank assert at the three attention wrappers** (ndimsmoke
+  12473624: agpt 10 steps, moe 10 steps, 0 fires). Upstream's fold-batch-dim
+  reshapes the LM stack to a flat `[T]` layout; our wrappers take `q_BLNH` and
+  immediately `transpose(1, 2)`. On 3D input that swaps N with H instead of L
+  with N and **SDPA accepts it** -- a degraded loss curve, no traceback. The
+  assert converts the worst failure mode in the whole sync from silent to
+  loud, passes today, and is constant-folded under dynamo. Note the analysis
+  said four sites; there are exactly three.
+
+- **The sync itself: defer.** Grain (`1b04fc1c3`) is the OLDEST of the 35
+  commits, so every other one descends from it -- no merge can take the
+  mechanical import fixes without also taking Grain and fold-batch-dim. I had
+  recommended "land group 1 first, gate group 2" twice before checking the
+  ancestry; that was wrong. Splitting requires cherry-pick, i.e. carrying
+  divergence. Trigger for doing it: upstream deprecating `partial_dtensor`, or
+  adopting the 2.14 nightly -- do both in one revalidation window, not two.
+
 ## 2026-08-21 (sunspot) -- the 30B RAN OUT: 2000/2000, 12.028 -> 2.115, zero NaN
 
 - **The 30B finished its full config.** Step 2000 of 2000, `rc=0`, in 2h58 of
