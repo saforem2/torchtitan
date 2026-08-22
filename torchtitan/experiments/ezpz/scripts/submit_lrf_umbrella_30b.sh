@@ -148,7 +148,10 @@ DFL="torchtitan/experiments/ezpz/data-lists/aurora/${DFL_NAME}.txt"
 # <optimizer>/ -- keyed by model+optimizer, so four DIFFERENT optimizers cannot
 # collide with each other. They CAN collide with an earlier run of the same
 # pair, so scope the dump folder by jobid.
-DUMP_BASE="outputs/lrf_umbrella_${JOBID}"
+# ABSOLUTE, because each seat cd's into its own directory (see S_CWD below).
+# A relative dump folder would resolve four different ways -- and the outputs
+# symlink in each seat dir would make that LOOK fine while scattering the CSVs.
+DUMP_BASE="${MAIN}/outputs/lrf_umbrella_${JOBID}"
 
 PROBES=$(python3 -c "print(max(1,int($STEPS*$FRACTION)))")
 
@@ -173,7 +176,7 @@ GAS=$(( GBS / (LBS * DP) ))
 [[ -f "$DFL" ]] || die "data list missing: $DFL"
 
 # ---- Slice the nodefile ------------------------------------------------------
-declare -a S_OPT S_PORT S_SLICE
+declare -a S_OPT S_PORT S_SLICE S_CWD
 offset=1
 for idx in "${!SEATS[@]}"; do
     IFS='|' read -r opt port <<< "${SEATS[$idx]}"
@@ -183,6 +186,24 @@ for idx in "${!SEATS[@]}"; do
     (( got == PER_SEAT )) || die "seat $idx: sliced $got nodes, expected $PER_SEAT"
     offset=$(( offset + PER_SEAT ))
     S_OPT[$idx]="$opt"; S_PORT[$idx]="$port"; S_SLICE[$idx]="$slice"
+
+    # EACH SEAT NEEDS ITS OWN CWD. This is not tidiness -- it is required for
+    # correctness. `ezpz launch --auto-retry` derives its state directory as
+    #     _auto_retry_log_dir(jobid) -> Path.cwd()/"logs"/f"failover-{jobid}"
+    # (ezpz/launch.py:760-768), which is keyed on cwd + jobid ONLY: no seat, no
+    # port, no rank, and no env override. Four seats sharing one cwd would all
+    # write the same logs/failover-<jobid>/active.hostfile, and NodeAllocation
+    # REWRITES that file on every spare swap while the launcher re-reads it each
+    # attempt. One seat swapping a bad node could therefore hand a sibling a
+    # hostfile naming the sibling's *other* nodes -- silently cross-wiring two
+    # 6144-rank launches. Symlink the repo into a throwaway dir per seat so the
+    # torchtitan source is identical while the cwd differs.
+    seatdir="$LOGDIR/cwd-${idx}-${opt}"
+    mkdir -p "$seatdir/logs"
+    for item in torchtitan assets .venv outputs; do
+        [[ -e "$MAIN/$item" ]] && ln -sfn "$MAIN/$item" "$seatdir/$item"
+    done
+    S_CWD[$idx]="$seatdir"
 done
 
 # No node may appear in two slices -- overlapping seats would have two 6144-rank
@@ -245,6 +266,9 @@ for idx in "${!SEATS[@]}"; do
     opt="${S_OPT[$idx]}"
     console="$LOGDIR/seat-${idx}-${opt}.console.log"
     (
+        # Per-seat cwd -- see the S_CWD comment above. Without this the four
+        # seats share one auto-retry state dir and can cross-wire on a swap.
+        cd "${S_CWD[$idx]}" || { echo "cd failed: ${S_CWD[$idx]}"; exit 97; }
         export MASTER_PORT="${S_PORT[$idx]}"; unset MASTER_ADDR
         ezpz launch \
             --nproc "$(( NNODES_ACTIVE * 12 ))" \
