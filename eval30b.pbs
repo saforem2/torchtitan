@@ -2,7 +2,7 @@
 #PBS -A datascience
 #PBS -q workq
 #PBS -l select=1
-#PBS -l walltime=10:00:00
+#PBS -l walltime=24:00:00
 #PBS -l filesystems=tegu:home
 #PBS -N eval30b
 #PBS -j oe
@@ -96,6 +96,7 @@ for STEP in ${STEPS:-2000}; do
     continue
   fi
   mkdir -p "$HF" "$RES"
+  LOGD_TASK="$RES/logs"; mkdir -p "$LOGD_TASK"
 
   echo "== step-$STEP: convert =="
   if [ -f "$HF/model.safetensors.index.json" ]; then
@@ -146,16 +147,40 @@ for STEP in ${STEPS:-2000}; do
   echo "== step-$STEP: eval =="
   source venvs/fw-2026.1-rc2/bin/activate
   unset PYTHONPATH
-  timeout 30600 python3 -m lm_eval \
-    --model hf \
-    --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
-    --tasks hellaswag,arc_easy,arc_challenge,piqa,winogrande,mmlu \
-    --num_fewshot 0 \
-    --batch_size 4 \
-    --device xpu \
-    --output_path "$RES" \
-    2>&1 | tail -30
-  echo "   eval rc=$?"
+
+  # ONE INVOCATION PER TASK. lm_eval serializes results only at completion, so
+  # a single all-tasks call is all-or-nothing: job 12473627 reached 77%
+  # (89402/116734) in 8.5h and wrote NOTHING. Per-task calls checkpoint value
+  # as they go -- a timeout then costs one task, not the whole eval.
+  #
+  # Ordered cheapest-first so the quick tasks are banked before the expensive
+  # ones start. Per-task budgets come from the 12473627 measurement, at the
+  # SLOW-band rate (~1.5 it/s), not the fast band -- see the note above.
+  #
+  # stdbuf -oL keeps the progress bar flowing into the .o file instead of
+  # buffering until exit; 12473627 looked hung for two hours because
+  # `| tail -30` swallowed everything until the process died.
+  for TASK in arc_challenge:1200 arc_easy:1800 winogrande:1800 piqa:2400 hellaswag:32400 mmlu:39600; do
+    NAME="${TASK%%:*}"; BUDGET="${TASK##*:}"
+    if compgen -G "$RES/$NAME/**/results*.json" > /dev/null 2>&1; then
+      echo "   [$NAME] already has results, skipping"
+      continue
+    fi
+    echo "   [$NAME] budget ${BUDGET}s"
+    mkdir -p "$RES/$NAME"
+    timeout "$BUDGET" stdbuf -oL -eL python3 -m lm_eval \
+      --model hf \
+      --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
+      --tasks "$NAME" \
+      --num_fewshot 0 \
+      --batch_size 4 \
+      --device xpu \
+      --output_path "$RES/$NAME" \
+      > "$LOGD_TASK/$NAME.log" 2>&1
+    rc=$?
+    echo "   [$NAME] rc=$rc $( [ $rc -eq 124 ] && echo '(TIMED OUT -- budget too small)' )"
+    tail -3 "$LOGD_TASK/$NAME.log" 2>/dev/null | sed 's/^/       /'
+  done
   deactivate 2>/dev/null || true
 done
 
@@ -167,11 +192,17 @@ base = os.environ.get("PWD","") + "/outputs/evals/agpt-30b-olmo2tok"
 rows = {}
 for step in (1000, 2000):
     hits = glob.glob(f"{base}/step-{step}/results/**/results*.json", recursive=True)
+    # per-task layout: results/<task>/**/results*.json -- merge them all
     if not hits:
         rows[step] = None; continue
-    with open(sorted(hits)[-1]) as f:
-        d = json.load(f)
-    rows[step] = d.get("results", {})
+    merged = {}
+    for h in sorted(hits):
+        try:
+            with open(h) as f:
+                merged.update(json.load(f).get("results", {}))
+        except (OSError, ValueError):
+            continue
+    rows[step] = merged
 tasks = sorted({t for r in rows.values() if r for t in r})
 if not tasks:
     print("  no results parsed -- check the per-step output above")
