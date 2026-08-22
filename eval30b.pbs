@@ -1,0 +1,152 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N eval30b
+#PBS -j oe
+set -o pipefail
+
+# Evaluate the completed 30B. Nobody has measured this model.
+#
+# The run finished 2000/2000 steps on 2026-08-21 (12.028 -> 2.115, zero NaN,
+# four-job chain ending 12473545). Loss says it trained; it does not say the
+# model is any good, and a converged loss curve on a new tokenizer is exactly
+# the case where you want a downstream number before believing the config.
+#
+# Two steps so the comparison is a trajectory, not a point: 1000 (mid-run,
+# loss 2.509) and 2000 (final, 2.115). If the eval numbers do not move between
+# them, that is a finding about the benchmark, not the model.
+#
+# TOKENIZER IS THE TRAP HERE. This chain trained on OLMo-2's 100,352 vocab
+# (agpt_30b_olmo2tok, hf_assets_path=./assets/hf/OLMo-2-1124-7B). Evaluating
+# it with a mismatched tokenizer produces confident gibberish -- exactly what
+# bit the Polaris 20B, where Llama2-tokenized data was scored with a gemma
+# eval tokenizer. The conversion below pins the OLMo-2 assets explicitly.
+#
+# --model_flavor is REQUIRED and has no safe default: it selects the RoPE
+# convention, and a wrong value exports a checkpoint that LOADS FINE and
+# generates garbage. Resolved from the run's own config dump, which reports
+# "flavor": "30b_olmo2tok" -- not guessed, and not inherited from a sibling
+# config. rope.theta=500000, scaling=none, confirmed in the same dump.
+#
+# Tasks: the standard zero-shot set used for the 20B/2B tables so the numbers
+# are directly comparable. hellaswag/arc/piqa/winogrande are the ones that
+# move at this scale; mmlu is included knowing a 26B model at 2000 steps is
+# likely at chance -- a null there is informative, not a failure.
+#
+# 1 node: this is inference on one model, not distributed training.
+#
+# venv: fw-2026.1-rc2 for BOTH convert and eval, not venvs/sunspot-lm-eval.
+# That venv is built against /opt/aurora/26.26.0 frameworks/2025.3.1, whose
+# torch no longer imports on this node at all -- `OSError:
+# libmkl_intel_lp64.so.2: cannot open shared object file`, under its OWN
+# module as well as under 2026.1.0. The 2025.3.1 stack is simply gone here.
+# fw-2026.1-rc2 already carries lm_eval 0.4.12 and transformers 5.14.1, so one
+# venv covers both phases and there is no deactivate/reactivate dance.
+#
+# (`torch.xpu.is_available()` reads False on the login node -- no GPUs there.
+# It resolves on a compute node; do not "fix" it.)
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_ENABLE_HF_TRANSFER=0   # breaks lm-eval's HF backend on this stack
+export HF_DATASETS_OFFLINE=0
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-converge"
+OUT="$PWD/outputs/evals/agpt-30b-olmo2tok"
+ASSETS="./assets/hf/OLMo-2-1124-7B"
+mkdir -p "$OUT"
+echo "ckpt:   $CKPT"
+echo "out:    $OUT"
+echo "assets: $ASSETS"
+echo ""
+
+for STEP in 2000 1000; do
+  SRC="$CKPT/step-$STEP"
+  HF="$OUT/step-$STEP/hf"
+  RES="$OUT/step-$STEP/results"
+
+  if [ ! -f "$SRC/.metadata" ]; then
+    echo "== step-$STEP: no .metadata, skipping (not a complete DCP checkpoint)"
+    continue
+  fi
+  mkdir -p "$HF" "$RES"
+
+  echo "== step-$STEP: convert =="
+  if [ -f "$HF/model.safetensors.index.json" ]; then
+    echo "   already converted, reusing"
+  else
+    source venvs/fw-2026.1-rc2/bin/activate
+    unset PYTHONPATH
+    timeout 5400 python3 -m torchtitan.experiments.ezpz.eval.convert_to_hf \
+      "$SRC" "$HF" \
+      --hf_assets_path "$ASSETS" \
+      --model_flavor 30b_olmo2tok \
+      --export_dtype bfloat16 \
+      2>&1 | tail -20
+    echo "   convert rc=$?"
+    deactivate 2>/dev/null || true
+  fi
+  ls -la "$HF" 2>/dev/null | head -5
+  du -sh "$HF" 2>/dev/null
+
+  if [ ! -f "$HF/model.safetensors.index.json" ]; then
+    echo "   NO HF INDEX -- conversion did not produce a loadable model, skipping eval"
+    continue
+  fi
+
+  echo "== step-$STEP: eval =="
+  source venvs/fw-2026.1-rc2/bin/activate
+  unset PYTHONPATH
+  timeout 7200 python3 -m lm_eval \
+    --model hf \
+    --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
+    --tasks hellaswag,arc_easy,arc_challenge,piqa,winogrande,mmlu \
+    --num_fewshot 0 \
+    --batch_size 4 \
+    --device xpu \
+    --output_path "$RES" \
+    2>&1 | tail -30
+  echo "   eval rc=$?"
+  deactivate 2>/dev/null || true
+done
+
+echo ""
+echo "########## 30B downstream ##########"
+python3 - <<'PY'
+import json, glob, os
+base = os.environ.get("PWD","") + "/outputs/evals/agpt-30b-olmo2tok"
+rows = {}
+for step in (1000, 2000):
+    hits = glob.glob(f"{base}/step-{step}/results/**/results*.json", recursive=True)
+    if not hits:
+        rows[step] = None; continue
+    with open(sorted(hits)[-1]) as f:
+        d = json.load(f)
+    rows[step] = d.get("results", {})
+tasks = sorted({t for r in rows.values() if r for t in r})
+if not tasks:
+    print("  no results parsed -- check the per-step output above")
+else:
+    print(f"  {'task':<18}" + "".join(f"{('step '+str(s)):>12}" for s in (1000,2000)))
+    for t in tasks:
+        line = f"  {t:<18}"
+        for s in (1000, 2000):
+            r = rows.get(s) or {}
+            m = r.get(t, {})
+            v = m.get("acc_norm,none", m.get("acc,none"))
+            line += f"{(f'{v*100:.2f}%' if isinstance(v,(int,float)) else '--'):>12}"
+        print(line)
+    print()
+    print("  Random baselines: hellaswag 25, arc_easy 25, arc_challenge 25,")
+    print("  piqa 50, winogrande 50, mmlu 25. At 2000 steps a 26B model is")
+    print("  undertrained by orders of magnitude -- near-chance on mmlu is the")
+    print("  EXPECTED result and says nothing bad about the config.")
+PY
+echo "EVAL30B_DONE"
