@@ -131,12 +131,32 @@ is nearly as fast.
 (An earlier reading of 174 tps was the first post-resume step, before
 throughput settled -- not representative.)
 
-This run ended at step 299, one step short of its step-300 checkpoint,
-because it was submitted with a 2h walltime. So the resume LOAD is verified
-and 49 steps of continued descent are verified; a post-resume SAVE has not
-been directly observed yet. The step-250 checkpoint it loaded was itself
-written by the compiled run, so the save path is not in doubt -- but
-confirming it end-to-end wants a longer walltime.
+> **CORRECTED 2026-08-22.** The paragraph that stood here said this run
+> "ended at step 299 ... a post-resume SAVE has not been directly observed
+> yet." Both halves are wrong. The log records **153 step lines, step 251
+> (loss 4.54003) through step 403 (loss 3.67819)**, and **two completed
+> saves** -- `Finished saving the checkpoint in 49.27 seconds` and
+> `in 26.99 seconds`, at steps 300 and 400. PBS killed it on walltime
+> (`7206` vs a `7200` limit), not at 299.
+>
+> The cause was timing, not analysis: this section was committed
+> (`e3c43169d`) at 15:32 CDT while job `12473387` was still running, and it
+> was never refreshed after the job ended at ~17:12. A doc written against a
+> live run needs a second pass once that run stops.
+>
+> Two consequences. First, the post-resume SAVE was directly observed here,
+> two days before job `12473515` was credited with closing that gap. Second,
+> and more interesting: **the step-400 checkpoint that `12473476` resumed
+> from was written by this UNCOMPILED job.** So the chain's compiled lineage
+> begins from an uncompiled-written checkpoint -- a stronger cross-mode
+> round-trip than this document claims anywhere. (Verified 2026-08-22 by
+> reading the log directly on Sunspot at
+> `outputs/logs/30b-converge/12473387.*/train.log`.)
+
+This run was submitted with a 2h walltime, which is what ended it. The resume
+LOAD, 153 steps of continued descent, and two post-resume SAVEs are all
+verified. The step-250 checkpoint it loaded was itself written by the compiled
+run, so the save path was never in doubt.
 
 ## Update 2026-08-20: past the old ceiling, on the repinned backend
 
@@ -283,8 +303,20 @@ Four jobs, one continuous trajectory, **zero NaN/inf in any of them**:
 |---|---|---|---|
 | 12473304 | 1 -> 482 | 12.028 -> 3.357 | fresh start |
 | 12473476 | 401 -> 871 | 3.698 -> 2.617 | `rc=124`, inner timeout unscaled |
-| 12473515 | 801 -> 1781 | 2.712 -> 2.246 | first COMPILED resume |
+| 12473515 | 801 -> 1781 | 2.712 -> 2.246 | compiled resume (the THIRD -- see note) |
 | 12473545 | 1751 -> 2000 | 2.248 -> **2.115** | finished it |
+
+> **CORRECTED 2026-08-22.** `12473515` was labelled the "first COMPILED
+> resume". It was the third. Counting `--compile.no-enable` occurrences in
+> each chain job's log: `12473304` 0, `12473387` **3**, `12473476` 0,
+> `12473515` 0, `12473545` 0. So `12473476` also resumed compiled (from
+> step-400), and only `12473387` was the deliberate uncompiled arm.
+>
+> Note the trap that produced the wrong label: the dumped config block reads
+> `"enable": true` in ALL FIVE jobs, including the uncompiled one -- it is the
+> config DEFAULT, not the effective setting. Only the CLI flag count
+> discriminates. Read the launch line, not the dumped config, when asking
+> whether a run was compiled.
 
 Nine checkpoints on disk (400 through 2000), 2.6 T total. Steady state held
 to the end: 496 tps, 28.3% MFU, memory flat at 38.29GiB (59.84%), grad_norm
