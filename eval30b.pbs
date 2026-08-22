@@ -154,13 +154,26 @@ for STEP in ${STEPS:-2000}; do
   # as they go -- a timeout then costs one task, not the whole eval.
   #
   # Ordered cheapest-first so the quick tasks are banked before the expensive
-  # ones start. Per-task budgets come from the 12473627 measurement, at the
-  # SLOW-band rate (~1.5 it/s), not the fast band -- see the note above.
+  # ones start.
+  #
+  # BUDGETS ARE FROM MEASURED REQUEST COUNTS, and the first version of this
+  # list was wrong because I used DOCUMENT counts. lm_eval issues one
+  # loglikelihood request PER ANSWER CHOICE, so arc_challenge is 4687 requests
+  # (not the 1172 documents I assumed) and arc_easy is 9501 (not 2376) -- 4x
+  # each. arc_challenge then blew a 1200s budget at 41% complete, which is how
+  # the error surfaced: the CHEAPEST task timing out is the tell that the cost
+  # model, not the number, is wrong.
+  #
+  # Measured from job 12473636 logs, at the ~2.3 it/s all-tasks rate:
+  #   arc_challenge  4687 req  0.6h     arc_easy   9501 req  1.1h
+  #   winogrande     5068 req  0.6h     hellaswag 40168 req  4.9h
+  #   piqa           7352 req  0.9h     mmlu      56168 req  6.8h
+  # Budgets below are ~3x those, so a slow band cannot clip a task.
   #
   # stdbuf -oL keeps the progress bar flowing into the .o file instead of
   # buffering until exit; 12473627 looked hung for two hours because
   # `| tail -30` swallowed everything until the process died.
-  for TASK in arc_challenge:1200 arc_easy:1800 winogrande:1800 piqa:2400 hellaswag:32400 mmlu:39600; do
+  for TASK in arc_challenge:7200 winogrande:7200 piqa:10800 arc_easy:12600 hellaswag:54000 mmlu:73800; do
     NAME="${TASK%%:*}"; BUDGET="${TASK##*:}"
     if compgen -G "$RES/$NAME/**/results*.json" > /dev/null 2>&1; then
       echo "   [$NAME] already has results, skipping"
