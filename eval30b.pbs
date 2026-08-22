@@ -2,7 +2,7 @@
 #PBS -A datascience
 #PBS -q workq
 #PBS -l select=1
-#PBS -l walltime=06:00:00
+#PBS -l walltime=10:00:00
 #PBS -l filesystems=tegu:home
 #PBS -N eval30b
 #PBS -j oe
@@ -38,6 +38,25 @@ set -o pipefail
 #
 # 1 node: this is inference on one model, not distributed training.
 #
+# ONE STEP PER JOB, and both clocks sized for it. Job 12473626 measured the
+# real cost: 116,734 loglikelihood requests at a settled 6.42 it/s = ~6.1h for
+# a SINGLE step. It was submitted with a 6h walltime AND an inner
+# `timeout 7200` (2h), so it was going to be SIGTERMed at 2h with nothing
+# written -- lm_eval only serializes at completion, so a killed run leaves an
+# empty results/ dir and the whole 2h is lost.
+#
+# That is the 30b_long rc=124 mistake again: sizing one clock and not the
+# other. Here BOTH are sized off the measurement -- walltime 10h, inner
+# timeout 30600s (8.5h) -- with the inner one deliberately smaller so the job
+# gets to print its summary instead of being killed by PBS.
+#
+# Run the second step as a separate submission:  qsub -v STEPS=1000 eval30b.pbs
+#
+# Cost driver is mmlu (57 subjects, ~56k of the 116k requests) and hellaswag
+# (~40k). Dropping mmlu would roughly halve the runtime, and at 2000 steps a
+# 26B model is near-chance there anyway -- but a measured null is worth more
+# than an assumed one, so it stays for the first pass.
+#
 # venv: fw-2026.1-rc2 for BOTH convert and eval, not venvs/sunspot-lm-eval.
 # That venv is built against /opt/aurora/26.26.0 frameworks/2025.3.1, whose
 # torch no longer imports on this node at all -- `OSError:
@@ -67,7 +86,7 @@ echo "out:    $OUT"
 echo "assets: $ASSETS"
 echo ""
 
-for STEP in 2000 1000; do
+for STEP in ${STEPS:-2000}; do
   SRC="$CKPT/step-$STEP"
   HF="$OUT/step-$STEP/hf"
   RES="$OUT/step-$STEP/results"
@@ -127,7 +146,7 @@ for STEP in 2000 1000; do
   echo "== step-$STEP: eval =="
   source venvs/fw-2026.1-rc2/bin/activate
   unset PYTHONPATH
-  timeout 7200 python3 -m lm_eval \
+  timeout 30600 python3 -m lm_eval \
     --model hf \
     --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
     --tasks hellaswag,arc_easy,arc_challenge,piqa,winogrande,mmlu \
@@ -171,5 +190,13 @@ else:
     print("  piqa 50, winogrande 50, mmlu 25. At 2000 steps a 26B model is")
     print("  undertrained by orders of magnitude -- near-chance on mmlu is the")
     print("  EXPECTED result and says nothing bad about the config.")
+
+# Exit non-zero if NOTHING was measured. Job 12473625 recorded
+# Exit_status=0 with two `eval rc=1` and zero parsed results -- a silent
+# no-op that reads as success in qstat. The artifact is the verdict, not
+# the exit code, so make the exit code follow the artifact.
+raise SystemExit(0 if any(rows.values()) else 1)
 PY
+rc=$?
 echo "EVAL30B_DONE"
+exit $rc
