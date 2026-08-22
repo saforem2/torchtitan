@@ -348,6 +348,84 @@ while `timeout 20400` stayed put. It died at step 871 with half its
 allocation unused. Scale both clocks together or the shorter one silently
 wins.
 
+## Downstream eval: hellaswag is above chance (job 12473637)
+
+The 2000-step model was converted to HF and evaluated zero-shot. Five tasks
+completed; mmlu was ordered last and clipped by walltime, which costs nothing
+informative at this token budget.
+
+| task | acc | acc_norm | chance | sigma |
+|---|---:|---:|---:|---:|
+| arc_challenge | 21.33% | 26.11% | 25% | +0.9 |
+| arc_easy | 24.75% | 25.67% | 25% | +0.8 |
+| **hellaswag** | 26.03% | **27.14%** | 25% | **+4.8** |
+| piqa | 52.07% | 51.20% | 50% | +1.0 |
+| winogrande | **51.38%** | -- | 50% | +1.0 |
+
+Combined across the five (Stouffer): **+3.77 sigma, significant.**
+
+**hellaswag is the only individually significant task, and that is a power
+result, not a capability difference.** Every task shows the same 1-2pp
+positive offset; hellaswag has 40,168 requests and a 0.44 stderr, 3x tighter
+than arc_challenge's 1.28, so it is the only one that can resolve an effect
+that size. The others are underpowered, not contradictory.
+
+**What this does NOT say.** 27.14% is ~2pp over random on a benchmark where
+useful models score 70%+. The model consumed 3.93B tokens (2000 steps x GBS
+480 x seq 4096) -- roughly 1/1000th of the 4.67T the 2B v2 chain trained on.
+The claim is narrowly that the 30B is learning in the right direction and that
+the pipeline is sound end to end.
+
+That second half is the real value here. Given the RoPE-flavor and tokenizer
+traps this config is exposed to, a clean at-chance-plus-epsilon result with
+tight stderr is the signature of a CORRECT export: a tokenizer mismatch or a
+wrong RoPE convention produces sub-random scores with erratic error bars (the
+Polaris 20B did exactly that), not a consistent slight-positive across five
+tasks with three answer formats and two chance baselines.
+
+Note winogrande reports no acc_norm -- it is 2-choice with equal-length
+completions, so length normalization does not apply and `acc` is the correct
+metric.
+
+### What it cost, and three sizing errors worth not repeating
+
+Getting these five numbers took four submissions. Each failure was mine, and
+each was the same mistake -- extrapolating instead of measuring:
+
+1. **12473625**: no `config.json`. convert_to_hf writes weights, an index and
+   ezpz_export.json but not a model config, so lm_eval cannot load the export.
+   Fixed by deriving it from the safetensors header
+   ([write_hf_config.py](../../../../eval/write_hf_config.py)) rather than
+   copying the assets config, which describes OLMo-2-**7B** and would have
+   silently mismatched the weights.
+2. **12473627**: sized from one early rate sample (6.42 it/s -> "6.1h"). The
+   rate is not constant; it tracks sequence length. The job reached 77%
+   (89402/116734) in 8.5h and wrote NOTHING, because lm_eval serializes only
+   at completion.
+3. **12473636**: per-task budgets built from DOCUMENT counts. lm_eval issues
+   one loglikelihood request PER ANSWER CHOICE, so arc_challenge is 4,687
+   requests not 1,172 -- and the cheapest task in the sweep blew its budget at
+   41%. The cheapest task timing out is the tell that the model is wrong, not
+   the number.
+
+The structural fix, and the one that should have come first: **one lm_eval
+invocation per task**, each writing its own results, ordered cheapest-first,
+budgets at 3x measured. A wrong budget then costs one task instead of the
+whole sweep, and a rerun resumes from whatever banked. The 3x margin is not
+padding -- hellaswag ran at 1.61 it/s against the 2.3 it/s the budget assumed,
+so 2x would have clipped it at ~93%.
+
+Measured request counts, for whoever sizes the next one:
+
+| task | requests | measured at ~2.3 it/s |
+|---|---:|---:|
+| arc_challenge | 4,687 | 0.6h |
+| winogrande | 5,068 | 0.6h |
+| piqa | 7,352 | 0.9h |
+| arc_easy | 9,501 | 1.1h |
+| hellaswag | 40,168 | 4.9h (actual: 6.9h) |
+| mmlu | 56,168 | 6.8h |
+
 ## Verdict
 
 **The 30B config trains to completion.** 2000/2000 steps, loss
