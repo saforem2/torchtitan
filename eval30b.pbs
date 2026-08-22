@@ -171,5 +171,13 @@ else:
     print("  piqa 50, winogrande 50, mmlu 25. At 2000 steps a 26B model is")
     print("  undertrained by orders of magnitude -- near-chance on mmlu is the")
     print("  EXPECTED result and says nothing bad about the config.")
+
+# Exit non-zero if NOTHING was measured. Job 12473625 recorded
+# Exit_status=0 with two `eval rc=1` and zero parsed results -- a silent
+# no-op that reads as success in qstat. The artifact is the verdict, not
+# the exit code, so make the exit code follow the artifact.
+raise SystemExit(0 if any(rows.values()) else 1)
 PY
+rc=$?
 echo "EVAL30B_DONE"
+exit $rc
