@@ -101,6 +101,29 @@ for STEP in 2000 1000; do
     continue
   fi
 
+  # convert_to_hf emits weights + index + ezpz_export.json but NO config.json,
+  # so lm_eval dies with "Unrecognized model ... should have a model_type key".
+  # The assets config.json cannot fill in: it describes OLMo-2-7B (hidden 4096,
+  # 32 layers), not this 26.2B model, and would load while silently
+  # mismatching the weights. Derive it from the safetensors header instead, and
+  # cross-check against the registry geometry so a wrong export aborts here
+  # rather than producing a plausible-looking eval number.
+  echo "== step-$STEP: config.json =="
+  source venvs/fw-2026.1-rc2/bin/activate; unset PYTHONPATH
+  python3 torchtitan/experiments/ezpz/eval/write_hf_config.py "$HF" \
+    --rope-theta 500000 \
+    --expect hidden_size=6144,num_hidden_layers=64,num_attention_heads=48,num_key_value_heads=8,vocab_size=100352,intermediate_size=16384
+  if [ $? -ne 0 ]; then
+    echo "   config derivation FAILED the cross-check -- skipping eval for step-$STEP"
+    deactivate 2>/dev/null || true
+    continue
+  fi
+  # lm_eval reads the tokenizer from --model_args tokenizer=, but transformers
+  # also wants these beside the weights for a clean from_pretrained.
+  cp -n "$ASSETS"/tokenizer.json "$ASSETS"/tokenizer_config.json \
+        "$ASSETS"/special_tokens_map.json "$HF"/ 2>/dev/null || true
+  deactivate 2>/dev/null || true
+
   echo "== step-$STEP: eval =="
   source venvs/fw-2026.1-rc2/bin/activate
   unset PYTHONPATH
