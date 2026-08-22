@@ -13,6 +13,9 @@
 #   LRF_INIT_LR     — starting LR (default: 1e-6)
 #   LRF_MAX_LR      — max LR (default: 1.0)
 #   LRF_TIMEOUT     — per-run timeout in seconds (default: 1800)
+#   LRF_DFL_NAME    — data list basename (default "books"). MUST match the
+#                     config's tokenizer: books.txt is Llama2-tokenized on
+#                     Aurora, so gemma configs need olmo-mix-1124.
 #   LRF_SEQ_LEN     — sequence length (default 8192). GBS counts SEQUENCES, so
 #                     this scales tokens/step and wall clock. Use the length the
 #                     target model was measured at (30B: 4096).
@@ -149,7 +152,23 @@ mkdir -p "${OUTDIR}"
 # so a trend sweep isolates each GBS's outputs.
 LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 
-DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt"
+# Data list. The default is books.txt for historical reasons, but on Aurora
+# that points at dolma/data_v1.7_Llama2Tokenizer -- LLAMA-2 token ids. Sweeping
+# a GEMMA-vocab config (every agpt_* except the *_llama3tok / *_olmo2tok
+# variants) against it calibrates the LR on the wrong vocabulary, and the
+# resulting number does not transfer -- which is the exact failure this whole
+# production-batch exercise exists to avoid. It fails SILENTLY: ids below the
+# embedding size index fine and the loss curve looks plausible.
+#
+# Set LRF_DFL_NAME to match the config's tokenizer:
+#   gemma configs (agpt_2b/20b/30b/80b)  -> olmo-mix-1124 (data_fused_gemma_eod)
+#   *_llama3tok / *_olmo2tok             -> a list tokenized to match
+LRF_DFL_NAME="${LRF_DFL_NAME:-books}"
+DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/${LRF_DFL_NAME}.txt"
+if [[ ! -f "$DATASET_PATH" ]]; then
+    echo "lr-finder FATAL: data list not found: $DATASET_PATH" >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Kill stale processes

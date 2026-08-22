@@ -88,6 +88,13 @@ export LRF_CONFIG="agpt_30b"   # see the CONFIG note above (olmo2 assets absent 
 export LRF_OPTIMIZERS="adamw mano sophiag"
 
 # GBS=6144 = dp(3072) * LBS(2) * GAS(1) at 256 nodes, TP=1.
+# TOKENIZER MUST MATCH THE CONFIG. run_lr_finder.sh defaults to books.txt,
+# which on Aurora is dolma/data_v1.7_Llama2Tokenizer -- Llama-2 ids against
+# agpt_30b's gemma 256,128 embedding. That mismatch is silent (ids below the
+# embedding size index fine, the curve looks plausible) and invalidates the
+# calibration. olmo-mix-1124 is data_fused_gemma_eod.
+export LRF_DFL_NAME=olmo-mix-1124
+
 export LRF_GBS=6144
 export LRF_LBS=2
 export LRF_SEQ_LEN=4096
