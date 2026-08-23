@@ -28,23 +28,23 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-19 | [30B-exp experiment log](./production/agpt/30b-exp/EXPERIMENTS.md) |
 | 2026-08-19 | [W&B gap-backfill: one synthetic run per gap](./notes/wandb-gap-backfill-plan.md) |
 | 2026-08-19 | [Development Journal](./journal.md) |
-| 2026-08-19 | [Flex attention on MoE: two stacked bugs, both fixed](./guides/known-bugs/moe-flex-attention-blockmask.md) |
-| 2026-08-19 | [MoE under EP aborts in all_to_all_single, worse with model size (2026-08-19)](./guides/known-bugs/moe-ep-a2a-degrades-with-size.md) |
-| 2026-08-19 | [--debug.deterministic costs ~27% device memory on the MoE path (2026-08-19)](./guides/known-bugs/moe-deterministic-memory.md) |
-| 2026-08-19 | [hybridep on XPU: not a version floor, not portable](./guides/known-bugs/hybridep-is-nvidia-only.md) |
+| 2026-08-19 | [Flex attention on MoE: two stacked bugs, both fixed](reference/known-bugs/moe-flex-attention-blockmask.md) |
+| 2026-08-19 | [MoE under EP aborts in all_to_all_single, worse with model size (2026-08-19)](reference/known-bugs/moe-ep-a2a-degrades-with-size.md) |
+| 2026-08-19 | [--debug.deterministic costs ~27% device memory on the MoE path (2026-08-19)](reference/known-bugs/moe-deterministic-memory.md) |
+| 2026-08-19 | [hybridep on XPU: not a version floor, not portable](reference/known-bugs/hybridep-is-nvidia-only.md) |
 | 2026-08-20 | [**SPMD backends on XPU: what works, what does not, and why**](./guides/spmd-backend-status.md) -- start here |
-| 2026-08-20 | [Trying a newer XPU torch against spmd_types (CONFIRMED: it fixes it)](./guides/known-bugs/spmd-types-newer-torch-attempt.md) |
-| 2026-08-20 | [Why spmd_types leaves parameters unconverted (upstream)](./guides/known-bugs/spmd-types-plain-tensor.md) |
-| 2026-08-19 | [agpt on full_dtensor: vc_check/DeviceMesh, and a pin justified uncompiled](./guides/known-bugs/agpt-full-dtensor-vc-check.md) |
+| 2026-08-20 | [Trying a newer XPU torch against spmd_types (CONFIRMED: it fixes it)](reference/known-bugs/spmd-types-newer-torch-attempt.md) |
+| 2026-08-20 | [Why spmd_types leaves parameters unconverted (upstream)](reference/known-bugs/spmd-types-plain-tensor.md) |
+| 2026-08-19 | [agpt on full_dtensor: vc_check/DeviceMesh, and a pin justified uncompiled](reference/known-bugs/agpt-full-dtensor-vc-check.md) |
 | 2026-08-19 | [2026-08-16 -- the 20B ARC-C "decay" was entirely the RoPE permute](records/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md) |
 | 2026-08-19 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-17 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-08-17 | [exp07 -- tokenizer bake-off: custom 64k does NOT pay; OLMo-2 wins and is confirmed on hardware](./production/agpt/30b-exp/exp07-custom-tokenizer-feasibility.md) |
 | 2026-08-17 | [exp05 -- 30B at 2N: first runs and performance tuning](./production/agpt/30b-exp/exp05-2n-performance.md) |
 | 2026-08-17 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-08-17 | [Unregistered W&B runs: the failure that never announces itself](./guides/known-bugs/unregistered-wandb-runs.md) |
-| 2026-08-17 | [RoPE flavor mismatch: a mid-flight convention switch, and the exports it broke](./guides/known-bugs/rope-flavor-mismatch.md) |
-| 2026-08-17 | [Concurrent-job checkpoint collision on 20b_v2_256](./guides/known-bugs/concurrent-job-ckpt-collision.md) |
+| 2026-08-17 | [Unregistered W&B runs: the failure that never announces itself](reference/known-bugs/unregistered-wandb-runs.md) |
+| 2026-08-17 | [RoPE flavor mismatch: a mid-flight convention switch, and the exports it broke](reference/known-bugs/rope-flavor-mismatch.md) |
+| 2026-08-17 | [Concurrent-job checkpoint collision on 20b_v2_256](reference/known-bugs/concurrent-job-ckpt-collision.md) |
 | 2026-08-17 | [2B-512 constant-LR fork: the decay phase is worth <0.01 nats so far](records/experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md) |
 | 2026-08-17 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](records/experiments/agpt/aurora/20260816-umbrella-8756070.md) |
 | 2026-08-17 | [Evaluation Results — agpt 20B](records/evals/agpt/20b/README.md) |
@@ -74,9 +74,9 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-16 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-08-16 | [Plan: reorganize experiments/ezpz/docs/](./notes/docs-reorg-plan.md) |
 | 2026-08-16 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
-| 2026-08-16 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](./guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
-| 2026-08-16 | [--debug.deterministic is not bit-reproducible on XPU (2026-08-16)](./guides/known-bugs/xpu-determinism-rank-seqlen-interaction.md) |
-| 2026-08-16 | [Aurora: 2098-node job killed at 9h13m of 24h with Exit_status = -14](./guides/known-bugs/aurora-job-8756070-exit-14.md) |
+| 2026-08-16 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](reference/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
+| 2026-08-16 | [--debug.deterministic is not bit-reproducible on XPU (2026-08-16)](reference/known-bugs/xpu-determinism-rank-seqlen-interaction.md) |
+| 2026-08-16 | [Aurora: 2098-node job killed at 9h13m of 24h with Exit_status = -14](reference/known-bugs/aurora-job-8756070-exit-14.md) |
 | 2026-08-16 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](records/evals/eval-landscape-2026-07.md) |
 | 2026-08-16 | [Claude Session Log](./claude-sessions.md) |
 | 2026-08-14 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](records/summaries/2026-Q2-incite.md) |

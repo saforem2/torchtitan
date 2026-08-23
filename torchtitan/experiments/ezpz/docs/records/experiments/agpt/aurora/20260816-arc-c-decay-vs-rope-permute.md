@@ -279,6 +279,6 @@ significance, but the magnitude at 2B has not been measured.
 
 ## Related
 
-- [`rope-flavor-mismatch.md`](../../../../guides/known-bugs/rope-flavor-mismatch.md)
+- [`rope-flavor-mismatch.md`](../../../../reference/known-bugs/rope-flavor-mismatch.md)
   -- mechanism, per-step registry, shipped fail-loud mitigation.
 - `scripts/eval/oneoff/reeval-20b-512-rope-ab2.sh` -- the pending 6000/7600 run.

@@ -200,7 +200,7 @@ TRAJECTORIES: list[dict] = [
             # 43,786 / 0 gaps (MEASURED).
             #
             # Independently flagged by the RoPE investigation the same day:
-            # docs/guides/known-bugs/rope-flavor-mismatch.md notes the
+            # docs/reference/known-bugs/rope-flavor-mismatch.md notes the
             # step->flavor resolver misreports this chain's cos_sin switch as
             # 2026-08-05/vtumb5cb when it was really 2026-07-10/9d10mqwb at
             # step 30401 -- because of this same omission. Two investigations,

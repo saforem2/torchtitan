@@ -9,7 +9,7 @@ downstream benchmark accuracy vs training step.
 Why a separate eval chart: the Polaris 20B dolma run trained on
 Llama2-tokenized data, so it must be evaluated with the Llama2 tokenizer,
 not the gemma one the model config declares (see
-docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md). These results
+docs/reference/known-bugs/polaris-20b-tokenizer-mismatch.md). These results
 come from the ``results-llama2tok`` dirs; the earlier ``results`` dirs
 (gemma tokenizer) are all at chance and should be ignored.
 

@@ -277,7 +277,7 @@ split, and the split is why nothing has broken yet.**
 >
 > So there is **no per-chain answer** -- the correct flavor depends on which
 > STEP is being converted. Canonical account:
-> [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md).
+> [`rope-flavor-mismatch.md`](../../../reference/known-bugs/rope-flavor-mismatch.md).
 > Resolver: `scripts/eval/rope_flavor_for_step.py`.
 >
 > Retained below unedited because the *mechanism* description is still

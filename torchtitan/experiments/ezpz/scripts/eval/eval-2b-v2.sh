@@ -89,7 +89,7 @@ TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,bool
 #
 # To find the right value for a given step, ask W&B for the run that produced
 # it (see scripts/eval/rope_flavor_for_step.py), or read the registry table in
-# docs/guides/known-bugs/rope-flavor-mismatch.md.
+# docs/reference/known-bugs/rope-flavor-mismatch.md.
 if [[ -z "${MODEL_FLAVOR:-}" ]]; then
     cat >&2 <<'ERRMSG'
 [eval-2b-v2] ERROR: MODEL_FLAVOR is required and has no default.
@@ -103,7 +103,7 @@ if [[ -z "${MODEL_FLAVOR:-}" ]]; then
         --chain <2b_v2_512|2b_v2_256|20b_v2_512|20b_v2_256> --step <N>
 
   Then re-run with e.g.  MODEL_FLAVOR=2b_real  or  MODEL_FLAVOR=2b
-  Details: docs/guides/known-bugs/rope-flavor-mismatch.md
+  Details: docs/reference/known-bugs/rope-flavor-mismatch.md
 ERRMSG
     exit 2
 fi
@@ -129,7 +129,7 @@ if [[ "$MODEL_FLAVOR" == *_real ]] \
   export this flag is meant to avoid.
 
   Convert from a checkout that HAS the adapter, or update the clone.
-  See docs/guides/known-bugs/rope-flavor-mismatch.md
+  See docs/reference/known-bugs/rope-flavor-mismatch.md
 ERRMSG
     exit 2
 fi

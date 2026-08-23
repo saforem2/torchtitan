@@ -36,7 +36,7 @@ better scraper, so the fix is to relaunch this chain on the native path.
    `step-4400`'s DCP keys are nested
    (`optimizer.state...exp_avg`/`.hessian`, `qkv_linear.wq`, **no**
    `.fused`) -> loads cleanly with this clone's code. No migration shim
-   needed. (See [pre-3623 known bug](../../../../guides/known-bugs) memory.)
+   needed. (See [pre-3623 known bug](../../../../reference/known-bugs) memory.)
 
 2. **ezpz too old for auto-retry.** The clone venv had **ezpz 0.16.0**
    (no `--auto-retry` flag). Upgraded to **0.21.3** in place via

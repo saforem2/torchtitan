@@ -46,7 +46,7 @@ from XPU sweeps rather than carry it as an open bug.
 The working EP paths on XPU are the `standard` moe_comm_backend configs.
 Note that the large EP configs have their own unrelated problem (an Intel
 Unified Runtime abort in all-to-all); see
-[moe-ep-a2a-degrades-with-size.md](./moe-ep-a2a-degrades-with-size.md).
+[moe-ep-a2a-degrades-with-size.md](moe-ep-a2a-degrades-with-size.md).
 
 ## If someone revisits this
 

@@ -17,7 +17,7 @@
 > `resolve_fsdp_mesh` guard per-parameter -- would be patching the wrong
 > layer. `spmd_types` needs a newer torch, not a torchtitan change.
 >
-> See [spmd-types-plain-tensor.md](../../guides/known-bugs/spmd-types-plain-tensor.md).
+> See [spmd-types-plain-tensor.md](../../reference/known-bugs/spmd-types-plain-tensor.md).
 
 Original draft follows, unedited.
 

@@ -185,7 +185,7 @@ token-efficiency lead is holding.
 > **Llama2** tokenizer (`bos=1`/`eos=2`), not gemma -- evaluating with
 > gemma produces fluent-subword salad and chance scores on every task.
 > Full diagnosis:
-> [`known-bugs/polaris-20b-tokenizer-mismatch.md`](../../guides/known-bugs/polaris-20b-tokenizer-mismatch.md).
+> [`known-bugs/polaris-20b-tokenizer-mismatch.md`](../../reference/known-bugs/polaris-20b-tokenizer-mismatch.md).
 > The earlier `results/` (gemma) dirs are all at chance and should be
 > ignored; the corrected results live in `results-llama2tok/`.
 

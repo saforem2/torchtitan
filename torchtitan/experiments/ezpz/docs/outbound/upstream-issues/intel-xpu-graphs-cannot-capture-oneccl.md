@@ -114,5 +114,5 @@ will measure it rather than assume.
 
 ## Related
 
-- [`known-bugs/xpu-graphs-block-oneccl-collectives.md`](../../guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) -- full investigation log
+- [`known-bugs/xpu-graphs-block-oneccl-collectives.md`](../../reference/known-bugs/xpu-graphs-block-oneccl-collectives.md) -- full investigation log
 - [`intel-ur-die-urEventWait-a2a.md`](./intel-ur-die-urEventWait-a2a.md) -- separate UR event-handling fault, same stack

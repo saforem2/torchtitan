@@ -70,7 +70,7 @@ def convert_to_hf(
         "The checkpoint does not record its convention -- if this does not "
         "match how it was TRAINED, the export is silently corrupt. Resolve "
         "with scripts/eval/rope_flavor_for_step.py; see "
-        "docs/guides/known-bugs/rope-flavor-mismatch.md"
+        "docs/reference/known-bugs/rope-flavor-mismatch.md"
     )
 
     # allocate state dict memory with empty weights to load checkpoint

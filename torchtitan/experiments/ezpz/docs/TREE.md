@@ -161,7 +161,7 @@ docs/
 | New training run that produced data | `experiments/<module>/<machine>/<YYYYMMDD>-<purpose>.md` |
 | New active production trajectory | `production/<module>/<model>/n<NODES>/README.md` |
 | New lm-eval result for a checkpoint | Append to `evals/<module>/<model>/README.md` results table |
-| New big finding (post-mortem, root cause writeup) | `guides/<finding>.md` (or `guides/known-bugs/<bug>.md` for narrower scope) |
+| New big finding (post-mortem, root cause writeup) | `guides/<finding>.md` (or `reference/known-bugs/<bug>.md` for narrower scope) |
 | Per-day status update | Append top of `journal.md` |
 | Upstream PR draft / repro | `upstream-issues/<PR-name>.md` + log in `upstream-sync.md` |
 | Anything ephemeral (temp diagnostics, scratch notes) | NOT here — use `~/scratch/` or a TODO; don't litter the docs tree |

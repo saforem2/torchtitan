@@ -206,7 +206,7 @@ def agpt(
     # never train. FSDP MixedPrecisionPolicy keeps the bf16 cast for
     # forward/backward; reduce stays fp32 — the fp32 master copy is
     # what enables sub-ulp accumulation.
-    # See docs/guides/known-bugs/training-dtype-bf16-norm-freeze.md.
+    # See docs/reference/known-bugs/training-dtype-bf16-norm-freeze.md.
     dtype: Literal["bfloat16", "float32"] = "float32",
     compile: bool = True,
     fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default",
@@ -226,7 +226,7 @@ def agpt(
     # in the same job. resolve_fsdp_mesh already guards this shape but only
     # when the WHOLE storage mesh is size 1; at TP=1 with FSDP>1 a param whose
     # only non-Replicate axis is tp still loses its annotation. See
-    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
+    # docs/reference/known-bugs/spmd-types-plain-tensor.md.
     #
     # This pin was "full_dtensor" until 2026-08-20. Two reasons it moved:
     #   1. upstream is REMOVING full_dtensor (601cf4d23, #4217) -- it is a
@@ -282,7 +282,7 @@ def agpt(
     # not keep the bare ".cache/blendcorpus" default and cold-build the
     # validation index at full scale on the first validate() call -- the race
     # that crashed job 12469584 ("mmap length > file size" at TP>1, mistaken
-    # for a validator collective deadlock; see docs/guides/known-bugs/).
+    # for a validator collective deadlock; see docs/reference/known-bugs/).
     # NOTE: this only aligns the in-config DEFAULT. In production the submit
     # scripts pass the warm path explicitly via
     # --validator.dataloader.data-cache-path (applied by tyro AFTER this

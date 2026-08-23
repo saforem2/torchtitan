@@ -62,7 +62,7 @@ re-export: steps 30,425 / 30,450 / 30,475 of `2b_v2_512` moved from `nv4qwxc8`
 3.61/3.07/2.93). Not corruption -- `nv4qwxc8` died at 30,483 and `9d10mqwb`
 resumed from the step-30,400 checkpoint and carried the chain. The elevated
 loss and grad-norm are the documented RoPE `cos_sin` switch transient; see
-[`known-bugs/rope-flavor-mismatch.md`](../../guides/known-bugs/rope-flavor-mismatch.md).
+[`known-bugs/rope-flavor-mismatch.md`](../../reference/known-bugs/rope-flavor-mismatch.md).
 
 So a diff on this store that changes existing values is not automatically a
 bug -- but it does deserve an explanation before it is committed.

@@ -170,7 +170,7 @@ HSn **0.5552**, ARC-E **0.5939**, ARC-C **0.3294**, **Wino 0.5627 (best yet)**. 
 the x4101c5/c6 rack cluster. Canonical writeup:
 [`20260524-80b-256n-sigsegv-cascade-8505222.md`](../../records/experiments/agpt/aurora/20260524-80b-256n-sigsegv-cascade-8505222.md).
 Distinct from the 80B 8N smoke (8505326), which surfaced a separate `blendcorpus` EOFError race documented in
-[`blendcorpus-eoferror-race.md`](../../guides/known-bugs/blendcorpus-eoferror-race.md). The 4N smoke 12466025
+[`blendcorpus-eoferror-race.md`](../../reference/known-bugs/blendcorpus-eoferror-race.md). The 4N smoke 12466025
 (2026-05-05) remains the only successful 80B training to date (20 steps). See [`80b/`](80b/README.md) for full
 status + next steps.
 

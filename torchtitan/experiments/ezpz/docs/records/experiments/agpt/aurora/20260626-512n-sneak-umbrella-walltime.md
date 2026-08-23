@@ -178,7 +178,7 @@ too, not just the infra files intended.
 > FusedQKV hooks only touch MODEL state, never `tok_embeddings` optimizer
 > state). The verified cause is the #3623/#3269 flat-optim-state migration.
 > Full diagnosis + the `git diff` reproduction:
-> [`docs/guides/known-bugs/pre3623-optim-statedict-resume.md`](../../../../guides/known-bugs/pre3623-optim-statedict-resume.md).
+> [`docs/reference/known-bugs/pre3623-optim-statedict-resume.md`](../../../../reference/known-bugs/pre3623-optim-statedict-resume.md).
 
 **Recovery (per-clone, reversible):** for each of agpt-2b-v2, agpt-20b-v2,
 agpt-20b-n256: created a `rollback-safety-<ts>` branch, `git reset --hard

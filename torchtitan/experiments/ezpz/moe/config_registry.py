@@ -152,7 +152,7 @@ def moe(
     # in the same job. resolve_fsdp_mesh already guards this shape but only
     # when the WHOLE storage mesh is size 1; at TP=1 with FSDP>1 a param whose
     # only non-Replicate axis is tp still loses its annotation. See
-    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
+    # docs/reference/known-bugs/spmd-types-plain-tensor.md.
     #
     # This pin was "full_dtensor" until 2026-08-20. Two reasons it moved:
     #   1. upstream is REMOVING full_dtensor (601cf4d23, #4217) -- it is a

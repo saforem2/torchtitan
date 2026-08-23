@@ -270,7 +270,7 @@ without PP, CP, or real Megatron-TP), but they need to be cleaned up
 before any of those features can be enabled with this dataloader.
 
 Companion writeup with the full taxonomy:
-[`docs/guides/known-bugs/blendcorpus-megatron-aliasing.md`](guides/known-bugs/blendcorpus-megatron-aliasing.md).
+[`docs/reference/known-bugs/blendcorpus-megatron-aliasing.md`](reference/known-bugs/blendcorpus-megatron-aliasing.md).
 
 ### Items to fix (all in `blendcorpus/blendcorpus_builder.py`)
 

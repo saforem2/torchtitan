@@ -58,7 +58,7 @@ EP has nothing to do with that second failure mode.
 
 `hybridep` is a third, unrelated thing and is now closed as WONTFIX -- it is
 NVIDIA-only by design. See
-[hybridep-is-nvidia-only.md](./hybridep-is-nvidia-only.md).
+[hybridep-is-nvidia-only.md](hybridep-is-nvidia-only.md).
 
 ## CCL_OP_SYNC / CCL_ATL_SYNC_COLL: keep them at 1 (2026-08-20)
 

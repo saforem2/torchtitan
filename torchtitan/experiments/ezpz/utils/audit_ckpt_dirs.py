@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Flag checkpoint dirs that two writers produced, and other shape anomalies.
 
-Recommendation #5 from `docs/guides/known-bugs/concurrent-job-ckpt-collision.md`.
+Recommendation #5 from `docs/reference/known-bugs/concurrent-job-ckpt-collision.md`.
 Episode 2 of that incident was found 18 days late by hand-counting files; both
 detectors below would have caught it the same day, and they are cheap.
 
@@ -237,7 +237,7 @@ def main() -> int:
             "shards are physically interleaved. Do NOT delete blind -- each may "
             "still hold a coherent checkpoint for its step; extract the "
             "referenced shards first. See "
-            "docs/guides/known-bugs/concurrent-job-ckpt-collision.md."
+            "docs/reference/known-bugs/concurrent-job-ckpt-collision.md."
         )
         return 1
     print("\nNo mixed directories found.")

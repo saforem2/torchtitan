@@ -107,7 +107,7 @@ target)
 > exported metric store stopped at 8,334 while training had reached 10,300 --
 > the chain was under-reporting its own progress by roughly 25%. Registered in
 > `777941c64`; see
-> [unregistered W&B runs](../../../../guides/known-bugs/unregistered-wandb-runs.md).
+> [unregistered W&B runs](../../../../reference/known-bugs/unregistered-wandb-runs.md).
 >
 > Note the checkpoints live in this chain's OWN clone under
 > `/flare/AuroraGPT/foremans/runs/agpt-20b-n256/`, not the main repo tree.

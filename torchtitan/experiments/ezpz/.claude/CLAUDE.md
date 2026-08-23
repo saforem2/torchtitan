@@ -376,7 +376,7 @@ that touches one of these areas.
   `validate()` completed at step 1, finite loss, no mmap/AttributeError/CCL
   hang.** (Confirmed at dp=12; a 62N pass would be belt-and-suspenders for
   production dp=186.) `VALIDATOR_ENABLE=0` remains the escape hatch. Full
-  evidence: [`docs/guides/known-bugs/validator-tp4-at-80b.md`](../docs/guides/known-bugs/validator-tp4-at-80b.md).
+  evidence: [`docs/reference/known-bugs/validator-tp4-at-80b.md`](../docs/reference/known-bugs/validator-tp4-at-80b.md).
 
 ## Common Pitfalls
 

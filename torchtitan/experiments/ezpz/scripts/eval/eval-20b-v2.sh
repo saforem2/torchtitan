@@ -64,7 +64,7 @@ TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,bool
 #   20b_v2_256   complex <= step 3100 ; cos_sin >= 3101   (switched 2026-07-10)
 #
 # so the correct value depends on the STEP being converted. See
-# docs/guides/known-bugs/rope-flavor-mismatch.md
+# docs/reference/known-bugs/rope-flavor-mismatch.md
 if [[ -z "${MODEL_FLAVOR:-}" ]]; then
     cat >&2 <<'ERRMSG'
 [eval-20b-v2] ERROR: MODEL_FLAVOR is required and has no default.
@@ -80,7 +80,7 @@ if [[ -z "${MODEL_FLAVOR:-}" ]]; then
     python3 torchtitan/experiments/ezpz/scripts/eval/rope_flavor_for_step.py \
         --chain <20b_v2_512|20b_v2_256> --step <N>
 
-  Details: docs/guides/known-bugs/rope-flavor-mismatch.md
+  Details: docs/reference/known-bugs/rope-flavor-mismatch.md
 ERRMSG
     exit 2
 fi
@@ -101,7 +101,7 @@ if [[ "$MODEL_FLAVOR" == *_real ]] \
 
   Convert from a checkout that HAS the adapter (e.g. the main
   projects/saforem2/torchtitan-ezpz), pointing --model_name at it, or update
-  the clone. See docs/guides/known-bugs/rope-flavor-mismatch.md
+  the clone. See docs/reference/known-bugs/rope-flavor-mismatch.md
 ERRMSG
     exit 2
 fi

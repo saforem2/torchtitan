@@ -19,7 +19,7 @@
 # NOTE: this adapter fixes a real (latent) export-correctness issue, but it was
 # NOT the cause of the Polaris 20B "eval gibberish" -- that was a separate
 # training-data / tokenizer mismatch (Llama2-tokenized data vs a gemma eval
-# tokenizer). See docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md.
+# tokenizer). See docs/reference/known-bugs/polaris-20b-tokenizer-mismatch.md.
 #
 # This adapter detects the RoPE type from the built ``model_config`` and:
 #   - CosSinRoPE  -> SKIP the Q/K permute (weights are already HF-native).

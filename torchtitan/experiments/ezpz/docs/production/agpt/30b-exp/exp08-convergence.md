@@ -60,7 +60,7 @@ Error: expected all tensors_saved_with_vc_check to be Tensors,
 Superseded twice. The trigger is `compile + AC + model.parallelize()` under
 `full_dtensor`, which the ezpz configs were pinned to. They are now pinned to
 `partial_dtensor` (`b2ff09632`) and this config runs clean. Full analysis:
-[agpt-full-dtensor-vc-check.md](../../../guides/known-bugs/agpt-full-dtensor-vc-check.md).
+[agpt-full-dtensor-vc-check.md](../../../reference/known-bugs/agpt-full-dtensor-vc-check.md).
 
 The intermediate (also wrong) reading is kept below, because the mistake --
 diffing job scripts while the tree moved underneath -- is the reusable part.

@@ -125,6 +125,6 @@ platform       Sunspot (Intel Max 1550), 2 nodes / 24 ranks
 
 ## Related
 
-- [`known-bugs/moe-ep-a2a-degrades-with-size.md`](../../guides/known-bugs/moe-ep-a2a-degrades-with-size.md) -- full sweep and per-arm evidence
+- [`known-bugs/moe-ep-a2a-degrades-with-size.md`](../../reference/known-bugs/moe-ep-a2a-degrades-with-size.md) -- full sweep and per-arm evidence
 - [`intel-xpu-graphs-cannot-capture-oneccl.md`](./intel-xpu-graphs-cannot-capture-oneccl.md) -- separate capture limitation, same stack
 - ezpz issue #214 -- same signature outside MoE

@@ -122,8 +122,8 @@ The usable nightly window is narrow:
 | **2026-07-22** | **works** |
 | 2026-07-29 onward | links `libpti_view.so.1`; this system has only `.so.0` |
 
-Detail: [`known-bugs/spmd-types-plain-tensor.md`](known-bugs/spmd-types-plain-tensor.md),
-[`known-bugs/spmd-types-newer-torch-attempt.md`](known-bugs/spmd-types-newer-torch-attempt.md).
+Detail: [`known-bugs/spmd-types-plain-tensor.md`](../reference/known-bugs/spmd-types-plain-tensor.md),
+[`known-bugs/spmd-types-newer-torch-attempt.md`](../reference/known-bugs/spmd-types-newer-torch-attempt.md).
 
 ## 1b. Does the backend change the numerics? No -- bit-identical.
 
@@ -148,7 +148,7 @@ deterministic, so that spread was expected behavior and said nothing about
 either backend.
 
 The tell was available before the rerun and I missed it:
-[known-bugs/xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md)
+[known-bugs/xpu-determinism-rank-seqlen-interaction.md](../reference/known-bugs/xpu-determinism-rank-seqlen-interaction.md)
 records that **single-node is deterministic at every size tested**, and the
 run in question was single-node at seq=2048 -- inside the deterministic
 regime. A 2.31-nat spread there contradicted our own documented finding,
@@ -258,7 +258,7 @@ clears.
 Multi-node parity is not resolvable by this method: the same-backend control
 is itself nondeterministic across nodes (a cross-node loss all-reduce
 ordering effect -- grad_norm matches while loss does not). See
-[known-bugs/xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+[known-bugs/xpu-determinism-rank-seqlen-interaction.md](../reference/known-bugs/xpu-determinism-rank-seqlen-interaction.md).
 
 ## 1c. Is the nightly PERFORMANT? Throughput yes, memory costs 6.25pp
 
@@ -453,7 +453,7 @@ and selective (62.41%) both die with `level_zero 40`, while FullAC (53.51%)
 is unaffected. Going to 2 nodes does not help -- there the same-backend
 CONTROL itself fails at seq=2048 on the 20B, so the cell is unresolvable
 regardless. Both effects are written up in
-[xpu-determinism-rank-seqlen-interaction.md](known-bugs/xpu-determinism-rank-seqlen-interaction.md).
+[xpu-determinism-rank-seqlen-interaction.md](../reference/known-bugs/xpu-determinism-rank-seqlen-interaction.md).
 Closing none/selective needs a smaller model or more nodes, not a retry of
 this shape.
 
@@ -524,7 +524,7 @@ which is why the flex MoE configs use it.
 `full_dtensor` is being deleted upstream regardless (#4217), so it is not
 worth working around.
 
-Detail: [`known-bugs/agpt-full-dtensor-vc-check.md`](known-bugs/agpt-full-dtensor-vc-check.md).
+Detail: [`known-bugs/agpt-full-dtensor-vc-check.md`](../reference/known-bugs/agpt-full-dtensor-vc-check.md).
 
 ## 3. Naming: `"default"` became `partial_dtensor`
 

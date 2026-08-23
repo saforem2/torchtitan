@@ -27,7 +27,7 @@ echo ""
 # mid-flight, and using the wrong flavor produces a model that loads fine and
 # scores several points low with no error anywhere. Resolve the flavor per
 # step with that script instead of assuming. See
-# docs/guides/known-bugs/rope-flavor-mismatch.md.
+# docs/reference/known-bugs/rope-flavor-mismatch.md.
 echo "=== Converting 2B step-5000 DCP → HF ==="
 time python3 torchtitan/experiments/ezpz/eval/convert_to_hf.py \
     outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs3072/step-5000 \

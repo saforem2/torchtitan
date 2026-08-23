@@ -42,7 +42,7 @@ README.md                                              (auto index)
 production/README.md                                   (dashboard)
 production/dispatch-log.md                             (cross-umbrella table)
 experiments/agpt/aurora/20260816-umbrella-8756070.md   (the report)
-guides/known-bugs/aurora-job-8756070-exit-14.md        (the -14 kill)
+reference/known-bugs/aurora-job-8756070-exit-14.md        (the -14 kill)
 production/agpt/30b-exp/exp04-...md                    (passing reference)
 ```
 
@@ -121,7 +121,7 @@ measured baseline, not a status page -- but it **is** currently stale for
 | from | to |
 |---|---|
 | `guides/*.md` | `reference/guides/*.md` |
-| `guides/known-bugs/**` | `reference/known-bugs/**` |
+| `reference/known-bugs/**` | `reference/known-bugs/**` |
 | `guides/training/**` | `reference/guides/training/**` |
 | `configs/**` | `reference/configs/**` |
 | `scaling/**` | `reference/scaling/**` |

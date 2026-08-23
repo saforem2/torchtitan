@@ -51,7 +51,7 @@ what torchtitan or ezpz do. It needs a torch containing `da19cbd78`.
 **PROVEN 2026-08-20** (job 12473463): with `torch 2.14.0.dev20260722+xpu` in
 an otherwise identical venv, `spmd_types` runs **3/3** where the shipped
 2.13 gives 0/3 with `params-not-DTensors`. See
-[spmd-types-newer-torch-attempt.md](./spmd-types-newer-torch-attempt.md) for
+[spmd-types-newer-torch-attempt.md](spmd-types-newer-torch-attempt.md) for
 the working recipe and the narrow window of usable nightlies.
 
 Note our build is named `pytorch_2.13.0_patched_08_02_2026` -- Aug 2, which

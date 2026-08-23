@@ -400,6 +400,6 @@ Production clone: `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/`.
   [20260524-80b-256n-sigsegv-cascade-8505222.md](../../../records/experiments/agpt/aurora/20260524-80b-256n-sigsegv-cascade-8505222.md).
   Distinct from the 80B 8N smoke failure (`blendcorpus` EOFError race —
   fixed by the init-barrier removal that landed in 2026-06-08's r4 smoke):
-  [blendcorpus-eoferror-race.md](../../../guides/known-bugs/blendcorpus-eoferror-race.md).
+  [blendcorpus-eoferror-race.md](../../../reference/known-bugs/blendcorpus-eoferror-race.md).
 - Historical v1 (NaN'd, bf16-master) runs:
   [../historical/v1-bf16/](../historical/v1-bf16/README.md).
