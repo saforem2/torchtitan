@@ -270,7 +270,7 @@ Auto-registered at runtime via `datasets.py`. No core changes needed.
 
 ## Competitions
 
-**Tracking:** `docs/competitions/`
+**Tracking:** `docs/records/competitions/`
 **W&B:** https://api.wandb.ai/links/aurora_gpt/hda3milo
 
 | Competition | Winner | Loss |

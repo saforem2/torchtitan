@@ -290,7 +290,7 @@ upstream syncs absorbed and replayed** this quarter (sync log:
 - **Optimizer / architecture research platform**: implemented Mano,
   SPAM, and TorchMuon optimizers plus QK-Norm, logit-softcapping, and
   ReLU^2 architecture variants, run as a 40+ experiment competition with
-  live tracking. ([competitions](../competitions/README.md))
+  live tracking. ([competitions](../records/competitions/README.md))
 
 ---
 
