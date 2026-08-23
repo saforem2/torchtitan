@@ -286,22 +286,20 @@ class FaultTolerantTrainer(Trainer):
         # would receive full-size batches and mis-shape every microbatch.
         # (The validator build below intentionally keeps local_batch_size --
         # upstream did not change the validator path.)
+        # 80th sync (#4121): pipeline_parallel_microbatch_size (a SIZE) became
+        # num_pp_microbatches (a COUNT). The old code divided to get the count;
+        # now it is read directly, and the per-microbatch size is what gets
+        # derived. Semantic inversion, not a rename -- inverting it the wrong
+        # way silently mis-shapes every PP microbatch.
         _num_pp_microbatches = (
-            config.training.local_batch_size
-            // config.parallelism.pipeline_parallel_microbatch_size
-            if parallel_dims.pp_enabled
-            else 1
+            config.parallelism.num_pp_microbatches if parallel_dims.pp_enabled else 1
         )
-        dataloader_batch_size = (
-            config.parallelism.pipeline_parallel_microbatch_size
-            if parallel_dims.pp_enabled
-            else config.training.local_batch_size
-        )
+        dataloader_batch_size = config.training.num_tokens_per_microbatch_per_dp_rank
         self.dataloader = config.dataloader.build(
             dp_world_size=batch_degree,
             dp_rank=batch_rank,
             tokenizer=self.tokenizer,
-            seq_len=config.training.seq_len,
+            seq_len=config.training.max_context_length,
             local_batch_size=dataloader_batch_size,
             # train_step pulls gas * num_pipeline_parallel_microbatches batches
             # per optimizer step, so the dataloader must be sized for that many
@@ -314,7 +312,7 @@ class FaultTolerantTrainer(Trainer):
             # (computed locally: self.num_pipeline_parallel_microbatches is not
             # assigned until later in __init__, after the dataloader is built.)
             training_steps=config.training.steps * _num_pp_microbatches,
-            global_batch_size=config.training.global_batch_size,
+            global_batch_size=config.training.num_tokens_per_train_step,
             parallel_dims=parallel_dims,
         )
 
@@ -369,7 +367,7 @@ class FaultTolerantTrainer(Trainer):
         (
             model_param_count,
             self.metrics_processor.num_flops_per_token,
-        ) = model_config.get_nparams_and_flops(model, config.training.seq_len)
+        ) = model_config.get_nparams_and_flops(model, config.training.max_context_length)
 
         heading = 80 * "="
         logger.info(
@@ -407,24 +405,29 @@ class FaultTolerantTrainer(Trainer):
         # for gradient sync.
         self.loss_fn = config.loss.build(compile_config=config.compile)
 
-        # verify batch sizes
-        global_batch_size = config.training.global_batch_size
-        if global_batch_size < 0:
-            # This global batch size results in 1 gradient accumulation
-            # step.
-            global_batch_size = config.training.local_batch_size * batch_degree
-        assert global_batch_size > 0
-        assert (
-            global_batch_size % (config.training.local_batch_size * batch_degree) == 0
-        ), (
-            f"global batch size must be multiple of local batch size times "
-            f"data-parallel degree ({global_batch_size} "
-            f"% ({config.training.local_batch_size} * {batch_degree}) != 0)"
+        # 80th sync (#4121): batch sizes are counted in TOKENS, not sequences.
+        #   num_tokens_per_microbatch_per_dp_rank == old local_batch_size * seq_len
+        #   num_tokens_per_train_step            == old global_batch_size * seq_len
+        # This is upstream's arithmetic (trainer.py:409-428) copied deliberately
+        # rather than re-derived: it owns the divisibility contract, and a
+        # subtly different GAS here would change the effective batch of every
+        # run without failing anything.
+        num_tokens_per_dp_rank = (
+            config.training.num_tokens_per_microbatch_per_dp_rank
+            * _num_pp_microbatches
         )
-
-        # calculate gradient accumulation steps
-        self.gradient_accumulation_steps = global_batch_size // (
-            config.training.local_batch_size * batch_degree
+        num_tokens_per_train_step = config.training.num_tokens_per_train_step
+        if num_tokens_per_train_step < 0:
+            num_tokens_per_train_step = num_tokens_per_dp_rank * batch_degree
+        if num_tokens_per_train_step % (num_tokens_per_dp_rank * batch_degree) != 0:
+            raise ValueError(
+                "training.num_tokens_per_train_step "
+                f"({num_tokens_per_train_step}) must be divisible by the number "
+                "of tokens processed globally in one gradient accumulation "
+                f"iteration ({num_tokens_per_dp_rank * batch_degree})."
+            )
+        self.gradient_accumulation_steps = num_tokens_per_train_step // (
+            num_tokens_per_dp_rank * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
 
@@ -485,7 +488,7 @@ class FaultTolerantTrainer(Trainer):
                 self.gradient_accumulation_steps,
                 self.batch_ramp_steps,
                 self.batch_ramp_start_gas
-                * config.training.local_batch_size
+                * config.training.num_tokens_per_microbatch_per_dp_rank
                 * batch_degree,
                 global_batch_size,
             )
@@ -682,8 +685,10 @@ class FaultTolerantTrainer(Trainer):
                 loss_fn=self.loss_fn,
                 validation_context=self.train_context,
                 metrics_processor=self.metrics_processor,
-                seq_len=config.training.seq_len,
-                local_batch_size=config.training.local_batch_size,
+                seq_len=config.training.max_context_length,
+                local_batch_size=(
+                    config.training.num_tokens_per_microbatch_per_dp_rank
+                ),
                 pp_schedule=pp_schedule,
                 pp_has_first_stage=pp_has_first_stage,
                 pp_has_last_stage=pp_has_last_stage,
@@ -691,10 +696,11 @@ class FaultTolerantTrainer(Trainer):
 
         logger.info(
             "Trainer is initialized with "
-            f"local batch size {config.training.local_batch_size}, "
+            f"tokens/microbatch/dp-rank "
+            f"{config.training.num_tokens_per_microbatch_per_dp_rank}, "
             f"global batch size {global_batch_size}, "
             f"gradient accumulation steps {self.gradient_accumulation_steps}, "
-            f"sequence length {config.training.seq_len}, "
+            f"sequence length {config.training.max_context_length}, "
             f"total steps {config.training.steps} "
             f"(warmup {config.lr_scheduler.warmup_steps})"
         )

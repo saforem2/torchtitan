@@ -64,6 +64,16 @@ def _import_blendcorpus_modules():
 class BlendCorpusDataLoader(BaseDataLoader):
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
+        # 80th sync (#4088, Grain): BaseDataLoader.Config lost `dataset` and
+        # `dataset_path` -- the new base is a bare `pass`, because Grain
+        # selects data by building a SingleDatasetConfig object rather than by
+        # naming a dataset string. We still address corpora by name (the CLI
+        # aliases --dataloader.dataset / --dataloader.dataset-path point here,
+        # and every production config and run JSON sets them), so the fields
+        # move ONTO this subclass instead of disappearing.
+        dataset: str = "blendcorpus"
+        dataset_path: str | None = None
+
         num_workers: int = 0
         persistent_workers: bool = False
         pin_memory: bool = field(

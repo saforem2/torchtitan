@@ -107,8 +107,9 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             min_lr_factor=0.0,
         ),
         training=TrainingConfig(
-            local_batch_size=8,
-            seq_len=8192,
+            # #4121: tokens, not sequences. 8 seqs x 8192 = 65536.
+            num_tokens_per_microbatch_per_dp_rank=8 * 8192,
+            max_context_length=8192,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
@@ -183,7 +184,9 @@ def moe(
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
-    cfg.training.local_batch_size = local_batch_size
+    # 80th sync (#4121): token units. Converted once here so the moe()
+    # signature keeps sequence units, matching agpt() and every caller.
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
     # hierarchy. Map the knob: none -> None (AC off); full -> FullAC;
     # selective -> MoeSelectiveAC (SelectiveAC minus the all_to_all_single
@@ -194,7 +197,7 @@ def moe(
         cfg.activation_checkpoint = FullAC.Config()
     else:
         cfg.activation_checkpoint = MoeSelectiveAC.Config()
-    cfg.training.seq_len = seq_len
+    cfg.training.max_context_length = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
