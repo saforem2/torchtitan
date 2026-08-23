@@ -1,5 +1,8 @@
 # Production Training Runs — Aurora
 
+> **Canonical record:** this page is authoritative for the live status of every production chain.
+> Other pages cross-reference it; do not duplicate status here.
+
 > **Living document** — updated as jobs complete and new runs are submitted.
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.

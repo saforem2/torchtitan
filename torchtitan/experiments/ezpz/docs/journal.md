@@ -1,5 +1,8 @@
 # Development Journal
 
+> **Canonical record:** this page is authoritative for the day-by-day development log (index; entries live in records/journal/).
+> Other pages cross-reference it; do not duplicate status here.
+
 Running log of what's happening, session by session. Most recent first.
 
 > **This file is now an index.** Day-by-day entries moved to

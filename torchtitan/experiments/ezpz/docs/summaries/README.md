@@ -1,5 +1,8 @@
 # Summaries
 
+> **Canonical record:** this page is authoritative for the index of periodic retrospectives.
+> Other pages cross-reference it; do not duplicate status here.
+
 Periodic retrospectives covering the project at a higher level than
 [`journal.md`](../journal.md) (which is a per-session running log).
 **Naming:** each summary is named for the **last day it covers**

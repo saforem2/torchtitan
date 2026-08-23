@@ -1,5 +1,8 @@
 # Upstream Sync Log
 
+> **Canonical record:** this page is authoritative for upstream sync history (index; entries live in records/upstream-sync/).
+> Other pages cross-reference it; do not duplicate status here.
+
 > **This file is now an index.** Per-sync entries moved to
 > `records/upstream-sync/YYYY-MM.md`. The standing notes below stay here,
 > because they are current guidance rather than history. Every inbound link

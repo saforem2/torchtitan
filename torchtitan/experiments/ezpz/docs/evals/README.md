@@ -1,5 +1,8 @@
 # Evaluation Results
 
+> **Canonical record:** this page is authoritative for the index of evaluation results per model.
+> Other pages cross-reference it; do not duplicate status here.
+
 Benchmark evaluations of AuroraGPT production checkpoints using
 [lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness).
 
