@@ -350,19 +350,49 @@ wins.
 
 ## Downstream eval: hellaswag is above chance (job 12473637)
 
-The 2000-step model was converted to HF and evaluated zero-shot. Five tasks
-completed; mmlu was ordered last and clipped by walltime, which costs nothing
-informative at this token budget.
+The 2000-step model was converted to HF and evaluated zero-shot. All six tasks
+completed in 11h50 of a 24h walltime.
 
-| task | acc | acc_norm | chance | sigma |
-|---|---:|---:|---:|---:|
-| arc_challenge | 21.33% | 26.11% | 25% | +0.9 |
-| arc_easy | 24.75% | 25.67% | 25% | +0.8 |
-| **hellaswag** | 26.03% | **27.14%** | 25% | **+4.8** |
-| piqa | 52.07% | 51.20% | 50% | +1.0 |
-| winogrande | **51.38%** | -- | 50% | +1.0 |
+| task | score | stderr | chance | sigma | |
+|---|---:|---:|---:|---:|---|
+| arc_challenge | 26.11% | 1.28 | 25% | +0.9 | at chance |
+| arc_easy | 25.67% | 0.90 | 25% | +0.8 | at chance |
+| **hellaswag** | **27.14%** | 0.44 | 25% | **+4.8** | **SIGNIFICANT** |
+| **mmlu** | **26.24%** | 0.37 | 25% | **+3.3** | **SIGNIFICANT** |
+| piqa | 51.20% | 1.17 | 50% | +1.0 | at chance |
+| winogrande | 51.38% | 1.40 | 50% | +1.0 | at chance |
 
-Combined across the five (Stouffer): **+3.77 sigma, significant.**
+Combined across all six (Stouffer): **+4.81 sigma.**
+
+(`acc_norm` where defined, `acc` otherwise. winogrande and mmlu have no
+`acc_norm` -- equal-length completions, so length normalization does not
+apply.)
+
+**Both individually significant tasks are the two with the most requests**,
+and that is the whole story: hellaswag has 40,168 and mmlu 56,168, giving
+stderr 0.44 and 0.37 against arc_challenge's 1.28. Every task shows the same
+1-2pp positive offset; only the two high-power ones can resolve it. This is
+one underlying effect seen through six lenses, not four nulls and two hits.
+
+mmlu's subject split is worth recording because it is not flat:
+
+| subject group | acc |
+|---|---:|
+| humanities | 24.40% |
+| other | 25.94% |
+| stem | 27.37% |
+| social sciences | 28.18% |
+
+STEM and social sciences carry the aggregate; humanities sits at chance. That
+is a plausible shape for olmo-mix at this token budget, not the uniform noise
+a broken export would give.
+
+**I predicted mmlu twice and was wrong twice:** that it would clip on walltime
+(it finished in 2h47, running the FAST band at ~7.7 it/s, not the slow band I
+budgeted from) and that it would be "guaranteed chance". At 56,168 requests it
+is the tightest measurement of the six and lands +3.3 sigma. The lesson is the
+same one this whole eval kept teaching: the cheap prediction was wrong and the
+measurement was cheap enough to have just taken.
 
 **hellaswag is the only individually significant task, and that is a power
 result, not a capability difference.** Every task shows the same 1-2pp
