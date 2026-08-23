@@ -14,6 +14,7 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.experiments.ezpz.optimizer.containers import default_mano
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -992,6 +993,24 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     does, so the tokenizer and the embedding cannot disagree.
     """
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
+def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok with the Mano optimizer instead of AdamW.
+
+    Mano is manifold-normalized; the 2B competition configs
+    (competition/configs.py) run it at lr=3e-4, the same peak the 30B AdamW
+    baseline uses, so the LR is held constant across the two and the optimizer
+    is the only variable.
+
+    NOT a resume target. Mano's optimizer state has a different shape from
+    AdamW's, so this cannot load an agpt-30b-olmo2tok-converge checkpoint --
+    it is a fresh run with its own checkpoint folder, and comparisons against
+    the AdamW baseline are per-token, not per-wallclock.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_mano(lr=3.0e-4)
+    return cfg
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
