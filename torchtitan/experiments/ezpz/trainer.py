@@ -223,6 +223,39 @@ class FaultTolerantTrainer(Trainer):
         losses (NaN/inf). 0 disables. Set ~5 for NaN-prone runs (e.g. 80B
         optimizer probes) so a divergence does not burn the full walltime."""
 
+        # Diagnostics. Everything torchtitan logs is a scalar summary of the
+        # WHOLE model, which says THAT a run is sick and not WHERE. These add
+        # per-layer grad norms, update ratios, clipping, optimizer state and
+        # QK statistics. Default OFF: opt-in instrumentation, not a tax.
+        diagnostics: bool = False
+        """Enable extended training diagnostics (per-layer grad norms, update
+        ratios, clip pre/post, optimizer state). See diagnostics/__init__.py
+        for what each metric catches and which incident motivated it."""
+
+        diagnostics_interval: int = 50
+        """Steps between diagnostic samples. Independent of metrics.log_freq
+        because these cost O(params) rather than O(1)."""
+
+        diagnostics_per_layer: bool = False
+        """Also emit per-layer grad-norm skew and the top-k worst layers.
+        Separate flag: this is the expensive half."""
+
+        diagnostics_attention: bool = False
+        """Sample QK magnitude statistics from attention. NOT entropy --
+        SDPA is fused and never materializes scores; see
+        diagnostics/attention.py."""
+
+        history_bridge: bool = False
+        """Feed per-rank scalars through ezpz.History for CROSS-RANK spread
+        (loss/std, loss/max). Our metrics are pre-reduced, so today we log the
+        mean and cannot see whether one rank is pathological. Auto-aggregation
+        is unavailable above world_size 384 -- the bridge warns rather than
+        silently reporting zeros."""
+
+        wandb_watch: bool = False
+        """wandb.watch(log="all") for true weight/grad HISTOGRAMS. Costly at
+        26B params; throttled to every 500 steps."""
+
     ft_manager: FTManager
 
     @record
@@ -617,6 +650,28 @@ class FaultTolerantTrainer(Trainer):
         # These attributes must be initialized before checkpoint loading.
         self.step = 0
         self.ntokens_seen = 0
+        # Diagnostics state. prev_weight_norms drives update_ratio; it is a
+        # dict of scalars (one float per parameter), NOT a copy of the
+        # weights -- the whole point of difference-of-norms.
+        self._diag_prev_weight_norms: dict[str, float] = {}
+        self._history_bridge = None
+        if getattr(config, "diagnostics", False) or getattr(
+            config, "history_bridge", False
+        ):
+            from torchtitan.experiments.ezpz.diagnostics.history_bridge import (
+                HistoryBridge,
+            )
+            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
+
+            _attn.configure(
+                enabled=getattr(config, "diagnostics_attention", False),
+                every=getattr(config, "diagnostics_interval", 50),
+            )
+            self._history_bridge = HistoryBridge(
+                enabled=getattr(config, "history_bridge", False),
+                outdir=os.path.join(config.dump_folder, "history"),
+                world_size=int(os.environ.get("WORLD_SIZE", "1")),
+            )
 
         # Build checkpoint manager.
         # When fault tolerance is enabled and config.checkpoint uses
@@ -944,6 +999,55 @@ class FaultTolerantTrainer(Trainer):
             "n_tokens_seen": global_ntokens_seen,
             "lr": lr,
         }
+
+        # Extended diagnostics. Gated on its own interval, not log_freq: these
+        # are O(params) rather than O(1), so they must not run every step.
+        # Collected AFTER the optimizer step, so update_ratio compares the
+        # weights this step produced against the previous sample.
+        if getattr(self.config, "diagnostics", False) and (
+            self.step % max(1, getattr(self.config, "diagnostics_interval", 50)) == 0
+        ):
+            try:
+                from torchtitan.experiments.ezpz import diagnostics as _diag
+                from torchtitan.experiments.ezpz.diagnostics import (
+                    attention as _attn,
+                )
+
+                extra_metrics.update(
+                    _diag.clipping_metrics(grad_norm, self.config.training.max_norm)
+                )
+                extra_metrics.update(
+                    _diag.collect_param_stats(
+                        self.model_parts,
+                        per_layer=getattr(
+                            self.config, "diagnostics_per_layer", False
+                        ),
+                    )
+                )
+                ratios, self._diag_prev_weight_norms = _diag.collect_update_ratios(
+                    self.model_parts, self._diag_prev_weight_norms
+                )
+                extra_metrics.update(ratios)
+                extra_metrics.update(_diag.collect_optimizer_stats(self.optimizers))
+                extra_metrics.update(_attn.drain())
+            except Exception as e:
+                # Instrumentation must never take down a training run. A
+                # broken probe costs a metric; an exception here costs the
+                # allocation.
+                logger.warning(f"diagnostics failed at step {self.step}: {e}")
+
+        # Cross-rank spread. Feeds the PER-RANK loss in (not the reduced one)
+        # so std/max mean what they say.
+        if self._history_bridge is not None and self._history_bridge.enabled:
+            extra_metrics.update(
+                self._history_bridge.update(
+                    {
+                        "loss": float(loss.detach().item()),
+                        "grad_norm": float(grad_norm.item()),
+                    },
+                    step=self.step,
+                )
+            )
         self.metrics_processor.log(
             self.step,
             global_avg_loss,
