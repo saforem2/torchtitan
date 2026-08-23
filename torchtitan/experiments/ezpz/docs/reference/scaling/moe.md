@@ -30,7 +30,7 @@
 
 **Note:** MoE scaling efficiency degrades significantly beyond 8 nodes.
 Memory usage grows with node count (all-to-all communication buffers).
-moe_7b OOMs at 32+ nodes. See [TODO — MoE throughput optimization](../TODO.md#3-moe-throughput-optimization)
+moe_7b OOMs at 32+ nodes. See [TODO — MoE throughput optimization](../../TODO.md#3-moe-throughput-optimization)
 for planned experiments (EP, TP, float8).
 
 ## Aurora torch 2.13 — partial
@@ -92,5 +92,5 @@ Aurora yet. The 2026-06-07 sweep at n=8 caught one OK row for moe_10b_2b:
 
 ## See Also
 
-- [MoE configs](../reference/configs/moe.md) — model architecture details
+- [MoE configs](../configs/moe.md) — model architecture details
 - [Experiment reports](../experiments/moe/) — per-run benchmark logs

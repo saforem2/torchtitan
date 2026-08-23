@@ -78,7 +78,7 @@ adds on top. B > A but C ~ A means the lever is *format exposure*, not knowledge
 density -- a much cheaper thing to buy, and it changes the 30B data plan.
 
 **Node count: 64, not 512.** From the measured Aurora torch-2.13 sweep
-([`docs/scaling/agpt-2b.md`](../../../scaling/agpt-2b.md)), 64N runs at
+([`docs/scaling/agpt-2b.md`](../../../reference/scaling/agpt-2b.md)), 64N runs at
 **22.8-24.6% MFU** (6,083-6,553 TPS/GPU) versus 18.5-18.8% at 128-256N and
 ~7.5-11% at 512N. 64N also fits `debug-scaling` (max 256 nodes, 1 h) for smoke
 and `prod`/`small` for the real thing, and its ~3 h walltime is short enough to
@@ -551,5 +551,5 @@ a proposal or paper.
 - [`README.md`](README.md) -- the 30B proposal this gates (Section 5 process gate, Section 7 falsification)
 - [`../../../notes/data-strategy-after-olmo-mix-2026-07.md`](../../../notes/data-strategy-after-olmo-mix-2026-07.md) -- corpus survey
 - [`../2b/n512/README.md`](../2b/n512/README.md) -- the completed 4.674T chain that motivates this
-- [`../../../scaling/agpt-2b.md`](../../../scaling/agpt-2b.md) -- the measured throughput table used for sizing
+- [`../../../scaling/agpt-2b.md`](../../../reference/scaling/agpt-2b.md) -- the measured throughput table used for sizing
 - [`../../../evals/agpt/2b/README.md`](../../../evals/agpt/2b/README.md) -- eval history the null distribution comes from

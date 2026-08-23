@@ -156,11 +156,11 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Scaling Index](./scaling/README.md) | Top-level scaling landing page | 2026-06-06 |
-| [agpt 2B scaling](./scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-06-13 |
-| [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-06-13 |
-| [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
-| [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
+| [Scaling Index](reference/scaling/README.md) | Top-level scaling landing page | 2026-06-06 |
+| [agpt 2B scaling](reference/scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-06-13 |
+| [agpt 20B scaling](reference/scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-06-13 |
+| [agpt 80B scaling](reference/scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
+| [MoE scaling](reference/scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
 | [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-07-11 |
 
 ## Sandboxes / Side-channels

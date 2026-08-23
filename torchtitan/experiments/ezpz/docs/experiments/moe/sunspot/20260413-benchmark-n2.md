@@ -59,7 +59,7 @@ Optimal LBS values found on Sunspot 2-node:
 
 ## Scaling Study (1–64 nodes)
 
-See [scaling/moe.md](../../../scaling/moe.md) for full results.
+See [scaling/moe.md](../../../reference/scaling/moe.md) for full results.
 
 | Model  | 1N TPS | 64N TPS | Weak Scaling Efficiency |
 |--------|--------|---------|------------------------|

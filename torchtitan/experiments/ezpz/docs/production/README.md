@@ -186,7 +186,7 @@ See per-model READMEs (`agpt/2b/`, `agpt/20b/`, `agpt/80b/`).
    the per-file rsync mode used to take hours and saturate Lustre. The
    tarball mode (`ezpz yeet-env --src .venv.tar.gz`, default in v2
    submit scripts) does the same broadcast in 70-420 seconds at
-   8-2048N. See [yeet_env scaling](../scaling/yeet_env/README.md).
+   8-2048N. See [yeet_env scaling](../reference/scaling/yeet_env/README.md).
 7. **Async checkpoint save is being killed mid-write by bad-node
    crashes** (discovered 2026-05-22 during eval refresh). Every recent
    20B run *logs* progress past the latest persisted ckpt (e.g. 8481645
@@ -219,7 +219,7 @@ for the diagnosis.
 - [`scaling-performance.md`](scaling-performance.md) — detailed
   experiment log from Apr 18-21 (compile scaling, 80B at 4-512N,
   interactive workflow validation).
-- [`docs/scaling/`](../scaling/README.md) — per-model weak-scaling
+- [`docs/scaling/`](../reference/scaling/README.md) — per-model weak-scaling
   tables (2B / 20B / MoE, 1-512N).
-- [`docs/scaling/yeet_env/`](../scaling/yeet_env/README.md) —
+- [`docs/scaling/yeet_env/`](../reference/scaling/yeet_env/README.md) —
   yeet-env tarball broadcast scaling (8N to 4096N) on Aurora.

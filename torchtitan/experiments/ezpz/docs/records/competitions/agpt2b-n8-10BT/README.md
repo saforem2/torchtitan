@@ -107,4 +107,4 @@ where per-token efficiency dominates.
 ## Related
 
 - [Speedrun competition](../agpt2b-n2-1000steps/) — 1000 steps, 2 nodes
-- [Scaling study](../../../scaling/agpt-2b.md) — weak scaling results
+- [Scaling study](../../../reference/scaling/agpt-2b.md) — weak scaling results

@@ -17,7 +17,7 @@ MoE training benchmarks using DeepSeek-style MLA + MoE architecture across ALCF 
 
 | Date | Report | Configs | Nodes | Key Result |
 |------|--------|---------|-------|------------|
-| 2026-04-12 | [Scaling Study](../../scaling/moe.md) | moe_2b, moe_7b at 1-64N | 1-64 | 2b 47% efficiency at 64N; 7b OOM at 32N+ |
+| 2026-04-12 | [Scaling Study](../../reference/scaling/moe.md) | moe_2b, moe_7b at 1-64N | 1-64 | 2b 47% efficiency at 64N; 7b OOM at 32N+ |
 | 2026-04-13 | [Benchmark (n2)](sunspot/20260413-benchmark-n2.md) | All 7 MoE configs | 2 | 9.7% MFU (debugmodel); compile hurts MoE |
 | 2026-04-15 | [Full Benchmark (n2)](../agpt/sunspot/20260415-benchmark-n2.md) | All 7 MoE configs | 2 | 6/7 pass; moe_10b_2b Inductor crash |
 | 2026-04-18 | [Torch 2.12 Benchmark (n2)](../agpt/sunspot/20260418-torch212-benchmark-n2.md) | 4 MoE configs + EP sweep | 2 | EP unblocked; 7b EP=2 +33% TPS; moe_2b crash |
