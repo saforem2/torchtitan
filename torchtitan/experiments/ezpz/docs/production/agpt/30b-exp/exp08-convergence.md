@@ -383,9 +383,36 @@ mmlu's subject split is worth recording because it is not flat:
 | stem | 27.37% |
 | social sciences | 28.18% |
 
-STEM and social sciences carry the aggregate; humanities sits at chance. That
-is a plausible shape for olmo-mix at this token budget, not the uniform noise
-a broken export would give.
+STEM and social sciences carry the aggregate; humanities sits at chance.
+
+**The per-subject spread is real but should NOT be read as subject
+competence.** Across the 57 subjects the sigma values have sd = 1.79, where
+pure sampling noise would give 1.0 -- so subjects genuinely differ by more
+than measurement error. Six clear the Bonferroni threshold for 57 comparisons
+(+/-2.9 sigma):
+
+| subject | acc | sigma |
+|---|---:|---:|
+| professional_medicine | 42.28% | +5.8 |
+| high_school_statistics | 40.28% | +4.6 |
+| security_studies | 35.92% | +3.6 |
+| high_school_macroeconomics | 32.31% | +3.1 |
+| high_school_psychology | 31.01% | +3.0 |
+| **human_aging** | **15.70%** | **-3.8** |
+
+Three reasons to treat the aggregate (+0.37 mean sigma) as the finding and the
+individual subjects as not-yet-interpretable:
+
+1. Each subject is 100-270 questions. Five hits above threshold out of 57 is
+   about what 1.79 overdispersion produces with no subject being special.
+2. The sub-chance entry is the tell. human_aging at 15.70% is 9pp BELOW
+   random and survives Bonferroni. A model at 3.9B tokens should not be
+   reliably WRONG about anything -- that points at answer-position or
+   option-length bias in a barely-trained model, not at knowledge.
+3. Nothing here has a second measurement. The step-1000 trajectory run
+   (12473656) evaluates hellaswag AND mmlu, so these subjects get a repeat.
+   Any that hold across both checkpoints are worth a second look; the rest
+   were noise.
 
 **I predicted mmlu twice and was wrong twice:** that it would clip on walltime
 (it finished in 2h47, running the FAST band at ~7.7 it/s, not the slow band I

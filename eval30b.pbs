@@ -219,7 +219,11 @@ for step in (1000, 2000):
         except (OSError, ValueError):
             continue
     rows[step] = merged
-tasks = sorted({t for r in rows.values() if r for t in r})
+# mmlu emits 57 per-subject rows plus 4 group rows; showing all 61 buries the
+# five headline numbers. Keep the aggregates only -- the per-subject detail is
+# in the results JSON for anyone who wants it.
+_HIDE = lambda t: t.startswith("mmlu_")
+tasks = sorted({t for r in rows.values() if r for t in r if not _HIDE(t)})
 if not tasks:
     print("  no results parsed -- check the per-step output above")
 else:
