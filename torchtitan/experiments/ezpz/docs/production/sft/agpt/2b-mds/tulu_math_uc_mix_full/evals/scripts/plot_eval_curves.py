@@ -28,10 +28,21 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+def _repo_root() -> Path:
+    # Walk up to the repo root instead of counting parents: a depth-counted
+    # path silently resolves to the wrong directory if this file ever moves,
+    # and the plot then renders empty rather than failing.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "torchtitan").is_dir():
+            return parent
+    raise RuntimeError("could not locate torchtitan repo root from " + __file__)
+
+
 # Resolve the repo from this file's location, not a hardcoded machine path:
 # the plotter is authored on Sunspot but refresh_all.sh runs it on Aurora too,
 # where /lus/tegu does not exist (it failed every Aurora refresh until 2026-08-05).
-REPO = Path(__file__).resolve().parents[11]
+REPO = _repo_root()
 EVALS = REPO / "outputs" / "evals"
 
 # Load plot_style DIRECTLY by file path. Importing it via the package

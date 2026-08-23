@@ -19,10 +19,21 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 apply_style()
 
+
+def _repo_root() -> Path:
+    # Walk up to the repo root instead of counting parents: a depth-counted
+    # path silently resolves to the wrong directory if this file ever moves,
+    # and the plot then renders empty rather than failing.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "torchtitan").is_dir():
+            return parent
+    raise RuntimeError("could not locate torchtitan repo root from " + __file__)
+
+
 # Resolve the repo from this file's location, not a hardcoded machine path:
 # the plotter is authored on Sunspot but refresh_all.sh runs it on Aurora too,
-# where /lus/tegu does not exist. docs/production/rl/grpo/ -> repo root is 7 up.
-REPO = Path(__file__).resolve().parents[7]
+# where /lus/tegu does not exist.
+REPO = _repo_root()
 BASE = str(REPO / "outputs")
 RUNS = [
     ("v5", "rl_lora_agpt2b_train_v5", "v5 lr2e-5 r8 (prev best)", "--", 1.6),
