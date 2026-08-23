@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-07-24
+> Last updated: 2026-08-23
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on

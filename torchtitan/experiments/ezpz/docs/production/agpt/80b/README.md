@@ -1,6 +1,6 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-23
 
 > [!IMPORTANT]
 > **2026-08-14 -- Wall 1 reproduces on the frameworks RC.** The RC

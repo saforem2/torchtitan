@@ -15,7 +15,7 @@
 > Eval-side scores live at
 > [`docs/evals/agpt/2b-mds/`](../../../records/evals/agpt/2b-mds/README.md).
 >
-> Last updated: 2026-05-03
+> Last updated: 2026-08-23
 
 ## Setup
 

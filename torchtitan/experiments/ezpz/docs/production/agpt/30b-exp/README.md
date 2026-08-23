@@ -1,6 +1,6 @@
 # agpt 30B-exp -- a proposed next flagship
 
-> **Last updated: 2026-08-19.**
+> **Last updated: 2026-08-23.**
 >
 > **Status: PROPOSAL, now partly MEASURED.** This began as a design document
 > written the day the 2B-512 canonical chain completed its full 4.674T
