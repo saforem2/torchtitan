@@ -40,6 +40,7 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
 
 LOGD="$PWD/outputs/logs/diagsmoke/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/train.log"; : > "$LOG"
+export EZPZ_DIAG_ECHO=1
 export WANDB_PROJECT="${WANDB_PROJECT:-agpt-diagnostics}"
 
 timeout 2400 ezpz launch --nproc 24 -ppn 12 -- \
@@ -65,18 +66,19 @@ C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
 echo "  steps: $(printf '%s' "$C" | grep -acE 'step: *[0-9]+ +loss:')"
 echo "  W&B:   $(printf '%s' "$C" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
 echo ""
-echo "  DID THE METRICS APPEAR? (0 anywhere = the feature did not work)"
-for k in update_ratio_mean n_params_frozen layer_gradnorm_skew clip_fired \
-         grad_norm_preclip grad_norm_postclip qk_logit_bound_est \
-         opt_exp_avg_norm weight_norm_global; do
-  n=$(printf '%s' "$C" | grep -ac "diag/$k")
-  printf "    %-24s occurrences=%s\n" "$k" "$n"
-done
-echo "  cross-rank (History, 24 ranks < 384 so aggregation active):"
-printf '%s' "$C" | grep -aoE "rank_(std|max|min)/[a-z_]+" | sort -u | sed 's/^/    /'
+# VERIFY AGAINST THE METRIC DICT, NOT STDOUT. The first smoke grepped the
+# console for diag/ keys and reported "occurrences=0" for features that were
+# working perfectly -- these metrics only ever reach W&B, never stdout, so the
+# check was measuring nothing. Worse, W&B's terminal summary OMITS keys whose
+# value never changes, so even reading that block under-reports.
+#
+# The trainer now dumps the full extra_metrics dict once per diagnostic step
+# when EZPZ_DIAG_ECHO=1, which is the only source that sees every key.
+echo "  METRICS EMITTED (from the trainer's own dict, not the W&B summary):"
+printf '%s' "$C" | grep -aoE "DIAG_ECHO .*" | tail -1 | tr ',' '\n' | sed 's/^ */    /' | head -30
 echo ""
-echo "  SAMPLE VALUES (must be finite, not nan/inf):"
-printf '%s' "$C" | grep -aoE "diag/[a-z_0-9]+[\"']?: *[-0-9.e+naif]+" | tail -14 | sed 's/^/    /'
+echo "  W&B summary keys (omits constant-valued metrics -- expected):"
+printf '%s' "$C" | grep -aoE "^wandb: +diag/[a-z_0-9]+" | sed 's/wandb: */    /' | sort -u
 echo ""
 echo "  history artifacts:"
 find outputs/history -maxdepth 2 2>/dev/null | head -6 | sed 's/^/    /'

@@ -915,6 +915,14 @@ class FaultTolerantTrainer(Trainer):
         # device-resource exhaustion (events/command-lists), not an OOM.
         # EZPZ_CLIP_NO_FOREACH=1 falls back to the unfused loop to test that.
         # Default is unchanged (foreach=True) -- this is opt-in diagnosis.
+        # Arm the attention sampler for THIS step. Must happen before the
+        # next forward; the SDPA wrapper checks it to decide whether to
+        # sample. Without this call observe() can never fire -- which is
+        # exactly the bug the first smoke exposed.
+        if getattr(self.config, "diagnostics_attention", False):
+            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
+            _attn.set_step(self.step)
+
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,
@@ -1047,6 +1055,14 @@ class FaultTolerantTrainer(Trainer):
                     },
                     step=self.step,
                 )
+            )
+        # Echo the FULL metric dict when asked. The smoke's verification
+        # cannot see these keys any other way: they go to W&B, not stdout, and
+        # W&B's terminal summary silently omits constant-valued keys.
+        if os.environ.get("EZPZ_DIAG_ECHO") == "1" and extra_metrics:
+            logger.info(
+                "DIAG_ECHO "
+                + ", ".join(f"{k}={v}" for k, v in sorted(extra_metrics.items()))
             )
         self.metrics_processor.log(
             self.step,
