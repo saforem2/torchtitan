@@ -25,7 +25,6 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
-from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
 
 from . import model_registry
 
@@ -59,7 +58,7 @@ def _set_rope_backend(
     layer's ``Attention.Config`` owns its own rope. So flipping the
     backend means rebuilding each layer's ``attention.rope`` as a
     fresh instance of the target subclass, copying over all other
-    fields (dim / max_seq_len / theta / scaling / yarn params).
+    fields (dim / max_context_length / theta / scaling / yarn params).
     """
     from dataclasses import fields
 
@@ -386,7 +385,16 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg = agpt_debugmodel()
     cfg.hf_assets_path = "./tests/assets/tokenizer"
     cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
-    cfg.dataloader = HuggingFaceTextDataLoader.Config(dataset="c4_test")
+    # Grain (#4088) DELETED HuggingFaceTextDataLoader with no drop-in
+    # replacement -- the equivalent is a GrainDataLoader built from a
+    # SingleDatasetConfig(source=HuggingFaceStreamingSource, processor=
+    # TextProcessor), a different object graph rather than a rename. Ported
+    # lazily: raise where the config is USED so importing the registry (and
+    # therefore every blendcorpus production config) still works.
+    raise NotImplementedError(
+        "c4_test needs porting to GrainDataLoader after the 80th sync; see "
+        "torchtitan/components/data/dataset.py SingleDatasetConfig"
+    )
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
     cfg.checkpoint.enable = False

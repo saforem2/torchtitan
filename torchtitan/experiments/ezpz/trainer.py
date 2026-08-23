@@ -17,7 +17,7 @@ import ezpz
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from torchtitan.components.dataloader import DataloaderExhaustedError
+from torchtitan.components.data.loader import DataloaderExhaustedError
 from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
