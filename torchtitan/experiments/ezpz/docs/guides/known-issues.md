@@ -312,7 +312,7 @@ along the sequence dimension, the non-sharded tensors remain as regular
 ## 80B TP=2 on Aurora (regression 2026-04-12, resolved 2026-04-18)
 
 **Status: RESOLVED** — 80B TP=2 works again as of 2026-04-18. See
-[restoration report](../experiments/agpt/aurora/20260418-80b-tp2-restored.md).
+[restoration report](../records/experiments/agpt/aurora/20260418-80b-tp2-restored.md).
 
 **Symptoms (when broken):** `torch.OutOfMemoryError` or
 `UR_RESULT_ERROR_OUT_OF_RESOURCES` on step 2. Step 1 completes at

@@ -364,10 +364,10 @@ diverged to NaN** from step 1 (grad_norm=NaN on first backward pass).
 - **Memory:** 43.02 GiB (67%) — plenty of headroom at this FSDP degree
 
 **NaN root cause:** SophiaG is broken at 80B scale — confirmed by the
-[LR finder 80B report](../experiments/lr-finder/agpt/80b/README.md#2026-04-21----80b-gas-sweep-sunspot-small-batch-gbs192)
+[LR finder 80B report](../records/experiments/lr-finder/agpt/80b/README.md#2026-04-21----80b-gas-sweep-sunspot-small-batch-gbs192)
 which found Muon and SophiaG both produce NaN for 80B. The small-batch finder
 suggested AdamW LR=1.1e-5, but **that does NOT hold at the production batch**:
-re-running at GBS=6144 ([2026-06-27 report](../experiments/lr-finder/agpt/80b/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot))
+re-running at GBS=6144 ([2026-06-27 report](../records/experiments/lr-finder/agpt/80b/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot))
 shows AdamW's usable LR collapses to ~7e-7 (NaN cliff) and **mano** is the
 better-behaved optimizer (clean U-min at 1.6e-5). For 80B production at
 GBS~6144, use AdamW LR~5e-7 or switch to mano (~3e-6).
@@ -494,7 +494,7 @@ use a fresh directory when the model architecture changes.
 
 ## Related
 
-- [80B TP=2 Restored](../experiments/agpt/aurora/20260418-80b-tp2-restored.md)
+- [80B TP=2 Restored](../records/experiments/agpt/aurora/20260418-80b-tp2-restored.md)
 - [Known Issues](../guides/known-issues.md)
 - [Scaling Study (Sunspot)](../scaling/)
 - [Production Run Plan](../TODO.md#5-production-multi-stage-training-plan)

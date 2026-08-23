@@ -33,7 +33,7 @@
 ## Prep + validation
 
 - Conversion, transfer, and 2N smoke are documented in the
-  [prep report](../../../../../experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md).
+  [prep report](../../../../../records/experiments/agpt/sunspot/2026-07-06-sft-2b-v2-256n-base-prep.md).
 - 2N smoke (job 12470086): 10 steps, loss 2.08 -> 1.7, mean_token_accuracy
   ~0.60, 0 Qwen fallback, 0 barrier crash, clean exit. wandb:
   `https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xudygzxr`.

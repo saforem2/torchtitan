@@ -37,7 +37,7 @@
 **Note:** 80B TP=2 was broken on Aurora from 2026-04-12 to 2026-04-17 (OOM by
 60 MiB). Resolved 2026-04-18 — works again at 88 TPS / 16% MFU after removing
 `import intel_extension_for_pytorch` (IPEX allocator overhead).
-See [restoration report](../../experiments/agpt/aurora/20260418-80b-tp2-restored.md).
+See [restoration report](../../records/experiments/agpt/aurora/20260418-80b-tp2-restored.md).
 
 ## Sunspot TP Sweep (2 nodes)
 
@@ -68,7 +68,7 @@ See [restoration report](../../experiments/agpt/aurora/20260418-80b-tp2-restored
 
 ## See Also
 
-- [80B throughput leaderboard](../../experiments/agpt/aurora/80b-throughput-leaderboard.md)
+- [80B throughput leaderboard](../../records/experiments/agpt/aurora/80b-throughput-leaderboard.md)
 - [Experiment reports](../experiments/agpt/) — per-run benchmark logs
 - [Production training](../production/agpt/80b/) — live training status
 - [Known issues — 80B OOM](../../guides/known-issues.md)

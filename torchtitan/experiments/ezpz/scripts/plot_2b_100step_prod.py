@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 REPO = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 BASE = f"{REPO}/outputs/lrfind-2b-100step-prod"
-FIGDIR = (f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/"
+FIGDIR = (f"{REPO}/torchtitan/experiments/ezpz/docs/records/experiments/"
           f"lr-finder/agpt/2b/figures")
 
 GBS_LADDER = [1536, 3072, 6144, 12288, 24576]

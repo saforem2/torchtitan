@@ -84,7 +84,7 @@ See `moe_runs/README.md` for the full list.
 
 ## Experiment Reports
 
-See [experiments/moe/README.md](../../experiments/moe/README.md) for benchmark
+See [experiments/moe/README.md](../../records/experiments/moe/README.md) for benchmark
 reports, and [experiments/lr-finder/moe/](../experiments/lr-finder/moe/) for
 LR finder results.
 

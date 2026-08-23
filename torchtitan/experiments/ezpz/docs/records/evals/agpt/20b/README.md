@@ -104,7 +104,7 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 > direction is also unreliable.
 >
 > Full account:
-> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
+> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
 > and [`rope-flavor-mismatch.md`](../../../../guides/known-bugs/rope-flavor-mismatch.md).
 
 **20B 512N sync at step-4,400 beats 2B 256N async at step-69,900 on

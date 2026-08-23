@@ -150,7 +150,7 @@ DEFAULT_FULL_DIR = "/flare/AuroraGPT/foremans/production-metrics"
 # depth, so files written there are silently untracked -- exactly the failure
 # this store exists to prevent. This location sits beside the production
 # READMEs that consume these numbers and follows the existing precedent of
-# committed CSVs under docs/ (docs/experiments/agpt/aurora/figures/loss_*.csv).
+# committed CSVs under docs/ (docs/records/experiments/agpt/aurora/figures/loss_*.csv).
 DEFAULT_REL_SUMMARY_DIR = "torchtitan/experiments/ezpz/docs/production/metrics"
 
 MANIFEST_NAME = "manifest.json"

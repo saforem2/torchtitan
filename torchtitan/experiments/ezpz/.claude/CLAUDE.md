@@ -178,7 +178,7 @@ so always build the tarball first via `ezpz tar-env`. See
   old "use LR=1e-6" guidance is unsafe -- if staying on AdamW use ~5e-7, but
   prefer mano/sophiag. The small-batch "AdamW 1.1e-5" finder number does NOT
   transfer (batch-dependent: ~14x lower ceiling at production). See
-  [`docs/experiments/lr-finder/agpt/README.md`](../docs/experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
+  [`docs/records/experiments/lr-finder/agpt/README.md`](../docs/records/experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 - **torch.compile OOM at 512N:** 2B OOMs on GPU, 80B OOMs on CPU.
   Use `--compile.no-enable` for 512N jobs.
 - **torch.compile time:** ~7–15 min at 256N depending on model size.
@@ -601,7 +601,7 @@ These are *preferences* (style/formatting), not rules. Hard rules
 moved up to "Golden Rules".
 
 - **Always document experiments** — every run needs a markdown report
-  under `docs/experiments/<module>/<machine>/<date>-<purpose>.md`,
+  under `docs/records/experiments/<module>/<machine>/<date>-<purpose>.md`,
   linked from a parent README.
 - **Don't modify project-level `.gitignore`.**
 - **Don't add `.ezpz-interactive-launch.sh`** to git — use

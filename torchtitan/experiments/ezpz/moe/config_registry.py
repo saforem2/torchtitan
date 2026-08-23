@@ -242,7 +242,7 @@ def moe_debugmodel_ep() -> FaultTolerantTrainer.Config:
     24 XPU ranks (2N Sunspot), the bf16 vocab-projection logits
     ``(LBS * seq_len, vocab_size) = (8 * 8192, 256128) * 2 B`` request
     ~33 GiB on a single tile and OOM at init. Validated 2026-05-20
-    (see docs/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md).
+    (see docs/records/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md).
     """
     cfg = moe("debugmodel", local_batch_size=2)
     cfg.model_spec = model_registry("debugmodel", moe_comm_backend="standard")

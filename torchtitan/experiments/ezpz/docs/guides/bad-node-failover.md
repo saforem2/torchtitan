@@ -130,10 +130,10 @@ treated as a bad-node failure: scrape (typically no specific host, since
 the hang IS the silence), blind-rotate, retry. 1800s was chosen because
 the longest observed *legitimate* quiet period was a 19-min async ckpt
 save at 20B 512N. First real-world recovery:
-[`8505298`](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
+[`8505298`](../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
 (hung at step 37, watchdog tripped at 30 min, swapped + retried, trained
 to walltime landing step-100/200 checkpoints). Originating incident:
-[`8479579`](../experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md).
+[`8479579`](../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md).
 
 ### Things to know
 
@@ -270,14 +270,14 @@ attempt.
 
 ## See also
 
-- [`docs/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
+- [`docs/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
   -- first real-world silent-hang recovery
-- [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
+- [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
   -- the originating silent-hang incident
 - [`docs/production/agpt/80b/README.md`](../production/agpt/80b/README.md)
   -- 80B TP=4/LBS=1 stable corner + `dp_degree<=186` ceiling
 - [`scripts/FAILOVER.md`](../../scripts/FAILOVER.md) -- code-adjacent quickref
-- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../experiments/agpt/aurora/20260630-failover-restart-economics.md)
+- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)
   -- log-mined restart economics: 7 confirmed successful restarts, ~11% raw
   recovery rate (higher for genuinely node-local failures), 132 spare swaps
   across 133 failover-wrapped jobs (2026-06-30 analysis)

@@ -174,6 +174,6 @@ applied, model-only fork loaded, trainers 0/1/3 regression-clean).
 ## Cross-refs
 
 - Launch/mechanism report:
-  [`../../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md`](../../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md)
+  [`../../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md`](../../records/experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md)
 - Base plateau evidence: [`../../evals/agpt/2b`](../../records/evals/agpt/2b/README.md)
 - Reproduce plot: `python3 docs/production/cpt/plot_cpt_loss.py --data-dir <tsv-dir>`

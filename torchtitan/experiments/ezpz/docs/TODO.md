@@ -148,7 +148,7 @@ Design configs for a production training run combining optimal LRs
   before hitting 2h walltime. Config validated end-to-end.
 - 2026-04-14: 512-node production job queued (Job 8436463), waiting for nodes.
 - 2026-04-08: 1024-node attempt crashed at init (Job 8423904, exit 143).
-- Full report: [20B Production (n512)](experiments/agpt/aurora/20260414-production-20b-n512.md)
+- Full report: [20B Production (n512)](records/experiments/agpt/aurora/20260414-production-20b-n512.md)
 
 ### Recommended configs
 

@@ -168,7 +168,7 @@ deliberately: (a) the optimizer choice (SophiaG vs mano) is a live team
 decision, and (b) no v2 run has yet succeeded above ~512N, so the
 1024N/2048N brackets may crash at init — that is treated as data, not
 regression. Plan:
-[20260628-80b-sophiag-constant-lr](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+[20260628-80b-sophiag-constant-lr](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 
 ---
 

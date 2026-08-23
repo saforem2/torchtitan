@@ -363,7 +363,7 @@ instruction-following adaptation has converged on this mix.
 
 ## Related
 
-- Prior SFT smoke: [`20260608-sft-2b-sophiag-metamathqa-n32.md`](../../../../../experiments/agpt/sunspot/20260608-sft-2b-sophiag-metamathqa-n32.md)
+- Prior SFT smoke: [`20260608-sft-2b-sophiag-metamathqa-n32.md`](../../../../../records/experiments/agpt/sunspot/20260608-sft-2b-sophiag-metamathqa-n32.md)
 - Upstream issue + fix: [pytorch/pytorch#186938](https://github.com/pytorch/pytorch/issues/186938) + [pytorch/pytorch#186940](https://github.com/pytorch/pytorch/pull/186940)
 - ezpz autoretry fix: [saforem2/ezpz commit `6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b)
 - ezpz autoretry _drain UTF-8 bug fix (pre-req for this work): [saforem2/ezpz PR #162](https://github.com/saforem2/ezpz/pull/162) (#163)

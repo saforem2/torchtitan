@@ -11,7 +11,7 @@
 # (decaying LR) vs the constant-LR fork branched from it at step-9200.
 #
 # WHY: at matched steps the two arms sit within +0.001..+0.008 nats -- inside
-# noise (docs/experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md).
+# noise (docs/records/experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md).
 # Loss is not the deliverable: v1-vs-v2 showed two chains can sit close on loss
 # and diverge sharply on downstream evals. This asks the eval question directly.
 #

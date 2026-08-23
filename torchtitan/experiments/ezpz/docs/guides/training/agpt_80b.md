@@ -316,7 +316,7 @@ failures). Diagnostic plan:
   live status, dispatch log, eval (when production starts persisting)
 - [`docs/production/agpt/80b/n4/README.md`](../../production/agpt/80b/n4/README.md) —
   the validated 4N reference run
-- [`docs/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
+- [`docs/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
   Sunspot 4N validation with xccl_split_group workaround
 - [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) —
   PBS submit script

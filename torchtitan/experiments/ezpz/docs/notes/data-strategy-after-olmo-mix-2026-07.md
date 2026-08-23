@@ -5,7 +5,7 @@
 > **[2026-07-29 UPDATE -- section 1 prediction partially OVERTURNED by experiment.]**
 > This memo predicted the primary lever is a "LR-decayed-to-zero (annealing)
 > stage." The 2B MDS mid-training A/B
-> ([sunspot/20260728-2b-mds-anneal-and-datamix.md](../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md))
+> ([sunspot/20260728-2b-mds-anneal-and-datamix.md](../records/experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md))
 > found the LR SCHEDULE is NOT the lever at 10B: constant-LR (flat) BEAT
 > WSD-decay-to-0 on both the MDS and olmo bases (held-out FineMath NLL). What DOES
 > move the needle is the DATA MIX: pure edu-web forgets math catastrophically
@@ -34,7 +34,7 @@ Related work already in flight:
   (dolmino-style high-quality upsample at low constant LR -- this memo's
   primary recommendation).
 - Synthetic-summary data POC:
-  [`../experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md`](../experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md)
+  [`../experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md`](../records/experiments/synthetic/aurora/2026-07-11-summarize-olmo-mix-poc.md)
   (~9x compression via LLM summaries -- one of the blended synthetic styles
   below).
 

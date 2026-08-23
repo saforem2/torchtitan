@@ -36,7 +36,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-20 | [Trying a newer XPU torch against spmd_types (CONFIRMED: it fixes it)](./guides/known-bugs/spmd-types-newer-torch-attempt.md) |
 | 2026-08-20 | [Why spmd_types leaves parameters unconverted (upstream)](./guides/known-bugs/spmd-types-plain-tensor.md) |
 | 2026-08-19 | [agpt on full_dtensor: vc_check/DeviceMesh, and a pin justified uncompiled](./guides/known-bugs/agpt-full-dtensor-vc-check.md) |
-| 2026-08-19 | [2026-08-16 -- the 20B ARC-C "decay" was entirely the RoPE permute](./experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md) |
+| 2026-08-19 | [2026-08-16 -- the 20B ARC-C "decay" was entirely the RoPE permute](records/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md) |
 | 2026-08-19 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-17 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-08-17 | [exp07 -- tokenizer bake-off: custom 64k does NOT pay; OLMo-2 wins and is confirmed on hardware](./production/agpt/30b-exp/exp07-custom-tokenizer-feasibility.md) |
@@ -45,8 +45,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-17 | [Unregistered W&B runs: the failure that never announces itself](./guides/known-bugs/unregistered-wandb-runs.md) |
 | 2026-08-17 | [RoPE flavor mismatch: a mid-flight convention switch, and the exports it broke](./guides/known-bugs/rope-flavor-mismatch.md) |
 | 2026-08-17 | [Concurrent-job checkpoint collision on 20b_v2_256](./guides/known-bugs/concurrent-job-ckpt-collision.md) |
-| 2026-08-17 | [2B-512 constant-LR fork: the decay phase is worth <0.01 nats so far](./experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md) |
-| 2026-08-17 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](./experiments/agpt/aurora/20260816-umbrella-8756070.md) |
+| 2026-08-17 | [2B-512 constant-LR fork: the decay phase is worth <0.01 nats so far](records/experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md) |
+| 2026-08-17 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](records/experiments/agpt/aurora/20260816-umbrella-8756070.md) |
 | 2026-08-17 | [Evaluation Results — agpt 20B](records/evals/agpt/20b/README.md) |
 | 2026-08-17 | [Evaluation Results](records/evals/README.md) |
 | 2026-08-16 | [Upstream Sync Log](./upstream-sync.md) |
@@ -100,7 +100,7 @@ going?" Tracking is per-model and per-node-count.
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-14 |
 | [20B 256N](./production/agpt/20b/n256/README.md) | step-**10,300** (518.4B tokens, 11.1% of 4.67T). | 2026-08-17 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-14 |
-| [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-07-24 |
+| [80B 512N NaN incident (2026-07-03)](records/experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
 | [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-16 |
@@ -127,7 +127,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Bad-node failover wrapper](./guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](./experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-30 |
+| [Bad-node failover wrapper](./guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-30 |
 | [Known Issues / Operational Notes](./guides/known-issues.md) | **Top entry (2026-05-23)**: `--checkpoint.async-mode=async` kills the cluster at 20B 512N+ — root cause of 3 weeks of lost persisted progress. Workaround: `CHECKPOINT_ASYNC_MODE=disabled`. | 2026-07-24 |
 | [bf16-master RMSNorm freeze](./guides/training-dtype-bf16-norm-freeze.md) | Root cause of v1 → v2 restart; `dtype=float32` is now default | 2026-08-14 |
 | [TP > 1 loss reporting off by `dp_world_size`](./guides/loss-reporting-tp-dist-reduce.md) | **Resolved upstream 2026-05-18** (PR #3159, commit `d64eabcce`). Doc preserved as historical context for affected 80B W&B traces. | 2026-07-24 |
@@ -161,7 +161,7 @@ relevant guide before suggesting work that touches one of these.
 | [agpt 20B scaling](reference/scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-06-13 |
 | [agpt 80B scaling](reference/scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
 | [MoE scaling](reference/scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
-| [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-07-11 |
+| [Per-run Experiment Reports](records/experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-07-11 |
 
 ## Sandboxes / Side-channels
 

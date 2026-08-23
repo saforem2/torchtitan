@@ -43,7 +43,7 @@
 # torchmuon, NOT muon. The custom Newton-Schulz implementation was DROPPED from
 # the 2B production-batch sweep: "muon dropped -- it crashes every job via a
 # oneCCL collective abort; use torchmuon if needed"
-# (docs/experiments/lr-finder/agpt/2b/README.md). That abort is a collective
+# (docs/records/experiments/lr-finder/agpt/2b/README.md). That abort is a collective
 # fault, not an LR cliff, so a `muon` seat would burn 522 nodes producing no
 # curve. torch.optim.Muon is also ~35% faster (CLAUDE.md).
 #

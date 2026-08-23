@@ -428,7 +428,7 @@ covaries with the spike on every chain.** The RoPE story survives the challenge.
   curve concludes the model lost most of its ARC-C ability; it gained. No
   amount of care reading those numbers recovers the truth, because a monotone
   corruption is indistinguishable from a trend. Full series:
-  [`20260816-arc-c-decay-vs-rope-permute.md`](../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
+  [`20260816-arc-c-decay-vs-rope-permute.md`](../../records/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
 - Any downstream claim resting on those numbers -- in particular
   "20B-512 beats 2B-256 per token" and any post-switch capability comparison
   between `2b_v2_512` and `2b_v2_256`, which is confounded by conversion.

@@ -150,7 +150,7 @@ git add \
     "torchtitan/experiments/ezpz/docs/production/**/*.tsv" \
     "torchtitan/experiments/ezpz/docs/production/figures/*" \
     "torchtitan/experiments/ezpz/docs/records/evals/**/figures/*" \
-    "torchtitan/experiments/ezpz/docs/experiments/lr-finder/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/**/figures/*" \
     "torchtitan/experiments/ezpz/docs/README.md" \
     2>/dev/null
 

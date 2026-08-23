@@ -38,7 +38,7 @@
 
 The full OpenMathInstruct-2 mix needed an offline build pipeline; each stage hit
 a distinct failure, all now fixed. Full blow-by-blow in the
-[launch report](../../../../../experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md).
+[launch report](../../../../../records/experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md).
 Short version:
 
 1. **Interleave build** was ~90 min single-threaded -> vectorized to ~5s
