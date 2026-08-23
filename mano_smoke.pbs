@@ -1,0 +1,56 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=00:40:00
+#PBS -l filesystems=tegu:home
+#PBS -N mano-smoke
+#PBS -j oe
+set -o pipefail
+
+# Does Mano actually CONSTRUCT and take a step on the 30B?
+#
+# 12473662 burned 64 nodes for 2m40 to discover that the optimizer could not
+# be resolved -- a failure a 2-node smoke would have caught for 1/32nd the
+# cost. The resolver is fixed (6cd8a49cf) and unit-verified, but "resolves in
+# a python shell" is again not "runs in the trainer", which is exactly the
+# gap that produced the last failure.
+#
+# So: same config, same GAS math, 2 nodes, 3 steps. Cheap enough to be
+# routine, and it exercises optimizer construction, the first backward, and
+# the first optimizer step -- everything that broke.
+#
+# GAS=4 at 2N/LBS=5: global_batch_size = 5 x 24 x 4 = 480.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+LOGD="$PWD/outputs/logs/mano-smoke/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+timeout 1800 ezpz launch --nproc 24 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok_mano \
+    --training.steps=3 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --training.global-batch-size=480 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-scheduler.warmup-steps=1 \
+    --checkpoint.no-enable \
+    --dataloader.num-workers=0 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## Mano smoke ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo "  optimizer: $(printf '%s' "$C" | grep -aoE '"optimizer_name": "[A-Za-z]+"' | head -1)"
+echo "  GAS:       $(printf '%s' "$C" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
+echo "  steps:     $(printf '%s' "$C" | grep -acE 'step: *[0-9]+ +loss:')  (want 3)"
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" | sed 's/^/    /'
+echo "  resolver error: $(printf '%s' "$C" | grep -ac 'not added.')  (want 0)"
+echo "  rc=$rc"
+echo "MANO_SMOKE_DONE"
