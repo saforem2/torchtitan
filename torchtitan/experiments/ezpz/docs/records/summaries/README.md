@@ -4,7 +4,7 @@
 > Other pages cross-reference it; do not duplicate status here.
 
 Periodic retrospectives covering the project at a higher level than
-[`journal.md`](../journal.md) (which is a per-session running log).
+[`journal.md`](../../journal.md) (which is a per-session running log).
 **Naming:** each summary is named for the **last day it covers**
 (`YYYY-MM-DD.md`), so the files sort chronologically and the newest is always
 last. The full date range stays in the document title and in the Period column

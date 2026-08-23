@@ -50,14 +50,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-17 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-08-17 | [Evaluation Results](./evals/README.md) |
 | 2026-08-16 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-08-16 | [Summaries](./summaries/README.md) |
+| 2026-08-16 | [Summaries](records/summaries/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
-| 2026-08-16 | [Week ending 2026-08-14](./summaries/2026-08-14.md) |
+| 2026-08-16 | [Week ending 2026-08-14](records/summaries/2026-08-14.md) |
 | 2026-08-16 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-08-16 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
 | 2026-08-16 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
@@ -79,9 +79,9 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-16 | [Aurora: 2098-node job killed at 9h13m of 24h with Exit_status = -14](./guides/known-bugs/aurora-job-8756070-exit-14.md) |
 | 2026-08-16 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-08-16 | [Claude Session Log](./claude-sessions.md) |
-| 2026-08-14 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
-| 2026-08-14 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](./summaries/2026-08-10.md) |
-| 2026-08-14 | [2026-07-10 to 2026-07-26 -- ~16-Day Summary](./summaries/2026-07-26.md) |
+| 2026-08-14 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](records/summaries/2026-Q2-incite.md) |
+| 2026-08-14 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](records/summaries/2026-08-10.md) |
+| 2026-08-14 | [2026-07-10 to 2026-07-26 -- ~16-Day Summary](records/summaries/2026-07-26.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -140,8 +140,8 @@ relevant guide before suggesting work that touches one of these.
 | [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-19 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-14 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
-| [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-14 |
-| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-08-16 |
+| [Summary 2026-04-12 → 2026-04-27](records/summaries/2026-04-27.md) | 2-week retrospective | 2026-08-14 |
+| [Periodic Summaries Index](records/summaries/README.md) | Index of 2-week / monthly retros | 2026-08-16 |
 
 ## Setup & Reference
 

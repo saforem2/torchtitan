@@ -10,7 +10,7 @@
 
 This report synthesizes the five two-week retrospectives written during
 the quarter ([index](README.md)) plus the live
-[production](../production/README.md) and [eval](../evals/README.md)
+[production](../../production/README.md) and [eval](../../evals/README.md)
 trackers. Section anchors link to the underlying per-trajectory pages so
 every claim is traceable to data on disk or in W&B.
 
@@ -59,7 +59,7 @@ within budget (see below).
 |---|---|---|
 | Year-2 Aurora budget | 6,620K node-hours | INCITE-2026 renewal milestone table |
 | Year-2 Polaris budget | 150K node-hours | renewal milestone table |
-| Aurora burn ratio (as of 2026-06-26) | **0.29** (~29% of Year-2 Aurora) | PBS, via [queue-wait-analysis](../production/queue-wait-analysis.md) |
+| Aurora burn ratio (as of 2026-06-26) | **0.29** (~29% of Year-2 Aurora) | PBS, via [queue-wait-analysis](../../production/queue-wait-analysis.md) |
 | Implied Aurora node-hours used | ~1.9M of 6,620K (derived from ratio) | derived |
 
 Burn is on a healthy trajectory: at roughly the half-year mark, ~29% of
@@ -73,7 +73,7 @@ queue to other projects despite thousands of physically free nodes and a
 healthy burn ratio. This is an operational/policy issue (candidate
 levers: a project reservation, consolidating on 256N, or a PI->ALCF
 priority discussion), documented in full at
-[queue-wait-analysis.md](../production/queue-wait-analysis.md). Worth
+[queue-wait-analysis.md](../../production/queue-wait-analysis.md). Worth
 raising at the program level.
 
 ---
@@ -100,7 +100,7 @@ raising at the program level.
 **Cross-cutting deliverable not itemized in the table:** standing up the
 torchtitan+`ezpz` stack on Aurora XPU as a validated alternative to the
 Megatron-DeepSpeed pipeline (the pre-torchtitan 2B-MDS run remains the
-[reference baseline](../evals/agpt/2b-mds/README.md)). This is the
+[reference baseline](../../evals/agpt/2b-mds/README.md)). This is the
 enabling work behind all four milestones above.
 
 ---
@@ -111,7 +111,7 @@ Full-scale pre-training on the
 [olmo-mix-1124](https://huggingface.co/datasets/allenai/olmo-mix-1124)
 corpus (4.67T-token budget). All runs are "v2" (post-bf16-fix,
 `dtype=float32` master weights). Live tracker:
-[production/README.md](../production/README.md).
+[production/README.md](../../production/README.md).
 
 ### 4.1 agpt 2B (dense) — COMPLETE
 
@@ -130,8 +130,8 @@ The chain ran across ~13 PBS dispatches since the 2026-04-30 restart,
 surviving repeated bad-node failures via the failover wrapper (Section
 6.3). The canonical **512N** 2B chain (large-batch trajectory) reached
 step-30,400 / 3.06T tokens (65.5%) but is queue-stalled. Detail:
-[2b/n256](../production/agpt/2b/n256/README.md),
-[2b/n512](../production/agpt/2b/n512/README.md).
+[2b/n256](../../production/agpt/2b/n256/README.md),
+[2b/n512](../../production/agpt/2b/n512/README.md).
 
 **Next:** convert the final DCP checkpoint to HF and run the full
 lm-eval suite for the end-of-pretraining scorecard (top post-maintenance
@@ -147,7 +147,7 @@ action).
 The 20B chain is the per-token efficiency story of the quarter (Section
 5). Two operational issues constrain it: the same 512N queue starvation,
 and a `set_determinism` `std::bad_alloc` init crash that intermittently
-kills 512N restarts. Detail: [20b/README](../production/agpt/20b/README.md).
+kills 512N restarts. Detail: [20b/README](../../production/agpt/20b/README.md).
 
 ### 4.3 agpt 80B (dense) — LAUNCHED
 
@@ -168,7 +168,7 @@ deliberately: (a) the optimizer choice (SophiaG vs mano) is a live team
 decision, and (b) no v2 run has yet succeeded above ~512N, so the
 1024N/2048N brackets may crash at init — that is treated as data, not
 regression. Plan:
-[20260628-80b-sophiag-constant-lr](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
+[20260628-80b-sophiag-constant-lr](../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
 
 ---
 
@@ -176,7 +176,7 @@ regression. Plan:
 
 Benchmarked with
 [lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness)
-on a 7-task suite. Live tables: [evals/README.md](../evals/README.md).
+on a 7-task suite. Live tables: [evals/README.md](../../evals/README.md).
 
 **The 20B 512N chain converges qualitatively faster per token than 2B**,
 monotonically across 35+ consecutive checkpoints (step-100 -> step-4,400,
@@ -197,8 +197,8 @@ converging faster per token, not just per FLOP.
 These curves are also the **smoking gun for the bf16-master fix**: the v2
 (fp32-master) chains climb steadily on ARC / HellaSwag / Winogrande
 where the v1 frozen-RMSNorm runs were flat. Detail:
-[evals/agpt/20b](../evals/agpt/20b/README.md),
-[evals/agpt/2b](../evals/agpt/2b/README.md).
+[evals/agpt/20b](../../evals/agpt/20b/README.md),
+[evals/agpt/2b](../../evals/agpt/2b/README.md).
 
 ---
 
@@ -219,7 +219,7 @@ A production-batch (GBS=6144) LR-finder on 2026-06-27 then showed **AdamW
 sits on a NaN cliff** at production scale (usable ceiling ~7e-7), while
 **mano (~3e-6) and SophiaG (~1e-6) train clean** — which is what made the
 80B launch (Section 4.3) possible. Detail:
-[80b/README](../production/agpt/80b/README.md). The underlying TP=2 /
+[80b/README](../../production/agpt/80b/README.md). The underlying TP=2 /
 LBS>1 grad-path overflow remains an open, upstream-worthy bug with two
 cheap reproducers.
 
@@ -251,7 +251,7 @@ multi-day runs impossible without tooling. Delivered this quarter:
 - **Bad-node failover wrapper** (production-validated 2026-05-23: caught a
   real silent hang at step 37, swapped the bad node, recovered cleanly),
   later replaced by **native `ezpz launch --auto-retry`** submit scripts
-  for 2B/20B/80B. ([bad-node-failover](../guides/bad-node-failover.md))
+  for 2B/20B/80B. ([bad-node-failover](../../guides/bad-node-failover.md))
 - **Silent-hang watchdog** (`--timeout`) so a stalled collective aborts
   at a deadline instead of burning the full PBS walltime.
 - **Walltime-aware checkpointing** — force a final checkpoint before the
@@ -263,7 +263,7 @@ multi-day runs impossible without tooling. Delivered this quarter:
 
 The project tracks `pytorch/torchtitan` main continuously — **~30+
 upstream syncs absorbed and replayed** this quarter (sync log:
-[upstream-sync.md](../upstream-sync.md)) — and contributed fixes back:
+[upstream-sync.md](../../upstream-sync.md)) — and contributed fixes back:
 
 - **pytorch/pytorch #184767** (xccl `_set_pg_timeout` dispatch) — filed;
   closed in deference to the overlapping Intel-side PR #183625. A local
@@ -290,14 +290,14 @@ upstream syncs absorbed and replayed** this quarter (sync log:
 - **Optimizer / architecture research platform**: implemented Mano,
   SPAM, and TorchMuon optimizers plus QK-Norm, logit-softcapping, and
   ReLU^2 architecture variants, run as a 40+ experiment competition with
-  live tracking. ([competitions](../records/competitions/README.md))
+  live tracking. ([competitions](../competitions/README.md))
 
 ---
 
 ## 7. Platform / XPU Findings
 
 Recurring Intel-XPU-specific constraints documented this quarter (full
-list in [guides/known-issues.md](../guides/known-issues.md)):
+list in [guides/known-issues.md](../../guides/known-issues.md)):
 
 - **torch 2.14 (py313)** `torch.compile` segfaults in the Triton 3.7.2
   XPU backend — stay on torch 2.13 (eager works, compile does not at 80B).
@@ -315,7 +315,7 @@ list in [guides/known-issues.md](../guides/known-issues.md)):
 1. **Aurora 512N queue starvation** — the single biggest throughput
    drag; the 512N chains lost 3+ weeks of wall-clock to scheduling
    contention. Candidate fix: a project reservation or PI->ALCF priority
-   discussion. ([analysis](../production/queue-wait-analysis.md))
+   discussion. ([analysis](../../production/queue-wait-analysis.md))
 2. **80B scale > 512N unproven** — 1024N/2048N have a documented init
    crash (`set_determinism` at 12,288+ ranks); real 2048N training is not
    yet submit-ready (would force pipeline parallelism, never validated for
@@ -362,5 +362,5 @@ PRs** (pytorch/pytorch #184767, pytorch/torchtitan #3436, saforem2 PR
 fixed.
 
 Branch: [`ezpz`](https://github.com/saforem2/torchtitan/tree/ezpz) ·
-Docs root: [README.md](../README.md) ·
-Live production: [production/README.md](../production/README.md)
+Docs root: [README.md](../../README.md) ·
+Live production: [production/README.md](../../production/README.md)
