@@ -10,6 +10,10 @@
 #   1. docs -> docs   every ](...md) target resolves
 #   2. code -> docs   every experiments/ezpz/docs/... path named in a .py/.sh
 #                     still exists
+#   3. depth-counted  no script UNDER docs/ computes a path by counting
+#      paths          parents[N] -- that silently resolves elsewhere when the
+#                     script moves and renders an EMPTY chart instead of
+#                     failing, which (1) and (2) cannot see
 #
 # The plan's version only did (1). (2) matters more in practice: the pinned
 # production clones pull separately, so a docs move that breaks a path
@@ -56,6 +60,24 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
             seen.add(key)
             if not os.path.exists(os.path.join(docs, m.group(1))):
                 bad.append("(code) %s -> experiments/ezpz/docs/%s" % key)
+
+# 3. depth-counted repo-root paths in scripts under docs/
+# A plotter that does Path(__file__).resolve().parents[N] keeps working until
+# the file moves between directory levels; then it silently points somewhere
+# else, loads nothing, and emits an empty figure that refresh_all.sh commits.
+# Checks (1) and (2) are blind to it -- they only look at markdown links.
+depth = re.compile(r'Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]')
+for r, dirs, files in os.walk(docs):
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
+    for fn in files:
+        if not fn.endswith(".py"): continue
+        p = os.path.join(r, fn)
+        for m in depth.finditer(open(p, errors="replace").read()):
+            bad.append(
+                "(depth) %s -> parents[%s] breaks silently if this file moves; "
+                "use a marker-anchored _repo_root() walk"
+                % (os.path.relpath(p, root), m.group(1))
+            )
 
 if bad:
     print("DANGLING references (%d):" % len(bad))
