@@ -138,8 +138,8 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-19 |
-| [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-14 |
-| [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
+| [AuroraGPT Sync Notes](records/meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-14 |
+| [Meeting Notes Index](records/meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](records/summaries/2026-04-27.md) | 2-week retrospective | 2026-08-14 |
 | [Periodic Summaries Index](records/summaries/README.md) | Index of 2-week / monthly retros | 2026-08-16 |
 

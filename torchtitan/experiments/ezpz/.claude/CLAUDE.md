@@ -355,7 +355,7 @@ that touches one of these areas.
   `shepherd died from signal 9` on four different nodes. step-N
   ckpts saved cleanly so trajectories are resumable. Open question
   whether to file an ALCF support ticket — see
-  [`docs/meeting-notes/agpt-sync.md`](../docs/meeting-notes/agpt-sync.md).
+  [`docs/records/meeting-notes/agpt-sync.md`](../docs/records/meeting-notes/agpt-sync.md).
 
 - **1024N init OOM/SIGSEGV (2026-05-04).** First-ever 1024N attempts
   on the v2 stack (8463182 2B, 8463183 20B) both crashed at startup
@@ -618,7 +618,7 @@ moved up to "Golden Rules".
   for reproducing v1 numbers — see `submit/README.md`.
 - **Date filenames as `YYYY-MM-DD`** for any per-day artifacts.
   Per-recurring-meeting docs use a stable filename with `## YYYY-MM-DD`
-  sections inside (see `docs/meeting-notes/agpt-sync.md`).
+  sections inside (see `docs/records/meeting-notes/agpt-sync.md`).
 - **Cross-link related docs.** Production READMEs link to eval READMEs
   and vice versa; the bf16-norm-freeze guide links to both training
   overlays and lm-eval figures.
