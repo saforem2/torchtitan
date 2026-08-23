@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-08-16
+> Last updated: 2026-08-17
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
