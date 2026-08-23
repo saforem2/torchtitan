@@ -92,5 +92,5 @@ Aurora yet. The 2026-06-07 sweep at n=8 caught one OK row for moe_10b_2b:
 
 ## See Also
 
-- [MoE configs](../configs/moe.md) — model architecture details
+- [MoE configs](../reference/configs/moe.md) — model architecture details
 - [Experiment reports](../experiments/moe/) — per-run benchmark logs
