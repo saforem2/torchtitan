@@ -47,7 +47,17 @@ for r, dirs, files in os.walk(docs):
                 bad.append("%s -> %s" % (os.path.relpath(p, root), t))
 
 # 2. code -> docs
-pat = re.compile(r'experiments/ezpz/docs/([A-Za-z0-9_./-]+\.md)')
+# Match BOTH reference spellings -- the full 'experiments/ezpz/docs/...' and
+# the bare 'docs/...' most comments use. Requiring the long prefix was why
+# eight stale references survived the earlier moves.
+#
+# Match .md files AND bare directory paths: a stale DIRECTORY reference is
+# worse than a stale file one, because a writer (a plot script's output dir)
+# silently recreates it rather than erroring.
+pat = re.compile(
+    r'(?:experiments/ezpz/)?docs/'
+    r'([A-Za-z0-9_./-]+?\.md|[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/)'
+)
 seen = set()
 for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
     dirs[:] = [d for d in dirs if not d.startswith(".") and d != "docs"]

@@ -9,7 +9,7 @@
 #
 # Convert + eval the v2 20B SophiaG checkpoints (fp32 master) and
 # produce results that can be directly compared against the v1
-# bf16-tainted eval table in docs/evals/agpt/20b/README.md.
+# bf16-tainted eval table in docs/records/evals/agpt/20b/README.md.
 #
 # v2 ckpt path:
 #   /flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/

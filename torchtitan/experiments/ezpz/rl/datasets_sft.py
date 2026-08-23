@@ -1006,8 +1006,8 @@ register_sft_dataset(
 # OpenThoughts-114k -- pre-distilled frontier reasoning traces (DeepSeek-R1),
 # reformatted from the OpenThoughts <|begin_of_thought|>/<|begin_of_solution|>
 # markers into our <think>/<answer>\boxed{} envelope. The breadth half of the
-# reasoning-distillation cold-start (docs/production/sft/agpt/2b-mds/
-# distill-cot-mix/): OpenThoughts spans math + code + science reasoning, vs
+# reasoning-distillation cold-start (the distill_cot_mix recipe; no report
+# written yet): OpenThoughts spans math + code + science reasoning, vs
 # OpenR1-Math's math-only. Non-math math-only cold-starts were too narrow.
 # ---------------------------------------------------------------------------
 
@@ -1123,7 +1123,7 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # distill_cot_mix -- reasoning-distillation cold-start mix
-# (docs/production/sft/agpt/2b-mds/distill-cot-mix/)
+# (TODO: no report written yet -- the docs/ dir this named was never created)
 # ---------------------------------------------------------------------------
 
 
@@ -1191,7 +1191,7 @@ def _build_distill_cot_mix(
     seed: int = 42,
 ):
     """Reasoning-distillation cold-start mix: broad frontier CoT traces
-    (docs/production/sft/agpt/2b-mds/distill-cot-mix/).
+    (TODO: no report written yet for this recipe).
 
     Replaces the team's narrow math-only CoT cold-start with breadth from
     pre-distilled frontier reasoning traces:

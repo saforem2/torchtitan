@@ -12,8 +12,8 @@ be compared directly:
     - 20B 256N (per-token comparator)
     - 20B 512N sync (canonical 20B chain)
 
-Writes to docs/evals/figures/all_production_evals.svg (single artifact
-referenced from docs/evals/README.md as the landing-page chart).
+Writes to docs/records/evals/figures/all_production_evals.svg (single artifact
+referenced from docs/records/evals/README.md as the landing-page chart).
 
 Run:
     python3 -m torchtitan.experiments.ezpz.eval.plot_evals_combined

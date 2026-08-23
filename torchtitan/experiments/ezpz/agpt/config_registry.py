@@ -206,7 +206,7 @@ def agpt(
     # never train. FSDP MixedPrecisionPolicy keeps the bf16 cast for
     # forward/backward; reduce stays fp32 — the fp32 master copy is
     # what enables sub-ulp accumulation.
-    # See docs/reference/known-bugs/training-dtype-bf16-norm-freeze.md.
+    # See docs/reference/guides/training-dtype-bf16-norm-freeze.md.
     dtype: Literal["bfloat16", "float32"] = "float32",
     compile: bool = True,
     fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default",

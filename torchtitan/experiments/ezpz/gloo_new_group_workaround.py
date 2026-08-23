@@ -36,7 +36,7 @@ line ~5906 is False, _get_backend(xpu) is skipped, and the gloo group
 builds cleanly on cpu. xccl/xpu groups pass through untouched. Idempotent;
 no-op off XPU. Remove when upstream makes the checkpointer gloo-subgroup
 creation defensive, or binds gloo universally on XPU. See
-docs/upstream-issues/checkpoint_async_gloo_on_xpu.md.
+docs/outbound/upstream-issues/checkpoint_async_gloo_on_xpu.md.
 """
 
 import torch

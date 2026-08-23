@@ -9,7 +9,7 @@
 #
 # Convert + eval the v2 2B SophiaG checkpoints (fp32 master) and
 # produce results that can be directly compared against the v1 256N
-# eval table in docs/evals/agpt/2b/README.md (and v1 256N+512N eval
+# eval table in docs/records/evals/agpt/2b/README.md (and v1 256N+512N eval
 # results sit at outputs/evals/agpt-2b/).
 #
 # v2 ckpt paths (both 256N and 512N v2 runs):

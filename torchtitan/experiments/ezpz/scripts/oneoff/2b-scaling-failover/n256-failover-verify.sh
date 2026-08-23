@@ -20,7 +20,7 @@
 # FAILOVER_MAX_RETRIES=0 reflects that (no spares to swap in).
 #
 # Once it lands and we read TPS/MFU off the .o log, compare to the
-# canonical n=256 LBS=2 row in docs/scaling/agpt-2b.md:
+# canonical n=256 LBS=2 row in docs/reference/scaling/agpt-2b.md:
 #     n=256 GBS=6,144 TPS=5,002 MFU=18.77% (2026-05-29 sweep)
 # If we land near that with the failover path, the 8542015 (n=512)
 # probe data is trustworthy.

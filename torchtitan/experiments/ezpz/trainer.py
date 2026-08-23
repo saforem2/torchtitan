@@ -79,7 +79,7 @@ def _set_pg_timeouts_xpu_aware(
     and never calls ``_set_default_timeout``. Result: ``train_timeout_seconds``
     silently no-ops and a hung collective burns the full PBS walltime
     instead of aborting (see
-    ``docs/upstream-issues/train_timeout_xpu_silent_noop.md``).
+    ``docs/outbound/upstream-issues/train_timeout_xpu_silent_noop.md``).
 
     Workaround: set the timeout on every mesh PG ourselves (with the
     safety barrier the upstream helper uses), then additionally call
