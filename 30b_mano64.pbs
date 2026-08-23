@@ -75,14 +75,54 @@ echo "log:      $LOG"
 echo "64 nodes x 12 = 768 ranks, LBS=5, GBS=15360 -> GAS=4, 62.9M tok/step"
 echo ""
 
+# BAD-NODE PREFLIGHT. Job 12473668 died rc=127 after step 1 with
+# x1921c4s3b0n0 in the allocation -- the node documented in
+# docs/guides/known-bugs/sunspot-x1921c4s3b0n0-bad-mount.md as unable to see
+# /lus/tegu. One bad rank aborts the whole MPI job, so a single node takes down
+# all 64. The autoretry scripts exclude it via their health probe; a bare PBS
+# script like this one does not, which is how it got in.
+#
+# Probe every node for the project path and drop any that cannot see it. This
+# catches the known-bad host AND any other node with the same fault, which is
+# better than hardcoding one hostname.
+NODEFILE_OK="$PBS_NODEFILE"
+if [ -n "$PBS_NODEFILE" ] && [ -r "$PBS_NODEFILE" ]; then
+    NODEFILE_OK="$LOGD/nodefile.healthy"
+    : > "$NODEFILE_OK"
+    BAD=0
+    while read -r h; do
+        [ -z "$h" ] && continue
+        if timeout 30 ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$h" \
+             "cd $PWD && test -d torchtitan/experiments/ezpz" >/dev/null 2>&1; then
+            echo "$h" >> "$NODEFILE_OK"
+        else
+            echo "  EXCLUDING unhealthy node: $h"
+            BAD=$((BAD+1))
+        fi
+    done < "$PBS_NODEFILE"
+    NHEALTHY=$(wc -l < "$NODEFILE_OK")
+    echo "  healthy nodes: $NHEALTHY (excluded $BAD)"
+    if [ "$NHEALTHY" -lt 32 ]; then
+        echo "ABORT: only $NHEALTHY healthy nodes, need >=32 to be worth the run"
+        echo "30B_MANO64_DONE"; exit 1
+    fi
+    export PBS_NODEFILE="$NODEFILE_OK"
+    # recompute ranks/GBS from the SURVIVING node count so GAS stays 4
+    NRANKS=$((NHEALTHY * 12))
+    GBS=$((5 * NRANKS * 4))
+    echo "  -> nproc=$NRANKS  global_batch_size=$GBS  (GAS=4 preserved)"
+else
+    NRANKS=768; GBS=15360
+fi
+
 export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
 
-timeout 25200 ezpz launch --nproc 768 -ppn 12 -- \
+timeout 25200 ezpz launch --nproc "$NRANKS" -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_30b_olmo2tok_mano \
     --training.steps=200 --training.seq-len=4096 \
     --training.local-batch-size=5 \
-    --training.global-batch-size=15360 \
+    --training.global-batch-size="$GBS" \
     --parallelism.tensor-parallel-degree=1 \
     --lr-scheduler.warmup-steps=20 \
     --checkpoint.enable \
