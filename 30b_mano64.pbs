@@ -88,26 +88,35 @@ echo ""
 NODEFILE_OK="$PBS_NODEFILE"
 if [ -n "$PBS_NODEFILE" ] && [ -r "$PBS_NODEFILE" ]; then
     NODEFILE_OK="$LOGD/nodefile.healthy"
-    : > "$NODEFILE_OK"
-    BAD=0
+    PROBE_OUT="$LOGD/probe"; mkdir -p "$PROBE_OUT"
+    NTOTAL=$(grep -c . "$PBS_NODEFILE")
+    echo "  probing $NTOTAL nodes for the project path..."
+    # `ssh -n` is REQUIRED: without it ssh reads the loop's stdin and eats the
+    # nodefile after the first iteration. Job 12473674 died exactly that way --
+    # "healthy nodes: 1 (excluded 0)", i.e. nothing was unhealthy, the loop
+    # just never saw lines 2..64. Probes run in PARALLEL because 64 serial
+    # 30s-timeout probes could burn half an hour of an 8h allocation.
     while read -r h; do
         [ -z "$h" ] && continue
-        if timeout 30 ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$h" \
-             "cd $PWD && test -d torchtitan/experiments/ezpz" >/dev/null 2>&1; then
-            echo "$h" >> "$NODEFILE_OK"
-        else
-            echo "  EXCLUDING unhealthy node: $h"
-            BAD=$((BAD+1))
-        fi
+        ( timeout 30 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "$h" \
+            "cd $PWD && test -d torchtitan/experiments/ezpz" >/dev/null 2>&1 \
+            && echo "$h" > "$PROBE_OUT/ok.$h" ) &
     done < "$PBS_NODEFILE"
-    NHEALTHY=$(wc -l < "$NODEFILE_OK")
-    echo "  healthy nodes: $NHEALTHY (excluded $BAD)"
+    wait
+    cat "$PROBE_OUT"/ok.* 2>/dev/null | sort -u > "$NODEFILE_OK"
+    NHEALTHY=$(grep -c . "$NODEFILE_OK")
+    BAD=$((NTOTAL - NHEALTHY))
+    if [ "$BAD" -gt 0 ]; then
+        echo "  EXCLUDED $BAD unhealthy node(s):"
+        comm -23 <(sort -u "$PBS_NODEFILE") <(sort -u "$NODEFILE_OK") | sed 's/^/    /'
+    fi
+    echo "  healthy nodes: $NHEALTHY of $NTOTAL"
     if [ "$NHEALTHY" -lt 32 ]; then
         echo "ABORT: only $NHEALTHY healthy nodes, need >=32 to be worth the run"
         echo "30B_MANO64_DONE"; exit 1
     fi
     export PBS_NODEFILE="$NODEFILE_OK"
-    # recompute ranks/GBS from the SURVIVING node count so GAS stays 4
+    # recompute ranks/GBS from the SURVIVING node count so GAS stays exactly 4
     NRANKS=$((NHEALTHY * 12))
     GBS=$((5 * NRANKS * 4))
     echo "  -> nproc=$NRANKS  global_batch_size=$GBS  (GAS=4 preserved)"
