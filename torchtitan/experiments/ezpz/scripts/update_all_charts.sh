@@ -46,8 +46,8 @@ declare -A SCRIPTS=(
     [production_combined]="torchtitan/experiments/ezpz/utils/plot_production_combined.py"
     [production_wandb]="torchtitan/experiments/ezpz/utils/plot_production_wandb.py"
     [evals_combined]="torchtitan/experiments/ezpz/eval/plot_evals_combined.py"
-    [evals_2b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py"
-    [evals_20b_overview]="torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py"
+    [evals_2b_overview]="torchtitan/experiments/ezpz/docs/records/evals/agpt/2b/plot_eval_overview.py"
+    [evals_20b_overview]="torchtitan/experiments/ezpz/docs/records/evals/agpt/20b/plot_eval_overview.py"
     # Non-manifest production subtrees with their own bespoke plotters. These
     # run no-arg (CPT reads its in-repo figures/*.tsv; SFT/GRPO read a Sunspot
     # trainer_state.json and skip cleanly if absent), so they slot into the

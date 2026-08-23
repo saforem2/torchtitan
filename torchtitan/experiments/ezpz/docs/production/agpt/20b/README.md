@@ -34,7 +34,7 @@ ladder (mmlu/gsm8k/arc_challenge) was backfilled across the full chain on 2026-0
 - Winogrande `acc` 0.493 → **0.586** (+9pp)
 
 Monotonic lift across 35+ consecutive ckpts. See
-[`evals/agpt/20b/`](../../../evals/agpt/20b/README.md) for the full
+[`evals/agpt/20b/`](../../../records/evals/agpt/20b/README.md) for the full
 per-task table.
 
 ## Snapshot
@@ -66,7 +66,7 @@ cont (8521628) Q, cont (8521632) H.
 
 ## Eval scores
 
-See [`docs/evals/agpt/20b/`](../../../evals/agpt/20b/README.md) for the
+See [`docs/evals/agpt/20b/`](../../../records/evals/agpt/20b/README.md) for the
 current 20B lm-eval tables and the **🏁 headline** finding above. At
 step 4,400 (~442.9B tokens) v2 512N sync reaches ARC-Easy **0.6641**
 and HellaSwag `acc_norm` **0.6346** — beating the 2B 256N async chain

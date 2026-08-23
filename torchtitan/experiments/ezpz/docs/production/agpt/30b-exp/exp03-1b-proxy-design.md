@@ -552,4 +552,4 @@ a proposal or paper.
 - [`../../../notes/data-strategy-after-olmo-mix-2026-07.md`](../../../notes/data-strategy-after-olmo-mix-2026-07.md) -- corpus survey
 - [`../2b/n512/README.md`](../2b/n512/README.md) -- the completed 4.674T chain that motivates this
 - [`../../../scaling/agpt-2b.md`](../../../reference/scaling/agpt-2b.md) -- the measured throughput table used for sizing
-- [`../../../evals/agpt/2b/README.md`](../../../evals/agpt/2b/README.md) -- eval history the null distribution comes from
+- [`../../../evals/agpt/2b/README.md`](../../../records/evals/agpt/2b/README.md) -- eval history the null distribution comes from

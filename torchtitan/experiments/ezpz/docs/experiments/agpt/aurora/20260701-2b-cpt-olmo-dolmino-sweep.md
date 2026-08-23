@@ -11,7 +11,7 @@
 The 2B 256N base **completed** stage-1 at step-92,859 (4.674T tokens) and
 its benchmarks are **plateaued** -- over the final ~635B tokens HellaSwag
 moved 0.5595->0.5610 and ARC-Easy held 0.651+-0.003 (see
-[`docs/evals/agpt/2b`](../../../evals/agpt/2b/README.md)). More olmo-mix
+[`docs/evals/agpt/2b`](../../../records/evals/agpt/2b/README.md)). More olmo-mix
 tokens cannot help a saturated 2B, so the next lever is **continued
 pretraining on a different data distribution**. This sweep measures how
 much a higher-quality mid-training mix (dolmino-mix-1124) lifts the
@@ -100,5 +100,5 @@ existing invocations are unaffected; interactive `"$@"` still works).
 
 ## Cross-refs
 
-- Base eval + plateau: [`docs/evals/agpt/2b`](../../../evals/agpt/2b/README.md)
+- Base eval + plateau: [`docs/evals/agpt/2b`](../../../records/evals/agpt/2b/README.md)
 - Data-list builder: `torchtitan/experiments/ezpz/utils/build_cpt_mixes.py`

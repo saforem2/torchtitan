@@ -26,7 +26,7 @@
 > ARC-C **0.3797** (+1.5pp jump), Wino 0.5864. Steady monotonic
 > climb continues with ARC-C breakout this step.
 >
-> **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md).
+> **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../records/evals/agpt/20b/README.md).
 > **🏁 The 20B 512N sync chain is now beating 2B 256N async per token
 > on every benchmark** — ARC-Easy 0.665, HellaSwag norm 0.574 at
 > step-3200 (vs 2B 256N async ~0.646 / ~0.547 at step-45,500). First

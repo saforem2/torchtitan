@@ -10,7 +10,7 @@
 
 This report synthesizes the five two-week retrospectives written during
 the quarter ([index](README.md)) plus the live
-[production](../../production/README.md) and [eval](../../evals/README.md)
+[production](../../production/README.md) and [eval](../evals/README.md)
 trackers. Section anchors link to the underlying per-trajectory pages so
 every claim is traceable to data on disk or in W&B.
 
@@ -100,7 +100,7 @@ raising at the program level.
 **Cross-cutting deliverable not itemized in the table:** standing up the
 torchtitan+`ezpz` stack on Aurora XPU as a validated alternative to the
 Megatron-DeepSpeed pipeline (the pre-torchtitan 2B-MDS run remains the
-[reference baseline](../../evals/agpt/2b-mds/README.md)). This is the
+[reference baseline](../evals/agpt/2b-mds/README.md)). This is the
 enabling work behind all four milestones above.
 
 ---
@@ -176,7 +176,7 @@ regression. Plan:
 
 Benchmarked with
 [lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness)
-on a 7-task suite. Live tables: [evals/README.md](../../evals/README.md).
+on a 7-task suite. Live tables: [evals/README.md](../evals/README.md).
 
 **The 20B 512N chain converges qualitatively faster per token than 2B**,
 monotonically across 35+ consecutive checkpoints (step-100 -> step-4,400,
@@ -197,8 +197,8 @@ converging faster per token, not just per FLOP.
 These curves are also the **smoking gun for the bf16-master fix**: the v2
 (fp32-master) chains climb steadily on ARC / HellaSwag / Winogrande
 where the v1 frozen-RMSNorm runs were flat. Detail:
-[evals/agpt/20b](../../evals/agpt/20b/README.md),
-[evals/agpt/2b](../../evals/agpt/2b/README.md).
+[evals/agpt/20b](../evals/agpt/20b/README.md),
+[evals/agpt/2b](../evals/agpt/2b/README.md).
 
 ---
 

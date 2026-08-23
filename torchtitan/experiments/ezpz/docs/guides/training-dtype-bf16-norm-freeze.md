@@ -171,10 +171,10 @@ it has enough tokens.
 
 - 2B v1-vs-v2 figure:
   [`docs/evals/agpt/2b/figures/eval_overview.svg`](../evals/agpt/2b/figures/eval_overview.svg)
-  ([full writeup](../evals/agpt/2b/README.md))
+  ([full writeup](../records/evals/agpt/2b/README.md))
 - 20B v1-vs-v2 figure:
   [`docs/evals/agpt/20b/figures/eval_overview.svg`](../evals/agpt/20b/figures/eval_overview.svg)
-  ([full writeup](../evals/agpt/20b/README.md))
+  ([full writeup](../records/evals/agpt/20b/README.md))
 
 Plot scripts: `docs/evals/agpt/{2b,20b}/plot_eval_overview.py`.
 
@@ -188,7 +188,7 @@ Per the [2B production page](../production/agpt/2b/README.md):
 For context, v1's mean across steps 1K–18K (≈453B tokens) was
 ARC-Easy 27.23 and HellaSwag 25.20 (both percentages, both within
 ~2pp of the random baseline). See the
-[v1 results table](../evals/agpt/2b/README.md) for the per-step
+[v1 results table](../records/evals/agpt/2b/README.md) for the per-step
 breakdown — v1 oscillates in noise and never escapes the
 ~25-27% range.
 

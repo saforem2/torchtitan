@@ -144,7 +144,7 @@ HSn **0.5552**, ARC-E **0.5939**, ARC-C **0.3294**, **Wino 0.5627 (best yet)**. 
 **🏁 Eval headline (35+ ckpts, step-900 → step-4,400)**: ARC-Easy `acc` 0.463 → **0.664** (+20pp), HellaSwag `acc_norm`
 0.296 → **0.635** (+34pp), ARC-C `acc_norm` 0.224 → **0.380** (+16pp), Winogrande 0.493 → 0.586 (+9pp).
 **20B 512N sync now beats 2B 256N async on every benchmark per token.** Monotonic across 35+ consecutive ckpts. See
-[`evals/agpt/20b/`](../../evals/agpt/20b/README.md).
+[`evals/agpt/20b/`](../../records/evals/agpt/20b/README.md).
 
 ## Other jobs (independent ckpt trajectories)
 
@@ -182,7 +182,7 @@ SophiaG trajectory look like?" baseline. Training curves (loss /
 grad_norm / TFLOPS / TPS) and eval scores live at:
 
 - [`production/agpt/2b-mds/`](2b-mds/README.md) — training curves
-- [`evals/agpt/2b-mds/`](../../evals/agpt/2b-mds/README.md) — lm-eval scores
+- [`evals/agpt/2b-mds/`](../../records/evals/agpt/2b-mds/README.md) — lm-eval scores
 
 ## Historical v1 (bf16-tainted) runs
 

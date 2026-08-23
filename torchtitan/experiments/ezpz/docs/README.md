@@ -47,8 +47,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-17 | [Concurrent-job checkpoint collision on 20b_v2_256](./guides/known-bugs/concurrent-job-ckpt-collision.md) |
 | 2026-08-17 | [2B-512 constant-LR fork: the decay phase is worth <0.01 nats so far](./experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md) |
 | 2026-08-17 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](./experiments/agpt/aurora/20260816-umbrella-8756070.md) |
-| 2026-08-17 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
-| 2026-08-17 | [Evaluation Results](./evals/README.md) |
+| 2026-08-17 | [Evaluation Results — agpt 20B](records/evals/agpt/20b/README.md) |
+| 2026-08-17 | [Evaluation Results](records/evals/README.md) |
 | 2026-08-16 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-08-16 | [Summaries](records/summaries/README.md) |
 
@@ -77,7 +77,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-16 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](./guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
 | 2026-08-16 | [--debug.deterministic is not bit-reproducible on XPU (2026-08-16)](./guides/known-bugs/xpu-determinism-rank-seqlen-interaction.md) |
 | 2026-08-16 | [Aurora: 2098-node job killed at 9h13m of 24h with Exit_status = -14](./guides/known-bugs/aurora-job-8756070-exit-14.md) |
-| 2026-08-16 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
+| 2026-08-16 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](records/evals/eval-landscape-2026-07.md) |
 | 2026-08-16 | [Claude Session Log](./claude-sessions.md) |
 | 2026-08-14 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](records/summaries/2026-Q2-incite.md) |
 | 2026-08-14 | [2026-07-26 to 2026-08-10 -- ~15-Day Summary](records/summaries/2026-08-10.md) |
@@ -115,10 +115,10 @@ ARC-Challenge / Winogrande vs the (frozen-norm) v1 baseline.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [agpt 2B evals](./evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-07-24 |
-| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-17 |
-| [agpt 2B-MDS evals](./evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-07-09 |
-| [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-08-17 |
+| [agpt 2B evals](records/evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-07-24 |
+| [agpt 20B evals](records/evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-17 |
+| [agpt 2B-MDS evals](records/evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-07-09 |
+| [Eval Index](records/evals/README.md) | Top-level eval landing page | 2026-08-17 |
 
 ## Big Findings (post-mortems and live workarounds)
 

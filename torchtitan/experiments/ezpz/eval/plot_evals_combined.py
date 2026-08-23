@@ -42,7 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 EVALS_DIR = REPO_ROOT / "outputs" / "evals"
 OUT_PATH = (
     REPO_ROOT
-    / "torchtitan/experiments/ezpz/docs/evals/figures/all_production_evals.svg"
+    / "torchtitan/experiments/ezpz/docs/records/evals/figures/all_production_evals.svg"
 )
 
 # Tokens-per-step for each trajectory (computed from GBS × SEQ_LEN where

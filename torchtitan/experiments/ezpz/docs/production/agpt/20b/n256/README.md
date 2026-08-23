@@ -1,6 +1,6 @@
 # Production Training — agpt 20B @ 256 nodes
 
-> **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md)
+> **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../records/evals/agpt/20b/README.md)
 > for the v2 lm-eval results.
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)

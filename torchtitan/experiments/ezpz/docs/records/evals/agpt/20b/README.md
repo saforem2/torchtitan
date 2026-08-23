@@ -4,13 +4,13 @@
 >
 > Last updated: 2026-08-17
 >
-> **Training curves:** see [`docs/production/agpt/20b/`](../../../production/agpt/20b/README.md)
+> **Training curves:** see [`docs/production/agpt/20b/`](../../../../production/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
 >
 > **Note:** the historical v1 results are from the bf16-tainted
 > 20B 256N SophiaG run (steps 100-2,500), where RMSNorm.weight was
 > frozen at 1.0 due to sub-ULP master-weight updates (see
-> [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md)).
+> [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../../guides/training-dtype-bf16-norm-freeze.md)).
 > All v1 scores hover near random — this is consistent with the model
 > having no trainable normalization. The fp32-master v2 run
 > (`agpt-20b-v2`, 512N) advanced cleanly through step-4,500 (453B
@@ -104,8 +104,8 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 > direction is also unreliable.
 >
 > Full account:
-> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
-> and [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md).
+> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md)
+> and [`rope-flavor-mismatch.md`](../../../../guides/known-bugs/rope-flavor-mismatch.md).
 
 **20B 512N sync at step-4,400 beats 2B 256N async at step-69,900 on
 every benchmark per token** — the bigger model continues to outperform

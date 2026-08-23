@@ -10,7 +10,7 @@ The 2B 256N base **completed** stage-1 pretraining at step-92,859 (4.674T
 tokens, 100%) and **plateaued**: over the final ~635B tokens its benchmarks
 were dead flat (HellaSwag 0.560, ARC-Easy 0.651) and validation loss saturated
 at **~2.80** on the olmo-mix-1124 distribution. See
-[`docs/evals/agpt/2b`](../../evals/agpt/2b/README.md). More olmo-mix tokens
+[`docs/evals/agpt/2b`](../../records/evals/agpt/2b/README.md). More olmo-mix tokens
 cannot help a saturated 2B, so the next lever is **continued pre-training on a
 different, higher-quality data distribution.**
 
@@ -124,7 +124,7 @@ mirrors up to its stage-1 boundary) did a much larger stage-2:
 
 Our completed v2 2B base = **4.674T = exactly the MDS stage-1 boundary**, so
 the direct stage-2 analog is **~2.391T tokens** (~8x the 300B pilot). See
-[`docs/evals/agpt/2b-mds`](../../evals/agpt/2b-mds/README.md).
+[`docs/evals/agpt/2b-mds`](../../records/evals/agpt/2b-mds/README.md).
 
 ## Plan: two-phase (screen cheap, scale the winner)
 
@@ -175,5 +175,5 @@ applied, model-only fork loaded, trainers 0/1/3 regression-clean).
 
 - Launch/mechanism report:
   [`../../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md`](../../experiments/agpt/aurora/20260701-2b-cpt-olmo-dolmino-sweep.md)
-- Base plateau evidence: [`../../evals/agpt/2b`](../../evals/agpt/2b/README.md)
+- Base plateau evidence: [`../../evals/agpt/2b`](../../records/evals/agpt/2b/README.md)
 - Reproduce plot: `python3 docs/production/cpt/plot_cpt_loss.py --data-dir <tsv-dir>`

@@ -8,7 +8,7 @@
 > checkpoint dir.
 >
 > Training-side plots (loss / grad_norm / TFLOPS / TPS) live at
-> [`docs/production/agpt/2b-mds/`](../../../production/agpt/2b-mds/README.md).
+> [`docs/production/agpt/2b-mds/`](../../../../production/agpt/2b-mds/README.md).
 >
 > Last updated: 2026-07-09
 
@@ -84,7 +84,7 @@ deterministic; we average them.
   trajectory uses a separate converter
   (`eval/mds_to_hf.py`) and was *not* affected by the bf16-master
   RMSNorm-freeze bug — see
-  [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md).
+  [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../../guides/training-dtype-bf16-norm-freeze.md).
 
 - **HellaSwag** has the steepest early ramp: 0.36 → 0.59 by step 60K,
   then plateaus around 0.59. Strong signal for commonsense narrative

@@ -371,7 +371,7 @@ def main() -> None:
     parser.add_argument(
         "--docs-dir",
         type=Path,
-        default=repo_root / "torchtitan/experiments/ezpz/docs/evals/agpt",
+        default=repo_root / "torchtitan/experiments/ezpz/docs/records/evals/agpt",
         help="Base docs directory for plot output",
     )
     parser.add_argument(
