@@ -9,6 +9,13 @@
 #PBS -q prod
 #PBS -j oe
 
+# Disable core dumps. A crashing rank dumps its whole address space, so a
+# failed 20B leg writes ~45 GB per dumping rank into $HOME -- two of them from
+# the 2026-08-14 exit-127 crashes filled 90 GB of home quota before anyone
+# noticed (14 cores / 98.9 GB total when found). The crashes we actually chase
+# are diagnosed from the .o logs, not from cores.
+ulimit -c 0
+
 # ============================================================================
 # Umbrella job: advance ALL 4 canonical AGPT chains in ONE PBS allocation,
 # each launched via NATIVE `ezpz launch --auto-retry` (ezpz >= 0.17.1).

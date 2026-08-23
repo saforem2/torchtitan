@@ -5,6 +5,13 @@
 #PBS -l filesystems=home:flare
 #PBS -q prod
 #PBS -j oe
+
+# Disable core dumps. A crashing rank dumps its whole address space, so a
+# failed 20B leg writes ~45 GB per dumping rank into $HOME -- two of them from
+# the 2026-08-14 exit-127 crashes filled 90 GB of home quota before anyone
+# noticed (14 cores / 98.9 GB total when found). The crashes we actually chase
+# are diagnosed from the .o logs, not from cores.
+ulimit -c 0
 # select= overridden via qsub -l select=N (e.g. 522 = 512 train + 10 spare)
 
 # Native-auto-retry variant of submit_agpt_20b_aurora_venv_failover.sh.
@@ -72,7 +79,45 @@ cd "${PBS_O_WORKDIR:-$(pwd)}"
 # covers active + spare, so any swapped-in spare already has /tmp/.venv.
 ezpz_load_modules
 ezpz_setup_job
+# ezpz_setup_job exports MPICH_GPU_SUPPORT_ENABLED=1, but Polaris has no
+# runtime GTL (GPU Transport Layer) linked for our prebuilt torch, so GPU-aware
+# MPI is *requested* and unsatisfiable -- EVERY mpiexec aborts with:
+#   MPIDI_CRAY_init: GPU_SUPPORT_ENABLED is requested, but GTL library is not linked
+# That kills the `ezpz yeet` broadcast -> no /tmp/.venv -> the job dies in
+# seconds (exit 127). This killed legs 7405953-56 on 2026-08-12.
+#
+# We do GPU collectives through NCCL; MPI is only the rendezvous bootstrap, so
+# GPU-aware MPICH buys us nothing here. Disabling it is the fix.
+# Verified job 7434816 (2N): yeet OK, node-local import OK, 5 training steps
+# logged to W&B (run fanciful-cherry-3334), exit 0, no GTL error.
+# NOTE: craype-accel-nvidia80 does NOT fix this -- it only sets compile-time
+# vars (CRAY_ACCEL_TARGET / CRAYPE_LINK_TYPE), not runtime GTL linkage.
+export MPICH_GPU_SUPPORT_ENABLED=0
+# Polaris maintenance (2026-08-19) bumped Cray MPICH 9.0.1 -> 9.1.0, which
+# DELETED libmpi_gnu_123.so.12. darshan/3.4.4 (auto-linked by the Cray `cc`
+# wrapper, so it is baked into our mpi4py as NEEDED + RPATH) still requires that
+# soname, so every `import mpi4py` dies with:
+#   ImportError: libmpi_gnu_123.so.12: cannot open shared object file
+# -> ezpz cannot start -> no yeet -> no /tmp/.venv -> exit 127 in seconds.
+# This burned the whole 5-deep chain (7458292 + 7484829-32) in ~3 minutes.
+# The ABI is unchanged, only the soname was renamed, so a compat symlink to the
+# real 9.1.0 library resolves it. Scrubbing darshan from LD_LIBRARY_PATH does
+# NOT work -- the craype wrapper links it regardless.
+export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 source .venv/bin/activate
+# Clear any STALE node-local venv before broadcasting. Nodes can carry a
+# /tmp/.venv from an earlier job (e.g. the old conda-seeded one); if the yeet
+# does not overwrite it, ranks import the stale venv and die on
+# `No module named importlib.metadata`. Cheap insurance at 130 nodes.
+_nnodes_all=$(wc -l < "${PBS_NODEFILE}")
+# `timeout` is load-bearing: this mpiexec fans out to every node, and on a
+# contended filesystem it can HANG rather than fail. `2>/dev/null || true`
+# guards against a non-zero exit but NOT against hanging -- probe 7552666 sat
+# here for 1h40m holding 64 nodes and produced no output at all before being
+# walltime-killed. 300s is far more than a recursive rm of a node-local dir
+# needs; if it is exceeded, skip the cleanup and let the yeet overwrite.
+timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
+unset _nnodes_all
 if [[ -f .venv.tar.gz ]]; then
     ezpz yeet --src .venv.tar.gz
 else
@@ -256,6 +301,7 @@ ezpz launch \
     --spare-nodes auto \
     --timeout "${IDLE_TIMEOUT:-1800}" \
     "${mfr_args[@]}" \
+    --no-transfer \
     -- \
     python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt \

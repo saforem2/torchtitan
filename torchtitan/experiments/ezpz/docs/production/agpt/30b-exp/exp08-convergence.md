@@ -348,6 +348,175 @@ while `timeout 20400` stayed put. It died at step 871 with half its
 allocation unused. Scale both clocks together or the shorter one silently
 wins.
 
+## Downstream eval: hellaswag is above chance (job 12473637)
+
+The 2000-step model was converted to HF and evaluated zero-shot. All six tasks
+completed in 11h50 of a 24h walltime.
+
+| task | score | stderr | chance | sigma | |
+|---|---:|---:|---:|---:|---|
+| arc_challenge | 26.11% | 1.28 | 25% | +0.9 | at chance |
+| arc_easy | 25.67% | 0.90 | 25% | +0.8 | at chance |
+| **hellaswag** | **27.14%** | 0.44 | 25% | **+4.8** | **SIGNIFICANT** |
+| **mmlu** | **26.24%** | 0.37 | 25% | **+3.3** | **SIGNIFICANT** |
+| piqa | 51.20% | 1.17 | 50% | +1.0 | at chance |
+| winogrande | 51.38% | 1.40 | 50% | +1.0 | at chance |
+
+Combined across all six (Stouffer): **+4.81 sigma.**
+
+(`acc_norm` where defined, `acc` otherwise. winogrande and mmlu have no
+`acc_norm` -- equal-length completions, so length normalization does not
+apply.)
+
+**Both individually significant tasks are the two with the most requests**,
+and that is the whole story: hellaswag has 40,168 and mmlu 56,168, giving
+stderr 0.44 and 0.37 against arc_challenge's 1.28. Every task shows the same
+1-2pp positive offset; only the two high-power ones can resolve it. This is
+one underlying effect seen through six lenses, not four nulls and two hits.
+
+mmlu's subject split is worth recording because it is not flat:
+
+| subject group | acc |
+|---|---:|
+| humanities | 24.40% |
+| other | 25.94% |
+| stem | 27.37% |
+| social sciences | 28.18% |
+
+STEM and social sciences carry the aggregate; humanities sits at chance.
+
+**The per-subject spread is real but should NOT be read as subject
+competence.** Across the 57 subjects the sigma values have sd = 1.79, where
+pure sampling noise would give 1.0 -- so subjects genuinely differ by more
+than measurement error. Six clear the Bonferroni threshold for 57 comparisons
+(+/-2.9 sigma):
+
+| subject | acc | sigma |
+|---|---:|---:|
+| professional_medicine | 42.28% | +5.8 |
+| high_school_statistics | 40.28% | +4.6 |
+| security_studies | 35.92% | +3.6 |
+| high_school_macroeconomics | 32.31% | +3.1 |
+| high_school_psychology | 31.01% | +3.0 |
+| **human_aging** | **15.70%** | **-3.8** |
+
+Three reasons to treat the aggregate (+0.37 mean sigma) as the finding and the
+individual subjects as not-yet-interpretable:
+
+1. Each subject is 100-270 questions. Five hits above threshold out of 57 is
+   about what 1.79 overdispersion produces with no subject being special.
+2. The sub-chance entry is the tell. human_aging at 15.70% is 9pp BELOW
+   random and survives Bonferroni. A model at 3.9B tokens should not be
+   reliably WRONG about anything -- that points at answer-position or
+   option-length bias in a barely-trained model, not at knowledge.
+3. Nothing here has a second measurement. The step-1000 trajectory run
+   (12473656) evaluates hellaswag AND mmlu, so these subjects get a repeat.
+   Any that hold across both checkpoints are worth a second look; the rest
+   were noise.
+
+**I predicted mmlu twice and was wrong twice:** that it would clip on walltime
+(it finished in 2h47, running the FAST band at ~7.7 it/s, not the slow band I
+budgeted from) and that it would be "guaranteed chance". At 56,168 requests it
+is the tightest measurement of the six and lands +3.3 sigma. The lesson is the
+same one this whole eval kept teaching: the cheap prediction was wrong and the
+measurement was cheap enough to have just taken.
+
+**hellaswag is the only individually significant task, and that is a power
+result, not a capability difference.** Every task shows the same 1-2pp
+positive offset; hellaswag has 40,168 requests and a 0.44 stderr, 3x tighter
+than arc_challenge's 1.28, so it is the only one that can resolve an effect
+that size. The others are underpowered, not contradictory.
+
+**What this does NOT say.** 27.14% is ~2pp over random on a benchmark where
+useful models score 70%+. The model consumed 3.93B tokens (2000 steps x GBS
+480 x seq 4096) -- roughly 1/1000th of the 4.67T the 2B v2 chain trained on.
+The claim is narrowly that the 30B is learning in the right direction and that
+the pipeline is sound end to end.
+
+That second half is the real value here. Given the RoPE-flavor and tokenizer
+traps this config is exposed to, a clean at-chance-plus-epsilon result with
+tight stderr is the signature of a CORRECT export: a tokenizer mismatch or a
+wrong RoPE convention produces sub-random scores with erratic error bars (the
+Polaris 20B did exactly that), not a consistent slight-positive across five
+tasks with three answer formats and two chance baselines.
+
+Note winogrande reports no acc_norm -- it is 2-choice with equal-length
+completions, so length normalization does not apply and `acc` is the correct
+metric.
+
+### What it cost, and three sizing errors worth not repeating
+
+Getting these five numbers took four submissions. Each failure was mine, and
+each was the same mistake -- extrapolating instead of measuring:
+
+1. **12473625**: no `config.json`. convert_to_hf writes weights, an index and
+   ezpz_export.json but not a model config, so lm_eval cannot load the export.
+   Fixed by deriving it from the safetensors header
+   ([write_hf_config.py](../../../../eval/write_hf_config.py)) rather than
+   copying the assets config, which describes OLMo-2-**7B** and would have
+   silently mismatched the weights.
+2. **12473627**: sized from one early rate sample (6.42 it/s -> "6.1h"). The
+   rate is not constant; it tracks sequence length. The job reached 77%
+   (89402/116734) in 8.5h and wrote NOTHING, because lm_eval serializes only
+   at completion.
+3. **12473636**: per-task budgets built from DOCUMENT counts. lm_eval issues
+   one loglikelihood request PER ANSWER CHOICE, so arc_challenge is 4,687
+   requests not 1,172 -- and the cheapest task in the sweep blew its budget at
+   41%. The cheapest task timing out is the tell that the model is wrong, not
+   the number.
+
+The structural fix, and the one that should have come first: **one lm_eval
+invocation per task**, each writing its own results, ordered cheapest-first,
+budgets at 3x measured. A wrong budget then costs one task instead of the
+whole sweep, and a rerun resumes from whatever banked. The 3x margin is not
+padding -- hellaswag ran at 1.61 it/s against the 2.3 it/s the budget assumed,
+so 2x would have clipped it at ~93%.
+
+Measured request counts, for whoever sizes the next one:
+
+| task | requests | measured at ~2.3 it/s |
+|---|---:|---:|
+| arc_challenge | 4,687 | 0.6h |
+| winogrande | 5,068 | 0.6h |
+| piqa | 7,352 | 0.9h |
+| arc_easy | 9,501 | 1.1h |
+| hellaswag | 40,168 | 4.9h (actual: 6.9h) |
+| mmlu | 56,168 | 6.8h |
+
+### Trajectory: step-1000 vs step-2000 (job 12473656)
+
+One eval point says the model learned something. Two say whether it is still
+learning. Both high-power tasks were re-run on step-1000 (already converted,
+geometry byte-identical to step-2000, same `rope=complex` flavor):
+
+| task | step 1000 | step 2000 | delta | sigma(delta) | |
+|---|---:|---:|---:|---:|---|
+| hellaswag | 26.68% +/-0.44 | 27.14% +/-0.44 | +0.46pp | +0.7 | unresolvable |
+| **mmlu** | 24.56% +/-0.36 | **26.24% +/-0.37** | **+1.67pp** | **+3.2** | **still climbing** |
+
+**mmlu went from dead at chance to +3.3 sigma above it.** At step 1000
+(1.97B tokens) it was 24.56%, indistinguishable from 25%; by step 2000 (3.93B)
+it is 26.24%. That is the answer this run was for: the config has NOT
+plateaued, and more tokens are the lever.
+
+hellaswag's +0.46pp is the case called in advance -- a gap under ~1.2pp cannot
+clear 2 sigma at this sample size, so it is unresolvable, NOT evidence of a
+plateau. The distinction matters: reporting it as "flat" would be a claim the
+data cannot support.
+
+The asymmetry is the interesting part. hellaswag was ALREADY at 26.68%
+(+3.8 sigma) by step 1000 while mmlu was at nothing. They measure different
+things on different schedules -- commonsense completion arrives early then
+moves slowly; knowledge starts later and is currently the faster mover. That
+makes hellaswag the right task for "did anything happen at all" and mmlu the
+better progress meter from here.
+
+Caveat on the mmlu delta: it rests on the same measurement whose per-subject
+spread shows option-order/length bias (human_aging 9pp BELOW random). 1.67pp
+is well above that floor and both checkpoints share any systematic bias, so
+the delta should be robust -- but a third point is needed before treating the
+slope as linear.
+
 ## Verdict
 
 **The 30B config trains to completion.** 2000/2000 steps, loss

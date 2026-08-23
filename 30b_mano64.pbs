@@ -1,0 +1,113 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=08:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 30b-mano64
+#PBS -j oe
+set -o pipefail
+
+# FRESH 30B run with the Mano optimizer, 64 nodes, GAS=4, 8h.
+#
+# Not a resume. Mano's optimizer state has a different shape from AdamW's, so
+# it cannot load agpt-30b-olmo2tok-converge -- this trains from scratch into
+# its own checkpoint folder. Comparisons against the AdamW baseline are
+# PER-TOKEN, never per-step or per-wallclock, because the batch size differs
+# by 32x (see below).
+#
+# GRADIENT ACCUMULATION IS DERIVED, NOT A FLAG. trainer.py:426 computes
+#   gradient_accumulation_steps = global_batch_size // (local_batch_size * dp)
+# so GAS=4 at 64N/LBS=5 means setting global_batch_size explicitly:
+#   5 x 768 ranks x 4 = 15,360   ->  62.9M tokens/step
+# Leaving it at -1 would give GAS=1 silently. The summary below prints the
+# trainer's own reported GAS so a mismatch cannot pass unnoticed.
+#
+# Budget, from exp06's MEASURED 64N row (426 tps/GPU, 93% retention vs 2N):
+#   327,168 tok/s aggregate -> ~192 s/step
+#   8h walltime, ~88% usable after startup+compile -> ~130 steps, ~8.2B tokens
+# That is 2x the tokens the entire 2000-step AdamW run consumed (3.93B), which
+# is the point of the wide/large-batch shape.
+#
+# steps=200 is a CEILING, not a target -- the run is walltime-bound and the
+# inner timeout stops it cleanly with a summary rather than letting PBS kill
+# it. Sized at 7h (25200s) under the 8h walltime; 30b_long took an rc=124 by
+# moving only one of the two clocks.
+#
+# CHECKPOINT INTERVAL 25: at ~192 s/step that is ~80 min between saves, and at
+# 294G each ~5 checkpoints fit comfortably in the 1.1P free. Small interval
+# because a walltime-bound run has no natural end -- whatever it reaches must
+# be on disk.
+#
+# LR 3e-4 is Mano's setting in the 2B competition configs AND the AdamW
+# baseline's peak, so the optimizer is the only variable. If Mano wants a
+# different LR at 30B that is a finding for the next run, not something to
+# guess at here.
+#
+# WHAT TO LOOK FOR: the AdamW baseline hit loss 2.115 after 3.93B tokens over
+# 2000 steps. If Mano reaches comparable loss in ~130 steps at 8.2B tokens it
+# is competitive per-token; if loss is still >4 at the end, the large-batch
+# regime or the LR is wrong for it.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+CFG_OK=0
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_30b_olmo2tok_mano" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: agpt_30b_olmo2tok_mano does not import"; exit 1; }
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-mano64"
+LOGD="$PWD/outputs/logs/30b-mano64/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+echo "ckpt dir: $CKPT   (FRESH -- not the adamw chain)"
+echo "log:      $LOG"
+echo "64 nodes x 12 = 768 ranks, LBS=5, GBS=15360 -> GAS=4, 62.9M tok/step"
+echo ""
+
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
+
+timeout 25200 ezpz launch --nproc 768 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok_mano \
+    --training.steps=200 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --training.global-batch-size=15360 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-scheduler.warmup-steps=20 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=25 \
+    --checkpoint.keep-latest-k=0 \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## 30B / Mano / 64N / GAS=4 ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo "  optimizer reported: $(printf '%s' "$C" | grep -aoE '\"optimizer_name\": *\"[A-Za-z]+\"' | head -1)"
+echo "  GAS reported:       $(printf '%s' "$C" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
+echo "                      (MUST be 4 -- if 1, global_batch_size did not take)"
+echo ""
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" \
+  | awk 'NR==1||NR%10==0{print "  "$0}' | head -18
+echo ""
+echo "  first/last:"
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | head -1 | sed 's/^/    /'
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | tail -1 | sed 's/^/    /'
+STEPS=$(printf '%s' "$C" | grep -acE 'step: *[0-9]+ +loss:')
+echo ""
+echo "  steps: $STEPS   tokens: $(python3 -c "print(f'{$STEPS*62914560/1e9:.2f}B')" 2>/dev/null)"
+echo "  (AdamW baseline reached loss 2.115 at 3.93B tokens / 2000 steps)"
+echo "  NaN/inf: $(printf '%s' "$C" | grep -acE 'loss: *(nan|inf)|grad_norm: *(nan|inf)')"
+echo "  grads skipped by guard: $(printf '%s' "$C" | grep -ac 'non-finite grad_norm')"
+echo "  tps: $(printf '%s' "$C" | grep -aoE 'tps: [0-9,]+' | tail -1)"
+echo "  mfu: $(printf '%s' "$C" | grep -aoE 'mfu: [0-9.]+%' | tail -1)"
+echo "  ckpts: $(ls -d "$CKPT"/step-* 2>/dev/null | wc -l)"
+echo "  W&B: $(printf '%s' "$C" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
+echo "  rc=$rc"
+echo "30B_MANO64_DONE"

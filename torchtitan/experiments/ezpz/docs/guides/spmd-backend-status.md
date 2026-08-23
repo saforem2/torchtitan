@@ -27,7 +27,7 @@ along the way, and what to run today.
 | --- | --- | --- |
 | **`partial_dtensor`** | **use this** | what every production trajectory has always run -- upstream renamed `"default"` to this name in #4085 |
 | `full_dtensor` | do not use | being deleted upstream (#4217); compiled agpt hits a `DeviceMesh` assertion |
-| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps) but the bump costs **+6.25pp memory** -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical through TP=4 and across nodes, and all three AC modes run backend-independently ([1e](#1e-ac-and-tp-on-the-nightly-both-close-jobs-12473592-12473593)) |
+| `spmd_types` | needs a newer torch | upstream's new default; fails on our build for a PyTorch-side reason, **not** a torchtitan one. On the 2.14 nightly it is throughput-neutral (-0.10% tps); the bump's memory cost is CONFIG-DEPENDENT and does not generalize (+6.25pp / -0.11pp / +0.32pp measured across three configs) -- see [1c](#1c-is-the-nightly-performant-throughput-yes-memory-costs-625pp). TP>1 is bit-identical through TP=4 and across nodes, and all three AC modes run backend-independently ([1e](#1e-ac-and-tp-on-the-nightly-both-close-jobs-12473592-12473593)) |
 
 Both ezpz config registries pin `partial_dtensor` as of `b2ff09632`.
 
