@@ -9,7 +9,7 @@ date: 2026-03-15
 > ordered by importance (live → reference → outbound). Within each
 > section, rows are sorted newest first by last-commit date.
 >
-> **Looking for something specific?** See [`TREE.md`](./TREE.md)
+> **Looking for something specific?** See [`TREE.md`](./reference/TREE.md)
 > for a single-page annotated tree of every directory and file
 > under `docs/`, with descriptions of what goes where.
 
