@@ -148,7 +148,7 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Running with Newer PyTorch (≥ 2.10)](./guides/running-with-newer-pytorch.md) | torch 2.13 venv setup + at-scale yeet (8N → 4096N) | 2026-06-09 |
-| [Reference Baselines](./baselines/README.md) | Training curves and benchmarks | 2026-04-29 |
+| [Reference Baselines](reference/baselines/README.md) | Training curves and benchmarks | 2026-04-29 |
 | [Dense Model Configs](./configs/dense.md) | 2B / 20B / 50B / 80B | 2026-04-26 |
 | [MoE Variants](./configs/moe.md) | 500M-10B | 2026-04-26 |
 
