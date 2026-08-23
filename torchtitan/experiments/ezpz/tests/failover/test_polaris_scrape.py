@@ -123,6 +123,26 @@ def test_hsn_suffix_dedupes_to_one_node() -> None:
     assert _scrape(log) == [f"x3014c0s1b0n0.{H}"]
 
 
+def test_device_side_assert_not_matched() -> None:
+    """A device-side assert is an APPLICATION defect, not a node fault.
+
+    It comes from a failing assertion inside a kernel (out-of-range
+    index, bad label, invalid model input), so swapping the node changes
+    nothing -- the retry hits the same assert on fresh hardware while
+    the loop burns a spare per attempt. Worse than blind rotation, since
+    it also retires a healthy node each time.
+
+    Rule for this pattern set: only match conditions where the same code
+    would succeed on a different node. (Caught in review of
+    saforem2/ezpz#230.)
+    """
+    log = (
+        f"x3020c0s1b0n0.{H} 3: RuntimeError: CUDA error: "
+        "device-side assert triggered\n"
+    )
+    assert _scrape(log) == []
+
+
 def test_clean_log_yields_nothing() -> None:
     log = "step=1 loss=12.03\nstep=2 loss=11.87\n"
     assert _scrape(log) == []

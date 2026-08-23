@@ -152,6 +152,21 @@ confirm the new tarball actually contains the module:
 tar tzf .venv.tar.gz | grep failover/patterns/polaris.py
 ```
 
+## Upstream
+
+Filed and fixed upstream so other Polaris users are not left on blind
+rotation:
+
+- Issue: [saforem2/ezpz#229](https://github.com/saforem2/ezpz/issues/229)
+- PR: [saforem2/ezpz#230](https://github.com/saforem2/ezpz/pull/230)
+  (`polaris.py` + the `EZPZ_MPI_LABEL` gate + 14 tests; 61 passing)
+
+Once #230 lands **and** the pinned ezpz commit used by this venv is
+advanced past it, the vendored copy under `failover_patterns/` becomes
+redundant and the install script can be dropped. Until then the vendored
+copy is what actually runs -- do not delete it just because the PR is
+merged.
+
 ## Related
 
 - `docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md`

@@ -6,6 +6,13 @@ installed from a **pinned** ezpz commit and is rebuilt/re-tarred
 periodically -- a fix applied only to `site-packages` silently
 disappears on the next rebuild.
 
+## Upstream status
+
+Submitted upstream as [saforem2/ezpz#230](https://github.com/saforem2/ezpz/pull/230)
+(issue [#229](https://github.com/saforem2/ezpz/issues/229)). This vendored
+copy stays authoritative until the PR lands *and* the pinned ezpz commit
+this venv installs from is advanced past it.
+
 ## What it fixes
 
 Before this module existed, `get_patterns_for_machine("polaris")`
