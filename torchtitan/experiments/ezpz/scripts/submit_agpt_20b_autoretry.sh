@@ -22,7 +22,7 @@ ulimit -c 0
 # non-zero exit (incl. watchdog 124 / walltime-racing 143), swaps a spare
 # in-place, and retries until success / walltime / spare-exhaustion /
 # stuck-pre-training / SIGINT. See submit_agpt_2b_autoretry.sh and
-# docs/guides/bad-node-failover.md (current native path).
+# docs/reference/guides/bad-node-failover.md (current native path).
 #
 # Portable: PBS headers default to Aurora (AuroraGPT / prod /
 # home:flare); the data list auto-selects by machine (olmo-mix-1124 on

@@ -99,7 +99,7 @@ model, compile works at 128N (5 min) but fails at 512N (CPU OOM). The
 2B model compiles at 256N (4.5 min) but takes 12+ hours at 512N.
 
 **See also:**
-[Scaling and production runs report](../production/scaling-performance.md)
+[Scaling and production runs report](../../production/scaling-performance.md)
 
 ## torch.compile + AC + TP crashes on torch 2.12+ (DeviceMesh assertion)
 
@@ -312,7 +312,7 @@ along the sequence dimension, the non-sharded tensors remain as regular
 ## 80B TP=2 on Aurora (regression 2026-04-12, resolved 2026-04-18)
 
 **Status: RESOLVED** — 80B TP=2 works again as of 2026-04-18. See
-[restoration report](../records/experiments/agpt/aurora/20260418-80b-tp2-restored.md).
+[restoration report](../../records/experiments/agpt/aurora/20260418-80b-tp2-restored.md).
 
 **Symptoms (when broken):** `torch.OutOfMemoryError` or
 `UR_RESULT_ERROR_OUT_OF_RESOURCES` on step 2. Step 1 completes at

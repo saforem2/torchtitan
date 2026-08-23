@@ -169,7 +169,7 @@ with the same recipe as 2B.
 
 **80B (diverging, only ~3x Chinchilla = the most data-hungry).** **Fix
 stability first** -- the NaN is a grad-path overflow, not the mix (see
-[`../guides/`](../guides/) / the 80B fp32-residual investigation). This is the
+[`../reference/guides/`](../reference/guides/) / the 80B fp32-residual investigation). This is the
 chain with the most appetite for *genuinely new unique tokens*: prioritize
 feeding it the low-overlap additive set (Nemotron-CC-v2 2024-25 snapshots +
 Math, Common Pile science) over repeats. Expect a **smaller annealing payoff**

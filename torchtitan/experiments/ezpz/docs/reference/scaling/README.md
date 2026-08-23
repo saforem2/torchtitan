@@ -56,4 +56,4 @@ Per-run results.json + report.md + agpt_*.log under:
 
 - [Per-run experiment reports](../experiments/agpt/) and [MoE per-run](../experiments/moe/)
 - [yeet-env scaling](yeet_env/) — venv broadcast wall-clock by N
-- [Known issues](../../guides/known-issues.md)
+- [Known issues](../guides/known-issues.md)

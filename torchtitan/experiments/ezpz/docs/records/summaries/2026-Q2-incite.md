@@ -251,7 +251,7 @@ multi-day runs impossible without tooling. Delivered this quarter:
 - **Bad-node failover wrapper** (production-validated 2026-05-23: caught a
   real silent hang at step 37, swapped the bad node, recovered cleanly),
   later replaced by **native `ezpz launch --auto-retry`** submit scripts
-  for 2B/20B/80B. ([bad-node-failover](../../guides/bad-node-failover.md))
+  for 2B/20B/80B. ([bad-node-failover](../../reference/guides/bad-node-failover.md))
 - **Silent-hang watchdog** (`--timeout`) so a stalled collective aborts
   at a deadline instead of burning the full PBS walltime.
 - **Walltime-aware checkpointing** — force a final checkpoint before the
@@ -297,7 +297,7 @@ upstream syncs absorbed and replayed** this quarter (sync log:
 ## 7. Platform / XPU Findings
 
 Recurring Intel-XPU-specific constraints documented this quarter (full
-list in [guides/known-issues.md](../../guides/known-issues.md)):
+list in [guides/known-issues.md](../../reference/guides/known-issues.md)):
 
 - **torch 2.14 (py313)** `torch.compile` segfaults in the Triton 3.7.2
   XPU backend — stay on torch 2.13 (eager works, compile does not at 80B).

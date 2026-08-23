@@ -195,7 +195,7 @@ Caveats for `prewarm_blendcorpus_cache.sh`:
 - [`blendcorpus-megatron-aliasing.md`](blendcorpus-megatron-aliasing.md):
   sibling guide covering separate blendcorpus issue (7 leftover
   Megatron-style aliases in the dataloader).
-- [`bad-node-failover.md`](../../guides/bad-node-failover.md): the wrapper
+- [`bad-node-failover.md`](../guides/bad-node-failover.md): the wrapper
   guide — note that the wrapper's swap-and-retry is a hammer that
   doesn't work on every nail. For this bug, the right escape hatch
   is the wrapper bailing after retries exhausted, then a human

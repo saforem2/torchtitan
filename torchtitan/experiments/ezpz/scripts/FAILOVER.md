@@ -1,7 +1,7 @@
 # Failover wrapper — code-adjacent quickref
 
 > **Canonical reference:**
-> [`docs/guides/bad-node-failover.md`](../docs/guides/bad-node-failover.md).
+> [`docs/reference/guides/bad-node-failover.md`](../docs/reference/guides/bad-node-failover.md).
 > This file is just a pointer + one-liner usage so people poking at
 > the scripts can find the docs.
 
@@ -40,7 +40,7 @@ qsub -l select=64 -l walltime=12:00:00 \
     submit_agpt_80b_autoretry.sh
 ```
 
-See [`docs/guides/bad-node-failover.md`](../docs/guides/bad-node-failover.md)
+See [`docs/reference/guides/bad-node-failover.md`](../docs/reference/guides/bad-node-failover.md)
 for the full design, detected failure modes, limitations (silent
 hangs are NOT handled — manual intervention required), and
 postmortem-file reference.

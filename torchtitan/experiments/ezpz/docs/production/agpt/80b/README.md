@@ -33,7 +33,7 @@
 > path.
 >
 > Stack status + what the RC does and does not fix:
-> [frameworks-rc-validation](../../../guides/frameworks-rc-validation.md).
+> [frameworks-rc-validation](../../../reference/guides/frameworks-rc-validation.md).
 
 > **🔴 80B production is BLOCKED at scale -- the bf16 NaN (Wall 1) above ~62N;
 > no viable production run exists yet.** The stable corner (TP=4/LBS=1/bf16/GAS)

@@ -71,4 +71,4 @@ See [restoration report](../../records/experiments/agpt/aurora/20260418-80b-tp2-
 - [80B throughput leaderboard](../../records/experiments/agpt/aurora/80b-throughput-leaderboard.md)
 - [Experiment reports](../experiments/agpt/) — per-run benchmark logs
 - [Production training](../production/agpt/80b/) — live training status
-- [Known issues — 80B OOM](../../guides/known-issues.md)
+- [Known issues — 80B OOM](../guides/known-issues.md)

@@ -18,7 +18,7 @@ ulimit -c 0
 #
 # Uses `ezpz launch --auto-retry` EXCLUSIVELY for bad-node failover (no
 # scripts/failover_lib.sh). See submit_agpt_2b_autoretry.sh and
-# docs/guides/bad-node-failover.md (current native path).
+# docs/reference/guides/bad-node-failover.md (current native path).
 #
 # DEFAULT CONFIG = the confirmed-stable corner (2026-06-24 investigation,
 # docs/production/agpt/80b/README.md): TP=4, LBS=1, AdamW LR=1e-6,

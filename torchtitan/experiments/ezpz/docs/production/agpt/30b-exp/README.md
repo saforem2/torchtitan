@@ -414,7 +414,7 @@ important question is being economised on -- that one needs the 1B proxy.
 - [`2b/n512/README.md`](../2b/n512/README.md) -- the completed chain
 - [`../../../notes/data-strategy-after-olmo-mix-2026-07.md`](../../../notes/data-strategy-after-olmo-mix-2026-07.md)
   -- corpus survey this builds on
-- [`../../../guides/training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md)
+- [`../../../guides/training-dtype-bf16-norm-freeze.md`](../../../reference/guides/training-dtype-bf16-norm-freeze.md)
   -- the fp32/bf16 investigation Section 6 refers to
 - [`../../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md`](../../../records/experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md)
   -- the anneal vs data-mix A/B

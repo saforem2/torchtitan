@@ -21,7 +21,7 @@ retry loop.
 
 `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR #170) owns the whole
 split + scrape + swap + retry loop internally. The submit scripts
-[`submit_agpt_{2b,20b,80b}_autoretry.sh`](../../scripts/) are portable:
+[`submit_agpt_{2b,20b,80b}_autoretry.sh`](../../../scripts) are portable:
 **Aurora PBS headers by default** (`AuroraGPT` / `prod` / `home:flare`,
 data list `olmo-mix-1124`), Sunspot via qsub overrides
 (`-A datascience -q workq -l filesystems=tegu:home`, data list `books`).
@@ -66,7 +66,7 @@ each script's header.
 The `CONFIG_SUFFIX` knob toggles the RoPE flavor (`_real` default for
 2B/20B; set `CONFIG_SUFFIX=` for the plain complex flavor). 80B stays on
 the plain numerically-validated `agpt_80b`. See
-[`production/agpt/80b/README.md`](../production/agpt/80b/README.md) for
+[`production/agpt/80b/README.md`](../../production/agpt/80b/README.md) for
 the TP=4/LBS=1 stable-corner derivation and the `dp_degree<=186` ceiling.
 
 ### What the submit script still must do
@@ -130,10 +130,10 @@ treated as a bad-node failure: scrape (typically no specific host, since
 the hang IS the silence), blind-rotate, retry. 1800s was chosen because
 the longest observed *legitimate* quiet period was a 19-min async ckpt
 save at 20B 512N. First real-world recovery:
-[`8505298`](../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
+[`8505298`](../../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
 (hung at step 37, watchdog tripped at 30 min, swapped + retried, trained
 to walltime landing step-100/200 checkpoints). Originating incident:
-[`8479579`](../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md).
+[`8479579`](../../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md).
 
 ### Things to know
 
@@ -234,7 +234,7 @@ attempt.
    + `scrape_bad_nodes.py`. v2 added the silent-hang `--timeout` watchdog
    (`eefccfc9d`), ANSI-aware exit-code parsing (`94a8fda66`), a unified
    walltime+crash regex (`0d93a1e91`), and the fixture test harness under
-   [`tests/failover/`](../../tests/failover/). First real-world silent-hang
+   [`tests/failover/`](../../../tests/failover). First real-world silent-hang
    recovery: job 8505298 (2026-05-23).
 2. **Native auto-retry (2026-06-24)**: ezpz PR #170 moved the
    split/scrape/swap/retry loop into `ezpz launch --auto-retry`. The
@@ -253,31 +253,31 @@ attempt.
 
 | Path | Purpose |
 |---|---|
-| [`scripts/submit_agpt_2b_autoretry.sh`](../../scripts/submit_agpt_2b_autoretry.sh) | 2B native auto-retry submit script (portable Sunspot/Aurora; `_real` RoPE default). |
-| [`scripts/submit_agpt_20b_autoretry.sh`](../../scripts/submit_agpt_20b_autoretry.sh) | 20B native auto-retry (adds the `DATASET` blendcorpus/HF knob). |
-| [`scripts/submit_agpt_80b_autoretry.sh`](../../scripts/submit_agpt_80b_autoretry.sh) | 80B native auto-retry (TP=4/LBS=1/AdamW default; `dp_degree>186` NaN warning). |
+| [`scripts/submit_agpt_2b_autoretry.sh`](../../../scripts/submit_agpt_2b_autoretry.sh) | 2B native auto-retry submit script (portable Sunspot/Aurora; `_real` RoPE default). |
+| [`scripts/submit_agpt_20b_autoretry.sh`](../../../scripts/submit_agpt_20b_autoretry.sh) | 20B native auto-retry (adds the `DATASET` blendcorpus/HF knob). |
+| [`scripts/submit_agpt_80b_autoretry.sh`](../../../scripts/submit_agpt_80b_autoretry.sh) | 80B native auto-retry (TP=4/LBS=1/AdamW default; `dp_degree>186` NaN warning). |
 
 ### Legacy (retained)
 
 | Path | Purpose |
 |---|---|
-| [`scripts/failover_lib.sh`](../../scripts/failover_lib.sh) | Bash library: `failover_init`, `failover_yeet_all`, `failover_swap_in`, `failover_swap_one_blind`, `failover_run`. |
-| [`scripts/scrape_bad_nodes.py`](../../scripts/scrape_bad_nodes.py) | Extracts bad-node hostnames from a training log. |
-| [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../../scripts/submit_agpt_2b_aurora_venv_failover.sh) | 2B production submit script with the bash failover wrapper. |
-| [`scripts/submit_agpt_20b_aurora_venv_failover.sh`](../../scripts/submit_agpt_20b_aurora_venv_failover.sh) | 20B production submit script with failover. |
-| [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../scripts/submit_agpt_80b_aurora_venv_failover.sh) | 80B production submit script with failover (AdamW LR=1e-6, TP=2, AC=full, compile=OFF). |
-| [`scripts/FAILOVER.md`](../../scripts/FAILOVER.md) | Brief code-adjacent quickref. **This page is the canonical reference.** |
+| [`scripts/failover_lib.sh`](../../../scripts/failover_lib.sh) | Bash library: `failover_init`, `failover_yeet_all`, `failover_swap_in`, `failover_swap_one_blind`, `failover_run`. |
+| [`scripts/scrape_bad_nodes.py`](../../../scripts/scrape_bad_nodes.py) | Extracts bad-node hostnames from a training log. |
+| [`scripts/submit_agpt_2b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_2b_aurora_venv_failover.sh) | 2B production submit script with the bash failover wrapper. |
+| [`scripts/submit_agpt_20b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_20b_aurora_venv_failover.sh) | 20B production submit script with failover. |
+| [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) | 80B production submit script with failover (AdamW LR=1e-6, TP=2, AC=full, compile=OFF). |
+| [`scripts/FAILOVER.md`](../../../scripts/FAILOVER.md) | Brief code-adjacent quickref. **This page is the canonical reference.** |
 
 ## See also
 
-- [`docs/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
+- [`docs/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
   -- first real-world silent-hang recovery
-- [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
+- [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
   -- the originating silent-hang incident
-- [`docs/production/agpt/80b/README.md`](../production/agpt/80b/README.md)
+- [`docs/production/agpt/80b/README.md`](../../production/agpt/80b/README.md)
   -- 80B TP=4/LBS=1 stable corner + `dp_degree<=186` ceiling
-- [`scripts/FAILOVER.md`](../../scripts/FAILOVER.md) -- code-adjacent quickref
-- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)
+- [`scripts/FAILOVER.md`](../../../scripts/FAILOVER.md) -- code-adjacent quickref
+- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)
   -- log-mined restart economics: 7 confirmed successful restarts, ~11% raw
   recovery rate (higher for genuinely node-local failures), 132 spare swaps
   across 133 failover-wrapped jobs (2026-06-30 analysis)

@@ -87,7 +87,7 @@ MFU baseline (4N validation): ~17.8%, identical to Sunspot reference.
 
    If you see `RuntimeError: No backend ... does not support
    splitting`, the workaround is not installed — see
-   [`docs/upstream-issues/xccl_split_group_unsupported.md`](../../outbound/upstream-issues/xccl_split_group_unsupported.md).
+   [`docs/upstream-issues/xccl_split_group_unsupported.md`](../../../outbound/upstream-issues/xccl_split_group_unsupported.md).
 
 ## Interactive launch (4N smoke validation)
 
@@ -140,7 +140,7 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --compile.no-enable
 ```
 
-Expected outcome (per [4N validation](../../production/agpt/80b/n4/README.md)):
+Expected outcome (per [4N validation](../../../production/agpt/80b/n4/README.md)):
 
 - Step 1: loss 12.93, mem 53 GiB (82.9%), MFU ~13% (warm-up)
 - Step 2: loss 12.92, mem 56.9 GiB (88.97%), MFU ~16.6%
@@ -154,7 +154,7 @@ don't burn 256N walltime chasing a stack issue.
 ## Submitting at scale via PBS
 
 The production submit script is
-[`scripts/submit_agpt_80b_autoretry.sh`](../../../scripts/submit_agpt_80b_autoretry.sh)
+[`scripts/submit_agpt_80b_autoretry.sh`](../../../../scripts/submit_agpt_80b_autoretry.sh)
 (native `ezpz launch --auto-retry`, the current production path; sets the
 TP=4/LBS=1/AdamW corner + a `dp_degree>186` NaN warning + `--nan-abort-consecutive`).
 The legacy bash-failover wrapper `scripts/submit_agpt_80b_aurora_venv_failover.sh`
@@ -209,7 +209,7 @@ because PBS reports walltime exit as failure, but walltime-exit is
 the *expected* end-of-shift behavior for long runs.
 
 See [`feedback_always_have_chain_continuation`] (memory) and
-[`docs/production/agpt/80b/README.md`](../../production/agpt/80b/README.md)
+[`docs/production/agpt/80b/README.md`](../../../production/agpt/80b/README.md)
 for the current chain status.
 
 ## Verification at each scale
@@ -217,7 +217,7 @@ for the current chain status.
 Before treating any new scale as "production-ready", do this in order:
 
 1. **4N smoke**: 10 steps, sync ckpt save, in interactive shell.
-   This is the canonical sanity check. The [n4 README](../../production/agpt/80b/n4/README.md)
+   This is the canonical sanity check. The [n4 README](../../../production/agpt/80b/n4/README.md)
    is the reference.
 2. **8N smoke** in `debug-scaling` queue (`-q debug-scaling -l select=8
    -l walltime=01:00:00`): same config, 20 steps.
@@ -253,12 +253,12 @@ this in mind for:
 > (dim=9216 x 84L) residual stream -- SophiaG (512N) and mano (62N) NaN
 > identically. fp32-residual prototype trains clean at 4N but still NaNs at
 > dp=192 (necessary-but-insufficient); no live 80B, work dormant. Full analysis:
-> [production/agpt/80b/README.md](../../production/agpt/80b/README.md). The
+> [production/agpt/80b/README.md](../../../production/agpt/80b/README.md). The
 > original hypotheses are kept below as the historical investigation trail.
 
 ### 256N NaN at step 2 (historical hypotheses, 2026-06-09)
 
-[8530891](../../production/agpt/80b/n4/README.md) (256N, LR=1e-6,
+[8530891](../../../production/agpt/80b/n4/README.md) (256N, LR=1e-6,
 GBS=1536, same config as the validated 4N smoke) trained step 1 cleanly
 (loss 12.94) but **NaN'd at step 2** and didn't recover. Even with a
 scheduler-clamped LR ≈ 1.8e-8 the NaN persists. Open hypotheses:
@@ -290,7 +290,7 @@ failures). Diagnostic plan:
 - **1024N init OOM/SIGSEGV** at 12,288 ranks in `set_determinism`
   `torch.distributed.broadcast`. 256N/512N unaffected. Bracket
   768N/896N before trying 1024N. See
-  [`memory/project_1024n_init_crash.md`](.).
+  [`memory/project_1024n_init_crash.md`](../../../guides/training).
 - **Aurora pals-RPC launcher infra failures** (exit 127 with
   `Couldn't forward RPC launch`) are transient infra issues, not bad
   nodes; the failover wrapper can't recover from them (the wrong-node
@@ -312,13 +312,13 @@ failures). Diagnostic plan:
   TP > 1 loss reporting bug + `EzpzValidator` workaround
 - [`bad-node-failover.md`](../bad-node-failover.md) — failover wrapper
   details
-- [`docs/production/agpt/80b/README.md`](../../production/agpt/80b/README.md) —
+- [`docs/production/agpt/80b/README.md`](../../../production/agpt/80b/README.md) —
   live status, dispatch log, eval (when production starts persisting)
-- [`docs/production/agpt/80b/n4/README.md`](../../production/agpt/80b/n4/README.md) —
+- [`docs/production/agpt/80b/n4/README.md`](../../../production/agpt/80b/n4/README.md) —
   the validated 4N reference run
-- [`docs/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
+- [`docs/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../../records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
   Sunspot 4N validation with xccl_split_group workaround
-- [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) —
+- [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) —
   PBS submit script
-- [`scripts/train_agpt_80b_venv.sh`](../../../scripts/train_agpt_80b_venv.sh) —
+- [`scripts/train_agpt_80b_venv.sh`](../../../../scripts/train_agpt_80b_venv.sh) —
   interactive launcher (called from a compute node)

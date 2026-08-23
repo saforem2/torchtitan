@@ -171,7 +171,7 @@ reason had gone unnoticed for the entire campaign.
 upgrades from risk-asymmetry judgment to measurement -- it is load-bearing,
 for a reason nobody had identified, and it is also the fastest option
 measured.** Section 6 amended; a correction added to
-`docs/guides/training-dtype-bf16-norm-freeze.md`. Worth keeping as a
+`docs/reference/guides/training-dtype-bf16-norm-freeze.md`. Worth keeping as a
 scale-free regression test: 300 steps on a 21M model, ~20s per arm, catches a
 class of bug that cost a full production restart.
 

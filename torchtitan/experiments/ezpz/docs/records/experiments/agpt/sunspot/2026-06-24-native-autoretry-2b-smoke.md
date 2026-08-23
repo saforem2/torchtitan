@@ -2,7 +2,7 @@
 
 Validates `scripts/submit_agpt_2b_autoretry.sh` -- the ezpz-native
 `ezpz launch --auto-retry` replacement for the bash `failover_lib.sh`
-machinery. See [`docs/guides/bad-node-failover.md`](../../../../guides/bad-node-failover.md)
+machinery. See [`docs/reference/guides/bad-node-failover.md`](../../../../reference/guides/bad-node-failover.md)
 "Two implementations".
 
 ## Setup

@@ -110,7 +110,7 @@
   **TP=4/LBS=1/AdamW LR=1e-6** corner (supersedes the legacy TP=2
   default, which NaNs at production GBS) and **warns when
   `dp_degree=NGPUS/TP > 186`** (the grad-path NaN trigger; safe corner
-  validated only to ~62N). See `docs/guides/bad-node-failover.md`.
+  validated only to ~62N). See `docs/reference/guides/bad-node-failover.md`.
 - **Legacy (retained, not for new runs):** the bash `failover_lib.sh`
   wrapper scripts `scripts/submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh`
   (torch 2.13 `.venv/`, LBS=2, fp32 master, bash preflight + spare-swap
@@ -157,7 +157,7 @@ pre-launch overhead is under 13 minutes.
 The "1–2+ hours per-file rsync DO NOT run concurrently" pattern still
 applies if you fall back to rsync mode (no `.venv.tar.gz` present),
 so always build the tarball first via `ezpz tar-env`. See
-[`docs/guides/running-with-newer-pytorch.md`](../docs/guides/running-with-newer-pytorch.md).
+[`docs/reference/guides/running-with-newer-pytorch.md`](../docs/reference/guides/running-with-newer-pytorch.md).
 
 ### Optimizer Constraints at Scale
 
@@ -303,7 +303,7 @@ that touches one of these areas.
     variance ≡ 0 (every value exactly 1.0); v2 step-5000 has
     mean(var)=1.2e-4, std=0.011, range [0.926, 1.102] across 25 norm
     layers. Final-norm channels scaled up uniformly to ~10% above init.
-  See [`docs/guides/training-dtype-bf16-norm-freeze.md`](../docs/guides/training-dtype-bf16-norm-freeze.md).
+  See [`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../docs/reference/guides/training-dtype-bf16-norm-freeze.md).
 
 - **TP > 1 loss reporting was off by `dp_world_size`** in the window
   2026-04-27 (upstream commit `1786292d`) through 2026-05-18 (upstream
@@ -321,7 +321,7 @@ that touches one of these areas.
   production runs use TP > 1**, so no live dashboard is wrong — but
   historical 80B v1 W&B traces from the affected window show
   `loss / 1536`. See
-  [`docs/guides/loss-reporting-tp-dist-reduce.md`](../docs/guides/loss-reporting-tp-dist-reduce.md).
+  [`docs/reference/guides/loss-reporting-tp-dist-reduce.md`](../docs/reference/guides/loss-reporting-tp-dist-reduce.md).
 
 - **`compile + AC + TP=2` crashes on torch 2.13 for the entire
   agpt 80B family** with the
@@ -513,7 +513,7 @@ purposes. Don't add tokens to v1 chains — they're frozen reference
 points. Confirmed bf16 freeze: every v1 RMSNorm.weight is exactly
 1.0 (variance ≡ 0); v2 step-5000 has mean(var)=1.2e-4, std=0.011,
 range [0.926, 1.102] across 25 norm layers — i.e. norms are actually
-training in v2. See `docs/guides/training-dtype-bf16-norm-freeze.md`.
+training in v2. See `docs/reference/guides/training-dtype-bf16-norm-freeze.md`.
 
 ## Scaling Study Results (Aurora)
 

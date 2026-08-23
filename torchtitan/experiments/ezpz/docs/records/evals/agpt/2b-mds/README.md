@@ -84,7 +84,7 @@ deterministic; we average them.
   trajectory uses a separate converter
   (`eval/mds_to_hf.py`) and was *not* affected by the bf16-master
   RMSNorm-freeze bug — see
-  [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../../guides/training-dtype-bf16-norm-freeze.md).
+  [`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../../../../reference/guides/training-dtype-bf16-norm-freeze.md).
 
 - **HellaSwag** has the steepest early ramp: 0.36 → 0.59 by step 60K,
   then plateaus around 0.59. Strong signal for commonsense narrative

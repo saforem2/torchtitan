@@ -16,7 +16,7 @@ unfrozen, but the model has no trainable normalization. Eval scores
 hovered at the noise floor across the whole run.
 
 Full diagnosis + side-by-side weight evidence:
-[`docs/guides/training-dtype-bf16-norm-freeze.md`](../../../../guides/training-dtype-bf16-norm-freeze.md).
+[`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../../../../reference/guides/training-dtype-bf16-norm-freeze.md).
 
 The fix flipped the default to `--training.dtype=float32`. All
 production was restarted from scratch in v2 clones on 2026-04-30.

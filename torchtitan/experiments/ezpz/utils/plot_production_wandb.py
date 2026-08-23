@@ -76,7 +76,7 @@ def _savefig_both(fig, svg_path, dpi=200):
 #      every RMSNorm.weight at its 1.0 init; loss curves are real but
 #      the model has no trainable normalization. Tainted, superseded
 #      by v2. Kept here for the historical record. See
-#      docs/guides/training-dtype-bf16-norm-freeze.md.
+#      docs/reference/guides/training-dtype-bf16-norm-freeze.md.
 # v2 = fresh restarts on 2026-04-30 from /flare/AuroraGPT/foremans/runs/
 #      agpt-{2b,20b}-v2/ (torch 2.13 venv, LBS=2,
 #      `--training.dtype=float32`, plain CrossEntropyLoss). These are
@@ -415,7 +415,7 @@ def plot_overlay(
     The point is to make the v1 (bf16-tainted) vs v2 (fp32) contrast
     visually unmissable: the loss curves descend together but their
     *eval-time* behavior diverges because v1 has frozen RMSNorm
-    weights. See docs/guides/training-dtype-bf16-norm-freeze.md.
+    weights. See docs/reference/guides/training-dtype-bf16-norm-freeze.md.
     """
     fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
     fig.suptitle(

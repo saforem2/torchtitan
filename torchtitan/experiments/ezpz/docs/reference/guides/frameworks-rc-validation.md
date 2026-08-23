@@ -36,7 +36,7 @@ generic error, so the latter is a false pass.
 - **Reducing collectives.** `reduce_scatter_tensor` and `all_reduce` SIGSEGV on
   oneAPI 2025.3.1 (12 ranks, one node, 1 KiB buffer) and run clean on the RC.
   This blocked *all* multi-rank training. Full diagnosis:
-  [sunspot-reduce-scatter-segv-20260814](../reference/known-bugs/sunspot-reduce-scatter-segv-20260814.md).
+  [sunspot-reduce-scatter-segv-20260814](../known-bugs/sunspot-reduce-scatter-segv-20260814.md).
 - **`torch.compile` at TP=4** -- see the table above.
 - **MoE EP=1 above 2N.**
 

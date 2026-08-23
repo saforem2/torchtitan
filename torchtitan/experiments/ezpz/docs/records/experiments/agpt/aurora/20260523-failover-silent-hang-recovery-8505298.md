@@ -145,7 +145,7 @@ step-100 saved at 21:45:11 (3s after the step log); step-200 at
 21:51:40 (8s after). This is the **first unambiguous proof since
 the 2026-05-03 regression that async checkpoint save can land
 on-disk with the new ezpz 0.16.0 tarball + fresh wrapper**. The 512N
-async-cluster-cascade ([the separate regression at scale](../../../../guides/known-issues.md))
+async-cluster-cascade ([the separate regression at scale](../../../../reference/guides/known-issues.md))
 is unrelated and remains open — but at 8N async works.
 
 ## Configuration
@@ -192,7 +192,7 @@ This validation greenlights:
 What this does **NOT** validate:
 
 - The 20B 512N async-save cluster cascade
-  ([known-issues.md](../../../../guides/known-issues.md)) is a separate
+  ([known-issues.md](../../../../reference/guides/known-issues.md)) is a separate
   failure mode, scale-dependent, unrelated to the wrapper. 20B + 80B
   smoke jobs (`8505325`, `8505326`) are queued to exercise the
   preflight path at 8N for those models too.
@@ -204,7 +204,7 @@ What this does **NOT** validate:
 
 ## Related
 
-- [Bad-node failover wrapper guide](../../../../guides/bad-node-failover.md)
+- [Bad-node failover wrapper guide](../../../../reference/guides/bad-node-failover.md)
 - [Original 8479579 silent-hang incident](20260511-20b-n512-hang-8479579.md)
 - [Wrapper test harness](../../../../../tests/failover)
-- [Known issues / async-save regression](../../../../guides/known-issues.md)
+- [Known issues / async-save regression](../../../../reference/guides/known-issues.md)

@@ -33,7 +33,7 @@ stack** (`ezpz_setup_env`, `frameworks/2025.3.1`) and were the
 production driver from the migration through 2026-04-29. They are the
 scripts that produced every v1 trajectory (bf16 master, frozen
 RMSNorm) — see
-[`../docs/guides/training-dtype-bf16-norm-freeze.md`](../docs/guides/training-dtype-bf16-norm-freeze.md)
+[`../docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../docs/reference/guides/training-dtype-bf16-norm-freeze.md)
 for the bug that triggered the v2 restart.
 
 After 2026-04-30 (v2 restart on `--training.dtype=float32`),

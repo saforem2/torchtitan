@@ -49,7 +49,7 @@ specific pages linked below.
 
 Full setup details — module loads, venv install, large-scale yeet-env
 broadcast — are in
-[`docs/guides/running-with-newer-pytorch.md`](docs/guides/running-with-newer-pytorch.md).
+[`docs/reference/guides/running-with-newer-pytorch.md`](docs/reference/guides/running-with-newer-pytorch.md).
 Minimum viable path on Aurora:
 
 ```bash
@@ -96,7 +96,7 @@ structural map of every file under `docs/`, see
 
 | Page | What's there |
 |------|--------------|
-| [Running with newer PyTorch](docs/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
+| [Running with newer PyTorch](docs/reference/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
 | [`scripts/submit_agpt_{2b,20b,80b}_aurora_venv*.sh`](scripts/) | Current (torch 2.13 venv) PBS production submitters |
 | [`submit/README.md`](submit/README.md) | Legacy torch-2.10-conda submit scripts (kept for v1 reproduction only) |
 
@@ -104,11 +104,11 @@ structural map of every file under `docs/`, see
 
 | Page | What's there |
 |------|--------------|
-| [Known issues](docs/guides/known-issues.md) | Operational notes + workarounds for active bugs |
-| [bf16 RMSNorm freeze](docs/guides/training-dtype-bf16-norm-freeze.md) | The headline v1 bug — why we restarted as v2 with `dtype=float32` |
-| [Bad-node failover wrapper](docs/guides/bad-node-failover.md) | How the `failover_lib.sh` wrapper detects + swaps bad nodes mid-training |
-| [TP loss-reporting bug](docs/guides/loss-reporting-tp-dist-reduce.md) | Why TP > 1 loss is off by `dp_world_size` and how `EzpzValidator` fixes it |
-| [XPU attention issues](docs/guides/xpu-attention-issues.md) | No flash-attn, selective AC quirks, SDPA fallback |
+| [Known issues](docs/reference/guides/known-issues.md) | Operational notes + workarounds for active bugs |
+| [bf16 RMSNorm freeze](docs/reference/guides/training-dtype-bf16-norm-freeze.md) | The headline v1 bug — why we restarted as v2 with `dtype=float32` |
+| [Bad-node failover wrapper](docs/reference/guides/bad-node-failover.md) | How the `failover_lib.sh` wrapper detects + swaps bad nodes mid-training |
+| [TP loss-reporting bug](docs/reference/guides/loss-reporting-tp-dist-reduce.md) | Why TP > 1 loss is off by `dp_world_size` and how `EzpzValidator` fixes it |
+| [XPU attention issues](docs/reference/guides/xpu-attention-issues.md) | No flash-attn, selective AC quirks, SDPA fallback |
 
 ### Per-feature subdirectories
 
@@ -131,7 +131,7 @@ structural map of every file under `docs/`, see
 |--------|----------|
 | [`docs/production/`](docs/production/) | Live per-model / per-node-count training trackers |
 | [`docs/evals/`](docs/evals/) | Per-model eval results + plots |
-| [`docs/guides/`](docs/guides/) | Big-finding writeups, operational notes, how-tos |
+| [`docs/reference/guides/`](docs/reference/guides/) | Big-finding writeups, operational notes, how-tos |
 | [`docs/experiments/`](docs/experiments/) | Per-machine smoke / benchmark / LR-finder reports |
 | [`docs/scaling/`](docs/scaling/) | Per-model scaling-study results (TPS / MFU vs N) |
 | [`docs/competitions/`](docs/competitions/) | Optimizer speedrun leaderboards |

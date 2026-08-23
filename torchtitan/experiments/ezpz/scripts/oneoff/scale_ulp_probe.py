@@ -28,7 +28,7 @@ investigation concluded the linear layers were fine -- they are.
 
 Context:
   docs/production/agpt/30b-exp/exp02-fp32-norms-ablation.md
-  docs/guides/training-dtype-bf16-norm-freeze.md
+  docs/reference/guides/training-dtype-bf16-norm-freeze.md
 
 Runs on CPU in seconds; no distributed setup required.
 """

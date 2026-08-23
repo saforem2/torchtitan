@@ -336,7 +336,7 @@ All logs in `/flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz/80b-*.o*
   what was needed for 70B+ models in the [Llama 3 405B paper](https://arxiv.org/abs/2407.21783)
   (their fp32-residual fix solved a similar bf16-overflow problem at
   scale).
-- See also `docs/guides/training-dtype-bf16-norm-freeze.md` for the
+- See also `docs/reference/guides/training-dtype-bf16-norm-freeze.md` for the
   prior bf16-master regression (different problem: master weights stuck
   at init due to bf16 ULP > optimizer step). That fix doesn't help here
   because the failure is in the forward path, not the master copy.

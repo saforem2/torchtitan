@@ -170,7 +170,7 @@ See per-model READMEs (`agpt/2b/`, `agpt/20b/`, `agpt/80b/`).
    `training.dtype` flipped from `bfloat16` to `float32` after we
    discovered RMSNorm.weight was frozen at 1.0 by sub-ULP updates at
    bf16. v2 runs fix this; checkpoints from before the fix are
-   tainted. See [bf16-norm-freeze guide](../guides/training-dtype-bf16-norm-freeze.md).
+   tainted. See [bf16-norm-freeze guide](../reference/guides/training-dtype-bf16-norm-freeze.md).
 2. **NODE_FAIL at end-of-walltime is common** — both v2 2B runs hit
    NODE_FAIL after 6 hours of clean training, with TPS dragging from
    ~5K → ~30 in the final few hundred steps before kill. Single bad
@@ -211,7 +211,7 @@ Full-scale production training of AuroraGPT models on the
 RMSNorm-freeze bug. All current production runs use `dtype=float32`
 master weights, plain CrossEntropyLoss, LBS=2 with the torch 2.13 venv
 (yeet-env tarball mode). See
-[`docs/guides/training-dtype-bf16-norm-freeze.md`](../guides/training-dtype-bf16-norm-freeze.md)
+[`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../reference/guides/training-dtype-bf16-norm-freeze.md)
 for the diagnosis.
 
 ## Scaling Performance

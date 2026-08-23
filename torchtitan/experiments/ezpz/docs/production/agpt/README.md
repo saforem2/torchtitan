@@ -191,7 +191,7 @@ which silently froze RMSNorm.weight at its 1.0 init. v2 is the clean
 restart on `--training.dtype=float32`. v1 archive (training curves,
 v1-vs-v2 overlays, job tables, log paths):
 [`historical/v1-bf16/`](historical/v1-bf16/README.md). Root-cause
-diagnosis: [`guides/training-dtype-bf16-norm-freeze.md`](../../guides/training-dtype-bf16-norm-freeze.md).
+diagnosis: [`guides/training-dtype-bf16-norm-freeze.md`](../../reference/guides/training-dtype-bf16-norm-freeze.md).
 
 ## Canonical chain dashboards (v2)
 

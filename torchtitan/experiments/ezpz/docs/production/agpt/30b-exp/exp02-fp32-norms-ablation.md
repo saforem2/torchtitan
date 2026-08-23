@@ -9,7 +9,7 @@
 > > measurement.
 >
 > Prior investigation:
-> [`training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md).
+> [`training-dtype-bf16-norm-freeze.md`](../../../reference/guides/training-dtype-bf16-norm-freeze.md).
 >
 > Status: **SETTLED** (2026-08-14). Aurora, agpt debugmodel; jobs 8757151
 > (correctness), 8757216 (throughput), 8757243 (visited-row control),
@@ -458,7 +458,7 @@ argument favors A or B at this scale.
 
 ## Related
 
-- [`training-dtype-bf16-norm-freeze.md`](../../../guides/training-dtype-bf16-norm-freeze.md)
+- [`training-dtype-bf16-norm-freeze.md`](../../../reference/guides/training-dtype-bf16-norm-freeze.md)
   -- the prior investigation this extends. Its "Why other parameters update
   fine" section is correct for linear layers and incomplete for the embedding;
   a correction has been added there pointing here.

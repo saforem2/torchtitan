@@ -17,7 +17,7 @@ production run hit one of these and either died outright (8459818,
 [silently hung](20260511-20b-n512-hang-8479579.md) (8479579).
 
 The
-[failover wrapper](../../../../guides/bad-node-failover.md) is supposed
+[failover wrapper](../../../../reference/guides/bad-node-failover.md) is supposed
 to fix this: request `N + spare` nodes, train on the active subset,
 scrape any crash log for the bad-node hostname, swap it out, retry.
 We landed the wrapper across 4 commits over 2026-05-13 → 2026-05-14

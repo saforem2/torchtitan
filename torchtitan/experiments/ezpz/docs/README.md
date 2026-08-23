@@ -32,7 +32,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-19 | [MoE under EP aborts in all_to_all_single, worse with model size (2026-08-19)](reference/known-bugs/moe-ep-a2a-degrades-with-size.md) |
 | 2026-08-19 | [--debug.deterministic costs ~27% device memory on the MoE path (2026-08-19)](reference/known-bugs/moe-deterministic-memory.md) |
 | 2026-08-19 | [hybridep on XPU: not a version floor, not portable](reference/known-bugs/hybridep-is-nvidia-only.md) |
-| 2026-08-20 | [**SPMD backends on XPU: what works, what does not, and why**](./guides/spmd-backend-status.md) -- start here |
+| 2026-08-20 | [**SPMD backends on XPU: what works, what does not, and why**](reference/guides/spmd-backend-status.md) -- start here |
 | 2026-08-20 | [Trying a newer XPU torch against spmd_types (CONFIRMED: it fixes it)](reference/known-bugs/spmd-types-newer-torch-attempt.md) |
 | 2026-08-20 | [Why spmd_types leaves parameters unconverted (upstream)](reference/known-bugs/spmd-types-plain-tensor.md) |
 | 2026-08-19 | [agpt on full_dtensor: vc_check/DeviceMesh, and a pin justified uncompiled](reference/known-bugs/agpt-full-dtensor-vc-check.md) |
@@ -127,11 +127,11 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Bad-node failover wrapper](./guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-30 |
-| [Known Issues / Operational Notes](./guides/known-issues.md) | **Top entry (2026-05-23)**: `--checkpoint.async-mode=async` kills the cluster at 20B 512N+ — root cause of 3 weeks of lost persisted progress. Workaround: `CHECKPOINT_ASYNC_MODE=disabled`. | 2026-07-24 |
-| [bf16-master RMSNorm freeze](./guides/training-dtype-bf16-norm-freeze.md) | Root cause of v1 → v2 restart; `dtype=float32` is now default | 2026-08-14 |
-| [TP > 1 loss reporting off by `dp_world_size`](./guides/loss-reporting-tp-dist-reduce.md) | **Resolved upstream 2026-05-18** (PR #3159, commit `d64eabcce`). Doc preserved as historical context for affected 80B W&B traces. | 2026-07-24 |
-| [XPU Attention Issues](./guides/xpu-attention-issues.md) | SDPA, FlexAttention, Triton on Intel Max 1550 | 2026-04-26 |
+| [Bad-node failover wrapper](reference/guides/bad-node-failover.md) | **🏁 v2 production-validated 2026-05-23** ([incident report 8505298](records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)). Production submit scripts that request N+spare nodes, swap bad nodes for spares on crash, retry. Silent-hang watchdog (`--timeout=1800`) caught its first real production hang at step 37, blind-swapped, recovered cleanly. Test harness at [`tests/failover/`](../tests/failover/) — 9 fixtures, all passing. | 2026-06-30 |
+| [Known Issues / Operational Notes](reference/guides/known-issues.md) | **Top entry (2026-05-23)**: `--checkpoint.async-mode=async` kills the cluster at 20B 512N+ — root cause of 3 weeks of lost persisted progress. Workaround: `CHECKPOINT_ASYNC_MODE=disabled`. | 2026-07-24 |
+| [bf16-master RMSNorm freeze](reference/guides/training-dtype-bf16-norm-freeze.md) | Root cause of v1 → v2 restart; `dtype=float32` is now default | 2026-08-14 |
+| [TP > 1 loss reporting off by `dp_world_size`](reference/guides/loss-reporting-tp-dist-reduce.md) | **Resolved upstream 2026-05-18** (PR #3159, commit `d64eabcce`). Doc preserved as historical context for affected 80B W&B traces. | 2026-07-24 |
+| [XPU Attention Issues](reference/guides/xpu-attention-issues.md) | SDPA, FlexAttention, Triton on Intel Max 1550 | 2026-04-26 |
 
 ## Day-by-day Work
 
@@ -147,7 +147,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Running with Newer PyTorch (≥ 2.10)](./guides/running-with-newer-pytorch.md) | torch 2.13 venv setup + at-scale yeet (8N → 4096N) | 2026-06-09 |
+| [Running with Newer PyTorch (≥ 2.10)](reference/guides/running-with-newer-pytorch.md) | torch 2.13 venv setup + at-scale yeet (8N → 4096N) | 2026-06-09 |
 | [Reference Baselines](reference/baselines/README.md) | Training curves and benchmarks | 2026-04-29 |
 | [Dense Model Configs](reference/configs/dense.md) | 2B / 20B / 50B / 80B | 2026-04-26 |
 | [MoE Variants](reference/configs/moe.md) | 500M-10B | 2026-04-26 |
