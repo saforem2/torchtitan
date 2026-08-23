@@ -1,0 +1,111 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=8
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 30b-cont
+#PBS -j oe
+set -o pipefail
+
+# CONTINUATION past the finished 2000-step run, at CONSTANT LOW LR.
+#
+# The step-2000 checkpoint is FULLY ANNEALED. The original schedule was
+# warmup 100 / stable 300 / linear decay 1600 with min_lr_factor 0.0, so at
+# step 2000 the LR is exactly 0 and the model sits at the bottom of its decay.
+#
+# That makes "just resume with more steps" wrong. lr_scheduler.total_steps
+# falls back to training.steps, so raising steps to 4000 RESCALES the whole
+# schedule: step 2000 becomes mid-decay of the new curve and the LR jumps
+# discontinuously from 0 to ~1.9e-4. Hitting a fully-annealed model with that
+# spikes the loss and throws away the anneal the run just paid 2000 steps for.
+#
+# Instead: constant LR, no warmup, no decay. This is the idiom the 2B constlr
+# fork already uses (submit_agpt_multi_autoretry.sh:658 --
+# decay-ratio=0.0 + min-lr-factor=1.0 is documented there as "constant LR").
+#
+#   --optimizer...lr=3e-5              10% of the 3e-4 peak
+#   --lr-scheduler.decay-ratio=0.0     no decay phase
+#   --lr-scheduler.min-lr-factor=1.0   floor == peak, i.e. flat
+#   --lr-scheduler.warmup-steps=0      no re-warm; the model is already warm
+#
+# 3e-5 rather than resuming at peak: the model is annealed, so the goal is to
+# keep making progress without re-heating it. If loss climbs instead of
+# descending in the first ~50 steps, that is the signal the LR is too high --
+# check before letting it run the full allocation.
+#
+# WHY CONTINUE AT ALL: the trajectory eval (12473656) shows mmlu going from
+# dead-at-chance at step 1000 (24.56%) to +3.3 sigma at step 2000 (26.24%),
+# +1.67pp with sigma(delta)=+3.2. The config has NOT plateaued, so more tokens
+# is the lever. hellaswag's +0.46pp over the same interval is unresolvable at
+# its sample size, not evidence of flatness.
+#
+# steps=3000 (1000 more). At the measured 41.35 s/step that is ~11.5h, which
+# fits the 12h walltime with the inner timeout below sized under it. Both
+# clocks scaled together -- 30b_long ate an rc=124 by moving only one.
+#
+# Checkpoint interval 100: at 294G each that is ~2.9T for 10 more checkpoints
+# against 1.1P free. Affordable now; it was not when the filesystem was at
+# 1.5T and interval=100 filled it.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+CFG_OK=0
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_30b_olmo2tok" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: agpt_30b_olmo2tok does not import"; exit 1; }
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-converge"
+LOGD="$PWD/outputs/logs/30b-converge/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+echo "ckpt dir: $CKPT"
+echo "log:      $LOG"
+echo "resuming from step-2000 at CONSTANT lr=3e-5 (peak was 3e-4)"
+echo ""
+
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
+
+timeout 41400 ezpz launch --nproc 96 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok \
+    --training.steps=3000 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --parallelism.tensor-parallel-degree=1 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=3e-5 \
+    --lr-scheduler.warmup-steps=0 \
+    --lr-scheduler.decay-ratio=0.0 \
+    --lr-scheduler.min-lr-factor=1.0 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=100 \
+    --checkpoint.keep-latest-k=0 \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## continuation ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo "  resumed from: $(printf '%s' "$C" | grep -aoE 'Loading the checkpoint from [^ ]*step-[0-9]+' | tail -1)"
+echo ""
+echo "  LR ACTUALLY USED (must be 3e-05 flat, NOT 0 and NOT 3e-04):"
+printf '%s' "$C" | grep -aoE '"lr": *[0-9.e+-]+' | head -2 | sed 's/^/    /'
+echo ""
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" \
+  | awk 'NR==1||NR%100==0{print "  "$0}' | head -14
+echo ""
+echo "  first/last:"
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | head -1 | sed 's/^/    /'
+printf '%s' "$C" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | tail -1 | sed 's/^/    /'
+echo ""
+echo "  NaN/inf: $(printf '%s' "$C" | grep -acE 'loss: *(nan|inf)|grad_norm: *(nan|inf)')"
+echo "  non-finite grads SKIPPED by the guard: $(printf '%s' "$C" | grep -ac 'non-finite grad_norm')"
+echo "  steps: $(printf '%s' "$C" | grep -acE 'step: *[0-9]+ +loss:')"
+echo "  ckpts: $(ls -d "$CKPT"/step-* 2>/dev/null | wc -l)"
+echo "  W&B: $(printf '%s' "$C" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
+echo "  rc=$rc"
+echo "30B_CONT_DONE"
