@@ -32,6 +32,25 @@ investigation lacked.
 
 Cheap by construction: a couple of reductions over tensors already resident,
 gated to fire every N steps on ONE layer, and OFF by default.
+
+COMPILE IS A HARD LIMIT, NOT A TUNABLE.
+
+The SDPA wrapper lives inside the compiled TransformerBlock. This code calls
+.item(), a host sync dynamo cannot express, so under torch.compile it does not
+degrade -- it kills the run before step 1 with
+
+  InternalTorchDynamoError: Argument 'item' of Node 'scalar_tensor'
+  does not belong to this Graph
+
+(job 12473689: 0 steps, rc=143). `observe()` therefore returns immediately
+when torch.compiler.is_compiling().
+
+The consequence is worth stating plainly rather than burying: PRODUCTION RUNS
+ARE COMPILED, so QK stats will never fire there. They are available on
+`--compile.no-enable` diagnostic runs only. Getting them under compile would
+need a different mechanism -- a graph-safe accumulator written to a device
+buffer and read after the step, not a .item() inside the graph. Not attempted
+here; recorded so the limitation is not rediscovered.
 """
 
 from __future__ import annotations
@@ -80,6 +99,15 @@ def observe(q: torch.Tensor, k: torch.Tensor, scale: float | None) -> None:
     """
     global _LAYER_TAG, _LATEST
     if not should_sample() or _LAYER_TAG is not None:
+        return
+    # HARD REQUIREMENT: never run under torch.compile. This function calls
+    # .item(), which forces a host sync; inside a compiled TransformerBlock
+    # dynamo cannot express that and dies with
+    #   InternalTorchDynamoError: Argument 'item' of Node 'scalar_tensor'
+    #   does not belong to this Graph
+    # killing the run before step 1 (job 12473689, 0 steps, rc=143). The SDPA
+    # wrapper IS inside the compiled region, so the guard has to live here.
+    if torch.compiler.is_compiling():
         return
     _LAYER_TAG = "layer0"
     try:

@@ -12,6 +12,13 @@ set -o pipefail
 # tests; nothing has produced a `diag/` key on an actual job or in W&B.
 #
 # 2N / agpt_20b / 12 steps, interval=2 so several samples land in a short run.
+#
+# UNCOMPILED (--compile.no-enable), which is not incidental: the QK hook calls
+# .item() inside the SDPA wrapper, which sits in the compiled TransformerBlock.
+# Under compile that is not slow, it is fatal -- dynamo raises
+# InternalTorchDynamoError and the run dies at 0 steps (job 12473689). The hook
+# now self-guards, but then it would never fire, so the only way to exercise
+# that path is to run eager.
 # All four features on at once, because the thing most likely to break is an
 # INTERACTION -- DTensor norms under FSDP, the attention hook inside the
 # local_map-wrapped forward, History under a real torch.distributed init.
@@ -50,6 +57,7 @@ timeout 2400 ezpz launch --nproc 24 -ppn 12 -- \
     --training.local-batch-size=1 \
     --parallelism.tensor-parallel-degree=1 \
     --parallelism.spmd-backend=partial_dtensor \
+    --compile.no-enable \
     --diagnostics \
     --diagnostics-interval=2 \
     --diagnostics-per-layer \
