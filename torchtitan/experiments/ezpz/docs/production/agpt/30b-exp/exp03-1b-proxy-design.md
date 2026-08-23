@@ -1,6 +1,6 @@
 # exp03 -- the 1B proxy that gates every future mix
 
-> **Last updated: 2026-08-14.**
+> **Last updated: 2026-08-23.**
 >
 > **Status: DESIGN. Nothing submitted. No jobs touched.** This specifies the
 > Section-5 process gate from [`README.md`](README.md) precisely enough to

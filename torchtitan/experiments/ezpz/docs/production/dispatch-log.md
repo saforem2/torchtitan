@@ -3,7 +3,7 @@
 > **Canonical record:** this page is authoritative for the cross-umbrella dispatch taxonomy -- which job ran what, and why each ended.
 > Other pages cross-reference it; do not duplicate status here.
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-23
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain

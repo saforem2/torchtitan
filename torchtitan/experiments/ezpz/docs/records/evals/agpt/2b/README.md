@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-07-24
+> Last updated: 2026-08-23
 >
 > **NOTE (2026-07-24):** the 2B 256N chain is **DONE** at step-92,859 =
 > 4.674T tokens (100%), loss ~2.65. The scores below now run through the

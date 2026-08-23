@@ -1,6 +1,6 @@
 # Umbrella `std::bad_alloc` at init -- intermittent, not yet root-caused
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-23
 
 **Status: OPEN.** Costs whole trainer slots on a ~2098-node allocation. A
 plausible mechanism (concurrent-init contention) is identified but NOT proven --

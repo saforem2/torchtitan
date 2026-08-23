@@ -1,6 +1,6 @@
 # 80B fp32-residual fix — root-cause + prototype
 
-> Last updated: 2026-07-24
+> Last updated: 2026-08-23
 
 ## Root cause (task #21)
 

@@ -1,6 +1,6 @@
 # 30B-exp experiment log
 
-> **Last updated: 2026-08-21.**
+> **Last updated: 2026-08-23.**
 >
 > Tracking table for every experiment run against the
 > [30B-exp proposal](README.md). One row per experiment, one file per
