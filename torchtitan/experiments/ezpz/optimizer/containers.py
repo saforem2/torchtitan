@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Callable, Any
 
 import torch
 import torch.nn as nn
@@ -40,7 +40,7 @@ __all__ = [
 # Post upstream PR #3269 ("[optimizer] support mixed optimizers"), the
 # Config base lives on OptimizersContainer.Config and just carries
 # ``param_groups: list[ParamGroupConfig]`` + ``implementation``. Each
-# container's only job is to extend ``_resolve_optimizer_cls`` so the
+# container's only job is to extend ``_resolve_optimizer_factory`` so the
 # pattern-based grouping inside OptimizersContainer.__init__ can dispatch
 # the registered optimizer name to its concrete class. The old per-Config
 # flat ``lr / beta1 / beta2 / eps / weight_decay`` fields are gone —
@@ -52,18 +52,18 @@ __all__ = [
 
 class ADOPTOptimizersContainer(OptimizersContainer):
     # Empty Config subclass so OptimizersContainer.Config.build() instantiates
-    # THIS class (which has the ADOPT-registering _resolve_optimizer_cls)
+    # THIS class (which has the ADOPT-registering _resolve_optimizer_factory)
     # instead of the base. Without this override, .build() builds the base
-    # OptimizersContainer, whose _resolve_optimizer_cls only knows Adam/AdamW.
+    # OptimizersContainer, whose _resolve_optimizer_factory only knows Adam/AdamW.
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "ADOPT":
             return ADOPT
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
 
 class SophiaGOptimizersContainer(OptimizersContainer):
@@ -72,10 +72,10 @@ class SophiaGOptimizersContainer(OptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "SophiaG":
             return SophiaG
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
     def update_hessian(self) -> None:
         """Delegate hessian update to each inner SophiaG optimizer."""
@@ -90,10 +90,10 @@ class MuonOptimizersContainer(OptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "Muon":
             return Muon
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
 
 class MuonClipOptimizersContainer(MuonOptimizersContainer):
@@ -102,10 +102,10 @@ class MuonClipOptimizersContainer(MuonOptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "MuonClip":
             return MuonClip
-        return MuonOptimizersContainer._resolve_optimizer_cls(name)
+        return MuonOptimizersContainer._resolve_optimizer_factory(name)
 
 
 class ManoOptimizersContainer(OptimizersContainer):
@@ -114,10 +114,10 @@ class ManoOptimizersContainer(OptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "Mano":
             return Mano
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
 
 class ScheduleFreeOptimizersContainer(OptimizersContainer):
@@ -132,10 +132,10 @@ class ScheduleFreeOptimizersContainer(OptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "AdamWScheduleFree":
             return AdamWScheduleFree
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
     def train_mode(self) -> None:
         """Switch all optimizers to train mode."""
@@ -154,10 +154,10 @@ class SPAMOptimizersContainer(OptimizersContainer):
         pass
 
     @staticmethod
-    def _resolve_optimizer_cls(name: str) -> type:
+    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
         if name == "SPAM":
             return SPAM
-        return OptimizersContainer._resolve_optimizer_cls(name)
+        return OptimizersContainer._resolve_optimizer_factory(name)
 
 
 # ---------------------------------------------------------------------------
