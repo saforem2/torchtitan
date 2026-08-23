@@ -93,6 +93,14 @@ ezpz_setup_job
 # NOTE: craype-accel-nvidia80 does NOT fix this -- it only sets compile-time
 # vars (CRAY_ACCEL_TARGET / CRAYPE_LINK_TYPE), not runtime GTL linkage.
 export MPICH_GPU_SUPPORT_ENABLED=0
+# Ask PALS to prefix every output line with `<fqdn> <rank>: ` so a rank's
+# Python traceback is attributable to the node that raised it. Without this,
+# a CUDA device fault reaches the log bare -- the bad-node scraper finds no
+# host, failover falls back to BLIND rotation, and it swaps a HEALTHY node
+# while the sick one stays in the allocation. That is exactly how job 7550301
+# burned ~1h of 130 nodes for zero training steps on 2026-08-23.
+# Consumed by ezpz.failover.patterns.polaris (added 2026-08-23).
+export EZPZ_MPI_LABEL=1
 # Polaris maintenance (2026-08-19) bumped Cray MPICH 9.0.1 -> 9.1.0, which
 # DELETED libmpi_gnu_123.so.12. darshan/3.4.4 (auto-linked by the Cray `cc`
 # wrapper, so it is baked into our mpi4py as NEEDED + RPATH) still requires that
