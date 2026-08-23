@@ -483,6 +483,40 @@ Measured request counts, for whoever sizes the next one:
 | hellaswag | 40,168 | 4.9h (actual: 6.9h) |
 | mmlu | 56,168 | 6.8h |
 
+### Trajectory: step-1000 vs step-2000 (job 12473656)
+
+One eval point says the model learned something. Two say whether it is still
+learning. Both high-power tasks were re-run on step-1000 (already converted,
+geometry byte-identical to step-2000, same `rope=complex` flavor):
+
+| task | step 1000 | step 2000 | delta | sigma(delta) | |
+|---|---:|---:|---:|---:|---|
+| hellaswag | 26.68% +/-0.44 | 27.14% +/-0.44 | +0.46pp | +0.7 | unresolvable |
+| **mmlu** | 24.56% +/-0.36 | **26.24% +/-0.37** | **+1.67pp** | **+3.2** | **still climbing** |
+
+**mmlu went from dead at chance to +3.3 sigma above it.** At step 1000
+(1.97B tokens) it was 24.56%, indistinguishable from 25%; by step 2000 (3.93B)
+it is 26.24%. That is the answer this run was for: the config has NOT
+plateaued, and more tokens are the lever.
+
+hellaswag's +0.46pp is the case called in advance -- a gap under ~1.2pp cannot
+clear 2 sigma at this sample size, so it is unresolvable, NOT evidence of a
+plateau. The distinction matters: reporting it as "flat" would be a claim the
+data cannot support.
+
+The asymmetry is the interesting part. hellaswag was ALREADY at 26.68%
+(+3.8 sigma) by step 1000 while mmlu was at nothing. They measure different
+things on different schedules -- commonsense completion arrives early then
+moves slowly; knowledge starts later and is currently the faster mover. That
+makes hellaswag the right task for "did anything happen at all" and mmlu the
+better progress meter from here.
+
+Caveat on the mmlu delta: it rests on the same measurement whose per-subject
+spread shows option-order/length bias (human_aging 9pp BELOW random). 1.67pp
+is well above that floor and both checkpoints share any systematic bias, so
+the delta should be robust -- but a third point is needed before treating the
+slope as linear.
+
 ## Verdict
 
 **The 30B config trains to completion.** 2000/2000 steps, loss
