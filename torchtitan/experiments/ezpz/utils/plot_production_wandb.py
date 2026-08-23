@@ -89,7 +89,9 @@ def _savefig_both(fig, svg_path, dpi=200):
 # trajectories.py — that single edit updates the charts, the stale-doc
 # map, the field-filler, and the eval plots together.
 from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    OLMO_MIX_1124_TOKENS,
     PRODUCTION_RUNS,
+    by_key,
 )
 
 # The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
@@ -98,11 +100,15 @@ from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
 # its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
 from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
 
-MODEL_COLORS = {
-    "2b": "#1E88E5",
-    "20b": "#D32F2F",
-    "80b": "#388E3C",
-}
+# Family mid-tones from the shared palette. The local copy here said
+# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
+# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
+# in the overlay. utils/palette.py is now the only definition.
+from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
+    alpha_for as _pal_alpha,
+    CHAIN_COLORS as _pal_chain_colors,
+    MODEL_COLORS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 DOCS_BASE = REPO_ROOT / "torchtitan" / "experiments" / "ezpz" / "docs"
@@ -322,6 +328,8 @@ def plot_tokens_vs_time(
     model_name: str,
     num_nodes: int,
     output_path: Path,
+    prior_tokens: float = 0.0,
+    token_target: float = OLMO_MIX_1124_TOKENS,
 ) -> Path:
     """Cumulative tokens vs wall-clock datetime.
 
@@ -347,6 +355,12 @@ def plot_tokens_vs_time(
     # up to the previous best produce dips. Take the running max so the
     # curve stays monotonic non-decreasing.
     tokens = np.maximum.accumulate(tokens)
+    # A stage-2 chain's logged `n_tokens_seen` ALSO restarts at 0: the trainer
+    # zeroes it and only train_state persists it, while
+    # --checkpoint.initial-load-path defaults to initial_load_model_only=True,
+    # so the seed run's count is never restored. Shift past what the seed
+    # checkpoint already consumed. Non-stage-2 chains pass 0 and are unchanged.
+    tokens = tokens + prior_tokens
 
     times = [datetime.fromtimestamp(t, tz=timezone.utc) for t in ts]
 
@@ -354,7 +368,11 @@ def plot_tokens_vs_time(
     ax.plot(times, tokens / 1e9, color=color, linewidth=1.8)
 
     final_tokens_b = tokens[-1] / 1e9
-    target_b = 4670  # 4.67T tokens
+    # Was a hardcoded `4670`, a drifting duplicate of OLMO_MIX_1124_TOKENS that
+    # was ALSO wrong for stage-2 chains: it divided an increment-frame numerator
+    # by a cumulative-frame denominator (dolmino read "14.7%", correct in
+    # neither frame). Both sides are now cumulative and per-chain.
+    target_b = (prior_tokens + token_target) / 1e9
     pct = 100 * final_tokens_b / target_b
 
     ax.set_xlabel("Date")
@@ -362,7 +380,11 @@ def plot_tokens_vs_time(
     ax.set_title(
         f"AuroraGPT {model_name.upper()} — Tokens vs Wall Clock  |  "
         f"{num_nodes} nodes  |  "
-        f"{final_tokens_b:,.1f}B tokens ({pct:.1f}% of 4.67T target)",
+        # The "of X target" label MUST be derived from target_b, not written
+        # as a literal: a second hardcoded 4.67T survived the first fix here
+        # and printed "77.2% of 4.67T" while dividing by 7.06T -- a percentage
+        # and a denominator that disagreed, in the same sentence.
+        f"{final_tokens_b:,.1f}B tokens ({pct:.1f}% of {target_b / 1000:.2f}T target)",
         fontsize=14,
         fontweight="bold",
     )
@@ -451,14 +473,16 @@ def plot_overlay(
     return output_path
 
 
-# Color/alpha presets per PRODUCTION_RUNS key. Lower alpha for the
-# v1 (bf16-tainted) entries so v2 reads as the "real" curve.
+# Color/alpha per PRODUCTION_RUNS key, derived from the shared palette so a
+# chain renders identically here and in the combined overlay. Lower alpha for
+# the v1 (bf16-tainted) entries so v2 reads as the "real" curve.
+#
+# Built from palette.CHAIN_COLORS rather than listed by hand: the old literal
+# table omitted 20b_v2_256 and 2b_v2_512_lr3.22e-5 entirely, so those two fell
+# through to a default and drew in whatever the model mid-tone happened to be.
 OVERLAY_STYLE: dict[str, dict] = {
-    "2b_v1_256":  {"color": "#94a3b8", "alpha": 0.55},  # slate, faded
-    "2b_v2_256":  {"color": "#1E88E5", "alpha": 1.00},
-    "2b_v2_512":  {"color": "#0d47a1", "alpha": 1.00},
-    "20b_v1_256": {"color": "#94a3b8", "alpha": 0.55},
-    "20b_v2_512": {"color": "#D32F2F", "alpha": 1.00},
+    _k: {"color": _c, "alpha": _pal_alpha(_k)}
+    for _k, _c in _pal_chain_colors.items()
 }
 
 
@@ -577,11 +601,17 @@ def main() -> None:
             cfg["num_nodes"],
             out_dir / f"training_diagnostics_{key}n.svg",
         )
+        # PRODUCTION_RUNS is a legacy projection that drops prior_tokens /
+        # token_target (and is asserted byte-for-byte in tests), so read the
+        # full trajectory record for them.
+        _traj = by_key(key)
         plot_tokens_vs_time(
             data,
             model_name,
             cfg["num_nodes"],
             out_dir / f"tokens_vs_time_{key}n.svg",
+            prior_tokens=_traj.get("prior_tokens") or 0,
+            token_target=_traj.get("token_target") or OLMO_MIX_1124_TOKENS,
         )
 
 

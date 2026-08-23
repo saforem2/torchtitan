@@ -348,11 +348,11 @@ This report is assembled from the quarter's two-week retrospectives:
 
 | Period | Headline |
 |---|---|
-| [2026-04-12 -> 04-27](2026-04-12_to_2026-04-27.md) | 291 commits — LR finder + scaling study + production training + optimizer competition platform |
-| [2026-05-08 -> 05-22](2026-05-08_to_2026-05-22.md) | 51 commits — first upstream PyTorch PR, 4 syncs, 80B bad-node failover wrapper |
-| [2026-05-22 -> 05-29](2026-05-22_to_2026-05-29.md) | 80 commits — 2 upstream PRs, 5 syncs, 20B HSn 0.579->0.635, failover hardening |
-| [2026-06-05 -> 06-12](2026-06-05_to_2026-06-12.md) | ~140 commits — SFT complete, GRPO 8N done, PR #14 review, 6 syncs |
-| [2026-06-12 -> 06-26](2026-06-12_to_2026-06-26.md) | 151 commits — 80B NaN root-caused, GRPO on XPU, native auto-retry, 4 syncs, PR #14 merged |
+| [2026-04-12 -> 04-27](2026-04-27.md) | 291 commits — LR finder + scaling study + production training + optimizer competition platform |
+| [2026-05-08 -> 05-22](2026-05-22.md) | 51 commits — first upstream PyTorch PR, 4 syncs, 80B bad-node failover wrapper |
+| [2026-05-22 -> 05-29](2026-05-29.md) | 80 commits — 2 upstream PRs, 5 syncs, 20B HSn 0.579->0.635, failover hardening |
+| [2026-06-05 -> 06-12](2026-06-12.md) | ~140 commits — SFT complete, GRPO 8N done, PR #14 review, 6 syncs |
+| [2026-06-12 -> 06-26](2026-06-26.md) | 151 commits — 80B NaN root-caused, GRPO on XPU, native auto-retry, 4 syncs, PR #14 merged |
 
 **Approximate Q2 activity** (sum of the documented windows; excludes
 undocumented gaps): **700+ commits** on the `ezpz` branch, **hundreds of

@@ -9,6 +9,7 @@ import json
 import difflib
 import collections
 import statistics
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -18,7 +19,11 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 apply_style()
 
-BASE = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs"
+# Resolve the repo from this file's location, not a hardcoded machine path:
+# the plotter is authored on Sunspot but refresh_all.sh runs it on Aurora too,
+# where /lus/tegu does not exist. docs/production/rl/grpo/ -> repo root is 7 up.
+REPO = Path(__file__).resolve().parents[7]
+BASE = str(REPO / "outputs")
 RUNS = [
     ("v5", "rl_lora_agpt2b_train_v5", "v5 lr2e-5 r8 (prev best)", "--", 1.6),
     ("w1", "rl_lora_agpt2b_w1", "w1 lr5e-5 r8", "-", 1.4),
@@ -119,8 +124,15 @@ ax.set_title("agpt-2b GRPO+LoRA on XPU -- breaking the reward-shape ceiling")
 ax.legend(loc="upper left", fontsize=8)
 fig.tight_layout()
 
-OUT = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
-       "torchtitan/experiments/ezpz/docs/production/rl/grpo/aurora2b/charts")
+# The RL runs this reads live under outputs/grpo/ on SUNSPOT. On a host
+# without them every series is empty, and writing anyway REPLACES a good
+# committed chart with a blank one (it did, 2026-08-05). Skip instead.
+if not finals:
+    print("skip: no GRPO run data found under "
+          f"{BASE} -- leaving existing charts untouched")
+    raise SystemExit(0)
+
+OUT = str(Path(__file__).resolve().parent / "aurora2b" / "charts")
 os.makedirs(OUT, exist_ok=True)
 for ext in ("png", "svg"):
     fig.savefig(os.path.join(OUT, "ceiling-attack." + ext),

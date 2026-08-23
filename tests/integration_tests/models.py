@@ -10,24 +10,17 @@ import dataclasses
 from tests.integration_tests import OverrideDefinitions
 
 
-def _enable_spmd_backend(t: OverrideDefinitions, backend: str) -> OverrideDefinitions:
-    """Use ``backend`` for every variant, or return an unsupported test unchanged."""
-    if backend == "spmd_types" and any(
-        "--module qwen3_5" in arg for variant in t.override_args for arg in variant
-    ):
-        return t
-
-    test_name = f"{t.test_name}_{backend}"
+def _configure_spmd_backend_and_typecheck(
+    t: OverrideDefinitions,
+) -> OverrideDefinitions:
+    """Configure the SPMD backend and enable typechecking where supported."""
+    # Compile, PP, and explicit AC modes are not compatible with SPMD
+    # typechecking yet; keep those as backend-only coverage.
     new_args = []
     for variant in t.override_args:
-        variant = tuple(
-            arg.replace(f"{t.test_name}/", f"{test_name}/") for arg in variant
-        )
-        prefix = [f"--parallelism.spmd_backend {backend}"]
+        prefix = []
         suffix = []
-        # Compile, PP, and explicit AC modes are not compatible with SPMD
-        # typechecking yet; keep those as backend-only coverage.
-        if backend == "spmd_types" and not any(
+        if not any(
             token in arg
             for arg in variant
             for token in (
@@ -43,7 +36,6 @@ def _enable_spmd_backend(t: OverrideDefinitions, backend: str) -> OverrideDefini
     return dataclasses.replace(
         t,
         override_args=tuple(new_args),
-        test_name=test_name,
     )
 
 
@@ -61,7 +53,8 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             [
                 [
-                    "--module deepseek_v3 --config deepseek_v3_debugmodel",
+                    "--training.disable_cuda_graphs",
+                    "--module deepseek_v3 --config deepseek_v3_debugmodel_mtp",
                     "--parallelism.data_parallel_shard_degree 4",
                     "--parallelism.expert_parallel_degree 2",
                     "--compile.enable",
@@ -69,8 +62,8 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
                     "torchtitan.overrides.helion_rope.helion_complex_rope",
                 ],
             ],
-            "DeepSeek V3 FSDP+EP+compile (+ Helion RoPE override)",
-            "deepseek_v3_fsdp+ep+compile",
+            "DeepSeek V3 MTP FSDP+EP+compile",
+            "deepseek_v3_mtp_fsdp+ep+compile",
             ngpu=4,
             # The Helion fused RoPE kernels are CUDA-only and tuned for NVIDIA
             # H100/GB200; skip on ROCm where they are unvalidated.
@@ -79,6 +72,7 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module deepseek_v3 --config deepseek_v3_debugmodel",
                     "--parallelism.pipeline_parallel_degree 2",
                     "--parallelism.pipeline_parallel_schedule Interleaved1F1B",
@@ -94,6 +88,7 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module deepseek_v3 --config deepseek_v3_debugmodel",
                     "--parallelism.data_parallel_replicate_degree 2",
                     "--parallelism.data_parallel_shard_degree 2",
@@ -104,10 +99,27 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
             "deepseek_v3_hsdp+ep",
             ngpu=4,
         ),
+        OverrideDefinitions(
+            [
+                [
+                    "--training.disable_cuda_graphs",
+                    "--module deepseek_v3 --config deepseek_v3_debugmodel",
+                    "--override.imports torchtitan.overrides.fused_mla.fused_mla,"
+                    "torchtitan.overrides.fused_swiglu.fused_swiglu",
+                    "--parallelism.data_parallel_shard_degree 4",
+                    "--parallelism.expert_parallel_degree 2",
+                ],
+            ],
+            "DeepSeek V3 fused MLA+SwiGLU FSDP+EP",
+            "deepseek_v3_fused_mla_swiglu_fsdp+ep",
+            ngpu=4,
+            skip_rocm_test=True,
+        ),
         # Integration Test Cases for Qwen3 dense and MoE model
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module qwen3 --config qwen3_debugmodel_moe_param_groups",
                     "--parallelism.data_parallel_shard_degree 2",
                     "--parallelism.tensor_parallel_degree 2",
@@ -176,6 +188,7 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module qwen3_5 --config qwen35_debugmodel_moe",
                     "--parallelism.data_parallel_shard_degree 2",
                     "--parallelism.pipeline_parallel_degree 2",
@@ -187,10 +200,29 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
             "qwen3_5_moe_fsdp+tp+ep+pp",
             ngpu=8,
         ),
+        OverrideDefinitions(
+            [
+                [
+                    "--training.disable_cuda_graphs",
+                    "--module qwen3_5 --config qwen35_debugmodel_varlen_attn",
+                    "--parallelism.data_parallel_shard_degree 2",
+                    "--parallelism.tensor_parallel_degree 2",
+                    # First-run FLA/TileLang kernel compile and autotune exceed
+                    # the default 100s train timeout.
+                    "--comm.train_timeout_seconds 600",
+                    "activation-checkpoint:selective",
+                ]
+            ],
+            "Qwen3.5 FSDP+TP+VARLEN_ATTN + per op SAC",
+            "qwen3_5_fsdp+tp+varlen_attn+per_op_sac",
+            ngpu=4,
+            skip_rocm_test=True,
+        ),
         # Integration Test Cases for gpt-oss
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module gpt_oss --config gpt_oss_debugmodel",
                     "--parallelism.data_parallel_shard_degree 4",
                     "--parallelism.tensor_parallel_degree 2",
@@ -205,7 +237,28 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             [
                 [
+                    "--training.disable_cuda_graphs",
                     "--module gpt_oss --config gpt_oss_debugmodel_flex",
+                    "--parallelism.data_parallel_shard_degree 2",
+                    "--parallelism.context_parallel_degree 2",
+                    "--parallelism.context_parallel_load_balancer ptrr",
+                    "--parallelism.context_parallel_ptrr_mask_key basic_mask",
+                    "--parallelism.pipeline_parallel_degree 2",
+                    "--parallelism.pipeline_parallel_schedule Interleaved1F1B",
+                    "--parallelism.expert_parallel_degree 4",
+                    "activation-checkpoint:selective",
+                ],
+            ],
+            "Gpt-oss PP+FSDP+CP+EP+SACOP",
+            "gpt_oss_pp+fsdp+cp+ep+sacop",
+            ngpu=8,
+        ),
+        OverrideDefinitions(
+            [
+                [
+                    "--training.disable_cuda_graphs",
+                    "--module gpt_oss --config gpt_oss_debugmodel",
+                    "--training.global_batch_size 64",
                     "--parallelism.data_parallel_shard_degree 4",
                     "--parallelism.pipeline_parallel_degree 2",
                     "--parallelism.pipeline_parallel_schedule Interleaved1F1B",
@@ -213,10 +266,43 @@ def build_model_tests_list() -> list[OverrideDefinitions]:
                     "activation-checkpoint:selective",
                 ],
             ],
-            "Gpt-oss PP+FSDP+EP+SACOP",
+            "Gpt-oss PP+FSDP+EP+SACOP with VarlenAttention",
             "gpt_oss_pp+fsdp+ep+sacop",
             ngpu=8,
         ),
+        # Integration Test Cases for Kimi K2.7
+        OverrideDefinitions(
+            [
+                [
+                    "--training.disable_cuda_graphs",
+                    # Consolidate the former 2-GPU FSDP smoke and 8-GPU
+                    # FSDP+TP+EP+PP test into one supported FSDP+EP path. Kimi
+                    # DistMuon rejects TP because it produces _StridedShard
+                    # storage. PP support follows in the next stack change.
+                    "--module kimi_k2_7 --config kimi_k2_5_debugmodel",
+                    "--parallelism.data_parallel_shard_degree 4",
+                    "--parallelism.expert_parallel_degree 2",
+                    "--training.steps 1",
+                ],
+            ],
+            "Kimi K2.7 DistMuon FSDP+EP",
+            "kimi_k2_5_muon_fsdp+ep",
+            ngpu=4,
+        ),
+        # Integration Test Cases for Muse Glimmer
+        OverrideDefinitions(
+            [
+                [
+                    "--training.disable_cuda_graphs",
+                    "--module muse_glimmer --config muse_glimmer_debugmodel_mm",
+                    "--parallelism.data_parallel_shard_degree 2",
+                    "--parallelism.tensor_parallel_degree 2",
+                ],
+            ],
+            "Muse Glimmer multimodal FSDP+TP+SP",
+            "muse_glimmer_mm_fsdp+tp+sp",
+            ngpu=4,
+        ),
     ]
 
-    return [_enable_spmd_backend(t, "spmd_types") for t in model_tests]
+    return [_configure_spmd_backend_and_typecheck(t) for t in model_tests]

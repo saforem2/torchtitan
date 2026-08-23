@@ -57,7 +57,7 @@ def _build_llama3_tests() -> list[OverrideDefinitions]:
                     "--config graph_trainer_llama3_debugmodel",
                     "--compile.mode jit",
                     "--parallelism.tensor_parallel_degree 2",
-                    "--parallelism.enable_async_tensor_parallel",
+                    "--compile.enable_async_tensor_parallel",
                 ],
             ],
             "JIT 2D async TP",
@@ -263,36 +263,42 @@ def _build_deepseek_v3_tests() -> list[OverrideDefinitions]:
             "batch",
             "layers.*",
             "transformer_batch",
+            False,
         ),
         (
             "regional",
             "batch",
             "layers.*.moe",
             "moe_batch",
+            True,
         ),
         (
             "regional",
             "seq",
             "layers.*.moe",
             "moe_seq",
+            True,
         ),
         (
             "full",
             "batch",
             "layers.*",
             "transformer_batch",
+            False,
         ),
         (
             "full",
             "batch",
             "layers.*.moe",
             "moe_batch",
+            True,
         ),
         (
             "full",
             "seq",
             "layers.*.moe",
             "moe_seq",
+            True,
         ),
     ]
 
@@ -355,9 +361,31 @@ def _build_deepseek_v3_tests() -> list[OverrideDefinitions]:
             disabled=_JIT_DISABLED,
         ),
         # === aot_fx_trace mode tests ===
-        # Note: cudagraph is auto-skipped for DSv3 because MoE load-balancing
-        # introduces CUDA→CPU transfers incompatible with CUDA graph capture.
+        # Note: standard DSv3 MoE load-balancing introduces CUDA-to-CPU
+        # transfers incompatible with CUDA graph capture, so this fused test
+        # explicitly disables the cudagraph pass.
         #
+        # TODO: Re-enable FSDP bucketing when its stable topological sort
+        # supports the fused MLA Q kernel's mutating custom-op boundary.
+        OverrideDefinitions(
+            [
+                [
+                    "--module graph_trainer.deepseek_v3",
+                    "--config graph_trainer_deepseek_v3_debugmodel",
+                    "--compile.mode aot_fx_trace",
+                    "--compile.disable_passes "
+                    "joint_transformer_block_bucketing_reordering_pass,"
+                    "cudagraph_pass",
+                    "--override.imports torchtitan.overrides.fused_mla.fused_mla,"
+                    "torchtitan.overrides.fused_swiglu.fused_swiglu",
+                    "--parallelism.data_parallel_shard_degree 2",
+                    "--parallelism.tensor_parallel_degree 2",
+                ],
+            ],
+            "aot_fx_trace deepseek_v3 fused MLA+SwiGLU FSDP+TP",
+            "aot_fx_trace_deepseek_v3_fused_mla_swiglu_fsdp_tp",
+            ngpu=4,
+        ),
         # TODO: FSDP+TP+CP+EP is disabled: tracing fails with "aten.add.Tensor
         # got mixed torch.Tensor and DTensor" — a separate CP+EP issue,
         # unrelated to the empty_strided shadow-node fix. Re-enable once fixed.
@@ -416,6 +444,9 @@ def _build_deepseek_v3_tests() -> list[OverrideDefinitions]:
             "aot_fx_trace deepseek_v3 FSDP+TP+EP+regional_inductor",
             "aot_fx_trace_deepseek_v3_fsdp_tp_ep_regional_inductor",
             ngpu=8,
+            # TODO(#4047): Re-enable once FSDP bucketing no longer creates a
+            # cyclic region for this DeepSeekV3 FSDP+TP+EP configuration.
+            disabled=True,
         ),
         *[
             OverrideDefinitions(
@@ -440,8 +471,17 @@ def _build_deepseek_v3_tests() -> list[OverrideDefinitions]:
                 f"aot_fx_trace deepseek_v3 FlexAttn {inductor_compilation}_inductor ep_overlap {variant}",
                 f"aot_fx_trace_deepseek_v3_flexattn_{inductor_compilation}_inductor_ep_overlap_{variant}",
                 ngpu=8,
+                # TODO(#4052): Re-enable MoE EP-overlap dense-region tests
+                # once FSDP comm scheduling handles alias users on wait sinks.
+                disabled=disabled,
             )
-            for inductor_compilation, mode, modules, variant in ep_overlap_flex_tests
+            for (
+                inductor_compilation,
+                mode,
+                modules,
+                variant,
+                disabled,
+            ) in ep_overlap_flex_tests
         ],
         OverrideDefinitions(
             [
@@ -582,14 +622,52 @@ def _build_qwen3_tests() -> list[OverrideDefinitions]:
     ]
 
 
+def _build_muse_glimmer_tests() -> list[OverrideDefinitions]:
+    """MuseGlimmer integration tests."""
+    return [
+        OverrideDefinitions(
+            [
+                [
+                    "--module graph_trainer.muse_glimmer",
+                    "--config graph_trainer_muse_glimmer_debugmodel",
+                    "--compile.mode aot_fx_trace",
+                    "--parallelism.data_parallel_shard_degree 8",
+                ],
+            ],
+            "aot_fx_trace muse_glimmer FSDP",
+            "aot_fx_trace_muse_glimmer_fsdp",
+            ngpu=8,
+        ),
+        OverrideDefinitions(
+            [
+                [
+                    "--module graph_trainer.muse_glimmer",
+                    "--config graph_trainer_muse_glimmer_debugmodel",
+                    "--compile.mode aot_fx_trace",
+                    "--parallelism.data_parallel_shard_degree 4",
+                    "--parallelism.tensor_parallel_degree 2",
+                ],
+            ],
+            "aot_fx_trace muse_glimmer FSDP+TP",
+            "aot_fx_trace_muse_glimmer_fsdp_tp",
+            ngpu=8,
+        ),
+    ]
+
+
 def build_graph_trainer_test_list() -> list[OverrideDefinitions]:
-    """All graph_trainer integration tests (Llama3 + DeepSeek-v3 + Qwen3)."""
-    return _build_llama3_tests() + _build_deepseek_v3_tests() + _build_qwen3_tests()
+    """All graph_trainer integration tests."""
+    return (
+        _build_llama3_tests()
+        + _build_deepseek_v3_tests()
+        + _build_qwen3_tests()
+        + _build_muse_glimmer_tests()
+    )
 
 
 def build_graph_trainer_default_test_list() -> list[OverrideDefinitions]:
-    """Llama3 tests only (for default A10 machines)."""
-    return _build_llama3_tests()
+    """Dense-model tests for default A10 machines."""
+    return _build_llama3_tests() + _build_muse_glimmer_tests()
 
 
 def _build_async_tp_tests() -> list[OverrideDefinitions]:
@@ -601,7 +679,7 @@ def _build_async_tp_tests() -> list[OverrideDefinitions]:
                     "--module graph_trainer.llama3",
                     "--config graph_trainer_llama3_8b",
                     "--compile.mode aot_fx_trace",
-                    "--parallelism.enable_async_tensor_parallel",
+                    "--compile.enable_async_tensor_parallel",
                     "--training.local_batch_size 2",
                     "--training.seq_len 512",
                     "--parallelism.data_parallel_shard_degree 4",

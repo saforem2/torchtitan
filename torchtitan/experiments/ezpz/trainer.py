@@ -22,6 +22,11 @@ from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
+from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
+from torchtitan.experiments.ezpz.ckpt_key_compat import (
+    maybe_install_flat_attention_compat,
+)
+from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
     TorchFTManager as FTManager,
@@ -35,6 +40,29 @@ from torchtitan.tools import utils
 from torchtitan.tools.logging import logger
 from torchtitan.tools.profiler import Profiler
 from torchtitan.trainer import Trainer
+
+
+_CLIP_FOREACH_LOGGED = False
+
+
+def _clip_foreach() -> bool:
+    """Whether to use the fused multi-tensor path in ``clip_grad_norm_``.
+
+    Defaults to True, matching upstream. ``EZPZ_CLIP_NO_FOREACH=1`` selects the
+    unfused loop, which exists to test whether the fused path is what exhausts
+    level_zero resources under HSDP on XPU (30B dies in
+    ``clip_grad.py:106 torch.stack([norm.to(first_device) ...])`` with
+    UR_RESULT_ERROR_OUT_OF_RESOURCES at 71.68% memory -- resource exhaustion,
+    not an OOM). Logged once so a run's own output proves which path it took,
+    rather than the caller assuming the env var reached the ranks.
+    """
+    global _CLIP_FOREACH_LOGGED
+    foreach = os.environ.get("EZPZ_CLIP_NO_FOREACH", "0") != "1"
+    if not _CLIP_FOREACH_LOGGED:
+        _CLIP_FOREACH_LOGGED = True
+        logger.info("EZPZ_CLIP_NO_FOREACH active: clip_grad foreach=%s", foreach)
+    return foreach
+
 
 
 def _set_pg_timeouts_xpu_aware(
@@ -250,13 +278,42 @@ class FaultTolerantTrainer(Trainer):
         )
 
         # build dataloader
+        # Under PP the dataloader must serve MICROBATCHES, not the full local
+        # batch -- upstream #3856 ("Always Pre-Split Microbatches for PP")
+        # moved the split to the dataloader. Mirror the base Trainer
+        # (torchtitan/trainer.py): feed pipeline_parallel_microbatch_size when
+        # PP is on, else the plain local batch size. Without this, a PP run
+        # would receive full-size batches and mis-shape every microbatch.
+        # (The validator build below intentionally keeps local_batch_size --
+        # upstream did not change the validator path.)
+        _num_pp_microbatches = (
+            config.training.local_batch_size
+            // config.parallelism.pipeline_parallel_microbatch_size
+            if parallel_dims.pp_enabled
+            else 1
+        )
+        dataloader_batch_size = (
+            config.parallelism.pipeline_parallel_microbatch_size
+            if parallel_dims.pp_enabled
+            else config.training.local_batch_size
+        )
         self.dataloader = config.dataloader.build(
             dp_world_size=batch_degree,
             dp_rank=batch_rank,
             tokenizer=self.tokenizer,
             seq_len=config.training.seq_len,
-            local_batch_size=config.training.local_batch_size,
-            training_steps=config.training.steps,
+            local_batch_size=dataloader_batch_size,
+            # train_step pulls gas * num_pipeline_parallel_microbatches batches
+            # per optimizer step, so the dataloader must be sized for that many
+            # -- not the raw step count. Without the PP factor the iterator runs
+            # dry mid-run ("Ran out of data") and a later microbatch group comes
+            # up short, which the pipeline schedule reports as
+            # "Expecting N arg_mbs but got M". The factor is 1 when PP is off,
+            # so this is unchanged for every non-PP run. (Upstream applies the
+            # same product to snapshot_every_n_steps, torchtitan/trainer.py.)
+            # (computed locally: self.num_pipeline_parallel_microbatches is not
+            # assigned until later in __init__, after the dataloader is built.)
+            training_steps=config.training.steps * _num_pp_microbatches,
             global_batch_size=config.training.global_batch_size,
             parallel_dims=parallel_dims,
         )
@@ -370,6 +427,42 @@ class FaultTolerantTrainer(Trainer):
             config.training.local_batch_size * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
+
+        # How many pipeline microbatches make up one local batch. This is 1
+        # whenever PP is off, so the extra loop it drives in train_step is a
+        # no-op for every non-PP run. Mirrors the base Trainer
+        # (torchtitan/trainer.py); FaultTolerantTrainer does not call
+        # super().__init__(), so it must be set here explicitly or the PP
+        # branch would AttributeError.
+        self.num_pipeline_parallel_microbatches = _num_pp_microbatches
+
+        # Same reason again (third instance of this in this file): core's
+        # Trainer.__init__ calls dist_utils.set_spmd_backend(
+        # config.parallelism.spmd_backend) at trainer.py:319, and we never
+        # reach it. Without this the module-level default -- currently
+        # "spmd_types" -- stays live no matter what the config or CLI says,
+        # and components/loss.py:43 then fires a bare
+        #   assert get_spmd_backend() == "partial_dtensor"
+        # on any TP>1 run whose pred is a DTensor. Observed as an
+        # unexplained AssertionError with no message in job 12473496, on the
+        # partial_dtensor CONTROL arm, i.e. a config that should trivially
+        # satisfy the assert.
+        dist_utils.set_spmd_backend(config.parallelism.spmd_backend)
+
+        # 78th sync (#3559 CUDA-graph capture + #4146 in-place loss accum):
+        # the base Trainer.__init__ now builds a `fwd_bwd_fn` indirection and
+        # forward_backward_step dispatches through it. Same reason as above --
+        # we do not call super().__init__() -- so without this every run dies
+        # with "'FaultTolerantTrainer' object has no attribute 'fwd_bwd_fn'"
+        # at step 1 (job 12473170: 3/3 arms rc=143, 0 steps).
+        #
+        # Core's wrap_with_cuda_graph is a CUDA-only path (it hard-gates on
+        # device_type=="cuda"), so it is never applied here. Instead, opt in to
+        # the XPU twin via EZPZ_XPU_GRAPHS=1 -- the frameworks RC exposes the
+        # full torch.xpu graph API. Default OFF returns the plain body, so
+        # behaviour is identical to pre-merge unless explicitly enabled.
+        # See experiments/ezpz/xpu_graph.py.
+        self.fwd_bwd_fn = maybe_wrap_with_xpu_graph(self._forward_backward_body)
 
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
@@ -693,13 +786,22 @@ class FaultTolerantTrainer(Trainer):
         # Equals self.gradient_accumulation_steps unless the ramp is on.
         gas = self._effective_gas()
 
-        # Collect all microbatches on CPU and count total valid tokens
-        microbatches = []
+        # Collect all microbatches on CPU and count total valid tokens.
+        # Two nested levels, mirroring the base Trainer: the OUTER level is
+        # gradient accumulation (one optimizer step per `gas` groups), the
+        # INNER level is pipeline microbatches (the PP schedule consumes a
+        # whole group at once). `num_pipeline_parallel_microbatches` is 1
+        # whenever PP is off, so with PP disabled this is exactly the old
+        # flat `gas` loop -- one (input_dict, labels) pair per group.
+        microbatch_groups: list[list[tuple[dict[str, torch.Tensor], torch.Tensor]]] = []
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
-            input_dict, labels = next(data_iterator)
-            local_valid_tokens += (labels != IGNORE_INDEX).sum()
-            microbatches.append((input_dict, labels))
+            microbatches = []
+            for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
+                input_dict, labels = next(data_iterator)
+                local_valid_tokens += (labels != IGNORE_INDEX).sum()
+                microbatches.append((input_dict, labels))
+            microbatch_groups.append(microbatches)
 
         # All-reduce to get global token count across DP ranks
         # Move to GPU for distributed communication
@@ -716,32 +818,88 @@ class FaultTolerantTrainer(Trainer):
             # consumer (BaseLoss.__call__) accepts either at runtime.
             global_valid_tokens = float(local_valid_tokens.item())
 
-        # Process each microbatch: move to GPU, forward/backward, then free
+        # Process each group: move to GPU, forward/backward, then free.
+        # Under PP the WHOLE group (the microbatch list) goes to
+        # forward_backward_step in one call -- the pipeline schedule drives the
+        # microbatches through the stages itself, so handing it one dict at a
+        # time trips `assert isinstance(input_dict, list)` in the base Trainer.
+        # Without PP each group holds exactly one pair and this unwraps to the
+        # original per-microbatch call.
         accumulated_losses = []
-        for input_dict, labels in microbatches:
-            # Move tensors to GPU
-            for k, v in input_dict.items():
-                if isinstance(v, torch.Tensor):
-                    input_dict[k] = v.to(self.device)
-            labels = labels.to(self.device)
+        for microbatches in microbatch_groups:
+            input_dict_mbs = []
+            label_mbs = []
+            for input_dict, labels in microbatches:
+                # Move tensors to GPU
+                for k, v in input_dict.items():
+                    if isinstance(v, torch.Tensor):
+                        input_dict[k] = v.to(self.device)
+                input_dict_mbs.append(input_dict)
+                label_mbs.append(labels.to(self.device))
+
+            if parallel_dims.pp_enabled:
+                fwd_bwd_input_dict = input_dict_mbs
+                fwd_bwd_labels = label_mbs
+            else:
+                assert len(input_dict_mbs) == len(label_mbs) == 1
+                fwd_bwd_input_dict = input_dict_mbs[0]
+                fwd_bwd_labels = label_mbs[0]
 
             loss = self.forward_backward_step(
-                input_dict=input_dict,
-                labels=labels,
+                input_dict=fwd_bwd_input_dict,
+                labels=fwd_bwd_labels,
                 # pyrefly: ignore [bad-argument-type]
                 global_valid_tokens=global_valid_tokens,
             )
             accumulated_losses.append(loss.detach())
 
+        # foreach=True fuses the per-parameter norms into one multi-tensor op.
+        # Under HSDP on XPU that path exhausts level_zero resources -- the 30B
+        # dies in clip_grad.py:106 `torch.stack([norm.to(first_device) ...])`
+        # with UR_RESULT_ERROR_OUT_OF_RESOURCES at only 71.68% memory, so it is
+        # device-resource exhaustion (events/command-lists), not an OOM.
+        # EZPZ_CLIP_NO_FOREACH=1 falls back to the unfused loop to test that.
+        # Default is unchanged (foreach=True) -- this is opt-in diagnosis.
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,
-            foreach=True,
+            foreach=_clip_foreach(),
             pp_mesh=parallel_dims.get_optional_mesh("pp"),
             ep_enabled=parallel_dims.ep_enabled,
         )
+        # Refuse to apply a non-finite update.
+        #
+        # The nan_abort_consecutive guard below runs AFTER this step and only
+        # inspects the loss, so a NaN gradient is written into the weights
+        # before anything notices. Job 12473142 shows why that ordering
+        # matters: grad_norm went nan at step 30 and loss only at step 31, so
+        # the earliest available signal was one full step ahead of the one we
+        # were watching -- and five more updates landed before the abort.
+        #
+        # grad_norm is already reduced across ranks by clip_grad_norm_ (and
+        # across pp when pp_mesh is passed), so every rank sees the same value
+        # and this branches identically everywhere. No extra collective.
+        #
+        # Deliberately NOT torch._assert_async, which upstream uses in #4226:
+        # on CUDA a failed device-side assert invalidates the process, which
+        # our failover machinery would see as a crash rather than a clean
+        # stop, and its XPU behavior is undocumented. A host-side check costs
+        # one already-materialized .item() -- grad_norm is read for logging at
+        # the metrics call below regardless.
+        # Staging is a checkpoint concern, not an optimizer one -- it must run
+        # whether or not we take the step, or a skipped step would leave an
+        # async save un-awaited.
         self.checkpointer.maybe_wait_for_staging()
-        self.optimizers.step()
+        if not math.isfinite(float(grad_norm.item())):
+            self.optimizers.zero_grad()
+            logger.error(
+                f"non-finite grad_norm ({grad_norm}) at step {self.step}: "
+                "SKIPPING the optimizer step to avoid writing NaN into the "
+                "weights. The model is unchanged; the loss guard decides "
+                "whether to abort."
+            )
+        else:
+            self.optimizers.step()
         self.lr_schedulers.step()
 
         # Reduce the data collected over gradient accumulation steps.
@@ -801,6 +959,54 @@ class FaultTolerantTrainer(Trainer):
     @record
     def train(self):
         config = self.config
+
+        # Checkpoints written before the attention QKV wrapper refactor store
+        # layers.N.attention.{wq,wk,wv} flat, while current code asks for
+        # layers.N.attention.qkv_linear.{wq,wk,wv} and dcp.load matches by
+        # exact key. Install the remap ONLY for such a checkpoint -- the
+        # detector reads the on-disk metadata, so a current-format checkpoint
+        # is left completely untouched. Without this, resuming an old ckpt
+        # dies with "Missing key in checkpoint state_dict" before step 1
+        # (it burned two umbrella slots three dispatches running).
+        # initial_load_path matters here: when checkpoint.folder holds no
+        # resumable step the checkpointer loads the SEED instead, and a seed
+        # can just as easily be pre-refactor. Probing only `folder` in that
+        # case probes a directory that does not exist yet (job 8771774).
+        maybe_install_flat_attention_compat(
+            self.checkpointer,
+            config.checkpoint.folder,
+            config.checkpoint.load_step,
+            dump_folder=config.dump_folder,
+            initial_load_path=getattr(
+                config.checkpoint, "initial_load_path", ""
+            )
+            or "",
+        )
+
+        # Two concurrent jobs writing one checkpoint.folder is silent and it
+        # physically mixes their shards -- it left two 453 GB dirs holding
+        # 3,072 files where 192 belong. Record a claim and say so loudly if
+        # someone else already holds one. Advisory only: a crashed predecessor
+        # leaves a stale claim behind, and refusing to start on one would turn
+        # every crash into a failed resume.
+        #
+        # Only claim if this job will actually WRITE. A --checkpoint.no-enable
+        # run (smoke tests, config sweeps, bisects) never creates a file, so
+        # claiming would be a pure false positive: it leaves a claim on the
+        # default folder that then warns the next job -- which may be the one
+        # legitimately using that directory. Observed 2026-08-19, where a
+        # throwaway sweep spooked a live 12h run into a shard-mixing warning
+        # about a collision that could not happen.
+        if getattr(config.checkpoint, "enable", True):
+            check_and_claim(
+                config.checkpoint.folder,
+                dump_folder=config.dump_folder,
+                world_size=int(os.environ.get("WORLD_SIZE", -1)),
+                is_rank_zero=(
+                    not torch.distributed.is_initialized()
+                    or torch.distributed.get_rank() == 0
+                ),
+            )
 
         self.checkpointer.load(step=config.checkpoint.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
@@ -865,6 +1071,34 @@ class FaultTolerantTrainer(Trainer):
             # which has no such attribute -> AttributeError at train() start).
             nan_abort_n = config.nan_abort_consecutive
             consecutive_nonfinite = 0
+
+            # --- Opt-in per-op numerics capture (80B overflow localization) ---
+            # Inert unless EZPZ_DUMP_NUMERICS=1. Captures one step of per-op
+            # activation stats via DebugMode into {dump_folder}/numerics/ to
+            # name the op that first goes non-finite. An UNFILTERED fp64 capture
+            # over 84L x dim9216 OOMs / exceeds the walltime window at 80B (why
+            # the first attempt was reverted), so restrict to the overflow
+            # suspects via EZPZ_NUMERICS_OPS (comma-separated op-name
+            # substrings, default "mm,bmm,softmax" = attention scores + FFN
+            # gate). EZPZ_NUMERICS_MIN_NUMEL raises the small-tensor cutoff.
+            # See agent_tooling/numerics_debugging/. Revert after diagnosis.
+            _numerics_capture = None
+            if os.environ.get("EZPZ_DUMP_NUMERICS", "0") == "1":
+                from agent_tooling.numerics_debugging.activation_tracer import (
+                    ActivationCaptureProfiler,
+                )
+
+                _ops_env = os.environ.get("EZPZ_NUMERICS_OPS", "mm,bmm,softmax")
+                _op_filter = {o for o in _ops_env.split(",") if o} or None
+                _numerics_capture = ActivationCaptureProfiler(
+                    enabled=True,
+                    model=self.model_parts[0],
+                    dump_dir=os.path.join(config.dump_folder, "numerics"),
+                    capture_step=int(os.environ.get("EZPZ_NUMERICS_STEP", "6")),
+                    op_filter=_op_filter,
+                    min_numel=int(os.environ.get("EZPZ_NUMERICS_MIN_NUMEL", "1000")),
+                )
+                _numerics_capture.__enter__()
 
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
@@ -933,6 +1167,8 @@ class FaultTolerantTrainer(Trainer):
                 # signal the profiler that the next profiling step has started
                 profiler.step()
 
+                if _numerics_capture is not None:
+                    _numerics_capture.step()
 
                 # reduce timeout after first train step for faster signal
                 # (assuming lazy init and compilation are finished)
@@ -941,6 +1177,9 @@ class FaultTolerantTrainer(Trainer):
                         timeout=timedelta(seconds=config.comm.train_timeout_seconds),
                         parallel_dims=self.parallel_dims,
                     )
+
+            if _numerics_capture is not None:
+                _numerics_capture.__exit__(None, None, None)
 
         if torch.distributed.get_rank() == 0:
             logger.info("Sleeping 2 seconds for other ranks to complete")

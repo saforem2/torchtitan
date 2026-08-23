@@ -40,6 +40,8 @@ from torchtitan.config import (
 import os
 
 from torchtitan.distributed import ParallelDims
+from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
@@ -47,7 +49,10 @@ from torchtitan.distributed.compile import (
 )
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
-from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
+# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED from
+# distributed/tensor_parallel.py -- async TP now happens inside apply_compile,
+# which gained a keyword-only `parallel_dims`. Importing the old symbol is an
+# ImportError, so this replay is mandatory, not cosmetic.
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.tools.logging import logger
 
@@ -63,10 +68,14 @@ from torchtitan.tools.logging import logger
 # Reuses the core _maybe_regional_inductor_backend so FlexAttention handling is
 # unchanged (its own inductor_configs still set max_autotune=False for the
 # backward, which OOMs on XPU -- that is per-kernel and independent of this).
-def _apply_compile_with_mode(model, compile_config) -> None:
+def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
     mode = os.environ.get("AGPT_COMPILE_MODE", "").strip() or None
     if mode in (None, "default"):
-        apply_compile(model, compile_config)
+        # 78th sync (#4045): apply_compile is keyword-only now and takes
+        # parallel_dims, because async TP moved inside it.
+        apply_compile(
+            model, compile_config=compile_config, parallel_dims=parallel_dims
+        )
         return
     # Mirror apply_compile's dynamo flags + backend resolution, adding mode=.
     torch._dynamo.config.capture_scalar_outputs = True
@@ -108,21 +117,36 @@ def parallelize_llama(
 
     # CP: wrap inner attention forward BEFORE parallelize() so CP logic
     # runs inside the local_map boundary on local tensors.
-    if parallel_dims.cp_enabled:
-        apply_cp_to_forward(
-            [block.attention.inner_attention for block in model.layers.values()],
-            parallel_dims.get_mesh("cp"),
-        )
-
-    # TP via the config-based sharding API. The model's sharding_config
-    # declarations were filled in by update_from_config (see model.py).
-    # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
-    # bare tp_mesh) so each Module can resolve its own SPMD submesh.
-    if parallel_dims.tp_enabled:
+    # 79th sync (#4085): under full_dtensor/spmd_types, model.parallelize()
+    # must run UNCONDITIONALLY -- it is what turns the parameters into DTensors
+    # on the SPMD mesh. Gating it on tp_enabled (correct for the legacy
+    # backend) leaves plain tensors at TP=1, and resolve_fsdp_mesh's
+    # DataParallelMeshDims then rejects them:
+    #   ValueError: When dp_mesh_dims is provided, all parameters must be
+    #   DTensors on the full SPMD mesh ... Got plain tensor for param
+    # Core does exactly this split (llama3/parallelize.py:42-53).
+    # Upstream #4217 removed validate_config outright and collapsed this to
+    # `spmd_backend == "spmd_types" or tp_enabled` (llama3/parallelize.py:40).
+    # "full_dtensor" is kept in the tuple only until the sync lands, since it
+    # is still a legal value on this tree.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
         model.parallelize(parallel_dims)
-        maybe_enable_async_tp(
-            parallelism, compile_config, parallel_dims.get_mesh("tp")
-        )
+    else:
+        if parallel_dims.cp_enabled:
+            apply_cp_to_forward(
+                [block.attention.inner_attention for block in model.layers.values()],
+                parallel_dims.get_mesh("cp"),
+            )
+        # TP via the config-based sharding API. The model's sharding_config
+        # declarations were filled in by update_from_config (see model.py).
+        # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
+        # bare tp_mesh) so each Module can resolve its own SPMD submesh.
+        if parallel_dims.tp_enabled:
+            model.parallelize(parallel_dims)
+        # 78th sync (#4045): the maybe_enable_async_tp call that used to live
+        # here is gone -- apply_compile now enables async TP itself from
+        # parallel_dims. Calling it here would be an ImportError (the symbol
+        # was deleted upstream) and, if it still existed, a double-enable.
 
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components
@@ -136,7 +160,7 @@ def parallelize_llama(
         ac_config.build(dump_folder=dump_folder).apply(model)
 
     if model_compile_enabled:
-        _apply_compile_with_mode(model, compile_config)
+        _apply_compile_with_mode(model, compile_config, parallel_dims)
         # apply_compile unconditionally sets capture_scalar_outputs=True
         # (needed for MoE dynamic shapes). For dense models this breaks
         # the separately-compiled loss_fn when loss_parallel + ignore_index
@@ -149,16 +173,52 @@ def parallelize_llama(
     if skip_dp:
         return model
 
-    names = ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-    dp_mesh = parallel_dims.get_mesh(names)
+    # 79th sync: upstream #4085 made spmd_types the DEFAULT spmd_backend, and
+    # under spmd_types/full_dtensor there IS no flattened "fsdp" mesh axis --
+    # the dense mesh is ["pp", "dp", "cp", "tp"] and dp_shard is the DP storage
+    # axis (parallel_dims.py:236-238). Asking for "fsdp" now raises
+    #   ValueError: Invalid mesh dim: 'fsdp'
+    # which VOIDed every ezpz arm post-merge. Core added resolve_fsdp_mesh()
+    # for exactly this and branches on the backend (llama3/parallelize.py:71);
+    # mirror that here rather than hardcoding either name.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+    else:
+        names = (
+            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
+        )
+        dp_mesh = parallel_dims.get_mesh(names)
+        dp_mesh_dims = None
+
+    # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
+    # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16
+    # master everywhere): promote the affine norm weights to an fp32 master
+    # while the bulk stays bf16. FSDP2 rejects mixed dtypes inside one
+    # fully_shard group, so the promoted norms must also be sharded
+    # separately -- see agpt/fp32_norms.py. Settles whether the shipped
+    # full-fp32 master is over-broad.
+    fp32_norm_modules: list[nn.Module] = []
+    if os.environ.get("EZPZ_FP32_NORMS", "0").strip() not in ("", "0", "false"):
+        from torchtitan.experiments.ezpz.agpt.fp32_norms import promote_norms_to_fp32
+
+        if training.dtype != "bfloat16":
+            logger.warning(
+                "EZPZ_FP32_NORMS=1 with training.dtype=%s: the master copy is "
+                "already float32, so promoting norms is a no-op.",
+                training.dtype,
+            )
+        fp32_norm_modules = promote_norms_to_fp32(model)
+
     apply_fsdp(
         model,
         dp_mesh,
+        dp_mesh_dims=dp_mesh_dims,
         param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
         reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
         pp_enabled=parallel_dims.pp_enabled,
         cpu_offload=training.enable_cpu_offload,
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
+        separate_fsdp_modules=fp32_norm_modules,
     )
 
     if parallel_dims.dp_replicate_enabled:
@@ -217,6 +277,8 @@ def apply_fsdp(
     pp_enabled: bool,
     cpu_offload: bool = False,
     reshard_after_forward_policy: str = "default",
+    separate_fsdp_modules: list[nn.Module] | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     """FSDP2 with the same per-block grouping as upstream llama3.
 
@@ -224,6 +286,13 @@ def apply_fsdp(
     `reshard_after_forward=reshard_after_forward_policy == "always"`
     (last layers don't reshard after forward by default — FSDP would
     prefetch them immediately).
+
+    `separate_fsdp_modules` (ezpz, ablation arm B) each get their OWN
+    `fully_shard` group, applied before the enclosing block/model groups so
+    the inner wrap wins. This exists because FSDP2 asserts a uniform
+    `orig_dtype` per group: the norms-only-fp32 arm has fp32 norm weights
+    inside otherwise-bf16 blocks, which is only expressible by regrouping.
+    Empty (the default) leaves the production grouping untouched.
     """
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -231,6 +300,12 @@ def apply_fsdp(
         cast_forward_inputs=False,
     )
     fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+    # Under full_dtensor/spmd_types the storage mesh is multi-axis, so
+    # fully_shard needs to be told WHICH axes are data-parallel; core passes
+    # the same thing (distributed/fsdp.py:106). None under the legacy backend,
+    # where the flattened fsdp axis already encodes it.
+    if dp_mesh_dims is not None:
+        fsdp_config["dp_mesh_dims"] = dp_mesh_dims
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
 
@@ -238,7 +313,47 @@ def apply_fsdp(
         reshard_after_forward_policy, pp_enabled
     )
 
-    if model.tok_embeddings is not None:
+    # [ezpz] Wrap the dtype-divergent modules first so each owns its group;
+    # the enclosing block/model wraps below then only see the remaining
+    # (uniformly bf16) parameters.
+    for module in separate_fsdp_modules or ():
+        fully_shard(
+            module,
+            **fsdp_config,
+            reshard_after_forward=reshard_after_forward,
+        )
+    if separate_fsdp_modules:
+        logger.info(
+            "Applied %d separate FSDP groups (dtype-divergent modules)",
+            len(separate_fsdp_modules),
+        )
+
+    # [ezpz] When embeddings are tied (enable_weight_tying), tok_embeddings
+    # and lm_head share one weight tensor -- FSDP2 requires shared/tied
+    # parameters to live in the SAME fully_shard group, so group tok_embeddings
+    # + norm + lm_head together here instead of the two separate calls the
+    # untied path below uses. Mirrors
+    # torchtitan.distributed.fsdp.apply_fsdp_to_decoder:151-163. The untied
+    # branch (default, currently working) is unchanged.
+    tied = getattr(model, "enable_weight_tying", False)
+
+    # [ezpz] Modules already given their own group above must not appear in a
+    # second fully_shard call ("can only be applied to a module once").
+    # Nesting inside an enclosing block/model wrap is fine -- that is how the
+    # per-layer norms keep their own group -- but a DIRECT re-wrap is not.
+    _separate = {id(m) for m in (separate_fsdp_modules or ())}
+
+    def _not_separate(modules):
+        return [m for m in modules if m is not None and id(m) not in _separate]
+
+    if tied:
+        modules = _not_separate([model.tok_embeddings, model.norm, model.lm_head])
+        fully_shard(
+            modules,
+            **fsdp_config,
+            reshard_after_forward=reshard_after_forward_policy == "always",
+        )
+    elif model.tok_embeddings is not None:
         fully_shard(
             model.tok_embeddings,
             **fsdp_config,
@@ -252,12 +367,14 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward,
         )
 
-    if model.norm is not None and model.lm_head is not None:
-        fully_shard(
-            [model.norm, model.lm_head],
-            **fsdp_config,
-            reshard_after_forward=reshard_after_forward_policy == "always",
-        )
+    if not tied and model.norm is not None and model.lm_head is not None:
+        tail_modules = _not_separate([model.norm, model.lm_head])
+        if tail_modules:
+            fully_shard(
+                tail_modules,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward_policy == "always",
+            )
 
     fully_shard(model, **fsdp_config)
     disable_fsdp_gradient_division(model)

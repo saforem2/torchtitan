@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.models.common import (
     ComplexRoPE,
@@ -62,6 +63,16 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # local_map contract check (protocols/module.py:_maybe_wrap_local_map)
         # matches by positional-arg name, and asserts under TP>1 if a
         # mapped input name is missing from in_dst_shardings.
+        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
+        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
+        # layout, and if that ever reaches here the tensors arrive 3D --
+        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
+        # ACCEPTS the result. The failure is a quietly degraded loss curve,
+        # not a traceback. Assert the rank so it is loud instead.
+        assert q_BLNH.ndim == 4, (
+            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
+            "fold-batch-dim token layout landed, this wrapper needs updating"
+        )
         q, k, v = (
             q_BLNH.transpose(1, 2),
             k_BLNH.transpose(1, 2),
@@ -150,6 +161,16 @@ class SoftcappedFlexAttention(Module):
     ) -> torch.Tensor:
         # 57th sync: shape-suffixed positional names required to match
         # set_gqa_inner_attention_local_map's in_dst_shardings under TP>1.
+        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
+        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
+        # layout, and if that ever reaches here the tensors arrive 3D --
+        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
+        # ACCEPTS the result. The failure is a quietly degraded loss curve,
+        # not a traceback. Assert the rank so it is loud instead.
+        assert q_BLNH.ndim == 4, (
+            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
+            "fold-batch-dim token layout landed, this wrapper needs updating"
+        )
         q, k, v = (
             q_BLNH.transpose(1, 2),
             k_BLNH.transpose(1, 2),
@@ -281,7 +302,17 @@ def _build_agpt_layers(
         inner_attention = _ezpz_get_attention_config(attn_backend)
     linear_init = _linear_init(dim)
     head_dim = dim // n_heads
-    qk_norm_config = RMSNorm.Config(normalized_shape=head_dim, param_init=_NORM_INIT) if qk_norm else None
+    # QK-Norm uses LocalShardRMSNorm (a drop-in RMSNorm subclass) so the
+    # per-head norm runs on the local TP shard, bypassing the native DTensor
+    # RMSNorm backward that crashes on a Shard(2) 4-D tensor under AC=full
+    # recompute at TP=4 ("tensor does not have a device"). Bit-identical:
+    # head_dim and the norm weight are both unsharded/replicated on TP.
+    # See local_rmsnorm.py.
+    qk_norm_config = (
+        LocalShardRMSNorm.Config(normalized_shape=head_dim, param_init=_NORM_INIT)
+        if qk_norm
+        else None
+    )
     layers = []
     for layer_id in range(n_layers):
         if relu_squared:
@@ -400,6 +431,20 @@ agpt_configs = {
         vocab_size=32000,
         hidden_dim=compute_ffn_hidden_dim(256, multiple_of=256),
     ),
+    # QK-norm adds 2 more RMSNorms per layer on head_dim, also initialized at
+    # 1.0. Used by the master-weight-dtype ablation to test whether the
+    # bf16 norm-freeze recurs for QK-norm gains -- the specific recurrence
+    # risk cited in docs/production/agpt/30b-exp/README.md Section 6.
+    "debugmodel_qknorm": _build_agpt_config(
+        dim=256,
+        n_layers=6,
+        n_heads=16,
+        n_kv_heads=None,
+        rope_theta=500000,
+        vocab_size=32000,
+        hidden_dim=compute_ffn_hidden_dim(256, multiple_of=256),
+        qk_norm=True,
+    ),
     "debugmodel_flex_attn": _build_agpt_config(
         dim=256,
         n_layers=6,
@@ -449,6 +494,27 @@ agpt_configs = {
         # The config fn disables FlexAttention max_autotune to avoid XPU
         # OUT_OF_RESOURCES on the backward.
         attn_backend="flex",
+    ),
+    # [ezpz] agpt-2b variant matching the Megatron-DeepSpeed AuroraGPT-2B base
+    # exactly (vocab 256000, the un-padded gemma-7b vocab the MDS run trained
+    # with; the plain "2B" flavor pads to 256128). Plain (non-fused) QKV and the
+    # default sdpa attention -- this is a PRETRAINING/anneal fork target, not an
+    # RL/LoRA one, so it does not carry the "2b-rl" fused-QKV + flex layout.
+    # Used by the mid-training anneal A/B configs (agpt_2b_mds_anneal_*), which
+    # fork the converted MDS gs138650 DCP. Complex RoPE matches the production
+    # "2B" flavor AND the Megatron-DeepSpeed base (adjacent-pair rotation), so
+    # convert to HF with --model_flavor 2b-mds (complex): the state_dict_adapter
+    # then APPLIES the Q/K permute, which is correct for a complex-trained base.
+    # Do NOT convert this with a cos_sin ("_real") flavor -- that skips the
+    # permute and corrupts the export.
+    "2b-mds": _build_agpt_config(
+        dim=2048,
+        n_layers=12,
+        n_heads=16,
+        n_kv_heads=4,
+        rope_theta=50000,
+        vocab_size=256000,
+        hidden_dim=11008,
     ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
@@ -541,6 +607,65 @@ agpt_configs = {
         hidden_dim=compute_ffn_hidden_dim(5120, multiple_of=1024),
         attn_backend="flex",
     ),
+    # 30B-exp: the proposed next flagship (docs/production/agpt/30b-exp/).
+    # The proposal fixes only dim=6144; the rest is sized to sit consistently
+    # between 20B (dim 5120, L=64) and 80B (dim 9216, L=84):
+    #   dim=6144, L=64, H=48 (head_dim 128, matching 20B/80B), kv=8 GQA,
+    #   ffn via the standard 2/3*4*dim rounded to 1024 -> 16384.
+    # That lands at 28.1B params with the current 256,128 gemma vocab. NOTE the
+    # proposal argues for a ~64k custom vocab, which would cut ~2.5B of
+    # embedding; this config keeps gemma so it is directly comparable to the
+    # existing 2B/20B/80B runs. Add a separate entry when the new tokenizer
+    # exists rather than changing this one.
+    "30B": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
+    # 30B-exp with the Llama-3 128k vocab instead of gemma's 256,128.
+    #
+    # The proposal asks for "~64k custom BPE", but we have no 64k tokenizer and
+    # training one is its own project. Llama-3.1/3.2 (128k) is already vendored
+    # in assets/hf/ and satisfies BOTH surviving arguments in the proposal:
+    #   - cost: halves the embedding, 3.15B -> 1.57B params (11.2% -> 5.9% of
+    #     the model). A 64k vocab would save only ~0.8B beyond this.
+    #   - code fertility: the proposal's own table has gemma costing +17% on
+    #     starcoder and +26% on Python vs Llama-3.1, and attributes that to
+    #     gemma's merges rather than to vocab size.
+    # 26.5B params. Needs assets/hf/Llama-3.1-8B (or 3.2-1B) as the tokenizer.
+    #
+    # NOT a drop-in swap for a gemma-trained checkpoint -- different vocab means
+    # retokenizing the corpus. This is for the NEXT flagship, not a continuation.
+    "30B_llama3tok": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=128256,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
+    # 30B-exp with OLMo-2's 100,352 vocab. exp07's nine-tokenizer bake-off
+    # measured this as tied with Llama-3 on fertility (225,749 vs 225,539
+    # tok/MB, +0.09%) with a 22% smaller vocab, so it should cost 0.34B fewer
+    # embedding params at dim=6144 (1.23B vs 1.58B) for the same tokens.
+    # 100,352 (not the tokenizer's 100,278) matches OLMo-2's own config.json,
+    # which pads to a multiple of 128; max added-token id is 100,277 so the
+    # embedding covers the tokenizer with room to spare.
+    # Needs assets/hf/OLMo-2-1124-7B as the tokenizer.
+    "30B_olmo2tok": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -594,6 +719,47 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=25600,
     ),
+    # 80B + QK-Norm: RMSNorm on Q,K per head before attention. Directly bounds
+    # the attention-score magnitude -- the prime remaining suspect for the
+    # dp>186 bf16 overflow after full-depth fp32 residual proved insufficient
+    # (residual stream was necessary-but-not-sufficient; scores/another
+    # activation still overflow). Near-free at train time; no ckpt-compat cost
+    # (no surviving 80B production checkpoint to preserve).
+    "80B_qknorm": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        qk_norm=True,
+    ),
+    # 80B + logit softcap (Gemma-2 style, tanh score_mod). Caps attention
+    # scores at +/-30 -- an alternative score-bounding lever to QK-Norm.
+    "80B_softcap": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        logit_softcap=30.0,
+    ),
+    # 80B + QK-Norm AND softcap: both score-bounding levers together, for the
+    # wall test if either alone is insufficient at dp=192.
+    "80B_qknorm_softcap": _build_agpt_config(
+        dim=9216,
+        n_layers=84,
+        n_heads=72,
+        n_kv_heads=12,
+        rope_theta=500000,
+        vocab_size=256128,
+        hidden_dim=25600,
+        qk_norm=True,
+        logit_softcap=30.0,
+    ),
     # ~80.0B: Wider (dim=10752), shallower (48 layers).
     # PP divides 48: {1,2,3,4,6,8,12,16,24}.
     "80B_wide": _build_agpt_config(
@@ -645,12 +811,18 @@ agpt_configs["2b_flex_attn"] = agpt_configs["2B_flex_attn"]
 agpt_configs["7b"] = agpt_configs["7B"]
 agpt_configs["8b"] = agpt_configs["8B"]
 agpt_configs["20b"] = agpt_configs["20B"]
+agpt_configs["30b"] = agpt_configs["30B"]
+agpt_configs["30b_llama3tok"] = agpt_configs["30B_llama3tok"]
+agpt_configs["30b_olmo2tok"] = agpt_configs["30B_olmo2tok"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]
 agpt_configs["70b_wide"] = agpt_configs["70B_wide"]
 agpt_configs["80b"] = agpt_configs["80B"]
 agpt_configs["80b_wide"] = agpt_configs["80B_wide"]
+agpt_configs["80b_qknorm"] = agpt_configs["80B_qknorm"]
+agpt_configs["80b_softcap"] = agpt_configs["80B_softcap"]
+agpt_configs["80b_qknorm_softcap"] = agpt_configs["80B_qknorm_softcap"]
 
 
 def _as_cos_sin(config: "AgptModel.Config") -> "AgptModel.Config":

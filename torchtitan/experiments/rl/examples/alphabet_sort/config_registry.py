@@ -15,8 +15,7 @@ import dataclasses
 
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
-from torchtitan.components.lr_scheduler import LRSchedulersContainer
-from torchtitan.components.optimizer import default_adamw
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.config import (
     CompileConfig,
     DebugConfig,
@@ -212,7 +211,8 @@ def rl_grpo_qwen3_0_6b_flex_batch_invariant() -> Controller.Config:
     # Batch invariance requires strict on-policy: the generator must run the
     # latest weights before generating so trainer/generator logprobs stay
     # bitwise-identical (bit_wise/logprob_diff == 0) every step, not just step 1.
-    config.async_loop.max_offpolicy_steps = 0
+    config.async_loop.target_offpolicy_steps = 0
+    config.async_loop.window_fraction = None
     config.trainer = dataclasses.replace(
         config.trainer,
         debug=_BATCH_INVARIANT_DEBUG,
@@ -363,7 +363,8 @@ def rl_grpo_gpt_oss_debug_varlen_batch_invariant() -> Controller.Config:
             num_training_steps=3,
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
-            max_offpolicy_steps=0,
+            target_offpolicy_steps=0,
+            window_fraction=None,
             num_prompts_per_train_step=5,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),
@@ -618,7 +619,6 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
         "debugmodel_moe", attn_backend="varlen", moe_comm_backend="deepep"
     )
     # Generator-only overrides -> cudagraph-able DeepEP EXPAND dispatch; trainer keeps compact.
-    # FULL_AND_PIECEWISE: decode captured FULL (incl. the expand MoE), prefill breakable.
     config.generator.override = OverrideConfig(
         imports=[
             "torchtitan.overrides.fused_swiglu.fused_swiglu",
@@ -632,27 +632,9 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
     config.generator.cudagraph = VLLMCudagraphConfig(
         enable=True, mode="FULL_AND_PIECEWISE"
     )
-    # Two inference knobs to set per workload (no golden default; here EP=4):
-    #  * max_num_batched_tokens: vLLM's per-step token budget. We expose the knob (default
-    #    None -> vLLM's own default of 2048). Decide it from your input/rollout sequence
-    #    length -- it is effectively the longest input sequence length the engine batches
-    #    (vLLM's 2048 default is just a stand-in for knowing that).
-    #  * num_max_tokens_per_rank: per-rank EXPAND-dispatch capacity, REQUIRED by the
-    #    deepep_override. For a dropless model (highest memory) set it to
-    #    longest_sequence_length // sp == max_num_batched_tokens // sp; lower it gradually to
-    #    save memory (trading off dropped tokens).
+    # vLLM's per-step token budget. The wrapper derives DeepEP's per-rank buffer capacity
+    # from this scheduler limit, CUDA graph capture sizes, CP, and SP.
     config.generator.max_num_batched_tokens = 2048
-    num_max_tokens_per_rank = (
-        config.generator.max_num_batched_tokens
-        // config.generator.parallelism.expert_parallel_degree
-    )
-    for block in config.model_spec.model.layers:
-        moe = getattr(block, "moe", None)
-        if moe is None:
-            continue
-        moe.routed_experts.token_dispatcher.num_max_tokens_per_rank = (
-            num_max_tokens_per_rank
-        )
     return config
 
 
@@ -681,7 +663,8 @@ def rl_grpo_qwen3_moe_debug_varlen_batch_invariant() -> Controller.Config:
             num_training_steps=10,
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
-            max_offpolicy_steps=0,
+            target_offpolicy_steps=0,
+            window_fraction=None,
             num_prompts_per_train_step=8,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),
@@ -859,7 +842,8 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant() -> Controller.Config:
             num_training_steps=10,
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
-            max_offpolicy_steps=0,
+            target_offpolicy_steps=0,
+            window_fraction=None,
             num_prompts_per_train_step=8,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),

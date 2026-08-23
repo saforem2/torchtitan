@@ -6,9 +6,8 @@
 
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.lr_scheduler import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.components.validate import Validator
 from torchtitan.config import ParallelismConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC
@@ -65,8 +64,6 @@ def gpt_oss_debugmodel() -> Trainer.Config:
 
 
 def gpt_oss_debugmodel_flex() -> Trainer.Config:
-    # FlexAttention variant. Pipeline Parallel is incompatible with
-    # VarlenAttention, so PP integration tests use this flex config.
     return _gpt_oss_debugmodel(attn_backend="flex")
 
 

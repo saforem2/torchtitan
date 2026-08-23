@@ -137,7 +137,7 @@ docs/
 │
 ├── summaries/             ← 2-week / monthly retrospectives
 │   ├── README.md
-│   └── 2026-04-12_to_2026-04-27.md
+│   └── 2026-04-27.md
 │
 ├── upstream-issues/       ← Repros + patches we're filing back to pytorch/torchtitan
 │   ├── dist_reduce_dtensor_skip.md      ← TP loss-reporting bug (PR #3204 filed)

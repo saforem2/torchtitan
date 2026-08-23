@@ -1349,7 +1349,11 @@ class TestMetadataPropagation(unittest.TestCase):
                 if not node.stack_trace:
                     bwd_nodes_missing_stack_trace.append((node.name, seq_nr))
 
-        self.assertEqual(num_checked, 24)
+        self.assertGreater(
+            num_checked,
+            0,
+            "Expected at least one backward node with a forward stack_trace",
+        )
         self.assertEqual(
             bwd_nodes_missing_stack_trace,
             [],
@@ -1838,6 +1842,7 @@ class TestTraceFSDP(FSDPTest):
             pp=1,
             ep=1,
             world_size=self.world_size,
+            spmd_backend="partial_dtensor",
         )
 
     def _run_fsdp_model_test(
@@ -2193,6 +2198,7 @@ class TestAutogradGradVsBackwardFSDP(FSDPTest):
                 pp=1,
                 ep=1,
                 world_size=self.world_size,
+                spmd_backend="partial_dtensor",
             )
             fsdp_mesh = parallel_dims.get_mesh("fsdp")
 

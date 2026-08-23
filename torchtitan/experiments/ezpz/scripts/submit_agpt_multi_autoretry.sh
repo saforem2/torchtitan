@@ -98,6 +98,14 @@ ulimit -c 0
 #   CKPT_INTERVAL   checkpoint every N steps (default 100).
 #   MULTI_TINY_NNODES (default 2), MULTI_TINY_SPARES (default 1),
 #   MULTI_TINY_STEPS (default 20) -- tiny-profile sizing.
+#   MULTI_ONLY      comma-separated trainer indices to run (default: all).
+#                   Keeps each seat's REAL ckpt/config/dataset/RoPE, unlike
+#                   MULTI_PROFILE=tiny which rewrites them to throwaways.
+#   MULTI_NNODES_OVERRIDE  force every selected seat to N nodes (smoke sizing).
+#   MULTI_STEPS_OVERRIDE   force every selected seat to N training steps. Only
+#                   useful with MULTI_ONLY: the prod step count is derived from
+#                   train_tokens and is ~6M, so a seed-validation smoke would
+#                   otherwise run until walltime instead of exiting on its own.
 #
 # NOTE: deliberately NO `set -euo pipefail`. venv activation trips unbound
 # vars, and the umbrella must survive a single child failing without aborting
@@ -159,14 +167,156 @@ if [[ -n "${NAN_ABORT_CONSECUTIVE}" ]]; then
 fi
 
 TRAINERS=(
-    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288"
-    "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
+    # t0 -- 2B STAGE 2 (continued pre-training on dolmino-mix-1124).
+    # The stage-1 512N chain COMPLETED 2026-08-13 at step 46,429 = 4.6737T
+    # tokens, so its old slot here would have had no budget left. Replaced
+    # with stage 2, seeded from that finished endpoint.
+    #
+    # Recipe mirrors MDS train_aGPT_2B_sophiag_stage2.sh:
+    #   DATA_FILE_LIST=dolmino-mix-1124 (fused)   LR=2.17e-5
+    #   LR_DECAY_STYLE=constant -> decay_ratio 0.0, min_lr_factor 1.0
+    #   OPT=sophiag
+    #
+    # TRAIN_TOKENS here is the STAGE-2 INCREMENT (2.390375382006T), NOT MDS's
+    # cumulative 7064155541716. Fixed 2026-08-16 after job 8756070: stage 2
+    # writes to a NEW ckpt dir, so its step counter starts at 0 and the
+    # umbrella's steps = tok/(gbs*seq_len) turns a cumulative figure into
+    # 70,176 steps of pure dolmino (7.06T) -- 2.96x the intended 2.39T.
+    # Harmless to the LR shape (constant LR: decay_ratio 0, min_lr_factor 1),
+    # so it only moved the stopping point, but it was still wrong.
+    #   2390375382006 / (12288 * 8192) = 23,742 steps  <- intended
+    #
+    # Motivation: the 2026-08-14 eval of the finished stage-1 endpoint showed
+    # the last 500B tokens moved NO metric and MMLU ended at chance (0.2511).
+    # More olmo-mix is demonstrably not the lever; a different mix might be.
+    #
+    # NOT the 2026-07-18 config that NaN'd (job 8663177, step 3801): that was
+    # olmo50-dolmino50 at LR 2e-6 -- a TENTH of this LR -- so its LR was not
+    # the cause; it was a single-step overflow on a dolmino batch. This run
+    # matches MDS (pure dolmino, 2.17e-5), which survived the full stage, and
+    # relies on NAN_ABORT_CONSECUTIVE to bail early instead of NaN-writing to
+    # step 6600 the way that attempt did.
+    "2b|512|29500|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/step-46429|0.0|1.0|2390375382006|_real"
+    # 20B-512 CONSTANT-LR FORK from step-9000.
+    #
+    # This row used to stop after the ckpt dir. An EMPTY decay_ratio field does
+    # NOT inherit the constant-LR default -- launch_one only passes
+    # --lr-scheduler.decay-ratio when T_DECAY is non-empty, so an omitted field
+    # silently falls through to torchtitan's OWN default of 0.8. The chain
+    # therefore ran warmup-stable-decay when constant LR was intended.
+    #
+    # decay_ratio=0.8 means decay occupies the LAST 80% of training, i.e. it
+    # STARTS at 20%: round(46429*0.8)=37143 decay steps, so stable ends at
+    # 46429+1-200-37143 = step 9087 by the prose formula -- but the OBSERVED
+    # onset is 9287. Commit b08fccfd1's own W&B cross-check settles it:
+    # predicted 2.25496e-05 vs observed 2.25502e-05 at step 9694 reproduces
+    # ONLY with onset=9287 (9087 gives 2.2429e-05, off in the 3rd digit).
+    # The 200-step warmup is evidently not subtracted the way the formula
+    # assumes. Use 9287 when reasoning about this chain; the formula is a
+    # lower bound, not the scheduler. The chain reached 10,200 before this was
+    # caught, so ~1,200 steps ran on a decaying LR (2.28e-5 -> 2.22389e-5).
+    #
+    # Fork from step-9000 (last checkpoint before onset; 6144 shards, valid
+    # .metadata, 244G) into its own dir so the canonical chain is untouched,
+    # exactly as the 2B constlr forks do. Now passes 0.0/1.0 EXPLICITLY.
+    "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000|olmo-mix-1124|2.28e-5|$RUNS/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288/step-9000|0.0|1.0|4673780159710|_real"
     # DROPPED 2026-07-18: this 50/50 dolmino CPT trainer NaN-diverged at
     # step 3801 in job 8663177 (single-step overflow on a dolmino batch)
     # and NaN-wrote to step 6600. Config preserved for a fixed retry
     # (gentler LR / data audit) but removed from the production umbrella.
 #    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144|olmo50-dolmino50|2e-6|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2391000000000"
-    "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+    # 20B-256: same missing-decay_ratio bug, but NO FORK NEEDED. Its onset is
+    # 92859+1-200-round(92859*0.8) = step 18373 and the chain is at ~11,100, so
+    # its LR is still flat at 2.28e-5. Passing 0.0/1.0 now means it simply never
+    # decays -- no restart from an earlier checkpoint, nothing discarded.
+    # Fixing this before step 18373 is what avoids a second fork.
+    "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|_real"
+    # 2B-512 constant-LR fork (from base step-9200, right before LR decay).
+    # Own prod dir already holds the full step-9200 (model+optim); plain
+    # resume-from-latest, decay_ratio=0.0 => constant LR (no decay phase).
+    #
+    # RoPE=_real, CORRECTED 2026-08-21 (was `complex`, which would have
+    # corrupted this live 122-checkpoint chain). The `complex` value came from
+    # resolving the flavor against the PARENT chain at the SEED step -- the
+    # wrong rule for a fork that plain-resumes.
+    #
+    # THE RULE: for a fork with an EMPTY field 8, resolve RoPE against the
+    # flavor that wrote the FORK'S OWN latest checkpoint, not the parent's at
+    # the branch point. The seed's flavor governs only the very first launch
+    # into an empty dir; after that the fork has its own history.
+    #
+    # Evidence: every t3 run launched --config=agpt_2b_real (verified across
+    # umbrellas 8756957 and 8764675), and the fork's step-21300 was written
+    # 2026-08-17, well after the 2026-06-25 cos_sin switch (5ffb850a1).
+    # The fork DID pay the transition once: at its first resume (job 8744247)
+    # step 9201 logged loss 6.51705 / grad_norm 18.4066 -- the complex-weights-
+    # under-cos_sin signature -- then re-converged to 2.93 by step 9300. It has
+    # been a cos_sin chain ever since. (That spike is also the true origin of
+    # the "step-9200 resumes at ~6.5" note: step-9200 is NOT corrupt -- it is
+    # fp32 with cos 0.999 to its parent. The 6.5 was the flavor transition.)
+    "2b|512|29700|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|_real"
+    # RETIRED 2026-08-21 -- 2B-256 constant-LR fork "from step-9500".
+    # Its seed was never a trained checkpoint. The file at
+    # .../n256-gbs6144-constlr-from9500/step-9500 is near-random-init weights
+    # mislabeled step-9500. Verified three independent ways:
+    #   - dtype: bfloat16 throughout (13G). EVERY healthy 2B ckpt is float32
+    #     only (24G, exactly 2x). No key rename can change a dtype.
+    #   - stats: layers.0.attention_norm.weight is exactly 1.0 with std 0.0
+    #     (RMSNorm gains never updated; parent is 0.921 +/- 0.0177);
+    #     tok_embeddings std 0.99999 (unit normal); absmax exactly 2.0000 on
+    #     every projection (truncation artifact).
+    #   - cosine to parent ~ ZERO: wq +0.000663, wk -0.000178, wv +0.001649,
+    #     tok_embeddings -0.000011, head +0.003091. All 6 off-diagonal
+    #     wq/wk/wv pairings were also tested -- nothing above 0.9, so it is
+    #     not a permuted/mis-mapped tensor either.
+    # Its own train_state self-reports ntokens_seen=155,648,000 where step 9500
+    # at gbs 6144 x 8192 should be ~478e9 -- 325x too few. The checkpoint
+    # contradicts its own label. It resumed at loss 5.97 (not 12.45 = ln(vocab)
+    # only because output.weight retains a weak unigram prior) and went flat:
+    # that run was pretraining from scratch at a fine-tuning LR.
+    # No genuine 256N step-9500 exists anywhere on the filesystem -- the
+    # surviving agpt-2b-v2 n256 chain starts at step 35600 -- so the seat could
+    # not be repaired, only redefined. Seven attempts, zero real steps.
+#    "2b|256|29900|$RUNS/agpt-2b-constlr-from9200/torchtitan-ezpz|checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144-constlr-from9500|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|complex"
+    # 2B-256 STAGE-2 DOLMINO -- the 256N twin of t0, added 2026-08-21 in the
+    # retired seat's place.
+    #
+    # Seeds (weights-only) from the COMPLETED 256N stage-1 chain at step-92859.
+    # That chain finished: it exited cleanly 2026-07-03 with "Training starts
+    # at step 92860 / Training completed", having hit its token budget
+    # (92859 * 6144 * 8192 = 4.6737T vs the 4.673780159710T target). The seed
+    # is intact: 3072 shards (256 nodes x 12 ranks), .metadata 108,980,217 B,
+    # 24G, fp32. Its 16 zero-byte tail-rank shards are normal -- step-92800 has
+    # 16 too, and the known-good 512N seed has 39 of 6144 in like proportion.
+    #
+    # AN EARLIER ATTEMPT AT THIS SEAT NaN'd, AND IT WAS NOT THE DATA OR THE LR.
+    # Job 8663177 (2026-07-18, dropped from the umbrella) launched this same
+    # seed under --config=agpt_2b_real -- cos_sin against COMPLEX-trained
+    # weights. It resumed at loss 7.23840 / grad_norm 46.4271 where the
+    # correct-flavor 512N twin resumed at 2.60254 / 0.2505. The load itself
+    # succeeded, which is the documented flavor-mismatch signature. It spent
+    # 3800 steps re-learning the scrambled Q/K pairing back to 2.63 and NaN'd
+    # at 3801 on a model driven through a large recovery excursion. The
+    # umbrella comment blaming the 50/50 mix or the 2e-6 LR was wrong on both:
+    # the 512N seat runs PURE dolmino at a 10x HIGHER LR and is clean past
+    # step 7700. Field 12 = complex closes that failure mode.
+    #
+    # rope=complex VERIFIED, not assumed: rope_flavor_for_step.py --chain
+    # 2b_v2_256 --step 92859 -> `2b`, and all 22 runs of that chain (2026-05-01
+    # through 2026-06-28) report `2b`. It never crossed the cos_sin switch.
+    # Contrast 2b_v2_512 @46429 -> `2b_real`, which is why t0 carries _real.
+    # (Unlike t3 above, the seed's flavor IS the right resolution here: this
+    # dir is empty, so the first launch loads the seed.)
+    #
+    # Token budget is DELIBERATELY the same 2390375382006 as t0, not half.
+    # Field 11 is tokens and steps = tok/(gbs*seq_len), so the same value
+    # yields 47,492 steps at gbs 6144 vs 23,746 at 12288 -- identical token
+    # exposure (291,790,848 samples both ways), which is what makes the 256N
+    # and 512N arms comparable.
+    #
+    # Port 30000: 29700 (used by the dead commented row above) now belongs to
+    # t3. Do not revive the old row verbatim -- it would collide.
+    "2b|256|30000|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n256-gbs6144|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2390375382006|complex"
 )
 
 # Shared training defaults (match submit_agpt_{2b,20b}_autoretry.sh).
@@ -181,6 +331,48 @@ TRAIN_TOKENS="${TRAIN_TOKENS:-4673780159710}"
 CONFIG_SUFFIX="${CONFIG_SUFFIX-_real}"
 VALIDATOR_FREQ="${VALIDATOR_FREQ:-100}"
 VALIDATOR_STEPS="${VALIDATOR_STEPS:-10}"
+
+# ---- Optional: run a SUBSET of the seats, optionally shrunk -------------------
+#
+# MULTI_ONLY="4"    -> run only trainer index 4
+# MULTI_ONLY="1,4"  -> run trainers 1 and 4
+# MULTI_NNODES_OVERRIDE=4 -> force every selected seat to 4 nodes
+#
+# This exists so a single seat can be smoke-tested THROUGH THIS LAUNCHER rather
+# than by hand-reconstructing its `ezpz launch` invocation. Three attempts at
+# the latter (2026-08-20) burned three allocations on: a missing venv
+# activation, `--optimizer.name` when the build wants `--optimizer=`, and
+# finally "Optimizer SophiaG not added" because `ezpz launch` needs
+# --nproc/--nproc_per_node/--hostfile and a `--` separator and must run from
+# the NODE-LOCAL venv. Reconstructing the shape is the bug; reuse the launcher.
+#
+# Unlike MULTI_PROFILE=tiny this keeps each seat's REAL ckpt dir, config,
+# dataset and RoPE flavor -- tiny rewrites those to throwaway values, which is
+# right for a plumbing smoke and wrong for "does THIS seed actually resume".
+# The filter runs BEFORE the node-budget loop so every downstream calculation
+# (need, slicing, offsets) sees only the selected seats.
+if [[ -n "${MULTI_ONLY:-}" ]]; then
+    _sel=()
+    IFS=',' read -ra _want <<< "$MULTI_ONLY"
+    for _i in "${_want[@]}"; do
+        _i="${_i// /}"
+        [[ "$_i" =~ ^[0-9]+$ ]] || die "MULTI_ONLY: '$_i' is not an index"
+        (( _i < ${#TRAINERS[@]} )) || die "MULTI_ONLY: index $_i >= ${#TRAINERS[@]} trainers"
+        _sel+=( "${TRAINERS[$_i]}" )
+        log "MULTI_ONLY: selected trainer $_i"
+    done
+    TRAINERS=( "${_sel[@]}" )
+fi
+if [[ -n "${MULTI_NNODES_OVERRIDE:-}" ]]; then
+    _shrunk=()
+    for _row in "${TRAINERS[@]}"; do
+        IFS='|' read -r _m _n _rest <<< "$_row"
+        # rebuild with field 2 replaced, preserving all other fields verbatim
+        _shrunk+=( "$(awk -v n="$MULTI_NNODES_OVERRIDE" 'BEGIN{FS=OFS="|"}{$2=n;print}' <<< "$_row")" )
+    done
+    TRAINERS=( "${_shrunk[@]}" )
+    log "MULTI_NNODES_OVERRIDE: every selected seat forced to $MULTI_NNODES_OVERRIDE nodes"
+fi
 
 # ---- Validate allocation ------------------------------------------------------
 [[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] \
@@ -217,10 +409,10 @@ log "slice + console logs under: $MULTI_LOG_DIR"
 
 # ---- Slice the nodefile + build each trainer's resolved plan ------------------
 declare -a T_MODEL T_NNODES T_SPARES T_PORT T_WORKDIR T_CKPT T_SLICE T_VENVDST T_VENVSRC
-declare -a T_DFL T_LR T_INITLOAD T_DECAY T_MINLR T_TOKENS
+declare -a T_DFL T_LR T_INITLOAD T_DECAY T_MINLR T_TOKENS T_ROPE
 offset=1
 for idx in "${!TRAINERS[@]}"; do
-    IFS='|' read -r model nnodes port workdir ckpt o_dfl o_lr o_init o_decay o_minlr o_tokens <<< "${TRAINERS[$idx]}"
+    IFS='|' read -r model nnodes port workdir ckpt o_dfl o_lr o_init o_decay o_minlr o_tokens o_rope <<< "${TRAINERS[$idx]}"
 
     # In tiny profile every trainer runs the 2B model on TINY_NNODES nodes and
     # writes a THROWAWAY ckpt dir keyed by jobid+idx -- NEVER a canonical chain.
@@ -257,6 +449,8 @@ for idx in "${!TRAINERS[@]}"; do
     T_DECAY[$idx]="$o_decay"
     T_MINLR[$idx]="$o_minlr"
     T_TOKENS[$idx]="$o_tokens"
+    # 12th field: RoPE config suffix. REQUIRED -- see the guard in launch_one.
+    T_ROPE[$idx]="$o_rope"
     # Per-model venv dst -- distinct names keep the shared mom node's 2b/20b
     # copies from clobbering each other; on disjoint compute slices the same
     # dst name resolves to physically distinct node-local dirs.
@@ -272,6 +466,43 @@ if [[ -n "$dupes" ]]; then
     die "slices overlap -- the same node(s) appear in multiple trainers:"$'\n'"$dupes"
 fi
 log "slices are disjoint (no shared nodes)"
+
+# ---- Per-seat cwd for auto-retry state ---------------------------------------
+# `ezpz launch --auto-retry` derives its state dir as
+#     _auto_retry_log_dir(jobid) -> Path.cwd()/"logs"/f"failover-{jobid}"
+# (ezpz/launch.py:768) -- keyed on cwd + jobid ONLY, with no seat/port/rank
+# component and no env override. Two seats sharing a workdir therefore share
+# one logs/failover-<jobid>/active.hostfile. NodeAllocation REWRITES that file
+# on every spare swap and the launcher re-reads it each attempt, so one seat
+# swapping a bad node can hand the other a hostfile naming the wrong nodes --
+# silently cross-wiring two multi-thousand-rank launches.
+#
+# This became live on 2026-08-21 when t4 was re-pointed from the constlr clone
+# to the 2b-v2 clone (the 256N stage-2 dolmino seat), which t0 already used.
+# Before that every seat had a distinct workdir and the bug was latent.
+#
+# Fix: when two seats share a workdir, give each a private cwd that symlinks
+# the clone's contents. The torchtitan source stays byte-identical (that is
+# what makes the pinned clones pinned); only Path.cwd() differs.
+declare -a T_CWD
+declare -A _wd_seen
+for idx in "${!TRAINERS[@]}"; do
+    wd="${T_WORKDIR[$idx]}"
+    if [[ -n "${_wd_seen[$wd]:-}" ]]; then
+        priv="$MULTI_LOG_DIR/cwd-${idx}"
+        mkdir -p "$priv/logs"
+        # Symlink every top-level entry so imports, assets and outputs resolve
+        # exactly as they would from the clone root.
+        for e in "$wd"/* "$wd"/.venv "$wd"/.venv.tar.gz; do
+            [[ -e "$e" ]] && ln -sfn "$e" "$priv/$(basename "$e")"
+        done
+        T_CWD[$idx]="$priv"
+        log "trainer $idx shares a workdir with trainer ${_wd_seen[$wd]}; using private cwd $priv"
+    else
+        _wd_seen[$wd]="$idx"
+        T_CWD[$idx]="$wd"
+    fi
+done
 
 # ---- Existence checks ---------------------------------------------------------
 for idx in "${!TRAINERS[@]}"; do
@@ -361,6 +592,11 @@ launch_trainer() {
     local training_steps
     if [[ "$PROFILE" == "tiny" ]]; then
         training_steps="$TINY_STEPS"
+    elif [[ -n "${MULTI_STEPS_OVERRIDE:-}" ]]; then
+        # A prod seat's step count comes from train_tokens (~6M steps). A smoke
+        # that only needs to answer "does this seed resume to a sane loss" must
+        # be able to stop on its own rather than at walltime.
+        training_steps="$MULTI_STEPS_OVERRIDE"
     else
         training_steps=$(( tok / (gbs * SEQ_LEN) ))
     fi
@@ -371,11 +607,64 @@ launch_trainer() {
     # Optional fork (initial-load) + constant/decayed-LR schedule overrides.
     local xtra=()
     [[ -n "${T_INITLOAD[$idx]}" ]] && xtra+=(--checkpoint.initial-load-path="${T_INITLOAD[$idx]}")
-    if [[ -n "${T_DECAY[$idx]}" ]]; then
-        xtra+=(--lr-scheduler.decay-ratio="${T_DECAY[$idx]}"
-               --lr-scheduler.min-lr-factor="${T_MINLR[$idx]:-1.0}"
-               --lr-scheduler.warmup-steps=20)
+    # An OMITTED decay_ratio is a bug, not a default. Leaving the field empty
+    # skips the flag entirely, and the run then inherits torchtitan's own
+    # decay_ratio=0.8 -- the OPPOSITE of the constant-LR schedule every
+    # production chain here wants. That silently put both 20B chains on
+    # warmup-stable-decay; 20b_v2_512 ran ~1,200 steps of unintended decay
+    # before it was caught, and needed a fork from step-9000 to undo.
+    #
+    # So refuse to launch a seat whose decay_ratio was not stated. Being
+    # explicit costs one field; being wrong costs a fork.
+    # RoPE FLAVOR IS PER-SEAT AND REQUIRED. There is no safe global default.
+    #
+    # CONFIG_SUFFIX used to be one global applied to all five seats. But each
+    # chain crossed the 2026-06-25 cos_sin switch at a DIFFERENT step, and
+    # 2b_v2_256 never crossed it at all -- so a single value is wrong for at
+    # least one seat by construction. Audited 2026-08-20 via
+    # scripts/eval/rope_flavor_for_step.py at each seat's actual resume/seed
+    # step:
+    #
+    #   t0 stage2_dolmino  <- 2b_v2_512  @46429  trained _real   OK
+    #   t1 20b-512 constlr <- 20b_v2_512 @9000   trained _real   OK
+    #   t2 20b-256         <- 20b_v2_256 @10369  trained _real   OK
+    #   t3 2b-512 constlr  <- 2b_v2_512  @21307  trained COMPLEX  was WRONG
+    #   t4 2b-256 constlr  <- 2b_v2_256  @9500   trained COMPLEX  was WRONG
+    #
+    # Complex and cos_sin rotate DIFFERENT Q/K channel pairings, so loading
+    # complex-trained weights under a cos_sin config silently corrupts the
+    # model: it loads fine and only shows up as bad loss. t3 is a 512N
+    # PRODUCTION seat resuming in place, so it would have written corrupted
+    # checkpoints into a live chain the moment its std::bad_alloc cleared.
+    #
+    # Empty string is a MEANINGFUL value here (complex), so the guard tests for
+    # the literal sentinel "-" rather than emptiness -- the same trap that let
+    # an omitted decay_ratio fall through to torchtitan's 0.8 default.
+    if [[ -z "${T_ROPE[$idx]+set}" ]]; then
+        echo "FATAL: trainer $idx ($model|$nnodes) has no rope field (12th)." >&2
+        echo "  Resolve it per seat:" >&2
+        echo "    rope_flavor_for_step.py --chain <parent> --step <resume/seed>" >&2
+        echo "  Then set field 12 to '_real' (cos_sin) or 'complex' (empty suffix)." >&2
+        exit 95
     fi
+    case "${T_ROPE[$idx]}" in
+        _real)   rope_suffix="_real" ;;
+        complex) rope_suffix="" ;;
+        *) echo "FATAL: trainer $idx rope field is '${T_ROPE[$idx]}'; want _real|complex" >&2
+           exit 95 ;;
+    esac
+
+    if [[ -z "${T_DECAY[$idx]}" ]]; then
+        echo "FATAL: trainer $idx ($model|$nnodes) has no decay_ratio field." >&2
+        echo "  An empty field does NOT mean 'constant LR' -- it means the flag" >&2
+        echo "  is never passed and torchtitan defaults to 0.8 (warmup-stable-" >&2
+        echo "  decay). State it: append |<dfl>|<lr>|<init>|0.0|1.0|<tokens>" >&2
+        echo "  to the row (0.0/1.0 == constant LR)." >&2
+        exit 96
+    fi
+    xtra+=(--lr-scheduler.decay-ratio="${T_DECAY[$idx]}"
+           --lr-scheduler.min-lr-factor="${T_MINLR[$idx]:-1.0}"
+           --lr-scheduler.warmup-steps=20)
 
     local val_flags
     if [[ "$PROFILE" == "tiny" ]]; then
@@ -388,7 +677,10 @@ launch_trainer() {
     [[ -n "${MAX_FAILOVER_RETRIES:-}" ]] && mfr=(--max-failover-retries "${MAX_FAILOVER_RETRIES}")
 
     (
-        cd "$workdir" || { echo "cd failed: $workdir"; exit 97; }
+        # T_CWD == workdir unless this seat shares a workdir with another,
+        # in which case it is a private symlink dir -- see the auto-retry
+        # state-collision note above.
+        cd "${T_CWD[$idx]}" || { echo "cd failed: ${T_CWD[$idx]}"; exit 97; }
         # Import torchtitan from THIS clone's (pinned) source tree; run the
         # driver from the node-local per-model venv.
         # shellcheck disable=SC1090
@@ -406,7 +698,7 @@ launch_trainer() {
             -- \
             python3 -m torchtitan.experiments.ezpz.train \
             --module=ezpz.agpt \
-            --config="agpt_${model}${CONFIG_SUFFIX:-}" \
+            --config="agpt_${model}${rope_suffix}" \
             --checkpoint.enable \
             --checkpoint.folder="$ckpt" \
             --checkpoint.interval="$CKPT_INTERVAL" \

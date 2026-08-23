@@ -15,7 +15,6 @@ qk_norm.
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
-from torch.distributed.tensor import Replicate
 
 from torchtitan.models.common.decoder_sharding import (
     dense_activation_placement,
@@ -72,13 +71,18 @@ def _set_agpt_layer_sharding(
 
     qk_norm = getattr(layer_cfg.attention, "qk_norm", None)
     if qk_norm is not None:
-        # QK-Norm RMSNorms operate on the head_dim of an already-Replicate-d
-        # x inside the GQA forward (set_gqa_attention_sharding uses
-        # in_dst_shardings={"x": Replicate}), so the norm itself only needs
-        # its weight distributed across all dims and no activation
-        # redistribution.
+        # QK-Norm uses LocalShardRMSNorm (agpt/local_rmsnorm.py): a drop-in
+        # RMSNorm subclass whose forward runs the per-head norm on the local TP
+        # shard and re-anchors its own DTensor output boundary. So this config
+        # only needs to declare the replicated weight; the module handles input
+        # unwrap / output re-wrap and the gradient placements itself. The prior
+        # attempt to fix the TP>1 backward crash by declaring the full S(2)
+        # in/out activation boundary here (mirroring qwen3) was a NO-OP: matched
+        # src/dst placements insert no redistribute autograd node, so DTensor's
+        # native (crashing) RMSNorm backward was unchanged. weight -> spmd.R
+        # (== I after layout resolution).
         qk_norm.sharding_config = ShardingConfig(
-            state_shardings={"weight": dense_param_placement(tp=Replicate())},
+            state_shardings={"weight": dense_param_placement(tp=spmd.R)},
         )
 
     assert layer_cfg.feed_forward is not None

@@ -61,6 +61,80 @@ LABEL="${LABEL:-512n}"
 
 STEPS="${STEPS:-1000 2000 3000 4000 5000}"
 TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,boolq}"
+# MODEL_FLAVOR / EVAL_CONFIG_JSON select the model shape at convert + eval time.
+# Default = the stock vocab-256128 "2b" flavor (olmo-mix bases). The MDS base is
+# vocab 256000, so its arm MUST pass MODEL_FLAVOR=2b-mds EVAL_CONFIG_JSON=agpt_2b_mds_config.json
+# -- otherwise a 256000-weight model is loaded under a 256128 config = gibberish
+# (the tokenizer-mismatch trap). Each base is evaluated with ITS OWN vocab.
+# RoPE FLAVOR -- MODEL_FLAVOR IS REQUIRED. There is no safe default.
+#
+# The flavor selects the RoPE convention at convert time, and the checkpoint
+# does NOT record which one it was trained with (both rope caches are
+# persistent=False, so nothing lands on disk). Pass the wrong one and the
+# adapter applies (or skips) the Q/K permute: the export loads fine and only
+# fails as gibberish at generation.
+#
+# Why there is no default: THE CHAINS SWITCHED CONVENTION MID-FLIGHT. Commit
+# 5ffb850a1 (2026-06-25) flipped CONFIG_SUFFIX to _real, and the running chains
+# picked it up on their next resume. W&B run metadata (the authoritative record
+# of what each run actually executed) shows:
+#
+#   20b_v2_256   agpt_20b  -> agpt_20b_real  at 2026-07-10  (loss 2.69 -> 6.14)
+#   20b_v2_512   agpt_20b  -> agpt_20b_real  at 2026-07-05  (loss 2.57 -> 6.03)
+#   2b_v2_512    agpt_2b   -> agpt_2b_real   at 2026-08-05  (no spike)
+#   2b_v2_256    agpt_2b   throughout                        (never switched)
+#
+# So the correct flavor depends on WHICH STEP you are converting, not on which
+# chain. A per-chain constant is wrong for at least one step of most chains.
+#
+# To find the right value for a given step, ask W&B for the run that produced
+# it (see scripts/eval/rope_flavor_for_step.py), or read the registry table in
+# docs/guides/known-bugs/rope-flavor-mismatch.md.
+if [[ -z "${MODEL_FLAVOR:-}" ]]; then
+    cat >&2 <<'ERRMSG'
+[eval-2b-v2] ERROR: MODEL_FLAVOR is required and has no default.
+
+  The agpt chains changed RoPE convention mid-flight (2026-06-25 onward), so
+  the correct flavor depends on the STEP being converted. Guessing silently
+  corrupts the export -- it loads fine and only fails as gibberish.
+
+  Find it:
+    python3 torchtitan/experiments/ezpz/scripts/eval/rope_flavor_for_step.py \
+        --chain <2b_v2_512|2b_v2_256|20b_v2_512|20b_v2_256> --step <N>
+
+  Then re-run with e.g.  MODEL_FLAVOR=2b_real  or  MODEL_FLAVOR=2b
+  Details: docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
+# The pinned v2 clones do NOT ship agpt/state_dict_adapter.py -- they fall back
+# to the bare Llama3StateDictAdapter, which applies the Q/K permute
+# UNCONDITIONALLY, so a cos_sin flavor is silently ignored there. Refuse rather
+# than emit a corrupt export.
+#
+# CHECK CONVERT_REPO, NOT V2_REPO. The conversion imports torchtitan from
+# CONVERT_REPO (see step 1 below: "venv from CONVERT_REPO, DCP from V2_REPO"),
+# so that is the checkout whose adapter decides whether the permute happens.
+# V2_REPO only supplies the DCP bytes. This guard tested V2_REPO and therefore
+# refused a CORRECT invocation: the matched-pair eval (job 8766898) passed
+# CONVERT_REPO=<main repo>, which HAS the adapter, and was blocked anyway --
+# losing the fork arm while the canonical arm completed fine.
+if [[ "$MODEL_FLAVOR" == *_real ]] \
+   && [[ ! -e "${CONVERT_REPO}/torchtitan/experiments/ezpz/agpt/state_dict_adapter.py" ]]; then
+    cat >&2 <<ERRMSG
+[eval-2b-v2] ERROR: MODEL_FLAVOR='${MODEL_FLAVOR}' (cos_sin) but the CONVERT_REPO
+  ${CONVERT_REPO}
+  has no agpt/state_dict_adapter.py, so it would use the bare
+  Llama3StateDictAdapter and permute anyway -- producing exactly the corrupt
+  export this flag is meant to avoid.
+
+  Convert from a checkout that HAS the adapter, or update the clone.
+  See docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
+echo "[eval-2b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default exists -- see rope-flavor-mismatch.md)"
+EVAL_CONFIG_JSON="${EVAL_CONFIG_JSON:-agpt_2b_config.json}"
 
 for step in $STEPS; do
     DCP_DIR="${V2_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
@@ -149,10 +223,10 @@ PYCHK
                 "${DCP_DIR}" \
                 "${HF_DIR_ABS}" \
                 --model_name "experiments.ezpz.agpt" \
-                --model_flavor "2b" \
+                --model_flavor "${MODEL_FLAVOR}" \
                 --export_dtype "bfloat16"
         ) || { echo "[1/2] Conversion FAILED — skipping eval for step ${step}"; continue; }
-        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/agpt_2b_config.json" \
+        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/${EVAL_CONFIG_JSON}" \
             "${HF_DIR_ABS}/config.json"
         cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer.{json,model} "${HF_DIR_ABS}/"
         cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer_config.json "${HF_DIR_ABS}/"

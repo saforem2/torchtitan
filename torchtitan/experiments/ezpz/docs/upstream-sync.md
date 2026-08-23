@@ -1,5 +1,371 @@
 # Upstream Sync Log
 
+
+## HEADS-UP for the 80th sync: `full_dtensor.py` is deleted upstream
+
+`601cf4d23` (#4217, 2026-08-19) removes `torchtitan/distributed/full_dtensor.py`
+entirely. Two ezpz files import from it and will fail at import time:
+
+- `agpt/parallelize.py:44` -- `resolve_fsdp_mesh, validate_config`
+- `moe/parallelize.py:50` -- `resolve_fsdp_mesh, resolve_sparse_fsdp_mesh, ...`
+
+Where things went:
+
+| symbol | upstream/main |
+|---|---|
+| `resolve_fsdp_mesh` | moved to `distributed/fsdp.py:32`, logic unchanged |
+| `resolve_sparse_fsdp_mesh` | moved to `distributed/fsdp.py:65`, logic unchanged |
+| `validate_config` | **GONE** -- no definition anywhere in `distributed/` |
+
+**Already handled (`bf3c4f47d`), so the sync should not trip on this.**
+
+`ezpz/fsdp_compat.py` resolves the two survivors from whichever location
+exists -- post-#4217 `distributed.fsdp` first, falling back to
+`distributed.full_dtensor` on this tree -- and both models import from it.
+
+`validate_config` was NOT shimmed. Upstream removed it outright and its
+callers just dropped the call (`llama3/parallelize.py:40` is now
+`if spmd_backend == "spmd_types" or tp_enabled: model.parallelize(...)`;
+deepseek_v3 likewise). Both ezpz call sites are dropped to match.
+
+That is a behavior change, so it was verified on hardware rather than by an
+import test (job 12473452), against the pre-change numbers:
+
+| config | steps | memory | was |
+|---|---|---|---|
+| `agpt_20b` | 5/5 | 84.86% | 84.86% |
+| `moe_small` | 5/5 | 72.70% | 72.55% |
+| `moe_10b_2b` | 5/5 | 79.97% | 79.97% |
+| `moe_10b_2b_sdpa` | 5/5 | 74.03% | 73.98% |
+
+Identical to within 0.15pp, i.e. the sharding plan is unchanged -- which is
+the property `validate_config` existed to guard.
+
+Remaining at sync time: `"full_dtensor"` stops being a legal `spmd_backend`
+value, so drop it from the `spmd_backend in (...)` tuples in both
+`parallelize.py` files. Our config pins already moved to `partial_dtensor`
+(`b2ff09632`).
+
+## 2026-08-16 -- 78th sync (31 commits)
+
+Merged `upstream/main` into `ezpz`. Conflict-free and it touched **no** ezpz
+file -- and it still broke the branch **twice**. Both breaks were deleted or
+added symbols in files the merge never opened, which no conflict marker can
+catch.
+
+### Break 1: `maybe_enable_async_tp` deleted (#4045)
+
+[#4045](https://github.com/pytorch/torchtitan/pull/4045) removed
+`maybe_enable_async_tp` from `distributed/tensor_parallel.py` (async TP moved
+*inside* `apply_compile`, which gained a keyword-only `parallel_dims`). Both
+`ezpz/agpt/parallelize.py` and `ezpz/moe/parallelize.py` imported it, so
+post-merge they died at **import**.
+
+Replay (commit `87e061714`):
+- `agpt`: thread `parallel_dims` through `_apply_compile_with_mode` into
+  `apply_compile`; drop the standalone call.
+- `moe`: drop import + call. This file compiles per-block rather than via
+  `apply_compile`, so async TP is simply unavailable there now. Not a
+  regression -- the call only ran under `tp_enabled` and MoE+async-TP was never
+  validated on XPU.
+
+### Break 2: `fwd_bwd_fn` added (#3559 + #4146)
+
+[#3559](https://github.com/pytorch/torchtitan/pull/3559) (CUDA-graph capture) and
+[#4146](https://github.com/pytorch/torchtitan/pull/4146) (in-place loss
+accumulation) added a `self.fwd_bwd_fn` indirection to `Trainer.__init__`, and
+`forward_backward_step` now dispatches through it. `FaultTolerantTrainer` does
+**not** call `super().__init__()`, so the assignment never ran:
+
+```
+AttributeError: 'FaultTolerantTrainer' object has no attribute 'fwd_bwd_fn'
+```
+
+Job `12473170`: 3/3 arms rc=143, **zero** steps. Fixed in `ef1736618` by binding
+`self._forward_backward_body` directly (NOT the CUDA-graph wrapper -- that is a
+CUDA capture path, `disable_cuda_graphs` defaults True, and no XPU run has
+exercised it, so behaviour is unchanged from pre-merge).
+
+This is the **second** time an upstream `__init__` attribute has gone missing
+this way (`num_pipeline_parallel_microbatches` was the first). Added
+[`tests/test_trainer_init_parity.py`](../../tests/test_trainer_init_parity.py)
+-- a static AST diff of what each `__init__` sets. Pure stdlib, no torch
+needed, mutation-tested. **Run it on every sync.**
+
+### Verification (jobs `12473171`, `12473172`, frameworks RC, 2N)
+
+| arm | result |
+|---|---|
+| 2B compile TP=4 (post) | PASS, 10 steps |
+| MoE EP=1 (post) | PASS, 10 steps -- covers the token_dispatcher +333 rewrite |
+| loss A/B pre vs post | **no change attributable to the merge** (see below) |
+
+### The loss A/B needed a control -- and `--debug.deterministic` is BROKEN here
+
+The first A/B reported "DIFFERS -- the merge CHANGED numerics": identical for
+steps 1-7, diverging from step 8. That verdict was **wrong**, and the run that
+produced it was invalid. Re-running the *same* pre-merge commit twice gives:
+
+| step | pre-vs-**pre** (same commit) | pre-vs-post |
+|---:|---:|---:|
+| 1-7 | 0.00000 | 0.00000 |
+| 8 | 0.00106 | 0.00106 |
+| 9 | 0.00260 | 0.00259 |
+| 10 | 0.01201 | 0.01206 |
+
+The merge difference is **indistinguishable from the run's own noise** -- same
+onset step, same magnitude to three decimals. So: the 78th sync does not change
+numerics.
+
+> [!WARNING]
+> **`--debug.seed=42 --debug.deterministic` does NOT give bit-identical runs on
+> the frameworks RC.** CLAUDE.md requires that two such runs "produce bit-wise
+> identical loss and grad_norm"; they do not. Any future "identical loss"
+> verification on this stack is currently unable to detect a real regression
+> smaller than ~0.012 at step 10 -- today that produced a false positive, but
+> the same blind spot could hide a true one.
+>
+> Steps 1-7 being *exactly* identical is a clue: the divergence has a specific
+> onset rather than being immediate, which points at a particular op or a
+> reduction-order effect rather than general float chaos. Candidates: an XPU
+> kernel with no deterministic implementation (there is a known `_histc_xpu`
+> gap) or nondeterminism entering via the collectives. Untriaged; a 1-rank vs
+> multi-rank and TP=1 vs TP=4 split would separate kernel from collective.
+
+## 2026-08-11 -- 77th sync (6 commits, 31 files)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
+this is the largest sync in a while and it DID need checking, because three of
+the six touch code `ezpz/moe` imports.
+
+- **`45ea2f093` "Experimenting MoE new sharding" (#3996)** -- the one that
+  mattered. Rewrites `models/common/moe_sharding.py` (+325/-170) and
+  `models/common/moe.py`.
+- **`f59c215e8` "[MTP] Add MTP module for deepseek_v3" (#3392)** -- new
+  `deepseek_v3/mtp.py` plus edits across that model folder.
+- **`547b0b481` "[CP] Move context parallel code into a context_parallel
+  package" (#3977)**, `5de7d1150` Muse Glimmer 30B (new model folder),
+  `f4f7cf717` inference MoE expert SP padding (#4080), `5c0b804ce` fake process
+  groups (#4018).
+
+**Why no replay onto `ezpz/moe`.** The protocol replays `deepseek_v3/` changes
+onto `ezpz/moe/`, so this was checked rather than assumed:
+
+1. `ezpz/moe` imports `MoE`, `RoutedExperts`, `TokenChoiceTopKRouter` (from
+   `models/common/moe.py`) and `GroupedExperts` -- all four still exist after
+   the rewrite (verified by AST, not grep).
+2. `#3996` changed **no** class or `__init__`/`forward` signatures in
+   `common/moe.py`; the 325-line churn in `moe_sharding.py` is internal.
+3. Our only direct call into the changed sharding code is
+   `set_moe_sharding_config` at `ezpz/moe/sharding.py:167`. Current upstream
+   signature is `(moe_cfg, *, enable_ep, enable_sp, expert_param_layout)` and
+   our call passes exactly those four as keywords -- unchanged.
+4. `ezpz/moe/*.py` and the three rewritten shared modules all parse.
+
+Nothing touched `llama3/`, so `ezpz/agpt` is unaffected. The MTP module and Muse
+Glimmer are additive new code we do not import.
+
+**Caveat:** this is a static check. `ezpz/moe` could not be smoke-tested because
+Sunspot is down (see
+[known-bugs/sunspot-ccl-allgatherv-outage-20260810](known-bugs/sunspot-ccl-allgatherv-outage-20260810.md)
+-- all multi-node FSDP fails in oneCCL `allgatherv_ring`, and PBS returns empty
+result sets). Given #3996 rewrote MoE sharding internals, **run a MoE smoke
+before trusting an EP/SP run on this sync.**
+
+## 2026-08-10 -- 76th sync (2 commits)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay, inert for ezpz.**
+
+- **`e06102808` "Decouple memory snapshot frequency from profiler" (#4092)** --
+  adds `Profiler.Config.memory_snapshot_freq: int | None = None`, defaulting to
+  `profile_freq` when unset, plus a positive-value guard. Backward-compatible by
+  construction.
+- **`95007d217`** -- TitanRL README + a pipeline diagram asset. Docs only.
+
+**Why no replay.** Nothing touched `llama3/` or `deepseek_v3/`, so neither
+`ezpz/agpt` nor `ezpz/moe` has a counterpart to update. The only code file is
+`torchtitan/tools/profiler.py`; `ezpz/trainer.py:39` imports `Profiler` for a
+type reference and never sets `profile_freq`, and the numerics path uses an
+unrelated `ActivationCaptureProfiler` (trainer.py:960-965). The new field
+defaults to the old behaviour, so ezpz is unaffected either way.
+
+## 2026-08-08 -- 75th sync (4 commits)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- but
+unlike the last few syncs this one carries a REAL CORRECTNESS FIX we inherit.
+
+- **`ecae62f15` "[MoE] fix: pass the computed `in_grad_placements` without EP too"
+  (#4054)** -- the important one. Without EP the experts run replicated on the TP
+  axis, so each rank's gradient w.r.t. the `local_map` inputs is one contribution
+  to a sum, not the finished value. Leaving `in_grad_placements=None` let it
+  default to the input placement (Replicate), which keeps one rank's share and
+  discards the rest: **the router gate's gradient came back a factor of ~sqrt(tp)
+  short on every MoE layer.** Applies to `moe` runs at TP>1 with EP disabled.
+- `96276d865` exclude fake-backed axes from `get_all_one_dimensional_meshes` (#4068)
+- `57cfb2745` pass correct fsdp mesh for `backend=spmd_types` (kimi2.7) (#4070)
+- `a6948f508` enable varlen full cudagraph (#3893) -- CUDA-only, inert on XPU.
+
+**Why no replay onto `ezpz/moe`.** The protocol replays `deepseek_v3/` changes
+onto `ezpz/moe/`, and #4054 touches shared
+`torchtitan/models/common/moe_sharding.py`. Checked directly:
+`ezpz/moe/sharding.py:37` imports `set_moe_sharding_config` from that module and
+`ezpz/moe/` defines **zero** occurrences of `in_grad_placements` /
+`experts_in_grad_layout` of its own. So the fix is inherited at the import, not
+copied -- nothing to port.
+
+Nothing touched `llama3/`, so `ezpz/agpt` is unaffected.
+
+## 2026-08-05 -- 74th sync (2 commits, merge `ddb41730a`)
+
+Merged `upstream/main` into `ezpz`. **No conflicts, no replay required** -- this
+sync is inert for ezpz.
+
+The two commits:
+
+- **`bcc09297a` "Add an NVFP4 quantization converter (#3914)"** -- new
+  `torchtitan/components/quantization/nvfp4.py` plus `NVFP4LinearConverter`
+  entries in `llama3/config_registry.py` (+73) and `qwen3/config_registry.py`
+  (+77), and 3-line additions to `quantization/__init__.py` and
+  `quantization/utils.py`.
+- **`d905f735d`** -- dependabot bump of `pypa/gh-action-pypi-publish` in
+  `.github/workflows/release.yml`. CI only.
+
+**Why no replay onto `ezpz/agpt`.** The sync protocol replays `llama3/` changes
+onto `ezpz/agpt/`, so `bcc09297a` was checked line by line. It is **purely
+additive**: `git show bcc09297a -- torchtitan/models/llama3/config_registry.py`
+has ZERO removed or modified lines, and the two shared `quantization/` files gain
+3 lines each with nothing existing changed. No behavior our configs depend on
+moved.
+
+NVFP4 is also **NVIDIA-only** (it targets Blackwell FP4 tensor cores and requires
+every GEMM dim divisible by 128), so the converter itself is inapplicable on
+Intel XPU regardless. Nothing to port; the new flavors simply go unused here.
+
+## 2026-08-03 -- 73rd sync (11 commits, `4bed50210..upstream/main`, merge `23b4000dd`)
+
+Merged `upstream/main` into `ezpz` (merge commit `23b4000dd`), 11 upstream commits
+since the 72nd sync. **One real conflict + one required replay** -- this sync was
+NOT inert, unlike the last few.
+
+**CONFLICT (resolved): `experiments/torchft/trainer.py`.** Both sides edited the
+dataloader-build kwargs since the merge base: ours added `training_steps` /
+`global_batch_size` / `parallel_dims`; upstream (#3856) changed
+`local_batch_size=config.training.local_batch_size` ->
+`local_batch_size=dataloader_batch_size`. The two are COMPLEMENTARY, so the
+resolution takes upstream's `dataloader_batch_size` and keeps our three kwargs
+(`dataloader_batch_size` is defined just above in the same function; identical
+pattern to the base `trainer.py`).
+
+**REPLAY (required, done): `922856452` "Always Pre-Split Microbatches for PP"
+(#3856)** -- rewrote base `trainer.py` (+184) so the DATALOADER serves
+microbatches under PP instead of the trainer splitting a full local batch.
+`experiments/ezpz/trainer.py` builds its OWN dataloader (it overrides the base
+Trainer), so it needed the same change or a PP run would receive full-size
+batches and mis-shape every microbatch. Mirrored the base exactly:
+```python
+dataloader_batch_size = (
+    config.parallelism.pipeline_parallel_microbatch_size
+    if parallel_dims.pp_enabled
+    else config.training.local_batch_size
+)
+```
+Scope note: applied to the TRAINING dataloader only. The ezpz VALIDATOR build
+intentionally keeps `local_batch_size` -- upstream did not change its validator
+path either (`trainer.py:589`). Also in #3856: `common/decoder.py` (-11) merely
+DROPPED a PP-incompatible-with-VarlenAttention guard (now unnecessary since
+microbatches are pre-split); agpt/moe use neither PP nor VarlenAttention, so
+nothing to mirror there.
+
+**NO replay needed:**
+- `95e42269f` graph trainer + mxfp8 composability (#3558) -- touches
+  `llama3/config_registry.py` (+20), but only ADDS a new opt-in `llama3_8b_mxfp8()`
+  config fn; changes nothing existing. `MXFP8LinearConverter` hard-raises
+  "MXFP8 is only supported on SM100 or later" (`has_cuda_capability(10,0)` =
+  NVIDIA Blackwell) AND requires `torch.compile` -- doubly inapplicable on Intel
+  XPU (and 80B runs compile=OFF). Touched 0 lines of `deepseek_v3/__init__.py`.
+- `85c549b93` kimi_k2_7 (#3532) -- an entire new vision/MoE model (+1800);
+  self-contained, no shared-path edits.
+- `qwen3_5` multimodal / `flux/trainer` / `gpt_oss/moe` / `overrides/fused_swiglu`
+  (+8) -- other models' own code.
+- CI/test/pin-only, zero runtime impact: `b175497ea` (#4053), `681fd4b50` (#4048),
+  `d84e54ef9` (#4046), `df51ae9ca` (#4036), `c91448d20` DeepEP pin (#4033),
+  `20f12e3bf` ROCm CI (#4002), `b5eb9d92f` llama3 CUDA loss golden (#4024),
+  `1ac465391` HF cache in H100 CI (#4006).
+
+**Verification:** no conflict markers remain; `experiments/ezpz/trainer.py` and
+`experiments/torchft/trainer.py` both parse clean (`ast.parse`).
+
+**PP SMOKE RUN -> ezpz does NOT support PP at all (pre-existing gap, not a
+regression).** Ran the first-ever ezpz PP test (job `12472451`, agpt-2b, 2N,
+PP=2, microbatch 1 / LBS 2). It fails at step 0:
+```
+torchtitan/trainer.py:742 in forward_backward_step
+    assert isinstance(input_dict, list)
+AssertionError
+```
+Cause: upstream's PP contract is to hand `forward_backward_step` the **whole
+microbatch list** so the pipeline schedule can drive the stages
+(`trainer.py:742-748` -> `pp_forward_backward_step`, `trainer.py:767`). But
+`experiments/ezpz/trainer.py.train_step` has **no `pp_enabled` branch**: it
+unconditionally loops microbatches for gradient accumulation and calls
+`forward_backward_step` once per microbatch (a `dict`, not a `list`).
+
+This is NOT caused by the #3856 replay -- the replay only fixed the dataloader's
+batch SIZE. The trainer's ITERATION contract was never PP-aware. Confirmed
+pre-existing: `grep` finds no `pipeline_parallel_degree>1` anywhere in
+`experiments/ezpz/`, i.e. PP has never been exercised here.
+
+To actually support PP, `ezpz/trainer.py.train_step` needs a `pp_enabled`
+branch that passes the microbatch list through in one call (mirroring the base
+Trainer) instead of looping. Not done -- no current workload needs PP, and the
+gradient-accumulation loop is load-bearing for everything that does run. Filed
+here so the next person who enables PP knows the shape of the work rather than
+rediscovering it from the assert.
+
+
+## 2026-07-29 -- 72nd sync (2 commits, `1c40dd26a..upstream/main`, merge `e5841d611`)
+
+Merged `upstream/main` into `ezpz` (merge commit `e5841d611`), 2 upstream commits
+since the 71st sync. No conflicts. Files touched vs ezpz-relevant paths:
+- `b3cf840ce` Fix float8 filter_fqns to exclude lm_head, not output (#4008) --
+  touches `models/deepseek_v3/config_registry.py` (+llama3). REPLAYED onto
+  `experiments/ezpz/moe/config_registry.py` (commit `2db11d18c`): our 671B float8
+  config had the SAME stale `filter_fqns=["output", ...]`. `filter_fqns` is an
+  EXCLUDE-list, and the head module is named `lm_head`, so `output` matched
+  nothing and the precision-sensitive LM head was silently fp8-quantized. Changed
+  to `["lm_head", "router.gate"]`. Only affects the float8 671B MoE path (no live
+  run uses it), but the fix is correct hygiene. agpt has no float8 config, so no
+  agpt replay needed.
+- `4bed50210` Select FA4 varlen attention on Blackwell (#4012) -- touches shared
+  `models/common/attention.py` (+ `tools/utils.py`, unit test). The change swaps
+  the Hopper-only `has_cuda_capability(9,0)`->FA3 branch for a generic
+  `get_cuda_flash_attention_impl()` that also selects FA4 on Blackwell (SM 10.0).
+  This is a CUDA-capability-gated path: on XPU `get_cuda_flash_attention_impl()`
+  returns None and the whole block is skipped, so the agpt/moe SDPA path is
+  UNAFFECTED (verified). No replay needed.
+
+
+## 2026-07-27 -- 71st sync (4 commits, `725b995d3..upstream/main`, merge `e0c9c615e`)
+
+Merged `upstream/main` into `ezpz` (merge commit `e0c9c615e`), 4 upstream commits
+since the 70th sync. No conflicts. Files touched vs ezpz-relevant paths:
+- `d24ae4031` Qwen 3.5 Varlen Attention (#3801) -- touches shared
+  `models/common/attention.py` (+34) but ONLY the varlen/document-masking path
+  (`VarlenMetadata`, `create_varlen_metadata_for_document`): adds an OPTIONAL
+  `include_host_offsets` param (default False). The `ScaledDotProductAttention`
+  SDPA/flash path agpt+moe use is UNTOUCHED (verified: empty diff on the SDPA
+  class). No agpt/moe replay needed.
+- `4c6481182` [cp] PTRR load balancer mask-from-dict (#3972) -- `distributed/
+  context_parallel.py`; we use pure FSDP (no CP), no impact.
+- `fd2776584` [rl] window FIFO scheduling (#3927) + `c30a80008` [rl] fix rl tests
+  (#3981) -- `experiments/rl/` engine + tests. The ezpz RL overlay drives this
+  engine; nice-to-have (window FIFO) when GRPO resumes, no replay needed now.
+Also minor +lines in `components/loss.py`, `config/configs.py`, `trainer.py`,
+`components/validate.py` (upstream plumbing; syntax-checked clean, agpt/moe build
+unaffected). NOTE: components/loss.py touched here -- keep in mind for the planned
+ezpz z-loss addition (rebase that onto the merged loss.py).
+
+
 Tracks changes merged from `upstream/main` (pytorch/torchtitan) into the `ezpz`
 branch, and any modifications required to keep `experiments/ezpz/{agpt,moe,qwen3}`
 compatible.
@@ -3164,3 +3530,13 @@ for minimal churn; they now map to the new kwarg names at the call site). Verifi
 by AST: merged controller.py AsyncLoopConfig accepts {num_prompts_per_train_step,
 num_samples_per_prompt}; both overlay files now pass exactly those. Without this
 replay the next GRPO run would fail with an unexpected-kwarg TypeError.
+
+## Sync 2026-07-29 (aa0d9ca63) -- 2 commits, both low-relevance, clean
+
+Merged upstream/main (was 2 behind). Both commits touch NOTHING on our XPU/dense-agpt path:
+- `1c40dd26a` Fix AMD 8-GPU CI (#3896): the distributed/utils.py set_determinism change is
+  GATED on `torch.version.hip is not None` (ROCm only) -- the else branch (XPU/CUDA) is
+  byte-identical to before, so it's a no-op for us. + ROCm loss test fixtures.
+- `b3a13eed9` MinimalAsyncEP int32 overflow fix in top-k kernels (#3969): MoE expert-parallel
+  kernel; we run dense agpt-2b, not MoE -- irrelevant to current work, harmless hygiene.
+Merge clean (5 files, zero ezpz files touched, zero conflicts). Now 0 behind upstream.

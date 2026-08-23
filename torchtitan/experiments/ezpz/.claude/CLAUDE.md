@@ -46,18 +46,40 @@
   Always check XPU compatibility before suggesting optimization strategies.
 - **torch.optim.Muon** is available since PyTorch 2.9 — prefer it over the custom
   Newton-Schulz implementation. The custom `optimizer/muon.py` is 35% slower.
-- **HSDP (`dp_replicate × dp_shard > 1`) is untested for ezpz models** as of
-  2026-05-04 — see "Recent Findings" below for the `aten.normal_.default`
-  failure mode. Stick with pure FSDP (`dp_replicate=1`) until that's fixed.
+- **HSDP works and is FASTEST as of 2026-07-27** (torch 2.13.0.dev20260519+xpu).
+  The old `aten.normal_.default` init crash (2026-05-04) is FIXED on current
+  torch. Measured 2N agpt-2b: HSDP (`dp_shard=NGPU_PER_HOST=12`,
+  `dp_replicate=NHOSTS=2`) = 28.06% MFU / 7478 tps, vs pure FSDP
+  (`dp_shard=24, dp_replicate=1`) 27.33% / 7284 (+2.7%), vs DDP
+  (`dp_replicate=N*12, dp_shard=1`) ~24-26%. Intra-node shard keeps the
+  all-gather on the fast fabric. **Prefer HSDP** (`--data-parallel-shard-degree=
+  NGPU_PER_HOST --data-parallel-replicate-degree=NHOSTS`); the win compounds at
+  20B/80B where DDP won't fit. (Was: "pure FSDP only, HSDP crashes" -- stale.)
 
 ## Environment Setup
 
 - **torch 2.13 venv:** `.venv/` in repo root, copy to compute with `ezpz yeet-env`
 - **torch 2.10 conda env:** `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env`
   Loads `frameworks/2025.3.1` module + user venv overlay. Has lm_eval, vllm, transformers.
-- **PBS scripts must NOT use `set -euo pipefail`** — venv activate has unbound vars
+- **PBS scripts must NOT use `set -euo pipefail`** — venv activate has unbound vars,
+  and `-u` also kills lmod (`ZSH_EVAL_CONTEXT: unbound variable`). Use
+  `set -o pipefail` alone.
+- **PBS scripts that run lm-eval need ALL FOUR of these**, and missing any one
+  fails differently and confusingly. Copy the working recipe from
+  `scripts/eval/eval-20b-v2.sh` rather than reassembling it:
+  1. `#!/bin/bash --login` — **without `--login` a batch shell has no `module`
+     function at all**; the load silently no-ops with `module: command not found`.
+  2. `module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1` at
+     **top level**, not inside a subshell (a subshell load does not persist).
+  3. `source venvs/aurora/tt-lm-eval/bin/activate` — the frameworks module alone
+     has no `lm_eval`; the venv alone has no MKL
+     (`OSError: libmkl_intel_lp64.so.2`).
+  4. `set -o pipefail` only, per the rule above.
 - **Compute nodes need proxy:** `export http_proxy=http://proxy.alcf.anl.gov:3128`
   (also `https_proxy`, `ftp_proxy`). Required before any `curl`, `pip`, or HF download.
+- **Verify a new job's environment with a 10-minute `debug`-queue smoke** before
+  spending a real allocation on it. A script that just loads the env and imports
+  the libraries costs nothing and catches all four traps above at once.
 
 ## Aurora-Specific
 
@@ -367,8 +389,9 @@ that touches one of these areas.
   with zero parameters after sharding.
 - **HF rate limits:** 24 ranks × multiple jobs = hundreds of API requests.
   Stagger PBS submissions by 5+ minutes.
-- **HSDP with `dp_replicate > 1` will crash at init** — see "Recent
-  Findings" above. Use pure FSDP.
+- **HSDP works + is fastest as of 2026-07-27** (the 2026-05-04 init crash is
+  fixed on current torch). Prefer `dp_shard=NGPU_PER_HOST` +
+  `dp_replicate=NHOSTS` (+2.7% MFU vs pure FSDP at 2N). See "Recent Findings".
 - **Don't trust `loss:` from TP > 1 runs** without the `EzpzValidator`/
   `trainer.py` workaround in place — multiply by `dp_world_size` to
   recover the true value. See "Recent Findings" above.
@@ -443,6 +466,23 @@ chain. Both jobs Q/H for 4+ days now.
 
 ### v2 — 80B
 
+**RUN ALL 80B EXPERIMENTS AT >=4N.** 80B peaks at **88.94% memory at
+4N/TP=2** — it barely fits there, so **2N is below the model's memory
+floor**. At 2N you get OOM-class failures (`UR_RESULT_ERROR_OUT_OF_RESOURCES`
+before step 1 at TP=2; a `GPU NotPresent/banned` fault at the step-1->2
+optimizer-state allocation at TP=4, after peaking 84% at step 1) that are
+easily mistaken for sharding/DTensor bugs. **Any 80B conclusion drawn from a
+2N run is void — re-run at 4N+ before believing it.** (Learned the expensive
+way 2026-08-03: a full implement->review->smoke cycle chased a "qk_norm TP=4
+DTensor bug" that was 2N memory pressure; see the 2026-08-03 agpt-sync entry.)
+
+**80B @ 4N/TP=4 is CLEAN and is the roomiest corner** (job 12472452,
+2026-08-03, 10/10 steps): loss 12.98 -> 11.30, **memory plateaus at 70.25%**
+(step 1 50.68% -> steady 44.95GiB/70.25%), no device/NotPresent/OOM errors.
+That is ~19 points more headroom than 4N/TP=2's 88.94%, because TP=4 shards
+params over 4 ranks instead of 2. **There is no TP=4 bug** — the earlier
+"TP=4 is broken" reading came entirely from 2N runs. Prefer TP=4 at 80B.
+
 **Working path identified 2026-05-05** (job 12466025, 4N smoke, 20
 steps, see `logs/agpt-80b-no-compile-t213-12466025/run.log`):
 
@@ -500,9 +540,11 @@ training in v2. See `docs/guides/training-dtype-bf16-norm-freeze.md`.
 Active issues with workarounds in place. For the full diagnosis +
 empirical evidence, follow the doc link.
 
-- **HSDP init crashes** with `aten.normal_.default: in-place operations
-  that require placement changes are not supported`. Workaround: pure
-  FSDP only.
+- **HSDP init crash — FIXED (2026-07-27).** The `aten.normal_.default:
+  in-place operations that require placement changes` crash (2026-05-04)
+  no longer reproduces on torch 2.13.0.dev20260519+xpu; HSDP trains clean
+  and is +2.7% MFU over pure FSDP. Use HSDP (`dp_shard=NGPU_PER_HOST`,
+  `dp_replicate=NHOSTS`). See "Recent Findings".
 
 - **`compile + AC + TP=2` AOT autograd crash on the agpt 80B family
   (torch 2.13).** `tensors_saved_with_vc_check` AssertionError —

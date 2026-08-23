@@ -1,16 +1,18 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-07-24
+> **Last updated:** 2026-08-14
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status:** persisted at step **6,050** (~609.0B tokens, 13.0% of
+> **Status:** persisted at step **6,100** (~614.0B tokens, 13.1% of
 > 4.67T target), loss ~2.44. **Advanced 2026-07-03** onward via the
 > native `ezpz --auto-retry` relaunch (`8638793`, resumed step-4,400 ->
 > step-5,109) and its `afterany` continuation `8638795`, which carried
-> the head from step-5,100 through step-5,400 and on to the current
-> step-6,050 (ckpts persisted every 100). The progress table below is
-> detailed through step-5,400; the current persisted head is step-6,050
+> the head from step-5,100 through step-5,400; a 16N `capacity`-queue
+> bridge (`cap_20b512_16n.sh`, GAS=32 -> GBS=12288 bit-identical) then
+> crept it 6,000 -> step-6,100 during prod-queue starvation (ckpts
+> persisted every 25-100). The progress table below is detailed through
+> step-5,400; the current persisted head is step-6,100
 > (see the Latest checkpoint line). This ended the long stall:
 > the chain had been stuck at step-4,400 since 2026-05-29 under
 > `small`-queue contention, and its legacy `failover_lib.sh`
@@ -83,11 +85,13 @@
 | [`8638793`](#log-8638793) | 2026-07-05 | 12h | 4,400 -> **5,109** | (reload blip 6.03) -> **2.54** | ~365 | ~18.2% | **Native `ezpz launch --auto-retry` relaunch** (torch 2.13 venv, ezpz 0.21.3). Resumed cleanly from step-4,400 after the legacy sync chain stalled; ran to step-5,109. step-4,500..5,100 persisted every 100. First forward progress in ~25 days. |
 | [`8638795`](#log-8638795) | 2026-07-07 | 12h | 5,100 -> **5,400** | 2.52 -> **2.47** | ~376 | ~18.7% | **`afterany` continuation** of 8638793 (native auto-retry). step-5,200..5,400 persisted. Advanced during the multi-umbrella queue wait (umbrella 8648363 never won a slot; this standalone carried the chain). |
 
-**Latest checkpoint:** step-6,050 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
+**Latest checkpoint:** step-8,700 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
 
-**Cumulative steps:** 6,050
+**Cumulative steps:** 8,700
 
-**Tokens consumed:** 6,050 × 12,288 × 8,192 = **609.0B tokens** (13.0% of 4.67T target)
+**Tokens consumed:** 8,700 × 12,288 × 8,192 = **875.8B tokens** (18.7% of 4.67T target)
+
+**Loss:** 2.4635 (c8zwrlqw end, step-8,800 -- umbrella 8744245)
 
 ### Recovery
 

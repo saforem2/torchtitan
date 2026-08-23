@@ -1,5 +1,55 @@
 # frameworks-RC torch: `torch.compile` at TP=4 crashes in the SDPA flash-backward
 
+> [!IMPORTANT]
+> **FIXED in frameworks RC4 (verified 2026-08-05, job 12472578).** The patched
+> build `torch 2.13.0a0+gitcf30153` / `pytorch_2.13.0_patched_08_02_2026`
+> (conda env `RC4_..._rel_one_2026.1.0_python_3.12.12`) trains **clean at TP=4**:
+> 10/10 steps, loss 12.98 -> 8.47, finite grad_norms, and **zero**
+> `assert_size_stride` occurrences in any rung. The full ladder on that build
+> (2N, agpt-2b, seq 4096, LBS 1):
+>
+> | rung | loss step 1 -> 10 | MFU | assert_size_stride |
+> | --- | --- | --- | --- |
+> | eager | 12.98 -> 8.38 | 19.36% | 0 |
+> | compile TP=1 | 12.92 -> 9.30 | 21.31% | 0 |
+> | compile TP=2 | 12.95 -> 8.65 | 13.31% | 0 |
+> | compile TP=4 | 12.98 -> 8.47 | 7.83% | 0 |
+>
+> Note the base git hash is UNCHANGED (`cf30153`) -- only the patch level
+> differs, so identify the build by `patched_08_02_2026`, not by the hash.
+>
+> **Scale + duration confirmed (job 12472582, 4N/48 ranks):**
+>
+> | rung | loss | MFU | assert_size_stride |
+> | --- | --- | --- | --- |
+> | TP=4, 4N, 10 steps | 12.94 -> 8.15 | 6.98% | 0 |
+> | TP=4, 4N, 30 steps | 13.00 -> 6.71 | 6.99% | 0 |
+>
+> 30 steps of continuous descent with zero asserts, at twice the nodes and three
+> times the steps of the first pass. No NaN/Inf (an earlier "nan/inf" grep hit
+> was `INFO` log lines and an `"infinite"` config key, not numerics).
+>
+> **The low TP=4 MFU is NOT an RC4 regression** (control run, job 12472583). The
+> same four rungs on the production `.venv` stack (torch
+> `2.13.0.dev20260519+xpu`, oneAPI 2025.3.1, via
+> `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`) land
+> within ~1.5% of RC4 everywhere:
+>
+> | rung | .venv MFU | RC4 MFU | delta |
+> | --- | --- | --- | --- |
+> | eager | 19.08% | 19.36% | +0.28 |
+> | compile TP=1 | 21.20% | 21.31% | +0.11 |
+> | compile TP=2 | 13.46% | 13.31% | -0.15 |
+> | compile TP=4 | 7.85% | 7.83% | -0.02 |
+>
+> So ~7% at TP=4 is simply what TP=4 costs for agpt-2b at 2N (TP splits a small
+> per-rank workload and adds collectives), not something RC4 introduced. RC4 is
+> performance-neutral against the production stack. Nothing to report upstream on
+> throughput; the TP=4 MFU cost is pre-existing and independent of the build.
+>
+> Everything below documents the ORIGINAL (pre-RC4) failure and remains the
+> reference for the older fw-RC conda stack.
+
 **Status (2026-07-26): reproduced + scoped.** On the "frameworks" RC conda torch
 (`2.13.0a0+gitcf30153`, oneAPI 2026.1.0, XPU) any `torch.compile` agpt run at
 **tensor-parallel degree 4** aborts in the compiled backward with an

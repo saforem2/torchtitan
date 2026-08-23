@@ -1,0 +1,26 @@
+# Frozen holdout fingerprints -- generated 2026-08-10T12:09:08Z
+#
+# These are the EXACT files used to score:
+#   Wave 2 (owm-100 / owm75-edu25 / owm50-edu50 / edu-100), and
+#   Wave 3 (owm75-cosmo25).
+# Verified 2026-08-08 (job 12472786): re-scoring owm75-edu25/step-1600 on
+# these files reproduced FineMath 1.8089 and wikitext 2.6597 exactly.
+#
+# Rebuild with:
+#   python3 -m torchtitan.experiments.ezpz.scripts.eval.build_math_holdout \
+#       --out-dir torchtitan/experiments/ezpz/eval/holdouts --num-docs 2000 --wikitext --pes2o
+# then verify with:
+#   sha256sum -c torchtitan/experiments/ezpz/eval/holdouts/MANIFEST.sha256
+# A MISMATCH means the upstream HF dataset revision moved and your numbers
+# are NOT comparable to the recorded Wave 2/3 tables -- re-score all arms.
+#
+# file                           lines        bytes
+# finemath_holdout.jsonl          2000     11129264
+# owm_holdout.jsonl               2000     15955474
+# pes2o_holdout.jsonl             2000     60207822
+# wikitext_holdout.jsonl          1500      1146861
+#
+33447e66728f3a4e9380a0d01817b0dcb996937aa0c1c6cefc7030bea52c2f96  ./finemath_holdout.jsonl
+aaf474410b0516badbea65896ba5d0918add021821ca671ed1cee015b6bfb2e1  ./owm_holdout.jsonl
+f702d36650d5bfeb108fe733a2a278221af319b14e0121d0d990f987f12f1ddd  ./pes2o_holdout.jsonl
+9092e48e28ff0b1ed13129f010e15e213baea371fc93d1919df840372bd969f0  ./wikitext_holdout.jsonl

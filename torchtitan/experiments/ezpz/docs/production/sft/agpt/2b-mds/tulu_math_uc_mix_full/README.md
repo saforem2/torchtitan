@@ -1,10 +1,13 @@
 # SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)
 
-> **Last updated: 2026-07-17.**
+> **Last updated: 2026-08-16.**
 > **Status: COMPLETE at 8N -- step 8672/8672, epoch 1.0, final loss 0.357,
 > mean_token_accuracy 0.902** (finished 2026-07-16). Head job **12470350**
 > (2026-07-12) + a 10-link afterany chain (... -> 12470478 -> 12470479 final);
-> `checkpoint-8672` saved, consolidated to `checkpoint-8672-hf` (the deliverable).
+> `checkpoint-8672` saved, consolidated to `checkpoint-8672-hf`. **NOT the
+> deliverable** -- 8672 is catastrophically forgotten (hellaswag 0.593 ->
+> 0.273). The deliverable is `checkpoint-900-hf`; see the Deliverable line
+> below.
 > Eval sweep in progress -- see [evals/](evals/README.md). This is the
 > "more tokens" SFT: the SAME gs138650 base as
 > the completed 729-step SFT, but over the FULL OpenMathInstruct-2

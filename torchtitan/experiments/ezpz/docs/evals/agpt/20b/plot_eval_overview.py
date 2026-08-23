@@ -39,11 +39,43 @@ V2_TRAJECTORIES = {
     256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 3_072),   # LBS=1 × 256N × 12 GPUs ÷ TP=2 ⇒ 1536 dp-shards × 2 micro-batches
     512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),  # LBS=2 × 512N × 12 GPUs (no TP)
 }
+
+# BOTH 20B chains changed RoPE convention mid-flight, and every eval exported
+# at or after the switch used the wrong convention -- understating the model by
+# up to 0.089 on ARC-C, growing with training, which INVERTS the trend rather
+# than shifting it. Corrected re-exports live in parallel `-ropefix` dirs
+# covering exactly the post-switch steps.
+#
+# node_count -> (corrected dir, switch step)
+V2_CORRECTED = {
+    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n-ropefix", 3101),
+    512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-ropefix", 4401),
+}
+
+# Pin every number to one shot count. The eval scripts write `<task>@<N>shot`
+# keys plus a bare `<task>` alias for whichever group ran LAST, so on steps
+# where a 25-shot ARC-C pass followed the 0-shot pass the bare key IS the
+# 25-shot number. The corrected sweep ran 0-shot throughout, so reading bare
+# keys splices two different measurements into one curve.
+SHOTS = "0shot"
 # 2B-MDS reference baseline overlaid for cross-size capacity comparison
 # (pre-torchtitan SophiaG, 140K steps / 7.77T tokens). Same trajectory
 # overlay used on the 2B eval page.
 MDS_RESULTS_BASE = REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds"
-MDS_TOKENS_PER_STEP = 7_770e9 / 140_000  # ~55.5M tokens/step
+# MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
+# (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter.
+#
+# The old 7_770e9/140_000 (~55.5M) figure was WRONG by +10.3%: it divided the
+# 7.770T budget by 140,000 steps, but the run reached that budget at iteration
+# 154,391, not 140,000. It stretched the MDS curve right, drawing the eval
+# point at iter 92,859 some 480B too far along and ending the curve at a
+# phantom 7.790T. On a v1-vs-v2 chart that systematically flatters v2.
+#
+# 6144*8192 is corroborated three ways: iter 92,859 -> 4.674T (exactly the
+# olmo-mix stage-1 target), iter 140,353 -> 7.064T (exactly the dolmino
+# cumulative), and iter 154,391 -> 7.771T (the real MDS budget). Verified
+# against the Megatron-DeepSpeed train_aGPT_2B_*.sh TRAIN_TOKENS budgets.
+MDS_TOKENS_PER_STEP = 6144 * 8192  # 50,331,648 tok/iter (GBS 6144 x seq 8192)
 FIG_DIR = Path(__file__).parent / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +115,73 @@ def _acc(metrics: dict) -> float | None:
     return None
 
 
-def load_v2_trajectory(results_base: Path) -> dict[int, dict[str, float]]:
+def _task_metrics(results: dict, task: str) -> dict | None:
+    """Metrics for `task`, pinned to SHOTS when the file records shot counts.
+
+    Returns None when shot-tagged keys exist but not at SHOTS, rather than
+    falling back to the bare key -- that key aliases whichever shot group ran
+    last, and trusting it is what splices a 25-shot segment onto a 0-shot one.
+    """
+    tagged = results.get(f"{task}@{SHOTS}")
+    if isinstance(tagged, dict):
+        return tagged
+    if any(k.startswith(f"{task}@") for k in results):
+        return None
+    # Untagged few-shot: SHOTS_SPEC="5:mmlu;25:arc_challenge" batches wrote no
+    # @Nshot keys, so they look 0-shot by key shape while holding 25-shot
+    # numbers. mmlu's presence is the tell -- a plain 0-shot commonsense pass
+    # never includes it. Measured ~4pp high on 2b_v2_256's ARC-C.
+    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+        return None
+    m = results.get(task)
+    return m if isinstance(m, dict) else None
+
+
+def load_v2_trajectory(
+    results_base: Path,
+    corrected_base: Path | None = None,
+    switch_step: int | None = None,
+) -> dict[int, dict[str, float]]:
+    """Load a chain's evals, splicing corrected results over the post-switch half.
+
+    Pre-switch numbers come from `results_base` (correct -- exported with the
+    matching RoPE convention); at/after `switch_step` they come from
+    `corrected_base`. A post-switch step the corrected sweep did not cover is
+    DROPPED, never backfilled from the original: the original value there is
+    the wrongly-permuted one this exists to remove, and a visible gap beats a
+    plausible wrong point.
+    """
+    out = _load_one(results_base)
+    if corrected_base is None or switch_step is None:
+        return out
+
+    corrected = _load_one(corrected_base)
+    dropped: dict[str, int] = {}
+    merged: dict[int, dict[str, float]] = {}
+    for step, scores in out.items():
+        if step < switch_step:
+            merged[step] = scores
+            continue
+        fixed = corrected.get(step, {})
+        keep = {t: v for t, v in fixed.items()}
+        for t in scores:
+            if t not in fixed:
+                dropped[t] = dropped.get(t, 0) + 1
+        if keep:
+            merged[step] = keep
+    for step, scores in corrected.items():
+        if step >= switch_step:
+            merged.setdefault(step, scores)
+    for t, n in sorted(dropped.items()):
+        print(
+            f"  NOTE [{results_base.name}/{t}]: {n} post-switch point(s) dropped"
+            " -- corrected sweep did not cover this task; original values are"
+            " wrongly permuted. Re-run the sweep with this task to restore."
+        )
+    return merged
+
+
+def _load_one(results_base: Path) -> dict[int, dict[str, float]]:
     out: dict[int, dict[str, float]] = {}
     if not results_base.exists():
         print(f"no v2 results at {results_base}")
@@ -103,7 +201,8 @@ def load_v2_trajectory(results_base: Path) -> dict[int, dict[str, float]]:
         # {"results": {task: ...}}. Handle both.
         results = payload.get("results", payload)
         for task in TASKS:
-            if task in results and (acc := _acc(results[task])) is not None:
+            m = _task_metrics(results, task)
+            if m is not None and (acc := _acc(m)) is not None:
                 scores[task] = acc
         if scores:
             out[step] = scores
@@ -270,7 +369,8 @@ def main() -> None:
     v2_by_nodes = {}
     v2_gbs = {}
     for nodes, (path, gbs) in V2_TRAJECTORIES.items():
-        traj = load_v2_trajectory(path)
+        corrected_path, switch = V2_CORRECTED.get(nodes, (None, None))
+        traj = load_v2_trajectory(path, corrected_path, switch)
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs
         print(f"loaded v2 {nodes}N: {len(traj)} steps from {path}")

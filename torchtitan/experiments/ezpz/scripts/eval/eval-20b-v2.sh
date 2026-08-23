@@ -55,6 +55,58 @@ LABEL="${LABEL:-512n}"
 STEPS="${STEPS:-100 200 300}"
 TASKS="${TASKS:-hellaswag,arc_easy,arc_challenge,winogrande,piqa,openbookqa,boolq}"
 
+# RoPE FLAVOR -- REQUIRED, no default. This script used to hardcode "20b"
+# (complex) at the convert call, which silently produced wrongly-permuted
+# exports for every cos_sin checkpoint. The 20B chains switched convention
+# MID-FLIGHT:
+#
+#   20b_v2_512   complex <= step 4400 ; cos_sin >= 4401   (switched 2026-07-05)
+#   20b_v2_256   complex <= step 3100 ; cos_sin >= 3101   (switched 2026-07-10)
+#
+# so the correct value depends on the STEP being converted. See
+# docs/guides/known-bugs/rope-flavor-mismatch.md
+if [[ -z "${MODEL_FLAVOR:-}" ]]; then
+    cat >&2 <<'ERRMSG'
+[eval-20b-v2] ERROR: MODEL_FLAVOR is required and has no default.
+
+  The 20B chains changed RoPE convention mid-flight, so the correct flavor
+  depends on the STEP. Guessing silently produces a wrongly-permuted export
+  that loads fine and quietly degrades every downstream metric.
+
+    20b_v2_512   steps <= 4400 -> 20b    steps >= 4401 -> 20b_real
+    20b_v2_256   steps <= 3100 -> 20b    steps >= 3101 -> 20b_real
+
+  Resolve a specific step:
+    python3 torchtitan/experiments/ezpz/scripts/eval/rope_flavor_for_step.py \
+        --chain <20b_v2_512|20b_v2_256> --step <N>
+
+  Details: docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
+
+# The conversion runs inside V2_REPO, and the pinned v2 clones do NOT ship
+# agpt/state_dict_adapter.py -- they fall back to the bare
+# Llama3StateDictAdapter, which applies the Q/K permute UNCONDITIONALLY. In
+# that clone a cos_sin flavor is silently ignored, so passing 20b_real there
+# does not help. Refuse rather than emit a corrupt export.
+if [[ "$MODEL_FLAVOR" == *_real ]] \
+   && [[ ! -e "${V2_REPO}/torchtitan/experiments/ezpz/agpt/state_dict_adapter.py" ]]; then
+    cat >&2 <<ERRMSG
+[eval-20b-v2] ERROR: MODEL_FLAVOR='${MODEL_FLAVOR}' (cos_sin) but the clone
+  ${V2_REPO}
+  has no agpt/state_dict_adapter.py, so it would use the bare
+  Llama3StateDictAdapter and permute anyway -- producing exactly the corrupt
+  export this flag is meant to avoid.
+
+  Convert from a checkout that HAS the adapter (e.g. the main
+  projects/saforem2/torchtitan-ezpz), pointing --model_name at it, or update
+  the clone. See docs/guides/known-bugs/rope-flavor-mismatch.md
+ERRMSG
+    exit 2
+fi
+echo "[eval-20b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default -- see rope-flavor-mismatch.md)"
+
 for step in $STEPS; do
     DCP_DIR="${V2_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
     HF_DIR="outputs/evals/agpt-20b-v2-${LABEL}/step-${step}/hf"
@@ -129,7 +181,7 @@ PYCHK
                 "${DCP_DIR}" \
                 "${HF_DIR_ABS}" \
                 --model_name "experiments.ezpz.agpt" \
-                --model_flavor "20b" \
+                --model_flavor "${MODEL_FLAVOR}" \
                 --export_dtype "bfloat16"
         ) || { echo "[1/2] Conversion FAILED — skipping eval for step ${step}"; continue; }
         # Copy HF config + tokenizer assets from the eval clone (we
@@ -184,6 +236,7 @@ else:
     groups = [(0, os.environ["TASKS"].split(","))]
 
 merged = {}
+n_shot = {}
 for shots, tset in groups:
     if not tset:
         continue
@@ -197,7 +250,20 @@ for shots, tset in groups:
         device="xpu:0",
         limit=eval_limit,
     )
-    merged.update(r["results"])
+    # A task can appear in more than one shot group (arc_challenge runs 0-shot
+    # in the commonsense block AND 25-shot in the modern block). Writing both
+    # to the bare task key makes the later group silently overwrite the
+    # earlier, producing a column that mixes shot counts with no way to tell
+    # which is which. Namespace every task by its shot count, and keep the
+    # bare key pointing at the LAST write so older readers/plotters still work.
+    for _task, _metrics in r["results"].items():
+        merged[f"{_task}@{shots}shot"] = _metrics
+        merged[_task] = _metrics
+    # lm-eval reports the shots actually used per task; preserve it so a
+    # results.json is self-describing even for the bare keys.
+    for _task, _n in (r.get("n-shot") or {}).items():
+        n_shot[_task] = _n
+        n_shot[f"{_task}@{shots}shot"] = _n
 
 # Merge into any existing results.json so the 0-shot dashboard and the modern
 # suite coexist (a step may be re-run to ADD tasks, not replace them).
@@ -209,9 +275,15 @@ if os.path.exists(out_path):
     except Exception:
         existing = {}
 existing.update(merged)
+if n_shot:
+    _prev = existing.get("n-shot") or {}
+    _prev.update(n_shot)
+    existing["n-shot"] = _prev
 with open(out_path, "w") as f:
     json.dump(existing, f, indent=2)
 for task, metrics in merged.items():
+    if not isinstance(metrics, dict):
+        continue
     # prefer acc_norm, then acc, then exact_match (gsm8k), then flexible EM
     val = (metrics.get("acc_norm,none")
            or metrics.get("acc,none")

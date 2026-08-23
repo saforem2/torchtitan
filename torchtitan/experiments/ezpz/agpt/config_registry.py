@@ -3,16 +3,20 @@ import ezpz.distributed
 import json
 import os
 from dataclasses import is_dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.lr_scheduler import LRSchedulersContainer
+# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
+# a re-export shim when the optimizer components were grouped into a package
+# by #4140). LRSchedulersContainer now lives in components.optimizer.
+from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.distributed.activation_checkpoint import FullAC
+from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.config.configs import CompileConfig
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
@@ -158,6 +162,16 @@ def agpt_2b_real() -> FaultTolerantTrainer.Config:
     return _set_rope_backend(ezpz_agpt_2b(), "cos_sin")
 
 
+def agpt_2b_tied() -> FaultTolerantTrainer.Config:
+    # agpt_2b_real + tied input/output embeddings. At vocab 256128/dim 2048 the
+    # untied embed+lm_head are ~53%% of a 2B; tying frees that budget. Arch bet #5
+    # validation (tied vs untied loss@fixed-tokens). state_dict_adapter already
+    # handles the tied case (adapter lines 82,103).
+    cfg = agpt_2b_real()
+    cfg.model_spec.model.enable_weight_tying = True
+    return cfg
+
+
 def agpt_2b_flex_attn() -> FaultTolerantTrainer.Config:
     return ezpz_agpt_2b_flex_attn()
 
@@ -183,7 +197,7 @@ def agpt_8b() -> FaultTolerantTrainer.Config:
 def agpt(
     flavor: str,
     local_batch_size: int = 1,
-    activation_checkpoint_mode: Literal["none", "full"] = "full",
+    activation_checkpoint_mode: Literal["none", "full", "selective"] = "full",
     seq_len: int = 8192,
     # IMPORTANT: bfloat16 master weights silently freeze RMSNorm.weight.
     # Norm weights init to 1.0 (bf16 ulp = 7.8e-3); per-step updates
@@ -202,14 +216,59 @@ def agpt(
 ) -> FaultTolerantTrainer.Config:
     cfg = _base_config(flavor)
     cfg.hf_assets_path = hf_assets_path
+    # 79th sync (#4085): upstream flipped the DEFAULT spmd_backend to
+    # "spmd_types", under which every ezpz config dies with
+    #   ValueError: When dp_mesh_dims is provided, all parameters must be
+    #   DTensors on the full SPMD mesh ... Got plain tensor for parameter
+    # That is an UPSTREAM gap, not ours: core llama3 through core's own
+    # trainer fails identically (job 12473444), while partial_dtensor passes
+    # in the same job. resolve_fsdp_mesh already guards this shape but only
+    # when the WHOLE storage mesh is size 1; at TP=1 with FSDP>1 a param whose
+    # only non-Replicate axis is tp still loses its annotation. See
+    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
+    #
+    # This pin was "full_dtensor" until 2026-08-20. Two reasons it moved:
+    #   1. upstream is REMOVING full_dtensor (601cf4d23, #4217) -- it is a
+    #      dead end, and the next sync deletes the file it depends on
+    #   2. the original pin cited job 12473350 as evidence full_dtensor
+    #      works, but that probe ran --compile.no-enable; compiled agpt on
+    #      full_dtensor hits the vc_check DeviceMesh assertion
+    # partial_dtensor is the supported fallback and what upstream itself
+    # pins for its rl+hf CI suites (b64d3f6a9, #4228).
+    cfg.parallelism.spmd_backend = "partial_dtensor"
+
+    # spmd_types loss-parallel CE needs the full vocab size, and it is the
+    # caller's job to supply it: CrossEntropyLoss.Config declares
+    #   global_vocab_size: int | None = None
+    #   """Full vocabulary size, needed for spmd_types loss-parallel CE."""
+    # The partial_dtensor/DTensor branch derives it from pred.shape[-1] and
+    # never reads the field, which is why leaving it unset has been harmless
+    # so far. Under spmd_types at TP>1 the unset None reaches
+    #   chunk_size = (global_vocab_size + tp_world_size - 1) // tp_world_size
+    # and the run dies with "unsupported operand type(s) for +: NoneType and
+    # int" (components/loss.py:134) before step 1.
+    #
+    # Read it off the model spec rather than hardcoding, so the flavors that
+    # differ (gemma 256128, Llama-3 128256, OLMo-2 100352) stay correct and
+    # cannot drift from the model. Guarded because not every loss Config has
+    # the field -- ChunkedLossWrapper, set by some configs below, does not.
+    _vocab = getattr(getattr(cfg.model_spec, "model", None), "vocab_size", None)
+    if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
+        cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
     cfg.training.local_batch_size = local_batch_size
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
     # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
     # is the agpt default (was mode="full").
-    cfg.activation_checkpoint = (
-        None if activation_checkpoint_mode == "none" else FullAC.Config()
-    )
+    if activation_checkpoint_mode == "none":
+        cfg.activation_checkpoint = None
+    elif activation_checkpoint_mode == "selective":
+        # Plain upstream SelectiveAC, not the MoE subclass: MoeSelectiveAC
+        # exists only to drop all_to_all_single from the save list, which is
+        # an EP concern agpt does not have.
+        cfg.activation_checkpoint = SelectiveAC.Config()
+    else:
+        cfg.activation_checkpoint = FullAC.Config()
     cfg.training.seq_len = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
@@ -336,6 +395,21 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
+    """``agpt_debugmodel_local`` plus QK-Norm.
+
+    QK-Norm adds two more RMSNorms per layer (on head_dim), also initialized
+    at 1.0, so it has the same bf16-master freeze exposure as the pre/post
+    block norms. Used by the master-weight-dtype ablation
+    (scripts/oneoff/fp32_norms_ablation.py) to test the "this recurs for any
+    parameter initialized near 1.0, QK-norm gains being exactly that" claim
+    in docs/production/agpt/30b-exp/README.md Section 6.
+    """
+    cfg = agpt_debugmodel_local()
+    cfg.model_spec = model_registry("debugmodel_qknorm")
+    return cfg
+
+
 def ezpz_agpt_2b() -> FaultTolerantTrainer.Config:
     return agpt("2b", activation_checkpoint_mode="none")
 
@@ -350,6 +424,375 @@ def agpt_2b_chunkedce() -> FaultTolerantTrainer.Config:
     """
     cfg = ezpz_agpt_2b()
     cfg.loss = ChunkedLossWrapper.Config(num_chunks=8)
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# MDS mid-training anneal A/B (fork the Megatron-DeepSpeed AuroraGPT-2B base)
+# ---------------------------------------------------------------------------
+#
+# Base: the MDS stage-3-end checkpoint `global_step138650` (val ~2.05),
+# converted to a torchtitan DCP at
+#   outputs/checkpoints/agpt-2b-mds-gs138650/step-0/
+# by a sibling job (referenced by path -- must exist before these run).
+#
+# SCHEDULE FRAMING -- MDS stage-3 was ALREADY a constant-LR phase, not an
+# anneal. The production script train_aGPT_2B_sophiag_stage3.sh sets
+# LR_DECAY_STYLE=constant at LR=2.17e-5; the Megatron scheduler
+# (optimizer_param_scheduler.py get_lr) returns max_lr at every post-warmup
+# step when lr_constant_plus_cooldown is False (confirmed False in the MDS
+# training-config dump). So the val 2.40->2.05 drop over the final 0.706T
+# tokens was a DATA-MIX shift (dolmino stage-2 -> nvidia-math1/code2 stage-3),
+# NOT a learning-rate decay. This A/B is therefore the FIRST true LR anneal on
+# a base that never annealed -- WSD decay-to-0 (ARM B) has never been applied.
+#
+# Both arms fork model weights only (fresh optimizer + LR schedule + step
+# counter) via --checkpoint.initial-load-path, mirroring the CPT recipe
+# (docs/production/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
+# GENTLE (2e-6 constant, warmup 20) -- NOT re-warmed to the 2.17e-5 peak,
+# which disrupted the converged base in the first CPT pilot.
+#
+# Data mix: on-the-fly gemma tokenization of a raw-text HF math dataset via
+# the auto-registering HF dataloader (datasets.py). The pre-tokenized Sunspot
+# math lists are Llama2-vocab and unusable here; streaming a raw-text dataset
+# lets the model's own gemma tokenizer (EZPZTokenizer, vocab 256000) encode it
+# at runtime. open-web-math/open-web-math is gemma-safe: a single default
+# config, a "text" column (the auto-register default), no config_name needed.
+#
+# Everything except the LR schedule is IDENTICAL between the two arms so the
+# A/B isolates the schedule.
+
+# Fork target produced by the sibling DCP-conversion job.
+#
+# MUST be absolute. CheckpointManager.Config.__post_init__ (checkpoint.py:399)
+# rejects a relative initial_load_path -- but ONLY when set at construction
+# time. We assign it AFTER the Config is built (below), so that guard never
+# re-runs and a relative value would slip through. At load time it is then
+# resolved against the process CWD; if that is not the repo root the path does
+# not exist and CheckpointManager.load() takes the "No checkpoint was provided,
+# this is a fresh start." branch (checkpoint.py:879) -- a SILENT no-load that
+# leaves the model random-init. Anchoring to the repo root (this file is at
+# <repo>/torchtitan/experiments/ezpz/agpt/config_registry.py, i.e. parents[4])
+# makes it CWD-independent. An explicit env override is honored for relocated
+# checkpoints.
+_MDS_ANNEAL_BASE = os.environ.get(
+    "MDS_ANNEAL_BASE",
+    str(
+        Path(__file__).resolve().parents[4]
+        / "outputs/checkpoints/agpt-2b-mds-gs138650/step-0"
+    ),
+)
+# Raw-text HF math dataset, streamed + gemma-tokenized on the fly. Default HF
+# config, "text" column -> works through the auto-register fallback with no
+# extra wiring. (HuggingFaceTB/finemath would need an explicit config_name --
+# finemath-4plus -- so open-web-math is the drop-in choice.)
+_MDS_ANNEAL_DATASET = "open-web-math/open-web-math"
+# Gentle constant LR shared by both arms (well below the 2.17e-5 MDS peak).
+_MDS_ANNEAL_LR = 2e-6
+# ~50B-token anneal at GBS=6144 x seq 8192 (GBS*seq ~= 50.3M tok/step).
+_MDS_ANNEAL_STEPS = 1000
+
+
+def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the MDS anneal A/B (schedule set by callers)."""
+    # vocab-256000 flavor, seq_len 8192; no AC (2B fits), matches the 2b path.
+    cfg = agpt("2b-mds", activation_checkpoint_mode="none", seq_len=8192)
+    # Fork the converted MDS base: model weights only, fresh optimizer + step
+    # counter (initial_load_model_only defaults True). Same mechanism the CPT
+    # sweep used to fork the plateaued v2 base.
+    #
+    # Fail loudly at config-build time if the DCP is missing. Otherwise a bad
+    # path is only "discovered" as a SILENT no-load at load time (the model
+    # stays random-init and training starts at loss ~12 instead of ~2), which
+    # is exactly the failure this A/B is meant to avoid. A missing .metadata
+    # means the dir is not a valid DCP (dcp.load would also silently no-op).
+    if not (Path(_MDS_ANNEAL_BASE) / ".metadata").is_file():
+        raise ValueError(
+            f"MDS anneal base DCP not found or invalid at {_MDS_ANNEAL_BASE!r} "
+            "(expected a <dir>/.metadata). Set $MDS_ANNEAL_BASE to the absolute "
+            "path of the converted step-0 DCP, or run the HF->DCP converter "
+            "first. A missing base would otherwise silently load nothing and "
+            "train from random init."
+        )
+    cfg.checkpoint.initial_load_path = _MDS_ANNEAL_BASE
+    cfg.checkpoint.initial_load_model_only = True
+    # Stream a raw-text HF math dataset -> gemma tokenization at runtime. Drop
+    # the blendcorpus data_file_list path so the HF hub path is used.
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
+    cfg.dataloader.dataset_path = None
+    # Fresh optimizer at the gentle anneal LR (SophiaG was the MDS optimizer,
+    # but the fork discards optimizer state; AdamW at a low LR is the safe,
+    # batch-robust choice for a short anneal -- consistent with the CPT gentle
+    # retry, which also used a low constant LR on the same base family).
+    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.training.steps = _MDS_ANNEAL_STEPS
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
+def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
+    """ARM A (control): fork MDS gs138650, CONSTANT low LR (no decay).
+
+    decay_ratio=0.0 -> decay phase is zero steps -> the multiplier is 1.0 at
+    every post-warmup step (see the DECAY_RATIO=0 constant-LR precedent in
+    docs/journal.md). min_lr_factor=1.0 pins the floor at the full LR so even
+    if any decay were computed it would be a no-op. This continues the base at
+    a flat gentle LR -- the null hypothesis for the anneal.
+    """
+    cfg = _agpt_2b_mds_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-flat"
+    return cfg
+
+
+def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
+    """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
+
+    Same base, same gentle peak LR (2e-6), same data + budget as ARM A -- only
+    the schedule differs. decay_ratio=1.0 makes the whole post-warmup run the
+    decay phase; min_lr_factor=0.0 + decay_type="linear" drives LR linearly to
+    0 by the final step (classic Warmup-Stable-Decay with a zero stable
+    window). This is the first true LR anneal applied to the MDS base.
+    """
+    cfg = _agpt_2b_mds_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 1.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
+    return cfg
+
+
+# --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
+# lever, not the schedule. These arms fork the SAME MDS base at the SAME winning
+# CONSTANT LR 2e-6 and differ ONLY in the training data mix. The MDS base is
+# already math+code-saturated (stage-3), so the highest-value axis is DIVERSITY /
+# anti-forgetting: does swapping math-web for general/edu web forget math or
+# improve general ability? Eval reserves FineMath-4+ + wikitext as FROZEN
+# holdouts that NO arm trains on (disjoint by construction). Wave 1 = these two
+# single-corpus arms (zero new dataloader code); weighted blends are a phase 2.
+
+
+def _agpt_2b_mds_mix_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the data-mix arms: MDS base, constant LR 2e-6
+    (the anneal winner), same budget -- caller sets the dataset + folder."""
+    cfg = _agpt_2b_mds_anneal_base()
+    # Flat / constant-LR schedule (the anneal-proven winner).
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    return cfg
+
+
+def agpt_2b_mds_mix_owm() -> FaultTolerantTrainer.Config:
+    """CONTROL arm: open-web-math 100% (== the anneal flat winner's data).
+
+    Identical to agpt_2b_mds_anneal_flat by construction -- kept as its own name
+    so the data-mix matrix reads uniformly and its checkpoints/eval land in the
+    mix output tree. Anchors the mix experiment to the anneal result.
+    """
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET  # open-web-math/open-web-math
+    cfg.dataloader.dataset_path = None
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-owm"
+    return cfg
+
+
+def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
+    """DIVERSITY-extreme arm: fineweb-edu 100% (general/edu web, no math).
+
+    Tests the core anti-forgetting question: does replacing math-web with edu-web
+    forget math (FineMath holdout rises) or improve general ability (wikitext
+    holdout falls)? fineweb_edu_local is a registered LOCAL parquet dir (140
+    files, ~280GB, verified 'text' column) -- no HF hub, no 429 at 384 ranks.
+    """
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader.dataset = "fineweb_edu_local"
+    cfg.dataloader.dataset_path = None
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-edu"
+    return cfg
+
+
+# --- Phase 2: weighted math/edu BLENDS. Wave 1 showed the extremes bracket the
+# space: owm-100 holds math (FineMath 1.804); edu-100 CATASTROPHICALLY forgets it
+# (+0.308) for a tiny general gain (-0.024). The math-loss curve is steep, the
+# general-gain curve flat -> the optimal mix is math-HEAVY. These arms find where.
+# They REPLACE cfg.dataloader wholesale with an InterleavedHuggingFaceTextDataLoader
+# (setting .sources on the inherited BlendCorpusDataLoader.Config silently no-ops);
+# all sources infinite=True (post_init guard requires uniform infinite). Weights
+# are token-mixture ratios.
+
+
+def _agpt_2b_mds_mix_blend(
+    owm_weight: float, edu_weight: float, folder: str
+) -> FaultTolerantTrainer.Config:
+    """Shared builder for owm/edu weighted-blend mix arms."""
+    from torchtitan.hf_datasets.text_datasets import (
+        HFDataSource,
+        InterleavedHuggingFaceTextDataLoader,
+    )
+
+    cfg = _agpt_2b_mds_mix_base()
+    # Replace the whole dataloader Config -- the base is a BlendCorpusDataLoader
+    # .Config whose .sources field does not exist, so setting it would no-op.
+    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
+        sources=[
+            HFDataSource(
+                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+            ),
+            HFDataSource(
+                dataset="fineweb_edu_local", weight=edu_weight, infinite=True
+            ),
+        ],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+    cfg.checkpoint.folder = folder
+    return cfg
+
+
+def agpt_2b_mds_mix_owm_edu_7525() -> FaultTolerantTrainer.Config:
+    """BLEND math-heavy: 75% open-web-math / 25% fineweb-edu. The predicted
+    winner -- keeps most math (steep loss) while adding a little general."""
+    return _agpt_2b_mds_mix_blend(0.75, 0.25, "checkpoints/agpt-2b-mds-mix-owm75-edu25")
+
+
+def agpt_2b_mds_mix_owm_edu_5050() -> FaultTolerantTrainer.Config:
+    """BLEND balanced: 50% open-web-math / 50% fineweb-edu. Brackets the ratio
+    axis on the more-general side of the math-heavy arm."""
+    return _agpt_2b_mds_mix_blend(0.50, 0.50, "checkpoints/agpt-2b-mds-mix-owm50-edu50")
+
+
+def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
+    """BLEND math-heaviest: 90% open-web-math / 10% fineweb-edu. Probes the
+    math-heavy EDGE past the 75/25 winner -- 75/25 already captured ~all of
+    edu's wikitext (general) gain at zero FineMath (math) cost, so this arm
+    asks whether an even smaller edu slot retains that general gain while
+    giving back more of the math corpus. Brackets the ratio axis on the
+    more-math side of 75/25."""
+    return _agpt_2b_mds_mix_blend(0.90, 0.10, "checkpoints/agpt-2b-mds-mix-owm90-edu10")
+
+
+# --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
+# 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
+# DOE-mission version). Same recipe (MDS fork, constant LR, 10B tok, 75/25),
+# only the 25% source changes. Decided (arm-vs-arm) on a DISJOINT science judge:
+# held-out common-pile/peS2o NLL (no arm trains on it) + MMLU-STEM confirmatory;
+# FineMath + wikitext stay as retention guards.
+
+
+def _agpt_2b_mds_mix_blend_src(
+    owm_weight: float, src_dataset: str, src_weight: float, folder: str
+) -> FaultTolerantTrainer.Config:
+    """Generalized owm/<science-src> weighted-blend builder (mirrors
+    _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
+    from torchtitan.hf_datasets.text_datasets import (
+        HFDataSource,
+        InterleavedHuggingFaceTextDataLoader,
+    )
+
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
+        sources=[
+            HFDataSource(
+                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+            ),
+            HFDataSource(dataset=src_dataset, weight=src_weight, infinite=True),
+        ],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+    cfg.checkpoint.folder = folder
+    return cfg
+
+
+def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
+    """SCIENCE arm: 75% open-web-math / 25% cosmopedia-science (synthetic STEM
+    textbooks: auto_math_text+khanacademy+openstax+stanford+wikihow). Tests
+    whether synthetic-science textbooks in the 25% slot beat generic edu."""
+    return _agpt_2b_mds_mix_blend_src(
+        0.75, "cosmopedia_science_local", 0.25,
+        "checkpoints/agpt-2b-mds-mix-owm75-cosmo25",
+    )
+
+
+def agpt_2b_mds_mix_owm_nemotron_7525() -> FaultTolerantTrainer.Config:
+    """SCIENCE arm: 75% open-web-math / 25% Nemotron-CC-Math-4+ (layout-aware
+    CC math+science web). The memo's #1 science lever. GATED corpus -- requires
+    HF access granted for nvidia/Nemotron-CC-Math-v1 + precache of config 4plus
+    registered as nemotron_cc_math_4plus_local."""
+    return _agpt_2b_mds_mix_blend_src(
+        0.75, "nemotron_cc_math_4plus_local", 0.25,
+        "checkpoints/agpt-2b-mds-mix-owm75-nemotron25",
+    )
+
+
+# --- olmo-mix anneal A/B (second base for the "both bases" anneal experiment) ---
+# The olmo-mix step-92859 base (v2 256N chain, val ~2.65, fp32 DCP) is the WEAKER
+# but apples-to-apples base (the CPT pilot forked it). vocab 256128 (stock 2b, not
+# 256000 like MDS). It uses the plain "2b" flavor via ezpz_agpt_2b (COMPLEX RoPE),
+# which is how production 2B was trained -- agpt_2b_real (cos_sin) is a
+# compile-throughput TEST flavor only, NEVER production, and forking a complex-
+# trained base with a cos_sin config applies the wrong Q/K rotation (different
+# channel pairing) and corrupts the model. Same anneal mechanism/LR/data as MDS.
+_OLMO_ANNEAL_BASE = os.environ.get(
+    "OLMO_ANNEAL_BASE",
+    str(
+        Path(__file__).resolve().parents[4]
+        / "outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859"
+    ),
+)
+
+
+def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
+    """Shared fork config for the olmo-mix anneal A/B (schedule set by callers)."""
+    # ezpz_agpt_2b = stock vocab-256128 flavor + COMPLEX RoPE, matching how the
+    # olmo base was actually trained. (Do NOT use agpt_2b_real here: cos_sin RoPE
+    # is a compile-throughput test flavor and mismatches the complex-trained base
+    # -- it rotates a different Q/K channel pairing and corrupts the fork.)
+    cfg = ezpz_agpt_2b()
+    cfg.training.seq_len = 8192
+    cfg.activation_checkpoint = None
+    if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
+        raise ValueError(
+            f"olmo anneal base DCP not found or invalid at {_OLMO_ANNEAL_BASE!r} "
+            "(expected a <dir>/.metadata). Set $OLMO_ANNEAL_BASE to the absolute "
+            "path of the step-92859 DCP. A missing base would silently load "
+            "nothing and train from random init."
+        )
+    cfg.checkpoint.initial_load_path = _OLMO_ANNEAL_BASE
+    cfg.checkpoint.initial_load_model_only = True
+    cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
+    cfg.dataloader.dataset_path = None
+    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.training.steps = _MDS_ANNEAL_STEPS
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
+def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
+    """ARM A (control): fork olmo-mix step-92859, CONSTANT low LR (no decay)."""
+    cfg = _agpt_2b_olmo_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
+    return cfg
+
+
+def agpt_2b_olmo_anneal_wsd() -> FaultTolerantTrainer.Config:
+    """ARM B (treatment): fork olmo-mix step-92859, WSD decay-to-0 anneal."""
+    cfg = _agpt_2b_olmo_anneal_base()
+    cfg.lr_scheduler.warmup_steps = 20
+    cfg.lr_scheduler.decay_ratio = 1.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
     return cfg
 
 
@@ -449,6 +892,39 @@ def agpt_20b() -> FaultTolerantTrainer.Config:
     return agpt("20b")
 
 
+def agpt_20b_noac() -> FaultTolerantTrainer.Config:
+    """agpt_20b with activation checkpointing OFF.
+
+    Diagnostic for the vc_check/DeviceMesh assertion. The backend matrix
+    (job 12473420) showed the failure correlates with whether
+    model.parallelize() ran, not with the spmd backend:
+
+                        TP=1                  TP=2
+        partial         PASS (skipped)        vc_check (ran)
+        full_dtensor    vc_check (ran)        vc_check (ran)
+
+    CLAUDE.md describes the bug as "compile + AC + TP". compile and
+    parallelize are both confirmed necessary; AC is the untested leg and the
+    one that decides the remedy. If AC is required, selective AC may dodge it
+    (as it did for the MoE router recompute bug) and we keep compile AND TP.
+    If not, the only lever is avoiding model.parallelize().
+    """
+    return agpt("20b", activation_checkpoint_mode="none")
+
+
+def agpt_20b_selac() -> FaultTolerantTrainer.Config:
+    """agpt_20b with selective AC instead of FullAC.
+
+    The vc_check assertion needs all three of compile + AC + model.parallelize
+    (job 12473421: AC=none does not fire it, no-compile does not fire it).
+    Selective AC saves a chosen op set instead of recomputing whole blocks, so
+    it may avoid whatever DeviceMesh-bearing value FullAC stashes -- the same
+    move that fixed the MoE router recompute bug earlier today. If it works,
+    we keep compile AND TP instead of surrendering one of them.
+    """
+    return agpt("20b", activation_checkpoint_mode="selective")
+
+
 def agpt_20b_chunkedce() -> FaultTolerantTrainer.Config:
     """agpt_20b with ChunkedLossWrapper. See agpt_2b_chunkedce for rationale."""
     cfg = ezpz_agpt_20b()
@@ -459,6 +935,63 @@ def agpt_20b_chunkedce() -> FaultTolerantTrainer.Config:
 def agpt_20b_real() -> FaultTolerantTrainer.Config:
     """agpt_20b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
     return _set_rope_backend(ezpz_agpt_20b(), "cos_sin")
+
+
+def ezpz_agpt_30b() -> FaultTolerantTrainer.Config:
+    return agpt("30b")
+
+
+def agpt_30b() -> FaultTolerantTrainer.Config:
+    """The proposed next flagship. See docs/production/agpt/30b-exp/.
+
+    28.1B params: dim=6144, 64 layers, 48 heads (head_dim 128), 8 KV heads,
+    ffn 16384, gemma 256,128 vocab. Geometry is interpolated between 20B and
+    80B -- the proposal fixes only dim=6144.
+    """
+    return agpt("30b")
+
+
+def agpt_30b_real() -> FaultTolerantTrainer.Config:
+    """agpt_30b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
+    return _set_rope_backend(ezpz_agpt_30b(), "cos_sin")
+
+
+def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
+    """30B with the Llama-3 128k vocab -- see docs/production/agpt/30b-exp/.
+
+    26.5B params vs 28.1B for the gemma-vocab variant. Halves the embedding
+    (3.15B -> 1.58B) using a tokenizer we already vendor, and the proposal's
+    own fertility table prefers Llama on code.
+
+    The Llama-3 assets are set HERE rather than left to the caller. This
+    function previously inherited the family default (gemma-7b, vocab 256,128)
+    while its model declares vocab_size=128,256, which is an inconsistent
+    config: the tokenizer can emit ids the embedding cannot index. Its
+    docstring also told callers to pass ``--tokenizer.path``, which is not a
+    real flag -- the field is top-level ``hf_assets_path`` (``--hf-assets-path``).
+    Every run of this config had in fact died at argument parsing with
+    "Unrecognized options: --tokenizer.path", which is why it never produced a
+    single step (jobs 12473195, 12473200).
+    """
+    return agpt("30b_llama3tok", hf_assets_path="./assets/hf/Llama-3.1-8B")
+
+
+def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
+
+    exp07's nine-tokenizer bake-off measured OLMo-2 tied with Llama-3.1 on
+    fertility (225,749 vs 225,539 tok/MB on held-out olmo-mix-1124 text) while
+    using a 22% smaller vocab. At dim=6144 that is 1.23B of embedding against
+    Llama-3's 1.58B -- 0.34B freed for the same token cost, and exp05 showed
+    freed HBM converts into batch size, the dominant throughput lever here.
+
+    OLMo-2's tokenizer is also the only one tested that was fit on our own
+    corpus family (dolma/olmo-mix) at production scale.
+
+    26.2B params. Sets the OLMo-2 assets explicitly, as agpt_30b_llama3tok
+    does, so the tokenizer and the embedding cannot disagree.
+    """
+    return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
@@ -530,6 +1063,33 @@ def agpt_80b_fp32res_depth() -> FaultTolerantTrainer.Config:
     the open question.
     """
     return _set_fp32_residual_depth(ezpz_agpt_80b())
+
+
+def agpt_80b_qknorm() -> FaultTolerantTrainer.Config:
+    """agpt_80b + QK-Norm (task: 80B dp>186 NaN, score-bounding fix).
+
+    RMSNorm on Q,K per head bounds the attention-score magnitude directly --
+    the prime remaining overflow suspect after full-depth fp32 residual proved
+    necessary-but-insufficient (agpt_80b_fp32res_depth still NaN'd at dp=192).
+    Near-free at train time; no ckpt-compat cost (no surviving 80B prod ckpt).
+    Wall test: 4N smoke for numeric sanity, then 64N/dp=192 (the wall that
+    killed the residual protos).
+    """
+    return agpt("80B_qknorm", tensor_parallel_degree=2)
+
+
+def agpt_80b_softcap() -> FaultTolerantTrainer.Config:
+    """agpt_80b + logit softcap (Gemma-2 tanh score_mod, cap +/-30).
+
+    Alternative attention-score-bounding lever to QK-Norm. Same wall-test plan.
+    """
+    return agpt("80B_softcap", tensor_parallel_degree=2)
+
+
+def agpt_80b_qknorm_softcap() -> FaultTolerantTrainer.Config:
+    """agpt_80b + QK-Norm AND logit softcap -- both score-bounding levers, for
+    the dp=192 wall test if either alone is insufficient."""
+    return agpt("80B_qknorm_softcap", tensor_parallel_degree=2)
 
 
 def ezpz_agpt_80b_alt() -> FaultTolerantTrainer.Config:

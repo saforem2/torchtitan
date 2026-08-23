@@ -82,6 +82,24 @@ if [[ "$fill_rc" -ne 0 ]]; then
     echo "!!! field-filler exited $fill_rc -- NOT committing (partial/failed write); review the working tree" >&2
 fi
 
+# ---- 2b. bump stale 'Last updated:' markers ----
+# Phase 2 of the staleness report flags docs whose marker predates their last
+# commit. Those markers are hand-written prose (outside the field-filler's
+# scalar scope), so the punch-list only ever grew. Closing the loop here means
+# the catch-all fixes what it detects. Stamps each doc with its LAST-COMMIT
+# date (not today) and skips dirty files -- see the module docstring.
+echo ""
+echo ">>> [2b/3] bump stale 'Last updated:' markers (refresh_last_updated.py)"
+lu_args=()
+[[ "$DRY_RUN" -eq 1 ]] && lu_args+=("--dry-run")
+lu_rc=0
+lu_out="$("$PY" torchtitan/experiments/ezpz/utils/refresh_last_updated.py "${lu_args[@]}" 2>&1)" || lu_rc=$?
+echo "$lu_out"
+lu_summary="$(echo "$lu_out" | grep -E '^=== ' | tail -1)"
+if [[ "$lu_rc" -ne 0 ]]; then
+    echo "!!! last-updated bumper exited $lu_rc -- review the working tree" >&2
+fi
+
 # ---- 3. charts + docs/README.md index table ----
 echo ""
 echo ">>> [3/3] charts + index table (update_all_charts.sh)"
@@ -104,6 +122,7 @@ echo "============================================================"
 echo "SUMMARY"
 echo "  staleness : ${stale_summary:-(none)}"
 echo "  fields    : ${fill_summary:-(none)} (rc=$fill_rc)"
+echo "  last-upd  : ${lu_summary:-(none)} (rc=$lu_rc)"
 echo "  charts    : rc=$charts_rc$( [[ $DRY_RUN -eq 1 ]] && echo ' (dry-run, skipped)' )"
 echo "============================================================"
 

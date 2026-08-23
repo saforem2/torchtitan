@@ -1003,6 +1003,241 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# OpenThoughts-114k -- pre-distilled frontier reasoning traces (DeepSeek-R1),
+# reformatted from the OpenThoughts <|begin_of_thought|>/<|begin_of_solution|>
+# markers into our <think>/<answer>\boxed{} envelope. The breadth half of the
+# reasoning-distillation cold-start (docs/production/sft/agpt/2b-mds/
+# distill-cot-mix/): OpenThoughts spans math + code + science reasoning, vs
+# OpenR1-Math's math-only. Non-math math-only cold-starts were too narrow.
+# ---------------------------------------------------------------------------
+
+# OpenThoughts wraps its two spans with these literal markers (verified against
+# the open-thoughts/OpenThoughts-114k 'default' config first-rows). We keep the
+# thought verbatim and normalize the tail to a single <answer>\boxed{}</answer>.
+_OT_THOUGHT_RE = re.compile(
+    r"<\|begin_of_thought\|>(.*?)<\|end_of_thought\|>", re.DOTALL
+)
+_OT_SOLUTION_RE = re.compile(
+    r"<\|begin_of_solution\|>(.*?)<\|end_of_solution\|>", re.DOTALL
+)
+
+# Max <think> trace length (chars) kept from OpenThoughts. Frontier R1 traces
+# are much longer than OpenR1-Math's, and the whole point of the distillation
+# cold-start is to expose the 2B to that richer reasoning, so this defaults far
+# more generous than OPENR1_MAX_THINK_CHARS (1200). It only drops pathological
+# run-ons. Env-tunable: tighten it (e.g. 4000) at the GPU pre-tokenize step if
+# the B4 verbose-dilution regression re-appears on this corpus.
+DISTILL_MAX_THINK_CHARS = int(os.environ.get("DISTILL_MAX_THINK_CHARS", "16000"))
+
+
+def _openthoughts_question(ex) -> str:
+    """Extract the user problem text from an OpenThoughts 'conversations' row
+    (list of {from, value}; the human turn is tagged from='user')."""
+    for turn in ex.get("conversations") or []:
+        if isinstance(turn, dict) and turn.get("from") in ("user", "human"):
+            return str(turn.get("value", ""))
+    return ""
+
+
+def _openthoughts_format_row(ex):
+    """Reformat one OpenThoughts row into our <think>/<answer> envelope, or
+    return None if it can't be cleanly wrapped (caller drops None rows).
+
+    Keeps the R1 reasoning trace (the <|begin_of_thought|> span) verbatim and
+    normalizes the final answer to <answer>\\boxed{ans}</answer>, taking the
+    LAST \\boxed{} anywhere in the assistant turn. Rows with no boxed answer are
+    dropped: OpenThoughts' code-generation rows end in a code block, not a boxed
+    scalar, so they don't fit an <answer>\\boxed{}</answer> tail and would teach
+    a malformed envelope. This keeps the math/science-reasoning rows (which the
+    GSM8K CoT eval rewards) and drops pure-code rows -- an intentional filter,
+    not an accident.
+    """
+    question = _openthoughts_question(ex)
+    if not question:
+        return None
+    assistant = ""
+    for turn in ex.get("conversations") or []:
+        if isinstance(turn, dict) and turn.get("from") == "assistant":
+            assistant = str(turn.get("value", ""))
+            break
+    if not assistant:
+        return None
+    tm = _OT_THOUGHT_RE.search(assistant)
+    trace = tm.group(1).strip() if tm else ""
+    if not trace or len(trace) > DISTILL_MAX_THINK_CHARS:
+        return None
+    boxes = _OPENR1_BOXED_RE.findall(assistant)
+    if not boxes:
+        return None
+    ans = boxes[-1].strip()
+    if not ans:
+        return None
+    completion = f"<think>{trace}</think>\n<answer>\\boxed{{{ans}}}</answer>"
+    return {
+        "prompt": [{"role": "user", "content": question + _OPENR1_SUFFIX}],
+        "completion": [{"role": "assistant", "content": completion}],
+    }
+
+
+def _openthoughts_map_row(ex):
+    """map() fn for _build_openthoughts_cot: format or emit a same-shaped
+    empty-content sentinel row (dropped by _openr1_filter_row). Mirrors
+    _openr1_map_row so tests can exercise map+filter without load_dataset."""
+    out = _openthoughts_format_row(ex)
+    if out is not None:
+        return out
+    return {
+        "prompt": [{"role": "user", "content": ""}],
+        "completion": [{"role": "assistant", "content": ""}],
+    }
+
+
+def _build_openthoughts_cot():
+    """open-thoughts/OpenThoughts-114k reformatted to the <think>/<answer>
+    envelope. Selects rows with a reasoning trace + a boxed final answer;
+    code-generation rows (no boxed scalar) are dropped. NOT decontaminated here
+    -- decontam is applied per-mix (see _build_distill_cot_mix) so this raw
+    formatted view stays reusable. Needs the HF download cached first (see
+    scripts/sft/_pretokenize_distill_cot_mix_1n.sh)."""
+    from datasets import load_dataset
+
+    raw = load_dataset("open-thoughts/OpenThoughts-114k", "default", split="train")
+    cols = raw.column_names
+    mapped = raw.map(_openthoughts_map_row, remove_columns=cols)
+    return mapped.filter(_openr1_filter_row)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="OpenThoughts-114k",
+        build=_build_openthoughts_cot,
+        description=(
+            "open-thoughts/OpenThoughts-114k R1-distilled reasoning traces "
+            "(math + science + code), reformatted into the <think>/<answer>"
+            "\\boxed{} envelope. Rows without a boxed final answer (pure-code "
+            "generations) are dropped. The breadth half of distill_cot_mix."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
+# distill_cot_mix -- reasoning-distillation cold-start mix
+# (docs/production/sft/agpt/2b-mds/distill-cot-mix/)
+# ---------------------------------------------------------------------------
+
+
+def _decontaminate_against_gsm8k(ds, source: str, n: int = 13):
+    """Drop rows whose question collides with the GSM8K TEST split (the eval).
+
+    Runs the shared decontam detector (decontam_traces) over an already
+    envelope-formatted {prompt, completion} dataset and logs the per-source
+    drop count. The critical prereq for the distillation experiment: the
+    distillation corpora are built from the same public math pools GSM8K was
+    drawn from, so a copied test question would silently inflate the GSM8K CoT
+    eval. See decontam_traces.py for the 13-gram + normalized-exact signals.
+    """
+    from torchtitan.experiments.ezpz.rl.decontam_traces import (
+        filter_dataset,
+        GSM8KDecontaminator,
+        load_gsm8k_test_questions,
+    )
+
+    detector = GSM8KDecontaminator(load_gsm8k_test_questions(), n=n)
+    kept, report = filter_dataset(ds, detector, num_proc=16)
+    log.info(
+        f"[decontam] {source}: dropped {report.dropped:,}/{report.total:,} "
+        f"GSM8K-test-contaminated rows ({report.as_dict()['drop_rate']:.4%}); "
+        f"by_reason={report.by_reason}; {report.kept:,} remain"
+    )
+    return kept
+
+
+def _build_openthoughts_cot_decontam():
+    """OpenThoughts-114k envelope-formatted + GSM8K-test-decontaminated."""
+    return _decontaminate_against_gsm8k(_build_openthoughts_cot(), "OpenThoughts-114k")
+
+
+def _build_openr1_math_cot_decontam():
+    """OpenR1-Math-220k envelope-formatted + GSM8K-test-decontaminated."""
+    return _decontaminate_against_gsm8k(_build_openr1_math_cot(), "OpenR1-Math-220k")
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="OpenThoughts-114k-decontam",
+        build=_build_openthoughts_cot_decontam,
+        description=(
+            "OpenThoughts-114k in the <think>/<answer> envelope, with GSM8K-"
+            "test-contaminated rows dropped (13-gram + exact-question match)."
+        ),
+    )
+)
+
+register_sft_dataset(
+    SFTDataset(
+        name="OpenR1-Math-220k-decontam",
+        build=_build_openr1_math_cot_decontam,
+        description=(
+            "OpenR1-Math-220k in the <think>/<answer> envelope, with GSM8K-"
+            "test-contaminated rows dropped (13-gram + exact-question match)."
+        ),
+    )
+)
+
+
+def _build_distill_cot_mix(
+    weights=(0.5, 0.5),
+    seed: int = 42,
+):
+    """Reasoning-distillation cold-start mix: broad frontier CoT traces
+    (docs/production/sft/agpt/2b-mds/distill-cot-mix/).
+
+    Replaces the team's narrow math-only CoT cold-start with breadth from
+    pre-distilled frontier reasoning traces:
+      0.50 OpenThoughts-114k-decontam  (math + science + code R1 traces)
+      0.50 OpenR1-Math-220k-decontam   (math-focused R1 traces)
+    Both are re-wrapped into the <think>/<answer>\\boxed{} envelope (matching
+    gsm8k-r1cot + the eval) and GSM8K-test-decontaminated BEFORE interleave, so
+    a copied test question can never leak into training and inflate the GSM8K
+    CoT eval. Uses the same materialized-mix cache + all_exhausted interleave as
+    the other mixes; the decontam is baked into each component's registered
+    build, so it is captured in the recipe hash (component names) -- a cache hit
+    is guaranteed to be decontaminated.
+
+    Optional additions (not wired in; add via a CLI mix-spec once cached):
+    bespokelabs/Bespoke-Stratos-17k, NovaSky-AI/Sky-T1_data_17k.
+    """
+    if len(weights) != 2:
+        raise ValueError(
+            f"distill_cot_mix weights must be (w_openthoughts, w_openr1); "
+            f"got {weights!r}"
+        )
+    return _materialized_mix_load_or_build(
+        component_names=[
+            "OpenThoughts-114k-decontam",
+            "OpenR1-Math-220k-decontam",
+        ],
+        weights=list(weights),
+        seed=seed,
+    )
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="distill_cot_mix",
+        build=_build_distill_cot_mix,
+        description=(
+            "Reasoning-distillation cold-start: 50%% OpenThoughts-114k + "
+            "50%% OpenR1-Math-220k, both in the <think>/<answer>\\boxed{} "
+            "envelope and GSM8K-test-decontaminated. Broad frontier CoT "
+            "breadth replacing the math-only cold-start."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # Generic mix-spec parser — `--sft_dataset 'a:0.5,b:0.3,c:0.2'`
 # ---------------------------------------------------------------------------
 

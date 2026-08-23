@@ -1,0 +1,253 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1
+#PBS -l walltime=24:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N eval30b
+#PBS -j oe
+set -o pipefail
+
+# Evaluate the completed 30B. Nobody has measured this model.
+#
+# The run finished 2000/2000 steps on 2026-08-21 (12.028 -> 2.115, zero NaN,
+# four-job chain ending 12473545). Loss says it trained; it does not say the
+# model is any good, and a converged loss curve on a new tokenizer is exactly
+# the case where you want a downstream number before believing the config.
+#
+# Two steps so the comparison is a trajectory, not a point: 1000 (mid-run,
+# loss 2.509) and 2000 (final, 2.115). If the eval numbers do not move between
+# them, that is a finding about the benchmark, not the model.
+#
+# TOKENIZER IS THE TRAP HERE. This chain trained on OLMo-2's 100,352 vocab
+# (agpt_30b_olmo2tok, hf_assets_path=./assets/hf/OLMo-2-1124-7B). Evaluating
+# it with a mismatched tokenizer produces confident gibberish -- exactly what
+# bit the Polaris 20B, where Llama2-tokenized data was scored with a gemma
+# eval tokenizer. The conversion below pins the OLMo-2 assets explicitly.
+#
+# --model_flavor is REQUIRED and has no safe default: it selects the RoPE
+# convention, and a wrong value exports a checkpoint that LOADS FINE and
+# generates garbage. Resolved from the run's own config dump, which reports
+# "flavor": "30b_olmo2tok" -- not guessed, and not inherited from a sibling
+# config. rope.theta=500000, scaling=none, confirmed in the same dump.
+#
+# Tasks: the standard zero-shot set used for the 20B/2B tables so the numbers
+# are directly comparable. hellaswag/arc/piqa/winogrande are the ones that
+# move at this scale; mmlu is included knowing a 26B model at 2000 steps is
+# likely at chance -- a null there is informative, not a failure.
+#
+# 1 node: this is inference on one model, not distributed training.
+#
+# ONE STEP PER JOB, and both clocks sized for it. Job 12473626 measured the
+# real cost: 116,734 loglikelihood requests at a settled 6.42 it/s = ~6.1h for
+# a SINGLE step. It was submitted with a 6h walltime AND an inner
+# `timeout 7200` (2h), so it was going to be SIGTERMed at 2h with nothing
+# written -- lm_eval only serializes at completion, so a killed run leaves an
+# empty results/ dir and the whole 2h is lost.
+#
+# That is the 30b_long rc=124 mistake again: sizing one clock and not the
+# other. Here BOTH are sized off the measurement -- walltime 10h, inner
+# timeout 30600s (8.5h) -- with the inner one deliberately smaller so the job
+# gets to print its summary instead of being killed by PBS.
+#
+# Run the second step as a separate submission:  qsub -v STEPS=1000 eval30b.pbs
+#
+# Cost driver is mmlu (57 subjects, ~56k of the 116k requests) and hellaswag
+# (~40k). Dropping mmlu would roughly halve the runtime, and at 2000 steps a
+# 26B model is near-chance there anyway -- but a measured null is worth more
+# than an assumed one, so it stays for the first pass.
+#
+# venv: fw-2026.1-rc2 for BOTH convert and eval, not venvs/sunspot-lm-eval.
+# That venv is built against /opt/aurora/26.26.0 frameworks/2025.3.1, whose
+# torch no longer imports on this node at all -- `OSError:
+# libmkl_intel_lp64.so.2: cannot open shared object file`, under its OWN
+# module as well as under 2026.1.0. The 2025.3.1 stack is simply gone here.
+# fw-2026.1-rc2 already carries lm_eval 0.4.12 and transformers 5.14.1, so one
+# venv covers both phases and there is no deactivate/reactivate dance.
+#
+# (`torch.xpu.is_available()` reads False on the login node -- no GPUs there.
+# It resolves on a compute node; do not "fix" it.)
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_ENABLE_HF_TRANSFER=0   # breaks lm-eval's HF backend on this stack
+export HF_DATASETS_OFFLINE=0
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-converge"
+OUT="$PWD/outputs/evals/agpt-30b-olmo2tok"
+ASSETS="./assets/hf/OLMo-2-1124-7B"
+mkdir -p "$OUT"
+echo "ckpt:   $CKPT"
+echo "out:    $OUT"
+echo "assets: $ASSETS"
+echo ""
+
+for STEP in ${STEPS:-2000}; do
+  SRC="$CKPT/step-$STEP"
+  HF="$OUT/step-$STEP/hf"
+  RES="$OUT/step-$STEP/results"
+
+  if [ ! -f "$SRC/.metadata" ]; then
+    echo "== step-$STEP: no .metadata, skipping (not a complete DCP checkpoint)"
+    continue
+  fi
+  mkdir -p "$HF" "$RES"
+  LOGD_TASK="$RES/logs"; mkdir -p "$LOGD_TASK"
+
+  echo "== step-$STEP: convert =="
+  if [ -f "$HF/model.safetensors.index.json" ]; then
+    echo "   already converted, reusing"
+  else
+    source venvs/fw-2026.1-rc2/bin/activate
+    unset PYTHONPATH
+    timeout 5400 python3 -m torchtitan.experiments.ezpz.eval.convert_to_hf \
+      "$SRC" "$HF" \
+      --hf_assets_path "$ASSETS" \
+      --model_flavor 30b_olmo2tok \
+      --export_dtype bfloat16 \
+      2>&1 | tail -20
+    echo "   convert rc=$?"
+    deactivate 2>/dev/null || true
+  fi
+  ls -la "$HF" 2>/dev/null | head -5
+  du -sh "$HF" 2>/dev/null
+
+  if [ ! -f "$HF/model.safetensors.index.json" ]; then
+    echo "   NO HF INDEX -- conversion did not produce a loadable model, skipping eval"
+    continue
+  fi
+
+  # convert_to_hf emits weights + index + ezpz_export.json but NO config.json,
+  # so lm_eval dies with "Unrecognized model ... should have a model_type key".
+  # The assets config.json cannot fill in: it describes OLMo-2-7B (hidden 4096,
+  # 32 layers), not this 26.2B model, and would load while silently
+  # mismatching the weights. Derive it from the safetensors header instead, and
+  # cross-check against the registry geometry so a wrong export aborts here
+  # rather than producing a plausible-looking eval number.
+  echo "== step-$STEP: config.json =="
+  source venvs/fw-2026.1-rc2/bin/activate; unset PYTHONPATH
+  python3 torchtitan/experiments/ezpz/eval/write_hf_config.py "$HF" \
+    --rope-theta 500000 \
+    --expect hidden_size=6144,num_hidden_layers=64,num_attention_heads=48,num_key_value_heads=8,vocab_size=100352,intermediate_size=16384
+  if [ $? -ne 0 ]; then
+    echo "   config derivation FAILED the cross-check -- skipping eval for step-$STEP"
+    deactivate 2>/dev/null || true
+    continue
+  fi
+  # lm_eval reads the tokenizer from --model_args tokenizer=, but transformers
+  # also wants these beside the weights for a clean from_pretrained.
+  cp -n "$ASSETS"/tokenizer.json "$ASSETS"/tokenizer_config.json \
+        "$ASSETS"/special_tokens_map.json "$HF"/ 2>/dev/null || true
+  deactivate 2>/dev/null || true
+
+  echo "== step-$STEP: eval =="
+  source venvs/fw-2026.1-rc2/bin/activate
+  unset PYTHONPATH
+
+  # ONE INVOCATION PER TASK. lm_eval serializes results only at completion, so
+  # a single all-tasks call is all-or-nothing: job 12473627 reached 77%
+  # (89402/116734) in 8.5h and wrote NOTHING. Per-task calls checkpoint value
+  # as they go -- a timeout then costs one task, not the whole eval.
+  #
+  # Ordered cheapest-first so the quick tasks are banked before the expensive
+  # ones start.
+  #
+  # BUDGETS ARE FROM MEASURED REQUEST COUNTS, and the first version of this
+  # list was wrong because I used DOCUMENT counts. lm_eval issues one
+  # loglikelihood request PER ANSWER CHOICE, so arc_challenge is 4687 requests
+  # (not the 1172 documents I assumed) and arc_easy is 9501 (not 2376) -- 4x
+  # each. arc_challenge then blew a 1200s budget at 41% complete, which is how
+  # the error surfaced: the CHEAPEST task timing out is the tell that the cost
+  # model, not the number, is wrong.
+  #
+  # Measured from job 12473636 logs, at the ~2.3 it/s all-tasks rate:
+  #   arc_challenge  4687 req  0.6h     arc_easy   9501 req  1.1h
+  #   winogrande     5068 req  0.6h     hellaswag 40168 req  4.9h
+  #   piqa           7352 req  0.9h     mmlu      56168 req  6.8h
+  # Budgets below are ~3x those, so a slow band cannot clip a task.
+  #
+  # stdbuf -oL keeps the progress bar flowing into the .o file instead of
+  # buffering until exit; 12473627 looked hung for two hours because
+  # `| tail -30` swallowed everything until the process died.
+  # TASKS overrides the sweep, e.g. TASKS="hellaswag:54000" for a
+  # trajectory run. Format is name:budget_seconds -- keep the budget, it is
+  # measured (see the table above), not decorative.
+  for TASK in ${TASKS:-arc_challenge:7200 winogrande:7200 piqa:10800 arc_easy:12600 hellaswag:54000 mmlu:73800}; do
+    NAME="${TASK%%:*}"; BUDGET="${TASK##*:}"
+    if compgen -G "$RES/$NAME/**/results*.json" > /dev/null 2>&1; then
+      echo "   [$NAME] already has results, skipping"
+      continue
+    fi
+    echo "   [$NAME] budget ${BUDGET}s"
+    mkdir -p "$RES/$NAME"
+    timeout "$BUDGET" stdbuf -oL -eL python3 -m lm_eval \
+      --model hf \
+      --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
+      --tasks "$NAME" \
+      --num_fewshot 0 \
+      --batch_size 4 \
+      --device xpu \
+      --output_path "$RES/$NAME" \
+      > "$LOGD_TASK/$NAME.log" 2>&1
+    rc=$?
+    echo "   [$NAME] rc=$rc $( [ $rc -eq 124 ] && echo '(TIMED OUT -- budget too small)' )"
+    tail -3 "$LOGD_TASK/$NAME.log" 2>/dev/null | sed 's/^/       /'
+  done
+  deactivate 2>/dev/null || true
+done
+
+echo ""
+echo "########## 30B downstream ##########"
+python3 - <<'PY'
+import json, glob, os
+base = os.environ.get("PWD","") + "/outputs/evals/agpt-30b-olmo2tok"
+rows = {}
+for step in (1000, 2000):
+    hits = glob.glob(f"{base}/step-{step}/results/**/results*.json", recursive=True)
+    # per-task layout: results/<task>/**/results*.json -- merge them all
+    if not hits:
+        rows[step] = None; continue
+    merged = {}
+    for h in sorted(hits):
+        try:
+            with open(h) as f:
+                merged.update(json.load(f).get("results", {}))
+        except (OSError, ValueError):
+            continue
+    rows[step] = merged
+# mmlu emits 57 per-subject rows plus 4 group rows; showing all 61 buries the
+# five headline numbers. Keep the aggregates only -- the per-subject detail is
+# in the results JSON for anyone who wants it.
+_HIDE = lambda t: t.startswith("mmlu_")
+tasks = sorted({t for r in rows.values() if r for t in r if not _HIDE(t)})
+if not tasks:
+    print("  no results parsed -- check the per-step output above")
+else:
+    print(f"  {'task':<18}" + "".join(f"{('step '+str(s)):>12}" for s in (1000,2000)))
+    for t in tasks:
+        line = f"  {t:<18}"
+        for s in (1000, 2000):
+            r = rows.get(s) or {}
+            m = r.get(t, {})
+            v = m.get("acc_norm,none", m.get("acc,none"))
+            line += f"{(f'{v*100:.2f}%' if isinstance(v,(int,float)) else '--'):>12}"
+        print(line)
+    print()
+    print("  Random baselines: hellaswag 25, arc_easy 25, arc_challenge 25,")
+    print("  piqa 50, winogrande 50, mmlu 25. At 2000 steps a 26B model is")
+    print("  undertrained by orders of magnitude -- near-chance on mmlu is the")
+    print("  EXPECTED result and says nothing bad about the config.")
+
+# Exit non-zero if NOTHING was measured. Job 12473625 recorded
+# Exit_status=0 with two `eval rc=1` and zero parsed results -- a silent
+# no-op that reads as success in qstat. The artifact is the verdict, not
+# the exit code, so make the exit code follow the artifact.
+raise SystemExit(0 if any(rows.values()) else 1)
+PY
+rc=$?
+echo "EVAL30B_DONE"
+exit $rc

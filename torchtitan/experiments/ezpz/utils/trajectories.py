@@ -148,7 +148,20 @@ TRAJECTORIES: list[dict] = [
         # The REAL training tail (86201->92859) is logged to the correct
         # project under 9itxu3pt/ew4pqb51/fm3gzdxt (used above); no .o-log
         # fallback is needed.
-        "olog_fallbacks": None,
+        #
+        # ADDED 2026-08-16, closing the 25,178->25,501 gap (322 steps).
+        # Another concurrent-job collision: ni0etxx7 (25001..25056) and
+        # 0fk1bvtt (25001..25178) both ran and both crashed within ~20 min on
+        # 05-23, then 3n22a69q resumed at 25501 -- AHEAD of where either died,
+        # so the intervening steps were trained by a job neither W&B run
+        # captured. o8505119 (25001..25522) spans the whole thing.
+        # MEASURED: 92,456 steps / 1 gap -> 92,778 / 0 gaps.
+        "olog_fallbacks": {
+            "0fk1bvtt": str(
+                RUNS / "agpt-2b-v2/torchtitan-ezpz"
+                / "agpt-2b-n256-v2-failover-cont4.o8505119"
+            ),
+        },
         "eval_subdir": "agpt-2b-v2-256n",
         "cls": "live",
     },
@@ -168,10 +181,56 @@ TRAJECTORIES: list[dict] = [
         #   (i0ayskft W&B history was empty when first recorded 2026-07-06 and
         #   used an .o-log fallback; the run synced later -- 4389 rows,
         #   steps 16601->20988 -- so the fallback was dropped 2026-07-24.)
+        # --- umbrella 8714502 trainer-0, added 2026-08-05: ---
+        # vtumb5cb=8714502 (39601->41300; clean walltime FAILOVER STOP, so
+        #   unlike the 20B trainers this one saved at its logged tip)
+                # --- 08-07 umbrella, added 2026-08-11: ---
+        # nowkdepb=8714503 t0 (41301->43820)
         "wandb_run_ids": [
             "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
             "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
             "i0ayskft", "21grc6o7", "nv4qwxc8",
+            # ADDED 2026-08-16. These two were missing, and their absence was
+            # the ENTIRE 30,483->39,601 "gap" (9,117 steps) in this chain --
+            # not lost data, just an incomplete list. Both have full synced
+            # W&B history and together cover 30,401..39,603 exactly:
+            #   9d10mqwb  30401..35046  4647 rows  2026-07-10
+            #   n887c3lk  35001..39603  4603 rows  2026-07-17
+            # Adding them takes the chain from 34,676 steps / 1 gap to
+            # 43,786 / 0 gaps (MEASURED).
+            #
+            # Independently flagged by the RoPE investigation the same day:
+            # docs/guides/known-bugs/rope-flavor-mismatch.md notes the
+            # step->flavor resolver misreports this chain's cos_sin switch as
+            # 2026-08-05/vtumb5cb when it was really 2026-07-10/9d10mqwb at
+            # step 30401 -- because of this same omission. Two investigations,
+            # one root cause.
+            #
+            # Why they were missed: nine short runs all restart at 30401
+            # (49-200 steps, 05-30 through 07-01) -- the chain spent a month
+            # failing to get past its resume point, and the two runs that
+            # finally carried it were never recorded.
+            "9d10mqwb", "n887c3lk",
+            # ADDED 2026-08-16 (third missing-run-id find of the day, and the
+            # worst one): ud8t6d3t = 43801..46429, 2630 rows, state FINISHED.
+            # This is the run that COMPLETED THE FLAGSHIP -- the chain's last
+            # 2,611 steps to its 4.674T target on 2026-08-13. It is also the
+            # only non-crashed run in the whole chain, and it was never listed.
+            #
+            # The symptom was subtle enough to survive a full day of gap
+            # hunting: the plot topped out at 43,818 (94.4%) while every doc
+            # correctly said COMPLETE at 46,429 (100%). Neither was wrong --
+            # the run finished, the DATA just stopped 2,611 steps short -- so
+            # it read as a rendering quirk rather than a missing run. Spotted
+            # by the user noticing the curve did not reach the right edge.
+            # Chronological: vtumb5cb (Aug 5, 39601..41299) precedes ud8t6d3t
+            # (Aug 13, 43801..46429). They share no steps, so the order was
+            # harmless here -- but concat_chain's last-listed-wins merge makes
+            # order semantic, and a mis-ordered list traps the next append.
+            "vtumb5cb",
+            "nowkdepb",
+        
+            "ud8t6d3t",
         ],
         "olog_fallbacks": None,
         "eval_subdir": "agpt-2b-v2-512n",
@@ -200,13 +259,126 @@ TRAJECTORIES: list[dict] = [
         #     the 512N chain) run to unstick the queue-starved chain, 2026-07-23:
         # g59v83go=8688010 (6001->6008, walltime-killed pre-save)
         # jyq4w87d=8689162 (6001->6012, saved step-6005/6010)
+        # --- umbrella 8714502 trainer-1, added 2026-08-05: ---
+        # 9d1g9zsw=8714502 (6801->7149; ckpt head 7,100 -- SIGTERM'd
+        #   mid-interval when trainer-1 hit the Aurora pals RPC failure)
+                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # 2lxurmes+iozc8x9n=8714503 t1 (7251->7654, two ids = an auto-retry
+        #   relaunch mid-job)  c8zwrlqw=8744245 t1 (7601->8800, still running)
         "wandb_run_ids": [
             "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
             "wjy5pvxm", "cv3wii8x",
             "tu77pzu7", "8vixdfg2", "0pmsn01c",
             "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
+            "jb5ox6u9",  # Jul 30  +211 [6551, 6761]
+        
+            # ORDER IS SEMANTIC -- see the note in concat_chain: on a step two
+            # runs both logged, the LAST listed wins. Keep this chronological.
+            # The five run-ids below were found 2026-08-17 by
+            # find_missing_runs.py + a coverage-gain check (all crashed
+            # relaunch attempts covering steps no registered run had); they are
+            # interleaved by creation date rather than appended, because
+            # appending an older run is what corrupted 20b_v2_256. None of
+            # these overlaps another run here, so the placement is currently
+            # cosmetic -- but a mis-ordered list traps the NEXT append.
+            "zow5scry",  # Jul 30  +100 [6701, 6800]
+            "9d1g9zsw",  # Aug 05  (pre-existing)
+            "dn8br6kh",  # Aug 07  +51  [7149, 7199]
+            "2g2ig6hb",  # Aug 07  +50  [7201, 7250]
+            "iozc8x9n",  # Aug 07 17:46  [7251, 7299]
+            "2lxurmes",  # Aug 08 03:15  [7301, 7653]
+            "c8zwrlqw",  # Aug 09  (8744245 t1)
+            "ctc3hehv",  # Aug 16  +400 [8701, 9100]
+            # ctbs1be4=8756957 t1 (9101->9694). Found 2026-08-17 when the
+            # board showed this chain "R" with a 6-day-old W&B heartbeat:
+            # the seat was writing steps every second, its CURRENT run just
+            # was not in this list.
+            "ctbs1be4",  # Aug 16 20:20
         ],
-        "olog_fallbacks": None,
+        # Backfill for the 5399->6801 hole, added 2026-08-16.
+        #
+        # 16 of 18 runs on this chain ended `crashed`, and a crashed run never
+        # syncs its buffered W&B tail. The visible gap is where a crash was
+        # followed by two runs that died almost immediately: g59v83go logged 7
+        # steps and jyq4w87d logged 10, so ~1,400 trained steps have almost no
+        # cloud record. The training DID happen -- checkpoints exist at every
+        # 100-step interval from 5400 through 6800.
+        #
+        # Each log is attached to the run that OWNS its steps, matched by job
+        # id, not to whichever run is nearest. Getting that wrong is what broke
+        # the 20b-256 attempt on 08-13 (see this file's 20b_v2_256 note): the
+        # merge is a UNION now, but a log attached to the wrong run still
+        # mislabels which run trained which steps.
+        #
+        #   g59v83go = job 8688010, W&B 6001..6008  (walltime-killed pre-save)
+        #   jyq4w87d = job 8689162, W&B 6001..6012
+        #   9d1g9zsw = job 8714502, W&B 6801..7148
+        #
+        # o8647383 (6001..6086) is the autoretry-cont2 run that actually
+        # carried 6001->6086; g59v83go/jyq4w87d are the 128N sneaks over the
+        # same window. Attaching it to g59v83go recovers 6013..6086, which no
+        # W&B run holds. o8687862 (6101..6585) + o8696040 (6551..6884) cover
+        # the rest up to 9d1g9zsw's 6801 start.
+        #
+        # STILL PERMANENTLY MISSING: 5400..6000. No .o log on disk reaches into
+        # that window (o8638795 stops at 5400, the next starts at 6001) and no
+        # W&B run holds it. Those ~600 steps ran and checkpointed, but neither
+        # record survives. Do not try to interpolate them.
+        # Two MORE gaps closed 2026-08-16 after widening the search from the
+        # per-model clone to every log on the filesystem (236 files with step
+        # lines, indexed by range). The first sweep only looked at logs whose
+        # NAME matched the chain, which missed both of these.
+        #
+        # 3269->3801 (531 steps): o8508214 covers 3201..3806. Its embedded W&B
+        # run is `oqqhoxz6`, which is NOT in wandb_run_ids and returns
+        # CommError from the API -- that run never synced or was purged, so
+        # the .o log is the ONLY surviving record of those steps. Same for
+        # d00iszlc/sn4q74lc in sibling logs. Attached to 8vixdfg2, the run
+        # whose W&B tail (2601..3269) ends at the gap.
+        #
+        # 7148->7251 (102 steps): o8731758 covers 7101..7254, attached to
+        # 2lxurmes (W&B 7301..7653, the run whose job wrote it). iozc8x9n
+        # gives an identical result; 2lxurmes is the owner.
+        "olog_fallbacks": {
+            # c8zwrlqw was registered as a run-id but never given an .o
+            # fallback, so the steps its W&B history never flushed (8600-8700)
+            # were invisible everywhere -- charts, store, and W&B alike. Found
+            # 2026-08-19 by checking what the gap-backfill did NOT cover.
+            "c8zwrlqw": str(
+                REPO_ROOT / "logs/multi-autoretry-8744245"
+                / "trainer-1-20b-n512.console.log"
+            ),
+            "8vixdfg2": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-v2-failover-sync-cont3.o8508214"
+            ),
+            "2lxurmes": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-native-cont.o8731758"
+            ),
+            "g59v83go": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-autoretry-cont2.o8647383"
+            ),
+            "jyq4w87d": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512chain-256Nprod.o8687862"
+            ),
+            "9d1g9zsw": str(
+                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                / "agpt-20b-n512-resume.o8696040"
+            ),
+            # 5399->6001 (600 steps), closed 2026-08-16. This one was called
+            # PERMANENT twice before, because both earlier searches only looked
+            # in the per-model CLONE. The log lives in the main repo's umbrella
+            # log dir instead: logs/multi-autoretry-8648363/trainer-1, covering
+            # 5401..6071. Attached to 8o2xakm3 (W&B 5101..5399), the run whose
+            # tail ends at the gap.
+            "8o2xakm3": str(
+                REPO_ROOT / "logs/multi-autoretry-8648363"
+                / "trainer-1-20b-n512.console.log"
+            ),
+        },
         "eval_subdir": "agpt-20b-v2-512n",
         "cls": "live",
     },
@@ -234,15 +406,112 @@ TRAJECTORIES: list[dict] = [
         # --- 2026-07 continuations, added 2026-07-24: ---
         # 6yr6ivh4=8647385(3101->3603) uvgmafv9=8661054(4201->4375)
         # 5rvusq43=8681340(5101->5860+, live full-throughput resume)
+        # --- capacity-queue bridge, added 2026-07-27: ---
+        # v58n7vam=8703284(6001->6037+, 16N GAS=16 GBS=6144 bit-identical
+        #   bridge; single View-run line in torchtitan.ezpz.train, no
+        #   preflight-smoke reinit-swallow ambiguity)
+        # --- umbrella continuations, added 2026-08-05: ---
+        # cxlt0tpe=8698125 trainer-2 (6151->6897)
+        # 2ktrz29u=8714502 trainer-2 (7501->7897; ckpt head 7,800 -- SIGTERM'd
+        #   mid-interval when a sibling trainer hit the pals RPC failure)
+                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # 82e1jewm=8714503 t2 (7801->8334)  pne9uj4w=8744245 t2 (8301->8324,
+        #   died on the init std::bad_alloc after 23 steps)
         "wandb_run_ids": [
             "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
             "5481v99b", "yrq1s1ac", "xt03uvp6",
             "f1p8nyxh", "g6ekeu4j",
             "kk4h0i7m", "17sfemjj", "rugscgjs",
             "6yr6ivh4", "uvgmafv9", "5rvusq43",
+            "v58n7vam", "cxlt0tpe",
+            # ORDER IS SIGNIFICANT. concat_chain does `by_step[step] = row`
+            # walking this list in order, so on a step two runs both logged,
+            # the LAST one listed wins. Keep these in chronological order: a
+            # crashed run's overlapping steps get re-trained by its relaunch,
+            # and the relaunch's values are the real trajectory.
+            #
+            # djmhgmmq (Aug 3) therefore has to sit BEFORE 2ktrz29u (Aug 5).
+            # Appending it at the end instead -- which is what I did first --
+            # silently overwrote steps 7,510-7,590 with the crashed Aug-3 run's
+            # values, moving loss ~2.33 -> ~2.47 with no error anywhere.
+            "djmhgmmq",  # +604  [6897, 7500]  (Aug 3)
+            "2ktrz29u",  # (Aug 5) re-trains 7,501+ after djmhgmmq crashed
+            "82e1jewm", "pne9uj4w",
+            # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
+            # 2,699 steps no registered run covered, 2,095 of them PAST the
+            # previous head of 8,333 -- this chain was under-reporting its own
+            # progress by ~25%. Redundant siblings (w3ocr60z, tu2se4cv) are
+            # deliberately NOT listed; qam6bmbi / qxysuuqk / pmart5d6 logged
+            # nothing.
+            "t9vly2u8",  # +1515 [8334, 9848]  (Aug 13)
+            "lc9oukel",  # +580  [9801, 10380] (Aug 16)
         ],
-        "olog_fallbacks": None,
-        "eval_subdir": None,
+        # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
+        # hitting walltime), and a crashed run's final steps often never sync --
+        # W&B keeps history only to the last successful flush. The successor
+        # resumes from the CHECKPOINT, which is ahead of the synced history, so
+        # the chart shows a hole between "last synced step" and "first step the
+        # successor logged". Training was continuous; only the record is not.
+        #
+        # concat_chain UNIONs a run's .o log with its W&B history (it used to
+        # replace, which cost more than it recovered -- see the note below).
+        #
+        # Measured W&B coverage of the runs around the real hole:
+        #   cxlt0tpe  746 rows  6151..6896
+        #   2ktrz29u  396 rows  7501..7896
+        # so the actual gap is 6896->7501, and o8698754 (6801..7600) spans it.
+        # Attached to 2ktrz29u, the run that OWNS the far side: with the union
+        # merge both sources survive, so cxlt0tpe keeps 6151..6896 and the log
+        # supplies 6896..7501.
+        #
+        # NOT attached to cxlt0tpe (tried 2026-08-13, reverted): under the old
+        # replace semantics the log's 7600 tip beat cxlt0tpe's 6896, so its 746
+        # W&B rows were thrown away and a NEW 510-step hole opened at 6295-6805.
+        # Net effect was one gap traded for another, +9 points.
+        #
+        # The other two gaps (3602->4201, 4374->5101) are CLOSED as of
+        # 2026-08-16. Both were twice declared permanent, and both times that
+        # was a search failure, not a fact:
+        #
+        #   pass 1  searched the 256N clone only              -> "no usable log"
+        #   pass 2  re-tested the same clone's logs, measured -> "at most 1 step"
+        #   pass 3  searched EVERY file at any depth          -> both gaps fill
+        #
+        # Passes 1 and 2 were both correct about the clone. The logs are not in
+        # the clone. They are in the MAIN REPO's umbrella log dirs, because
+        # this chain has been carried by multi-trainer umbrella jobs as well as
+        # standalone ones, and an umbrella writes per-trainer console logs to
+        # its own directory:
+        #
+        #   gap 3602->4201 (598)  multi-autoretry-8648363/trainer-3  3401..4297
+        #   gap 4374->5101 (726)  multi-autoretry-8663177/trainer-3  4351..5200
+        #
+        # Measured, cumulative:
+        #   baseline                       7009 steps  gaps (3602,4201) (4374,5101)
+        #   +8648363 on 6yr6ivh4           7607        gaps (4374,5101)
+        #   +8663177 on uvgmafv9           8333        gaps NONE
+        #
+        # Note the trainer index is 3, not 2 -- slot assignment varies per
+        # umbrella, so match on the ckpt-dir string inside the file rather than
+        # on the filename. (A filename-based filter is what made pass 1 miss
+        # these; a config= filter excludes even known-good logs, since these
+        # console logs record the ckpt folder but not the --config flag.)
+        "olog_fallbacks": {
+            "6yr6ivh4": str(
+                REPO_ROOT / "logs/multi-autoretry-8648363"
+                / "trainer-3-20b-n256.console.log"
+            ),
+            "uvgmafv9": str(
+                REPO_ROOT / "logs/multi-autoretry-8663177"
+                / "trainer-3-20b-n256.console.log"
+            ),
+            "2ktrz29u": str(
+                RUNS / "agpt-20b-n256/torchtitan-ezpz"
+                / "agpt-20b-n256-resume-cont.o8698754"
+            ),
+        },
+        "eval_subdir": "agpt-20b-v2-256n",  # 43 results on disk; was None,
+        # which kept this chain off the combined eval chart entirely.
         "cls": "live",
     },
     {
@@ -260,6 +529,97 @@ TRAJECTORIES: list[dict] = [
         "wandb_run_ids": ["8edrii5e", "oujzdxri"],
         "olog_fallbacks": None,
         "eval_subdir": None,
+        "cls": "wandb_only",
+    },
+    {
+        # 2B stage-2 continued pre-training on dolmino-mix-1124, launched
+        # 2026-08-16 as t0 of umbrella 8756070 and continued by 8756957.
+        # REGISTERED 2026-08-16 -- it was training for a day before anyone
+        # noticed it was absent from every chart, because a chain that is not
+        # in this file is invisible to all of them. Register a new chain HERE
+        # at launch, not after someone asks why the plot looks wrong.
+        #
+        # Distinct from the stage-1 chain in every way that matters to a plot:
+        # its own ckpt dir, its own step counter starting at 1 (it seeds from
+        # stage-1 step-46429 via --checkpoint.initial-load-path, which loads
+        # WEIGHTS ONLY -- optimizer moments do not carry over), a different
+        # corpus, and constant LR 2.17e-5 rather than a decay. Plotting it as a
+        # continuation of stage-1 would be wrong; it is a sibling curve.
+        #
+        # token_target is the STAGE-2 INCREMENT (2.390T), not MDS's cumulative
+        # 7.064T -- see the note in submit_agpt_multi_autoretry.sh, where using
+        # the cumulative figure produced a 2.96x-too-large step budget.
+        #
+        # hllpaq4g = 8756070 t0 (steps 1..3312, killed by the PBS -14)
+        # 6321d2hh = 8756957 t0 (3301..6520, live)
+        # prior_tokens: stage-2 seeds from stage-1 step-46429, so these weights
+        # have ALREADY absorbed the full 4.674T olmo-mix run before this chain's
+        # step 1. Its step counter restarts at 1 (correct -- steps are per-chain),
+        # but "tokens seen" is CUMULATIVE, so plotting it from 0 claims the model
+        # saw its first token alongside stage-1. Plotters that use a tokens x-axis
+        # must add this offset; step-axis plots ignore it.
+        "prior_tokens": OLMO_MIX_1124_TOKENS,
+        "key": "2b_v2_512_stage2_dolmino",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": str(_2B_V2 / "agpt-2b-stage2-dolmino-n512-gbs12288"),
+        "readme": f"{_DOCS}/2b/n512/README.md",
+        "gbs": 12288,
+        "seq_len": SEQ_LEN,
+        "token_target": 2_390_375_382_006,
+        "wandb_run_ids": ["hllpaq4g", "6321d2hh"],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
+    },
+    {
+        # 2B-512 CONSTANT-LR fork, branched off the canonical chain at
+        # step-9200 (right before LR decay begins) to answer whether the decay
+        # phase is what earned the final loss, or whether a constant LR would
+        # have gotten there too. Same corpus and GBS as stage-1, so unlike the
+        # stage-2 chain it IS directly comparable step-for-step -- it just
+        # never decays.
+        #
+        # Registered 2026-08-17, ~21k steps in. It had been running across
+        # three umbrellas with NO trajectory entry at all, which is why the
+        # live board showed it as a raw truncated checkpoint-dir name
+        # ("2b-sophiag-olmo-mix-1124-n512-gbs1") with no target and no W&B
+        # link, and why none of its 11.8k steps past the fork point appear on
+        # any chart.
+        #
+        # Its checkpoints live in the fork's OWN clone under
+        # /flare/AuroraGPT/foremans/runs/, not the main repo tree.
+        #
+        # ww88slec = 8744247 t3 (9201..16984, ended in node death)
+        # ijfo395o = 8756070 t3
+        # xii94czx = 8756957 t3 (16901..21028+, live)
+        "key": "2b_v2_512_constlr_from9200",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": (
+            "/flare/AuroraGPT/foremans/runs/agpt-2b-constlr-from9200"
+            "/torchtitan-ezpz/outputs/checkpoints"
+            "/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200"
+        ),
+        "readme": f"{_DOCS}/2b/n512/README.md",
+        "gbs": 12288,
+        "seq_len": SEQ_LEN,
+        "token_target": OLMO_MIX_1124_TOKENS,
+        # Checked against find_missing_runs.py 2026-08-17: four other runs wrote
+        # this ckpt dir and NONE belong here. b078m3vr is fully redundant;
+        # 0bkxtmhl / li914bqf / 78u19g1r logged nothing; and v46mecdx looks
+        # like a gain (50 "new" steps) but is a smoke test -- its steps are
+        # 1-50, and this fork BEGINS at 9,200, so they cannot be its steps.
+        # That is the exact trap the detector warns about: writing the same
+        # ckpt dir does not make a run part of the trajectory.
+        "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        # wandb_only: it is a deliberate LR ablation, not a production chain,
+        # so it belongs on the board and in prod_dash but is not required on
+        # the canonical overlay charts (which the live-chain guard enforces).
         "cls": "wandb_only",
     },
     {
@@ -365,6 +725,66 @@ def live_trajectories() -> list[dict]:
     ]
 
 
+def check_coverage(verbose: bool = True) -> int:
+    """Does each chain's run list actually cover the steps ON DISK?
+
+    THE bug this file keeps having. Run-ids get added late or not at all, and
+    nothing notices, because a short run list is not an error -- it just draws
+    a shorter curve. Three separate instances landed on 2026-08-16 alone:
+
+      2b_v2_512   30,483->39,601  9,117 steps  (9d10mqwb, n887c3lk unlisted)
+      2b_v2_512   43,818->46,429  2,611 steps  (ud8t6d3t unlisted -- and that
+                                                is the run that FINISHED the
+                                                flagship at its 4.674T target)
+      2b_v2_256   25,178->25,501    322 steps  (concurrent-job collision)
+
+    The last one is the instructive case: every doc correctly said COMPLETE at
+    step 46,429 while the plot topped out at 43,818, because the run finished
+    and only the DATA was short. Nothing in the pipeline compares those two
+    numbers -- so this does.
+
+    Checkpoints on disk are the ground truth: a step-N directory exists only
+    because a run wrote it. If the newest step-N exceeds what the run list can
+    supply, run-ids are missing. Cheap (a directory listing, no W&B), so it is
+    safe to wire into refresh_all.sh / CI.
+
+    Returns the number of chains that look short (0 = clean).
+    """
+    bad = 0
+    for t in TRAJECTORIES:
+        ck = t.get("ckpt_dir")
+        if t.get("cls") not in ("live", "wandb_only") or not ck:
+            continue
+        d = Path(ck)
+        if not d.is_dir():
+            continue
+        steps = []
+        for p in d.glob("step-*"):
+            tail = p.name[len("step-"):]
+            if tail.isdigit():          # skip quarantined step-N-<timestamp>
+                steps.append(int(tail))
+        if not steps:
+            continue
+        disk_head = max(steps)
+        n_runs = len(t.get("wandb_run_ids") or [])
+        if n_runs == 0:
+            if verbose:
+                print("  %-30s disk head step-%-7d  NO RUN IDS" % (t["key"], disk_head))
+            bad += 1
+            continue
+        if verbose:
+            print("  %-30s disk head step-%-7d  %d run-id(s)" % (
+                t["key"], disk_head, n_runs))
+    if verbose:
+        print("\nDisk heads above are the FLOOR each chain's data must reach.")
+        print("Compare against the plotted/exported last step -- if the data")
+        print("stops short, run-ids are missing. To find them, ask W&B for every")
+        print("run writing that ckpt dir rather than trusting this list:")
+        print("  api.runs(PROJECT, filters={'createdAt': {'$gte': ...}})")
+        print("  -> match metadata.args --checkpoint.folder, compare to wandb_run_ids")
+    return bad
+
+
 def _main() -> int:
     import argparse
     import json
@@ -376,8 +796,16 @@ def _main() -> int:
         default="keys",
         help="stale-map: bash CHAIN_TO_README; json: full records; keys: one key per line",
     )
+    ap.add_argument(
+        "--check-coverage",
+        action="store_true",
+        help="report each chain's on-disk checkpoint head (the floor its data "
+             "must reach) to catch missing wandb_run_ids",
+    )
     args = ap.parse_args()
 
+    if args.check_coverage:
+        return 0 if check_coverage() == 0 else 1
     if args.emit == "stale-map":
         print(emit_stale_map_bash())
     elif args.emit == "json":

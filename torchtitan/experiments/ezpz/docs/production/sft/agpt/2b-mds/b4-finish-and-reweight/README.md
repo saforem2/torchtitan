@@ -3,6 +3,20 @@
 Date: 2026-07-24
 Verdict: NEITHER B4 path recovered B2's 0.205. Do not pursue single-stage rebuilds further.
 
+## TL;DR
+
+Teaching chain-of-thought in **two separate SFT stages** (general math, then
+GSM8K CoT) beats doing it in **one combined SFT run** -- and the gap is large,
+not marginal. The two-stage "B2" model scores **0.205** on the 200-problem
+GSM8K CoT eval while every single-stage rebuild lands at **0.02-0.065**, a 3-10x
+difference. Mix weights, length filtering, and sequence length were all varied
+across the rebuilds and none of them closed it. The *sequencing* is doing the
+work, not the data composition.
+
+This matters beyond this recipe: it says the cold-start CoT lever at 2B is the
+SFT *structure*, so future post-training effort should go into extending the
+two-stage lineage rather than into re-tuning a single combined mix.
+
 ## Results (200-problem GSM8K CoT, fp32 vLLM, identical eval)
 
 | model | cot_accuracy | format_hit_rate | mean_gen_len | n_unclosed | notes |
@@ -13,6 +27,40 @@ Verdict: NEITHER B4 path recovered B2's 0.205. Do not pursue single-stage rebuil
 | B4b (reweighted + len-filtered @4096) | 0.065 | 0.86 | 611 | 27 | fixed run-on symptom, NOT accuracy |
 
 Jobs: B4a 12471671 (ep1/2/3 = 12471676/77/78), B4b 12471672 (eval 12471685).
+
+![B-series CoT SFT: accuracy, format, and verbosity](figures/cot_ladder.svg)
+
+The three panels are the whole story. **Accuracy (left)** separates one model
+from three: B2 clears 0.205, and no rebuild gets close. **Format (middle)** and
+**verbosity (right)** move on a completely different axis -- B4b restored both
+to B3-like health (0.86 hit rate, gen_len 611, 27 unclosed) and its accuracy
+still only went 0.05 -> 0.065. That independence is the key negative result:
+**the run-on style was a symptom, not the cause of the accuracy loss.** Fixing
+what the guardrails flagged did not fix what we cared about.
+
+![Accuracy vs generation length](figures/accuracy_vs_genlen.svg)
+
+Plotted against verbosity, B2 sits alone in the short-and-accurate corner
+(282 tokens, 0.205) while the single-stage rebuilds cluster long-and-inaccurate.
+B4a is the cautionary datapoint: adding a short gsm8k-r1cot finish on top of the
+already-verbose B3 base pushed it *further* out (1378 tokens, 133/200 generations
+never closed, accuracy floor 0.02). Marker size tracks unclosed generations, so
+B4a's blow-out is visible as both position and size.
+
+## What each arm tested
+
+- **B3** -- one combined SFT from the MDS stage-3 base (`global_step138650`) on a
+  broad instruct+CoT mix at seq-len 8192, with gsm8k-r1cot weighted only 0.15 and
+  diluted by 0.25 OpenR1 long-form CoT. Regressed to 0.05.
+- **B4a** -- hypothesis: B3 has the knowledge and only lacks the *finishing*
+  signal, so bolt B2's final stage (gsm8k-r1cot only, 3 epochs, checkpoint +
+  eval per epoch) onto the B3 base. This was the "best of both worlds" bet.
+- **B4b** -- hypothesis: the OpenR1 long-CoT contamination is the problem, so
+  rebuild the single-stage mix with an `OPENR1_MAX_THINK_CHARS` length filter,
+  gsm8k-r1cot reweighted up to 0.40, at seq-len 4096.
+
+Both B4 hypotheses were refuted, in different ways: B4a refuted the "just add a
+finishing stage" story, B4b refuted the "it's the long-CoT contamination" story.
 
 ## Conclusions
 
@@ -38,6 +86,16 @@ Jobs: B4a 12471671 (ep1/2/3 = 12471676/77/78), B4b 12471672 (eval 12471685).
    B2's two-stage 0.205. The accuracy lever is NOT SFT recipe tuning at 2B; it is a
    bigger / math-specialized base model, or accepting B2 as the deliverable.
 
+## Why the guardrails earned their keep
+
+The eval reports `mean_gen_len` and `n_unclosed` alongside accuracy. On B4a,
+accuracy alone (0.02) would have read as "the finish stage just didn't help."
+The guardrails showed something sharper: 133 of 200 generations never emitted a
+closing tag, i.e. the model had lost the *format envelope*, not merely the math.
+That distinction is what ruled out "train it longer" and sent us to B4b instead.
+Keep these fields in any future CoT eval -- an accuracy number by itself hides
+envelope collapse.
+
 ## Recommendation
 
 - Keep B2 (checkpoint-93 lineage, 0.205) as the agpt-2b CoT cold-start deliverable.
@@ -49,3 +107,19 @@ Jobs: B4a 12471671 (ep1/2/3 = 12471676/77/78), B4b 12471672 (eval 12471685).
 - Reusable infra built this session survives regardless: OPENR1_MAX_THINK_CHARS
   filter, b4_reweight_mix, the eval gen_len/n_unclosed guardrails (which correctly
   surfaced the run-on failure that accuracy alone hid), and merge_and_eval tooling.
+
+## Reproducing the charts
+
+```bash
+python3 torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/plot_b4.py
+```
+
+Writes `figures/*.svg` and `figures/*.png`. Requires `matplotlib` + `ambivalent`
+(the house style; a missing `ambivalent` raises rather than silently falling back).
+
+## Related
+
+- [B4 design](design.md) -- the two hypotheses and why each was worth testing
+- [B4 implementation plan](implementation-plan.md)
+- [B3 design](../b3-instruct-cot-mix/design.md) -- the single-stage mix that regressed
+- [tulu_math_uc_mix_full](../tulu_math_uc_mix_full/) -- the B2 lineage and its evals

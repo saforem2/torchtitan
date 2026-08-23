@@ -1,5 +1,26 @@
 # RL (GRPO) on Intel XPU
 
+> [!IMPORTANT]
+> **For the 2B model's post-training results, start at
+> [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** -- SFT and RL
+> together, with what each actually bought.
+>
+> Short version for RL: **GRPO perfects format but has not moved accuracy on
+> the metric we care about.** 100 gated steps on the best SFT base held format
+> at **1.000** with zero drift, and moved GSM8K-CoT **0.205 -> 0.215** (~2
+> problems, noise). At ~20% solve rate with `group_size=4` most groups are
+> all-wrong, so the advantage is zero.
+>
+> What RL *has* delivered: a genuinely solved task (sum_digits, accuracy_reward
+> ~0.4 -> ~0.9 over 1000 steps), a **+168%** reward-shaping result, and
+> **RL-as-an-SFT-probe** -- convergence speed cleanly separates checkpoints.
+> No LoRA adapter has been promoted to production.
+>
+> Two findings worth reading before starting a run: the alphabet_sort plateau
+> was the **reward function**, not capacity ([ceiling-attack](grpo/ceiling-attack.md));
+> and reward-hacking was caught in the act -- reward rose while eval accuracy
+> fell -- caused by a **weak cold-start**, not by GRPO ([cot.md](plans/cot.md)).
+
 Reinforcement learning (GRPO) for AuroraGPT / Qwen3 on ALCF XPU systems
 (Sunspot / Aurora). This is the **status hub** -- it routes to the per-path docs.
 

@@ -1,0 +1,96 @@
+#!/bin/bash -l
+#PBS -A AuroraGPT
+#PBS -q prod
+#PBS -l select=256
+#PBS -l walltime=10:00:00
+#PBS -l filesystems=flare:home
+#PBS -N 80b-dp-bracket
+#PBS -j oe
+#
+# THE remaining 80B production question: where is the dp ceiling?
+#
+# Proven clean in bf16: dp=186, 192, 264 (jobs 12469494/12469628/12469629).
+# The only dp-axis NaN on record is dp=372 -- and that run was TP=2, so it is
+# confounded with the LBS/TP trigger and proves nothing about TP=4.
+# Production wants 256N/512N = dp=768/1536, i.e. 3-6x past anything measured.
+#
+# Sunspot physically cannot reach past dp=276 at TP=4 (94 usable nodes), which
+# is why this is an Aurora job.
+#
+# Ladder at TP=4/LBS=1/bf16/AdamW 1e-6 -- the production corner:
+#   256N -> dp=768   (THE production target for 256N; 512N would be dp=1536)
+#   192N -> dp=576
+#   150N -> dp=450
+#   124N -> dp=372   (the disputed NaN, now at TP=4 instead of TP=2)
+#   108N -> dp=324   (first unmapped point)
+#
+# Sized at 256 nodes because that is Auroras MINIMUM schedulable allocation
+# (resources_min.nodect=256) -- the original 150N script could never have run
+# here. Since the floor is 256 anyway, the top arm goes straight at the
+# production dp rather than stopping at 450.
+# 40 steps each: bf16 80B NaNs have all appeared by step 38 (14/17/19/30/38).
+#
+# Walltime 10h: 5 arms x 5400s cap = 7.5h worst case, plus setup and the
+# 256N launch overhead, with margin. Do NOT shrink this below 8h without also
+# cutting arms -- a PBS-truncated arm reports INCOMPLETE for a scheduling
+# reason and is indistinguishable from a real numerical failure at a glance.
+#
+# Descending order so the most expensive point runs first while the allocation
+# is fresh; each arm is independently reported, so a later failure does not
+# invalidate an earlier pass.
+set -o pipefail
+REPO=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
+cd "$REPO" || exit 9
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 8
+ezpz_setup .venv || exit 8
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+if ! python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry" >/dev/null 2>&1; then
+  echo "ABORT: config_registry import failed; nothing tested."; exit 7
+fi
+LOGD="$REPO/outputs/logs/80b-dp-bracket/$PBS_JOBID"; mkdir -p "$LOGD"
+echo "avail nodes: $(sort -u "$PBS_NODEFILE" | wc -l)"
+
+arm() {  # arm <nodes>
+  local n="$1" np=$(( n * 12 )) dp=$(( n * 12 / 4 ))
+  local log="$LOGD/dp$dp.log"; : > "$log"
+  timeout 5400 ezpz launch --nproc "$np" -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_80b \
+      --training.steps=40 --training.seq-len=8192 \
+      --training.local-batch-size=1 \
+      --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+      --lr-scheduler.warmup-steps=200 \
+      --checkpoint.no-enable --compile.no-enable \
+      --dataloader.num-workers=2 \
+      --nan-abort-consecutive=5 > "$log" 2>&1
+  local rc=$? steps nan last
+  steps=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -acE "step: *[0-9]+ +loss:")
+  nan=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -acE "loss: *nan|grad_norm: *nan")
+  last=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "step: *[0-9]+ +loss: *[a-z0-9.]+" | tail -1)
+  local verdict
+  if   [ "$steps" -eq 0 ];  then verdict="VOID (never trained -- read the log)"
+  elif [ "$nan" -gt 0 ];    then verdict="NaN"
+  elif [ "$steps" -ge 40 ]; then verdict="CLEAN 40/40"
+  else                           verdict="INCOMPLETE ($steps/40)"; fi
+  printf "RESULT %3sN dp=%-5s rc=%-4s steps=%-3s nan=%-3s %-22s %s\n" \
+    "$n" "$dp" "$rc" "$steps" "$nan" "$verdict" "$last"
+  [ "$steps" -eq 0 ] && sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "(RuntimeError|ValueError|Error): .*" | sort -u | head -2 | sed 's/^/       /'
+}
+
+echo ""
+echo "########## 80B dp ceiling bracket, TP=4/LBS=1/bf16 ##########"
+arm 256
+arm 192
+arm 150
+arm 124
+arm 108
+echo ""
+echo "80B_DP_BRACKET_DONE"

@@ -81,6 +81,25 @@ class BlendCorpusDataLoader(BaseDataLoader):
         append_eod: bool = True
         provide_attention_mask: bool = False
         eod_token_id: int | None = None
+
+        emit_positions: bool = False
+        """Yield a per-document ``positions`` key alongside ``input``.
+
+        Required by flex/varlen attention: core builds the BlockMask in
+        ``Trainer._prepare_inputs`` only ``if positions is not None``.
+
+        OFF by default, and deliberately so. ``positions`` is not free for
+        configs that do not need a mask: core still forwards it into the
+        model for RoPE, and ``rope._maybe_wrap_positions`` then calls
+        ``DTensor.from_local(positions, x.device_mesh, ...)`` whenever the
+        query is a DTensor. That puts a ``DeviceMesh`` into the
+        saved-for-backward set, which AOT autograd rejects with
+        ``expected all tensors_saved_with_vc_check to be Tensors``. Turning
+        this on unconditionally broke every compiled agpt config on
+        2026-08-19.
+
+        Set it only on configs whose attention backend is flex or varlen.
+        """
         data_cache_path: str = ".cache/blendcorpus"
 
         train_iters: int | None = None
@@ -107,6 +126,11 @@ class BlendCorpusDataLoader(BaseDataLoader):
     ):
         self._mode = "hf"
         self._delegate: BaseDataLoader | None = None
+        # Set here too: the HF-delegate branch below returns before the
+        # blendcorpus setup that normally assigns this. The delegate path
+        # never reaches the reader that uses it, but leaving the attribute
+        # undefined is a trap for the next edit.
+        self._emit_positions = False
 
         if config.dataset != "blendcorpus":
             hf_cfg = HuggingFaceTextDataLoader.Config(
@@ -164,6 +188,21 @@ class BlendCorpusDataLoader(BaseDataLoader):
                 )
                 train_iters = 1
 
+        # Resolve the EOD id ONCE, here, and keep it on self. Reading it back
+        # off the round-tripped blendcorpus config (bc_get_config()) is not
+        # reliable: that object is owned by the blendcorpus library and is not
+        # guaranteed to carry this field, in which case a getattr default
+        # silently yields None and flex attention loses its BlockMask.
+        _resolved_eod = (
+            int(config.eod_token_id)
+            if config.eod_token_id is not None
+            else getattr(tokenizer, "eos_id", None)
+        )
+        self._eod_token_id = (
+            int(_resolved_eod) if _resolved_eod is not None else None
+        )
+        self._emit_positions = bool(config.emit_positions)
+
         bc_cfg = SimpleNamespace(
             data_file_list=config.dataset_path,
             seq_length=seq_len,
@@ -190,11 +229,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
             blend_sample_in_corpus=bool(config.blend_sample_in_corpus),
             append_eod=bool(config.append_eod),
             provide_attention_mask=bool(config.provide_attention_mask),
-            eod_token_id=(
-                int(config.eod_token_id)
-                if config.eod_token_id is not None
-                else getattr(tokenizer, "eos_id", None)
-            ),
+            eod_token_id=_resolved_eod,
             data_cache_path=os.path.abspath(config.data_cache_path),
         )
         os.makedirs(bc_cfg.data_cache_path, exist_ok=True)
@@ -326,7 +361,60 @@ class BlendCorpusDataLoader(BaseDataLoader):
             tokens = batch["text"].long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
-            yield {"input": input_ids}, labels
+            out: dict[str, torch.Tensor] = {"input": input_ids}
+            if self._emit_positions:
+                positions = self._document_positions(input_ids)
+                if positions is not None:
+                    out["positions"] = positions
+            yield out, labels
+
+    def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
+        """Per-document position ids, or None when we cannot derive them.
+
+        Flex/Varlen attention needs these: core builds the BlockMask in
+        `Trainer._prepare_inputs` only `if positions is not None`
+        (trainer.py:738), and `Decoder.get_attention_masks` uses them to find
+        document boundaries. blendcorpus never yielded `positions`, so every
+        flex-attention MoE config died with
+
+            AssertionError: attention_masks must be instance of BlockMask,
+                            got <class 'NoneType'>
+
+        while the SDPA sibling of the same model trained fine (it relies on
+        is_causal and ignores masks).
+
+        blendcorpus PACKS multiple documents into one sequence separated by
+        EOD, so a plain arange would be wrong -- it would let attention cross
+        document boundaries, which is exactly what the mask exists to prevent.
+        Positions restart at 0 after each EOD token, matching the HF loader's
+        convention of emitting `range(len(sample_tokens) - 1)` per document.
+
+        Returns None when the EOD id is unknown, so the caller omits the key
+        and the maskless (SDPA) path behaves exactly as before rather than
+        silently receiving wrong positions. The id is resolved once in
+        __init__ and stored on self, because the blendcorpus config object
+        this loader gets back from bc_get_config() is not guaranteed to
+        carry the field.
+        """
+        eod = getattr(self, "_eod_token_id", None)
+        if eod is None:
+            return None
+
+        # positions = index since the last EOD, computed per row without a
+        # python loop over the sequence dimension.
+        is_eod = input_ids == int(eod)
+        # doc_id increments AFTER an EOD, so the EOD token itself ends the
+        # document it belongs to.
+        doc_id = is_eod.cumsum(dim=1) - is_eod.long()
+        idx = torch.arange(input_ids.shape[1], device=input_ids.device)
+        idx = idx.unsqueeze(0).expand_as(input_ids)
+        # first index of each document, broadcast back over its span
+        doc_start = torch.zeros_like(idx)
+        doc_start.scatter_reduce_(
+            1, doc_id, idx, reduce="amin", include_self=False
+        )
+        starts = doc_start.gather(1, doc_id)
+        return (idx - starts).contiguous()
 
     def set_consumed_by_global_step(self, global_step: int, global_batch_size: int):
         if self._delegate is not None:

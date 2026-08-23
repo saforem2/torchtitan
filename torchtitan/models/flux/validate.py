@@ -142,12 +142,14 @@ class FluxValidator(Validator):
         model.eval()
 
         assert isinstance(self.config, FluxValidator.Config)
-        save_img_count = self.config.save_img_count
+        max_saved_images = self.config.save_img_count
+        image_idx = 0
 
         parallel_dims = self.parallel_dims
 
-        accumulated_losses = []
+        accumulated_loss: torch.Tensor | None = None
         device_type = dist_utils.device_type
+        total_local_elements = torch.zeros((), dtype=torch.int64, device=device_type)
         num_steps = 0
 
         validation_dataloader = self.dl_config.build(
@@ -166,7 +168,7 @@ class FluxValidator(Validator):
                 prompt = [prompt]
             for p in prompt:
                 assert isinstance(p, str), f"prompt must be a string, got {type(p)}"
-                if save_img_count != -1 and save_img_count <= 0:
+                if max_saved_images != -1 and image_idx >= max_saved_images:
                     break
                 img_size = (
                     self.config.dataloader.img_size  # pyrefly: ignore [missing-attribute]
@@ -190,7 +192,10 @@ class FluxValidator(Validator):
                 )
 
                 save_image(
-                    name=f"image_rank{str(torch.distributed.get_rank())}_{step}.png",
+                    name=(
+                        f"image_rank{torch.distributed.get_rank()}_step{step}_"
+                        f"{image_idx:06d}.png"
+                    ),
                     output_dir=os.path.join(
                         self.dump_folder,
                         self.config.save_img_folder,
@@ -199,7 +204,7 @@ class FluxValidator(Validator):
                     add_sampling_metadata=True,
                     prompt=p,
                 )
-                save_img_count -= 1
+                image_idx += 1
 
             # generate t5 and clip embeddings
             input_dict["image"] = labels
@@ -229,6 +234,9 @@ class FluxValidator(Validator):
                 labels = labels.repeat_interleave(8, dim=0)
             else:
                 stratified_timesteps = input_dict.pop("timestep")
+
+            # Count full latent elements before CP shards the sequence.
+            total_local_elements += labels.numel()
 
             # Note the tps may be inaccurate due to the generating image step not being counted
             self.metrics_processor.ntokens_since_last_log += labels.numel()
@@ -285,19 +293,33 @@ class FluxValidator(Validator):
 
             del noise, target, latent_noise_pred, latents
 
-            accumulated_losses.append(loss.detach())
+            loss = loss.detach()
+            if accumulated_loss is None:
+                accumulated_loss = loss.clone()
+            else:
+                accumulated_loss.add_(loss)
 
             num_steps += 1
 
-        # Compute average loss
-        loss = torch.sum(torch.stack(accumulated_losses))
-        loss /= num_steps
-        if parallel_dims.dp_cp_enabled:
-            global_avg_loss = dist_utils.dist_mean(
-                loss, parallel_dims.get_optional_mesh("loss")
+        assert accumulated_loss is not None
+
+        # CP ranks shard the same full latent tensor, so only DP contributes
+        # additional elements to the denominator.
+        if parallel_dims.dp_enabled:
+            total_global_elements = dist_utils.dist_sum_tensor(
+                total_local_elements, parallel_dims.get_mesh("batch")
             )
         else:
-            global_avg_loss = float(loss.item())
+            total_global_elements = total_local_elements
+
+        if parallel_dims.dp_cp_enabled:
+            global_loss_sum = dist_utils.dist_sum(
+                accumulated_loss, parallel_dims.get_optional_mesh("loss")
+            )
+        else:
+            global_loss_sum = float(accumulated_loss.item())
+
+        global_avg_loss = global_loss_sum / int(total_global_elements.item())
 
         self.metrics_processor.log_validation(loss=global_avg_loss, step=step)
 

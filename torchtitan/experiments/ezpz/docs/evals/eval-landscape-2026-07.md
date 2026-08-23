@@ -1,6 +1,6 @@
 # AuroraGPT evaluation strategy: modern-suite review (2026-07)
 
-> Last updated: 2026-07-17
+> Last updated: 2026-08-14
 
 Decision-focused review of what we evaluate, what modern peers evaluate, and how
 we compare. Grounded in a fact-checked research pass over primary sources (model
@@ -114,3 +114,21 @@ benchmark against OLMo-2 (with the token-count caveat explicit), not Llama/SmolL
 - Backfill: `scripts/eval/oneoff/eval-backfill-{20b-512n,20b-256n,2b-512n}-modern.sh`.
 - Aggregator: `eval/aggregate_evals.py` reads `exact_match` (GSM8K) + mmlu/gsm8k
   colors + baselines.
+
+## Backfill runs
+
+### 2026-08-03 -- modern-block tail backfill (`8729921` 256n, `8729922` 512n)
+The commonsense-7 ladder is complete to each chain live tip (256n step-6800,
+512n step-6500), but the modern block (MMLU-57 loglikelihood + gsm8k) was left
+partial: the prior tail pass (`8714836` 256n) died Exit -29 -- walltime -- mid-MMLU
+under the old 12h cap, and the 512n modern phase (`8714837`, Exit 0) only reached
+step-6100. These two capacity-queue jobs run modern-only at **48h** walltime so the
+slow ~56k-request/step MMLU pass cannot be walltime-killed again:
+
+- `8729921` (256n): MMLU-5 + ARC-C-25 on steps 5900,6100,6400,6500,6600,6700,6800;
+  gsm8k on 6800. REPO override -> relocated `agpt-20b-n256` clone.
+- `8729922` (512n): MMLU-5 + ARC-C-25 on steps 6200,6300,6400,6500; gsm8k on 6500.
+
+Content-aware skip-guard merges into the existing per-step `results.json`, so the
+HF conversions cached by the commonsense pass are reused (no re-convert). Scripts:
+`scripts/eval/oneoff/eval-backfill-20b-{256n,512n}-modern-tail.sh` (commit daeb510b7).

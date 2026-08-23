@@ -46,10 +46,21 @@ from torchtitan.config import (
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
+from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.experiments.ezpz.fsdp_compat import (
+    resolve_fsdp_mesh,
+    resolve_sparse_fsdp_mesh,
+)
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
-from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
+# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
+# now enabled inside apply_compile from parallel_dims. Importing it is an
+# ImportError. This file compiles per-block directly (see the compile block
+# below) rather than calling apply_compile, so there is nothing to thread
+# parallel_dims into here; async TP simply is not available on this path.
+# That is not a regression: the call below only ran under tp_enabled, and the
+# MoE path has never been validated with async TP on XPU.
 from torchtitan.experiments.ezpz.moe import moeModel
 from torchtitan.tools.logging import logger
 
@@ -133,13 +144,21 @@ def parallelize_moe(
     # dense (attention, dense FFN) and MoE (router, shared/routed experts)
     # submodules. ``GroupedExperts.parallelize`` additionally wires the
     # EP/TP meshes onto the token dispatcher.
-    if parallel_dims.tp_enabled or parallel_dims.ep_enabled:
+    # 79th sync (#4085): under full_dtensor/spmd_types this must run
+    # UNCONDITIONALLY -- it is what makes the params DTensors on the SPMD mesh,
+    # which resolve_fsdp_mesh's DataParallelMeshDims then requires. Gating on
+    # tp/ep (right for the legacy backend) leaves plain tensors when both are
+    # off. Core: llama3/parallelize.py:42-53.
+    # Upstream #4217 removed validate_config outright; deepseek_v3 (our base)
+    # now just calls model.parallelize. "full_dtensor" stays in the tuple only
+    # until the sync lands, since it is still a legal value on this tree.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        model.parallelize(parallel_dims)
+    elif parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         model.parallelize(parallel_dims)
 
-    if parallel_dims.tp_enabled:
-        maybe_enable_async_tp(
-            parallelism, compile_config, parallel_dims.get_mesh("tp")
-        )
+    # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
+    # gone -- see the import-site note above.
 
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components
@@ -164,19 +183,34 @@ def parallelize_moe(
             block.compile(backend=compile_config.backend)
             model.layers.register_module(layer_id, block)
 
-    dp_mesh_names = (
-        ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-    )
-    dp_mesh = parallel_dims.get_mesh(dp_mesh_names)
-
-    edp_mesh = None
-    if parallel_dims.ep_enabled:
-        edp_mesh_names = (
-            ["dp_replicate", "efsdp"]
-            if parallel_dims.dp_replicate_enabled
-            else ["efsdp"]
+    # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
+    # spmd_types/full_dtensor there is no flattened "fsdp" mesh axis -- asking
+    # for it raises ValueError: Invalid mesh dim: 'fsdp'. Mirror core's
+    # backend branch (llama3/parallelize.py:71) instead of hardcoding a name.
+    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
+        # BOTH meshes must come from the new resolvers. Resolving only the
+        # dense one and leaving edp on the legacy "efsdp" name makes both
+        # resolve to the same dp_shard mesh, and FSDP then refuses:
+        #   RuntimeError: Cannot concatenate overlapping meshes:
+        #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
+        # Core pairs them in one branch (gpt_oss/parallelize.py:108-110).
+        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+        edp_mesh, edp_mesh_dims = resolve_sparse_fsdp_mesh(parallel_dims)
+    else:
+        dp_mesh_names = (
+            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
         )
-        edp_mesh = parallel_dims.get_optional_mesh(edp_mesh_names)
+        dp_mesh = parallel_dims.get_mesh(dp_mesh_names)
+        dp_mesh_dims = None
+        edp_mesh = None
+        edp_mesh_dims = None
+        if parallel_dims.ep_enabled:
+            edp_mesh_names = (
+                ["dp_replicate", "efsdp"]
+                if parallel_dims.dp_replicate_enabled
+                else ["efsdp"]
+            )
+            edp_mesh = parallel_dims.get_optional_mesh(edp_mesh_names)
 
     apply_fsdp(
         model,
@@ -188,6 +222,8 @@ def parallelize_moe(
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
         ep_degree=parallel_dims.ep,
         edp_mesh=edp_mesh,
+        dp_mesh_dims=dp_mesh_dims,
+        edp_mesh_dims=edp_mesh_dims,
     )
 
     if parallel_dims.dp_replicate_enabled:
@@ -222,6 +258,8 @@ def apply_fsdp(
     reshard_after_forward_policy: str = "default",
     ep_degree: int = 1,
     edp_mesh: DeviceMesh | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
+    edp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -229,6 +267,12 @@ def apply_fsdp(
         cast_forward_inputs=False,
     )
     fsdp_config: dict[str, Any] = {"mesh": dp_mesh, "mp_policy": mp_policy}
+    if dp_mesh_dims is not None:
+        # Multi-axis storage mesh under full_dtensor/spmd_types: fully_shard
+        # must be told which axes are data-parallel (core does the same, see
+        # distributed/fsdp.py:106). None under the legacy backend, where the
+        # flattened "fsdp" axis already encodes it.
+        fsdp_config["dp_mesh_dims"] = dp_mesh_dims
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
 
@@ -309,10 +353,29 @@ def apply_fsdp(
                     FSDPMeshInfo,
                     ShardPlacementResult,
                 )
+                from torch.distributed.fsdp._fully_shard._fsdp_init import (
+                    _get_mesh_info,
+                )
 
                 assert edp_mesh is not None
-                edp_mesh_info = FSDPMeshInfo(mesh=edp_mesh, shard_mesh_dim=0)
-                dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+
+                # 79th sync: build the mesh infos via FSDP2's own builder
+                # rather than FSDPMeshInfo(mesh=..., shard_mesh_dim=0).
+                # Under full_dtensor/spmd_types the meshes handed in are FULL
+                # SPMD meshes; _get_mesh_info EXTRACTS AND FLATTENS the DP
+                # submesh out of them using mesh_dims. Constructing
+                # FSDPMeshInfo directly leaves both at full width, so the
+                # dense and sparse infos both present as dp_shard and
+                # fully_shard rejects them:
+                #   RuntimeError: Cannot concatenate overlapping meshes:
+                #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
+                # Core: distributed/fsdp.py:274-279.
+                edp_mesh_info = _get_mesh_info(edp_mesh, edp_mesh_dims)
+                dp_mesh_info = _get_mesh_info(dp_mesh, dp_mesh_dims)
+                # _get_mesh_info is typed to the DataParallelMeshInfo base;
+                # with a shard dim it always yields FSDPMeshInfo/HSDPMeshInfo.
+                assert isinstance(edp_mesh_info, FSDPMeshInfo)
+                assert isinstance(dp_mesh_info, FSDPMeshInfo)
 
                 def _shard_placement_fn(
                     param: nn.Parameter,

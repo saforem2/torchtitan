@@ -1,0 +1,101 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=8
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 30b-long3
+#PBS -j oe
+set -o pipefail
+
+# LONG RUN. The 30B has only ever accumulated 531 steps of a 2000-step
+# config (482 fresh + 49 on an uncompiled resume), so nothing is known about
+# its behavior past ~step 500. This runs it out.
+#
+# Resumes from step-400 (latest on disk). Two changes vs 30b_converge.pbs:
+#   walltime 6h -> 12h        (531 steps took ~6h; 2000 needs the headroom)
+#   ckpt interval 250 -> 100  (more restart points, cheap at this size)
+#
+# Backend: no explicit flag, so it inherits the partial_dtensor pin from
+# b2ff09632. That matters -- earlier 30B runs predate the pin and reported
+# spmd_backend "default", which is the SAME code path under its old name.
+#
+# Known risk: if this run hits its walltime and a later job resumes it
+# COMPILED, that resume dies on the vc_check DeviceMesh assertion (the DCP
+# load itself succeeds; it is the first compiled backward that fails). See
+# docs/guides/known-bugs/agpt-full-dtensor-vc-check.md. Resume uncompiled if
+# that happens -- ~7% slower but 93.8% memory, so watch for OOM.
+#
+# FIRST REAL TRAINING RUN of the 30B production config.
+#
+# Everything measured so far was 12-20 steps of throughput. This asks the
+# questions those cannot: does loss actually descend, does grad_norm stay
+# bounded, and does a checkpoint round-trip (save -> resume -> continue)?
+# A config that benchmarks at 29.63% MFU and then diverges at step 400 is
+# worthless, and we would not know yet.
+#
+# Config is the one settled by exp05/exp07 (job 12473210, n=3 per arm):
+#   agpt_30b_olmo2tok, TP=1, LBS=5, compiled, full AC, seq=4096
+#   -> 511 tps / 29.63% MFU / 76.83% memory at 2N
+#
+# 8 nodes (not 2) so GBS=480 is closer to a real training regime than 2N's
+# 120, and so this doubles as the first multi-node correctness check for the
+# olmo2 vocab. 6h at ~96 tok/s/gpu-step gives well over 1000 steps.
+#
+# CKPT_INTERVAL is deliberately small (250): the resume test is the point,
+# and short jobs need short intervals (a lesson from the walltime-reset bug).
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+# Gate on the config actually importing, with PYTHONPATH unset -- manager.py
+# masks every import error as one generic "Cannot import config_registry".
+CFG_OK=0
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_30b_olmo2tok" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: agpt_30b_olmo2tok does not import"; exit 1; }
+
+CKPT="$PWD/checkpoints/agpt-30b-olmo2tok-converge"
+LOGD="$PWD/outputs/logs/30b-converge/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+echo "ckpt dir: $CKPT"
+echo "log:      $LOG"
+echo ""
+
+# W&B on, always (every run, no exceptions).
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
+
+timeout 41400 ezpz launch --nproc 96 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok \
+    --training.steps=2000 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --parallelism.tensor-parallel-degree=1 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=3e-4 \
+    --lr-scheduler.warmup-steps=100 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=250 \
+    --checkpoint.keep-latest-k=0 \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## convergence ##########"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" \
+  | awk 'NR==1||NR%100==0{print "  "$0}' | head -25
+echo ""
+echo "  first/last:"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | head -1 | sed 's/^/    /'
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | tail -1 | sed 's/^/    /'
+echo ""
+echo "  NaN/inf in loss or grad_norm: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE 'loss: *(nan|inf)|grad_norm: *(nan|inf)')"
+echo "  steps completed: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE 'step: *[0-9]+ +loss:')"
+echo "  checkpoints written: $(ls -d "$CKPT"/step-* 2>/dev/null | wc -l)"
+echo "  W&B: $(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
+echo "  rc=$rc"
+echo "30B_CONVERGE_DONE"

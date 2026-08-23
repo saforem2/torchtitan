@@ -1,5 +1,31 @@
 # Production SFT
 
+> [!IMPORTANT]
+> **Start here: [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** --
+> the complete SFT + RL picture in one page.
+>
+> Headline: **accuracy lives in SFT structure, not mix tuning and not RL.**
+> Two-stage SFT (general math -> then GSM8K CoT) scores **0.205** GSM8K-CoT;
+> every single-stage rebuild lands **0.02-0.065**. 100 steps of GRPO on top
+> moved accuracy **0.205 -> 0.215** -- noise. ~0.2 is near this base's ceiling.
+>
+> **Deliverables:** `checkpoint-93` (B2) for CoT, `checkpoint-900-hf` for
+> general instruct.
+>
+> **Do NOT use `checkpoint-8672`** -- it catastrophically forgot (hellaswag
+> 0.593 -> 0.273, arc_easy 0.694 -> 0.298, at/near chance). The
+> `tulu_math_uc_mix_full` header used to call it "the deliverable"; **fixed
+> 2026-08-16** -- that header now says NOT the deliverable and points at
+> `checkpoint-900-hf`, matching its own body.
+>
+> **B3/B4 are still not in the table below.** They are single-base CoT
+> experiments whose results live in
+> [POST-TRAINING-2B](../POST-TRAINING-2B.md): B3 (instruct+CoT mix) and B4
+> (finish-and-reweight) both FAILED to recover B2, which is why B2's
+> `checkpoint-93` remains the CoT deliverable. Listing them here would need a
+> row shape this table does not have (they are ablations off one base, not
+> base->recipe pairs), so the status page stays their home.
+
 > SFT'd checkpoints derived from pre-trained AuroraGPT models. These
 > are the inputs to downstream alignment work (GRPO, DPO, …) and the
 > deliverables for instruction-tuned model releases.

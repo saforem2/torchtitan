@@ -13,6 +13,18 @@
 #   LRF_INIT_LR     — starting LR (default: 1e-6)
 #   LRF_MAX_LR      — max LR (default: 1.0)
 #   LRF_TIMEOUT     — per-run timeout in seconds (default: 1800)
+#   LRF_DFL_NAME    — data list basename (default "books"). MUST match the
+#                     config's tokenizer: books.txt is Llama2-tokenized on
+#                     Aurora, so gemma configs need olmo-mix-1124.
+#   LRF_SEQ_LEN     — sequence length (default 8192). GBS counts SEQUENCES, so
+#                     this scales tokens/step and wall clock. Use the length the
+#                     target model was measured at (30B: 4096).
+#   LRF_CONFIG      — exact config flavor, overriding "agpt_<model>". Needed
+#                     whenever the flavor is not just the size (e.g.
+#                     agpt_30b_olmo2tok).
+#   LRF_AC          — activation-checkpoint mode (e.g. "full"). Appends the
+#                     tyro positional subcommand. Required at 30B/80B.
+#   LRF_NO_COMPILE  — set to 1 to pass --compile.no-enable.
 #   LRF_LBS         — local batch size per device (default: 1). At production
 #                     N + LBS to measure the optimal LR at the actual GBS the
 #                     production chain will run at (e.g. LBS=2 for 2b 256N
@@ -91,6 +103,24 @@ LRF_INIT_LR="${LRF_INIT_LR:-1e-6}"
 LRF_MAX_LR="${LRF_MAX_LR:-1.0}"
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
 LRF_LBS="${LRF_LBS:-1}"
+# Sequence length. Was hardcoded to 8192 in the launch below, which is wrong
+# for any model whose measurements are at another length: every 30B datapoint
+# (exp05 tuning, exp06 scaling, exp07 tokenizer/LBS, exp08's convergence run)
+# is at seq=4096, and GBS counts SEQUENCES -- so 8192 would double tokens/step
+# and the wall clock for no calibration benefit.
+LRF_SEQ_LEN="${LRF_SEQ_LEN:-8192}"
+# Config flavor override. The default composes "agpt_${model}", which is right
+# for 2b/20b/80b but picks the WRONG 30B: agpt_30b is the gemma-256k-vocab
+# 28.1B variant, while every 30B measurement and the converged chain use
+# agpt_30b_olmo2tok (26.2B, olmo2 vocab). Set this to name the flavor exactly.
+LRF_CONFIG="${LRF_CONFIG:-}"
+# Activation checkpointing. `full` appends the tyro positional subcommand
+# activation-checkpoint:full, which MUST be the last argv token. At 30B this
+# is load-bearing: exp05 found `none` OOMs and `selective` errors at this size.
+LRF_AC="${LRF_AC:-}"
+# Set to 1 to pass --compile.no-enable. The 80B path forces this (its compile
+# is broken); 30B trains compiled and should stay compiled.
+LRF_NO_COMPILE="${LRF_NO_COMPILE:-}"
 # Target global batch for the sweep. The optimal LR is batch-size
 # dependent, so to calibrate a production run you must sweep at THAT run's
 # GBS. Empty (default) = whatever world_size*LBS/TP gives. Set e.g.
@@ -122,7 +152,23 @@ mkdir -p "${OUTDIR}"
 # so a trend sweep isolates each GBS's outputs.
 LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 
-DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/books.txt"
+# Data list. The default is books.txt for historical reasons, but on Aurora
+# that points at dolma/data_v1.7_Llama2Tokenizer -- LLAMA-2 token ids. Sweeping
+# a GEMMA-vocab config (every agpt_* except the *_llama3tok / *_olmo2tok
+# variants) against it calibrates the LR on the wrong vocabulary, and the
+# resulting number does not transfer -- which is the exact failure this whole
+# production-batch exercise exists to avoid. It fails SILENTLY: ids below the
+# embedding size index fine and the loss curve looks plausible.
+#
+# Set LRF_DFL_NAME to match the config's tokenizer:
+#   gemma configs (agpt_2b/20b/30b/80b)  -> olmo-mix-1124 (data_fused_gemma_eod)
+#   *_llama3tok / *_olmo2tok             -> a list tokenized to match
+LRF_DFL_NAME="${LRF_DFL_NAME:-books}"
+DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/${LRF_DFL_NAME}.txt"
+if [[ ! -f "$DATASET_PATH" ]]; then
+    echo "lr-finder FATAL: data list not found: $DATASET_PATH" >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Kill stale processes
@@ -156,7 +202,7 @@ declare -a R_MODEL R_OPT R_STATUS R_WALL R_MIN_LOSS R_LR_AT_MIN
 RUN_IDX=0
 
 for model in "${MODELS[@]}"; do
-    config="agpt_${model}"
+    config="${LRF_CONFIG:-agpt_${model}}"
     # Per-model parallelism + stability flags.
     #
     # For 80B the validated stable corner is TP=4 / LBS=1 / compile OFF /
@@ -168,6 +214,14 @@ for model in "${MODELS[@]}"; do
     # LR cliff. Override the TP via LRF_TP if probing a different corner.
     tp_args=()
     ac_subcommand=()
+    # Generic AC / compile knobs, applied to ANY model. These run BEFORE the
+    # 80B block so that block can still override them wholesale.
+    if [[ -n "${LRF_AC}" ]]; then
+        ac_subcommand=("activation-checkpoint:${LRF_AC}")
+    fi
+    if [[ -n "${LRF_NO_COMPILE}" ]]; then
+        tp_args+=(--compile.no-enable)
+    fi
     if [[ "${model}" == "80b" || "${model}" == "80B" ]]; then
         tp_args=(
             --parallelism.tensor_parallel_degree "${LRF_TP:-4}"
@@ -252,7 +306,7 @@ for model in "${MODELS[@]}"; do
             --training.steps "${LRF_STEPS}" \
             --training.local_batch_size "${LRF_LBS}" \
             "${gbs_args[@]}" \
-            --training.seq_len 8192 \
+            --training.seq_len "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
             --dataloader.dataset blendcorpus \

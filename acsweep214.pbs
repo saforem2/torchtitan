@@ -1,0 +1,124 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N acsweep214
+#PBS -j oe
+set -o pipefail
+
+# Does activation checkpointing still work on the 2.14 nightly?
+#
+# It has never been varied there. The only AC sweep we ever ran (spmdac,
+# job 12473441) was entirely on torch 2.13, and every 2.14 datapoint to date
+# is FullAC -- the agpt default -- so "AC works on the nightly" is an
+# untested assumption, not a result.
+#
+# It is worth testing rather than assuming because AC is load-bearing in the
+# one bug that shaped this whole config: vc_check needs compile + AC +
+# model.parallelize together, and selective AC is what kept those three green
+# under full_dtensor. AC is also where MoE routing broke under recompute
+# (560 vs 559), so the recompute path is not inert.
+#
+# Six arms: {none, full, selective} x {partial_dtensor, spmd_types}, all on
+# 2.14, TP=1, 2N, seq=2048, compiled, 10 steps.
+#
+# AC mode is chosen by CONFIG NAME, not a CLI flag -- the registry maps
+# agpt_20b -> FullAC, agpt_20b_noac -> None, agpt_20b_selac -> SelectiveAC
+# (config_registry.py, the activation_checkpoint_mode branch). Passing an
+# --activation-checkpoint flag would silently do nothing; there isn't one.
+#
+# Expected, so a surprise is legible:
+#   none        should run; costs the most memory, may hit the level_zero 40
+#               capacity wall that uncompiled runs hit at long seq (we are at
+#               2048, so it should fit)
+#   full        should run; this is every existing 2.14 datapoint
+#   selective   should run and sit BETWEEN the two on memory
+# Backend should not interact with AC at all. If it does, that is the finding.
+#
+# Also records memory per arm, which is the practical output: the +6.25pp
+# torch-bump cost was measured at FullAC only, and whether it holds under
+# selective/none is exactly the kind of extrapolation that has bitten us.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/rc-plus-nightly/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+
+WANT=2.14.0.dev20260722
+GOT=$(python3 -c "import torch;print(torch.__version__)" 2>/dev/null)
+WHERE=$(python3 -c "import torch,os;print(os.path.dirname(torch.__file__))" 2>/dev/null)
+echo "torch: ${GOT:-<import failed>}"
+echo "from:  ${WHERE:-<none>}"
+case "$GOT" in
+  $WANT*) echo "  gate OK" ;;
+  *) echo "  ABORT: wanted ${WANT}*, got '${GOT:-nothing}'"; echo "ACSWEEP_DONE"; exit 1 ;;
+esac
+echo ""
+
+export LOGD="$PWD/outputs/logs/acsweep214/$PBS_JOBID"; mkdir -p "$LOGD"
+
+run() {  # run <label> <config> <backend>
+  timeout 1200 ezpz launch --nproc 24 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config "$2" \
+      --checkpoint.no-enable --dataloader.num-workers=0 \
+      --training.steps=10 --training.local-batch-size=1 \
+      --training.seq-len=2048 \
+      --parallelism.tensor-parallel-degree=1 \
+      --parallelism.spmd-backend="$3" \
+      > "$LOGD/$1.log" 2>&1
+  echo "  [$1] rc=$?"
+}
+
+for bk in partial_dtensor spmd_types; do
+  run "none-$bk"      agpt_20b_noac  "$bk"
+  run "full-$bk"      agpt_20b       "$bk"
+  run "selective-$bk" agpt_20b_selac "$bk"
+done
+
+echo ""
+echo "########## AC x backend on torch 2.14 ##########"
+python3 - <<'PY'
+import os, re
+d = os.environ["LOGD"]
+print(f"  {'AC':<11}{'backend':<17}{'steps':>6}{'mem':>9}{'tps':>7}  {'AC class in dump':<22}{'note'}")
+for ac in ("none", "full", "selective"):
+    for bk in ("partial_dtensor", "spmd_types"):
+        p = f"{d}/{ac}-{bk}.log"
+        try:
+            t = re.sub(r"\x1b\[[0-9;]*m", "", open(p, errors="ignore").read())
+        except OSError:
+            print(f"  {ac:<11}{bk:<17}{'--':>6}  (missing)"); continue
+        rows = re.findall(r"step: *(\d+) .*?memory: *([\d.]+)GiB\(([\d.]+)%\).*?tps: *([\d,]+)", t)
+        n = len(re.findall(r"step: *\d+ +loss:", t))
+        # what the run says its AC actually is -- do not trust the config name
+        i = t.find('"activation_checkpoint"')
+        blk = t[i:i+200] if i > 0 else ""
+        if '"activation_checkpoint": null' in t: klass = "null (disabled)"
+        elif "per_op" in blk or "selective" in blk.lower(): klass = "SelectiveAC"
+        elif i > 0: klass = "FullAC"
+        else: klass = "<absent>"
+        if n:
+            mem, tps = rows[-1][2], rows[-1][3]
+            note = ""
+        else:
+            mem = tps = "--"
+            for pat, lbl in (("must be DTensors","DTensor(old torch)"),
+                             ("NoneType' and 'int","vocab TypeError"),
+                             ("tensors_saved_with_vc_check","vc_check"),
+                             ("Recomputed values","AC RECOMPUTE MISMATCH"),
+                             ("level_zero","level_zero 40"),
+                             ("out of memory","XPU OOM")):
+                if pat in t: note = lbl; break
+            else: note = "no steps, unrecognized"
+        print(f"  {ac:<11}{bk:<17}{n:>6}{mem:>8}%{tps:>7}  {klass:<22}{note}")
+print()
+print("  Reference: FullAC/partial on 2.13 = 50.31%, on 2.14 = 56.56% (job 12473548,")
+print("  LBS=2). This job is LBS=1 so absolute memory differs; the AC ORDERING and")
+print("  the backend-independence are what transfer.")
+PY
+echo "ACSWEEP_DONE"

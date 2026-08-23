@@ -1,0 +1,108 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N nanguard
+#PBS -j oe
+set -o pipefail
+
+# Smoke the pre-step non-finite grad_norm guard.
+#
+# The guard sits in the hot path of every training step, so the thing that
+# actually matters is that it does NOTHING on a healthy run: same loss, same
+# grad_norm, same throughput. A guard that perturbs normal training is worse
+# than no guard.
+#
+# Arm A: baseline, pinned to the commit BEFORE the guard.
+# Arm B: HEAD with the guard.
+# Both seeded and deterministic at 12 ranks / 1 node / seq=2048, which is the
+# regime where the control holds (job 12473608 passed 10/10 there; 24 ranks /
+# 2 nodes does NOT -- see known-bugs/xpu-determinism-rank-seqlen-interaction).
+#
+# The bar is bit-identity. The guard only reads grad_norm and branches on
+# isfinite, so on a healthy run it must not change a single digit. Anything
+# else means .item() forced a sync that moved something, and that is a
+# finding.
+#
+# FullAC only: --debug.deterministic pushes AC=none (80%) and selective (62%)
+# past the level_zero-40 ceiling at this size.
+#
+# NOT tested here: that the guard actually FIRES. Inducing a real NaN needs a
+# divergent config and would confound the no-op test. The firing path is
+# exercised by the 80B history that motivated it (job 12473142: grad_norm nan
+# @30, loss nan @31) and is a follow-up, not a blocker for a change whose
+# entire purpose is to be inert until something is already broken.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/rc-plus-nightly/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export LOGD="$PWD/outputs/logs/nanguard/$PBS_JOBID"; mkdir -p "$LOGD"
+
+GUARD=$(git rev-parse HEAD)
+BASE=$(git rev-parse HEAD~1)
+echo "guard commit: $GUARD"
+echo "baseline    : $BASE"
+echo "torch: $(python3 -c 'import torch;print(torch.__version__)')"
+echo ""
+
+run() {  # run <label>
+  timeout 900 ezpz launch --nproc 12 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_20b \
+      --checkpoint.no-enable --dataloader.num-workers=0 \
+      --training.steps=10 --training.local-batch-size=1 \
+      --training.seq-len=2048 \
+      --parallelism.tensor-parallel-degree=1 \
+      --parallelism.spmd-backend=partial_dtensor \
+      --debug.seed=42 --debug.deterministic \
+      > "$LOGD/$1.log" 2>&1
+  echo "  [$1] rc=$?"
+}
+
+# guard arm first, on the working tree as committed
+run guard
+
+# baseline: check out ONLY trainer.py at the parent commit, then restore.
+git show "$BASE":torchtitan/experiments/ezpz/trainer.py > /tmp/trainer_base.py || exit 1
+cp torchtitan/experiments/ezpz/trainer.py /tmp/trainer_guard.py
+cp /tmp/trainer_base.py torchtitan/experiments/ezpz/trainer.py
+run baseline
+cp /tmp/trainer_guard.py torchtitan/experiments/ezpz/trainer.py
+echo "  restored trainer.py: $(git status --short torchtitan/experiments/ezpz/trainer.py | wc -l) modified (expect 0)"
+
+echo ""
+echo "########## guard must be a NO-OP on a healthy run ##########"
+python3 - <<'PY'
+import os, re
+d = os.environ["LOGD"]
+def R(n):
+    try: t = re.sub(r"\x1b\[[0-9;]*m","",open(f"{d}/{n}.log",errors="ignore").read())
+    except OSError: return None, ""
+    return {int(m[0]):(m[1],m[2]) for m in
+            re.findall(r"step: *(\d+) +loss: *([\d.]+) +grad_norm: *([\d.]+)",t)}, t
+g, tg = R("guard"); b, tb = R("baseline")
+if not g or not b:
+    print("  a log is missing or produced no steps"); raise SystemExit
+ks = sorted(set(g) & set(b))
+same = sum(g[k] == b[k] for k in ks)
+print(f"  steps compared     : {len(ks)}")
+print(f"  bit-identical      : {same}/{len(ks)}")
+if same != len(ks):
+    k = next(k for k in ks if g[k] != b[k])
+    print(f"  FIRST DIVERGENCE at step {k}: baseline={b[k]}  guard={g[k]}")
+    print("  -> the guard is NOT inert. Investigate before merging.")
+else:
+    print("  -> guard is inert on a healthy run, as required.")
+fired = len(re.findall(r"non-finite grad_norm", tg))
+print(f"  guard fired        : {fired} times (expect 0 on a healthy run)")
+def tps(t):
+    m = re.findall(r"tps: *([\d,]+)", t)
+    return m[-1] if m else "--"
+print(f"  tps  baseline={tps(tb)}  guard={tps(tg)}")
+PY
+echo "NANGUARD_DONE"
