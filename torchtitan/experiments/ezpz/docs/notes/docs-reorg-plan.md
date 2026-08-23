@@ -221,8 +221,12 @@ guides/               <- 25 inbound from code on one file alone
 production/           <- LAST, most linked, and live during production
 ```
 
-**`production/` moves last and only during a quiet window** -- it is read by
-the dashboard tooling and referenced from the pinned clones.
+**`production/` moves last and only during a quiet window** -- it is
+read by the dashboard tooling and referenced from the pinned clones.
+Its four-way split is scoped separately in
+[`production-move-plan.md`](production-move-plan.md): 187 files, 94 code
+references, and an ordering constraint (`agpt/30b-exp/` must move before
+`agpt/`).
 
 ### Step 4 -- link checker in `refresh_all.sh`
 
