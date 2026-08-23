@@ -24,9 +24,20 @@ import matplotlib.pyplot as plt  # noqa: F401
 # charts) via the one helper, so eval + production charts match.
 from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
+
+def _repo_root() -> Path:
+    # Walk up to the repo root instead of counting parents: a depth-counted
+    # path silently resolves to the wrong directory if this file ever moves,
+    # and the plot then renders empty rather than failing.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "torchtitan").is_dir():
+            return parent
+    raise RuntimeError("could not locate torchtitan repo root from " + __file__)
+
+
 apply_style()
 
-REPO_ROOT = Path(__file__).resolve().parents[7]
+REPO_ROOT = _repo_root()
 # Per-trajectory v2 eval roots; gbs differs per node count, so they
 # can't be conflated.
 V2_TRAJECTORIES = {

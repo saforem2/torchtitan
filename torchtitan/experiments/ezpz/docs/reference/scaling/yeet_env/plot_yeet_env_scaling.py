@@ -28,12 +28,23 @@ import matplotlib.ticker as mticker
 # Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
 import ambivalent  # noqa: F401
 
+
+def _repo_root() -> Path:
+    # Walk up to the repo root instead of counting parents: a depth-counted
+    # path silently resolves to the wrong directory if this file ever moves,
+    # and the plot then renders empty rather than failing.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "torchtitan").is_dir():
+            return parent
+    raise RuntimeError("could not locate torchtitan repo root from " + __file__)
+
+
 plt.style.use(ambivalent.STYLES["ambivalent"])
 
 plt.rcParams["font.family"] = "monospace"
 
 DEFAULT_CSV = (
-    Path(__file__).resolve().parents[6]  # ezpz/docs/scaling/yeet_env/ -> repo root
+    _repo_root()
     / ".yeet-env-scaling-results.csv"
 )
 FIG_DIR = Path(__file__).parent / "figures"
