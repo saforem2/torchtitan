@@ -22,6 +22,7 @@ from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
+from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
@@ -209,6 +210,29 @@ class FaultTolerantTrainer(Trainer):
         """Force a final checkpoint + stop once within this many seconds of the
         deadline. Must cover one checkpoint save + async flush at the target
         scale (20B/512N+ may want ~900; 600 is safe for <=2B/256N)."""
+
+        # Signal-triggered final checkpoint. The walltime guard above only
+        # fires when the deadline is CONFIGURED and the clock is read between
+        # steps. It cannot help when the stop arrives from outside as a signal:
+        #   * `timeout N ezpz launch ...` sends SIGTERM at N (every walltime-
+        #     bound PBS script here wraps the launch in one),
+        #   * PBS sends SIGTERM at walltime before SIGKILL,
+        #   * an operator sends SIGINT/SIGTERM to stop a run early.
+        # In all three the process dies wherever it happens to be and every
+        # step since the last interval boundary is discarded. Job 12473683
+        # (30B/Mano/64N) was projected to stop at ~step 147 with its last save
+        # at 125 -- ~22 steps, ~1.4B tokens, ~1h of 64-node time thrown away.
+        #
+        # The handler CANNOT save: dcp.save is a collective and every rank must
+        # call it from the same place in the loop, so saving from a handler
+        # that fires at an arbitrary instruction would hang or corrupt. It only
+        # sets a flag; the loop checks it between steps and takes the same
+        # forced-save path the walltime guard uses.
+        save_on_signal: bool = True
+        """Catch SIGTERM/SIGINT and force a final checkpoint before exiting,
+        instead of losing every step since the last interval boundary. The
+        handler only sets a flag -- the save happens in the train loop, where
+        all ranks participate. Set False to restore the default OS behavior."""
 
         # NaN-abort guard. A diverged run (e.g. an 80B optimizer NaN) otherwise
         # keeps "training" on non-finite losses for the ENTIRE walltime -- the
@@ -1183,6 +1207,27 @@ class FaultTolerantTrainer(Trainer):
             else:
                 wall_deadline = None
 
+            # Cooperative stop on SIGTERM/SIGINT. Complements the walltime
+            # deadline above rather than replacing it: the deadline needs to be
+            # configured and only helps when it is set correctly, while the
+            # signal path covers `timeout N` in the PBS scripts, PBS's own
+            # pre-walltime SIGTERM, and an operator stopping a run by hand --
+            # none of which the clock can see. Installed here, just before the
+            # loop, so the handler cannot fire during setup (dataloader build,
+            # checkpoint load) where there is no step worth saving.
+            if config.save_on_signal:
+                if signal_stop.install():
+                    logger.info(
+                        "signal-ckpt: SIGTERM/SIGINT will force a final "
+                        "checkpoint and stop cleanly after the current step"
+                    )
+                else:
+                    logger.warning(
+                        "signal-ckpt: could not install signal handlers "
+                        "(not the main thread?); a SIGTERM will lose every "
+                        "step since the last checkpoint interval"
+                    )
+
             # NaN-abort: count consecutive non-finite reported losses so a
             # diverged run does not "train" on NaN for the whole walltime.
             # Field lives on the top-level trainer Config (sibling of
@@ -1277,6 +1322,28 @@ class FaultTolerantTrainer(Trainer):
                         # saves).
                         self.checkpointer.maybe_wait_for_saving()
                         break
+
+                # Cooperative stop: a SIGTERM/SIGINT arrived (inner `timeout`,
+                # PBS pre-walltime kill, or an operator). Same forced-save path
+                # as the walltime guard -- last_step=True bypasses the interval,
+                # then block until the async save is actually on disk, because
+                # the process is about to be killed and close() does NOT wait.
+                # Checked here, between steps, because every rank is
+                # synchronized at this point; dcp.save is collective and cannot
+                # be called from the handler itself.
+                if signal_stop.stop_requested():
+                    logger.warning(
+                        f"{signal_stop.stop_signal_name()} received at step "
+                        f"{self.step}; forcing final checkpoint and stopping"
+                    )
+                    if not saved_this_step:
+                        self.checkpointer.save(self.step, last_step=True)
+                    self.checkpointer.maybe_wait_for_saving()
+                    logger.info(
+                        f"signal-ckpt: checkpoint for step {self.step} is on "
+                        "disk; exiting cleanly"
+                    )
+                    break
 
                 # Run validation if validator is available
                 if self.config.validator.enable and self.validator.should_validate(
