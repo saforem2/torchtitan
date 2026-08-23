@@ -39,6 +39,13 @@ set -o pipefail
 # because a walltime-bound run has no natural end -- whatever it reaches must
 # be on disk.
 #
+#
+# LR/WARMUP SETTLED BY MEASUREMENT (job 12473667, 2N, 8 steps before its own
+# timeout). The 3-step smoke's loss->29.9 / grad_norm->198 spike was a WARMUP
+# artifact, not the LR: that smoke ran warmup=1. With warmup=20 the same
+# lr=3e-4 gives step 2 = 12.167 (not 29.865) and grad_norm 9.77 (not 198.5),
+# and by step 8 Mano is at 11.075 / 7.21 against AdamW's 10.222 / 38.78 --
+# trailing on loss but CALMER on grad_norm. No instability. So 3e-4 stands.
 # LR 3e-4 is Mano's setting in the 2B competition configs AND the AdamW
 # baseline's peak, so the optimizer is the only variable. If Mano wants a
 # different LR at 30B that is a finding for the next run, not something to
