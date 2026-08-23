@@ -1,0 +1,99 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=8
+#PBS -l walltime=04:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 30b-mano-lrfind
+#PBS -j oe
+set -o pipefail
+
+# LR finder for Mano at 30B, using the built-in lr_finder.py.
+#
+# I hand-rolled a 4-arm LR sweep before noticing this existed. It is strictly
+# better: an exponential sweep from init_lr to max_lr over one run, EMA-smoothed
+# loss per LR, then derivative analysis for the blow-up point (Smith 2015,
+# suggested LR = blow-up / 10). One job instead of four, and it produces a
+# curve rather than four points.
+#
+# WHY THIS MATTERS MORE THAN I ASSUMED. The existing 2B finder data
+# (outputs/lrfind-2b-100step/) has min-loss for mano at lr=4.79e-03 -- SIXTEEN
+# TIMES the 3e-4 I carried over from the competition configs. That 3e-4 may be
+# far too LOW rather than too high, which the 8-step comparison could not see:
+# Mano trailing AdamW (11.075 vs 10.222 at step 8) is exactly what an
+# undersized LR looks like.
+#
+# CLAUDE.md also records the 80B finder result: mano's suggested LR is batch
+# dependent (~3e-6 at GBS 6144), and the small-batch AdamW number explicitly
+# does NOT transfer. So the 30B number has to be measured at a 30B-realistic
+# batch, not inherited from the 2B.
+#
+# 8N, GBS=480 (LBS=5 x 96 ranks, GAS=1) to match the AdamW baseline's batch
+# exactly -- the one config whose loss curve we can compare against.
+#
+# steps=1000 x fraction=0.1 -> 100 finder steps, matching the 2B run's
+# resolution. warmup_fraction=0.1 holds 10 steps at init_lr first so the model
+# settles before LR sensitivity is measured -- without it the first few points
+# measure init transients, which is precisely the artifact that made the 3-step
+# smoke look catastrophic.
+#
+# Sweep 1e-6 -> 1e-1: brackets both the 3e-4 in use and the 4.79e-03 the 2B
+# preferred, with room above to actually find a blow-up. A sweep that never
+# blows up yields no suggestion at all (the finder warns and returns nothing).
+#
+# smooth_frac=0.1 per the config docstring's guidance for <50-ish effective
+# points / noisy curves.
+#
+# Budget: 100 steps at ~41 s/step (8N/GAS=1, measured) = ~68 min + ~4 min
+# startup. 4h walltime, inner timeout 3h. Both clocks sized together.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+CFG_OK=0
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_30b_olmo2tok_mano" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: agpt_30b_olmo2tok_mano does not import"; exit 1; }
+
+DUMP="$PWD/outputs/lrfind-30b-mano"
+LOGD="$PWD/outputs/logs/30b-mano-lrfind/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+echo "dump: $DUMP"
+echo "log:  $LOG"
+echo ""
+
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b}"
+
+timeout 10800 ezpz launch --nproc 96 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok_mano \
+    --training.steps=1000 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-finder.enable \
+    --lr-finder.init-lr=1e-6 \
+    --lr-finder.max-lr=1e-1 \
+    --lr-finder.fraction=0.1 \
+    --lr-finder.warmup-fraction=0.1 \
+    --lr-finder.smooth-frac=0.1 \
+    --dump-folder="$DUMP" \
+    --checkpoint.no-enable \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## Mano LR finder @ 30B ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+printf '%s' "$C" | grep -aE "LR Finder" | tail -12 | sed 's/^/  /'
+echo ""
+echo "  SUGGESTED: $(printf '%s' "$C" | grep -aoE 'suggested LR = [0-9.e+-]+' | tail -1)"
+echo "  blow-up:   $(printf '%s' "$C" | grep -aoE 'blow-up at [0-9.e+-]+' | tail -1)"
+echo "  currently running 64N at lr=3e-4; 2B finder liked 4.79e-03"
+echo ""
+find "$DUMP" -name "lr_finder_data.csv" 2>/dev/null | sed 's/^/  csv: /'
+find "$DUMP" -name "lr_vs_loss.png" 2>/dev/null | sed 's/^/  png: /'
+echo "  rc=$rc"
+echo "MANO_LRFIND_DONE"
