@@ -87,7 +87,7 @@ MFU baseline (4N validation): ~17.8%, identical to Sunspot reference.
 
    If you see `RuntimeError: No backend ... does not support
    splitting`, the workaround is not installed — see
-   [`docs/upstream-issues/xccl_split_group_unsupported.md`](../../upstream-issues/xccl_split_group_unsupported.md).
+   [`docs/upstream-issues/xccl_split_group_unsupported.md`](../../outbound/upstream-issues/xccl_split_group_unsupported.md).
 
 ## Interactive launch (4N smoke validation)
 

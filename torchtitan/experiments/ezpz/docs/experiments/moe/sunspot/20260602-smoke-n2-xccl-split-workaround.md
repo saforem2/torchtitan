@@ -6,7 +6,7 @@ end-to-end on `moe_2b_ep`. Before the workaround, the EP sparse mesh
 construction inside `ParallelDims.build_mesh` raised
 `RuntimeError: No backend for the parent process group or its backend
 does not support splitting` at trainer init — see
-[`docs/upstream-issues/xccl_split_group_unsupported.md`](../../../upstream-issues/xccl_split_group_unsupported.md).
+[`docs/upstream-issues/xccl_split_group_unsupported.md`](../../../outbound/upstream-issues/xccl_split_group_unsupported.md).
 
 ## TL;DR
 

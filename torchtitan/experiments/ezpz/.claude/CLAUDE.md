@@ -337,7 +337,7 @@ that touches one of these areas.
   `agpt_50b_wide` ~48B params, 2N, ~30s to crash).
   Workaround: `compile=OFF` for any 80B-family config on torch 2.13.
   Toy repro:
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
 
 - **HSDP (`dp_replicate × dp_shard > 1`) hits an `aten.normal_.default`
   failure during init** (2026-05-04). Param init goes through
@@ -556,7 +556,7 @@ empirical evidence, follow the doc link.
   fires on torch 2.13, did not fire on torch 2.10.** Workaround:
   `compile=OFF` for 80B-family on torch 2.13, OR stay on torch 2.10
   for these configs. Toy repro:
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
 
 - **80B TP=2 regression on torch 2.10:** Hangs at step 1 since upstream
   changes April 16-23. Works on torch 2.13. See `project_80b_bisect`

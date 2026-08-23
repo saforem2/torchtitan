@@ -92,4 +92,4 @@ the documented mitigation.
 
 ## Cross-refs
 - [`docs/guides/known-bugs/blendcorpus-eoferror-race.md`](../../../guides/known-bugs/blendcorpus-eoferror-race.md)
-- [`docs/upstream-issues/blendcorpus-atomic-rename-index-fix.md`](../../../upstream-issues/blendcorpus-atomic-rename-index-fix.md)
+- [`docs/upstream-issues/blendcorpus-atomic-rename-index-fix.md`](../../../outbound/upstream-issues/blendcorpus-atomic-rename-index-fix.md)

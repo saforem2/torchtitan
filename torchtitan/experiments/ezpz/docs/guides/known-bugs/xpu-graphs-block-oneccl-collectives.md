@@ -157,7 +157,7 @@ scheduling until collectives are capturable.
 
 > [!NOTE]
 > **Filable version lives at**
-> [`upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md`](../../upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md).
+> [`upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md`](../../outbound/upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md).
 > That is the copy to send; the text below is the original draft.
 
 > **Subject:** XPU graphs cannot capture oneCCL collectives (torch

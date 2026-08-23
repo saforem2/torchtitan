@@ -98,7 +98,7 @@ in the ticket.
 
 > [!NOTE]
 > **Written up and ready to file:**
-> [`upstream-issues/intel-ur-die-urEventWait-a2a.md`](../../upstream-issues/intel-ur-die-urEventWait-a2a.md)
+> [`upstream-issues/intel-ur-die-urEventWait-a2a.md`](../../outbound/upstream-issues/intel-ur-die-urEventWait-a2a.md)
 > (2026-08-20). Needs an ALCF/Intel account to submit.
 
 Measured on the post-79th-sync tree (job `12473367`, 2N, LBS=1, 5 steps,
