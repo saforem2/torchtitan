@@ -110,7 +110,13 @@ source .venv/bin/activate
 # does not overwrite it, ranks import the stale venv and die on
 # `No module named importlib.metadata`. Cheap insurance at 130 nodes.
 _nnodes_all=$(wc -l < "${PBS_NODEFILE}")
-mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
+# `timeout` is load-bearing: this mpiexec fans out to every node, and on a
+# contended filesystem it can HANG rather than fail. `2>/dev/null || true`
+# guards against a non-zero exit but NOT against hanging -- probe 7552666 sat
+# here for 1h40m holding 64 nodes and produced no output at all before being
+# walltime-killed. 300s is far more than a recursive rm of a node-local dir
+# needs; if it is exceeded, skip the cleanup and let the yeet overwrite.
+timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
 unset _nnodes_all
 if [[ -f .venv.tar.gz ]]; then
     ezpz yeet --src .venv.tar.gz
