@@ -1,0 +1,84 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N diagsmoke
+#PBS -j oe
+set -o pipefail
+
+# First real run of the extended diagnostics. Everything so far is CPU unit
+# tests; nothing has produced a `diag/` key on an actual job or in W&B.
+#
+# 2N / agpt_20b / 12 steps, interval=2 so several samples land in a short run.
+# All four features on at once, because the thing most likely to break is an
+# INTERACTION -- DTensor norms under FSDP, the attention hook inside the
+# local_map-wrapped forward, History under a real torch.distributed init.
+# None of that is exercised by a CPU test.
+#
+# What to check in the output:
+#   diag/update_ratio_mean     ~1e-3 healthy. A hard 0.0 means a frozen layer
+#                              (the bf16 RMSNorm failure), which at fp32 here
+#                              would itself be a finding.
+#   diag/layer_gradnorm_skew   max/mean over layers. Near 1 is uniform.
+#   diag/clip_fired            whether max_norm=1.0 is actually engaging --
+#                              we have never measured this.
+#   diag/qk_logit_bound_est    the QK trend; should be stable over 12 steps.
+#   rank_std/loss              cross-rank spread. 24 ranks is under History's
+#                              384 cutoff, so aggregation IS active here.
+#
+# Deliberately small: the point is to confirm the metrics APPEAR and are
+# finite under real sharding, not to learn anything about the 20B.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+
+LOGD="$PWD/outputs/logs/diagsmoke/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-diagnostics}"
+
+timeout 2400 ezpz launch --nproc 24 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_20b \
+    --training.steps=12 --training.seq-len=2048 \
+    --training.local-batch-size=1 \
+    --parallelism.tensor-parallel-degree=1 \
+    --parallelism.spmd-backend=partial_dtensor \
+    --diagnostics \
+    --diagnostics-interval=2 \
+    --diagnostics-per-layer \
+    --diagnostics-attention \
+    --history-bridge \
+    --checkpoint.no-enable \
+    --dataloader.num-workers=0 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## diagnostics smoke ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo "  steps: $(printf '%s' "$C" | grep -acE 'step: *[0-9]+ +loss:')"
+echo "  W&B:   $(printf '%s' "$C" | grep -aoE 'https://wandb[^ ]*runs/[A-Za-z0-9]+' | tail -1)"
+echo ""
+echo "  DID THE METRICS APPEAR? (0 anywhere = the feature did not work)"
+for k in update_ratio_mean n_params_frozen layer_gradnorm_skew clip_fired \
+         grad_norm_preclip grad_norm_postclip qk_logit_bound_est \
+         opt_exp_avg_norm weight_norm_global; do
+  n=$(printf '%s' "$C" | grep -ac "diag/$k")
+  printf "    %-24s occurrences=%s\n" "$k" "$n"
+done
+echo "  cross-rank (History, 24 ranks < 384 so aggregation active):"
+printf '%s' "$C" | grep -aoE "rank_(std|max|min)/[a-z_]+" | sort -u | sed 's/^/    /'
+echo ""
+echo "  SAMPLE VALUES (must be finite, not nan/inf):"
+printf '%s' "$C" | grep -aoE "diag/[a-z_0-9]+[\"']?: *[-0-9.e+naif]+" | tail -14 | sed 's/^/    /'
+echo ""
+echo "  history artifacts:"
+find outputs/history -maxdepth 2 2>/dev/null | head -6 | sed 's/^/    /'
+echo "  rc=$rc"
+echo "DIAGSMOKE_DONE"
