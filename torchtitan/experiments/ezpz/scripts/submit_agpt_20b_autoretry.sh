@@ -155,7 +155,13 @@ NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))   # == --nproc passed to ezpz launch
 NNODES="$NHOSTS_TRAIN"                    # for CKPT_DIR naming
 
 # ---- Configuration (matches submit_agpt_20b_aurora_venv_failover.sh) ----
-MODEL="20b"
+# MODEL is overridable so this script can drive the exp03 1B-proxy gate
+# arms (agpt 2b == 0.937B non-embedding, the proxy size) without a
+# forked copy. Everything else here -- the Polaris MPICH compat symlink,
+# MPICH_GPU_SUPPORT_ENABLED=0, EZPZ_MPI_LABEL, --no-transfer, the guarded
+# stale-venv cleanup, and the blendcorpus-vs-HF-streaming DATASET switch
+# -- is machine-hardening we want identically on every Polaris arm.
+MODEL="${MODEL:-20b}"
 # Default to the `_real` flavor: real-valued (cos_sin) RoPE instead of the
 # complex backend, which torch.compile's inductor cannot lower (it falls
 # back to eager). With compile ON (the 20B default) cos_sin is faster.
@@ -268,8 +274,19 @@ if [[ "${DATASET}" == "blendcorpus" ]]; then
         "--validator.dataloader.data-cache-path=${DATA_CACHE_PATH}"
     )
 else
+    # HF streaming. `--dataloader.dataset-path=""` is REQUIRED, not
+    # cosmetic: the agpt config registry defaults dataset_path to
+    # data-lists/<machine>/books.txt (config_registry.py, for the
+    # blendcorpus path), and core's _validate_dataset resolves
+    # `path = dataset_path or config.path` -- so a non-empty default
+    # SHADOWS the registered HF repo id. Job 7554131 asked for
+    # fineweb_edu and died on
+    #   FileNotFoundError: Couldn't find any data file at .../books.txt
+    # Passing an empty path makes the `or` fall through to the
+    # registered repo id.
     DATALOADER_FLAGS=(
         "--dataloader.dataset=${DATASET}"
+        "--dataloader.dataset-path="
         "--dataloader.num-workers=2"
     )
     VALIDATOR_DATA_FLAGS=()
