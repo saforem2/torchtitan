@@ -186,6 +186,18 @@ and should be run after any upstream sync -- it reports zero undefined names in
 
 ## Phase 2 interim results (chain 1, ~1.95B tokens per arm)
 
+![Loss and gradient norm, three optimizers at GBS=960](figures/optcmp_30b_gbs960.svg)
+
+![Mano minus AdamW loss; below zero means Mano is ahead](figures/optcmp_30b_crossover.svg)
+
+Regenerate with `python3 torchtitan/experiments/ezpz/scripts/plot_optcmp.py`.
+It reads the arms' `train.log` files directly rather than W&B, so the figures
+rebuild from a checkout with no network and no run-id bookkeeping. Chained
+jobs re-log steps they resumed over, so the reader keys by step with
+last-write-wins -- otherwise a resumed step would appear twice with the killed
+run's value.
+
+
 Jobs 12473743/44/45, 16N each, GBS=960, constant LR after a 20-step warmup,
 each arm at its own Phase 1 LR. Loss / grad_norm at each 100-step mark:
 
