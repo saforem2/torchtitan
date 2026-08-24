@@ -18,6 +18,13 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
     default_sophiag,
 )
+from torchtitan.components.data import (
+    ConcatThenSplitPackingConfig,
+    GrainDataLoader,
+    SingleDatasetConfig,
+)
+from torchtitan.components.data.sources import HuggingFaceRandomAccessSource
+from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -1021,8 +1028,41 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
+# Local fineweb-edu shards for the optimizer comparison. The 80th upstream sync
+# (#4088) deleted HuggingFaceTextDataLoader, so `dataset="fineweb_edu_local"` on
+# a BlendCorpusDataLoader.Config now raises -- the replacement is a Grain
+# dataset graph, not a renamed class.
+#
+# HOW MANY SHARDS. Each parquet holds ~726k rows / ~1.4B tokens, and
+# HuggingFaceRandomAccessSource materializes what it is given (streaming=False),
+# so pointing at all 140 files would try to hold 267 GB. 16 shards is ~22B
+# tokens: comfortably more than the 10B-per-arm budget, so no arm repeats data,
+# while staying small enough to materialize. Sorted + sliced, never sampled, so
+# every arm reads byte-identical input.
+_FINEWEB_EDU_DIR = "/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT"
+_FINEWEB_EDU_NUM_SHARDS = 16
+
+
+def _fineweb_edu_shards() -> list[str]:
+    """The exact shard list every comparison arm reads.
+
+    Sorted so the selection is deterministic across arms and across reruns:
+    two arms trained on different shards would not be comparable, and that
+    difference would be invisible in the loss curve.
+    """
+    import glob
+
+    files = sorted(glob.glob(f"{_FINEWEB_EDU_DIR}/*.parquet"))
+    if len(files) < _FINEWEB_EDU_NUM_SHARDS:
+        raise ValueError(
+            f"expected >= {_FINEWEB_EDU_NUM_SHARDS} parquet shards in "
+            f"{_FINEWEB_EDU_DIR}, found {len(files)}"
+        )
+    return files[:_FINEWEB_EDU_NUM_SHARDS]
+
+
 def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
-    """Point a config at the LOCAL fineweb-edu-100BT parquet instead of books.
+    """Point a config at the LOCAL fineweb-edu parquet shards via Grain.
 
     agpt() defaults dataset_path to data-lists/<machine>/books.txt, which on
     Sunspot is THREE shards totalling ~11 GB -- about 5.8B tokens. A 10B-token
@@ -1031,19 +1071,36 @@ def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.C
     That is precisely the confound a fixed-batch optimizer comparison exists to
     exclude, so the arms read a corpus larger than their budget instead.
 
-    fineweb_edu_local is a registered LOCAL parquet dir (140 files, ~267 GB,
-    ~100B tokens) already used by agpt_2b_mds_mix_edu. Local matters: streaming
-    allenai/olmo-mix-1124 from the hub 429-storms at this rank count (see the
-    module docstring in datasets.py), and the on-disk olmo-mix cache here holds
-    only the wiki slice (6.1 GB), which is smaller and narrower than books.
+    books.txt is also the ONLY blendcorpus list that resolves on Sunspot -- every
+    other list under data-lists/sunspot/ points at /gila, which is not mounted
+    here. So there is no "use blendcorpus with a bigger corpus" option; reading
+    real data at this scale requires the Grain path.
 
-    dataset_path must be cleared: it is the blendcorpus file-list path and is
-    meaningless for a parquet dataset, but a stale value would still be read.
+    Streaming allenai/olmo-mix-1124 from the hub was the other candidate and is
+    rejected: it 429-storms at this rank count (datasets.py module docstring
+    documents the failure at 384 ranks; these arms run 192), and the on-disk
+    olmo-mix cache holds only the wiki slice (6.1 GB), smaller AND narrower than
+    the books list it would replace.
+
+    ConcatThenSplitPackingConfig matches how the blendcorpus path feeds the
+    model: documents concatenated and split at max_context_length, so every
+    sequence is full rather than padded, and tokens-per-step means what the
+    batch arithmetic assumes.
     """
-    cfg.dataloader.dataset = "fineweb_edu_local"
-    cfg.dataloader.dataset_path = None
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=ConcatThenSplitPackingConfig(
+            dataset=SingleDatasetConfig(
+                source=HuggingFaceRandomAccessSource.Config(
+                    path="parquet",
+                    split="train",
+                    load_dataset_kwargs={"data_files": _fineweb_edu_shards()},
+                ),
+                processor=TextProcessor.Config(),
+                post_filters=(lambda sample: sample is not None,),
+            )
+        )
+    )
     return cfg
-
 
 def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
     """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
