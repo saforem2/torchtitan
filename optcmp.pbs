@@ -72,6 +72,25 @@ CKPT="$PWD/checkpoints/agpt-30b-optcmp-$OPT"
 LOGD="$PWD/outputs/logs/optcmp-$OPT/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/train.log"; : > "$LOG"
 
+# LUSTRE STRIPING. Jobs 12473740-42 all died at the step-100 checkpoint with
+#   OSError: [Errno 28] No space left on device
+# in DCP write_data, while `df` reported 1.1P free. The cause is per-OST, not
+# total: /lus/tegu has FOUR OSTs and they are wildly asymmetric --
+#   OST0/OST1: 624 TB each,  6-7% used
+#   OST2/OST3:  27 TB each,  100% used
+# The default layout here is stripe_count=1 with stripe_offset=-1 (round
+# robin), so every file lands on ONE OST and has a ~50% chance of picking a
+# full one. Three concurrent 30B checkpoints (241-285 GB each) made that a
+# certainty.
+#
+# Pin the checkpoint dir to the two large OSTs by explicit index. Subdirs
+# inherit the layout, so the step-N/ dirs DCP creates are covered. Verified:
+# a new file under this dir reports obdidx 0 and 1 only.
+mkdir -p "$CKPT"
+lfs setstripe -c 2 -i 0 -o 0,1 "$CKPT" 2>/dev/null || \
+    echo "  WARNING: lfs setstripe failed; checkpoints may hit a full OST"
+echo "  stripe: $(lfs getstripe -d "$CKPT" 2>/dev/null | tr -s ' ' | head -1)"
+
 LAST=$(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -n | tail -1)
 echo "arm:    $OPT   config: $CONFIG   lr: $LR (CONSTANT after 20-step warmup)"
 echo "batch:  GBS=960 (LBS 5 x 192 ranks x GAS 1), seq 4096 -> 3.93M tok/step"
