@@ -1,0 +1,100 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N mano-lrsweep
+#PBS -j oe
+set -o pipefail
+
+# Which LR does Mano want at 30B? Measure it on 2 nodes before spending 64.
+#
+# The 3-step smoke (12473665) passed mechanically but the numerics were hot.
+# Step 1 matches AdamW almost exactly -- same init, same data:
+#
+#           step 1              step 2                step 3
+#   AdamW   12.028 / 5.66       11.246 /   6.03       11.519 / 32.92
+#   Mano    12.014 / 5.68       29.865 / 198.48       20.651 / 30.05
+#
+# Mano's FIRST update spikes loss to 29.9 and grad_norm to 198 -- a 33x
+# grad_norm jump where AdamW moved 5.66 -> 6.03. It recovers by step 3, so it
+# is not diverged, but lr=3e-4 is clearly aggressive.
+#
+# That LR came from the 2B competition configs. I carried it over so "the
+# optimizer is the only variable", which was clean experimental design and
+# wrong on the substance: the LR is part of an optimizer's identity, and
+# manifold-normalized updates need not scale across a 13x model-size change.
+#
+# Three steps cannot separate "warmup transient that settles" from "too hot,
+# will thrash for 130 steps". 20 steps can. Four arms, 2 nodes:
+#
+#   3e-4  the 2B value, as-is (the arm that spiked)
+#   1e-4  ~3x down
+#   3e-5  ~10x down, matches the AdamW continuation's constant LR
+#   1e-5  floor, to bracket -- if even this spikes, the problem is not LR
+#
+# warmup-steps=20 over a 20-step run means LR ramps the whole way, which is
+# also what the 64N job does. The smoke used warmup=1, so it tested the
+# unwarmed spike specifically; this tests the configuration that would
+# actually run.
+#
+# The verdict is per-arm: does loss at step 20 beat step 1 (12.0), and does
+# grad_norm stay bounded? An arm that ends above its starting loss is thrashing
+# regardless of what it did in between.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+export LOGD="$PWD/outputs/logs/mano-lrsweep/$PBS_JOBID"; mkdir -p "$LOGD"
+
+run() {  # run <lr>
+  timeout 1500 ezpz launch --nproc 24 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_30b_olmo2tok_mano \
+      --training.steps=20 --training.seq-len=4096 \
+      --training.local-batch-size=5 \
+      --training.global-batch-size=480 \
+      --parallelism.tensor-parallel-degree=1 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr="$1" \
+      --lr-scheduler.warmup-steps=20 \
+      --checkpoint.no-enable \
+      --dataloader.num-workers=0 \
+      > "$LOGD/lr$1.log" 2>&1
+  echo "  [lr=$1] rc=$?"
+}
+
+for LR in 3e-4 1e-4 3e-5 1e-5; do run "$LR"; done
+
+echo ""
+echo "########## Mano LR sweep, 30B, 2N, 20 steps ##########"
+python3 - <<'PY'
+import os, re
+d = os.environ["LOGD"]
+print(f"  {'lr':>6}{'steps':>7}{'loss@1':>9}{'loss@20':>9}{'delta':>9}{'max|gn|':>10}  verdict")
+for lr in ("3e-4","1e-4","3e-5","1e-5"):
+    try:
+        t = re.sub(r"\x1b\[[0-9;]*m","",open(f"{d}/lr{lr}.log",errors="ignore").read())
+    except OSError:
+        print(f"  {lr:>6}  (missing)"); continue
+    r = re.findall(r"step: *(\d+) +loss: *([\d.]+) +grad_norm: *([\d.]+)", t)
+    if not r:
+        why = ("OOM" if "out of memory" in t else
+               "level_zero" if "level_zero" in t else
+               "resolver" if "not added." in t else "no steps")
+        print(f"  {lr:>6}{0:>7}  --  {why}"); continue
+    l1 = float(r[0][1]); ln = float(r[-1][1])
+    gn = max(float(x[2]) for x in r)
+    d_ = ln - l1
+    v = ("THRASHING (ended above start)" if d_ >= 0 else
+         "unstable (grad_norm > 100)" if gn > 100 else
+         "descending, bounded")
+    print(f"  {lr:>6}{len(r):>7}{l1:>9.3f}{ln:>9.3f}{d_:>+9.3f}{gn:>10.1f}  {v}")
+print()
+print("  AdamW reference on the same config: step 1 = 12.028, and it reached")
+print("  2.115 over 2000 steps. Any arm that ends ABOVE 12.0 after 20 steps is")
+print("  not a candidate for the 64N run.")
+PY
+echo "MANO_LRSWEEP_DONE"

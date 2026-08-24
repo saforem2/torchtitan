@@ -12,8 +12,9 @@ be compared directly:
     - 20B 256N (per-token comparator)
     - 20B 512N sync (canonical 20B chain)
 
-Writes to docs/records/evals/figures/all_production_evals.svg (single artifact
-referenced from docs/records/evals/README.md as the landing-page chart).
+Writes to <eval-docs>/figures/all_production_evals.svg (single artifact
+referenced from the eval README as the landing-page chart). The eval docs dir
+is resolved at import by locating the README.md that embeds this chart.
 
 Run:
     python3 -m torchtitan.experiments.ezpz.eval.plot_evals_combined
@@ -38,12 +39,46 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E4
 
 apply_style()
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+def _repo_root() -> Path:
+    # Walk up to the repo root instead of counting parents: a depth-counted
+    # path silently resolves to the wrong directory if this file ever moves,
+    # and the chart then writes somewhere nobody reads rather than failing.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "torchtitan").is_dir():
+            return parent
+    raise RuntimeError("could not locate torchtitan repo root from " + __file__)
+
+
+REPO_ROOT = _repo_root()
 EVALS_DIR = REPO_ROOT / "outputs" / "evals"
-OUT_PATH = (
-    REPO_ROOT
-    / "torchtitan/experiments/ezpz/docs/records/evals/figures/all_production_evals.svg"
-)
+
+# Where the eval docs live. The docs lifecycle reorg moves `docs/evals/` to
+# `docs/records/evals/` (dated, immutable results are `records/`), so the
+# destination differs by branch. Resolve it instead of hardcoding: a hardcoded
+# path does not merely break at the merge, it breaks SILENTLY -- mkdir(parents=
+# True) below would recreate the retired tree, write the chart into it, and exit
+# 0 while every README still points at the live one.
+#
+# Probe on README.md, NOT on the directory existing. Both paths exist
+# simultaneously on the pre-reorg branch (docs/records/evals/agpt/{2b,20b} holds
+# the per-model overviews while docs/evals/ is still the landing page), so a
+# bare is_dir() test picks whichever the list happens to name first and is
+# wrong on one branch or the other. README.md marks the landing page, which is
+# the doc that embeds this chart -- exactly the thing the path must track.
+_DOCS = REPO_ROOT / "torchtitan/experiments/ezpz/docs"
+_EVAL_DOC_DIRS = [_DOCS / "records" / "evals", _DOCS / "evals"]
+for _d in _EVAL_DOC_DIRS:
+    if (_d / "README.md").is_file():
+        EVAL_DOCS_DIR = _d
+        break
+else:
+    raise SystemExit(
+        "No eval docs landing page found (looked for README.md in):\n"
+        + "".join("  - %s\n" % d for d in _EVAL_DOC_DIRS)
+        + "This chart is embedded from that README; create it, or add the\n"
+        "new location to _EVAL_DOC_DIRS."
+    )
+OUT_PATH = EVAL_DOCS_DIR / "figures" / "all_production_evals.svg"
 
 # Tokens-per-step for each trajectory (computed from GBS × SEQ_LEN where
 # SEQ_LEN=8192 across the board).
@@ -65,6 +100,15 @@ TRAJECTORIES: list[dict] = [
     {
         "label": "2B-MDS (SophiaG, n256)",
         "eval_subdir": "agpt-2b-mds",
+        # The MDS history is split across sibling result dirs, and reading only
+        # the first truncates the flagship run at 7.06T of its 7.77T tokens --
+        # exactly the tail that makes it the reference chain. `agpt-2b-mds`
+        # covers steps 5,000-140,352 (its three ntok* stages are replicates of
+        # the same physical ckpts); `agpt-2b-mds-7771T` carries 140,400-154,391
+        # in the same <stage>/step-*/results/results.json layout. Same chain,
+        # two directories, so read both and let the replicate-averaging in
+        # load_mds handle the overlap it already handles within one dir.
+        "extra_subdirs": ["agpt-2b-mds-7771T"],
         "layout": "mds",
         # 6144 x 8192 = 50,331,648. NOT 7_770e9/140_000 (~55.5M), which was
         # wrong by +10.3%: the 7.770T budget was reached at iteration 154,391,
@@ -268,25 +312,39 @@ def load_dcp(
     return sorted(merged.items())
 
 
-def load_mds(subdir: str, task: str, metric: str) -> list[tuple[int, float]]:
-    """MDS layout: 3 stage dirs containing step-{N}/results/results.json.
+def load_mds(
+    subdir: str,
+    task: str,
+    metric: str,
+    extra_subdirs: list[str] | None = None,
+) -> list[tuple[int, float]]:
+    """MDS layout: stage dirs containing step-{N}/results/results.json.
 
-    The three stages all symlink to the same physical ckpt dir for the
-    SophiaG sweep — same step appears up to 3 times. Average across
-    replicates (XPU lm-eval isn't bit-deterministic).
+    Stages symlink to the same physical ckpt dir for the SophiaG sweep -- the
+    same step appears up to 3 times. Average across replicates (XPU lm-eval
+    isn't bit-deterministic).
+
+    ``extra_subdirs`` names sibling dirs holding LATER segments of the SAME
+    chain. They share the layout and the step numbering, so they merge into the
+    one series: a step present in several dirs averages exactly as replicate
+    stages within one dir already do.
     """
-    base = EVALS_DIR / subdir
     by_step: dict[int, list[float]] = {}
-    for p in sorted(base.glob("*/step-*/results/results.json")):
-        step = int(p.parent.parent.name.split("-")[1])
-        val = _read_metric(p, task, metric)
-        if val is not None:
-            by_step.setdefault(step, []).append(val)
+    for d in [subdir] + list(extra_subdirs or []):
+        base = EVALS_DIR / d
+        if not base.is_dir():
+            print(f"  NOTE [{d}/{task}]: results dir absent -- skipped")
+            continue
+        for p in sorted(base.glob("*/step-*/results/results.json")):
+            step = int(p.parent.parent.name.split("-")[1])
+            val = _read_metric(p, task, metric)
+            if val is not None:
+                by_step.setdefault(step, []).append(val)
     return sorted((s, sum(v) / len(v)) for s, v in by_step.items())
 
 
 def _assert_no_missing_live_chains() -> None:
-    """Fail if a live chain with an eval_subdir is absent from TRAJECTORIES.
+    """Fail if a plotted-class chain with an eval_subdir is absent from TRAJECTORIES.
 
     Same failure mode as the training chart: this module keeps its own display
     list, so a chain can be fully registered in trajectories.py, have results
@@ -298,21 +356,53 @@ def _assert_no_missing_live_chains() -> None:
     """
     from torchtitan.experiments.ezpz.utils.trajectories import TRAJECTORIES as _ALL
 
+    # Both plotted classes, not just "live". A chain that stops running becomes
+    # wandb_only rather than disappearing, and its eval history stays just as
+    # valid -- gating on "live" alone would drop a chain from the chart on the
+    # day it finished, which is the day its final numbers matter most.
+    plotted_cls = ("live", "wandb_only")
+    have = {t["eval_subdir"] for t in TRAJECTORIES}
+    have |= {d for t in TRAJECTORIES for d in (t.get("extra_subdirs") or ())}
+    have |= {t["corrected_subdir"] for t in TRAJECTORIES if t.get("corrected_subdir")}
+
     want = {
         t["eval_subdir"]
         for t in _ALL
-        if t.get("cls") == "live" and t.get("eval_subdir")
+        if t.get("cls") in plotted_cls and t.get("eval_subdir")
     }
-    have = {t["eval_subdir"] for t in TRAJECTORIES}
     missing = sorted(want - have)
     if missing:
         raise SystemExit(
-            "Live chains with eval results missing from this chart:\n"
+            "Chains with eval results missing from this chart:\n"
             + "".join(f"  - {k}\n" for k in missing)
             + "\nAdd an entry to TRAJECTORIES here, or clear that chain's\n"
             "eval_subdir in utils/trajectories.py if it is intentionally\n"
             "not plotted. Do not leave it registered-but-undrawn."
         )
+
+    # Second, weaker check: an eval dir holding real results that NO trajectory
+    # references. This is how the MDS chain lost its last 14k steps -- the tail
+    # sat in a sibling dir (agpt-2b-mds-7771T) that nothing pointed at, so the
+    # flagship 7.77T run plotted as if it ended at 7.06T, with no error anywhere.
+    # A warning, not a failure: plenty of dirs here are SFT/IFEval/one-off sweeps
+    # that legitimately do not belong on a pretraining-token chart. The point is
+    # that dropping one becomes a decision someone made, not an oversight.
+    if EVALS_DIR.is_dir():
+        unreferenced = []
+        for d in sorted(EVALS_DIR.iterdir()):
+            if not d.is_dir() or d.name in have:
+                continue
+            if not d.name.startswith("agpt-"):
+                continue      # sft / ifeval / harness one-offs, not chains
+            n = sum(1 for _ in d.glob("**/step-*/results/results.json"))
+            if n:
+                unreferenced.append((d.name, n))
+        if unreferenced:
+            print("  NOTE: eval dirs with results that no trajectory reads:")
+            for name, n in unreferenced:
+                print(f"    - {name} ({n} result file(s))")
+            print("    Add them to a trajectory (eval_subdir / extra_subdirs) "
+                  "or ignore deliberately.")
 
 
 def main() -> None:
@@ -335,7 +425,10 @@ def main() -> None:
     for ax, (task, metric, title) in zip(axes, PANELS):
         for traj in TRAJECTORIES:
             if traj["layout"] == "mds":
-                pts = load_mds(traj["eval_subdir"], task, metric)
+                pts = load_mds(
+                    traj["eval_subdir"], task, metric,
+                    traj.get("extra_subdirs"),
+                )
             else:
                 pts = load_dcp(
                     traj["eval_subdir"],

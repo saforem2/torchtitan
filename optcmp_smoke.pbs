@@ -1,0 +1,81 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=00:40:00
+#PBS -l filesystems=tegu:home
+#PBS -N optcmp-smoke
+#PBS -j oe
+set -o pipefail
+
+# 2-NODE SMOKE for the optimizer-comparison arms.
+#
+# WHY THIS EXISTS. Five consecutive 48-node launches died in under a minute,
+# each on a DIFFERENT layer: renamed CLI flags (#4121), a deleted dataloader
+# (#4088), a flag GrainDataLoader.Config lacks, stale dataloader kwargs in
+# trainer.py, then a stale global_batch_size in a log line. Every one of them
+# was reachable at 2 nodes for 1/24th the allocation. Fixing forward one
+# 48-node launch at a time was the actual mistake.
+#
+# Runs all three arms SEQUENTIALLY in one small allocation, 3 steps each, so a
+# single job proves every arm reaches real training -- not just that it parses.
+# GBS here is NOT 960: at 2N/24 ranks the comparison batch is unreachable, and
+# this job tests the code path, not the numerics. The 48N launch keeps GBS=960.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+
+LOGD="$PWD/outputs/logs/optcmp-smoke/$PBS_JOBID"; mkdir -p "$LOGD"
+NRANKS=24
+# 24 ranks x 20480 tok = 491520 tok/step -> GAS=1 at this scale
+TOK_MB=20480
+TOK_STEP=$((TOK_MB * NRANKS))
+
+FAIL=0
+for pair in "adamw agpt_30b_olmo2tok_optcmp_adamw 3.05e-5" \
+            "mano agpt_30b_olmo2tok_mano 5.61e-5" \
+            "sophiag agpt_30b_olmo2tok_sophiag 3.55e-5"; do
+  set -- $pair
+  ARM=$1; CONFIG=$2; LR=$3
+  LOG="$LOGD/$ARM.log"; : > "$LOG"
+  echo ""
+  echo "########## SMOKE: $ARM ($CONFIG) lr=$LR ##########"
+  timeout 1500 ezpz launch --nproc "$NRANKS" -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config "$CONFIG" \
+      --optimizer.param-groups.0.optimizer-kwargs.lr="$LR" \
+      --training.steps=3 --training.max-context-length=4096 \
+      --training.num-tokens-per-microbatch-per-dp-rank=$TOK_MB \
+      --training.num-tokens-per-train-step=$TOK_STEP \
+      --parallelism.tensor-parallel-degree=1 \
+      --lr-scheduler.warmup-steps=20 \
+      --lr-scheduler.decay-ratio=0.0 \
+      --checkpoint.no-enable \
+      --nan-abort-consecutive=5 \
+      >> "$LOG" 2>&1
+  rc=$?
+  C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+  STEPS=$(printf '%s' "$C" | grep -acE "step: +[0-9]+ +loss")
+  ERR=$(printf '%s' "$C" | grep -aoE 'NameError.*|TypeError.*|NotImplementedError.*|Unrecognized options:.*|AttributeError.*' | head -1)
+  echo "  rc=$rc  steps=$STEPS"
+  echo "  GAS:      $(printf '%s' "$C" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
+  echo "  first:    $(printf '%s' "$C" | grep -aoE "step: +[0-9]+ +loss: +[0-9.]+" | head -1)"
+  echo "  last:     $(printf '%s' "$C" | grep -aoE "step: +[0-9]+ +loss: +[0-9.]+" | tail -1)"
+  [ -n "$ERR" ] && echo "  ERROR:    $ERR"
+  if [ "${STEPS:-0}" -lt 3 ]; then
+    echo "  VERDICT:  FAIL ($ARM did not reach 3 steps)"
+    FAIL=$((FAIL+1))
+  else
+    echo "  VERDICT:  PASS"
+  fi
+done
+
+echo ""
+echo "########## SMOKE SUMMARY ##########"
+echo "  arms failed: $FAIL of 3"
+[ "$FAIL" -eq 0 ] && echo "  ALL ARMS REACH TRAINING -- safe to launch 48N" \
+                  || echo "  DO NOT LAUNCH 48N until these pass"
+echo "OPTCMP_SMOKE_DONE"

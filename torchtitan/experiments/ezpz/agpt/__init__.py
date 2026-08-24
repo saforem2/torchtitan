@@ -9,9 +9,25 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
+_EZPZ_MAX_CONTEXT_LENGTH: int | None = None
+
+
+def set_ezpz_max_context_length(seq_len: int) -> None:
+    """Tell the SDPA wrapper how to unflatten #4121 flat [T, N, H] batches.
+
+    Module-level rather than a Config field: the forward's positional-arg names
+    are contract-checked under TP>1 (set_gqa_inner_attention_local_map matches
+    in_dst_shardings by name), so the signature must not change.
+    """
+    global _EZPZ_MAX_CONTEXT_LENGTH
+    _EZPZ_MAX_CONTEXT_LENGTH = int(seq_len)
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
 
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
@@ -63,16 +79,43 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # local_map contract check (protocols/module.py:_maybe_wrap_local_map)
         # matches by positional-arg name, and asserts under TP>1 if a
         # mapped input name is missing from in_dst_shardings.
-        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
-        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
-        # layout, and if that ever reaches here the tensors arrive 3D --
-        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
-        # ACCEPTS the result. The failure is a quietly degraded loss curve,
-        # not a traceback. Assert the rank so it is loud instead.
-        assert q_BLNH.ndim == 4, (
-            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
-            "fold-batch-dim token layout landed, this wrapper needs updating"
-        )
+        # #4121 (fold-batch-dim) reshaped the LM stack to a flat [T, N, H]
+        # token layout, so these arrive 3D on the current tree. SDPA needs
+        # [B, N, L, H], and a bare transpose(1, 2) on a 3D tensor swaps N with
+        # H -- which SDPA ACCEPTS, producing a quietly degraded loss curve
+        # rather than a traceback. Unflatten first, restore the layout after.
+        #
+        # B is recoverable because ConcatThenSplitPacking emits "fixed-length
+        # rows": T is a whole number of max_context_length sequences (measured
+        # T=20480, L=4096 -> B=5, exactly the configured LBS). The divisibility
+        # check keeps that a verified property rather than an assumption -- a
+        # ragged batch must not silently reshape into the wrong grid.
+        #
+        # Upstream's own SDPA does the same bare transpose, and its flat-layout
+        # path (VarlenAttention) needs CUDA flash attention, which XPU lacks --
+        # so neither upstream branch covers this and the adaptation lives here.
+        folded = q_BLNH.ndim == 3
+        if folded:
+            seq_len = _EZPZ_MAX_CONTEXT_LENGTH
+            if seq_len is None:
+                raise ValueError(
+                    "3D [T, N, H] attention input but max_context_length is "
+                    "unknown; the trainer must call "
+                    "set_ezpz_max_context_length() before the first forward"
+                )
+            num_tokens, num_heads, head_dim = q_BLNH.shape
+            if num_tokens % seq_len != 0:
+                raise ValueError(
+                    f"token count {num_tokens} is not a multiple of "
+                    f"max_context_length {seq_len}; this wrapper assumes the "
+                    "fixed-length rows ConcatThenSplitPacking emits and cannot "
+                    "reshape a ragged batch"
+                )
+            batch = num_tokens // seq_len
+            q_BLNH = q_BLNH.view(batch, seq_len, num_heads, head_dim)
+            k_BLNH = k_BLNH.view(batch, seq_len, -1, head_dim)
+            v_BLNH = v_BLNH.view(batch, seq_len, -1, head_dim)
+        assert q_BLNH.ndim == 4, f"expected 4D, got {tuple(q_BLNH.shape)}"
         q, k, v = (
             q_BLNH.transpose(1, 2),
             k_BLNH.transpose(1, 2),
@@ -81,11 +124,22 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # Avoid set_priority=True — triggers a torch._dynamo bug in
         # PyTorch 2.11 where FX proxy nodes are incorrectly passed to
         # int() during fake tensor tracing.
+        # QK diagnostics. Module-level gate rather than a config on self: the
+        # positional-arg names of this forward are contract-checked under TP>1
+        # (see the _BLNH note above), so the signature must not change. No-op
+        # and near-free when disabled -- see diagnostics/attention.py.
+        _attn_diag.observe(q, k, scale)
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
                 q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
             )
-        return out.transpose(1, 2)
+        out = out.transpose(1, 2)
+        if folded:
+            # Restore the caller's flat [T, N, H]: GQAttention immediately does
+            # out.view(out.shape[0], -1), which reads the wrong stride off a 4D
+            # tensor.
+            out = out.reshape(-1, out.shape[-2], out.shape[-1])
+        return out
 
 
 class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
@@ -373,7 +427,7 @@ def _build_agpt_config(
     attn_backend: str = "sdpa",
     rope_backend: Literal["complex", "cos_sin"] = "complex",
     scaling: Literal["none", "llama", "yarn"] = "none",
-    max_seq_len: int = 131072,
+    max_context_length: int = 131072,
     qk_norm: bool = False,
     logit_softcap: float | None = None,
     relu_squared: bool = False,
@@ -389,7 +443,7 @@ def _build_agpt_config(
     )
     rope_cfg = rope_cls(
         dim=dim // n_heads,
-        max_seq_len=max_seq_len,
+        max_context_length=max_context_length,
         theta=rope_theta,
         scaling=scaling,
     )

@@ -177,6 +177,22 @@ from step-2400 when it lands a slot.
 ~22.6B) at a lower loss (~2.2 vs 2.36) -- the larger-model
 token-efficiency lead is holding.
 
+### Failover: bad-node attribution (Polaris)
+
+> Polaris failover was **blind** until 2026-08-23: no bad-node scraper
+> patterns were registered for the machine, so `launch_autoretry` could
+> never name a culprit and always rotated an arbitrary (usually healthy)
+> node, leaving the sick one in the allocation. Job 7550301 burned ~1h of
+> 130 nodes to exactly this. Fixed by a Polaris pattern module plus
+> `EZPZ_MPI_LABEL=1` (PALS `--label`), which is what makes a rank's CUDA
+> traceback attributable at all. Full writeup:
+> [`known-bugs/polaris-failover-blind-rotation.md`](../../guides/known-bugs/polaris-failover-blind-rotation.md).
+>
+> **After any venv rebuild**, re-run
+> `scripts/install_polaris_failover_patterns.sh` *before* `ezpz tar-env`
+> -- ezpz is installed from a pinned commit, so the fix would otherwise
+> silently vanish and revert failover to blind.
+
 ### Evaluation (lm-eval, Llama2 tokenizer)
 
 > **Important:** this chain trained on **Llama2-tokenized** dolma

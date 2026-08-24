@@ -93,6 +93,14 @@ ezpz_setup_job
 # NOTE: craype-accel-nvidia80 does NOT fix this -- it only sets compile-time
 # vars (CRAY_ACCEL_TARGET / CRAYPE_LINK_TYPE), not runtime GTL linkage.
 export MPICH_GPU_SUPPORT_ENABLED=0
+# Ask PALS to prefix every output line with `<fqdn> <rank>: ` so a rank's
+# Python traceback is attributable to the node that raised it. Without this,
+# a CUDA device fault reaches the log bare -- the bad-node scraper finds no
+# host, failover falls back to BLIND rotation, and it swaps a HEALTHY node
+# while the sick one stays in the allocation. That is exactly how job 7550301
+# burned ~1h of 130 nodes for zero training steps on 2026-08-23.
+# Consumed by ezpz.failover.patterns.polaris (added 2026-08-23).
+export EZPZ_MPI_LABEL=1
 # Polaris maintenance (2026-08-19) bumped Cray MPICH 9.0.1 -> 9.1.0, which
 # DELETED libmpi_gnu_123.so.12. darshan/3.4.4 (auto-linked by the Cray `cc`
 # wrapper, so it is baked into our mpi4py as NEEDED + RPATH) still requires that
@@ -147,7 +155,13 @@ NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))   # == --nproc passed to ezpz launch
 NNODES="$NHOSTS_TRAIN"                    # for CKPT_DIR naming
 
 # ---- Configuration (matches submit_agpt_20b_aurora_venv_failover.sh) ----
-MODEL="20b"
+# MODEL is overridable so this script can drive the exp03 1B-proxy gate
+# arms (agpt 2b == 0.937B non-embedding, the proxy size) without a
+# forked copy. Everything else here -- the Polaris MPICH compat symlink,
+# MPICH_GPU_SUPPORT_ENABLED=0, EZPZ_MPI_LABEL, --no-transfer, the guarded
+# stale-venv cleanup, and the blendcorpus-vs-HF-streaming DATASET switch
+# -- is machine-hardening we want identically on every Polaris arm.
+MODEL="${MODEL:-20b}"
 # Default to the `_real` flavor: real-valued (cos_sin) RoPE instead of the
 # complex backend, which torch.compile's inductor cannot lower (it falls
 # back to eager). With compile ON (the 20B default) cos_sin is faster.
@@ -260,8 +274,19 @@ if [[ "${DATASET}" == "blendcorpus" ]]; then
         "--validator.dataloader.data-cache-path=${DATA_CACHE_PATH}"
     )
 else
+    # HF streaming. `--dataloader.dataset-path=""` is REQUIRED, not
+    # cosmetic: the agpt config registry defaults dataset_path to
+    # data-lists/<machine>/books.txt (config_registry.py, for the
+    # blendcorpus path), and core's _validate_dataset resolves
+    # `path = dataset_path or config.path` -- so a non-empty default
+    # SHADOWS the registered HF repo id. Job 7554131 asked for
+    # fineweb_edu and died on
+    #   FileNotFoundError: Couldn't find any data file at .../books.txt
+    # Passing an empty path makes the `or` fall through to the
+    # registered repo id.
     DATALOADER_FLAGS=(
         "--dataloader.dataset=${DATASET}"
+        "--dataloader.dataset-path="
         "--dataloader.num-workers=2"
     )
     VALIDATOR_DATA_FLAGS=()

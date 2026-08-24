@@ -11,7 +11,7 @@ Running log of what's happening, session by session. Most recent first.
 
 ## Contents
 
-- [2026-08](records/journal/2026-08.md) -- 10 entries
+- [2026-08](records/journal/2026-08.md) -- 11 entries
 - [2026-07](records/journal/2026-07.md) -- 14 entries
 - [2026-06](records/journal/2026-06.md) -- 32 entries
 - [2026-05](records/journal/2026-05.md) -- 21 entries

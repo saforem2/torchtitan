@@ -52,7 +52,6 @@ from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_sparse_fsdp_mesh,
 )
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 # 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
 # now enabled inside apply_compile from parallel_dims. Importing it is an
@@ -118,25 +117,18 @@ def parallelize_moe(
     the model must fit on GPU or CPU memory.
     """
     assert (
-        training.seq_len % parallel_dims.seq_len_divisor == 0
+        training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
-        Sequence length {training.seq_len} must be divisible by the product of TP degree
+        Sequence length {training.max_context_length} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
     # CP: wrap inner attention forward BEFORE parallelize() so CP logic
     # runs inside the local_map boundary on local tensors.
-    if parallel_dims.cp_enabled:
-        if parallel_dims.tp_enabled:
-            raise NotImplementedError(
-                "Context Parallel with Tensor Parallel is not yet supported "
-                "for DeepSeek-V3. "
-                "See https://github.com/pytorch/torchtitan/issues/2446"
-            )
-        apply_cp_to_forward(
-            [block.attention.inner_attention for block in model.layers.values()],
-            parallel_dims.get_mesh("cp"),
-        )
+    # CP removed upstream (#4218): apply_cp_to_forward is gone, and the
+    # replacement validate_cp_backend() rejects cp>1 on anything but
+    # spmd_types. We pin partial_dtensor and every ezpz config sets
+    # context_parallel_degree=1, so this branch was already dead.
 
     # TP/EP via the config-based sharding API. The model's
     # ``sharding_config`` declarations were filled in by

@@ -225,10 +225,20 @@ TRAINERS=(
     # and NaN-wrote to step 6600. Config preserved for a fixed retry
     # (gentler LR / data audit) but removed from the production umbrella.
 #    "2b|256|29700|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-olmo50dolmino50-const2e6-n256-gbs6144|olmo50-dolmino50|2e-6|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2391000000000"
-    # 20B-256: same missing-decay_ratio bug, but NO FORK NEEDED. Its onset is
-    # 92859+1-200-round(92859*0.8) = step 18373 and the chain is at ~11,100, so
-    # its LR is still flat at 2.28e-5. Passing 0.0/1.0 now means it simply never
-    # decays -- no restart from an earlier checkpoint, nothing discarded.
+    # 20B-256: same missing-decay_ratio bug, but NO FORK NEEDED. The prose
+    # formula 92859+1-200-round(92859*0.8) gives step 18373; the OBSERVED onset
+    # is 200 higher, so use 18573. The 512N chain is what establishes the
+    # offset: there the formula says 9087, but commit b08fccfd1's W&B
+    # cross-check (predicted 2.25496e-05 vs observed 2.25502e-05 at step 9694)
+    # reproduces ONLY with 9287 -- i.e. the warmup is not subtracted the way
+    # the formula assumes. Treat the formula as a LOWER BOUND.
+    #
+    # Either way the conclusion holds: 20b_v2_256 is at ~10,400 with lr FLAT at
+    # 2.28e-5 (verified 2026-08-23: 580 lr points across steps 9801..10380, one
+    # distinct value), which is well below both candidates. Passing 0.0/1.0 now
+    # means it simply never decays -- no restart, nothing discarded. This run
+    # cannot itself discriminate 18373 from 18573; it is only far enough from
+    # both for the difference not to matter yet.
     # Fixing this before step 18373 is what avoids a second fork.
     "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|_real"
     # 2B-512 constant-LR fork (from base step-9200, right before LR decay).
