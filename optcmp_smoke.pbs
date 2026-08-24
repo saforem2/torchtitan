@@ -58,12 +58,12 @@ for pair in "adamw agpt_30b_olmo2tok_optcmp_adamw 3.05e-5" \
       >> "$LOG" 2>&1
   rc=$?
   C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
-  STEPS=$(printf '%s' "$C" | grep -acE 'step: [0-9]+ +loss')
+  STEPS=$(printf '%s' "$C" | grep -acE "step: +[0-9]+ +loss")
   ERR=$(printf '%s' "$C" | grep -aoE 'NameError.*|TypeError.*|NotImplementedError.*|Unrecognized options:.*|AttributeError.*' | head -1)
   echo "  rc=$rc  steps=$STEPS"
   echo "  GAS:      $(printf '%s' "$C" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
-  echo "  first:    $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | head -1)"
-  echo "  last:     $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | tail -1)"
+  echo "  first:    $(printf '%s' "$C" | grep -aoE "step: +[0-9]+ +loss: +[0-9.]+" | head -1)"
+  echo "  last:     $(printf '%s' "$C" | grep -aoE "step: +[0-9]+ +loss: +[0-9.]+" | tail -1)"
   [ -n "$ERR" ] && echo "  ERROR:    $ERR"
   if [ "${STEPS:-0}" -lt 3 ]; then
     echo "  VERDICT:  FAIL ($ARM did not reach 3 steps)"
