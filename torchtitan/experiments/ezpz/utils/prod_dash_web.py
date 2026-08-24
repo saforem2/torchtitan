@@ -224,7 +224,9 @@ label.ctl { color:var(--muted); cursor:pointer; user-select:none }
   <div id="chartwrap"><div id="chart"></div></div>
   <aside>
     <div class="legend" id="legend"></div>
-    <div class="boardwrap"><table id="board"></table></div>
+    <div class="boardwrap"><table id="board"></table>
+<h3 class="meta">eval scores (newest evaluated ckpt; acc_norm where applicable, gsm8k = exact_match)</h3>
+<table id="evals"></table></div>
   </aside>
 </main>
 
@@ -445,6 +447,38 @@ function drawBoard() {
   }).join("");
   document.getElementById("board").innerHTML =
     "<tr><th>chain</th><th>step</th><th>loss</th><th>%tgt</th><th>tps</th></tr>" + rows;
+
+  // Eval scores: a SECOND table rather than extra columns. Tasks vary per
+  // chain, so a merged table would be mostly empty cells, and the union of
+  // task columns changes as backfills land.
+  const evEl = document.getElementById("evals");
+  if (!evEl) return;
+  const PREF = ["hellaswag", "arc_challenge", "arc_easy", "mmlu", "gsm8k",
+                "winogrande", "piqa"];
+  const scored = chainOrder()
+    .map(k => [k, ch[k]])
+    .filter(([k, c]) => c && c.evals && c.evals.scores &&
+                        Object.keys(c.evals.scores).length);
+  if (!scored.length) {
+    // Say WHY it is empty -- a blank panel reads as a bug.
+    evEl.innerHTML = "<tr><td class='meta'>no evaluated checkpoints yet</td></tr>";
+    return;
+  }
+  const seen = [];
+  scored.forEach(([k, c]) => Object.keys(c.evals.scores).forEach(
+      t => { if (!seen.includes(t)) seen.push(t); }));
+  const cols = PREF.filter(t => seen.includes(t))
+                   .concat(seen.filter(t => !PREF.includes(t)));
+  evEl.innerHTML =
+    "<tr><th>chain</th><th>step</th>" +
+    cols.map(t => `<th>${t}</th>`).join("") + "</tr>" +
+    scored.map(([k, c]) => {
+      const nm = c.label || k;
+      return `<tr><td title="${nm}">${nm}</td><td>${c.evals.step ?? "-"}</td>` +
+        cols.map(t => `<td>${c.evals.scores[t] == null ? "-"
+                          : c.evals.scores[t].toFixed(3)}</td>`).join("") +
+        "</tr>";
+    }).join("");
 }
 
 function drawTabs() {
@@ -472,7 +506,24 @@ async function load() {
   const bb = payload.built_age == null ? "-" : Math.round(payload.built_age / 60) + "m";
   document.getElementById("meta").textContent =
     `${live} live / ${n} chains · backbone ${bb} old · payload ${payload.web_age ?? "?"}s`;
-  document.getElementById("err").textContent = payload.web_error || "";
+  // A stale payload rendering as if it were live is the real hazard here: the
+  // "live" count above is computed from timestamps in a cache that may be
+  // hours old, so it will happily claim chains are running when the cluster is
+  // unreachable. Say so unmissably rather than trusting the reader to notice
+  // the backbone age.
+  const errEl = document.getElementById("err");
+  if (payload.stale) {
+    const h = payload.stale_age_hours ?? "?";
+    errEl.textContent =
+      `⚠ OFFLINE — showing cached data from ${h}h ago (${payload.stale_reason ||
+        "aggregator unreachable"}). The live/chain counts above are NOT current.`;
+    errEl.style.color = "#d62728";
+    errEl.style.fontWeight = "600";
+  } else {
+    errEl.textContent = payload.web_error || "";
+    errEl.style.color = "";
+    errEl.style.fontWeight = "";
+  }
   drawTabs(); drawLegend(); drawBoard(); draw();
 }
 
