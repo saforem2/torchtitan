@@ -76,7 +76,52 @@ produces **no suggestion at all**, so bracketing divergence is required.
 Expect SophiaG to find the ceiling: the 2026-07-03 80B SophiaG run NaN'd at
 step 14 and burned ~12h. That is what the blow-up detection is for.
 
-## Phase 2: comparison runs (not yet launched)
+## Phase 1 RESULTS (2026-08-23, jobs 12473714/15/16)
+
+All three swept 1e-6 -> 1e-1 over 100 steps at GBS=960 on fineweb-edu, and all
+three produced a real blow-up, so every suggestion is a measurement rather than
+a sweep that ran out of range.
+
+| arm | suggested LR | blow-up | min loss | at LR |
+|---|---:|---:|---:|---:|
+| AdamW | **3.05e-05** | 3.05e-04 | 8.8381 | 3.594e-04 |
+| Mano | **5.61e-05** | 5.61e-04 | 8.9925 | 5.275e-04 |
+| SophiaG | **3.55e-05** | 3.55e-04 | 9.3441 | 4.642e-04 |
+
+Verified from the raw CSVs, not just the log summaries: 90 rows each, and every
+row of every arm records `global_batch_size=960`, `world_size=192`. The fixed
+batch is therefore a checked fact, not an assumption -- which matters because
+the suggestion is batch-dependent and the arms are only comparable at one batch.
+
+**The inherited placeholder was on the divergence cliff.** Both mano and sophiag
+configs carried lr=3.0e-4 from the 2B competition configs:
+
+| | value | vs suggested | vs blow-up |
+|---|---:|---:|---:|
+| placeholder | 3.0e-4 | 8.5x too high (sophiag) | only 1.18x below |
+
+Running SophiaG there would have read as "SophiaG is unstable at 30B" when the
+truth is "SophiaG was run at 8.5x its usable LR" -- the same shape as the
+documented 2026-07-03 80B NaN. This is the concrete payoff of measuring per
+optimizer per batch instead of inheriting a constant.
+
+Note the three suggestions land within 1.8x of each other (3.05e-05 to
+5.61e-05), which is much tighter than the three-orders-of-magnitude spread seen
+ACROSS batch sizes. At a fixed batch the optimizer choice moves the usable LR
+far less than the batch size does.
+
+## Phase 2: comparison runs (LAUNCHED 2026-08-23)
+
+Jobs 12473720 (adamw), 12473721 (mano), 12473722 (sophiag) -- 16N each, running
+concurrently on 48N, each at its own Phase 1 LR, constant after a 20-step warmup.
+
+```bash
+qsub -v OPT=adamw,LR=3.05e-5   -N cmp-adamw   optcmp.pbs
+qsub -v OPT=mano,LR=5.61e-5    -N cmp-mano    optcmp.pbs
+qsub -v OPT=sophiag,LR=3.55e-5 -N cmp-sophiag optcmp.pbs
+```
+
+## Phase 2: design notes
 
 Each arm runs at its own finder-suggested LR, constant after warmup, to a
 shared token budget. At 3.93M tok/step an 8h job yields ~2.3B tokens, so the
