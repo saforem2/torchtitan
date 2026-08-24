@@ -54,4 +54,4 @@ Reopens the shard and decodes doc0 as a readback sanity check.
 
 ## Report
 
-Pilot results + eval gate: [`../docs/experiments/synthetic/aurora/`](../docs/experiments/synthetic/aurora/).
+Pilot results + eval gate: [`../docs/records/experiments/synthetic/aurora/`](../docs/records/experiments/synthetic/aurora/).

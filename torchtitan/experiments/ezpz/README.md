@@ -82,14 +82,14 @@ For other models / machines / data files, see
 The full prioritized landing page (with last-modified dates and a
 sentence per entry) is at [`docs/README.md`](docs/README.md). For a
 structural map of every file under `docs/`, see
-[`docs/TREE.md`](docs/TREE.md). The headline pages by topic:
+[`docs/reference/TREE.md`](docs/reference/TREE.md). The headline pages by topic:
 
 ### Live status
 
 | Page | What's there |
 |------|--------------|
 | [Production index](docs/live/dashboard.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
-| [Eval index](docs/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
+| [Eval index](docs/records/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
 | [Journal](docs/journal.md) | Day-by-day session log |
 
 ### Setup + running
@@ -129,17 +129,20 @@ structural map of every file under `docs/`, see
 
 | Folder | Contents |
 |--------|----------|
-| [`docs/live/`](docs/live/) | Live per-model / per-node-count training trackers |
-| [`docs/evals/`](docs/evals/) | Per-model eval results + plots |
+| [`docs/live/`](docs/live/) | Chain status today: per-model trackers, the dashboard, the dispatch log |
 | [`docs/reference/guides/`](docs/reference/guides/) | Big-finding writeups, operational notes, how-tos |
-| [`docs/experiments/`](docs/experiments/) | Per-machine smoke / benchmark / LR-finder reports |
-| [`docs/scaling/`](docs/scaling/) | Per-model scaling-study results (TPS / MFU vs N) |
-| [`docs/competitions/`](docs/competitions/) | Optimizer speedrun leaderboards |
-| [`docs/meeting-notes/`](docs/meeting-notes/) | AuroraGPT sync agendas + action items |
-| [`docs/summaries/`](docs/summaries/) | 2-week / monthly retrospectives |
-| [`docs/upstream-issues/`](docs/upstream-issues/) | Repros + drafts for PRs we're filing back to `pytorch/torchtitan` |
-| [`docs/configs/`](docs/configs/) | Model config docs (architecture, registered names) |
-| [`docs/baselines/`](docs/baselines/) | Reference training curves + benchmarks |
+| [`docs/reference/known-bugs/`](docs/reference/known-bugs/) | Diagnosed failures and their workarounds |
+| [`docs/reference/scaling/`](docs/reference/scaling/) | Per-model scaling-study results (TPS / MFU vs N) |
+| [`docs/records/evals/`](docs/records/evals/) | Per-model eval results + plots |
+| [`docs/records/experiments/`](docs/records/experiments/) | Per-machine smoke / benchmark / LR-finder reports |
+| [`docs/records/journal/`](docs/records/journal/) | Day-by-day session log, by month |
+| [`docs/records/meeting-notes/`](docs/records/meeting-notes/) | AuroraGPT sync agendas + action items |
+| [`docs/records/summaries/`](docs/records/summaries/) | 2-week / monthly retrospectives |
+| [`docs/records/upstream-sync/`](docs/records/upstream-sync/) | Upstream merge log, by month |
+| [`docs/records/competitions/`](docs/records/competitions/) | Optimizer speedrun leaderboards |
+| [`docs/outbound/upstream-issues/`](docs/outbound/upstream-issues/) | Repros + drafts for PRs we're filing back to `pytorch/torchtitan` |
+| [`docs/reference/configs/`](docs/reference/configs/) | Model config docs (architecture, registered names) |
+| [`docs/reference/baselines/`](docs/reference/baselines/) | Reference training curves + benchmarks |
 
 ## MoE training
 

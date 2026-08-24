@@ -46,6 +46,26 @@ for r, dirs, files in os.walk(docs):
             if not os.path.exists(os.path.join(r, t)):
                 bad.append("%s -> %s" % (os.path.relpath(p, root), t))
 
+# 1b. markdown OUTSIDE docs/ that links INTO it
+# Check 1 only walks docs/. But experiments/ezpz/README.md is the landing page
+# and its folder table is nothing but docs/ links -- after the reorg six of its
+# nine rows pointed at retired directories and no check saw it, because the
+# file lives one level up. Any .md under experiments/ezpz but outside docs/
+# counts.
+ezpz = os.path.join(root, "torchtitan/experiments/ezpz")
+for r, dirs, files in os.walk(ezpz):
+    dirs[:] = [d for d in dirs if not d.startswith(".") and d != "docs"]
+    for fn in files:
+        if not fn.endswith(".md"): continue
+        p = os.path.join(r, fn)
+        for m in re.finditer(r'\]\(\s*([^)\s]+?)\s*(?:"[^"]*")?\)',
+                             open(p, errors="replace").read()):
+            t = m.group(1).split("#")[0]
+            if not t or t.startswith(("http://", "https://", "#", "mailto:", "/")):
+                continue
+            if not os.path.exists(os.path.join(r, t)):
+                bad.append("%s -> %s" % (os.path.relpath(p, root), t))
+
 # 2. code -> docs
 # Match BOTH reference spellings -- the full 'experiments/ezpz/docs/...' and
 # the bare 'docs/...' most comments use. Requiring the long prefix was why

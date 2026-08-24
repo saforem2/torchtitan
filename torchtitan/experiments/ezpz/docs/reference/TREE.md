@@ -17,77 +17,59 @@ wrong?*
 
 | Top level | Expires? | Contents | When to look here |
 |---|---|---|---|
-| `production/` (187 files) | **mixed -- not yet split** | `agpt/`, `cpt/`, `figures/`, `metrics/`, `moe/`, `polaris/`, `rl/`, `sft/` | Chain status today; moving to `live/` + `reference/` + `records/proposals/` -- see [`../notes/production-move-plan.md`](../notes/production-move-plan.md) |
-| `reference/` (51 files) | durable; corrected in place, never dated | `baselines/`, `configs/`, `guides/`, `known-bugs/`, `scaling/` | How do I do X? Why does Y break? |
-| `records/` (217 files) | dated; immutable once written | `competitions/`, `evals/`, `experiments/`, `journal/`, `meeting-notes/`, `summaries/`, `upstream-sync/` | What happened on date X? What did we measure? |
+| `live/` (181 files) | **yes -- decays** | `chains/`, `figures/`, `metrics/`, plus the dashboard and dispatch log | What is running right now? Where is each chain? |
+| `reference/` (56 files) | durable; corrected in place, never dated | `baselines/`, `configs/`, `guides/`, `known-bugs/`, `scaling/` | How do I do X? Why does Y break? |
+| `records/` (234 files) | dated; immutable once written | `competitions/`, `evals/`, `experiments/`, `journal/`, `meeting-notes/`, `proposals/`, `summaries/`, `upstream-sync/` | What happened on date X? What did we measure? |
 | `outbound/` (27 files) | leaves the repo | `upstream-issues/` | What are we filing upstream? |
-| `notes/` (5 files) | scratch; not yet classified | (files only) | Working plans and drafts |
+| `notes/` (6 files) | scratch; not yet classified | (files only) | Working plans and drafts |
+
+A page that decays goes in `live/`. A page that is a dated observation goes in
+`records/` and is never edited afterward. A page that should stay true goes in
+`reference/` and is corrected in place rather than superseded.
 
 ## Root files
+
+Only three, all indexes into the trees above.
 
 | File | Purpose |
 |---|---|
 | `README.md` | Prioritized landing page |
-| `SESSION-RESUME-2026-08-21.md` | Session handoff note |
-| `TODO.md` | Open work items |
-| `journal.md` | Day-by-day session log (stub; monthly files under `records/journal/`) |
-| `upstream-sync-79.md` | One upstream sync, kept at root for its inbound links |
-| `upstream-sync.md` | Upstream merge log (stub; per-sync files under `outbound/upstream-sync/`) |
+| `journal.md` | Day-by-day session log (index; monthly files under `records/journal/`) |
+| `upstream-sync.md` | Upstream merge log (index; monthly files under `records/upstream-sync/`) |
+
+Append-only logs are split by month rather than kept as one file: `journal.md`
+had reached 252 KB and `upstream-sync.md` 184 KB, which is past the point where
+anyone scrolls them. Both keep their path, so inbound links still resolve.
+Individual syncs and journal days are `##` sections inside the monthly file,
+not separate files.
 
 ## Full tree
 
 ```
 docs/
-├── notes/                   (5 files)
-├── outbound/                (27 files)
-│   └── upstream-issues/         (27 files)
-├── production/              (187 files)
-│   ├── agpt/                    (92 files)
-│   │   ├── 20b/                     (19 files)
-│   │   ├── 2b/                      (29 files)
-│   │   ├── 2b-mds/                  (12 files)
-│   │   ├── 30b-exp/                 (10 files)
-│   │   ├── 80b/                     (3 files)
-│   │   └── historical/              (17 files)
-│   ├── cpt/                     (13 files)
-│   │   └── figures/                 (8 files)
-│   ├── figures/                 (6 files)
-│   ├── metrics/                 (11 files)
-│   ├── moe/                     (1 file) 
-│   │   └── 10b_2b_sdpa_ep/          (1 file) 
-│   ├── polaris/                 (6 files)
-│   │   └── figures/                 (5 files)
-│   ├── rl/                      (26 files)
-│   │   ├── grpo/                    (12 files)
-│   │   ├── history/                 (9 files)
-│   │   └── plans/                   (1 file) 
-│   └── sft/                     (26 files)
-│       └── agpt/                    (25 files)
-├── records/                 (217 files)
-│   ├── competitions/            (20 files)
-│   │   ├── agpt2b-n2-1000steps/     (4 files)
-│   │   ├── agpt2b-n2-gas8-1000steps/ (7 files)
-│   │   ├── agpt2b-n8-10BT/          (4 files)
-│   │   └── agpt2b-n8-r5/            (3 files)
-│   ├── evals/                   (17 files)
-│   │   ├── agpt/                    (14 files)
-│   │   └── figures/                 (1 file) 
-│   ├── experiments/             (150 files)
-│   │   ├── agpt/                    (65 files)
-│   │   ├── lr-finder/               (69 files)
-│   │   ├── moe/                     (14 files)
-│   │   └── synthetic/               (1 file) 
-│   ├── journal/                 (5 files)
-│   ├── meeting-notes/           (6 files)
-│   │   └── agpt-sync/               (4 files)
-│   ├── summaries/               (13 files)
-│   └── upstream-sync/           (5 files)
-└── reference/               (51 files)
-    ├── baselines/               (3 files)
-    ├── configs/                 (2 files)
-    ├── guides/                  (11 files)
-    │   └── training/                (1 file) 
-    ├── known-bugs/              (25 files)
-    └── scaling/                 (9 files)
-        └── yeet_env/                (4 files)
+├── live/                   (181 files)
+│   ├── chains/                 (159 files)
+│   ├── figures/                (6 files)
+│   └── metrics/                (11 files)
+├── notes/                  (6 files)
+├── outbound/               (27 files)
+│   └── upstream-issues/        (27 files)
+├── records/                (234 files)
+│   ├── competitions/           (20 files)
+│   ├── evals/                  (15 files)
+│   ├── experiments/            (159 files)
+│   ├── journal/                (5 files)
+│   ├── meeting-notes/          (6 files)
+│   ├── proposals/              (10 files)
+│   ├── summaries/              (13 files)
+│   └── upstream-sync/          (5 files)
+└── reference/              (56 files)
+    ├── baselines/              (3 files)
+    ├── configs/                (2 files)
+    ├── guides/                 (12 files)
+    ├── known-bugs/             (27 files)
+    └── scaling/                (10 files)
 ```
+
+> Regenerate the counts above from disk rather than editing them by hand --
+> every directory row in the previous version of this page was stale.

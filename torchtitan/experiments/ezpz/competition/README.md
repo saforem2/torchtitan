@@ -1,6 +1,6 @@
 # agpt_2b Loss Competition
 
-See [docs/competitions/](../docs/competitions/) for the full
+See [docs/competitions/](../docs/records/competitions/) for the full
 leaderboard, experiment tracking, and modifications log.
 
 **W&B Report:** [aurora_gpt/torchtitan.ezpz.train](https://api.wandb.ai/links/aurora_gpt/hda3milo)
