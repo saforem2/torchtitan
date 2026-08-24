@@ -9,7 +9,7 @@
 #   3. CHARTS  : update_all_charts.sh -- regenerate all figures + the
 #                docs/README.md index table (refresh_docs_readme_table.py)
 #   3b. LINKS  : check_doc_links.sh -- dangling md links, stale docs paths in
-#                code, depth-counted and piecewise repo-root paths (ADVISORY)
+#                code, depth-counted and piecewise repo-root paths (FATAL)
 #   4. SUMMARY : one rolled-up report + non-zero exit iff a worker failed
 #   5. COMMIT  : (default ON) conventional commit of the changed docs/figures
 #                -- pull-first, NEVER push unless --push is given
@@ -122,12 +122,10 @@ fi
 # repeat. Runs AFTER the charts because a chart run can itself write a figure
 # to a path a doc references.
 #
-# ADVISORY, not fatal: there is a standing backlog of ~31 dangling references
-# (dead rl/ paths, a Sunspot home path) that predates this script. Failing the
-# whole refresh on those would mean refresh_all.sh never exits 0, and a check
-# that always fails is a check nobody reads. What matters is the DELTA -- so
-# report the count and let the operator compare. Gate on it in CI once the
-# backlog is cleared.
+# FATAL. It was advisory while a 31-reference backlog stood -- a check that
+# always fails is a check nobody reads. The backlog is now cleared (0
+# dangling), so any hit is something this run, or the commit before it, just
+# broke. That is exactly the signal worth stopping on.
 echo ""
 echo ">>> [3b/3] doc link + code-reference check (check_doc_links.sh)"
 links_out="$(bash torchtitan/experiments/ezpz/scripts/check_doc_links.sh 2>&1)"
@@ -146,6 +144,7 @@ fi
 
 # ---- 4. summary ----
 overall_rc=$(( charts_rc != 0 ? charts_rc : fill_rc ))
+[[ "$overall_rc" -eq 0 && "$links_rc" -ne 0 ]] && overall_rc=$links_rc
 echo ""
 echo "============================================================"
 echo "SUMMARY"
@@ -153,7 +152,7 @@ echo "  staleness : ${stale_summary:-(none)}"
 echo "  fields    : ${fill_summary:-(none)} (rc=$fill_rc)"
 echo "  last-upd  : ${lu_summary:-(none)} (rc=$lu_rc)"
 echo "  charts    : rc=$charts_rc$( [[ $DRY_RUN -eq 1 ]] && echo ' (dry-run, skipped)' )"
-echo "  links     : ${links_summary:-(none)} (advisory)"
+echo "  links     : ${links_summary:-(none)} (rc=$links_rc)"
 echo "============================================================"
 
 # ---- 5. commit (default on; never push unless --push) ----
@@ -167,6 +166,14 @@ fi
 # rewritten some-but-not-all READMEs. Leave it for human review.
 if [[ "$fill_rc" -ne 0 ]]; then
     echo "(field-filler failed; skipping auto-commit -- review + commit manually)"
+    exit "$overall_rc"
+fi
+
+# Nor a broken link. With the backlog cleared, a hit means this refresh (or the
+# commit under it) just broke a reference -- and auto-committing is precisely
+# how the empty eval charts reached the branch on 2026-08-16.
+if [[ "$links_rc" -ne 0 ]]; then
+    echo "(dangling references; skipping auto-commit -- fix them or commit manually)"
     exit "$overall_rc"
 fi
 

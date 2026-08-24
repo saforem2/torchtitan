@@ -4,7 +4,7 @@
 **Machine:** Sunspot
 **Job:** (filled in after submission)
 **Config:** 4N → 32N scaleup of the verified 50-step SFT smoke
-([12468212 path](20260607-sft-smoke-n4-aurora2b-gsm8k.md), if that doc exists).
+(12468212 path (`20260607-sft-smoke-n4-aurora2b-gsm8k.md`, not in this repo), if that doc exists).
 
 ## Goal
 
@@ -90,7 +90,7 @@ Once the run completes:
    `--model_name_or_path
    outputs/sft/aurora2b-sophiag-metamathqa-32n/final` and
    running the same 25-step verification harness from
-   [`20260607-sft-smoke-n4-aurora2b-gsm8k.md`](20260607-sft-smoke-n4-aurora2b-gsm8k.md)
+   `20260607-sft-smoke-n4-aurora2b-gsm8k.md` (`20260607-sft-smoke-n4-aurora2b-gsm8k.md`, not in this repo)
    (if it exists; otherwise use the prompt format from the
    parent `docs/rl/README.md` "Sample completions" section).
 2. **Compare** the step-1 completion table from the SFT'd ckpt vs

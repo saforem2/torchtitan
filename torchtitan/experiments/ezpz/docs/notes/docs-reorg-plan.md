@@ -207,7 +207,7 @@ For each directory, in this order (least-linked first):
 2. rewrite internal links: `grep -rl 'old/path' docs | xargs sed -i 's|old/path|new/path|g'`
 3. rewrite external refs: same sweep over `*.py`, `*.sh`, `.claude/CLAUDE.md`,
    `experiments/ezpz/.claude/CLAUDE.md`
-4. verify: every `](...md)` target resolves (script below)
+4. verify: every markdown link target resolves (script below)
 5. `refresh_all.sh`
 6. commit
 

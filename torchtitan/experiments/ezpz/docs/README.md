@@ -178,4 +178,4 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [TODO](./TODO.md) | Open work items | 2026-08-23 |
+| [TODO](live/TODO.md) | Open work items | 2026-08-23 |

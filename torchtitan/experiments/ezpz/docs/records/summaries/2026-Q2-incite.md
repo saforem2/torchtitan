@@ -240,8 +240,8 @@ A full post-training path now runs end-to-end on Intel XPU:
   remains parked at the fork-spawn / oneCCL-rendezvous boundary; the TRL
   path is the working alternative.
 
-Detail: [rl/README](../rl/README.md),
-[grpo-on-xpu-status](../rl/grpo-on-xpu-status.md).
+Detail: [rl/README](../../live/chains/rl/README.md),
+[grpo-on-xpu-status](../../live/chains/rl/README.md).
 
 ### 6.3 Production resilience infrastructure
 
