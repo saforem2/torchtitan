@@ -84,7 +84,7 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
                     bad.append("(code) %s:%d -> experiments/ezpz/docs/%s"
                                % (key[0], i + 1, key[1]))
 
-# 3. PIECEWISE docs paths: DOCS_BASE / "production" / "agpt" / ...
+# 3. PIECEWISE docs paths: a pathlib chain naming a retired dir segment.  docs-link-check: ignore
 # Check 2 only sees a docs path written as ONE string. A pathlib chain built a
 # segment at a time is invisible to it -- and that is not hypothetical: after
 # the production/ split, three plotters kept writing to the retired tree

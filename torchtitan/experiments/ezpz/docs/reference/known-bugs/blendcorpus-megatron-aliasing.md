@@ -4,7 +4,7 @@
 > PP, no CP, no Megatron-style TP path). Will silently misbehave the
 > moment any of those features are turned on with this dataloader.
 >
-> **Tracked in:** [`docs/TODO.md` §6](../../TODO.md).
+> **Tracked in:** [`docs/live/TODO.md` §6](../../live/TODO.md).
 >
 > Discovered: 2026-05-05 while debugging the `agpt_2b --validator.enable`
 > trace.

@@ -8,6 +8,8 @@
 #                tokens+% / last-updated, and --wandb: loss) from disk truth
 #   3. CHARTS  : update_all_charts.sh -- regenerate all figures + the
 #                docs/README.md index table (refresh_docs_readme_table.py)
+#   3b. LINKS  : check_doc_links.sh -- dangling md links, stale docs paths in
+#                code, depth-counted and piecewise repo-root paths (ADVISORY)
 #   4. SUMMARY : one rolled-up report + non-zero exit iff a worker failed
 #   5. COMMIT  : (default ON) conventional commit of the changed docs/figures
 #                -- pull-first, NEVER push unless --push is given
@@ -115,6 +117,33 @@ else
     bash torchtitan/experiments/ezpz/scripts/update_all_charts.sh 2>&1 || charts_rc=$?
 fi
 
+# ---- 3b. link + code-reference check ----
+# Step 4 of docs/notes/docs-reorg-plan.md, and the reason step 3 was safe to
+# repeat. Runs AFTER the charts because a chart run can itself write a figure
+# to a path a doc references.
+#
+# ADVISORY, not fatal: there is a standing backlog of ~31 dangling references
+# (dead rl/ paths, a Sunspot home path) that predates this script. Failing the
+# whole refresh on those would mean refresh_all.sh never exits 0, and a check
+# that always fails is a check nobody reads. What matters is the DELTA -- so
+# report the count and let the operator compare. Gate on it in CI once the
+# backlog is cleared.
+echo ""
+echo ">>> [3b/3] doc link + code-reference check (check_doc_links.sh)"
+links_out="$(bash torchtitan/experiments/ezpz/scripts/check_doc_links.sh 2>&1)"
+links_rc=$?
+links_summary="$(echo "$links_out" | grep -E '^DANGLING' | tail -1)"
+if [[ "$links_rc" -eq 0 ]]; then
+    links_summary="no dangling references"
+    echo "  $links_summary"
+else
+    # Print the heading + a bounded sample; the full list is long and the
+    # operator wants the count first.
+    echo "$links_out" | head -12
+    n_total="$(echo "$links_out" | grep -cE '^   ')"
+    [[ "$n_total" -gt 10 ]] && echo "   ... ($n_total total; run check_doc_links.sh for the full list)"
+fi
+
 # ---- 4. summary ----
 overall_rc=$(( charts_rc != 0 ? charts_rc : fill_rc ))
 echo ""
@@ -124,6 +153,7 @@ echo "  staleness : ${stale_summary:-(none)}"
 echo "  fields    : ${fill_summary:-(none)} (rc=$fill_rc)"
 echo "  last-upd  : ${lu_summary:-(none)} (rc=$lu_rc)"
 echo "  charts    : rc=$charts_rc$( [[ $DRY_RUN -eq 1 ]] && echo ' (dry-run, skipped)' )"
+echo "  links     : ${links_summary:-(none)} (advisory)"
 echo "============================================================"
 
 # ---- 5. commit (default on; never push unless --push) ----
