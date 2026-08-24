@@ -387,6 +387,17 @@ class FaultTolerantTrainer(Trainer):
             parallel_dims=parallel_dims,
         )
 
+        # The SDPA wrapper needs max_context_length to unflatten #4121's flat
+        # [T, N, H] batches back to [B, L, N, H] for scaled_dot_product_attention.
+        # It cannot take it as an argument: the forward's positional-arg names
+        # are contract-checked under TP>1 (set_gqa_inner_attention_local_map
+        # matches in_dst_shardings by name), so a module-level setter is used.
+        # Set here -- after the dataloader, before the model is built -- so it
+        # is in place well before the first forward.
+        from torchtitan.experiments.ezpz.agpt import set_ezpz_max_context_length
+
+        set_ezpz_max_context_length(config.training.max_context_length)
+
         # build model (using meta init)
         model_config = model_spec.model
         # set the model args from training job configs
