@@ -356,8 +356,22 @@ class FaultTolerantTrainer(Trainer):
             dp_world_size=batch_degree,
             dp_rank=batch_rank,
             tokenizer=self.tokenizer,
+            # BOTH naming conventions, deliberately. #4121 renamed the
+            # dataloader kwargs, and this tree runs two dataloaders whose
+            # signatures did NOT converge:
+            #   GrainDataLoader   wants max_context_length / num_tokens_per_batch
+            #   BlendCorpusDataLoader wants seq_len / local_batch_size
+            # Both take **kwargs and ignore what they do not name, so sending
+            # both pairs satisfies either one. Sending only the new pair breaks
+            # blendcorpus -- which is every production config -- and sending
+            # only the old pair breaks Grain, as it did in job 12473732
+            # ("missing 2 required keyword-only arguments").
+            # Same value either way: dataloader_batch_size is already
+            # num_tokens_per_microbatch_per_dp_rank, a TOKEN count post-#4121.
             seq_len=config.training.max_context_length,
             local_batch_size=dataloader_batch_size,
+            max_context_length=config.training.max_context_length,
+            num_tokens_per_batch=dataloader_batch_size,
             # train_step pulls gas * num_pipeline_parallel_microbatches batches
             # per optimizer step, so the dataloader must be sized for that many
             # -- not the raw step count. Without the PP factor the iterator runs
