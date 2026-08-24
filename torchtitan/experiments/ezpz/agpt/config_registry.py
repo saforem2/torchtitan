@@ -998,6 +998,40 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
+def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+    """Point a config at the LOCAL fineweb-edu-100BT parquet instead of books.
+
+    agpt() defaults dataset_path to data-lists/<machine>/books.txt, which on
+    Sunspot is THREE shards totalling ~11 GB -- about 5.8B tokens. A 10B-token
+    comparison arm would therefore loop that corpus 1.7x, and repeated data
+    bends the loss curve in ways that need not be the same for every optimizer.
+    That is precisely the confound a fixed-batch optimizer comparison exists to
+    exclude, so the arms read a corpus larger than their budget instead.
+
+    fineweb_edu_local is a registered LOCAL parquet dir (140 files, ~267 GB,
+    ~100B tokens) already used by agpt_2b_mds_mix_edu. Local matters: streaming
+    allenai/olmo-mix-1124 from the hub 429-storms at this rank count (see the
+    module docstring in datasets.py), and the on-disk olmo-mix cache here holds
+    only the wiki slice (6.1 GB), which is smaller and narrower than books.
+
+    dataset_path must be cleared: it is the blendcorpus file-list path and is
+    meaningless for a parquet dataset, but a stale value would still be read.
+    """
+    cfg.dataloader.dataset = "fineweb_edu_local"
+    cfg.dataloader.dataset_path = None
+    return cfg
+
+
+def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
+    """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
+
+    Same model and data as the mano/sophiag arms; only the optimizer differs.
+    See docs/experiments/optimizer-comparison/README.md.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_fineweb_edu(cfg)
+
+
 def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """agpt_30b_olmo2tok with the Mano optimizer instead of AdamW.
 
@@ -1013,7 +1047,7 @@ def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_mano(lr=3.0e-4)
-    return cfg
+    return _use_fineweb_edu(cfg)
 
 
 def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
@@ -1039,7 +1073,7 @@ def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_sophiag(lr=3.0e-4)
-    return cfg
+    return _use_fineweb_edu(cfg)
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
