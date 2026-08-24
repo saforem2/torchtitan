@@ -106,6 +106,63 @@ if [ -n "$PBS_NODEFILE" ] && [ -r "$PBS_NODEFILE" ]; then
     export PBS_NODEFILE="$NODEFILE_OK"
 fi
 
+# ARGUMENT PREFLIGHT. Three launches of this experiment died in under a minute
+# on argument/config errors -- renamed flags (#4121), a deleted dataloader
+# (#4088), then a flag GrainDataLoader.Config does not have. Each cost a 48-node
+# allocation to discover something a single-process parse would have caught.
+#
+# This parses the EXACT argv the launch uses and refuses to submit if it fails.
+# It stops at PARSING and config construction: it must not build the Trainer,
+# because that calls set_device and a login/head context has no GPU (the parse
+# would then "fail" for a reason that has nothing to do with the arguments).
+# Using the real parser rather than a hand-maintained list of valid flags is
+# the point -- a list would drift the next time upstream renames something.
+echo "  preflight: parsing launch args..."
+cat > "$LOGD/preflight.py" <<'PREEOF'
+import sys, tyro
+from torchtitan.experiments.ezpz.agpt import config_registry as cr
+cfg_name, lr = sys.argv[1], sys.argv[2]
+base = getattr(cr, cfg_name)()
+args = [
+    f"--optimizer.param-groups.0.optimizer-kwargs.lr={lr}",
+    "--training.steps=6000",
+    "--training.max-context-length=4096",
+    "--training.num-tokens-per-microbatch-per-dp-rank=20480",
+    "--training.num-tokens-per-train-step=3932160",
+    "--parallelism.tensor-parallel-degree=1",
+    "--lr-scheduler.warmup-steps=20",
+    "--lr-scheduler.decay-ratio=0.0",
+    "--checkpoint.interval=100",
+    "--checkpoint.keep-latest-k=0",
+    "--nan-abort-consecutive=5",
+]
+cfg = tyro.cli(type(base), args=args, default=base)
+t = cfg.training
+tok_mb, tok_st, ctx = (
+    t.num_tokens_per_microbatch_per_dp_rank,
+    t.num_tokens_per_train_step,
+    t.max_context_length,
+)
+gas = tok_st // (tok_mb * 192)
+# Assert the batch the LR was measured at, not just that the flags parsed.
+# A flag that parses but yields a different GBS would silently invalidate the
+# comparison, which is worse than a crash.
+assert ctx == 4096, ctx
+assert tok_mb // ctx == 5, tok_mb
+assert tok_st // ctx == 960, tok_st
+assert gas == 1, gas
+assert cfg.lr_scheduler.decay_ratio == 0.0
+print(f"PREFLIGHT OK lr={cfg.optimizer.param_groups[0].optimizer_kwargs['lr']} "
+      f"LBS={tok_mb//ctx} GBS={tok_st//ctx} GAS={gas} "
+      f"dataloader={type(cfg.dataloader).__qualname__}")
+PREEOF
+if ! python3 "$LOGD/preflight.py" "$CONFIG" "$LR" > "$LOGD/preflight.log" 2>&1; then
+    echo "ABORT: launch arguments do not parse / batch assertion failed"
+    grep -aE "Unrecognized|Error|assert|AssertionError" "$LOGD/preflight.log" | head -5 | sed "s/^/    /"
+    echo "OPTCMP_${OPT}_DONE"; exit 1
+fi
+grep -a "PREFLIGHT OK" "$LOGD/preflight.log" | sed "s/^/  /"
+
 export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
 
 timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
@@ -123,7 +180,6 @@ timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
     --checkpoint.interval=100 \
     --checkpoint.keep-latest-k=0 \
     --nan-abort-consecutive=5 \
-    --dataloader.num-workers=2 \
     >> "$LOG" 2>&1
 rc=$?
 
