@@ -14,7 +14,10 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
-from torchtitan.experiments.ezpz.optimizer.containers import default_mano
+from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_mano,
+    default_sophiag,
+)
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -1010,6 +1013,32 @@ def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_mano(lr=3.0e-4)
+    return cfg
+
+
+def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok with the SophiaG optimizer instead of AdamW.
+
+    Third arm of the fixed-batch optimizer comparison (AdamW / Mano / SophiaG,
+    all at GBS=960). SophiaG is a second-order method: it estimates a diagonal
+    Hessian and clips the per-coordinate update at rho, so its useful LR range
+    does not have to resemble either first-order optimizer's.
+
+    The lr here is a PLACEHOLDER. Do not trust it -- the comparison runs pass
+    --optimizer.lr explicitly from the LR-finder result measured at THIS batch
+    size. Batch dependence is not a small effect for these optimizers: the 2B
+    finder put Mano at 4.79e-03 while the 80B at GBS=6144 wanted ~3e-6, three
+    orders of magnitude apart, so an inherited LR says nothing.
+
+    SophiaG has form here: the 2026-07-03 80B run NaN'd at step 14 and burned
+    ~12h. That is what --nan-abort-consecutive and the finder's blow-up
+    detection are for; expect this arm to be the one that finds the ceiling.
+
+    NOT a resume target for an AdamW or Mano checkpoint -- the optimizer state
+    shapes differ. Fresh run, own checkpoint folder, per-token comparisons.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_sophiag(lr=3.0e-4)
     return cfg
 
 
