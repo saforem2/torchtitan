@@ -351,7 +351,27 @@ class FaultTolerantTrainer(Trainer):
         _num_pp_microbatches = (
             config.parallelism.num_pp_microbatches if parallel_dims.pp_enabled else 1
         )
-        dataloader_batch_size = config.training.num_tokens_per_microbatch_per_dp_rank
+        # #4121 counts batches in TOKEN SLOTS, but BlendCorpus (this
+        # experiment's dataloader) counts SEQUENCES -- its micro_batch_size /
+        # global_batch_size feed a Megatron-style sampler, not a token packer.
+        # Passing the token count straight through made the embedding try to
+        # allocate 8192 seq x 8192 tok x 2048 dim x 2 B = exactly 256 GiB on a
+        # 40 GiB card (smoke 7554426), with 32 GiB still free -- a shape bug
+        # wearing an OOM costume.
+        #
+        # Convert back to sequences for the dataloader only. Core's Grain path
+        # keeps the token units it expects; nothing else here changes.
+        _seq_len = config.training.max_context_length
+        dataloader_batch_size = (
+            config.training.num_tokens_per_microbatch_per_dp_rank // _seq_len
+        )
+        if dataloader_batch_size < 1:
+            raise ValueError(
+                "training.num_tokens_per_microbatch_per_dp_rank "
+                f"({config.training.num_tokens_per_microbatch_per_dp_rank}) "
+                f"must be at least one full sequence of "
+                f"max_context_length ({_seq_len})."
+            )
         self.dataloader = config.dataloader.build(
             dp_world_size=batch_degree,
             dp_rank=batch_rank,
@@ -366,12 +386,18 @@ class FaultTolerantTrainer(Trainer):
             # blendcorpus -- which is every production config -- and sending
             # only the old pair breaks Grain, as it did in job 12473732
             # ("missing 2 required keyword-only arguments").
-            # Same value either way: dataloader_batch_size is already
-            # num_tokens_per_microbatch_per_dp_rank, a TOKEN count post-#4121.
+            # NOT the same value: BlendCorpus counts SEQUENCES (its
+            # micro_batch_size feeds a Megatron-style sampler) while Grain
+            # counts TOKENS. Send each the unit it actually means --
+            # collapsing them mis-sizes whichever loader disagrees, and the
+            # blendcorpus side of that is a 256 GiB embedding allocation
+            # (smoke 7554426), not a clean error.
             seq_len=config.training.max_context_length,
             local_batch_size=dataloader_batch_size,
             max_context_length=config.training.max_context_length,
-            num_tokens_per_batch=dataloader_batch_size,
+            num_tokens_per_batch=(
+                config.training.num_tokens_per_microbatch_per_dp_rank
+            ),
             # train_step pulls gas * num_pipeline_parallel_microbatches batches
             # per optimizer step, so the dataloader must be sized for that many
             # -- not the raw step count. Without the PP factor the iterator runs
@@ -383,7 +409,10 @@ class FaultTolerantTrainer(Trainer):
             # (computed locally: self.num_pipeline_parallel_microbatches is not
             # assigned until later in __init__, after the dataloader is built.)
             training_steps=config.training.steps * _num_pp_microbatches,
-            global_batch_size=config.training.num_tokens_per_train_step,
+            # Sequences, not tokens -- see the conversion above.
+            global_batch_size=(
+                config.training.num_tokens_per_train_step // _seq_len
+            ),
             parallel_dims=parallel_dims,
         )
 

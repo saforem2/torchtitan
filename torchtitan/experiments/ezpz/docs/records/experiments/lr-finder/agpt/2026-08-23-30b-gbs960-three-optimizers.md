@@ -16,6 +16,13 @@
 whose smoothed loss stays within 5% of that arm's minimum -- a width measure,
 not a recommendation.
 
+![LR finder sweeps, three optimizers at GBS=960](figures/lrfind_30b_gbs960.svg)
+
+Dots mark each arm's minimum; dotted verticals mark the suggested LR. The
+suggestion sits well LEFT of the minimum by construction (Smith 2015 takes
+blow-up/10) -- it buys stability margin and is deliberately not the
+best-loss LR.
+
 Sweep: 1e-6 -> 1e-1, 100 steps, `warmup_fraction=0.1`, `smooth_frac=0.1`.
 All three produced a real blow-up, so every suggestion is measured rather than
 an artifact of a sweep that ran out of range (a sweep that never diverges
@@ -26,11 +33,20 @@ yields no suggestion at all).
 Plots and raw data, per arm, under
 `outputs/lrfind-30b-gbs960-<arm>/lr_finder/ezpz/ezpz.agpt/30b_olmo2tok/<arm>/`:
 
-| arm | plot | csv |
+| arm | per-arm plot (scratch) | csv (scratch) |
 |---|---|---|
 | adamw | `.../adamw/lr_vs_loss.png` | `.../adamw/lr_finder_data.csv` |
 | mano | `.../mano/lr_vs_loss.png` | `.../mano/lr_finder_data.csv` |
 | sophiag | `.../sophiag/lr_vs_loss.png` | `.../sophiag/lr_finder_data.csv` |
+
+Those live under `outputs/`, which is GITIGNORED -- they exist only on the
+machine that ran the sweep, so the paths above are dead links from a fresh
+checkout. The committed figure above is the one to read; regenerate it from
+the CSVs with:
+
+```bash
+python3 torchtitan/experiments/ezpz/scripts/plot_lrfind_30b.py
+```
 
 Each CSV has 90 rows of `learning_rate,loss` plus `global_batch_size` and
 `world_size` on every row. Those last two are worth checking rather than

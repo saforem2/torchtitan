@@ -103,16 +103,30 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "unknown; the trainer must call "
                     "set_ezpz_max_context_length() before the first forward"
                 )
-            num_tokens, num_heads, head_dim = q_BLNH.shape
-            if num_tokens % seq_len != 0:
+            # MEASURED, not assumed: on the blendcorpus path the decoder
+            # receives 2D tokens [B, L] (probe run 7554521:
+            # tokens.shape=(1, 8192)), so q arrives as [B, L*N, H] -- the
+            # batch dim is PRESERVED and it is L and N that are folded
+            # together. Reading dim 0 as a token count (the [T, N, H]
+            # reading) yields B=1, and `1 % 8192 != 0` rejects a perfectly
+            # well-formed batch.
+            #
+            # Both observed shapes agree with [B, L*N, H]: LBS=16 gave
+            # (1, 131072, 128) == B=1, L*N=8192*16, H=128; LBS=1 gave
+            # dim 0 == 1. Recover N from the fold instead of guessing which
+            # dim is which.
+            batch, folded_ln, head_dim = q_BLNH.shape
+            if folded_ln % seq_len != 0:
                 raise ValueError(
-                    f"token count {num_tokens} is not a multiple of "
+                    f"folded L*N dim {folded_ln} is not a multiple of "
                     f"max_context_length {seq_len}; this wrapper assumes the "
                     "fixed-length rows ConcatThenSplitPacking emits and cannot "
                     "reshape a ragged batch"
                 )
-            batch = num_tokens // seq_len
+            num_heads = folded_ln // seq_len
             q_BLNH = q_BLNH.view(batch, seq_len, num_heads, head_dim)
+            # k/v carry n_kv_heads under GQA, which differs from num_heads --
+            # let -1 infer it rather than reusing q's head count.
             k_BLNH = k_BLNH.view(batch, seq_len, -1, head_dim)
             v_BLNH = v_BLNH.view(batch, seq_len, -1, head_dim)
         assert q_BLNH.ndim == 4, f"expected 4D, got {tuple(q_BLNH.shape)}"
