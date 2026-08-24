@@ -112,9 +112,9 @@ timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config "$CONFIG" \
     --optimizer.param-groups.0.optimizer-kwargs.lr="$LR" \
-    --training.steps=6000 --training.seq-len=4096 \
-    --training.local-batch-size=5 \
-    --training.global-batch-size=960 \
+    --training.steps=6000 --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=20480 \
+    --training.num-tokens-per-train-step=3932160 \
     --parallelism.tensor-parallel-degree=1 \
     --lr-scheduler.warmup-steps=20 \
     --lr-scheduler.decay-ratio=0.0 \
