@@ -186,7 +186,7 @@ token-efficiency lead is holding.
 > 130 nodes to exactly this. Fixed by a Polaris pattern module plus
 > `EZPZ_MPI_LABEL=1` (PALS `--label`), which is what makes a rank's CUDA
 > traceback attributable at all. Full writeup:
-> [`known-bugs/polaris-failover-blind-rotation.md`](../../guides/known-bugs/polaris-failover-blind-rotation.md).
+> [`known-bugs/polaris-failover-blind-rotation.md`](../../reference/known-bugs/polaris-failover-blind-rotation.md).
 >
 > **After any venv rebuild**, re-run
 > `scripts/install_polaris_failover_patterns.sh` *before* `ezpz tar-env`

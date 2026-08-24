@@ -550,7 +550,7 @@ executed. Use it.
 - [`polaris-20b-tokenizer-mismatch.md`](polaris-20b-tokenizer-mismatch.md) --
   a *different* silent eval-corruption mode (Llama2-tokenized data vs gemma eval
   tokenizer); not this bug.
-- [`exp04-fp32-inference-investigation.md`](../../production/agpt/30b-exp/exp04-fp32-inference-investigation.md)
+- [`exp04-fp32-inference-investigation.md`](../../records/proposals/30b-exp/exp04-fp32-inference-investigation.md)
   -- where this was found (H3), including the separate and still-unisolated
   vLLM bf16 gibberish, which is **not** this bug.
 - [`state_dict_adapter.py`](../../../agpt/state_dict_adapter.py) -- the branch.

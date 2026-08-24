@@ -429,7 +429,7 @@ def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
     block norms. Used by the master-weight-dtype ablation
     (scripts/oneoff/fp32_norms_ablation.py) to test the "this recurs for any
     parameter initialized near 1.0, QK-norm gains being exactly that" claim
-    in docs/production/agpt/30b-exp/README.md Section 6.
+    in docs/records/proposals/30b-exp/README.md Section 6.
     """
     cfg = agpt_debugmodel_local()
     cfg.model_spec = model_registry("debugmodel_qknorm")
@@ -976,7 +976,7 @@ def ezpz_agpt_30b() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b() -> FaultTolerantTrainer.Config:
-    """The proposed next flagship. See docs/production/agpt/30b-exp/.
+    """The proposed next flagship. See docs/records/proposals/30b-exp/.
 
     28.1B params: dim=6144, 64 layers, 48 heads (head_dim 128), 8 KV heads,
     ffn 16384, gemma 256,128 vocab. Geometry is interpolated between 20B and
@@ -991,7 +991,7 @@ def agpt_30b_real() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
-    """30B with the Llama-3 128k vocab -- see docs/production/agpt/30b-exp/.
+    """30B with the Llama-3 128k vocab -- see docs/records/proposals/30b-exp/.
 
     26.5B params vs 28.1B for the gemma-vocab variant. Halves the embedding
     (3.15B -> 1.58B) using a tokenizer we already vendor, and the proposal's
@@ -1011,7 +1011,7 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
-    """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
+    """30B with OLMo-2's 100,352 vocab -- see docs/records/proposals/30b-exp/.
 
     exp07's nine-tokenizer bake-off measured OLMo-2 tied with Llama-3.1 on
     fertility (225,749 vs 225,539 tok/MB on held-out olmo-mix-1124 text) while

@@ -28,7 +28,7 @@
 # degree 1 for exactly this reason), so all three arms exercise the real
 # master-weight path.
 #
-# See docs/production/agpt/30b-exp/exp02-fp32-norms-ablation.md.
+# See docs/records/proposals/30b-exp/exp02-fp32-norms-ablation.md.
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT

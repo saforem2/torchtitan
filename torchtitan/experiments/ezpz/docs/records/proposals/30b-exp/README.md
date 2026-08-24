@@ -7,7 +7,7 @@
 > olmo-mix-1124 budget, arguing for what the *next* flagship should be given
 > what that campaign measured. Since then exp05-exp08 have actually run, so
 > the argument below is no longer purely a priori -- see
-> [EXPERIMENTS.md](./EXPERIMENTS.md) for what is settled and what is not.
+> [EXPERIMENTS.md](EXPERIMENTS.md) for what is settled and what is not.
 >
 > Headline results so far: the config trains (482 steps, loss 12.03 -> 3.37,
 > ~28% MFU held), checkpoints round-trip, the OLMo-2 tokenizer beats a
@@ -112,7 +112,7 @@ mix: `olmo-mix-1124` carries little multiple-choice academic content.
 > is a within-table comparison where every row carries the same bias. But the
 > absolute capability numbers are ~6 points too low on the tasks the model
 > actually learned. Full account:
-> [`20260816-arc-c-decay-vs-rope-permute.md`](../../../records/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
+> [`20260816-arc-c-decay-vs-rope-permute.md`](../../experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md).
 > Corrected rows for 41,000 / 43,000 / 45,000 pending in job `8760307`.
 
 Final eval of the completed chain (job 8754664, 2026-08-14):
@@ -411,12 +411,12 @@ important question is being economised on -- that one needs the 1B proxy.
 
 ## Related
 
-- [`2b/n512/README.md`](../2b/n512/README.md) -- the completed chain
+- [`2b/n512/README.md`](../../../production/agpt/2b/n512/README.md) -- the completed chain
 - [`../../../notes/data-strategy-after-olmo-mix-2026-07.md`](../../../notes/data-strategy-after-olmo-mix-2026-07.md)
   -- corpus survey this builds on
 - [`../../../guides/training-dtype-bf16-norm-freeze.md`](../../../reference/guides/training-dtype-bf16-norm-freeze.md)
   -- the fp32/bf16 investigation Section 6 refers to
-- [`../../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md`](../../../records/experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md)
+- [`../../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md`](../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md)
   -- the anneal vs data-mix A/B
 - [`../../POST-TRAINING-2B.md`](../POST-TRAINING-2B.md) -- post-training
   counterpart: accuracy lives in SFT structure, not RL

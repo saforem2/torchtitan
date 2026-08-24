@@ -20,7 +20,7 @@
 # across all ranks at each dtype setting, and reports steps/sec + memory from
 # the normal metrics line.
 #
-# See docs/production/agpt/30b-exp/exp02-fp32-norms-ablation.md.
+# See docs/records/proposals/30b-exp/exp02-fp32-norms-ablation.md.
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT

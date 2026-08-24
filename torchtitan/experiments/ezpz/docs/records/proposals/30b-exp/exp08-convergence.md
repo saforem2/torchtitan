@@ -535,6 +535,6 @@ What remains open is not convergence but capacity: at 294 G per checkpoint,
 
 ## Cross-references
 
-- Throughput tuning that produced this config: [exp05](./exp05-2n-performance.md)
-- Scaling behavior 2N-64N: [exp06](./exp06-scaling.md)
-- Tokenizer choice: [exp07](./exp07-custom-tokenizer-feasibility.md)
+- Throughput tuning that produced this config: [exp05](exp05-2n-performance.md)
+- Scaling behavior 2N-64N: [exp06](exp06-scaling.md)
+- Tokenizer choice: [exp07](exp07-custom-tokenizer-feasibility.md)

@@ -65,7 +65,7 @@ carries the same ~7.8e-3 bf16 ULP and the same freeze exposure. The
 section above only considered linear layers and missed it.
 
 Measured on the debugmodel over 300 steps (Aurora job 8757151, see
-[`exp02-fp32-norms-ablation.md`](../../production/agpt/30b-exp/exp02-fp32-norms-ablation.md)):
+[`exp02-fp32-norms-ablation.md`](../../records/proposals/30b-exp/exp02-fp32-norms-ablation.md)):
 
 | `tok_embeddings.weight` | master dtype | frac_changed | mean abs delta |
 |---|---|---|---|

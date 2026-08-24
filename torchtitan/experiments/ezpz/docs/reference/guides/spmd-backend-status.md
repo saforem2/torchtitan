@@ -316,7 +316,7 @@ Do NOT reach for the uncompiled 30B's 93.80% as the ceiling here. That number
 is a historical artifact of a path we no longer run -- it came from job
 12473387, the uncompiled resume that existed only while vc_check was thought
 to block the compiled one. Compiled resume works
-([exp08](../../production/agpt/30b-exp/exp08-convergence.md)), and the live
+([exp08](../../records/proposals/30b-exp/exp08-convergence.md)), and the live
 30B chain (12473515 / 12473545) runs compiled at **59.84%**. +6.25pp there is
 ~66%: comfortable.
 

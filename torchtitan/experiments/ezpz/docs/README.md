@@ -74,10 +74,10 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-23 | [MoE Training Configs](./reference/configs/moe.md) |
 | 2026-08-23 | [Dense Models: AuroraGPT-{2,20}B](./reference/configs/dense.md) |
 | 2026-08-23 | [Upstream Sync — Loss Baselines](./reference/baselines/README.md) |
+| 2026-08-23 | [docs/ tree map](./reference/TREE.md) |
 | 2026-08-23 | [Upstream sync -- 2026-08](./records/upstream-sync/2026-08.md) |
 | 2026-08-23 | [Upstream sync -- 2026-07](./records/upstream-sync/2026-07.md) |
 | 2026-08-23 | [Upstream sync -- 2026-06](./records/upstream-sync/2026-06.md) |
-| 2026-08-23 | [Upstream sync -- 2026-05](./records/upstream-sync/2026-05.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->

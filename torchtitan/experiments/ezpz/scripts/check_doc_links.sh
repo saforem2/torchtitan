@@ -64,12 +64,25 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
     for fn in files:
         if not fn.endswith((".py", ".sh")): continue
         p = os.path.join(r, fn)
-        for m in pat.finditer(open(p, errors="replace").read()):
-            key = (os.path.relpath(p, root), m.group(1))
-            if key in seen: continue
-            seen.add(key)
-            if not os.path.exists(os.path.join(docs, m.group(1))):
-                bad.append("(code) %s -> experiments/ezpz/docs/%s" % key)
+        src = open(p, errors="replace").read()
+        # Skip lines opted out with `docs-link-check: ignore`. Some code names
+        # a path that is SUPPOSED to be absent: a branch-tolerant resolver
+        # lists both the pre- and post-move location and picks whichever
+        # exists, and prose in a comment explaining the move names the retired
+        # path by definition. Flagging those trains people to ignore the
+        # checker, which costs more than the few false negatives an explicit,
+        # greppable opt-out allows.
+        lines = src.splitlines()
+        for i, line in enumerate(lines):
+            if "docs-link-check: ignore" in line:
+                continue
+            for m in pat.finditer(line):
+                key = (os.path.relpath(p, root), m.group(1))
+                if key in seen: continue
+                seen.add(key)
+                if not os.path.exists(os.path.join(docs, m.group(1))):
+                    bad.append("(code) %s:%d -> experiments/ezpz/docs/%s"
+                               % (key[0], i + 1, key[1]))
 
 # 3. depth-counted repo-root paths in scripts under docs/
 # A plotter that does Path(__file__).resolve().parents[N] keeps working until

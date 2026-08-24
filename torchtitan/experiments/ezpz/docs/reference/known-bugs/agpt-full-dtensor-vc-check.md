@@ -233,7 +233,7 @@ Open questions, in order:
    12.03 -> 2.263, zero NaN, 28.3% MFU. It also resumed COMPILED from
    step-800 without vc_check and wrote three checkpoints since -- so the
    compiled round trip is verified on this pin, not merely smoke-tested.
-   See [exp08](../../production/agpt/30b-exp/exp08-convergence.md).
+   See [exp08](../../records/proposals/30b-exp/exp08-convergence.md).
 2. Where exactly does the `DeviceMesh` enter saved-for-backward under
    `full_dtensor`? Not yet localized.
 3. Separately: the uncompiled level_zero 40 in `cross_entropy` at seq=8192 is
