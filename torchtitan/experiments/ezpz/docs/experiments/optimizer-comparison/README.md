@@ -182,3 +182,55 @@ negatively: the preflight rejects an unknown flag, a halved GBS, and
 `pyflakes` over `torchtitan/experiments/ezpz/` is the cheap catch for failure 5
 and should be run after any upstream sync -- it reports zero undefined names in
 `trainer.py` now.
+
+
+## Phase 2 interim results (chain 1, ~1.95B tokens per arm)
+
+Jobs 12473743/44/45, 16N each, GBS=960, constant LR after a 20-step warmup,
+each arm at its own Phase 1 LR. Loss / grad_norm at each 100-step mark:
+
+| step | tokens | AdamW | Mano | SophiaG | Mano - AdamW |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 0.39B | **6.1018** | 6.3064 | 7.1746 | +0.2046 |
+| 200 | 0.79B | **5.3382** | 5.4752 | 6.6477 | +0.1370 |
+| 300 | 1.18B | 4.7682 | **4.6622** | 6.2720 | **-0.1060** |
+| 400 | 1.57B | 4.4364 | **4.1891** | 5.9182 | -0.2473 |
+| ~495 | 1.95B | 4.2057 | **3.8722** | 5.5492 | **-0.3335** |
+
+**Mano overtakes AdamW between step 200 and 300** and the gap keeps widening
+(+0.20 -> -0.33 nats). This is not a single-point wobble: the sign flips once,
+monotonically, and holds across 200+ steps.
+
+Per-100-step improvement over the last two intervals shows why -- Mano is
+descending faster, not merely starting luckier:
+
+| arm | 300->400 | 400->~495 |
+|---|---:|---:|
+| AdamW | 0.3318 | 0.2307 |
+| **Mano** | **0.4731** | **0.3169** |
+| SophiaG | 0.3538 | 0.3690 |
+
+SophiaG is a clear third throughout (1.7 nats back) but has the flattest
+decay in improvement rate, so its ordering versus the others is the least
+settled of the three.
+
+### What this is not yet
+
+* **1.95B of a 10B budget.** The documented pattern from earlier competitions
+  is "Mano/Muon win short runs, AdamW wins in the cosine decay phase" -- and
+  these runs are constant-LR by design, so they have NO decay phase. This
+  result speaks to the constant-LR regime only.
+* **One seed per arm.** The crossover is large relative to the step-to-step
+  noise, but no seed variance has been measured here.
+* Absolute losses are NOT comparable to the decayed AdamW 30B baseline
+  (2.115 at 3.93B tokens); only the three arms are comparable to each other.
+
+### Interruptions (none affected the numbers)
+
+Chain 1 was killed externally at 05:23-05:25 on 2026-08-24 -- all three arms
+simultaneously, mid-line, on different nodes, with no catchable signal. PBS
+recorded 6:09 walltime against an 8h request, and a maintenance reservation
+(14:00 -> Tue 00:30) was scheduled the same day, so node drain is the likely
+cause. All three had complete step-400 checkpoints, so chain 2
+(12473753/54/55) resumes there; it is queued behind the reservation with an
+estimated start of Tue 00:30.
