@@ -23,7 +23,10 @@ from torchtitan.components.data import (
     GrainDataLoader,
     SingleDatasetConfig,
 )
-from torchtitan.components.data.sources import HuggingFaceRandomAccessSource
+from torchtitan.components.data.sources import (
+    HuggingFaceRandomAccessSource,
+    HuggingFaceStreamingSource,
+)
 from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
@@ -1101,6 +1104,64 @@ def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.C
         )
     )
     return cfg
+
+def _use_hf_streaming(
+    cfg: FaultTolerantTrainer.Config,
+    *,
+    path: str,
+    name: str | None = None,
+    split: str = "train",
+) -> FaultTolerantTrainer.Config:
+    """Read an arbitrary Hugging Face dataset by STREAMING it.
+
+    Same object graph as :func:`_use_fineweb_edu` -- ConcatThenSplitPacking
+    over a SingleDatasetConfig -- but sourced from
+    HuggingFaceStreamingSource instead of local parquet shards, so it needs
+    no preprocessed corpus on disk.
+
+    This exists so the model/dataloader path can be exercised on a machine
+    that has GPUs but none of our pretokenized data (Perlmutter, a laptop,
+    CI). It deliberately does NOT go through the ezpz BlendCorpus wrapper,
+    which raises NotImplementedError for every dataset except
+    "blendcorpus" after the 80th sync deleted the HF delegate -- the
+    replacement is exactly this Grain object graph.
+
+    Not for production runs: streaming throughput is network-bound and the
+    shard order is not the deterministic, sorted selection the comparison
+    arms rely on.
+    """
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=ConcatThenSplitPackingConfig(
+            dataset=SingleDatasetConfig(
+                source=HuggingFaceStreamingSource.Config(
+                    path=path,
+                    name=name,
+                    split=split,
+                ),
+                processor=TextProcessor.Config(),
+                post_filters=(lambda sample: sample is not None,),
+            )
+        )
+    )
+    return cfg
+
+
+def agpt_2b_real_stream_c4() -> FaultTolerantTrainer.Config:
+    """agpt_2b_real reading streamed C4 -- an integration smoke config.
+
+    Purpose is to exercise the full dataloader -> model -> attention path
+    (the #4121 token-unit flags and the [B, L*N, H] attention unflatten) on
+    hardware that has no local corpus. Loss values are not meaningful; the
+    question is whether real batches flow and the shapes are right.
+    """
+    cfg = agpt("2b_real")
+    # wikitext rather than C4: it is small enough to pre-cache on a login
+    # node, which matters because NERSC COMPUTE nodes have no egress -- a
+    # live hub call there dies with errno 524 / "not cached in None".
+    return _use_hf_streaming(
+        cfg, path="Salesforce/wikitext", name="wikitext-103-raw-v1"
+    )
+
 
 def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
     """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
