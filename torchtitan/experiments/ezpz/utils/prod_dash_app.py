@@ -21,12 +21,14 @@ b/c board/charts pane | t focus run-toggles | T hide/show the run panel |
 z cycle focus through runs (bright + fit; wraps to reset) | Z/0 reset view |
 p pan/zoom mode | +/- zoom x in/out | h/l pan left/right | j/k pan down/up |
 L y-axis log/linear | s zen mode (chart only) | X set xlim | Y set ylim |
+m/M cycle marker style (hd/fhd/braille/sd/auto/glyphs) |
 left/right (or the tab bar) switch metric | d dark/light |
 space (in the run list) toggle a run.
 """
 from __future__ import annotations
 
 import os
+import zlib
 
 import prod_dash as pd  # data layer (same utils/ dir -> on sys.path[0])
 
@@ -165,11 +167,83 @@ for _d, _l in _THEME_PAIRS:
     _THEME_COUNTERPART.setdefault(_l, _d)
 
 
-# plotext marker for every chain curve. `hd` (half-block glyphs) over the
-# previous `braille`: braille's 2x4 dot grid is finer but its dots are thin and
-# wash out once a chain is dimmed toward the background. Override with
-# PD_MARKER=braille to get the fine grid back without editing this file.
-_MARKER = os.environ.get("PD_MARKER", "hd")
+# plotext marker modes for the chain curves, cycled by the `m` key (`M` steps
+# backward). Two families, and the distinction matters:
+#
+#   RESOLUTION markers (hd / fhd / braille) subdivide each terminal cell into
+#   sub-pixels, so the curve is a continuous LINE drawn at 2x2, 2x3, or 2x4 the
+#   cell resolution. These are what you want by default.
+#   GLYPH markers (dot / at / star / ...) stamp one character per data point, so
+#   the curve reads as discrete SAMPLES. Useful when two chains share a hue, or
+#   when a sparse fork would otherwise render as a near-flat segment.
+#
+# `hd` leads: braille's 2x4 grid is finer but its dots are thin and wash out
+# once a chain is dimmed toward the background, while `hd`'s half-blocks stay
+# legible dimmed. `auto` gives each chain its own GLYPH, mirroring the matplotlib
+# path's --marker auto in prod_dash.py.
+#
+# Order is the cycle order. PD_MARKER picks the starting mode.
+MARKER_MODES = [
+    "hd",        # 2x2 half-block sub-cells (default)
+    "fhd",       # 2x3 sub-cells -- finer, needs a font with sextant glyphs
+    "braille",   # 2x4 dot grid -- finest, thin
+    "sd",        # solid block, one per cell -- chunkiest line
+    "auto",      # per-chain distinct glyph (see _AUTO_GLYPHS)
+    "dot",
+    "at",
+    "star",
+    "cross",
+    "heart",
+    "shamrock",
+    "smile",
+]
+# Glyph pool for `auto`. Deliberately visually distinct at 1 cell; drawn from
+# plotext's all_markers table (see _valid_marker below).
+_AUTO_GLYPHS = ["dot", "at", "star", "cross", "heart", "shamrock", "smile",
+                "snowflake", "atom", "yinyang", "flower", "king"]
+
+_MARKER_DEFAULT = "hd"
+
+
+def _valid_marker(name):
+    """True iff plotext knows this marker name.
+
+    plotext does NOT validate: ``correct_marker`` returns ``marker[0]`` for an
+    unknown name, so ``marker="circle"`` silently plots the literal letter "c"
+    at every point. Verified against plotext's own ``all_markers`` table so a
+    typo in PD_MARKER degrades to the default instead of drawing garbage.
+    """
+    try:
+        from plotext._utility import all_markers
+    except Exception:
+        # Can't introspect -- accept the names we ship and reject the rest.
+        return name in MARKER_MODES or name in _AUTO_GLYPHS
+    return name in all_markers
+
+
+def _auto_glyph_map(keys):
+    """Assign a DISTINCT glyph per chain, deterministically.
+
+    Mirrors prod_dash._auto_marker_map: crc32 picks a preference (so a chain
+    keeps its shape across refreshes and across step/tokens axes) and collisions
+    probe forward to the next free glyph. Iterating ``sorted(keys)`` makes the
+    result independent of dict order. Past len(_AUTO_GLYPHS) chains some reuse
+    is unavoidable -- color still separates those.
+    """
+    pool = [g for g in _AUTO_GLYPHS if _valid_marker(g)] or ["dot"]
+    n = len(pool)
+    out, used = {}, set()
+    for key in sorted(keys):
+        start = zlib.crc32(key.encode()) % n
+        for off in range(n):
+            cand = pool[(start + off) % n]
+            if cand not in used:
+                break
+        else:                      # more chains than glyphs -- accept a repeat
+            cand = pool[start]
+        used.add(cand)
+        out[key] = cand
+    return out
 
 
 def _dim(rgb, f=0.55, bg=(0, 0, 0)):
@@ -255,6 +329,8 @@ class ProdDashApp(App):
         Binding("k", "pan_up", "pan up", priority=True),
         Binding("L", "toggle_ylog", "y log/linear", priority=True),
         Binding("s", "toggle_zen", "zen mode", priority=True),
+        Binding("m", "next_marker", "marker style", priority=True),
+        Binding("M", "prev_marker", "marker (back)", show=False, priority=True),
     ]
 
     def __init__(self):
@@ -277,6 +353,15 @@ class ProdDashApp(App):
         self._ylog = False         # y-axis log scale (L toggles)
         self._zen = False          # zen mode: only the chart, no panels/chrome
         self._force_next = False   # ctrl+r: force a full cache re-pull next fetch
+        # Marker style, cycled by m/M. PD_MARKER seeds it; an unknown value
+        # falls back to the default rather than raising -- plotext accepts any
+        # string and silently draws its first character, so a typo would
+        # otherwise stipple the chart with a stray letter.
+        env_marker = os.environ.get("PD_MARKER", _MARKER_DEFAULT)
+        if env_marker not in MARKER_MODES and not _valid_marker(env_marker):
+            env_marker = _MARKER_DEFAULT
+        self._marker = env_marker
+        self._auto_glyphs = {}     # chain key -> glyph, rebuilt per redraw
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -611,6 +696,12 @@ class ProdDashApp(App):
             xs, ys, is_live = got
             prepped.append((key, c, xs, ys, is_live))
 
+        # Build the auto-glyph map over ALL chains, not just the visible ones:
+        # keying it to the visible set would reshuffle every chain's glyph the
+        # moment one is toggled off. Same reasoning as prod_dash._auto_marker_map.
+        if self._marker == "auto":
+            self._auto_glyphs = _auto_glyph_map([k for k, _ in ordered])
+
         xlo, xhi = self._xlim
         ylo, yhi = self._ylim
         # Pass 2: plot. BOTH x- and y-limits are applied by CLIPPING in python,
@@ -649,12 +740,12 @@ class ProdDashApp(App):
                 xs = [p[0] for p in lp]
                 ys = [p[1] for p in lp]
             color = self._color_for(key)
-            # `hd` markers (user preference, 2026-08-19). plotext's braille
-            # gives 2x4 sub-cells per char, but its dots are thin and can wash
-            # out at low contrast, especially once a chain is dimmed toward the
-            # background; `hd` draws denser half-block glyphs that stay legible
-            # dimmed. Switch back by setting marker="braille" here if you want
-            # the finer dot grid.
+            # Marker: a resolution mode (hd/fhd/braille/sd) draws a continuous
+            # sub-cell line and is shared by every chain; `auto` instead stamps
+            # a per-chain glyph so overlapping curves stay tellable apart when
+            # their hues are close. Cycle with m / M.
+            marker = (self._auto_glyphs.get(key, "dot")
+                      if self._marker == "auto" else self._marker)
             # Dimming rule: when a chain is FOCUSED (z-cycle), it alone stays
             # bright and every other chain is dimmed toward the background;
             # otherwise the usual idle-dims-vs-live-bright rule applies. Fading
@@ -668,13 +759,15 @@ class ProdDashApp(App):
             # (no reposition/disable API) and covered the early-step points of
             # interest. The run SelectionList on the left IS the legend now -- it
             # carries a color swatch per chain (see _rebuild_runs).
-            plt.plot(xs, ys, color=color, marker=_MARKER)
+            plt.plot(xs, ys, color=color, marker=marker)
             drawn += 1
 
         axis_label = _metric_label(self.metric)
         if self._ylog:
             axis_label = "log10(%s)" % axis_label
         tags = []
+        if self._marker != _MARKER_DEFAULT:
+            tags.append("marker:%s" % self._marker)
         if self._ylog:
             tags.append("y:log")
         if self._zen:
@@ -840,6 +933,27 @@ class ProdDashApp(App):
         (plotext drops the bad points) but flag it in the title tag."""
         self._ylog = not self._ylog
         self._redraw()
+
+    def _cycle_marker(self, step: int) -> None:
+        """Advance the marker mode by ``step`` positions through MARKER_MODES.
+
+        Wraps in both directions. If the current mode came from a PD_MARKER
+        value outside the cycle list, restart from the head rather than
+        erroring on a .index() miss.
+        """
+        try:
+            i = MARKER_MODES.index(self._marker)
+        except ValueError:
+            i = -1 if step > 0 else 0
+        self._marker = MARKER_MODES[(i + step) % len(MARKER_MODES)]
+        self._log_line("marker: %s" % self._marker)
+        self._redraw()
+
+    def action_next_marker(self) -> None:
+        self._cycle_marker(1)
+
+    def action_prev_marker(self) -> None:
+        self._cycle_marker(-1)
 
     def action_toggle_zen(self) -> None:
         """Zen mode: hide the run panel, metric tabs, header, footer, and log --

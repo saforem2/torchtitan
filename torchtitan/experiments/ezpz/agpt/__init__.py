@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
+
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.models.common import (
@@ -81,6 +83,11 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # Avoid set_priority=True — triggers a torch._dynamo bug in
         # PyTorch 2.11 where FX proxy nodes are incorrectly passed to
         # int() during fake tensor tracing.
+        # QK diagnostics. Module-level gate rather than a config on self: the
+        # positional-arg names of this forward are contract-checked under TP>1
+        # (see the _BLNH note above), so the signature must not change. No-op
+        # and near-free when disabled -- see diagnostics/attention.py.
+        _attn_diag.observe(q, k, scale)
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
                 q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa

@@ -302,3 +302,82 @@ model. Six jobs on Sunspot (`12473195`-`12473202`), all on the frameworks RC.
   real +5.9% compile effect to be written off as noise.
 - **`git stash pop` with nothing stashed** pops an unrelated older stash. Mine
   restored an 11-day-old autostash and conflicted a generated SVG.
+
+## 2026-08-23 (Polaris failover: blind rotation -> attributed bad nodes)
+
+**Shipped:** Polaris now identifies the node that actually failed. Commits
+`341096f90` (fix + tests) and `9ab148774` (docs).
+
+The 20B chain's job 7550301 ran, held 130 nodes for ~1 hour, and produced
+**zero training steps** -- then the two queued dependents aged out. The
+checkpoint (`step-5600`, 512 shards, `.metadata` present) is intact; the
+loss was pure allocation burn against a balance that is now **-49,134
+node-hours**.
+
+**Two stacked causes:**
+
+1. **Polaris had no scraper patterns at all.** `ezpz.failover.patterns`
+   shipped `aurora.py` and `sunspot.py`; `get_patterns_for_machine
+   ("polaris")` returned `[]`. `scrape_bad_nodes` returns `[]` for an
+   empty pattern set, which the caller reads as "no actionable hostname"
+   and falls back to blind rotation. `swap_one_blind()` rotates
+   `active[0]` **by design**, so the sick node stayed in the allocation
+   and attempt 2 failed identically. This was true of *every* Polaris
+   failover ever run, not just this job.
+2. **CUDA faults are unattributable without `--label`.** PALS prints a
+   rank's stderr verbatim with no host prefix. The
+   `torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are
+   busy or unavailable` traceback therefore carried nothing to match on.
+
+**Fix (both halves required):** `EZPZ_MPI_LABEL=1` -> `ezpz/pbs.py`
+appends PALS `--label` -> every line becomes `<fqdn> <rank>: <text>`;
+a new `polaris.py` registers 5 patterns that read it. Opt-in rather than
+global because Aurora/Sunspot patterns anchor on *unlabeled*
+`^<host>: ` lines and would break silently.
+
+**Insights:**
+
+- **An empty pattern set and a genuinely clean log are indistinguishable
+  downstream.** Both surface as `[]`, and the blind-rotation fallback is
+  a *correct* response to the second -- so a whole machine having zero
+  patterns degraded gracefully into looking like normal operation. The
+  bug had no error message; it had to be found by asking what the
+  scraper returns, not by reading a failure.
+- **The only host-attributed line in the log named the wrong node.**
+  `x3007c0s13b1n0: rank 57 died from signal 15` is the idle watchdog's
+  *own* SIGTERM. It was tempting to match -- it is the sole hostname in
+  1800 lines -- and matching it would have swapped a third innocent
+  node. The most-available evidence pointed away from the culprit.
+- **Verify the log FORMAT before writing regexes against it.** I ran
+  probe 7553963 rather than assume the `--label` shape. It confirmed the
+  prefix is applied **per line** to a multi-line traceback on stderr --
+  the property the whole fix depends on. A guess of `<host>: ` (the
+  Aurora shape, no rank field) would have compiled fine and matched
+  nothing.
+- **The negative test matters more than the positive one.** On unlabeled
+  input the scraper must return `[]`, not tag the SIGTERM victim: a false
+  positive swaps a healthy node *and* leaves the culprit, which is
+  strictly worse than blind rotation. Verified against the real 7550301
+  log.
+
+**Method lessons:**
+
+- **`ezpz tar-env` skips with exit 0 when the tarball exists.** It logged
+  "already exists, skipping creation" and exited clean; I nearly shipped
+  a "rebuilt" 4.4 GB tarball still containing the Aug 10 code. Another
+  instance of the silent-no-op pattern: verify the artifact.
+- **Compute nodes run a yeeted `/tmp/.venv`, not the live `.venv`.**
+  Editing `site-packages` changes nothing until `.venv.tar.gz` is
+  rebuilt -- and ezpz is installed from a *pinned* commit, so the fix
+  would vanish on the next rebuild. Hence vendoring under
+  `experiments/ezpz/failover_patterns/` plus an install script that
+  verifies registration and exits non-zero if it did not take.
+- **My first two probes failed on my own harness bugs, not the code.**
+  An unresolved `$MPI` glob, then a missing `LD_LIBRARY_PATH` mpi-compat
+  export (the known MPICH 9.1.0 breakage). Also `2>/dev/null` in a test
+  loop hid the real `ValueError` and made a working patch look inert --
+  never silence stderr while diagnosing.
+- **Grepping for the wrong checkout wastes real time.** The repo root
+  under `argonne_tpc` is a stale 2024 clone; production lives under
+  `/eagle/AuroraGPT/foremans/`, and its checkpoints are in
+  `outputs/checkpoints/`, not `checkpoints/`.

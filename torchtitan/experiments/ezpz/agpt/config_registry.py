@@ -14,7 +14,10 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
-from torchtitan.experiments.ezpz.optimizer.containers import default_mano
+from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_mano,
+    default_sophiag,
+)
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -1018,6 +1021,40 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
+def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+    """Point a config at the LOCAL fineweb-edu-100BT parquet instead of books.
+
+    agpt() defaults dataset_path to data-lists/<machine>/books.txt, which on
+    Sunspot is THREE shards totalling ~11 GB -- about 5.8B tokens. A 10B-token
+    comparison arm would therefore loop that corpus 1.7x, and repeated data
+    bends the loss curve in ways that need not be the same for every optimizer.
+    That is precisely the confound a fixed-batch optimizer comparison exists to
+    exclude, so the arms read a corpus larger than their budget instead.
+
+    fineweb_edu_local is a registered LOCAL parquet dir (140 files, ~267 GB,
+    ~100B tokens) already used by agpt_2b_mds_mix_edu. Local matters: streaming
+    allenai/olmo-mix-1124 from the hub 429-storms at this rank count (see the
+    module docstring in datasets.py), and the on-disk olmo-mix cache here holds
+    only the wiki slice (6.1 GB), which is smaller and narrower than books.
+
+    dataset_path must be cleared: it is the blendcorpus file-list path and is
+    meaningless for a parquet dataset, but a stale value would still be read.
+    """
+    cfg.dataloader.dataset = "fineweb_edu_local"
+    cfg.dataloader.dataset_path = None
+    return cfg
+
+
+def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
+    """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
+
+    Same model and data as the mano/sophiag arms; only the optimizer differs.
+    See docs/experiments/optimizer-comparison/README.md.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_fineweb_edu(cfg)
+
+
 def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """agpt_30b_olmo2tok with the Mano optimizer instead of AdamW.
 
@@ -1033,7 +1070,33 @@ def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_mano(lr=3.0e-4)
-    return cfg
+    return _use_fineweb_edu(cfg)
+
+
+def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok with the SophiaG optimizer instead of AdamW.
+
+    Third arm of the fixed-batch optimizer comparison (AdamW / Mano / SophiaG,
+    all at GBS=960). SophiaG is a second-order method: it estimates a diagonal
+    Hessian and clips the per-coordinate update at rho, so its useful LR range
+    does not have to resemble either first-order optimizer's.
+
+    The lr here is a PLACEHOLDER. Do not trust it -- the comparison runs pass
+    --optimizer.lr explicitly from the LR-finder result measured at THIS batch
+    size. Batch dependence is not a small effect for these optimizers: the 2B
+    finder put Mano at 4.79e-03 while the 80B at GBS=6144 wanted ~3e-6, three
+    orders of magnitude apart, so an inherited LR says nothing.
+
+    SophiaG has form here: the 2026-07-03 80B run NaN'd at step 14 and burned
+    ~12h. That is what --nan-abort-consecutive and the finder's blow-up
+    detection are for; expect this arm to be the one that finds the ceiling.
+
+    NOT a resume target for an AdamW or Mano checkpoint -- the optimizer state
+    shapes differ. Fresh run, own checkpoint folder, per-token comparisons.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_sophiag(lr=3.0e-4)
+    return _use_fineweb_edu(cfg)
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
