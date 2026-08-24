@@ -4,6 +4,251 @@
 
 ---
 
+## 2026-08-24
+
+> [!IMPORTANT]
+> **Headline:** **the 30B ran its full config to completion** -- 2000/2000
+> steps, loss 12.028 -> 2.115, zero NaN, ~28% MFU held to the last step, with
+> the final two resumes COMPILED. That answers every question exp08 was opened
+> for. Against it, production pre-training **did not advance at all this
+> window**: the 2B-512 flagship finished at 46,367 (99.9% of target) and both
+> 20B chains have been idle 7-8 days, first behind a node-health collapse
+> (~1,025 nodes offlined by a failed prologue) and now behind a full-system
+> reservation that neither queued job can fit in front of. Two hardening
+> results came out of the idle time: **production had no defense against a NaN
+> gradient** (the guard ran *after* the optimizer step and only watched loss),
+> and **Polaris failover was blind the entire time it has existed** -- zero
+> scraper patterns registered for the machine, so every failover rotated a
+> healthy node and left the sick one in.
+
+Covers the two weeks since 2026-08-10. The shape of this window is unusual:
+**no production tokens**, but the largest model we have run end-to-end, plus
+three classes of silent failure found and closed. Nothing here was caught by an
+error message -- each surfaced only by asking a tool what it actually returns.
+
+### 1. Production pre-training -- stalled, not broken
+
+No chain advanced this window. Current state:
+
+| chain | step | loss | % target | last job | idle |
+|---|---|---|---|---|---|
+| 2b 512N (flagship) | 46,367 | 2.6934 | **99.9%** | 8769743 | 11d |
+| 2b 256N | 92,772 | 2.6522 | **99.9%** | 8773381 | 56d |
+| 20b 512N | 9,690 | 2.4065 | 20.9% | 8731758 | 7d |
+| 20b 256N | 10,369 | 2.3645 | 11.2% | 8703746 | 8d |
+| 2b 512N stage2-dolmino | 7,728 | 2.5178 | 32.5% | 8764675 | 7d |
+| 2b 512N constlr-from9200 | 21,307 | 2.7451 | 45.9% | 8681590 | 7d |
+| 2b MDS (v1 ref) | 154,285 | 2.0330 | 99.9% | -- | frozen |
+
+Two jobs are queued and neither can start:
+
+- `8773440` -- the 5-seat umbrella, 2,098 nodes, 12 h, queued Aug 21 (64 h
+  eligible)
+- `8775285` -- 30B LR-finder umbrella, 2,088 nodes, 6 h, queued Aug 22 (45 h
+  eligible)
+
+**The binding constraint is reservation `M8769283`** (whole machine, Mon 14:00
+-> Tue 00:30 UTC). PBS will not start a job that cannot finish before a
+reservation, so each job's real deadline is `14:00 - walltime`: 02:00 for the
+umbrella, 08:00 for the 30B. Both passed while the machine was still short of
+capacity. Their PBS comment changed from `Not enough free nodes available` to
+`Job would conflict with reservation or top job`, which is the scheduler
+confirming the deadline rather than a shortage -- by Monday midday there were
+9,492 free nodes and still no start.
+
+Before the reservation, the blocker was real scarcity of our own making
+upstream: job `8776339` (3,420 nodes, 5-minute walltime, not ours) failed at
+prologue with `Exit_status = -3` and **offlined 1,025 nodes as "reboot
+required"**. Node health has since recovered (846 offline -> 141). Separately,
+we are out-waited on `eligible_time` in `large`: ten queued jobs carry 84-128 h
+against our 64 h, several wanting 3,430 nodes each.
+
+Eligibility resumes at the reservation's end, Tue 00:30 UTC.
+
+### 2. The 30B ran out -- 2000/2000, zero NaN
+
+The headline result. Four jobs, one continuous trajectory, ending in an actual
+completion rather than a timeout (`rc=0`, 2 h 58 of a 6 h allocation):
+
+| job | steps | loss |
+|---|---|---|
+| 12473304 | 1 -> 482 | 12.028 -> 3.357 |
+| 12473476 | 401 -> 871 | -> 2.617 |
+| 12473515 | 801 -> 1781 | -> 2.246 |
+| 12473545 | 1751 -> 2000 | -> **2.115** |
+
+Steady state to the last step: 496 tps, **28.3% MFU**, memory flat at 59.84%,
+grad_norm falling 0.26 -> 0.074. Nine checkpoints, 2.6 T. Zero NaN/inf anywhere
+in the four jobs. That closes all three questions exp08 was opened for -- loss
+descends, grad_norm stays bounded, checkpoints round-trip -- and **the last two
+resumes were compiled**, retiring the "compiled resume is broken at 30B"
+caveat (the real culprit was `full_dtensor`, not resume).
+
+Details: [`exp08-convergence.md`](../production/agpt/30b-exp/exp08-convergence.md).
+
+### 3. Production had no defense against a NaN gradient
+
+Found while reading the 80th upstream sync, not from a failure.
+
+**The guard ran after the optimizer step, and only looked at loss.** Guard at
+`trainer.py:1085`, step at `:871` -- so a NaN gradient was written into the
+weights before anything noticed. Our own 80B report is the proof:
+`grad_norm nan @30, loss nan @31, nan-abort @35`. grad_norm went bad a full
+step **before** the loss, so the earliest available signal was one ahead of the
+one we watched, and five more updates landed on top.
+
+Worse than "off by default": production omits `--nan-abort-consecutive`
+entirely, because the pinned pre-#3623 clones have no such field and passing it
+crashes every rank.
+
+**Scope, stated carefully:** no canonical chain was observed doing this. All
+five seats of umbrella 8764675 log zero non-finite loss/grad_norm lines. The
+two cited jobs are experiments. The defect is that nothing *would* have caught
+it, not that it happened in production.
+
+Fixed with a host-side `isfinite` check on grad_norm before the step:
+non-finite -> zero_grad, log, skip the step, still advance the LR scheduler. No
+new collective, since grad_norm is already rank-reduced inside
+`clip_grad_norm_`, so every rank branches identically.
+
+Deliberately **not** upstream's mechanism (#4226), which uses
+`torch._assert_async`: a failed device-side assert invalidates the process, and
+our failover would read that as a crash rather than a clean stop. Its XPU
+behavior is also undocumented, and it lands in `Trainer.train_step`, which
+`FaultTolerantTrainer` overrides wholesale -- merging it would have given us
+nothing. The most valuable commit in that sync was valuable only as a
+hand-port.
+
+Honest about the smoke: 10/10 bit-identical against the parent, guard fired 0
+times, tps 337-338 vs 338-340. The ~0.3% delta is **below** what a single-shot
+10-step comparison resolves, so bit-identity is the real result and "costs
+nothing" is not yet earned. And the smoke proves the guard is inert, not that
+it fires -- that path needs a divergent config and is still owed.
+
+### 4. Polaris failover was blind for its entire existence
+
+`ezpz.failover.patterns` ships `aurora.py` and `sunspot.py`;
+`get_patterns_for_machine("polaris")` returned `[]`. **An empty pattern set and
+a genuinely clean log both return `[]`**, and falling back to blind rotation is
+the correct response to the second -- so a whole machine having no patterns
+degraded gracefully into looking like normal operation. No error to grep for.
+It surfaced only by asking the scraper directly what it returns.
+
+The cost was job 7550301: **130 nodes, ~1 hour, zero training steps.** Two
+ranks raised `CUDA error: ... device(s) is/are busy or unavailable` at
+`set_device()`. Blind rotation swaps `active[0]` *by design*, so it retired a
+healthy node twice while the sick one stayed in, and attempt 2 failed
+identically. Balance is now at **-49,134 node-hours**.
+
+The one host-attributed line in 1,800 lines named the **wrong** node:
+`x3007c0s13b1n0: rank 57 died from signal 15` is the idle watchdog's own
+SIGTERM -- a victim of our teardown, not a cause. Matching it would have
+swapped a third innocent node.
+
+Fix: PALS `--label` (confirmed on real hardware rather than assumed -- the
+prefix is `<fqdn> <rank>: ` applied per line) enabled **opt-in** via
+`EZPZ_MPI_LABEL=1`, since Aurora and Sunspot patterns anchor on *unlabeled*
+`^<host>: ` lines and turning it on globally would have silently broken both.
+8/8 tests pass, including the negative one: on unlabeled input the scraper must
+stay silent rather than tag the SIGTERM victim.
+
+Writeup:
+[`known-bugs/polaris-failover-blind-rotation.md`](../guides/known-bugs/polaris-failover-blind-rotation.md).
+
+### 5. Flex-attention MoE: two stacked bugs
+
+Every flex-attention MoE config was dying on a missing BlockMask, and it took
+two fixes. Core builds the mask in `_prepare_inputs` only `if positions is not
+None`, and blendcorpus never yielded that key. Fix 1 emits per-document
+positions (restarting at 0 after each EOD, because blendcorpus *packs*
+documents and a plain arange would let attention cross document boundaries). I
+unit-tested that against HF semantics on four cases before running it anywhere;
+it passed, and the real run **failed identically**. Fix 2 was the actual bug:
+`_document_positions` read the EOD id off `_bc_cfg`, blendcorpus's own config
+object, which does not carry the field -- so `getattr(..., None)` silently
+yielded None.
+
+The mask fix then exposed an unrelated bug underneath: **MoE routing is not
+recompute-stable under FullAC** (`Recomputed values ... 560 vs 559`). Three AC
+arms on both flex configs: full fails, AC-off fails at 89-94% memory,
+**selective passes 5/5** -- not luck, `SelectiveAC` keeps `aten.topk.default`
+as MUST_SAVE precisely to hold expert assignments stable across recompute.
+
+Also settled: the EP all-to-all abort is
+`ur_die: urEventWait must not be called for an internal event` -- Intel's
+Unified Runtime, **not** a torchtitan assertion. EP is not the trigger
+(`moe_debugmodel_ep` runs 5/5). And **hybridep is closed WONTFIX**: `deep_ep`
+is CUDA-only ("GB200 NVLink72 Systems", TMA-optimized, calls
+`cudaStreamSynchronize`), so it is not a torch version floor as previously
+recorded.
+
+### 6. Two seats were loading complex-trained weights as cos_sin
+
+`CONFIG_SUFFIX` was one global `_real` across all five umbrella seats, but each
+chain crossed the 2026-06-25 RoPE switch at a different step and `2b_v2_256`
+never crossed it at all:
+
+| seat | parent @ step | trained | was |
+|---|---|---|---|
+| t0 dolmino | 2b_v2_512 @46429 | `_real` | ok |
+| t1 20b-512 | 20b_v2_512 @9000 | `_real` | ok |
+| t2 20b-256 | 20b_v2_256 @10369 | `_real` | ok |
+| t3 2b-512 constlr | 2b_v2_512 @21307 | **complex** | WRONG |
+| t4 2b-256 constlr | 2b_v2_256 @9500 | **complex** | WRONG |
+
+t3 is a 512N production seat resuming **in place** -- it only avoided
+corrupting a live chain because it dies on `std::bad_alloc` first. Now a
+per-seat field, guarded on UNSET rather than empty, because empty is a
+meaningful value here (complex). Mis-flavoring loads cleanly and only shows up
+as high loss, which is what makes it dangerous.
+
+Consequence for the matched-pair eval at step 21,000: mean delta -0.0033 across
+7 tasks, no meaningful separation -- but **boolq is confounded**, because the
+fork trained under cos_sin from complex-derived weights and boolq is
+calibration-sensitive. The clean version of that experiment needs a
+correctly-flavored fork.
+
+### 7. Tooling: the dashboard, and a class of silent failure
+
+- **MDS and `lr` are in the production dashboard.** MDS reads the committed CSV
+  (154,391 rows, zero W&B calls); its tokens/step is confirmed bit-exact
+  against W&B's own `consumed_train_tokens` (`154391*6144*8192 ==
+  7,770,753,466,368`). `lr` rides in a separate `scan_history` pass -- folding
+  it into `OLOG_KEYS` returns 0 rows for all 6 backfill runs and would have
+  deleted 3,408 points from every other metric.
+- **The combined eval chart was truncating the MDS flagship at 7.06T of its
+  7.77T tokens.** The last 14k steps live in a sibling results dir
+  (`agpt-2b-mds-7771T`) that no trajectory referenced. 28 points -> 36.
+- **A whole class of path bug closed.** Plot scripts that computed the repo
+  root by counting `parents[N]` render an *empty* figure when moved, which
+  `refresh_all.sh` then auto-commits at exit 0; two charts had already lost
+  data this way. Anchored to a marker-based walk-up, and the link checker now
+  flags both depth-counted paths and pathlib chains built a segment at a time
+  (`DOCS_BASE / "production" / ...`), which no string scan can see. The docs
+  tree is reorganized by lifecycle (`live/` `reference/` `records/`
+  `outbound/`) with the link check now **fatal** in `refresh_all.sh` and the
+  dangling-reference backlog cleared 31 -> 0.
+
+### 8. Standing items
+
+- **The main Aurora clone is currently un-runnable for training.** Its HEAD
+  imports `grain`, which is deliberately absent from the shipped venv (a stray
+  install there vendors a `torch/` that shadows the conda one). Docs and charts
+  are fine. The queued umbrella is unaffected -- it runs from pinned production
+  clones, none of which has that import -- but pulling a production clone to
+  HEAD would break it.
+- **The 80th upstream sync: defer.** Grain is the *oldest* of the 35 commits,
+  so every other one descends from it; no merge can take the mechanical import
+  fixes without also taking Grain and fold-batch-dim. Splitting requires
+  cherry-pick, i.e. carrying divergence. Trigger for revisiting: upstream
+  deprecating `partial_dtensor`, or adopting the 2.14 nightly -- both in one
+  revalidation window, not two.
+- **Umbrella slot conversion** remains the open production question from
+  2026-08-10: 1-3 of 5 seats converting into work, with an unresolved init
+  `std::bad_alloc` the main cause.
+
+---
+
 ## 2026-08-10
 
 > [!IMPORTANT]
