@@ -62,7 +62,7 @@ esac
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
 module use /opt/aurora/26.181.0/modulefiles
 module load frameworks/2026.1.0
-source venvs/fw-2026.1-rc2/bin/activate
+source venvs/fw-2026.1-rc2-grain/bin/activate
 unset PYTHONPATH
 
 python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import $CONFIG" 2>/dev/null \
