@@ -167,6 +167,40 @@ redundant and the install script can be dropped. Until then the vendored
 copy is what actually runs -- do not delete it just because the PR is
 merged.
 
+## Sibling trap: the venv tarball is a THIRD place code can be stale
+
+This bug needed the same fix applied in three places, and each one
+fails silently if missed:
+
+1. the vendored source in this repo,
+2. the live `.venv` (reinstalled by the install script),
+3. **`.venv.tar.gz`** -- what compute nodes actually unpack to
+   `/tmp/.venv` via `ezpz yeet`.
+
+On 2026-08-23 an upstream sync (Grain, #4088) made
+`experiments/ezpz/train.py` import `grain` transitively. `grain==0.2.18`
+is declared in BOTH `pyproject.toml` and `requirements.txt` but had never
+been installed, so *every* run died at import -- blendcorpus production
+included, not just HF streaming:
+
+```
+ModuleNotFoundError: No module named 'grain'
+```
+
+Installing it into the login `.venv` was NOT enough. Smoke 7554244 failed
+identically afterwards, because compute nodes read the tarball, which
+still predated the install. The sequence that actually works:
+
+```bash
+uv pip install "grain==0.2.18"          # dry-run first; must not touch torch
+mv .venv.tar.gz .venv.tar.gz.pre-grain  # tar-env SKIPS if the file exists
+ezpz tar-env
+tar tzf .venv.tar.gz | grep site-packages/grain/   # verify the ARTIFACT
+```
+
+Do not trust `tar-env`'s exit code: it logs "already exists, skipping
+creation" and exits **0**.
+
 ## Related
 
 - `docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md`

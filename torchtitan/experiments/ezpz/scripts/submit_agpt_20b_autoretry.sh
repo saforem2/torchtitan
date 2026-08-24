@@ -174,6 +174,22 @@ CP="${CP:-1}"
 LBS="${LBS:-2}"
 GAS="${GAS:-1}"
 GBS=$(( NGPUS_ACTIVE * LBS * GAS / (TP * PP * CP) ))
+# ---- #4121 token-unit flags ----
+# The 80th upstream sync ("fold batch dim", #4121) removed
+# --training.{local,global}-batch-size and --training.seq-len. The
+# replacements count TOKEN SLOTS instead of sequences:
+#
+#   local-batch-size  -> num-tokens-per-microbatch-per-dp-rank = LBS * SEQ_LEN
+#   global-batch-size -> num-tokens-per-train-step             = GBS * SEQ_LEN
+#   seq-len           -> max-context-length
+#
+# Derived from the SAME LBS/GAS/GBS arithmetic above rather than
+# hardcoded, so the production chain keeps its exact tokens/step across
+# the rename. At the chain's settings (128 nodes x 4 GPU, LBS=2, GAS=1)
+# that is GBS 1024 x 8192 = 8,388,608 tokens/step -- unchanged, which is
+# what makes resuming step-5600 safe.
+TOKENS_PER_MICROBATCH_PER_DP_RANK=$(( LBS * SEQ_LEN ))
+TOKENS_PER_TRAIN_STEP=$(( GBS * SEQ_LEN ))
 
 TRAIN_TOKENS="${TRAIN_TOKENS:-4673780159710}"
 TRAINING_STEPS="${TRAINING_STEPS:-$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))}"
@@ -252,6 +268,8 @@ log_message INFO "PBS_JOBID: ${PBS_JOBID}"
 log_message INFO "OPTIMIZER: ${OPTIMIZER}"
 log_message INFO "LR: ${LR}"
 log_message INFO "GBS: ${GBS}"
+log_message INFO "tokens/microbatch/dp-rank: ${TOKENS_PER_MICROBATCH_PER_DP_RANK}"
+log_message INFO "tokens/train-step: ${TOKENS_PER_TRAIN_STEP}"
 log_message INFO "DATASET: ${DATASET}"
 log_message INFO "data list: ${DFL}"
 log_message INFO "Checkpoint directory: ${CKPT_DIR}"
@@ -342,9 +360,9 @@ ezpz launch \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
-    --training.local-batch-size="${LBS}" \
-    --training.global-batch-size="${GBS}" \
-    --training.seq-len="${SEQ_LEN}" \
+    --training.num-tokens-per-microbatch-per-dp-rank="${TOKENS_PER_MICROBATCH_PER_DP_RANK}" \
+    --training.num-tokens-per-train-step="${TOKENS_PER_TRAIN_STEP}" \
+    --training.max-context-length="${SEQ_LEN}" \
     --training.steps="${TRAINING_STEPS}" \
     --lr-scheduler.decay-ratio="${DECAY_RATIO}" \
     "$@"
