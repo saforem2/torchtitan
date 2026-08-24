@@ -1,0 +1,146 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=16
+#PBS -l walltime=08:00:00
+#PBS -l filesystems=tegu:home
+#PBS -j oe
+set -o pipefail
+
+# Phase 2 of the fixed-batch optimizer comparison: one arm of
+# AdamW / Mano / SophiaG at GBS=960, constant LR, chained to a token budget.
+# Design + rationale: docs/experiments/optimizer-comparison/README.md
+#
+#   qsub -v OPT=adamw,LR=8e-4   -N cmp-adamw   optcmp.pbs
+#   qsub -v OPT=mano,LR=...     -N cmp-mano    optcmp.pbs
+#   qsub -v OPT=sophiag,LR=...  -N cmp-sophiag optcmp.pbs
+#
+# The LR flag is --optimizer.param-groups.0.optimizer-kwargs.lr, NOT
+# --optimizer.lr (which does not exist). Each of these configs builds a
+# single param group matching r'.*', so index 0 is the whole model; a config
+# with more groups would need one flag per group.
+#
+# LR IS REQUIRED AND HAS NO DEFAULT. It comes from the Phase 1 finder run at
+# THIS batch size (jobs 12473711/12/13). A default would silently reintroduce
+# the exact failure this experiment exists to avoid: an inherited constant that
+# makes the comparison measure luck rather than the optimizer. Mano alone spans
+# 4.79e-03 (2B) to 1.29e-04 (30B/GBS=480) to ~3e-06 (80B/GBS=6144).
+#
+# CONSTANT LR, AND WHY training.steps IS THE FULL BUDGET NOT THE JOB CEILING.
+# decay_ratio=0.0 makes the schedule flat after warmup, which is what keeps a
+# CHAINED run honest -- a resume cannot reshape the schedule (the 1.83x LR jump
+# that invalidated the 64N Mano run). But the flat branch is only taken while
+#   current_step < warmup + stable = total_steps + 1
+# and past that the scheduler enters the decay branch and trips
+#   assert decay_steps != 0
+# because decay_ratio=0.0 made decay_steps zero. So training.steps must cover
+# the ENTIRE budget across all chain links; each job is bounded by its inner
+# timeout instead. Setting it to a per-job ceiling would crash the last link.
+#
+# BATCH: GBS=960 = LBS 5 x 192 ranks (16N) x GAS 1, seq 4096 -> 3.93M tok/step.
+# 16N per arm so all three arms run CONCURRENTLY on 48N.
+#
+# BUDGET: 10B tokens = 2543 steps at ~42.7 s/step = ~30h per arm, so ~5 chained
+# 8h jobs. Each job: ~543 steps (~2.14B tokens) after ~33 min startup.
+# training.steps=6000 is a generous ceiling above the 2543 target -- it only
+# has to EXCEED the budget, and overshooting costs nothing while undershooting
+# trips the assert above.
+#
+# CHECKPOINT INTERVAL 100: ~71 min between saves. The SIGTERM handler
+# (docs/guides/checkpoint-on-signal.md) saves the tail when the inner timeout
+# fires, so a mid-interval stop no longer discards work.
+
+OPT="${OPT:-}"
+case "$OPT" in
+  adamw)   CONFIG=agpt_30b_olmo2tok ;;
+  mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
+  sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag (got: ${OPT:-empty})"; exit 1 ;;
+esac
+[ -n "${LR:-}" ] || { echo "ABORT: pass -v LR=<value> from the Phase 1 finder; there is no safe default"; exit 1; }
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import $CONFIG" 2>/dev/null \
+  || { echo "ABORT: $CONFIG does not import"; exit 1; }
+
+CKPT="$PWD/checkpoints/agpt-30b-optcmp-$OPT"
+LOGD="$PWD/outputs/logs/optcmp-$OPT/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+
+LAST=$(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -n | tail -1)
+echo "arm:    $OPT   config: $CONFIG   lr: $LR (CONSTANT after 20-step warmup)"
+echo "batch:  GBS=960 (LBS 5 x 192 ranks x GAS 1), seq 4096 -> 3.93M tok/step"
+echo "ckpt:   $CKPT"
+echo "resume: ${LAST:-none (fresh start)}"
+echo "log:    $LOG"
+echo ""
+
+# BAD-NODE PREFLIGHT. `ssh -n` is REQUIRED or ssh eats the loop stdin and only
+# the first node is probed. All 16 must be healthy: losing one changes GBS,
+# and an arm at a different batch is not comparable to the other two.
+if [ -n "$PBS_NODEFILE" ] && [ -r "$PBS_NODEFILE" ]; then
+    NODEFILE_OK="$LOGD/nodefile.healthy"
+    PROBE_OUT="$LOGD/probe"; mkdir -p "$PROBE_OUT"
+    NTOTAL=$(grep -c . "$PBS_NODEFILE")
+    echo "  probing $NTOTAL nodes..."
+    while read -r h; do
+        [ -z "$h" ] && continue
+        ( timeout 30 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "$h" \
+            "cd $PWD && test -d torchtitan/experiments/ezpz" >/dev/null 2>&1 \
+            && echo "$h" > "$PROBE_OUT/ok.$h" ) &
+    done < "$PBS_NODEFILE"
+    wait
+    cat "$PROBE_OUT"/ok.* 2>/dev/null | sort -u > "$NODEFILE_OK"
+    NHEALTHY=$(grep -c . "$NODEFILE_OK")
+    echo "  healthy nodes: $NHEALTHY of $NTOTAL"
+    if [ "$NHEALTHY" -lt "$NTOTAL" ]; then
+        comm -23 <(sort -u "$PBS_NODEFILE") <(sort -u "$NODEFILE_OK") | sed "s/^/    excluded: /"
+        echo "ABORT: need all $NTOTAL nodes to hold GBS=960 fixed across arms"
+        echo "OPTCMP_${OPT}_DONE"; exit 1
+    fi
+    export PBS_NODEFILE="$NODEFILE_OK"
+fi
+
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
+
+timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config "$CONFIG" \
+    --optimizer.param-groups.0.optimizer-kwargs.lr="$LR" \
+    --training.steps=6000 --training.seq-len=4096 \
+    --training.local-batch-size=5 \
+    --training.global-batch-size=960 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-scheduler.warmup-steps=20 \
+    --lr-scheduler.decay-ratio=0.0 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=100 \
+    --checkpoint.keep-latest-k=0 \
+    --nan-abort-consecutive=5 \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## optcmp: $OPT @ GBS=960, lr=$LR constant ##########"
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo "  optimizer:  $(printf '%s' "$C" | grep -aoE '"optimizer_name": *"[A-Za-z]+"' | head -1)"
+echo "  GAS:        $(printf '%s' "$C" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)  (MUST be 1)"
+echo "  resumed:    ${LAST:-fresh}"
+echo "  first step: $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | head -1)"
+echo "  last step:  $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | tail -1)"
+LASTN=$(printf '%s' "$C" | grep -aoE 'step: [0-9]+' | tail -1 | grep -oE '[0-9]+')
+[ -n "$LASTN" ] && echo "  tokens:     $(python3 -c "print(f'{$LASTN*960*4096/1e9:.2f}B')")"
+echo "  NaN/inf:    $(printf '%s' "$C" | grep -ac 'non-finite loss')"
+echo "  grad skips: $(printf '%s' "$C" | grep -ac 'SKIPPING')"
+echo "  signal-ckpt: $(printf '%s' "$C" | grep -ac 'received at step') (1 = tail was saved on timeout)"
+echo "  ckpts:      $(ls -1d "$CKPT"/step-* 2>/dev/null | wc -l)"
+echo "  W&B:        $(printf '%s' "$C" | grep -aoE 'https://wandb.ai/[^ ]*/runs/[a-z0-9]+' | tail -1)"
+echo "  rc=$rc  (124 = inner timeout, the EXPECTED clean stop)"
+echo "OPTCMP_${OPT}_DONE"
