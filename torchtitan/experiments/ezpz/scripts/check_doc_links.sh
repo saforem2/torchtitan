@@ -84,7 +84,43 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
                     bad.append("(code) %s:%d -> experiments/ezpz/docs/%s"
                                % (key[0], i + 1, key[1]))
 
-# 3. depth-counted repo-root paths in scripts under docs/
+# 3. PIECEWISE docs paths: DOCS_BASE / "production" / "agpt" / ...
+# Check 2 only sees a docs path written as ONE string. A pathlib chain built a
+# segment at a time is invisible to it -- and that is not hypothetical: after
+# the production/ split, three plotters kept writing to the retired tree
+# because their output dir was assembled as / "production" / "agpt". Nothing
+# raised; mkdir recreated the directory and the figures went there, newer than
+# the ones anybody reads.
+#
+# So: flag a quoted segment that names a directory which no longer exists
+# directly under docs/. Cheap and specific -- it only fires on names that USED
+# to be real, which is exactly the post-move window where it matters.
+# Anchor on a DOCS base. Without it this fires on outputs/evals/... too --
+# a data directory that merely shares a name with a retired docs one.
+seg = re.compile(
+    r'(?:DOCS_BASE|"docs"|\'docs\'|/\s*"docs")\s*/\s*"([A-Za-z0-9_-]+)"'
+)
+live_dirs = {d for d in os.listdir(docs)
+             if os.path.isdir(os.path.join(docs, d))}
+retired = {"production", "evals", "guides", "experiments", "summaries",
+           "meeting-notes", "scaling", "upstream-issues", "competitions",
+           "configs"} - live_dirs
+for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
+    for fn in files:
+        if not fn.endswith((".py", ".sh")): continue
+        p2 = os.path.join(r, fn)
+        for i, line in enumerate(open(p2, errors="replace").read().splitlines(), 1):
+            if "docs-link-check: ignore" in line: continue
+            for m in seg.finditer(line):
+                if m.group(1) in retired:
+                    bad.append(
+                        "(piecewise) %s:%d -> / \"%s\" names a retired docs "
+                        "directory; a pathlib chain is invisible to the "
+                        "string check" % (os.path.relpath(p2, root), i, m.group(1))
+                    )
+
+# 4. depth-counted repo-root paths in scripts under docs/
 # A plotter that does Path(__file__).resolve().parents[N] keeps working until
 # the file moves between directory levels; then it silently points somewhere
 # else, loads nothing, and emits an empty figure that refresh_all.sh commits.

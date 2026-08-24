@@ -253,7 +253,7 @@ PRODUCTION_RUNS: dict[str, dict] = {
             "agpt-2b-sophiag-n256.o8446338",
         ],
         "num_nodes": 256,
-        "output_dir": DOCS_BASE / "production" / "agpt" / "2b" / "figures",
+        "output_dir": DOCS_BASE / "live" / "chains" / "agpt" / "2b" / "figures",
     },
     "20b": {
         "files": [
@@ -264,12 +264,12 @@ PRODUCTION_RUNS: dict[str, dict] = {
             "agpt-20b-sophiag-n256.o8446342",
         ],
         "num_nodes": 256,
-        "output_dir": DOCS_BASE / "production" / "agpt" / "20b" / "figures",
+        "output_dir": DOCS_BASE / "live" / "chains" / "agpt" / "20b" / "figures",
     },
 }
 
 COMBINED_OUTPUT = (
-    DOCS_BASE / "experiments" / "agpt" / "aurora" / "figures" / "production_training_loss.png"
+    DOCS_BASE / "records" / "experiments" / "agpt" / "aurora" / "figures" / "production_training_loss.png"
 )
 
 
@@ -332,7 +332,7 @@ def main() -> None:
             num_nodes = args.num_nodes
             output_dir = args.output_dir or PRODUCTION_RUNS.get(model_name, {}).get(
                 "output_dir",
-                DOCS_BASE / "production" / "agpt" / model_name / "figures",
+                DOCS_BASE / "live" / "chains" / "agpt" / model_name / "figures",
             )
         elif model_name in PRODUCTION_RUNS:
             cfg = PRODUCTION_RUNS[model_name]

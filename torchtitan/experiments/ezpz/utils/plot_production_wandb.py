@@ -528,7 +528,7 @@ def main() -> None:
             )
         # v1-vs-v2 overlay charts live in the historical archive.
         out_dir = args.output_dir or (
-            DOCS_BASE / "production" / "agpt" / "historical" / "v1-bf16" / "figures"
+            DOCS_BASE / "live" / "chains" / "agpt" / "historical" / "v1-bf16" / "figures"
         )
         series = []
         for key in keys_to_overlay:
@@ -565,7 +565,8 @@ def main() -> None:
         if "_v1_" in key:
             default_out = (
                 DOCS_BASE
-                / "production"
+                / "live"
+                / "chains"
                 / "agpt"
                 / "historical"
                 / "v1-bf16"
@@ -574,7 +575,8 @@ def main() -> None:
         else:
             default_out = (
                 DOCS_BASE
-                / "production"
+                / "live"
+                / "chains"
                 / "agpt"
                 / model_name
                 / f"n{cfg['num_nodes']}"
