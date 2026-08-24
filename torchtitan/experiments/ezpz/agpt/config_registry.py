@@ -6,7 +6,7 @@ from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from torchtitan.components.checkpoint import CheckpointManager
+from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
@@ -14,7 +14,17 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
-from torchtitan.experiments.ezpz.optimizer.containers import default_mano
+from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_mano,
+    default_sophiag,
+)
+from torchtitan.components.data import (
+    ConcatThenSplitPackingConfig,
+    GrainDataLoader,
+    SingleDatasetConfig,
+)
+from torchtitan.components.data.sources import HuggingFaceRandomAccessSource
+from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -25,7 +35,6 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
-from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
 
 from . import model_registry
 
@@ -59,7 +68,7 @@ def _set_rope_backend(
     layer's ``Attention.Config`` owns its own rope. So flipping the
     backend means rebuilding each layer's ``attention.rope`` as a
     fresh instance of the target subclass, copying over all other
-    fields (dim / max_seq_len / theta / scaling / yarn params).
+    fields (dim / max_context_length / theta / scaling / yarn params).
     """
     from dataclasses import fields
 
@@ -257,7 +266,12 @@ def agpt(
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
-    cfg.training.local_batch_size = local_batch_size
+    # 80th sync (#4121): training batch fields are counted in TOKENS now.
+    # The agpt() signature deliberately KEEPS sequence units -- every caller
+    # and every doc says "LBS=5", and rewriting ~40 callsites to pass tokens
+    # would make each one carry the seq_len multiplication independently. One
+    # conversion here is the whole change for anything built through agpt().
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
     # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
     # is the agpt default (was mode="full").
@@ -270,7 +284,7 @@ def agpt(
         cfg.activation_checkpoint = SelectiveAC.Config()
     else:
         cfg.activation_checkpoint = FullAC.Config()
-    cfg.training.seq_len = seq_len
+    cfg.training.max_context_length = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
@@ -317,8 +331,9 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             min_lr_factor=0.0,
         ),
         training=TrainingConfig(
-            local_batch_size=8,
-            seq_len=2048,
+            # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
+            num_tokens_per_microbatch_per_dp_rank=8 * 2048,
+            max_context_length=2048,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
@@ -386,13 +401,23 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg = agpt_debugmodel()
     cfg.hf_assets_path = "./tests/assets/tokenizer"
     cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
-    cfg.dataloader = HuggingFaceTextDataLoader.Config(dataset="c4_test")
+    # Grain (#4088) DELETED HuggingFaceTextDataLoader with no drop-in
+    # replacement -- the equivalent is a GrainDataLoader built from a
+    # SingleDatasetConfig(source=HuggingFaceStreamingSource, processor=
+    # TextProcessor), a different object graph rather than a rename. Ported
+    # lazily: raise where the config is USED so importing the registry (and
+    # therefore every blendcorpus production config) still works.
+    raise NotImplementedError(
+        "c4_test needs porting to GrainDataLoader after the 80th sync; see "
+        "torchtitan/components/data/dataset.py SingleDatasetConfig"
+    )
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
     cfg.checkpoint.enable = False
     cfg.training.steps = 10
-    cfg.training.seq_len = 512
-    cfg.training.local_batch_size = 2
+    cfg.training.max_context_length = 512
+    # 2 seqs x 512 = 1024 tokens (#4121 unit change)
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = 2 * 512
     return cfg
 
 
@@ -756,7 +781,15 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     # is a compile-throughput test flavor and mismatches the complex-trained base
     # -- it rotates a different Q/K channel pairing and corrupts the fork.)
     cfg = ezpz_agpt_2b()
-    cfg.training.seq_len = 8192
+    # #4121 HAZARD: num_tokens_per_microbatch_per_dp_rank was already computed
+    # by agpt() as local_batch_size * seq_len. Overriding the sequence length
+    # AFTER that does NOT update the token count, so the effective batch would
+    # silently change. agpt()'s default seq_len is 8192, so this assignment is
+    # currently a no-op -- but only by coincidence. Recompute explicitly so it
+    # stays correct if that default ever moves.
+    _lbs = cfg.training.num_tokens_per_microbatch_per_dp_rank // 8192
+    cfg.training.max_context_length = 8192
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = _lbs * 8192
     cfg.activation_checkpoint = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
         raise ValueError(
@@ -995,6 +1028,90 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
+# Local fineweb-edu shards for the optimizer comparison. The 80th upstream sync
+# (#4088) deleted HuggingFaceTextDataLoader, so `dataset="fineweb_edu_local"` on
+# a BlendCorpusDataLoader.Config now raises -- the replacement is a Grain
+# dataset graph, not a renamed class.
+#
+# HOW MANY SHARDS. Each parquet holds ~726k rows / ~1.4B tokens, and
+# HuggingFaceRandomAccessSource materializes what it is given (streaming=False),
+# so pointing at all 140 files would try to hold 267 GB. 16 shards is ~22B
+# tokens: comfortably more than the 10B-per-arm budget, so no arm repeats data,
+# while staying small enough to materialize. Sorted + sliced, never sampled, so
+# every arm reads byte-identical input.
+_FINEWEB_EDU_DIR = "/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT"
+_FINEWEB_EDU_NUM_SHARDS = 16
+
+
+def _fineweb_edu_shards() -> list[str]:
+    """The exact shard list every comparison arm reads.
+
+    Sorted so the selection is deterministic across arms and across reruns:
+    two arms trained on different shards would not be comparable, and that
+    difference would be invisible in the loss curve.
+    """
+    import glob
+
+    files = sorted(glob.glob(f"{_FINEWEB_EDU_DIR}/*.parquet"))
+    if len(files) < _FINEWEB_EDU_NUM_SHARDS:
+        raise ValueError(
+            f"expected >= {_FINEWEB_EDU_NUM_SHARDS} parquet shards in "
+            f"{_FINEWEB_EDU_DIR}, found {len(files)}"
+        )
+    return files[:_FINEWEB_EDU_NUM_SHARDS]
+
+
+def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+    """Point a config at the LOCAL fineweb-edu parquet shards via Grain.
+
+    agpt() defaults dataset_path to data-lists/<machine>/books.txt, which on
+    Sunspot is THREE shards totalling ~11 GB -- about 5.8B tokens. A 10B-token
+    comparison arm would therefore loop that corpus 1.7x, and repeated data
+    bends the loss curve in ways that need not be the same for every optimizer.
+    That is precisely the confound a fixed-batch optimizer comparison exists to
+    exclude, so the arms read a corpus larger than their budget instead.
+
+    books.txt is also the ONLY blendcorpus list that resolves on Sunspot -- every
+    other list under data-lists/sunspot/ points at /gila, which is not mounted
+    here. So there is no "use blendcorpus with a bigger corpus" option; reading
+    real data at this scale requires the Grain path.
+
+    Streaming allenai/olmo-mix-1124 from the hub was the other candidate and is
+    rejected: it 429-storms at this rank count (datasets.py module docstring
+    documents the failure at 384 ranks; these arms run 192), and the on-disk
+    olmo-mix cache holds only the wiki slice (6.1 GB), smaller AND narrower than
+    the books list it would replace.
+
+    ConcatThenSplitPackingConfig matches how the blendcorpus path feeds the
+    model: documents concatenated and split at max_context_length, so every
+    sequence is full rather than padded, and tokens-per-step means what the
+    batch arithmetic assumes.
+    """
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=ConcatThenSplitPackingConfig(
+            dataset=SingleDatasetConfig(
+                source=HuggingFaceRandomAccessSource.Config(
+                    path="parquet",
+                    split="train",
+                    load_dataset_kwargs={"data_files": _fineweb_edu_shards()},
+                ),
+                processor=TextProcessor.Config(),
+                post_filters=(lambda sample: sample is not None,),
+            )
+        )
+    )
+    return cfg
+
+def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
+    """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
+
+    Same model and data as the mano/sophiag arms; only the optimizer differs.
+    See docs/experiments/optimizer-comparison/README.md.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_fineweb_edu(cfg)
+
+
 def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """agpt_30b_olmo2tok with the Mano optimizer instead of AdamW.
 
@@ -1010,7 +1127,33 @@ def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_mano(lr=3.0e-4)
-    return cfg
+    return _use_fineweb_edu(cfg)
+
+
+def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok with the SophiaG optimizer instead of AdamW.
+
+    Third arm of the fixed-batch optimizer comparison (AdamW / Mano / SophiaG,
+    all at GBS=960). SophiaG is a second-order method: it estimates a diagonal
+    Hessian and clips the per-coordinate update at rho, so its useful LR range
+    does not have to resemble either first-order optimizer's.
+
+    The lr here is a PLACEHOLDER. Do not trust it -- the comparison runs pass
+    --optimizer.lr explicitly from the LR-finder result measured at THIS batch
+    size. Batch dependence is not a small effect for these optimizers: the 2B
+    finder put Mano at 4.79e-03 while the 80B at GBS=6144 wanted ~3e-6, three
+    orders of magnitude apart, so an inherited LR says nothing.
+
+    SophiaG has form here: the 2026-07-03 80B run NaN'd at step 14 and burned
+    ~12h. That is what --nan-abort-consecutive and the finder's blow-up
+    detection are for; expect this arm to be the one that finds the ceiling.
+
+    NOT a resume target for an AdamW or Mano checkpoint -- the optimizer state
+    shapes differ. Fresh run, own checkpoint folder, per-token comparisons.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_sophiag(lr=3.0e-4)
+    return _use_fineweb_edu(cfg)
 
 
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:

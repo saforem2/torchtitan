@@ -7,8 +7,7 @@ from typing import Any
 import ezpz
 import torch
 
-from torchtitan.components.dataloader import BaseDataLoader
-from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
+from torchtitan.components.data.loader import BaseDataLoader
 from torchtitan.tools.logging import logger
 
 
@@ -65,6 +64,16 @@ def _import_blendcorpus_modules():
 class BlendCorpusDataLoader(BaseDataLoader):
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
+        # 80th sync (#4088, Grain): BaseDataLoader.Config lost `dataset` and
+        # `dataset_path` -- the new base is a bare `pass`, because Grain
+        # selects data by building a SingleDatasetConfig object rather than by
+        # naming a dataset string. We still address corpora by name (the CLI
+        # aliases --dataloader.dataset / --dataloader.dataset-path point here,
+        # and every production config and run JSON sets them), so the fields
+        # move ONTO this subclass instead of disappearing.
+        dataset: str = "blendcorpus"
+        dataset_path: str | None = None
+
         num_workers: int = 0
         persistent_workers: bool = False
         pin_memory: bool = field(
@@ -133,7 +142,19 @@ class BlendCorpusDataLoader(BaseDataLoader):
         self._emit_positions = False
 
         if config.dataset != "blendcorpus":
-            hf_cfg = HuggingFaceTextDataLoader.Config(
+            # Grain (#4088) deleted HuggingFaceTextDataLoader. The delegate
+            # path is not ported: the replacement is a GrainDataLoader over a
+            # SingleDatasetConfig, a different object graph rather than a
+            # renamed class. Raise here so the blendcorpus path -- which is
+            # every production config -- keeps working, and anyone reaching
+            # for the HF path gets told why instead of an AttributeError.
+            raise NotImplementedError(
+                f"dataset={config.dataset!r} used the HF delegate, which the "
+                "80th sync removed. Port to GrainDataLoader "
+                "(torchtitan/components/data/loader.py) or use "
+                "dataset='blendcorpus'."
+            )
+            hf_cfg = HuggingFaceTextDataLoader.Config(  # noqa: F821  (dead)
                 dataset=config.dataset,
                 dataset_path=config.dataset_path,
                 num_workers=config.num_workers,

@@ -380,7 +380,7 @@ def _build_agpt_config(
     attn_backend: str = "sdpa",
     rope_backend: Literal["complex", "cos_sin"] = "complex",
     scaling: Literal["none", "llama", "yarn"] = "none",
-    max_seq_len: int = 131072,
+    max_context_length: int = 131072,
     qk_norm: bool = False,
     logit_softcap: float | None = None,
     relu_squared: bool = False,
@@ -396,7 +396,7 @@ def _build_agpt_config(
     )
     rope_cfg = rope_cls(
         dim=dim // n_heads,
-        max_seq_len=max_seq_len,
+        max_context_length=max_context_length,
         theta=rope_theta,
         scaling=scaling,
     )

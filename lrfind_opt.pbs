@@ -1,0 +1,143 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=16
+#PBS -l walltime=03:00:00
+#PBS -l filesystems=tegu:home
+#PBS -j oe
+set -o pipefail
+
+# LR finder at the COMPARISON batch size, for one optimizer.
+#
+# ONE script, three arms, selected by -v OPT=adamw|mano|sophiag. Three copies
+# of a script drift: a fix to one silently leaves the others measuring
+# something else, and the whole point here is that the three arms differ ONLY
+# in the optimizer.
+#
+#   qsub -v OPT=adamw   lrfind_opt.pbs
+#   qsub -v OPT=mano    lrfind_opt.pbs
+#   qsub -v OPT=sophiag lrfind_opt.pbs
+#
+# WHY MEASURE AT ALL, PER OPTIMIZER, AT THIS BATCH. The suggested LR is
+# strongly batch- AND optimizer-dependent. Measured here already:
+#   * 2B finder:            mano 4.79e-03
+#   * 80B finder GBS=6144:  mano ~3e-06
+#   * 30B finder GBS=480:   mano 1.29e-04
+# Three orders of magnitude across batch sizes for the SAME optimizer, so an
+# inherited LR is worthless. The comparison is only apples-to-apples if each
+# optimizer runs at ITS OWN best LR for THIS batch -- otherwise it measures
+# which optimizer happened to inherit a luckier constant.
+#
+# BATCH: GBS=960 = LBS 5 x 192 ranks (16N) x GAS 1, seq 4096 -> 3.93M tok/step.
+# Chosen to sit near the AdamW baseline (GBS=480), the one existing 30B loss
+# curve worth comparing against. 16N x 3 arms = 48 nodes, so all three finders
+# run CONCURRENTLY rather than serially.
+#
+# SWEEP 1e-6 -> 1e-1. Must bracket every plausible answer above AND blow up: a
+# sweep that never diverges yields no suggestion at all (the finder warns and
+# returns nothing). 1e-1 is far above anything expected, which is the point.
+#
+# 100 finder steps (steps=1000 x fraction=0.1) matches the 2B run resolution.
+# warmup_fraction=0.1 holds 10 steps at init_lr so the model settles before LR
+# sensitivity is measured -- without it the first points measure init
+# transients, the artifact that made an early 3-step Mano smoke look
+# catastrophic (loss 29.9) when nothing was wrong.
+#
+# BUDGET: 100 steps at ~42.7 s/step (measured 8N/GAS=1, per-rank throughput is
+# flat 8N->64N) = ~71 min + ~33 min startup/compile = ~1.7h. Inner timeout
+# 2.5h under a 3h walltime -- BOTH clocks sized together, since moving only one
+# is how 30b_long took an rc=124.
+
+OPT="${OPT:-}"
+case "$OPT" in
+  adamw)   CONFIG=agpt_30b_olmo2tok_optcmp_adamw ;;
+  mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
+  sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag (got: ${OPT:-empty})"; exit 1 ;;
+esac
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+
+python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import $CONFIG" 2>/dev/null \
+  || { echo "ABORT: $CONFIG does not import"; exit 1; }
+
+DUMP="$PWD/outputs/lrfind-30b-gbs960-$OPT"
+LOGD="$PWD/outputs/logs/lrfind-gbs960-$OPT/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+echo "optimizer: $OPT   config: $CONFIG"
+echo "batch:     GBS=960 (LBS 5 x 192 ranks x GAS 1), seq 4096 -> 3.93M tok/step"
+echo "dump:      $DUMP"
+echo "log:       $LOG"
+echo ""
+
+# BAD-NODE PREFLIGHT. One node that cannot see /lus/tegu aborts the whole MPI
+# job (rc=127). `ssh -n` is REQUIRED: without it ssh consumes the loop stdin
+# and only the first node is ever probed.
+if [ -n "$PBS_NODEFILE" ] && [ -r "$PBS_NODEFILE" ]; then
+    NODEFILE_OK="$LOGD/nodefile.healthy"
+    PROBE_OUT="$LOGD/probe"; mkdir -p "$PROBE_OUT"
+    NTOTAL=$(grep -c . "$PBS_NODEFILE")
+    echo "  probing $NTOTAL nodes..."
+    while read -r h; do
+        [ -z "$h" ] && continue
+        ( timeout 30 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no "$h" \
+            "cd $PWD && test -d torchtitan/experiments/ezpz" >/dev/null 2>&1 \
+            && echo "$h" > "$PROBE_OUT/ok.$h" ) &
+    done < "$PBS_NODEFILE"
+    wait
+    cat "$PROBE_OUT"/ok.* 2>/dev/null | sort -u > "$NODEFILE_OK"
+    NHEALTHY=$(grep -c . "$NODEFILE_OK")
+    if [ "$NHEALTHY" -lt "$NTOTAL" ]; then
+        echo "  EXCLUDED $((NTOTAL-NHEALTHY)) unhealthy node(s):"
+        comm -23 <(sort -u "$PBS_NODEFILE") <(sort -u "$NODEFILE_OK") | sed "s/^/    /"
+    fi
+    echo "  healthy nodes: $NHEALTHY of $NTOTAL"
+    # A finder curve is only comparable across arms at the SAME batch. Losing a
+    # node would change GBS, so refuse rather than silently measure a different
+    # experiment -- unlike a training run, there is nothing to salvage.
+    if [ "$NHEALTHY" -lt "$NTOTAL" ]; then
+        echo "ABORT: need all $NTOTAL nodes to hold GBS=960 fixed across arms"
+        echo "LRFIND_${OPT}_DONE"; exit 1
+    fi
+    export PBS_NODEFILE="$NODEFILE_OK"
+fi
+
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
+
+timeout 9000 ezpz launch --nproc 192 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config "$CONFIG" \
+    --training.steps=1000 --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=20480 \
+    --training.num-tokens-per-train-step=3932160 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-finder.enable \
+    --lr-finder.init-lr=1e-6 \
+    --lr-finder.max-lr=1e-1 \
+    --lr-finder.fraction=0.1 \
+    --lr-finder.warmup-fraction=0.1 \
+    --lr-finder.smooth-frac=0.1 \
+    --dump-folder="$DUMP" \
+    --checkpoint.no-enable \
+    --dataloader.num-workers=2 \
+    >> "$LOG" 2>&1
+rc=$?
+
+echo ""
+echo "########## LR finder: $OPT @ 30B, GBS=960 ##########"
+C=$(sed "s/\x1b\[[0-9;]*m//g" "$LOG")
+echo "  GAS reported: $(printf "%s" "$C" | grep -aoE "gradient accumulation steps [0-9]+" | head -1)  (MUST be 1)"
+echo "  optimizer:    $(printf "%s" "$C" | grep -aoE "\"optimizer_name\": *\"[A-Za-z]+\"" | head -1)"
+printf "%s" "$C" | grep -aE "LR Finder" | tail -12 | sed "s/^/  /"
+echo ""
+echo "  SUGGESTED: $(printf "%s" "$C" | grep -aoE "suggested LR = [0-9.e+-]+" | tail -1)"
+echo "  blow-up:   $(printf "%s" "$C" | grep -aoE "blow-up at [0-9.e+-]+" | tail -1)"
+echo ""
+find "$DUMP" -name "lr_finder_data.csv" 2>/dev/null | sed "s/^/  csv: /"
+find "$DUMP" -name "lr_vs_loss.png" 2>/dev/null | sed "s/^/  png: /"
+echo "  rc=$rc  (124 = inner timeout: sweep did NOT finish, treat result as incomplete)"
+echo "LRFIND_${OPT}_DONE"

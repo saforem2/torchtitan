@@ -47,7 +47,6 @@ from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
     apply_compile,
 )
-from torchtitan.distributed.context_parallel import apply_cp_to_forward
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 # 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED from
 # distributed/tensor_parallel.py -- async TP now happens inside apply_compile,
@@ -109,9 +108,9 @@ def parallelize_llama(
     the model must fit on GPU or CPU memory.
     """
     assert (
-        training.seq_len % parallel_dims.seq_len_divisor == 0
+        training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
-        Sequence length {training.seq_len} must be divisible by the product of TP degree
+        Sequence length {training.max_context_length} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
@@ -132,11 +131,10 @@ def parallelize_llama(
     if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
         model.parallelize(parallel_dims)
     else:
-        if parallel_dims.cp_enabled:
-            apply_cp_to_forward(
-                [block.attention.inner_attention for block in model.layers.values()],
-                parallel_dims.get_mesh("cp"),
-            )
+        # CP removed upstream (#4218): apply_cp_to_forward is gone, and the
+        # replacement validate_cp_backend() rejects cp>1 on anything but
+        # spmd_types. We pin partial_dtensor and every ezpz config sets
+        # context_parallel_degree=1, so this branch was already dead.
         # TP via the config-based sharding API. The model's sharding_config
         # declarations were filled in by update_from_config (see model.py).
         # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
