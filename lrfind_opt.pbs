@@ -50,7 +50,7 @@ set -o pipefail
 
 OPT="${OPT:-}"
 case "$OPT" in
-  adamw)   CONFIG=agpt_30b_olmo2tok ;;
+  adamw)   CONFIG=agpt_30b_olmo2tok_optcmp_adamw ;;
   mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
   sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
   *) echo "ABORT: pass -v OPT=adamw|mano|sophiag (got: ${OPT:-empty})"; exit 1 ;;
