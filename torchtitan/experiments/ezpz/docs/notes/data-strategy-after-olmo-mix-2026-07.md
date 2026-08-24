@@ -30,7 +30,7 @@ misattributed; the DCLM "6.6x less compute" and "filtered top-25% repeats
 safely" claims were overstated.
 
 Related work already in flight:
-- CPT stage-2 experiments: [`../production/cpt/`](../production/cpt/README.md)
+- CPT stage-2 experiments: [`../production/cpt/`](../live/chains/cpt/README.md)
   (dolmino-style high-quality upsample at low constant LR -- this memo's
   primary recommendation).
 - Synthetic-summary data POC:

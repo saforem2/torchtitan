@@ -65,7 +65,7 @@ OLMO_MIX_1124_TOKENS = 4_673_780_159_710
 SEQ_LEN = 8192
 
 # Production-tracking docs live under here (repo-relative paths in records).
-_DOCS = "torchtitan/experiments/ezpz/docs/production/agpt"
+_DOCS = "torchtitan/experiments/ezpz/docs/live/chains/agpt"
 
 
 TRAJECTORIES: list[dict] = [

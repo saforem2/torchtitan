@@ -148,4 +148,4 @@ The wall tests above were run (tasks #25-#29):
 **Status: dormant.** There is no live 80B production; the fp32-residual
 prototype does not yet clear the dp>186 wall, and the effort is paused pending
 a decision to invest in per-op instrumentation. See
-[production/agpt/80b/README.md](../../../../production/agpt/80b/README.md) Wall 1.
+[production/agpt/80b/README.md](../../../../live/chains/agpt/80b/README.md) Wall 1.

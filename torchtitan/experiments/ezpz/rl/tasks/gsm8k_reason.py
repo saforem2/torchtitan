@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 # gsm8k_reason: GRPO task for Stage 2 of the CoT plan
-# (docs/production/rl/plans/cot.md). Trains the Stage-1 cold-start checkpoint to
+# (docs/live/chains/rl/plans/cot.md). Trains the Stage-1 cold-start checkpoint to
 # reason BETTER: reward keys on the <answer> span (never the reasoning text),
 # and is COMPONENTIZED per the ceiling-attack result -- separate additive reward
 # funcs (each shows up in reward_breakdown) rather than one binary exact-match,
@@ -130,7 +130,7 @@ def build_dataset(num_samples: int = 0, split: str = "train", seed: int = 42) ->
 # inert (zero gradient), not diluting. Keep them as cheap REGRESSION guards
 # (0.05 each), and put the reward budget where within-group VARIANCE lives: the
 # hard sub-skill (numeric correctness). That is the actual ceiling-attack lesson
-# (docs/production/rl/grpo/ceiling-attack.md) -- its winning component was DENSE
+# (docs/live/chains/rl/grpo/ceiling-attack.md) -- its winning component was DENSE
 # on the hard skill, not on the already-saturated easy skills. So we add a dense
 # relative-closeness partial-credit term that gives all-wrong groups (~75% of
 # groups at cold start, frac_reward_zero_std~0.75) some variance to learn from.

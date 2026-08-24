@@ -4,14 +4,14 @@
 For each configured production trajectory we emit one or two artifacts:
 
     - ``all_production_training.{svg,png}`` — every trajectory overlaid
-      (top-level ``docs/production/README.md`` + cross-model
-      ``docs/production/agpt/README.md``).
+      (top-level ``docs/live/dashboard.md`` + cross-model
+      ``docs/live/chains/agpt/README.md``).
     - ``production_2b_training.{svg,png}`` — 2B trajectories only
-      (embedded on ``docs/production/agpt/2b/README.md``).
+      (embedded on ``docs/live/chains/agpt/2b/README.md``).
     - ``production_20b_training.{svg,png}`` — 20B only
-      (embedded on ``docs/production/agpt/20b/README.md``).
+      (embedded on ``docs/live/chains/agpt/20b/README.md``).
     - ``production_80b_training.{svg,png}`` — 80B only
-      (embedded on ``docs/production/agpt/80b/README.md``); skipped if
+      (embedded on ``docs/live/chains/agpt/80b/README.md``); skipped if
       no 80B trajectory has live W&B data yet.
 
 Each chart is 3 subplot panels (Loss / TPS-per-GPU / MFU) vs tokens
@@ -52,13 +52,13 @@ from torchtitan.experiments.ezpz.utils.plot_production_wandb import (  # noqa: E
 import wandb  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FIGURES_DIR = REPO_ROOT / "torchtitan/experiments/ezpz/docs/production/figures"
+FIGURES_DIR = REPO_ROOT / "torchtitan/experiments/ezpz/docs/live/figures"
 OUT_PATH = FIGURES_DIR / "all_production_training.svg"
 
 # MDS data lives as a CSV pulled separately from the MDS W&B project.
 MDS_CSV = (
     REPO_ROOT
-    / "torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/train_metrics.csv"
+    / "torchtitan/experiments/ezpz/docs/live/chains/agpt/2b-mds/loss_data/train_metrics.csv"
 )
 # MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
 # (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter. (The old

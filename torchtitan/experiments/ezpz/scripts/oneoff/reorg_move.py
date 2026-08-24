@@ -117,7 +117,7 @@ def main() -> int:
     # Unlike the markdown pass this IS a string substitution, which is safe
     # only because the pattern is anchored on the full "docs/<src>" prefix --
     # never a bare directory name. "production" alone appears throughout the
-    # prose; "docs/production/" does not appear by accident.
+    # prose; the anchored form does not appear by accident.  docs-link-check: ignore
     # Exclude THIS file: its own comments name example paths to explain the
     # substitution, and rewriting them mid-run would edit the tool describing
     # the edit.
@@ -127,8 +127,8 @@ def main() -> int:
         if p.suffix in (".py", ".sh") and ".git/" not in str(p)
         and "node_modules" not in str(p) and p.resolve() != self_path
     ]
-    # Longest-prefix first so docs/production/agpt/30b-exp is not eaten by a
-    # later docs/production/agpt pass in the same run.
+    # Longest-prefix first so a nested subtree is not eaten by a  docs-link-check: ignore
+    # later parent-directory pass in the same run.
     old_pfx, new_pfx = "docs/%s" % src_rel, "docs/%s" % dst_rel
     code_edits = {}
     for cf in code_files:
@@ -139,7 +139,7 @@ def main() -> int:
         if old_pfx not in text:
             continue
         # Only rewrite when the next char ends the path component, so
-        # docs/production does not match docs/production-archive.
+        # a prefix does not match a longer sibling name.
         out, i = [], 0
         while True:
             j = text.find(old_pfx, i)
@@ -174,7 +174,12 @@ def main() -> int:
         path = newloc(md)
         path.write_text(new_text, encoding="utf-8")
     for cf, new_text in code_edits.items():
-        cf.write_text(new_text, encoding="utf-8")
+        # A code file INSIDE the moved tree is already at its new home by the
+        # time we get here (git mv ran above), so writing to the pre-move path
+        # raises FileNotFoundError and aborts the run partway -- the tree moved
+        # but the literals did not. Redirect through the same moved-map the
+        # markdown pass uses.
+        newloc(cf).write_text(new_text, encoding="utf-8")
     print(f"moved + rewrote {len(edits)} markdown, {len(code_edits)} code file(s)")
     return 0
 

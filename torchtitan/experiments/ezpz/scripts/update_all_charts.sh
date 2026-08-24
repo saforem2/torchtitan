@@ -3,7 +3,7 @@
 #
 # Re-renders:
 #   - Per-trajectory production figures (loss / MFU / grad_norm / tokens-vs-time)
-#     under docs/production/agpt/{2b,20b}/n{N}/figures/
+#     under docs/live/chains/agpt/{2b,20b}/n{N}/figures/
 #   - The all_production_training.{svg,png} cross-chain overview
 #   - W&B-pulled per-chain figures (loss/MFU/tokens) for the SophiaG + LR-fork chains
 #   - The all_production_evals.svg cross-eval overview
@@ -53,15 +53,15 @@ declare -A SCRIPTS=(
     # trainer_state.json and skip cleanly if absent), so they slot into the
     # same parallel/failure-isolated contract as the chains above. Wiring them
     # here is what puts them under refresh_all.sh's catch-all.
-    [cpt_loss]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_loss.py"
-    [cpt_eval]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_eval.py"
-    [mds_2b_loss]="torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/plot_loss.py"
-    [sft_curves]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix/scripts/plot_sft_curves.py"
-    [sft_curves_full]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix_full/scripts/plot_sft_curves.py"
-    [eval_curves_full]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/scripts/plot_eval_curves.py"
-    [grpo_curves]="torchtitan/experiments/ezpz/docs/production/rl/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
-    [grpo_ceiling]="torchtitan/experiments/ezpz/docs/production/rl/grpo/plot_ceiling.py"
-    [sft_b4]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/plot_b4.py"
+    [cpt_loss]="torchtitan/experiments/ezpz/docs/live/chains/cpt/plot_cpt_loss.py"
+    [cpt_eval]="torchtitan/experiments/ezpz/docs/live/chains/cpt/plot_cpt_eval.py"
+    [mds_2b_loss]="torchtitan/experiments/ezpz/docs/live/chains/agpt/2b-mds/loss_data/plot_loss.py"
+    [sft_curves]="torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/tulu_math_uc_mix/scripts/plot_sft_curves.py"
+    [sft_curves_full]="torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/tulu_math_uc_mix_full/scripts/plot_sft_curves.py"
+    [eval_curves_full]="torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/scripts/plot_eval_curves.py"
+    [grpo_curves]="torchtitan/experiments/ezpz/docs/live/chains/rl/grpo/aurora2b/sft_arithmetic/scripts/plot_grpo_curves.py"
+    [grpo_ceiling]="torchtitan/experiments/ezpz/docs/live/chains/rl/grpo/plot_ceiling.py"
+    [sft_b4]="torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/plot_b4.py"
     # LR-finder trend + per-GBS figures (2B/80B). Regenerates from the
     # isolated per-GBS CSVs under outputs/lrtrend*/; tolerates missing CSVs
     # (a queued/incomplete GBS just plots fewer curves), so it is safe to run

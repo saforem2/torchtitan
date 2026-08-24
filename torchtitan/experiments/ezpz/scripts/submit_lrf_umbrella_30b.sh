@@ -69,7 +69,7 @@
 # COMPILE IS ON, which is the production default and worth ~27% here
 # (exp05: 340 tps uncompiled vs 466 compiled).
 #
-# An earlier revision of this script disabled it, citing docs/production's
+# An earlier revision of this script disabled it, citing docs/live's
 # "torch.compile OOM at 512N -- 2B OOMs on GPU, 80B OOMs on CPU. Use
 # --compile.no-enable for 512+ node jobs." THAT NOTE IS STALE. Every live 512N
 # production seat runs compiled: grepping umbrella 8764675's trainer logs for

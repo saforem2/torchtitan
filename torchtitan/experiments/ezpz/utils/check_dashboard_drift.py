@@ -3,7 +3,7 @@
 
 check_stale_docs.sh's "Last updated" check only compares a doc's marker date
 to its git-commit date -- it CANNOT catch content that drifted without the
-file being re-committed. The top-level docs/production/README.md dashboard is
+file being re-committed. The top-level docs/live/dashboard.md dashboard is
 hand-narrated (not auto-filled by fill_trajectory_fields.py, whose rollup
 propagator is intentionally NOT pointed at it -- its column schema differs and
 once mangled the Loss cells). So its per-chain step counts can silently fall
@@ -31,7 +31,7 @@ from torchtitan.experiments.ezpz.utils.fill_trajectory_fields import (
     largest_valid_step,
 )
 
-DASHBOARD = REPO_ROOT / "torchtitan/experiments/ezpz/docs/production/README.md"
+DASHBOARD = REPO_ROOT / "torchtitan/experiments/ezpz/docs/live/dashboard.md"
 
 # A table cell that is *just* a step count: >=4 significant digits
 # (optionally comma-grouped, optionally bolded, optionally followed by a
@@ -47,8 +47,8 @@ _STEP_CELL = re.compile(
 
 def _link_suffix(traj: dict) -> str:
     r = traj["readme"]
-    i = r.find("docs/production/")
-    rel = r[i + len("docs/production/"):] if i != -1 else r
+    i = r.find("docs/live/")
+    rel = r[i + len("docs/live/"):] if i != -1 else r
     return rel  # e.g. agpt/20b/n512/README.md
 
 

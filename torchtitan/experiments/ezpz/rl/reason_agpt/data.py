@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 """GSM8K chain-of-thought dataset for the Monarch RL engine (Stage 2 of the CoT
-plan, docs/production/rl/plans/cot.md).
+plan, docs/live/chains/rl/plans/cot.md).
 
 Ports the dataset half of the TRL task ``rl/tasks/gsm8k_reason.py`` to an
 upstream ``Configurable`` dataset that the ``Rollouter`` iterates. Each sample is

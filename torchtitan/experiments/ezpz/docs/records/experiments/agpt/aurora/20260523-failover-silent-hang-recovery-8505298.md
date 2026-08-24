@@ -197,7 +197,7 @@ What this does **NOT** validate:
   smoke jobs (`8505325`, `8505326`) are queued to exercise the
   preflight path at 8N for those models too.
 - 80B init-time bad-node prevalence ([11 attempts since 2026-05-11,
-  zero persisted](../../../../production/agpt/80b/README.md)). The
+  zero persisted](../../../../live/chains/agpt/80b/README.md)). The
   wrapper *correctly identifies* these failures, but Aurora's bad-node
   rate at 80B init currently exceeds the spare count we can afford.
   That's a node-health problem, not a wrapper problem.

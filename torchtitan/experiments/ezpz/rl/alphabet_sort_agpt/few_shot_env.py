@@ -10,7 +10,7 @@ The SFT agpt-2b model can sort but rarely emits the exact
 raises format adherence (~30% -> ~50-65% hit rate in the runs) so partial-credit
 reward has variance to optimize.
 
-Design notes (v2, learned the hard way -- see docs/production/rl/
+Design notes (v2, learned the hard way -- see docs/live/chains/rl/
 grpo-lora-agpt2b-repro.md):
   - BARE name lines (no ``<name>`` tags) -- the rubric reads bare lines.
   - example names clearly DISTINCT from any task names, with an explicit

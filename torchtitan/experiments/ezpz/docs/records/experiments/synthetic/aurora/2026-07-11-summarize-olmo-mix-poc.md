@@ -7,7 +7,7 @@ existing `olmo-mix-1124` tokens, and validate the full round-trip is lossless an
 the summaries usable, before committing compute to a large generation run.
 
 **Motivation.** The dolmino stage-2 mix helped by raising information density of
-mid-training tokens (see [`../../../production/cpt/`](../../../../production/cpt/README.md)).
+mid-training tokens (see [`../../../production/cpt/`](../../../../live/chains/cpt/README.md)).
 Dense, faithful summaries of the pretraining corpus are another way to raise
 information-per-token. This POC tests the machinery + a first quality read.
 

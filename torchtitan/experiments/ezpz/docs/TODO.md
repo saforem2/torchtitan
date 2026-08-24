@@ -5,7 +5,7 @@
 ### Problem
 Scaling results, benchmarks, and throughput data are scattered across
 `docs/benchmarks.md`, `docs/benchmark-80B.md`, `docs/scaling-study.md`,
-`docs/scaling-study-torch213.md`, `docs/production-training/scaling-performance.md`,
+`docs/scaling-study-torch213.md`, `docs/live-training/scaling-performance.md`,
 and per-experiment logs in `docs/experiments/{agpt,moe}/{aurora,sunspot,polaris}/`.
 Finding the latest numbers for a given model/machine requires checking 5+ files.
 

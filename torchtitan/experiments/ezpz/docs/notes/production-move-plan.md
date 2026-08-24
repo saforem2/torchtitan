@@ -68,7 +68,7 @@ extend the mover.
 ## Verify after each commit
 
 1. `bash scripts/check_doc_links.sh` -- must stay at 33
-2. `grep -rn "docs/production" --include="*.py" --include="*.sh"` -- zero stale
+2. `grep -rn "docs/live" --include="*.py" --include="*.sh"` -- zero stale
 3. Diff any regenerated SVG by DISTINCT COLOR COUNT, not byte size
 4. Do NOT let a local `refresh_all.sh` commit the two eval charts: their JSON
    is cluster-side, so they always render empty here

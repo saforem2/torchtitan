@@ -3,7 +3,7 @@
 against the 2B-MDS reference ceiling on a single figure per task.
 
 v1 (bf16-master, archived) results are now at
-docs/production/agpt/historical/v1-bf16/ and no longer plotted here.
+docs/live/chains/agpt/historical/v1-bf16/ and no longer plotted here.
 
 Usage:
     python3 plot_eval_overview.py

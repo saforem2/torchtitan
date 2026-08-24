@@ -151,7 +151,7 @@ Sam Foreman (foremans), AuroraGPT
 
 ## Related
 
-- [`dispatch-log.md`](../../production/dispatch-log.md) -- the per-slot record
+- [`dispatch-log.md`](../../live/dispatch-log.md) -- the per-slot record
   for this umbrella, including the two failures that *were* ours
   (`Config.job` AttributeError on t3/t4, and the t0 token-budget overshoot).
 - [`umbrella-bad-alloc-init.md`](umbrella-bad-alloc-init.md) -- the separate,

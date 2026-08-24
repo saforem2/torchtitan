@@ -20,7 +20,7 @@ curves should separate. If it is not, they should not.
 ## Result: they have not separated
 
 Loss at matched steps, constant-LR vs canonical (canonical values from the
-committed ground-truth store, `docs/production/metrics/2b_v2_512.csv`):
+committed ground-truth store, `docs/live/metrics/2b_v2_512.csv`):
 
 | step | constant-LR | canonical | delta | LR |
 |-----:|------------:|----------:|------:|----|
@@ -83,7 +83,7 @@ run-id on that chain too (`ctbs1be4`). Both were fixed in the same commit.
 python3 -c "
 import csv
 rows=list(csv.DictReader(open(
-  'torchtitan/experiments/ezpz/docs/production/metrics/2b_v2_512.csv')))
+  'torchtitan/experiments/ezpz/docs/live/metrics/2b_v2_512.csv')))
 d={int(float(r['_step'])): float(r['loss_metrics/global_avg_loss'])
    for r in rows if r.get('loss_metrics/global_avg_loss')}
 for s in (12000,16000,20000,21000):

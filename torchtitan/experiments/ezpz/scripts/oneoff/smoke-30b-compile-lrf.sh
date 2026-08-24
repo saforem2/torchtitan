@@ -10,7 +10,7 @@
 # Can the 30B COMPILE at the LR-finder's shape? Answer this on 64 debug nodes
 # before spending a 2088-node allocation on the assumption.
 #
-# THE DOUBT. docs/production/README.md says "torch.compile OOM at 512N -- 2B
+# THE DOUBT. docs/live/dashboard.md says "torch.compile OOM at 512N -- 2B
 # OOMs on GPU, 80B OOMs on CPU. Use --compile.no-enable for 512+ node jobs."
 # I initially took that at face value and hardcoded --compile.no-enable into
 # the 4x512N umbrella, which cost ~27% throughput (exp05: 340 vs 466 tps) and,

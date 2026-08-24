@@ -18,7 +18,7 @@ Usage:
     python3 torchtitan/experiments/ezpz/utils/plot_production.py \
         --model 2b \
         --files agpt-2b-sophiag-n256.o8444122 agpt-2b-sophiag-n256.o8446337 \
-        --output-dir torchtitan/experiments/ezpz/docs/production/agpt/2b/figures
+        --output-dir torchtitan/experiments/ezpz/docs/live/chains/agpt/2b/figures
 
     # Generate combined loss plot only:
     python3 torchtitan/experiments/ezpz/utils/plot_production.py --combined-only

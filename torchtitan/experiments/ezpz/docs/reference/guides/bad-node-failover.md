@@ -66,7 +66,7 @@ each script's header.
 The `CONFIG_SUFFIX` knob toggles the RoPE flavor (`_real` default for
 2B/20B; set `CONFIG_SUFFIX=` for the plain complex flavor). 80B stays on
 the plain numerically-validated `agpt_80b`. See
-[`production/agpt/80b/README.md`](../../production/agpt/80b/README.md) for
+[`production/agpt/80b/README.md`](../../live/chains/agpt/80b/README.md) for
 the TP=4/LBS=1 stable-corner derivation and the `dp_degree<=186` ceiling.
 
 ### What the submit script still must do
@@ -274,7 +274,7 @@ attempt.
   -- first real-world silent-hang recovery
 - [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
   -- the originating silent-hang incident
-- [`docs/production/agpt/80b/README.md`](../../production/agpt/80b/README.md)
+- [`docs/live/agpt/80b/README.md`](../../live/chains/agpt/80b/README.md)
   -- 80B TP=4/LBS=1 stable corner + `dp_degree<=186` ceiling
 - [`scripts/FAILOVER.md`](../../../scripts/FAILOVER.md) -- code-adjacent quickref
 - [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)

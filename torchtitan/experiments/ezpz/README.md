@@ -88,7 +88,7 @@ structural map of every file under `docs/`, see
 
 | Page | What's there |
 |------|--------------|
-| [Production index](docs/production/README.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
+| [Production index](docs/live/dashboard.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
 | [Eval index](docs/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
 | [Journal](docs/journal.md) | Day-by-day session log |
 
@@ -129,7 +129,7 @@ structural map of every file under `docs/`, see
 
 | Folder | Contents |
 |--------|----------|
-| [`docs/production/`](docs/production/) | Live per-model / per-node-count training trackers |
+| [`docs/live/`](docs/live/) | Live per-model / per-node-count training trackers |
 | [`docs/evals/`](docs/evals/) | Per-model eval results + plots |
 | [`docs/reference/guides/`](docs/reference/guides/) | Big-finding writeups, operational notes, how-tos |
 | [`docs/experiments/`](docs/experiments/) | Per-machine smoke / benchmark / LR-finder reports |

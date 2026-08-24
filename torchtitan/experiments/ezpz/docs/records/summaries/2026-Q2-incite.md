@@ -10,7 +10,7 @@
 
 This report synthesizes the five two-week retrospectives written during
 the quarter ([index](README.md)) plus the live
-[production](../../production/README.md) and [eval](../evals/README.md)
+[production](../../live/dashboard.md) and [eval](../evals/README.md)
 trackers. Section anchors link to the underlying per-trajectory pages so
 every claim is traceable to data on disk or in W&B.
 
@@ -59,7 +59,7 @@ within budget (see below).
 |---|---|---|
 | Year-2 Aurora budget | 6,620K node-hours | INCITE-2026 renewal milestone table |
 | Year-2 Polaris budget | 150K node-hours | renewal milestone table |
-| Aurora burn ratio (as of 2026-06-26) | **0.29** (~29% of Year-2 Aurora) | PBS, via [queue-wait-analysis](../../production/queue-wait-analysis.md) |
+| Aurora burn ratio (as of 2026-06-26) | **0.29** (~29% of Year-2 Aurora) | PBS, via [queue-wait-analysis](../../live/queue-wait-analysis.md) |
 | Implied Aurora node-hours used | ~1.9M of 6,620K (derived from ratio) | derived |
 
 Burn is on a healthy trajectory: at roughly the half-year mark, ~29% of
@@ -73,7 +73,7 @@ queue to other projects despite thousands of physically free nodes and a
 healthy burn ratio. This is an operational/policy issue (candidate
 levers: a project reservation, consolidating on 256N, or a PI->ALCF
 priority discussion), documented in full at
-[queue-wait-analysis.md](../../production/queue-wait-analysis.md). Worth
+[queue-wait-analysis.md](../../live/queue-wait-analysis.md). Worth
 raising at the program level.
 
 ---
@@ -111,7 +111,7 @@ Full-scale pre-training on the
 [olmo-mix-1124](https://huggingface.co/datasets/allenai/olmo-mix-1124)
 corpus (4.67T-token budget). All runs are "v2" (post-bf16-fix,
 `dtype=float32` master weights). Live tracker:
-[production/README.md](../../production/README.md).
+[production/README.md](../../live/dashboard.md).
 
 ### 4.1 agpt 2B (dense) — COMPLETE
 
@@ -130,8 +130,8 @@ The chain ran across ~13 PBS dispatches since the 2026-04-30 restart,
 surviving repeated bad-node failures via the failover wrapper (Section
 6.3). The canonical **512N** 2B chain (large-batch trajectory) reached
 step-30,400 / 3.06T tokens (65.5%) but is queue-stalled. Detail:
-[2b/n256](../../production/agpt/2b/n256/README.md),
-[2b/n512](../../production/agpt/2b/n512/README.md).
+[2b/n256](../../live/chains/agpt/2b/n256/README.md),
+[2b/n512](../../live/chains/agpt/2b/n512/README.md).
 
 **Next:** convert the final DCP checkpoint to HF and run the full
 lm-eval suite for the end-of-pretraining scorecard (top post-maintenance
@@ -147,7 +147,7 @@ action).
 The 20B chain is the per-token efficiency story of the quarter (Section
 5). Two operational issues constrain it: the same 512N queue starvation,
 and a `set_determinism` `std::bad_alloc` init crash that intermittently
-kills 512N restarts. Detail: [20b/README](../../production/agpt/20b/README.md).
+kills 512N restarts. Detail: [20b/README](../../live/chains/agpt/20b/README.md).
 
 ### 4.3 agpt 80B (dense) — LAUNCHED
 
@@ -219,7 +219,7 @@ A production-batch (GBS=6144) LR-finder on 2026-06-27 then showed **AdamW
 sits on a NaN cliff** at production scale (usable ceiling ~7e-7), while
 **mano (~3e-6) and SophiaG (~1e-6) train clean** — which is what made the
 80B launch (Section 4.3) possible. Detail:
-[80b/README](../../production/agpt/80b/README.md). The underlying TP=2 /
+[80b/README](../../live/chains/agpt/80b/README.md). The underlying TP=2 /
 LBS>1 grad-path overflow remains an open, upstream-worthy bug with two
 cheap reproducers.
 
@@ -315,7 +315,7 @@ list in [guides/known-issues.md](../../reference/guides/known-issues.md)):
 1. **Aurora 512N queue starvation** — the single biggest throughput
    drag; the 512N chains lost 3+ weeks of wall-clock to scheduling
    contention. Candidate fix: a project reservation or PI->ALCF priority
-   discussion. ([analysis](../../production/queue-wait-analysis.md))
+   discussion. ([analysis](../../live/queue-wait-analysis.md))
 2. **80B scale > 512N unproven** — 1024N/2048N have a documented init
    crash (`set_determinism` at 12,288+ ranks); real 2048N training is not
    yet submit-ready (would force pipeline parallelism, never validated for
@@ -363,4 +363,4 @@ fixed.
 
 Branch: [`ezpz`](https://github.com/saforem2/torchtitan/tree/ezpz) ·
 Docs root: [README.md](../../README.md) ·
-Live production: [production/README.md](../../production/README.md)
+Live production: [production/README.md](../../live/dashboard.md)

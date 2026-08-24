@@ -89,20 +89,20 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-08-23 |
-| [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-08-23 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-08-23 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.68687. | 2026-08-23 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-23 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**10,300** (518.4B tokens, 11.1% of 4.67T). | 2026-08-23 |
-| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-23 |
+| [Production Index](live/dashboard.md) | Top-level snapshot of every active trajectory | 2026-08-23 |
+| [Dense (agpt) Production](live/chains/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-08-23 |
+| [2B 256N](live/chains/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-08-23 |
+| [2B 512N](live/chains/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.68687. | 2026-08-23 |
+| [20B 512N](live/chains/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-23 |
+| [20B 256N](live/chains/agpt/20b/n256/README.md) | step-**10,300** (518.4B tokens, 11.1% of 4.67T). | 2026-08-23 |
+| [agpt 80B](live/chains/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-23 |
 | [80B 512N NaN incident (2026-07-03)](records/experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-08-23 |
-| [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
-| [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-23 |
-| [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-08-23 |
-| [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-08-23 |
-| [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-08-23 |
+| [20B 1024N](live/chains/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
+| [2B 1024N](live/chains/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
+| [agpt 2B](live/chains/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-23 |
+| [agpt 2B-MDS](live/chains/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-08-23 |
+| [2B CPT (olmo x dolmino)](live/chains/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-08-23 |
+| [Production Scaling Report](reference/scaling/performance.md) | Apr 18-21 experiments (historical) | 2026-08-23 |
 
 ## Evaluation (lm-eval results)
 
@@ -164,7 +164,7 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Optimizer Speedrun Competitions](records/competitions/README.md) | [W&B link](https://api.wandb.ai/links/aurora_gpt/hda3milo) | 2026-08-23 |
-| [RL (GRPO) Experiment](./production/rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-08-14 |
+| [RL (GRPO) Experiment](live/chains/rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-08-14 |
 
 ## Outbound (upstream)
 

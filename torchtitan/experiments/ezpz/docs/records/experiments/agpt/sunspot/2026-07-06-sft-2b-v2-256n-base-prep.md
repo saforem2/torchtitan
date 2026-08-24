@@ -86,4 +86,4 @@ Full 32N SFT on Sunspot: copy `aurora2b_tulu_mix_32n_gbs6144.sh`, swap
 BASE_MODEL + fresh CKPT_DIR, recipe otherwise identical (GBS=6144, 3 epochs,
 lr 2e-5, `--auto-retry`, select=36). Produces the first production SFT
 checkpoint on the completed v2 base, then a proper trajectory page under
-`docs/production/sft/agpt/2b-v2-256n/`.
+`docs/live/sft/agpt/2b-v2-256n/`.

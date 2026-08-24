@@ -22,7 +22,7 @@
 # AC=full, pure FSDP) inside run_lr_finder.sh so dp_degree stays at the
 # NaN-free <=186 ceiling -- a TP=2 sweep would NaN from the dp-degree
 # trigger, not the swept LR (see run_lr_finder.sh and
-# docs/production/agpt/80b/README.md).
+# docs/live/chains/agpt/80b/README.md).
 #
 # Knobs (all optional, forwarded via the environment to run_lr_finder.sh):
 #   LRF_MODELS      space-separated flavors      (default "2b 20b")

@@ -101,7 +101,7 @@ combination is winning real throughput here.
 `step-500/` (never written — async save killed by the wrapper's
 walltime exit mid-write) are unloadable. The latest *complete* ckpt
 remains `step-300` from the 8463659 era. This is now tracked as
-Known Issue #7 in the [production index](../../../../production/README.md).
+Known Issue #7 in the [production index](../../../../live/dashboard.md).
 The failover wrapper itself worked perfectly — the persistence
 failure is a separate async-ckpt-save robustness issue, not a
 wrapper bug.

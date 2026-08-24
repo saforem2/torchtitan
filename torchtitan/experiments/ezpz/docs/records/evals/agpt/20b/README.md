@@ -4,7 +4,7 @@
 >
 > Last updated: 2026-08-23
 >
-> **Training curves:** see [`docs/production/agpt/20b/`](../../../../production/agpt/20b/README.md)
+> **Training curves:** see [`docs/live/agpt/20b/`](../../../../live/chains/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
 >
 > **Note:** the historical v1 results are from the bf16-tainted

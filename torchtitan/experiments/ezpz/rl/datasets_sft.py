@@ -401,7 +401,7 @@ def _build_gsm8k_r1cot() -> Dataset:
     ``<think>{rationale}</think>\n<answer>\\boxed{{N}}</answer>`` so the model
     learns to EMIT a delimited reasoning trace + boxed final answer. This is the
     Stage 1 cold-start for the CoT plan
-    (docs/production/rl/plans/cot.md) -- teaches the FORMAT from gsm8k's own
+    (docs/live/chains/rl/plans/cot.md) -- teaches the FORMAT from gsm8k's own
     data, no teacher model required.
 
     Two details that matter:
@@ -912,13 +912,13 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # b3_instruct_cot_mix -- balanced instruction + CoT mix for the B3 cold-start
-# rebuild (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
+# rebuild (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
 # ---------------------------------------------------------------------------
 
 
 def _build_b3_instruct_cot_mix(seed: int = 42):
     """Balanced instruction + CoT SFT mix for the B3 cold-start rebuild
-    (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
       0.30 tulu-3-sft-mixture (general instruction-following)
       0.25 OpenR1-Math-220k   (rich long-form R1 CoT, our envelope)
       0.15 gsm8k-r1cot        (in-distribution CoT, eval-matching format)
@@ -961,13 +961,13 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # b4_reweight_mix -- reweighted mix fixing the B3 dilution regression
-# (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
+# (docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
 # ---------------------------------------------------------------------------
 
 
 def _build_b4_reweight_mix(seed: int = 42):
     """B4 reweighted mix -- fixes the B3 dilution regression
-    (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
       0.40 gsm8k-r1cot        (was 0.15 in b3 -- restore in-distribution short CoT)
       0.15 OpenR1-Math-220k   (LENGTH-FILTERED via OPENR1_MAX_THINK_CHARS -- short
                                traces only; the run-on ones caused the regression)

@@ -22,7 +22,7 @@ Run from the repo root (on Polaris, where the eval outputs live):
 
     python3 torchtitan/experiments/ezpz/utils/plot_polaris_20b_evals.py \
         --eval-base outputs/evals/agpt-20b-dolma-n128 \
-        --out torchtitan/experiments/ezpz/docs/production/polaris/figures
+        --out torchtitan/experiments/ezpz/docs/live/chains/polaris/figures
 """
 
 from __future__ import annotations
@@ -176,7 +176,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="torchtitan/experiments/ezpz/docs/production/polaris/figures",
+        default="torchtitan/experiments/ezpz/docs/live/chains/polaris/figures",
         help="Output dir for the chart",
     )
     args = parser.parse_args()

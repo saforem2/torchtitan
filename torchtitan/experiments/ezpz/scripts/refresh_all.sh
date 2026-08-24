@@ -144,11 +144,11 @@ fi
 # like journal.md / meeting-notes). This keeps the auto-commit's blast
 # radius to exactly what the refresh produces.
 git add \
-    "torchtitan/experiments/ezpz/docs/production/**/README.md" \
-    "torchtitan/experiments/ezpz/docs/production/**/figures/*" \
-    "torchtitan/experiments/ezpz/docs/production/**/charts/*" \
-    "torchtitan/experiments/ezpz/docs/production/**/*.tsv" \
-    "torchtitan/experiments/ezpz/docs/production/figures/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/README.md" \
+    "torchtitan/experiments/ezpz/docs/live/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/charts/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/*.tsv" \
+    "torchtitan/experiments/ezpz/docs/live/figures/*" \
     "torchtitan/experiments/ezpz/docs/records/evals/**/figures/*" \
     "torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/**/figures/*" \
     "torchtitan/experiments/ezpz/docs/README.md" \

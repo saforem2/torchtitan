@@ -67,7 +67,7 @@ def _savefig_both(fig, svg_path, dpi=200):
 # Production runs identified by step ranges (cross-checked with PBS logs).
 # Listed oldest first so concatenation matches resume order.
 # Each key here drives the figure filename + output dir:
-#   docs/production/agpt/<model>/n<num_nodes>/figures/<scope>_<key>n.svg
+#   docs/live/chains/agpt/<model>/n<num_nodes>/figures/<scope>_<key>n.svg
 # So the key MUST encode model + version + node count, e.g. "2b_v1_256",
 # "20b_v2_512". Don't include the trailing "n" — the template adds it.
 #
@@ -506,7 +506,7 @@ def main() -> None:
         help=(
             "Generate a v1-vs-v2 overlay dashboard for the given model, "
             "instead of (or in addition to) per-run dashboards. The "
-            "figure goes to docs/production/agpt/<model>/figures/"
+            "figure goes to docs/live/chains/agpt/<model>/figures/"
             "overlay_<model>_v1_vs_v2.svg."
         ),
     )
@@ -514,7 +514,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override output directory (default: docs/production/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/production/agpt/<model>/figures/ for overlays)",
+        help="Override output directory (default: docs/live/chains/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/live/chains/agpt/<model>/figures/ for overlays)",
     )
     args = parser.parse_args()
 

@@ -474,7 +474,7 @@ def agpt_2b_chunkedce() -> FaultTolerantTrainer.Config:
 #
 # Both arms fork model weights only (fresh optimizer + LR schedule + step
 # counter) via --checkpoint.initial-load-path, mirroring the CPT recipe
-# (docs/production/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
+# (docs/live/chains/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
 # GENTLE (2e-6 constant, warmup 20) -- NOT re-warmed to the 2.17e-5 peak,
 # which disrupted the converged base in the first CPT pilot.
 #
