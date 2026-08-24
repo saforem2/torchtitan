@@ -561,7 +561,7 @@ class FaultTolerantTrainer(Trainer):
                 self.batch_ramp_start_gas
                 * config.training.num_tokens_per_microbatch_per_dp_rank
                 * batch_degree,
-                global_batch_size,
+                config.training.num_tokens_per_train_step,
             )
 
         # apply parallelisms and initialization
@@ -791,7 +791,8 @@ class FaultTolerantTrainer(Trainer):
             "Trainer is initialized with "
             f"tokens/microbatch/dp-rank "
             f"{config.training.num_tokens_per_microbatch_per_dp_rank}, "
-            f"global batch size {global_batch_size}, "
+            f"tokens/train-step "
+            f"{config.training.num_tokens_per_train_step}, "
             f"gradient accumulation steps {self.gradient_accumulation_steps}, "
             f"sequence length {config.training.max_context_length}, "
             f"total steps {config.training.steps} "
