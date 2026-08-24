@@ -219,7 +219,7 @@ for the diagnosis.
 - [`scaling-performance.md`](../reference/scaling/performance.md) — detailed
   experiment log from Apr 18-21 (compile scaling, 80B at 4-512N,
   interactive workflow validation).
-- [`docs/scaling/`](../reference/scaling/README.md) — per-model weak-scaling
+- [`docs/reference/scaling/`](../reference/scaling/README.md) — per-model weak-scaling
   tables (2B / 20B / MoE, 1-512N).
-- [`docs/scaling/yeet_env/`](../reference/scaling/yeet_env/README.md) —
+- [`docs/reference/scaling/yeet_env/`](../reference/scaling/yeet_env/README.md) —
   yeet-env tarball broadcast scaling (8N to 4096N) on Aurora.

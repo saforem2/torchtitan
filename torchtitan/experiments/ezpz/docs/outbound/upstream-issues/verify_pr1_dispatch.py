@@ -21,7 +21,7 @@ Exit code:
 Run with exactly 2 ranks on an XPU node, e.g.::
 
     ezpz launch python3 \
-        torchtitan/experiments/ezpz/docs/upstream-issues/verify_pr1_dispatch.py
+        torchtitan/experiments/ezpz/docs/outbound/upstream-issues/verify_pr1_dispatch.py
 """
 
 from __future__ import annotations

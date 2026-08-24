@@ -9,7 +9,7 @@ The 100-step B2 GRPO run (job 12471432) proved RL is NOT the accuracy lever for
 agpt-2b at ~20% GSM8K: merged step-100 eval'd 0.205 -> 0.215 on the 200-problem
 GSM8K CoT metric (+1pp, noise), while format went 0.985 -> 1.000. GRPO cleanly
 perfects format but cannot raise accuracy when the base's correct-rollout density
-is thin. Per docs/live/rl/plans/cot.md, the #1 next lever is a
+is thin. Per docs/live/chains/rl/plans/cot.md, the #1 next lever is a
 stronger/longer cold-start SFT. This spec designs that rebuild.
 
 ## Goal

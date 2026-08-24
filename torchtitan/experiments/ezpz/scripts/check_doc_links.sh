@@ -104,6 +104,40 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
                     bad.append("(code) %s:%d -> experiments/ezpz/docs/%s"
                                % (key[0], i + 1, key[1]))
 
+# 2b. BARE docs/ path mentions in prose and comments
+# Checks 1/1b/2 all require a markdown link or a resolvable string reference.
+# But most stale paths after a move are neither: they are a bare docs path
+# written inline in a sentence, or a comment naming a directory. The link
+# target next to them gets rewritten by path resolution while the visible text
+# keeps saying the old location -- 147 such mentions survived the reorg, in 61
+# files, including prose that named a chain subtree without its `chains/`
+# level.
+#
+# Only flags a path whose FIRST segment names a real (or once-real) docs
+# directory, so an unrelated docs path in an external URL and other coincidental
+# matches stay quiet.
+bare = re.compile(r'docs/([A-Za-z0-9_./-]+)')
+known_tops = set(os.listdir(docs)) | {
+    "production", "evals", "guides", "experiments", "summaries", "scaling",
+    "configs", "meeting-notes", "upstream-issues", "competitions", "baselines",
+    "journal", "upstream-sync",
+}
+for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
+    for fn in files:
+        if not fn.endswith((".md", ".py", ".sh")): continue
+        if fn in ("reorg_move.py", "check_doc_links.sh"): continue
+        p2 = os.path.join(r, fn)
+        for i, line in enumerate(open(p2, errors="replace").read().splitlines(), 1):
+            if "docs-link-check: ignore" in line: continue
+            for m in bare.finditer(line):
+                rel = m.group(1).rstrip("/.,)`'\"*;:")
+                if not rel or any(c in rel for c in "*{}$"): continue
+                if rel.split("/")[0] not in known_tops: continue
+                if os.path.exists(os.path.join(docs, rel)): continue
+                bad.append("(path) %s:%d -> docs/%s does not exist"
+                           % (os.path.relpath(p2, root), i, rel))
+
 # 3. PIECEWISE docs paths: a pathlib chain naming a retired dir segment.  docs-link-check: ignore
 # Check 2 only sees a docs path written as ONE string. A pathlib chain built a
 # segment at a time is invisible to it -- and that is not hypothetical: after

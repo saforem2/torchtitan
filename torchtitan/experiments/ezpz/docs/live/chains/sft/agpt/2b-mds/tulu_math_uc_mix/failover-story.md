@@ -251,7 +251,7 @@ of the PR switched to `torch.accelerator.current_accelerator()`
 to avoid the composite trap entirely.
 
 Full writeup with the proposed fix snippet:
-[`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../../outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md).
+[`docs/outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../../outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md).
 
 ### 2. autoretry STUCK_PRE_TRAINING false-positive on TRL format
 
@@ -367,5 +367,5 @@ instruction-following adaptation has converged on this mix.
 - Upstream issue + fix: [pytorch/pytorch#186938](https://github.com/pytorch/pytorch/issues/186938) + [pytorch/pytorch#186940](https://github.com/pytorch/pytorch/pull/186940)
 - ezpz autoretry fix: [saforem2/ezpz commit `6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b)
 - ezpz autoretry _drain UTF-8 bug fix (pre-req for this work): [saforem2/ezpz PR #162](https://github.com/saforem2/ezpz/pull/162) (#163)
-- Local upstream-issues writeup: [`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../../outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md)
+- Local upstream-issues writeup: [`docs/outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../../outbound/upstream-issues/sharded_tensor_device_cuda_hardcode.md)
 - Journal entry: [`docs/journal.md`](../../../../../../journal.md) 2026-06-10

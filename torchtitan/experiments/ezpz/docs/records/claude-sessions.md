@@ -164,13 +164,13 @@ TORCH_DEVICE=cpu LOCAL_RANK=0 RANK=0 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 \
 ### Discussion
 
 - Wrote the first **INCITE quarterly report** at
-  `docs/summaries/2026-Q2-incite.md` covering Q2 2026 (Apr 1 - Jun 30).
+  `docs/records/summaries/2026-Q2-incite.md` covering Q2 2026 (Apr 1 - Jun 30).
   No prior quarterly artifact existed in the repo -- only the five
   two-week summaries and the renewal milestone table
   (`~/Downloads/AuroraGPT_INCITE_Renewal_2026_MilestoneTable.pdf`).
 - Format chosen with the user: **hybrid** (exec summary + milestone
   status mapped to Y2:M1-M5 + themed technical highlights). Period:
-  calendar Q2 (matches the docs/summaries coverage, earliest entry
+  calendar Q2 (matches the docs/records/summaries coverage, earliest entry
   2026-04-12).
 - Synthesized from the 5 two-week summaries + production/evals trackers +
   queue-wait-analysis (allocation burn 0.29 of Year-2 Aurora).
@@ -181,7 +181,7 @@ TORCH_DEVICE=cpu LOCAL_RANK=0 RANK=0 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 \
   with 2B/20B/80B dense. Flagged the 512N queue starvation as a
   program-level item worth raising.
 - Added a "Quarterly / program reports" section to
-  `docs/summaries/README.md` index.
+  `docs/records/summaries/README.md` index.
 
 ## 2026-06-29 (2B 100-step production ladder + LR-finder reorg)
 

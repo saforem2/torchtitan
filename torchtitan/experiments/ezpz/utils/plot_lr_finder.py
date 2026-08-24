@@ -12,7 +12,7 @@ Usage:
 
     # Custom output dir:
     python3 torchtitan/experiments/ezpz/utils/plot_lr_finder.py \
-        --output-dir torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/figures
+        --output-dir torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/figures  # docs-link-check: ignore (created on demand)
 """
 
 from __future__ import annotations

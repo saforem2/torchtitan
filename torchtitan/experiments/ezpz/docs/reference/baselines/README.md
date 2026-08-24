@@ -22,22 +22,22 @@ qsub -l select=2 -l walltime=00:45:00 -N smoke_moe_vNN \
 # 3. Diff against the saved baselines.
 python3 -m torchtitan.experiments.ezpz.eval.loss_baseline check \
     --log smoke_2b_vNN.o<jobid> \
-    --baseline torchtitan/experiments/ezpz/docs/baselines/agpt_2b_50.json
+    --baseline torchtitan/experiments/ezpz/docs/reference/baselines/agpt_2b_50.json
 
 python3 -m torchtitan.experiments.ezpz.eval.loss_baseline check \
     --log smoke_moe_vNN.o<jobid> \
-    --baseline torchtitan/experiments/ezpz/docs/baselines/moe_500m_50.json
+    --baseline torchtitan/experiments/ezpz/docs/reference/baselines/moe_500m_50.json
 
 # 4. If both PASS, refresh the baselines from this run so future drift
 #    is measured against the latest code:
 python3 -m torchtitan.experiments.ezpz.eval.loss_baseline save \
     --log smoke_2b_vNN.o<jobid> \
-    --baseline torchtitan/experiments/ezpz/docs/baselines/agpt_2b_50.json \
+    --baseline torchtitan/experiments/ezpz/docs/reference/baselines/agpt_2b_50.json \
     --note "vNN: <one-line summary of what changed>"
 
 python3 -m torchtitan.experiments.ezpz.eval.loss_baseline save \
     --log smoke_moe_vNN.o<jobid> \
-    --baseline torchtitan/experiments/ezpz/docs/baselines/moe_500m_50.json \
+    --baseline torchtitan/experiments/ezpz/docs/reference/baselines/moe_500m_50.json \
     --note "vNN: <one-line summary of what changed>"
 
 # 5. Commit the updated baselines + the journal entry.

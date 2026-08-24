@@ -216,7 +216,7 @@ and the broadcast tarball rebuilt.
 
 Pending on-hardware confirmation: a cold-`CKPT_DIR` 80B TP=4 smoke (the
 exact config that raced on `74b09fd`) -- see
-[`docs/experiments/agpt/aurora`](../../experiments/agpt/aurora/). (Do NOT
+[`docs/records/experiments/agpt/aurora`](../../experiments/agpt/aurora/). (Do NOT
 mark this fully closed until that cold run passes; an earlier in-session
 "FIXED" claim for `74b09fd` was premature -- the hardware re-run then
 showed `74b09fd` only fixed the sibling paths, not `_build_index_mappings`.

@@ -13,7 +13,7 @@
 > the v2 torchtitan production runs.
 >
 > Eval-side scores live at
-> [`docs/evals/agpt/2b-mds/`](../../../../records/evals/agpt/2b-mds/README.md).
+> [`docs/records/evals/agpt/2b-mds/`](../../../../records/evals/agpt/2b-mds/README.md).
 >
 > Last updated: 2026-08-23
 
@@ -77,6 +77,6 @@ plot to skip the warm-up transient. Reproduce with
 
 ## Eval scores
 
-See [`docs/evals/agpt/2b-mds/`](../../../../records/evals/agpt/2b-mds/README.md)
+See [`docs/records/evals/agpt/2b-mds/`](../../../../records/evals/agpt/2b-mds/README.md)
 for the lm-eval sweep results (HellaSwag / ARC-Easy / ARC-Challenge /
 Winogrande, 28 checkpoints × 3 measurement replicates).

@@ -44,7 +44,7 @@ apply_style()
 
 REPO_ROOT = _repo_root()
 # Per-trajectory v2 eval roots; gbs differs per node count, so they
-# can't be conflated. Mirror docs/evals/agpt/2b/plot_eval_overview.py.
+# can't be conflated. Mirror docs/records/evals/agpt/2b/plot_eval_overview.py.
 V2_TRAJECTORIES = {
     # node_count -> (results dir, GBS)
     256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 3_072),   # LBS=1 × 256N × 12 GPUs ÷ TP=2 ⇒ 1536 dp-shards × 2 micro-batches

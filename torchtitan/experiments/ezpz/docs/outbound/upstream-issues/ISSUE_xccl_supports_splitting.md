@@ -82,7 +82,7 @@ it without losing FSDP2's `foreach_all_gather` routing).
 ### Minimal repro
 
 A self-contained two-layer repro lives at
-[`saforem2/torchtitan/torchtitan/experiments/ezpz/docs/upstream-issues/repro_xccl_supports_splitting.py`](https://github.com/saforem2/torchtitan/blob/83e2e8ee0/torchtitan/experiments/ezpz/docs/upstream-issues/repro_xccl_supports_splitting.py).
+[`saforem2/torchtitan/torchtitan/experiments/ezpz/docs/outbound/upstream-issues/repro_xccl_supports_splitting.py`](https://github.com/saforem2/torchtitan/blob/83e2e8ee0/torchtitan/experiments/ezpz/docs/outbound/upstream-issues/repro_xccl_supports_splitting.py).
 No torchtitan / mpiexec dependency — just torch + xpu + xccl:
 
 ```bash

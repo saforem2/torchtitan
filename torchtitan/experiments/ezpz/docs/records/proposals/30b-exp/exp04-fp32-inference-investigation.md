@@ -104,7 +104,7 @@ benign floating-point nondeterminism, not corruption.
 
 The recorded root cause attributes the gibberish to agpt-2b's large vocab
 (256000) and FFN (11008) accumulating bf16 error
-(`docs/live/rl/history/grpo-lora-agpt2b-repro.md:113`). I tested that exact
+(`docs/live/chains/rl/history/grpo-lora-agpt2b-repro.md:113`). I tested that exact
 family: the MDS base `/home/foremans/global_step138650` on Sunspot
 (`vocab_size=256000`, hidden 2048, ffn 11008, 12L -- the same architecture and
 the direct ancestor of the ckpt-900 that gibberished), venv `pt2.12`:

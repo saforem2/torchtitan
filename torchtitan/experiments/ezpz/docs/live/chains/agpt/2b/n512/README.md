@@ -55,7 +55,7 @@
 > data treatments -- against a harness validated on the same code path
 > (Llama-3.2-1B 0.3121, Llama-3.1-8B 0.6530). The chance-floor is
 > **data-limited, not token-limited**: more olmo-mix-1124 will not move
-> it. See [`docs/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) and
+> it. See [`docs/records/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) and
 > the 2026-08-05 journal entry.
 >
 > Earlier coverage (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot) was

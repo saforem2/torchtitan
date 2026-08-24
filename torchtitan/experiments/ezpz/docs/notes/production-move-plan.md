@@ -90,7 +90,7 @@ Three failure modes, all silent -- none raised, none set a non-zero exit:
    Writes now route through the same moved-map the markdown pass uses.
 
 3. **Piecewise pathlib chains are invisible to any string scan.**
-   `DOCS_BASE / "production" / "agpt" / ...` contains no `docs/production`
+   `DOCS_BASE / "production" / "agpt" / ...` contains no `docs/live/chains/`
    substring, so three plotters kept writing to the retired tree. Caught only
    because the leftover figures had a NEWER mtime than the live ones. Fixed,
    and `check_doc_links.sh` gained a check for the class -- which promptly

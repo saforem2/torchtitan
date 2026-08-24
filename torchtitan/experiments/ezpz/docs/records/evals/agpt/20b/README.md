@@ -4,7 +4,7 @@
 >
 > Last updated: 2026-08-23
 >
-> **Training curves:** see [`docs/live/agpt/20b/`](../../../../live/chains/agpt/20b/README.md)
+> **Training curves:** see [`docs/live/chains/agpt/20b/`](../../../../live/chains/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
 >
 > **Note:** the historical v1 results are from the bf16-tainted
@@ -47,7 +47,7 @@ band on every benchmark.
 Re-render with new v2 ckpts as they become available:
 
 ```bash
-python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
+python3 torchtitan/experiments/ezpz/docs/records/evals/agpt/20b/plot_eval_overview.py
 ```
 
 ![20B benchmark accuracy overview](figures/eval_overview.svg)

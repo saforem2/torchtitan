@@ -276,7 +276,7 @@ LRF_MODELS="2b 20b" LRF_OPTIMIZERS="adamw muon sophiag" \
 # filenames by machine, e.g. sunspot_2b.png, when committing):
 python3 torchtitan/experiments/ezpz/utils/plot_lr_finder.py \
     --data-dir outputs/lr_finder/ezpz/ezpz.agpt \
-    --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures
+    --output-dir torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/agpt/figures
 ```
 
 ## References

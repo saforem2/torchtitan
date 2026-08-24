@@ -15,11 +15,11 @@
 > was backfilled 2026-07-24 across the 2B chains (2B 256N: mmlu ~8 steps +
 > gsm8k; 2B 512N: mmlu ~10 steps + gsm8k).
 >
-> **Training curves:** see [`docs/live/agpt/2b/`](../../../../live/chains/agpt/2b/README.md)
+> **Training curves:** see [`docs/live/chains/agpt/2b/`](../../../../live/chains/agpt/2b/README.md)
 > for loss / throughput / MFU dashboards across the live 2B trajectories
 > (v2 256N, v2 512N, v2 1024N), each with its own per-node sub-page.
 > v1 (bf16-tainted, archived) results live at
-> [`docs/live/agpt/historical/v1-bf16/`](../../../../live/chains/agpt/historical/v1-bf16/README.md).
+> [`docs/live/chains/agpt/historical/v1-bf16/`](../../../../live/chains/agpt/historical/v1-bf16/README.md).
 
 ## Setup
 
@@ -48,7 +48,7 @@ Re-render with new v2 ckpts (and refreshed MDS data) as they become
 available:
 
 ```bash
-python3 torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py
+python3 torchtitan/experiments/ezpz/docs/records/evals/agpt/2b/plot_eval_overview.py
 ```
 
 ![v2 vs MDS — 2B benchmark accuracy](figures/eval_overview.svg)
@@ -331,13 +331,13 @@ is now hardcoded in all 3 submit scripts; setting it >0 via `-v`
 prints an explicit ERROR + bails before training starts. The early-
 ckpt-range eval data (steps 500..9,500) only survives in the legacy
 clone and is archived at
-[`docs/live/agpt/historical/v1-bf16/`](../../../../live/chains/agpt/historical/v1-bf16/README.md)
+[`docs/live/chains/agpt/historical/v1-bf16/`](../../../../live/chains/agpt/historical/v1-bf16/README.md)
 along with the rest of the v1 trajectory.
 
 ### Re-render
 
 ```bash
-python3 torchtitan/experiments/ezpz/docs/evals/agpt/2b/plot_eval_overview.py
+python3 torchtitan/experiments/ezpz/docs/records/evals/agpt/2b/plot_eval_overview.py
 # writes figures/eval_overview.svg and prints the canonical table above
 ```
 

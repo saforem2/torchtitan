@@ -190,7 +190,7 @@ versus the 1--2 hours the per-file `rsync` mode was projected to take.
 
 For more detail (full sweep, plots, methodology) see the
 [yeet CLI docs](https://ezpz.cool/cli/yeet/) and the
-[benchmark harness](https://github.com/saforem2/torchtitan/tree/ezpz/torchtitan/experiments/ezpz/docs/scaling/yeet_env).
+[benchmark harness](https://github.com/saforem2/torchtitan/tree/ezpz/torchtitan/experiments/ezpz/docs/reference/scaling/yeet_env).
 
 ### Workflow
 

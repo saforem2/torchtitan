@@ -31,7 +31,7 @@
 - `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b3_instruct_cot_mix_smoke_2n.sh` (CREATE) -- 2N smoke: batch-fit @ 8192, format learns, loss sane.
 - `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b3_instruct_cot_mix_8n.sh` (CREATE) -- 8N full run reading the pretokenized copy offline.
 - `torchtitan/experiments/ezpz/rl/scripts/eval/submit_b3_eval.sh` (CREATE, or reuse `scripts/eval/submit_cot_eval.sh`) -- consolidate + 200-problem eval.
-- `torchtitan/experiments/ezpz/docs/live/sft/agpt/2b-mds/b3-instruct-cot-mix/README.md` (CREATE) -- run tracking per ezpz golden rule #2.
+- `torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/README.md` (CREATE -- not yet written)  <!-- docs-link-check: ignore --> -- run tracking per ezpz golden rule #2.
 
 Tests: this is a data-pipeline + training project, not a unit-testable library. The "tests" are (a) a small local dry-run of the OpenR1 loader on a handful of rows asserting the envelope + filtering, and (b) the 2N smoke as the integration test. Each is an explicit task step below.
 
@@ -239,7 +239,7 @@ Via `/tmp/patch_b3_mix.py` on the cluster, insert after the `tulu_math_uc_mix` r
 ```python
 def _build_b3_instruct_cot_mix(seed: int = 42):
     """Balanced instruction + CoT SFT mix for the B3 cold-start rebuild
-    (docs/live/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
       0.30 tulu-3-sft-mixture (general instruction-following)
       0.25 OpenR1-Math-220k   (rich long-form R1 CoT, our envelope)
       0.15 gsm8k-r1cot        (in-distribution CoT, eval-matching format)
@@ -483,7 +483,7 @@ Run: `ssh ... 'cd <repo> && PATH=/opt/pbs/bin:$PATH qsub ...8n.sh'`. Chain a con
 
 **Files:**
 - Create: `torchtitan/experiments/ezpz/rl/scripts/eval/submit_b3_eval.sh` (or reuse `scripts/eval/submit_cot_eval.sh` if it accepts an FSDP-checkpoint consolidation path)
-- Create: `torchtitan/experiments/ezpz/docs/live/sft/agpt/2b-mds/b3-instruct-cot-mix/README.md`
+- Create: `torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/README.md`  <!-- docs-link-check: ignore -->
 
 **Interfaces:**
 - Consumes: a B3 checkpoint from Task 5 (`outputs/sft/agpt2b-b3-instruct-cot-mix-8n/checkpoint-N`); `scripts/eval/eval_cot_gsm8k.py`; `accelerate merge-weights` (FSDP->HF); `scripts/eval/fix_ckpt_eos.py`.
@@ -495,7 +495,7 @@ Run: `ssh ... 'cd <repo> && PATH=/opt/pbs/bin:$PATH qsub ...8n.sh'`. Chain a con
 
 - [ ] **Step 3: Submit the eval** on the best/last B3 checkpoint. Expected output: a JSON with `n: 200, format_hit_rate, cot_accuracy`.
 
-- [ ] **Step 4: Write the README** documenting: base (gs138650), mix + weights, max_length 8192, pretokenize job id + dataset size + OpenR1 filter drop-rate, smoke result (fit/loss), 8N job id(s) + final loss, and the eval verdict (B3 acc/format vs B2 0.205/0.985). Cross-link from `docs/live/rl/plans/cot.md` and `docs/live/sft/README.md`.
+- [ ] **Step 4: Write the README** documenting: base (gs138650), mix + weights, max_length 8192, pretokenize job id + dataset size + OpenR1 filter drop-rate, smoke result (fit/loss), 8N job id(s) + final loss, and the eval verdict (B3 acc/format vs B2 0.205/0.985). Cross-link from `docs/live/chains/rl/plans/cot.md` and `docs/live/chains/sft/README.md`.
 
 - [ ] **Step 5: Commit the README + update cot.md** with the B3 result.
 

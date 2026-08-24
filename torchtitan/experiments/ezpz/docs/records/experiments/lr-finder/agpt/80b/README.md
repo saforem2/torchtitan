@@ -142,7 +142,7 @@ to set a large-batch production LR for AdamW at 80B.
    [2026-06-30 convergence report](../../../agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md).
 
 Raw per-experiment record:
-[`docs/experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md`](../../../agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md).
+[`docs/records/experiments/agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md`](../../../agpt/sunspot/2026-06-27-80b-lr-finder-production-batch.md).
 
 ### LR-ceiling vs GBS trend (AdamW)
 

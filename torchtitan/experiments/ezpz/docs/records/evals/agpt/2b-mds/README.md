@@ -8,7 +8,7 @@
 > checkpoint dir.
 >
 > Training-side plots (loss / grad_norm / TFLOPS / TPS) live at
-> [`docs/live/agpt/2b-mds/`](../../../../live/chains/agpt/2b-mds/README.md).
+> [`docs/live/chains/agpt/2b-mds/`](../../../../live/chains/agpt/2b-mds/README.md).
 >
 > Last updated: 2026-08-23
 

@@ -270,14 +270,14 @@ attempt.
 
 ## See also
 
-- [`docs/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
+- [`docs/records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md`](../../records/experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md)
   -- first real-world silent-hang recovery
-- [`docs/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
+- [`docs/records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md`](../../records/experiments/agpt/aurora/20260511-20b-n512-hang-8479579.md)
   -- the originating silent-hang incident
-- [`docs/live/agpt/80b/README.md`](../../live/chains/agpt/80b/README.md)
+- [`docs/live/chains/agpt/80b/README.md`](../../live/chains/agpt/80b/README.md)
   -- 80B TP=4/LBS=1 stable corner + `dp_degree<=186` ceiling
 - [`scripts/FAILOVER.md`](../../../scripts/FAILOVER.md) -- code-adjacent quickref
-- [`docs/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)
+- [`docs/records/experiments/agpt/aurora/20260630-failover-restart-economics.md`](../../records/experiments/agpt/aurora/20260630-failover-restart-economics.md)
   -- log-mined restart economics: 7 confirmed successful restarts, ~11% raw
   recovery rate (higher for genuinely node-local failures), 132 spare swaps
   across 133 failover-wrapped jobs (2026-06-30 analysis)

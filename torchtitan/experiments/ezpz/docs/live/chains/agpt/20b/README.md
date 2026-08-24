@@ -66,7 +66,7 @@ cont (8521628) Q, cont (8521632) H.
 
 ## Eval scores
 
-See [`docs/evals/agpt/20b/`](../../../../records/evals/agpt/20b/README.md) for the
+See [`docs/records/evals/agpt/20b/`](../../../../records/evals/agpt/20b/README.md) for the
 current 20B lm-eval tables and the **🏁 headline** finding above. At
 step 4,400 (~442.9B tokens) v2 512N sync reaches ARC-Easy **0.6641**
 and HellaSwag `acc_norm` **0.6346** — beating the 2B 256N async chain

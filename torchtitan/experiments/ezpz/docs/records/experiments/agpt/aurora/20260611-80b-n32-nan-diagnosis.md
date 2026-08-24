@@ -15,7 +15,7 @@ at TP=4.
 > dp_degree** (= NGPUS/TP), not raw GBS. Keeping LBS=1 and dp_degree
 > low (TP=4 halves it: 744/4=186 vs 744/2=372) stays in the safe regime
 > in pure bf16. Full matrix + perf numbers:
-> `docs/live/agpt/80b/README.md` ("grad_norm NaN: two independent
+> `docs/live/chains/agpt/80b/README.md` ("grad_norm NaN: two independent
 > triggers"). **Stability CONFIRMED 4/4 clean** (jobs 12469494/509/510/511,
 > 20-30 steps each, 0 NaN, three landing at identical loss 9.69-9.70) —
 > not the nondeterministic knife-edge. New production recommendation:

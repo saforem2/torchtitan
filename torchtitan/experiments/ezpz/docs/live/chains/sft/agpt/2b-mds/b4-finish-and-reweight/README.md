@@ -111,7 +111,7 @@ envelope collapse.
 ## Reproducing the charts
 
 ```bash
-python3 torchtitan/experiments/ezpz/docs/live/sft/agpt/2b-mds/b4-finish-and-reweight/plot_b4.py
+python3 torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/plot_b4.py
 ```
 
 Writes `figures/*.svg` and `figures/*.png`. Requires `matplotlib` + `ambivalent`

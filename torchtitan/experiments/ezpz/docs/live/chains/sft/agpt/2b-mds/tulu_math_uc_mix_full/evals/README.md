@@ -98,7 +98,7 @@ standalone `.venv` hf.generate GRPO both failed -- the former on walltime
 starvation, the latter because the `.venv` (torch 2.13 nightly) per-rank
 `hf.generate()` FSDP path HANGS multi-rank (regressed since June; single-rank
 works). The working path is the vLLM server-mode (`--use_vllm --vllm_mode
-server`) from `venvs/rl-vllm/`; see `docs/live/rl/grpo-on-xpu-status.md`. The old
+server`) from `venvs/rl-vllm/`; see `docs/live/chains/rl/README.md`. The old
 FSDP-generate + vllm-test-split GRPO scripts were removed 2026-07-17.
 
 ## Recommendation

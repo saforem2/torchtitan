@@ -69,7 +69,7 @@ for the end-to-end scripts. Aggregate with
 `eval/aggregate_evals.py --model {2b,20b,2b-mds}`.
 
 > Note: the canonical chart/table path is now `scripts/update_all_charts.sh`
-> (via the per-model `docs/evals/agpt/{2b,20b}/plot_eval_overview.py`), which
+> (via the per-model `docs/records/evals/agpt/{2b,20b}/plot_eval_overview.py`), which
 > `scripts/refresh_all.sh` runs automatically. `aggregate_evals.py` remains a
 > manual fallback aggregator.
 

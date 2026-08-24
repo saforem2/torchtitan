@@ -6,7 +6,7 @@
 Scaling results, benchmarks, and throughput data are scattered across
 `docs/benchmarks.md`, `docs/benchmark-80B.md`, `docs/scaling-study.md`,
 `docs/scaling-study-torch213.md`, `docs/live-training/scaling-performance.md`,
-and per-experiment logs in `docs/experiments/{agpt,moe}/{aurora,sunspot,polaris}/`.
+and per-experiment logs in `docs/records/experiments/{agpt,moe}/{aurora,sunspot,polaris}/`.
 Finding the latest numbers for a given model/machine requires checking 5+ files.
 
 ### Proposed structure
@@ -127,7 +127,7 @@ weak and strong scaling efficiency.
    one that submits jobs at each node count and collects results.
 
 5. **Output**: Scaling curves (TPS vs nodes), efficiency table,
-   report in `docs/experiments/agpt/aurora/` and `moe/aurora/`
+   report in `docs/records/experiments/agpt/aurora/` and `moe/aurora/`
 
 ### Challenges
 - Need large allocations (64-128 nodes on capacity queue)

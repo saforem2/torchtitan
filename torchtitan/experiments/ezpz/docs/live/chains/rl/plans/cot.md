@@ -59,7 +59,7 @@ Notes from the run:
 
 There is **no generation-based, chat-templated CoT eval today**. The existing
 `5:gsm8k` lm-eval path is loglikelihood/EM and is blind to whether the model
-*emits* a reasoning trace (`docs/evals/eval-landscape-2026-07.md` deliberately
+*emits* a reasoning trace (`docs/records/evals/eval-landscape-2026-07.md` deliberately
 defers `gsm8k_cot_llama`). Nothing downstream is measurable without it, so
 **Stage 0 is built first.**
 
@@ -86,7 +86,7 @@ Stage 2 reward) we must **strip `<think>` first and require an explicit terminal
 marker** (`\boxed{}`/`####`) -- do not rely on the last-number fallback.
 
 **Checkpoint identity.** Deliverable = `checkpoint-900-hf` from
-`docs/live/sft/agpt/2b-mds/tulu_math_uc_mix_full/` (the full-mix SFT; ~5.7B
+`docs/live/chains/sft/agpt/2b-mds/tulu_math_uc_mix_full/` (the full-mix SFT; ~5.7B
 tokens; the strongest IFEval + GRPO-start per its evals README). Confirm the HF
 dir is staged/reachable on the target cluster and use it as
 `--model_name_or_path`. Do **not** target the v2-256n base -- blocked on a
@@ -564,4 +564,4 @@ effort (RL flat 0.205->0.215, B3 0.05, B4a 0.02, B4b 0.065) NOTHING beat B2's 0.
 ~0.2 is near the 2B GSM8K-CoT ceiling for this base. Keep B2 (checkpoint-93) as the
 deliverable; the next real lever is a bigger/math-pretrained base or extending WITHIN
 B2's two-stage recipe -- NOT more single-stage SFT mix-tuning. Full table +
-per-checkpoint metrics: docs/live/sft/agpt/2b-mds/b4-finish-and-reweight/README.md
+per-checkpoint metrics: docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/README.md

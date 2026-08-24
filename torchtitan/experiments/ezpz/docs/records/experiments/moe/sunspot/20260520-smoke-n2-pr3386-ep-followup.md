@@ -191,7 +191,7 @@ error). No code change recommended. Full retry writeup, plus three
 adjacent findings (`comm.train_timeout_seconds` not wiring through,
 `TORCH_DISTRIBUTED_DEBUG=DETAIL` crashing on XPU,
 `--debug.deterministic` incompatible with MoE `_histc_xpu`):
-[`docs/upstream-issues/moe_ep_step41_hang.md`](../../../../outbound/upstream-issues/moe_ep_step41_hang.md).
+[`docs/outbound/upstream-issues/moe_ep_step41_hang.md`](../../../../outbound/upstream-issues/moe_ep_step41_hang.md).
 
 ### 3. The PR #3386 EP wiring works at production scale
 

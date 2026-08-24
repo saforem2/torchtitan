@@ -49,7 +49,7 @@ For the cross-model view (2B + 20B together), see
 
 ## Eval scores
 
-See [`docs/evals/agpt/2b/`](../../../../records/evals/agpt/2b/README.md) for the
+See [`docs/records/evals/agpt/2b/`](../../../../records/evals/agpt/2b/README.md) for the
 current 2B lm-eval tables (HellaSwag / ARC-Easy / ARC-Challenge /
 Winogrande). Latest entries are at the bottom of that table; step-69900
 holds the chain's **best Winogrande** at 0.5627.

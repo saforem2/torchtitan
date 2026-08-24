@@ -80,6 +80,6 @@ visible:
 
 ## Updates to other docs (DONE 2026-05-21)
 
-- Smoke report `docs/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md`
+- Smoke report `docs/records/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md`
   Finding #2 still reads "uninvestigated"; should be updated to point
   at this note and reclassify as transient.

@@ -203,6 +203,6 @@ creation" and exits **0**.
 
 ## Related
 
-- `docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md`
+- `docs/reference/known-bugs/polaris-20b-tokenizer-mismatch.md`
 - `torchtitan/experiments/ezpz/failover_patterns/README.md`
 - `torchtitan/experiments/ezpz/tests/failover/test_polaris_scrape.py`

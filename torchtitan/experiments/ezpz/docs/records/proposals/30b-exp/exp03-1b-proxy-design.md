@@ -78,7 +78,7 @@ adds on top. B > A but C ~ A means the lever is *format exposure*, not knowledge
 density -- a much cheaper thing to buy, and it changes the 30B data plan.
 
 **Node count: 64, not 512.** From the measured Aurora torch-2.13 sweep
-([`docs/scaling/agpt-2b.md`](../../../reference/scaling/agpt-2b.md)), 64N runs at
+([`docs/reference/scaling/agpt-2b.md`](../../../reference/scaling/agpt-2b.md)), 64N runs at
 **22.8-24.6% MFU** (6,083-6,553 TPS/GPU) versus 18.5-18.8% at 128-256N and
 ~7.5-11% at 512N. 64N also fits `debug-scaling` (max 256 nodes, 1 h) for smoke
 and `prod`/`small` for the real thing, and its ~3 h walltime is short enough to
@@ -484,7 +484,7 @@ dims and the derived parameter counts (from `agpt/__init__.py`); the
 `torchtitan/models/utils.py:450` and `tools/utils.py:166`, reproducing the
 documented 27.55% MFU at 4N to within 0.01pp, which confirms Aurora runs
 standard-EU 448-CU mode); the 64N throughput numbers (from
-`docs/scaling/agpt-2b.md`); FineWeb-Edu's presence, gemma tokenizer, format, and
+`docs/reference/scaling/agpt-2b.md`); FineWeb-Edu's presence, gemma tokenizer, format, and
 1.551T size (by inspecting `.idx` headers and `tk_gemma.sh` on Aurora); the
 dolmino slice sizes; the MMLU test-split size of 14,042; and the existence of
 the 13-gram decontaminator.

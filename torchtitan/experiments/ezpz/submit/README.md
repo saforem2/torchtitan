@@ -3,7 +3,7 @@
 > **Status: legacy / historical.** No current production training uses
 > these scripts. They are kept for reference (to reproduce or inspect
 > the v1 bf16-master runs) and are linked from the v1 sections of the
-> per-node-count READMEs under `docs/live/agpt/`.
+> per-node-count READMEs under `docs/live/chains/agpt/`.
 
 ## Current production scripts
 

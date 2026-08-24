@@ -63,7 +63,7 @@ Both passes were exit-0 across all 12 ranks. Logs in
    source $HOME/.ezpz/utils.sh && ezpz_setup_job && ezpz_setup_xpu \
      && source .venv/bin/activate \
      && NRANKS=2 ezpz launch --filter=2 python3 \
-       torchtitan/experiments/ezpz/docs/upstream-issues/verify_pr1_dispatch.py
+       torchtitan/experiments/ezpz/docs/outbound/upstream-issues/verify_pr1_dispatch.py
    ```
    (`--filter=2` keeps Sunspot from launching all 12 tiles per node
    when we only want 2 — verifier still runs the dispatch on every

@@ -95,7 +95,7 @@ The SFT deliverable used by path B is `outputs/sft/agpt-2b-gs138650-tulu-math-uc
 ## Layout
 
 ```
-docs/live/rl/
+docs/live/chains/rl/
   README.md      <- this hub
   trl.md         <- TRL GRPOTrainer (vLLM-server + .generate fallback): status, run, stack
   monarch.md     <- Monarch + TorchStore + vLLM (vendored, verified): status, run, arch

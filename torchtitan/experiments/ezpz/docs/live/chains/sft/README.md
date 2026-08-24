@@ -31,7 +31,7 @@
 > deliverables for instruction-tuned model releases.
 >
 > Pre-training trajectories live under
-> [`docs/live/agpt/`](../agpt/README.md). This page tracks the
+> [`docs/live/chains/agpt/`](../agpt/README.md). This page tracks the
 > recipes that run on top of those pre-trained checkpoints.
 
 ## What a "production SFT" deliverable is
@@ -41,14 +41,14 @@ data-mix-and-hyperparameter combination applied to a specific base
 model, producing a usable HF-format checkpoint and a comparison
 against the base on a standardized eval suite.
 
-The layout mirrors the pre-training layout (`docs/live/agpt/<size-base>/`):
+The layout mirrors the pre-training layout (`docs/live/chains/agpt/<size-base>/`):
 base directories use the same `agpt/<size>-<base>` names as pre-training
 (e.g. `agpt/2b-mds` is the AuroraGPT-2B MDS stage-3 base = `global_step138650`;
 `agpt/2b-v2-256n` is the completed v2 256N base), and each base holds one or
 more `<recipe>/` subdirs:
 
 ```
-docs/live/sft/agpt/<size>-<base>/<recipe>/
+docs/live/chains/sft/agpt/<size>-<base>/<recipe>/
 ├── README.md               trajectory overview (run table, loss, checkpoints)
 ├── failover-story.md       per-job operational writeup (when interesting)
 └── evals/
@@ -80,8 +80,8 @@ a first-class production asset, not a one-off date-stamped report.
 
 If you spin up a *new* recipe (different mix, different
 hyperparameters, or a different base model), it gets its own folder
-under `docs/live/sft/agpt/<size>-<base>/<recipe>/`. The
-date-stamped `docs/experiments/agpt/sunspot/<date>-sft-…md` reports
+under `docs/live/chains/sft/agpt/<size>-<base>/<recipe>/`. The
+date-stamped `docs/records/experiments/agpt/sunspot/<date>-sft-…md` reports
 are kept as the rolling debug log; once a recipe stabilizes (its
 checkpoints are being consumed by downstream work), it should be
 promoted to a folder here.

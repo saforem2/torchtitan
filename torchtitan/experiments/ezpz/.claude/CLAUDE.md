@@ -418,7 +418,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
 - **Status:** 8463626 walltime-finished cleanly (50 ckpts saved every
   100 steps); 8463627 (continuation) and 8466847 (held behind it)
   are both Q for a 512N slot.
-- **Trajectory page:** [`docs/live/agpt/2b/n512/`](../docs/live/chains/agpt/2b/n512/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/2b/n512/`](../docs/live/chains/agpt/2b/n512/README.md)
 
 ### v2 — 20B 512N canonical chain (`8460302 → 8463628 → 8466848`)
 
@@ -434,7 +434,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
   breaks out **0.254 → 0.284** (+3pp above v1). ARC-C / Winogrande
   still in noise at this token count. The fp32-master fix is
   smoking-gun-validated at 20B.
-- **Trajectory page:** [`docs/live/agpt/20b/n512/`](../docs/live/chains/agpt/20b/n512/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/20b/n512/`](../docs/live/chains/agpt/20b/n512/README.md)
 
 ### v2 — 20B 256N (`8463659`, NODE_FAIL after step 364)
 
@@ -443,7 +443,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
 - step-300 ckpt saved cleanly; resumable. No continuation chained
   (production is consolidated on the 512N chain; this trajectory was
   a per-token comparator scaling experiment).
-- **Trajectory page:** [`docs/live/agpt/20b/n256/`](../docs/live/chains/agpt/20b/n256/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/20b/n256/`](../docs/live/chains/agpt/20b/n256/README.md)
 
 ### v2 — 1024N first attempts (`8463182` 2B, `8463183` 20B) — both crashed at startup
 
@@ -508,7 +508,7 @@ script. Job 12466025 was a smoke validation only.
 ### v1 (bf16-tainted, historical)
 
 All v1 trajectories are kept under each per-trajectory page in
-`docs/live/agpt/{2b,20b,80b}/n*/` for v1-vs-v2 comparison
+`docs/live/chains/agpt/{2b,20b,80b}/n*/` for v1-vs-v2 comparison
 purposes. Don't add tokens to v1 chains — they're frozen reference
 points. Confirmed bf16 freeze: every v1 RMSNorm.weight is exactly
 1.0 (variance ≡ 0); v2 step-5000 has mean(var)=1.2e-4, std=0.011,

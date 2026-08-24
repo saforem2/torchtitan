@@ -44,7 +44,7 @@ for N in 2048 4096; do
 done
 
 # Plot results once ≥3 points have landed:
-python3 torchtitan/experiments/ezpz/docs/scaling/yeet_env/plot_yeet_env_scaling.py
+python3 torchtitan/experiments/ezpz/docs/reference/scaling/yeet_env/plot_yeet_env_scaling.py
 ```
 
 ## Results (2026-04-30 to 2026-05-01)

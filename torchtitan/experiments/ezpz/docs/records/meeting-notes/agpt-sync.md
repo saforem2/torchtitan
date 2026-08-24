@@ -1472,11 +1472,11 @@ checkpoints. The v1-vs-v2 lm-eval comparison is the smoking gun:
   signature of the bug — a model with frozen normalization cannot
   improve on what lm-eval measures, no matter how much data it sees.
 - 2B eval comparison:
-  [`docs/evals/agpt/2b/`](../evals/agpt/2b/README.md);
+  [`docs/records/evals/agpt/2b/`](../evals/agpt/2b/README.md);
   20B eval comparison:
-  [`docs/evals/agpt/20b/`](../evals/agpt/20b/README.md);
+  [`docs/records/evals/agpt/20b/`](../evals/agpt/20b/README.md);
   full diagnosis + cross-linked evidence:
-  [`docs/guides/training-dtype-bf16-norm-freeze.md`](../../reference/guides/training-dtype-bf16-norm-freeze.md).
+  [`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../../reference/guides/training-dtype-bf16-norm-freeze.md).
 
 ### Production status
 
@@ -1484,18 +1484,18 @@ checkpoints. The v1-vs-v2 lm-eval comparison is the smoking gun:
   step **5,073**, loss **2.97**, **510B tokens / 10.9% of 4.67T
   target**. Continuation 8463627 queued, follow-up 8466847 held on
   `afterany:8463627`. Trajectory page:
-  [`docs/production/agpt/2b/n512/`](../../live/chains/agpt/2b/n512/README.md).
+  [`docs/live/chains/agpt/2b/n512/`](../../live/chains/agpt/2b/n512/README.md).
 - **20B 512N canonical chain** (`8460302 → 8463628`): step **~862**,
   loss **~3.47**, MFU ~17.8%. 8463628 currently running near
   walltime; 8466848 held on `afterany:8463628`. Trajectory page:
-  [`docs/production/agpt/20b/n512/`](../../live/chains/agpt/20b/n512/README.md).
+  [`docs/live/chains/agpt/20b/n512/`](../../live/chains/agpt/20b/n512/README.md).
 - **20B 256N (8463659):** ran 9h walltime then **NODE_FAIL after
   step 364** (loss 4.61, 18.3B tokens). `shepherd died from signal 9`
   on `x4406c6s7b0n0`, PBS exit -20 — same recurring Aurora bad-node
   failure mode as 8459818 / 8460301. **step-300 ckpt saved cleanly,
   resumable.** Throughput on this run was bouncing 21-410 TPS
   depending on flare contention (1-20% MFU). Trajectory page:
-  [`docs/production/agpt/20b/n256/`](../../live/chains/agpt/20b/n256/README.md).
+  [`docs/live/chains/agpt/20b/n256/`](../../live/chains/agpt/20b/n256/README.md).
   Are these recurring `signal 9` crashes being tracked anywhere?
   They've now killed three long-walltime jobs across three different
   nodes — worth raising with ALCF support if not.
@@ -1534,7 +1534,7 @@ checkpoints. The v1-vs-v2 lm-eval comparison is the smoking gun:
   then it's ready to launch.
 - Initial toy repro (legacy `parallelize_module` — does NOT fire,
   needs the new sharding API):
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../../outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../../outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
 
 ### Open work I'm holding
 
@@ -1565,7 +1565,7 @@ checkpoints. The v1-vs-v2 lm-eval comparison is the smoking gun:
   [`a24ed2e1`](https://github.com/saforem2/torchtitan/commit/a24ed2e1)
   + [`a0b9b13d`](https://github.com/saforem2/torchtitan/commit/a0b9b13d).
   Full diagnosis:
-  [`docs/guides/loss-reporting-tp-dist-reduce.md`](../../reference/guides/loss-reporting-tp-dist-reduce.md).
+  [`docs/reference/guides/loss-reporting-tp-dist-reduce.md`](../../reference/guides/loss-reporting-tp-dist-reduce.md).
 
 ### Action items
 

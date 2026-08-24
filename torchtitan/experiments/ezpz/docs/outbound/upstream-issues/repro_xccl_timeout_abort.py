@@ -22,7 +22,7 @@ Run
     ssh <node> "bash --login -c 'cd <repo> && source ~/.ezpz/utils.sh \\
         && ezpz_setup_env && source .venv/bin/activate \\
         && ezpz launch python3 \\
-            torchtitan/experiments/ezpz/docs/upstream-issues/repro_xccl_timeout_abort.py'"
+            torchtitan/experiments/ezpz/docs/outbound/upstream-issues/repro_xccl_timeout_abort.py'"
 
 Expects exactly 2 ranks (the launch harness usually gives you 12 per
 node — override with ``MPICH_PROCESSES`` or run via a smaller mpiexec

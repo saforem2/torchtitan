@@ -30,7 +30,7 @@
 - `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b4a_gsm8k_finish_2n.sh` (CREATE) -- Path A finishing stage.
 - `torchtitan/experiments/ezpz/rl/scripts/sft/_pretokenize_b4_reweight_mix_1n.sh` (CREATE) -- Path B pretokenize @4096.
 - `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b4b_reweight_8n.sh` (CREATE) -- Path B 8N run.
-- `torchtitan/experiments/ezpz/docs/live/sft/agpt/2b-mds/b4-finish-and-reweight/README.md` (CREATE) -- results tracking.
+- `torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/README.md` (CREATE) -- results tracking.
 
 Tests: unit tests for the OpenR1 length filter (pure function, no torch) and the mix registration + eval-summary shape; the 2N Path A run and Path B pretokenize are the integration checks. Controller submits + monitors all cluster jobs (subagents author scripts + run unit tests only).
 
@@ -145,7 +145,7 @@ print("B4_MIX_OK")
 ```python
 def _build_b4_reweight_mix(seed: int = 42):
     """B4 reweighted mix -- fixes the B3 dilution regression
-    (docs/live/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
       0.40 gsm8k-r1cot        (was 0.15 in b3 -- restore in-distribution short CoT)
       0.15 OpenR1-Math-220k   (LENGTH-FILTERED via OPENR1_MAX_THINK_CHARS -- short
                                traces only; the run-on ones caused the regression)
@@ -325,7 +325,7 @@ Mirror `_pretokenize_b3_instruct_cot_mix_1n.sh` (the proven B3 pretokenize) with
 ### Task 6: Eval all B4 checkpoints + document
 
 **Files:**
-- Create: `torchtitan/experiments/ezpz/docs/live/sft/agpt/2b-mds/b4-finish-and-reweight/README.md`
+- Create: `torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/README.md`
 
 **Interfaces:**
 - Consumes: B4a per-epoch checkpoints (Task 4), B4b final checkpoint (Task 5), `consolidate_and_eval_cot.sh` (+ Task 3's gen_len/unclosed reporting).
@@ -333,7 +333,7 @@ Mirror `_pretokenize_b3_instruct_cot_mix_1n.sh` (the proven B3 pretokenize) with
 
 - [ ] **Step 1 (controller):** eval each B4a per-epoch checkpoint via `consolidate_and_eval_cot.sh` (CKPT=<...>/checkpoint-N, HF_OUT=/tmp, BASE=729-hf, TOK_SRC). Record cot_accuracy, format_hit_rate, mean_gen_len, n_unclosed for each.
 - [ ] **Step 2 (controller):** eval the B4b final (and a mid checkpoint) the same way.
-- [ ] **Step 3:** write the README: the B3-regression diagnosis summary, both B4 recipes, per-checkpoint eval table (acc/format/gen_len/unclosed vs B2 0.205 / B3 0.05), and the verdict -- did either path beat 0.205? which structure won? Cross-link from `docs/live/rl/plans/cot.md` + `docs/live/sft/README.md`.
+- [ ] **Step 3:** write the README: the B3-regression diagnosis summary, both B4 recipes, per-checkpoint eval table (acc/format/gen_len/unclosed vs B2 0.205 / B3 0.05), and the verdict -- did either path beat 0.205? which structure won? Cross-link from `docs/live/chains/rl/plans/cot.md` + `docs/live/chains/sft/README.md`.
 - [ ] **Step 4:** commit README + append the B4 result to cot.md (`docs(ezpz/sft): B4 results -- <verdict> vs B2 0.205`).
 
 ---

@@ -60,7 +60,7 @@ branched from an older base than its name suggests. Worth raising with
 whoever builds it, since it likely affects more than this one path.
 
 **Nothing to file upstream.** The draft issue at
-`docs/upstream-issues/spmd-types-plain-tensor-issue.md` should NOT be filed:
+`docs/outbound/upstream-issues/spmd-types-plain-tensor-issue.md` should NOT be filed:
 it argues torchtitan should wrap the tensor, but upstream deliberately leaves
 that to FSDP, and their CI is green because their torch has the consumer.
 

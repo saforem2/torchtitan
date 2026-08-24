@@ -1,6 +1,6 @@
 # Production Training — agpt 2B @ 256 nodes
 
-> **Eval scores:** see [`docs/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md)
+> **Eval scores:** see [`docs/records/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md)
 > for the v2 lm-eval results.
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
@@ -40,7 +40,7 @@
 > — only 512N+ hits the async-save cluster cascade documented on the
 > 2B/20B 512N pages. Loss flat ~2.66-2.67 (eval plateau in HSn
 > 0.554-0.558; **step-69900 Winogrande 0.5627 is best yet**, see
-> [`docs/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) row
+> [`docs/records/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) row
 > for step 69,900). Continuation chain since drained: cont9 (`8521626`) and cont10
 > (`8521630`) both landed and carried the run through step-80,400;
 > cont12 (`8558531`) then reached the 92,859-step target (clean exit
@@ -50,7 +50,7 @@
 > (chain1/chain2 walltime to step ~10,723). Loss tracking the
 > canonical 512N chain closely — at matched step counts the per-token
 > under-training pattern documented in
-> [`docs/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) is
+> [`docs/records/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md) is
 > visible (256N learns more per token, 512N learns more per wall
 > clock).
 
@@ -123,7 +123,7 @@
 ### Recent evals
 
 Pulled from the canonical sweep table at
-[`docs/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md). Latest
+[`docs/records/evals/agpt/2b/`](../../../../../records/evals/agpt/2b/README.md). Latest
 evaluated ckpt is step-69900 (landed 2026-06-08). Metric is
 `acc_norm,none` for HellaSwag / ARC; `acc,none` for Winogrande.
 

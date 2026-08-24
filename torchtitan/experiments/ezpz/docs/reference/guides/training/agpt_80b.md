@@ -87,7 +87,7 @@ MFU baseline (4N validation): ~17.8%, identical to Sunspot reference.
 
    If you see `RuntimeError: No backend ... does not support
    splitting`, the workaround is not installed — see
-   [`docs/upstream-issues/xccl_split_group_unsupported.md`](../../../outbound/upstream-issues/xccl_split_group_unsupported.md).
+   [`docs/outbound/upstream-issues/xccl_split_group_unsupported.md`](../../../outbound/upstream-issues/xccl_split_group_unsupported.md).
 
 ## Interactive launch (4N smoke validation)
 
@@ -209,7 +209,7 @@ because PBS reports walltime exit as failure, but walltime-exit is
 the *expected* end-of-shift behavior for long runs.
 
 See [`feedback_always_have_chain_continuation`] (memory) and
-[`docs/live/agpt/80b/README.md`](../../../live/chains/agpt/80b/README.md)
+[`docs/live/chains/agpt/80b/README.md`](../../../live/chains/agpt/80b/README.md)
 for the current chain status.
 
 ## Verification at each scale
@@ -282,7 +282,7 @@ failures). Diagnostic plan:
 
 - **`compile=ON` AOT autograd crash** on torch 2.13 for the entire
   80B family. See
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../../upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../../upstream-issues/repro_devicemesh_in_saved_tensors.py).
   Workaround: `--compile.no-enable`.
 - **`compile` on torch 2.10** hangs at step 1 for 80B TP=2 since
   upstream changes April 16-23. The torch-2.13 stack works
@@ -312,11 +312,11 @@ failures). Diagnostic plan:
   TP > 1 loss reporting bug + `EzpzValidator` workaround
 - [`bad-node-failover.md`](../bad-node-failover.md) — failover wrapper
   details
-- [`docs/live/agpt/80b/README.md`](../../../live/chains/agpt/80b/README.md) —
+- [`docs/live/chains/agpt/80b/README.md`](../../../live/chains/agpt/80b/README.md) —
   live status, dispatch log, eval (when production starts persisting)
-- [`docs/live/agpt/80b/n4/README.md`](../../../live/chains/agpt/80b/n4/README.md) —
+- [`docs/live/chains/agpt/80b/n4/README.md`](../../../live/chains/agpt/80b/n4/README.md) —
   the validated 4N reference run
-- [`docs/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../../records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
+- [`docs/records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md`](../../../records/experiments/agpt/sunspot/20260602-smoke-n4-80b-tp2-xccl-workaround.md) —
   Sunspot 4N validation with xccl_split_group workaround
 - [`scripts/submit_agpt_80b_aurora_venv_failover.sh`](../../../../scripts/submit_agpt_80b_aurora_venv_failover.sh) —
   PBS submit script

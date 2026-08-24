@@ -34,11 +34,11 @@ mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/run.log"
 
 # The repro script lives at
-# torchtitan/experiments/ezpz/docs/upstream-issues/repro_xccl_supports_splitting.py
+# torchtitan/experiments/ezpz/docs/outbound/upstream-issues/repro_xccl_supports_splitting.py
 # but its dotted-module name has hyphens in it, so we invoke it via
 # file path under ezpz launch instead of -m.
 ezpz launch python3 \
-    torchtitan/experiments/ezpz/docs/upstream-issues/repro_xccl_supports_splitting.py \
+    torchtitan/experiments/ezpz/docs/outbound/upstream-issues/repro_xccl_supports_splitting.py \
     2>&1 | tee "${LOG_FILE}" || true
 
 # Print the script's verdict line for quick eyeballing
