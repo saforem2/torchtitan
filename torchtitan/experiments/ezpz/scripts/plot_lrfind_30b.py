@@ -29,6 +29,19 @@ import ambivalent  # noqa: F401
 
 plt.style.use(ambivalent.STYLES["ambivalent"])
 
+# ambivalent sets IBM Plex Sans; these figures want Iosevka to match the rest
+# of the docs. Prepend rather than replace so the style's own fallback chain
+# still applies on a machine without Iosevka installed.
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = ["Iosevka"] + list(
+    plt.rcParams["font.sans-serif"]
+)
+# Math text otherwise renders in DejaVu and visibly disagrees with the labels.
+plt.rcParams["mathtext.fontset"] = "custom"
+plt.rcParams["mathtext.rm"] = "Iosevka"
+plt.rcParams["mathtext.it"] = "Iosevka:italic"
+plt.rcParams["mathtext.bf"] = "Iosevka:bold"
+
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 
 # Same colors as plot_optcmp.py so the two figures read as one experiment.
