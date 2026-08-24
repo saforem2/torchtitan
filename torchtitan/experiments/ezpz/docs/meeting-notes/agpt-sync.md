@@ -4,6 +4,295 @@
 
 ---
 
+## 2026-08-24
+
+> [!IMPORTANT]
+> **Headline:** **the 2B-512 flagship reached its 4.674T target and finished**
+> -- 46,429/46,429, loss 2.687 -- and its **stage-2 dolmino continuation is
+> already 32.5% done** (7,728 steps, 0.778T of 2.390T) from a standing start
+> this window. Both 20B chains advanced (**256N 8,300 -> 10,369**, +2,069;
+> **512N 8,300 -> 9,690**, +1,390) and the constant-LR fork moved **16,984 ->
+> 21,307** (+4,323). That is **~1.66T tokens added across five chains in two
+> weeks**, the most productive window this year, and it came from the umbrella
+> launcher finally converting most of its seats: it went from 1-3 of 5 to
+> **four chains training simultaneously**, with the seat-level failure modes
+> that caused the waste now diagnosed and fixed rather than merely counted.
+> Alongside production, the 30B side experiment ran its config to completion
+> (2000/2000, 12.028 -> 2.115, zero NaN) -- a useful convergence answer, not
+> this window's main effort.
+
+Covers the two weeks since 2026-08-10. **Production pre-training is the
+headline and leads below.** The 2B flagship completing is the milestone; the
+umbrella becoming reliable is what made the rest of the window's tokens
+possible. Then the hardening work that came out of the same runs (a NaN-gradient
+hole, blind Polaris failover, two seats on the wrong RoPE flavor), and the 30B
+convergence experiment.
+
+**Current status note:** everything is idle as of this writing, but that is
+recent and external. A failed prologue on another user's job offlined ~1,025
+nodes late last week, and a full-system reservation (`M8769283`, Mon 14:00 ->
+Tue 00:30 UTC) now blocks both queued jobs -- PBS will not start a job that
+cannot finish before a reservation, so the umbrella's 12 h ask and the 30B's
+6 h ask both missed their `14:00 - walltime` deadlines. Eligibility resumes
+Tue 00:30.
+
+### 1. Production pre-training -- the flagship landed, and four seats ran at once
+
+| chain | 08-10 | now | delta | loss | tokens |
+|---|---|---|---|---|---|
+| **2B 512N** | 43,800 | **46,429 DONE** | +2,629 | **2.687** | **4.674T (100%)** |
+| **2B 512N stage-2 dolmino** | -- | **7,728** | **+7,728** (new) | 2.518 | 0.778T (32.5%) |
+| **20B 256N** | 8,300 | **10,369** | +2,069 | 2.365 | 0.261T |
+| **20B 512N** | 8,300 | **9,690** | +1,390 | 2.407 | 0.975T |
+| **2B 512N constlr-from9200** | 16,984 | **21,307** | +4,323 | 2.745 | 2.145T |
+
+**~1.66T tokens added across five chains.** Three things stand out.
+
+**The flagship is done.** 2B-512 reached 46,429/46,429 on 2026-08-13 under
+umbrella `8744247`, which was also the first umbrella to run nearly its whole
+allocation (23h18m of 24h, 97%). The chain that had been the pacing item since
+May is now a finished artifact at its full 4.674T budget.
+
+**Stage 2 started and is a third done.** The dolmino continued-pretrain seeded
+from the finished step-46429 and reached 7,728 steps across two umbrellas -- an
+entirely new chain that did not exist at the last sync, now further along than
+either 20B chain is on its own target.
+
+**The constant-LR fork was the quiet mover** at +4,323 steps, more than either
+20B chain, and is at 45.9% of its budget.
+
+### 2. The umbrella went from wasting allocation to being the delivery mechanism
+
+At 08-10 this section read "the umbrella is wasting most of its allocation"
+with 3/5, 3/5, 1/5 productive slots. That has changed materially, and it is the
+reason section 1 has numbers in it.
+
+- **`8744247` (08-13): 23h18m / 24h, 97% of allocation.** Carried 2B-512 to its
+  target, 20B-256 to 9,850, and the constlr fork to 16,984.
+- **`8756957` (08-16): 12h00m / 12h, the first umbrella to use 100%.** The 12 h
+  ask appears both easier to schedule and easier to survive than the 24 h
+  dispatches that kept dying young -- worth making the default.
+- **`8764675` (08-20): a full 12 h clean walltime finish**, `Exit_status=-29`,
+  carrying 20B-512 to 10,699 and 20B-256 to 11,800. During this run `prod_dash`
+  showed **four chains training simultaneously** -- and exposed a dashboard bug
+  in doing so, since `CKPT_RE.search()` took only the first of the five ckpt
+  dirs the shared `.o` names, so it had been reporting exactly one live seat.
+
+The seat-level failures are now diagnosed rather than tallied:
+
+| cause | status |
+|---|---|
+| `output.weight` -> `lm_head.weight` rename (t4, 3rd occurrence) | **FIXED** `e1320edf9` -- shims compose; step-9500 predates both renames |
+| pre-#3623 nested->flat optimizer state | **converted** -- step-9500 round-trips, 1110 subkeys / 111 params |
+| idle watchdog killing a healthy 20B-512 mid-DCP-load | **FIXED** -- `IDLE_TIMEOUT=5400`; 6,144 shards load silently for >30 min |
+| `Config.job` AttributeError in the constlr clone | **FIXED** in the clone 08-16 |
+| `std::bad_alloc` at init | **OPEN** -- fresh 512N reproduction; t1 ran fine at the same 522 nodes in the same job, which argues against pure rank count |
+
+The remaining waste is per-seat, not per-job: seats that die at init never hold
+a slot productively, while the surviving seats now run the full window. See the
+[dispatch log](../production/dispatch-log.md) for the per-slot table.
+
+**One process lesson worth repeating:** PBS snapshots the submit script at
+`qsub`. The 20B constant-LR fix (`b08fccfd1`, Aug 19 12:23) never reached job
+`8764675` (queued Aug 18 20:03), which then trained a full 12 h cycle on the
+decaying config. Held successors are submitted alongside their predecessor, so
+they are pre-fix too and had to be replaced. **Check `qstat -f <id> | grep
+ctime` against the fix commit date whenever a script fix lands with jobs already
+queued.**
+
+### 3. Side experiment: the 30B ran its config out -- 2000/2000, zero NaN
+
+An exploratory Sunspot experiment, not a production chain -- it exists to
+answer whether a 30B config converges and resumes at all before anyone proposes
+scheduling one. It now has that answer. Four jobs, one continuous trajectory,
+ending in an actual completion rather than a timeout (`rc=0`, 2 h 58 of a 6 h
+allocation):
+
+| job | steps | loss |
+|---|---|---|
+| 12473304 | 1 -> 482 | 12.028 -> 3.357 |
+| 12473476 | 401 -> 871 | -> 2.617 |
+| 12473515 | 801 -> 1781 | -> 2.246 |
+| 12473545 | 1751 -> 2000 | -> **2.115** |
+
+Steady state to the last step: 496 tps, **28.3% MFU**, memory flat at 59.84%,
+grad_norm falling 0.26 -> 0.074. Nine checkpoints, 2.6 T. Zero NaN/inf anywhere
+in the four jobs. That closes all three questions exp08 was opened for -- loss
+descends, grad_norm stays bounded, checkpoints round-trip -- and **the last two
+resumes were compiled**, retiring the "compiled resume is broken at 30B"
+caveat (the real culprit was `full_dtensor`, not resume).
+
+Details: [`exp08-convergence.md`](../production/agpt/30b-exp/exp08-convergence.md).
+
+### 4. Production had no defense against a NaN gradient
+
+Found while reading the 80th upstream sync, not from a failure.
+
+**The guard ran after the optimizer step, and only looked at loss.** Guard at
+`trainer.py:1085`, step at `:871` -- so a NaN gradient was written into the
+weights before anything noticed. Our own 80B report is the proof:
+`grad_norm nan @30, loss nan @31, nan-abort @35`. grad_norm went bad a full
+step **before** the loss, so the earliest available signal was one ahead of the
+one we watched, and five more updates landed on top.
+
+Worse than "off by default": production omits `--nan-abort-consecutive`
+entirely, because the pinned pre-#3623 clones have no such field and passing it
+crashes every rank.
+
+**Scope, stated carefully:** no canonical chain was observed doing this. All
+five seats of umbrella 8764675 log zero non-finite loss/grad_norm lines. The
+two cited jobs are experiments. The defect is that nothing *would* have caught
+it, not that it happened in production.
+
+Fixed with a host-side `isfinite` check on grad_norm before the step:
+non-finite -> zero_grad, log, skip the step, still advance the LR scheduler. No
+new collective, since grad_norm is already rank-reduced inside
+`clip_grad_norm_`, so every rank branches identically.
+
+Deliberately **not** upstream's mechanism (#4226), which uses
+`torch._assert_async`: a failed device-side assert invalidates the process, and
+our failover would read that as a crash rather than a clean stop. Its XPU
+behavior is also undocumented, and it lands in `Trainer.train_step`, which
+`FaultTolerantTrainer` overrides wholesale -- merging it would have given us
+nothing. The most valuable commit in that sync was valuable only as a
+hand-port.
+
+Honest about the smoke: 10/10 bit-identical against the parent, guard fired 0
+times, tps 337-338 vs 338-340. The ~0.3% delta is **below** what a single-shot
+10-step comparison resolves, so bit-identity is the real result and "costs
+nothing" is not yet earned. And the smoke proves the guard is inert, not that
+it fires -- that path needs a divergent config and is still owed.
+
+### 5. Polaris failover was blind for its entire existence
+
+`ezpz.failover.patterns` ships `aurora.py` and `sunspot.py`;
+`get_patterns_for_machine("polaris")` returned `[]`. **An empty pattern set and
+a genuinely clean log both return `[]`**, and falling back to blind rotation is
+the correct response to the second -- so a whole machine having no patterns
+degraded gracefully into looking like normal operation. No error to grep for.
+It surfaced only by asking the scraper directly what it returns.
+
+The cost was job 7550301: **130 nodes, ~1 hour, zero training steps.** Two
+ranks raised `CUDA error: ... device(s) is/are busy or unavailable` at
+`set_device()`. Blind rotation swaps `active[0]` *by design*, so it retired a
+healthy node twice while the sick one stayed in, and attempt 2 failed
+identically. Balance is now at **-49,134 node-hours**.
+
+The one host-attributed line in 1,800 lines named the **wrong** node:
+`x3007c0s13b1n0: rank 57 died from signal 15` is the idle watchdog's own
+SIGTERM -- a victim of our teardown, not a cause. Matching it would have
+swapped a third innocent node.
+
+Fix: PALS `--label` (confirmed on real hardware rather than assumed -- the
+prefix is `<fqdn> <rank>: ` applied per line) enabled **opt-in** via
+`EZPZ_MPI_LABEL=1`, since Aurora and Sunspot patterns anchor on *unlabeled*
+`^<host>: ` lines and turning it on globally would have silently broken both.
+8/8 tests pass, including the negative one: on unlabeled input the scraper must
+stay silent rather than tag the SIGTERM victim.
+
+Writeup:
+[`known-bugs/polaris-failover-blind-rotation.md`](../guides/known-bugs/polaris-failover-blind-rotation.md).
+
+### 6. Flex-attention MoE: two stacked bugs
+
+Every flex-attention MoE config was dying on a missing BlockMask, and it took
+two fixes. Core builds the mask in `_prepare_inputs` only `if positions is not
+None`, and blendcorpus never yielded that key. Fix 1 emits per-document
+positions (restarting at 0 after each EOD, because blendcorpus *packs*
+documents and a plain arange would let attention cross document boundaries). I
+unit-tested that against HF semantics on four cases before running it anywhere;
+it passed, and the real run **failed identically**. Fix 2 was the actual bug:
+`_document_positions` read the EOD id off `_bc_cfg`, blendcorpus's own config
+object, which does not carry the field -- so `getattr(..., None)` silently
+yielded None.
+
+The mask fix then exposed an unrelated bug underneath: **MoE routing is not
+recompute-stable under FullAC** (`Recomputed values ... 560 vs 559`). Three AC
+arms on both flex configs: full fails, AC-off fails at 89-94% memory,
+**selective passes 5/5** -- not luck, `SelectiveAC` keeps `aten.topk.default`
+as MUST_SAVE precisely to hold expert assignments stable across recompute.
+
+Also settled: the EP all-to-all abort is
+`ur_die: urEventWait must not be called for an internal event` -- Intel's
+Unified Runtime, **not** a torchtitan assertion. EP is not the trigger
+(`moe_debugmodel_ep` runs 5/5). And **hybridep is closed WONTFIX**: `deep_ep`
+is CUDA-only ("GB200 NVLink72 Systems", TMA-optimized, calls
+`cudaStreamSynchronize`), so it is not a torch version floor as previously
+recorded.
+
+### 7. Two seats were loading complex-trained weights as cos_sin
+
+`CONFIG_SUFFIX` was one global `_real` across all five umbrella seats, but each
+chain crossed the 2026-06-25 RoPE switch at a different step and `2b_v2_256`
+never crossed it at all:
+
+| seat | parent @ step | trained | was |
+|---|---|---|---|
+| t0 dolmino | 2b_v2_512 @46429 | `_real` | ok |
+| t1 20b-512 | 20b_v2_512 @9000 | `_real` | ok |
+| t2 20b-256 | 20b_v2_256 @10369 | `_real` | ok |
+| t3 2b-512 constlr | 2b_v2_512 @21307 | **complex** | WRONG |
+| t4 2b-256 constlr | 2b_v2_256 @9500 | **complex** | WRONG |
+
+t3 is a 512N production seat resuming **in place** -- it only avoided
+corrupting a live chain because it dies on `std::bad_alloc` first. Now a
+per-seat field, guarded on UNSET rather than empty, because empty is a
+meaningful value here (complex). Mis-flavoring loads cleanly and only shows up
+as high loss, which is what makes it dangerous.
+
+Consequence for the matched-pair eval at step 21,000: mean delta -0.0033 across
+7 tasks, no meaningful separation -- but **boolq is confounded**, because the
+fork trained under cos_sin from complex-derived weights and boolq is
+calibration-sensitive. The clean version of that experiment needs a
+correctly-flavored fork.
+
+### 8. Tooling: the dashboard, and a class of silent failure
+
+- **MDS and `lr` are in the production dashboard.** MDS reads the committed CSV
+  (154,391 rows, zero W&B calls); its tokens/step is confirmed bit-exact
+  against W&B's own `consumed_train_tokens` (`154391*6144*8192 ==
+  7,770,753,466,368`). `lr` rides in a separate `scan_history` pass -- folding
+  it into `OLOG_KEYS` returns 0 rows for all 6 backfill runs and would have
+  deleted 3,408 points from every other metric.
+- **The combined eval chart was truncating the MDS flagship at 7.06T of its
+  7.77T tokens.** The last 14k steps live in a sibling results dir
+  (`agpt-2b-mds-7771T`) that no trajectory referenced. 28 points -> 36.
+- **A whole class of path bug closed.** Plot scripts that computed the repo
+  root by counting `parents[N]` render an *empty* figure when moved, which
+  `refresh_all.sh` then auto-commits at exit 0; two charts had already lost
+  data this way. Anchored to a marker-based walk-up, and the link checker now
+  flags both depth-counted paths and pathlib chains built a segment at a time
+  (`DOCS_BASE / "production" / ...`), which no string scan can see. The docs
+  tree is reorganized by lifecycle (`live/` `reference/` `records/`
+  `outbound/`) with the link check now **fatal** in `refresh_all.sh` and the
+  dangling-reference backlog cleared 31 -> 0.
+
+### 9. Standing items
+
+- **The main Aurora clone is currently un-runnable for training.** Its HEAD
+  imports `grain`, which is deliberately absent from the shipped venv (a stray
+  install there vendors a `torch/` that shadows the conda one). Docs and charts
+  are fine. The queued umbrella is unaffected -- it runs from pinned production
+  clones, none of which has that import -- but pulling a production clone to
+  HEAD would break it.
+- **The 80th upstream sync: defer.** Grain is the *oldest* of the 35 commits,
+  so every other one descends from it; no merge can take the mechanical import
+  fixes without also taking Grain and fold-batch-dim. Splitting requires
+  cherry-pick, i.e. carrying divergence. Trigger for revisiting: upstream
+  deprecating `partial_dtensor`, or adopting the 2.14 nightly -- both in one
+  revalidation window, not two.
+- **Umbrella slot conversion is largely answered** (section 2): the named
+  seat failures are fixed and three umbrellas in a row ran 97%, 100% and 100%
+  of their allocation. What remains is the init `std::bad_alloc`, now the only
+  unexplained seat killer -- a fresh 512N reproduction exists, and the fact
+  that t1 ran fine at the same 522 nodes in the same job argues against pure
+  rank count. Falsifiable next test: `qsub -v LAUNCH_STAGGER=180`.
+- **Prefer 12 h umbrella asks over 24 h.** Both umbrellas that used ~all of
+  their allocation asked for 12 h; the 24 h dispatches kept dying young. Worth
+  making the default rather than a per-submission choice.
+
+---
+
 ## 2026-08-10
 
 > [!IMPORTANT]

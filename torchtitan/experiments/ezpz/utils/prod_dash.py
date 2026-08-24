@@ -502,6 +502,79 @@ def _wandb_ids_from_paths(paths):
                 ids.append(rid)
     return ids
 
+EVAL_ROOT = "outputs/evals"
+# Headline metric per task. lm_eval reports several; acc_norm is the standard
+# for the multiple-choice tasks (length-normalized), plain acc for the rest.
+EVAL_TASKS = {
+    "hellaswag": "acc_norm,none",
+    "arc_challenge": "acc_norm,none",
+    "arc_easy": "acc_norm,none",
+    "mmlu": "acc,none",
+    "gsm8k": "exact_match,strict-match",
+    "winogrande": "acc,none",
+    "piqa": "acc_norm,none",
+}
+
+
+def _eval_scores(ckpt_base):
+    """Newest evaluated step for one chain, as {task: score}.
+
+    Reads the results_*.json lm_eval writes under
+      outputs/evals/<ckpt_base>/step-N/results/<task>/**/results_*.json
+    which is the SAME layout scripts/eval/convert_and_eval.sh produces. The
+    markdown tables under docs/evals/ are hand-maintained and lag reality, so
+    they are deliberately not the source here.
+
+    Returns {} rather than raising: an un-evaluated chain is the normal case
+    and must not take the whole payload down with it.
+    """
+    if not ckpt_base:
+        return {}
+    root = os.path.join(EVAL_ROOT, ckpt_base)
+    if not os.path.isdir(root):
+        return {}
+    steps = []
+    for d in os.listdir(root):
+        if d.startswith("step-"):
+            try:
+                steps.append((int(d.split("-", 1)[1]), d))
+            except ValueError:
+                # backup dirs like step-100-20260824-051209 -- skip, they are
+                # not evaluated checkpoints.
+                continue
+    if not steps:
+        return {}
+    out = {}
+    # Walk newest-first and keep the newest step that yielded ANY score: the
+    # latest dir can exist while its eval is still running or was killed.
+    for step_n, step_d in sorted(steps, reverse=True):
+        scores = {}
+        for task, metric in EVAL_TASKS.items():
+            hits = glob.glob(os.path.join(root, step_d, "results", task,
+                                          "**", "results_*.json"),
+                             recursive=True)
+            if not hits:
+                continue
+            try:
+                with open(max(hits, key=os.path.getmtime)) as fh:
+                    res = json.load(fh).get("results", {}).get(task, {})
+            except Exception:
+                continue
+            val = res.get(metric)
+            if val is None:
+                # fall back to whichever acc-like key the task did report
+                for k in ("acc_norm,none", "acc,none", "exact_match,strict-match"):
+                    if res.get(k) is not None:
+                        val = res[k]
+                        break
+            if isinstance(val, (int, float)):
+                scores[task] = round(float(val), 4)
+        if scores:
+            out = {"step": step_n, "scores": scores}
+            break
+    return out
+
+
 def build_backbone():
     _log("cold build: scanning PBS .o logs for ckpt-dir index ...")
     logs = _all_ologs()
@@ -534,6 +607,7 @@ def build_backbone():
         rec = {
             "label": label,
             "model": t["model"], "num_nodes": t["num_nodes"],
+            "evals": _eval_scores(base),
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
             # Cumulative tokens already absorbed before this chain's step 1
@@ -923,6 +997,48 @@ print(json.dumps(bb))
 '''
 
 
+# Client-side view of the aggregator's cache. The CACHE constant inside _AGG
+# is part of the REMOTE script string, so the client cannot see it -- this
+# duplicates the path deliberately rather than importing it.
+LOCAL_CACHE = "/tmp/prod_dash_backbone_%s.json" % os.environ.get(
+    "USER", "foremans")
+
+
+def _cached_payload(why: str) -> dict | None:
+    """Serve the last good backbone when the aggregator cannot be reached.
+
+    The aggregator already has stale-while-revalidate logic, but it runs on the
+    far side of the ssh hop -- so when SSH ITSELF is what failed (cluster down,
+    maintenance, no network) that logic never executes and a perfectly good
+    local cache sits unread while fetch() returns an empty payload. Observed
+    2026-08-24 during an ALCF outage: a 17h-old 9-chain cache was on disk the
+    whole time the dashboard rendered nothing.
+
+    Returns None when there is no cache, so the caller still reports the real
+    error rather than pretending success.
+    """
+    if not os.path.exists(LOCAL_CACHE):
+        return None
+    try:
+        bb = json.load(open(LOCAL_CACHE))
+    except Exception as e:
+        sys.stderr.write("prod_dash: local cache unreadable (%s)\n" % e)
+        return None
+    if not bb.get("chains"):
+        return None
+    age_h = (time.time() - os.path.getmtime(LOCAL_CACHE)) / 3600.0
+    # Mark it, loudly. A stale dashboard that looks live is worse than no
+    # dashboard -- every consumer of this payload should be able to say so.
+    bb["stale"] = True
+    bb["stale_reason"] = why
+    bb["stale_age_hours"] = round(age_h, 1)
+    sys.stderr.write(
+        "prod_dash: %s -- serving LOCAL CACHE from %.1fh ago "
+        "(%d chains). Numbers are NOT live.\n"
+        % (why, age_h, len(bb["chains"])))
+    return bb
+
+
 def fetch(stderr_cb=None) -> dict:
     """Run the remote aggregator and return the parsed backbone+live payload.
 
@@ -984,7 +1100,7 @@ def fetch(stderr_cb=None) -> dict:
                                  stderr=subprocess.PIPE, text=True)
         except Exception as e:
             sys.stderr.write("prod_dash: aggregator launch failed: %s\n" % e)
-            return {"chains": {}}
+            return _cached_payload("aggregator launch failed") or {"chains": {}}
         out_chunks = []
         t_out = threading.Thread(target=lambda: out_chunks.append(p.stdout.read()),
                                  daemon=True)
@@ -1003,7 +1119,7 @@ def fetch(stderr_cb=None) -> dict:
                 stderr_cb("prod_dash: aggregator timed out after %ds" % int(SSH_TIMEOUT))
             except Exception:
                 pass
-            return {"chains": {}}
+            return _cached_payload("aggregator timed out") or {"chains": {}}
         t_out.join(timeout=10)
         stdout_text = out_chunks[0] if out_chunks else ""
     else:
@@ -1015,7 +1131,7 @@ def fetch(stderr_cb=None) -> dict:
             sys.stderr.write(
                 "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
                 "for a cold build)\n" % int(SSH_TIMEOUT))
-            return {"chains": {}}
+            return _cached_payload("aggregator timed out") or {"chains": {}}
         stdout_text = r.stdout or ""
     for line in stdout_text.splitlines():
         line = line.strip()
@@ -1055,7 +1171,7 @@ def fetch(stderr_cb=None) -> dict:
         )
     else:
         sys.stderr.write("prod_dash: no JSON from aggregator\n")
-    return {"chains": {}}
+    return _cached_payload("no JSON from aggregator") or {"chains": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1242,44 @@ def render_board(payload) -> str:
         "  ".join("-" * w for w in widths),
     ]
     out += [fmt(r) for r in rows]
+
+    # Eval scores as a SEPARATE block, not a board column: each chain carries
+    # several tasks, and squeezing them into one cell would either truncate or
+    # blow the width out. Only chains with a scored checkpoint appear -- an
+    # empty section means nothing has been evaluated, which is honest.
+    ev_rows = []
+    tasks = []
+    for key, c in sorted(chains.items(), key=order):
+        ev = c.get("evals") or {}
+        sc = ev.get("scores") or {}
+        if not sc:
+            continue
+        for t in sc:
+            if t not in tasks:
+                tasks.append(t)
+        ev_rows.append((c.get("label", key)[:34], ev.get("step"), sc))
+    if ev_rows:
+        # Stable column order: the EVAL_TASKS order where known, then any
+        # extras, so the table does not reshuffle between refreshes.
+        pref = ["hellaswag", "arc_challenge", "arc_easy", "mmlu", "gsm8k",
+                "winogrande", "piqa"]
+        tasks = [t for t in pref if t in tasks] + [t for t in tasks if t not in pref]
+        ehdr = ["chain", "step"] + [t[:9] for t in tasks]
+        erows = [[lab, "-" if st is None else str(st)]
+                 + ["-" if t not in sc else "%.3f" % sc[t] for t in tasks]
+                 for lab, st, sc in ev_rows]
+        ew = [max(len(ehdr[i]), *(len(r[i]) for r in erows)) if erows else len(ehdr[i])
+              for i in range(len(ehdr))]
+        def efmt(r):
+            return "  ".join(str(r[i]).ljust(ew[i]) for i in range(len(r)))
+        out += [
+            "",
+            "eval scores (newest evaluated ckpt per chain; acc_norm where "
+            "applicable, gsm8k = exact_match)",
+            efmt(ehdr),
+            "  ".join("-" * w for w in ew),
+        ]
+        out += [efmt(r) for r in erows]
     return "\n".join(out)
 
 
