@@ -1,7 +1,8 @@
 # `production/` move -- the last Step 3 item
 
-> Scoped 2026-08-23. NOT yet executed: the plan requires a quiet window, and
-> two umbrellas were queued when this was written.
+> Scoped 2026-08-23. **EXECUTED 2026-08-24** in commits `90a732e13`
+> (30b-exp), `c3b2e29c6` (the split), `9eb27f477` (piecewise-path fallout).
+> Kept as the record of what moved where and what the move taught.
 
 `production/` is the only directory that contains all four lifecycle kinds at
 once, so it does not move as one rename -- it splits four ways.
@@ -72,3 +73,29 @@ extend the mover.
 3. Diff any regenerated SVG by DISTINCT COLOR COUNT, not byte size
 4. Do NOT let a local `refresh_all.sh` commit the two eval charts: their JSON
    is cluster-side, so they always render empty here
+
+## What the move taught (2026-08-24)
+
+Three failure modes, all silent -- none raised, none set a non-zero exit:
+
+1. **`reorg_move.py` rewrote markdown only.** 60 `.py`/`.sh` files name docs
+   paths as string literals -- output dirs and dashboard sources. The tool now
+   rewrites those too, anchored on the full `docs/<src>` prefix plus a
+   path-terminating character (a bare directory name cannot be substituted
+   safely: "production" appears throughout the prose).
+
+2. **Code inside a moved tree is already relocated when the rewrite runs.**
+   `git mv` goes first, so writing the pre-move path raised `FileNotFoundError`
+   and aborted the `sft` pass mid-run: the tree moved, the literals did not.
+   Writes now route through the same moved-map the markdown pass uses.
+
+3. **Piecewise pathlib chains are invisible to any string scan.**
+   `DOCS_BASE / "production" / "agpt" / ...` contains no `docs/production`
+   substring, so three plotters kept writing to the retired tree. Caught only
+   because the leftover figures had a NEWER mtime than the live ones. Fixed,
+   and `check_doc_links.sh` gained a check for the class -- which promptly
+   found a second instance stale since the earlier `experiments/` move.
+
+The shared lesson: verify the ARTIFACT, not the exit code. Every one of these
+reported success. The mtime comparison is what surfaced #3 -- worth doing after
+any future move.
