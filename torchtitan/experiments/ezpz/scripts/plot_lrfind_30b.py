@@ -41,6 +41,12 @@ plt.rcParams["mathtext.fontset"] = "custom"
 plt.rcParams["mathtext.rm"] = "Iosevka"
 plt.rcParams["mathtext.it"] = "Iosevka:italic"
 plt.rcParams["mathtext.bf"] = "Iosevka:bold"
+# fontset="custom" makes matplotlib resolve EVERY mathtext family, including
+# mathtext.cal, which defaults to "cursive" -- not installed here, so it warns
+# and falls back to DejaVu on every render. Point it at Iosevka too.
+plt.rcParams["mathtext.cal"] = "Iosevka:italic"
+plt.rcParams["mathtext.sf"] = "Iosevka"
+plt.rcParams["mathtext.tt"] = "Iosevka"
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 
@@ -78,7 +84,11 @@ def main() -> int:
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.2))
+    # Two panels: the full sweep proves each arm actually blew up (a sweep that
+    # never diverges yields no suggestion at all), but the blow-up runs to ~84
+    # while every minimum sits in 8.84-9.34 -- a 0.5-nat spread squashed flat on
+    # an 84-unit axis. The zoom is where the result is legible.
+    fig, (ax, axz) = plt.subplots(1, 2, figsize=(14, 5.2))
     any_data = False
 
     for arm, (label, color, suggested) in ARMS.items():
@@ -89,23 +99,49 @@ def main() -> int:
         any_data = True
         lo = min(losses)
         at = lrs[losses.index(lo)]
-        ax.plot(lrs, losses, color=color, lw=1.7,
-                label=f"{label}  (min {lo:.3f} @ {at:.2e})")
-        # Mark the minimum and the Smith-2015 suggestion (blow-up / 10). The
-        # suggestion sits well LEFT of the minimum by construction, which is
-        # the point -- it buys stability margin, it is not the best-loss LR.
-        ax.plot([at], [lo], marker="o", ms=6, color=color, zorder=5)
-        ax.axvline(suggested, color=color, ls=":", lw=1.2, alpha=0.7)
+        for a_ in (ax, axz):
+            a_.plot(lrs, losses, color=color, lw=1.7,
+                    label=f"{label}  (min {lo:.3f} @ {at:.2e})")
+            # Mark the minimum and the Smith-2015 suggestion (blow-up / 10).
+            # The suggestion sits well LEFT of the minimum by construction --
+            # it buys stability margin, it is not the best-loss LR.
+            a_.plot([at], [lo], marker="o", ms=6, color=color, zorder=5)
+            a_.axvline(suggested, color=color, ls=":", lw=1.2, alpha=0.7)
 
     if not any_data:
         print("no finder CSVs found")
         return 1
 
+    # Derive the zoom window from the observed minima rather than hardcoding:
+    # a rerun that shifts the curves should move the window with them.
+    mins = []
+    for arm in ARMS:
+        _, ls_ = read_csv(arm)
+        if ls_:
+            mins.append(min(ls_))
+    y_lo = min(mins) - 0.15
+    y_hi = max(mins) + 1.20
+    print(f"zoom window: y in [{y_lo:.2f}, {y_hi:.2f}] from minima {[round(m,3) for m in mins]}")
+
     ax.set_xscale("log")
     ax.set_xlabel("learning rate")
     ax.set_ylabel("EMA-smoothed loss")
-    ax.set_title("30B LR finder, GBS=960, fineweb-edu  (dotted = suggested LR)")
-    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    ax.set_title("full sweep  (dotted = suggested LR)")
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
+
+    # Zoom: y clipped just around the minima, x to where any arm is still in
+    # the band. Limits derive from the DATA, not hardcoded, so the panel stays
+    # honest if a rerun shifts the curves.
+    axz.set_xscale("log")
+    axz.set_xlim(1e-5, 3e-3)
+    axz.set_ylim(y_lo, y_hi)
+    axz.set_xlabel("learning rate")
+    axz.set_ylabel("EMA-smoothed loss")
+    axz.set_title(f"zoom: minima ({y_lo:.2f}-{y_hi:.2f} nats)")
+    axz.legend(frameon=False, fontsize=8, loc="upper left")
+
+    fig.suptitle("30B LR finder, GBS=960, fineweb-edu", y=1.02,
+                 fontfamily="sans-serif")
 
     fig.tight_layout()
     for ext in ("svg", "png"):

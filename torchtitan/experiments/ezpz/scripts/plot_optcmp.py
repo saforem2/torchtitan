@@ -39,6 +39,12 @@ plt.rcParams["mathtext.fontset"] = "custom"
 plt.rcParams["mathtext.rm"] = "Iosevka"
 plt.rcParams["mathtext.it"] = "Iosevka:italic"
 plt.rcParams["mathtext.bf"] = "Iosevka:bold"
+# fontset="custom" makes matplotlib resolve EVERY mathtext family, including
+# mathtext.cal, which defaults to "cursive" -- not installed here, so it warns
+# and falls back to DejaVu on every render. Point it at Iosevka too.
+plt.rcParams["mathtext.cal"] = "Iosevka:italic"
+plt.rcParams["mathtext.sf"] = "Iosevka"
+plt.rcParams["mathtext.tt"] = "Iosevka"
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 SEQ_LEN = 4096
