@@ -90,7 +90,7 @@ The seat-level failures are now diagnosed rather than tallied:
 
 The remaining waste is per-seat, not per-job: seats that die at init never hold
 a slot productively, while the surviving seats now run the full window. See the
-[dispatch log](../production/dispatch-log.md) for the per-slot table.
+[dispatch log](../../live/dispatch-log.md) for the per-slot table.
 
 **One process lesson worth repeating:** PBS snapshots the submit script at
 `qsub`. The 20B constant-LR fix (`b08fccfd1`, Aug 19 12:23) never reached job
