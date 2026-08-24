@@ -472,7 +472,24 @@ async function load() {
   const bb = payload.built_age == null ? "-" : Math.round(payload.built_age / 60) + "m";
   document.getElementById("meta").textContent =
     `${live} live / ${n} chains · backbone ${bb} old · payload ${payload.web_age ?? "?"}s`;
-  document.getElementById("err").textContent = payload.web_error || "";
+  // A stale payload rendering as if it were live is the real hazard here: the
+  // "live" count above is computed from timestamps in a cache that may be
+  // hours old, so it will happily claim chains are running when the cluster is
+  // unreachable. Say so unmissably rather than trusting the reader to notice
+  // the backbone age.
+  const errEl = document.getElementById("err");
+  if (payload.stale) {
+    const h = payload.stale_age_hours ?? "?";
+    errEl.textContent =
+      `⚠ OFFLINE — showing cached data from ${h}h ago (${payload.stale_reason ||
+        "aggregator unreachable"}). The live/chain counts above are NOT current.`;
+    errEl.style.color = "#d62728";
+    errEl.style.fontWeight = "600";
+  } else {
+    errEl.textContent = payload.web_error || "";
+    errEl.style.color = "";
+    errEl.style.fontWeight = "";
+  }
   drawTabs(); drawLegend(); drawBoard(); draw();
 }
 

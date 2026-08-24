@@ -923,6 +923,48 @@ print(json.dumps(bb))
 '''
 
 
+# Client-side view of the aggregator's cache. The CACHE constant inside _AGG
+# is part of the REMOTE script string, so the client cannot see it -- this
+# duplicates the path deliberately rather than importing it.
+LOCAL_CACHE = "/tmp/prod_dash_backbone_%s.json" % os.environ.get(
+    "USER", "foremans")
+
+
+def _cached_payload(why: str) -> dict | None:
+    """Serve the last good backbone when the aggregator cannot be reached.
+
+    The aggregator already has stale-while-revalidate logic, but it runs on the
+    far side of the ssh hop -- so when SSH ITSELF is what failed (cluster down,
+    maintenance, no network) that logic never executes and a perfectly good
+    local cache sits unread while fetch() returns an empty payload. Observed
+    2026-08-24 during an ALCF outage: a 17h-old 9-chain cache was on disk the
+    whole time the dashboard rendered nothing.
+
+    Returns None when there is no cache, so the caller still reports the real
+    error rather than pretending success.
+    """
+    if not os.path.exists(LOCAL_CACHE):
+        return None
+    try:
+        bb = json.load(open(LOCAL_CACHE))
+    except Exception as e:
+        sys.stderr.write("prod_dash: local cache unreadable (%s)\n" % e)
+        return None
+    if not bb.get("chains"):
+        return None
+    age_h = (time.time() - os.path.getmtime(LOCAL_CACHE)) / 3600.0
+    # Mark it, loudly. A stale dashboard that looks live is worse than no
+    # dashboard -- every consumer of this payload should be able to say so.
+    bb["stale"] = True
+    bb["stale_reason"] = why
+    bb["stale_age_hours"] = round(age_h, 1)
+    sys.stderr.write(
+        "prod_dash: %s -- serving LOCAL CACHE from %.1fh ago "
+        "(%d chains). Numbers are NOT live.\n"
+        % (why, age_h, len(bb["chains"])))
+    return bb
+
+
 def fetch(stderr_cb=None) -> dict:
     """Run the remote aggregator and return the parsed backbone+live payload.
 
@@ -984,7 +1026,7 @@ def fetch(stderr_cb=None) -> dict:
                                  stderr=subprocess.PIPE, text=True)
         except Exception as e:
             sys.stderr.write("prod_dash: aggregator launch failed: %s\n" % e)
-            return {"chains": {}}
+            return _cached_payload("aggregator launch failed") or {"chains": {}}
         out_chunks = []
         t_out = threading.Thread(target=lambda: out_chunks.append(p.stdout.read()),
                                  daemon=True)
@@ -1003,7 +1045,7 @@ def fetch(stderr_cb=None) -> dict:
                 stderr_cb("prod_dash: aggregator timed out after %ds" % int(SSH_TIMEOUT))
             except Exception:
                 pass
-            return {"chains": {}}
+            return _cached_payload("aggregator timed out") or {"chains": {}}
         t_out.join(timeout=10)
         stdout_text = out_chunks[0] if out_chunks else ""
     else:
@@ -1015,7 +1057,7 @@ def fetch(stderr_cb=None) -> dict:
             sys.stderr.write(
                 "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
                 "for a cold build)\n" % int(SSH_TIMEOUT))
-            return {"chains": {}}
+            return _cached_payload("aggregator timed out") or {"chains": {}}
         stdout_text = r.stdout or ""
     for line in stdout_text.splitlines():
         line = line.strip()
@@ -1055,7 +1097,7 @@ def fetch(stderr_cb=None) -> dict:
         )
     else:
         sys.stderr.write("prod_dash: no JSON from aggregator\n")
-    return {"chains": {}}
+    return _cached_payload("no JSON from aggregator") or {"chains": {}}
 
 
 # ---------------------------------------------------------------------------
