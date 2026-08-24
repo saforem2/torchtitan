@@ -502,6 +502,79 @@ def _wandb_ids_from_paths(paths):
                 ids.append(rid)
     return ids
 
+EVAL_ROOT = "outputs/evals"
+# Headline metric per task. lm_eval reports several; acc_norm is the standard
+# for the multiple-choice tasks (length-normalized), plain acc for the rest.
+EVAL_TASKS = {
+    "hellaswag": "acc_norm,none",
+    "arc_challenge": "acc_norm,none",
+    "arc_easy": "acc_norm,none",
+    "mmlu": "acc,none",
+    "gsm8k": "exact_match,strict-match",
+    "winogrande": "acc,none",
+    "piqa": "acc_norm,none",
+}
+
+
+def _eval_scores(ckpt_base):
+    """Newest evaluated step for one chain, as {task: score}.
+
+    Reads the results_*.json lm_eval writes under
+      outputs/evals/<ckpt_base>/step-N/results/<task>/**/results_*.json
+    which is the SAME layout scripts/eval/convert_and_eval.sh produces. The
+    markdown tables under docs/evals/ are hand-maintained and lag reality, so
+    they are deliberately not the source here.
+
+    Returns {} rather than raising: an un-evaluated chain is the normal case
+    and must not take the whole payload down with it.
+    """
+    if not ckpt_base:
+        return {}
+    root = os.path.join(EVAL_ROOT, ckpt_base)
+    if not os.path.isdir(root):
+        return {}
+    steps = []
+    for d in os.listdir(root):
+        if d.startswith("step-"):
+            try:
+                steps.append((int(d.split("-", 1)[1]), d))
+            except ValueError:
+                # backup dirs like step-100-20260824-051209 -- skip, they are
+                # not evaluated checkpoints.
+                continue
+    if not steps:
+        return {}
+    out = {}
+    # Walk newest-first and keep the newest step that yielded ANY score: the
+    # latest dir can exist while its eval is still running or was killed.
+    for step_n, step_d in sorted(steps, reverse=True):
+        scores = {}
+        for task, metric in EVAL_TASKS.items():
+            hits = glob.glob(os.path.join(root, step_d, "results", task,
+                                          "**", "results_*.json"),
+                             recursive=True)
+            if not hits:
+                continue
+            try:
+                with open(max(hits, key=os.path.getmtime)) as fh:
+                    res = json.load(fh).get("results", {}).get(task, {})
+            except Exception:
+                continue
+            val = res.get(metric)
+            if val is None:
+                # fall back to whichever acc-like key the task did report
+                for k in ("acc_norm,none", "acc,none", "exact_match,strict-match"):
+                    if res.get(k) is not None:
+                        val = res[k]
+                        break
+            if isinstance(val, (int, float)):
+                scores[task] = round(float(val), 4)
+        if scores:
+            out = {"step": step_n, "scores": scores}
+            break
+    return out
+
+
 def build_backbone():
     _log("cold build: scanning PBS .o logs for ckpt-dir index ...")
     logs = _all_ologs()
@@ -534,6 +607,7 @@ def build_backbone():
         rec = {
             "label": label,
             "model": t["model"], "num_nodes": t["num_nodes"],
+            "evals": _eval_scores(base),
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
             # Cumulative tokens already absorbed before this chain's step 1
@@ -1168,6 +1242,44 @@ def render_board(payload) -> str:
         "  ".join("-" * w for w in widths),
     ]
     out += [fmt(r) for r in rows]
+
+    # Eval scores as a SEPARATE block, not a board column: each chain carries
+    # several tasks, and squeezing them into one cell would either truncate or
+    # blow the width out. Only chains with a scored checkpoint appear -- an
+    # empty section means nothing has been evaluated, which is honest.
+    ev_rows = []
+    tasks = []
+    for key, c in sorted(chains.items(), key=order):
+        ev = c.get("evals") or {}
+        sc = ev.get("scores") or {}
+        if not sc:
+            continue
+        for t in sc:
+            if t not in tasks:
+                tasks.append(t)
+        ev_rows.append((c.get("label", key)[:34], ev.get("step"), sc))
+    if ev_rows:
+        # Stable column order: the EVAL_TASKS order where known, then any
+        # extras, so the table does not reshuffle between refreshes.
+        pref = ["hellaswag", "arc_challenge", "arc_easy", "mmlu", "gsm8k",
+                "winogrande", "piqa"]
+        tasks = [t for t in pref if t in tasks] + [t for t in tasks if t not in pref]
+        ehdr = ["chain", "step"] + [t[:9] for t in tasks]
+        erows = [[lab, "-" if st is None else str(st)]
+                 + ["-" if t not in sc else "%.3f" % sc[t] for t in tasks]
+                 for lab, st, sc in ev_rows]
+        ew = [max(len(ehdr[i]), *(len(r[i]) for r in erows)) if erows else len(ehdr[i])
+              for i in range(len(ehdr))]
+        def efmt(r):
+            return "  ".join(str(r[i]).ljust(ew[i]) for i in range(len(r)))
+        out += [
+            "",
+            "eval scores (newest evaluated ckpt per chain; acc_norm where "
+            "applicable, gsm8k = exact_match)",
+            efmt(ehdr),
+            "  ".join("-" * w for w in ew),
+        ]
+        out += [efmt(r) for r in erows]
     return "\n".join(out)
 
 
