@@ -25,13 +25,26 @@ from __future__ import annotations
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 import os
 from collections.abc import Callable
 from typing import Any
 
 from datasets import load_dataset
 
-from torchtitan.hf_datasets import DatasetConfig
+# Grain (#4088) emptied torchtitan.hf_datasets: DatasetConfig as a
+# constructible 3-field dataclass (path / loader / sample_processor) is gone.
+# The name still exists at components/data/dataset.py but is a PROTOCOL with a
+# single build() method -- not constructible, so this is a port, not a rename.
+#
+# Deferred rather than ported: DatasetConfig is used only as an annotation and
+# inside function bodies here, so importing the module still works and the HF
+# auto-registration paths raise at their use sites. Every production config
+# uses blendcorpus and does not touch them.
+if TYPE_CHECKING:
+    from torchtitan.components.data.dataset import DatasetConfig
+else:
+    DatasetConfig = None  # noqa: N816  (ported at the 80th sync)
 from torchtitan.hf_datasets import text_datasets
 from torchtitan.hf_datasets.text_datasets import DATASETS
 
@@ -158,6 +171,12 @@ def register_local_dataset(
     Returns:
         The registered DatasetConfig.
     """
+    if DatasetConfig is None:
+        # Grain (#4088) removed the constructible DatasetConfig; HF
+        # auto-registration is inactive until ported. blendcorpus
+        # configs never reach here.
+        log.debug("HF dataset registration skipped (post-Grain)")
+        return None  # type: ignore[return-value]
     config = DatasetConfig(
         path=data_dir,
         loader=_make_local_loader(
@@ -226,6 +245,12 @@ def register_hf_dataset(
         >>> register_hf_dataset("fineweb_edu", "HuggingFaceFW/fineweb-edu")
         >>> # Then in config: --dataloader.dataset fineweb_edu
     """
+    if DatasetConfig is None:
+        # Grain (#4088) removed the constructible DatasetConfig; HF
+        # auto-registration is inactive until ported. blendcorpus
+        # configs never reach here.
+        log.debug("HF dataset registration skipped (post-Grain)")
+        return None  # type: ignore[return-value]
     config = DatasetConfig(
         path=path,
         loader=_make_loader(
@@ -317,8 +342,16 @@ def register_precached_or_hf(
 # Auto-registration fallback: treat unknown dataset names as HF hub paths
 # ---------------------------------------------------------------------------
 
-# Save the original validator so we can call it for known datasets
-_original_validate_dataset = text_datasets._validate_dataset
+# Save the original validator so we can call it for known datasets.
+#
+# Grain (#4088) removed _validate_dataset entirely. There is no longer a
+# string-name validation step to intercept: dataset selection is now by
+# constructing a SingleDatasetConfig object directly, so the auto-registration
+# design this module is built around has no hook. That is a redesign, not a
+# patch, and it is deferred -- every production config names "blendcorpus"
+# and never reaches this path.
+_original_validate_dataset = getattr(text_datasets, "_validate_dataset", None)
+_VALIDATE_HOOK_AVAILABLE = _original_validate_dataset is not None
 
 
 def _validate_dataset_with_fallback(
@@ -374,7 +407,13 @@ def _validate_dataset_with_fallback(
 
 # Patch the validator so all code paths (HuggingFaceTextDataset,
 # HuggingFaceTextDataLoader, BlendCorpusDataLoader) benefit.
-text_datasets._validate_dataset = _validate_dataset_with_fallback
+if _VALIDATE_HOOK_AVAILABLE:
+    text_datasets._validate_dataset = _validate_dataset_with_fallback
+else:
+    log.debug(
+        "hf_datasets._validate_dataset is gone (Grain #4088); HF dataset "
+        "auto-registration is inactive. blendcorpus configs are unaffected."
+    )
 
 
 # ---------------------------------------------------------------------------

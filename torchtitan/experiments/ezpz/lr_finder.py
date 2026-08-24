@@ -226,8 +226,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         )
         hostname = os.environ.get("HOSTNAME", "unknown")
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
-        global_batch_size = trainer.config.training.global_batch_size
-        seq_len = trainer.config.training.seq_len
+        global_batch_size = trainer.config.training.num_tokens_per_train_step
+        seq_len = trainer.config.training.max_context_length
 
         # CSV — append mode so runs accumulate across experiments.
         # If file exists with outdated header, rename as backup.

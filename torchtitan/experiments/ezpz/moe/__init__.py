@@ -515,7 +515,7 @@ def _debugmodel() -> moeModel.Config:
         score_before_experts=False,
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -573,7 +573,7 @@ def _debugmodel_flex_attn() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -633,7 +633,7 @@ def _small() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=256128,
+            max_context_length=256128,
             theta=50000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -691,7 +691,7 @@ def _16b() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -753,7 +753,7 @@ def _236b() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -816,7 +816,7 @@ def _671b() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -874,7 +874,7 @@ def _500m() -> moeModel.Config:
         score_before_experts=False,
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -932,7 +932,7 @@ def _2b() -> moeModel.Config:
         score_before_experts=False,
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -993,7 +993,7 @@ def _4b() -> moeModel.Config:
         score_before_experts=False,
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -1055,7 +1055,7 @@ def _7b() -> moeModel.Config:
         score_before_experts=False,
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,
@@ -1113,7 +1113,7 @@ def _10b_2b() -> moeModel.Config:
         attn_backend="flex",
         rope=ComplexRoPE.Config(
             dim=rope_dim,
-            max_seq_len=4096 * 4,
+            max_context_length=4096 * 4,
             theta=10000.0,
             scaling="yarn",
             rope_factor=40.0,

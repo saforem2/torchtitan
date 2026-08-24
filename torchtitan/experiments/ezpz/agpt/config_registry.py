@@ -6,7 +6,7 @@ from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from torchtitan.components.checkpoint import CheckpointManager
+from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
@@ -28,7 +28,6 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
-from torchtitan.hf_datasets.text_datasets import HuggingFaceTextDataLoader
 
 from . import model_registry
 
@@ -62,7 +61,7 @@ def _set_rope_backend(
     layer's ``Attention.Config`` owns its own rope. So flipping the
     backend means rebuilding each layer's ``attention.rope`` as a
     fresh instance of the target subclass, copying over all other
-    fields (dim / max_seq_len / theta / scaling / yarn params).
+    fields (dim / max_context_length / theta / scaling / yarn params).
     """
     from dataclasses import fields
 
@@ -260,7 +259,12 @@ def agpt(
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
-    cfg.training.local_batch_size = local_batch_size
+    # 80th sync (#4121): training batch fields are counted in TOKENS now.
+    # The agpt() signature deliberately KEEPS sequence units -- every caller
+    # and every doc says "LBS=5", and rewriting ~40 callsites to pass tokens
+    # would make each one carry the seq_len multiplication independently. One
+    # conversion here is the whole change for anything built through agpt().
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
     # 57th sync: PR #3674 replaced the `mode` string with a policy class
     # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
     # is the agpt default (was mode="full").
@@ -273,7 +277,7 @@ def agpt(
         cfg.activation_checkpoint = SelectiveAC.Config()
     else:
         cfg.activation_checkpoint = FullAC.Config()
-    cfg.training.seq_len = seq_len
+    cfg.training.max_context_length = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
@@ -320,8 +324,9 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             min_lr_factor=0.0,
         ),
         training=TrainingConfig(
-            local_batch_size=8,
-            seq_len=2048,
+            # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
+            num_tokens_per_microbatch_per_dp_rank=8 * 2048,
+            max_context_length=2048,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
@@ -389,13 +394,23 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg = agpt_debugmodel()
     cfg.hf_assets_path = "./tests/assets/tokenizer"
     cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
-    cfg.dataloader = HuggingFaceTextDataLoader.Config(dataset="c4_test")
+    # Grain (#4088) DELETED HuggingFaceTextDataLoader with no drop-in
+    # replacement -- the equivalent is a GrainDataLoader built from a
+    # SingleDatasetConfig(source=HuggingFaceStreamingSource, processor=
+    # TextProcessor), a different object graph rather than a rename. Ported
+    # lazily: raise where the config is USED so importing the registry (and
+    # therefore every blendcorpus production config) still works.
+    raise NotImplementedError(
+        "c4_test needs porting to GrainDataLoader after the 80th sync; see "
+        "torchtitan/components/data/dataset.py SingleDatasetConfig"
+    )
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
     cfg.checkpoint.enable = False
     cfg.training.steps = 10
-    cfg.training.seq_len = 512
-    cfg.training.local_batch_size = 2
+    cfg.training.max_context_length = 512
+    # 2 seqs x 512 = 1024 tokens (#4121 unit change)
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = 2 * 512
     return cfg
 
 
@@ -759,7 +774,15 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     # is a compile-throughput test flavor and mismatches the complex-trained base
     # -- it rotates a different Q/K channel pairing and corrupts the fork.)
     cfg = ezpz_agpt_2b()
-    cfg.training.seq_len = 8192
+    # #4121 HAZARD: num_tokens_per_microbatch_per_dp_rank was already computed
+    # by agpt() as local_batch_size * seq_len. Overriding the sequence length
+    # AFTER that does NOT update the token count, so the effective batch would
+    # silently change. agpt()'s default seq_len is 8192, so this assignment is
+    # currently a no-op -- but only by coincidence. Recompute explicitly so it
+    # stays correct if that default ever moves.
+    _lbs = cfg.training.num_tokens_per_microbatch_per_dp_rank // 8192
+    cfg.training.max_context_length = 8192
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = _lbs * 8192
     cfg.activation_checkpoint = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
         raise ValueError(
