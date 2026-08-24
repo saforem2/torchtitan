@@ -136,3 +136,49 @@ Comparisons are **per-token**, never per-step or per-wallclock.
 the result is incomplete, not a finding. The job summary prints the reported
 GAS (must be 1) and the resolved optimizer name, so a config that silently
 failed to take cannot pass unnoticed.
+
+
+## Phase 2 launch: five failures, and the process fix
+
+Phase 2 took six attempts to leave the ground. Every failure was a
+sub-minute crash on a 48-node allocation, and every one was a DIFFERENT layer
+of the same cause: the 80th upstream sync landed between the Phase 1 finders
+(which ran on the pre-merge tree and succeeded) and the first Phase 2 launch.
+
+| # | jobs | failure | layer |
+|---|---|---|---|
+| 1 | 12473720-22 | `Unrecognized options: --training.seq-len, --training.local-batch-size, --training.global-batch-size` | CLI flags renamed by #4121 |
+| 2 | 12473725-27 | `NotImplementedError: dataset='fineweb_edu_local' used the HF delegate` | dataloader class deleted by #4088 |
+| 3 | 12473729-31 | `Unrecognized options: --dataloader.num-workers` | flag absent from `GrainDataLoader.Config` |
+| 4 | 12473732-34 | `GrainDataLoader.__init__() missing 2 required keyword-only arguments` | dataloader kwargs stale in `trainer.py` |
+| 5 | 12473735-37 | `NameError: name 'global_batch_size' is not defined` | stale name in a log line |
+
+**Every one was reachable at 2 nodes.** Fixing forward at full scale, five
+times, was the actual mistake -- each failure looked like an isolated bug, but
+they were a cascade from one merge, so fixing the top layer only exposed the
+next. The standing rule (smoke before large jobs) was skipped because the
+finders had just succeeded; they had run on the pre-merge tree.
+
+Two durable guards came out of it:
+
+**`optcmp_smoke.pbs`** -- runs all three arms sequentially, 3 steps each, in one
+2N allocation, printing a PASS/FAIL verdict per arm. One job proves every arm
+reaches real training. Its GBS is deliberately not 960: 24 ranks cannot reach
+the comparison batch, and the smoke tests the code path, not the numerics.
+
+**An argument preflight inside `optcmp.pbs`** -- parses the exact argv on one
+rank before allocating, and asserts the resulting batch (`max_context_length`
+4096, LBS 5, GBS 960, GAS 1, `decay_ratio` 0.0) rather than only that the flags
+parse. It deliberately stops at config construction and does NOT build the
+Trainer, because that calls `set_device` and a login context has no GPU -- the
+first version did exactly that and rejected valid arguments.
+
+The batch assertions matter more than the flag check. A flag that parses but
+yields a different GBS would not crash; it would silently train at the wrong
+batch and invalidate the comparison against the Phase 1 LRs. Verified
+negatively: the preflight rejects an unknown flag, a halved GBS, and
+`decay_ratio` flipped back to 0.8.
+
+`pyflakes` over `torchtitan/experiments/ezpz/` is the cheap catch for failure 5
+and should be run after any upstream sync -- it reports zero undefined names in
+`trainer.py` now.
