@@ -91,7 +91,21 @@ lfs setstripe -c 2 -i 0 -o 0,1 "$CKPT" 2>/dev/null || \
     echo "  WARNING: lfs setstripe failed; checkpoints may hit a full OST"
 echo "  stripe: $(lfs getstripe -d "$CKPT" 2>/dev/null | tr -s ' ' | head -1)"
 
-LAST=$(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -n | tail -1)
+# RESUME DETECTION. A step-N directory is NOT proof of a loadable checkpoint:
+# DCP writes its shards first and commits .metadata LAST, so a checkpoint
+# interrupted mid-write (the ENOSPC in jobs 12473740-42) leaves a directory
+# full of shards with no index. dcp.load SILENTLY SKIPS such a directory and
+# the trainer starts from random init -- which shows up as loss jumping back to
+# ~12 and the step counter restarting, not as an error. Jobs 12473743-45 lost
+# an hour to exactly that.
+#
+# So resolve the newest step dir that actually HAS .metadata, and say plainly
+# when a newer one is being ignored.
+LAST=""
+for d in $(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -rn); do
+    if [ -f "$CKPT/step-$d/.metadata" ]; then LAST="$d"; break; fi
+    echo "  IGNORING step-$d: no .metadata (interrupted write, not loadable)"
+done
 echo "arm:    $OPT   config: $CONFIG   lr: $LR (CONSTANT after 20-step warmup)"
 echo "batch:  GBS=960 (LBS 5 x 192 ranks x GAS 1), seq 4096 -> 3.93M tok/step"
 echo "ckpt:   $CKPT"
