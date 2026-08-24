@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
 """Regression test for the folded-attention unflatten in agpt/__init__.py.
 
-#4121 ("fold batch dim") makes the LM stack hand attention a 3D tensor.
-The first port read it as ``[T, N, H]`` -- batch folded INTO the token
-count -- but on the blendcorpus path the batch dim is PRESERVED and it is
-L and N that are folded: ``[B, L*N, H]``. Reading dim 0 as tokens yields
-B=1, so ``1 % 8192 != 0`` and a well-formed batch was rejected with
+#4121 ("fold batch dim") hands attention a 3D tensor. The layout is
+``[T, N, H]`` -- the batch dim is folded INTO the token count -- so B is
+recovered as ``num_tokens // seq_len``.
 
-    ValueError: token count 1 is not a multiple of max_context_length 8192
+MEASURED on 4 A100s (Perlmutter job 57536150), agpt_2b_real, one
+sequence per rank::
 
-Measured, not inferred (probe run 7554521): the decoder receives 2D
-tokens ``[B, L]`` -- ``tokens.shape=(1, 8192)``. Both observed attention
-shapes agree with ``[B, L*N, H]`` and rule out ``[T, N, H]``:
+    q=(8192, 16, 128)  k=(8192, 4, 128)  seq_len=8192
 
-    LBS=16 -> (1, 131072, 128) == B=1, L*N = 8192*16, H=128
-    LBS=1  -> dim 0 == 1        (would be 8192 under the other reading)
+T=8192 tokens, N=16 heads, H=128; k carries n_kv=4 under GQA, which is
+why k/v keep the ``-1`` head inference instead of reusing q's count.
 
-Why this test extracts the source instead of importing it: importing the
+An earlier revision of this test asserted ``[B, L*N, H]`` instead --
+reading dim 0 as the batch. That was inferred from a single observed
+shape, ``(1, 131072, 128)``, which is arithmetically consistent with
+BOTH readings; the wrong one was picked and the matching arithmetic
+mistaken for proof. It shipped as 5b4a81803 and was reverted after this
+measurement. The lesson worth keeping: a test written from an inferred
+layout will pass its own negative control, because the control only
+shows the test is sensitive to a change -- not that the premise is
+right.
+
+Why this extracts the source instead of importing it: importing the
 module needs the full distributed stack (``spmd_types`` and friends),
 which is not available on a login node or in CI. Extracting keeps the
-test honest -- it exercises the SHIPPED lines, so a future edit that
-breaks the reshape fails here rather than passing against a copy that
-drifted.
+test honest -- it exercises the SHIPPED lines, so an edit that breaks
+the reshape fails here rather than passing against a drifted copy.
 
-What is actually asserted is element-order preservation
-(``torch.equal`` against the pre-fold tensor), not just the output shape.
-A wrong-but-plausible reshape has the right shape and the wrong values,
-and SDPA accepts it -- the failure mode is a quietly degraded loss curve,
-not a traceback.
+What is asserted is element-order preservation (``torch.equal`` against
+the pre-fold tensor), not just output shape. A wrong-but-plausible
+reshape has the right shape and the wrong values, and SDPA accepts it:
+the symptom is a quietly degraded loss curve, not a traceback.
+
+Verified end to end: with the correct unflatten the same config trains
+(Perlmutter 57536357, 4/4 steps, loss 12.90 -> 12.01, 48% MFU, rc=0).
 
 Run from repo root:
     python3 torchtitan/experiments/ezpz/tests/test_attn_unflatten.py
@@ -51,7 +59,7 @@ def _committed_unflatten_block() -> str:
     """Return the shipped unflatten lines, dedented for exec()."""
     src = _SRC.read_text()
     m = re.search(
-        r"batch, folded_ln, head_dim = q_BLNH\.shape.*?"
+        r"num_tokens, num_heads, head_dim = q_BLNH\.shape.*?"
         r"v_BLNH = v_BLNH\.view\(batch, seq_len, -1, head_dim\)",
         src,
         re.S,
@@ -76,9 +84,10 @@ def _roundtrip(B: int, L: int, N: int, H: int, n_kv: int | None = None):
     )
     v_ref = k_ref.clone()
     ns = {
-        "q_BLNH": q_ref.reshape(B, L * N, H),
-        "k_BLNH": k_ref.reshape(B, L * n_kv, H),
-        "v_BLNH": v_ref.reshape(B, L * n_kv, H),
+        # [T, N, H] with T = B*L -- the batch dim folded into tokens.
+        "q_BLNH": q_ref.reshape(B * L, N, H),
+        "k_BLNH": k_ref.reshape(B * L, n_kv, H),
+        "v_BLNH": v_ref.reshape(B * L, n_kv, H),
         "seq_len": L,
         "ValueError": ValueError,
     }
@@ -118,9 +127,10 @@ def test_ragged_batch_raises() -> None:
     Better a loud failure than a reshape onto the wrong grid.
     """
     ns = {
-        "q_BLNH": torch.zeros(1, 100, 128),
-        "k_BLNH": torch.zeros(1, 100, 128),
-        "v_BLNH": torch.zeros(1, 100, 128),
+        # 100 tokens is not a whole number of 8192-token sequences.
+        "q_BLNH": torch.zeros(100, 16, 128),
+        "k_BLNH": torch.zeros(100, 4, 128),
+        "v_BLNH": torch.zeros(100, 4, 128),
         "seq_len": 8192,
         "ValueError": ValueError,
     }
