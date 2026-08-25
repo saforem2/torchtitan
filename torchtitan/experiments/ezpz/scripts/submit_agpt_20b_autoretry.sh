@@ -112,7 +112,18 @@ export EZPZ_MPI_LABEL=1
 # real 9.1.0 library resolves it. Scrubbing darshan from LD_LIBRARY_PATH does
 # NOT work -- the craype wrapper links it regardless.
 export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
-source .venv/bin/activate
+# VENV_DIR overridable because the two machines are on different torch.
+# Aurora's .venv is the production one; Polaris's .venv is torch 2.10, which
+# cannot import HEAD at all -- `from torch.distributed.fsdp import
+# DataParallelMeshDims` needs 2.13. Polaris runs pass
+# `-v VENV_DIR=.venv-torch213`. Unlike Aurora's ABI-welded XPU stack, Polaris
+# is plain CUDA, so that venv is just a normal `torch==2.13.0` install.
+VENV_DIR="${VENV_DIR:-.venv}"
+if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
+    echo "ERROR: no venv at ${VENV_DIR}/bin/activate" >&2
+    exit 1
+fi
+source "${VENV_DIR}/bin/activate"
 # Clear any STALE node-local venv before broadcasting. Nodes can carry a
 # /tmp/.venv from an earlier job (e.g. the old conda-seeded one); if the yeet
 # does not overwrite it, ranks import the stale venv and die on
@@ -124,17 +135,39 @@ _nnodes_all=$(wc -l < "${PBS_NODEFILE}")
 # here for 1h40m holding 64 nodes and produced no output at all before being
 # walltime-killed. 300s is far more than a recursive rm of a node-local dir
 # needs; if it is exceeded, skip the cleanup and let the yeet overwrite.
-timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
+timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 \
+    bash -c "rm -rf /tmp/$(basename "${VENV_DIR}")" 2>/dev/null || true
 unset _nnodes_all
-if [[ -f .venv.tar.gz ]]; then
-    ezpz yeet --src .venv.tar.gz
+# Tarball name tracks VENV_DIR (`ezpz tar-env --src .venv-foo` writes
+# `.venv-foo.tar.gz`). Hardcoding `.venv.tar.gz` here meant a non-default
+# VENV_DIR silently fell through to per-file rsync mode -- which still
+# works, but is the slow path the tarball exists to avoid, and it fails
+# quietly by just being slow.
+_venv_tarball="${VENV_DIR}.tar.gz"
+if [[ -f "${_venv_tarball}" ]]; then
+    log_message INFO "yeet: broadcasting ${_venv_tarball}"
+    ezpz yeet --src "${_venv_tarball}"
 else
+    log_message INFO "yeet: no ${_venv_tarball}, falling back to rsync mode"
     ezpz yeet
 fi
+unset _venv_tarball
 deactivate
-# The driver must run from the broadcast venv so mpiexec points ranks at
-# /tmp/.venv (node-local), not the Lustre .venv.
-source /tmp/.venv/bin/activate
+# The driver must run from the broadcast venv so mpiexec points ranks at the
+# node-local copy, not the Lustre one.
+#
+# yeet extracts to /tmp/<env-name>/, i.e. it keeps VENV_DIR's basename -- so a
+# non-default VENV_DIR lands at /tmp/.venv-torch213, NOT /tmp/.venv. Sourcing
+# a hardcoded /tmp/.venv would either die here or, worse, silently activate a
+# STALE /tmp/.venv left by an earlier job and run production on the wrong
+# torch.
+_node_venv="/tmp/$(basename "${VENV_DIR}")"
+if [[ ! -f "${_node_venv}/bin/activate" ]]; then
+    echo "ERROR: yeet did not produce ${_node_venv}/bin/activate" >&2
+    exit 1
+fi
+source "${_node_venv}/bin/activate"
+unset _node_venv
 
 # Kill stale palsd processes from previous runs.
 _my_pids=$(ps -o pid= --ppid $$ 2>/dev/null | tr '\n' '|')
@@ -325,6 +358,26 @@ else
     VALIDATOR_FLAGS=("--validator.no-enable")
 fi
 
+# Grad-norm runaway guard. This script defaults to OPTIMIZER=sophiag, which is
+# the arm that blew up at 30B: grad_norm went 0.39 -> 100,611 in nine steps
+# while loss still read 3.957, and a controlled re-run from the same weights
+# AND optimizer state passed straight through -- so it is a knife-edge, not a
+# reproducible step. AdamW and Mano were at 0.30-0.58 on the same nodes and
+# data. See guides/known-bugs/sophiag-stochastic-divergence-30b.md.
+#
+# The guard compares against the run's own trailing median (healthy grad_norm
+# differs ~10x across optimizers and drifts down), skips warmup, and was
+# validated against four real logs: fires eight steps before the peak, clean
+# on adamw/mano/the re-run. Off by default in the trainer; on here because a
+# production chain running sophiag unguarded is the exact shape that burned
+# job 12473783.
+GRAD_NORM_ABORT="${GRAD_NORM_ABORT:-20.0}"
+if [[ "${GRAD_NORM_ABORT}" != "0" && "${GRAD_NORM_ABORT}" != "0.0" ]]; then
+    GRAD_NORM_FLAGS=("--grad-norm-abort=${GRAD_NORM_ABORT}")
+else
+    GRAD_NORM_FLAGS=()
+fi
+
 # ---- Launch with native auto-retry ----
 # No preflight: ezpz's STUCK_PRE_TRAINING guard already bails (without
 # burning spares) if init crashes twice with zero training progress.
@@ -357,6 +410,7 @@ ezpz launch \
     --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     "${DATALOADER_FLAGS[@]}" \
     "${VALIDATOR_FLAGS[@]}" \
+    "${GRAD_NORM_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \

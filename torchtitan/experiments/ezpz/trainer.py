@@ -242,6 +242,22 @@ class FaultTolerantTrainer(Trainer):
         # rest of the window. Counts reset on any finite loss, so a lone
         # transient never trips it. 0 disables (exact prior behavior); set a
         # small value (e.g. 5) for optimizer-stability-risky runs.
+        grad_norm_abort: float = 0.0
+        """Stop when grad_norm exceeds this, in units of its own recent median.
+
+        The nan_abort_consecutive guard below only catches NON-FINITE values,
+        which is useless for the failure actually observed: SophiaG at 30B went
+        grad_norm 0.39 -> 2.41 -> 89.9 -> 1702 -> 100611 over nine steps
+        (job 12473783, step 1048). Every one of those is finite, so nothing
+        fired, and the run burned ~50 steps and 2.5 nats before recovering.
+
+        A ratio against the running median rather than an absolute threshold:
+        grad_norm's healthy scale differs by an order of magnitude across
+        optimizers and shrinks as training proceeds, so any fixed number is
+        either too loose early or too tight late. 0 disables."""
+        grad_norm_abort_window: int = 50
+        """Steps of history used for the median grad_norm baseline."""
+
         nan_abort_consecutive: int = 0
         """Abort training after this many consecutive non-finite reported
         losses (NaN/inf). 0 disables. Set ~5 for NaN-prone runs (e.g. 80B
@@ -819,7 +835,13 @@ class FaultTolerantTrainer(Trainer):
                 validation_context=self.train_context,
                 metrics_processor=self.metrics_processor,
                 seq_len=config.training.max_context_length,
-                local_batch_size=(
+                # #4121 renamed this kwarg on core's Validator:
+                # local_batch_size (SEQUENCES) -> num_tokens_per_batch (TOKENS).
+                # It is keyword-only with no default, so passing the old name
+                # is a hard TypeError at config.build() -- before step 1, and
+                # only when the validator is enabled, which is why it survived
+                # the sync smokes (job 7558514).
+                num_tokens_per_batch=(
                     config.training.num_tokens_per_microbatch_per_dp_rank
                 ),
                 pp_schedule=pp_schedule,
@@ -1297,6 +1319,15 @@ class FaultTolerantTrainer(Trainer):
             # which has no such attribute -> AttributeError at train() start).
             nan_abort_n = config.nan_abort_consecutive
             consecutive_nonfinite = 0
+            # Grad-norm runaway detector. Keeps a short history so the
+            # threshold tracks the run's own scale instead of a guessed
+            # constant (see grad_norm_abort in the Config).
+            import collections
+            import statistics as _stats
+
+            gn_hist: collections.deque = collections.deque(
+                maxlen=max(2, config.grad_norm_abort_window)
+            )
 
             # --- Opt-in per-op numerics capture (80B overflow localization) ---
             # Inert unless EZPZ_DUMP_NUMERICS=1. Captures one step of per-op
@@ -1341,6 +1372,46 @@ class FaultTolerantTrainer(Trainer):
                 # without this the job burns its full window (see the 2026-07-03
                 # 80B SophiaG NaN, ~12h wasted). Reset on any finite loss so a
                 # lone transient never trips it.
+                # Grad-norm runaway. Checked BEFORE the nan guard because
+                # this failure never produces a non-finite value: the observed
+                # SophiaG blow-up (job 12473783) ran 0.39 -> 2.41 -> 89.9 ->
+                # 1702 -> 100611 with every value finite, so nan_abort never
+                # fired and ~50 steps were spent diverging and recovering.
+                #
+                # Compares against the run's OWN recent median rather than a
+                # constant: healthy grad_norm differs ~10x across these three
+                # optimizers and drifts down as training proceeds, so a fixed
+                # threshold is wrong for someone. Requires a full window before
+                # arming, so early-training transients (a warmup spike is
+                # normal and self-corrects) cannot trip it.
+                # Skip warmup entirely. Measured on the healthy arms: EVERY
+                # grad_norm above 20x sits at step <= 19 (adamw steps 5,6,7,11
+                # up to 82.3; mano 6..19 up to 74.3), i.e. the documented
+                # warmup transient that self-corrects. Without this skip the
+                # guard aborts two perfectly good runs -- worse than the
+                # failure it exists to catch. Loosening the threshold instead
+                # would have blinded it to the real event (89.9 at step 1049).
+                if (
+                    config.grad_norm_abort > 0
+                    and grad_norm is not None
+                    and self.step > config.lr_scheduler.warmup_steps
+                ):
+                    gn = float(grad_norm)
+                    if math.isfinite(gn):
+                        if len(gn_hist) == gn_hist.maxlen:
+                            med = _stats.median(gn_hist)
+                            if med > 0 and gn > config.grad_norm_abort * med:
+                                logger.error(
+                                    "grad_norm runaway at step %d: %.4g is "
+                                    "%.1fx the trailing median (%.4g) over "
+                                    "%d steps; aborting before it burns the "
+                                    "window (threshold %.1fx)",
+                                    self.step, gn, gn / med, med,
+                                    gn_hist.maxlen, config.grad_norm_abort,
+                                )
+                                break
+                        gn_hist.append(gn)
+
                 if nan_abort_n > 0:
                     if loss_val is None or not math.isfinite(loss_val):
                         consecutive_nonfinite += 1

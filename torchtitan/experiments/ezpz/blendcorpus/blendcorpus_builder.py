@@ -81,6 +81,19 @@ class BlendCorpusDataLoader(BaseDataLoader):
         )
         prefetch_factor: int | None = None
         infinite: bool = True
+        repeat: bool = True
+        """Upstream's spelling of ``infinite``; accepted so core can set it.
+
+        Core's ``Validator.__init__`` does
+        ``replace(config.dataloader, repeat=config.steps != -1)``
+        (components/validate.py:132) against whatever dataloader config it is
+        handed. ``dataclasses.replace`` raises TypeError on an unknown field,
+        so without this the validator cannot be built on the blendcorpus path
+        at all -- it aborts in ``config.build()`` before step 1.
+
+        Same concept as ``infinite``, different name. ``__post_init__``
+        reconciles them so a caller may set either.
+        """
 
         split: str = "95,5,0"
         dataloader_type: str = "single"
@@ -122,6 +135,17 @@ class BlendCorpusDataLoader(BaseDataLoader):
         serve_validation: bool = False
         eval_iters: int = 100
 
+        def __post_init__(self):
+            # Reconcile the two spellings of one concept. Whichever side was
+            # moved off its default wins; `infinite` is the name the rest of
+            # this file reads, so it is the one that must end up right.
+            # Core only ever sets `repeat`, and it always sets it explicitly.
+            if self.repeat != self.infinite:
+                if self.repeat is not True:
+                    self.infinite = self.repeat
+                else:
+                    self.repeat = self.infinite
+
     def __init__(
         self,
         config: Config,
@@ -129,10 +153,36 @@ class BlendCorpusDataLoader(BaseDataLoader):
         dp_world_size: int,
         dp_rank: int,
         tokenizer,
-        seq_len: int,
-        local_batch_size: int,
+        seq_len: int | None = None,
+        local_batch_size: int | None = None,
+        max_context_length: int | None = None,
+        num_tokens_per_batch: int | None = None,
         **kwargs,
     ):
+        # Accept both spellings. #4121 renamed these on core's dataloader
+        # contract -- seq_len -> max_context_length, and local_batch_size
+        # (SEQUENCES) -> num_tokens_per_batch (TOKENS) -- but blendcorpus is a
+        # Megatron-style loader that genuinely counts sequences, so it keeps
+        # the old fields internally and converts at the boundary.
+        #
+        # Both are needed because two callers reach here with different
+        # spellings: ezpz's trainer/validator send both pairs, while core's
+        # own Validator.validate() sends ONLY the new pair. Requiring the old
+        # names made that second path a TypeError.
+        if seq_len is None:
+            seq_len = max_context_length
+        if seq_len is None:
+            raise ValueError(
+                "BlendCorpusDataLoader needs seq_len (or max_context_length)"
+            )
+        if local_batch_size is None:
+            if num_tokens_per_batch is None:
+                raise ValueError(
+                    "BlendCorpusDataLoader needs local_batch_size (sequences) "
+                    "or num_tokens_per_batch (tokens)"
+                )
+            # tokens -> sequences; blendcorpus's sampler counts sequences.
+            local_batch_size = max(1, num_tokens_per_batch // seq_len)
         self._mode = "hf"
         self._delegate: BaseDataLoader | None = None
         # Set here too: the HF-delegate branch below returns before the
@@ -382,11 +432,33 @@ class BlendCorpusDataLoader(BaseDataLoader):
             tokens = batch["text"].long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
+            # Positions are derived BEFORE the fold below: _document_positions
+            # reduces along dim 1 to find EOD boundaries and needs [B, L].
+            positions = (
+                self._document_positions(input_ids) if self._emit_positions else None
+            )
+            # Fold [B, L] -> [T]. Upstream #4121 ("fold batch dim", 80th sync)
+            # moved the LM stack to a flat token layout: QKVLinear reads
+            # num_tokens = x.shape[0] then x.view(num_tokens, -1, head_dim),
+            # and GQAttention finishes with out_TNH.view(out_TNH.shape[0], -1)
+            # (models/common/attention.py). Both treat dim 0 as TOKENS.
+            # Handing them [B, L] leaves dim 0 = B, so at B=1 the sequence and
+            # heads merge into one axis: q arrives (1, L*N, head_dim) --
+            # (1, 131072, 128) for agpt-2b at L=8192, N=16 -- instead of
+            # (L, N, head_dim). Measured on Polaris job 7557496 as
+            # "token count 1 is not a multiple of max_context_length 8192".
+            #
+            # Core's Grain path never hits this: TextCollator emits
+            # torch.cat(rows), already flat (components/data/collators.py).
+            # flatten() is row-major, so it is bit-identical to that cat --
+            # token ORDER is unchanged, which is what makes this safe for the
+            # in-flight production chains and their checkpoints. Per-row
+            # positions restart at 0, so document structure survives the fold.
+            input_ids = input_ids.flatten()
+            labels = labels.flatten()
             out: dict[str, torch.Tensor] = {"input": input_ids}
-            if self._emit_positions:
-                positions = self._document_positions(input_ids)
-                if positions is not None:
-                    out["positions"] = positions
+            if positions is not None:
+                out["positions"] = positions.flatten()
             yield out, labels
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:

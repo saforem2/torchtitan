@@ -516,21 +516,30 @@ EVAL_TASKS = {
 }
 
 
-def _eval_scores(ckpt_base):
+def _eval_scores(eval_subdir):
     """Newest evaluated step for one chain, as {task: score}.
 
     Reads the results_*.json lm_eval writes under
-      outputs/evals/<ckpt_base>/step-N/results/<task>/**/results_*.json
+      outputs/evals/<eval_subdir>/step-N/results/<task>/**/results_*.json
     which is the SAME layout scripts/eval/convert_and_eval.sh produces. The
     markdown tables under docs/evals/ are hand-maintained and lag reality, so
     they are deliberately not the source here.
 
+    Takes the chain's `eval_subdir`, NOT its ckpt_base. The two have never
+    matched: checkpoints are named for their full config
+    (`agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288`) while the eval sweeps write
+    to a short alias (`agpt-2b-v2-512n`). Passing ckpt_base made os.path.isdir
+    miss on every chain -- and because an un-evaluated chain legitimately
+    returns {}, the board showed no eval scores at all and never said why.
+    trajectories.py carries `eval_subdir` as the authoritative name; it is the
+    same field plot_evals_combined.py reads.
+
     Returns {} rather than raising: an un-evaluated chain is the normal case
     and must not take the whole payload down with it.
     """
-    if not ckpt_base:
+    if not eval_subdir:
         return {}
-    root = os.path.join(EVAL_ROOT, ckpt_base)
+    root = os.path.join(EVAL_ROOT, eval_subdir)
     if not os.path.isdir(root):
         return {}
     steps = []
@@ -545,21 +554,48 @@ def _eval_scores(ckpt_base):
     if not steps:
         return {}
     out = {}
-    # Walk newest-first and keep the newest step that yielded ANY score: the
-    # latest dir can exist while its eval is still running or was killed.
+    series = []          # [(step, {task: score})] for every evaluated step
+    # Walk newest-first. The FIRST step that yields any score becomes the
+    # board's summary (the latest dir can exist while its eval is still
+    # running or was killed); every step that yields scores also contributes
+    # a point to the charted history.
     for step_n, step_d in sorted(steps, reverse=True):
+        # TWO on-disk layouts, and only the second one is what our sweeps
+        # actually write:
+        #   a) results/<task>/**/results_*.json  -- lm_eval's own per-task
+        #      output tree, and what an earlier version of this function
+        #      assumed exclusively
+        #   b) results/results.json              -- ONE file, task names at the
+        #      TOP level (not under a "results" key). This is what
+        #      scripts/eval/convert_and_eval.sh produces, so (a) never matched
+        #      and every chain silently scored {}.
+        # Read (b) first, fall back to (a), so a hand-run lm_eval still works.
+        blob = {}
+        flat = os.path.join(root, step_d, "results", "results.json")
+        if os.path.isfile(flat):
+            try:
+                with open(flat) as fh:
+                    d = json.load(fh)
+                # tolerate both shapes: bare task keys, or nested under
+                # "results" the way lm_eval's own dumps do it
+                blob = d.get("results") if isinstance(d.get("results"), dict) else d
+            except Exception:
+                blob = {}
+
         scores = {}
         for task, metric in EVAL_TASKS.items():
-            hits = glob.glob(os.path.join(root, step_d, "results", task,
-                                          "**", "results_*.json"),
-                             recursive=True)
-            if not hits:
-                continue
-            try:
-                with open(max(hits, key=os.path.getmtime)) as fh:
-                    res = json.load(fh).get("results", {}).get(task, {})
-            except Exception:
-                continue
+            res = blob.get(task) if isinstance(blob, dict) else None
+            if not isinstance(res, dict):
+                hits = glob.glob(os.path.join(root, step_d, "results", task,
+                                              "**", "results_*.json"),
+                                 recursive=True)
+                if not hits:
+                    continue
+                try:
+                    with open(max(hits, key=os.path.getmtime)) as fh:
+                        res = json.load(fh).get("results", {}).get(task, {})
+                except Exception:
+                    continue
             val = res.get(metric)
             if val is None:
                 # fall back to whichever acc-like key the task did report
@@ -570,8 +606,19 @@ def _eval_scores(ckpt_base):
             if isinstance(val, (int, float)):
                 scores[task] = round(float(val), 4)
         if scores:
-            out = {"step": step_n, "scores": scores}
-            break
+            series.append((step_n, scores))
+            if not out:
+                out = {"step": step_n, "scores": scores}
+    if out and series:
+        # Full history, oldest-first, for charting: {task: [[step, score], ...]}.
+        # `step`/`scores` above stay as the newest-checkpoint summary the board
+        # table renders, so this is additive -- no consumer of the old shape
+        # changes.
+        by_task = {}
+        for step_n, sc in sorted(series):
+            for task, val in sc.items():
+                by_task.setdefault(task, []).append([step_n, val])
+        out["history"] = by_task
     return out
 
 
@@ -607,7 +654,7 @@ def build_backbone():
         rec = {
             "label": label,
             "model": t["model"], "num_nodes": t["num_nodes"],
-            "evals": _eval_scores(base),
+            "evals": _eval_scores(t.get("eval_subdir")),
             "gbs": t["gbs"], "seq_len": t["seq_len"],
             "token_target": t["token_target"], "kind": "canonical",
             # Cumulative tokens already absorbed before this chain's step 1
