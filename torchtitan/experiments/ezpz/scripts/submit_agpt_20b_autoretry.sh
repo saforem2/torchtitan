@@ -112,7 +112,18 @@ export EZPZ_MPI_LABEL=1
 # real 9.1.0 library resolves it. Scrubbing darshan from LD_LIBRARY_PATH does
 # NOT work -- the craype wrapper links it regardless.
 export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
-source .venv/bin/activate
+# VENV_DIR overridable because the two machines are on different torch.
+# Aurora's .venv is the production one; Polaris's .venv is torch 2.10, which
+# cannot import HEAD at all -- `from torch.distributed.fsdp import
+# DataParallelMeshDims` needs 2.13. Polaris runs pass
+# `-v VENV_DIR=.venv-torch213`. Unlike Aurora's ABI-welded XPU stack, Polaris
+# is plain CUDA, so that venv is just a normal `torch==2.13.0` install.
+VENV_DIR="${VENV_DIR:-.venv}"
+if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
+    echo "ERROR: no venv at ${VENV_DIR}/bin/activate" >&2
+    exit 1
+fi
+source "${VENV_DIR}/bin/activate"
 # Clear any STALE node-local venv before broadcasting. Nodes can carry a
 # /tmp/.venv from an earlier job (e.g. the old conda-seeded one); if the yeet
 # does not overwrite it, ranks import the stale venv and die on
