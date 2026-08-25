@@ -382,11 +382,33 @@ class BlendCorpusDataLoader(BaseDataLoader):
             tokens = batch["text"].long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
+            # Positions are derived BEFORE the fold below: _document_positions
+            # reduces along dim 1 to find EOD boundaries and needs [B, L].
+            positions = (
+                self._document_positions(input_ids) if self._emit_positions else None
+            )
+            # Fold [B, L] -> [T]. Upstream #4121 ("fold batch dim", 80th sync)
+            # moved the LM stack to a flat token layout: QKVLinear reads
+            # num_tokens = x.shape[0] then x.view(num_tokens, -1, head_dim),
+            # and GQAttention finishes with out_TNH.view(out_TNH.shape[0], -1)
+            # (models/common/attention.py). Both treat dim 0 as TOKENS.
+            # Handing them [B, L] leaves dim 0 = B, so at B=1 the sequence and
+            # heads merge into one axis: q arrives (1, L*N, head_dim) --
+            # (1, 131072, 128) for agpt-2b at L=8192, N=16 -- instead of
+            # (L, N, head_dim). Measured on Polaris job 7557496 as
+            # "token count 1 is not a multiple of max_context_length 8192".
+            #
+            # Core's Grain path never hits this: TextCollator emits
+            # torch.cat(rows), already flat (components/data/collators.py).
+            # flatten() is row-major, so it is bit-identical to that cat --
+            # token ORDER is unchanged, which is what makes this safe for the
+            # in-flight production chains and their checkpoints. Per-row
+            # positions restart at 0, so document structure survives the fold.
+            input_ids = input_ids.flatten()
+            labels = labels.flatten()
             out: dict[str, torch.Tensor] = {"input": input_ids}
-            if self._emit_positions:
-                positions = self._document_positions(input_ids)
-                if positions is not None:
-                    out["positions"] = positions
+            if positions is not None:
+                out["positions"] = positions.flatten()
             yield out, labels
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
