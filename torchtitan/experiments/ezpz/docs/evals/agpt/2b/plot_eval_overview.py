@@ -327,7 +327,24 @@ def main() -> None:
         print(f"loaded v2 {nodes}N: {len(traj)} steps from {path}")
     mds = load_mds()
     print(f"loaded MDS reference: {len(mds)} steps from {MDS_RESULTS_BASE}")
-    plot_per_task(v2_by_nodes, v2_gbs, mds, FIG_DIR / "eval_overview.svg")
+
+    # Refuse to overwrite a good figure with an empty one. outputs/evals is
+    # gitignored and lives on the cluster, so running this from a laptop
+    # loads 0 steps for every series -- and matplotlib will happily render
+    # and save the axes anyway. refresh_all.sh then auto-commits the result,
+    # so a chart silently loses its data with every step reporting success.
+    # Happened 2026-08-25: agpt 2b went 5 series -> 2, 20b 6 -> 3.
+    out_path = FIG_DIR / "eval_overview.svg"
+    total_points = sum(len(t) for t in v2_by_nodes.values()) + len(mds)
+    if total_points == 0 and out_path.exists():
+        raise SystemExit(
+            f"refusing to overwrite {out_path}: every series loaded 0 steps.\n"
+            f"  eval results are gitignored (outputs/evals) and live on the\n"
+            f"  cluster -- run this where the data is, or leave the committed\n"
+            f"  figure alone."
+        )
+
+    plot_per_task(v2_by_nodes, v2_gbs, mds, out_path)
     print_table(v2_by_nodes, v2_gbs)
 
 
