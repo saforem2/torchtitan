@@ -20,7 +20,6 @@ new ``model.parallelize(parallel_dims)`` flow.
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
-from torch.distributed.tensor import Placement, Replicate, Shard
 
 from torchtitan.experiments.ezpz.moe.model import Attention
 from torchtitan.models.common.decoder_sharding import (
@@ -50,10 +49,15 @@ if TYPE_CHECKING:
 # After upstream PR #3425 (41st sync, MoE [8/n] shape-suffix rename), the
 # parameters are named w{1,2,3}_E{F,D}D using Shazeer shape-suffix style.
 # Matches upstream ``deepseek_v3.sharding._GROUPED_EXPERTS_PARAM_LAYOUT``.
-_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, Placement] = {
-    "w1_EFD": Shard(1),
-    "w2_EDF": Shard(2),
-    "w3_EFD": Shard(1),
+# spmd.S(n), NOT DTensor Shard(n): resolve_placements feeds these through
+# spmd_type_to_dtensor_placement, which only understands spmd_types. A DTensor
+# Shard reaches it as an unrecognized object and dies with the unhelpfully
+# identical-looking "Unknown spmd type: S(1)". Matches upstream
+# deepseek_v3/sharding.py, which migrated this table; our fork missed the replay.
+_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
+    "w1_EFD": spmd.S(1),
+    "w2_EDF": spmd.S(2),
+    "w3_EFD": spmd.S(1),
 }
 
 
@@ -132,25 +136,25 @@ def _set_moe_layer_sharding(
     # which is a different thing from the module's own state.
     if getattr(attention, "rope", None) is not None:
         attention.rope.sharding_config = ShardingConfig(
-            state_shardings={"cache": dense_param_placement(tp=Replicate())},
+            state_shardings={"cache": dense_param_placement(tp=spmd.R)},
         )
 
     # MLA attention input: x is gathered to Replicate; freqs_cis always Replicate.
     attention.sharding_config = ShardingConfig(
         in_src_shardings={
             "x": attn_x_layout,
-            "freqs_cis": dense_param_placement(tp=Replicate()),
+            "freqs_cis": dense_param_placement(tp=spmd.R),
         },
         in_dst_shardings={
-            "x": dense_activation_placement(tp=Replicate(), cp=spmd.S(0)),
-            "freqs_cis": dense_param_placement(tp=Replicate()),
+            "x": dense_activation_placement(tp=spmd.R, cp=spmd.S(0)),
+            "freqs_cis": dense_param_placement(tp=spmd.R),
         },
     )
     # Low-rank projections and norms keep Replicate weights on TP. We still
     # distribute them (Replicate DTensor) so DTensor activations flow through
     # without mixing plain Tensor + DTensor in the matmul.
     replicate_weight = ShardingConfig(
-        state_shardings={"weight": dense_param_placement(tp=Replicate())},
+        state_shardings={"weight": dense_param_placement(tp=spmd.R)},
     )
     attention.wkv_a.sharding_config = replicate_weight
     attention.kv_norm.sharding_config = replicate_weight
