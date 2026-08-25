@@ -554,8 +554,11 @@ def _eval_scores(eval_subdir):
     if not steps:
         return {}
     out = {}
-    # Walk newest-first and keep the newest step that yielded ANY score: the
-    # latest dir can exist while its eval is still running or was killed.
+    series = []          # [(step, {task: score})] for every evaluated step
+    # Walk newest-first. The FIRST step that yields any score becomes the
+    # board's summary (the latest dir can exist while its eval is still
+    # running or was killed); every step that yields scores also contributes
+    # a point to the charted history.
     for step_n, step_d in sorted(steps, reverse=True):
         # TWO on-disk layouts, and only the second one is what our sweeps
         # actually write:
@@ -603,8 +606,19 @@ def _eval_scores(eval_subdir):
             if isinstance(val, (int, float)):
                 scores[task] = round(float(val), 4)
         if scores:
-            out = {"step": step_n, "scores": scores}
-            break
+            series.append((step_n, scores))
+            if not out:
+                out = {"step": step_n, "scores": scores}
+    if out and series:
+        # Full history, oldest-first, for charting: {task: [[step, score], ...]}.
+        # `step`/`scores` above stay as the newest-checkpoint summary the board
+        # table renders, so this is additive -- no consumer of the old shape
+        # changes.
+        by_task = {}
+        for step_n, sc in sorted(series):
+            for task, val in sc.items():
+                by_task.setdefault(task, []).append([step_n, val])
+        out["history"] = by_task
     return out
 
 
