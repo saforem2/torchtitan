@@ -81,6 +81,19 @@ class BlendCorpusDataLoader(BaseDataLoader):
         )
         prefetch_factor: int | None = None
         infinite: bool = True
+        repeat: bool = True
+        """Upstream's spelling of ``infinite``; accepted so core can set it.
+
+        Core's ``Validator.__init__`` does
+        ``replace(config.dataloader, repeat=config.steps != -1)``
+        (components/validate.py:132) against whatever dataloader config it is
+        handed. ``dataclasses.replace`` raises TypeError on an unknown field,
+        so without this the validator cannot be built on the blendcorpus path
+        at all -- it aborts in ``config.build()`` before step 1.
+
+        Same concept as ``infinite``, different name. ``__post_init__``
+        reconciles them so a caller may set either.
+        """
 
         split: str = "95,5,0"
         dataloader_type: str = "single"
@@ -122,6 +135,17 @@ class BlendCorpusDataLoader(BaseDataLoader):
         serve_validation: bool = False
         eval_iters: int = 100
 
+        def __post_init__(self):
+            # Reconcile the two spellings of one concept. Whichever side was
+            # moved off its default wins; `infinite` is the name the rest of
+            # this file reads, so it is the one that must end up right.
+            # Core only ever sets `repeat`, and it always sets it explicitly.
+            if self.repeat != self.infinite:
+                if self.repeat is not True:
+                    self.infinite = self.repeat
+                else:
+                    self.repeat = self.infinite
+
     def __init__(
         self,
         config: Config,
@@ -129,10 +153,36 @@ class BlendCorpusDataLoader(BaseDataLoader):
         dp_world_size: int,
         dp_rank: int,
         tokenizer,
-        seq_len: int,
-        local_batch_size: int,
+        seq_len: int | None = None,
+        local_batch_size: int | None = None,
+        max_context_length: int | None = None,
+        num_tokens_per_batch: int | None = None,
         **kwargs,
     ):
+        # Accept both spellings. #4121 renamed these on core's dataloader
+        # contract -- seq_len -> max_context_length, and local_batch_size
+        # (SEQUENCES) -> num_tokens_per_batch (TOKENS) -- but blendcorpus is a
+        # Megatron-style loader that genuinely counts sequences, so it keeps
+        # the old fields internally and converts at the boundary.
+        #
+        # Both are needed because two callers reach here with different
+        # spellings: ezpz's trainer/validator send both pairs, while core's
+        # own Validator.validate() sends ONLY the new pair. Requiring the old
+        # names made that second path a TypeError.
+        if seq_len is None:
+            seq_len = max_context_length
+        if seq_len is None:
+            raise ValueError(
+                "BlendCorpusDataLoader needs seq_len (or max_context_length)"
+            )
+        if local_batch_size is None:
+            if num_tokens_per_batch is None:
+                raise ValueError(
+                    "BlendCorpusDataLoader needs local_batch_size (sequences) "
+                    "or num_tokens_per_batch (tokens)"
+                )
+            # tokens -> sequences; blendcorpus's sampler counts sequences.
+            local_batch_size = max(1, num_tokens_per_batch // seq_len)
         self._mode = "hf"
         self._delegate: BaseDataLoader | None = None
         # Set here too: the HF-delegate branch below returns before the
