@@ -39,7 +39,7 @@ Ruled out by reading the code against upstream `deepseek_v3`, not by guessing:
 - **The MLA fold port** (`38a0d595c`). The port is verified at TP=1 and the
   failing line is byte-identical to upstream's.
 
-## The control run did not settle it
+## The control run was invalid (my mistake)
 
 Job `8782898` ran UNFORKED `deepseek_v3_debugmodel` at TP=2 on the same node
 and stack, to test whether the bug is ours or the platform's. It failed
@@ -50,12 +50,19 @@ RuntimeError: No backend for the parent process group or its backend
               does not support splitting        (distributed_c10d.py:5568)
 ```
 
-That is `split_group`, i.e. XCCL does not support process-group splitting --
-an XPU backend limitation, not EP (the config has `expert_parallel_degree=1`).
+**That was MY error, not a platform limit.** We already carry a workaround:
+`torchtitan/experiments/ezpz/xccl_split_group_workaround.py`, installed by
+`trainer.py:898`. It steers `DeviceMesh._init_one_process_group` to the
+`new_group` fallback because `ProcessGroupXCCL` inherits
+`supportsSplitting() == false`.
 
-**Upstream MoE cannot run at TP=2 on this stack for an independent reason, so
-it cannot serve as a comparison.** Our fork gets FURTHER: zero `split_group`
-errors, reaching the forward pass.
+The control ran **upstream `deepseek_v3`**, which uses the upstream trainer and
+therefore never installs it. So the control was invalid -- it measured the
+absence of our workaround, not a property of the stack. Our own moe run shows
+zero `split_group` errors and reaches the forward pass, exactly as expected.
+
+A valid control needs upstream `deepseek_v3` running under our
+`FaultTolerantTrainer` (or the workaround installed some other way).
 
 ## Next step
 
@@ -72,4 +79,4 @@ measurement.
 | `8782754` | moe TP=2 | `Unknown spmd type: S(1)` -> fixed in `59b8c9053` |
 | `8782821` | moe TP=2 | this bug |
 | `8782843` | moe TP=2, SP off | this bug (SP ruled out) |
-| `8782898` | upstream dsv3 TP=2 | `split_group` -- XPU limitation, no comparison |
+| `8782898` | upstream dsv3 TP=2 | INVALID control -- upstream trainer, so our xccl split_group workaround was never installed |

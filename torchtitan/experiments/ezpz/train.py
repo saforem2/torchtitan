@@ -450,6 +450,23 @@ def main(args: list[str] | None = None) -> None:
 
     trainer = None
 
+    # Install the xccl split_group workaround BEFORE config.build(). It also
+    # runs inside FaultTolerantTrainer.__init__, but only ezpz configs build
+    # that trainer -- an upstream config (deepseek_v3, llama3, ...) launched
+    # through this same entrypoint builds the UPSTREAM Trainer and never gets
+    # it, then dies in DeviceMesh setup with "No backend for the parent
+    # process group or its backend does not support splitting". That cost an
+    # invalid control run on 2026-08-25 (job 8782898), where the missing
+    # workaround was misread as an XPU platform limit.
+    #
+    # Idempotent, guarded by _should_patch(), and a no-op off XPU, so hoisting
+    # it here is free and the trainer-side call stays as a belt-and-braces.
+    from torchtitan.experiments.ezpz.xccl_split_group_workaround import (
+        maybe_install_xccl_split_group_workaround,
+    )
+
+    maybe_install_xccl_split_group_workaround()
+
     try:
         if config.comm.mode == "local_tensor":
             logger.info("Local tensor mode enabled - skipping training execution")
