@@ -76,6 +76,63 @@ Same signature as the original: a few steps of quiet ramp (0.67 -> 2.9 -> 5.0),
 then four orders of magnitude. The peak was TWICE the original's, and the loss
 ended up worse (9.47 vs 8.16).
 
+## It is a regime flip, not a spike (added 2026-08-25)
+
+Quantified across the four arms, counting post-warmup steps (step > 20) whose
+grad_norm exceeds 2.0:
+
+| arm | steps | grad_norm > 2.0 | max grad_norm |
+|---|---:|---:|---:|
+| AdamW | 568 | **0** | **0.8** |
+| Mano | 562 | **0** | **0.8** |
+| SophiaG | 565 | 365 | 100,611 |
+| SophiaG re-run | 379 | 135 | 204,017 |
+
+The healthy optimizers never come within a factor of 2.5 of the threshold in
+~1,100 combined steps. There is no overlap between the two populations.
+
+Splitting SophiaG at its onset step shows the behavior is bimodal rather than
+a degradation:
+
+| window | steps with grad_norm > 2.0 | max |
+|---|---:|---:|
+| SophiaG, steps 21-1047 (pre-onset) | **0 / 147** | 0.921 |
+| SophiaG, steps 1049+ (post-onset) | 364 / 417 (**87%**) | 100,611 |
+| re-run, steps 1176+ (post-onset) | 131 / 204 (**64%**) | 204,017 |
+
+Before onset SophiaG is indistinguishable from AdamW and Mano. After onset it
+sits in a persistent high-gradient regime and does not leave it.
+
+**Consequence: apparent "recovery" is an artifact.** Watching the loss alone,
+the re-run looked like it was recovering twice (7.15 -> 4.56, then 5.50 -> 4.29).
+Both were dips inside the bad regime, not returns to the good one -- grad_norm
+stayed 30-315 throughout. Any read of these arms must use grad_norm, not loss.
+
+**The onset is a discontinuity, not a ramp.** Arm 1 held grad_norm 0.35-0.52
+for the 18 steps before onset, then went 0.39 -> 2.41 -> 89.9 -> 437 -> 1702
+while the loss moved only 3.957 -> 4.089. A 4,000x gradient change under a
+0.13-nat loss change is not the LR being slightly too high.
+
+**This is why the LR-finder sweep did not predict it.** The SophiaG sweep
+descends smoothly and monotonically across the whole low band -- 11.079 at
+8.8e-6 down to 10.025 at 4.1e-5, no instability anywhere near the 3.55e-5 the
+arms actually ran at, and the measured blow-up is 10x higher at 3.55e-4. A
+static LR sweep probes the loss surface in the first ~100 steps; it cannot see
+a state-dependent failure that arms after 1,000 steps of Hessian accumulation.
+
+**Therefore lowering the LR is a weak fix.** The obvious next move -- restart
+at ~1.2e-05 -- rests on the assumption that this is LR-driven. The evidence
+above is against that: the failure is bimodal, state-dependent, and invisible
+to the LR sweep. A low-LR arm may well delay onset (smaller steps accumulate
+curvature error more slowly) but nothing here predicts it prevents it, and a
+clean 2,000-step low-LR run would not prove much either -- onset was at 1,048
+and 1,176, so a run that merely goes further is consistent with "delayed".
+
+What would actually discriminate: instrument SophiaG's Hessian-estimate norm
+(and its update clipping) per step and check whether the estimate degrades
+monotonically before onset. If it does, the fix is in the Hessian update
+(rho, the EMA, or the clipping), not the LR.
+
 ## What this means
 
 The blow-up is **recurrent, not a one-off**: 2 of 2 runs from the same seed
@@ -87,10 +144,14 @@ re-run would have fired at 1048 where the data order was nearly identical.
 SophiaG at lr=3.55e-05 on this model **will** diverge; only the timing is
 unpredictable.
 
-Consistent with Phase 1, where SophiaG had the **narrowest usable LR band** of
-the three (blow-up at 3.55e-04, only 10x above its suggestion). The suggested
-LR may simply be too close to the cliff for this model, and a materially lower
-LR would be the thing to test next.
+Phase 1 did show SophiaG with the **narrowest usable LR band** of the three
+(blow-up at 3.55e-04, 10x above its suggestion), which is why "the LR is too
+close to the cliff, lower it" was the first reading. The regime-flip evidence
+above argues against that: the sweep descends smoothly through the entire low
+band with no instability near 3.55e-05, and the onset is a discontinuity under
+a nearly flat loss rather than the gradual degradation a too-high LR produces.
+Lower LR may delay onset without preventing it. Instrumenting the Hessian
+estimate discriminates the two; a low-LR arm alone does not.
 
 ## Correction
 
