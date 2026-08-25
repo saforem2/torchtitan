@@ -2,8 +2,15 @@
 """Build a W&B report for the fixed-batch optimizer comparison.
 
 Committed as a SCRIPT rather than run once by hand: the chain is still adding
-links, so the report has to be regenerable. Re-running overwrites the same
-report (matched by title) instead of accumulating duplicates.
+links, so the report has to be regenerable.
+
+NOTE: re-running does NOT overwrite. `report.save()` mints a NEW report id
+every call, even with an identical title -- this docstring previously claimed
+otherwise and ten same-titled reports accumulated before anyone checked. The
+URL printed at the end is the only current one; every earlier URL is a stale
+snapshot that still renders, which makes a shared link silently go out of
+date. Prune old ones in the W&B UI (the API exposes no report delete), and
+re-share the new URL after each regenerate.
 
 Usage:
     python3 make_optcmp_report.py [--dry-run]
@@ -89,10 +96,34 @@ Same signature, **twice the peak**, and a worse landing (loss 9.47 vs 8.16).
 
 ### What that means
 
-**2 of 2 runs from the same seed diverged**, at different steps, with matching
-severity. Not a rare event that luck avoids, and not tied to a specific batch:
+**3 of 3 runs from the same seed diverged**, at different steps (1048, 1176,
+1071), with matching severity. Not a rare event that luck avoids, and not tied to a specific batch:
 if it were the data, the re-run would have fired at 1048, where the data order
 was nearly identical (step 1001 loss matched to five decimals).
+
+### Replicate 3 makes it 3 of 3
+
+A third replicate (job 12473833, `--debug.seed=42`, grad-norm guard armed at
+20x) forked from the same clean `step-1000` checkpoint and blew up at **step
+1071**:
+
+| step | loss | grad_norm |
+|---:|---:|---:|
+| 1064 | 3.915 | 0.32 |
+| 1067 | 3.909 | **6.88** |
+| 1070 | 3.945 | 1.53 |
+| **1071** | 3.954 | **53.49** |
+
+Three runs, three distinct onsets -- **1048, 1176, 1071** -- from identical
+weights and optimizer state. The timing is random; the event is not.
+
+Note the loss again: 3.915 -> 3.954 across the whole onset. Nothing in the
+loss curve distinguishes these steps from the 1,000 healthy ones before them.
+
+**The guard worked.** It fired at 53.49 (133x the trailing median of 0.4022)
+and stopped the run at rc=0 after 55 minutes, instead of letting it ride to
+grad_norm ~100,000 and burn the remaining ~7 hours of the window, which is
+what happened to replicates 1 and 2.
 
 SophiaG at lr=3.55e-05 on this model **will** diverge; only the timing is
 unpredictable.
@@ -369,10 +400,11 @@ def main() -> int:
         _rr.config["optimizer_name"] = "SophiaG re-run"
         _rr.config["arm"] = "sophiag-rerun"
         _rr.update()
-    _orig = api.run(f"{ENTITY}/{PROJECT}/{ARMS['sophiag'][2][-1]}")
-    if _orig.config.get("optimizer_name") != "SophiaG (diverged)":
-        _orig.config["optimizer_name"] = "SophiaG (diverged)"
-        _orig.update()
+    for _rid in ARMS["sophiag"][2]:
+        _orig = api.run(f"{ENTITY}/{PROJECT}/{_rid}")
+        if _orig.config.get("optimizer_name") != "SophiaG (diverged)":
+            _orig.config["optimizer_name"] = "SophiaG (diverged)"
+            _orig.update()
     _rr2 = api.run(f"{ENTITY}/{PROJECT}/{RERUN2[0]}")
     if _rr2.config.get("optimizer_name") != "SophiaG replicate 3 (seed 42)":
         _rr2.config["optimizer_name"] = "SophiaG replicate 3 (seed 42)"
@@ -396,7 +428,11 @@ def main() -> int:
         return 1
     print("verified groupby keys are distinct per panel")
 
-    all_ids = [r for _, _, ids in ARMS.values() for r in ids]
+    # Include the re-runs. Built from ARMS alone, the main panels silently
+    # omitted every SophiaG replicate -- they were only ever visible in the
+    # dedicated divergence panel further down.
+    all_ids = ([r for _, _, ids in ARMS.values() for r in ids]
+               + [RERUN[0], RERUN2[0]])
     # `filters` is parsed as a Python expression by wandb_workspaces (it walks
     # the AST), NOT as a mongo-style dict -- passing {"name": {"$in": ...}}
     # raises "Unsupported expression type: ast.Dict".
@@ -404,6 +440,30 @@ def main() -> int:
         entity=ENTITY, project=PROJECT, name="all arms",
         filters=f"ID in {all_ids!r}",
     )
+
+    # Every run the report knows about must appear in the main runset --
+    # resolving is not the same as being displayed.
+    _known = set(all_ids)
+    _expected = ({r for _, _, ids in ARMS.values() for r in ids}
+                 | {RERUN[0], RERUN2[0]})
+    _missing = _expected - _known
+    if _missing:
+        print(f"ERR runs pinned but NOT in the main runset: {sorted(_missing)}"
+              " -- they would resolve, pass every other check, and still be "
+              "invisible in the loss/grad_norm panels")
+        return 1
+    print(f"verified all {len(_known)} runs appear in the main runset")
+
+    # One arm must not split into two legend entries.
+    for _arm, (_label, _lr, _ids) in ARMS.items():
+        _names = {api.run(f"{ENTITY}/{PROJECT}/{i}").config.get("optimizer_name")
+                  for i in _ids}
+        if len(_names) != 1:
+            print(f"ERR arm {_arm!r} has {len(_names)} distinct "
+                  f"optimizer_name values {sorted(map(str, _names))} -- "
+                  "groupby will draw it as multiple traces")
+            return 1
+    print("verified each arm carries ONE optimizer_name across its links")
 
     def lines(metric, title, log_y=False):
         return wr.LinePlot(
@@ -474,7 +534,18 @@ def main() -> int:
         print(f"  runs   : {len(all_ids)}")
         print(f"  blocks : {len(report.blocks)}")
         return 0
+    _prior = []
+    try:
+        _prior = [r for r in api.reports(f"{ENTITY}/{PROJECT}")
+                  if getattr(r, "id", None)]
+    except Exception:
+        pass
+
     url = report.save().url
+    if len(_prior) > 1:
+        print(f"NOTE {len(_prior)} same-project reports already existed; "
+              "save() mints a new id rather than overwriting, so the older "
+              "ones are now stale snapshots. Prune them in the W&B UI.")
     print(f"REPORT URL {url}")
     return 0
 
