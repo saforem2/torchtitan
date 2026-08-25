@@ -135,17 +135,39 @@ _nnodes_all=$(wc -l < "${PBS_NODEFILE}")
 # here for 1h40m holding 64 nodes and produced no output at all before being
 # walltime-killed. 300s is far more than a recursive rm of a node-local dir
 # needs; if it is exceeded, skip the cleanup and let the yeet overwrite.
-timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 bash -c 'rm -rf /tmp/.venv' 2>/dev/null || true
+timeout 300 mpiexec -n "${_nnodes_all}" --ppn 1 \
+    bash -c "rm -rf /tmp/$(basename "${VENV_DIR}")" 2>/dev/null || true
 unset _nnodes_all
-if [[ -f .venv.tar.gz ]]; then
-    ezpz yeet --src .venv.tar.gz
+# Tarball name tracks VENV_DIR (`ezpz tar-env --src .venv-foo` writes
+# `.venv-foo.tar.gz`). Hardcoding `.venv.tar.gz` here meant a non-default
+# VENV_DIR silently fell through to per-file rsync mode -- which still
+# works, but is the slow path the tarball exists to avoid, and it fails
+# quietly by just being slow.
+_venv_tarball="${VENV_DIR}.tar.gz"
+if [[ -f "${_venv_tarball}" ]]; then
+    log_message INFO "yeet: broadcasting ${_venv_tarball}"
+    ezpz yeet --src "${_venv_tarball}"
 else
+    log_message INFO "yeet: no ${_venv_tarball}, falling back to rsync mode"
     ezpz yeet
 fi
+unset _venv_tarball
 deactivate
-# The driver must run from the broadcast venv so mpiexec points ranks at
-# /tmp/.venv (node-local), not the Lustre .venv.
-source /tmp/.venv/bin/activate
+# The driver must run from the broadcast venv so mpiexec points ranks at the
+# node-local copy, not the Lustre one.
+#
+# yeet extracts to /tmp/<env-name>/, i.e. it keeps VENV_DIR's basename -- so a
+# non-default VENV_DIR lands at /tmp/.venv-torch213, NOT /tmp/.venv. Sourcing
+# a hardcoded /tmp/.venv would either die here or, worse, silently activate a
+# STALE /tmp/.venv left by an earlier job and run production on the wrong
+# torch.
+_node_venv="/tmp/$(basename "${VENV_DIR}")"
+if [[ ! -f "${_node_venv}/bin/activate" ]]; then
+    echo "ERROR: yeet did not produce ${_node_venv}/bin/activate" >&2
+    exit 1
+fi
+source "${_node_venv}/bin/activate"
+unset _node_venv
 
 # Kill stale palsd processes from previous runs.
 _my_pids=$(ps -o pid= --ppid $$ 2>/dev/null | tr '\n' '|')
