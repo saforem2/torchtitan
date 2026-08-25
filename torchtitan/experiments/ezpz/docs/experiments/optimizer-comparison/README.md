@@ -246,3 +246,56 @@ recorded 6:09 walltime against an 8h request, and a maintenance reservation
 cause. All three had complete step-400 checkpoints, so chain 2
 (12473753/54/55) resumes there; it is queued behind the reservation with an
 estimated start of Tue 00:30.
+
+
+## Phase 2 results at 3.54B tokens per arm (chains 1-3)
+
+Jobs 12473743/44/45 -> 12473753/54/55 -> 12473764/65/66, all resuming cleanly
+from the previous link's checkpoint. Every arm ran to `rc=124`, the inner
+timeout, which is the designed clean stop.
+
+| step | tokens | AdamW | Mano | SophiaG | Mano - AdamW |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 0.39B | **6.1387** | 6.3146 | 7.1219 | +0.1759 |
+| 300 | 1.18B | 4.7682 | **4.6622** | 6.2720 | -0.1060 |
+| 500 | 1.97B | 4.2196 | **3.8716** | 5.5492 | -0.3479 |
+| **600** | **2.36B** | 4.0272 | **3.6636** | 5.2602 | **-0.3636 (max)** |
+| 700 | 2.75B | 3.8458 | **3.4978** | 4.9237 | -0.3479 |
+| 800 | 3.15B | 3.7171 | **3.3764** | 4.6574 | -0.3407 |
+| 900 | 3.54B | 3.5957 | **3.2748** | 4.3526 | -0.3209 |
+
+**Mano still leads, but the gap has PEAKED and is now closing.** It crossed
+AdamW between 0.79B and 1.18B, widened to -0.3636 nats at 2.36B, and has
+narrowed every interval since. Per-100-step improvement now favours AdamW:
+
+| arm | 600->700 | 700->800 | 800->900 |
+|---|---:|---:|---:|
+| **AdamW** | 0.1814 | **0.1287** | **0.1214** |
+| Mano | 0.1658 | 0.1215 | 0.1016 |
+| SophiaG | 0.3365 | 0.2663 | 0.3048 |
+
+This is the earlier interim reading updated, not confirmed: at 1.95B the gap
+was still widening and Mano was descending fastest. Both have since reversed.
+Extrapolating the current rates, AdamW would catch Mano around ~6-7B tokens --
+inside the planned 10B budget, so the ordering at the budget end is genuinely
+open.
+
+SophiaG remains a clear third (1.08 nats behind Mano) but is descending
+FASTEST of the three and has been since ~2B. It started worst and has closed
+from 1.51 to 1.08 nats behind. Whether that continues is the other open
+question.
+
+### Caveats unchanged
+
+Constant LR by design, so no decay phase -- and the documented prior from
+earlier competitions is exactly "Mano/Muon win short runs, AdamW wins in the
+cosine decay phase." The crossover-then-reconvergence seen here is consistent
+with that prior playing out even WITHOUT a decay phase. One seed per arm.
+
+### Status
+
+Stopped at 3.54B of the 10B budget: project 2297 hit its 22.0 TB hard quota
+(27 checkpoints x ~290 GB = 7.5 TB of optcmp alone), so the next chain link
+would fail at its first write. Continuing requires pruning checkpoints or a
+quota increase; the newest checkpoint per arm (adamw/mano step-800, sophiag
+step-900) is intact and resumable either way.
