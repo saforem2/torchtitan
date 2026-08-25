@@ -22,16 +22,23 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-08-25 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
+| 2026-08-25 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
+| 2026-08-25 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
+| 2026-08-25 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-08-25 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
+| 2026-08-25 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-08-25 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-08-25 | [Installing PyTorch in a Fresh, Self-Contained .venv on Polaris](./guides/polaris-fresh-venv.md) |
 | 2026-08-25 | [Perlmutter as a debug/verification host](./guides/perlmutter-debug-host.md) |
 | 2026-08-25 | [BlendCorpus yielded [B, L] after #4121 moved the stack to flat [T]](./guides/known-bugs/blendcorpus-fold-batch-dim.md) |
 | 2026-08-25 | [Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG](./experiments/optimizer-comparison/README.md) |
+| 2026-08-25 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-24 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-08-24 | [Polaris failover was always blind (no bad-node patterns registered)](./guides/known-bugs/polaris-failover-blind-rotation.md) |
 | 2026-08-24 | [30B LR finder: AdamW / Mano / SophiaG at GBS=960](./experiments/lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md) |
 | 2026-08-23 | [80th upstream sync: what works, what is deferred, what it costs](./upstream-sync-80th-status.md) |
 | 2026-08-23 | [Week ending 2026-08-21](./summaries/2026-08-21.md) |
-| 2026-08-23 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-08-23 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-08-23 | [exp08: does the 30B config actually train?](./production/agpt/30b-exp/exp08-convergence.md) |
 | 2026-08-23 | [Production Training Runs — Aurora](./production/README.md) |
@@ -40,6 +47,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-23 | [SPMD backends on XPU: what works, what does not, and why](./guides/spmd-backend-status.md) |
 | 2026-08-23 | [ENOSPC on /lus/tegu while df reports 1.1P free](./guides/known-bugs/sunspot-enospc-full-ost.md) |
 | 2026-08-23 | [Checkpointing on SIGTERM/SIGINT](./guides/checkpoint-on-signal.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-08-23 | [Mano LR finder at 30B (Sunspot, 2026-08-23)](./experiments/lr-finder/agpt/2026-08-23-30b-mano-sunspot.md) |
 | 2026-08-23 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](./experiments/agpt/aurora/20260816-umbrella-8756070.md) |
 | 2026-08-23 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
@@ -47,12 +60,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-23 | [Claude Session Log](./claude-sessions.md) |
 | 2026-08-22 | [Summaries](./summaries/README.md) |
 | 2026-08-21 | [Intel ticket: XPU graphs cannot capture oneCCL collectives](./upstream-issues/intel-xpu-graphs-cannot-capture-oneccl.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-08-21 | [Intel ticket: ur_die: urEventWait must not be called for an internal event](./upstream-issues/intel-ur-die-urEventWait-a2a.md) |
 | 2026-08-21 | [30B-exp experiment log](./production/agpt/30b-exp/EXPERIMENTS.md) |
 | 2026-08-21 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](./guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
@@ -65,15 +72,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-20 | [DRAFT upstream issue: spmd_types yields plain tensors when every Shard axis is size 1](./upstream-issues/spmd-types-plain-tensor-issue.md) |
 | 2026-08-20 | [Why spmd_types leaves parameters unconverted](./guides/known-bugs/spmd-types-plain-tensor.md) |
 | 2026-08-20 | [Trying a newer XPU torch against spmd_types (2026-08-20)](./guides/known-bugs/spmd-types-newer-torch-attempt.md) |
-| 2026-08-20 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-19 | [79th upstream sync -- 26 commits, four stacked defects, all from one PR](./upstream-sync-79.md) |
-| 2026-08-19 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
-| 2026-08-19 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
-| 2026-08-19 | [SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix](./production/sft/agpt/2b-mds/tulu_math_uc_mix/README.md) |
 | 2026-08-19 | [agpt 30B-exp -- a proposed next flagship](./production/agpt/30b-exp/README.md) |
-| 2026-08-19 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
-| 2026-08-19 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-08-19 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-08-19 | [W&B gap-backfill: one synthetic run per gap](./notes/wandb-gap-backfill-plan.md) |
 | 2026-08-19 | [Flex attention on MoE: two stacked bugs, both fixed](./guides/known-bugs/moe-flex-attention-blockmask.md) |
 | 2026-08-19 | [--debug.deterministic costs ~27% device memory on the MoE path (2026-08-19)](./guides/known-bugs/moe-deterministic-memory.md) |
@@ -94,12 +94,12 @@ going?" Tracking is per-model and per-node-count.
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-08-14 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.68687. | 2026-08-14 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**8,700** (875.8B tokens, 18.7% of 4.67T), loss 2.4635. | 2026-08-14 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**10,300** (518.4B tokens, 11.1% of 4.67T). | 2026-08-19 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**10,300** (518.4B tokens, 11.1% of 4.67T). | 2026-08-25 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-14 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
-| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-19 |
+| [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-08-25 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
 | [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-07-10 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
