@@ -1179,6 +1179,12 @@ class FaultTolerantTrainer(Trainer):
             extra_metrics=extra_metrics,
         )
 
+        # Publish the step grad_norm for the training loop. train_step returns
+        # only the loss (several callsites depend on that), but the grad_norm
+        # runaway guard in train() needs this value and grad_norm is local to
+        # this method. Reuses the .item() already materialized just above.
+        self._last_grad_norm = float(grad_norm.item())
+
         if isinstance(global_avg_loss, torch.Tensor):
             return float(global_avg_loss.item())
         return float(global_avg_loss)
@@ -1391,12 +1397,13 @@ class FaultTolerantTrainer(Trainer):
                 # guard aborts two perfectly good runs -- worse than the
                 # failure it exists to catch. Loosening the threshold instead
                 # would have blinded it to the real event (89.9 at step 1049).
+                _gn = getattr(self, "_last_grad_norm", None)
                 if (
                     config.grad_norm_abort > 0
-                    and grad_norm is not None
+                    and _gn is not None
                     and self.step > config.lr_scheduler.warmup_steps
                 ):
-                    gn = float(grad_norm)
+                    gn = float(_gn)
                     if math.isfinite(gn):
                         if len(gn_hist) == gn_hist.maxlen:
                             med = _stats.median(gn_hist)
