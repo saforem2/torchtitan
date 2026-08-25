@@ -819,7 +819,13 @@ class FaultTolerantTrainer(Trainer):
                 validation_context=self.train_context,
                 metrics_processor=self.metrics_processor,
                 seq_len=config.training.max_context_length,
-                local_batch_size=(
+                # #4121 renamed this kwarg on core's Validator:
+                # local_batch_size (SEQUENCES) -> num_tokens_per_batch (TOKENS).
+                # It is keyword-only with no default, so passing the old name
+                # is a hard TypeError at config.build() -- before step 1, and
+                # only when the validator is enabled, which is why it survived
+                # the sync smokes (job 7558514).
+                num_tokens_per_batch=(
                     config.training.num_tokens_per_microbatch_per_dp_rank
                 ),
                 pp_schedule=pp_schedule,

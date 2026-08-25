@@ -74,15 +74,30 @@ class EzpzValidator(Validator):
                 if training_cfg is not None:
                     if getattr(training_cfg, "steps", None):
                         extra["training_steps"] = training_cfg.steps
-                    gbs = getattr(training_cfg, "global_batch_size", None)
-                    if gbs and gbs > 0:
-                        extra["global_batch_size"] = gbs
+                    # #4121 renamed training.global_batch_size (SEQUENCES) to
+                    # num_tokens_per_train_step (TOKENS). blendcorpus still
+                    # wants sequences, so convert rather than pass through.
+                    tokens_per_step = getattr(
+                        training_cfg, "num_tokens_per_train_step", None
+                    )
+                    seq_len = getattr(training_cfg, "max_context_length", None)
+                    if tokens_per_step and tokens_per_step > 0 and seq_len:
+                        extra["global_batch_size"] = tokens_per_step // seq_len
+            # Same unit split as the trainer's dataloader build: blendcorpus
+            # counts SEQUENCES (local_batch_size/seq_len), Grain counts TOKENS
+            # (num_tokens_per_batch/max_context_length). Both loaders take
+            # **kwargs and ignore what they do not name, so send both pairs.
+            # self.num_tokens_per_batch is what core now stores -- it dropped
+            # self.local_batch_size in #4121.
+            local_batch_size = max(1, self.num_tokens_per_batch // self.seq_len)
             self._cached_dataloader = self.dl_config.build(
                 dp_world_size=self.dp_world_size,
                 dp_rank=self.dp_rank,
                 tokenizer=self.tokenizer,
                 seq_len=self.seq_len,
-                local_batch_size=self.local_batch_size,
+                local_batch_size=local_batch_size,
+                max_context_length=self.seq_len,
+                num_tokens_per_batch=self.num_tokens_per_batch,
                 parallel_dims=self.parallel_dims,
                 **extra,
             )
