@@ -2,6 +2,64 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-25 (polaris) -- BlendCorpus never got the #4121 fold
+
+- **The post-sync crash was a dataloader layout mismatch, and both earlier
+  readings of it were half right.** Upstream #4121 moved the LM stack to a
+  flat `[T]` token layout. BlendCorpus counts SEQUENCES and kept yielding
+  `[B, L]`; nobody adapted it, because it lives out-of-tree at ALCF. Every
+  production agpt config on that path died at the first attention layer with
+  `token count 1 is not a multiple of max_context_length 8192` -- `token
+  count` is dim 0, and it was the batch size.
+
+- **Measured rather than inferred, after two reverted guesses.** Pushing real
+  tensors through the shipped reshape:
+
+      OLD | input (1, 8192) | q (1, 131072, 128)  BROKEN
+      NEW | input (8192,)   | q (8192, 16, 128)   OK
+
+  The first is bit-for-bit the shape the 2026-08-24 crash reported.
+  `QKVLinear` reads `num_tokens = x.shape[0]`, so a retained batch dim merges
+  sequence and heads. The earlier Perlmutter measurement of `[T, N, H]` was
+  correct *for Grain* -- and treating it as settling the question for
+  BlendCorpus was the mistake. Two loaders, two layouts.
+
+- **The `positions` half was the dangerous one.** It also had to fold, and it
+  does not raise. `get_efficient_causal_mask_mod_for_packed_document` reads
+  `positions.shape[0]` as seq_len and cumsums along dim 0; on `[B, L]` that
+  reads the batch size and yields document ids of `-1`. Flex attention would
+  mask the wrong spans and show up only as a worse loss curve.
+
+- **Fix** (`42f4edfaa`, entirely inside `experiments/ezpz/`): fold `input`,
+  `labels`, and `positions` at the yield. `flatten()` is row-major, so it is
+  identical to the `torch.cat(rows)` core already does -- token order is
+  unchanged, which is what makes it safe for in-flight chains. Smoke: Polaris
+  7557829, 2N, 12/12 steps, loss **12.91 -> 8.19**, step-1 within 0.007 nats
+  of the Grain baseline. `rc=0` alone would have proven nothing; a wrong
+  reshape scrambles Q/K and still runs.
+
+- **Polaris needed a torch 2.13 venv.** The production `.venv` is torch
+  2.10.0+cu128 and cannot import HEAD (`DataParallelMeshDims`). Unlike
+  Aurora's ABI-welded XPU stack, Polaris is plain CUDA, so `torch==2.13.0`
+  installs from PyPI normally. Built `.venv-torch213` alongside, verifying
+  `torch.__version__` after every install batch. `submit_agpt_20b_autoretry.sh`
+  now takes `VENV_DIR` (`a3264a329`). Note PyPI `ezpz` is a *different*
+  package (0.1.2) -- an auto-install loop keyed on ModuleNotFoundError will
+  chase it forever.
+
+- **ezpz#230 merged** (2026-08-24). Verified live: `get_patterns_for_machine
+  ("polaris")` now returns all 5 patterns, so the blind-failover bug below is
+  closed on the code side.
+
+- **`refresh_all.sh` quietly committed two empty charts.** Both agpt
+  `eval_overview.svg` regenerated from a laptop with no eval data
+  (`outputs/evals` is gitignored and lives on the cluster): the plotters
+  logged `0 steps` for every series, rendered empty axes, saved, and exited
+  0. 2b went 5 series -> 2, 20b 6 -> 3. Caught by distinct-color count, not
+  by any exit code. Restored (`2982d114a`) and guarded (`34ea26b2d`) -- the
+  plotters now refuse to overwrite an existing figure when every disk-backed
+  series is empty.
+
 ## 2026-08-23 (polaris) -- failover was blind on this machine the whole time
 
 - **Polaris had zero bad-node scraper patterns registered, and nothing ever
