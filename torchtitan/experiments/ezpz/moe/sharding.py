@@ -139,15 +139,16 @@ def _set_moe_layer_sharding(
             state_shardings={"cache": dense_param_placement(tp=spmd.R)},
         )
 
-    # MLA attention input: x is gathered to Replicate; freqs_cis always Replicate.
+    # MLA attention input: x is gathered to Replicate. RoPE is read from the
+    # attention layer's local cache -- freqs_cis is NOT a forward arg since
+    # PR #3458 (the rope module owns its cache), so declaring a placement for
+    # it here described a parameter that does not exist. Matches upstream.
     attention.sharding_config = ShardingConfig(
         in_src_shardings={
             "x": attn_x_layout,
-            "freqs_cis": dense_param_placement(tp=spmd.R),
         },
         in_dst_shardings={
             "x": dense_activation_placement(tp=spmd.R, cp=spmd.S(0)),
-            "freqs_cis": dense_param_placement(tp=spmd.R),
         },
     )
     # Low-rank projections and norms keep Replicate weights on TP. We still
