@@ -95,7 +95,15 @@ DEFAULT_CONFIGS=(
     "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
-    read -r -a CONFIGS <<< "${SMOKE_CONFIGS}"
+    # Split on NEWLINES, not whitespace. Every real config spec contains
+    # spaces (the extra CLI flags), so the old `read -r -a` word-split made
+    # the override unusable: a single spec became N bogus entries and each
+    # flag was parsed as a module name (`ImportError: Cannot import module
+    # ---training.num-tokens-...`). Observed in job 8782715.
+    CONFIGS=()
+    while IFS= read -r _line; do
+        [[ -n "$_line" ]] && CONFIGS+=("$_line")
+    done <<< "${SMOKE_CONFIGS}"
 else
     CONFIGS=("${DEFAULT_CONFIGS[@]}")
 fi
