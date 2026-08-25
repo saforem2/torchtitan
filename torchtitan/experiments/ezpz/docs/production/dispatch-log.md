@@ -43,6 +43,17 @@ are a **lower bound** -- the banner stops when the umbrella script stops, which
 can precede the job's own end. `8744247` shows the gap: its log spans 12h30m
 against PBS's true 23h18m.
 
+**How large that gap gets: `8764675` banners only 1h47m (11:46:23 -> 13:33:24)
+against a PBS walltime of 12h00m31s -- 6.7x.** Its last banner line is
+`trainer 0 finished rc=143`; t1 and t2 went on to log 604 and 807 steps each
+after the umbrella stopped narrating, and no per-seat completion was ever
+recorded for them. So for any run without PBS history, the `.o` banner tells
+you when the umbrella went quiet, NOT when the job or its trainers ended, and
+a seat that looks dead in the banner may have trained for hours. Read the
+per-trainer `logs/multi-autoretry-<jobid>/trainer-N-*.console.log` for what a
+seat actually did; the umbrella log is not authoritative for anything after
+its final line.
+
 Read the percentage as *allocation actually used*, not as success -- `8714502`
 burned 67% of a 24h slot on nothing, and six of nine umbrellas used under 40%.
 That is the single largest source of wasted 2,098-node allocation in this
