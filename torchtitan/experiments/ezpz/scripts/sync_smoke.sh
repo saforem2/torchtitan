@@ -67,23 +67,32 @@ SEED="${SEED:-42}"
 # TP=1 debugmodels passed clean -- the regression only surfaced at 64N.
 # agpt_debugmodel @ TP=2 exercises model.parallelize's local_map path on
 # a single node (12 tiles).
+# Every arm pins BOTH max-context-length AND
+# num-tokens-per-microbatch-per-dp-rank, and they must be EQUAL.
 #
-# The agpt arms pin seq-len for a DIFFERENT reason than the moe arm above.
-# agpt_debugmodel is agpt("debugmodel", local_batch_size=2), and agpt()
-# defaults seq_len=8192 -- so the debugmodel inherits
-# max_context_length=8192 while its dataloader hands attention T=2 tokens.
-# The #4121 folded-attention wrapper recovers B as T // max_context_length
-# and correctly refuses:
-#   ValueError: token count 2 is not a multiple of max_context_length 8192
-# That guard is protecting production (a bare transpose on 3D input swaps N
-# with H, which SDPA ACCEPTS -- a degraded loss curve, no traceback), so the
-# config is what is wrong here, not the wrapper. Production is unaffected:
-# measured q=(8192,16,128) at seq_len=8192, i.e. T is a whole number of rows
-# (Perlmutter 57536150; see tests/test_attn_unflatten.py).
+# Post-#4121 the loader flattens [B, L] -> [T], so T = ntok_per_microbatch.
+# rope._reshape_for_broadcast then does rope_cache[:T].view(T, 1, w) against a
+# cache that has only max_context_length rows -- so T > max_context_length is a
+# hard shape error:
+#   RuntimeError: shape '[16384, 1, 8]' is invalid for input of size 65536
+# (MEASURED, smoke 8781623 arm 1: agpt_debugmodel defaults to ntok=16384 vs
+# max_context_length=8192, i.e. 2 rows.) Production runs exactly one row
+# (agpt_2b and agpt_20b both have ntok == max_context_length == 8192), which is
+# why it does not hit this -- but the margin is zero.
+#
+# Setting emit_positions would take the rope_cache[positions] branch instead,
+# but that is NOT a workaround here: it puts a DeviceMesh into the
+# saved-for-backward set, which AOT autograd rejects (see the emit_positions
+# docstring in blendcorpus_builder.py).
+#
+# There is no training.seq_len and no training.local_batch_size. The real
+# fields are num_tokens_per_microbatch_per_dp_rank, num_tokens_per_train_step
+# and max_context_length -- both earlier spellings were silently rejected by
+# tyro on every run since b8c369fb0.
 DEFAULT_CONFIGS=(
-    "ezpz.agpt:agpt_debugmodel:--training.seq-len=512"
-    "ezpz.agpt:agpt_debugmodel:--training.seq-len=512 --parallelism.tensor-parallel-degree=2"
-    "ezpz.moe:moe_debugmodel:--training.seq-len=512 --training.local-batch-size=1"
+    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512"
+    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --parallelism.tensor-parallel-degree=2"
+    "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
     read -r -a CONFIGS <<< "${SMOKE_CONFIGS}"

@@ -454,9 +454,64 @@ function buildChart(host, label, getter, opts2) {
 
 let gridCharts = [];
 
+// A cell's inner width after layout. Falls back to a sane default when the
+// element is not laid out yet (display:none section, or a draw() that lands
+// before first paint) -- uPlot throws on width 0.
+function hostW(host) {
+  return Math.max(240, Math.floor(host.clientWidth) || 360);
+}
+
+// uPlot renders to a fixed-pixel canvas: it does NOT reflow with its container.
+// The CSS grid happily re-columns on resize, which left canvases at their old
+// width overlapping their neighbours' axes. Redraw on container resize instead.
+// Debounced through rAF + a timer so a click-drag resize coalesces into one
+// rebuild rather than one per resize event (each rebuild destroys and
+// re-creates every chart).
+let resizeTimer = null;
+let lastW = {};      // element id -> width at last redraw
+
+// draw() rewrites #allgrid/#evalgrid innerHTML, which resizes them, which
+// re-fires the observer. Without this guard that is an unbounded rebuild loop.
+// Only a WIDTH change can invalidate a canvas, so height churn (cells being
+// added, a section unhiding) is ignored.
+function widthChanged() {
+  let changed = false;
+  for (const id of ["focuswrap", "allgrid", "evalgrid"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const w = Math.floor(el.clientWidth);
+    if (w > 0 && lastW[id] !== w) { lastW[id] = w; changed = true; }
+  }
+  return changed;
+}
+
+function scheduleRedraw() {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    resizeTimer = null;
+    requestAnimationFrame(() => { if (payload && widthChanged()) draw(); });
+  }, 120);
+}
+
+function initResizeObserver() {
+  if (typeof ResizeObserver === "undefined") {   // very old browser
+    window.addEventListener("resize", scheduleRedraw);
+    return;
+  }
+  // Observe the containers, not window: this also catches the aside wrapping
+  // to a new flex row, which changes chart width without changing window size.
+  const ro = new ResizeObserver(scheduleRedraw);
+  for (const id of ["focuswrap", "allgrid", "evalgrid"]) {
+    const el = document.getElementById(id);
+    if (el) ro.observe(el);
+  }
+}
+
 function draw() {
   if (!payload) return;
-  const w = document.getElementById("chartwrap").clientWidth;
+  // Measure the element the canvas actually lives in, not its grandparent.
+  // #chartwrap is a flex item that wraps; #focuswrap is the real content box.
+  const w = document.getElementById("focuswrap").clientWidth;
 
   // ---- focus chart: the tab-selected metric, full width ----
   if (chart) { chart.destroy(); chart = null; }
@@ -476,8 +531,13 @@ function draw() {
   // ---- all metrics, small multiples ----
   const grid = document.getElementById("allgrid");
   grid.innerHTML = "";
-  const cw = () => Math.max(300, Math.floor(grid.clientWidth /
-                     Math.max(1, Math.floor(grid.clientWidth / 380))) - 18);
+  // Append every cell BEFORE sizing any chart. Re-deriving the column count in
+  // JS duplicates the CSS `minmax()` and drifted from it (JS said 380, CSS says
+  // 360), so a canvas could be laid out wider than the cell holding it. Letting
+  // the browser lay the grid out and then reading back each host's real
+  // clientWidth keeps the two in sync by construction -- change the CSS and the
+  // canvases follow, with no second copy of the math to keep aligned.
+  const pending = [];
   for (const [mk, mlab] of METRICS) {
     if (mk === metric) continue;              // already the focus chart
     const cell = document.createElement("div");
@@ -487,8 +547,11 @@ function draw() {
     host.className = "plot";
     cell.appendChild(host);
     grid.appendChild(cell);
+    pending.push([host, mk, mlab]);
+  }
+  for (const [host, mk, mlab] of pending) {
     const c = buildChart(host, mlab, (k, ch) => seriesFor(k, ch, mk),
-                         { width: cw(), height: 190, thin: true,
+                         { width: hostW(host), height: 190, thin: true,
                            sci: mk === "lr" });
     if (c) gridCharts.push(c);
   }
@@ -507,6 +570,7 @@ function draw() {
   const ordered = PREF.filter(t => tasks.includes(t))
                       .concat(tasks.filter(t => !PREF.includes(t)));
   document.getElementById("evalsec").style.display = ordered.length ? "" : "none";
+  const epending = [];
   for (const t of ordered) {
     const cell = document.createElement("div");
     cell.className = "cell";
@@ -515,13 +579,17 @@ function draw() {
     host.className = "plot";
     cell.appendChild(host);
     eg.appendChild(cell);
+    epending.push([host, t]);
+  }
+  for (const [host, t] of epending) {
     // Accuracy is a probability: pin y to [0,1] so panels are comparable and
     // a 2-point curve does not fill the cell with a meaningless zoom. Never
     // log-scaled, never outlier-clipped -- every eval point is a real
     // measurement, not a checkpoint-step artifact.
     const c = buildChart(host, t, (k, ch) => evalSeriesFor(k, ch, t),
-                         { width: cw(), height: 190, thin: true, points: true,
-                           noLog: true, noClip: true, range: [0, 1] });
+                         { width: hostW(host), height: 190, thin: true,
+                           points: true, noLog: true, noClip: true,
+                           range: [0, 1] });
     if (c) gridCharts.push(c);
   }
 }
@@ -647,8 +715,7 @@ for (const id of ["tokens", "ylog", "clip"])
 document.getElementById("refresh").onclick = async () => {
   await fetch("/api/refresh"); setTimeout(load, 1500);
 };
-addEventListener("resize", () => { clearTimeout(window._rt);
-                                   window._rt = setTimeout(draw, 150); });
+initResizeObserver();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   drawLegend(); draw();
 });

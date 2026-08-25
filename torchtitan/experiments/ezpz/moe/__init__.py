@@ -61,33 +61,72 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_BLNH: torch.Tensor,
-        k_BLNH: torch.Tensor,
-        v_BLNH: torch.Tensor,
+        q_TNH: torch.Tensor,
+        k_TNH: torch.Tensor,
+        v_TNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        # 57th sync: positional arg names MUST be the shape-suffixed
-        # q_BLNH/k_BLNH/v_BLNH to match set_gqa_inner_attention_local_map's
-        # in_dst_shardings keys; the local_map contract check matches by
-        # positional-arg name and asserts under TP>1 otherwise.
-        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
-        # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
-        # layout, and if that ever reaches here the tensors arrive 3D --
-        # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
-        # ACCEPTS the result. The failure is a quietly degraded loss curve,
-        # not a traceback. Assert the rank so it is loud instead.
-        assert q_BLNH.ndim == 4, (
-            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
-            "fold-batch-dim token layout landed, this wrapper needs updating"
-        )
+        # Positional arg names MUST be the shape-suffixed q_TNH/k_TNH/v_TNH to
+        # match set_gqa_inner_attention_local_map's in_dst_shardings keys --
+        # the local_map contract check matches by positional-arg NAME and
+        # asserts under TP>1 otherwise. Renamed from _BLNH 2026-08-25: #4121
+        # (73aed7f6c) renamed the upstream keys and our port left the
+        # parameters behind (MEASURED on the agpt twin, smoke 8781623 arm 2).
+        #
+        # This wrapper is a straight port of the agpt one -- moe reaches it
+        # through the SAME BlendCorpusDataLoader (moe/config_registry.py:115),
+        # and 42f4edfaa folds [B, L] -> [T] unconditionally at the yield, so
+        # these tensors arrive 3D exactly as agpt's do. The 4D assert that used
+        # to stand here said "if the fold-batch-dim token layout landed, this
+        # wrapper needs updating"; it landed.
+        #
+        # Why unflatten rather than transpose in place: on 3D input a bare
+        # transpose(1, 2) swaps N with H instead of L with N, and SDPA ACCEPTS
+        # the result -- a quietly degraded loss curve, not a traceback.
+        #
+        # B is recoverable because the loader emits fixed-length rows: T is a
+        # whole number of max_context_length sequences. The divisibility check
+        # keeps that verified rather than assumed; a ragged batch must not
+        # silently reshape into the wrong grid.
+        folded = q_TNH.ndim == 3
+        if folded:
+            # Read agpt's module global rather than defining a second one.
+            # trainer.py:443 only ever calls agpt.set_ezpz_max_context_length,
+            # so a moe-local copy would stay None forever and every moe step
+            # would raise the "must call set_ezpz_max_context_length" branch
+            # below. Imported inside the function because agpt imports heavy
+            # model deps at module scope.
+            from torchtitan.experiments.ezpz.agpt import (
+                _EZPZ_MAX_CONTEXT_LENGTH as seq_len,
+            )
+
+            if seq_len is None:
+                raise ValueError(
+                    "3D [T, N, H] attention input but max_context_length is "
+                    "unknown; the trainer must call "
+                    "set_ezpz_max_context_length() before the first forward"
+                )
+            num_tokens, num_heads, head_dim = q_TNH.shape
+            if num_tokens % seq_len != 0:
+                raise ValueError(
+                    f"token count {num_tokens} is not a multiple of "
+                    f"max_context_length {seq_len}; this wrapper assumes the "
+                    "fixed-length rows the loader emits and cannot reshape a "
+                    "ragged batch"
+                )
+            batch = num_tokens // seq_len
+            q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
+            k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
+            v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
+        assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
         q, k, v = (
-            q_BLNH.transpose(1, 2),
-            k_BLNH.transpose(1, 2),
-            v_BLNH.transpose(1, 2),
+            q_TNH.transpose(1, 2),
+            k_TNH.transpose(1, 2),
+            v_TNH.transpose(1, 2),
         )
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(

@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-25
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -33,6 +33,8 @@ Reading rules:
 | `8744247` | 08-13 | **23h18m / 24h (97%)** | **2B-512 43,801->46,429 DONE (4.674T, target reached)** | watchdog-kill | 20B-256 8,301->9,850+ | 2B-512clr 9,201->16,984 (node death) | ckpt-key | 3/5 |
 | `8756070` | 08-16 | 9h14m / 24h (38%) | **2B-512 STAGE 2 1->3,312** (dolmino CPT, seed step-46429) | 20B-512 8,701->9,109 | 20B-256 9,801->10,381 | `Config.job` AttributeError | `Config.job` AttributeError | 3/5 |
 | `8756957` | 08-16 | **12h00m / 12h (100%)** | **2B-512 STAGE 2 3,301->7,731** (dolmino CPT) | 20B-512 9,101->9,695 | CCL KVS timeout at init | 2B-512clr 16,901->21,309 | **ckpt-key (3rd time)** | 3/5 |
+| `8760249` | 08-17 | **12h00m / 12h (100%)** | CCL KVS timeout -> **bad_alloc** at init | 20B-512 9,601->10,200 | 20B-256 10,301->11,100 | CCL KVS segfault at init | **ckpt-key, 4th time -- OPTIMIZER namespace** | 2/5 |
+| `8764675` | 08-20 | **12h00m31s / 12h (100%)** | CCL KVS timeout -> segfault at init | 20B-512 10,101->10,699 | 20B-256 11,001->11,800 | **bad_alloc** | SophiaG `update_hessian`: `'dict' object has no attribute 'mul_'` | 2/5 |
 
 **Walltime column.** `8744247` and `8756070` are `resources_used.walltime` from
 `qstat -xf` (authoritative). The rest predate PBS history retention and are
@@ -41,11 +43,38 @@ are a **lower bound** -- the banner stops when the umbrella script stops, which
 can precede the job's own end. `8744247` shows the gap: its log spans 12h30m
 against PBS's true 23h18m.
 
+**How large that gap gets: `8764675` banners only 1h47m (11:46:23 -> 13:33:24)
+against a PBS walltime of 12h00m31s -- 6.7x.** Its last banner line is
+`trainer 0 finished rc=143`; t1 and t2 went on to log 604 and 807 steps each
+after the umbrella stopped narrating, and no per-seat completion was ever
+recorded for them. So for any run without PBS history, the `.o` banner tells
+you when the umbrella went quiet, NOT when the job or its trainers ended, and
+a seat that looks dead in the banner may have trained for hours. Read the
+per-trainer `logs/multi-autoretry-<jobid>/trainer-N-*.console.log` for what a
+seat actually did; the umbrella log is not authoritative for anything after
+its final line.
+
 Read the percentage as *allocation actually used*, not as success -- `8714502`
 burned 67% of a 24h slot on nothing, and six of nine umbrellas used under 40%.
 That is the single largest source of wasted 2,098-node allocation in this
 table, and it is almost entirely startup faults and infra kills rather than
 training problems.
+
+**Three umbrellas in a row have now used ~all of their allocation** --
+`8744247` 97%, then `8756957` and `8760249` and `8764675` at 100%. All four
+asked for 12h or less; the 24h dispatches that kept dying young are the
+contrast. Treat 12h as the default ask.
+
+What the last two add to the taxonomy: **t0 died at init in both**, so the 2B
+stage-2 chain has been stalled since 08-16 while t1/t2 (the two 20B chains) ran
+the full window each time. That is where the +910 and +1,431 steps the
+dashboard was missing came from. And the t4 seat's failure has moved PAST the
+checkpoint-key rename this log records three times -- in `8760249` the shim
+fired but `optimizer.state...qkv_linear.wq.weight.step` was still missing, and
+in `8764675` the load SUCCEEDED (62s) and then 3,073 ranks died in SophiaG
+`update_hessian` on `'dict' object has no attribute 'mul_'`, i.e. the
+pre-#3623 nested->flat optimizer format. Converting step-9500 fixed it: smoke
+`8772046` loaded the converted seed in 10.42s and trained 8 clean steps.
 
 **`8756957` is the first umbrella to use 100% of its allocation** (12h00m23s of
 12h, `Exit_status = -29` = walltime expiry, not a fault), beating `8744247`'s

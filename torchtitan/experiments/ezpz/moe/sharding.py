@@ -106,10 +106,18 @@ def _set_moe_layer_sharding(
     # set_dense_ffn_sharding's `attn_x_placement: Placement` arg to
     # `attn_x_layout: SpmdLayout`. Build via the dense_*_placement
     # helpers (same pattern as deepseek_v3/sharding.py).
+    #
+    # `cp` later became a REQUIRED kwarg on dense_activation_placement and
+    # these two calls were not updated, so moe aborted in config.build() with
+    # `TypeError: missing 1 required keyword-only argument: 'cp'` before
+    # reaching a single step (MEASURED, smoke 8781696 arm 3). cp=spmd.S(0) is
+    # what every upstream callsite passes (decoder_sharding.py:117,129,136,
+    # 150,170) and matches the helper's own docstring -- activations are
+    # token-sharded on CP.
     attn_x_layout = (
         dense_sequence_parallel_placement()
         if enable_sp
-        else dense_activation_placement(tp=spmd.R)
+        else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
 
     # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
@@ -134,7 +142,7 @@ def _set_moe_layer_sharding(
             "freqs_cis": dense_param_placement(tp=Replicate()),
         },
         in_dst_shardings={
-            "x": dense_activation_placement(tp=Replicate()),
+            "x": dense_activation_placement(tp=Replicate(), cp=spmd.S(0)),
             "freqs_cis": dense_param_placement(tp=Replicate()),
         },
     )

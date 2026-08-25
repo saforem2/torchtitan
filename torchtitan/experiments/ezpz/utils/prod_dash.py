@@ -176,7 +176,7 @@ def detect_dark_background():
 # Remote aggregator: everything that needs cluster-side data lives here. It is
 # base64'd and piped to the cluster's .venv python (which has wandb). Emits a
 # single JSON object on stdout. The W&B "backbone" (full loss history per
-# chain) is expensive, so it is cached on the cluster at /tmp and only rebuilt
+# chain) is expensive, so it is cached on the cluster under ~/.cache and only rebuilt
 # when older than BACKBONE_TTL or when PD_FRESH=1. The cheap "live layer"
 # (qstat states + tails of currently-running .o logs) runs every call.
 # ---------------------------------------------------------------------------
@@ -195,7 +195,24 @@ EXP_MAX_AGE = %(exp_max_age)d
 LIVE_WINDOW = %(live_window)f
 USER = os.environ.get("USER", "foremans")
 PROJECT = "aurora_gpt/torchtitan.ezpz.train"
-CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
+# Not /tmp: an Aurora login node reboot (or a /tmp sweeper) drops the cache and
+# forces a ~14min cold rebuild on the next call. ~/.cache persists. Falls back
+# to /tmp only if HOME is unwritable, so this can never be the thing that
+# breaks the aggregator.
+_CD = os.path.join(os.environ.get("XDG_CACHE_HOME")
+                   or os.path.expanduser("~/.cache"), "prod_dash")
+try:
+    os.makedirs(_CD, exist_ok=True)
+except OSError:
+    _CD = "/tmp"
+CACHE = os.path.join(_CD, "backbone_%%s.json" %% USER)
+_OLD_CACHE = "/tmp/prod_dash_backbone_%%s.json" %% USER
+if not os.path.exists(CACHE) and os.path.exists(_OLD_CACHE):
+    try:
+        import shutil
+        shutil.copy2(_OLD_CACHE, CACHE)
+    except OSError:
+        pass
 os.chdir(REPO)
 
 # Progress goes to STDERR (stdout is reserved for the single JSON payload the
@@ -1047,8 +1064,70 @@ print(json.dumps(bb))
 # Client-side view of the aggregator's cache. The CACHE constant inside _AGG
 # is part of the REMOTE script string, so the client cannot see it -- this
 # duplicates the path deliberately rather than importing it.
-LOCAL_CACHE = "/tmp/prod_dash_backbone_%s.json" % os.environ.get(
+#
+# NOT /tmp: this is the offline fallback, i.e. the one payload you still need
+# when the cluster is unreachable and it cannot be rebuilt. macOS clears /tmp
+# on boot, so a reboot silently threw away the ~14min cold build and left the
+# dash with nothing to fall back on (observed 2026-08-25). ~/.cache survives
+# reboots and is the conventional home for expensive-to-regenerate artifacts.
+def _cache_dir() -> str:
+    d = os.path.join(
+        os.environ.get("XDG_CACHE_HOME")
+        or os.path.expanduser("~/.cache"),
+        "prod_dash",
+    )
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except OSError:
+        return "/tmp"          # unwritable HOME (odd container): degrade, don't crash
+
+
+LOCAL_CACHE = os.path.join(
+    _cache_dir(), "backbone_%s.json" % os.environ.get("USER", "foremans"))
+
+# One-time migration off the old /tmp path so an existing warm cache is not
+# thrown away on upgrade. Best-effort: a failure here just means a cold build.
+_OLD_LOCAL_CACHE = "/tmp/prod_dash_backbone_%s.json" % os.environ.get(
     "USER", "foremans")
+if not os.path.exists(LOCAL_CACHE) and os.path.exists(_OLD_LOCAL_CACHE):
+    try:
+        import shutil
+
+        shutil.copy2(_OLD_LOCAL_CACHE, LOCAL_CACHE)
+    except OSError:
+        pass
+
+
+def _save_local_cache(bb: dict) -> None:
+    """Persist a good payload so _cached_payload has something to serve.
+
+    Without this the offline fallback is dead code: _cached_payload reads
+    LOCAL_CACHE, but nothing in this codebase ever wrote it, so the file only
+    existed if an older code path or a manual copy happened to leave one behind
+    (and a /tmp clear removed it for good). Found 2026-08-25 -- a rebuild
+    completed all 9 chains and left no local cache at all.
+
+    Never raises: a cache write failing must not take down a working fetch.
+    Writes to a temp file in the same directory then renames, so a crash or a
+    concurrent reader can never observe a half-written JSON payload.
+    """
+    if not bb.get("chains"):
+        return                      # never cache an empty/failed payload
+    if bb.get("stale"):
+        return                      # do not re-save what we just read back
+    tmp = LOCAL_CACHE + ".partial"
+    try:
+        os.makedirs(os.path.dirname(LOCAL_CACHE), exist_ok=True)
+        with open(tmp, "w") as fh:
+            json.dump(bb, fh)
+        os.replace(tmp, LOCAL_CACHE)
+    except Exception as e:
+        sys.stderr.write("prod_dash: could not save local cache (%s)\n" % e)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def _cached_payload(why: str) -> dict | None:
@@ -1184,9 +1263,11 @@ def fetch(stderr_cb=None) -> dict:
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                payload = json.loads(line)
             except Exception:
-                pass
+                continue
+            _save_local_cache(payload)
+            return payload
     if not LOCAL:
         # Report what we OBSERVED, then rank causes by likelihood -- do not
         # assert one. The previous text blamed a dead ControlMaster socket
