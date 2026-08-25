@@ -67,23 +67,13 @@ SEED="${SEED:-42}"
 # TP=1 debugmodels passed clean -- the regression only surfaced at 64N.
 # agpt_debugmodel @ TP=2 exercises model.parallelize's local_map path on
 # a single node (12 tiles).
-#
-# The agpt arms pin seq-len for a DIFFERENT reason than the moe arm above.
-# agpt_debugmodel is agpt("debugmodel", local_batch_size=2), and agpt()
-# defaults seq_len=8192 -- so the debugmodel inherits
-# max_context_length=8192 while its dataloader hands attention T=2 tokens.
-# The #4121 folded-attention wrapper recovers B as T // max_context_length
-# and correctly refuses:
-#   ValueError: token count 2 is not a multiple of max_context_length 8192
-# That guard is protecting production (a bare transpose on 3D input swaps N
-# with H, which SDPA ACCEPTS -- a degraded loss curve, no traceback), so the
-# config is what is wrong here, not the wrapper. Production is unaffected:
-# measured q=(8192,16,128) at seq_len=8192, i.e. T is a whole number of rows
-# (Perlmutter 57536150; see tests/test_attn_unflatten.py).
+# NOTE: the agpt arms are deliberately NOT pinned to a smaller context.
+# agpt_debugmodel currently FAILS here, and pinning would hide the failure
+# rather than fix it -- see the folded-attention note below.
 DEFAULT_CONFIGS=(
-    "ezpz.agpt:agpt_debugmodel:--training.seq-len=512"
-    "ezpz.agpt:agpt_debugmodel:--training.seq-len=512 --parallelism.tensor-parallel-degree=2"
-    "ezpz.moe:moe_debugmodel:--training.seq-len=512 --training.local-batch-size=1"
+    "ezpz.agpt:agpt_debugmodel:"
+    "ezpz.agpt:agpt_debugmodel:--parallelism.tensor-parallel-degree=2"
+    "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.local-batch-size=1"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
     read -r -a CONFIGS <<< "${SMOKE_CONFIGS}"
