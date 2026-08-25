@@ -19,7 +19,10 @@
 > a scrambled reshape has the right shape and leaks across positions.
 > Regression tests: `tests/test_moe_mla_flat_layout.py` (15, CPU-only).
 >
-> **Still unverified: TP>1.** The `expand(-1, k_nope.size(1), -1)` change only
+> **Still unverified: TP>1** -- and blocked behind a separate bug, see
+> [`moe-tp2-wo-placement.md`](moe-tp2-wo-placement.md).
+>
+> **Original note:** The `expand(-1, k_nope.size(1), -1)` change only
 > matters at tp>1 and no single-rank test reaches it. Needs a real multi-rank
 > smoke before MoE runs at scale.
 
