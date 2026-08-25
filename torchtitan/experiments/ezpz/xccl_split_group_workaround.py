@@ -75,6 +75,21 @@ from torchtitan.tools.logging import logger
 _PATCHED_ATTR = "_ezpz_xccl_split_group_patched"
 
 
+# There is a SECOND, independent workaround for the same upstream gap in the
+# ezpz library: ezpz.distributed._xccl_split_workaround, a context manager
+# that temporarily clears the default PG's bound_device_id around two
+# specific mesh-construction calls. The two compose safely -- ours patches
+# DeviceMesh._init_one_process_group to take the new_group branch
+# regardless of bound_device_id, so a cleared value is consistent with what
+# we already do -- but if you are debugging mesh construction on XPU, know that
+# both exist and check which one is in play.
+#
+# Do NOT "simplify" either by dropping device_id on XPU. ezpz tried that and it
+# silently deadlocked FSDP2: without device-bound PGs, foreach_all_gather routes
+# some ranks to xpu:0 and others to xpu:LOCAL_RANK and they never meet
+# (Aurora job 8518207). A loud split_group failure is the better trade.
+
+
 def _should_patch() -> bool:
     """Return True iff we're on an XPU build with xccl available.
 
