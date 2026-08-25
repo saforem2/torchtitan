@@ -358,6 +358,26 @@ else
     VALIDATOR_FLAGS=("--validator.no-enable")
 fi
 
+# Grad-norm runaway guard. This script defaults to OPTIMIZER=sophiag, which is
+# the arm that blew up at 30B: grad_norm went 0.39 -> 100,611 in nine steps
+# while loss still read 3.957, and a controlled re-run from the same weights
+# AND optimizer state passed straight through -- so it is a knife-edge, not a
+# reproducible step. AdamW and Mano were at 0.30-0.58 on the same nodes and
+# data. See guides/known-bugs/sophiag-stochastic-divergence-30b.md.
+#
+# The guard compares against the run's own trailing median (healthy grad_norm
+# differs ~10x across optimizers and drifts down), skips warmup, and was
+# validated against four real logs: fires eight steps before the peak, clean
+# on adamw/mano/the re-run. Off by default in the trainer; on here because a
+# production chain running sophiag unguarded is the exact shape that burned
+# job 12473783.
+GRAD_NORM_ABORT="${GRAD_NORM_ABORT:-20.0}"
+if [[ "${GRAD_NORM_ABORT}" != "0" && "${GRAD_NORM_ABORT}" != "0.0" ]]; then
+    GRAD_NORM_FLAGS=("--grad-norm-abort=${GRAD_NORM_ABORT}")
+else
+    GRAD_NORM_FLAGS=()
+fi
+
 # ---- Launch with native auto-retry ----
 # No preflight: ezpz's STUCK_PRE_TRAINING guard already bails (without
 # burning spares) if init crashes twice with zero training progress.
@@ -390,6 +410,7 @@ ezpz launch \
     --checkpoint.async-mode="${CHECKPOINT_ASYNC_MODE:-disabled}" \
     "${DATALOADER_FLAGS[@]}" \
     "${VALIDATOR_FLAGS[@]}" \
+    "${GRAD_NORM_FLAGS[@]}" \
     --debug.print-config \
     --optimizer="${OPTIMIZER}" \
     --optimizer.lr="${LR}" \
