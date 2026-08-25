@@ -1,8 +1,27 @@
 # moe's MLA attention was never ported to the #4121 fold
 
-> **Canonical record.** Found 2026-08-25 by smoke `8781776`. **No agpt chain is
-> affected and no MoE production chain exists**, so this is a blocker for
-> running MoE at all, not a risk to anything in flight.
+> **RESOLVED 2026-08-25** by `38a0d595c`. Kept as the record of what the port
+> required and how it was verified. Original framing below.
+>
+> The port mirrors `torchtitan/models/deepseek_v3/model.py` (the upstream MLA
+> this forked from, which #4121 DID update) rather than inferring axes from the
+> traceback. Verified on CPU by RUNNING it, not by shape:
+>
+> - full `moe_debugmodel` (163M params): flat `[16]` tokens -> `[16, 256128]`
+>   logits, finite
+> - trains: loss 4.95 -> 2.33 over 3 steps, finite grads on all 83 param
+>   tensors, clean across 5 seeds
+> - **causality**: perturbing the last token changes ONLY that token
+> - **sequence isolation**: 3 folded seqs of 8, perturbing token 0 changes
+>   tokens 0-7 and nothing crosses into seq 1 or 2
+>
+> The last two are what separate a correct port from a wrong-but-plausible one:
+> a scrambled reshape has the right shape and leaks across positions.
+> Regression tests: `tests/test_moe_mla_flat_layout.py` (15, CPU-only).
+>
+> **Still unverified: TP>1.** The `expand(-1, k_nope.size(1), -1)` change only
+> matters at tp>1 and no single-rank test reaches it. Needs a real multi-rank
+> smoke before MoE runs at scale.
 
 ## Verdict
 
