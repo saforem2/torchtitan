@@ -1099,6 +1099,37 @@ if not os.path.exists(LOCAL_CACHE) and os.path.exists(_OLD_LOCAL_CACHE):
         pass
 
 
+def _save_local_cache(bb: dict) -> None:
+    """Persist a good payload so _cached_payload has something to serve.
+
+    Without this the offline fallback is dead code: _cached_payload reads
+    LOCAL_CACHE, but nothing in this codebase ever wrote it, so the file only
+    existed if an older code path or a manual copy happened to leave one behind
+    (and a /tmp clear removed it for good). Found 2026-08-25 -- a rebuild
+    completed all 9 chains and left no local cache at all.
+
+    Never raises: a cache write failing must not take down a working fetch.
+    Writes to a temp file in the same directory then renames, so a crash or a
+    concurrent reader can never observe a half-written JSON payload.
+    """
+    if not bb.get("chains"):
+        return                      # never cache an empty/failed payload
+    if bb.get("stale"):
+        return                      # do not re-save what we just read back
+    tmp = LOCAL_CACHE + ".partial"
+    try:
+        os.makedirs(os.path.dirname(LOCAL_CACHE), exist_ok=True)
+        with open(tmp, "w") as fh:
+            json.dump(bb, fh)
+        os.replace(tmp, LOCAL_CACHE)
+    except Exception as e:
+        sys.stderr.write("prod_dash: could not save local cache (%s)\n" % e)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def _cached_payload(why: str) -> dict | None:
     """Serve the last good backbone when the aggregator cannot be reached.
 
@@ -1232,9 +1263,11 @@ def fetch(stderr_cb=None) -> dict:
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                payload = json.loads(line)
             except Exception:
-                pass
+                continue
+            _save_local_cache(payload)
+            return payload
     if not LOCAL:
         # Report what we OBSERVED, then rank causes by likelihood -- do not
         # assert one. The previous text blamed a dead ControlMaster socket
