@@ -108,8 +108,97 @@ smoke ran without the 200-step warmup production uses.
 
 ## Tests
 
+`experiments/ezpz/tests/test_attention_layout_no_op_guard.py` (9 tests,
+CPU-only) pins the bad layout directly: the `B=1` identity-on-`v`, the
+`B>1` cross-row leak, the GQA ratio check that fails to catch either, and
+the `wo` width being `L` times too wide -- plus the correct path's
+causality and row isolation.
+
 `experiments/ezpz/tests/test_blendcorpus_fold_batch_dim.py` (7 tests,
 CPU-only, no corpus or GPU needed). Covers the fold's order-equivalence
 to core's `cat`, both attention shapes including GQA `n_kv != n_heads`,
 and -- as a negative control -- the `-1` document-id failure, so the
 silent-corruption mode stays pinned.
+
+## The competing fix that was wrong: `[B, L*N, H]`
+
+There is a second, incompatible "fix" for the same
+`token count 1 is not a multiple of max_context_length 8192` error, and
+it is worth recording because it is plausible, self-consistent, and
+trains without ever raising.
+
+Commit `5b4a81803` (2026-08-24, on `origin/ezpz`) patched the ATTENTION
+WRAPPER instead of the dataloader: it read dim 0 as the BATCH dim and
+unflattened as `[B, L*N, H]`, leaving blendcorpus emitting `[B, L]`. The
+commit message reasoned "the batch dim is PRESERVED; it is L and N that
+are folded together."
+
+That reading makes SDPA see a sequence of length 1 with 131072 heads.
+Causal attention over a single token is `softmax([one score]) = 1.0`, so
+the output is EXACTLY `v`, bit for bit. No token attends to any other and
+the model degenerates into a position-wise MLP, `wo(wv(x))`. It trains,
+the loss descends -- an MLP still learns unigram statistics -- and
+nothing ever raises.
+
+Measured on CPU, agpt-2b shapes (`D=2048, H=128, n_q=16, n_kv=4`):
+
+| | A: `[B, L*N, H]` (`5b4a81803`) | B: flat `[T]` fold (`42f4edfaa`) |
+| --- | --- | --- |
+| q / k | `(1, 131072, 128)` / `(1, 32768, 128)` | `(8192, 16, 128)` / `(8192, 4, 128)` |
+| seq len SDPA sees | 1 | 8192 |
+| heads SDPA sees | 131072 | 16 |
+| `max abs(out - v)` | **0.000e+00** | 5.392 |
+| `out.view(dim0, -1)` | `(1, 16777216)` | `(8192, 2048)` |
+
+### Why the obvious sanity check passes
+
+`131072 / 32768 == 4 == n_q / n_kv`. The GQA head ratio is preserved
+because both sides scale by `L`, so a ratio check confirms the wrong
+reading. Do not use it as evidence. The load-bearing check is
+`max abs(out - v) == 0`: if attention output equals `v` exactly, no
+attention happened.
+
+The width mismatch at `wo` is the other tell -- `(1, 16777216)` against
+the expected `(8192, 2048)`, off by a factor of `L`.
+
+### Two degenerate modes, depending on B
+
+Which failure you get under A depends on the batch, and only one of them
+is a clean no-op:
+
+| B | what SDPA sees | failure |
+| --- | --- | --- |
+| 1 (production blendcorpus) | sequence length 1 | output is EXACTLY `v`; no attention at all |
+| > 1 | sequence length B | batch rows attend to EACH OTHER |
+
+The cross-row leak runs FORWARD: with the batch dim standing in for the
+sequence, row `i` sits at position `i`, and `is_causal` lets later
+positions attend to earlier ones. Perturbing row 0 moves row 1 by ~100;
+row 0 is unreachable from row 1 (delta exactly `0.0`). Production runs
+`B=1`, so the shipped failure is the silent no-op.
+
+### What HEAD does (correct)
+
+`experiments/ezpz/agpt/__init__.py` reads dim 0 as TOKENS, recovers
+`B = T / max_context_length`, and reshapes to `[B, L, N, H]`. Verified
+end-to-end at `B=2`: `B` recovered exactly; perturbing the second half of
+`v` leaves first-half outputs bit-identical (causality holds); perturbing
+row 1 leaves row 0 bit-identical (rows isolated).
+
+### No production impact
+
+The AuroraGPT-project 20B chain
+(`agpt-20b-sophiag-dolma-n128-gbs1024`) last checkpointed `step-5600` on
+2026-08-16 08:05; `5b4a81803` is dated 2026-08-24 13:05. The chain had
+been dry for eight days -- the #4121 break was what stopped it, and that
+commit was the attempt to restart it. Zero steps trained under the bad
+reading.
+
+### Operational note
+
+The chain lives in `/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan`,
+NOT the `/eagle/datascience/...` checkout where the gate smokes ran. The
+two clones have separate `outputs/checkpoints/`. Checking one and
+concluding "no chain exists" is how a resume turns into a step-0 restart
+under the same ckpt-dir name; the `-A AuroraGPT` account and the checkout
+go together.
