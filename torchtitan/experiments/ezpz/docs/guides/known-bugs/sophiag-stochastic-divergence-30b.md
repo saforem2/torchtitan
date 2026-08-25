@@ -1,7 +1,9 @@
-# SophiaG: a non-deterministic grad-norm blow-up at 30B
+# SophiaG: a RECURRENT grad-norm blow-up at 30B
 
 **Seen:** 2026-08-25, job 12473783 (30B, GBS=960, constant LR 3.55e-05).
-**Status:** reproduced as NOT reproducible -- see the controlled re-run below.
+**Status:** RECURRENT. 2 of 2 runs from the same seed diverged, at different
+steps. An earlier version of this document concluded the opposite -- see
+"Correction" at the bottom for why that was wrong.
 
 ## What happened
 
@@ -55,7 +57,55 @@ differ. It tracked the original to five decimals at step 1001, then:
 It passed straight through, and by step 1058 was at loss 3.912 -- BELOW the
 original's pre-spike best.
 
+## The re-run diverged too, 128 steps later
+
+The re-run cleared step 1048 and kept training normally for 128 more steps --
+then blew up on its own schedule:
+
+| step | loss | grad_norm |
+|---:|---:|---:|
+| 1173 | 3.722 | 0.67 |
+| 1174 | 3.732 | **2.94** |
+| 1176 | 3.747 | **37.4** |
+| 1180 | 3.989 | 19,648 |
+| 1182 | 4.280 | 85,081 |
+| **1189** | -- | **204,016** |
+| 1219 | 8.831 | 467 |
+
+Same signature as the original: a few steps of quiet ramp (0.67 -> 2.9 -> 5.0),
+then four orders of magnitude. The peak was TWICE the original's, and the loss
+ended up worse (9.47 vs 8.16).
+
 ## What this means
+
+The blow-up is **recurrent, not a one-off**: 2 of 2 runs from the same seed
+diverged, with near-identical severity, at different steps (1048 and 1176).
+
+That is worse than either earlier reading. It is not a rare event that luck
+avoids, and it is not tied to a specific batch of data -- if it were, the
+re-run would have fired at 1048 where the data order was nearly identical.
+SophiaG at lr=3.55e-05 on this model **will** diverge; only the timing is
+unpredictable.
+
+Consistent with Phase 1, where SophiaG had the **narrowest usable LR band** of
+the three (blow-up at 3.55e-04, only 10x above its suggestion). The suggested
+LR may simply be too close to the cliff for this model, and a materially lower
+LR would be the thing to test next.
+
+## Correction
+
+The first version of this document concluded the blow-up was "not
+deterministic" on the strength of the re-run clearing step 1048. That was a
+badly scoped test: it watched a SPECIFIC STEP and the live tail stopped at
+1085, so it could only ever answer "did it fire in the same place", not "does
+it fire at all". The right question was the latter, and the answer is yes.
+
+The lesson is about the experiment design, not the optimizer: when testing
+whether a failure reproduces, run past the window you expect it in, and define
+the stopping condition by the BEHAVIOUR (no divergence for N steps) rather
+than by the step number where it happened last time.
+
+
 
 The blow-up is **not deterministic**. Identical weights and optimizer state,
 and floating-point nondeterminism alone was enough to avoid it entirely.
@@ -85,8 +135,11 @@ It skips warmup, and that is load-bearing rather than defensive: on the healthy
 arms EVERY grad_norm above 20x sits at step <= 19 (adamw 5,6,7,11 up to 82.3;
 mano 6..19 up to 74.3). Without the skip the guard aborts two good runs.
 
-Validated against four real logs: fires at step 1049 (eight steps before the
-peak), clean on adamw, mano, and the re-run.
+Validated against four real logs. It fires on BOTH divergences -- step 1049 in
+the original (8 steps before the peak) and step 1176 in the re-run (13 steps
+before its 204,016 peak) -- and stays clean on adamw and mano. Given the
+failure is recurrent rather than rare, this guard is not optional for any
+SophiaG run at this LR.
 
 ```bash
 --grad-norm-abort=20.0        # off by default (0.0)
