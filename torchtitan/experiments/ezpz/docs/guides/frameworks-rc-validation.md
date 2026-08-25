@@ -20,6 +20,101 @@ Gate on `import torchtitan.experiments.ezpz.agpt.config_registry`, never on
 `import agpt` -- `config/manager.py` masks every missing dependency behind one
 generic error, so the latter is a false pass.
 
+## Aurora deployment (2026-08-25): a DIFFERENT layout, and one blocker
+
+The recipe above is the **Sunspot** one. `frameworks/2026.1.0` reached Aurora
+in the maintenance that ended 2026-08-25, and it is deployed differently:
+
+| | Sunspot | Aurora validation nodes |
+|---|---|---|
+| torch | none -- module provides oneAPI only, venv supplies torch | **bundled**: the module's own `python3` (3.12.12) has torch `2.13.0a0+gitcf30153` |
+| venv | `venvs/fw-2026.1-rc2` | does not exist; no `grain`-bearing or RC venv on this host |
+| visible from login node | yes | **no** -- `/opt/aurora/26.181.0` exists only in the validation-node image |
+
+That last row matters operationally: `module avail frameworks` on an Aurora
+login node shows **only** `2025.3.1`, and a `find` for anything under
+`26.181.0` returns nothing. The module is real, but you cannot see it -- or
+test it -- without landing on a validation node.
+
+Queue access is by ACL (`acl_user_enable = True`); `foremans` was added
+2026-08-25. Three nodes, one of them offline for image testing:
+`x4413c2s2b0n0`, `x4003c0s0b0n0`, `x4508c2s0b0n0` (offline, "Image testing --
+bsallen [2026-08-18]").
+
+Image delta vs a login node: SLES **15-SP7** (login: 15-SP4), level-zero
+`1.6.33578.77-1146` (login: `.42-1146`), opencl `25.18.33578.77` (login:
+`.42`), oneAPI tree `26.181.0` (login: `25.190.0` + `26.26.0`).
+
+### BLOCKER: `import torch` fails until you export the module's own `lib/`
+
+Every torch import dies immediately after `module load frameworks/2026.1.0`:
+
+```
+torchcomms/__init__.py:42  ctypes.CDLL(libtorchcomms_path, mode=RTLD_LOCAL)
+OSError: libglog.so.0: cannot open shared object file: No such file or directory
+```
+
+`torchcomms` is imported from `torch/__init__.py`, so this gates everything --
+not an optional component.
+
+The library is not missing. It ships **inside the module's own tree** and the
+modulefile does not put that directory on `LD_LIBRARY_PATH`:
+
+```
+/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0/lib/libglog.so.0     (0.4.0)
+```
+
+`ldd libtorchcomms.so` reports `libglog.so.0 => not found` and
+`libgflags.so.2.2 => not found` (the torch libs also show not-found there, but
+resolve at import time through torch's own loader).
+
+Version skew is worth noting: 2025.3.1 ships `libglog.so.2` (0.7.1);
+2026.1.0 ships `libglog.so.0` (0.4.0) -- a downgrade, not an omission.
+
+**Workaround**, MEASURED to fix it (job `8781129`):
+
+```bash
+FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
+module load frameworks/2026.1.0
+export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
+```
+
+A `module load` must be at TOP LEVEL, never piped. `module load ... | tail -3`
+runs the load in a subshell and it silently evaporates -- python stays
+`/usr/bin/python3` 3.6.15 and every import fails with a misleading
+`No module named 'torch'`. Cost one allocation (job `8781054`) to relearn.
+
+### What passes on Aurora with the workaround (job `8781129`, 1N)
+
+| check | result |
+|---|---|
+| torch | `2.13.0a0+gitcf30153`, `xpu.is_available()` True, 12 devices, `Intel(R) Data Center GPU Max 1550` |
+| `import torchcomms` | OK |
+| bf16 matmul (512x512) | OK, mean 0.1505 |
+| SDPA fwd+bwd bf16 | OK, `|grad_q|` 51.5 |
+| **compiled** SDPA fwd+bwd | **OK**, `|grad_q|` 52.5 |
+| `dist.is_xccl_available()` | **True** (job `8781210`) |
+
+The compiled SDPA backward is the surface that failed on the Sunspot fw-RC with
+`assert_size_stride` (see `known-bugs/fw-rc-compile-sdpa-backward-tp4.md`).
+Same build hash, so this is RC4 and consistent with RC4 having fixed it --
+but note this is **1 rank**, not TP=4, so it does not yet retire that entry.
+
+`oneccl_bindings_for_pytorch` is absent and that is CORRECT, not a gap: it is
+the IPEX-era external shim, and torch 2.13 carries XCCL natively.
+
+### Not yet established
+
+- **XCCL collectives.** `is_xccl_available()` is True but no all_reduce has
+  completed. Two attempts failed in the harness, not the backend: PALS exports
+  `PMI_RANK`/`PMI_SIZE` rather than the `RANK`/`WORLD_SIZE` that `env://`
+  rendezvous wants (job `8781210`), then `EADDRINUSE` on a hardcoded port
+  (`8781295`). Use `ezpz launch` rather than hand-rolled rendezvous.
+- **Anything above 1 rank**, including the TP=4 question above.
+- Beware: `val-xccl.sh` set `pipefail` without `set -e`, so the job reported
+  `Exit_status = 0` while `mpiexec` failed. Do not read a 0 from these probes
+  as a pass.
+
 ## Results (job `12473146`, Sunspot, 2-4N, 10 steps each)
 
 | case | verdict | final loss | note |
