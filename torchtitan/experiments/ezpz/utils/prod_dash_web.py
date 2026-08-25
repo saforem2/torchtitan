@@ -180,6 +180,20 @@ main { display:flex; gap:12px; padding:12px; align-items:flex-start;
    280px aside 116px past its own box and overflowed the document by 104px
    (measured). Letting the items shrink is what actually stops that. */
 #chartwrap { flex:1 1 640px; min-width:340px; }
+/* Every metric at once, in a responsive grid. auto-fit + minmax means the
+   column count follows the window: 3-up on a wide screen, 1-up on a laptop,
+   with no breakpoint list to maintain. Each cell owns a <div> that uPlot
+   appends its canvas into. */
+.grid { display:grid; gap:10px;
+        grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); }
+.cell { border:1px solid var(--line); border-radius:5px; padding:6px 6px 2px; }
+.cell h4 { margin:0 0 4px 2px; font-size:12px; font-weight:600;
+           color:var(--muted); }
+.cell .plot { width:100%; }
+/* The focused metric reads first: full width, taller, above the grid. */
+#focuswrap { margin-bottom:12px; }
+h3.sec { margin:16px 0 6px 2px; font-size:12px; font-weight:600;
+         color:var(--muted); }
 aside { flex:0 1 380px; min-width:0; max-width:100%; }
 .legend { border:1px solid var(--line); border-radius:5px; overflow:hidden; }
 .legend div { display:flex; gap:8px; align-items:center; padding:5px 9px;
@@ -221,7 +235,13 @@ label.ctl { color:var(--muted); cursor:pointer; user-select:none }
 </header>
 <div id="err"></div>
 <main>
-  <div id="chartwrap"><div id="chart"></div></div>
+  <div id="chartwrap">
+    <div id="focuswrap"><div id="chart"></div></div>
+    <h3 class="sec" id="allsec">all metrics</h3>
+    <div class="grid" id="allgrid"></div>
+    <h3 class="sec" id="evalsec">eval benchmarks vs training step</h3>
+    <div class="grid" id="evalgrid"></div>
+  </div>
   <aside>
     <div class="legend" id="legend"></div>
     <div class="boardwrap"><table id="board"></table>
@@ -300,12 +320,13 @@ const colorFor = key => palette()[chainOrder().indexOf(key) % palette().length];
 // the tip HAS that metric. The tip is parsed from the .o per-step line, which
 // carries loss/grad_norm/tps/tflops/mfu but NOT lr -- so the lr curve simply
 // ends at the last W&B-synced step rather than being extended with undefined.
-function seriesFor(key, c) {
-  let s = ((c.series || {})[metric] || []).slice();
+function seriesFor(key, c, mk) {
+  const met = mk || metric;
+  let s = ((c.series || {})[met] || []).slice();
   const tip = c.live_tip;
-  if (tip && tip[metric] !== undefined && tip.step !== undefined &&
+  if (tip && tip[met] !== undefined && tip.step !== undefined &&
       (!s.length || tip.step > s[s.length - 1][0])) {
-    s = s.concat([[tip.step, tip[metric]]]);
+    s = s.concat([[tip.step, tip[met]]]);
   }
   if (!s.length) return null;
   const tps = (c.gbs || 0) * (c.seq_len || 0);
@@ -320,6 +341,22 @@ function seriesFor(key, c) {
     return s.map(p => [prior + p[0] * tps / 1e9, p[1]]);
   }
   return s;
+}
+
+// Eval scores come from c.evals.history (written by prod_dash._eval_scores),
+// not c.series -- different source, same [[step, value]] shape. Kept separate
+// because an eval point exists only where a checkpoint was actually evaluated,
+// which is a far sparser grid than the per-step training metrics.
+function evalSeriesFor(key, c, task) {
+  const h = ((c.evals || {}).history || {})[task];
+  if (!h || h.length < 2) return null;
+  const tps = (c.gbs || 0) * (c.seq_len || 0);
+  if (document.getElementById("tokens").checked) {
+    if (!tps) return null;
+    const prior = (c.prior_tokens || 0) / 1e9;
+    return h.map(p => [prior + p[0] * tps / 1e9, p[1]]);
+  }
+  return h.slice();
 }
 
 // p1/p99 across VISIBLE chains. Throughput metrics spike hard on checkpoint
@@ -338,26 +375,35 @@ function clipRange(cols) {
   return [lo - pad, hi + pad];
 }
 
-function draw() {
-  if (!payload) return;
+// ONE chart builder for every panel. `getter(key, chain)` returns that chain's
+// [[x, y], ...] for whichever metric this panel shows, so the focus chart, the
+// all-metrics grid and the eval grid share identical axis, color, liveness and
+// gap-spanning behavior instead of drifting apart.
+function buildChart(host, label, getter, opts2) {
+  const o = opts2 || {};
   const ch = payload.chains || {};
   const keys = chainOrder().filter(k => !hidden.has(k));
-  const logY = document.getElementById("ylog").checked;
+  const logY = o.noLog ? false : document.getElementById("ylog").checked;
 
   // uPlot wants one shared x array; chains have different step grids, so union
   // the x values and index each chain's y into it (null = no sample there,
   // which uPlot renders as a gap rather than interpolating).
   const prepared = [];
   for (const k of keys) {
-    const s = seriesFor(k, ch[k]);
-    if (s && s.length > 1) prepared.push([k, s]);
+    const ser = getter(k, ch[k]);
+    if (ser && ser.length > 1) prepared.push([k, ser]);
   }
-  const xs = [...new Set(prepared.flatMap(([, s]) => s.map(p => p[0])))]
+  host.innerHTML = "";
+  if (!prepared.length) {
+    host.innerHTML = '<p class="meta">no data</p>';
+    return null;
+  }
+  const xs = [...new Set(prepared.flatMap(([, ser]) => ser.map(p => p[0])))]
              .sort((a, b) => a - b);
   const data = [xs];
   const series = [{}];
-  for (const [k, s] of prepared) {
-    const m = new Map(s);
+  for (const [k, ser] of prepared) {
+    const m = new Map(ser);
     let ys = xs.map(x => (m.has(x) ? m.get(x) : null));
     if (logY) ys = ys.map(v => (v != null && v > 0 ? v : null));
     data.push(ys);
@@ -365,50 +411,119 @@ function draw() {
     series.push({
       label: ch[k].label || k,
       stroke: colorFor(k),
-      width: live ? 3 : 2,
+      width: live ? (o.thin ? 2 : 3) : (o.thin ? 1.4 : 2),
       alpha: live ? 1 : 0.55,
       // spanGaps MUST be true. Chains sit on DIFFERENT step grids, so the
       // union x-axis is ~3.5k values of which any one chain occupies ~600 --
       // the other ~83% are nulls meaning "this chain has no sample HERE",
       // not "training gapped". With spanGaps:false every chain renders as
       // isolated points and (points.show:false) draws nothing at all.
-      // Spanning connects each chain's own adjacent samples: the same curve
-      // matplotlib draws from that chain's private xs array.
       spanGaps: true,
-      points: { show: false },
+      // Eval points are sparse (one per evaluated ckpt, often <40 total), so
+      // showing the markers tells you where a real measurement sits rather
+      // than implying a continuous curve.
+      points: { show: !!o.points },
     });
   }
 
-  const yr = document.getElementById("clip").checked
+  const yr = (!o.noClip && document.getElementById("clip").checked)
              ? clipRange(data.slice(1)) : null;
-  const label = (METRICS.find(m => m[0] === metric) || [, metric])[1];
-  const w = document.getElementById("chartwrap").clientWidth;
   const opts = {
-    width: w, height: Math.max(340, Math.round(window.innerHeight * 0.62)),
+    width: o.width, height: o.height,
     // x is a step/token COUNT, not a timestamp. Without time:false uPlot
     // formats the axis as dates ("12/31/69" for small step numbers).
     scales: { x: { time: false },
-              y: { distr: logY ? 3 : 1, ...(yr ? { range: yr } : {}) } },
+              y: { distr: logY ? 3 : 1,
+                   ...(o.range ? { range: o.range } : (yr ? { range: yr } : {})) } },
     axes: [
-      { label: document.getElementById("tokens").checked
-               ? "tokens seen (billions)" : "training step (cumulative)",
+      { label: o.thin ? "" : (document.getElementById("tokens").checked
+               ? "tokens seen (billions)" : "training step (cumulative)"),
         stroke: dark() ? "#d5d5d5" : "#333",
-        grid: { stroke: dark() ? "#262b33" : "#eee" } },
-      { label, stroke: dark() ? "#d5d5d5" : "#333",
+        grid: { stroke: dark() ? "#262b33" : "#eee" },
+        size: o.thin ? 28 : 50 },
+      { label: o.thin ? "" : label, stroke: dark() ? "#d5d5d5" : "#333",
         grid: { stroke: dark() ? "#262b33" : "#eee" },
         // ~2e-5 values would all print as "0.00" under the default formatter.
-        ...(metric === "lr" ? { values: (u, ts) => ts.map(SCI), size: 70 } : {}) },
+        ...(o.sci ? { values: (u, ts) => ts.map(SCI), size: 62 } : {}) },
     ],
     legend: { show: false },
     series,
   };
+  return new uPlot(opts, data, host);
+}
+
+let gridCharts = [];
+
+function draw() {
+  if (!payload) return;
+  const w = document.getElementById("chartwrap").clientWidth;
+
+  // ---- focus chart: the tab-selected metric, full width ----
   if (chart) { chart.destroy(); chart = null; }
-  // Clear FIRST: uPlot appends its canvas here, so a leftover placeholder
-  // (or a destroyed chart's node) would stack up across redraws.
-  const host = document.getElementById("chart");
-  host.innerHTML = "";
-  if (data.length > 1) chart = new uPlot(opts, data, host);
-  else host.innerHTML = '<p class="meta">no data for this metric</p>';
+  const label = (METRICS.find(m => m[0] === metric) || [, metric])[1];
+  chart = buildChart(document.getElementById("chart"), label,
+                     (k, c) => seriesFor(k, c),
+                     { width: w,
+                       height: Math.max(300, Math.round(window.innerHeight * 0.46)),
+                       sci: metric === "lr" });
+
+  // Destroy before rebuilding: uPlot keeps window resize + pointer listeners
+  // per instance, so redrawing without destroy() leaks one listener set per
+  // refresh (the board auto-refreshes, so that compounds).
+  gridCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  gridCharts = [];
+
+  // ---- all metrics, small multiples ----
+  const grid = document.getElementById("allgrid");
+  grid.innerHTML = "";
+  const cw = () => Math.max(300, Math.floor(grid.clientWidth /
+                     Math.max(1, Math.floor(grid.clientWidth / 380))) - 18);
+  for (const [mk, mlab] of METRICS) {
+    if (mk === metric) continue;              // already the focus chart
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.innerHTML = `<h4>${mlab}</h4>`;
+    const host = document.createElement("div");
+    host.className = "plot";
+    cell.appendChild(host);
+    grid.appendChild(cell);
+    const c = buildChart(host, mlab, (k, ch) => seriesFor(k, ch, mk),
+                         { width: cw(), height: 190, thin: true,
+                           sci: mk === "lr" });
+    if (c) gridCharts.push(c);
+  }
+
+  // ---- eval benchmarks, one panel per task ----
+  const eg = document.getElementById("evalgrid");
+  eg.innerHTML = "";
+  const chs = payload.chains || {};
+  const tasks = [];
+  for (const k of chainOrder()) {
+    const h = ((chs[k] || {}).evals || {}).history || {};
+    for (const t of Object.keys(h)) if (!tasks.includes(t)) tasks.push(t);
+  }
+  const PREF = ["hellaswag", "arc_challenge", "arc_easy", "mmlu", "gsm8k",
+                "winogrande", "piqa"];
+  const ordered = PREF.filter(t => tasks.includes(t))
+                      .concat(tasks.filter(t => !PREF.includes(t)));
+  document.getElementById("evalsec").style.display = ordered.length ? "" : "none";
+  for (const t of ordered) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.innerHTML = `<h4>${t}</h4>`;
+    const host = document.createElement("div");
+    host.className = "plot";
+    cell.appendChild(host);
+    eg.appendChild(cell);
+    // Accuracy is a probability: pin y to [0,1] so panels are comparable and
+    // a 2-point curve does not fill the cell with a meaningless zoom. Never
+    // log-scaled, never outlier-clipped -- every eval point is a real
+    // measurement, not a checkpoint-step artifact.
+    const c = buildChart(host, t, (k, ch) => evalSeriesFor(k, ch, t),
+                         { width: cw(), height: 190, thin: true, points: true,
+                           noLog: true, noClip: true, range: [0, 1] });
+    if (c) gridCharts.push(c);
+  }
 }
 
 function drawLegend() {

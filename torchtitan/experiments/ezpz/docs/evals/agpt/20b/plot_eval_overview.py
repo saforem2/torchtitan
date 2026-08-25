@@ -377,7 +377,26 @@ def main() -> None:
     mds = load_mds()
     print(f"loaded 2B-MDS reference: {len(mds)} steps from {MDS_RESULTS_BASE}")
     print(f"loaded v1: {len(V1_RESULTS)} steps")
-    plot_per_task(V1_RESULTS, v2_by_nodes, v2_gbs, mds, FIG_DIR / "eval_overview.svg")
+
+    # Refuse to overwrite a good figure with an empty one. outputs/evals is
+    # gitignored and lives on the cluster, so running this from a laptop
+    # loads 0 steps for every disk-backed series -- and matplotlib will
+    # happily render and save the axes anyway. refresh_all.sh then
+    # auto-commits the result, so a chart silently loses its data with every
+    # step reporting success. Happened 2026-08-25: this figure went 6 series
+    # -> 3. V1_RESULTS is excluded from the count deliberately: it is
+    # hardcoded in this file, so it is present even when nothing loaded.
+    out_path = FIG_DIR / "eval_overview.svg"
+    loaded_points = sum(len(t) for t in v2_by_nodes.values()) + len(mds)
+    if loaded_points == 0 and out_path.exists():
+        raise SystemExit(
+            f"refusing to overwrite {out_path}: every disk-backed series\n"
+            f"  loaded 0 steps. Eval results are gitignored (outputs/evals)\n"
+            f"  and live on the cluster -- run this where the data is, or\n"
+            f"  leave the committed figure alone."
+        )
+
+    plot_per_task(V1_RESULTS, v2_by_nodes, v2_gbs, mds, out_path)
     print_table(V1_RESULTS, v2_by_nodes, v2_gbs)
 
 
