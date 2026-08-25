@@ -125,6 +125,21 @@ and stopped the run at rc=0 after 55 minutes, instead of letting it ride to
 grad_norm ~100,000 and burn the remaining ~7 hours of the window, which is
 what happened to replicates 1 and 2.
 
+### The regime persists -- it is not a transient
+
+Replicate 2 was deliberately left running well past its blow-up to show what
+the post-onset state actually looks like on the charts above. 306 steps after
+onset it is **still in it**: 72% of those steps exceed grad_norm 2.0, and it
+was still throwing excursions of 21.9, 16.2 and 61.8 at steps 1465-1467 --
+nearly 300 steps after the 204,016 peak at step 1189.
+
+For contrast, AdamW and Mano have never once exceeded 0.8 in ~1,100 combined
+steps.
+
+This is why the loss panel misleads on its own. Replicate 2's loss wanders
+back down toward 4.1-4.3 and looks like a recovering run; the grad_norm panel
+shows it is nothing of the kind. Read the SophiaG arms on the grad_norm chart.
+
 SophiaG at lr=3.55e-05 on this model **will** diverge; only the timing is
 unpredictable.
 
