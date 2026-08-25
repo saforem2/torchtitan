@@ -64,21 +64,31 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_BLNH: torch.Tensor,
-        k_BLNH: torch.Tensor,
-        v_BLNH: torch.Tensor,
+        q_TNH: torch.Tensor,
+        k_TNH: torch.Tensor,
+        v_TNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        # 57th sync: positional arg names MUST be the shape-suffixed
-        # q_BLNH/k_BLNH/v_BLNH to match the keys in
-        # set_gqa_inner_attention_local_map's in_dst_shardings -- the
-        # local_map contract check (protocols/module.py:_maybe_wrap_local_map)
-        # matches by positional-arg name, and asserts under TP>1 if a
-        # mapped input name is missing from in_dst_shardings.
+        # Positional arg names MUST be the shape-suffixed q_TNH/k_TNH/v_TNH to
+        # match the keys in set_gqa_inner_attention_local_map's
+        # in_dst_shardings (models/common/decoder_sharding.py:288) -- the
+        # local_map contract check matches by positional-arg NAME and asserts
+        # under TP>1 if a mapped input is missing.
+        #
+        # These were q_BLNH until 2026-08-25. #4121 (73aed7f6c) renamed the
+        # upstream keys _BLNH -> _TNH along with the layout change, and our
+        # port (476d16831) adapted this function's BODY without renaming its
+        # PARAMETERS -- so the contract silently broke for TP>1 while TP=1,
+        # which never wraps local_map, kept passing. MEASURED on smoke 8781623
+        # arm 2 (2N, TP=2):
+        #   AssertionError: XPUScaledDotProductAttention: local_map is set but
+        #   in_dst_shardings is missing entries for: ['q_BLNH','k_BLNH','v_BLNH']
+        # Exactly the failure mode the 57th sync's q_BLNH rename was written
+        # to prevent, reintroduced from the other direction.
         # #4121 (fold-batch-dim) reshaped the LM stack to a flat [T, N, H]
         # token layout, so these arrive 3D on the current tree. SDPA needs
         # [B, N, L, H], and a bare transpose(1, 2) on a 3D tensor swaps N with
@@ -94,7 +104,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # Upstream's own SDPA does the same bare transpose, and its flat-layout
         # path (VarlenAttention) needs CUDA flash attention, which XPU lacks --
         # so neither upstream branch covers this and the adaptation lives here.
-        folded = q_BLNH.ndim == 3
+        folded = q_TNH.ndim == 3
         if folded:
             seq_len = _EZPZ_MAX_CONTEXT_LENGTH
             if seq_len is None:
@@ -103,7 +113,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "unknown; the trainer must call "
                     "set_ezpz_max_context_length() before the first forward"
                 )
-            num_tokens, num_heads, head_dim = q_BLNH.shape
+            num_tokens, num_heads, head_dim = q_TNH.shape
             if num_tokens % seq_len != 0:
                 raise ValueError(
                     f"token count {num_tokens} is not a multiple of "
@@ -112,21 +122,21 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "reshape a ragged batch"
                 )
             batch = num_tokens // seq_len
-            q_BLNH = q_BLNH.view(batch, seq_len, num_heads, head_dim)
-            k_BLNH = k_BLNH.view(batch, seq_len, -1, head_dim)
-            v_BLNH = v_BLNH.view(batch, seq_len, -1, head_dim)
-        assert q_BLNH.ndim == 4, f"expected 4D, got {tuple(q_BLNH.shape)}"
+            q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
+            k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
+            v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
+        assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
         q, k, v = (
-            q_BLNH.transpose(1, 2),
-            k_BLNH.transpose(1, 2),
-            v_BLNH.transpose(1, 2),
+            q_TNH.transpose(1, 2),
+            k_TNH.transpose(1, 2),
+            v_TNH.transpose(1, 2),
         )
         # Avoid set_priority=True — triggers a torch._dynamo bug in
         # PyTorch 2.11 where FX proxy nodes are incorrectly passed to
         # int() during fake tensor tracing.
         # QK diagnostics. Module-level gate rather than a config on self: the
         # positional-arg names of this forward are contract-checked under TP>1
-        # (see the _BLNH note above), so the signature must not change. No-op
+        # (see the arg-name note above), so the signature must not change. No-op
         # and near-free when disabled -- see diagnostics/attention.py.
         _attn_diag.observe(q, k, scale)
         with sdpa_kernel(self.sdpa_backends):
