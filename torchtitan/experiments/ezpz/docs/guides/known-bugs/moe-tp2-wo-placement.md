@@ -61,8 +61,29 @@ therefore never installs it. So the control was invalid -- it measured the
 absence of our workaround, not a property of the stack. Our own moe run shows
 zero `split_group` errors and reaches the forward pass, exactly as expected.
 
-A valid control needs upstream `deepseek_v3` running under our
-`FaultTolerantTrainer` (or the workaround installed some other way).
+**Re-run with the workaround hoisted (`99f3aabe2`), job `8782983`: 0
+`split_group` errors -- upstream now clears mesh setup.** It then fails at a
+DIFFERENT point, still earlier than ours:
+
+```
+ValueError: When dp_mesh_dims is provided, all parameters must be DTensors on
+            the full SPMD mesh (e.g. via distribute_module).
+            Got plain tensor for parameter 'weight'.
+```
+
+Our moe runs (`8782821`, `8782843`) never hit that error -- 0 occurrences --
+so the two forks fail at genuinely different stages:
+
+| Run | Fails at |
+|---|---|
+| ours, TP=2 | `wo` placement, INSIDE the forward |
+| upstream dsv3, TP=2 | parameter distribution, BEFORE the forward |
+
+So upstream MoE at TP=2 remains unusable as a comparison on this stack, but for
+a second independent reason rather than the platform limit I first claimed.
+**Our fork gets further than upstream in both attempts.** Whether the
+`dp_mesh_dims` failure is an upstream bug, an XPU gap, or a config mismatch is
+not yet established -- it is a separate thread from this page's bug.
 
 ## Next step
 
@@ -80,3 +101,4 @@ measurement.
 | `8782821` | moe TP=2 | this bug |
 | `8782843` | moe TP=2, SP off | this bug (SP ruled out) |
 | `8782898` | upstream dsv3 TP=2 | INVALID control -- upstream trainer, so our xccl split_group workaround was never installed |
+| `8782983` | upstream dsv3 TP=2, workaround hoisted | 0 split_group errors; fails earlier than ours on `dp_mesh_dims` plain-tensor params |
