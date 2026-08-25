@@ -61,9 +61,9 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_BLNH: torch.Tensor,
-        k_BLNH: torch.Tensor,
-        v_BLNH: torch.Tensor,
+        q_TNH: torch.Tensor,
+        k_TNH: torch.Tensor,
+        v_TNH: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
@@ -71,23 +71,29 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         **kwargs,
     ) -> torch.Tensor:
         # 57th sync: positional arg names MUST be the shape-suffixed
-        # q_BLNH/k_BLNH/v_BLNH to match set_gqa_inner_attention_local_map's
+        # q_TNH/k_TNH/v_TNH to match set_gqa_inner_attention_local_map's
         # in_dst_shardings keys; the local_map contract check matches by
         # positional-arg name and asserts under TP>1 otherwise.
-        # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
+        # Renamed from _BLNH 2026-08-25: #4121 (73aed7f6c) renamed the
+        # upstream in_dst_shardings keys to _TNH and the contract matches by
+        # positional-arg NAME, so the old names asserted under TP>1 (MEASURED
+        # on the agpt twin, smoke 8781623 arm 2). The 4D assert below is a
+        # SEPARATE contract and is left as-is: unlike agpt, this wrapper never
+        # got #4121 fold handling, so it still expects [B, L, N, H].
+        # Upstream's
         # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
         # layout, and if that ever reaches here the tensors arrive 3D --
         # transpose(1, 2) then swaps N with H instead of L with N, and SDPA
         # ACCEPTS the result. The failure is a quietly degraded loss curve,
         # not a traceback. Assert the rank so it is loud instead.
-        assert q_BLNH.ndim == 4, (
-            f"expected 4D [B, L, N, H], got {tuple(q_BLNH.shape)} -- if the "
+        assert q_TNH.ndim == 4, (
+            f"expected 4D [B, L, N, H], got {tuple(q_TNH.shape)} -- if the "
             "fold-batch-dim token layout landed, this wrapper needs updating"
         )
         q, k, v = (
-            q_BLNH.transpose(1, 2),
-            k_BLNH.transpose(1, 2),
-            v_BLNH.transpose(1, 2),
+            q_TNH.transpose(1, 2),
+            k_TNH.transpose(1, 2),
+            v_TNH.transpose(1, 2),
         )
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
