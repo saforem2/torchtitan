@@ -59,8 +59,13 @@ def _committed_unflatten_block() -> str:
     """Return the shipped unflatten lines, dedented for exec()."""
     src = _SRC.read_text()
     m = re.search(
-        r"num_tokens, num_heads, head_dim = q_BLNH\.shape.*?"
-        r"v_BLNH = v_BLNH\.view\(batch, seq_len, -1, head_dim\)",
+        # Suffix is _TNH since b5f6f712f (the local_map contract matches
+        # positional-arg NAMES, so these track upstream's in_dst_shardings
+        # keys). Matched loosely so a future rename fails on the STRUCTURE
+        # here, not on the letters -- this test broke silently for a day
+        # because it pinned the old _BLNH spelling.
+        r"num_tokens, num_heads, head_dim = q_\w+\.shape.*?"
+        r"v_\w+ = v_\w+\.view\(batch, seq_len, -1, head_dim\)",
         src,
         re.S,
     )
@@ -74,6 +79,13 @@ def _committed_unflatten_block() -> str:
 
 _BLOCK = _committed_unflatten_block()
 
+# Derive the q/k/v variable names FROM the extracted block instead of hardcoding
+# them. The shape suffix is a naming convention that tracks upstream's local_map
+# keys (_BLNH -> _TNH in b5f6f712f), and hardcoding it here is what made this
+# test start failing silently the day that rename landed.
+_SUF = re.search(r"num_tokens, num_heads, head_dim = q_(\w+)\.shape", _BLOCK).group(1)
+_Q, _K, _V = f"q_{_SUF}", f"k_{_SUF}", f"v_{_SUF}"
+
 
 def _roundtrip(B: int, L: int, N: int, H: int, n_kv: int | None = None):
     """Fold a known 4D tensor, run the shipped code, compare exactly."""
@@ -85,16 +97,16 @@ def _roundtrip(B: int, L: int, N: int, H: int, n_kv: int | None = None):
     v_ref = k_ref.clone()
     ns = {
         # [T, N, H] with T = B*L -- the batch dim folded into tokens.
-        "q_BLNH": q_ref.reshape(B * L, N, H),
-        "k_BLNH": k_ref.reshape(B * L, n_kv, H),
-        "v_BLNH": v_ref.reshape(B * L, n_kv, H),
+        _Q: q_ref.reshape(B * L, N, H),
+        _K: k_ref.reshape(B * L, n_kv, H),
+        _V: v_ref.reshape(B * L, n_kv, H),
         "seq_len": L,
         "ValueError": ValueError,
     }
     exec(_BLOCK, ns)  # noqa: S102 -- deliberate: run the shipped lines
-    assert torch.equal(ns["q_BLNH"], q_ref), f"q mismatch B={B} L={L} N={N}"
-    assert torch.equal(ns["k_BLNH"], k_ref), f"k mismatch B={B} L={L} N={N}"
-    assert torch.equal(ns["v_BLNH"], v_ref), f"v mismatch B={B} L={L} N={N}"
+    assert torch.equal(ns[_Q], q_ref), f"q mismatch B={B} L={L} N={N}"
+    assert torch.equal(ns[_K], k_ref), f"k mismatch B={B} L={L} N={N}"
+    assert torch.equal(ns[_V], v_ref), f"v mismatch B={B} L={L} N={N}"
 
 
 def test_smoke_shape_lbs1() -> None:
@@ -128,9 +140,9 @@ def test_ragged_batch_raises() -> None:
     """
     ns = {
         # 100 tokens is not a whole number of 8192-token sequences.
-        "q_BLNH": torch.zeros(100, 16, 128),
-        "k_BLNH": torch.zeros(100, 4, 128),
-        "v_BLNH": torch.zeros(100, 4, 128),
+        _Q: torch.zeros(100, 16, 128),
+        _K: torch.zeros(100, 4, 128),
+        _V: torch.zeros(100, 4, 128),
         "seq_len": 8192,
         "ValueError": ValueError,
     }
