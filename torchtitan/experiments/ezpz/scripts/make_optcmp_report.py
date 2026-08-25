@@ -1,20 +1,39 @@
 #!/usr/bin/env python3
 """Build a W&B report for the fixed-batch optimizer comparison.
 
-Committed as a SCRIPT rather than run once by hand: the chain is still adding
-links, so the report has to be regenerable.
+Every arm is a CHAIN of runs -- the jobs are walltime-bounded and each link
+resumes from the previous link's checkpoint -- so the report has to stitch
+links together and has to be regenerable as new links land.
 
-NOTE: re-running does NOT overwrite. `report.save()` mints a NEW report id
-every call, even with an identical title -- this docstring previously claimed
-otherwise and ten same-titled reports accumulated before anyone checked. The
-URL printed at the end is the only current one; every earlier URL is a stale
-snapshot that still renders, which makes a shared link silently go out of
-date. Prune old ones in the W&B UI (the API exposes no report delete), and
-re-share the new URL after each regenerate.
+It does that by GROUP, not by pinned run ids. Each run already carries a
+wandb group ("adamw", "mano", "sophiag", "lrfind-<arm>", "rerun-<arm>"), set
+at launch by the PBS scripts, so the runset filters on group and the panels
+group by it. New chain links join their arm the moment they start; nothing
+here needs editing.
+
+The previous version pinned an explicit list of ~19 run ids. Every bug this
+report has had came from that list drifting out of date:
+
+  - the newest chain link was missing, so panels showed a truncated curve
+  - both SophiaG re-runs resolved and were labeled but were never added to
+    the main runset, so they appeared in NO main panel for the report's life
+  - only the LAST link of the sophiag arm got relabeled "SophiaG (diverged)",
+    so groupby split one arm into two legend entries
+
+None of those are possible now: there is no list to drift. The guards that
+existed to catch list drift are gone with it.
+
+NOTE: re-running does NOT overwrite. report.save() mints a NEW report id every
+call, even with an identical title. The URL printed at the end is the only
+current one; earlier URLs are stale snapshots that still render, which is how
+a shared link goes quietly out of date. Prune old ones in the W&B UI (the API
+exposes no report delete).
 
 Usage:
     python3 make_optcmp_report.py [--dry-run]
 """
+
+from __future__ import annotations
 
 import argparse
 import sys
@@ -26,41 +45,16 @@ ENTITY = "aurora_gpt"
 PROJECT = "agpt-30b-optcmp"
 TITLE = "30B optimizer comparison: AdamW vs Mano vs SophiaG (GBS=960, constant LR)"
 
-# Chain links per arm, oldest -> newest. Order matters for the reader, not for
-# W&B: each link is a separate run because the job is walltime-bounded and
-# resumes from the previous link's checkpoint.
-ARMS = {
-    "adamw":   ("AdamW",   "3.05e-05",
-                ["9r60gcoc", "b58dh9pe", "75w7d5nz", "t0f38yi7", "qcha7hxk",
-                 "w3uc6m5r"]),
-    "mano":    ("Mano",    "5.61e-05",
-                ["gipl1yu8", "01w94y2f", "k5tum9ye", "boo5194c", "81yrfd1n",
-                 "geryqvdw"]),
-    "sophiag": ("SophiaG", "3.55e-05",
-                ["hacandli", "9g9hj6ft", "jp7e6k8h", "atqm4546", "uve9aqcq"]),
-}
-
-# Phase 1 LR-finder sweeps, same project. Two runs exist per arm: the first
-# attempt read blendcorpus and was killed at ~19 steps, the second swept the
-# real fineweb-edu data for the full 100. Only the latter is meaningful, so
-# these ids are pinned rather than globbed -- and verified below by state,
-# step count, and dataset, so a wrong pin cannot quietly plot the killed run.
-LRFIND = {
-    "adamw":   ("dasclciy", "3.05e-05"),
-    "mano":    ("oe8w5i7d", "5.61e-05"),
-    "sophiag": ("25s1nia7", "3.55e-05"),
-}
-
-# The controlled re-run of the SophiaG divergence. Same seed checkpoint, same
-# optimizer state (initial_load_model_only=False), same LR -- only the data
-# order and RNG differ. Its own W&B group so it cannot be mistaken for the
-# original arm.
-RERUN = ("a8i1825t", "sophiag")
-
-# Third replicate of the divergence, forked from the same step-1000 seed with
-# --debug.seed=42 and the grad-norm guard armed at 20x. Exists to put a RATE on
-# the 2-of-2: a third distinct onset step means recurrent-with-random-timing.
-RERUN2 = ("9ewej3bc", "sophiag")
+# Groups, not run ids. These are set at launch (WANDB_RUN_GROUP in the PBS
+# scripts), so a new chain link joins its arm automatically.
+ARM_GROUPS = ["adamw", "mano", "sophiag"]
+LRFIND_GROUPS = ["lrfind-adamw", "lrfind-mano", "lrfind-sophiag"]
+# Each SophiaG divergence replicate has its own rerun-* group, so they stay
+# distinguishable from each other and from the original arm.
+RERUN_GROUP_PREFIX = "rerun-"
+# A replicate has to outlive the earliest observed divergence onset (step 1048)
+# to say anything about divergence. Below this it is an aborted launch.
+MIN_RERUN_STEPS = 1040
 
 DIVERGENCE_MD = """
 ## The SophiaG divergence -- it happens twice
@@ -294,33 +288,37 @@ nats behind Mano. Its ordering is the least settled of the three.
 """
 
 
-def _check_groupby(api, ids, key, panel):
-    """Every run in a panel must have a DISTINCT value for its groupby key.
+def _discover(api) -> dict[str, list]:
+    """Map group -> runs, for every group this report displays.
 
-    Three chart bugs in this report came from asserting structure instead of
-    querying it, and this one was the worst: the re-run carried
-    optimizer_name=None, so grouping merged it into the original's trace and
-    the panel captioned "the re-run that avoided the blow-up" drew the
-    divergence as a single line -- arguing the opposite of the finding.
-
-    A missing or duplicated value never errors in W&B; it silently merges. So
-    check it here, where it can fail loudly.
+    Reads the project instead of trusting a hardcoded list. A group that is
+    expected but absent is an error worth stopping on: it means a launch
+    script changed its WANDB_RUN_GROUP and the report would silently render
+    a missing arm.
     """
-    seen = {}
-    for rid in ids:
-        r = api.run(f"{ENTITY}/{PROJECT}/{rid}")
-        v = r.config.get(key)
-        if v is None:
-            print(f"ERR {panel}: run {rid} has no {key!r} -- it would merge "
-                  "into another run's line")
-            return False
-        seen.setdefault(v, []).append(rid)
-    dupes = {v: r for v, r in seen.items() if len(r) > 1}
-    if dupes and len(seen) < 2:
-        print(f"ERR {panel}: all runs share {key}={list(seen)[0]!r} -- "
-              "the panel would draw ONE merged line")
-        return False
-    return True
+    by_group: dict[str, list] = {}
+    for run in api.runs(f"{ENTITY}/{PROJECT}"):
+        if not run.group:
+            continue  # smoke/preflight runs, never part of the comparison
+        by_group.setdefault(run.group, []).append(run)
+
+    # Drop aborted launches. Discovery is only better than a pinned list if it
+    # also declines to plot runs that never produced a comparable trajectory:
+    # group `rerun-sophiag-seed42` is the first attempt at replicate 3, which
+    # died at step 1001 with a NameError in the grad-norm guard. Plotted, it
+    # reads as a replicate that survived where the others blew up. The
+    # threshold is deliberately low -- it excludes launch failures, not short
+    # runs -- and lr-finder sweeps are exactly 100 steps by design.
+    kept = {}
+    for group, runs in by_group.items():
+        longest = max((r.summary.get("_step") or 0) for r in runs)
+        if group.startswith(RERUN_GROUP_PREFIX) and longest < MIN_RERUN_STEPS:
+            print(f"  SKIP {group}: longest run reached step {longest} "
+                  f"(< {MIN_RERUN_STEPS}), an aborted launch rather than a "
+                  "replicate")
+            continue
+        kept[group] = runs
+    return kept
 
 
 def main() -> int:
@@ -329,168 +327,46 @@ def main() -> int:
                     help="build the report object but do not save it")
     args = ap.parse_args()
 
-    # Verify every run id actually resolves BEFORE building panels: a typo'd id
-    # yields a silently empty line rather than an error, which is the worst
-    # outcome for a report someone else reads.
     api = wandb.Api()
-    missing = []
-    for arm, (_, _, ids) in ARMS.items():
-        for rid in ids:
-            try:
-                api.run(f"{ENTITY}/{PROJECT}/{rid}")
-            except Exception:
-                missing.append(f"{arm}/{rid}")
+    by_group = _discover(api)
+
+    rerun_groups = sorted(g for g in by_group if g.startswith(RERUN_GROUP_PREFIX))
+    expected = ARM_GROUPS + LRFIND_GROUPS
+    missing = [g for g in expected if g not in by_group]
     if missing:
-        print("MISSING run ids (report would render empty lines):")
-        for m in missing:
-            print("   ", m)
+        print(f"ERR expected groups absent from {PROJECT}: {missing}")
+        print("    a launch script's WANDB_RUN_GROUP probably changed; the "
+              "report would render an empty arm")
         return 1
-    print(f"verified {sum(len(v[2]) for v in ARMS.values())} run ids resolve")
 
-    # Label every run with a FLAT, groupable key. config["optimizer"] is a
-    # nested dict (param_groups -> [{optimizer_name: ...}]), and W&B cannot
-    # group on a dict -- doing so renders all 15 runs as one indistinguishable
-    # blob, which is exactly how the first version of this report shipped.
-    # Derive the label from each run's OWN config rather than the id lists
-    # above: a mislabeled run would put the wrong curve under the wrong name,
-    # which is worse than no grouping.
-    expect = {"adamw": "AdamW", "mano": "Mano", "sophiag": "SophiaG"}
-    for arm, (_, _, ids) in ARMS.items():
-        for rid in ids:
-            r = api.run(f"{ENTITY}/{PROJECT}/{rid}")
-            got = r.config["optimizer"]["param_groups"][0]["optimizer_name"]
-            if got != expect[arm]:
-                print(f"ERR {rid}: config says {got}, expected {expect[arm]}")
-                return 1
-            if r.group != arm or r.config.get("optimizer_name") != got:
-                r.group = arm
-                r.config["optimizer_name"] = got
-                r.config["arm"] = arm
-                r.update()
-    for arm, (rid, _) in LRFIND.items():
-        fr = api.run(f"{ENTITY}/{PROJECT}/{rid}")
-        got = fr.config["optimizer"]["param_groups"][0]["optimizer_name"]
-        if fr.config.get("optimizer_name") != got or fr.group != f"lrfind-{arm}":
-            fr.group = f"lrfind-{arm}"
-            fr.config["optimizer_name"] = got
-            fr.update()
-    print("labeled all runs with group + flat optimizer_name")
+    for g in expected + rerun_groups:
+        runs = by_group[g]
+        steps = max((r.summary.get("_step") or 0) for r in runs)
+        print(f"  {g:24} {len(runs):2d} run(s), max step {steps}")
+    print(f"discovered {len(expected) + len(rerun_groups)} groups, "
+          f"{sum(len(by_group[g]) for g in expected + rerun_groups)} runs")
 
-    # Verify every metric a panel plots EXISTS on the runs. A wrong key does
-    # not error -- W&B renders "Select runs that logged <key>", an empty panel
-    # that looks like a data problem rather than a typo. Three of the six keys
-    # in the first version of this report were wrong for exactly that reason.
-    probe = api.run(f"{ENTITY}/{PROJECT}/{ARMS['adamw'][2][-1]}")
-    have = set(probe.summary.keys())
-    want = ["loss_metrics/global_avg_loss", "loss_metrics/global_max_loss",
-            "grad_norm", "lr", "throughput(tps)", "mfu(%)"]
-    absent = [k for k in want if k not in have]
-    if absent:
-        print("MISSING metric keys (panels would render empty):")
-        for k in absent:
-            print("   ", k)
-        print("  available:", sorted(k for k in have if not k.startswith("_")))
-        return 1
-    print(f"verified {len(want)} metric keys exist on the runs")
-
-    # Verify the LR-finder pins are the REAL sweeps, not the killed first
-    # attempt: 100 steps, finished, and on fineweb rather than blendcorpus.
-    for arm, (rid, _) in LRFIND.items():
-        fr = api.run(f"{ENTITY}/{PROJECT}/{rid}")
-        ds = fr.config.get("dataloader", {})
-        ds = ds.get("dataset") if isinstance(ds, dict) else ds
-        if fr.state != "finished" or ds != "fineweb_edu_local":
-            print(f"ERR lr-finder {arm}/{rid}: state={fr.state} dataset={ds} "
-                  "-- this looks like the killed blendcorpus attempt")
-            return 1
-    print("verified 3 lr-finder runs (finished, fineweb, full sweep)")
-
-    # Label the rerun too. It was previously left with optimizer_name=None,
-    # so grouping on that key merged it INTO the original's line -- the panel
-    # meant to show "the rerun avoided the blow-up" drew both as one trace and
-    # argued the opposite. Give it a distinct value rather than reusing
-    # "SophiaG", which would collide with the original by construction.
-    _rr = api.run(f"{ENTITY}/{PROJECT}/{RERUN[0]}")
-    if _rr.config.get("optimizer_name") != "SophiaG re-run":
-        _rr.config["optimizer_name"] = "SophiaG re-run"
-        _rr.config["arm"] = "sophiag-rerun"
-        _rr.update()
-    for _rid in ARMS["sophiag"][2]:
-        _orig = api.run(f"{ENTITY}/{PROJECT}/{_rid}")
-        if _orig.config.get("optimizer_name") != "SophiaG (diverged)":
-            _orig.config["optimizer_name"] = "SophiaG (diverged)"
-            _orig.update()
-    _rr2 = api.run(f"{ENTITY}/{PROJECT}/{RERUN2[0]}")
-    if _rr2.config.get("optimizer_name") != "SophiaG replicate 3 (seed 42)":
-        _rr2.config["optimizer_name"] = "SophiaG replicate 3 (seed 42)"
-        _rr2.config["arm"] = "sophiag-rerun2"
-        _rr2.update()
-    print("labeled all three divergence replicates distinctly")
-
-    rr = api.run(f"{ENTITY}/{PROJECT}/{RERUN[0]}")
-    if "rerun" not in (rr.group or ""):
-        print(f"ERR rerun {RERUN[0]}: group={rr.group!r} -- expected a rerun-* "
-              "group; this may be the ORIGINAL arm, which would make the "
-              "comparison panel plot the same run twice")
-        return 1
-    print(f"verified rerun run (group={rr.group})")
-
-    if not _check_groupby(api, [ARMS["sophiag"][2][-1], RERUN[0], RERUN2[0]],
-                          "optimizer_name", "divergence comparison"):
-        return 1
-    if not _check_groupby(api, [v[0] for v in LRFIND.values()],
-                          "optimizer_name", "lr finder"):
-        return 1
-    print("verified groupby keys are distinct per panel")
-
-    # Include the re-runs. Built from ARMS alone, the main panels silently
-    # omitted every SophiaG replicate -- they were only ever visible in the
-    # dedicated divergence panel further down.
-    all_ids = ([r for _, _, ids in ARMS.values() for r in ids]
-               + [RERUN[0], RERUN2[0]])
-    # `filters` is parsed as a Python expression by wandb_workspaces (it walks
-    # the AST), NOT as a mongo-style dict -- passing {"name": {"$in": ...}}
-    # raises "Unsupported expression type: ast.Dict".
+    # The comparison panels show the three arms plus every divergence
+    # replicate. Group is the legend key, so each arm is ONE trace across all
+    # its chain links and each replicate stays separate.
+    main_groups = ARM_GROUPS + rerun_groups
     runset = wr.Runset(
-        entity=ENTITY, project=PROJECT, name="all arms",
-        filters=f"ID in {all_ids!r}",
+        entity=ENTITY, project=PROJECT, name="all arms + divergence replicates",
+        filters=f"group in {main_groups!r}",
+        groupby=["group"],
     )
-
-    # Every run the report knows about must appear in the main runset --
-    # resolving is not the same as being displayed.
-    _known = set(all_ids)
-    _expected = ({r for _, _, ids in ARMS.values() for r in ids}
-                 | {RERUN[0], RERUN2[0]})
-    _missing = _expected - _known
-    if _missing:
-        print(f"ERR runs pinned but NOT in the main runset: {sorted(_missing)}"
-              " -- they would resolve, pass every other check, and still be "
-              "invisible in the loss/grad_norm panels")
-        return 1
-    print(f"verified all {len(_known)} runs appear in the main runset")
-
-    # One arm must not split into two legend entries.
-    for _arm, (_label, _lr, _ids) in ARMS.items():
-        _names = {api.run(f"{ENTITY}/{PROJECT}/{i}").config.get("optimizer_name")
-                  for i in _ids}
-        if len(_names) != 1:
-            print(f"ERR arm {_arm!r} has {len(_names)} distinct "
-                  f"optimizer_name values {sorted(map(str, _names))} -- "
-                  "groupby will draw it as multiple traces")
-            return 1
-    print("verified each arm carries ONE optimizer_name across its links")
 
     def lines(metric, title, log_y=False):
         return wr.LinePlot(
             title=title, x="_step", y=[metric],
             log_y=log_y, smoothing_factor=0.0,
-            groupby="optimizer_name", legend_position="east",
+            groupby="group", legend_position="east",
         )
 
     report = wr.Report(
         entity=ENTITY, project=PROJECT, title=TITLE,
         description="Fixed-batch optimizer comparison at 30B. Regenerate with "
-                    "scripts/make_optcmp_report.py",
+                    "scripts/make_optcmp_report.py (groups, not pinned ids).",
         blocks=[
             wr.MarkdownBlock(text=INTRO),
             wr.PanelGrid(runsets=[runset], panels=[
@@ -506,64 +382,53 @@ def main() -> int:
             wr.PanelGrid(
                 runsets=[wr.Runset(
                     entity=ENTITY, project=PROJECT, name="lr finder sweeps",
-                    filters=f"ID in {[v[0] for v in LRFIND.values()]!r}",
+                    filters=f"group in {LRFIND_GROUPS!r}",
+                    groupby=["group"],
                 )],
                 panels=[wr.LinePlot(
                     title="LR finder: loss vs LEARNING RATE (log x)",
                     x="lr", y=["loss_metrics/global_avg_loss"],
                     log_x=True,
-                    groupby="optimizer_name", legend_position="east",
+                    groupby="group", legend_position="east",
                 )],
             ),
             wr.MarkdownBlock(text=DIVERGENCE_MD),
             wr.PanelGrid(
                 runsets=[wr.Runset(
                     entity=ENTITY, project=PROJECT,
-                    name="sophiag: all three divergence replicates",
-                    filters=f"ID in {[ARMS['sophiag'][2][-1], RERUN[0], RERUN2[0]]!r}",
+                    name="sophiag: original + every divergence replicate",
+                    filters=f"group in {['sophiag'] + rerun_groups!r}",
+                    groupby=["group"],
                 )],
                 panels=[
                     wr.LinePlot(title="grad_norm: every replicate blows up "
                                       "(log scale; healthy arms never exceed 0.8)",
                                 x="_step", y=["grad_norm"], log_y=True,
-                                groupby="optimizer_name",
-                                legend_position="east"),
+                                groupby="group", legend_position="east"),
                     wr.LinePlot(title="loss: same window",
                                 x="_step", y=["loss_metrics/global_avg_loss"],
-                                groupby="optimizer_name",
-                                legend_position="east"),
+                                groupby="group", legend_position="east"),
                 ],
             ),
-            wr.MarkdownBlock(text="## Throughput\n\nAll three arms hold ~28% "
-                                  "MFU, so no arm is paying a speed penalty "
-                                  "for its optimizer."),
-            wr.PanelGrid(runsets=[runset], panels=[
-                lines("throughput(tps)", "tokens/sec/GPU"),
-                lines("mfu(%)", "MFU (%)"),
-            ]),
         ],
     )
+
     if args.dry_run:
         print("dry run: report built, not saved")
         print(f"  title  : {TITLE}")
-        print(f"  runs   : {len(all_ids)}")
+        print(f"  groups : {main_groups}")
         print(f"  blocks : {len(report.blocks)}")
         return 0
-    _prior = []
-    try:
-        _prior = [r for r in api.reports(f"{ENTITY}/{PROJECT}")
-                  if getattr(r, "id", None)]
-    except Exception:
-        pass
 
+    prior = len([r for r in api.reports(f"{ENTITY}/{PROJECT}")])
     url = report.save().url
-    if len(_prior) > 1:
-        print(f"NOTE {len(_prior)} same-project reports already existed; "
-              "save() mints a new id rather than overwriting, so the older "
-              "ones are now stale snapshots. Prune them in the W&B UI.")
+    if prior > 1:
+        print(f"NOTE {prior} same-project reports already existed; save() "
+              "mints a new id rather than overwriting, so the older ones are "
+              "now stale snapshots. Prune them in the W&B UI.")
     print(f"REPORT URL {url}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
