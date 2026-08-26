@@ -105,6 +105,25 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # path (VarlenAttention) needs CUDA flash attention, which XPU lacks --
         # so neither upstream branch covers this and the adaptation lives here.
         folded = q_TNH.ndim == 3
+        # --- TEMPORARY PROBE (EZPZ_MLA_PLACEMENT_PROBE=1), remove with the
+        # moe TP>1 investigation. Mirrors the moe probe so agpt and moe can be
+        # compared on identical output.
+        import os as _os
+
+        if _os.environ.get("EZPZ_MLA_PLACEMENT_PROBE") == "1":
+            import torch.distributed as _d
+
+            if not (_d.is_initialized() and _d.get_rank() != 0):
+                print(
+                    "[AGPT-PROBE] in  q ndim=%d shape=%-22s placements=%s folded=%s"
+                    % (
+                        q_TNH.ndim,
+                        tuple(q_TNH.shape),
+                        getattr(q_TNH, "placements", "PLAIN"),
+                        folded,
+                    ),
+                    flush=True,
+                )
         if folded:
             seq_len = _EZPZ_MAX_CONTEXT_LENGTH
             if seq_len is None:
@@ -125,6 +144,15 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
             q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
             k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
             v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
+        if _os.environ.get("EZPZ_MLA_PLACEMENT_PROBE") == "1":
+            import torch.distributed as _d2
+
+            if not (_d2.is_initialized() and _d2.get_rank() != 0):
+                print(
+                    "[AGPT-PROBE] out q shape=%-24s placements=%s"
+                    % (tuple(q_TNH.shape), getattr(q_TNH, "placements", "PLAIN")),
+                    flush=True,
+                )
         assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
         q, k, v = (
             q_TNH.transpose(1, 2),
