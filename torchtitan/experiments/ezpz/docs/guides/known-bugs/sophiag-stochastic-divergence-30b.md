@@ -81,27 +81,59 @@ ended up worse (9.47 vs 8.16).
 Quantified across the four arms, counting post-warmup steps (step > 20) whose
 grad_norm exceeds 2.0:
 
-| arm | steps | grad_norm > 2.0 | max grad_norm |
+| arm | post-warmup steps | grad_norm > 2.0 | max grad_norm |
 |---|---:|---:|---:|
-| AdamW | 568 | **0** | **0.8** |
-| Mano | 562 | **0** | **0.8** |
-| SophiaG | 565 | 365 | 100,611 |
-| SophiaG re-run | 379 | 135 | 204,017 |
+| AdamW | 1,984 | 54 (**2.7%**) | 14.6 |
+| Mano | 1,983 | 128 (**6.5%**) | 30.0 |
+| SophiaG | 1,524 | 573 (**37.6%**) | 100,611 |
+| SophiaG re-run | 644 | 380 (**59.0%**) | 204,017 |
 
-The healthy optimizers never come within a factor of 2.5 of the threshold in
-~1,100 combined steps. There is no overlap between the two populations.
+An earlier version of this table reported **0 excursions and max 0.8** for both
+healthy arms. That was wrong: it was computed from a single chain link's
+`train.log` rather than the whole chain, and each arm is six chained jobs, so
+it missed every excursion outside that one window. Mano has reached 30.0.
 
-Splitting SophiaG at its onset step shows the behavior is bimodal rather than
-a degradation:
+The separation survives the correction but is quantitative, not absolute. The
+healthy arms spend 3-7% of steps above 2.0 and peak in the tens; the SophiaG
+arms spend 38-59% there and peak in the hundred-thousands -- a factor of
+~3,000 in magnitude.
+
+What actually discriminates them is the SHAPE of an excursion, not its
+existence. Mano's largest late spike (3.84 at step 1944) ramped over six steps
+-- 0.24, 0.39, 0.55, 1.03, 3.84 -- with the loss moving alongside it (2.89 ->
+3.09), and was back under 1.0 within five steps: a hard batch, not a state
+change. SophiaG's onsets are discontinuities under a nearly flat loss: 0.39 ->
+2.41 -> 89.9 -> 437 -> 1702 while the loss moves only 3.957 -> 4.089.
+
+The populations overlap in KIND but not in degree: every arm has excursions,
+and SophiaG's are three orders of magnitude larger.
+
+Splitting SophiaG at its first onset (step 1048), measured over the full
+chain:
 
 | window | steps with grad_norm > 2.0 | max |
 |---|---:|---:|
-| SophiaG, steps 21-1047 (pre-onset) | **0 / 147** | 0.921 |
+| SophiaG, steps 21-1047 (pre-onset) | 184 / 1,027 (**17.9%**) | 75.2 |
+| AdamW, same window | 54 / 1,027 (5.3%) | 14.6 |
+| Mano, same window | 121 / 1,027 (11.8%) | 30.0 |
 | SophiaG, steps 1049+ (post-onset) | 364 / 417 (**87%**) | 100,611 |
 | re-run, steps 1176+ (post-onset) | 131 / 204 (**64%**) | 204,017 |
 
-Before onset SophiaG is indistinguishable from AdamW and Mano. After onset it
-sits in a persistent high-gradient regime and does not leave it.
+An earlier version of this document reported the pre-onset window as
+**0 / 147, max 0.921** and concluded the behavior was bimodal -- a clean flip
+from healthy-looking into a bad regime. That number came from reading ONE
+chain link's `train.log` when each arm is six chained jobs, so it missed every
+excursion outside that window.
+
+On the full chain SophiaG is already the noisiest arm BEFORE its blow-up:
+17.9% of pre-onset steps above 2.0 against AdamW's 5.3% and Mano's 11.8%, and
+a pre-onset peak of 75.2 that neither healthy arm comes near. So this is
+escalation from an elevated baseline, not a flip between two clean states --
+and that elevated baseline is a usable early-warning signal, where waiting for
+the discontinuity is not.
+
+After onset it sits in a persistent high-gradient regime and does not leave
+it.
 
 **Consequence: apparent "recovery" is an artifact.** Watching the loss alone,
 the re-run looked like it was recovering twice (7.15 -> 4.56, then 5.50 -> 4.29).
@@ -122,8 +154,8 @@ a state-dependent failure that arms after 1,000 steps of Hessian accumulation.
 
 **Therefore lowering the LR is a weak fix.** The obvious next move -- restart
 at ~1.2e-05 -- rests on the assumption that this is LR-driven. The evidence
-above is against that: the failure is bimodal, state-dependent, and invisible
-to the LR sweep. A low-LR arm may well delay onset (smaller steps accumulate
+above is against that: the failure is state-dependent and invisible to the LR
+sweep. A low-LR arm may well delay onset (smaller steps accumulate
 curvature error more slowly) but nothing here predicts it prevents it, and a
 clean 2,000-step low-LR run would not prove much either -- onset was at 1,048
 and 1,176, so a run that merely goes further is consistent with "delayed".

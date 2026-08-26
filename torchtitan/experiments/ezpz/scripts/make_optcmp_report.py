@@ -24,10 +24,15 @@ None of those are possible now: there is no list to drift. The guards that
 existed to catch list drift are gone with it.
 
 NOTE: re-running does NOT overwrite. report.save() mints a NEW report id every
-call, even with an identical title. The URL printed at the end is the only
-current one; earlier URLs are stale snapshots that still render, which is how
-a shared link goes quietly out of date. Prune old ones in the W&B UI (the API
-exposes no report delete).
+call, even with an identical title, so each regenerate leaves a stale snapshot
+that still renders -- which is how a shared link goes quietly out of date.
+This script now deletes the older duplicates after a successful save (pass
+--keep-old to skip). Fifteen accumulated before that was wired up.
+
+Deletion goes through the `deleteView` GraphQL mutation: reports are `View`
+objects internally, which is why searching the public API for "report" finds
+no delete method and why an earlier version of this docstring wrongly claimed
+none exists.
 
 Usage:
     python3 make_optcmp_report.py [--dry-run]
@@ -59,6 +64,19 @@ RERUN_GROUP_PREFIX = "rerun-"
 # aggregated line). `arm` is a real config key set at launch, and it matches
 # the wandb group 1:1 for every comparison run -- verified before use below.
 GROUPBY_KEY = "arm"
+
+# Per-arm line colors are NOT settable from this library version. All three
+# documented paths fail, and all three fail SILENTLY rather than raising:
+#   - custom_run_colors with plain string keys: keys are read as RUN IDS and
+#     merged into run_settings, so a group name matches nothing and the field
+#     round-trips empty.
+#   - the (grouping-key, value) tuple the field's own type annotation and
+#     docstring advertise for grouped runs: passes Runset validation, then is
+#     rejected by PanelGridMetadata at save ("Input should be a valid string").
+#   - run_settings={run_id: RunSettings(color=...)}: saves without error and
+#     also round-trips empty.
+# Verified by saving throwaway reports and reading the spec back. Set colors
+# in the W&B UI until this is fixed upstream.
 # A replicate has to outlive the earliest observed divergence onset (step 1048)
 # to say anything about divergence. Below this it is an aborted launch.
 MIN_RERUN_STEPS = 1040
@@ -155,16 +173,31 @@ blow-up", not as SophiaG.
 Counting post-warmup steps whose grad_norm exceeds 2.0, the populations do not
 overlap:
 
-| arm | steps | grad_norm > 2.0 | max grad_norm |
+| arm | post-warmup steps | grad_norm > 2.0 | max grad_norm |
 |---|---:|---:|---:|
-| AdamW | 568 | **0** | **0.8** |
-| Mano | 562 | **0** | **0.8** |
-| SophiaG | 565 | 365 | 100,611 |
-| SophiaG re-run | 379 | 135 | 204,017 |
+| AdamW | 1,984 | 54 (**2.7%**) | 14.6 |
+| Mano | 1,983 | 128 (**6.5%**) | 30.0 |
+| SophiaG | 1,524 | 573 (**37.6%**) | 100,611 |
+| SophiaG re-run | 644 | 380 (**59.0%**) | 204,017 |
 
-Split at onset, SophiaG is indistinguishable from the healthy arms before
-(0/147 steps above 2.0, max 0.921) and lives in a high-gradient regime after
-(87% and 64% of steps above 2.0). It does not leave that regime.
+An earlier version of this section reported **0 excursions and max 0.8** for
+both healthy arms. That was wrong: it was computed from a single chain link's
+log rather than the whole chain, so it missed every excursion outside that
+window. The healthy arms DO spike -- Mano reached 30.0 -- and the corrected
+numbers are above.
+
+The separation survives the correction, but it is quantitative rather than
+absolute: the healthy arms spend 3-7% of steps above 2.0 and peak in the tens,
+while the SophiaG arms spend 38-56% there and peak in the hundred-thousands, a
+factor of ~3,000 in magnitude. Post-onset SophiaG does not leave the regime;
+replicate 2 ran 403 steps past onset with 77% of them above 2.0.
+
+The distinguishing feature is the SHAPE of an excursion, not its existence.
+Mano's largest late spike (3.84 at step 1944) ramped over six steps --
+0.24, 0.39, 0.55, 1.03, 3.84 -- with the loss moving alongside it (2.89 ->
+3.09), and was back under 1.0 within five steps. SophiaG's onsets are
+discontinuities under a nearly flat loss: 0.39 -> 2.41 -> 89.9 -> 437 -> 1702
+while the loss moves only 3.957 -> 4.089.
 
 **So apparent recovery is an artifact.** The re-run's loss dipped twice
 (7.15 -> 4.56, then 5.50 -> 4.29) while grad_norm stayed 30-315 -- dips inside
@@ -335,6 +368,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true",
                     help="build the report object but do not save it")
+    ap.add_argument("--keep-old", action="store_true",
+                    help="do not delete older same-project reports after saving")
     args = ap.parse_args()
 
     api = wandb.Api()
@@ -360,29 +395,27 @@ def main() -> int:
 
     # groupby silently no-ops on a config key that does not exist, collapsing
     # every run into one line. Verify the key is present and 1:1 with the group.
-    bad = []
-    for g in main_groups_check:
-        for r in by_group[g]:
-            v = r.config.get(GROUPBY_KEY)
-            if v is None:
-                bad.append(f"{r.id} (group={g}) has no config[{GROUPBY_KEY!r}]")
-    if bad:
-        print(f"ERR groupby key {GROUPBY_KEY!r} missing on some runs -- the "
-              "panels would collapse into one aggregated trace:")
-        for b in bad[:8]:
-            print(f"    {b}")
-        return 1
-    print(f"verified config[{GROUPBY_KEY!r}] present on every displayed run")
-
-    # The lr-finder runs predate `arm` and would collapse the finder panel the
-    # same way. Backfill from the group name ("lrfind-<arm>"), which is the
-    # label the panel should show anyway.
-    for g in LRFIND_GROUPS:
+    for g in main_groups_check + LRFIND_GROUPS:
         for r in by_group[g]:
             if r.config.get(GROUPBY_KEY) != g:
                 r.config[GROUPBY_KEY] = g
                 r.update()
                 print(f"  backfilled config[{GROUPBY_KEY!r}]={g!r} on {r.id}")
+
+    # Re-check rather than trust the writes: a failed update would otherwise
+    # collapse the panel silently, which is the exact failure this guards.
+    bad = []
+    for g in main_groups_check + LRFIND_GROUPS:
+        for r in api.runs(f"{ENTITY}/{PROJECT}", filters={"group": g}):
+            if r.config.get(GROUPBY_KEY) is None:
+                bad.append(f"{r.id} (group={g})")
+    if bad:
+        print(f"ERR groupby key {GROUPBY_KEY!r} still missing after backfill "
+              "-- panels would collapse into one aggregated trace:")
+        for b in bad[:8]:
+            print(f"    {b}")
+        return 1
+    print(f"verified config[{GROUPBY_KEY!r}] present on every displayed run")
 
     # The comparison panels show the three arms plus every divergence
     # replicate. Group is the legend key, so each arm is ONE trace across all
@@ -437,7 +470,7 @@ def main() -> int:
                             )],
                 panels=[
                     wr.LinePlot(title="grad_norm: every replicate blows up "
-                                      "(log scale; healthy arms never exceed 0.8)",
+                                      "(log scale; healthy arms peak in the tens)",
                                 x="_step", y=["grad_norm"], log_y=True,
                                 groupby=GROUPBY_KEY, legend_position="east"),
                     wr.LinePlot(title="loss: same window",
@@ -455,13 +488,33 @@ def main() -> int:
         print(f"  blocks : {len(report.blocks)}")
         return 0
 
-    prior = len([r for r in api.reports(f"{ENTITY}/{PROJECT}")])
-    url = report.save().url
-    if prior > 1:
-        print(f"NOTE {prior} same-project reports already existed; save() "
-              "mints a new id rather than overwriting, so the older ones are "
-              "now stale snapshots. Prune them in the W&B UI.")
+    prior = list(api.reports(f"{ENTITY}/{PROJECT}"))
+    saved = report.save()
+    url = saved.url
     print(f"REPORT URL {url}")
+
+    # Delete the snapshots this save superseded. They are renderings of THIS
+    # generator, so nothing unique is lost -- but the ids are captured BEFORE
+    # the save so a concurrent regenerate's report can never be a target, and
+    # the just-saved id is excluded explicitly.
+    if not args.keep_old and prior:
+        stale = [r for r in prior if r.id != getattr(saved, "id", None)]
+        if stale:
+            mutation = ("mutation DeleteView($id: ID!) "
+                        "{ deleteView(input: {id: $id}) { success } }")
+            sa = api._service_api
+            ok = 0
+            for r in stale:
+                try:
+                    res = sa.execute_graphql(query=mutation,
+                                             variables={"id": r.id})
+                    if ((res.get("data") or res).get("deleteView") or {}).get(
+                            "success"):
+                        ok += 1
+                except Exception as e:
+                    print(f"  could not delete {r.id}: {type(e).__name__}")
+            print(f"pruned {ok} superseded report snapshot(s); "
+                  f"pass --keep-old to retain them")
     return 0
 
 

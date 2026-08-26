@@ -290,17 +290,55 @@ All three replicates forked from the clean `step-1000` checkpoint blew up, at
 Full analysis in
 [`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
 
-The failure is bimodal, not a too-high LR:
+The failure is not a too-high LR:
 
-| arm | steps | grad_norm > 2.0 (post-warmup) | max grad_norm |
+| arm | post-warmup steps | grad_norm > 2.0 | max grad_norm |
 |---|---:|---:|---:|
-| AdamW | 568 | **0** | **0.8** |
-| Mano | 562 | **0** | **0.8** |
-| SophiaG | 565 | 365 | 100,611 |
-| SophiaG re-run | 403+ | 312 | 204,017 |
+| AdamW | 1,984 | 54 (**2.7%**) | 14.6 |
+| Mano | 1,983 | 128 (**6.5%**) | 30.0 |
+| SophiaG | 1,524 | 573 (**37.6%**) | 100,611 |
+| SophiaG re-run | 644 | 380 (**59.0%**) | 204,017 |
 
-Pre-onset SophiaG is indistinguishable from the healthy arms (0/147 steps above
-2.0, max 0.921). Post-onset it never leaves the high-gradient regime: replicate
+An earlier version of this table reported **0 excursions and max 0.8** for both
+healthy arms. That was wrong: it was computed from a single chain link's
+`train.log` rather than the whole chain, and each arm is six chained jobs, so
+it missed every excursion outside that one window. Mano has reached 30.0.
+
+The separation survives the correction but is quantitative, not absolute. The
+healthy arms spend 3-7% of steps above 2.0 and peak in the tens; the SophiaG
+arms spend 38-59% there and peak in the hundred-thousands -- a factor of
+~3,000 in magnitude.
+
+What actually discriminates them is the SHAPE of an excursion, not its
+existence. Mano's largest late spike (3.84 at step 1944) ramped over six steps
+-- 0.24, 0.39, 0.55, 1.03, 3.84 -- with the loss moving alongside it (2.89 ->
+3.09), and was back under 1.0 within five steps: a hard batch, not a state
+change. SophiaG's onsets are discontinuities under a nearly flat loss: 0.39 ->
+2.41 -> 89.9 -> 437 -> 1702 while the loss moves only 3.957 -> 4.089.
+
+Splitting SophiaG at its first onset (step 1048) over the full chain:
+
+| window | steps > 2.0 | max |
+|---|---:|---:|
+| SophiaG, steps 21-1047 (pre-onset) | 184 / 1,027 (**17.9%**) | 75.2 |
+| AdamW, same window | 54 / 1,027 (5.3%) | 14.6 |
+| Mano, same window | 121 / 1,027 (11.8%) | 30.0 |
+
+This retires the "bimodal" framing an earlier version of this document used.
+That claim rested on the same single-log census -- it reported SophiaG as
+0/147 above 2.0 before onset, i.e. indistinguishable from the healthy arms,
+with a clean discontinuity into a bad regime. On the full chain SophiaG is
+already the noisiest arm BEFORE its blow-up: 17.9% of pre-onset steps above
+2.0 against 5.3% and 11.8%, and a pre-onset peak of 75.2 that neither healthy
+arm approaches.
+
+So the honest reading is escalation from an elevated baseline, not a flip
+between two clean states. The blow-up is still real, still recurrent (3/3),
+and still five orders of magnitude beyond anything the healthy arms do -- but
+SophiaG was visibly the least stable arm the whole time, which is a better
+early-warning signal than waiting for the discontinuity.
+
+Post-onset it never leaves the high-gradient regime: replicate
 2 was left running to its walltime, **403 steps past onset, 77% of them above
 2.0**, still spiking to 13.0 at step 1573.
 
