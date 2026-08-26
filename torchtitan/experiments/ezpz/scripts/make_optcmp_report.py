@@ -175,10 +175,10 @@ overlap:
 
 | arm | post-warmup steps | grad_norm > 2.0 | max grad_norm |
 |---|---:|---:|---:|
-| AdamW | 1,941 | 54 (**2.8%**) | 14.6 |
-| Mano | 1,939 | 127 (**6.5%**) | 30.0 |
-| SophiaG | 1,480 | 564 (**38.1%**) | 100,611 |
-| SophiaG re-run | 600 | 338 (**56.3%**) | 204,017 |
+| AdamW | 1,984 | 54 (**2.7%**) | 14.6 |
+| Mano | 1,983 | 128 (**6.5%**) | 30.0 |
+| SophiaG | 1,524 | 573 (**37.6%**) | 100,611 |
+| SophiaG re-run | 644 | 380 (**59.0%**) | 204,017 |
 
 An earlier version of this section reported **0 excursions and max 0.8** for
 both healthy arms. That was wrong: it was computed from a single chain link's
