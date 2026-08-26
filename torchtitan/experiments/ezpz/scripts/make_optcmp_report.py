@@ -64,6 +64,19 @@ RERUN_GROUP_PREFIX = "rerun-"
 # aggregated line). `arm` is a real config key set at launch, and it matches
 # the wandb group 1:1 for every comparison run -- verified before use below.
 GROUPBY_KEY = "arm"
+
+# Per-arm line colors are NOT settable from this library version. All three
+# documented paths fail, and all three fail SILENTLY rather than raising:
+#   - custom_run_colors with plain string keys: keys are read as RUN IDS and
+#     merged into run_settings, so a group name matches nothing and the field
+#     round-trips empty.
+#   - the (grouping-key, value) tuple the field's own type annotation and
+#     docstring advertise for grouped runs: passes Runset validation, then is
+#     rejected by PanelGridMetadata at save ("Input should be a valid string").
+#   - run_settings={run_id: RunSettings(color=...)}: saves without error and
+#     also round-trips empty.
+# Verified by saving throwaway reports and reading the spec back. Set colors
+# in the W&B UI until this is fixed upstream.
 # A replicate has to outlive the earliest observed divergence onset (step 1048)
 # to say anything about divergence. Below this it is an aborted launch.
 MIN_RERUN_STEPS = 1040
@@ -160,16 +173,31 @@ blow-up", not as SophiaG.
 Counting post-warmup steps whose grad_norm exceeds 2.0, the populations do not
 overlap:
 
-| arm | steps | grad_norm > 2.0 | max grad_norm |
+| arm | post-warmup steps | grad_norm > 2.0 | max grad_norm |
 |---|---:|---:|---:|
-| AdamW | 568 | **0** | **0.8** |
-| Mano | 562 | **0** | **0.8** |
-| SophiaG | 565 | 365 | 100,611 |
-| SophiaG re-run | 379 | 135 | 204,017 |
+| AdamW | 1,941 | 54 (**2.8%**) | 14.6 |
+| Mano | 1,939 | 127 (**6.5%**) | 30.0 |
+| SophiaG | 1,480 | 564 (**38.1%**) | 100,611 |
+| SophiaG re-run | 600 | 338 (**56.3%**) | 204,017 |
 
-Split at onset, SophiaG is indistinguishable from the healthy arms before
-(0/147 steps above 2.0, max 0.921) and lives in a high-gradient regime after
-(87% and 64% of steps above 2.0). It does not leave that regime.
+An earlier version of this section reported **0 excursions and max 0.8** for
+both healthy arms. That was wrong: it was computed from a single chain link's
+log rather than the whole chain, so it missed every excursion outside that
+window. The healthy arms DO spike -- Mano reached 30.0 -- and the corrected
+numbers are above.
+
+The separation survives the correction, but it is quantitative rather than
+absolute: the healthy arms spend 3-7% of steps above 2.0 and peak in the tens,
+while the SophiaG arms spend 38-56% there and peak in the hundred-thousands, a
+factor of ~3,000 in magnitude. Post-onset SophiaG does not leave the regime;
+replicate 2 ran 403 steps past onset with 77% of them above 2.0.
+
+The distinguishing feature is the SHAPE of an excursion, not its existence.
+Mano's largest late spike (3.84 at step 1944) ramped over six steps --
+0.24, 0.39, 0.55, 1.03, 3.84 -- with the loss moving alongside it (2.89 ->
+3.09), and was back under 1.0 within five steps. SophiaG's onsets are
+discontinuities under a nearly flat loss: 0.39 -> 2.41 -> 89.9 -> 437 -> 1702
+while the loss moves only 3.957 -> 4.089.
 
 **So apparent recovery is an artifact.** The re-run's loss dipped twice
 (7.15 -> 4.56, then 5.50 -> 4.29) while grad_norm stayed 30-315 -- dips inside
@@ -442,7 +470,7 @@ def main() -> int:
                             )],
                 panels=[
                     wr.LinePlot(title="grad_norm: every replicate blows up "
-                                      "(log scale; healthy arms never exceed 0.8)",
+                                      "(log scale; healthy arms peak in the tens)",
                                 x="_step", y=["grad_norm"], log_y=True,
                                 groupby=GROUPBY_KEY, legend_position="east"),
                     wr.LinePlot(title="loss: same window",
