@@ -52,6 +52,13 @@ LRFIND_GROUPS = ["lrfind-adamw", "lrfind-mano", "lrfind-sophiag"]
 # Each SophiaG divergence replicate has its own rerun-* group, so they stay
 # distinguishable from each other and from the original arm.
 RERUN_GROUP_PREFIX = "rerun-"
+
+# The panel legend key. groupby resolves against CONFIG keys, NOT run metadata:
+# "group" looks right and is silently wrong (no run carries a config key by
+# that name, so every run lands in one bucket and the panel renders a single
+# aggregated line). `arm` is a real config key set at launch, and it matches
+# the wandb group 1:1 for every comparison run -- verified before use below.
+GROUPBY_KEY = "arm"
 # A replicate has to outlive the earliest observed divergence onset (step 1048)
 # to say anything about divergence. Below this it is an aborted launch.
 MIN_RERUN_STEPS = 1040
@@ -122,17 +129,20 @@ what happened to replicates 1 and 2.
 ### The regime persists -- it is not a transient
 
 Replicate 2 was deliberately left running well past its blow-up to show what
-the post-onset state actually looks like on the charts above. 306 steps after
-onset it is **still in it**: 72% of those steps exceed grad_norm 2.0, and it
-was still throwing excursions of 21.9, 16.2 and 61.8 at steps 1465-1467 --
-nearly 300 steps after the 204,016 peak at step 1189.
+the post-onset state actually looks like on the charts above. It ran to its
+walltime, **403 steps past onset, and never left the regime**: 77% of those
+steps exceed grad_norm 2.0, and it was still throwing excursions of 12.7,
+13.4 and 13.0 at steps 1569-1573 -- nearly 400 steps after the 204,016 peak
+at step 1189.
 
 For contrast, AdamW and Mano have never once exceeded 0.8 in ~1,100 combined
 steps.
 
-This is why the loss panel misleads on its own. Replicate 2's loss wanders
-back down toward 4.1-4.3 and looks like a recovering run; the grad_norm panel
-shows it is nothing of the kind. Read the SophiaG arms on the grad_norm chart.
+This is why the loss panel misleads on its own. Replicate 2 ended at loss
+4.193 -- back in the range it held before the blow-up, and on the loss chart
+alone indistinguishable from a run that recovered. Its grad_norm at that same
+final step was 2.449, six times what AdamW or Mano have ever reached. Read the
+SophiaG arms on the grad_norm chart.
 
 SophiaG at lr=3.55e-05 on this model **will** diverge; only the timing is
 unpredictable.
@@ -251,8 +261,8 @@ other.
 ## Reading the curves
 
 Each arm is several runs, one per chained job -- the walltime-bounded job stops
-and the next resumes from its checkpoint. Group by `optimizer` to see one line
-per arm rather than one per link.
+and the next resumes from its checkpoint. The panels group by wandb `group`,
+so each arm is one line across all of its links.
 """
 
 FINDING = """
@@ -346,21 +356,48 @@ def main() -> int:
     print(f"discovered {len(expected) + len(rerun_groups)} groups, "
           f"{sum(len(by_group[g]) for g in expected + rerun_groups)} runs")
 
+    main_groups_check = ARM_GROUPS + rerun_groups
+
+    # groupby silently no-ops on a config key that does not exist, collapsing
+    # every run into one line. Verify the key is present and 1:1 with the group.
+    bad = []
+    for g in main_groups_check:
+        for r in by_group[g]:
+            v = r.config.get(GROUPBY_KEY)
+            if v is None:
+                bad.append(f"{r.id} (group={g}) has no config[{GROUPBY_KEY!r}]")
+    if bad:
+        print(f"ERR groupby key {GROUPBY_KEY!r} missing on some runs -- the "
+              "panels would collapse into one aggregated trace:")
+        for b in bad[:8]:
+            print(f"    {b}")
+        return 1
+    print(f"verified config[{GROUPBY_KEY!r}] present on every displayed run")
+
+    # The lr-finder runs predate `arm` and would collapse the finder panel the
+    # same way. Backfill from the group name ("lrfind-<arm>"), which is the
+    # label the panel should show anyway.
+    for g in LRFIND_GROUPS:
+        for r in by_group[g]:
+            if r.config.get(GROUPBY_KEY) != g:
+                r.config[GROUPBY_KEY] = g
+                r.update()
+                print(f"  backfilled config[{GROUPBY_KEY!r}]={g!r} on {r.id}")
+
     # The comparison panels show the three arms plus every divergence
     # replicate. Group is the legend key, so each arm is ONE trace across all
     # its chain links and each replicate stays separate.
-    main_groups = ARM_GROUPS + rerun_groups
+    main_groups = main_groups_check
     runset = wr.Runset(
         entity=ENTITY, project=PROJECT, name="all arms + divergence replicates",
         filters=f"group in {main_groups!r}",
-        groupby=["group"],
     )
 
     def lines(metric, title, log_y=False):
         return wr.LinePlot(
             title=title, x="_step", y=[metric],
             log_y=log_y, smoothing_factor=0.0,
-            groupby="group", legend_position="east",
+            groupby=GROUPBY_KEY, legend_position="east",
         )
 
     report = wr.Report(
@@ -383,13 +420,12 @@ def main() -> int:
                 runsets=[wr.Runset(
                     entity=ENTITY, project=PROJECT, name="lr finder sweeps",
                     filters=f"group in {LRFIND_GROUPS!r}",
-                    groupby=["group"],
-                )],
+                            )],
                 panels=[wr.LinePlot(
                     title="LR finder: loss vs LEARNING RATE (log x)",
                     x="lr", y=["loss_metrics/global_avg_loss"],
                     log_x=True,
-                    groupby="group", legend_position="east",
+                    groupby=GROUPBY_KEY, legend_position="east",
                 )],
             ),
             wr.MarkdownBlock(text=DIVERGENCE_MD),
@@ -398,16 +434,15 @@ def main() -> int:
                     entity=ENTITY, project=PROJECT,
                     name="sophiag: original + every divergence replicate",
                     filters=f"group in {['sophiag'] + rerun_groups!r}",
-                    groupby=["group"],
-                )],
+                            )],
                 panels=[
                     wr.LinePlot(title="grad_norm: every replicate blows up "
                                       "(log scale; healthy arms never exceed 0.8)",
                                 x="_step", y=["grad_norm"], log_y=True,
-                                groupby="group", legend_position="east"),
+                                groupby=GROUPBY_KEY, legend_position="east"),
                     wr.LinePlot(title="loss: same window",
                                 x="_step", y=["loss_metrics/global_avg_loss"],
-                                groupby="group", legend_position="east"),
+                                groupby=GROUPBY_KEY, legend_position="east"),
                 ],
             ),
         ],

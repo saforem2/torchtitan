@@ -248,72 +248,71 @@ cause. All three had complete step-400 checkpoints, so chain 2
 estimated start of Tue 00:30.
 
 
-## Phase 2 results at 5.31B tokens per arm (chains 1-6)
+## Phase 2 results at 7.37B tokens per arm (chains 1-7)
 
-Resumed after the quota prune. Chains 4-6 are jobs 12473781/82/83 ->
-12473824/25 (adamw, mano) plus the SophiaG re-runs tracked separately below.
+| step | tokens | AdamW | Mano | Mano - AdamW |
+|---:|---:|---:|---:|---:|
+| 1300 | 5.11B | 3.3155 | **3.0444** | -0.2711 |
+| 1400 | 5.50B | 3.2730 | **3.0133** | -0.2597 |
+| 1500 | 5.89B | 3.2141 | **3.0028** | -0.2113 |
+| 1600 | 6.29B | 3.1815 | **2.9680** | -0.2134 |
+| 1700 | 6.68B | 3.1416 | **2.9574** | -0.1842 |
+| 1800 | 7.07B | 3.1109 | **2.9410** | -0.1700 |
+| 1875 | 7.37B | 3.0839 | **2.9375** | -0.1464 |
 
-| step | tokens | AdamW | Mano | SophiaG | Mano - AdamW |
-|---:|---:|---:|---:|---:|---:|
-| 900 | 3.54B | 3.5957 | **3.2748** | 4.3526 | -0.3209 |
-| 1000 | 3.93B | 3.5388 | **3.2218** | 4.1078 | -0.3170 |
-| 1100 | 4.32B | 3.4522 | **3.1599** | 6.4505 | -0.2923 |
-| 1200 | 4.72B | 3.3732 | **3.0790** | 4.8135 | -0.2943 |
-| 1300 | 5.11B | 3.3155 | **3.0444** | 4.3902 | -0.2711 |
-| 1350 | 5.31B | 3.2930 | **3.0197** | 4.2433 | -0.2732 |
+**Mano still leads, and the gap is now closing on a clean monotone trend.**
+From the -0.3636 peak at 2.36B it is at -0.1464 at 7.37B, narrowing in six of
+the last six intervals. A linear fit over this window gives +0.054 nats/B and
+puts the crossover at **~10.1B tokens -- effectively at the budget end**.
 
-**Mano still leads; the gap is closing slowly, not converging.** From its
--0.3636 peak at 2.36B it has narrowed to -0.273 at 5.31B -- about 0.09 nats
-over 3B tokens, and non-monotonically (it widened 1100 -> 1200 and again
-1300 -> 1350). Two earlier readings of this table were too confident in both
-directions:
+Three earlier readings of this same table were wrong, in both directions, and
+the reason is worth recording:
 
-- at 3.54B it read as "peaked and closing fast, AdamW catches up at ~6-7B"
-- at ~5.2B, off three points, it read as "no longer closing, reopening"
+| at | claim | why it failed |
+|---|---|---|
+| 3.54B | "peaked, closing fast, AdamW catches up ~6-7B" | extrapolated 3 points off a fresh peak |
+| ~5.2B | "no longer closing, reopening" | read noise (-0.271 -> -0.273) as reversal |
+| 5.31B | "closing at ~0.03 nats/B, crossover well past budget" | rate estimated across the noisy stretch |
 
-Neither survives the fuller series. The honest statement is that the gap is
-drifting shut at roughly 0.03 nats/B with visible noise of the same size, so
-**the crossover -- if it happens -- lies well beyond the 10B budget**, and the
-ordering at the budget end is no longer genuinely open the way it looked at
-3.54B.
+The current reading has more support than any of those -- six consecutive
+intervals moving one direction, not three points -- but it is the fourth
+revision of the same claim, so treat the 10.1B figure as an extrapolation of a
+local trend rather than a prediction. What is solid: Mano leads throughout, and
+its lead has more than halved since 2.36B.
 
-The SophiaG column is not comparable after step ~1048: it diverged there and
-every later point measures a post-divergence trajectory. The 6.4505 at step
-1100 is mid-blow-up, not a data point. See below.
+SophiaG is excluded from this table. It diverged at step 1048 and every later
+point measures a post-divergence trajectory. See below.
 
-### SophiaG: a regime flip, not a too-high LR
+### SophiaG: a regime flip, 3 of 3
 
-Both SophiaG arms blew up (steps 1048 and 1176) and neither recovered. The
-full analysis is in
-[`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md);
-the load-bearing part is that the failure is **bimodal**, not gradual:
+All three replicates forked from the clean `step-1000` checkpoint blew up, at
+**three distinct steps: 1048, 1176, 1071**. Timing is random; the event is not.
+Full analysis in
+[`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+
+The failure is bimodal, not a too-high LR:
 
 | arm | steps | grad_norm > 2.0 (post-warmup) | max grad_norm |
 |---|---:|---:|---:|
 | AdamW | 568 | **0** | **0.8** |
 | Mano | 562 | **0** | **0.8** |
 | SophiaG | 565 | 365 | 100,611 |
-| SophiaG re-run | 379 | 135 | 204,017 |
+| SophiaG re-run | 403+ | 312 | 204,017 |
 
-Split at onset, SophiaG is indistinguishable from the healthy arms before
-(0/147 steps above 2.0, max 0.921) and lives in a high-gradient regime after
-(87% and 64% of steps above 2.0). It does not leave that regime.
+Pre-onset SophiaG is indistinguishable from the healthy arms (0/147 steps above
+2.0, max 0.921). Post-onset it never leaves the high-gradient regime: replicate
+2 was left running to its walltime, **403 steps past onset, 77% of them above
+2.0**, still spiking to 13.0 at step 1573.
 
-Two consequences for reading this experiment:
+It ended at loss 4.193 -- back in its pre-blow-up range, and on a loss chart
+alone indistinguishable from a recovered run. Its grad_norm at that same step
+was 2.449, six times anything AdamW or Mano have reached. **Read these arms by
+grad_norm, never by loss.**
 
-1. **Apparent recovery is an artifact.** The re-run's loss dipped twice
-   (7.15 -> 4.56, then 5.50 -> 4.29) while grad_norm stayed 30-315. Those are
-   dips inside the bad regime. Read the SophiaG arms by grad_norm, not loss.
-2. **A lower-LR restart is a weak test.** Onset is a discontinuity (0.39 ->
-   2.41 -> 89.9 -> 437 -> 1702 while loss moves 3.957 -> 4.089), and the LR
-   sweep descends smoothly through the whole low band with no instability near
-   3.55e-05. A static sweep probes ~100 steps and cannot see a failure that
-   arms after 1,000 steps of Hessian accumulation. Lower LR may delay onset
-   without preventing it.
-
-A third replicate (job 12473833, W&B `9ewej3bc`) is running from the same
-step-1000 seed with `--debug.seed=42` and the grad-norm guard armed at 20x, to
-put a rate on the 2-of-2.
+The grad-norm guard caught replicate 3 at 53.49 (133x trailing median) and
+stopped it at rc=0 in 55 minutes, against the ~8h each that replicates 1 and 2
+burned. `nan_abort_consecutive` never fires here -- every value in the blow-up
+is finite.
 
 ### Caveats unchanged
 
@@ -323,14 +322,15 @@ cosine decay phase." One seed per arm.
 
 ### Status
 
-**Running.** 5.31B of the 10B budget per arm. The 3.54B stop was a quota wall
-(project 2297 at its 22.0 TB hard limit); pruning superseded mid-chain
-checkpoints reclaimed 1.13 TB and the chains resumed. Live jobs: 12473824
-(adamw), 12473825 (mano), 12473797 (sophiag re-run), 12473833 (third SophiaG
-replicate).
+**Running.** 7.37B of the 10B budget per arm; jobs 12473867 (adamw) and
+12473868 (mano) resumed from step-1800. SophiaG is retired from the comparison
+-- all three replicates are post-divergence and no clean arm exists.
 
-Checkpoint policy after the prune: each arm keeps step-400 (matched
-pre-divergence anchor), step-1000 (the SophiaG divergence seed), and its
-newest resumable link. Mid-chain links are deleted once superseded --
-`backup` is a timestamped `mv` and reclaims nothing, so freeing quota requires
-actual deletion.
+Checkpoint policy: each arm keeps step-400 (matched pre-divergence anchor),
+step-1000 (the SophiaG divergence seed), and its newest resumable link.
+Mid-chain links are deleted once superseded. `backup` is a timestamped `mv` and
+reclaims nothing, so freeing quota requires actual deletion.
+
+A walltime cut can leave an empty `step-N` directory with no `.metadata` (seen
+on adamw/step-1881). The resume logic skips those by design, but they are worth
+removing so the newest-directory heuristic stays honest.
