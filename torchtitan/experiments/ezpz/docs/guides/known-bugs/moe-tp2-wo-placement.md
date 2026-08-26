@@ -85,13 +85,59 @@ a second independent reason rather than the platform limit I first claimed.
 `dp_mesh_dims` failure is an upstream bug, an XPU gap, or a config mismatch is
 not yet established -- it is a separate thread from this page's bug.
 
-## Next step
+## MEASURED (job `8784667`)
 
-Instrument rather than theorize. Print the actual DTensor placement of
-`output` immediately before `self.wo(output)` at TP=2, and walk back to the
-first op that makes it `Shard(0)` instead of feature-sharded. Four successive
-theories about this error were wrong; each time the answer came from one
-measurement.
+Probed the DTensor placement at every step between SDPA and `wo` at TP=2
+(`EZPZ_MLA_PLACEMENT_PROBE=1`, rank 0):
+
+```
+q (into sdpa)          shape=(512, 16, 192)     placements=(Shard(dim=1),)
+k (into sdpa)          shape=(512, 16, 192)     placements=(Shard(dim=1),)
+v (into sdpa, pre-pad) shape=(512, 16, 192)     placements=(Shard(dim=1),)
+sdpa out               shape=(1, 1024, 8, 192)  placements=(Shard(dim=1),)
+after pad_v slice      shape=(1, 1024, 8, 128)  placements=(Shard(dim=1),)
+after contiguous       shape=(1, 1024, 8, 128)  placements=(Shard(dim=1),)
+after view -> wo in    shape=(512, 2048)        placements=(Shard(dim=0),)
+```
+
+Two facts fall out, neither of which any earlier theory predicted:
+
+**1. `Shard(dim=1)` on the way in is CORRECT.**
+`attention_activation_placement` declares
+`partition_spec=((DP, CP), TP, None)` -- axis 0 is tokens, axis 1 is heads,
+and heads are the TP-sharded axis. So the inputs are exactly right, and
+`pad_v` / the slice / `contiguous` are all innocent: placement is unchanged
+across every one of them.
+
+**2. The SDPA output shape is wrong.** q enters as `(512, 16, 192)` with
+`seq_len=512`, so the wrapper's unflatten computes `batch = 512//512 = 1` and
+reshapes to `(1, 512, 16, 192)`. The measured output is
+**`(1, 1024, 8, 192)`** -- the sequence axis is inflated by exactly the TP
+degree while the head axis is halved. The reshape is computed from the GLOBAL
+shape but applied to LOCAL storage, so under TP the heads leak into the
+sequence axis.
+
+The final `view(num_tokens, -1)` then flattens that mis-shaped tensor and the
+placement collapses `Shard(dim=1)` -> `Shard(dim=0)`. That is the value `wo`
+rejects. **The `wo` error is a symptom; the defect is upstream of it, in the
+unflatten.**
+
+## The open question
+
+`agpt/__init__.py` carries a **byte-identical** unflatten, and **agpt TP=2
+passes** (both arms green in `sync_smoke.sh`). Both wrappers are local_mapped
+through the same `set_gqa_inner_attention_local_map`. So the unflatten alone
+cannot be the whole story -- something differs in how moe's tensors reach it,
+or in whether agpt reaches the 3D branch at all under TP.
+
+Resolve that before changing either wrapper: a fix derived from moe alone
+risks breaking the agpt path that currently works in production.
+
+## Probe
+
+The instrumentation is in `moe/model.py` behind
+`EZPZ_MLA_PLACEMENT_PROBE=1` (rank 0, no output when unset). Re-run with
+`scripts/moe-tp2-probe.sh`. **Remove it once this is fixed.**
 
 ## Jobs
 
@@ -100,5 +146,6 @@ measurement.
 | `8782754` | moe TP=2 | `Unknown spmd type: S(1)` -> fixed in `59b8c9053` |
 | `8782821` | moe TP=2 | this bug |
 | `8782843` | moe TP=2, SP off | this bug (SP ruled out) |
+| `8784667` | moe TP=2 + placement probe | MEASURED: sdpa out is (1,1024,8,192) -- heads leaked into the sequence axis |
 | `8782898` | upstream dsv3 TP=2 | INVALID control -- upstream trainer, so our xccl split_group workaround was never installed |
 | `8782983` | upstream dsv3 TP=2, workaround hoisted | 0 split_group errors; fails earlier than ours on `dp_mesh_dims` plain-tensor params |

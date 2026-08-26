@@ -180,15 +180,48 @@ class Attention(BaseAttention):
         if pad_v:
             v = F.pad(v, (0, self.qk_head_dim - self.v_head_dim))
 
+        # --- TEMPORARY PLACEMENT PROBE (remove once the TP>1 bug is fixed) ---
+        # wo receives Shard(0) where rowwise_config expects Partial(sum). Four
+        # theories about why were all wrong, so measure instead: print the
+        # DTensor placement after every step between SDPA and wo, rank 0 only,
+        # first call only.
+        import os as _os
+
+        _probe = _os.environ.get("EZPZ_MLA_PLACEMENT_PROBE") == "1"
+
+        def _pl(tag, t):
+            if not _probe:
+                return
+            import torch.distributed as _d
+
+            if _d.is_initialized() and _d.get_rank() != 0:
+                return
+            pl = getattr(t, "placements", None)
+            print(
+                "[MLA-PROBE] %-22s shape=%-22s placements=%s"
+                % (tag, tuple(t.shape), pl if pl is not None else "PLAIN TENSOR"),
+                flush=True,
+            )
+
+        _pl("q (into sdpa)", q)
+        _pl("k (into sdpa)", k)
+        _pl("v (into sdpa, pre-pad)", v)
+
         output = self.inner_attention(
             q, k, v, attention_masks=attention_masks, scale=self.softmax_scale
         )
+        _pl("sdpa out", output)
 
         if pad_v:
             output = output[..., : self.v_head_dim]
+            _pl("after pad_v slice", output)
 
         output = output.contiguous()
+        _pl("after contiguous", output)
         output = output.view(num_tokens, -1)
+        _pl("after view -> wo in", output)
+        if _probe:
+            globals()["_EZPZ_MLA_PROBE_DONE"] = True
         return self.wo(output)
 
 
