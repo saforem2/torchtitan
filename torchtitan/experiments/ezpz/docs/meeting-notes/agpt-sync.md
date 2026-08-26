@@ -4,6 +4,210 @@
 
 ---
 
+## 2026-08-26
+
+> [!IMPORTANT]
+> **Headline:** the 30B optimizer comparison has an answer. At a fixed
+> GBS=960 and constant LR, **Mano beats AdamW by 0.142 nats at 8.9B tokens
+> and the gap has stopped closing** -- refit on the last billion tokens the
+> crossover moves from ~10B to ~35B, so Mano wins the 10B budget outright.
+> SophiaG is disqualified: it blew up in **3 of 3** replicates from the same
+> checkpoint, at three different steps.
+>
+> Aurora production is **idle and has been since the last sync**. Nothing
+> ran. Five chain jobs are held behind checkpoint conflicts, two umbrellas
+> terminated in queue without seating, and `8784460` (2,098 nodes) has been
+> Q since 13:22 today on "Not enough free nodes available". The last umbrella
+> to seat, `8773440`, used 5h13 of its 12h -- and the fix for exactly that
+> waste landed after it.
+
+Two days since 2026-08-24. Almost everything below is Sunspot; the Aurora
+production section is short because there is nothing to report, which is
+itself the report.
+
+### 1. Aurora production: nothing moved
+
+| chain | 08-24 | now | delta |
+|---|---|---|---|
+| 2B 512N stage-2 dolmino | 7,728 | 7,728 | -- |
+| 20B 256N | 10,369 | 10,369 | -- |
+| 20B 512N | 9,690 | 9,690 | -- |
+| 2B 512N constlr | 21,307 | 21,307 | -- |
+
+Queue state as of this writing: `8687863`, `8752939`, `8752824`, `8756071`,
+`8756072` all **H** (the checkpoint-conflict holds from 08-16, still not
+released), `8784460` **Q** at 2,098 nodes, `8784462` **H** behind it. Per-slot detail in
+the [dispatch log](../production/dispatch-log.md).
+
+Two umbrellas submitted today, `8784447` and `8784449`, are already **F** with
+no elapsed time. `8784447`'s comment reads *"Not Running: Not enough free nodes
+available and terminated"* -- queued 13:00, gone by 13:22. That is a 2,098-node
+ask being killed in queue rather than waiting, and it is worth understanding
+before resubmitting a third: if the scheduler is terminating large asks under
+current occupancy, resubmitting the same shape just burns queue position.
+
+### 2. Seats that exit early no longer idle their slice
+
+`8773440` used **5h13 of 12h**. Every seat had exited by 04:27 -- three after
+real training, two on bad-node SIGSEGV -- and PBS did not tear the shell down
+until 09:29. Roughly 5 hours x 2,098 nodes of allocation held and doing
+nothing.
+
+Each seat was launched exactly once, so a seat that exited left its slice dark
+for the remainder. `supervise_trainer()` now wraps each seat in a relaunch
+loop with four guards (`0304881bf`):
+
+- **deadline** -- no new attempt with under 45 min of walltime left, since a
+  fresh attempt cannot yeet, init and checkpoint in less
+- **quick-death** -- 2 consecutive attempts under 10 min means the *seat* is
+  broken, not the nodes; the counter resets after any healthy attempt
+- plus the existing bad-node scrape and spare pool
+
+This is the largest single source of wasted allocation we have measured, and
+it was invisible in the per-chain step counts -- the chains looked like they
+simply got less done.
+
+### 3. 30B optimizer comparison: Mano wins at the 10B budget
+
+Sunspot, 16N per arm, GBS=960 fixed, constant LR after a 20-step warmup, LRs
+from a per-optimizer
+[finder](../experiments/lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md) at
+that exact batch (AdamW 3.05e-5, Mano 5.61e-5, SophiaG 3.55e-5 -- all measured
+blow-ups, not defaults).
+
+| | AdamW | Mano | gap |
+|---|---:|---:|---:|
+| 5.89B | 3.2141 | **3.0028** | -0.211 |
+| 7.86B | 3.0627 | **2.9141** | -0.149 |
+| 8.94B | 2.9490 | **2.8073** | -0.142 |
+
+The interesting part is the second derivative. Fit on 5.9-7.5B the gap closes
+at +0.0252 nats/B and crosses at ~14B; fit on **7.9-8.9B** it closes at
++0.0056 and crosses at **~35B**. The closing rate fell 4.5x, so Mano finishes
+the 10B budget ~0.14 nats ahead rather than being caught at the line.
+
+Scope, because it matters for what this does and does not say: constant LR by
+design, **one seed per arm**, no decay phase. The documented prior from our
+earlier competitions is "Mano/Muon win short runs, AdamW wins in the cosine
+decay phase" -- this experiment deliberately has no decay phase, so it is not
+a claim about a production recipe.
+
+I revised this conclusion **four times** and every wrong version failed the
+same way: fitting a trend across a window that contained a regime change. That
+table is now in the
+[writeup](../experiments/optimizer-comparison/README.md) rather than just the
+corrected number, because the number will move again and the failure mode will
+not.
+
+### 4. SophiaG: 3 of 3, and the regime is metastable
+
+Three replicates forked from the same clean step-1000 checkpoint carrying full
+optimizer state. All three blew up, at **steps 1048, 1176 and 1071**. Same
+weights, same LR, same data; only RNG and data order differ. Timing is random,
+the event is not.
+
+The loss gives no warning -- 3.915 -> 3.954 across the whole onset while
+grad_norm goes 0.39 -> 2.41 -> 89.9 -> 437 -> 1702. Only grad_norm sees it.
+
+Two claims I published during this and then had to retract, both from the same
+root cause -- computing a per-arm statistic from **one chain link's log** when
+each arm is six chained jobs:
+
+- *"healthy arms never exceed grad_norm 0.8"* -- actually AdamW 54/1984 steps
+  above 2.0 (max 14.6) and Mano 128/1983 (max **30.0**)
+- *"SophiaG is indistinguishable from the healthy arms pre-onset (0/147)"* --
+  actually **184/1027 (17.9%), max 75.2**, i.e. already the noisiest arm a
+  thousand steps *before* its first blow-up
+
+The corrected version is better news than the one it replaces. "Bimodal flip"
+offered no warning; an elevated baseline is watchable, and it was visible the
+whole time.
+
+Then, given another 200 steps, one arm **left** the regime:
+
+| window | sophiag | sophiag re-run |
+|---|---:|---:|
+| 1200-1299 | 92% (max 9,613) | 68% (max 63,685) |
+| 1500-1599 | 11% (max 89.7) | 98% (max 1,120) |
+| 1600-1699 | **0% (max 0.7)** | 97% (max 1,023) |
+
+`sophiag` recovered completely -- zero excursions, peak 0.7, below Mano's
+lifetime average, ~600 steps after a 100,611 spike. Its twin never did. So the
+regime is **metastable, not absorbing**, and escape looks as stochastic as
+onset. The earlier "does not leave that regime" came from ~400 post-onset
+steps that all happened to sit inside the bad window.
+
+Still disqualifying: a failure that burns ~600 steps of a 2,500-step budget is
+not usable, even when it recovers. Full evidence:
+[`sophiag-stochastic-divergence-30b.md`](../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+
+The grad-norm runaway guard (20x trailing median) caught replicate 3 at 53.49
+and stopped it cleanly at rc=0 in 55 minutes, against the ~8h each that
+replicates 1 and 2 burned. That is its first live catch. It also shipped with a
+scope bug that killed its first run at step 1 -- `NameError` on a name local to
+`train_step` -- which PBS reported as `Exit_status=0`. A guard validated only
+by replaying finished logs proves the policy, never the binding.
+
+### 5. MoE TP>1: measured, not guessed
+
+Four theories about the `wo` placement error were wrong. The fifth attempt
+instrumented it instead (`bae99a84c`, job 8784667):
+
+```
+q into sdpa      (512, 16, 192)     Shard(dim=1)
+sdpa out         (1, 1024, 8, 192)  Shard(dim=1)
+after view -> wo (512, 2048)        Shard(dim=0)   <- what wo rejects
+```
+
+`Shard(dim=1)` on the inputs is **correct** -- axis 1 is the head axis and
+heads are TP-sharded. The `view` is where it goes wrong, so `wo` is the
+symptom, not the bug.
+
+Worth noting the control failed too: unforked `deepseek_v3` at TP=2 dies
+*earlier* on this stack, in `split_group` (XCCL does not support process-group
+splitting, and EP=1 so this is not expert parallelism). Our fork gets further,
+which means **there is no working upstream comparison on XPU** for this path.
+
+Related: `maybe_install_xccl_split_group_workaround()` lived only in
+`FaultTolerantTrainer.__init__`, but `ezpz/train.py` builds whatever trainer
+the config names -- so launching any upstream config through our entrypoint
+built the upstream `Trainer` and never installed it. Hoisted to before
+`config.build()` (`66a8b6f1f`).
+
+### 6. Aurora frameworks RC trains
+
+Job 8784615, 2 nodes x 12 ranks: 10/10 steps, loss 10.865 -> 9.059, finite grad
+norms, rc=0. Also rc=0 on `ezpz.examples.test` at 24 ranks -- the first
+completed collective on Aurora RC, which the validation guide had listed as
+never established. First training of any kind on that stack.
+
+### 7. Upstream sync 81
+
+Six commits, merged and smoked (2N, 3 arms, 3 steps each, PASS 3/3). Now 0
+behind `upstream/main`. Only two could plausibly touch our path and both are
+inert: `tools/utils.py` changed a URL in a comment, and `overrides/fused_swiglu.py`
+is an override ezpz does not reference. The rest are qwen3.5 vision, RL rollout
+and the transformers backend.
+
+### Discussion topics
+
+1. **The 2,098-node umbrella is not seating.** Two terminated in queue today.
+   Is the right move a smaller ask, a reservation, or waiting? The seat-relaunch
+   fix only helps once a job actually seats.
+2. **Five held chain jobs from 08-16 are still held.** They were `qhold`'d
+   rather than `qdel`'d to preserve queue position, but those positions are now
+   ten days old and the umbrella that displaced them has not run since.
+   Release them?
+3. **Does the 30B optimizer result change anything for production?** It is
+   constant-LR and single-seed, and our own prior says AdamW recovers during
+   decay. The honest read is that it argues for testing Mano *with* a decay
+   phase, not for switching.
+4. **SophiaG at 30B should be considered closed** unless someone wants the
+   Hessian instrumentation. 3/3 divergence with random timing is not a tuning
+   problem, and the LR sweep is smooth through the whole low band.
+
+---
+
 ## 2026-08-24
 
 > [!IMPORTANT]

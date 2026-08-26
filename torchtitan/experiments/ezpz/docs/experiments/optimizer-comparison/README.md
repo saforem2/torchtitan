@@ -253,32 +253,42 @@ estimated start of Tue 00:30.
 | step | tokens | AdamW | Mano | Mano - AdamW |
 |---:|---:|---:|---:|---:|
 | 1300 | 5.11B | 3.3155 | **3.0444** | -0.2711 |
-| 1400 | 5.50B | 3.2730 | **3.0133** | -0.2597 |
 | 1500 | 5.89B | 3.2141 | **3.0028** | -0.2113 |
-| 1600 | 6.29B | 3.1815 | **2.9680** | -0.2134 |
 | 1700 | 6.68B | 3.1416 | **2.9574** | -0.1842 |
-| 1800 | 7.07B | 3.1109 | **2.9410** | -0.1700 |
-| 1875 | 7.37B | 3.0839 | **2.9375** | -0.1464 |
+| 1900 | 7.47B | 3.0596 | **2.8880** | -0.1715 |
+| 2000 | 7.86B | 3.0627 | **2.9141** | -0.1485 |
+| 2100 | 8.25B | 2.9894 | **2.8428** | -0.1466 |
+| 2200 | 8.65B | 2.9912 | **2.8451** | -0.1461 |
+| 2275 | 8.94B | 2.9490 | **2.8073** | -0.1417 |
 
-**Mano still leads, and the gap is now closing on a clean monotone trend.**
-From the -0.3636 peak at 2.36B it is at -0.1464 at 7.37B, narrowing in six of
-the last six intervals. A linear fit over this window gives +0.054 nats/B and
-puts the crossover at **~10.1B tokens -- effectively at the budget end**.
+**Mano leads throughout, and the gap has stopped closing.** It narrowed
+quickly through 7.9B and has been nearly flat since:
 
-Three earlier readings of this same table were wrong, in both directions, and
-the reason is worth recording:
+| window | slope | implied crossover | gap at 10B |
+|---|---:|---:|---:|
+| 5.9-7.5B | +0.0252 nats/B | ~14.2B | -0.105 |
+| **7.9-8.9B** | **+0.0056 nats/B** | **~34.6B** | **-0.137** |
+
+Fitting only the recent window drops the closing rate by 4.5x. At the current
+rate Mano finishes the 10B budget still ~0.14 nats ahead, and AdamW does not
+catch it within any horizon this experiment can reach.
+
+This is the fourth revision of this claim, and the pattern in the failures is
+consistent enough to state plainly: every wrong version came from fitting a
+trend across a window that included a regime change.
 
 | at | claim | why it failed |
 |---|---|---|
-| 3.54B | "peaked, closing fast, AdamW catches up ~6-7B" | extrapolated 3 points off a fresh peak |
+| 3.54B | "peaked, AdamW catches up ~6-7B" | 3 points off a fresh peak |
 | ~5.2B | "no longer closing, reopening" | read noise (-0.271 -> -0.273) as reversal |
-| 5.31B | "closing at ~0.03 nats/B, crossover well past budget" | rate estimated across the noisy stretch |
+| 5.31B | "crossover well past budget" | rate fit across the noisy stretch |
+| 7.37B | "crossover ~10.1B, at the budget end" | fit spanned the fast-closing phase that had already ended |
 
-The current reading has more support than any of those -- six consecutive
-intervals moving one direction, not three points -- but it is the fourth
-revision of the same claim, so treat the 10.1B figure as an extrapolation of a
-local trend rather than a prediction. What is solid: Mano leads throughout, and
-its lead has more than halved since 2.36B.
+The honest statement now: **Mano wins this comparison at the 10B budget.** The
+gap is -0.142 at 8.94B and closing at a rate that would need ~26B more tokens
+to reach zero. That is a statement about this configuration -- constant LR, one
+seed, no decay phase -- and the documented prior is that AdamW recovers ground
+during cosine decay, which this experiment deliberately does not have.
 
 SophiaG is excluded from this table. It diverged at step 1048 and every later
 point measures a post-divergence trajectory. See below.
