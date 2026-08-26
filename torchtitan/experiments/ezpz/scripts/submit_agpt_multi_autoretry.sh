@@ -125,6 +125,24 @@ TINY_SPARES="${MULTI_TINY_SPARES:-1}"
 TINY_STEPS="${MULTI_TINY_STEPS:-20}"
 IDLE_TIMEOUT="${IDLE_TIMEOUT:-1800}"
 CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
+# Seat supervision. A seat used to be launched ONCE: when it exited early its
+# slice sat idle for the rest of the job. Job 8773440 lost ~5h of a 12h
+# allocation that way -- every seat had exited by 04:27, PBS killed the shell
+# at 09:29. Now each seat is relaunched until the job is nearly out of
+# walltime. ezpz --auto-retry still owns node rotation WITHIN an attempt; this
+# is the outer loop that survives an attempt giving up entirely.
+SEAT_RELAUNCH="${SEAT_RELAUNCH:-1}"          # 0 disables (old behavior)
+# Stop relaunching this close to the wall -- a fresh attempt needs time to
+# yeet, init and reach its first checkpoint or it is pure waste.
+SEAT_RELAUNCH_MIN_LEFT="${SEAT_RELAUNCH_MIN_LEFT:-2700}"   # 45 min
+# A seat that dies faster than this did not really run; two in a row means the
+# seat itself is broken (bad config, missing ckpt) and relaunching just burns
+# the allocation in a loop.
+SEAT_MIN_HEALTHY_SECS="${SEAT_MIN_HEALTHY_SECS:-600}"      # 10 min
+SEAT_MAX_QUICK_DEATHS="${SEAT_MAX_QUICK_DEATHS:-2}"
+# Job walltime in seconds, for the deadline. PBS does not export it, so it is
+# read from qstat with a conservative fallback.
+JOB_WALLTIME_SECS="${JOB_WALLTIME_SECS:-0}"
 PPN="${NGPU_PER_HOST:-12}"
 JOBID="${PBS_JOBID%%.*}"
 [[ -z "$JOBID" ]] && JOBID="nojob"
@@ -581,6 +599,28 @@ done
 
 # ---- Launch one trainer via native `ezpz launch --auto-retry` ----------------
 declare -a PIDS
+# ---- Job deadline ------------------------------------------------------------
+# Absolute epoch second past which no new seat attempt is started.
+JOB_START_EPOCH=$(date +%s)
+_resolve_walltime_secs() {
+    [[ "$JOB_WALLTIME_SECS" -gt 0 ]] 2>/dev/null && { echo "$JOB_WALLTIME_SECS"; return; }
+    local wt=""
+    if [[ -n "${PBS_JOBID:-}" ]] && command -v qstat >/dev/null 2>&1; then
+        wt=$(qstat -f "$PBS_JOBID" 2>/dev/null              | tr -d '
+' | grep -oE 'Resource_List\.walltime = [0-9:]+'              | head -1 | awk '{print $3}')
+    fi
+    if [[ "$wt" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        echo $(( ${BASH_REMATCH[1]}*3600 + ${BASH_REMATCH[2]}*60 + ${BASH_REMATCH[3]} ))
+    else
+        # Conservative fallback: assume 12h (the prod queue max) so the
+        # deadline logic still bounds relaunches if qstat is unavailable.
+        echo 43200
+    fi
+}
+WALLTIME_SECS=$(_resolve_walltime_secs)
+JOB_DEADLINE=$(( JOB_START_EPOCH + WALLTIME_SECS ))
+secs_left() { echo $(( JOB_DEADLINE - $(date +%s) )); }
+
 launch_trainer() {
     local idx="$1"
     local model="${T_MODEL[$idx]}"
@@ -733,16 +773,80 @@ launch_trainer() {
     sleep "$LAUNCH_STAGGER"
 }
 
-for idx in "${!TRAINERS[@]}"; do launch_trainer "$idx"; done
-log "all ${#TRAINERS[@]} trainers launched; waiting..."
+# ---- Seat supervisor ---------------------------------------------------------
+# Relaunch a seat that exits while the job still has useful walltime. Without
+# this a seat that dies at minute 10 leaves its slice idle for the remaining
+# 11h50m (job 8773440: all seats gone by 04:27, PBS killed the shell at 09:29).
+#
+# Guards, in order of importance:
+#   * deadline    -- never start an attempt with < SEAT_RELAUNCH_MIN_LEFT
+#                    seconds left; a fresh attempt cannot yeet, init and reach
+#                    a checkpoint in less than that, so it would be pure waste.
+#   * quick-death -- SEAT_MAX_QUICK_DEATHS consecutive attempts shorter than
+#                    SEAT_MIN_HEALTHY_SECS means the SEAT is broken (bad
+#                    config, missing checkpoint), not the nodes. Relaunching
+#                    then just burns the allocation in a tight loop.
+#   * rc=0        -- a seat that finished its step budget is DONE. Never
+#                    relaunch it; that would restart a completed chain.
+supervise_trainer() {
+    local idx="$1" attempt=1 quick=0 rc=0 t0 dt left
+    while :; do
+        t0=$(date +%s)
+        launch_trainer "$idx"
+        wait "${PIDS[$idx]}"; rc=$?
+        dt=$(( $(date +%s) - t0 ))
+        log "trainer $idx attempt $attempt finished rc=$rc after ${dt}s"
+
+        RC[$idx]=$rc
+        (( rc == 0 )) && { log "trainer $idx: rc=0, chain complete -- not relaunching"; return 0; }
+        [[ "$SEAT_RELAUNCH" != "1" ]] && return "$rc"
+
+        if (( dt < SEAT_MIN_HEALTHY_SECS )); then
+            quick=$(( quick + 1 ))
+            log "trainer $idx: quick death $quick/$SEAT_MAX_QUICK_DEATHS (${dt}s < ${SEAT_MIN_HEALTHY_SECS}s)"
+            if (( quick >= SEAT_MAX_QUICK_DEATHS )); then
+                log "trainer $idx: $quick consecutive quick deaths -- seat looks broken, giving up"
+                return "$rc"
+            fi
+        else
+            quick=0   # it ran a real stretch; earlier quick deaths do not count
+        fi
+
+        left=$(secs_left)
+        if (( left < SEAT_RELAUNCH_MIN_LEFT )); then
+            log "trainer $idx: ${left}s left (< ${SEAT_RELAUNCH_MIN_LEFT}s) -- not relaunching"
+            return "$rc"
+        fi
+
+        attempt=$(( attempt + 1 ))
+        log "trainer $idx: relaunching (attempt $attempt, ${left}s of walltime left)"
+        sleep 10
+    done
+}
+
+log "job walltime ${WALLTIME_SECS}s; seat relaunch=$SEAT_RELAUNCH (min-left ${SEAT_RELAUNCH_MIN_LEFT}s)"
+declare -a RC SUP_PIDS
+for idx in "${!TRAINERS[@]}"; do
+    supervise_trainer "$idx" &
+    SUP_PIDS[$idx]=$!
+    sleep "$LAUNCH_STAGGER"
+done
+log "all ${#TRAINERS[@]} trainers launched under supervision; waiting..."
 
 # ---- Wait + per-trainer rc ---------------------------------------------------
-declare -a RC
 fails=0
+# Wait on the SUPERVISORS, not the raw trainer PIDs: a supervisor outlives its
+# current attempt and may relaunch several times. Waiting on PIDS[idx] here
+# would return after the FIRST attempt and tear the job down while seats were
+# still restarting.
+#
+# RC[] is set inside supervise_trainer, but that runs in a subshell, so its
+# assignments are not visible here -- take the rc from the supervisor itself
+# (it returns the last attempt rc).
 for idx in "${!TRAINERS[@]}"; do
-    wait "${PIDS[$idx]}"; RC[$idx]=$?
+    wait "${SUP_PIDS[$idx]}"; RC[$idx]=$?
     (( RC[$idx] == 0 )) || fails=$(( fails + 1 ))
-    log "trainer $idx finished rc=${RC[$idx]}"
+    log "trainer $idx supervisor exited rc=${RC[$idx]}"
 done
 
 echo "============================================================"
