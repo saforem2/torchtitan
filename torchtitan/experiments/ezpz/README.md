@@ -160,16 +160,25 @@ or prints nothing alarming, and you only find out at the next stage.
    `No virtual environment found` -- the venv's interpreter symlinks into
    `/opt/aurora/26.181.0`, which is not there -- and **still exits 0**. Install
    on the node.
-4. **`--no-deps` on everything** skips legitimate pure-python deps. It exists
-   to protect torch; use `-P torch ...` for that instead. Chasing the skipped
-   deps one failed job at a time cost four runs (`etils`, `xarray`,
-   `portpicker`, `typeguard`).
-5. **`import torchtitan.experiments.ezpz.agpt` is not a readiness gate** -- it
+4. **Neither blanket install policy works.** `--no-deps` on everything skips
+   legitimate pure-python deps -- chasing them one failed job at a time cost
+   four runs (`etils`, `xarray`, `portpicker`, `typeguard`). But letting the
+   resolver run pulled a generic PyPI **`torch-2.13.0`** into the overlay,
+   shadowing the RC's XPU build, **even with `-P torch -P pytorch-triton-xpu`
+   pins**: all 14 installs printed `ok` and only an explicit
+   `torch.__version__` assertion caught it (job `8784535`). Use the resolver
+   for leaf packages, `--no-deps` for anything that declares torch, and assert
+   on the torch version afterwards.
+5. **Evicting a stray torch is not enough -- take `triton` with it.** The same
+   pull brings a generic `triton-3.7.1` that shadows the RC's Intel-enabled
+   build; removing torch alone leaves `config_registry` dying on
+   `No module named 'triton.backends.intel'` (job `8784572`).
+6. **`import torchtitan.experiments.ezpz.agpt` is not a readiness gate** -- it
    succeeds while `config_registry` is still broken, because
    `config/manager.py` catches every exception and re-raises one generic
    `Cannot import config_registry`. Gate on `config_registry` itself, with
    `PYTHONPATH` unset from a neutral cwd, which is what ranks see.
-6. **Rank errors are not on stdout.** A launch that prints only
+7. **Rank errors are not on stdout.** A launch that prints only
    `Execution finished with 143` usually has the real traceback in
    `logs/<module>/<timestamp>-rank0.jsonl`.
 
@@ -179,15 +188,28 @@ or prints nothing alarming, and you only find out at the next stage.
 |---|---|
 | torch / XPU / XCCL on the RC | **PASS** -- `2.13.0a0+gitcf30153`, 12 devices, xccl True |
 | compiled SDPA fwd+bwd | **PASS** (job `8781129`, 1N) |
-| all deps import in the overlay | **PASS** (job `8784520`) |
-| `config_registry` | **PASS** (job `8784520`) |
-| W&B run created from a launch | **PASS** (job `8784520`) |
-| 2N collectives + real training | **pending** -- see
-  [`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md) |
+| all deps import in the overlay | **PASS** (job `8784615`) |
+| `config_registry` | **PASS** (job `8784615`) |
+| 2N collectives (`ezpz.examples.test`) | **PASS** -- rc=0, 24 ranks, 268s (job `8784615`) |
+| **2N x 12 distributed training** | **PASS** -- 10/10 steps, loss 10.865 -> 9.059 (job `8784615`) |
+| W&B from a real run | **PASS** -- `torchtitan.ezpz.train/runs/70fumwgc` |
 
-The 2B / MoE / 80B training results in that guide are **Sunspot**
-(`1247xxxx`), a different machine. Nothing had trained a step on Aurora's RC
-as of this writing.
+Full trajectory, `agpt_debugmodel`, 2 nodes x 12 ranks:
+
+```
+step:  1  loss: 10.86492  grad_norm: 0.5543
+step:  5  loss: 10.50758  grad_norm: 0.7077
+step: 10  loss:  9.05897  grad_norm: 1.0462
+```
+
+Monotonic descent, finite grad norms throughout. MFU is ~0.05% because
+`agpt_debugmodel` at `max_context_length=512` is a plumbing check, not a
+performance measurement -- do not read a throughput number off this run.
+
+Note the 2B / MoE / 80B results in
+[`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md)
+are **Sunspot** (`1247xxxx`), a different machine. The rows above are the
+first training on Aurora's RC.
 
 > [!TIP]
 > To suppress the `UserWarning: Torchinductor` error seen when using

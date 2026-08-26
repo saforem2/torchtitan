@@ -2,7 +2,7 @@
 #PBS -A AuroraGPT
 #PBS -q validation
 #PBS -l select=2
-#PBS -l walltime=00:50:00
+#PBS -l walltime=01:00:00
 #PBS -l filesystems=home:flare
 #PBS -N rc-full
 #PBS -j oe
@@ -44,20 +44,54 @@ UV=/home/foremans/.local/bin/uv
 # grain's deps read from .venv (where grain WORKS) via
 # importlib.metadata.requires. Chasing them one failed job at a time cost
 # three runs: etils, then xarray, then portpicker.
-for p in tensorboard tyro grain 'etils[epath,epy]' xarray absl-py \
-         array-record cloudpickle portpicker 'protobuf>=5.28.3' \
-         'spmd_types==0.2.1' wandb \
-         'git+https://github.com/saforem2/ezpz' \
-         'git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed'; do
+# Two tiers, because neither blanket policy works:
+#
+#   --no-deps on everything  -> silently drops pure-python deps. Cost four
+#                               jobs (etils, xarray, portpicker, typeguard).
+#   resolver on everything   -> pulled a generic PyPI torch-2.13.0 into the
+#                               overlay, shadowing the RC's XPU build, even
+#                               with -P pins. Caught by the guard in [3]
+#                               (job 8784535); -P does NOT prevent this.
+#
+# So: resolve deps for the leaf packages that cannot drag torch in, and use
+# --no-deps for the ones that declare it.
+RESOLVE=(tensorboard tyro grain 'etils[epath,epy]' xarray absl-py
+         array-record cloudpickle portpicker 'protobuf>=5.28.3' typeguard)
+NODEPS=('spmd_types==0.2.1' wandb
+        'git+https://github.com/saforem2/ezpz'
+        'git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed')
+
+for p in "${RESOLVE[@]}"; do
     printf '  %-52s ' "$p"
-    # Resolve deps normally, but NEVER let the resolver touch torch: the
-    # XPU build is on no index and would be swapped for a CUDA wheel.
-    # --no-deps was the old guard; it also skipped legitimate pure-python
-    # deps and cost four jobs (etils, xarray, portpicker, typeguard).
-    $UV pip install --no-cache --link-mode=copy \
-        -P torch -P pytorch-triton-xpu -P torchvision -P torchaudio \
-        "$p" >/dev/null 2>&1 \
+    if $UV pip install --no-cache --link-mode=copy "$p" >/dev/null 2>&1; then
+        echo ok
+    elif python3 -c "import ${p%%[<>=\[]*}" >/dev/null 2>&1; then
+        echo "ok (already satisfied)"
+    else
+        echo FAILED
+    fi
+done
+for p in "${NODEPS[@]}"; do
+    printf '  %-52s ' "$p (no-deps)"
+    $UV pip install --no-deps --no-cache --link-mode=copy "$p" >/dev/null 2>&1 \
       && echo ok || echo FAILED
+done
+
+# Belt and braces: if anything DID land a torch in the overlay it shadows the
+# RC build. Move it aside rather than let the guard just abort the job.
+SP=$(python3 -c 'import site; print(site.getsitepackages()[0])')
+# triton too: the PyPI torch pull brings a generic triton-3.7.1 that
+# shadows the RC's Intel-enabled build. Evicting torch alone leaves it,
+# and config_registry then dies on "No module named triton.backends.intel"
+# (job 8784572).
+for d in torch torchgen functorch triton; do
+    if [[ -e "$SP/$d" ]]; then
+        mv "$SP/$d" "$SP/$d.evicted-$(date +%H%M%S)"
+        echo "  EVICTED overlay $d (was shadowing the RC torch)"
+    fi
+done
+for d in "$SP"/torch-*.dist-info "$SP"/triton-*.dist-info; do
+    [[ -e "$d" ]] && mv "$d" "$d.evicted" && echo "  EVICTED $(basename $d)"
 done
 
 # torchtitan is NEVER pip-installed; it is imported from the repo tree. A
