@@ -29,9 +29,9 @@ for setting in "unset" "0" "1"; do
     else
         export CCL_OP_SYNC="$setting"
     fi
-    timeout 400 python3 -m ezpz.launch --nproc 2 --nproc_per_node 2 \
+    timeout 500 python3 -m ezpz.launch --nproc 2 --nproc_per_node 2 \
         -- python3 -m torchtitan.experiments.ezpz.tests.probe_xpu_graph_collective \
-        2>&1 | grep -aE "OUTSIDE capture|INSIDE capture|CAPTURES|FAIL|Error|wait method" | head -8
+        2>&1 | grep -aE "capture:|CCL_CAPTURE_PROBE_DONE|^[A-Za-z]*Error" | head -8
     echo "  rc=$?"
     echo
 done
