@@ -132,8 +132,47 @@ escalation from an elevated baseline, not a flip between two clean states --
 and that elevated baseline is a usable early-warning signal, where waiting for
 the discontinuity is not.
 
-After onset it sits in a persistent high-gradient regime and does not leave
-it.
+### It is recoverable -- one arm left the regime, the other did not
+
+Both SophiaG arms were left running well past their blow-ups to see whether
+the high-gradient state ever ends. It does, for one of them. Excursion rate
+per 100-step window (fraction of steps with grad_norm > 2.0):
+
+| window | sophiag | sophiag re-run |
+|---|---:|---:|
+| 1000-1099 | 52% (max 100,611) | -- |
+| 1100-1199 | 81% (max 497) | 28% (max 204,017) |
+| 1200-1299 | 92% (max 9,613) | 68% (max 63,685) |
+| 1300-1399 | 93% (max 9.9) | 55% (max 315) |
+| 1400-1499 | 61% (max 419) | 88% (max 4,250) |
+| 1500-1599 | 11% (max 89.7) | 98% (max 1,120) |
+| 1600-1699 | **0% (max 0.7)** | 97% (max 1,023) |
+| 1700-1799 | -- | 93% |
+
+**sophiag recovered completely.** By step 1600 it is at 0 excursions with a
+peak of 0.7 -- below Mano's lifetime average, ~600 steps after a 100,611 spike.
+The decline is not monotone (it peaks at 93% in 1300-1399 before falling), so
+the recovery is only visible once several windows are compared; any single
+window would read as noise.
+
+**sophiag re-run did not.** Same optimizer, same LR, same seed checkpoint,
+same data; 600 steps past onset it is still at 93-98% and still spiking past
+1,000.
+
+This retires the "does not leave that regime" claim earlier versions of this
+document made. That claim was made when the only evidence was ~400 post-onset
+steps, all of which happened to be inside the bad window. Given another 200
+steps, one arm walked out of it.
+
+So the regime is **metastable, not absorbing** -- and, like onset itself,
+whether an arm escapes appears to be luck. Two replicates from the same
+checkpoint diverged at different steps; two replicates past divergence had
+opposite recoveries. That is the same stochastic signature at both ends.
+
+What does NOT change: the blow-up is recurrent (3/3), five orders of magnitude
+beyond the healthy arms, and costs hundreds of steps of progress even when the
+arm eventually recovers. A recoverable failure that burns 600 steps of a 2,500
+step budget is still disqualifying for this comparison.
 
 **Consequence: apparent "recovery" is an artifact.** Watching the loss alone,
 the re-run looked like it was recovering twice (7.15 -> 4.56, then 5.50 -> 4.29).
