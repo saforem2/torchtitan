@@ -348,7 +348,7 @@ and still five orders of magnitude beyond anything the healthy arms do -- but
 SophiaG was visibly the least stable arm the whole time, which is a better
 early-warning signal than waiting for the discontinuity.
 
-### It is recoverable -- one arm left the regime, the other did not
+### It is recoverable, but not reliably -- read to the end of this section
 
 Both SophiaG arms were left running well past their blow-ups to see whether
 the high-gradient state ever ends. It does, for one of them. Excursion rate
@@ -389,6 +389,40 @@ What does NOT change: the blow-up is recurrent (3/3), five orders of magnitude
 beyond the healthy arms, and costs hundreds of steps of progress even when the
 arm eventually recovers. A recoverable failure that burns 600 steps of a 2,500
 step budget is still disqualifying for this comparison.
+
+### And it relapses -- recovery is not an exit
+
+Left running further, the re-run did briefly recover, then fell straight back
+in. Per-100-step excursion rate (grad_norm > 2.0):
+
+| window | sophiag | sophiag re-run |
+|---|---:|---:|
+| 1600 | 0% (max 0.7) | 97% (max 1,023) |
+| 1700 | 0% (max 0.5) | 95% (max 29.5) |
+| 1800 | 2% (max 7.0) | **4% (max 5.2)** |
+| 1900 | 0% (max 0.9) | 93% (max 17,065) |
+| 2000 | -- | **100% (max 27,524)** |
+
+The re-run's window-1800 is a genuine quiet spell -- 4%, peak 5.2, materially
+better than Mano's lifetime 6.5% -- and it does not hold. The next window is
+back to 93% with a peak three orders of magnitude higher, and the one after is
+100%.
+
+So recovery is not a one-way exit. An arm can sit quiet for a hundred steps and
+re-enter, which means **no finite quiet window proves an arm is out of it**.
+The reading immediately above -- one arm "left the regime", the other did not
+-- was taken at the moment the re-run happened to be in its quiet window, and
+it did not survive another 200 steps. That is the second time a claim in this
+section came from a window that happened to sit inside one phase.
+
+`sophiag` has now held 0-2% across four consecutive windows with a peak of 7.0,
+which is a far stronger basis than the single window the earlier claim rested
+on -- but on this evidence it is a longer quiet spell, not proof of exit.
+
+The practical consequence is unchanged and firmer: an optimizer that can
+re-enter a 27,000-grad-norm state after appearing healthy for a hundred steps
+is not usable for a production chain, recoverable or not.
+
 
 It ended at loss 4.193 -- back in its pre-blow-up range, and on a loss chart
 alone indistinguishable from a recovered run. Its grad_norm at that same step
