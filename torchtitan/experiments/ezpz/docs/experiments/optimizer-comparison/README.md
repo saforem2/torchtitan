@@ -1,7 +1,48 @@
 # Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG
 
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
-**Status:** LR finders launched 2026-08-23 (jobs 12473711/12/13).
+**Status:** COMPLETE. Both healthy arms passed the 10B budget 2026-08-26.
+
+## RESULT: Mano wins at the 10B budget
+
+Both healthy arms crossed the 10B target (step 2,543 at GBS=960 x 4096 =
+3.93M tok/step). Final numbers at and around the budget line:
+
+| step | tokens | AdamW | Mano | Mano - AdamW |
+|---:|---:|---:|---:|---:|
+| 2400 | 9.43B | 2.9492 | **2.8016** | -0.1477 |
+| 2500 | 9.82B | 2.9161 | **2.7683** | -0.1479 |
+| **2543** | **9.99B** | **2.9134** | **2.7701** | **-0.1433** |
+| 2590 | 10.18B | 2.9069 | **2.7643** | -0.1426 |
+
+**Mano finishes 0.143 nats ahead of AdamW at 10B tokens**, having led since
+the crossover at ~1.0B. SophiaG is disqualified -- it diverged in 3 of 3
+replicates from the same checkpoint (steps 1048, 1176, 1071).
+
+The gap flattened rather than closed. Refit on the last billion tokens the
+closing rate is +0.0056 nats/B against +0.0252 over 5.9-7.5B, which puts a
+crossover at ~35B rather than the ~10B a whole-span fit suggested. AdamW does
+not catch Mano within any horizon this experiment reaches.
+
+### What this does and does not say
+
+**Does:** at a fixed GBS=960, with per-optimizer LRs measured at that exact
+batch, held constant after a 20-step warmup, Mano reaches a lower loss than
+AdamW at every point past ~1.0B tokens and the advantage is stable at ~0.14
+nats by 10B.
+
+**Does not:** this is one seed per arm and there is **no decay phase**. The
+documented prior from earlier competitions is precisely "Mano/Muon win short
+runs, AdamW wins in the cosine decay phase" -- so this result is consistent
+with that prior rather than a refutation of it. Testing whether Mano's lead
+survives a decay phase is the obvious follow-up and is NOT answered here.
+
+**Also does not:** say anything about SophiaG's usability at a lower LR. The
+LR-finder sweep is smooth through the whole low band, and the divergence is
+state-dependent rather than LR-driven, so a low-LR arm would test a different
+hypothesis than the one the sweep addresses.
+
+---
 
 ## What this replaces, and why
 
