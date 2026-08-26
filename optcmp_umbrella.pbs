@@ -1,0 +1,190 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N optcmp-umbrella
+#PBS -q workq
+#PBS -l walltime=08:00:00
+#PBS -l select=64
+#PBS -l filesystems=tegu:home
+#PBS -j oe
+
+# Advance ALL FOUR optimizer-comparison arms in ONE 64-node allocation.
+#
+# Why an umbrella instead of four 16N jobs
+# ----------------------------------------
+# Four independent jobs each race the queue separately, so they start at
+# different times, run for different fractions of their window, and drift out
+# of step-alignment. The whole experiment is a MATCHED-STEP comparison, so
+# drift is not cosmetic: it is the thing being measured. One allocation means
+# all four arms advance the same wall-clock and stay comparable.
+#
+# Modeled on scripts/submit_agpt_multi_autoretry.sh: slice $PBS_NODEFILE into
+# disjoint per-arm hostfiles, fire concurrent `ezpz launch`, wait() on all.
+# One arm crashing does NOT abort the others.
+#
+# Usage
+#   qsub optcmp_umbrella.pbs
+#   qsub -v ARMS="adamw mano" optcmp_umbrella.pbs     # subset
+#
+# Deliberately NOT set: --grad-norm-abort. This run exists to watch what the
+# SophiaG arms do over a long window, so stopping them early defeats it. The
+# guard is validated (it caught replicate 3 at 133x median); leaving it off
+# here is a choice about this experiment, not doubt about the guard.
+
+set -o pipefail   # NOT -euo: a nonzero from one arm must not kill the others
+
+ulimit -c 0       # a crashing 30B rank dumps ~45 GB into $HOME
+
+cd "$PBS_O_WORKDIR" || exit 1
+
+# Same env the single-arm script uses -- `ezpz` and python3 both come from
+# here, so without it every arm dies with command-not-found. `unset
+# PYTHONPATH` matters: a stale PYTHONPATH shadows the venv's torchtitan and
+# the import check passes while training imports the wrong tree.
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+
+NODES_PER_ARM=16
+PROC_PER_ARM=192
+PPN=12
+STEPS=6000
+CKPT_INTERVAL=100
+# 8h wall, leave ~50 min for startup + the final checkpoint flush
+INNER_TIMEOUT=25200
+
+# arm -> "config lr ckpt_suffix"
+declare -A ARM_CONFIG=(
+  [adamw]="agpt_30b_olmo2tok_optcmp_adamw 3.05e-5 adamw"
+  [mano]="agpt_30b_olmo2tok_mano 5.61e-5 mano"
+  [sophiag]="agpt_30b_olmo2tok_sophiag 3.55e-5 sophiag"
+  [sophiag_rerun]="agpt_30b_olmo2tok_sophiag 3.55e-5 sophiag-rerun"
+)
+ARMS="${ARMS:-adamw mano sophiag sophiag_rerun}"
+
+for _arm in $ARMS; do
+    _cfg=$(echo "${ARM_CONFIG[$_arm]}" | awk '{print $1}')
+    python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import $_cfg" 2>/dev/null \
+        || { echo "ABORT: $_cfg does not import (arm $_arm)"; exit 1; }
+done
+echo "verified every arm's config imports"
+
+LOGROOT="$PBS_O_WORKDIR/outputs/logs/optcmp-umbrella/$PBS_JOBID"
+mkdir -p "$LOGROOT"
+
+log() { echo "[umbrella $(date +%H:%M:%S)] $*"; }
+
+# ---------------------------------------------------------------- nodefile
+[ -n "$PBS_NODEFILE" ] && [ -f "$PBS_NODEFILE" ] || {
+    log "FATAL: PBS_NODEFILE unset/missing"; exit 1; }
+TOTAL=$(wc -l < "$PBS_NODEFILE")
+NARMS=$(echo $ARMS | wc -w)
+NEED=$(( NARMS * NODES_PER_ARM ))
+log "allocation: $TOTAL nodes; need $NEED ($NARMS arms x $NODES_PER_ARM)"
+if [ "$TOTAL" -lt "$NEED" ]; then
+    log "FATAL: too few nodes ($TOTAL < $NEED)"; exit 1
+fi
+
+# Disjoint slices. Overlapping slices would put two trainers on one node,
+# which oversubscribes the GPUs and corrupts BOTH arms' throughput numbers.
+idx=0
+for arm in $ARMS; do
+    off=$(( idx * NODES_PER_ARM + 1 ))
+    sed -n "${off},$(( off + NODES_PER_ARM - 1 ))p" "$PBS_NODEFILE" \
+        > "$LOGROOT/$arm.hostfile"
+    n=$(wc -l < "$LOGROOT/$arm.hostfile")
+    log "  slice $arm: $n nodes (offset $off)"
+    idx=$(( idx + 1 ))
+done
+dupes=$(cat "$LOGROOT"/*.hostfile | sort | uniq -d)
+[ -n "$dupes" ] && { log "FATAL: slices overlap:"; echo "$dupes"; exit 1; }
+log "verified slices are disjoint"
+
+# ---------------------------------------------------------------- launch
+declare -A PIDS
+port=29500
+
+for arm in $ARMS; do
+    read -r CONFIG LR SUFFIX <<< "${ARM_CONFIG[$arm]}"
+    CKPT="$PBS_O_WORKDIR/checkpoints/agpt-30b-optcmp-$SUFFIX"
+    HF="$LOGROOT/$arm.hostfile"
+    LOG="$LOGROOT/$arm.log"
+    mkdir -p "$CKPT"
+
+    # Stripe across the two OSTs with free space. tegu has 4 asymmetric OSTs
+    # (2x624TB at ~7%, 2x27TB at 100%); the default stripe_offset=-1 gives a
+    # ~50% chance of landing on a full one and failing with ENOSPC while `df`
+    # still reports over a petabyte free.
+    lfs setstripe -c 2 -i 0 -o 0,1 "$CKPT" 2>/dev/null
+
+    # Resume from the newest checkpoint that actually HAS .metadata. DCP writes
+    # shards first and commits .metadata LAST, so a walltime-interrupted write
+    # leaves a directory that dcp.load silently SKIPS -- which restarts from
+    # random init and looks like training, not like an error.
+    LAST=""
+    for d in $(ls -1 "$CKPT" 2>/dev/null | sed -n 's/^step-//p' | sort -rn); do
+        if [ -f "$CKPT/step-$d/.metadata" ]; then LAST="$d"; break; fi
+        log "  $arm: IGNORING step-$d (no .metadata, interrupted write)"
+    done
+    log "  $arm: config=$CONFIG lr=$LR resume=${LAST:-fresh} ckpt=$(basename "$CKPT")"
+
+    (
+        export MASTER_PORT="$port"; unset MASTER_ADDR
+        export WANDB_PROJECT="agpt-30b-optcmp"
+        export WANDB_RUN_GROUP="$SUFFIX"
+        cd "$PBS_O_WORKDIR" || exit 1
+        timeout "$INNER_TIMEOUT" ezpz launch \
+            --nproc "$PROC_PER_ARM" -ppn "$PPN" --hostfile "$HF" -- \
+          python3 -m torchtitan.experiments.ezpz.train \
+            --module ezpz.agpt --config "$CONFIG" \
+            --optimizer.param-groups.0.optimizer-kwargs.lr="$LR" \
+            --training.steps=$STEPS \
+            --training.max-context-length=4096 \
+            --training.num-tokens-per-microbatch-per-dp-rank=20480 \
+            --training.num-tokens-per-train-step=3932160 \
+            --parallelism.tensor-parallel-degree=1 \
+            --lr-scheduler.warmup-steps=20 \
+            --lr-scheduler.decay-ratio=0.0 \
+            --checkpoint.enable \
+            --checkpoint.folder="$CKPT" \
+            --checkpoint.interval=$CKPT_INTERVAL \
+            --checkpoint.keep-latest-k=0 \
+            --nan-abort-consecutive=5
+    ) >> "$LOG" 2>&1 &
+
+    PIDS[$arm]=$!
+    log "  $arm launched pid=${PIDS[$arm]} port=$port -> $LOG"
+    port=$(( port + 1 ))
+    sleep 20   # stagger: 4 simultaneous 192-rank inits storm the CCL KVS
+done
+
+log "all $NARMS arms launched; waiting..."
+declare -A RC
+for arm in $ARMS; do
+    wait "${PIDS[$arm]}"; RC[$arm]=$?
+done
+
+# ---------------------------------------------------------------- report
+echo ""
+echo "########## optcmp umbrella $PBS_JOBID ##########"
+for arm in $ARMS; do
+    read -r CONFIG LR SUFFIX <<< "${ARM_CONFIG[$arm]}"
+    LOG="$LOGROOT/$arm.log"
+    C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" 2>/dev/null)
+    first=$(printf '%s' "$C" | grep -aoE 'step: +[0-9]+ +loss: +[0-9.]+' | head -1)
+    last=$(printf '%s' "$C" | grep -aoE 'step: +[0-9]+ +loss: +[0-9.]+' | tail -1)
+    lastn=$(printf '%s' "$last" | grep -oE '[0-9]+' | head -1)
+    echo "  -- $arm (rc=${RC[$arm]}) --"
+    echo "     first: ${first:-none}"
+    echo "     last:  ${last:-none}"
+    [ -n "$lastn" ] && echo "     tokens: $(python3 -c "print(f'{$lastn*960*4096/1e9:.2f}B')" 2>/dev/null)"
+    echo "     ckpts written: $(ls -1d "$PBS_O_WORKDIR/checkpoints/agpt-30b-optcmp-$SUFFIX"/step-* 2>/dev/null | wc -l)"
+    echo "     max grad_norm: $(printf '%s' "$C" | grep -aoE 'grad_norm: +[0-9.]+' | awk '{if($2+0>m)m=$2+0} END{printf "%.2f", m}')"
+    # 124 = the inner timeout, which is the DESIGNED clean stop for these arms
+    case "${RC[$arm]}" in
+        124) echo "     verdict: clean walltime stop (expected)" ;;
+        0)   echo "     verdict: exited 0 -- finished steps or stopped early, CHECK last step" ;;
+        *)   echo "     verdict: rc=${RC[$arm]} -- inspect $LOG" ;;
+    esac
+done
+echo "OPTCMP_UMBRELLA_DONE"
