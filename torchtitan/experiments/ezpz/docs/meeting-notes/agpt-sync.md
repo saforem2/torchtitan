@@ -20,6 +20,11 @@
 > Q since 13:22 today on "Not enough free nodes available". The last umbrella
 > to seat, `8773440`, used 5h13 of its 12h -- and the fix for exactly that
 > waste landed after it.
+>
+> Why it stopped: `ezpz`'s auto-retry matched progress on `step=` and
+> `torchtitan` prints `step: `. Three seats were training (201, 504, 782
+> steps), all three scored zero progress, and the failover called it
+> `stuck_pre_training`. `ezpz` 0.27.3 fixes it; both tarballs are rebuilt.
 
 Two days since 2026-08-24. Almost everything below is Sunspot; the Aurora
 production section is short because there is nothing to report, which is
@@ -46,7 +51,58 @@ ask being killed in queue rather than waiting, and it is worth understanding
 before resubmitting a third: if the scheduler is terminating large asks under
 current occupancy, resubmitting the same shape just burns queue position.
 
-### 2. Seats that exit early no longer idle their slice
+### 2. Why `8773440` stopped: `ezpz` looked for `step=`, `torchtitan` prints `step: `
+
+The 5h13m was two separate failures, and this is the one that threw away the
+training. `ezpz` 0.21.x classified progress with:
+
+```python
+_PROGRESS_MARKER_RX = re.compile(r"\bstep=\d+")
+```
+
+Measured on `8773440`'s own logs:
+
+| seat | steps | 0.21.x | 0.27.3 |
+|---|---|---|---|
+| t0 | 0 | False | False |
+| t1 | 0 | False | False |
+| t2 | 201 | **False** | True |
+| t3 | 504 | **False** | True |
+| t4 | 782 | **False** | True |
+
+Every `torchtitan` seat scores zero progress regardless of how much it trains,
+so a seat whose attempt exits non-zero twice is filed `stuck_pre_training` and
+abandoned with spares still free. t3 was killed immediately after checkpointing
+step 21,800.
+
+Upstream `ezpz` had already widened it to
+`(iter|step|epoch|batch|idx)\s*[=:]\s*\d+`; the comment there notes that
+`torchtitan`-style `step: 1` is deliberately accepted and that this "has
+already bitten."
+
+Both venv tarballs rebuilt on 0.27.3, regex verified **inside** each archive.
+There are only two real ones -- `agpt-20b-n256` and
+`agpt-2b-constlr-from9200` symlink to `agpt-20b-v2` and `agpt-2b-v2` -- so a
+clone's `.venv` version is irrelevant at runtime. The tarball is what ships.
+
+Regression test at
+[`tests/failover/test_progress_marker_contract.py`](../../tests/failover/test_progress_marker_contract.py):
+the detector lives in `ezpz`, the log format is `torchtitan`'s, and nothing
+tested the pair together.
+
+**Two corrections to the 08-24 entry** while on this run:
+
+- **`std::bad_alloc` is not the last open seat failure.** t0 and t1 died on
+  `signal 11` at 150s and 700s, and the failover logged
+  `FAILOVER STOP: walltime (rc=143, attempt 1)`. Neither was near walltime; a
+  recoverable bad-node SIGSEGV was filed as terminal, so no rotation was
+  attempted with 10 spares free.
+- **The umbrella `.o` is not a record of what happened.** `8773440` banners
+  01:03 -> 01:15 against 5h13m of PBS walltime; `8764675` banners 1h47m against
+  12h00m31s. Both stop narrating while seats keep training. Read
+  `logs/multi-autoretry-<jobid>/trainer-N-*.console.log`.
+
+### 3. Seats that exit early no longer idle their slice
 
 `8773440` used **5h13 of 12h**. Every seat had exited by 04:27 -- three after
 real training, two on bad-node SIGSEGV -- and PBS did not tear the shell down
@@ -67,7 +123,7 @@ This is the largest single source of wasted allocation we have measured, and
 it was invisible in the per-chain step counts -- the chains looked like they
 simply got less done.
 
-### 3. 30B optimizer comparison: Mano wins at the 10B budget
+### 4. 30B optimizer comparison: Mano wins at the 10B budget
 
 Sunspot, 16N per arm, GBS=960 fixed, constant LR after a 20-step warmup, LRs
 from a per-optimizer
@@ -99,7 +155,7 @@ table is now in the
 corrected number, because the number will move again and the failure mode will
 not.
 
-### 4. SophiaG: 3 of 3, and the regime is metastable
+### 5. SophiaG: 3 of 3, and the regime is metastable
 
 Three replicates forked from the same clean step-1000 checkpoint carrying full
 optimizer state. All three blew up, at **steps 1048, 1176 and 1071**. Same
@@ -148,7 +204,7 @@ scope bug that killed its first run at step 1 -- `NameError` on a name local to
 `train_step` -- which PBS reported as `Exit_status=0`. A guard validated only
 by replaying finished logs proves the policy, never the binding.
 
-### 5. MoE TP>1: measured, not guessed
+### 6. MoE TP>1: measured, not guessed
 
 Four theories about the `wo` placement error were wrong. The fifth attempt
 instrumented it instead (`bae99a84c`, job 8784667):
@@ -174,14 +230,14 @@ the config names -- so launching any upstream config through our entrypoint
 built the upstream `Trainer` and never installed it. Hoisted to before
 `config.build()` (`66a8b6f1f`).
 
-### 6. Aurora frameworks RC trains
+### 7. Aurora frameworks RC trains
 
 Job 8784615, 2 nodes x 12 ranks: 10/10 steps, loss 10.865 -> 9.059, finite grad
 norms, rc=0. Also rc=0 on `ezpz.examples.test` at 24 ranks -- the first
 completed collective on Aurora RC, which the validation guide had listed as
 never established. First training of any kind on that stack.
 
-### 7. Upstream sync 81
+### 8. Upstream sync 81
 
 Six commits, merged and smoked (2N, 3 arms, 3 steps each, PASS 3/3). Now 0
 behind `upstream/main`. Only two could plausibly touch our path and both are

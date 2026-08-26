@@ -122,16 +122,61 @@ placement collapses `Shard(dim=1)` -> `Shard(dim=0)`. That is the value `wo`
 rejects. **The `wo` error is a symptom; the defect is upstream of it, in the
 unflatten.**
 
-## The open question
+## Why identical code diverges: the attention TYPE
 
-`agpt/__init__.py` carries a **byte-identical** unflatten, and **agpt TP=2
-passes** (both arms green in `sync_smoke.sh`). Both wrappers are local_mapped
-through the same `set_gqa_inner_attention_local_map`. So the unflatten alone
-cannot be the whole story -- something differs in how moe's tensors reach it,
-or in whether agpt reaches the 3D branch at all under TP.
+```
+moe  attention cfg = Attention.Config        (upstream MLA)
+agpt attention cfg = GQAttention.Config
+```
 
-Resolve that before changing either wrapper: a fix derived from moe alone
-risks breaking the agpt path that currently works in production.
+Both build the **same** `EzpzScaledDotProductAttention.Config` inner attention,
+and both forwards expose the **same** positional names
+(`['q_TNH', 'k_TNH', 'v_TNH']`, verified with `inspect`), so the local_map
+name-matching contract is satisfied on both sides. The divergence is one layer
+up, in the attention block itself.
+
+`set_gqa_attention_sharding` asserts `GQAttention.Config`, so **agpt gets that
+whole helper and moe structurally cannot** -- moe hand-rolls the equivalent in
+`moe/sharding.py`.
+
+### What was checked and ELIMINATED
+
+- **The hand-rolled sharding is not missing anything.** Diffed assignment for
+  assignment against upstream `deepseek_v3/sharding.py`: the same 12 entries in
+  the same order (attention block, rope, wkv_a, kv_norm, wkv_b, wo, the
+  local_map, wq / wq_a+q_norm+wq_b). Ours adds only a
+  `getattr(attention, "rope", None) is not None` guard, and rope is non-None
+  here anyway.
+- **Positional-arg names match** -- the local_map contract binds by name and
+  both are `q_TNH`/`k_TNH`/`v_TNH`.
+- **`pad_v` and the output slice are innocent** -- placement is unchanged
+  across both (see the probe above).
+- **Head count is not it** -- both have `n_heads=16`.
+
+### The one live difference
+
+moe's MLA is **head-dim asymmetric**: `qk_head_dim=192` vs `v_head_dim=128`.
+agpt's GQA shares a single head_dim across q/k/v. The unflatten reshapes all
+three with the head_dim taken from **q**:
+
+```python
+q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
+k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)   # same head_dim
+v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)   # same head_dim, but v is 128
+```
+
+For agpt that is exact. For moe, `v` only survives it because `pad_v` has
+already padded v to 192 -- and the `-1` then absorbs any residual mismatch into
+the head axis instead of raising.
+
+**This is a candidate, not a conclusion.** It has not been measured: the
+agpt-vs-moe probe job (`8784895`) was killed by walltime during the agpt arm
+and produced no probe output at all -- the smoke script yeets a venv first,
+which ate the 40 minute limit. Re-run it with a longer walltime, or against an
+already-warm node, before acting on this.
+
+Do not change either wrapper until the agpt side is measured: a fix derived
+from moe alone risks breaking the agpt path production depends on.
 
 ## Probe
 
