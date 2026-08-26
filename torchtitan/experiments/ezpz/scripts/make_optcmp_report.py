@@ -146,12 +146,28 @@ what happened to replicates 1 and 2.
 
 ### The regime persists -- it is not a transient
 
-Replicate 2 was deliberately left running well past its blow-up to show what
-the post-onset state actually looks like on the charts above. It ran to its
-walltime, **403 steps past onset, and never left the regime**: 77% of those
-steps exceed grad_norm 2.0, and it was still throwing excursions of 12.7,
-13.4 and 13.0 at steps 1569-1573 -- nearly 400 steps after the 204,016 peak
-at step 1189.
+Both SophiaG arms were left running well past their blow-ups to see whether
+the high-gradient state ever ends. **It does -- for one of them.** Excursion
+rate per 100-step window (steps with grad_norm > 2.0):
+
+| window | sophiag | sophiag re-run |
+|---|---:|---:|
+| 1200-1299 | 92% (max 9,613) | 68% (max 63,685) |
+| 1400-1499 | 61% (max 419) | 88% (max 4,250) |
+| 1500-1599 | 11% (max 89.7) | 98% (max 1,120) |
+| 1600-1699 | **0% (max 0.7)** | 97% (max 1,023) |
+
+sophiag recovered completely: by step 1600 it is at zero excursions with a
+peak of 0.7, below Mano's lifetime average, ~600 steps after a 100,611 spike.
+The re-run, from the same checkpoint at the same LR, is still at 93-98% and
+still spiking past 1,000 at step 1750.
+
+So the regime is **metastable, not absorbing** -- an earlier version of this
+report said it "does not leave that regime", which was based on ~400 post-onset
+steps that all happened to fall inside the bad window. Whether an arm escapes
+looks like luck, the same stochastic signature as onset itself: two replicates
+from one checkpoint diverged at different steps, and two replicates past
+divergence had opposite recoveries.
 
 For contrast, AdamW and Mano have never once exceeded 0.8 in ~1,100 combined
 steps.
