@@ -1,5 +1,48 @@
 # MoE at TP>1: `wo` gets Shard(0) where row-parallel wants Partial(sum)
 
+> [!IMPORTANT]
+> **RESOLVED 2026-08-27 (`6e4e1996f`). moe trains at TP=2.** The bug was in the
+> SDPA wrapper, not in `wo`, not in the sharding config, and not in the
+> `local_map`.
+>
+> `moe/__init__.py` unflattened `[T, N, H] -> [B, L, N, H]` on the way IN
+> (ported in `e4517ae09`) but never re-flattened on the way OUT -- it returned
+> `out.transpose(1, 2)`, still 4D. So it took 3D and returned 4D, violating its
+> own contract. MLA's `output.view(num_tokens, -1)` then reshaped against a
+> leading dim that is BATCH rather than tokens, and the result landed
+> `Shard(dim=0)` where the rowwise `wo` declares `Partial(sum)`.
+>
+> `agpt/__init__.py` already had the re-flatten, and its comment warns about
+> exactly this ("reads the wrong stride off a 4D tensor"). The port copied the
+> input half and dropped the output half -- that is the entire difference
+> between agpt training at TP=2 and moe not.
+>
+> Verified, job `8787243`, 4 ranks, TP=2, 5 steps:
+>
+> | arm | step 1 -> step 5 |
+> |---|---|
+> | agpt | 10.88838 -> 10.43820 |
+> | moe tp=1 | 12.93609 -> 11.32376 |
+> | moe tp=2 | 12.94930 -> 11.49335 |
+>
+> All monotonic, finite grad norms. The moe arms agree to 0.011 at step 1 and
+> track within 0.17 over five steps, and TP=2 uses less memory per rank than
+> TP=1 (1.93 vs 2.78 GiB).
+>
+> **A wrong fix went first, and only the TP=1 arm caught it.** Patching MLA to
+> `output.view(output.shape[0], -1)` -- copying agpt's line verbatim -- reads
+> the BATCH axis off moe's 4D output and collapses everything into one row
+> (`mat1 and mat2 shapes cannot be multiplied (1x1048576 and 2048x256)`),
+> breaking TP=1, which had always worked. agpt's SDPA returns 3D so `shape[0]`
+> is tokens there; moe's returned 4D so it was not. **Always keep a TP=1 arm:
+> without it that regression ships looking like a fix.**
+>
+> The twelve eliminated hypotheses below are all still correct -- and that is
+> the lesson. Config population, layout axes, arg names, the parallelize
+> branch, the local_map install: every one measured identical between the two
+> models. The difference was never configuration. It was two missing lines.
+
+
 > **Open.** Found 2026-08-25 while verifying the MLA fold port
 > ([`moe-mla-not-ported-to-4121-fold.md`](moe-mla-not-ported-to-4121-fold.md)).
 > **Nothing in production is affected**: no agpt chain uses this code and no MoE
