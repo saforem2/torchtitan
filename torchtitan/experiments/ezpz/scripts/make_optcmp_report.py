@@ -81,6 +81,10 @@ GROUPBY_KEY = "arm"
 # to say anything about divergence. Below this it is an aborted launch.
 MIN_RERUN_STEPS = 1040
 
+# Checkpoint-folder prefix that identifies a run as a comparison arm. Used to
+# tell a forgot-the-group chain link apart from a genuine smoke run.
+ORPHAN_CKPT_PREFIX = "agpt-30b-optcmp-"
+
 DIVERGENCE_MD = """
 ## The SophiaG divergence -- it happens twice
 
@@ -356,10 +360,33 @@ def _discover(api) -> dict[str, list]:
     a missing arm.
     """
     by_group: dict[str, list] = {}
+    orphans = []
     for run in api.runs(f"{ENTITY}/{PROJECT}"):
         if not run.group:
-            continue  # smoke/preflight runs, never part of the comparison
+            # An ungrouped run is USUALLY a smoke/preflight run, but it is also
+            # exactly what a comparison link looks like when its launch script
+            # forgot to export WANDB_RUN_GROUP -- which optcmp.pbs did for its
+            # whole life, dropping five links (up to step 2880) out of this
+            # report with no error. The two cases are told apart by the
+            # checkpoint folder: comparison arms write to
+            # checkpoints/agpt-30b-optcmp-<arm>, smoke runs do not.
+            ckpt = run.config.get("checkpoint", {})
+            folder = ckpt.get("folder", "") if isinstance(ckpt, dict) else ""
+            base = str(folder).rstrip("/").split("/")[-1]
+            if base.startswith(ORPHAN_CKPT_PREFIX):
+                orphans.append((run.id, run.name, base[len(ORPHAN_CKPT_PREFIX):],
+                                run.summary.get("_step")))
+            continue
         by_group.setdefault(run.group, []).append(run)
+
+    if orphans:
+        print("ERR ungrouped comparison run(s) -- these are chain links whose "
+              "launch script did not export WANDB_RUN_GROUP. They would be "
+              "silently absent from every panel. Set group+config['arm'] on "
+              "each, then re-run:")
+        for rid, name, arm, step in orphans:
+            print(f"    {rid} ({name}) looks like arm {arm!r}, reached step {step}")
+        raise SystemExit(1)
 
     # Drop aborted launches. Discovery is only better than a pinned list if it
     # also declines to plot runs that never produced a comparable trajectory:
