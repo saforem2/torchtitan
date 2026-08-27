@@ -72,8 +72,13 @@ echo "== verifying =="
 ssh "$REMOTE" "set -e
   f='$REMOTE_DIR/${SESSION}.jsonl'
   n=\$(wc -l < \"\$f\" | tr -d ' ')
-  echo \"   records: \$n (expected $LINES)\"
-  [ \"\$n\" = '$LINES' ] || { echo '   RECORD COUNT MISMATCH' >&2; exit 1; }
+  echo \"   records: \$n (expected >= $LINES)\"
+  # >= not ==: the transcript is appended to LIVE, so it grows while the copy
+  # streams -- the handoff conversation is itself being recorded. An exact
+  # match reported RECORD COUNT MISMATCH on a perfectly good 222,498-record
+  # copy (expected 222,494) and aborted before the memory rsync. Fewer records
+  # than expected is still a real truncation.
+  [ \"\$n\" -ge '$LINES' ] || { echo '   TRUNCATED: fewer records than source' >&2; exit 1; }
   if grep -q '$LOCAL_ROOT' \"\$f\"; then
     echo '   STALE PATHS REMAIN' >&2; exit 1
   fi
