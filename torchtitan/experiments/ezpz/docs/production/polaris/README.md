@@ -274,6 +274,42 @@ and do not trust a green `refresh_all.sh` as evidence they are current.
 > `scripts/install_polaris_failover_patterns.sh` *before* `ezpz tar-env`
 > -- ezpz is installed from a pinned commit, so the fix would otherwise
 > silently vanish and revert failover to blind.
+>
+> **A second, independent failover bug bit on 2026-08-27** (job 7560196,
+> **3h03m** of 130 nodes, `Exit_status=124`). The patterns were installed
+> and correct but **unreachable**: `_detect_machine()` resolves the
+> registry key from `ezpz.get_machine()`, which on a login node returns
+> the FQDN `polaris-login-04.hsn...` while the keys are bare
+> (`polaris`). The import raised, the scraper fell back to the generic
+> "possible application crash on rank 0" noise, and wrote the **innocent
+> rank-0 node** into `bad_nodes.txt` while both real culprits stayed in
+> the allocation. Fixed in the same installer script. Writeup:
+> [`known-bugs/polaris-failover-detect-machine-fqdn.md`](../../guides/known-bugs/polaris-failover-detect-machine-fqdn.md).
+>
+> Two things that make this easy to ship as a no-op, both hit for real:
+>
+> 1. **The Lustre `.venv` is not what runs.** Jobs broadcast
+>    `.venv.tar.gz` to `/tmp/.venv`. Patching site-packages alone ships
+>    nothing to the compute nodes.
+> 2. **`ezpz tar-env` silently skips an existing tarball** -- it logs
+>    `already exists, skipping creation` and **exits 0**. Move the stale
+>    tarball aside first (dated `mv`, or `backup`; never `rm`), then
+>    verify the artifact rather than the exit code:
+>
+> ```bash
+> tar -xzOf .venv.tar.gz --wildcards '*/ezpz/failover/scrape.py' \
+>   | grep -c 'normalize FQDN'     # 1 = fix present
+> ```
+>
+> A `0` while `tar` is still writing is expected (sequential archive);
+> only trust the check once `tar` has exited.
+>
+> Gate before launching: the auto-detect path, with no explicit argument,
+> must resolve to `polaris`.
+>
+> ```bash
+> python3 -c 'from ezpz.failover.scrape import _detect_machine; print(_detect_machine())'
+> ```
 
 ### Evaluation (lm-eval, Llama2 tokenizer)
 

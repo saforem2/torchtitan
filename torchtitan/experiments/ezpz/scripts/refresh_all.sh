@@ -110,7 +110,12 @@ elif [[ "$WANDB" -eq 0 ]]; then
     # Fast path: only the W&B-free workers (eval figures + index-table
     # refresher). Skip the two W&B chart scripts.
     echo "    (--fast: regenerating index table + eval figures only; skipping W&B charts)"
-    "$PY" -m torchtitan.experiments.ezpz.utils.refresh_docs_readme_table 2>&1 || charts_rc=$?
+    # Run as a SCRIPT, not -m: `python -m torchtitan.experiments.ezpz.utils.X`
+    # walks the package chain, and ezpz/__init__.py -> local_device_compat
+    # imports torch. The generator itself is stdlib-only (its one
+    # trajectories import is already try/except-guarded), so -m made it
+    # need a full training env to regenerate a markdown table.
+    "$PY" torchtitan/experiments/ezpz/utils/refresh_docs_readme_table.py 2>&1 || charts_rc=$?
 else
     bash torchtitan/experiments/ezpz/scripts/update_all_charts.sh 2>&1 || charts_rc=$?
 fi
