@@ -215,15 +215,60 @@ different conditions.
 - The SDPA output shape is wrong: sequence inflated by the TP degree, heads
   halved.
 
-### Next
+## ANSWERED (job `8785537`): agpt gets local tensors, moe gets DTensors
 
-Re-run agpt TP=2 with `--debug.deterministic` AND the probe, to get a
-like-for-like comparison. If agpt reaches the unflatten and comes out with the
-right shape while moe does not, the asymmetry candidate is back on the table.
-If agpt never reaches the 3D branch at all, the unflatten was never exercised
-there and moe is the only caller -- which makes the fix much lower risk.
+Three arms, same node, same flags, `--debug.deterministic` throughout:
 
-Do not change either wrapper before that run.
+| arm | q entering the unflatten | q leaving it | rc |
+|---|---|---|---|
+| agpt + det | -- (compile AOT assertion) | -- | 1 |
+| **agpt + det + `--compile.no-enable`** | `(512, 8, 16)` **PLAIN** | `(1, 512, 8, 16)` | **0** |
+| moe + det | `(512, 16, 192)` **`Shard(dim=1)`** | `(1, 1024, 8, 192)` | 143 |
+
+**agpt's wrapper receives plain local tensors. moe's receives DTensors.**
+
+That is the entire divergence, and it explains every observation:
+
+- agpt sees `8` heads -- already the LOCAL count at tp=2 -- so
+  `view(batch, seq_len, num_heads, head_dim)` is exact and the output is the
+  expected `(1, 512, 8, 16)`.
+- moe sees `16` heads, the GLOBAL count, on a tensor whose local storage holds
+  half of it. The reshape is computed from the global shape and applied to
+  local storage, so the sequence axis absorbs the missing heads:
+  `(1, 1024, 8, 192)` instead of `(1, 512, 16, 192)`.
+- The final `view(num_tokens, -1)` then collapses `Shard(dim=1)` ->
+  `Shard(dim=0)`, which is what `wo` rejects.
+
+`local_map`'s contract is "convert DTensors to local tensors before the kernel
+runs, then wrap outputs back" (`decoder_sharding.py:265`). It is holding for
+agpt and **not** for moe.
+
+The traversal in `Module.parallelize` (`protocols/module.py:263-286`) is
+unconditional -- it recurses into every child and looks through non-Module
+wrappers -- so moe's `inner_attention` IS reached and DOES get a
+`LocalMapConfig`. The config is installed; the conversion is not happening.
+
+### So the bug is not the unflatten
+
+The unflatten is correct **given local tensors**, which is what it is
+documented to receive and what agpt actually gets. Rewriting it to be
+TP-aware would paper over a local_map that is not converting, and would break
+agpt, which depends on the current behavior.
+
+Fix the conversion, not the reshape.
+
+### Also settled here
+
+- **`agpt` TP=2 requires `--compile.no-enable`.** The `agpt + det` arm still
+  hit the `tensors_saved_with_vc_check` / `DeviceMesh` AOT assertion; only the
+  nocompile arm reached the forward. `sync_smoke.sh`'s green agpt TP=2 arm is
+  therefore green under whatever compile default that path resolves to -- not
+  evidence that compiled agpt TP=2 works. This is the known torch-2.13
+  compile+AC+TP bug, previously recorded only for the 80B family; it fires at
+  `agpt_debugmodel` scale too.
+- The head-dim-asymmetry candidate from the previous revision is **dead**.
+  agpt's head_dim is 16 vs moe's 192, and agpt reshapes correctly anyway. The
+  difference was never the geometry.
 
 ## Probe
 
