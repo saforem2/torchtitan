@@ -257,7 +257,84 @@ agpt, which depends on the current behavior.
 
 Fix the conversion, not the reshape.
 
-### Also settled here
+### Narrowed to three silent early-returns (2026-08-27, code read)
+
+`local_map` not converting has exactly three exits, and **all three return the
+unwrapped forward with no error**:
+
+```python
+# protocols/module.py:280   in parallelize()
+if self._sharding_config is None:
+    return                      # module never parallelized at all
+
+# protocols/module.py:430   in _maybe_wrap_with_local_region()
+if sharding_config.local_map is None:
+    return fn                   # no local_map on this config
+
+# protocols/module.py:479   in _apply_local_map()
+if resolved_mesh is None:
+    return fn                   # <-- returns the RAW forward: DTensors flow in
+```
+
+The third is the one that matches the measurement: the config IS installed (we
+confirmed the traversal is unconditional), yet the wrapper receives DTensors.
+
+`resolve_shared_mesh` returns `None` in two cases -- every entry `None`, or
+`resolve_mesh` filtering every axis out. Under `partial_dtensor`,
+`resolve_mesh` keeps only `("tp", "ep")`:
+
+```python
+in_band = ("dp", "cp", "tp", "ep") if spmd_backend == "spmd_types" else ("tp", "ep")
+return self.get_activated_mesh([a for a in axes_list if a in in_band])
+```
+
+### Eliminated by reading (do not re-check these)
+
+| hypothesis | why it is dead |
+|---|---|
+| different spmd_backend | both pin `partial_dtensor` (`{agpt,moe}/config_registry.py`) |
+| different lifecycle point | both call their sharding setter from `Config.update_from_config` |
+| different object passed | both pass `self` and iterate `config.layers` |
+| moe's sharding is incomplete | diffed assignment-for-assignment against upstream `deepseek_v3`: same 12 entries, same order |
+| positional-arg names | identical, `['q_TNH','k_TNH','v_TNH']` via `inspect` |
+| head-dim asymmetry | agpt head_dim 16 vs moe 192, and agpt reshapes correctly regardless |
+
+### The one live lead
+
+`attention_activation_placement` returns **two structurally different
+layouts** depending on its `cp` argument:
+
+```python
+if isinstance(cp, spmd.Shard):          # q path: cp defaults to S(0)
+    return SpmdLayout({DP: V, CP: V, TP: V},
+                      partition_spec=((DP, CP), TP, None))
+return SpmdLayout({DP: S(0), CP: cp, TP: S(1)})   # kv path: cp=R, NO partition_spec
+```
+
+`set_gqa_inner_attention_local_map` passes `cp=spmd.R` for `kv_dst_placements`
+and `cp=spmd.P` for `kv_grad_placements`, so a single boundary mixes a
+partition_spec'd layout (q) with two that have none (k/v). `resolve_shared_mesh`
+asserts all entries share the same axis keys and then calls `resolve_mesh` on
+them -- worth checking whether the no-partition_spec branch resolves to a
+different mesh, or to `None`, under `partial_dtensor`.
+
+**Not verified.** `spmd_types` is not installed on the laptop this was read on,
+so `aap(cp=R).axes()` could not be evaluated. Do that first -- it is a
+three-line check and needs no GPU:
+
+```python
+import spmd_types as spmd
+from torchtitan.models.common.decoder_sharding import attention_activation_placement as aap
+for kw in ({}, {"cp": spmd.R}, {"cp": spmd.P}):
+    lay = aap(**kw); print(sorted(a.value for a in lay.axes()),
+                           getattr(lay, "partition_spec", None))
+```
+
+If the axis sets differ between the q and k/v layouts, `resolve_shared_mesh`'s
+assert would fire rather than return `None` -- so equal axes with a differing
+mesh resolution is the shape to look for.
+
+## Also settled here
 
 - **`agpt` TP=2 requires `--compile.no-enable`.** The `agpt + det` arm still
   hit the `tensors_saved_with_vc_check` / `DeviceMesh` AOT assertion; only the
