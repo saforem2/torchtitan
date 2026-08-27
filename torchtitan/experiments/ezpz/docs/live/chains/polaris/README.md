@@ -284,7 +284,7 @@ and do not trust a green `refresh_all.sh` as evidence they are current.
 > "possible application crash on rank 0" noise, and wrote the **innocent
 > rank-0 node** into `bad_nodes.txt` while both real culprits stayed in
 > the allocation. Fixed in the same installer script. Writeup:
-> [`known-bugs/polaris-failover-detect-machine-fqdn.md`](../../guides/known-bugs/polaris-failover-detect-machine-fqdn.md).
+> [`known-bugs/polaris-failover-detect-machine-fqdn.md`](../../../reference/known-bugs/polaris-failover-detect-machine-fqdn.md).
 >
 > Two things that make this easy to ship as a no-op, both hit for real:
 >
