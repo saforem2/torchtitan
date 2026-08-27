@@ -109,6 +109,65 @@ tar -xzOf .venv.tar.gz --wildcards '*/ezpz/failover/scrape.py' | grep -c 'normal
 A `0` while `tar` is still writing is expected -- the archive is
 sequential. Only trust the check after `tar` exits.
 
+## Sequel: the fix was on a path a hung job never reaches
+
+Fixing detection was necessary and **not sufficient**. The very next leg
+(7560197) burned **4h04m** over three attempts, exhausted the spare
+pool, and trained zero steps -- with every swap tagged `blind`:
+
+```
+x3006c0s37b1n0  blind  attempt=1     <- rank-0 node, never errored
+x3005c0s13b0n0  blind  attempt=2     <- a SPARE swapped in at attempt 1
+FAILOVER STOP: exhausted (no spare nodes left, rc=124)
+```
+
+`ezpz/launch_autoretry.py` classifies an idle-output watchdog kill
+*before* consulting the scraper:
+
+```python
+if effective_rc == _WATCHDOG_RC:      # 124
+    if not has_spares:
+        return _result(TerminationReason.EXHAUSTED)
+    return _result(TerminationReason.BAD_NODE_BLIND)
+```
+
+The stated rationale is "the hang IS the silence, so the scraper rarely
+finds anything". True for a genuine silent hang; **false here.** A rank
+that fails `set_device` prints a full traceback naming its host and
+*then* hangs the first collective, so the log is loud. Run against the
+three real attempt logs:
+
+```
+attempt-1 -> ['x3007c0s13b1n0...', 'x3111c0s37b1n0...']
+attempt-2 -> same two
+attempt-3 -> same two
+```
+
+The scraper had the correct answer three times and was never asked,
+while blind rotation evicted three innocent hosts -- one of them a spare
+it had just swapped in.
+
+Fixed in the same installer script: on `rc=124`, if the scraper named
+hosts, classify `BAD_NODE_KNOWN` so `swap_in()` replaces exactly those.
+A genuinely empty scrape still blind-rotates, preserving the documented
+behaviour for a real silent hang.
+
+### Why three separate gates all read green
+
+This was the third gate in one session that passed while production
+failed:
+
+| Gate | Why it could not catch the bug |
+|---|---|
+| `get_patterns_for_machine("polaris")` in the installer | passes an **explicit** key; production auto-detects |
+| `tests/failover/test_polaris_scrape.py:45` | passes `machine="polaris"` for the same reason |
+| (this bug) scraper verified correct on real logs | correct -- but on a code path `rc=124` never enters |
+
+Each tested the **policy** (do the regexes match?) rather than the
+**binding** (is this code reached, with these inputs, in production?).
+The gate now asserts the watchdog branch can *reach* `BAD_NODE_KNOWN`
+and still retains its blind fallback.
+
 ## The trigger was not a bad node
 
 `cudaErrorDevicesUnavailable` here was **one GPU per node**, not node
