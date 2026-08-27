@@ -22,6 +22,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-08-27 | [Polaris failover patterns were correct and UNREACHABLE (FQDN detection)](./guides/known-bugs/polaris-failover-detect-machine-fqdn.md) |
 | 2026-08-27 | [Handoff -- Polaris 20B chain (live job + resume verification)](./HANDOFF-20b-polaris-2026-08-26.md) |
 | 2026-08-25 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-08-25 | [SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) |
