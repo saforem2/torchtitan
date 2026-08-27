@@ -43,8 +43,12 @@ negative (`burn_ratio 1.68`); `resources_min.burn_ratio = 1` on that queue.
 ## Two clones, and which one is live
 
 - `/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan` -- **the live
-  chain.** `agpt-20b-sophiag-dolma-n128-gbs1024`, 58 ckpt dirs, latest
-  `step-5600` (2026-08-16), 512 shards + `.metadata`.
+  chain.** `agpt-20b-sophiag-dolma-n128-gbs1024`, **56** ckpt dirs
+  (step-100 .. step-5600, all 56 carrying `.metadata`), latest
+  `step-5600` (2026-08-16), 512 shards each, 234 GB each / 13 TB total.
+  (An earlier revision of this file said 58 -- that was the directory's
+  hard-link count, `drwxr-sr-x 58` = 56 subdirs + `.` + `..`, not a
+  count of checkpoints.)
 - `/eagle/datascience/foremans/projects/saforem2/torchtitan` -- where the
   debug/gate smokes ran. Only holds `agpt-20b-sophiag-dolma-n4-gbs32`.
 
