@@ -257,7 +257,78 @@ agpt, which depends on the current behavior.
 
 Fix the conversion, not the reshape.
 
-### Narrowed to three silent early-returns (2026-08-27, code read)
+### All three early-returns ELIMINATED (2026-08-27, measured locally)
+
+Run on a laptop -- no GPU, no cluster. `torch`, `spmd_types`, `ezpz` and
+`sentencepiece` all install fine outside a training env, which makes this whole
+class of question answerable without a queue slot.
+
+The check that matters: build both configs, call `update_from_config` the way
+the trainer does, at `tensor_parallel_degree = 2`.
+
+```
+moe   inner.sharding_config = ShardingConfig    inner.local_map = LocalMapConfig
+agpt  inner.sharding_config = ShardingConfig    inner.local_map = LocalMapConfig
+```
+
+So `_sharding_config is None` and `local_map is None` are both out. And the
+declared axes are **byte-identical** between the two models:
+
+```
+moe   in q_TNH/k_TNH/v_TNH, out, 3x grad   ->  all ['cp', 'dp', 'tp']
+agpt  in q_TNH/k_TNH/v_TNH, out, 3x grad   ->  all ['cp', 'dp', 'tp']
+```
+
+`resolve_shared_mesh` therefore receives identical input from both, so
+`resolved_mesh is None` cannot distinguish them either. **All three exits are
+eliminated.**
+
+Also checked and identical: both `parallelize_moe` and `parallelize_llama` take
+the same `partial_dtensor` branch and call `model.parallelize(parallel_dims)`
+when TP is enabled.
+
+### What this means
+
+The difference is NOT in the local_map installation path. Everything static --
+config population, layout axes, arg names, the parallelize branch -- matches.
+Whatever diverges does so at RUNTIME, during `parallelize`, on state that only
+exists once a real mesh is built.
+
+### Dead hypotheses (do not re-check)
+
+| # | hypothesis | how it died |
+|---|---|---|
+| 1 | different `spmd_backend` | both pin `partial_dtensor` |
+| 2 | different lifecycle point | both set sharding in `Config.update_from_config` |
+| 3 | different object passed | both pass `self`, iterate `config.layers` |
+| 4 | moe's sharding incomplete | matches upstream `deepseek_v3` 12-for-12 |
+| 5 | positional-arg names | identical `['q_TNH','k_TNH','v_TNH']` |
+| 6 | head-dim asymmetry | agpt head_dim 16 reshapes fine; moe 192 does not |
+| 7 | `cp` branch splits the layout | both branches yield the same axes |
+| 8 | `_sharding_config is None` | both are `ShardingConfig` |
+| 9 | `local_map is None` | both are `LocalMapConfig` |
+| 10 | `resolved_mesh is None` | identical axes in, so identical mesh out |
+| 11 | different parallelize branch | both take the same one |
+
+### Next, and it does need ranks
+
+Instrument `_apply_local_map` itself at TP=2 -- print whether it returns the
+wrapped or unwrapped `fn` for each model, and what `resolved_mesh` actually
+came back as. Everything cheaper than that has been tried.
+
+Reproduce the local checks with:
+
+```bash
+.venv/bin/python -c "
+from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel
+cfg = moe_debugmodel(); cfg.parallelism.tensor_parallel_degree = 2
+m = cfg.model_spec.model; m.update_from_config(config=cfg)
+sc = m.layers[0].attention.inner_attention.sharding_config
+print(sc.local_map, {k: sorted(a.value for a in v.axes())
+                     for k, v in (sc.in_dst_shardings or {}).items()})"
+```
+
+## Superseded: narrowed to three silent early-returns (2026-08-27, code read)
 
 `local_map` not converting has exactly three exits, and **all three return the
 unwrapped forward with no error**:
