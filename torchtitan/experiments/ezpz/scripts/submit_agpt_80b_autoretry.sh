@@ -18,10 +18,10 @@ ulimit -c 0
 #
 # Uses `ezpz launch --auto-retry` EXCLUSIVELY for bad-node failover (no
 # scripts/failover_lib.sh). See submit_agpt_2b_autoretry.sh and
-# docs/guides/bad-node-failover.md (current native path).
+# docs/reference/guides/bad-node-failover.md (current native path).
 #
 # DEFAULT CONFIG = the confirmed-stable corner (2026-06-24 investigation,
-# docs/production/agpt/80b/README.md): TP=4, LBS=1, AdamW LR=1e-6,
+# docs/live/chains/agpt/80b/README.md): TP=4, LBS=1, AdamW LR=1e-6,
 # bf16-compute / fp32-master (the agpt_80b builder default -- no dtype
 # flag), AC=full, compile=OFF. This SUPERSEDES the old TP=2 failover
 # default, which NaNs at production GBS.
@@ -135,7 +135,7 @@ if (( DP_DEGREE > 186 )); then
     log_message WARN "validated safe ceiling (~186). The 80B grad-path NaN trigger"
     log_message WARN "is large dp_degree; GAS cannot lower it. This config is"
     log_message WARN "NaN-prone and NOT validated. Raise TP, drop NHOSTS_TRAIN, or"
-    log_message WARN "see docs/production/agpt/80b/README.md before proceeding."
+    log_message WARN "see docs/live/chains/agpt/80b/README.md before proceeding."
     log_message WARN "==========================================================="
 fi
 

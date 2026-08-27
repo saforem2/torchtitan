@@ -149,7 +149,7 @@ echo "=== Last-updated summary: $lu_ok fresh, $lu_stale stale ==="
 # ---- chart-plotter coverage audit --------------------------------------------
 # refresh_all.sh only regenerates charts whose plotter is registered in
 # update_all_charts.sh. A production subtree can ship its own bespoke plotter
-# (docs/production/**/plot_*.py) that nobody wired in -- then its charts go
+# (docs/live/**/plot_*.py) that nobody wired in -- then its charts go
 # silently stale forever (this is exactly how cpt/ + sft/ + grpo/ were missed).
 # Flag any production plotter NOT referenced by update_all_charts.sh so a new
 # subtree surfaces here instead of being ignored.
@@ -166,13 +166,13 @@ while IFS= read -r plotter; do
         echo "    not referenced in update_all_charts.sh -- refresh_all.sh will NOT regenerate its charts"
         cov_unwired=$((cov_unwired + 1))
     fi
-done < <(find torchtitan/experiments/ezpz/docs/production -type f -name 'plot_*.py' 2>/dev/null | sort)
+done < <(find torchtitan/experiments/ezpz/docs/live -type f -name 'plot_*.py' 2>/dev/null | sort)
 echo "=== coverage summary: $cov_ok wired, $cov_unwired unwired ==="
 
 # ---- dashboard step-drift audit ----------------------------------------------
 # The 'Last updated' check above is date-based: it CANNOT catch content that
 # drifted without the file being re-committed. The hand-narrated top-level
-# dashboard (docs/production/README.md) is not auto-filled, so its per-chain
+# dashboard (docs/live/dashboard.md) is not auto-filled, so its per-chain
 # step CELLS can fall behind disk while the marker still looks fresh (it did:
 # 20B rows sat at 4,400 / 2,100 after disk hit 5,400 / 3,100). Cross-check the
 # dashboard's table step-cells against disk truth. Read-only (advisory).

@@ -67,7 +67,7 @@ def _savefig_both(fig, svg_path, dpi=200):
 # Production runs identified by step ranges (cross-checked with PBS logs).
 # Listed oldest first so concatenation matches resume order.
 # Each key here drives the figure filename + output dir:
-#   docs/production/agpt/<model>/n<num_nodes>/figures/<scope>_<key>n.svg
+#   docs/live/chains/agpt/<model>/n<num_nodes>/figures/<scope>_<key>n.svg
 # So the key MUST encode model + version + node count, e.g. "2b_v1_256",
 # "20b_v2_512". Don't include the trailing "n" — the template adds it.
 #
@@ -76,7 +76,7 @@ def _savefig_both(fig, svg_path, dpi=200):
 #      every RMSNorm.weight at its 1.0 init; loss curves are real but
 #      the model has no trainable normalization. Tainted, superseded
 #      by v2. Kept here for the historical record. See
-#      docs/guides/training-dtype-bf16-norm-freeze.md.
+#      docs/reference/guides/training-dtype-bf16-norm-freeze.md.
 # v2 = fresh restarts on 2026-04-30 from /flare/AuroraGPT/foremans/runs/
 #      agpt-{2b,20b}-v2/ (torch 2.13 venv, LBS=2,
 #      `--training.dtype=float32`, plain CrossEntropyLoss). These are
@@ -415,7 +415,7 @@ def plot_overlay(
     The point is to make the v1 (bf16-tainted) vs v2 (fp32) contrast
     visually unmissable: the loss curves descend together but their
     *eval-time* behavior diverges because v1 has frozen RMSNorm
-    weights. See docs/guides/training-dtype-bf16-norm-freeze.md.
+    weights. See docs/reference/guides/training-dtype-bf16-norm-freeze.md.
     """
     fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
     fig.suptitle(
@@ -506,7 +506,7 @@ def main() -> None:
         help=(
             "Generate a v1-vs-v2 overlay dashboard for the given model, "
             "instead of (or in addition to) per-run dashboards. The "
-            "figure goes to docs/production/agpt/<model>/figures/"
+            "figure goes to docs/live/chains/agpt/<model>/figures/"
             "overlay_<model>_v1_vs_v2.svg."
         ),
     )
@@ -514,7 +514,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override output directory (default: docs/production/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/production/agpt/<model>/figures/ for overlays)",
+        help="Override output directory (default: docs/live/chains/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/live/chains/agpt/<model>/figures/ for overlays)",
     )
     args = parser.parse_args()
 
@@ -528,7 +528,7 @@ def main() -> None:
             )
         # v1-vs-v2 overlay charts live in the historical archive.
         out_dir = args.output_dir or (
-            DOCS_BASE / "production" / "agpt" / "historical" / "v1-bf16" / "figures"
+            DOCS_BASE / "live" / "chains" / "agpt" / "historical" / "v1-bf16" / "figures"
         )
         series = []
         for key in keys_to_overlay:
@@ -565,7 +565,8 @@ def main() -> None:
         if "_v1_" in key:
             default_out = (
                 DOCS_BASE
-                / "production"
+                / "live"
+                / "chains"
                 / "agpt"
                 / "historical"
                 / "v1-bf16"
@@ -574,7 +575,8 @@ def main() -> None:
         else:
             default_out = (
                 DOCS_BASE
-                / "production"
+                / "live"
+                / "chains"
                 / "agpt"
                 / model_name
                 / f"n{cfg['num_nodes']}"

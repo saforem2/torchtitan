@@ -16,7 +16,7 @@ model does not parrot it.
 Single-turn: ``init`` poses the problem; the first ``step`` ends the rollout (the
 model's one completion is graded). No tools, no multi-turn -- pure CoT, per the
 CoT plan's decision to drop search_r1's retrieval tool
-(docs/production/rl/plans/cot.md).
+(docs/live/chains/rl/plans/cot.md).
 """
 
 from __future__ import annotations

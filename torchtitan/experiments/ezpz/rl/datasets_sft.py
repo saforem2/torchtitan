@@ -401,7 +401,7 @@ def _build_gsm8k_r1cot() -> Dataset:
     ``<think>{rationale}</think>\n<answer>\\boxed{{N}}</answer>`` so the model
     learns to EMIT a delimited reasoning trace + boxed final answer. This is the
     Stage 1 cold-start for the CoT plan
-    (docs/production/rl/plans/cot.md) -- teaches the FORMAT from gsm8k's own
+    (docs/live/chains/rl/plans/cot.md) -- teaches the FORMAT from gsm8k's own
     data, no teacher model required.
 
     Two details that matter:
@@ -912,13 +912,13 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # b3_instruct_cot_mix -- balanced instruction + CoT mix for the B3 cold-start
-# rebuild (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
+# rebuild (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md)
 # ---------------------------------------------------------------------------
 
 
 def _build_b3_instruct_cot_mix(seed: int = 42):
     """Balanced instruction + CoT SFT mix for the B3 cold-start rebuild
-    (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/design.md):
       0.30 tulu-3-sft-mixture (general instruction-following)
       0.25 OpenR1-Math-220k   (rich long-form R1 CoT, our envelope)
       0.15 gsm8k-r1cot        (in-distribution CoT, eval-matching format)
@@ -961,13 +961,13 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # b4_reweight_mix -- reweighted mix fixing the B3 dilution regression
-# (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
+# (docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/design.md)
 # ---------------------------------------------------------------------------
 
 
 def _build_b4_reweight_mix(seed: int = 42):
     """B4 reweighted mix -- fixes the B3 dilution regression
-    (docs/production/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
+    (docs/live/chains/sft/agpt/2b-mds/b4-finish-and-reweight/design.md):
       0.40 gsm8k-r1cot        (was 0.15 in b3 -- restore in-distribution short CoT)
       0.15 OpenR1-Math-220k   (LENGTH-FILTERED via OPENR1_MAX_THINK_CHARS -- short
                                traces only; the run-on ones caused the regression)
@@ -1006,8 +1006,8 @@ register_sft_dataset(
 # OpenThoughts-114k -- pre-distilled frontier reasoning traces (DeepSeek-R1),
 # reformatted from the OpenThoughts <|begin_of_thought|>/<|begin_of_solution|>
 # markers into our <think>/<answer>\boxed{} envelope. The breadth half of the
-# reasoning-distillation cold-start (docs/production/sft/agpt/2b-mds/
-# distill-cot-mix/): OpenThoughts spans math + code + science reasoning, vs
+# reasoning-distillation cold-start (the distill_cot_mix recipe; no report
+# written yet): OpenThoughts spans math + code + science reasoning, vs
 # OpenR1-Math's math-only. Non-math math-only cold-starts were too narrow.
 # ---------------------------------------------------------------------------
 
@@ -1123,7 +1123,7 @@ register_sft_dataset(
 
 # ---------------------------------------------------------------------------
 # distill_cot_mix -- reasoning-distillation cold-start mix
-# (docs/production/sft/agpt/2b-mds/distill-cot-mix/)
+# (TODO: no report written yet -- the docs/ dir this named was never created)
 # ---------------------------------------------------------------------------
 
 
@@ -1191,7 +1191,7 @@ def _build_distill_cot_mix(
     seed: int = 42,
 ):
     """Reasoning-distillation cold-start mix: broad frontier CoT traces
-    (docs/production/sft/agpt/2b-mds/distill-cot-mix/).
+    (TODO: no report written yet for this recipe).
 
     Replaces the team's narrow math-only CoT cold-start with breadth from
     pre-distilled frontier reasoning traces:

@@ -6,7 +6,7 @@
 #PBS -q workq
 #PBS -j oe
 #
-# 8N Sunspot SFT: full B3 cold-start mix run (docs/production/sft/agpt/2b-mds/
+# 8N Sunspot SFT: full B3 cold-start mix run (docs/live/chains/sft/agpt/2b-mds/
 # b3-instruct-cot-mix/), continuing the global_step138650 base (vocab 256000)
 # on the pretokenized agpt2b-b3-instruct-cot-mix-len8192 dataset, 1 epoch.
 #

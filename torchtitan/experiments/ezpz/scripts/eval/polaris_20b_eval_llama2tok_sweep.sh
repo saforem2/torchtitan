@@ -9,7 +9,7 @@
 #
 # Corrected Polaris 20B eval sweep: re-eval existing faithful HF exports with the
 # LLAMA2 tokenizer (the run's true tokenizer). See
-# docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md. The DCP->HF weight
+# docs/reference/known-bugs/polaris-20b-tokenizer-mismatch.md. The DCP->HF weight
 # export was always correct; only the eval tokenizer was wrong (gemma vs Llama2),
 # so this reuses each step-N/hf/ export and only overrides tokenizer= -- no
 # re-conversion. gmu=0.80 for the 256128-vocab logit headroom (0.90 OOMs).

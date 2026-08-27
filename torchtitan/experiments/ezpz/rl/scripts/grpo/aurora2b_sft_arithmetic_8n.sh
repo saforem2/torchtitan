@@ -19,7 +19,7 @@
 # the last 10 steps vs the baseline's 0.12, with the SFT'd model
 # already at 28% accuracy cold (step 1) where the baseline was at
 # 0%. See
-# docs/production/sft/aurora2b/tulu_math_uc_mix/evals/grpo-smoke.md.
+# docs/live/chains/sft/agpt/2b-mds/tulu_math_uc_mix/evals/grpo-smoke.md.
 #
 # Allocation: select=10 (8 train + 2 spare for --auto-retry). The
 # Sunspot oneCCL `pidfd_getfd` SIGABRT (the dominant 32N failure

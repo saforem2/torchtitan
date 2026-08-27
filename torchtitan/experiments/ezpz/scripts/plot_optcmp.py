@@ -4,7 +4,7 @@
 Reads loss + grad_norm straight from the arms' train.log files rather than
 W&B, so the figure can be regenerated from a checkout with no network and no
 run-id bookkeeping. Emits SVG under the doc's figures/ dir, matching the
-convention used by docs/experiments/lr-finder/moe/*/figures/.
+convention used by docs/records/experiments/lr-finder/moe/*/figures/.
 
 Usage:
     python3 plot_optcmp.py [--out <dir>]
@@ -87,7 +87,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--out",
-        default=f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/"
+        default=f"{REPO}/torchtitan/experiments/ezpz/docs/records/experiments/"
         "optimizer-comparison/figures",
     )
     args = ap.parse_args()

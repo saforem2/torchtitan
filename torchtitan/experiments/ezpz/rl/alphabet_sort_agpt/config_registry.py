@@ -18,7 +18,7 @@ Invoke via the arbitrary-dotted-path `--module` branch of the ConfigManager:
         --config rl_grpo_lora_agpt_2b_easy \\
         --hf_assets_path <staged ckpt-900 dir with gemma chat_template>
 
-Winning settings from the 3-way training study (docs/production/rl/
+Winning settings from the 3-way training study (docs/live/chains/rl/
 grpo-lora-agpt2b-repro.md) are baked in:
   - fp32 generation (`generator.model_dtype="float32"`): THE fix -- bf16 corrupts
     agpt-2b generation through vLLM (large vocab/ffn -> rounding flips greedy argmax).

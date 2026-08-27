@@ -22,7 +22,7 @@ failure than the one being prevented. The claim is a diagnostic that makes the
 collision visible in the first 30 seconds of a log rather than in a file count
 weeks later.
 
-Read `docs/guides/known-bugs/concurrent-job-ckpt-collision.md` for the full
+Read `docs/reference/known-bugs/concurrent-job-ckpt-collision.md` for the full
 forensics.
 """
 

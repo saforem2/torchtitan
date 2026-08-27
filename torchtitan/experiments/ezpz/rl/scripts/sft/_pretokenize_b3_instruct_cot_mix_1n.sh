@@ -7,7 +7,7 @@
 #PBS -j oe
 #
 # 1N offline DOWNLOAD + PRE-TOKENIZE of b3_instruct_cot_mix @ 8192 for the B3
-# cold-start SFT (docs/production/sft/agpt/2b-mds/b3-instruct-cot-mix/).
+# cold-start SFT (docs/live/chains/sft/agpt/2b-mds/b3-instruct-cot-mix/).
 #
 # WHY: SFTTrainer re-tokenizes+packs the WHOLE train dataset at job start, so
 # a multi-million-row mix takes hours -- long enough that the auto-retry

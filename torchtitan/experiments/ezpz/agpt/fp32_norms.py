@@ -8,7 +8,7 @@
 
 Why this exists
 ---------------
-`docs/guides/training-dtype-bf16-norm-freeze.md` established that with
+`docs/reference/guides/training-dtype-bf16-norm-freeze.md` established that with
 `training.dtype = "bfloat16"` the master parameter copy is bf16, and every
 `RMSNorm.weight` (init 1.0, bf16 ULP 7.8e-3) is frozen because the per-step
 optimizer update (~1.6e-5) rounds to zero. The shipped fix was

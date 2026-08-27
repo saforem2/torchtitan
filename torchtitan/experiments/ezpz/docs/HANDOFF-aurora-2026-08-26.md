@@ -82,7 +82,7 @@ bug.
 conversion is not happening. Fix that.
 
 Full writeup, including everything eliminated:
-[`known-bugs/moe-tp2-wo-placement.md`](guides/known-bugs/moe-tp2-wo-placement.md).
+[`known-bugs/moe-tp2-wo-placement.md`](reference/known-bugs/moe-tp2-wo-placement.md).
 
 Side result: **agpt TP=2 needs `--compile.no-enable`** -- the torch-2.13
 compile+AC+TP `DeviceMesh` AOT assertion, previously recorded only for the 80B

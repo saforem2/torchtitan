@@ -206,7 +206,7 @@ for model in "${MODELS[@]}"; do
     # Per-model parallelism + stability flags.
     #
     # For 80B the validated stable corner is TP=4 / LBS=1 / compile OFF /
-    # AC=full / pure FSDP (see docs/production/agpt/80b/README.md). TP=2
+    # AC=full / pure FSDP (see docs/live/chains/agpt/80b/README.md). TP=2
     # here would put dp_degree at 62*12/2 = 372 -- past the ~186 NaN
     # ceiling -- so every 80B sweep would NaN from the dp-degree trigger
     # rather than from the LR being swept, making the curve meaningless.

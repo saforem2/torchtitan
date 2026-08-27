@@ -12,7 +12,7 @@ MDS (Megatron-DeepSpeed AuroraGPT-2B optimizer-experiments runs):
     -> one curve per (stage, task), since each stage is a different
        continuation branch off the AdamW parent run
 
-Generates per-model plots in `docs/evals/agpt/{model}/figures/eval_{model}.png`
+Generates per-model plots in `docs/records/evals/agpt/{model}/figures/eval_{model}.png`
 and prints a markdown table of accuracies.
 
 Usage:
@@ -371,7 +371,7 @@ def main() -> None:
     parser.add_argument(
         "--docs-dir",
         type=Path,
-        default=repo_root / "torchtitan/experiments/ezpz/docs/evals/agpt",
+        default=repo_root / "torchtitan/experiments/ezpz/docs/records/evals/agpt",
         help="Base docs directory for plot output",
     )
     parser.add_argument(

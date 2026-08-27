@@ -498,7 +498,7 @@ agpt_configs = {
     # QK-norm adds 2 more RMSNorms per layer on head_dim, also initialized at
     # 1.0. Used by the master-weight-dtype ablation to test whether the
     # bf16 norm-freeze recurs for QK-norm gains -- the specific recurrence
-    # risk cited in docs/production/agpt/30b-exp/README.md Section 6.
+    # risk cited in docs/records/proposals/30b-exp/README.md Section 6.
     "debugmodel_qknorm": _build_agpt_config(
         dim=256,
         n_layers=6,
@@ -671,7 +671,7 @@ agpt_configs = {
         hidden_dim=compute_ffn_hidden_dim(5120, multiple_of=1024),
         attn_backend="flex",
     ),
-    # 30B-exp: the proposed next flagship (docs/production/agpt/30b-exp/).
+    # 30B-exp: the proposed next flagship (docs/records/proposals/30b-exp/).
     # The proposal fixes only dim=6144; the rest is sized to sit consistently
     # between 20B (dim 5120, L=64) and 80B (dim 9216, L=84):
     #   dim=6144, L=64, H=48 (head_dim 128, matching 20B/80B), kv=8 GQA,

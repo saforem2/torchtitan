@@ -7,7 +7,7 @@
 # loss trajectories past the finder's early-step window.
 #
 # Recommendations from the 2026-06-27 production-batch finder
-# (docs/experiments/lr-finder/agpt/80b/README.md):
+# (docs/records/experiments/lr-finder/agpt/80b/README.md):
 #   mano    @ ~3e-6  (min/5; clean U-min at 1.6e-5, safest)
 #   sophiag @ ~1e-6  (min/2.5; real U-min at 2.5e-6, narrower band)
 #   adamw   @ ~5e-7  (under the 7.4e-7 NaN cliff)

@@ -218,7 +218,7 @@ def agpt(
     # never train. FSDP MixedPrecisionPolicy keeps the bf16 cast for
     # forward/backward; reduce stays fp32 — the fp32 master copy is
     # what enables sub-ulp accumulation.
-    # See docs/guides/known-bugs/training-dtype-bf16-norm-freeze.md.
+    # See docs/reference/guides/training-dtype-bf16-norm-freeze.md.
     dtype: Literal["bfloat16", "float32"] = "float32",
     compile: bool = True,
     fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default",
@@ -238,7 +238,7 @@ def agpt(
     # in the same job. resolve_fsdp_mesh already guards this shape but only
     # when the WHOLE storage mesh is size 1; at TP=1 with FSDP>1 a param whose
     # only non-Replicate axis is tp still loses its annotation. See
-    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
+    # docs/reference/known-bugs/spmd-types-plain-tensor.md.
     #
     # This pin was "full_dtensor" until 2026-08-20. Two reasons it moved:
     #   1. upstream is REMOVING full_dtensor (601cf4d23, #4217) -- it is a
@@ -299,7 +299,7 @@ def agpt(
     # not keep the bare ".cache/blendcorpus" default and cold-build the
     # validation index at full scale on the first validate() call -- the race
     # that crashed job 12469584 ("mmap length > file size" at TP>1, mistaken
-    # for a validator collective deadlock; see docs/guides/known-bugs/).
+    # for a validator collective deadlock; see docs/reference/known-bugs/).
     # NOTE: this only aligns the in-config DEFAULT. In production the submit
     # scripts pass the warm path explicitly via
     # --validator.dataloader.data-cache-path (applied by tyro AFTER this
@@ -432,7 +432,7 @@ def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
     block norms. Used by the master-weight-dtype ablation
     (scripts/oneoff/fp32_norms_ablation.py) to test the "this recurs for any
     parameter initialized near 1.0, QK-norm gains being exactly that" claim
-    in docs/production/agpt/30b-exp/README.md Section 6.
+    in docs/records/proposals/30b-exp/README.md Section 6.
     """
     cfg = agpt_debugmodel_local()
     cfg.model_spec = model_registry("debugmodel_qknorm")
@@ -477,7 +477,7 @@ def agpt_2b_chunkedce() -> FaultTolerantTrainer.Config:
 #
 # Both arms fork model weights only (fresh optimizer + LR schedule + step
 # counter) via --checkpoint.initial-load-path, mirroring the CPT recipe
-# (docs/production/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
+# (docs/live/chains/cpt/README.md). Per the CPT re-warm-shock lesson, LR is
 # GENTLE (2e-6 constant, warmup 20) -- NOT re-warmed to the 2.17e-5 peak,
 # which disrupted the converged base in the first CPT pilot.
 #
@@ -979,7 +979,7 @@ def ezpz_agpt_30b() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b() -> FaultTolerantTrainer.Config:
-    """The proposed next flagship. See docs/production/agpt/30b-exp/.
+    """The proposed next flagship. See docs/records/proposals/30b-exp/.
 
     28.1B params: dim=6144, 64 layers, 48 heads (head_dim 128), 8 KV heads,
     ffn 16384, gemma 256,128 vocab. Geometry is interpolated between 20B and
@@ -994,7 +994,7 @@ def agpt_30b_real() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
-    """30B with the Llama-3 128k vocab -- see docs/production/agpt/30b-exp/.
+    """30B with the Llama-3 128k vocab -- see docs/records/proposals/30b-exp/.
 
     26.5B params vs 28.1B for the gemma-vocab variant. Halves the embedding
     (3.15B -> 1.58B) using a tokenizer we already vendor, and the proposal's
@@ -1014,7 +1014,7 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
 
 
 def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
-    """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
+    """30B with OLMo-2's 100,352 vocab -- see docs/records/proposals/30b-exp/.
 
     exp07's nine-tokenizer bake-off measured OLMo-2 tied with Llama-3.1 on
     fertility (225,749 vs 225,539 tok/MB on held-out olmo-mix-1124 text) while
@@ -1167,7 +1167,7 @@ def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
     """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
 
     Same model and data as the mano/sophiag arms; only the optimizer differs.
-    See docs/experiments/optimizer-comparison/README.md.
+    See docs/records/experiments/optimizer-comparison/README.md.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     return _use_fineweb_edu(cfg)

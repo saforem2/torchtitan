@@ -30,7 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.font_manager as fm  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
-DOCS = Path("torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt")
+DOCS = Path("torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/agpt")
 
 
 def apply_house_style() -> None:

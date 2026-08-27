@@ -180,7 +180,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path(__file__).resolve().parents[1]
-        / "docs" / "production" / "polaris" / "figures",
+        / "docs" / "live" / "chains" / "polaris" / "figures",
         help="Directory to write the SVG/PNG charts into.",
     )
     args = parser.parse_args()

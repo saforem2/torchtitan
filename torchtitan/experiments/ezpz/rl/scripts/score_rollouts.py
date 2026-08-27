@@ -13,7 +13,7 @@ The `cot-long` run (400 steps, 2026-07-21) was documented for weeks as
 "never evaluated on the real metric; likely drifting" purely because its
 checkpoints were gone. Its rollout log had been sitting on disk the whole
 time, and scoring it flatly contradicted the inference. See
-`docs/production/rl/plans/cot.md`.
+`docs/live/chains/rl/plans/cot.md`.
 
 What it reports, binned by policy version (the GRPO step):
   - `acc`       -- mean `AnswerCorrectReward`, i.e. the task metric

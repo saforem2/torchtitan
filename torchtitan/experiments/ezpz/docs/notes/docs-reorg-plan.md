@@ -42,7 +42,7 @@ README.md                                              (auto index)
 production/README.md                                   (dashboard)
 production/dispatch-log.md                             (cross-umbrella table)
 experiments/agpt/aurora/20260816-umbrella-8756070.md   (the report)
-guides/known-bugs/aurora-job-8756070-exit-14.md        (the -14 kill)
+reference/known-bugs/aurora-job-8756070-exit-14.md        (the -14 kill)
 production/agpt/30b-exp/exp04-...md                    (passing reference)
 ```
 
@@ -121,7 +121,7 @@ measured baseline, not a status page -- but it **is** currently stale for
 | from | to |
 |---|---|
 | `guides/*.md` | `reference/guides/*.md` |
-| `guides/known-bugs/**` | `reference/known-bugs/**` |
+| `reference/known-bugs/**` | `reference/known-bugs/**` |
 | `guides/training/**` | `reference/guides/training/**` |
 | `configs/**` | `reference/configs/**` |
 | `scaling/**` | `reference/scaling/**` |
@@ -207,7 +207,7 @@ For each directory, in this order (least-linked first):
 2. rewrite internal links: `grep -rl 'old/path' docs | xargs sed -i 's|old/path|new/path|g'`
 3. rewrite external refs: same sweep over `*.py`, `*.sh`, `.claude/CLAUDE.md`,
    `experiments/ezpz/.claude/CLAUDE.md`
-4. verify: every `](...md)` target resolves (script below)
+4. verify: every markdown link target resolves (script below)
 5. `refresh_all.sh`
 6. commit
 
@@ -221,8 +221,12 @@ guides/               <- 25 inbound from code on one file alone
 production/           <- LAST, most linked, and live during production
 ```
 
-**`production/` moves last and only during a quiet window** -- it is read by
-the dashboard tooling and referenced from the pinned clones.
+**`production/` moves last and only during a quiet window** -- it is
+read by the dashboard tooling and referenced from the pinned clones.
+Its four-way split is scoped separately in
+[`production-move-plan.md`](production-move-plan.md): 187 files, 94 code
+references, and an ordering constraint (`agpt/30b-exp/` must move before
+`agpt/`).
 
 ### Step 4 -- link checker in `refresh_all.sh`
 

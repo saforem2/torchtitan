@@ -52,7 +52,7 @@ def _repo_root() -> Path:
 REPO_ROOT = _repo_root()
 EVALS_DIR = REPO_ROOT / "outputs" / "evals"
 
-# Where the eval docs live. The docs lifecycle reorg moves `docs/evals/` to
+# Where the eval docs live. The docs lifecycle reorg moves `docs/records/evals/` to  docs-link-check: ignore
 # `docs/records/evals/` (dated, immutable results are `records/`), so the
 # destination differs by branch. Resolve it instead of hardcoding: a hardcoded
 # path does not merely break at the merge, it breaks SILENTLY -- mkdir(parents=
@@ -61,7 +61,7 @@ EVALS_DIR = REPO_ROOT / "outputs" / "evals"
 #
 # Probe on README.md, NOT on the directory existing. Both paths exist
 # simultaneously on the pre-reorg branch (docs/records/evals/agpt/{2b,20b} holds
-# the per-model overviews while docs/evals/ is still the landing page), so a
+# the per-model overviews while docs/records/evals/ is still the landing page), so a  docs-link-check: ignore
 # bare is_dir() test picks whichever the list happens to name first and is
 # wrong on one branch or the other. README.md marks the landing page, which is
 # the doc that embeds this chart -- exactly the thing the path must track.

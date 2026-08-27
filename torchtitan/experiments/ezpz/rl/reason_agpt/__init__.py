@@ -8,7 +8,7 @@
 Sibling of ``alphabet_sort_agpt/``: a thin ``--module`` target that provides
 ``rl_grpo_lora_agpt_2b_gsm8k*`` configs backing the upstream
 ``torchtitan.experiments.rl`` engine with ``ezpz.agpt``, for Stage 2 (GRPO-RLVR)
-of the CoT plan (docs/production/rl/plans/cot.md). The model reasons inside
+of the CoT plan (docs/live/chains/rl/plans/cot.md). The model reasons inside
 ``<think></think>`` and answers inside ``<answer>\\boxed{}</answer>``, scored by a
 componentized dense reward ported from ``rl/tasks/gsm8k_reason.py``.
 

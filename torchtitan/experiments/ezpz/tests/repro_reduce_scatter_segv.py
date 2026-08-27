@@ -17,7 +17,7 @@ oneAPI /opt/aurora/default/oneapi/ccl/latest, ZE_FLAT_DEVICE_HIERARCHY=FLAT.
 
 Context: this is what blocks 80B training -- DTensor's redistribute calls
 reduce_scatter_tensor, so any TP>1 config dies in the first forward pass.
-See docs/guides/known-bugs/sunspot-reduce-scatter-segv-20260814.md
+See docs/reference/known-bugs/sunspot-reduce-scatter-segv-20260814.md
 """
 from __future__ import annotations
 

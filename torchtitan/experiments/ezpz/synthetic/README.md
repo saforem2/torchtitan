@@ -13,7 +13,7 @@ summaries           --(3 retok)-->  synthetic .bin/.idx  (drop-in training shard
 The synthetic summaries are dense, faithful restatements of the source facts. The
 hypothesis: mid-training on higher-information-density text improves benchmark
 performance per token vs. re-seeing raw web text (the same lever that made the
-dolmino stage-2 mix help -- see [`../docs/production/cpt/`](../docs/production/cpt/README.md)).
+dolmino stage-2 mix help -- see [`../docs/live/chains/cpt/`](../docs/live/chains/cpt/README.md)).
 
 This is a **proof-of-concept pilot** (a ~2k-doc wiki slice), not a production
 data-gen system. It validates the round-trip is lossless and the summaries are
@@ -54,4 +54,4 @@ Reopens the shard and decodes doc0 as a readback sanity check.
 
 ## Report
 
-Pilot results + eval gate: [`../docs/experiments/synthetic/aurora/`](../docs/experiments/synthetic/aurora/).
+Pilot results + eval gate: [`../docs/records/experiments/synthetic/aurora/`](../docs/records/experiments/synthetic/aurora/).

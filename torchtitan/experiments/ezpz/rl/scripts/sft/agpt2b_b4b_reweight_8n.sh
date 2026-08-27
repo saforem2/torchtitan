@@ -6,7 +6,7 @@
 #PBS -q workq
 #PBS -j oe
 #
-# 8N Sunspot SFT: B4b reweighted single-stage mix (docs/production/sft/agpt/
+# 8N Sunspot SFT: B4b reweighted single-stage mix (docs/live/chains/sft/agpt/
 # 2b-mds/b4-finish-and-reweight/), continuing the global_step138650 base
 # (vocab 256000) on the pretokenized agpt2b-b4-reweight-len4096 dataset, 1
 # epoch.

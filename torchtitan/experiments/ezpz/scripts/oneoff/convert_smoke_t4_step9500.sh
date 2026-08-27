@@ -19,7 +19,7 @@
 #       state["hessian"].mul_(beta2)...
 #       AttributeError: 'dict' object has no attribute 'mul_'
 # i.e. the optimizer state LOADS but arrives nested, not flat -- the documented
-# pre-#3623 format migration (docs/guides/known-bugs/pre3623-optim-statedict-
+# pre-#3623 format migration (docs/reference/known-bugs/pre3623-optim-statedict-  docs-link-check: ignore
 # resume.md). The converter bridges exactly that.
 #
 # WHY THIS IS A TEST AND NOT A FIX. The converter is PROVEN (full 4-link dress

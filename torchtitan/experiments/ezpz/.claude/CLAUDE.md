@@ -110,7 +110,7 @@
   **TP=4/LBS=1/AdamW LR=1e-6** corner (supersedes the legacy TP=2
   default, which NaNs at production GBS) and **warns when
   `dp_degree=NGPUS/TP > 186`** (the grad-path NaN trigger; safe corner
-  validated only to ~62N). See `docs/guides/bad-node-failover.md`.
+  validated only to ~62N). See `docs/reference/guides/bad-node-failover.md`.
 - **Legacy (retained, not for new runs):** the bash `failover_lib.sh`
   wrapper scripts `scripts/submit_agpt_{2b,20b,80b}_aurora_venv_failover.sh`
   (torch 2.13 `.venv/`, LBS=2, fp32 master, bash preflight + spare-swap
@@ -157,7 +157,7 @@ pre-launch overhead is under 13 minutes.
 The "1–2+ hours per-file rsync DO NOT run concurrently" pattern still
 applies if you fall back to rsync mode (no `.venv.tar.gz` present),
 so always build the tarball first via `ezpz tar-env`. See
-[`docs/guides/running-with-newer-pytorch.md`](../docs/guides/running-with-newer-pytorch.md).
+[`docs/reference/guides/running-with-newer-pytorch.md`](../docs/reference/guides/running-with-newer-pytorch.md).
 
 ### Optimizer Constraints at Scale
 
@@ -178,7 +178,7 @@ so always build the tarball first via `ezpz tar-env`. See
   old "use LR=1e-6" guidance is unsafe -- if staying on AdamW use ~5e-7, but
   prefer mano/sophiag. The small-batch "AdamW 1.1e-5" finder number does NOT
   transfer (batch-dependent: ~14x lower ceiling at production). See
-  [`docs/experiments/lr-finder/agpt/README.md`](../docs/experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
+  [`docs/records/experiments/lr-finder/agpt/README.md`](../docs/records/experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
 - **torch.compile OOM at 512N:** 2B OOMs on GPU, 80B OOMs on CPU.
   Use `--compile.no-enable` for 512N jobs.
 - **torch.compile time:** ~7–15 min at 256N depending on model size.
@@ -270,7 +270,7 @@ Auto-registered at runtime via `datasets.py`. No core changes needed.
 
 ## Competitions
 
-**Tracking:** `docs/competitions/`
+**Tracking:** `docs/records/competitions/`
 **W&B:** https://api.wandb.ai/links/aurora_gpt/hda3milo
 
 | Competition | Winner | Loss |
@@ -303,7 +303,7 @@ that touches one of these areas.
     variance ≡ 0 (every value exactly 1.0); v2 step-5000 has
     mean(var)=1.2e-4, std=0.011, range [0.926, 1.102] across 25 norm
     layers. Final-norm channels scaled up uniformly to ~10% above init.
-  See [`docs/guides/training-dtype-bf16-norm-freeze.md`](../docs/guides/training-dtype-bf16-norm-freeze.md).
+  See [`docs/reference/guides/training-dtype-bf16-norm-freeze.md`](../docs/reference/guides/training-dtype-bf16-norm-freeze.md).
 
 - **TP > 1 loss reporting was off by `dp_world_size`** in the window
   2026-04-27 (upstream commit `1786292d`) through 2026-05-18 (upstream
@@ -321,7 +321,7 @@ that touches one of these areas.
   production runs use TP > 1**, so no live dashboard is wrong — but
   historical 80B v1 W&B traces from the affected window show
   `loss / 1536`. See
-  [`docs/guides/loss-reporting-tp-dist-reduce.md`](../docs/guides/loss-reporting-tp-dist-reduce.md).
+  [`docs/reference/guides/loss-reporting-tp-dist-reduce.md`](../docs/reference/guides/loss-reporting-tp-dist-reduce.md).
 
 - **`compile + AC + TP=2` crashes on torch 2.13 for the entire
   agpt 80B family** with the
@@ -337,7 +337,7 @@ that touches one of these areas.
   `agpt_50b_wide` ~48B params, 2N, ~30s to crash).
   Workaround: `compile=OFF` for any 80B-family config on torch 2.13.
   Toy repro:
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
 
 - **HSDP (`dp_replicate × dp_shard > 1`) hits an `aten.normal_.default`
   failure during init** (2026-05-04). Param init goes through
@@ -355,7 +355,7 @@ that touches one of these areas.
   `shepherd died from signal 9` on four different nodes. step-N
   ckpts saved cleanly so trajectories are resumable. Open question
   whether to file an ALCF support ticket — see
-  [`docs/meeting-notes/agpt-sync.md`](../docs/meeting-notes/agpt-sync.md).
+  [`docs/records/meeting-notes/agpt-sync.md`](../docs/records/meeting-notes/agpt-sync.md).
 
 - **1024N init OOM/SIGSEGV (2026-05-04).** First-ever 1024N attempts
   on the v2 stack (8463182 2B, 8463183 20B) both crashed at startup
@@ -376,7 +376,7 @@ that touches one of these areas.
   `validate()` completed at step 1, finite loss, no mmap/AttributeError/CCL
   hang.** (Confirmed at dp=12; a 62N pass would be belt-and-suspenders for
   production dp=186.) `VALIDATOR_ENABLE=0` remains the escape hatch. Full
-  evidence: [`docs/guides/known-bugs/validator-tp4-at-80b.md`](../docs/guides/known-bugs/validator-tp4-at-80b.md).
+  evidence: [`docs/reference/known-bugs/validator-tp4-at-80b.md`](../docs/reference/known-bugs/validator-tp4-at-80b.md).
 
 ## Common Pitfalls
 
@@ -402,7 +402,7 @@ that touches one of these areas.
 
 ## Production Training Status (Aurora)
 
-Tracking in `docs/production/`. All v2 (post-bf16-fix) runs use the
+Tracking in `docs/live/`. All v2 (post-bf16-fix) runs use the
 torch 2.13 venv stack. New runs use the native auto-retry scripts
 (`scripts/submit_agpt_*_autoretry.sh`); earlier Aurora v2 trajectories
 ran under the legacy `*_aurora_venv_failover.sh` wrapper (see Job
@@ -418,7 +418,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
 - **Status:** 8463626 walltime-finished cleanly (50 ckpts saved every
   100 steps); 8463627 (continuation) and 8466847 (held behind it)
   are both Q for a 512N slot.
-- **Trajectory page:** [`docs/production/agpt/2b/n512/`](../docs/production/agpt/2b/n512/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/2b/n512/`](../docs/live/chains/agpt/2b/n512/README.md)
 
 ### v2 — 20B 512N canonical chain (`8460302 → 8463628 → 8466848`)
 
@@ -434,7 +434,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
   breaks out **0.254 → 0.284** (+3pp above v1). ARC-C / Winogrande
   still in noise at this token count. The fp32-master fix is
   smoking-gun-validated at 20B.
-- **Trajectory page:** [`docs/production/agpt/20b/n512/`](../docs/production/agpt/20b/n512/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/20b/n512/`](../docs/live/chains/agpt/20b/n512/README.md)
 
 ### v2 — 20B 256N (`8463659`, NODE_FAIL after step 364)
 
@@ -443,7 +443,7 @@ Submission above). Default dtype is now `float32` (see Recent Findings).
 - step-300 ckpt saved cleanly; resumable. No continuation chained
   (production is consolidated on the 512N chain; this trajectory was
   a per-token comparator scaling experiment).
-- **Trajectory page:** [`docs/production/agpt/20b/n256/`](../docs/production/agpt/20b/n256/README.md)
+- **Trajectory page:** [`docs/live/chains/agpt/20b/n256/`](../docs/live/chains/agpt/20b/n256/README.md)
 
 ### v2 — 1024N first attempts (`8463182` 2B, `8463183` 20B) — both crashed at startup
 
@@ -508,12 +508,12 @@ script. Job 12466025 was a smoke validation only.
 ### v1 (bf16-tainted, historical)
 
 All v1 trajectories are kept under each per-trajectory page in
-`docs/production/agpt/{2b,20b,80b}/n*/` for v1-vs-v2 comparison
+`docs/live/chains/agpt/{2b,20b,80b}/n*/` for v1-vs-v2 comparison
 purposes. Don't add tokens to v1 chains — they're frozen reference
 points. Confirmed bf16 freeze: every v1 RMSNorm.weight is exactly
 1.0 (variance ≡ 0); v2 step-5000 has mean(var)=1.2e-4, std=0.011,
 range [0.926, 1.102] across 25 norm layers — i.e. norms are actually
-training in v2. See `docs/guides/training-dtype-bf16-norm-freeze.md`.
+training in v2. See `docs/reference/guides/training-dtype-bf16-norm-freeze.md`.
 
 ## Scaling Study Results (Aurora)
 
@@ -556,7 +556,7 @@ empirical evidence, follow the doc link.
   fires on torch 2.13, did not fire on torch 2.10.** Workaround:
   `compile=OFF` for 80B-family on torch 2.13, OR stay on torch 2.10
   for these configs. Toy repro:
-  [`docs/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/upstream-issues/repro_devicemesh_in_saved_tensors.py).
+  [`docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py`](../docs/outbound/upstream-issues/repro_devicemesh_in_saved_tensors.py).
 
 - **80B TP=2 regression on torch 2.10:** Hangs at step 1 since upstream
   changes April 16-23. Works on torch 2.13. See `project_80b_bisect`
@@ -601,7 +601,7 @@ These are *preferences* (style/formatting), not rules. Hard rules
 moved up to "Golden Rules".
 
 - **Always document experiments** — every run needs a markdown report
-  under `docs/experiments/<module>/<machine>/<date>-<purpose>.md`,
+  under `docs/records/experiments/<module>/<machine>/<date>-<purpose>.md`,
   linked from a parent README.
 - **Don't modify project-level `.gitignore`.**
 - **Don't add `.ezpz-interactive-launch.sh`** to git — use
@@ -618,7 +618,7 @@ moved up to "Golden Rules".
   for reproducing v1 numbers — see `submit/README.md`.
 - **Date filenames as `YYYY-MM-DD`** for any per-day artifacts.
   Per-recurring-meeting docs use a stable filename with `## YYYY-MM-DD`
-  sections inside (see `docs/meeting-notes/agpt-sync.md`).
+  sections inside (see `docs/records/meeting-notes/agpt-sync.md`).
 - **Cross-link related docs.** Production READMEs link to eval READMEs
   and vice versa; the bf16-norm-freeze guide links to both training
   overlays and lm-eval figures.

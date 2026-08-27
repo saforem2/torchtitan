@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 """GRPO+LoRA-on-XPU config for AuroraGPT-2B GSM8K chain-of-thought (Stage 2 of the
-CoT plan, docs/production/rl/plans/cot.md).
+CoT plan, docs/live/chains/rl/plans/cot.md).
 
 Thin ezpz overlay: imports the UPSTREAM ``torchtitan.experiments.rl`` engine and
 backs it with OUR ``ezpz.agpt`` model (``model_registry("2b-rl", converters=...)``).

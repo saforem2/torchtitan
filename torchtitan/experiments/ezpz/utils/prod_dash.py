@@ -17,7 +17,7 @@ Modes:
     # 1. Live kitcat loop (run in a kitty terminal; rl_dash3 twin)
     /tmp/kitcat-venv/bin/python prod_dash.py
 
-    # 2. Headless SVG/PNG snapshot for docs/production/
+    # 2. Headless SVG/PNG snapshot for docs/live/
     python prod_dash.py --svg /path/to/production_loss_live.svg
 
     # 3. Stall-aware text status board (no matplotlib needed)
@@ -288,7 +288,7 @@ def _series_from_records(records):
 # against W&B run ov1dn10t: 1242/1242 loss values identical to the last bit,
 # 0 differing, 0 missing. Prefer W&B only if the CSV is ever suspected stale.
 MDS_CSV = os.path.join(
-    REPO, "torchtitan/experiments/ezpz/docs/production/agpt/2b-mds",
+    REPO, "torchtitan/experiments/ezpz/docs/live/chains/agpt/2b-mds",
     "loss_data/train_metrics.csv")
 # tokens/iter is CONSTANT across all 3 MDS stages: GBS 6144 x seq 8192.
 #
@@ -539,7 +539,7 @@ def _eval_scores(eval_subdir):
     Reads the results_*.json lm_eval writes under
       outputs/evals/<eval_subdir>/step-N/results/<task>/**/results_*.json
     which is the SAME layout scripts/eval/convert_and_eval.sh produces. The
-    markdown tables under docs/evals/ are hand-maintained and lag reality, so
+    markdown tables under docs/records/evals/ are hand-maintained and lag reality, so
     they are deliberately not the source here.
 
     Takes the chain's `eval_subdir`, NOT its ckpt_base. The two have never

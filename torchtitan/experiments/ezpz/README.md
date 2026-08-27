@@ -49,7 +49,7 @@ specific pages linked below.
 
 Full setup details — module loads, venv install, large-scale yeet-env
 broadcast — are in
-[`docs/guides/running-with-newer-pytorch.md`](docs/guides/running-with-newer-pytorch.md).
+[`docs/reference/guides/running-with-newer-pytorch.md`](docs/reference/guides/running-with-newer-pytorch.md).
 Minimum viable path on Aurora:
 
 ```bash
@@ -207,7 +207,7 @@ Monotonic descent, finite grad norms throughout. MFU is ~0.05% because
 performance measurement -- do not read a throughput number off this run.
 
 Note the 2B / MoE / 80B results in
-[`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md)
+[`docs/reference/guides/frameworks-rc-validation.md`](docs/reference/guides/frameworks-rc-validation.md)
 are **Sunspot** (`1247xxxx`), a different machine. The rows above are the
 first training on Aurora's RC.
 
@@ -223,21 +223,21 @@ first training on Aurora's RC.
 The full prioritized landing page (with last-modified dates and a
 sentence per entry) is at [`docs/README.md`](docs/README.md). For a
 structural map of every file under `docs/`, see
-[`docs/TREE.md`](docs/TREE.md). The headline pages by topic:
+[`docs/reference/TREE.md`](docs/reference/TREE.md). The headline pages by topic:
 
 ### Live status
 
 | Page | What's there |
 |------|--------------|
-| [Production index](docs/production/README.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
-| [Eval index](docs/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
+| [Production index](docs/live/dashboard.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
+| [Eval index](docs/records/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
 | [Journal](docs/journal.md) | Day-by-day session log |
 
 ### Setup + running
 
 | Page | What's there |
 |------|--------------|
-| [Running with newer PyTorch](docs/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
+| [Running with newer PyTorch](docs/reference/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
 | [`scripts/submit_agpt_{2b,20b,80b}_aurora_venv*.sh`](scripts/) | Current (torch 2.13 venv) PBS production submitters |
 | [`submit/README.md`](submit/README.md) | Legacy torch-2.10-conda submit scripts (kept for v1 reproduction only) |
 
@@ -245,11 +245,11 @@ structural map of every file under `docs/`, see
 
 | Page | What's there |
 |------|--------------|
-| [Known issues](docs/guides/known-issues.md) | Operational notes + workarounds for active bugs |
-| [bf16 RMSNorm freeze](docs/guides/training-dtype-bf16-norm-freeze.md) | The headline v1 bug — why we restarted as v2 with `dtype=float32` |
-| [Bad-node failover wrapper](docs/guides/bad-node-failover.md) | How the `failover_lib.sh` wrapper detects + swaps bad nodes mid-training |
-| [TP loss-reporting bug](docs/guides/loss-reporting-tp-dist-reduce.md) | Why TP > 1 loss is off by `dp_world_size` and how `EzpzValidator` fixes it |
-| [XPU attention issues](docs/guides/xpu-attention-issues.md) | No flash-attn, selective AC quirks, SDPA fallback |
+| [Known issues](docs/reference/guides/known-issues.md) | Operational notes + workarounds for active bugs |
+| [bf16 RMSNorm freeze](docs/reference/guides/training-dtype-bf16-norm-freeze.md) | The headline v1 bug — why we restarted as v2 with `dtype=float32` |
+| [Bad-node failover wrapper](docs/reference/guides/bad-node-failover.md) | How the `failover_lib.sh` wrapper detects + swaps bad nodes mid-training |
+| [TP loss-reporting bug](docs/reference/guides/loss-reporting-tp-dist-reduce.md) | Why TP > 1 loss is off by `dp_world_size` and how `EzpzValidator` fixes it |
+| [XPU attention issues](docs/reference/guides/xpu-attention-issues.md) | No flash-attn, selective AC quirks, SDPA fallback |
 
 ### Per-feature subdirectories
 
@@ -270,17 +270,20 @@ structural map of every file under `docs/`, see
 
 | Folder | Contents |
 |--------|----------|
-| [`docs/production/`](docs/production/) | Live per-model / per-node-count training trackers |
-| [`docs/evals/`](docs/evals/) | Per-model eval results + plots |
-| [`docs/guides/`](docs/guides/) | Big-finding writeups, operational notes, how-tos |
-| [`docs/experiments/`](docs/experiments/) | Per-machine smoke / benchmark / LR-finder reports |
-| [`docs/scaling/`](docs/scaling/) | Per-model scaling-study results (TPS / MFU vs N) |
-| [`docs/competitions/`](docs/competitions/) | Optimizer speedrun leaderboards |
-| [`docs/meeting-notes/`](docs/meeting-notes/) | AuroraGPT sync agendas + action items |
-| [`docs/summaries/`](docs/summaries/) | 2-week / monthly retrospectives |
-| [`docs/upstream-issues/`](docs/upstream-issues/) | Repros + drafts for PRs we're filing back to `pytorch/torchtitan` |
-| [`docs/configs/`](docs/configs/) | Model config docs (architecture, registered names) |
-| [`docs/baselines/`](docs/baselines/) | Reference training curves + benchmarks |
+| [`docs/live/`](docs/live/) | Chain status today: per-model trackers, the dashboard, the dispatch log |
+| [`docs/reference/guides/`](docs/reference/guides/) | Big-finding writeups, operational notes, how-tos |
+| [`docs/reference/known-bugs/`](docs/reference/known-bugs/) | Diagnosed failures and their workarounds |
+| [`docs/reference/scaling/`](docs/reference/scaling/) | Per-model scaling-study results (TPS / MFU vs N) |
+| [`docs/records/evals/`](docs/records/evals/) | Per-model eval results + plots |
+| [`docs/records/experiments/`](docs/records/experiments/) | Per-machine smoke / benchmark / LR-finder reports |
+| [`docs/records/journal/`](docs/records/journal/) | Day-by-day session log, by month |
+| [`docs/records/meeting-notes/`](docs/records/meeting-notes/) | AuroraGPT sync agendas + action items |
+| [`docs/records/summaries/`](docs/records/summaries/) | 2-week / monthly retrospectives |
+| [`docs/records/upstream-sync/`](docs/records/upstream-sync/) | Upstream merge log, by month |
+| [`docs/records/competitions/`](docs/records/competitions/) | Optimizer speedrun leaderboards |
+| [`docs/outbound/upstream-issues/`](docs/outbound/upstream-issues/) | Repros + drafts for PRs we're filing back to `pytorch/torchtitan` |
+| [`docs/reference/configs/`](docs/reference/configs/) | Model config docs (architecture, registered names) |
+| [`docs/reference/baselines/`](docs/reference/baselines/) | Reference training curves + benchmarks |
 
 ## MoE training
 

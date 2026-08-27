@@ -11,7 +11,7 @@
 # checkpoints, not a finish line.
 #
 # Switch points: 20b_v2_512 step 4401, 20b_v2_256 step 3101,
-# 2b_v2_512 step 30401 (see guides/known-bugs/rope-flavor-mismatch.md).
+# 2b_v2_512 step 30401 (see reference/known-bugs/rope-flavor-mismatch.md).
 R=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
 printf "%-14s %-8s %-6s %-6s %s\n" arm switch need have status
 while read -r a sw; do

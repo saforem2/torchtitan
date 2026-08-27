@@ -12,7 +12,7 @@ Usage:
 
     # Custom output dir:
     python3 torchtitan/experiments/ezpz/utils/plot_lr_finder.py \
-        --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/figures
+        --output-dir torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/figures  # docs-link-check: ignore (created on demand)
 """
 
 from __future__ import annotations
@@ -328,7 +328,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path(
-            "torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures"
+            "torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/agpt/figures"
         ),
         help=(
             "Directory to save plots. Figures are shared per family; prefix "

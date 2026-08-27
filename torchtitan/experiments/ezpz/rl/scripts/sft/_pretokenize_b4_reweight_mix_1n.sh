@@ -7,7 +7,7 @@
 #PBS -j oe
 #
 # 1N offline DOWNLOAD + PRE-TOKENIZE of b4_reweight_mix @ 4096 for the B4b
-# reweighted single-stage SFT (docs/production/sft/agpt/2b-mds/
+# reweighted single-stage SFT (docs/live/chains/sft/agpt/2b-mds/
 # b4-finish-and-reweight/).
 #
 # WHY: same rationale as _pretokenize_b3_instruct_cot_mix_1n.sh -- SFTTrainer
@@ -22,7 +22,7 @@
 # traces above ~1200 chars -- the traced cause of B3's verbose-wrong-answer
 # style), tulu-3-sft-mixture 0.30, ultrachat-200k 0.15. OpenMathInstruct-2 is
 # DROPPED entirely (added math breadth the 2B couldn't convert to accuracy).
-# See torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/
+# See torchtitan/experiments/ezpz/docs/live/chains/sft/agpt/2b-mds/
 # b4-finish-and-reweight/design.md for the full diagnosis.
 #
 # CRITICAL: OPENR1_MAX_THINK_CHARS must be exported here so the filter is

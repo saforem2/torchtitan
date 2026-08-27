@@ -16,7 +16,7 @@ derivable fields in each trajectory's README:
         (only with --wandb; left untouched otherwise)
 
 Scope note: this fills the per-trajectory LEAF READMEs only. Rollup
-snapshot cells in docs/production/README.md and docs/production/agpt/
+snapshot cells in docs/live/dashboard.md and docs/live/chains/agpt/
 README.md are NOT auto-propagated here (their numbers were hand-set and
 carry surrounding narrative); refresh those manually or via the
 docs/README.md index table that refresh_docs_readme_table.py owns.
@@ -400,7 +400,7 @@ def _wandb_latest_loss(traj: dict) -> float | None:
 # (The cross-model agpt/README.md is intentionally absent: it is pure
 # narrative Headlines with no snapshot table.)
 #
-# The top-level docs/production/README.md is ALSO intentionally absent: its
+# The top-level docs/live/dashboard.md is ALSO intentionally absent: its
 # "Status-at-a-glance" dashboard uses a different column schema
 # (Trajectory | State | Persisted step | Loss | % target | Trend) than the
 # per-model rollup tables (... | Cumulative steps | Loss | Tokens). The
@@ -409,19 +409,19 @@ def _wandb_latest_loss(traj: dict) -> float | None:
 # The dashboard's trend-lights + narrative State are hand-curated; leave it
 # to manual upkeep.
 ROLLUP_PAGES = [
-    "torchtitan/experiments/ezpz/docs/production/agpt/2b/README.md",
-    "torchtitan/experiments/ezpz/docs/production/agpt/20b/README.md",
+    "torchtitan/experiments/ezpz/docs/live/chains/agpt/2b/README.md",
+    "torchtitan/experiments/ezpz/docs/live/chains/agpt/20b/README.md",
     # The top-level dashboard: its per-model rollup tables are Shape B and its
     # status-at-a-glance table is Shape C (see _rewrite_rollup_row). Both are
     # handled cell-by-index so the differing schema is not mangled.
-    "torchtitan/experiments/ezpz/docs/production/README.md",
+    "torchtitan/experiments/ezpz/docs/live/dashboard.md",
 ]
 
 
 def _canon_readme(repo_rel: str) -> str:
     """Normalize a leaf README repo-relative path to its canonical
     docs-relative form, e.g.
-    'torchtitan/.../docs/production/agpt/2b/n256/README.md' ->
+    'torchtitan/.../docs/live/chains/agpt/2b/n256/README.md' ->
     'production/agpt/2b/n256/README.md'. Used as the disambiguating key
     so 2B-256N and 20B-256N never collide (both end '.../n256/README.md'
     but differ in the model segment)."""
@@ -522,7 +522,7 @@ def propagate_to_rollups(
         # current than the leaf README's **Loss:** field (often lagging at an
         # older step). Propagating loss there would REGRESS it, so only the
         # disk-derivable step/tokens/% cells are auto-filled on the dashboard.
-        _page_skip_loss = page_rel.endswith("docs/production/README.md")
+        _page_skip_loss = page_rel.endswith("docs/live/dashboard.md")
         lines = page.read_text().splitlines(keepends=False)
         out: list[str] = []
         changed_here = False

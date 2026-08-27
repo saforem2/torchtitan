@@ -12,7 +12,7 @@
 #
 # WHY 8N (not 32N): the 32N run GPU-page-faults at step 1-2
 # ("Segmentation fault from GPU ... NotPresent Write" -> rank signal 6). Full
-# diagnosis in docs/experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md:
+# diagnosis in docs/records/experiments/agpt/sunspot/2026-07-10-sft-2b-gs138650-big-mix-32n.md:
 # NOT a bad node (reproduces on rank 221 across nodes), NOT an OOV token id
 # (full 53M-row scan: max 255998 < vocab 256000) -- it is a 384-rank SCALE
 # fault (the project_sft_v2_base_oom_badnode class, base-independent). A scale

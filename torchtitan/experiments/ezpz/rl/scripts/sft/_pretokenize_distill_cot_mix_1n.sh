@@ -7,7 +7,7 @@
 #PBS -j oe
 #
 # 1N offline DOWNLOAD + PRE-TOKENIZE of distill_cot_mix @ 8192 for the
-# reasoning-distillation cold-start SFT (docs/production/sft/agpt/2b-mds/
+# reasoning-distillation cold-start SFT (docs/live/chains/sft/agpt/2b-mds/
 # distill-cot-mix/).
 #
 # WHY: same rationale as _pretokenize_b4_reweight_mix_1n.sh -- SFTTrainer

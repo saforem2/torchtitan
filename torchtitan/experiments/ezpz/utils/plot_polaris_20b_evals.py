@@ -9,7 +9,7 @@ downstream benchmark accuracy vs training step.
 Why a separate eval chart: the Polaris 20B dolma run trained on
 Llama2-tokenized data, so it must be evaluated with the Llama2 tokenizer,
 not the gemma one the model config declares (see
-docs/guides/known-bugs/polaris-20b-tokenizer-mismatch.md). These results
+docs/reference/known-bugs/polaris-20b-tokenizer-mismatch.md). These results
 come from the ``results-llama2tok`` dirs; the earlier ``results`` dirs
 (gemma tokenizer) are all at chance and should be ignored.
 
@@ -22,7 +22,7 @@ Run from the repo root (on Polaris, where the eval outputs live):
 
     python3 torchtitan/experiments/ezpz/utils/plot_polaris_20b_evals.py \
         --eval-base outputs/evals/agpt-20b-dolma-n128 \
-        --out torchtitan/experiments/ezpz/docs/production/polaris/figures
+        --out torchtitan/experiments/ezpz/docs/live/chains/polaris/figures
 """
 
 from __future__ import annotations
@@ -176,7 +176,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="torchtitan/experiments/ezpz/docs/production/polaris/figures",
+        default="torchtitan/experiments/ezpz/docs/live/chains/polaris/figures",
         help="Output dir for the chart",
     )
     args = parser.parse_args()

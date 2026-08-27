@@ -78,7 +78,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--out",
-        default=f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/"
+        default=f"{REPO}/torchtitan/experiments/ezpz/docs/records/experiments/"
         "lr-finder/agpt/figures",
     )
     args = ap.parse_args()

@@ -10,13 +10,13 @@ Usage:
     # After running smoke_2b_50steps and confirming results look reasonable:
     python3 -m torchtitan.experiments.ezpz.eval.loss_baseline save \\
         --log smoke_2b_v22.o12465527 \\
-        --baseline torchtitan/experiments/ezpz/docs/baselines/agpt_2b_50.json \\
+        --baseline torchtitan/experiments/ezpz/docs/reference/baselines/agpt_2b_50.json \\
         --note "v22 — quantize-on-config + LocalMapInnerAttention removal"
 
     # On the next sync's smoke run:
     python3 -m torchtitan.experiments.ezpz.eval.loss_baseline check \\
         --log smoke_2b_v23.o12465999 \\
-        --baseline torchtitan/experiments/ezpz/docs/baselines/agpt_2b_50.json
+        --baseline torchtitan/experiments/ezpz/docs/reference/baselines/agpt_2b_50.json
 
 The check passes if:
     - The new run reached the same number of steps as the baseline

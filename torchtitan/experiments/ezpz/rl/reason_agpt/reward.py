@@ -9,7 +9,7 @@ Ports the four additive reward functions from the TRL task
 ``rl/tasks/gsm8k_reason.py`` to upstream ``RewardFn`` subclasses so each shows up
 SEPARATELY in ``reward_breakdown`` (keyed by class name). Packing them into one
 fn would collapse the per-component metrics -- exactly what the CoT plan warns
-against for Path B (docs/production/rl/plans/cot.md, "On Path B (Monarch overlay)
+against for Path B (docs/live/chains/rl/plans/cot.md, "On Path B (Monarch overlay)
 specifically: these must be separate RewardFn classes in the Rubric list").
 
 The reward keys ONLY on the ``<answer>`` span after ``</think>`` (never the

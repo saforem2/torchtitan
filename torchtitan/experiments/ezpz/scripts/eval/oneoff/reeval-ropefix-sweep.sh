@@ -22,7 +22,7 @@
 #   2B  step 46429 hellaswag 0.4753 -> 0.5384, mmlu 0.2511 -> 0.2579
 # The published "ARC-C decays monotonically" curve is an artifact: corrected,
 # the model improves throughout. See
-# docs/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md
+# docs/records/experiments/agpt/aurora/20260816-arc-c-decay-vs-rope-permute.md
 #
 # DISK IS THE BINDING CONSTRAINT. A 20B HF export is 78 GB; 70 of them is
 # 5.5 TB and flare has ~31 PB free but this dir does not need 5 TB of garbage.

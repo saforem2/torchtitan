@@ -8,6 +8,8 @@
 #                tokens+% / last-updated, and --wandb: loss) from disk truth
 #   3. CHARTS  : update_all_charts.sh -- regenerate all figures + the
 #                docs/README.md index table (refresh_docs_readme_table.py)
+#   3b. LINKS  : check_doc_links.sh -- dangling md links, stale docs paths in
+#                code, depth-counted and piecewise repo-root paths (FATAL)
 #   4. SUMMARY : one rolled-up report + non-zero exit iff a worker failed
 #   5. COMMIT  : (default ON) conventional commit of the changed docs/figures
 #                -- pull-first, NEVER push unless --push is given
@@ -110,13 +112,44 @@ elif [[ "$WANDB" -eq 0 ]]; then
     # Fast path: only the W&B-free workers (eval figures + index-table
     # refresher). Skip the two W&B chart scripts.
     echo "    (--fast: regenerating index table + eval figures only; skipping W&B charts)"
-    "$PY" -m torchtitan.experiments.ezpz.utils.refresh_docs_readme_table 2>&1 || charts_rc=$?
+    # Run as a SCRIPT, not -m: `python -m torchtitan.experiments.ezpz.utils.X`
+    # walks the package chain, and ezpz/__init__.py -> local_device_compat
+    # imports torch. The generator itself is stdlib-only (its one
+    # trajectories import is already try/except-guarded), so -m made it
+    # need a full training env to regenerate a markdown table.
+    "$PY" torchtitan/experiments/ezpz/utils/refresh_docs_readme_table.py 2>&1 || charts_rc=$?
 else
     bash torchtitan/experiments/ezpz/scripts/update_all_charts.sh 2>&1 || charts_rc=$?
 fi
 
+# ---- 3b. link + code-reference check ----
+# Step 4 of docs/notes/docs-reorg-plan.md, and the reason step 3 was safe to
+# repeat. Runs AFTER the charts because a chart run can itself write a figure
+# to a path a doc references.
+#
+# FATAL. It was advisory while a 31-reference backlog stood -- a check that
+# always fails is a check nobody reads. The backlog is now cleared (0
+# dangling), so any hit is something this run, or the commit before it, just
+# broke. That is exactly the signal worth stopping on.
+echo ""
+echo ">>> [3b/3] doc link + code-reference check (check_doc_links.sh)"
+links_out="$(bash torchtitan/experiments/ezpz/scripts/check_doc_links.sh 2>&1)"
+links_rc=$?
+links_summary="$(echo "$links_out" | grep -E '^DANGLING' | tail -1)"
+if [[ "$links_rc" -eq 0 ]]; then
+    links_summary="no dangling references"
+    echo "  $links_summary"
+else
+    # Print the heading + a bounded sample; the full list is long and the
+    # operator wants the count first.
+    echo "$links_out" | head -12
+    n_total="$(echo "$links_out" | grep -cE '^   ')"
+    [[ "$n_total" -gt 10 ]] && echo "   ... ($n_total total; run check_doc_links.sh for the full list)"
+fi
+
 # ---- 4. summary ----
 overall_rc=$(( charts_rc != 0 ? charts_rc : fill_rc ))
+[[ "$overall_rc" -eq 0 && "$links_rc" -ne 0 ]] && overall_rc=$links_rc
 echo ""
 echo "============================================================"
 echo "SUMMARY"
@@ -124,6 +157,7 @@ echo "  staleness : ${stale_summary:-(none)}"
 echo "  fields    : ${fill_summary:-(none)} (rc=$fill_rc)"
 echo "  last-upd  : ${lu_summary:-(none)} (rc=$lu_rc)"
 echo "  charts    : rc=$charts_rc$( [[ $DRY_RUN -eq 1 ]] && echo ' (dry-run, skipped)' )"
+echo "  links     : ${links_summary:-(none)} (rc=$links_rc)"
 echo "============================================================"
 
 # ---- 5. commit (default on; never push unless --push) ----
@@ -140,17 +174,25 @@ if [[ "$fill_rc" -ne 0 ]]; then
     exit "$overall_rc"
 fi
 
+# Nor a broken link. With the backlog cleared, a hit means this refresh (or the
+# commit under it) just broke a reference -- and auto-committing is precisely
+# how the empty eval charts reached the branch on 2026-08-16.
+if [[ "$links_rc" -ne 0 ]]; then
+    echo "(dangling references; skipping auto-commit -- fix them or commit manually)"
+    exit "$overall_rc"
+fi
+
 # Stage ONLY known generated subpaths (never code, never hand-written docs
 # like journal.md / meeting-notes). This keeps the auto-commit's blast
 # radius to exactly what the refresh produces.
 git add \
-    "torchtitan/experiments/ezpz/docs/production/**/README.md" \
-    "torchtitan/experiments/ezpz/docs/production/**/figures/*" \
-    "torchtitan/experiments/ezpz/docs/production/**/charts/*" \
-    "torchtitan/experiments/ezpz/docs/production/**/*.tsv" \
-    "torchtitan/experiments/ezpz/docs/production/figures/*" \
-    "torchtitan/experiments/ezpz/docs/evals/**/figures/*" \
-    "torchtitan/experiments/ezpz/docs/experiments/lr-finder/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/README.md" \
+    "torchtitan/experiments/ezpz/docs/live/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/charts/*" \
+    "torchtitan/experiments/ezpz/docs/live/**/*.tsv" \
+    "torchtitan/experiments/ezpz/docs/live/figures/*" \
+    "torchtitan/experiments/ezpz/docs/records/evals/**/figures/*" \
+    "torchtitan/experiments/ezpz/docs/records/experiments/lr-finder/**/figures/*" \
     "torchtitan/experiments/ezpz/docs/README.md" \
     2>/dev/null
 

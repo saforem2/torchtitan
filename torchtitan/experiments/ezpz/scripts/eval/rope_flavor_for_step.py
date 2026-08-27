@@ -168,7 +168,7 @@ def main() -> int:
         print(
             f"could not place step {args.step} in any run of {args.chain}. "
             "It may predate W&B logging, or fall in a gap between runs -- "
-            "check the registry in docs/guides/known-bugs/rope-flavor-mismatch.md",
+            "check the registry in docs/reference/known-bugs/rope-flavor-mismatch.md",
             file=sys.stderr,
         )
         return 3
