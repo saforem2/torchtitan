@@ -130,3 +130,82 @@ if [[ "$detected" != "polaris" ]]; then
     exit 1
 fi
 echo "verified: auto-detect resolves to '${detected}'"
+
+# ---------------------------------------------------------------------------
+# Prefer SCRAPED hosts over blind rotation on the watchdog (rc=124) path.
+#
+# ezpz classifies an idle-output watchdog kill as BAD_NODE_BLIND *before*
+# consulting the scraper, on the stated assumption that "the hang IS the
+# silence, so the scraper rarely finds anything".
+#
+# That assumption does not hold for cudaErrorDevicesUnavailable. The failing
+# rank prints a full traceback naming its host and THEN hangs in the first
+# collective -- so the log is loud, the scraper finds the culprits, and the
+# code never asks. Job 7560197 burned 4h04m over three attempts evicting
+# three innocent hosts (one of them a spare it had just swapped in) while
+# scrape_bad_nodes() returned the same two true culprits every time:
+#
+#   attempt-1 -> ['x3007c0s13b1n0...', 'x3111c0s37b1n0...']
+#   attempt-2 -> same two
+#   attempt-3 -> same two
+#
+# Fix: on rc=124, if the scraper named hosts, treat it as BAD_NODE_KNOWN so
+# swap_in() replaces exactly those. Fall through to the original blind
+# rotation when the scraper is genuinely empty (a real silent hang), which
+# preserves the documented behaviour for that case.
+python3 - <<'PY'
+import inspect
+import pathlib
+
+from ezpz import launch_autoretry
+
+path = pathlib.Path(inspect.getfile(launch_autoretry))
+src = path.read_text()
+
+MARK = "# --- torchtitan/ezpz: scraped hosts beat blind on the watchdog path ---"
+if MARK in src:
+    print("watchdog-scrape patch already present")
+    raise SystemExit(0)
+
+OLD = """    if effective_rc == _WATCHDOG_RC:
+        if not has_spares:
+            return _result(TerminationReason.EXHAUSTED)
+        return _result(TerminationReason.BAD_NODE_BLIND)
+"""
+NEW = """    if effective_rc == _WATCHDOG_RC:
+        if not has_spares:
+            return _result(TerminationReason.EXHAUSTED)
+        # --- torchtitan/ezpz: scraped hosts beat blind on the watchdog path ---
+        # A rank that dies with cudaErrorDevicesUnavailable prints a
+        # traceback naming its host and THEN hangs the collective, so a
+        # watchdog kill can still carry a loud, correct log. Only rotate
+        # blind when the scraper genuinely found nothing.
+        if scraped_bad_nodes:
+            return _result(TerminationReason.BAD_NODE_KNOWN)
+        return _result(TerminationReason.BAD_NODE_BLIND)
+"""
+
+if OLD not in src:
+    raise SystemExit(
+        "ERROR: could not find the watchdog branch to patch; ezpz changed "
+        "upstream -- re-check launch_autoretry.py before trusting failover"
+    )
+
+path.write_text(src.replace(OLD, NEW, 1))
+print(f"patched watchdog branch -> {path}")
+PY
+
+# Gate on BEHAVIOUR: a watchdog rc with named hosts must now classify as
+# BAD_NODE_KNOWN, and an empty scrape must still classify as BAD_NODE_BLIND.
+python3 - <<'PY'
+import inspect
+
+from ezpz import launch_autoretry as L
+
+src = inspect.getsource(L)
+i = src.index("if effective_rc == _WATCHDOG_RC:")
+window = src[i : i + 700]
+assert "BAD_NODE_KNOWN" in window, "watchdog branch cannot reach BAD_NODE_KNOWN"
+assert "BAD_NODE_BLIND" in window, "watchdog branch lost its blind fallback"
+print("verified: watchdog path can now return BAD_NODE_KNOWN, blind retained")
+PY
