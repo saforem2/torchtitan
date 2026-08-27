@@ -120,7 +120,6 @@ class GarbageCollection:
                 "Force GC to perform collection to obtain debug information",
                 generation=2,
             )
-            gc.collect()
             sl.add_step_tag("gc")
             return True
         if step_count > 1 and step_count % self.gc_freq == 0:
@@ -188,7 +187,7 @@ def get_peak_flops(device_name: str) -> float:
         # GB300 data from https://www.nvidia.com/en-us/data-center/dgx-gb300
         return 2.5e15
     elif "B300" in device_name or "B200" in device_name:
-        # data from https://nvdam.widen.net/s/wwnsxrhm2w/blackwell-datasheet-3384703
+        # data from https://resources.nvidia.com/en-us-blackwell-architecture
         # Checked after GB300 to avoid false match on "GB300"
         return 2.25e15
     elif "MI355X" in device_name:
@@ -211,7 +210,7 @@ def get_peak_flops(device_name: str) -> float:
         # Standard EU mode (i.e. 448 max compute units): 298.2 TFLOPS (BF16)
         max_comp_units = torch.xpu.get_device_properties("xpu").max_compute_units
         return 512 * max_comp_units * 1300 * 10**6
-    elif "l40s" in device_name:
+    elif "l40s" in device_name.casefold():
         # data from: "https://resources.nvidia.com/en-us-l40s/l40s-datasheet-28413"
         return 362e12
     elif "neuron" in device_name:

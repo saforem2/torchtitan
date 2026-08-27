@@ -9,6 +9,7 @@ import os
 import dataclasses
 from dataclasses import dataclass
 
+import spmd_types as spmd
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -120,7 +121,13 @@ class Attention(BaseAttention):
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
     ):
-        bsz, seqlen, _ = x.size()
+        # Flat token layout (upstream #4121): x is [T, D], NOT [B, L, D]. The
+        # loader folds [B, L] -> [T] unconditionally, so every reshape below
+        # works on a token count rather than a (batch, seq) pair. Ported from
+        # torchtitan/models/deepseek_v3/model.py, which is what this MLA forked
+        # from -- the axis shifts here are subtle enough that inferring them
+        # from a traceback gets two of them wrong.
+        num_tokens = x.shape[0]
 
         # Query projection
         if self.q_lora_rank == 0:
@@ -128,7 +135,13 @@ class Attention(BaseAttention):
         else:
             q = self.wq_a(x)
             q = self.wq_b(self.q_norm(q))
-        q = q.view(bsz, seqlen, -1, self.qk_head_dim)
+
+        # spmd.local(): the unflatten splits a TP-sharded feature axis into
+        # (heads, head_dim). Under TP the -1 resolves to the LOCAL head count,
+        # so this must be treated as a local-shard op, not a global one.
+        with spmd.local():
+            q = q.view(num_tokens, -1, self.qk_head_dim)
+
         q_nope, q_pe = torch.split(
             q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
         )
@@ -140,13 +153,22 @@ class Attention(BaseAttention):
         # PR #3458 (RoPE refactor): rope module now owns its cache and
         # rotates q+k in one call; freqs_cis no longer threaded through
         # forward.
-        q_pe, k_pe = self.rope(q_pe, k_pe.unsqueeze(2), positions)
+        # unsqueeze(1), not (2): k_pe is [T, rope_dim] here (rank 2), so the
+        # head axis is inserted at 1. It was 2 when this tensor was 3D.
+        q_pe, k_pe = self.rope(q_pe, k_pe.unsqueeze(1), positions)
         q = torch.cat([q_nope, q_pe], dim=-1)
 
         kv = self.wkv_b(self.kv_norm(kv))
-        kv = kv.view(bsz, seqlen, -1, self.qk_nope_head_dim + self.v_head_dim)
-        k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
-        k = torch.cat([k_nope, k_pe.expand(-1, -1, self.n_heads, -1)], dim=-1)
+
+        with spmd.local():
+            kv = kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)
+            k_nope, v = torch.split(
+                kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
+            )
+            # expand to k_nope's LOCAL head count, not self.n_heads: under TP
+            # each rank holds n_heads/tp_degree heads, so the global count
+            # would over-expand and only fail at tp>1.
+            k = torch.cat([k_nope, k_pe.expand(-1, k_nope.size(1), -1)], dim=-1)
 
         # NOTE: The XPU SDPA backend on Aurora doesn't properly handle
         # different head dimensions for Q/K vs V.
@@ -166,7 +188,7 @@ class Attention(BaseAttention):
             output = output[..., : self.v_head_dim]
 
         output = output.contiguous()
-        output = output.view(bsz, seqlen, -1)
+        output = output.view(num_tokens, -1)
         return self.wo(output)
 
 

@@ -218,12 +218,23 @@ Should get past `init_process_group` and run to completion (exit 0).
 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --module=ezpz.agpt --config=agpt_2b \
     --checkpoint.no-enable \
-    --training.local-batch-size=1 --training.seq-len=8192 \
+    --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+    --training.num-tokens-per-train-step=65536 \
+    --training.max-context-length=8192 \
     --training.steps=5
 ```
 
 Should build the blendcorpus index and log training steps, ending in
 `Execution finished with 0`.
+
+> [!NOTE]
+> The batch flags above are the post-#4121 (80th sync) token-unit names.
+> The old `--training.local-batch-size` / `--training.seq-len` /
+> `--training.global-batch-size` were replaced: sizes are now counted in
+> **tokens**, not sequences. `tokens = batch_size * seq_len`, so the
+> `LBS=1, SEQ_LEN=8192` above becomes `8192` tokens per microbatch per DP
+> rank. `submit_agpt_20b_autoretry.sh` is already ported;
+> `submit_agpt_2b_autoretry.sh` is **not** and still passes the old names.
 
 ---
 

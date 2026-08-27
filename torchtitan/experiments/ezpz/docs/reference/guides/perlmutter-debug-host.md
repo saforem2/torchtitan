@@ -5,11 +5,20 @@ CPU-side verification work. Notes so the next switch is quicker.
 
 ## Why it works as a stand-in
 
-`module load pytorch/2.13.0` matches the torch version in the Polaris
-production venv (`2.13.0+cu129` there, `2.13.0+cu130` here), so
-tensor-semantics reproductions are like-for-like rather than
-approximate. That is enough for shape/layout bugs, dataloader unit
-bugs, and anything else that is pure tensor math.
+`module load pytorch/2.13.0` gives `2.13.0+cu130`, which is the torch
+version HEAD actually requires (`DataParallelMeshDims`, added in 2.13).
+So tensor-semantics reproductions here run on the same torch the code
+targets. That is enough for shape/layout bugs, dataloader unit bugs, and
+anything else that is pure tensor math.
+
+> [!WARNING]
+> An earlier revision of this guide claimed the Polaris production venv
+> was also `2.13.0+cu129`. It is not. Measured 2026-08-25, that venv is
+> **`torch 2.10.0+cu128`** and cannot even import HEAD -- it dies on
+> `from torch.distributed.fsdp import DataParallelMeshDims`. Perlmutter
+> matches *HEAD's requirement*, not the Polaris prod venv. A separate
+> `.venv-torch213` was built on Polaris for HEAD work; see
+> [polaris-fresh-venv.md](polaris-fresh-venv.md).
 
 It is NOT a stand-in for the training chain: no torchtitan env, no
 blendcorpus corpora, and the checkpoints live on Polaris `/eagle`

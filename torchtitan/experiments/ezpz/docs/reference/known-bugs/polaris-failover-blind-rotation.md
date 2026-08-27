@@ -4,6 +4,16 @@
 **Cost of the bug:** job 7550301 -- ~1 hour of 130 nodes, zero training steps
 **Checkpoint impact:** none; `step-5600` intact (512 shards, `.metadata` present)
 
+> **A second, independent bug can produce the same symptom.** If failover
+> names a node that never errored, check that the patterns are
+> *reachable* before concluding this bug regressed:
+> `python3 -c 'from ezpz.failover.scrape import _detect_machine; print(_detect_machine())'`
+> must print `polaris`, not a login-node FQDN. See
+> [polaris-failover-detect-machine-fqdn.md](polaris-failover-detect-machine-fqdn.md)
+> (job 7560196, 3h03m burned).
+
+
+
 ## Symptom
 
 A Polaris training job fails before the first training step and the

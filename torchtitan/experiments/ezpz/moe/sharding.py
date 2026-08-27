@@ -20,7 +20,6 @@ new ``model.parallelize(parallel_dims)`` flow.
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
-from torch.distributed.tensor import Placement, Replicate, Shard
 
 from torchtitan.experiments.ezpz.moe.model import Attention
 from torchtitan.models.common.decoder_sharding import (
@@ -50,10 +49,15 @@ if TYPE_CHECKING:
 # After upstream PR #3425 (41st sync, MoE [8/n] shape-suffix rename), the
 # parameters are named w{1,2,3}_E{F,D}D using Shazeer shape-suffix style.
 # Matches upstream ``deepseek_v3.sharding._GROUPED_EXPERTS_PARAM_LAYOUT``.
-_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, Placement] = {
-    "w1_EFD": Shard(1),
-    "w2_EDF": Shard(2),
-    "w3_EFD": Shard(1),
+# spmd.S(n), NOT DTensor Shard(n): resolve_placements feeds these through
+# spmd_type_to_dtensor_placement, which only understands spmd_types. A DTensor
+# Shard reaches it as an unrecognized object and dies with the unhelpfully
+# identical-looking "Unknown spmd type: S(1)". Matches upstream
+# deepseek_v3/sharding.py, which migrated this table; our fork missed the replay.
+_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
+    "w1_EFD": spmd.S(1),
+    "w2_EDF": spmd.S(2),
+    "w3_EFD": spmd.S(1),
 }
 
 
@@ -106,10 +110,18 @@ def _set_moe_layer_sharding(
     # set_dense_ffn_sharding's `attn_x_placement: Placement` arg to
     # `attn_x_layout: SpmdLayout`. Build via the dense_*_placement
     # helpers (same pattern as deepseek_v3/sharding.py).
+    #
+    # `cp` later became a REQUIRED kwarg on dense_activation_placement and
+    # these two calls were not updated, so moe aborted in config.build() with
+    # `TypeError: missing 1 required keyword-only argument: 'cp'` before
+    # reaching a single step (MEASURED, smoke 8781696 arm 3). cp=spmd.S(0) is
+    # what every upstream callsite passes (decoder_sharding.py:117,129,136,
+    # 150,170) and matches the helper's own docstring -- activations are
+    # token-sharded on CP.
     attn_x_layout = (
         dense_sequence_parallel_placement()
         if enable_sp
-        else dense_activation_placement(tp=spmd.R)
+        else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
 
     # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
@@ -124,25 +136,26 @@ def _set_moe_layer_sharding(
     # which is a different thing from the module's own state.
     if getattr(attention, "rope", None) is not None:
         attention.rope.sharding_config = ShardingConfig(
-            state_shardings={"cache": dense_param_placement(tp=Replicate())},
+            state_shardings={"cache": dense_param_placement(tp=spmd.R)},
         )
 
-    # MLA attention input: x is gathered to Replicate; freqs_cis always Replicate.
+    # MLA attention input: x is gathered to Replicate. RoPE is read from the
+    # attention layer's local cache -- freqs_cis is NOT a forward arg since
+    # PR #3458 (the rope module owns its cache), so declaring a placement for
+    # it here described a parameter that does not exist. Matches upstream.
     attention.sharding_config = ShardingConfig(
         in_src_shardings={
             "x": attn_x_layout,
-            "freqs_cis": dense_param_placement(tp=Replicate()),
         },
         in_dst_shardings={
-            "x": dense_activation_placement(tp=Replicate()),
-            "freqs_cis": dense_param_placement(tp=Replicate()),
+            "x": dense_activation_placement(tp=spmd.R, cp=spmd.S(0)),
         },
     )
     # Low-rank projections and norms keep Replicate weights on TP. We still
     # distribute them (Replicate DTensor) so DTensor activations flow through
     # without mixing plain Tensor + DTensor in the matmul.
     replicate_weight = ShardingConfig(
-        state_shardings={"weight": dense_param_placement(tp=Replicate())},
+        state_shardings={"weight": dense_param_placement(tp=spmd.R)},
     )
     attention.wkv_a.sharding_config = replicate_weight
     attention.kv_norm.sharding_config = replicate_weight

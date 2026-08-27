@@ -198,6 +198,15 @@ grep -a "PREFLIGHT OK" "$LOGD/preflight.log" | sed "s/^/  /"
 
 export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
 
+# The report (scripts/make_optcmp_report.py) discovers arms BY WANDB GROUP and
+# skips any run whose group is unset -- silently, since an ungrouped run looks
+# the same as a smoke run. This script never exported the group, so every
+# main-arm link launched here landed ungrouped and vanished from the report;
+# the arms that did carry groups had been relabeled by hand after the fact.
+# Five links (2 adamw, 2 mano, 1 sophiag, up to step 2880) were missing before
+# this was found. Set it at launch so the arm is correct from step 1.
+export WANDB_RUN_GROUP="${OPT}"
+
 timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config "$CONFIG" \

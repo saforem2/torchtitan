@@ -8,10 +8,16 @@ disappears on the next rebuild.
 
 ## Upstream status
 
-Submitted upstream as [saforem2/ezpz#230](https://github.com/saforem2/ezpz/pull/230)
-(issue [#229](https://github.com/saforem2/ezpz/issues/229)). This vendored
-copy stays authoritative until the PR lands *and* the pinned ezpz commit
-this venv installs from is advanced past it.
+**Merged.** [saforem2/ezpz#230](https://github.com/saforem2/ezpz/pull/230)
+(issue [#229](https://github.com/saforem2/ezpz/issues/229)) landed on
+`main`; `src/ezpz/failover/patterns/polaris.py` now ships with ezpz
+itself (confirmed present in ezpz 0.27.3, 2026-08-25).
+
+This vendored copy is therefore a **fallback**, not the source of truth.
+It still matters for any venv pinned to a pre-#230 ezpz: installing from
+such a pin gives you an ezpz whose `get_patterns_for_machine("polaris")`
+returns `[]` again. Prefer advancing the pin (`uv pip install --no-deps
+'git+https://github.com/saforem2/ezpz@main'`) over installing this copy.
 
 ## What it fixes
 

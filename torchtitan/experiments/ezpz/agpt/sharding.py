@@ -90,10 +90,17 @@ def _set_agpt_layer_sharding(
     # set_dense_ffn_sharding's `attn_x_placement: Placement` arg to
     # `attn_x_layout: SpmdLayout`. Build via the dense_*_placement
     # helpers (same pattern as llama3/sharding.py).
+    #
+    # `cp` is a REQUIRED kwarg on dense_activation_placement. This branch runs
+    # only when SP is OFF, so no smoke reaches it -- the TP=2 arm enables SP
+    # and takes the line above. Its moe twin DID abort in config.build()
+    # (smoke 8781696 arm 3), which is how this one was found. cp=spmd.S(0)
+    # matches every upstream callsite (decoder_sharding.py:117,129,136,150,
+    # 170) and the helper's docstring: activations are token-sharded on CP.
     attn_x_layout = (
         dense_sequence_parallel_placement()
         if enable_sp
-        else dense_activation_placement(tp=spmd.I)
+        else dense_activation_placement(tp=spmd.I, cp=spmd.S(0))
     )
     set_dense_ffn_sharding(
         layer_cfg.feed_forward,

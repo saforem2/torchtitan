@@ -1,5 +1,41 @@
 # XPU graphs cannot capture oneCCL collectives (2026-08-16)
 
+> [!CAUTION]
+> **WRONG, corrected 2026-08-26 (job `8785582`). Collectives ARE capturable.**
+> The blocker is `CCL_OP_SYNC=1`, which `ezpz_setup_env` exports
+> unconditionally (three sites in `ezpz-utils`), so every run that reached this
+> conclusion had it set without anyone choosing it.
+>
+> Swept the same `probe_xpu_graph_collective.py` across all three settings:
+>
+> | `CCL_OP_SYNC` | `all_gather` inside capture |
+> |---|---|
+> | unset | **OK -- collectives ARE capturable** |
+> | `0` | **OK -- collectives ARE capturable** |
+> | `1` | FAILS: `wait method cannot be used for an event associated with a command graph` |
+>
+> `matmul` inside capture passes in all three, so capture itself was never in
+> question.
+>
+> Consequences:
+>
+> - **The Intel ask at the bottom of this page should not be filed as written.**
+>   It describes a limitation that does not exist; the async-collective path
+>   captures fine.
+> - Anything wanting graph capture must `unset CCL_OP_SYNC` after
+>   `ezpz_setup_env`, the way `rl/xpu_overrides.py` and four RL scripts already
+>   do -- they hit this from the other direction and worked around it without
+>   the connection being made.
+> - `CCL_OP_SYNC=1` is presumably load-bearing for determinism elsewhere
+>   (`bitwise_sync_check.sh` sets it deliberately), so it should not simply be
+>   dropped from `ezpz_setup_env`. Capture and this flag are mutually
+>   exclusive; that is the real finding.
+>
+> The reasoning below is kept, but read it knowing the environment was
+> confounded throughout.
+
+
+
 > [!NOTE]
 > **RESOLVED (2026-08-16): the collective framing is CORRECT after all.** The
 > detour below is kept because the reasoning matters.
