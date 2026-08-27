@@ -47,7 +47,7 @@ ASSETS = os.path.join(_HERE, "webassets")
 # Serve the last good payload while a refresh runs, so a browser hitting
 # /api/backbone during a cold build gets stale-but-real data instead of a
 # multi-minute hang. Mirrors the aggregator's own stale-while-revalidate rule.
-_state = {"payload": None, "fetched_at": 0.0, "error": None}
+_state = {"payload": None, "fetched_at": 0.0, "error": None, "revision": 0}
 _lock = threading.Lock()
 _refreshing = threading.Event()
 
@@ -72,6 +72,11 @@ def _refresh(force=False):
                 _state["payload"] = payload
                 _state["fetched_at"] = time.time()
                 _state["error"] = None
+                # Lets the browser distinguish a genuinely new backbone from
+                # the same cached payload returned by its 30 s status poll.
+                # Without this, it destroyed and rebuilt every uPlot twice per
+                # WEB_TTL even though no chart data had changed.
+                _state["revision"] += 1
             else:
                 _state["error"] = "aggregator returned no chains"
     except Exception as e:  # noqa: BLE001 - surface any failure to the page
@@ -86,18 +91,44 @@ def _payload_json() -> bytes:
         payload = _state["payload"]
         age = time.time() - _state["fetched_at"] if _state["fetched_at"] else None
         err = _state["error"]
+        revision = _state["revision"]
     if payload is None:
         _refresh()
         with _lock:
             payload = _state["payload"] or {"chains": {}}
             age = 0.0
             err = _state["error"]
+            revision = _state["revision"]
     elif age is not None and age > WEB_TTL and not _refreshing.is_set():
         threading.Thread(target=_refresh, daemon=True).start()
     out = dict(payload)
     out["web_age"] = round(age, 1) if age is not None else None
     out["web_error"] = err
+    out["web_revision"] = revision
     out["live_window"] = pd.LIVE_WINDOW
+    return json.dumps(out).encode()
+
+
+def _status_json() -> bytes:
+    """Return cheap polling metadata without serializing every chart point."""
+    with _lock:
+        payload = _state["payload"] or {}
+        fetched_at = _state["fetched_at"]
+        err = _state["error"]
+        revision = _state["revision"]
+    age = time.time() - fetched_at if fetched_at else None
+    if payload and age is not None and age > WEB_TTL and not _refreshing.is_set():
+        threading.Thread(target=_refresh, daemon=True).start()
+    # These are the only payload-level fields load() needs to update its status
+    # line between revisions. `chains` is intentionally excluded: it dominates
+    # both JSON serialization and transfer size.
+    out = {k: payload.get(k) for k in
+           ("built_age", "stale", "stale_age_hours", "stale_reason")}
+    out.update({
+        "web_age": round(age, 1) if age is not None else None,
+        "web_error": err,
+        "web_revision": revision,
+    })
     return json.dumps(out).encode()
 
 
@@ -122,6 +153,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        {"Cache-Control": "no-store"})
         elif path == "/api/backbone":
             self._send(200, _payload_json(), "application/json",
+                       {"Cache-Control": "no-store"})
+        elif path == "/api/status":
+            self._send(200, _status_json(), "application/json",
                        {"Cache-Control": "no-store"})
         elif path == "/api/refresh":
             threading.Thread(target=_refresh, kwargs={"force": True},
@@ -186,9 +220,25 @@ main { display:flex; gap:12px; padding:12px; align-items:flex-start;
    appends its canvas into. */
 .grid { display:grid; gap:10px;
         grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); }
-.cell { border:1px solid var(--line); border-radius:5px; padding:6px 6px 2px; }
+.cell { border:1px solid var(--line); border-radius:5px; padding:6px 6px 2px;
+        background:var(--bg); }
 .cell h4 { margin:0 0 4px 2px; font-size:12px; font-weight:600;
-           color:var(--muted); }
+           color:var(--muted); display:flex; align-items:center; gap:6px; }
+.cell h4 .chart-title { flex:1; }
+.expand-chart { border:0; background:transparent; color:var(--muted);
+                cursor:pointer; font:16px/1 monospace; padding:1px 4px;
+                border-radius:3px; }
+.expand-chart:hover { color:var(--fg); background:var(--panel); }
+/* Maximized charts stay in this page rather than opening another browser
+   window (which would need to duplicate payload/visibility state). Rebuilding
+   the uPlot after applying this class gives it the actual viewport-sized
+   canvas; CSS scaling a fixed canvas would make labels and hover positions
+   blurry/wrong. */
+body.chart-expanded { overflow:hidden; }
+.cell.expanded { position:fixed; inset:12px; z-index:1000; padding:10px;
+                 border-color:#4c78a8;
+                 box-shadow:0 8px 40px rgba(0,0,0,.38); }
+.cell.expanded h4 { font-size:14px; margin-bottom:8px; }
 .cell .plot { width:100%; }
 /* The focused metric reads first: full width, taller, above the grid. */
 #focuswrap { margin-bottom:12px; }
@@ -267,6 +317,9 @@ const METRICS = [["loss","loss (global avg)"],["grad_norm","grad norm"],
 const SCI = v => (v == null ? "" : v.toExponential(2));
 
 let payload = null, metric = "loss", hidden = new Set(), chart = null;
+let expandedPanel = null;
+let loadInFlight = false;
+let orderRevision = null, orderedKeys = [];
 const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 const palette = () => dark() ? DARK : LIGHT;
 
@@ -302,8 +355,9 @@ const isLive = c => {
 // Sorted chain keys: canonical first, then by model/nodes -- same ordering rule
 // as render_board so the legend, the table, and the colors all agree.
 function chainOrder() {
+  if (orderRevision === payload.web_revision) return orderedKeys;
   const ch = payload.chains || {};
-  return Object.keys(ch).sort((a, b) => {
+  orderedKeys = Object.keys(ch).sort((a, b) => {
     const A = ch[a], B = ch[b];
     const ac = A.kind !== "canonical", bc = B.kind !== "canonical";
     if (ac !== bc) return ac - bc;
@@ -313,6 +367,8 @@ function chainOrder() {
     if (an !== bn) return bn - an;
     return a < b ? -1 : 1;
   });
+  orderRevision = payload.web_revision;
+  return orderedKeys;
 }
 const colorFor = key => palette()[chainOrder().indexOf(key) % palette().length];
 
@@ -375,6 +431,29 @@ function clipRange(cols) {
   return [lo - pad, hi + pad];
 }
 
+// Eval metrics are bounded probabilities, but pinning every panel to [0, 1]
+// hides most of the movement (MMLU lives in a few points around 0.25 and
+// gsm8k is often very close to zero). Fit each panel to its visible data while
+// retaining a minimum five-percentage-point window and the legal [0, 1]
+// bounds. The minimum window keeps a flat/two-point series from producing a
+// misleading microscope-scale axis.
+function scoreRange(cols) {
+  const all = [];
+  for (const ys of cols) for (const y of ys)
+    if (y != null && isFinite(y)) all.push(y);
+  if (!all.length) return [0, 1];
+
+  const dataLo = Math.min(...all), dataHi = Math.max(...all);
+  const span = Math.max(0.05, (dataHi - dataLo) * 1.20);
+  const mid = (dataLo + dataHi) / 2;
+  let lo = mid - span / 2, hi = mid + span / 2;
+  // Shift rather than merely clamp at a boundary, preserving the requested
+  // viewing span for scores clustered at exactly zero or one.
+  if (lo < 0) { hi -= lo; lo = 0; }
+  if (hi > 1) { lo -= hi - 1; hi = 1; }
+  return [Math.max(0, lo), Math.min(1, hi)];
+}
+
 // ONE chart builder for every panel. `getter(key, chain)` returns that chain's
 // [[x, y], ...] for whichever metric this panel shows, so the focus chart, the
 // all-metrics grid and the eval grid share identical axis, color, liveness and
@@ -428,13 +507,16 @@ function buildChart(host, label, getter, opts2) {
 
   const yr = (!o.noClip && document.getElementById("clip").checked)
              ? clipRange(data.slice(1)) : null;
+  const fixedRange = typeof o.range === "function"
+                     ? o.range(data.slice(1)) : o.range;
   const opts = {
     width: o.width, height: o.height,
     // x is a step/token COUNT, not a timestamp. Without time:false uPlot
     // formats the axis as dates ("12/31/69" for small step numbers).
     scales: { x: { time: false },
               y: { distr: logY ? 3 : 1,
-                   ...(o.range ? { range: o.range } : (yr ? { range: yr } : {})) } },
+                   ...(fixedRange ? { range: fixedRange }
+                                  : (yr ? { range: yr } : {})) } },
     axes: [
       { label: o.thin ? "" : (document.getElementById("tokens").checked
                ? "tokens seen (billions)" : "training step (cumulative)"),
@@ -461,6 +543,45 @@ function hostW(host) {
   return Math.max(240, Math.floor(host.clientWidth) || 360);
 }
 
+// Build a small-multiple cell with an in-page maximize/restore button. The
+// caller appends the cell before measuring `host`, so fixed-position expanded
+// cells and ordinary grid cells both report their real rendered width.
+function chartCell(title, panelKey) {
+  const cell = document.createElement("div");
+  const expanded = expandedPanel === panelKey;
+  cell.className = "cell" + (expanded ? " expanded" : "");
+
+  const heading = document.createElement("h4");
+  const text = document.createElement("span");
+  text.className = "chart-title";
+  text.textContent = title;
+  const button = document.createElement("button");
+  button.className = "expand-chart";
+  button.type = "button";
+  button.textContent = expanded ? "×" : "⛶";
+  button.title = expanded ? "Restore chart (Esc)" : "Maximize chart";
+  button.setAttribute("aria-label", button.title);
+  button.onclick = () => {
+    expandedPanel = expanded ? null : panelKey;
+    document.body.classList.toggle("chart-expanded", !!expandedPanel);
+    draw();
+  };
+  heading.append(text, button);
+
+  const host = document.createElement("div");
+  host.className = "plot";
+  cell.append(heading, host);
+  return [cell, host, expanded];
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && expandedPanel) {
+    expandedPanel = null;
+    document.body.classList.remove("chart-expanded");
+    draw();
+  }
+});
+
 // uPlot renders to a fixed-pixel canvas: it does NOT reflow with its container.
 // The CSS grid happily re-columns on resize, which left canvases at their old
 // width overlapping their neighbours' axes. Redraw on container resize instead.
@@ -481,6 +602,13 @@ function widthChanged() {
     if (!el) continue;
     const w = Math.floor(el.clientWidth);
     if (w > 0 && lastW[id] !== w) { lastW[id] = w; changed = true; }
+  }
+  // Expanded chart height follows the viewport too. The ordinary grid ignores
+  // height-only changes to avoid observer loops, but a maximized chart should
+  // reflow when a laptop is rotated or browser chrome changes available space.
+  if (expandedPanel) {
+    const vh = Math.floor(window.innerHeight);
+    if (lastW.viewportH !== vh) { lastW.viewportH = vh; changed = true; }
   }
   return changed;
 }
@@ -540,18 +668,15 @@ function draw() {
   const pending = [];
   for (const [mk, mlab] of METRICS) {
     if (mk === metric) continue;              // already the focus chart
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    cell.innerHTML = `<h4>${mlab}</h4>`;
-    const host = document.createElement("div");
-    host.className = "plot";
-    cell.appendChild(host);
+    const [cell, host, expanded] = chartCell(mlab, `metric:${mk}`);
     grid.appendChild(cell);
-    pending.push([host, mk, mlab]);
+    pending.push([host, mk, mlab, expanded]);
   }
-  for (const [host, mk, mlab] of pending) {
+  for (const [host, mk, mlab, expanded] of pending) {
     const c = buildChart(host, mlab, (k, ch) => seriesFor(k, ch, mk),
-                         { width: hostW(host), height: 190, thin: true,
+                         { width: hostW(host),
+                           height: expanded ? window.innerHeight - 76 : 190,
+                           thin: !expanded,
                            sci: mk === "lr" });
     if (c) gridCharts.push(c);
   }
@@ -572,24 +697,21 @@ function draw() {
   document.getElementById("evalsec").style.display = ordered.length ? "" : "none";
   const epending = [];
   for (const t of ordered) {
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    cell.innerHTML = `<h4>${t}</h4>`;
-    const host = document.createElement("div");
-    host.className = "plot";
-    cell.appendChild(host);
+    const [cell, host, expanded] = chartCell(t, `eval:${t}`);
     eg.appendChild(cell);
-    epending.push([host, t]);
+    epending.push([host, t, expanded]);
   }
-  for (const [host, t] of epending) {
-    // Accuracy is a probability: pin y to [0,1] so panels are comparable and
-    // a 2-point curve does not fill the cell with a meaningless zoom. Never
-    // log-scaled, never outlier-clipped -- every eval point is a real
-    // measurement, not a checkpoint-step artifact.
+  for (const [host, t, expanded] of epending) {
+    // Accuracy is a probability, so use a data-fitted axis clamped to [0,1].
+    // scoreRange also enforces a five-point minimum span, preventing a sparse
+    // or flat curve from filling the cell with a meaningless microscope zoom.
+    // Never log-scaled or outlier-clipped: every eval point is real.
     const c = buildChart(host, t, (k, ch) => evalSeriesFor(k, ch, t),
-                         { width: hostW(host), height: 190, thin: true,
+                         { width: hostW(host),
+                           height: expanded ? window.innerHeight - 76 : 190,
+                           thin: !expanded,
                            points: true, noLog: true, noClip: true,
-                           range: [0, 1] });
+                           range: scoreRange });
     if (c) gridCharts.push(c);
   }
 }
@@ -677,13 +799,35 @@ function drawTabs() {
 }
 
 async function load() {
+  // A slow cold refresh can outlive the polling interval. Never stack another
+  // fetch/render pipeline on top of one already in progress.
+  if (loadInFlight) return;
+  loadInFlight = true;
+  let changed = !payload;
   try {
-    const r = await fetch("/api/backbone");
-    payload = await r.json();
+    // Once initialized, poll the tiny status document first. Download and
+    // parse the full history only when the server says its revision changed.
+    const statusURL = payload ? "/api/status" : "/api/backbone";
+    const statusResp = await fetch(statusURL);
+    if (!statusResp.ok) throw new Error(`${statusURL}: HTTP ${statusResp.status}`);
+    const status = await statusResp.json();
+    changed = !payload || status.web_revision !== payload.web_revision;
+    if (payload && changed) {
+      const dataResp = await fetch("/api/backbone");
+      if (!dataResp.ok) throw new Error(`/api/backbone: HTTP ${dataResp.status}`);
+      payload = await dataResp.json();
+    } else if (payload) {
+      Object.assign(payload, status);
+    } else {
+      payload = status;
+    }
   } catch (e) {
     document.getElementById("err").textContent = "fetch failed: " + e;
     return;
+  } finally {
+    loadInFlight = false;
   }
+
   const n = Object.keys(payload.chains || {}).length;
   const live = Object.values(payload.chains || {}).filter(isLive).length;
   const bb = payload.built_age == null ? "-" : Math.round(payload.built_age / 60) + "m";
@@ -707,7 +851,10 @@ async function load() {
     errEl.style.color = "";
     errEl.style.fontWeight = "";
   }
-  drawTabs(); drawLegend(); drawBoard(); draw();
+  // Keep lightweight age/error text current on every poll, but only rebuild
+  // the fixed-size uPlot canvases and tables when the server installed a new
+  // backbone. A typical unchanged poll now does no chart allocation at all.
+  if (changed) { drawTabs(); drawLegend(); drawBoard(); draw(); }
 }
 
 for (const id of ["tokens", "ylog", "clip"])
@@ -720,7 +867,12 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   drawLegend(); draw();
 });
 load();
-setInterval(load, 30000);
+// Background tabs need neither JSON transfers nor canvas work. Refresh once
+// immediately when the user returns, then resume the ordinary cadence.
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) load();
+});
 </script>
 """
 
