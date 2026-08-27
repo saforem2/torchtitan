@@ -4,6 +4,16 @@ Snapshot of session `b09e4b10-ba26-4278-92b7-9cdc17634795` at handoff to
 `mbph`. Written so the resumed session does not have to reconstruct this
 from the transcript.
 
+**Status: handoff COMPLETE.** The session is running on `mbph` as of
+2026-08-27 03:29 UTC -- transcript slug
+`-Users-sam-projects-saforem2-torchtitan`, embedded `cwd` rewritten, memory
+dir carried across (133 files). Both far-side blockers named at the bottom
+of `scripts/handoff_to_mbph.sh` are cleared: ALCF ssh works
+non-interactively from here (`polaris-login-04`, rc=0), and the checkout is
+at `3bf235f52` with the grad-norm fix `40de81570` as an ancestor. Do not
+re-run the script from `mbph` -- it targets `mbph` as the remote and there
+is no `mbph` ssh identity in this account.
+
 ## Live state
 
 | Job | State | Notes |
