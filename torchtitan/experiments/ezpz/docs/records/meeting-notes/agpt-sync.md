@@ -42,7 +42,7 @@ itself the report.
 Queue state as of this writing: `8687863`, `8752939`, `8752824`, `8756071`,
 `8756072` all **H** (the checkpoint-conflict holds from 08-16, still not
 released), `8784460` **Q** at 2,098 nodes, `8784462` **H** behind it. Per-slot detail in
-the [dispatch log](../production/dispatch-log.md).
+the [dispatch log](../../live/dispatch-log.md).
 
 Two umbrellas submitted today, `8784447` and `8784449`, are already **F** with
 no elapsed time. `8784447`'s comment reads *"Not Running: Not enough free nodes
@@ -195,7 +195,7 @@ steps that all happened to sit inside the bad window.
 
 Still disqualifying: a failure that burns ~600 steps of a 2,500-step budget is
 not usable, even when it recovers. Full evidence:
-[`sophiag-stochastic-divergence-30b.md`](../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+[`sophiag-stochastic-divergence-30b.md`](../../reference/known-bugs/sophiag-stochastic-divergence-30b.md).
 
 The grad-norm runaway guard (20x trailing median) caught replicate 3 at 53.49
 and stopped it cleanly at rc=0 in 55 minutes, against the ~8h each that

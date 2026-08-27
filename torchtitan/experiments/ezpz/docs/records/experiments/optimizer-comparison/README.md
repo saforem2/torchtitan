@@ -339,7 +339,7 @@ point measures a post-divergence trajectory. See below.
 All three replicates forked from the clean `step-1000` checkpoint blew up, at
 **three distinct steps: 1048, 1176, 1071**. Timing is random; the event is not.
 Full analysis in
-[`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+[`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../../reference/known-bugs/sophiag-stochastic-divergence-30b.md).
 
 The failure is not a too-high LR:
 

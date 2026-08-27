@@ -207,7 +207,7 @@ Monotonic descent, finite grad norms throughout. MFU is ~0.05% because
 performance measurement -- do not read a throughput number off this run.
 
 Note the 2B / MoE / 80B results in
-[`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md)
+[`docs/reference/guides/frameworks-rc-validation.md`](docs/reference/guides/frameworks-rc-validation.md)
 are **Sunspot** (`1247xxxx`), a different machine. The rows above are the
 first training on Aurora's RC.
 
