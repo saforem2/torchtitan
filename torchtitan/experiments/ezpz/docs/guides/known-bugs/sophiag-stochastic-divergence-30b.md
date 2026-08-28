@@ -314,6 +314,34 @@ first tens of steps; counting those makes any from-scratch run look like it
 diverged at step 21. Unfiltered, this arm reports "162 excursions pre-onset" --
 every one of them at loss >= 5.0, i.e. ordinary early training.
 
+### It did not escape either -- and the dip at 1650 was a lull, not an exit
+
+Left running past onset, the fresh arm went deeper rather than out. Excursion
+rate by 50-step window (grad_norm > 2.0, steps at loss < 5.0):
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 1550 | 3 | 6.0% | 37.01 | 2.9497 |
+| 1600 | 10 | 20.0% | 731.80 | 3.0540 |
+| 1650 | 2 | **4.0%** | 13.49 | 2.9710 |
+| 1700 | 25 | **50.0%** | **4068.43** | 3.0387 |
+| 1750 | 6/6 | **100.0%** | 436.47 | 3.5660 |
+
+The 1650 window looked like recovery: rate down from 20% to 4%, peak magnitude
+down from 731 to 13, mean loss back under 2.98. It was not. The next two
+windows are 50% and 100%, with a peak of 4,068 -- five times anything the arm
+had produced -- and mean loss finally climbing (2.97 -> 3.04 -> 3.57).
+
+That is the same relapse shape the re-run showed (4% -> 93% -> 100%), now
+reproduced in an independent arm. A single improving window inside this regime
+is indistinguishable from an exit while you are in it; only the sequence
+separates them. An earlier version of this document called a recovery on
+exactly such a dip and had to retract it.
+
+So the arm with the CLEANEST pre-onset history of any replicate -- 1,529 steps
+at 0.0% -- both diverged and stayed diverged. Across four arms: 4/4 onset,
+and of the three followed well past onset, one escaped and two did not.
+
 ### Method note
 
 This arm was characterized three times in three readings -- "healthy", then
