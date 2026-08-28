@@ -68,8 +68,18 @@ unset PYTHONPATH
 python3 -c "from torchtitan.experiments.ezpz.agpt.config_registry import $CONFIG" 2>/dev/null \
   || { echo "ABORT: $CONFIG does not import"; exit 1; }
 
-CKPT="$PWD/checkpoints/agpt-30b-optcmp-$OPT"
-LOGD="$PWD/outputs/logs/optcmp-$OPT/$PBS_JOBID"; mkdir -p "$LOGD"
+# CKPT_INTERVAL: steps between checkpoint saves. 100 was right for the first
+# 10B (a crash costs <=100 steps), but a +10B continuation at interval=100
+# writes 25 ckpts/arm -- 21.4 TB across three arms, over the project quota.
+# 500 costs at most ~35 min of redo, which the SIGTERM tail-save already
+# largely covers, and fits in the available headroom.
+CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
+
+# TAG gives a run its OWN checkpoint dir and wandb group. Without it a fresh
+# replicate would resume from the existing arm's checkpoint instead of
+# starting over -- the failure this exists to prevent.
+CKPT="$PWD/checkpoints/agpt-30b-optcmp-$OPT${TAG:+-$TAG}"
+LOGD="$PWD/outputs/logs/optcmp-$OPT${TAG:+-$TAG}/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/train.log"; : > "$LOG"
 
 # LUSTRE STRIPING. Jobs 12473740-42 all died at the step-100 checkpoint with
@@ -108,7 +118,8 @@ for d in $(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -rn); d
 done
 echo "arm:    $OPT   config: $CONFIG   lr: $LR (CONSTANT after 20-step warmup)"
 echo "batch:  GBS=960 (LBS 5 x 192 ranks x GAS 1), seq 4096 -> 3.93M tok/step"
-echo "ckpt:   $CKPT"
+echo "ckpt:   $CKPT   (interval $CKPT_INTERVAL)"
+echo "seed:   ${TSEED:-unset (nondeterministic RNG, as the original arms ran)}"
 echo "resume: ${LAST:-none (fresh start)}"
 echo "log:    $LOG"
 echo ""
@@ -154,7 +165,7 @@ echo "  preflight: parsing launch args..."
 cat > "$LOGD/preflight.py" <<'PREEOF'
 import sys, tyro
 from torchtitan.experiments.ezpz.agpt import config_registry as cr
-cfg_name, lr = sys.argv[1], sys.argv[2]
+cfg_name, lr = sys.argv[1], sys.argv[2]  # sys.argv[3] = ckpt interval
 base = getattr(cr, cfg_name)()
 args = [
     f"--optimizer.param-groups.0.optimizer-kwargs.lr={lr}",
@@ -165,7 +176,7 @@ args = [
     "--parallelism.tensor-parallel-degree=1",
     "--lr-scheduler.warmup-steps=20",
     "--lr-scheduler.decay-ratio=0.0",
-    "--checkpoint.interval=100",
+    f"--checkpoint.interval={sys.argv[3]}",
     "--checkpoint.keep-latest-k=0",
     "--nan-abort-consecutive=5",
 ]
@@ -189,7 +200,7 @@ print(f"PREFLIGHT OK lr={cfg.optimizer.param_groups[0].optimizer_kwargs['lr']} "
       f"LBS={tok_mb//ctx} GBS={tok_st//ctx} GAS={gas} "
       f"dataloader={type(cfg.dataloader).__qualname__}")
 PREEOF
-if ! python3 "$LOGD/preflight.py" "$CONFIG" "$LR" > "$LOGD/preflight.log" 2>&1; then
+if ! python3 "$LOGD/preflight.py" "$CONFIG" "$LR" "$CKPT_INTERVAL" > "$LOGD/preflight.log" 2>&1; then
     echo "ABORT: launch arguments do not parse / batch assertion failed"
     grep -aE "Unrecognized|Error|assert|AssertionError" "$LOGD/preflight.log" | head -5 | sed "s/^/    /"
     echo "OPTCMP_${OPT}_DONE"; exit 1
@@ -205,7 +216,7 @@ export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
 # the arms that did carry groups had been relabeled by hand after the fact.
 # Five links (2 adamw, 2 mano, 1 sophiag, up to step 2880) were missing before
 # this was found. Set it at launch so the arm is correct from step 1.
-export WANDB_RUN_GROUP="${OPT}"
+export WANDB_RUN_GROUP="${OPT}${TAG:+-$TAG}"
 
 timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
@@ -219,8 +230,9 @@ timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
     --lr-scheduler.decay-ratio=0.0 \
     --checkpoint.enable \
     --checkpoint.folder="$CKPT" \
-    --checkpoint.interval=100 \
+    --checkpoint.interval="$CKPT_INTERVAL" \
     --checkpoint.keep-latest-k=0 \
+    ${TSEED:+--debug.seed=$TSEED} \
     --nan-abort-consecutive=5 \
     >> "$LOG" 2>&1
 rc=$?

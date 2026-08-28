@@ -132,7 +132,17 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
             out = F.scaled_dot_product_attention(
                 q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
             )
-        return out.transpose(1, 2)
+        out = out.transpose(1, 2)
+        if folded:
+            # Restore the caller's flat [T, N, H]. The input unflatten was
+            # ported in e4517ae09 but this half was not, so the wrapper took
+            # 3D and returned 4D -- violating its own contract. MLA then does
+            # output.view(num_tokens, -1) against a 4D tensor whose leading dim
+            # is BATCH, not tokens, and the result lands Shard(dim=0) where the
+            # rowwise wo declares Partial(sum). agpt/__init__.py does exactly
+            # this and is why agpt trains at TP=2.
+            out = out.reshape(-1, out.shape[-2], out.shape[-1])
+        return out
 
 
 class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
