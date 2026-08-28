@@ -1,6 +1,54 @@
 # Upstream Sync Log
 
 
+## Sync 82 (2026-08-28): TRIAL MERGE DONE, NOT LANDED -- moe is broken
+
+21 commits behind `upstream/main` (2,564 ahead). Merged into a scratch clone
+`../tt-sync82` to test ahead of landing. **The merge itself is clean: zero
+conflicts across 127 files.**
+
+NOT landed on the production clone yet, deliberately: three optcmp arms are
+mid-chain with 7 links queued on `afterany`. Each released link re-reads the
+working tree at launch, so merging under a running chain means later links
+train on different code than earlier ones -- which silently breaks
+comparability of the +10B measurement in progress. Land it after those finish.
+
+### What works
+
+`agpt` imports and all three optcmp configs build:
+`agpt_30b_olmo2tok_optcmp_adamw`, `..._mano`, `..._sophiag`. The arms training
+right now are unaffected by anything in this sync.
+
+`SpmdLayout` (removed by #4265) appears in ezpz only in comments and as a
+local variable name `attn_x_layout` -- no imports, no annotations. Not a break.
+
+### What breaks: ezpz/moe
+
+```
+ImportError: cannot import name 'get_moe_model_nparams_and_flops'
+             from 'torchtitan.models.utils'
+```
+
+`Fix mfu calculation for muse glimmer and gpt_oss (#4300)` rewrote
+`models/utils.py` and removed that helper. One real callsite:
+`experiments/ezpz/moe/model.py:30` (import) and `:344` (call).
+
+This is a port, not a rename -- the API changed shape:
+
+| | old | new |
+|---|---|---|
+| name | `get_moe_model_nparams_and_flops` | `get_nparams_and_active_nparams` |
+| args | `(model_config, model, n_heads, head_dims, seq_len)` | `(model, *, modules_excluded_from_active_params=())` |
+| returns | `(nparams, nflops)` | `(nparams, active_nparams)` |
+
+FLOPs are no longer returned; they are composed separately from
+`quadratic_attention_flops_per_token`. Follow
+`models/deepseek_v3/model.py:195` (`get_deepseek_v3_nparams_and_flops`) as the
+reference pattern -- it calls the new helper, then sums attention op flops per
+layer, and is the closest analogue to what moe needs.
+
+Note `agpt` does NOT hit this; only `moe` imports the removed helper.
+
 ## HEADS-UP for the 80th sync: `full_dtensor.py` is deleted upstream
 
 `601cf4d23` (#4217, 2026-08-19) removes `torchtitan/distributed/full_dtensor.py`
