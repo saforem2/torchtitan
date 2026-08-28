@@ -54,6 +54,18 @@
 > visible (256N learns more per token, 512N learns more per wall
 > clock).
 
+> [!NOTE]
+> **Tooling has moved on since this chain last ran.** The rows below record
+> what these jobs actually used, which was the bash `failover_lib.sh` wrapper
+> (`submit_agpt_2b_aurora_venv_failover.sh`). Production has since migrated to
+> ezpz-native `--auto-retry`
+> ([`scripts/submit_agpt_2b_autoretry.sh`](../../../../../scripts/submit_agpt_2b_autoretry.sh),
+> added 2026-06-24 in `8c5856f2d`). Note the overlap: the native script existed
+> before the last run here, so these jobs kept the old wrapper by inertia rather
+> than by choice. **Relaunch this chain with the autoretry script**, not the one
+> named below. The old wrapper is retained but is no longer the default -- see
+> [bad-node-failover.md](../../../../guides/bad-node-failover.md).
+
 | Field | Value |
 |-------|-------|
 | Clone | `/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/` |
