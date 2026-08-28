@@ -16,8 +16,12 @@ Both healthy arms crossed the 10B target (step 2,543 at GBS=960 x 4096 =
 | 2590 | 10.18B | 2.9069 | **2.7643** | -0.1426 |
 
 **Mano finishes 0.143 nats ahead of AdamW at 10B tokens**, having led since
-the crossover at ~1.0B. SophiaG is disqualified -- it diverged in 3 of 3
-replicates from the same checkpoint (steps 1048, 1176, 1071).
+the crossover at ~1.0B. SophiaG is disqualified -- it diverged in **4 of 4**
+replicates: three forks of one checkpoint (steps 1048, 1176, 1071) plus an
+independent from-scratch run with `--debug.seed=1234` pinned (step ~1550).
+That fourth arm also showed **no precursor**: 1,529 steps at 0.0% excursions
+before onset, where the original arm ran 17.9%. See
+[the known-bugs writeup](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
 
 The gap flattened rather than closed. Refit on the last billion tokens the
 closing rate is +0.0056 nats/B against +0.0252 over 5.9-7.5B, which puts a
@@ -334,10 +338,12 @@ during cosine decay, which this experiment deliberately does not have.
 SophiaG is excluded from this table. It diverged at step 1048 and every later
 point measures a post-divergence trajectory. See below.
 
-### SophiaG: a regime flip, 3 of 3
+### SophiaG: a regime flip, 4 of 4
 
 All three replicates forked from the clean `step-1000` checkpoint blew up, at
-**three distinct steps: 1048, 1176, 1071**. Timing is random; the event is not.
+**four distinct steps: 1048, 1176, 1071, and ~1550**. The fourth was an
+independent draw from random init with RNG pinned, which rules out both seed
+and lineage: timing is random, the event is not.
 Full analysis in
 [`guides/known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
 

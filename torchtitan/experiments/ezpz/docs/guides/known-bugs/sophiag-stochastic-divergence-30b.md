@@ -169,7 +169,8 @@ whether an arm escapes appears to be luck. Two replicates from the same
 checkpoint diverged at different steps; two replicates past divergence had
 opposite recoveries. That is the same stochastic signature at both ends.
 
-What does NOT change: the blow-up is recurrent (3/3), five orders of magnitude
+What does NOT change: the blow-up is recurrent (3/3 here, 4/4 including
+the independent fresh run -- see the 2026-08-28 update), five orders of magnitude
 beyond the healthy arms, and costs hundreds of steps of progress even when the
 arm eventually recovers. A recoverable failure that burns 600 steps of a 2,500
 step budget is still disqualifying for this comparison.
@@ -257,6 +258,70 @@ band with no instability near 3.55e-05, and the onset is a discontinuity under
 a nearly flat loss rather than the gradual degradation a too-high LR produces.
 Lower LR may delay onset without preventing it. Instrumenting the Hessian
 estimate discriminates the two; a low-LR arm alone does not.
+
+## Update 2026-08-28: 4/4, from an INDEPENDENT run, and there is no warning
+
+Everything above was measured on three replicates that shared a checkpoint
+lineage -- forks of one trajectory, so "3/3" was three samples of a single
+draw. A fourth arm was run to test that: fresh from random init, its own
+checkpoint dir and wandb group, `--debug.seed=1234` pinned
+(`optcmp.pbs -v OPT=sophiag,TAG=fresh-seed1234,TSEED=1234`).
+
+**It diverged too, at ~step 1550 -- a fourth distinct onset step.** The
+escalation, monotone over five steps:
+
+| step | loss | grad_norm |
+|---|---|---|
+| 1638 | 2.952 | 0.20 |
+| 1639 | 2.954 | 4.95 |
+| 1640 | 2.992 | 36.14 |
+| 1641 | 3.034 | 98.98 |
+| 1642 | 3.641 | **731.80** |
+| 1643 | 4.445 | 98.72 |
+
+A 3,600x gradient climb in four steps, loss driven 2.89 -> 4.45.
+
+### This settles two things
+
+**Divergence is a property of SophiaG at this scale, not of one lineage.** An
+independent draw with RNG pinned still found its own onset step. Seed does not
+prevent it, and data order is ruled out for good -- `dataloader.seed` was
+already 42 in every arm, so it was never what differed.
+
+**The pre-onset noise is NOT a precursor.** This is the genuinely new result
+and it inverts a natural reading of the table above. The original arm ran
+**17.9% of steps above 2.0 with max 75.2** for the 1,027 steps BEFORE its
+blow-up, which looks like a warning sign you could monitor for. This arm ran
+**1,529 comparable steps at 0.0%, max 0.31** -- nine consecutive clean 50-step
+windows from step 650 to 1550, never exceeding 0.65 -- and diverged anyway.
+
+Excursion rate by 50-step window (grad_norm > 2.0, steps at loss < 5.0):
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 1450 | 0 | 0.0% | 0.23 | 2.9631 |
+| 1500 | 0 | 0.0% | 0.23 | 2.9347 |
+| 1550 | 3 | 6.0% | 37.01 | 2.9497 |
+| 1600 | 10 | **20.0%** | **731.80** | 3.0540 |
+| 1650 | 2 | 4.7% | 13.49 | 2.9752 |
+
+So a healthy-looking SophiaG run tells you nothing. "It has survived N steps"
+is not evidence of safety, and there is no signal to watch that buys warning.
+
+Note the comparison window is steps whose **loss is already below 5.0**, not a
+fixed step cutoff. A fresh init sits at loss ~12 with grad_norm 5-50 for its
+first tens of steps; counting those makes any from-scratch run look like it
+diverged at step 21. Unfiltered, this arm reports "162 excursions pre-onset" --
+every one of them at loss >= 5.0, i.e. ordinary early training.
+
+### Method note
+
+This arm was characterized three times in three readings -- "healthy", then
+"an isolated transient", then "a clustered regime" -- each from a handful of
+consecutive steps, and each optimistic read was wrong. The 50-step binned
+table resolved it immediately. Bin first: a sequence of windows is the unit of
+evidence here, never a run of steps. That is the same lesson the metastability
+section above records, re-learned.
 
 ## Correction
 
