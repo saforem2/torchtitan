@@ -193,6 +193,30 @@ or prints nothing alarming, and you only find out at the next stage.
 | 2N collectives (`ezpz.examples.test`) | **PASS** -- rc=0, 24 ranks, 268s (job `8784615`) |
 | **2N x 12 distributed training** | **PASS** -- 10/10 steps, loss 10.865 -> 9.059 (job `8784615`) |
 | W&B from a real run | **PASS** -- `torchtitan.ezpz.train/runs/70fumwgc` |
+| **agpt TP=2, eager** | **PASS** -- 10.88838 -> 10.43820 (job `8789506`) |
+| **agpt TP=2, COMPILED** | **PASS** -- the torch-2.13 `DeviceMesh` AOT assertion does NOT fire on the RC |
+| **moe TP=1** | **PASS** -- 12.93609 -> 11.32376 |
+| **moe TP=2** | **PASS** -- 12.94930 -> 11.49335, with the `6e4e1996f` wrapper fix |
+
+Coverage matrix run: [`scripts/rc-matrix.sh`](scripts/rc-matrix.sh), 2N x 4
+ranks, 5 steps each, all five arms monotonic with finite grad norms.
+
+Two results worth calling out:
+
+**Compiled agpt at TP=2 works on the RC.** On the production `.venv` stack
+(torch `2.13.0.dev20260519+xpu`) that corner dies in
+`tensors_saved_with_vc_check` with a `DeviceMesh` in saved-for-backward -- the
+assertion documented for the 80B family, which also fires at debugmodel scale.
+It does not fire here. Compiled and eager agree to `3.6e-4` over five steps
+(10.88838 vs 10.88835 at step 1), so this is a real pass and not a silently
+different code path. **If the RC ships, the `compile=OFF` workaround can be
+retired** -- but confirm at 80B before acting on it, since that is where the
+assertion was originally characterised.
+
+**The moe TP>1 fix holds on the RC, bit-identically.** Both moe arms reproduce
+the production-stack numbers (job `8787243`) to five decimals across a
+different torch build and oneCCL. The fix is in the reshape, not in anything
+version-dependent, and this confirms it.
 
 Full trajectory, `agpt_debugmodel`, 2 nodes x 12 ranks:
 
