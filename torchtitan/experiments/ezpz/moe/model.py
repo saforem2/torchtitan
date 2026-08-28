@@ -27,7 +27,10 @@ from torchtitan.models.common.token_dispatcher import (
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-from torchtitan.models.utils import get_moe_model_nparams_and_flops
+from torchtitan.models.utils import (
+    get_nparams_and_active_nparams,
+    quadratic_attention_flops_per_token,
+)
 from torchtitan.protocols.module import Module
 from torchtitan.experiments.ezpz.logging import warn_once
 from torchtitan.tools.logging import logger
@@ -340,13 +343,30 @@ class moeModel(Decoder):  # noqa: N801
         def get_nparams_and_flops(
             self, model: nn.Module, seq_len: int
         ) -> tuple[int, int]:
-            assert isinstance(self.layers[0].attention, Attention.Config)
-            return get_moe_model_nparams_and_flops(
-                self,
-                model,
-                self.layers[0].attention.n_heads,
-                self.layers[0].attention.qk_nope_head_dim
-                + self.layers[0].attention.qk_rope_head_dim
-                + self.layers[0].attention.v_head_dim,
-                seq_len,
-            )
+            # Upstream #4300 removed get_moe_model_nparams_and_flops. Its
+            # replacement returns (nparams, ACTIVE nparams) and no longer
+            # computes flops, so the attention term is summed here and the
+            # 6*N matmul term applied explicitly. Mirrors
+            # models/deepseek_v3/model.py:get_deepseek_v3_nparams_and_flops,
+            # minus its MTP lm_head term -- this decoder has no mtp_layers.
+            #
+            # Per-layer rather than layers[0] x depth: the old helper took a
+            # single head count for the whole model, which is only correct
+            # when every layer's attention is identical. Summing per layer
+            # costs nothing and does not silently mismeasure a mixed stack.
+            nparams, active_nparams = get_nparams_and_active_nparams(model)
+
+            attention_op_flops = 0
+            for layer in self.layers:
+                attention = layer.attention
+                assert isinstance(attention, Attention.Config)
+                attention_op_flops += quadratic_attention_flops_per_token(
+                    num_heads=attention.n_heads,
+                    qk_head_dim=(
+                        attention.qk_nope_head_dim + attention.qk_rope_head_dim
+                    ),
+                    v_head_dim=attention.v_head_dim,
+                    seq_len=seq_len,
+                )
+
+            return nparams, 6 * active_nparams + attention_op_flops
