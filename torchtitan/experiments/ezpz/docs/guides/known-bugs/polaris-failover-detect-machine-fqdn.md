@@ -168,6 +168,88 @@ Each tested the **policy** (do the regexes match?) rather than the
 The gate now asserts the watchdog branch can *reach* `BAD_NODE_KNOWN`
 and still retains its blind fallback.
 
+## Third act: one missing pattern abandoned a recoverable job
+
+Leg 7567541 (2026-08-28) is the cleanest demonstration of why a scraper
+gap is expensive, because it shows both halves at once.
+
+**Attempt 1 -- the watchdog fix working, confirmed on hardware:**
+
+```
+[auto-retry] bad nodes: ['x3111c0s37b1n0...'] -- swapped 1
+bad_nodes.txt:  x3111c0s37b1n0...  scraped  attempt=1
+```
+
+One node named, one swapped, 3 of 4 spares retained. Compare leg
+7560197 under the old code: 3 attempts, all `blind`, three innocent
+hosts evicted, pool exhausted.
+
+**Attempt 2 -- a NEW error string, not in the pattern set:**
+
+```
+x3003c0s25b0n0 rank 495: CUDA error: invalid device ordinal
+                          GPU device may be out of range, do you have enough GPUs?
+```
+
+A genuine node fault, not a config error: `nvidia-smi -L` listed all 4
+A100s, `CUDA_VISIBLE_DEVICES` was unset, the hostfile had no duplicates
+(128 lines / 128 unique), ranks 492-495 were placed correctly, and the
+identical launch worked on the other 131 nodes. Same one-GPU signature
+as before -- index 1 at 0 MiB while the other three held 427 MiB.
+
+`scrape_bad_nodes()` returned `[]` for it.
+
+**The consequence was not "one blind swap". The job died:**
+
+```
+FAILOVER STOP: stuck_pre_training (INFERRED, not observed: two consecutive
+attempts showed no iter=/step=/epoch=/batch=/idx= line, and the scraper named
+no host either, so the run is assumed to be dying before training starts...)
+```
+
+with **3 of 4 spares unused**. The gate is:
+
+```python
+if (prior_attempt_had_progress is False
+    and not has_progress
+    and not scraped_bad_nodes):
+    return _result(TerminationReason.STUCK_PRE_TRAINING)
+```
+
+All three conditions had to hold. The first two were legitimately true.
+The third was true **only** because the pattern was missing. So:
+
+> a single unmatched error string -> empty scrape -> the heuristic reads
+> "no host implicated" as evidence the *job* is broken -> a recoverable
+> run is abandoned with spares in hand.
+
+**The guard is not the bug.** It behaves correctly given its inputs; its
+input was wrong. Do not patch `stuck_pre_training` -- widen the pattern
+set instead. The message even anticipates this failure in its own text
+("...this verdict is wrong and a recoverable job was abandoned").
+
+Fix: added `invalid device ordinal` to `_CUDA_INIT_RX` in the vendored
+`failover_patterns/polaris.py`. It satisfies that file's stated rule --
+"only match conditions where the same code would succeed on a different
+node".
+
+### A patch cannot reach a job already running
+
+Worth knowing before trying: patching `/tmp/.venv` on the head node of a
+running job does nothing. `get_patterns_for_machine()` lazy-imports the
+machine module **once** and caches it in a module-level `_PATTERNS`
+dict:
+
+```python
+if machine not in _PATTERNS:
+    importlib.import_module(f"ezpz.failover.patterns.{machine}")
+```
+
+That import already happened during attempt 1's scrape. Clearing
+`__pycache__` does not help either -- the module object is live in
+`sys.modules`. A pattern fix reaches the **next** job, via the tarball
+broadcast, and only that.
+
 ## The trigger was not a bad node
 
 `cudaErrorDevicesUnavailable` here was **one GPU per node**, not node

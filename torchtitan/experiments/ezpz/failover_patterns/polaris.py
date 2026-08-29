@@ -116,6 +116,17 @@ _CUDA_INIT_RX = compile_multiline(
     + r"|initialization error"
     + r"|unknown error"
     + r"|system not yet initialized"
+    # Observed on job 7567541 attempt 2 (x3003c0s25b0n0, rank 495 =
+    # local 3): torch asked for a device ordinal the driver rejected,
+    # printing "GPU device may be out of range, do you have enough
+    # GPUs?". It is NOT a config error -- nvidia-smi -L on that node
+    # lists all 4 A100s, CUDA_VISIBLE_DEVICES is unset, the hostfile has
+    # no duplicates (128 lines, 128 unique), and the identical launch
+    # placed ranks correctly on the other 131 nodes. Same 5MiB-vs-427MiB
+    # single-GPU signature as cudaErrorDevicesUnavailable, and it clears
+    # on a different node -- so it passes this file's rule and is
+    # node-fatal for our purposes.
+    + r"|invalid device ordinal"
     + r")",
 )
 
