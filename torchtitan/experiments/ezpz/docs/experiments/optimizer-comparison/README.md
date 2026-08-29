@@ -1,7 +1,8 @@
 # Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG
 
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
-**Status:** COMPLETE. Both healthy arms passed the 10B budget 2026-08-26.
+**Status:** COMPLETE. Both healthy arms passed the 10B budget 2026-08-26,
+then a +10B continuation carried them to ~21.6B (2026-08-29).
 
 ## RESULT: Mano wins at the 10B budget
 
@@ -28,12 +29,46 @@ closing rate is +0.0056 nats/B against +0.0252 over 5.9-7.5B, which puts a
 crossover at ~35B rather than the ~10B a whole-span fit suggested. AdamW does
 not catch Mano within any horizon this experiment reaches.
 
+### Confirmed by a +10B continuation, to ~21.6B tokens
+
+Both arms were resumed from step 2800 and run a further 10B tokens, reaching
+steps 5504 (AdamW) and 5491 (Mano). Mean loss per 250-step window:
+
+| window | AdamW | Mano | gap |
+|---:|---:|---:|---:|
+| 2750 | 2.85076 | **2.71296** | -0.1378 |
+| 3000 | 2.79227 | **2.65386** | -0.1384 |
+| 3250 | 2.76546 | **2.63579** | -0.1297 |
+| 3500 | 2.74284 | **2.62022** | -0.1226 |
+| 3750 | 2.71802 | **2.60138** | -0.1167 |
+| 4000 | 2.69667 | **2.58457** | -0.1121 |
+| 4250 | 2.67590 | **2.56922** | -0.1067 |
+| 4500 | 2.65860 | **2.55581** | -0.1028 |
+| 4750 | 2.64135 | **2.54271** | -0.0987 |
+| 5000 | 2.62479 | **2.52999** | -0.0948 |
+| 5250 | 2.60907 | **2.51798** | -0.0911 |
+
+**Mano still leads at ~21.6B, by 0.091 nats.** The gap narrows in EVERY
+window with no reversals -- 0.0467 nats over 2,500 steps, about 0.0187 per
+1,000 steps. Extrapolated linearly that is a crossover near step 10,100
+(~40B tokens), consistent with the ~35B estimate above and far outside any
+budget this comparison would spend.
+
+The monotonicity is the point. Single-point readings taken during the run
+ranged from -0.064 to -0.154 and each looked like the gap widening or
+collapsing; all of them were noise around this curve. Bin before claiming a
+trend -- the same lesson the SophiaG arm taught at a larger cost.
+
+Excursion behaviour over the full ~5,250-step comparison window: **AdamW 0
+steps above grad_norm 2.0** (lifetime max 1.20), Mano 7 (0.1%, max 4.94).
+Both are far inside the healthy band.
+
 ### What this does and does not say
 
 **Does:** at a fixed GBS=960, with per-optimizer LRs measured at that exact
 batch, held constant after a 20-step warmup, Mano reaches a lower loss than
-AdamW at every point past ~1.0B tokens and the advantage is stable at ~0.14
-nats by 10B.
+AdamW at every point past ~1.0B tokens; the advantage is ~0.14 nats at 10B
+and still 0.091 nats at ~21.6B, narrowing monotonically but slowly.
 
 **Does not:** this is one seed per arm and there is **no decay phase**. The
 documented prior from earlier competitions is precisely "Mano/Muon win short
