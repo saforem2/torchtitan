@@ -18,7 +18,11 @@ from tests.integration_tests.features import build_features_test_list
 from tests.integration_tests.flux import build_flux_test_list
 from tests.integration_tests.h100 import build_h100_tests_list
 from tests.integration_tests.models import build_model_tests_list
-from tests.integration_tests.run_tests import _parse_test_suites, run_single_test
+from tests.integration_tests.run_tests import (
+    _filter_tests,
+    _parse_test_suites,
+    run_single_test,
+)
 
 
 def test_hf_checkpoint_load_path_comes_from_test_config(monkeypatch) -> None:
@@ -72,6 +76,41 @@ def test_parse_multiple_integration_test_suites() -> None:
     )
 
 
+def test_filter_tests_skips_unsupported_cuda_capability(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tests.integration_tests.run_tests.torch.cuda.is_available", lambda: True
+    )
+    monkeypatch.setattr(
+        "tests.integration_tests.run_tests.torch.cuda.get_device_capability",
+        lambda: (8, 6),
+    )
+    supported = OverrideDefinitions(test_name="supported")
+    blackwell_only = OverrideDefinitions(
+        test_name="blackwell_only",
+        required_cuda_capabilities=((10, 0), (10, 3)),
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "test_name": "all",
+            "execution_mode": "real_pg",
+            "test_scope": "all",
+            "gpu_arch_type": "cuda",
+            "ngpu": 8,
+            "exclude": None,
+        },
+    )()
+
+    runnable, skipped_ngpu, skipped_cuda_capability = _filter_tests(
+        args, [supported, blackwell_only]
+    )
+
+    assert runnable == [supported]
+    assert not skipped_ngpu
+    assert skipped_cuda_capability == [blackwell_only]
+
+
 def test_h100_tests_are_registered_in_separate_suite() -> None:
     assert {test.test_name for test in build_h100_tests_list()} == {
         "2d_asynctp_compile",
@@ -103,17 +142,21 @@ def test_specialized_moe_backends_have_ep_coverage() -> None:
         assert config.parallelism.expert_parallel_degree > 1
 
 
-def test_models_do_not_reserve_canonical_real_pg_cases() -> None:
+def test_models_select_fake_and_real_pg_cases() -> None:
     model_tests = build_model_tests_list()
     fake_pg_model_tests = {
         test.test_name for test in model_tests if not test.use_real_pg
     }
+    real_pg_model_tests = {test.test_name for test in model_tests if test.use_real_pg}
 
     assert {
+        "deepseek_v3_fsdp+ep",
         "qwen3_moe_fsdp+tp+cp+ep_param_groups",
         "kimi_k2_5_muon_fsdp+ep",
+        "muse_glimmer_text_fsdp",
         "muse_glimmer_mm_fsdp+tp+sp",
     } <= fake_pg_model_tests
+    assert {"deepseek_v3_fsdp+cp+pp+ep"} <= real_pg_model_tests
 
 
 def test_flux_fake_pg_filters_real_collective_cases() -> None:
