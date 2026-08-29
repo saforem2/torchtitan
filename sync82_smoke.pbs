@@ -1,0 +1,102 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=01:30:00
+#PBS -l filesystems=tegu:home
+#PBS -N sync82-smoke
+#PBS -j oe
+set -o pipefail
+
+# 82nd upstream sync smoke (23 commits). Arms cover what this merge puts at
+# risk:
+#   agpt2b      -- the dense path and its config_registry imports
+#   agpt2b-tp2  -- TP>1, where sharding changes surface
+#   moe         -- #4300 removed get_moe_model_nparams_and_flops, which
+#                  moe/model.py called; ported in c52bb0ddd
+# The validator is exercised by every arm at its validation step: #4116
+# deleted Trainer.post_dataloading_process, which EzpzValidator called, and
+# that raises only at validation time -- not at import. Ported in 5d8c85b74.
+#
+# FLAGS: max-context-length / num-tokens-per-microbatch-per-dp-rank are the
+# real field names. sync79_smoke.pbs still uses --training.seq-len and
+# --training.local-batch-size, which do NOT exist post-#4121; running it now
+# would abort in flag parsing and read as a merge failure.
+#
+# seq 2048 deliberately: --debug.deterministic is only bit-reproducible
+# multi-node at seq<=2048, so a real regression stays visible.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
+
+TAG="${SYNC82_TAG:-postmerge}"
+LOGD="$PWD/outputs/logs/sync82/$TAG-$PBS_JOBID"; mkdir -p "$LOGD"
+echo "TAG=$TAG   HEAD=$(git log --oneline -1)"
+echo ""
+
+echo "########## import gate ##########"
+for m in agpt moe; do
+  if python3 -c "import torchtitan.experiments.ezpz.$m.config_registry" 2>/dev/null; then
+    echo "  IMPORT OK   ezpz.$m"
+  else
+    echo "  IMPORT FAIL ezpz.$m"
+    python3 -c "import torchtitan.experiments.ezpz.$m.config_registry" 2>&1 | grep -E "Error" | tail -2 | sed 's/^/      /'
+  fi
+done
+# The validator import is the #4116 canary and is NOT covered by the configs.
+if python3 -c "from torchtitan.experiments.ezpz.validator import EzpzValidator" 2>/dev/null; then
+  echo "  IMPORT OK   ezpz.validator"
+else
+  echo "  IMPORT FAIL ezpz.validator"
+  python3 -c "from torchtitan.experiments.ezpz.validator import EzpzValidator" 2>&1 | grep -E "Error" | tail -2 | sed 's/^/      /'
+fi
+
+CTX=2048
+NTOK=2048   # must EQUAL max_context_length post-fold
+
+arm() {  # arm <label> <module> <config> <extra...>
+  local label="$1" mod="$2" cfg="$3"; shift 3
+  local log="$LOGD/$label.log"; : > "$log"
+  timeout 1500 ezpz launch --nproc 24 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module "$mod" --config "$cfg" \
+      --training.steps=20 \
+      --training.max-context-length=$CTX \
+      --training.num-tokens-per-microbatch-per-dp-rank=$NTOK \
+      --debug.seed=42 --debug.deterministic \
+      --checkpoint.no-enable --compile.no-enable \
+      "$@" > "$log" 2>&1
+  local rc=$? steps
+  steps=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -acE "step: *[0-9]+ +loss:")
+  printf "  %-16s rc=%-4s steps=%-3s " "$label" "$rc" "$steps"
+  if [ "$steps" -eq 0 ]; then
+    echo "VOID"
+    sed 's/\x1b\[[0-9;]*m//g' "$log" \
+      | grep -aoE "(TypeError|ImportError|ModuleNotFoundError|RuntimeError|AttributeError|ValueError): .*" \
+      | sort -u | head -3 | sed 's/^/        /'
+  else
+    echo ""
+    sed 's/\x1b\[[0-9;]*m//g' "$log" \
+      | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+ +grad_norm: *[0-9.]+" \
+      | sed 's/  */ /g' > "$LOGD/$label.trace"
+    head -3 "$LOGD/$label.trace" | sed 's/^/        /'
+    echo "        ..."
+    tail -2 "$LOGD/$label.trace" | sed 's/^/        /'
+  fi
+}
+
+echo ""
+echo "########## arms (seq=$CTX, seed=42, deterministic) ##########"
+arm "agpt2b"     ezpz.agpt agpt_2b
+arm "agpt2b-tp2" ezpz.agpt agpt_2b --parallelism.tensor-parallel-degree=2
+arm "moe"        ezpz.moe  moe_10b_2b_sdpa
+
+echo ""
+echo "SYNC82_SMOKE_DONE"

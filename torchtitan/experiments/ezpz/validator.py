@@ -16,6 +16,7 @@
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -24,6 +25,7 @@ from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.components.validate import Validator
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.distributed.context_parallel import prepare_context_parallel_input
+from torchtitan.protocols.model import BaseModel
 from torchtitan.tools import utils
 
 
@@ -129,13 +131,19 @@ class EzpzValidator(Validator):
                 input_dict[k] = v.to(device_type)
             labels = labels.to(device_type)
 
-            # post_dataloading_process returns a 3-tuple (inputs, labels,
-            # extra_kwargs); an older upstream signature also returned a
-            # separate `extra_inputs`, which has since been folded into
-            # extra_kwargs. Match the current upstream contract (see
-            # torchtitan/components/validate.py).
-            inputs, labels, extra_kwargs = self.post_dataloading_process(
-                input_dict, labels, model_parts
+            # Upstream #4116 deleted Trainer.post_dataloading_process and moved
+            # the work onto the model as preprocess_inputs, which takes the
+            # labels INSIDE the input dict rather than as a separate arg and
+            # reads parallelism off the caller. Mirrors the non-PP branch of
+            # torchtitan/components/validate.py. Both attributes come from the
+            # base Validator (self.parallel_dims, self.parallelism set in its
+            # __init__), so no plumbing is needed here.
+            inputs, labels, extra_kwargs = cast(
+                BaseModel, model_parts[0]
+            ).preprocess_inputs(
+                {**input_dict, "labels": labels},
+                parallel_dims=self.parallel_dims,
+                parallelism=self.parallelism,
             )
 
             local_valid_tokens = torch.tensor(0, dtype=torch.int64, device=device_type)

@@ -342,6 +342,45 @@ So the arm with the CLEANEST pre-onset history of any replicate -- 1,529 steps
 at 0.0% -- both diverged and stayed diverged. Across four arms: 4/4 onset,
 and of the three followed well past onset, one escaped and two did not.
 
+### ...and then it escaped, completely
+
+The relapse section above was written at window 1750 and reported the arm
+"both diverged and stayed diverged". That was premature -- it escaped about
+100 steps later, and more cleanly than any previous arm:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 1700 | 25/50 | 50.0% | 4068.43 | 3.0387 |
+| 1750 | 31/42 | 73.8% | 6045.04 | 3.4676 |
+| 1800 | 36/36 | **100.0%** | **16531.91** | 4.5410 |
+| 1850 | 27/46 | 58.7% | 176.15 | 3.7745 |
+| 1900 | 0/50 | **0.0%** | 0.97 | 3.0622 |
+| 1950 | 0/50 | **0.0%** | 0.23 | 2.9242 |
+| 2000 | 0/50 | **0.0%** | 0.62 | 2.8749 |
+| 2050 | 0/33 | **0.0%** | 0.19 | 2.8535 |
+
+From 100% of steps above grad_norm 2.0 with a peak of 16,532, to four
+consecutive windows at zero with peaks under 1.0 -- inside ~100 steps. Mean
+loss recovered 4.54 -> 2.85, which is BELOW the 2.89 it held before onset, so
+the arm did not merely stabilise, it resumed making progress.
+
+The full single-arm arc, all at a fixed seed:
+
+1. 1,529 steps at 0.0% excursions, max 0.31 -- no precursor whatsoever
+2. onset at ~1550, escalating 0.20 -> 4.95 -> 36.1 -> 99.0 -> 731.8 in 4 steps
+3. a lull at window 1650 (4.0%) that reversed
+4. deterioration to 100% of steps and gn 16,532, loss 2.89 -> 4.54
+5. full escape by window 1900, loss back under pre-onset by 2050
+
+**What distinguishes the real escape from the fake one at 1650:** the 1650
+window was 4.0% with a max of 13.49 -- still spiking, just less often. The
+escape is 0.0% with maxima collapsing 176 -> 0.97 -> 0.23 -> 0.62 -> 0.19 and
+loss monotonically recovering. Rate alone is not enough; watch whether the
+PEAK magnitude collapses and whether loss resumes descending.
+
+Tally across four arms: 4/4 onset, and of the three followed well past onset,
+**two escaped and one did not**.
+
 ### Method note
 
 This arm was characterized three times in three readings -- "healthy", then

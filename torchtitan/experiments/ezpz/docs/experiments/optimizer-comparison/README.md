@@ -1,7 +1,8 @@
 # Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG
 
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
-**Status:** COMPLETE. Both healthy arms passed the 10B budget 2026-08-26.
+**Status:** COMPLETE. Both healthy arms ran to the `training.steps=6000`
+ceiling on 2026-08-29 -- 23.59B tokens each, `rc=0`, 0 NaN/inf, 0 grad skips.
 
 ## RESULT: Mano wins at the 10B budget
 
@@ -28,12 +29,86 @@ closing rate is +0.0056 nats/B against +0.0252 over 5.9-7.5B, which puts a
 crossover at ~35B rather than the ~10B a whole-span fit suggested. AdamW does
 not catch Mano within any horizon this experiment reaches.
 
+### Confirmed by a +10B continuation, to ~21.6B tokens
+
+Both arms were resumed from step 2800 and run a further 10B tokens, reaching
+steps 5504 (AdamW) and 5491 (Mano). Mean loss per 250-step window:
+
+| window | AdamW | Mano | gap |
+|---:|---:|---:|---:|
+| 2750 | 2.85076 | **2.71296** | -0.1378 |
+| 3000 | 2.79227 | **2.65386** | -0.1384 |
+| 3250 | 2.76546 | **2.63579** | -0.1297 |
+| 3500 | 2.74284 | **2.62022** | -0.1226 |
+| 3750 | 2.71802 | **2.60138** | -0.1167 |
+| 4000 | 2.69667 | **2.58457** | -0.1121 |
+| 4250 | 2.67590 | **2.56922** | -0.1067 |
+| 4500 | 2.65860 | **2.55581** | -0.1028 |
+| 4750 | 2.64135 | **2.54271** | -0.0987 |
+| 5000 | 2.62479 | **2.52999** | -0.0948 |
+| 5250 | 2.60907 | **2.51798** | -0.0911 |
+
+Both arms then ran on to the configured ceiling. Final windows:
+
+| window | AdamW | Mano | gap |
+|---:|---:|---:|---:|
+| 5500 | 2.59550 | **2.51625** | -0.0793 |
+| 5750 | 2.57410 | **2.52161** | -0.0525 |
+| 6000 | 2.51357 | **2.43889** | -0.0747 |
+
+**Final: AdamW 2.51357, Mano 2.43889 at step 6000 / 23.59B tokens -- Mano
+ahead by 0.075 nats.**
+
+The narrowing is monotone from 2750 through 5500 (-0.1378 -> -0.0793, about
+0.0187 nats per 1,000 steps) and then REVERSES over the last two windows. The
+reversal is not a change in trend: the 5750 window contains a transient
+disturbance in the Mano arm (see below) that temporarily raised its mean loss,
+and 6000 contains the rebound to its best loss of the run. Fitting a crossover
+through the tail would read that detour as signal. Fit on 2750-5500 and the
+implied crossover is ~40B tokens, consistent with the ~35B from the 10B run's
+tail and far outside any budget this comparison would spend.
+
+### The Mano arm's late disturbance
+
+After 5,600 steps at 0.0% excursions, Mano entered a noisier stretch:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 5600 | 0 | 0.0% | 0.20 | 2.5051 |
+| 5650 | 2 | 4.0% | 5.18 | 2.5226 |
+| 5700 | 3 | 6.0% | 3.85 | 2.5321 |
+| 5750 | 3 | 6.0% | **60.09** | 2.5319 |
+| 5800 | 4 | 9.1% | 13.08 | 2.5654 |
+
+Step 5792 was a genuine discontinuity -- grad_norm 0.23 -> 60.09 in one step
+with loss jumping 2.51 -> 3.03 -- and for a stretch the between-spike floor
+sat at 0.6-2.7 rather than its usual 0.18-0.28. It resolved: no further
+excursions after step ~5850, and the arm finished at 2.43889, its best loss of
+the run and below where it sat before the event.
+
+Worth recording because the rate drift (0 -> 4 -> 6 -> 6 -> 9.1%) looks like
+the opening of a SophiaG-style regime flip and is not one. What separates them
+is scale and direction: SophiaG's equivalent four windows ran 6% -> 20% -> 74%
+-> 100% with mean loss 2.93 -> 4.54 and peaks in the thousands. Mano's rate
+topped out under 10%, its peak was 60, and its loss recovered. A single
+disturbance is not a regime -- bin it and watch whether mean loss follows.
+
+The monotonicity is the point. Single-point readings taken during the run
+ranged from -0.064 to -0.154 and each looked like the gap widening or
+collapsing; all of them were noise around this curve. Bin before claiming a
+trend -- the same lesson the SophiaG arm taught at a larger cost.
+
+Excursion behaviour over the full run: **AdamW 0 steps above grad_norm 2.0 in
+5,747 steps** (lifetime max 1.20), Mano 21 (0.4%, max 60.09, all of them in
+the late disturbance described below). Both are far inside the healthy band;
+for contrast the SophiaG arms spend 38-56% of steps there.
+
 ### What this does and does not say
 
 **Does:** at a fixed GBS=960, with per-optimizer LRs measured at that exact
 batch, held constant after a 20-step warmup, Mano reaches a lower loss than
-AdamW at every point past ~1.0B tokens and the advantage is stable at ~0.14
-nats by 10B.
+AdamW at every point past ~1.0B tokens; the advantage is ~0.14 nats at 10B
+and 0.075 nats at 23.59B, narrowing at ~0.0187 nats per 1,000 steps.
 
 **Does not:** this is one seed per arm and there is **no decay phase**. The
 documented prior from earlier competitions is precisely "Mano/Muon win short
