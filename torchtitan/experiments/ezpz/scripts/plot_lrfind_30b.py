@@ -51,10 +51,24 @@ plt.rcParams["mathtext.tt"] = "Iosevka"
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 
 # Same colors as plot_optcmp.py so the two figures read as one experiment.
+# Third element is the Smith-2015 suggestion (blow-up/10), drawn as a dotted
+# vertical. Use None for an arm whose sweep has not been read out yet: the
+# curve still plots, only the marker line is skipped. Do NOT guess a value --
+# a wrong dotted line is worse than a missing one.
+#
+# An arm missing from this dict is missing from the FIGURE, silently, at
+# exit 0. Adding a config + a PBS arm is not enough; register it here too.
 ARMS = {
     "adamw": ("AdamW", "#1f77b4", 3.05e-05),
     "mano": ("Mano", "#d62728", 5.61e-05),
     "sophiag": ("SophiaG", "#2ca02c", 3.55e-05),
+    # Muon, job 12474326 (2026-08-30). Suggestion pending; fill it in from the
+    # job summary. NOTE the number that goes here is the BASE lr the finder
+    # reports -- Muon rescales by a uniform 15.677x on its 21.5% of params
+    # (optimizer/muon.py:130-139), so this dotted line is NOT comparable
+    # like-for-like with the other three. See
+    # docs/experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md.
+    "muon": ("Muon", "#9467bd", None),
 }
 
 
@@ -106,7 +120,8 @@ def main() -> int:
             # The suggestion sits well LEFT of the minimum by construction --
             # it buys stability margin, it is not the best-loss LR.
             a_.plot([at], [lo], marker="o", ms=6, color=color, zorder=5)
-            a_.axvline(suggested, color=color, ls=":", lw=1.2, alpha=0.7)
+            if suggested is not None:
+                a_.axvline(suggested, color=color, ls=":", lw=1.2, alpha=0.7)
 
     if not any_data:
         print("no finder CSVs found")
@@ -133,7 +148,18 @@ def main() -> int:
     # the band. Limits derive from the DATA, not hardcoded, so the panel stays
     # honest if a rerun shifts the curves.
     axz.set_xscale("log")
-    axz.set_xlim(1e-5, 3e-3)
+    # Derive the x-window from the data. It was hardcoded 1e-5..3e-3, which fits
+    # arms whose suggestions cluster at 3-6e-05; an arm reporting a much smaller
+    # BASE lr (Muon, whose 15.677x rescale shifts the whole curve left) would
+    # fall off the left edge and vanish while the figure still saved at exit 0.
+    x_at_min = []
+    for arm_ in ARMS:
+        lr_, ls_ = read_csv(arm_)
+        if ls_:
+            x_at_min.append(lr_[ls_.index(min(ls_))])
+    x_lo = min(min(x_at_min) / 10.0, 1e-5) if x_at_min else 1e-5
+    x_hi = max(max(x_at_min) * 6.0, 3e-3) if x_at_min else 3e-3
+    axz.set_xlim(x_lo, x_hi)
     axz.set_ylim(y_lo, y_hi)
     axz.set_xlabel("learning rate")
     axz.set_ylabel("EMA-smoothed loss")
