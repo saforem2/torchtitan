@@ -28,6 +28,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-28 | [SophiaG: a RECURRENT grad-norm blow-up at 30B](./guides/known-bugs/sophiag-stochastic-divergence-30b.md) |
 | 2026-08-28 | [Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG](./experiments/optimizer-comparison/README.md) |
 | 2026-08-27 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-08-30 | [Draft ALCF ticket -- 8784460 has not scheduled in 101h](./ops/alcf-ticket-8784460-not-scheduling-20260830.md) |
 | 2026-08-27 | [Draft ALCF ticket -- two Polaris nodes with a stuck GPU](./ops/alcf-ticket-zombie-gpu-nodes-20260827.md) |
 | 2026-08-27 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](./guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
 | 2026-08-27 | [Polaris failover patterns were correct and UNREACHABLE](./guides/known-bugs/polaris-failover-detect-machine-fqdn.md) |
