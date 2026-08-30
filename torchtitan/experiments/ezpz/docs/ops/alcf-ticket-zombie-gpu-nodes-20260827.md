@@ -1,9 +1,19 @@
-# Draft ALCF ticket -- two Polaris nodes with a stuck GPU
+# ALCF ticket -- Polaris nodes with a stuck GPU
 
-**Status:** DRAFT, not sent. Needs a human to file it.
-**Nodes:** `x3007c0s13b1n0`, `x3111c0s37b1n0`
-**Cost so far:** jobs 7560196 (3h03m) + 7560197 (4h04m) = **~7h of 130
-nodes, zero training steps**, both `Exit_status=124`.
+**Status:** FILED 2026-08-30 by Sam Foreman. Awaiting ALCF response.
+**Nodes:** `x3007c0s13b1n0`, `x3111c0s37b1n0`, `x3003c0s25b0n0`
+**Cost so far:** jobs 7560196 (3h03m) + 7560197 (4h04m) + 7567541
+(12m56s) = **~7h20m of 130-132 nodes, zero training steps**.
+
+`x3003c0s25b0n0` surfaced later than the other two (job 7567541,
+2026-08-29) with a different signature: `invalid device ordinal` rather
+than `cudaErrorDevicesUnavailable`. Same practical effect -- one rank
+loses its GPU and the allocation hangs.
+
+As of 2026-08-30 21:51 UTC all three still show
+`resources_available.ngpus = 4`, and `x3111c0s37b1n0` still carries the
+`EXECJOB_END` comment below. `x3111c0s37b1n0` appeared in the estimated
+node list for job 7567542, i.e. PBS is still assigning it.
 
 ## Suggested ticket text
 
@@ -13,8 +23,9 @@ nodes, zero training steps**, both `Exit_status=124`.
 > are repeatedly scheduled onto them and lose one rank per node, which
 > hangs the whole allocation.
 >
-> Nodes: `x3007c0s13b1n0`, `x3111c0s37b1n0`
-> Affected jobs: 7560196, 7560197 (user foremans, project AuroraGPT)
+> Nodes: `x3007c0s13b1n0`, `x3111c0s37b1n0`, `x3003c0s25b0n0`
+> Affected jobs: 7560196, 7560197, 7567541 (user foremans, project
+> AuroraGPT)
 >
 > `pbsnodes x3111c0s37b1n0` reports:
 >
@@ -26,7 +37,7 @@ nodes, zero training steps**, both `Exit_status=124`.
 > so the likely cause is leftover processes from an unrelated job on
 > 2026-08-22 that never terminated.
 >
-> Observed on both nodes: all four A100s enumerate, 0% utilisation,
+> Observed on all three nodes: all four A100s enumerate, 0% utilisation,
 > persistence mode on, compute mode Default, and
 > `ecc.errors.uncorrected.volatile.total = 0` on every GPU -- so this
 > does not look like an ECC/hardware fault. Exactly one GPU per node
@@ -35,7 +46,7 @@ nodes, zero training steps**, both `Exit_status=124`.
 > `nvidia-smi --query-compute-apps` shows **no process at all** holding
 > the stuck GPU. It nonetheless rejects `cudaSetDevice`.
 >
-> Could these two nodes be drained and reset?
+> Could these three nodes be drained and reset?
 
 ## Evidence to attach
 
@@ -52,7 +63,7 @@ $ nvidia-smi --query-gpu=index,memory.used,ecc.errors.uncorrected.volatile.total
 3, 427 MiB, 0
 ```
 
-Diagnostic signature, identical across both jobs and both nodes: the
+Diagnostic signature, identical across every affected job and node: the
 5 MiB GPU's index equals the dead rank's **local** rank index
 (`x3007c0s13b1n0` rank 13 -> local 1 -> GPU 1; `x3111c0s37b1n0` rank 420
 -> local 0 -> GPU 0).

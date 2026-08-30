@@ -1,5 +1,31 @@
 # MoE at TP>1: `wo` gets Shard(0) where row-parallel wants Partial(sum)
 
+> [!NOTE]
+> **Coverage extended 2026-08-30 (job `8792615`): TP=4 and compiled `moe` both
+> work.** The fix was verified at TP=2 eager only; these were the open corners.
+>
+> | arm | step 1 -> 5 | max delta vs eager |
+> |---|---|---|
+> | TP=1 control | 12.93609 -> 11.32376 | -- |
+> | TP=2 eager | 12.94930 -> 11.49335 | -- |
+> | TP=2 **compiled** | 12.94907 -> 11.49342 | **0.00033** |
+> | TP=4 eager | 12.86241 -> 11.75634 | -- |
+> | TP=4 **compiled** | 12.86258 -> 11.75609 | **0.00041** |
+>
+> All five monotonic with finite grad norms. Compiled tracks eager to 3.3e-4
+> (TP=2) and 4.1e-4 (TP=4), so compile is doing the same math rather than a
+> different code path. Losses differ ACROSS TP degrees (0.196 at TP=2, 0.433 at
+> TP=4 vs TP=1) which is expected -- different sharding means a different
+> reduction order -- and memory per rank falls as it should: 2.80 / 1.94 / 1.38
+> GiB at TP=1/2/4.
+>
+> The TP=1 control ran first in every case. Keep it: the wrong first fix broke
+> TP=1 while looking like a plausible TP=2 fix, and only that arm caught it.
+>
+> Blocked at first by an unrelated env skew -- core `parallel_dims.py` imports
+> `SpmdType`, absent from the venv's pinned `spmd_types` 0.2.1; 0.2.5 has it.
+> All five arms died at import until that was upgraded.
+
 > [!IMPORTANT]
 > **RESOLVED 2026-08-27 (`6e4e1996f`). moe trains at TP=2.** The bug was in the
 > SDPA wrapper, not in `wo`, not in the sharding config, and not in the

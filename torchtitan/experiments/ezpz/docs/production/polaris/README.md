@@ -336,10 +336,10 @@ and do not trust a green `refresh_all.sh` as evidence they are current.
 > written up in
 > [`known-bugs/polaris-failover-detect-machine-fqdn.md`](../../guides/known-bugs/polaris-failover-detect-machine-fqdn.md).
 >
-> The underlying hardware problem is unresolved: two nodes carry a GPU
+> The underlying hardware problem is unresolved: three nodes carry a GPU
 > stuck by another user's leftover processes while PBS still advertises
-> `ngpus = 4`, so rotation cannot win. Drain ticket **drafted, not
-> sent**:
+> `ngpus = 4`, so rotation cannot win. Drain ticket **filed 2026-08-30**,
+> awaiting ALCF:
 > [`ops/alcf-ticket-zombie-gpu-nodes-20260827.md`](../../ops/alcf-ticket-zombie-gpu-nodes-20260827.md).
 
 ### Evaluation (lm-eval, Llama2 tokenizer)
