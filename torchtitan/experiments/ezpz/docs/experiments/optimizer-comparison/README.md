@@ -200,6 +200,23 @@ step 14 and burned ~12h. That is what the blow-up detection is for.
 
 ## Phase 1 RESULTS (2026-08-23, jobs 12473714/15/16)
 
+![30B LR-finder sweeps, three optimizers at GBS=960 on fineweb-edu](../lr-finder/agpt/figures/lrfind_30b_gbs960.svg)
+
+These sweeps are what set the LRs every Phase 2 arm runs at, so they are the
+premise the whole comparison rests on. Each curve descends smoothly to a
+minimum and then blows up; the suggestion is taken an order of magnitude below
+the blow-up, not at the minimum.
+
+Two things to read off the figure directly. The low band is **smooth** -- there
+is no instability anywhere below the suggestion for any of the three, which is
+why "SophiaG's divergence is a too-high LR" does not survive contact with the
+sweep: a static 100-step probe cannot see a failure that arms after ~1,000
+steps. And the three minima sit within 1.8x of each other, far tighter than
+the spread the same optimizers show ACROSS batch sizes.
+
+Regenerate with `python3 torchtitan/experiments/ezpz/scripts/plot_lrfind_30b.py`.
+Full writeup: [2026-08-23-30b-gbs960-three-optimizers.md](../lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md).
+
 All three swept 1e-6 -> 1e-1 over 100 steps at GBS=960 on fineweb-edu, and all
 three produced a real blow-up, so every suggestion is a measurement rather than
 a sweep that ran out of range.
