@@ -93,11 +93,31 @@ def test_ladder_rungs_are_genuinely_different_models():
     assert counts == sorted(counts)
 
 
-def test_mup_lm_head_init_is_d_inverse():
+def test_mup_lm_head_init_is_fan_in_sqrt():
+    """The readout keeps fan_in^-1/2; the eta/m LR group supplies the scaling.
+
+    This asserted dim**-1.0 -- the literal Table 3 prescription -- until the
+    coordinate check rejected it. With d^-1 the readout came out over-scaled:
+    lm_head slope -0.130 against a 0.05 tolerance, and -0.483 once its LR was
+    also scaled to "complete" Table 3. Keeping d^-1/2 gives slope 0.001 and a
+    passing check. See docs/experiments/mup/README.md section 5.6.
+    """
     for name in ("mup_1536", "mup_3072", "mup_6144"):
         cfg = agpt_configs[name]
         dim = cfg.layers[0].attention.dim
-        assert _std(cfg.lm_head.param_init) == dim**-1.0, name
+        assert _std(cfg.lm_head.param_init) == dim**-0.5, name
+
+
+def test_mup_lm_head_init_matches_sp():
+    """And is therefore identical to the standard-parametrization readout.
+
+    Guards the equivalence directly: if someone "restores" the paper value,
+    this fails alongside the test above rather than leaving a silent
+    divergence between the muP and SP readouts.
+    """
+    mup_std = _std(agpt_configs["mup_6144"].lm_head.param_init)
+    sp_std = _std(agpt_configs["30B_olmo2tok"].lm_head.param_init)
+    assert mup_std == sp_std
 
 
 def test_mup_top_rung_matches_production_geometry():
@@ -155,6 +175,9 @@ def test_lr_groups_scale_hidden_by_one_over_m():
         oc = M.default_mup_adamw(ETA, dim=dim, base_dim=M.MUP_BASE_DIM)
         lrs = [pg.optimizer_kwargs["lr"] for pg in oc.param_groups]
         assert len(lrs) == 4
+        # embedding, readout, norms all O(1); only hidden matrices get eta/m.
+        # The readout is O(1) BECAUSE its init stayed at fan_in^-1/2 -- the two
+        # are a matched pair, and the coordinate check fails if they are split.
         assert lrs[:3] == [ETA, ETA, ETA]
         assert lrs[3] == ETA / m
 

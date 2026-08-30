@@ -410,7 +410,9 @@ def _slope(widths: list[int], values: list[float]) -> float:
     return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / den
 
 
-def _aggregate(runs: list[dict[str, Any]], out_dir: str) -> dict[str, Any]:
+def _aggregate(
+    runs: list[dict[str, Any]], out_dir: str, *, mup: bool = False
+) -> dict[str, Any]:
     runs = sorted(runs, key=lambda r: r["width"])
     widths = [r["width"] for r in runs]
 
@@ -491,13 +493,27 @@ def _aggregate(runs: list[dict[str, Any]], out_dir: str) -> dict[str, Any]:
         "worst_module": worst,
         "control_slopes_last_step": ctrl_slopes,
         "width_dependence_detected": detected,
+        "mup": bool(mup),
+        # The SAME observation -- flat coordinates -- means opposite things
+        # depending on which parametrization was built. Under SP, flat is a
+        # broken harness. Under muP, flat IS the result. A single fixed string
+        # told a correct muP run that it had failed.
         "verdict": (
-            "SP DIVERGENCE REPRODUCED -- coordinates depend on width; the "
-            "harness discriminates and can validate muP"
-            if detected
-            else "FLAT -- no width dependence detected. Under the CURRENT "
-            "(standard) parametrization this is a HARNESS FAILURE, not a "
-            "muP pass: investigate before trusting any muP result."
+            (
+                "muP PASS -- coordinates are width-invariant within tolerance"
+                if not detected
+                else "muP FAIL -- coordinates still depend on width; the "
+                "parametrization is incomplete or wrong"
+            )
+            if mup
+            else (
+                "SP DIVERGENCE REPRODUCED -- coordinates depend on width; the "
+                "harness discriminates and can validate muP"
+                if detected
+                else "FLAT -- no width dependence detected. Under the CURRENT "
+                "(standard) parametrization this is a HARNESS FAILURE, not a "
+                "muP pass: investigate before trusting any muP result."
+            )
         ),
         "runs": [
             {
@@ -725,7 +741,7 @@ def run_driver(args: argparse.Namespace) -> int:
         with open(path) as f:
             runs.append(json.load(f))
 
-    summary = _aggregate(runs, out_dir)
+    summary = _aggregate(runs, out_dir, mup=args.mup)
     _print_table(summary)
     if not args.no_plot:
         _plot(summary, out_dir)
