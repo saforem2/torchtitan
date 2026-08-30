@@ -25,7 +25,7 @@
 > | moe tp=1 | 12.93609 -> 11.32376 |
 > | moe tp=2 | 12.94930 -> 11.49335 |
 >
-> All monotonic, finite grad norms. The moe arms agree to 0.011 at step 1 and
+> All monotonic, finite grad norms. The moe arms agree to 0.013 at step 1 and
 > track within 0.17 over five steps, and TP=2 uses less memory per rank than
 > TP=1 (1.93 vs 2.78 GiB).
 >
