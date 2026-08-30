@@ -138,9 +138,21 @@ collapsing; all of them were noise around this curve. Bin before claiming a
 trend -- the same lesson the SophiaG arm taught at a larger cost.
 
 Excursion behaviour over the full run: **AdamW 0 steps above grad_norm 2.0 in
-5,747 steps** (lifetime max 1.20), Mano 21 (0.4%, max 60.09, all of them in
-the late disturbance described below). Both are far inside the healthy band;
-for contrast the SophiaG arms spend 38-56% of steps there.
+5,747 steps** (lifetime max 1.20), Mano 21 (0.4%, max 60.09). Both are far
+inside the healthy band; for contrast the SophiaG arms spend 38-56% of steps
+there.
+
+Mano's 21 fall into two clusters, not one: **7 at steps 1694-1981** (max 4.94,
+including the 3.84 spike at step 1944 that the regime-flip section analyses)
+and **14 at steps 5693-5980** (the late disturbance described below). An
+earlier version of this line said all of them were late, which was wrong.
+
+Both counts are over steps with `loss < 5.0`, which is the window these arms
+are comparable in. Unfiltered from step 21 the same census gives AdamW 54 and
+Mano 142 -- but every one of AdamW's 54 sits at steps 21-161 with `loss >= 5.0`,
+i.e. ordinary early training from a fresh init, not an excursion in any
+meaningful sense. The two censuses count the same events through different
+windows; the filtered ones are the comparable figures.
 
 ### What this does and does not say
 
@@ -159,6 +171,7 @@ survives a decay phase is the obvious follow-up and is NOT answered here.
 LR-finder sweep is smooth through the whole low band, and the divergence is
 state-dependent rather than LR-driven, so a low-LR arm would test a different
 hypothesis than the one the sweep addresses.
+
 
 ## Conclusions and production guidance
 
@@ -179,7 +192,7 @@ reverses of each other and neither implies the other.
 | arm | LOSS at matched step 5080 | STABILITY over the full chain |
 |---|---:|---|
 | SophiaG (fresh, seed 1234) | **2.43156** | 2 onsets, peak grad_norm 16,532, ~900 steps lost |
-| Mano | 2.51114 | 22 excursions (0.4%), max 60.09, one transient that resolved |
+| Mano | 2.51114 | 21 excursions (0.4%), max 60.09, one transient that resolved |
 | AdamW | 2.60621 | **0 excursions in 5,747 steps**, max 1.20 |
 
 All three arms log from step 10 with step-aligned histories, so equal step is
@@ -254,7 +267,7 @@ events. The difference is the filter, and the filtered number is the right one:
 | census | AdamW | Mano |
 |---|---:|---:|
 | step > 20 only | 54 over 2.0 | 144 over 2.0 |
-| step > 20 **and loss < 5.0** | **0** (max 1.20) | **22** (0.4%, max 60.09) |
+| step > 20 **and loss < 5.0** | **0** (max 1.20) | **21** (0.4%, max 60.09) |
 
 Every one of AdamW's 54 sits at steps 21-161 with loss >= 5.0 -- a fresh init
 holds grad_norm 5-50 for its first tens of steps, and counting those makes any
@@ -263,7 +276,7 @@ known-bugs writeup flags for the SophiaG arms ("unfiltered, this arm reports 162
 excursions pre-onset -- every one of them at loss >= 5.0").
 
 One correction while reconciling. The full-run line above says Mano's excursions
-are "all of them in the late disturbance". They are not: 14 of the 22 are (steps
+are "all of them in the late disturbance". They are not: 14 of the 21 are (steps
 5693-5980, max 60.09), but 8 sit in a mid-run cluster at steps 1694-1981 with a
 max of 4.94 -- one of which is the 3.84 spike at step 1944 that the regime-flip
 section analyses in detail. The 0.4% rate and every conclusion drawn from it
@@ -314,6 +327,7 @@ estimate degrades before onset. Another LR arm does not discriminate it.
 * **NOT** that any of this measures seed variance, or transfers to GBS=15360
   production without re-measuring the LR at that batch.
 
+---
 ---
 
 ## What this replaces, and why
