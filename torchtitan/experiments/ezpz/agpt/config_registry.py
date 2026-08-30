@@ -1266,6 +1266,52 @@ def agpt_30b_olmo2tok_muon() -> FaultTolerantTrainer.Config:
     return _use_fineweb_edu(cfg)
 
 
+def agpt_30b_olmo2tok_muon_norescale() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok_muon with Muon's 15.677x LR rescale DISABLED.
+
+    Exists to answer one question the first Muon sweep raised and could not
+    settle. That sweep suggested a base LR of 5.68e-04 -- 18.6x AdamW's and
+    10.1x Mano's -- but only 21.5% of parameters are on the Muon path, and
+    only those get the 0.2*sqrt(max(A,B)) = 15.677x rescale. The other 78.5%
+    (w1/w2/w3, embeddings, lm_head, norms) run on an internal AdamW branch at
+    the base LR unscaled.
+
+    So the reported base could mean either of two things and the first sweep
+    cannot tell them apart:
+
+      (a) Muon genuinely wants a high base, and the 8.90e-03 effective rate on
+          its own tensors is what it is asking for; or
+      (b) the AdamW-path MAJORITY is anchoring the curve, and 5.68e-04 mostly
+          describes what those parameters tolerate -- in which case the Muon
+          tensors are along for the ride at 15.677x whatever the majority
+          picks.
+
+    With ``adjuster_lr_ref=False`` every parameter sees the same base LR and
+    the two populations are no longer coupled by a constant. If the suggestion
+    lands near 5.68e-04 again, the rescale was not what set it and (b) is the
+    better reading. If it lands near 8.90e-03 -- i.e. the previous effective
+    Muon-path rate -- then the Muon tensors were the binding constraint and
+    (a) is. Anything else means the two populations interact in a way neither
+    reading captures.
+
+    Note ``adjuster_lr_ref`` must be passed EXPLICITLY. ``default_muon`` omits
+    the key entirely, so it falls through to ``muon.py:56``, which defaults it
+    True -- the opposite of what this config is for. Verified reaching
+    optimizer_kwargs before this config was registered.
+
+    Equivalences worth knowing when reading this against upstream: ezpz's
+    ``adjuster_lr_ref=True`` is upstream ``dist_muon.py``'s
+    ``match_rms_adamw``, and ``False`` is its ``original``. Neither is the
+    Bernstein/muP-correct ``spectral_unclamped`` = sqrt(d_out/d_in), which
+    ezpz's Muon does not expose.
+
+    NOT a resume target for any other arm. Fresh run, own checkpoint folder.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_muon(lr=3.0e-4, adjuster_lr_ref=False)
+    return _use_fineweb_edu(cfg)
+
+
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
     return agpt("50b")
 

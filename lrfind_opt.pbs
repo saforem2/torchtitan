@@ -66,7 +66,11 @@ case "$OPT" in
   mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
   sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
   muon)    CONFIG=agpt_30b_olmo2tok_muon ;;
-  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon (got: ${OPT:-empty})"; exit 1 ;;
+  # muon_norescale: same arm with Muon's 15.677x LR rescale off, to separate
+  # "Muon wants a high base" from "the AdamW-path 78.5% is anchoring the
+  # curve". See docs/experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md.
+  muon_norescale) CONFIG=agpt_30b_olmo2tok_muon_norescale ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon|muon_norescale (got: ${OPT:-empty})"; exit 1 ;;
 esac
 
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
