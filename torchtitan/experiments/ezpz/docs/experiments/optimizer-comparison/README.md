@@ -70,6 +70,43 @@ through the tail would read that detour as signal. Fit on 2750-5500 and the
 implied crossover is ~40B tokens, consistent with the ~35B from the 10B run's
 tail and far outside any budget this comparison would spend.
 
+### The fresh SophiaG replicate finished FIRST on loss
+
+The independent seeded replicate (`TAG=fresh-seed1234`) ran 5,080 steps from
+random init and finished at **2.43156**, ahead of both healthy arms. All three
+arms log from step 10 with step-aligned histories, so equal step is equal
+tokens and this is a like-for-like comparison:
+
+| step | AdamW | Mano | SophiaG fresh |
+|---:|---:|---:|---:|
+| 3000 | 2.81825 | 2.67857 | **2.59921** |
+| 3500 | 2.76576 | 2.63788 | **2.56017** |
+| 4000 | 2.70875 | 2.59240 | **2.51426** |
+| 4500 | 2.68131 | 2.57592 | **2.50088** |
+| 5000 | 2.64644 | 2.55030 | **2.47070** |
+| 5080 | 2.60621 | 2.51114 | **2.43156** |
+
+It leads by ~0.08 nats over Mano and ~0.17 over AdamW, consistently, **and it
+does so having diverged twice** -- peaking at grad_norm 16,532, losing roughly
+900 steps of progress, and recovering both times.
+
+**This separates two claims the earlier sections ran together.** On loss,
+SophiaG at lr=3.55e-05 is not third and is not 1.7 nats back; that number came
+from an arm measured entirely after its blow-up. On stability it is still
+disqualified: 4/4 onset across four arms, at four distinct steps, with no
+precursor -- see
+[the known-bugs writeup](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+
+The honest statement is **SophiaG is the strongest of the three on loss and
+the only one that is unusable in production**, because a run that silently
+destroys 900 steps at an unpredictable moment cannot be scheduled around.
+Nothing here recommends running it; it does mean the loss ordering in the
+interim sections above should not be cited.
+
+Caveat on the endpoint: sophiag-fresh stopped at step 5080 / 19.98B tokens
+while the other two ran to 6000 / 23.59B, so the FINAL numbers are not
+comparable. The matched-step table above is.
+
 ### The Mano arm's late disturbance
 
 After 5,600 steps at 0.0% excursions, Mano entered a noisier stretch:
@@ -199,6 +236,23 @@ Expect SophiaG to find the ceiling: the 2026-07-03 80B SophiaG run NaN'd at
 step 14 and burned ~12h. That is what the blow-up detection is for.
 
 ## Phase 1 RESULTS (2026-08-23, jobs 12473714/15/16)
+
+![30B LR-finder sweeps, three optimizers at GBS=960 on fineweb-edu](../lr-finder/agpt/figures/lrfind_30b_gbs960.svg)
+
+These sweeps are what set the LRs every Phase 2 arm runs at, so they are the
+premise the whole comparison rests on. Each curve descends smoothly to a
+minimum and then blows up; the suggestion is taken an order of magnitude below
+the blow-up, not at the minimum.
+
+Two things to read off the figure directly. The low band is **smooth** -- there
+is no instability anywhere below the suggestion for any of the three, which is
+why "SophiaG's divergence is a too-high LR" does not survive contact with the
+sweep: a static 100-step probe cannot see a failure that arms after ~1,000
+steps. And the three minima sit within 1.8x of each other, far tighter than
+the spread the same optimizers show ACROSS batch sizes.
+
+Regenerate with `python3 torchtitan/experiments/ezpz/scripts/plot_lrfind_30b.py`.
+Full writeup: [2026-08-23-30b-gbs960-three-optimizers.md](../lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md).
 
 All three swept 1e-6 -> 1e-1 over 100 steps at GBS=960 on fineweb-edu, and all
 three produced a real blow-up, so every suggestion is a measurement rather than
@@ -364,6 +418,13 @@ descending faster, not merely starting luckier:
 SophiaG is a clear third throughout (1.7 nats back) but has the flattest
 decay in improvement rate, so its ordering versus the others is the least
 settled of the three.
+
+> **Superseded on loss.** This measured the ORIGINAL SophiaG arm, which blew
+> up at step 1048, so every point after that is "SophiaG after a blow-up"
+> rather than SophiaG. An independent seeded replicate run later finishes
+> AHEAD of both healthy arms at every matched step -- see
+> [the fresh replicate's result](#the-fresh-sophiag-replicate-finished-first-on-loss).
+> The disqualification stands, but it rests on stability, not on loss.
 
 ### What this is not yet
 
