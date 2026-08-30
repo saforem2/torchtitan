@@ -58,13 +58,25 @@ def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
         "--lr-scheduler.warmup-steps=1",
         "--lr-scheduler.decay-ratio=0.0",
     ]
-    # The muP flavors carry four param groups; SP carries one. Set every
-    # group's lr to eta and let default_mup_adamw's ratios ride on top --
-    # NO: that would flatten the groups exactly like lr_finder does. Instead
-    # the flavor's own optimizer config already encodes eta/m, so only the
-    # BASE eta is overridden, group 0 (embeddings) being the O(1) reference.
-    argv.append(f"--optimizer.param-groups.0.optimizer-kwargs.lr={lr}")
+    # SWEEPING eta CORRECTLY IS THE WHOLE MEASUREMENT, AND IT IS EASY TO GET
+    # WRONG. The first version of this passed
+    #   --optimizer.param-groups.0.optimizer-kwargs.lr=<eta>
+    # reasoning that group 0 is the O(1) reference and the rest ride on it.
+    # They do not. tyro overrides exactly the group it is told to: group 0 is
+    # `^tok_embeddings\.`, ONE parameter. Groups 1-3 -- readout, norms, and
+    # the 42-parameter hidden group that does the actual learning -- kept the
+    # config default. Every run in a 16x sweep therefore trained at the same
+    # effective LR, the loss varied by ~0.006 nats across the grid, and the
+    # argmin was picked out of noise. Verified in the logs: group 0 showed
+    # lr=0.0032 while groups 1-3 all showed lr=0.0008.
+    #
+    # There is no CLI form that rescales all four groups coherently, because
+    # the hidden group must stay at eta/m while the others sit at eta -- a
+    # ratio, not a common value. So the optimizer config is rebuilt per run
+    # via MUP_ETA, read by the muP config functions in config_registry.
+    env_eta = f"{lr:.12g}"
     env = dict(os.environ)
+    env["MUP_ETA"] = env_eta
     env["MASTER_PORT"] = str(port)
     env.setdefault("TORCH_DEVICE", "cpu")
     with open(log, "w") as fh:

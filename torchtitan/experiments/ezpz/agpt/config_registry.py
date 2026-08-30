@@ -1329,11 +1329,24 @@ def agpt_30b_olmo2tok_muon_norescale() -> FaultTolerantTrainer.Config:
 
 
 def _mup_cfg(flavor: str, *, dim: int, base_dim: int) -> FaultTolerantTrainer.Config:
-    """agpt under muP at one rung of the ladder."""
+    """agpt under muP at one rung of the ladder.
+
+    ``eta`` comes from the MUP_ETA environment variable when set, defaulting to
+    8e-4. It is an env var rather than a CLI flag because muP's four groups
+    hold a RATIO -- hidden at eta/m, the rest at eta -- and tyro can only
+    override one group at a time. Sweeping eta via
+    ``--optimizer.param-groups.0...lr`` silently moves only the embedding
+    group's LR and leaves the 42-parameter hidden group at the default, which
+    is exactly the bug that made a stage-4 rehearsal report flat curves and a
+    spurious NO TRANSFER verdict.
+    """
+    import os
+
     from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
 
+    eta = float(os.environ.get("MUP_ETA", "8e-4"))
     cfg = agpt(flavor)
-    cfg.optimizer = default_mup_adamw(8e-4, dim=dim, base_dim=base_dim)
+    cfg.optimizer = default_mup_adamw(eta, dim=dim, base_dim=base_dim)
     return cfg
 
 
