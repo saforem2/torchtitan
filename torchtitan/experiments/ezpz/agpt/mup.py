@@ -101,15 +101,32 @@ def mup_width_multiplier(dim: int, base_dim: int) -> float:
 
 
 def mup_output_linear_init(dim: int) -> dict[str, Callable]:
-    """Unembedding init at ``fan_in^-1``, replacing agpt's ``fan_in^-1/2``.
+    """Unembedding init at ``fan_in^-1/2``, with the width scaling in the LR.
 
-    ``agpt/__init__.py:_output_linear_init`` uses ``std = dim**-0.5``. muP wants
-    ``dim**-1.0`` for the readout. Truncation stays at 3 sigma so the exponent
-    is the only difference from the function this replaces.
+    Identical to ``agpt/__init__.py:_output_linear_init``. It exists as a
+    separate function because the muP readout is a decision point, not an
+    inheritance: the literal Table 3 prescription is ``d^-1`` here, and that
+    was measured to be wrong for this model (see the comment in the body).
 
-    Meaningless on its own under Adam -- see the module docstring.
+    Paired with :func:`default_mup_adamw`, whose readout group supplies the
+    width scaling. Meaningless on its own under Adam -- see the module
+    docstring.
     """
-    s = float(dim) ** -1.0
+    # MEASURED, not derived. The literal Table 3 reading is std = d^-1, and
+    # that is what this returned first. The coordinate check rejected it:
+    # lm_head slope -0.130 with an O(1) readout LR, and -0.483 once the LR was
+    # also scaled to eta/m to "complete" Table 3 -- i.e. scaling the readout
+    # down harder made it worse, so it was already too small.
+    #
+    # Keeping agpt's existing fan_in^-1/2 and letting the eta/m LR group supply
+    # the width scaling gives lm_head slope 0.001 and every module inside
+    # tolerance. See docs/experiments/mup/README.md section 5.6.
+    #
+    # This is abc-equivalent to Table 8 with the 1/m folded into the update
+    # rather than a forward multiplier, which is why no forward path changes.
+    # It is NOT the literal d^-1; anyone re-deriving from the paper will expect
+    # that and should read the measurement above before changing it back.
+    s = float(dim) ** -0.5
     return {
         "weight": partial(nn.init.trunc_normal_, std=s, a=-3 * s, b=3 * s),
         "bias": nn.init.zeros_,
@@ -393,6 +410,7 @@ def default_mup_adamw(
     dim: int,
     base_dim: int,
     independent_weight_decay: bool = False,
+    readout_lr_scaled: bool = False,
     **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """AdamW with muP's four parameter groups instead of one catch-all.
@@ -418,6 +436,11 @@ def default_mup_adamw(
             audit's section 5.1, weight decay is one of the three features
             documented to break transfer on a recipe like this one, so this is
             the first knob to try when the coordinate check fails.
+        readout_lr_scaled: give ``lm_head`` ``eta / m`` rather than ``eta``.
+            Default ``False``, which is the pairing the coordinate check
+            passes with (``fan_in^-1/2`` readout init + ``O(1)`` readout LR).
+            ``True`` belongs with a ``d^-1`` readout init; both scaled variants
+            were measured and both failed -- see the comment in the body.
         **kwargs: forwarded to every group, overriding the shared defaults.
 
     Note:
@@ -428,6 +451,33 @@ def default_mup_adamw(
         ``independent_weight_decay`` is set.
     """
     m = mup_width_multiplier(dim, base_dim)
+
+    # THE READOUT MUST MATCH ITS OWN INIT. Tensor Programs V gives two
+    # abc-equivalent forms and they differ in where the readout's width
+    # scaling lives:
+    #
+    #   Table 3: init var 1/fan_in^2 (std = d^-1)   AND  Adam LR eta/m
+    #   Table 8: init width-independent, forward multiplier 1/m, Adam LR eta
+    #
+    # mup_output_linear_init implements Table 3's d^-1 init. Pairing it with
+    # Table 8's O(1) LR is neither form: the readout is scaled down once at
+    # init and never compensated in the update. The first coordinate check
+    # measured exactly that -- lm_head slope -0.130, negative, i.e. over-scaled
+    # DOWN, while every hidden module sat at ~0.00. See
+    # docs/experiments/mup/README.md section 5.6.
+    #
+    # Default False, and that is the MEASURED pairing, not the derived one.
+    # Both scaled-LR variants were tried and both failed the coordinate check:
+    # d^-1 init with O(1) readout LR gave lm_head slope -0.130, and d^-1 init
+    # with eta/m readout LR gave -0.483 -- scaling it down harder made it
+    # worse, which is how we learned the readout was already too small. The
+    # combination that passes (slope 0.001, every module inside tolerance) is
+    # fan_in^-1/2 init with an O(1) readout LR, which is what
+    # mup_output_linear_init and this default now do together.
+    #
+    # Set True only alongside a d^-1 readout init; the two are a matched pair
+    # in Table 3 and splitting them is what the check caught.
+    readout_lr = lr / m if readout_lr_scaled else lr
 
     shared: dict[str, Any] = {
         "betas": (0.9, 0.95),
@@ -450,7 +500,7 @@ def default_mup_adamw(
     return OptimizersContainer.Config(
         param_groups=[
             _group("embedding", {**shared, "lr": lr}),
-            _group("unembedding", {**shared, "lr": lr}),
+            _group("unembedding", {**shared, "lr": readout_lr}),
             _group("norm", {**shared, "lr": lr}),
             _group("hidden", hidden),
         ]

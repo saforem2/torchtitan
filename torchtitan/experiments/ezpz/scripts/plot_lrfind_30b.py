@@ -68,7 +68,7 @@ ARMS = {
     # (optimizer/muon.py:130-139), so this dotted line is NOT comparable
     # like-for-like with the other three. See
     # docs/experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md.
-    "muon": ("Muon", "#9467bd", None),
+    "muon": ("Muon", "#9467bd", 5.68e-04),
 }
 
 
