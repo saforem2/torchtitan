@@ -92,6 +92,8 @@ and nothing that can train.
 module load frameworks/2026.1.0
 
 # 2. libglog.so.0 lives inside the module tree but is not on the path.
+#    Every `import torch` dies without this. Full writeup:
+#    docs/guides/known-bugs/fw-rc-libglog-not-on-loader-path.md
 #    Without this every `import torch` dies in torchcomms.
 FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
 export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
@@ -213,10 +215,11 @@ different code path. **If the RC ships, the `compile=OFF` workaround can be
 retired** -- but confirm at 80B before acting on it, since that is where the
 assertion was originally characterised.
 
-**The moe TP>1 fix holds on the RC, bit-identically.** Both moe arms reproduce
-the production-stack numbers (job `8787243`) to five decimals across a
-different torch build and oneCCL. The fix is in the reshape, not in anything
-version-dependent, and this confirms it.
+**The moe TP>1 fix holds on the RC.** Both moe arms reproduce the
+production-stack losses (job `8787243`) to the five decimals stdout prints,
+across a different torch build and oneCCL. That is the reported precision, not
+a bitwise check. The fix is a reshape, so version-independence is what you
+would expect.
 
 Full trajectory, `agpt_debugmodel`, 2 nodes x 12 ranks:
 

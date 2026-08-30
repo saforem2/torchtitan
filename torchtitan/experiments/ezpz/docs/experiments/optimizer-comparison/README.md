@@ -3,6 +3,8 @@
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
 **Status:** COMPLETE. Both healthy arms ran to the `training.steps=6000`
 ceiling on 2026-08-29 -- 23.59B tokens each, `rc=0`, 0 NaN/inf, 0 grad skips.
+**[W&B report](https://api.wandb.ai/links/aurora_gpt/0em3ktti)** &middot;
+[project `agpt-30b-optcmp`](https://wandb.ai/aurora_gpt/agpt-30b-optcmp)
 
 ## RESULT: Mano wins at the 10B budget
 

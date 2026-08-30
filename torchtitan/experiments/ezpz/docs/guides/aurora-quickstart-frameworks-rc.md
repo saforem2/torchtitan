@@ -37,7 +37,8 @@ Each of these four exports cost a failed job to find. None is optional.
 ```bash
 module load frameworks/2026.1.0
 
-# libglog.so.0 ships here and is NOT on the default loader path
+# libglog.so.0 ships here and is NOT on the default loader path.
+# Without this every `import torch` dies -- see known-bugs/fw-rc-libglog-not-on-loader-path.md
 FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
 export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
 
