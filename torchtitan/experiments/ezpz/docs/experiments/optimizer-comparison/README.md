@@ -160,6 +160,160 @@ LR-finder sweep is smooth through the whole low band, and the divergence is
 state-dependent rather than LR-driven, so a low-LR arm would test a different
 hypothesis than the one the sweep addresses.
 
+## Conclusions and production guidance
+
+At a fixed GBS=960, with each optimizer at its own LR measured at that batch and
+held constant after a 20-step warmup: **Mano beats AdamW at every point past
+~1.0B tokens and finishes 0.075 nats ahead at 23.59B**; **AdamW is the only arm
+that never left the healthy gradient band**; and **SophiaG produced the best
+loss trajectory of the three while diverging in 4 of 4 replicates** at four
+distinct and unpredictable steps. No arm wins on both axes, so the guidance
+below is conditioned rather than a single name.
+
+### Loss and stability are separate results -- read them separately
+
+Conflating them is how "SophiaG is a clear third, 1.7 nats back" got published
+off an arm measured entirely after its blow-up. The two orderings are exact
+reverses of each other and neither implies the other.
+
+| arm | LOSS at matched step 5080 | STABILITY over the full chain |
+|---|---:|---|
+| SophiaG (fresh, seed 1234) | **2.43156** | 2 onsets, peak grad_norm 16,532, ~900 steps lost |
+| Mano | 2.51114 | 22 excursions (0.4%), max 60.09, one transient that resolved |
+| AdamW | 2.60621 | **0 excursions in 5,747 steps**, max 1.20 |
+
+All three arms log from step 10 with step-aligned histories, so equal step is
+equal tokens and the loss column is like-for-like. It is NOT a final-loss
+ranking: sophiag-fresh stopped at 5080 / 19.98B while the other two ran to
+6000 / 23.59B. The two-arm final is AdamW 2.51357 vs Mano **2.43889**, both
+`rc=0` at the configured ceiling, 0 NaN/inf, 0 grad skips.
+
+### Which optimizer to run
+
+**Mano, if the run is constant-LR and the budget is fixed.** It leads from ~1.0B
+tokens onward, by 0.143 nats at 10B and 0.075 nats at 23.59B, and its stability
+is good enough to schedule: 0.4% of steps above grad_norm 2.0 and a single
+transient at step 5792 (grad_norm 0.23 -> 60.09, loss 2.51 -> 3.03) that
+resolved by ~5850 and left the arm at its best loss of the run.
+
+**AdamW, if the run has a decay phase or must be unattended.** This is the
+binding caveat on the Mano recommendation, not a hedge. The documented prior
+from earlier competitions is "Mano/Muon win short runs, AdamW wins in the cosine
+decay phase", and these arms are constant-LR **by design** -- there is no decay
+phase anywhere in this experiment. A real production run has one, so the
+0.075-nat Mano lead does not transfer to it without being retested. AdamW is
+also the only arm here with a perfect record: 0 steps above grad_norm 2.0 in
+5,747, lifetime max 1.20.
+
+**Do not run SophiaG in production, whatever its loss curve does.** It is the
+strongest of the three on loss and the only one that is unusable. A run that
+destroys ~900 steps at an unpredictable moment cannot be chained, and 4/4 onset
+across four arms -- including one from random init with `--debug.seed=1234`
+pinned -- makes that a property of SophiaG at this scale, not of one lineage.
+
+**If you run SophiaG anyway, `--grad-norm-abort=20.0` is mandatory, not
+optional.** It is off by default (0.0). It fired on both documented divergences
+(step 1049, eight steps before the 100,611 peak; step 1176, thirteen before
+204,016) and stayed clean on adamw and mano. `nan_abort_consecutive` never fires
+here -- every value in a SophiaG blow-up is finite.
+
+**Measure the LR per optimizer AT the production batch.** For Mano alone the
+suggested LR spans 4.79e-03 (2B config) to ~3e-06 (80B, GBS=6144) -- three
+orders of magnitude for the same optimizer. The inherited 3.0e-4 placeholder was
+8.5x above SophiaG's suggestion and only 1.18x below its measured blow-up;
+running it would have read as "SophiaG is unstable at 30B" for the wrong reason.
+
+### There is no way to monitor a SophiaG run into safety
+
+This is the result that removes "just watch it" from the options.
+
+| | original arm | fresh arm (seed 1234) |
+|---|---:|---:|
+| clean steps before onset | 1,027 at **17.9%** over 2.0, max 75.2 | 1,529 at **0.0%**, max 0.31 |
+| onset step | 1048 | ~1550, then again at ~4106 |
+| peak grad_norm | 100,611 | 16,532 (first), 177 (second) |
+
+The original arm's elevated pre-onset baseline looks like a warning sign you
+could monitor for. The fresh arm ran 1,529 comparable steps at exactly zero
+excursions and blew up anyway, then held the good state for ~2,200 more clean
+steps and blew up a second time. **No quiet streak certifies a SophiaG arm.**
+
+Severity is stochastic too, not just timing: the same arm's two onsets peaked at
+16,532 and 177, ran 100% vs 16.7% worst-window excursion rates, and lasted ~4
+windows vs ~2 intermittent ones. Nothing in either run-up predicts which you get.
+
+`dataloader.seed` was 42 in every arm, so data order was never the variable.
+
+### Reconciling the two excursion censuses in this document
+
+Two tables above report the healthy arms' stability and appear to contradict
+each other: **0 excursions / 5,747 steps** for AdamW here, **54 (2.7%)** in the
+[regime-flip section](#sophiag-a-regime-flip-4-of-4). They count the same 54
+events. The difference is the filter, and the filtered number is the right one:
+
+| census | AdamW | Mano |
+|---|---:|---:|
+| step > 20 only | 54 over 2.0 | 144 over 2.0 |
+| step > 20 **and loss < 5.0** | **0** (max 1.20) | **22** (0.4%, max 60.09) |
+
+Every one of AdamW's 54 sits at steps 21-161 with loss >= 5.0 -- a fresh init
+holds grad_norm 5-50 for its first tens of steps, and counting those makes any
+from-scratch run look like it diverged at step 21. This is the same artifact the
+known-bugs writeup flags for the SophiaG arms ("unfiltered, this arm reports 162
+excursions pre-onset -- every one of them at loss >= 5.0").
+
+One correction while reconciling. The full-run line above says Mano's excursions
+are "all of them in the late disturbance". They are not: 14 of the 22 are (steps
+5693-5980, max 60.09), but 8 sit in a mid-run cluster at steps 1694-1981 with a
+max of 4.94 -- one of which is the 3.84 spike at step 1944 that the regime-flip
+section analyses in detail. The 0.4% rate and every conclusion drawn from it
+stand; only the "all" is wrong.
+
+### Open questions
+
+**A low-LR SophiaG arm is live and unfinished.** Job 12474322, lr **1.78e-5**
+(half the 3.55e-5 suggestion), `--debug.seed=1234` pinned, 6000 steps
+configured. As of 2026-08-30 it is at step ~331, loss 6.04 -- still in ordinary
+early training and far short of the earliest onset observed anywhere (1048). It
+currently proves nothing in either direction; do not pre-judge it. Note also
+what it can and cannot settle: clearing 1,550 would only show delay, and the
+fresh arm's second onset at ~4106 came after ~2,200 clean steps, so the honest
+stopping condition is behavioural (no divergence for N steps) rather than a step
+number -- the lesson recorded in the known-bugs Correction. Even a clean 6,000
+steps bounds the rate rather than disproving the failure.
+
+**No decay phase, anywhere in this experiment.** Whether Mano's lead survives
+cosine decay is the obvious follow-up and is NOT answered here.
+
+**One seed per arm.** The 0.075-nat final gap has no error bar. The crossover
+near 40B is an extrapolation from the 2750-5500 windows; nobody ran there.
+
+**The SophiaG mechanism is unresolved.** The discriminating test is instrumenting
+the Hessian-estimate norm and its update clipping per step to see whether the
+estimate degrades before onset. Another LR arm does not discriminate it.
+
+### What a reader should NOT conclude
+
+* **NOT** that Mano beats AdamW in a decayed production run. Untested, and the
+  documented prior points the other way.
+* **NOT** that SophiaG is worse on loss. It was the best of the three at every
+  matched step measured. The "clear third, 1.7 nats back" reading came from an
+  arm measured entirely post-blow-up.
+* **NOT** that the last two windows (5750, 6000) show the gap reopening. The
+  narrowing is monotone from 2750 to 5500 (-0.1378 -> -0.0793, ~0.0187 nats per
+  1,000 steps); the final two straddle the Mano transient and its rebound. Fit
+  on 2750-5500 only.
+* **NOT** that 0.075 nats is a converged separation. It is the gap at the
+  configured ceiling, still closing.
+* **NOT** that sophiag-fresh's 2.43156 beats Mano's 2.43889 -- different token
+  counts (19.98B vs 23.59B). Compare at matched step or not at all.
+* **NOT** that a healthy-looking SophiaG run is a safe one. 1,529 and ~2,200
+  clean steps each preceded an onset.
+* **NOT** that lower LR fixes SophiaG. That arm is running now and is 331 steps
+  in.
+* **NOT** that any of this measures seed variance, or transfers to GBS=15360
+  production without re-measuring the LR at that batch.
+
 ---
 
 ## What this replaces, and why

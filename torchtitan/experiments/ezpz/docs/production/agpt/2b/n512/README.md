@@ -1,6 +1,6 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-08-14.**
+> **Last updated: 2026-08-30.**
 >
 > **This is the canonical 2B production chain.**
 >
@@ -29,9 +29,30 @@
 > submit continuations against this checkpoint dir; a resume would
 > either no-op or need an explicitly raised `TRAIN_TOKENS`, which
 > would no longer be the 4.67T olmo-mix-1124 run this page
-> documents. The 512N slot it occupied in the umbrella is free for
-> another chain. Post-training work (eval, SFT, forks) should start
+> documents. Post-training work (eval, SFT, forks) should start
 > from `step-46429`.
+>
+> **What took the 512N slot after it (as of 2026-08-30).** The slot
+> this chain vacated did not stay free: umbrella seat `t0` became the
+> **2B-512 stage-2 dolmino CPT** arm, seeded model-only from
+> `step-46429`, and seat `t3` carries the **512N constant-LR fork**
+> branched at step-9,200. Both are separate checkpoint dirs and
+> neither adds tokens here. **Both are idle**, not finished: Aurora
+> production last trained **2026-08-26** under umbrella `8773440`,
+> where `t3` advanced the constant-LR fork **+504 steps
+> (2.74535 -> 2.73836)** and `t0` logged **0 steps**. `8773440` used
+> only 5h13m of a 12h slot (`Exit_status=-14`) -- `ezpz` 0.21's
+> progress regex matched `step=` while `torchtitan` prints `step: `,
+> so training seats scored zero progress and were filed
+> `stuck_pre_training`; `t3` was killed right after checkpointing
+> step 21,800. Fixed in `ezpz` 0.27.3. The successor umbrella
+> `8784460` (2,098 nodes, `large`) has been `Q` since 2026-08-26
+> 13:22 UTC with 101h+ eligible time and `score_boost = 0`, with
+> `8784462` held behind it; ALCF ticket drafted but **NOT sent**
+> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+> Stage-2 detail: [`production/cpt/`](../../../cpt/README.md); fork
+> writeup:
+> [`20260817-2b-512-constant-lr-fork.md`](../../../../experiments/agpt/aurora/20260817-2b-512-constant-lr-fork.md).
 >
 > **Eval scores (final, job `8754664`, 2026-08-14):** the last 6,800
 > steps were unevaluated (coverage had stopped at 39,600), so the tail
@@ -160,11 +181,13 @@ training. Default is now 600s + `--train-iters 5`.
 - **Aurora `small` queue stall (2026-05-30 -> 2026-06-07), since
   cleared.** The chain spent ~10 days without a sustained 512N
   slot on the saturated `small` queue -- not a model, venv, or
-  failover-wrapper fault. It has since resumed via the autoretry
-  continuation chain and a HEAD-migration dress rehearsal
-  (`8686135` -> `8686136`), advancing the on-disk frontier to
-  step-39,600. Aurora `small` stays heavily oversubscribed, so
-  sustained 512N dispatches can still be days apart.
+  failover-wrapper fault. It resumed via the autoretry continuation
+  chain and a HEAD-migration dress rehearsal
+  (`8686135` -> `8686136`), reached step-39,600, and went on to
+  finish the budget at step-46,429 on 2026-08-13. Aurora queue
+  contention outlived the chain: as of 2026-08-30 the successor
+  umbrella `8784460` has been queued 101h+, so nothing seeded from
+  this checkpoint has run since 2026-08-26.
 - **yeet-env single-bad-node rsync transient (2026-06-07, job
   `8521627`).** One node out of 522 dropped its incoming rsync
   connection (`Connection reset by 10.112.164.235 port 22`) and

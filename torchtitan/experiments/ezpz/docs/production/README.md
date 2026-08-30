@@ -4,12 +4,34 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-08-23
+> Last updated: 2026-08-30
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
 > [**production/polaris/README.md**](polaris/README.md). This page is
 > Aurora/Sunspot (Intel XPU) only.
+
+> [!IMPORTANT]
+> **Aurora production is IDLE and has not trained since 2026-08-26.**
+> The last umbrella to seat, `8773440`, started Wed 08-26 04:14 UTC and used
+> **5h13m of a 12h slot** (`Exit_status=-14`); three of its five seats
+> trained (20B-256 +201 steps, 2B-512 +504, 2B-256 +782) and both 512N seats
+> never started. `8775285` (the 30B LR-finder umbrella) ran 1h32m and exited
+> 0 with all four seats at `rc=143` and no suggested LR -- a clean exit that
+> produced nothing. **Nothing has trained since.**
+>
+> The blocker is the queue, not the code: **`8784460`** (2,098 nodes, `large`,
+> project `AuroraGPT`) has been `Q` since Wed Aug 26 13:22 UTC with
+> **101h+ eligible time** and `score_boost = 0` -- the previous incarnation of
+> this chain pair carried a ~10M boost and started within a day, and this pair
+> lost it on resubmit. `8784462` is held behind it on `afterany`. Reservations,
+> allocation, queue limits, holds and node pinning were all ruled out locally.
+> An ALCF ticket is **drafted but NOT SENT**:
+> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+>
+> The tables below describe each chain's last *persisted* state. A "Trend"
+> cell describing an advance refers to the job that made it, not to anything
+> running now.
 
 > [!NOTE]
 > **The per-step metrics behind these tables and charts are stored locally:**
@@ -36,18 +58,21 @@
 
 ### Pre-training
 
-One row per live trajectory; `% target` is against the 4.67T olmo-mix budget.
-Post-training stages (CPT / SFT / RL-GRPO) are in the
+One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
+**No row is advancing** -- see the idle banner above; every state below is
+where its chain stopped. Post-training stages (CPT / SFT / RL-GRPO) are in the
 [next table](#post-training-stages-cpt--sft--rl). Detail + per-dispatch history
 in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
-| [2B 512N](agpt/2b/n512/README.md) sync | **COMPLETE** | 46,429 | **2.687** | **100.0%** | ✅ **finished 2026-08-13 19:11 UTC** as umbrella 8744247 t0, exit 0. Full 4.674T olmo-mix-1124 budget. Final eval: MMLU 0.2511 (chance), and the last 500B tokens moved no metric. Stage 2 (dolmino CPT) seeded from step-46429 is queued as 8756070 t0. |
-| [20B 256N](agpt/20b/n256/README.md) | advancing | **9,800** | 2.476 | 10.5% | 🟢 umbrella 8744247 carried 8,300→9,800 (ckpt head; last logged 9,850) before walltime. Continuation 8756071 queued. |
-| [20B 512N](agpt/20b/n512/README.md) | advancing | **8,700** | 2.464 | 18.7% | 🟢 the mover: umbrellas 8714503+8744245 carried 7,100→8,700 |
+| [2B 512N](agpt/2b/n512/README.md) sync | **COMPLETE** | 46,429 | **2.687** | **100.0%** | ✅ **finished 2026-08-13 19:11 UTC** as umbrella 8744247 t0, exit 0. Full 4.674T olmo-mix-1124 budget. Final eval: MMLU 0.2511 (chance), and the last 500B tokens moved no metric. Stage 2 (dolmino CPT) seeded from step-46429 **has since run** (8756070 t0 then 8756957 t0) and sits at step 7,728, also idle. |
+| [20B 256N](agpt/20b/n256/README.md) | **idle** since 08-26 | **10,369**[^head] | 2.372 | 11.2% | ⏸️ the only pre-training chain `8773440` actually advanced: seat `t2`, **+201 steps, 2.31488 -> 2.24577**. Nothing since. |
+| [20B 512N](agpt/20b/n512/README.md) | **idle** since 08-26 | **9,690**[^head] | 2.400 | 20.9% | ⏸️ seat `t1` of `8773440` **never started** (0 steps). Last advance was `8764675` on 08-20. |
 | [**80B**](agpt/80b/README.md) | **blocked** (dp wall) | — | nan | — | 🔴 optimizer-independent grad-path overflow at dp>~186; not a SophiaG bug |
+| [2B 512N stage-2 dolmino](cpt/README.md) | **idle** since 08-26 | **7,728**[^head] | 2.519 | n/a (CPT) | ⏸️ a 2B-512 seat of `8773440` logged **0 steps**. Seeded from 2B-512 step-46429. |
+| [2B 512N constlr fork](agpt/2b/n512/README.md) | **idle** since 08-26 | **21,307**[^head] | 2.745 | n/a (fork) | ⏸️ a 2B-512 seat of `8773440` ran **+504 steps, 2.74535 -> 2.73836**. Constant-LR fork branched at step 9,201. |
 
 ### Post-training stages (CPT / SFT / RL)
 
@@ -66,11 +91,38 @@ has its own token/step goal in the linked page.
 > Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
 > [production/rl/grpo/README.md](rl/grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
 
-<details>
-<summary><strong>512N queue starvation</strong> — both 512N chains ~20d in <code>small</code>; node contention, not a hold (details)</summary>
+[^head]: Chain positions as reported in the
+    [2026-08-26 sync census](../meeting-notes/agpt-sync.md#1-aurora-production-nothing-moved).
+    The [dispatch log](dispatch-log.md) records higher *logged* steps for the
+    20B chains (`8764675`: 20B-512 to 10,699, 20B-256 to 11,800) -- logged is
+    not persisted, checkpoints save on an interval, and the log's own reading
+    rules say to take the resumable head from disk. Losses are the tips of the
+    committed [metrics store](metrics/README.md) (exported 2026-08-17), whose
+    nearest sampled steps are 10,380 / 9,694 / 7,730 / 21,307.
+    Seat-to-chain attribution for `8773440` is by node count plus the seat's
+    reported loss: its two 2B-512 seats logged 0 and 504 steps, and the 504
+    seat's 2.74535 matches the constlr tip. Its 2B-256 seat (+782 steps,
+    2.56449 -> 2.54807) is **not** attributed to a row here -- the canonical
+    2B-256 chain finished at 4.674T and loss 2.652, so that seat is something
+    else. Per-seat detail: [dispatch log](dispatch-log.md).
 
-> Both 512N chains sitting ~20 days in `small` is pure node contention, not a
-> hold or bad request — and re-submitting would *reset* their accrued priority.
+<details>
+<summary><strong>Queue starvation</strong> -- the recurring blocker; now <code>8784460</code> at 101h+ eligible (details)</summary>
+
+> **Current instance (2026-08-30).** `8784460`, the 2,098-node umbrella that
+> owns every chain above, has been `Q` since 2026-08-26 13:22 UTC with 101h+
+> eligible time and `score_boost = 0`. Ruled out locally: reservations total
+> 134 nodes, `AuroraGPT` has +1.27M node-hours, `large` allows `max_queued=10`
+> against our 2, 2,098 is inside the queue's 2000-10624 range, `Hold_Types=n`,
+> and the `depend` is our own chain successor. A *larger* job (`8791192`,
+> 2,304 nodes, another project) with the same zero boost and 22 minutes
+> eligible started ahead of it on 08-29. Ticket drafted, **not sent**:
+> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+>
+> **Earlier instance (June 2026).** Both 512N chains sat ~20 days in `small`
+> on pure node contention, not a hold or bad request -- and re-submitting
+> would have *reset* their accrued priority. That lesson applies again here:
+> re-`qsub` is what cost this pair its score boost.
 > Full diagnosis + data: [queue-wait-analysis.md](queue-wait-analysis.md).
 
 </details>
@@ -114,22 +166,28 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 
 ## Active Runs
 
+> **Nothing in this section is running.** Heading kept for stable anchors;
+> "Active" here means "on the live roster", not "executing". Every chain has
+> been idle since 2026-08-26 -- see the banner at the top of this page.
+
 ### Canonical chains (one per model)
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **46,429** (FINAL) | **2.687** | **4.67T** (100.0%) | — chain complete | ✅ **COMPLETE 2026-08-13 19:11 UTC.** Finished the full olmo-mix-1124 budget as trainer 0 of umbrella 8744247: step 46,429/46,429, exit 0 (`FAILOVER STOP: success`), final ckpt step-46429 with 6,144 shards + `.metadata`. Do NOT submit continuations against this ckpt dir -- there is no budget left. Post-training and stage-2 work seed from step-46429. |
-| 20B | 512 | **8,700** (persisted) | **2.47** | **875.8B** (18.7%) | [`8638795`](../experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md) advanced (afterany cont) | **ADVANCING on native auto-retry (broke the stall 2026-07-05..07, 4,400→5,400).** Had been frozen at step-4400 since 05-29: its last advance was as trainer-1 in umbrella 8568429, which died at init on bad node x4410 and the legacy `failover_lib.sh` blind-swapped the wrong nodes (scraper can't parse the hostname from `signal 11`), exhausting retries. Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned runs/agpt-20b-v2 clone (ezpz upgraded 0.16->0.21.3 for `--auto-retry`; resume step-4400 CONFIRMED by 2N smoke 8638756: `Training starts at step 4401`). NOTE step-4500 is an empty/aborted save (not resumable); step-4400 is the last valid ckpt. Legacy sync jobs 8521632/8534295 qdel'd to avoid ckpt-dir collision. head 8638793 + cont 8638795 (afterany). |
+| 20B | 512 | **9,690** (persisted) | **2.400** | **975.4B** (20.9%) | [`8773440`](dispatch-log.md) t1 -- **never started** | ⏸️ **IDLE since 2026-08-26.** Its seat in the last umbrella to run logged 0 steps; the last real advance was `8764675` on 08-20. Now waiting on `8784460` (Q 101h+). *History:* had been frozen at step-4400 since 05-29: its last advance was as trainer-1 in umbrella 8568429, which died at init on bad node x4410 and the legacy `failover_lib.sh` blind-swapped the wrong nodes (scraper can't parse the hostname from `signal 11`), exhausting retries. Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned runs/agpt-20b-v2 clone (ezpz upgraded 0.16->0.21.3 for `--auto-retry`; resume step-4400 CONFIRMED by 2N smoke 8638756: `Training starts at step 4401`). NOTE step-4500 is an empty/aborted save (not resumable); step-4400 is the last valid ckpt. Legacy sync jobs 8521632/8534295 qdel'd to avoid ckpt-dir collision. head 8638793 + cont 8638795 (afterany). |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
 
 ### Active 256N trajectories
 
+> Both idle. The 2B row is genuinely finished; the 20B row is stalled.
+
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
-| 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). **Next: eval the final ckpt (blocked on PM).** |
-| 20B | 256 | **9,800** (persisted) | **2.476** | **493.2B** (10.5%) | [`8558549`](agpt/20b/n256/README.md) advanced (cont1) | Carried step-1,100 → **3,100** (loss **2.68**) via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549). Per-token comparator to the canonical 512N. Relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
+| 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). The final step-92,859 checkpoint **has since been evaluated** (job 8638581): see [`evals/agpt/2b/`](../evals/agpt/2b/README.md). |
+| 20B | 256 | **10,369** (persisted) | **2.372** | **521.9B** (11.2%) | [`8773440`](dispatch-log.md) t2 -- last to advance | ⏸️ **IDLE since 2026-08-26.** The only pre-training chain the last umbrella actually moved: **+201 steps, loss 2.31488 -> 2.24577**. Now waiting on `8784460` (Q 101h+). Per-token comparator to the canonical 512N. *History:* carried step-1,100 → 3,100 via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549); relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
 
 ### Every dispatch (individual + umbrella)
 

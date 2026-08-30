@@ -1,8 +1,17 @@
 # Production GRPO
 
+> Last updated: 2026-08-30
+
 > GRPO-tuned checkpoints derived from SFT'd or pre-trained AuroraGPT
 > models. Each entry is a recipe + checkpoint pair: a specific task
 > applied to a specific starting model.
+>
+> **Every row below is finished.** The newest entry is dated 2026-07-20;
+> no GRPO run is training or queued. Note that the three
+> `agpt-2b-gs138650-sft-fullmix-step900` rows start from a checkpoint whose
+> consolidated `-hf` export is **no longer on disk** -- re-consolidate from
+> the sharded `checkpoint-900/` before reproducing them (see
+> [SFT evals](../../sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md#recommendation)).
 
 ## Index
 

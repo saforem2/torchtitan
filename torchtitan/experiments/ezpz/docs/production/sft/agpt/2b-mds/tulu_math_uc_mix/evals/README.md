@@ -1,5 +1,8 @@
 # lm-eval: SFT'd AuroraGPT-2B (tulu_math_uc_mix) vs pretrained baseline
 
+> **Last updated: 2026-08-30.** Results unchanged since 2026-06-10; the
+> 08-30 edit only marks the two "planned" follow-up evals as done.
+
 **Date:** 2026-06-10
 **Machine:** Sunspot
 **Models compared:**
@@ -60,17 +63,25 @@ Three reasons the 7-task suite would not show SFT improvements:
    roughly one standard error. With 7 comparisons we expect about
    half to land negative just from sampling noise on the eval set.
 
-## Where SFT *does* show up (planned follow-up evals)
+## Where SFT *does* show up (follow-up evals)
+
+> The first two were planned when this page was written on 2026-06-10 and
+> have **both since been run** -- results in
+> [`ifeval.md`](ifeval.md) and [`grpo-smoke.md`](grpo-smoke.md). The last
+> two were never run.
 
 - **IFEval** — `lm-eval --tasks ifeval`. Generative, 541 prompts that
   test verifiable structural instruction-following ("include the
   word X", "use exactly 5 sentences", "do not use commas"). A base
   LM scores near-zero; an SFT'd LM should jump substantially.
-  Running now in
+  **Done** -- +8pp on `prompt_level_strict_acc`; see
+  [`ifeval.md`](ifeval.md). Harness:
   [`eval_ifeval_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/eval_ifeval_sft_vs_baseline.sh).
 - **GRPO from this checkpoint** — the original justification for the
   SFT push. A model that already speaks chat will accept the GRPO
-  signal much faster than a raw base LM. Smoke comparison in
+  signal much faster than a raw base LM. **Done** -- ~8x the baseline
+  on the converged window; see [`grpo-smoke.md`](grpo-smoke.md).
+  Harness:
   [`grpo_smoke_sft_vs_baseline.sh`](../../../../../../../rl/scripts/sft/grpo_smoke_sft_vs_baseline.sh).
 - **MMLU 5-shot** — not run here (57 subjects × 14k questions is
   slow at 0-shot on 2B; would burn most of a day on 1 tile). MMLU

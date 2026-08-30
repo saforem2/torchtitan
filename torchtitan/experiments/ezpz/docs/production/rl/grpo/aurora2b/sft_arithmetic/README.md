@@ -1,5 +1,8 @@
 # GRPO recipe: AuroraGPT-2B-sft-tulu-mix x sum_digits arithmetic (8N)
 
+> **Last updated: 2026-08-30** (stamp added; the run finished 2026-06-11
+> and none of its numbers have changed).
+>
 > **Status: complete.** 1000 GRPO steps over the `sum_digits`
 > arithmetic task using the SFT'd checkpoint as starting point.
 > Final checkpoint at

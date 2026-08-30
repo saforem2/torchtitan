@@ -1,6 +1,6 @@
 # SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix
 
-> **Last updated: 2026-08-19.**
+> **Last updated: 2026-08-30.**
 > **Status: NOT DELIVERED (blocked).** Corrected 2026-08-16: this page said
 > "in progress" while the SFT index said "blocked", both dated the same
 > day. Disk settles it -- the output dir
@@ -8,6 +8,12 @@
 > `checkpoint-*` directories, so the `checkpoint-100 saved` note in the run
 > table below did not survive. Blocked on the v2-base oneCCL scale crash at
 > 32N (jobs 12470254/258/262, unsolved; 2N smoke is green).
+>
+> **Re-checked 2026-08-30: unchanged.** The output dir still holds only its
+> own `README.md` and no `checkpoint-*`. Nothing is queued or running for
+> this recipe, and no work has gone into it since July -- post-training
+> effort moved to the `2b-mds` lineage (see
+> [POST-TRAINING-2B](../../../../POST-TRAINING-2B.md)).
 >
 > Originally: First production SFT on the COMPLETED v2 2B base
 > (step-92,859 = 4.674T tokens, 256N chain). Full 32N run is job **12470088**
@@ -42,17 +48,18 @@
 
 | Job | Date | Steps | Loss | Notes |
 |-----|------|------:|-----:|-------|
-| 12470088 | 2026-07-06 -> | ~100+/729 (in progress) | 1.35 -> 0.95 | Full 32N, select=36 (32+4 spare), --auto-retry. Fresh CKPT_DIR (resume coerced to None -> clean start on v2 base, NOT resuming old 729). **checkpoint-100 saved** at 16:20; trajectory persists. mean_token_accuracy 0.68 -> 0.757. |
+| 12470088 | 2026-07-06 | ~100+/729, then lost | 1.35 -> 0.95 | Full 32N, select=36 (32+4 spare), --auto-retry. Fresh CKPT_DIR (resume coerced to None -> clean start on v2 base, NOT resuming old 729). A `checkpoint-100` was reported saved at 16:20 and mean_token_accuracy moved 0.68 -> 0.757, but **no checkpoint from this job is on disk today** -- the output dir contains zero `checkpoint-*` (re-verified 2026-08-30). The run did not survive; the loss figures below come from its logs, not from a recoverable checkpoint. |
 
 <!-- RUN-PROGRESS -->
 
 ### Early trajectory (job 12470088)
 
 First ~100 steps on the v2 base (2N-smoke-consistent descent, at production
-GBS=6144): loss 1.35 -> 0.95, mean_token_accuracy 0.68 -> 0.757. First
-checkpoint (step-100) saved cleanly via `save_fsdp_model`. Runs to ~729 steps
-(3 epochs), saving every 100 with `--save-total-limit 8` and auto-retry
-bad-node protection. Compare: the gs138650 SFT started ~1.16 (this v2 base
+GBS=6144): loss 1.35 -> 0.95, mean_token_accuracy 0.68 -> 0.757. A step-100
+checkpoint was reported saved via `save_fsdp_model` (none is on disk now).
+The plan was ~729 steps (3 epochs), saving every 100 with
+`--save-total-limit 8` and auto-retry bad-node protection; it never got
+there. Compare: the gs138650 SFT started ~1.16 (this v2 base
 starts higher because it is a different pretrained model seeing the chat
 format cold) and finished 0.77 over 729 steps.
 
@@ -60,7 +67,9 @@ format cold) and finished 0.77 over 729 steps.
 
 The prior production SFT
 ([tulu_math_uc_mix on gs138650](../../2b-mds/tulu_math_uc_mix/README.md))
-reached final loss 0.77 over 729 steps. This run applies the identical recipe
-to the completed v2 base; the eval comparison (base-LM benchmarks + downstream
-GRPO signal) will show whether SFT on the completed 4.674T base beats SFT on
-the older lineage.
+reached final loss 0.77 over 729 steps. This run applied the identical recipe
+to the completed v2 base, so an eval comparison (base-LM benchmarks +
+downstream GRPO signal) would have shown whether SFT on the completed 4.674T
+base beats SFT on the older lineage. **That comparison was never made** -- the
+run never produced a surviving checkpoint to evaluate, and the question is
+still open.

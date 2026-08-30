@@ -1,5 +1,15 @@
 # B3 Cold-Start SFT (instruct + CoT rebuild) Implementation Plan
 
+> **Last updated: 2026-08-30. This plan has already been executed -- do not
+> pick it up and run it.** B3 was built, trained and evaluated: it scored
+> **0.05** cot_accuracy against B2's 0.205 (a long-CoT dilution regression),
+> and the B4 follow-ups failed to recover it. Verdict and numbers:
+> [`../b4-finish-and-reweight/README.md`](../b4-finish-and-reweight/README.md).
+> The unticked `- [ ]` boxes below are the original tracking state and were
+> not maintained through execution -- they are not a to-do list. One step
+> genuinely was skipped: this directory has **no `README.md`** (Step 4), so
+> B3's own results live only on the B4 page.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild the agpt-2b CoT cold-start as ONE TRL SFT from the stage-3 pretrain base (`gs138650`) on a balanced instruction + chain-of-thought data mix, then eval it on the 200-problem GSM8K CoT metric vs B2 (0.205).

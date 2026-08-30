@@ -1,7 +1,12 @@
 # B4 cold-start SFT fix: recover + beat B2 after the B3 dilution regression
 
 Date: 2026-07-24
-Status: approved (brainstorming), pending implementation plan
+Status when written: approved (brainstorming), pending implementation plan
+
+> **Last updated: 2026-08-30.** This is the original design document and is
+> kept as written. Both paths it proposes were **built, run, and lost** --
+> B4a scored 0.02 and B4b 0.065 against B2's 0.205. Results and verdict:
+> [`README.md`](README.md) in this directory. Nothing here is running.
 
 ## Motivation
 

@@ -1,5 +1,10 @@
 # GRPO on Intel XPU: TRL `GRPOTrainer`
 
+> **Last updated: 2026-08-30.** The status table below is unchanged since
+> 2026-07-06 and still reflects what was validated then; "works" means the
+> path was proven, not that anything is running now. No TRL GRPO job has
+> been submitted since July.
+
 On-policy GRPO via **TRL `GRPOTrainer`** on Sunspot XPU (no Monarch). Two
 generation backends: **`trl vllm-serve`** (recommended, on-policy) with a
 **`.generate()` per-rank** fallback. For the Monarch + TorchStore + vLLM path

@@ -2,7 +2,18 @@
 
 > **Living document** — updated as CPT runs complete and are evaluated.
 >
-> Last updated: 2026-07-10
+> Last updated: 2026-08-30
+>
+> **Nothing on this page is running.** The two 300B pilots finished
+> 2026-07-06 and are the durable result. Everything launched after them
+> stopped in July and none of it has restarted: the olmo50-dolmino50
+> constant-2e6 stage-2 chain last wrote a checkpoint 2026-07-18, the
+> dolmino-100 gentle-LR retry last wrote one 2026-07-10, and the
+> `olmo25-dolmino75` arm never ran at all. Per the
+> [2026-07 sync notes](../../meeting-notes/agpt-sync.md), the ratio
+> sweep was superseded by the data-mix experiment; the gentle-LR arms
+> are kept as reference, not as an active front. Read the sections
+> below as a record of what was tried, not of what is in flight.
 
 ## Motivation
 
@@ -31,7 +42,7 @@ Both pilots forked the base (model-weights-only via
 |-----|----------|-----------:|---------------:|-------------------:|------------:|
 | **dolmino-100** | 8638977 + 8638979 | 7.27 | 2.480 | **2.492** | **-0.31** |
 | **olmo50-dolmino50** | 8638978 + 8638980 | 7.24 | 2.590 | **2.601** | **-0.20** |
-| olmo25-dolmino75 | (queued) | — | — | — | — |
+| olmo25-dolmino75 | never ran | — | — | — | — |
 | olmo-100 (control) | (base plateau) | — | ~2.80 | ~2.80 | 0 |
 
 > [!WARNING]
@@ -46,9 +57,15 @@ Both pilots forked the base (model-weights-only via
 > distribution. **Root cause hypothesis: the recipe re-warmed the converged
 > base back to the FULL peak LR (2.28e-5), disrupting it (downstream
 > forgetting).** The MDS reference ran continuous SophiaG @ 2.17e-5 and never
-> re-warmed to peak for stage-2. **Gentler retry launched: dolmino-100 @
-> LR=2e-6 constant, warmup=20 (job 8648114)** -- if it holds the plateau, the
-> recipe was the culprit; if it also tanks, dolmino is wrong for downstream.
+> re-warmed to peak for stage-2. **A gentler retry (dolmino-100 @
+> LR=2e-6 constant, warmup=20, job 8648114) was launched to test this** --
+> if it held the plateau the recipe was the culprit; if it also tanked,
+> dolmino is wrong for downstream. **It never got far enough to settle
+> the question:** the arm's ckpt dir
+> (`agpt-2b-cpt-dolmino100-gentleLR2e6-n256-gbs6144`) holds 12
+> checkpoints, topping out at step-1200 of the 5,960-step budget, last
+> written 2026-07-10, and no eval of it is recorded here. The hypothesis
+> is still open and nothing is queued to close it.
 
 ### Downstream eval (job 8647850, full 12-point screen)
 
@@ -63,14 +80,16 @@ Both pilots forked the base (model-weights-only via
 **Two distinct damage modes:**
 1. **Immediate, ratio-independent HellaSwag drop** (~-6-7pp at step-1000, both
    mixes, never recovers) -- consistent with the **LR-spike/re-warm shock** on
-   the converged base (the recipe). This is what the gentle-LR retry tests.
+   the converged base (the recipe). This is what the gentle-LR retry was
+   meant to test; it stopped at step-1200 without an eval.
 2. **Slow, ratio-DEPENDENT ARC-Easy bleed:** dolmino-100 collapses monotonically
    (0.619 -> 0.547) while **olmo50-dolmino50 HOLDS (~0.61)**. Keeping olmo in
    the mix prevents the ARC-Easy bleed -> pure dolmino is specifically bad here.
 
 So both levers matter: **gentler LR** (for the shock) AND **keeping some olmo**
-(for the bleed). The gentle retry isolates the LR lever on dolmino-100; if it
-recovers, a gentle-LR + blended-mix run is the next step.
+(for the bleed). The gentle retry was designed to isolate the LR lever on
+dolmino-100 -- it stopped at step-1200 and was never evaluated, so that
+lever is still unmeasured.
 
 **Loss-only findings (do NOT imply capability gains -- see the eval warning above):**
 1. **The distribution shift is real.** Both runs started at ~7.2 -- far above
@@ -128,6 +147,13 @@ the direct stage-2 analog is **~2.391T tokens** (~8x the 300B pilot). See
 
 ## Plan: two-phase (screen cheap, scale the winner)
 
+> **Historical -- this plan was not carried out past step 1.** Step 1 (the
+> eval screen) ran as job 8647850 and is the "Downstream eval" section
+> above. Step 2 (`olmo25-dolmino75`) never ran. Step 3 was attempted once,
+> as the stage-2 chain below, and stopped in July. The 2026-07 sync notes
+> record the sweep as superseded by the data-mix experiment, which answers
+> "what data for stage 2" more directly.
+
 1. **Eval the 300B pilot checkpoints** (step-5,960 each: dolmino-100 +
    olmo50-dolmino50, + olmo25-dolmino75 once it runs) on the downstream
    benchmark suite, overlaid vs the olmo-100 flat tail -- the real quality
@@ -144,7 +170,18 @@ the direct stage-2 analog is **~2.391T tokens** (~8x the 300B pilot). See
 > before knowing which wins would be ~7T tokens of compute; the 300B screen
 > costs ~1/8 of one and identifies the winner first.
 
-## Stage-2 LAUNCHED (2026-07-10) -- via the chained umbrella
+## Stage-2 launched 2026-07-10 via the chained umbrella -- and stopped
+
+> **Outcome (verified 2026-08-30):** this chain reached **step-6,600** of
+> its ~47,500-step budget and stopped. Its ckpt dir holds 66 checkpoints,
+> the newest written **2026-07-18**, and nothing has been submitted
+> against it since. Note also that job 8663177 NaN-diverged at step 3,801
+> and ran ~370 unbounded NaN steps afterwards, so **checkpoints from
+> step-3801 to step-6600 are NaN-poisoned** and should not be resumed or
+> evaluated. The seat this chain occupied in the umbrella was later
+> reassigned to a pure-dolmino stage-2 arm
+> (`agpt-2b-stage2-dolmino-n512-gbs12288` / `-n256-gbs6144`), which is
+> tracked with the umbrella, not here.
 
 Rather than pure dolmino-100 (the pilot DEGRADED benchmarks: HellaSwag -7.4pp,
 ARC-Easy -10.4pp -- see the warning above), stage-2 uses **olmo50-dolmino50**
@@ -165,11 +202,13 @@ applied, model-only fork loaded, trainers 0/1/3 regression-clean).
 - **Budget:** train_tokens=2.391e12 -> ~47,500 steps at GBS=6144 (the MDS
   stage-2 analog); spans many 12h umbrella windows, resuming the stage-2
   ckpt dir each run.
-- **Launch:** chained umbrella `8663177` (H on `afterany:8648363`) -- dispatches
-  when the current umbrella walltimes. The 3 standalone chains it covers
-  (8647383, 8661117, 8647386) were qheld to avoid ckpt-dir collision.
-- **Also running:** the standalone dolmino-100 constant-2e6 CPT retry
-  (`8662867`, distinct dir) still tests the pure-dolmino gentle-LR arm.
+- **Launch:** chained umbrella `8663177` (H on `afterany:8648363`), which
+  dispatched when the then-current umbrella walltimed. The 3 standalone
+  chains it covered (8647383, 8661117, 8647386) were qheld to avoid
+  ckpt-dir collision. 8663177 is the job that NaN-diverged at step 3,801.
+- **Second arm:** the standalone dolmino-100 constant-2e6 CPT retry
+  (`8662867`, distinct dir) tested the pure-dolmino gentle-LR lever. It
+  also stopped -- 12 checkpoints, last at step-1200 on 2026-07-10.
 
 ## Cross-refs
 

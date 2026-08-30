@@ -1,6 +1,15 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-08-19
+> Last updated: 2026-08-30
+>
+> **Nothing is training right now.** The last leg on either 20B chain was
+> umbrella `8773440` on **2026-08-26**, which used 5h13m of a 12h slot
+> (`Exit_status=-14`): its 20B-256 seat trained 201 steps (loss 2.31488 ->
+> 2.24577) and its 20B-512 seat never started. The successor umbrella
+> `8784460` (2,098 nodes, `large`) has been `Q` since 2026-08-26 13:22 UTC
+> with 101h+ eligible and `score_boost=0`, `8784462` held behind it; ticket
+> drafted, NOT sent
+> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -19,7 +28,7 @@ torchtitan.experiments.ezpz.utils.plot_production_combined`.
 For the cross-model view (2B + 20B together) with per-token efficiency
 comparison, see [`../README.md`](../README.md).
 
-## 🏁 Headline (2026-07-24)
+## 🏁 Headline (2026-07-24, historical -- step counts below are as of that date)
 
 **20B 512N chain beats 2B 256N async on every benchmark per token.**
 Advanced to step **6,050** / ~609.0B tokens (13.0%) after the native
@@ -41,8 +50,8 @@ per-task table.
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 512N**](n512/README.md) (canonical chain) | Advancing — native auto-retry relaunch (8638793 resume + 8638795 cont) broke the sync-chain stall, carried step-4,400 → 5,400 (2026-07-05..07). step-100..5,400 persisted every 100. cont chained. | **8,700** (persisted) | **2.4635** | **~875.8B (18.7%)** |
-| [v2 256N](n256/README.md) | Advancing — carried to step **3,100** (156.0B, 3.3%) via the relocated `agpt-20b-n256` clone chain (8558548/8558549 + sneaks). Per-token comparator to the canonical 512N. | 9,400 | 2.2682 | ~156.0B (10.1%) |
+| [**v2 512N**](n512/README.md) (canonical chain) | **Idle since 2026-08-20.** Last advanced by umbrella `8764675` (10,101 -> 10,699, ckpt head 10,600); its seat in `8773440` on 08-26 never started. Waiting on `8784460`. | **10,600** (persisted, disk-audited 2026-08-21) | **2.41076** (last logged, step 10,699) | **~1,067.0B (22.8%)** |
+| [v2 256N](n256/README.md) | **Idle since 2026-08-26.** Last leg was umbrella `8773440` seat t2: 201 steps, loss 2.31488 -> 2.24577, on top of the step-12,000 head. Per-token comparator to the canonical 512N. | **12,000** (persisted, disk-audited 2026-08-21) | **2.24577** (last logged, 08-26) | **~604.0B (12.9%)** |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode
@@ -54,20 +63,24 @@ walltime, ended step 3,270) → 8508214 (walltime, +5 ckpts, ended step
 `step-4500/` placeholder), 8521624 / 8521625 (trained in-RAM past
 4,400 but blocked by stale placeholder), placeholder
 renamed `.bak-empty-20260606-170503/` on 2026-06-06 to unblock resume,
-cont (8521628) Q, cont (8521632) H.
+cont (8521628) Q, cont (8521632) H. From 2026-07 on the chain moved to
+native auto-retry and then to the ~2,098N umbrellas; see
+[n512/](n512/README.md) and the [dispatch log](../../dispatch-log.md).
 
 ## Per-trajectory detail
 
-- [n512/](n512/README.md) — **canonical v2 512N sync chain** (advancing;
-  step 6,050 via native auto-retry relaunch)
-- [n256/](n256/README.md) — v2 256N (live ~step 5,900; job 8681340, agpt-20b-n256 clone)
+- [n512/](n512/README.md) -- **canonical v2 512N chain** (idle since
+  2026-08-20; persisted step 10,600)
+- [n256/](n256/README.md) -- v2 256N in the `agpt-20b-n256` clone (idle since
+  2026-08-26; persisted step 12,000, last logged loss 2.24577)
 - [n1024/](n1024/README.md) — v2 1024N (8463183 crashed at startup,
   std::bad_alloc / SIGSEGV — needs 768N/896N bracket before retry)
 
 ## Eval scores
 
 See [`docs/evals/agpt/20b/`](../../../evals/agpt/20b/README.md) for the
-current 20B lm-eval tables and the **🏁 headline** finding above. At
+current 20B lm-eval tables and the **🏁 headline** finding above (which is
+a 2026-07-24 snapshot -- both chains have advanced well past it since). At
 step 4,400 (~442.9B tokens) v2 512N sync reaches ARC-Easy **0.6641**
 and HellaSwag `acc_norm` **0.6346** — beating the 2B 256N async chain
 at step-69,900 / ~3.52T tokens (HSn 0.5552) by a wide per-token margin.

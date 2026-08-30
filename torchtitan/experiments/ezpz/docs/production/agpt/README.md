@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-07-24
+> Last updated: 2026-08-30
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -19,7 +19,50 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
 
-## Headline (2026-07-24)
+## Headline (2026-08-30): production is idle
+
+**Nothing has trained on Aurora since 2026-08-26**, and the blocker is the
+queue rather than the code.
+
+- **Last umbrella to seat: `8773440`**, started Wed 08-26 04:14 UTC, used
+  **5h13m of a 12h slot** (`Exit_status=-14`). Three of five seats trained:
+
+  | seat | chain | steps | loss |
+  |---|---|---:|---|
+  | `t0` | 2B 512N | 0 | never started |
+  | `t1` | 20B 512N | 0 | never started |
+  | `t2` | 20B 256N | **201** | 2.31488 -> 2.24577 |
+  | `t3` | 2B 512N | **504** | 2.74535 -> 2.73836 |
+  | `t4` | 2B 256N | **782** | 2.56449 -> 2.54807 |
+
+  (Seats are listed by the node count each was configured for. Which *chain*
+  a 2B seat was writing is not settled by the seat table alone -- t3's
+  2.74535 matches the constant-LR fork's tip, and t4's 2.56449 does not match
+  the canonical 2B-256 chain, which finished at 4.674T / loss 2.652. See the
+  [dispatch log](../dispatch-log.md).)
+
+- **`8775285`** (the 30B LR-finder umbrella) ran 1h32m and exited **0** with
+  all four seats at `rc=143` and no suggested LR in any log -- a clean exit
+  that produced nothing. Exit code 0 is not evidence a job did anything.
+- **`8784460`** (2,098 nodes, `large`, project `AuroraGPT`) has been `Q` since
+  Wed Aug 26 13:22 UTC with **101h+ eligible time** and `score_boost = 0`.
+  `8784462` is held behind it on `afterany`. The previous incarnation of this
+  chain pair carried a ~10M boost and started within a day; this pair lost it
+  on resubmit, and a fresh `qsub` starts at 0. Reservations, allocation, queue
+  limits, holds and node pinning were all ruled out locally. ALCF ticket
+  **drafted but NOT SENT**:
+  [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+- **The 30B is a Sunspot experiment, not Aurora production.** It is not one of
+  the chains above and does not compete for these nodes. It **COMPLETED**
+  2000/2000 steps -- see [30b-exp/](30b-exp/README.md).
+
+Per-slot detail for every umbrella: [dispatch log](../dispatch-log.md).
+
+## Headline (2026-07-24) -- historical snapshot
+
+> Superseded by the 2026-08-30 headline above. Kept as the record of where
+> each chain stood that day; the "LIVE" and step figures below are **not**
+> current.
 
 - **2B 256N async chain COMPLETE -- step 92,859 = 4.674T tokens (100.0%**
   of target), final loss **2.652**. The full v2 2B base pre-training run is
@@ -87,7 +130,13 @@ extensions.
 | [`8521627`](2b/n512/README.md#log-8521627) | 2026-06-07 | 12h | — | — | **Failed** @ 8 min — 1 of 522 nodes failed yeet-env rsync (`x4112c1s7b0n0` Connection reset). Mitigation: ezpz [PR #160](https://github.com/saforem2/ezpz/pull/160). |
 | `8521631` | 2026-06-07 | 12h | (cont10) | — | **Queued** in `small` (`afterany:8521627`). |
 
-**Latest cumulative**: step **30,500** · loss **2.71** · **~3.07T tokens** (65.7% of 4.67T target).
+**As far as the table above goes**: step **30,500** · loss **2.71** ·
+**~3.07T tokens** (65.7% of target). **This chain is now COMPLETE** at step
+**46,429 / 46,429**, loss **2.68687**, **4.674T tokens (100%)**, finished
+2026-08-13 19:11 UTC as trainer 0 of umbrella `8744247` (rc=0). The rows
+between step 30,500 and the finish are in
+[2b/n512/README.md](2b/n512/README.md). Do not submit continuations against
+this ckpt dir -- there is no budget left.
 
 ### 2B per-token comparator chain (256N, async-mode)
 
@@ -108,7 +157,10 @@ extensions.
 | `8521630` | 2026-06-06 | 12h | (cont10) | — | Held (`afterany:8521626`). |
 | `8534293` | 2026-06-10 | 12h | (cont11) | — | Held (`afterany:8521630`). |
 
-**Latest cumulative (256N)**: step **74,300** · loss **2.67** · **~3.740T tokens** (80.1% of 4.67T target — past the 80% mark). Step-69900 evals:
+**As far as the table above goes (256N)**: step **74,300** · loss **2.67** ·
+**~3.740T tokens** (80.1% of target). **This chain is now COMPLETE** at step
+**92,859**, loss **2.652**, **4.674T tokens (100%)**, finished 2026-06-29.
+Step-69900 evals:
 HSn **0.5552**, ARC-E **0.5939**, ARC-C **0.3294**, **Wino 0.5627 (best yet)**. Per-task plateau on HSn/ARC since step-64K
 (~+1pp swings); Wino has the clearest monotonic trend.
 
@@ -139,7 +191,11 @@ HSn **0.5552**, ARC-E **0.5939**, ARC-C **0.3294**, **Wino 0.5627 (best yet)**. 
 | `8521632` | 2026-06-10 | 12h | (cont12) | — | **Queued** (`afterany:8521628`). |
 | `8534295` | 2026-06-10 | 12h | (cont13) | — | Held (`afterany:8521632`). |
 
-**Latest cumulative**: step **4,500** · loss **~2.51** · **~453.0B tokens** (9.7% of 4.67T target).
+**As far as the table above goes**: step **4,500** · loss **~2.51** ·
+**~453.0B tokens** (9.7% of target). The chain has since advanced to step
+**9,690** (loss **~2.40**, **~975.4B tokens**, 20.9%) and is **IDLE since
+2026-08-26** -- its seat in `8773440` never started. Intervening dispatches
+are in the [dispatch log](../dispatch-log.md).
 
 **🏁 Eval headline (35+ ckpts, step-900 → step-4,400)**: ARC-Easy `acc` 0.463 → **0.664** (+20pp), HellaSwag `acc_norm`
 0.296 → **0.635** (+34pp), ARC-C `acc_norm` 0.224 → **0.380** (+16pp), Winogrande 0.493 → 0.586 (+9pp).
@@ -234,15 +290,20 @@ per token.
 </details>
 
 <details>
-<summary><strong>20B 256N v2 (live chain, ~step 5,900) — click to expand</strong></summary>
+<summary><strong>20B 256N v2 (idle since 2026-08-26, step 10,369) -- click to expand</strong></summary>
 
 Separate ckpt trajectory at 256 nodes (`gbs6144`, independent from
 the canonical 512N `gbs12288` chain). History: 8463659 (NODE_FAIL after
 step 364), 8470102 + 8470103 (gloo TCP timeouts ~3h), 8479581 + 8479582,
 and 8505255 (ran out the 12h walltime ending 2026-05-26 20:35 at step
-**1,125**). The 256N chain is now LIVE again: job [8681340](20b/n256/README.md)
-is running (agpt-20b-n256 clone) at ~step 5,900, loss ~2.51, with a
-modern-eval ladder (mmlu / gsm8k / arc_challenge) backfilled 2026-07-24.
+**1,125**); then a run of umbrella seats carried it into five figures, the
+last being job [8681340](20b/n256/README.md) at ~step 5,900 (loss ~2.51,
+modern-eval ladder backfilled 2026-07-24).
+
+**Current state: step 10,369, loss ~2.37, IDLE since 2026-08-26.** It was the
+only pre-training chain the last umbrella to seat (`8773440`) actually
+advanced -- seat `t2`, +201 steps, loss 2.31488 -> 2.24577 -- and nothing has
+run since.
 
 ![20B v2 256N Diagnostics](20b/n256/figures/training_diagnostics_20b_v2_256n.svg)
 

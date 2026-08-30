@@ -1,5 +1,9 @@
 # Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)
 
+> **Last updated: 2026-08-30.** Sweep itself unchanged since 2026-07-17;
+> the 08-30 edit only records that the `checkpoint-900-hf` export is no
+> longer on disk (the sharded checkpoint is).
+
 **Date:** 2026-07-17 (updated at run completion; supersedes the 2026-07-12
 partial-sweep version).
 **Machine:** Sunspot.
@@ -98,14 +102,27 @@ standalone `.venv` hf.generate GRPO both failed -- the former on walltime
 starvation, the latter because the `.venv` (torch 2.13 nightly) per-rank
 `hf.generate()` FSDP path HANGS multi-rank (regressed since June; single-rank
 works). The working path is the vLLM server-mode (`--use_vllm --vllm_mode
-server`) from `venvs/rl-vllm/`; see `docs/production/rl/grpo-on-xpu-status.md`. The old
+server`) from `venvs/rl-vllm/`; see [`docs/production/rl/trl.md`](../../../../../rl/trl.md)
+(that path was `grpo-on-xpu-status.md` when this was written; it was split into the
+RL hub + `trl.md` + `monarch.md` on 2026-07-19). The old
 FSDP-generate + vllm-test-split GRPO scripts were removed 2026-07-17.
 
 ## Recommendation
 
-- **Deliverable = full-mix `checkpoint-900-hf`** (not 8672). It has the
+- **Deliverable = full-mix `checkpoint-900`** (not 8672). It has the
   instruction-following gains of the metamathqa deliverable AND intact base-LM
-  capability. checkpoint-900-hf is consolidated and preserved.
+  capability.
+
+  > **The consolidated `checkpoint-900-hf` export is no longer on disk**
+  > (checked 2026-08-30: no `checkpoint-*-hf` exists under
+  > `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/`; the only
+  > surviving `-hf` exports on Sunspot are `checkpoint-729-hf`,
+  > `checkpoint-100-hf` and `aurora2b-sophiag-metamathqa-32n/checkpoint-400-hf`).
+  > The **sharded** `checkpoint-900/` is intact -- 23 GB, 96 `.distcp` shards
+  > in `pytorch_model_fsdp_0/` (7.5 GB), plus `optimizer_0/`, `scheduler.pt`
+  > and `trainer_state.json` -- so the deliverable can be re-consolidated with
+  > `rl/scripts/consolidate_sft_ckpt.sh`. Anything below that points a tool at
+  > a `checkpoint-900-hf` path will fail until that is done.
 - **Do NOT use checkpoint-8672** for anything downstream -- it is a
   math-CoT-only overfit, near-random on general tasks.
 - **Recipe lesson (recorded):** for full-mix (narrow-distribution) SFT at

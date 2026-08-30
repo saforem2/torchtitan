@@ -2,8 +2,10 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-08-27 (20B section reconciled against the cluster;
-> the 20B body had been frozen at 2026-07-22 while this stamp advanced)
+> Last updated: 2026-08-30 (queue state re-checked against `qstat`; the
+> 08-27 reconciliation of the 20B body held, but the chain has advanced
+> two more legs -- 7560196/97 and 7567541 -- all of which trained zero
+> steps)
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -29,7 +31,7 @@ absolute (not % of a budget).
 | Trajectory | State | Persisted step | Live step | Loss | Tokens | Notes |
 |------------|-------|---------------:|----------:|-----:|-------:|-------|
 | **2B n128** (`gbs512`) | idle (last leg done) | **5,300** | 5,383 | **2.36** | ~22.6B | 53 ckpts; last leg 7228272 ran full 12h |
-| **20B n128** (`gbs1024`) | **queued** (chain 2-deep) | **5,600** | 5,606 | **2.36** (val) | 47.0B | 19 legs trained -> step-5600; queued 7560196 (Q) + 7560197 (H) |
+| **20B n128** (`gbs1024`) | **stalled** (1 job queued, no progress since 08-16) | **5,600** | 5,606 | **2.36** (val) | 47.0B | 19 legs trained -> step-5600; the three legs since (7560196, 7560197, 7567541) each ran and trained **zero** steps. 7567542 is the only job left queued |
 
 Smaller/earlier 2B node-count variants also exist on disk (comparison
 runs, not the canonical chain): n64 -> step ~1,970 / loss 2.57;
@@ -169,8 +171,11 @@ absent from `RUN_IDS`. Project `aurora_gpt/torchtitan.ezpz.train`.
 | **leg 15** | 7434962 | full 12h (exit -29) | 4101 -> **4,505** | 1.55 -> 2.29 |
 | **leg 16** | 7434963 | full 12h (exit -29) | 4501 -> **4,904** | 1.83 -> 2.29 |
 | **leg 17** | 7434964 | full 12h (exit -29) | 4901 -> **5,300** | 1.76 -> 1.98 |
-| **leg 18** | 7458291 | full 12h (exit -29) -- **newest leg** | 5201 -> **5,606** | 1.75 -> 2.32 |
-| **queued** | 7560196 (+7560197 H) | **Q**, resumes step-5600; chain 2-deep | -- | -- |
+| **leg 18** | 7458291 | full 12h (exit -29) -- **newest leg that trained** | 5201 -> **5,606** | 1.75 -> 2.32 |
+| (no leg) | 7560196 | `Exit_status=124` after **3h03m** -- FQDN failover bug, zero steps | -- | -- |
+| (no leg) | 7560197 | `Exit_status=124` after **4h04m** -- blind rotation exhausted the spares, zero steps | -- | -- |
+| (no leg) | 7567541 | `Exit_status=124` after **4h04m** (2026-08-28) -- `stuck_pre_training`, zero steps | -- | -- |
+| **queued** | 7567542 | **Q** since 2026-08-27 15:49; resumes step-5600; chain 1-deep | -- | -- |
 
 **Legs that started but logged zero steps** (allocation burned, no
 progress): 7323581/82/83/84 (`No module named
@@ -178,8 +183,11 @@ torchtitan.experiments.ezpz.train` from `/tmp/.venv`; their logs say
 `FAILOVER STOP: walltime`, which is a **misleading label**),
 7405953/54/55/56 and 7458292 and 7484829/30/31/32 (`ezpz: command not
 found` -- the last cluster drained the whole queued chain in 3 minutes
-on 2026-08-19), and 7550301 (CUDA device busy, 1h burned, the job that
-motivated the Polaris failover-pattern fix below).
+on 2026-08-19), 7550301 (CUDA device busy, 1h burned, the job that
+motivated the Polaris failover-pattern fix below), and the three most
+recent legs 7560196 (3h03m), 7560197 (4h04m) and 7567541 (4h04m), all
+`Exit_status=124` -- see the failover section below. Those three are why
+the chain has not advanced past step-5600 since 2026-08-16.
 
 **Never started, burned nothing:** 7550302/03, 7554100/01/02 (one
 deletion batch, `mtime` 2026-08-24 13:47:21) and 7559749/50 (submitted
@@ -205,14 +213,18 @@ fault (rank426 on `x3205c0s37b0n0`, which ALCF then took offline for
 (bad-node init hang, `stuck_pre_training` guard bailed after 0-step
 retries). Both left step-2400 (leg 9) / step-1400 (leg 5) intact. The
 chain went dry twice because it was only 1-2 deep at the time. The
-7270694+3 restart ran **4-deep**; the current queue is **2-deep**
-(7560196 + 7560197).
+7270694+3 restart ran **4-deep**; the current queue is **1-deep**
+(7567542 alone).
 
-**Current state:** step **5,600** persisted, last logged step **5,606**
-(the 6 steps past the last save are lost on resume). Validation loss at
-step-5600 is **2.3621**; last logged train loss 2.319 (grad_norm 0.220,
-memory 20.28 GiB / 51.34%). Tokens **47.0B** = `1024 x 8192 x 5600`.
-Queued 7560196 resumes from step-5600.
+**Current state (2026-08-30):** step **5,600** persisted, last logged
+step **5,606** (the 6 steps past the last save are lost on resume).
+Validation loss at step-5600 is **2.3621**; last logged train loss 2.319
+(grad_norm 0.220, memory 20.28 GiB / 51.34%). Tokens **47.0B** =
+`1024 x 8192 x 5600`. Those numbers are unchanged since 2026-08-16 --
+the `step-5600` dir has an `mtime` of Aug 16 08:05 and nothing has
+written to the chain since. Queued **7567542** resumes from step-5600;
+PBS currently estimates a start of 2026-08-30 21:46 UTC after
+`eligible_time` 46h.
 
 > Read the **validation** number, not the last train loss. Each leg
 > restarts the BlendCorpus shuffle rather than restoring the loader
@@ -310,6 +322,25 @@ and do not trust a green `refresh_all.sh` as evidence they are current.
 > ```bash
 > python3 -c 'from ezpz.failover.scrape import _detect_machine; print(_detect_machine())'
 > ```
+>
+> **Neither fix has yet bought a training step.** Two more legs died
+> after the FQDN fix landed: **7560197** (4h04m, `Exit_status=124`) to
+> the `rc=124` watchdog path that classifies blind *before* consulting
+> the scraper, and **7567541** (4h04m, `Exit_status=124`, 2026-08-28) to
+> a `stuck_pre_training` verdict caused by one unmatched error string
+> (`invalid device ordinal`), with 3 of 4 spares still in hand. Both are
+> fixed (the watchdog path in the installer script, the pattern in
+> [`failover_patterns/polaris.py`](../../../failover_patterns/polaris.py)
+> at commit `c147e897b`) but **neither fix has run a leg to completion**
+> -- the next job to prove it is the queued 7567542. Both acts are
+> written up in
+> [`known-bugs/polaris-failover-detect-machine-fqdn.md`](../../guides/known-bugs/polaris-failover-detect-machine-fqdn.md).
+>
+> The underlying hardware problem is unresolved: two nodes carry a GPU
+> stuck by another user's leftover processes while PBS still advertises
+> `ngpus = 4`, so rotation cannot win. Drain ticket **drafted, not
+> sent**:
+> [`ops/alcf-ticket-zombie-gpu-nodes-20260827.md`](../../ops/alcf-ticket-zombie-gpu-nodes-20260827.md).
 
 ### Evaluation (lm-eval, Llama2 tokenizer)
 
@@ -411,4 +442,5 @@ step-1400 -- **all three carry `.metadata` today** and the census is
 
 Each leg is chained with `qsub -W depend=afterany:<prev>`. Keep one
 `+1` continuation held behind the newest job so training never runs dry
-at a walltime handoff. Current depth: **7560196 (Q) + 7560197 (H)**.
+at a walltime handoff. Current depth: **7567542 (Q) alone** -- the chain
+is 1-deep, so a `+1` should be queued behind it.

@@ -1,5 +1,13 @@
 # Teaching agpt-2b Chain-of-Thought Reasoning (plan)
 
+> **Last updated: 2026-08-30.** Nothing in this plan is running or queued;
+> the last dated section is 2026-07-24 and the effort has since concluded.
+> The bottom line across everything tried -- RL (0.205 -> 0.215), B3 (0.05),
+> B4a (0.02), B4b (0.065) -- is that **nothing beat B2's 0.205**, and ~0.2
+> is near this base's GSM8K-CoT ceiling. `checkpoint-93` (B2) stands as the
+> CoT deliverable. Read the "next levers" lists below as options that were
+> written down, not as work in progress.
+
 > Status: **Stages 0-2 complete** (2026-07-22). Stage 0 (eval) + Stage 1 (cold-start CoT-SFT) DONE and validated; Stage 2 (GRPO-RLVR) RUN -- gated GRPO on the strong B2 base is drift-proof (format perfected) but RL is NOT the accuracy lever at 2B ~20% GSM8K (accuracy work moves upstream to SFT). See the dated Stage-2 sections below. Staged recipe to take the
 > instruction-tuned AuroraGPT-2B (`checkpoint-900-hf`, full-mix SFT) from "has
 > seen math rationales but does not reliably emit reasoning" to "emits and

@@ -1,15 +1,16 @@
 # SFT recipe: gs138650 x tulu_math_uc_mix (FULL big mix, ~54B tokens)
 
-> **Last updated: 2026-08-19.**
+> **Last updated: 2026-08-30.**
 > **Status: COMPLETE at 8N -- step 8672/8672, epoch 1.0, final loss 0.357,
 > mean_token_accuracy 0.902** (finished 2026-07-16). Head job **12470350**
 > (2026-07-12) + a 10-link afterany chain (... -> 12470478 -> 12470479 final);
-> `checkpoint-8672` saved, consolidated to `checkpoint-8672-hf`. **NOT the
+> `checkpoint-8672` saved and consolidated at the time. **NOT the
 > deliverable** -- 8672 is catastrophically forgotten (hellaswag 0.593 ->
-> 0.273). The deliverable is `checkpoint-900-hf`; see the Deliverable line
-> below.
-> Eval sweep in progress -- see [evals/](evals/README.md). This is the
-> "more tokens" SFT: the SAME gs138650 base as
+> 0.273). The deliverable is `checkpoint-900`; see the Deliverable line
+> below. **Neither `-hf` export survives on disk** (checked 2026-08-30);
+> the sharded `checkpoint-*/` dirs do, so either can be re-consolidated.
+> The eval sweep is **done** (2026-07-17) -- see [evals/](evals/README.md).
+> This is the "more tokens" SFT: the SAME gs138650 base as
 > the completed 729-step SFT, but over the FULL OpenMathInstruct-2
 > `tulu_math_uc_mix` (~53.3M packed sequences, ~54B tokens, 1 epoch) instead of
 > the small metamathqa-swap mix (~4.5B tokens).
@@ -86,12 +87,13 @@ The scale fault itself remains an open infra issue; running at 8N sidesteps it.
 [![SFT training curves](charts/sft-curves.svg)](charts/sft-curves.svg)
 
 Loss + grad_norm + LR + mean-token-accuracy + entropy + cumulative-tokens over
-the run so far (regenerated from the latest checkpoint's `trainer_state.json` by
+the full run (regenerated from the final checkpoint's `trainer_state.json` by
 [`scripts/plot_sft_curves.py`](scripts/plot_sft_curves.py), wired into the
 [refresh catch-all](../../../../../../scripts/update_all_charts.sh)). The token axis
 stitches TRL's per-chain-link `num_tokens` counter into a monotonic total (each
-afterany continuation resumes and re-inits the counter). Chart is absent until
-the first `update_all_charts.sh` run lands it on Sunspot.
+afterany continuation resumes and re-inits the counter). The committed chart
+covers the run through its final step 8,672; the run is finished, so it will
+not change.
 
 ## Run status
 
@@ -105,7 +107,8 @@ the first `update_all_charts.sh` run lands it on Sunspot.
 | 12470377-380 (cont 4-7) | 2026-07-13/14 | ~1750 -> ~2400 | 0.739 -> 0.656 | Four short chain links, each ended by the same ~30-min idle-watchdog SIGTERM (HANGs #4-#7, ~150-250 steps/link); afterany recovered every time. wandb [xjkrtv4y](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xjkrtv4y) (377) / [fdxw19mr](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fdxw19mr) (378) / [i44624kh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/i44624kh) (379) / [5kpf4glh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/5kpf4glh) (380, ->2400). |
 | 12470436 (cont 8) | 2026-07-14 | 2450 -> ~4350 | 0.660 -> 0.496 | Resumed from checkpoint-2450 (relaunched this session, disk freed 2.65T first). **First long clean link (~1900 steps, no idle-hang)** -- ran to its 12h walltime. wandb [fhjznrn4](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fhjznrn4). |
 | 12470437 (cont 9) | 2026-07-14/15 | 4350 -> ~6200 | 0.511 -> 0.409 | Auto-took-over via afterany when 436 hit walltime. Clean ~1850 steps to its own 12h walltime (checkpoint-6200). wandb [30ntcag7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/30ntcag7). |
-| **12470478 (cont 10)** | 2026-07-15 | 6200 -> **~7050 (running)** | 0.409 -> **0.378** | Resumed from checkpoint-6200 (zero steps lost). Currently running; epoch **0.82**, accuracy **0.893**, LR cosine-decaying (cont 11 **12470479** queued). wandb [8gbmuj37](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/8gbmuj37). |
+| **12470478 (cont 10)** | 2026-07-15 | 6200 -> ~7050 | 0.409 -> **0.378** | Resumed from checkpoint-6200 (zero steps lost). At the time this row was written it was mid-run at epoch **0.82**, accuracy **0.893**, LR cosine-decaying; cont 11 **12470479** was queued behind it. |
+| **12470479 (cont 11, final)** | 2026-07-16 | -> **8672/8672** | -> **0.357** | Final link; carried the run to the end of the epoch. Epoch 1.0, mean_token_accuracy 0.902, `checkpoint-8672` saved. The chain is **complete** -- 82 `checkpoint-*` dirs remain on disk (steps 900 .. 8672). Per-link start values for this leg are not recorded here. |
 
 <!-- RUN-PROGRESS -->
 
@@ -136,7 +139,9 @@ Each continuation resumes from the latest checkpoint (not step 0). Run ids:
 | 12470376 (cont 3) | [7hps3eu1](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/7hps3eu1) | 900 -> ~1650 |
 | 12470377-380 (cont 4-7) | [xjkrtv4y](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/xjkrtv4y) / [fdxw19mr](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fdxw19mr) / [i44624kh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/i44624kh) / [5kpf4glh](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/5kpf4glh) | ~1750 -> ~2400 (four idle-hang links) |
 | 12470436 (cont 8) | [fhjznrn4](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/fhjznrn4) | 2450 -> ~4350 (clean, walltime) |
-| 12470437 (cont 9) | [30ntcag7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/30ntcag7) | 4350 -> **5950 (running)** |
+| 12470437 (cont 9) | [30ntcag7](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/30ntcag7) | 4350 -> ~6200 (ran to its 12h walltime) |
+| 12470478 (cont 10) | [8gbmuj37](https://wandb.ai/aurora_gpt/torchtitan.ezpz.sft/runs/8gbmuj37) | 6200 -> ~7050 |
+| 12470479 (cont 11, final) | (run id not recorded here) | -> 8672 (epoch 1.0, complete) |
 
 > **Idle-hang pattern (update 2026-07-15):** chain links through step ~2400
 > (head + cont 1-7) each ended in a ~30-min-silence idle-watchdog SIGTERM
@@ -177,7 +182,10 @@ epoch at peak LR is the mistake, not the mix. GRPO (vLLM server-mode,
 checkpoint-900): accuracy_reward climbed **0.31 -> ~0.74** in ~20 steps -- a
 strong RL starting point (hit 6h walltime, not converged; see evals).
 
-**Deliverable: `checkpoint-900-hf`** (NOT 8672).
+**Deliverable: `checkpoint-900`** (NOT 8672). Note the consolidated
+`checkpoint-900-hf` export is **no longer on disk** as of 2026-08-30 -- the
+sharded `checkpoint-900/` survives and can be re-consolidated. See the
+[evals page](evals/README.md#recommendation) for the check.
 
 ## Comparison to the completed 729-step SFT
 
@@ -185,6 +193,8 @@ The prior production SFT
 ([tulu_math_uc_mix, metamathqa swap](../tulu_math_uc_mix/README.md))
 reached final loss 0.77 over 729 steps / ~4.5B tokens. This run keeps the same
 base + recipe weights but uses the FULL OpenMathInstruct-2 mix (~54B tokens,
-~12x the tokens) for 1 epoch. The eval comparison (base-LM benchmarks, IFEval,
-downstream GRPO signal) will show whether the ~12x-larger math+instruction SFT
-corpus improves on the metamathqa-swap deliverable.
+~12x the tokens) for 1 epoch. **That comparison has been run** (2026-07-17,
+[evals/](evals/README.md)) and the answer is split: at step ~900 the full mix
+matches-or-beats the metamathqa-729 deliverable on IFEval while keeping base-LM
+capability, but at the full epoch (8672) it is worse on every axis. ~12x more
+tokens did not buy a better final model -- where you stop did.

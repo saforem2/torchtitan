@@ -1,5 +1,8 @@
 # GRPO smoke — SFT-step729 vs baseline as RL starting point
 
+> **Last updated: 2026-08-30.** Results unchanged since 2026-06-10; the
+> 08-30 edit only resolves two forward-looking sentences.
+
 **Status:** complete. Logs at
 `logs/grpo-smoke-sft-vs-baseline-20260610-204539/{baseline,sft-step729}.log`.
 
@@ -88,8 +91,8 @@ stable ~95% plateau.
 The 7-task lm-eval ([`README.md`](README.md)) showed no improvement
 from SFT — expected, because those benchmarks measure base-LM
 knowledge that SFT doesn't change. The IFEval result
-([`ifeval.md`](ifeval.md)) will validate the structural
-instruction-following gain.
+([`ifeval.md`](ifeval.md)) has since confirmed the structural
+instruction-following gain: +8pp on `prompt_level_strict_acc`.
 
 This eval validates the **downstream alignment** claim: the SFT'd
 model is the right starting point for any GRPO-style RL on a
@@ -123,7 +126,8 @@ one 50-step smoke. It doesn't tell us:
   can't be RL'd off their distribution) — not tested here because
   the mix was deliberately broad
 
-Future smokes on the other tasks in `rl/tasks/` will fill these in.
+Smokes on the other tasks in `rl/tasks/` would fill these in; as of
+2026-08-30 none have been run, so these gaps are still open.
 
 ## Setup
 

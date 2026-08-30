@@ -1,5 +1,13 @@
 # B4 Cold-Start SFT Fix (finishing-stage + reweighted-mix) Implementation Plan
 
+> **Last updated: 2026-08-30. This plan has already been executed -- do not
+> pick it up and run it.** Both paths were built, trained and evaluated:
+> path A (B4a) scored **0.02** and path B (B4b) **0.065** against B2's
+> 0.205, so neither met its goal. Results:
+> [`README.md`](README.md) in this directory. The unticked `- [ ]` boxes
+> below are the original tracking state and were not maintained through
+> execution -- they are not a to-do list.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Beat B2's GSM8K CoT accuracy (0.205) after the B3 dilution regression (0.05), via two parallel paths: (A) a short gsm8k-r1cot finishing stage on the B3 base, and (B) a fresh reweighted single-stage SFT with length-filtered OpenR1.
