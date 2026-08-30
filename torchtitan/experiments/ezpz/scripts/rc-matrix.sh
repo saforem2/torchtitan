@@ -27,7 +27,9 @@ cd $REPO || exit 1
 
 module load frameworks/2026.1.0
 FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
-export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"     # libglog.so.0
+# libglog.so.0 ships in the module tree but the modulefile does not export
+# it; without this every import torch dies. docs/guides/known-bugs/fw-rc-libglog-not-on-loader-path.md
+export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT

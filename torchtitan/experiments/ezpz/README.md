@@ -92,6 +92,8 @@ and nothing that can train.
 module load frameworks/2026.1.0
 
 # 2. libglog.so.0 lives inside the module tree but is not on the path.
+#    Every `import torch` dies without this. Full writeup:
+#    docs/guides/known-bugs/fw-rc-libglog-not-on-loader-path.md
 #    Without this every `import torch` dies in torchcomms.
 FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
 export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
