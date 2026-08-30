@@ -381,6 +381,85 @@ PEAK magnitude collapses and whether loss resumes descending.
 Tally across four arms: 4/4 onset, and of the three followed well past onset,
 **two escaped and one did not**.
 
+### The escape was not permanent: a SECOND onset at ~4106
+
+The escape section above is correct but incomplete as a conclusion. The arm
+held the good state for ~2,200 steps -- reaching loss 2.4984, BELOW the
+AdamW arm's final 2.51357 -- and then went again, from a completely quiet
+state:
+
+| step | loss | grad_norm |
+|---|---|---|
+| 4105 | 2.52557 | 0.0875 |
+| 4106 | 2.50375 | 4.7431 |
+| 4108 | 2.51449 | 0.5845 |
+| 4109 | 2.86697 | 112.6056 |
+| 4110 | 4.88487 | 177.2523 |
+
+Loss 2.51 -> 4.88 in five steps. Same escalating shape as its first onset at
+~1550.
+
+The run-up is even quieter than the first time -- six consecutive 100-step
+windows at exactly zero excursions, max never above 0.24:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 3400 | 0/100 | 0.0% | 0.20 | 2.5547 |
+| 3500 | 0/100 | 0.0% | 0.22 | 2.5500 |
+| 3600 | 0/100 | 0.0% | 0.24 | 2.5447 |
+| 3700 | 0/100 | 0.0% | 0.22 | 2.5357 |
+| 3800 | 0/100 | 0.0% | 0.17 | 2.5244 |
+| 3900 | 0/100 | 0.0% | 0.17 | 2.5151 |
+| 4000 | 0/100 | 0.0% | 1.84 | 2.5113 |
+| 4100 | 3/11 | **27.3%** | **177.25** | 2.7608 |
+
+**Two consequences.**
+
+First, read "escaped" as "returned to the metastable good state", not as
+"recovered". A SophiaG arm that has escaped is a SophiaG arm that can diverge
+again, and this one did so while training better than the AdamW baseline.
+
+Second, this is now TWO independent onsets in a single arm, each preceded by
+nothing -- 1,529 clean steps before the first, ~2,200 before the second. The
+no-precursor result no longer rests on one observation. There is no quiet
+streak long enough to certify a SophiaG run as safe.
+
+### The second onset was an order of magnitude milder -- severity is stochastic too
+
+It resolved after ~2 intermittent windows rather than the first onset's four:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 4050 | 0/50 | 0.0% | 0.21 | 2.5097 |
+| 4100 | 7/42 | **16.7%** | **177.25** | 2.6922 |
+| 4150 | 0/50 | 0.0% | 0.20 | 2.5203 |
+| 4200 | 4/50 | 8.0% | 15.81 | 2.5114 |
+| 4250 | 0/50 | 0.0% | 0.34 | 2.5097 |
+| 4300 | 0/50 | 0.0% | 0.19 | 2.4995 |
+
+Spike, clean, partial, clean -- and mean loss never left 2.51 except in the
+onset window itself. The arm came out at 2.4977, below the AdamW arm's final
+2.51357.
+
+Side by side, the same arm's two onsets:
+
+| | first (~1550) | second (~4106) |
+|---|---|---|
+| peak grad_norm | 16,531.91 | 177.25 |
+| worst window rate | 100% | 16.7% |
+| peak mean loss | 4.5410 | 2.6922 |
+| duration | ~4 windows | ~2, intermittent |
+| clean steps before it | 1,529 | ~2,200 |
+
+Same optimizer, same LR, same arm, and in both cases a precursor window of
+exactly zero excursions -- yet two orders of magnitude apart in peak gradient.
+**So severity is stochastic as well as timing.** A SophiaG blow-up may cost
+you 100 steps or 400, and there is nothing in the run-up that predicts which.
+
+A practical note for anyone reading a live run: the 4200 window read "1/39,
+2.6%" while partial and "4/50, 8.0%" once full. Do not compare a partial bin
+against complete ones -- wait for the bin to close.
+
 ### Method note
 
 This arm was characterized three times in three readings -- "healthy", then
