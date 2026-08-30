@@ -424,6 +424,42 @@ nothing -- 1,529 clean steps before the first, ~2,200 before the second. The
 no-precursor result no longer rests on one observation. There is no quiet
 streak long enough to certify a SophiaG run as safe.
 
+### The second onset was an order of magnitude milder -- severity is stochastic too
+
+It resolved after ~2 intermittent windows rather than the first onset's four:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 4050 | 0/50 | 0.0% | 0.21 | 2.5097 |
+| 4100 | 7/42 | **16.7%** | **177.25** | 2.6922 |
+| 4150 | 0/50 | 0.0% | 0.20 | 2.5203 |
+| 4200 | 4/50 | 8.0% | 15.81 | 2.5114 |
+| 4250 | 0/50 | 0.0% | 0.34 | 2.5097 |
+| 4300 | 0/50 | 0.0% | 0.19 | 2.4995 |
+
+Spike, clean, partial, clean -- and mean loss never left 2.51 except in the
+onset window itself. The arm came out at 2.4977, below the AdamW arm's final
+2.51357.
+
+Side by side, the same arm's two onsets:
+
+| | first (~1550) | second (~4106) |
+|---|---|---|
+| peak grad_norm | 16,531.91 | 177.25 |
+| worst window rate | 100% | 16.7% |
+| peak mean loss | 4.5410 | 2.6922 |
+| duration | ~4 windows | ~2, intermittent |
+| clean steps before it | 1,529 | ~2,200 |
+
+Same optimizer, same LR, same arm, and in both cases a precursor window of
+exactly zero excursions -- yet two orders of magnitude apart in peak gradient.
+**So severity is stochastic as well as timing.** A SophiaG blow-up may cost
+you 100 steps or 400, and there is nothing in the run-up that predicts which.
+
+A practical note for anyone reading a live run: the 4200 window read "1/39,
+2.6%" while partial and "4/50, 8.0%" once full. Do not compare a partial bin
+against complete ones -- wait for the bin to close.
+
 ### Method note
 
 This arm was characterized three times in three readings -- "healthy", then
