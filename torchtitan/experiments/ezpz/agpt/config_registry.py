@@ -16,6 +16,7 @@ from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
+    default_muon,
     default_sophiag,
 )
 from torchtitan.components.data import (
@@ -1214,6 +1215,54 @@ def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_sophiag(lr=3.0e-4)
+    return _use_fineweb_edu(cfg)
+
+
+def agpt_30b_olmo2tok_muon() -> FaultTolerantTrainer.Config:
+    """agpt_30b_olmo2tok with the Muon optimizer instead of AdamW.
+
+    Fourth arm of the fixed-batch optimizer comparison (AdamW / Mano /
+    SophiaG all ran at GBS=960). Muon won the 2B competition
+    (competition/README.md: agpt2b-n2-1000steps, 3.557) and has never been
+    run at 30B.
+
+    The lr here is a PLACEHOLDER, as it was for the mano and sophiag arms.
+    Do not trust it: the comparison runs pass --optimizer.lr explicitly from
+    an LR-finder result measured at THIS batch size. The 2B competition value
+    was 2.4e-3, and the three measured 30B/GBS=960 suggestions all landed near
+    3-6e-05, so the inherited constant is roughly 40-80x too high.
+
+    MUON PARTITIONS BY SHAPE, NOT BY NAME. optimizer/muon.py:85-89 gates on
+    ``p.ndim == 2 and max(p.shape) <= 10000``; everything else silently falls
+    through to an internal AdamW branch. Measured on this exact config, only
+    21.5% of the 26.2B parameters are on the Muon path:
+
+      MUON  : 256 tensors,  5.637B  -- every attention projection, x64 layers:
+                                       wq/wo (6144,6144), wk/wv (1024,6144)
+      AdamW : 323 tensors, 20.561B  -- w1/w2/w3 (16384 > 10000), tok_embeddings
+                                       and lm_head (100352 > 10000), and all
+                                       129 rank-1 norm weights
+
+    So this arm is a Muon/AdamW hybrid, not a Muon run: attention runs on Muon,
+    the FFN and embeddings on AdamW. That boundary is a coincidence of
+    dim=6144 and hidden_dim=16384 straddling the hardcoded 10000, not a
+    designed split -- at a flavor with dim > 10000 the attention projections
+    would fall through too and this would be a pure-AdamW run wearing a Muon
+    label. Recorded so the comparison against the other three arms is read
+    correctly.
+
+    For the Muon-path tensors the LR is then rescaled by
+    ``0.2 * sqrt(max(A, B))`` (muon.py:130-139). All four Muon shapes here have
+    max dim 6144, so the factor is a UNIFORM 15.677x -- the effective LR on
+    every Muon tensor is 15.677x the number the finder reports, while the
+    AdamW-path majority sees the base LR unscaled.
+
+    NOT a resume target for an AdamW, Mano, or SophiaG checkpoint -- the
+    optimizer state shapes differ. Fresh run, own checkpoint folder,
+    per-token comparisons.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_muon(lr=3.0e-4)
     return _use_fineweb_edu(cfg)
 
 

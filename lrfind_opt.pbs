@@ -17,6 +17,18 @@ set -o pipefail
 #   qsub -v OPT=adamw   lrfind_opt.pbs
 #   qsub -v OPT=mano    lrfind_opt.pbs
 #   qsub -v OPT=sophiag lrfind_opt.pbs
+#   qsub -v OPT=muon    lrfind_opt.pbs
+#
+# MUON (added 2026-08-30) is a fourth arm run against the same protocol. Read
+# its suggestion with one caveat the other three do not have: Muon partitions
+# parameters BY SHAPE (muon.py:85-89, `p.ndim == 2 and max(p.shape) <= 10000`),
+# so at 30B only 21.5% of params (wq/wk) are on the Muon path -- w1/w2
+# (16384) and the embedding/head (100352) fall through to an internal AdamW
+# branch. For the Muon-path tensors the LR is then rescaled by
+# 0.2*sqrt(max(A,B)) = a uniform 15.677x here. The finder sweeps and reports
+# the BASE lr (lr_finder.py:143,195 set param_group["lr"]), so the effective
+# LR on Muon tensors is 15.677x the reported number and 1x on the AdamW
+# majority. Report both or the value gets misread against the other arms.
 #
 # WHY MEASURE AT ALL, PER OPTIMIZER, AT THIS BATCH. The suggested LR is
 # strongly batch- AND optimizer-dependent. Measured here already:
@@ -53,7 +65,8 @@ case "$OPT" in
   adamw)   CONFIG=agpt_30b_olmo2tok_optcmp_adamw ;;
   mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
   sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
-  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag (got: ${OPT:-empty})"; exit 1 ;;
+  muon)    CONFIG=agpt_30b_olmo2tok_muon ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon (got: ${OPT:-empty})"; exit 1 ;;
 esac
 
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
@@ -108,6 +121,12 @@ fi
 
 export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
 
+# NO --dataloader.num-workers HERE. The 2026-08-23 arms passed it and it
+# parsed, but #4088 replaced the dataloader with Grain and #4121 landed after
+# those runs: GrainDataLoader.Config (components/data/loader.py:57-73) has no
+# num_workers field, so the flag is now an "Unrecognized options" hard abort at
+# parse time. optcmp.pbs already dropped it for Phase 2; this script had not
+# been rerun since and was stale for ALL FOUR arms, not just muon.
 timeout 9000 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config "$CONFIG" \
@@ -123,7 +142,6 @@ timeout 9000 ezpz launch --nproc 192 -ppn 12 -- \
     --lr-finder.smooth-frac=0.1 \
     --dump-folder="$DUMP" \
     --checkpoint.no-enable \
-    --dataloader.num-workers=2 \
     >> "$LOG" 2>&1
 rc=$?
 
