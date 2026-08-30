@@ -1,27 +1,42 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-08-14
+> **Last updated:** 2026-08-30
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status:** persisted at step **6,100** (~614.0B tokens, 13.1% of
-> 4.67T target), loss ~2.44. **Advanced 2026-07-03** onward via the
+> **Status: NOT RUNNING.** Persisted at step **10,600** (~1,067.0B tokens,
+> 22.8% of 4.67T target), last logged loss **2.41076** at step 10,699
+> (disk audit 2026-08-21). The last leg to advance it was umbrella `8764675`
+> on **2026-08-20** (seat t1, 10,101 -> 10,699). Its seat in the 2026-08-26
+> umbrella `8773440` **never started**, and nothing on Aurora has trained
+> since that job. The successor umbrella `8784460` (2,098 nodes, `large`) has
+> been `Q` since 2026-08-26 13:22 UTC with 101h+ eligible and
+> `score_boost=0`, with `8784462` held behind it; a ticket is drafted but NOT
+> sent
+> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+>
+> The progress table below is detailed only through step-5,400 (2026-07-07);
+> everything from step-5,400 to the current head was carried by the ~2,098N
+> 5-chain umbrellas in seat t1 and is recorded per-dispatch in the
+> [dispatch log](../../../dispatch-log.md), not here.
+>
+> **History.** **Advanced 2026-07-03** onward via the
 > native `ezpz --auto-retry` relaunch (`8638793`, resumed step-4,400 ->
 > step-5,109) and its `afterany` continuation `8638795`, which carried
 > the head from step-5,100 through step-5,400; a 16N `capacity`-queue
 > bridge (`cap_20b512_16n.sh`, GAS=32 -> GBS=12288 bit-identical) then
 > crept it 6,000 -> step-6,100 during prod-queue starvation (ckpts
-> persisted every 25-100). The progress table below is detailed through
-> step-5,400; the current persisted head is step-6,100
-> (see the Latest checkpoint line). This ended the long stall:
+> persisted every 25-100). This ended the long stall:
 > the chain had been stuck at step-4,400 since 2026-05-29 under
 > `small`-queue contention, and its legacy `failover_lib.sh`
 > continuations kept dying to bad-node blind-swap (see the
 > [20B 512N relaunch report](../../../../experiments/agpt/aurora/20260701-20b-512n-relaunch-autoretry.md)).
-> Continuation `8647383` (cont2) is Q'd behind the next head; the stale
-> legacy conts (8521631/8534294) were superseded by the autoretry chain.
+> Continuation `8647383` (cont2) was Q'd behind the head at the time; the
+> stale legacy conts (8521631/8534294) were superseded by the autoretry
+> chain, which was in turn superseded by the umbrellas.
 >
-> **Latest eval (step-4,400, 2026-05-29):**
+> **Latest eval on record here (step-4,400, 2026-05-29)** -- the chain is far
+> past this; see the eval page for newer ladders:
 > HSn **0.6346** (+0.7pp from step-4,300), ARC-E 0.6641 (flat),
 > ARC-C **0.3797** (+1.5pp jump), Wino 0.5864. Steady monotonic
 > climb continues with ARC-C breakout this step.
@@ -84,14 +99,20 @@
 | **[`8521628`](#log-8521628)** | 2026-06-10 | 4h | 4,400 → **4,500** | 2.51 → ~2.51 | — | — | **🏁 SYNC mode.** `afterany` continuation, ran 01:27 → 05:32 (4h04m), Exit_status 143. **step-4,500 persisted cleanly** (the renamed `step-4500.bak-empty-20260606-170503/` placeholder no longer blocked the save). **First new persisted ckpt in 12 days** (since 2026-05-29's step-4,400). After the step-4,500 save, failover attempt 4 hit the same intermittent `MemoryError: std::bad_alloc` at `set_determinism` rank 3,195 — wrapper exhausted 3 retries (exit 143). +1 ckpt persisted. 8521632 (cont12) Q'd to resume from step-4,500. |
 | [`8638793`](#log-8638793) | 2026-07-05 | 12h | 4,400 -> **5,109** | (reload blip 6.03) -> **2.54** | ~365 | ~18.2% | **Native `ezpz launch --auto-retry` relaunch** (torch 2.13 venv, ezpz 0.21.3). Resumed cleanly from step-4,400 after the legacy sync chain stalled; ran to step-5,109. step-4,500..5,100 persisted every 100. First forward progress in ~25 days. |
 | [`8638795`](#log-8638795) | 2026-07-07 | 12h | 5,100 -> **5,400** | 2.52 -> **2.47** | ~376 | ~18.7% | **`afterany` continuation** of 8638793 (native auto-retry). step-5,200..5,400 persisted. Advanced during the multi-umbrella queue wait (umbrella 8648363 never won a slot; this standalone carried the chain). |
+| `8731758` | 2026-08-04 | -- | -> **7,251** | -- | -- | -- | Individual 516N dispatch; ran before umbrella 8744245 and carried the chain to step-7,251. |
+| umbrellas `8714502`..`8764675` seat t1 | 2026-08-05..08-20 | 12h-24h | 6,801 -> **10,699** | 2.33289 -> **2.41076** | ~332 (mean) | ~16.6% (mean) | Carried by the ~2,098N 5-chain umbrella in seat t1 across eight dispatches. TPS/MFU are means over the committed metric store, which covers 6,801-9,694 of this range. Per-dispatch ranges: 8714502 6,801->7,149; 8714503 7,251->7,654; 8744245 7,601->8,000+; 8744247 idle-watchdog kill during a silent DCP load; 8756070 8,701->9,109; 8756957 9,101->9,695; 8760249 9,601->10,200; 8764675 10,101->10,699. Ckpt head **10,600**. See the [dispatch log](../../../dispatch-log.md). |
+| `8773440` t1 | 2026-08-26 | 12h | **0 steps** | -- | -- | -- | **Never started.** Both 512N seats in this umbrella failed to launch; the reason is not yet established. The 20B-256 seat in the same job did train. **This chain has not advanced since 2026-08-20.** |
 
-**Latest checkpoint:** step-8,700 (8638795, 2026-07-07, native auto-retry chain; step-100..5,400 persisted every 100)
+**Latest checkpoint:** step-10,600 (audited on disk 2026-08-21; written by
+umbrella `8764675` seat t1 on 2026-08-20, which logged through step 10,699)
 
-**Cumulative steps:** 8,700
+**Cumulative steps:** 10,600 (disk-confirmed)
 
-**Tokens consumed:** 8,700 × 12,288 × 8,192 = **875.8B tokens** (18.7% of 4.67T target)
+**Tokens consumed:** 10,600 x 12,288 x 8,192 = **1,067.0B tokens** (22.8% of 4.67T target)
 
-**Loss:** 2.4635 (c8zwrlqw end, step-8,800 -- umbrella 8744245)
+**Loss:** 2.41076 (last logged step 10,699, umbrella `8764675` t1). The
+committed metric store here stops at step-9,694 / 2.3997; it was exported
+2026-08-17 and predates the 08-20 leg.
 
 ### Recovery
 
@@ -112,10 +133,11 @@ persisted** across four consecutive sync-mode dispatches. **Loss
 descended 2.86 → 2.65 in 1,227 steps** — the v2 fp32 master chain
 is converging cleanly.
 
-`8508214` (next continuation) is **Q in `small`** since 03:44 and
-has not started — Aurora capacity for the `small` queue is exhausted.
-Capacity (not async-cascade or any other bug) is now the bottleneck
-for the 20B 512N trajectory.
+`8508214` (next continuation) was **Q in `small`** since 03:44 and
+had not started -- Aurora capacity for the `small` queue was exhausted at
+the time. Capacity (not async-cascade or any other bug) was the bottleneck
+for the 20B 512N trajectory, and as of 2026-08-30 it still is: the chain is
+idle behind `8784460`.
 
 The same sync-mode fix is now validated for the 2B 512N chain (see
 [`8506221` on the 2B 512N page](../../2b/n512/README.md#recovery)).
@@ -123,9 +145,9 @@ Note the preflight gotcha from that 2B work: the wrapper's default
 120s smoke-test timeout doesn't scale to 6,144-rank DDP init.
 Default is now 600s + `--train-iters 5`.
 
-#### Recent issues (2026-05-29 → 2026-06-09)
+#### Issues in the 2026-05-29 -> 2026-06-09 window (historical)
 
-- **2026-05-29 → present (~10 days): chain stalled in queue.** Aurora
+- **2026-05-29 -> 2026-06-09 (~10 days): chain stalled in queue.** Aurora
   `small` queue has been heavily contended. Six continuations
   (`8513546`, `8514610`, `8516701`, `8521624`, `8521625`, `8521628`)
   have been Q'd over this window; the first five ran (the last,

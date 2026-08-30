@@ -5,21 +5,36 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-19
+> Last updated: 2026-08-30
 >
-> Status: chain at step **10,300** persisted (**518.4B tokens, 11.1%** of
-> 4.67T), loss ~**2.38**. Trajectory since the step-300 stall: `8505255`
+> Status: **NOT RUNNING.** The last leg to train this chain was umbrella
+> `8773440` seat t2 on **2026-08-26** (**201 steps, loss 2.31488 ->
+> 2.24577**); nothing on Aurora has trained since. Chain head **step-12,000**
+> persisted (**604.0B tokens, 12.9%** of 4.67T, 137 step dirs verified on disk
+> 2026-08-21) -- the 08-26 leg resumed from that head, and its resulting
+> checkpoint head has not been re-verified on disk here. `8773440` used 5h13m
+> of a 12h slot and exited `-14`. The successor umbrella `8784460` (2,098
+> nodes, `large`) has been `Q` since 2026-08-26 13:22 UTC with 101h+ eligible
+> and `score_boost=0`, with `8784462` held behind it; a ticket is drafted but
+> NOT sent
+> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+>
+> Trajectory since the step-300 stall: `8505255`
 > (sync mode) reached step-1,125; `8558548`/`8558549` carried it
 > 1,101 -> 3,136; native-autoretry continuations (`8647385`, `8661054`)
 > advanced it 3,101 -> 4,375; `8681340` (260N) resumed to step-6,000; a 16N
 > `capacity`-queue bridge (`8703284`, run `v58n7vam`) then carried it
 > 6,000 -> 6,800. **Bridge retired 2026-07-29** after it collided with a
 > concurrently-scheduled umbrella trainer on the shared ckpt dir (corrupted
-> step-6,200 + step-6,300, both quarantined; latest CLEAN ckpt = step-6,800).
-> The chain is now owned by the **5-chain ~2,098N umbrella** (`8714502`,
-> resumes step-6,800) with a small `8698753` (260N) resume as queue backfill;
-> individual + umbrella are mutually guarded (handoff-kill on umbrella start)
-> so they never co-write the dir again.
+> step-6,200 + step-6,300, both quarantined; latest CLEAN ckpt AT THAT TIME =
+> step-6,800).
+> From 2026-08-05 on, the chain has been carried by the successive
+> **5-chain ~2,098N umbrellas** (`8714502` resumed step-6,800, then `8714503`,
+> `8744245`/`8744247`, `8756070`, `8760249`, `8764675`, and finally `8773440`
+> on 08-26); a small `8698753` (260N) resume served as queue backfill.
+> Individual + umbrella are mutually guarded (handoff-kill on umbrella start)
+> so they never co-write the dir again. Per-umbrella step ranges are in the
+> [dispatch log](../../../dispatch-log.md).
 > NOTE: the run-ids for the 1,101->3,135 segment
 > were originally recorded as the `ezpz.examples.test` preflight-smoke runs;
 > corrected 2026-07-24 to the real `torchtitan.ezpz.train` run-ids (the
@@ -86,19 +101,26 @@
 | `8558548` | 2026-06-16 | 12h | 1,100 → ? | — | — | — | **Re-submit after tarball fix** (spmd_types==0.2.1 installed + rebuilt 2026-06-16). Resumes from step-1,100. Q at submit. |
 | `8558549` | — | 12h | (cont1) | — | — | — | Held (`afterany:8558548`). |
 | `8647385`+ | 2026-07-06..23 | 12h | 3,100 -> 4,375 | ~3.2 -> ~2.5 | ~440 | ~22% | Continuations 8647385 (3101-3603), 8661054 (4201-4375) advanced the chain; interspersed with CCL/gloo crashes + resubmits (transient infra). |
-| `8681340` | 2026-07-23 | 12h | 5,101 -> **5,885**+ | 2.485 -> 2.509 | 40-443 (variable) | ~22% | **RUNNING** (full 260N throughput, resumes real chain). Advancing step-5,100 -> 5,800+; loss steady ~2.49. |
+| `8681340` | 2026-07-23 | 12h | 5,101 -> **6,000** | 2.485 -> 2.533 | 40-443 (variable) | ~22% | **Done.** Full 260N throughput, resumed the real chain from `step-5100` and wrote `step-5200`..`step-6000` (3,072 shards each). Was marked RUNNING here through 2026-08-30; it is long finished and has aged out of PBS history. |
+| umbrellas `8698125`..`8764675` | 2026-07-28..08-20 | 12h-24h | 6,151 -> **12,000** | 2.41007 -> **2.43380** | ~370 (mean) | ~18.5% (mean) | Carried by the ~2,098N 5-chain umbrella seat t2 across eight dispatches, with the 16N `8703284` bridge and the 260N `8698753` backfill in between. TPS/MFU are means over the committed metric store, which covers 6,151-10,380 of this range. Per-dispatch step ranges: [dispatch log](../../../dispatch-log.md). |
+| `8773440` t2 | 2026-08-26 | 12h | **201 steps** on top of the step-12,000 head | **2.31488 -> 2.24577** | -- | -- | **Last leg to train this chain.** Umbrella used 5h13m of a 12h slot, `Exit_status=-14`; three of five seats trained, both 512N seats never started. The seat was abandoned early as `stuck_pre_training` because ezpz 0.21's progress regex matched `step=` while torchtitan prints `step: ` -- fixed in ezpz 0.27.3, pinned by [`tests/failover/test_progress_marker_contract.py`](../../../../../tests/failover/test_progress_marker_contract.py). **Nothing has trained since.** |
 
-**Latest checkpoint:** step-10,300 (120 step dirs on disk, 117 with valid
-`.metadata`)
+**Latest checkpoint:** step-12,000 (137 step dirs, audited on disk 2026-08-21).
+The 08-26 leg (`8773440` t2) trained 201 further steps on top of this head; its
+resulting checkpoint head has not been re-verified on disk, so the last
+disk-confirmed figure is the one quoted.
 
-**Cumulative persisted steps:** 10,300
+**Cumulative persisted steps:** 12,000 (disk-confirmed)
 
-**Tokens consumed:** 10,300 x 6,144 x 8,192 = **518.4B tokens** (11.1% of 4.67T
+**Tokens consumed:** 12,000 x 6,144 x 8,192 = **604.0B tokens** (12.9% of 4.67T
 target)
 
-**Loss:** ~2.38 (lc9oukel, step-10,380)
+**Loss:** 2.24577 at the end of the 08-26 leg (`8773440` t2, last logged step).
+The committed metric store here stops at step-10,380 / ~2.372 (`lc9oukel`); it
+was exported 2026-08-17 and predates the 08-20 and 08-26 legs.
 
-> **Corrected 2026-08-17.** This page previously carried three different step
+> **Corrected 2026-08-17** (and again 2026-08-30, see the status header).
+> This page previously carried three different step
 > counts -- 6,800 in the header, 9,400 here, and a loss quoted at step-8,334 --
 > none of which matched the 10,300 on disk. The 8,334 figure was not a typo: it
 > was the true head of the chain's *plotted* data, because three W&B runs
@@ -133,7 +155,8 @@ target)
   it **silently hung after ~step 435** and sat idle until PBS walltime-killed it
   at 04:01. No NaN; MFU ~22%; checkpoints step-50..step-400 saved (~385s/save).
 - **Disposition:** NOT resumed -- it would just duplicate the canonical 20B-256
-  chain (already at step-4,200) at a worse loss. The mislabeled ckpt dir can be
+  chain (step-4,200 at the time of that decision; step-12,000 now) at a worse
+  loss. The mislabeled ckpt dir can be
   archived/removed. A REAL constant-LR experiment is now handled differently:
   the canonical chains hold LR flat via `DECAY_RATIO=0.0` in
   `submit_agpt_20b_autoretry.sh` (see 2026-07-12 journal entry).

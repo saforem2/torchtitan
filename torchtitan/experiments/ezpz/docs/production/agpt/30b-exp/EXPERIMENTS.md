@@ -1,6 +1,8 @@
 # 30B-exp experiment log
 
-> **Last updated: 2026-08-21.**
+> **Last updated: 2026-08-30.**
+>
+> **These run on Sunspot, not on the Aurora production allocation.**
 >
 > Tracking table for every experiment run against the
 > [30B-exp proposal](README.md). One row per experiment, one file per
@@ -42,7 +44,7 @@ economising on the important one.
 | [05](exp05-2n-performance.md) | 30B at 2N | Does the proposed 30B train at all, and what is its best per-GPU config? | 2N, ~2h x3 | **DONE** -- 466 tps / 27.89% MFU at LBS=3; TP hurts; HSDP fails |
 | [06](exp06-scaling.md) | 30B weak scaling | Does the 30B hold its MFU as node count grows, as the proposal's "3x effective compute" claim requires? | 64N, 3h | **DONE** -- 25.54% at 64N; 1.42%/doubling vs the 2B's 13.96% |
 | [07](exp07-custom-tokenizer-feasibility.md) | Custom 64k tokenizer | Should we train our own tokenizer on olmo-mix-1124, and what does the already-tokenized corpus cost us? | 1N CPU, ~1h | **DONE** -- NO. Custom 64k measures 2.5% WORSE than gemma and 5.9% worse than Llama-3; use the vendored Llama-3 128k |
-| [08](exp08-convergence.md) | 30B convergence + DCP resume | Does loss actually descend over hundreds of steps, and does save -> resume -> continue work? | 8N, 6h + 2h | **DONE** -- **COMPLETE at 2000/2000 steps**, loss 12.028 -> 2.115, zero NaN, ~28% MFU held throughout; save -> resume -> continue -> save verified **under compile** on the `partial_dtensor` pin. Four-job chain, finished by 12473545 (rc=0) |
+| [08](exp08-convergence.md) | 30B convergence + DCP resume | Does loss actually descend over hundreds of steps, and does save -> resume -> continue work? | 8N, 6h + 2h | **DONE** -- **COMPLETE at 2000/2000 steps**, loss 12.028 -> 2.115, zero NaN, ~28% MFU held throughout; save -> resume -> continue -> save verified **under compile** on the `partial_dtensor` pin. Four-job chain, finished by 12473545 (rc=0). **Downstream eval landed** (job 12473637): six tasks, combined **+4.81 sigma** over random |
 
 ## Tier 1 -- the gate
 
@@ -303,6 +305,51 @@ arm on Aurora would be planned against data that is not there.
 model sizes and five data treatments, so some spread may be real capability
 difference. The reseed arm replaces it with a measurement; until then +0.030
 is provisional.
+
+### exp08 -- 30B convergence + DCP resume (2026-08-19, COMPLETE 2026-08-21)
+
+**Supports feasibility. Settles nothing about the data question.**
+
+The run is **finished, not in progress**: 2000/2000 steps across a four-job
+Sunspot chain ending with `12473545` at `rc=0` / `Exit_status=0`, in 2h58 of
+a 6h allocation.
+
+1. **Loss descends and keeps descending.** 12.028 -> **2.115** over 1,999
+   steps, monotone in the mean, no plateau and no divergence. **Zero NaN/inf
+   in any of the four jobs** -- worth stating explicitly given that the 80B
+   NaN is the wall this proposal exists to route around.
+2. **grad_norm stays bounded**, 0.7-1.0 early and 0.074 at the end, falling
+   throughout. Steady state held to the last step: 496 tps, **28.3% MFU**,
+   memory flat at 38.29 GiB (59.84%).
+3. **The checkpoint round trip works under compile.** Three separate resumes,
+   the last two compiled, each continuing the trajectory rather than
+   restarting it, plus a directly observed post-resume SAVE. This **closes
+   the `vc_check` item** the proposal listed as open: that assertion is a
+   `full_dtensor` failure and the configs are pinned to `partial_dtensor`.
+
+**Downstream eval (job `12473637`), the first capability numbers on this
+model.** Step-2000 converted to HF and evaluated zero-shot across six tasks;
+combined **+4.81 sigma** over random, with `hellaswag` (+4.8) and `mmlu`
+(+3.3) individually significant.
+
+*This is direction, not capability.* Every score is 1-2pp over random on
+benchmarks where useful models sit at 60-70%, off **3.93B tokens** -- about
+1/1000th of the completed 2B chain. The two significant tasks are simply the
+two with the most requests (40,168 and 56,168, giving stderr 0.44 and 0.37);
+every task shows the same small positive offset and only the high-power ones
+can resolve it. One effect through six lenses, not four nulls and two hits.
+The mmlu subject spread is real but **not** interpretable as subject
+competence -- a sub-chance entry (`human_aging`, 15.70%, -3.8 sigma) survives
+Bonferroni, which points at answer-position or option-length bias in a
+barely-trained model.
+
+**Two process lessons.** A job ended early because only the PBS walltime was
+raised 6h -> 12h while the inner `timeout 20400` stayed put -- scale both
+clocks together or the shorter one silently wins. And at 30B the checkpoint
+interval is a **capacity** decision, not a resume-granularity knob: 294 G x
+20 checkpoints = 5.9 T against 1.5 T free filled the filesystem mid-write.
+The fix was `interval=250`, **not** `keep-latest-k` -- deleting history to buy
+space trades a permanent asset for a temporary one.
 
 ## Rules for this directory
 

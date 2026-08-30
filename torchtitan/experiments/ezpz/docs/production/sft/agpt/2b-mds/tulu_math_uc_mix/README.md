@@ -1,8 +1,10 @@
 # SFT recipe: AuroraGPT-2B-sophiag-138650 × tulu_math_uc_mix
 
-> **Last updated: 2026-08-19.**
-> **Status: complete.** Final checkpoint at
+> **Last updated: 2026-08-30.**
+> **Status: complete** (finished 2026-06-10; nothing here is running).
+> Final checkpoint at
 > `outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/checkpoint-729-hf/`,
+> verified present and intact on Sunspot (7.5 GB) as of 2026-08-30 and
 > ready for downstream alignment work.
 
 ## Quick reference
@@ -87,27 +89,28 @@ coverage at 35× less I/O. Details in
 
 ## Checkpoints on disk
 
+As of 2026-08-30 the directory holds only the two consolidated exports --
+the intermediate FSDP1-sharded dirs were reclaimed during the 2026-07-13
+`/lus/tegu` disk-full cleanup, which preserved every `-hf` deliverable:
+
 ```
 outputs/sft/aurora2b-sophiag-tulu-mix-32n-gbs6144/
-├── checkpoint-100/        FSDP1 sharded
 ├── checkpoint-100-hf/     consolidated HF format (early milestone, 7.5 GB)
-├── checkpoint-200/
-├── checkpoint-300/
-├── checkpoint-400/
-├── checkpoint-500/
-├── checkpoint-600/
-├── checkpoint-700/
-├── checkpoint-729/        final FSDP1 sharded (last step)
-└── checkpoint-729-hf/     ← FINAL HF format, the deliverable
+└── checkpoint-729-hf/     ← FINAL HF format, the deliverable (7.5 GB, intact)
 ```
+
+The run originally also wrote FSDP1-sharded `checkpoint-{100,200,...,700,729}/`
+dirs at ~28 GB each; those are gone. The deliverable is unaffected -- it is
+the flat `-hf` copy, not a shard set.
 
 FSDP1 → HF consolidation is via
 [`rl/scripts/consolidate_sft_ckpt.sh`](../../../../../../rl/scripts/consolidate_sft_ckpt.sh),
-which wraps `accelerate merge-weights`. Each `checkpoint-N/` is
+which wraps `accelerate merge-weights`. Each `checkpoint-N/` was
 ~28 GB on disk (FSDP shards + optimizer + per-rank RNG); the `-hf/`
-flat-format copy is 7.5 GB. Intermediate `checkpoint-N/` dirs are
-kept for resume; only `checkpoint-729-hf/` is meant for downstream
-consumption.
+flat-format copy is 7.5 GB. Intermediate `checkpoint-N/` dirs were
+kept for resume while the run was live and have since been reclaimed;
+only `checkpoint-729-hf/` is meant for downstream consumption, and it
+is the one that was preserved.
 
 ## Evals
 

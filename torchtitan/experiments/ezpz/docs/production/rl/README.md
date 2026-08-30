@@ -1,5 +1,10 @@
 # RL (GRPO) on Intel XPU
 
+> **Last updated: 2026-08-30.** No GRPO run is training or queued. The
+> statuses below ("works", "complete", "study") describe validated paths
+> and finished runs, not activity -- the most recent GRPO job on this page
+> is from 2026-07-20.
+
 > [!IMPORTANT]
 > **For the 2B model's post-training results, start at
 > [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** -- SFT and RL
@@ -90,7 +95,15 @@ no HF-Hub download; `model_type=llama` -> FSDP wraps `LlamaDecoderLayer`):
 | Aurora | `/flare/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/public/sophiag/hf/global_step138650` |
 | Sunspot | `/home/foremans/datascience/foremans/projects/saforem2/torchtitan/AuroraGPT-2B-sophiag-gs138650` |
 
-The SFT deliverable used by path B is `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf`.
+The SFT deliverable used by path B is
+`outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf`.
+
+> **That consolidated export is no longer on disk** (checked 2026-08-30 --
+> no `checkpoint-*-hf` remains under that output dir). The sharded
+> `checkpoint-900/` is intact (23 GB, 96 `.distcp` shards), so re-run
+> `rl/scripts/consolidate_sft_ckpt.sh` before launching anything that
+> expects the `-hf` path. See
+> [SFT evals](../sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md#recommendation).
 
 ## Layout
 

@@ -1,5 +1,9 @@
 # GRPO+LoRA on XPU: Monarch + TorchStore + vLLM
 
+> **Last updated: 2026-08-30.** "WORKS" below is a path-validation result
+> from 2026-07-19, not a running job -- the most recent Monarch GRPO run on
+> record is 2026-07-20. Nothing on this page is training or queued.
+
 **Current status doc** for the UPSTREAM `torchtitan.experiments.rl` RL path
 (Monarch actors + TorchStore weight store + vLLM generation), vendored into
 **our** repo under `experiments/ezpz/` and verified end-to-end on Sunspot XPU.

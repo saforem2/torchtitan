@@ -1,6 +1,6 @@
 # agpt 30B-exp -- a proposed next flagship
 
-> **Last updated: 2026-08-19.**
+> **Last updated: 2026-08-30.**
 >
 > **Status: PROPOSAL, now partly MEASURED.** This began as a design document
 > written the day the 2B-512 canonical chain completed its full 4.674T
@@ -9,11 +9,21 @@
 > the argument below is no longer purely a priori -- see
 > [EXPERIMENTS.md](./EXPERIMENTS.md) for what is settled and what is not.
 >
-> Headline results so far: the config trains (482 steps, loss 12.03 -> 3.37,
-> ~28% MFU held), checkpoints round-trip, the OLMo-2 tokenizer beats a
-> custom 64k, and weak scaling is far better than the 2B's (1.42% vs 13.96%
-> loss per doubling). Open: HSDP fails at this size, and compiled resume hits
-> the vc_check bug.
+> **These are Sunspot experiments, not Aurora production.** They do not
+> consume the production allocation and are not one of the chains on the
+> [production index](../../README.md).
+>
+> Headline results so far: the convergence run **COMPLETED 2000/2000 steps**
+> (loss **12.028 -> 2.115**, zero NaN/inf, ~28% MFU held throughout),
+> checkpoints round-trip **under compile**, the step-2000 model has **first
+> downstream eval numbers** (combined **+4.81 sigma** over random -- see
+> below), the OLMo-2 tokenizer beats a custom 64k, and weak scaling is far
+> better than the 2B's (1.42% vs 13.96% MFU lost per doubling). Open: HSDP
+> fails at this size.
+>
+> The compiled-resume `vc_check` bug is **no longer open** -- it is a
+> `full_dtensor` failure and the configs are pinned to `partial_dtensor`
+> ([exp08](exp08-convergence.md), job `12473515`).
 >
 > Read the [Evidence](#1-evidence-what-this-campaign-actually-measured)
 > section first. Every claim there is a measurement from our own runs with a
@@ -156,7 +166,7 @@ wider.** Recovering 27% MFU is a ~3x effective-compute multiplier, larger
 than any data change proposed below.
 
 > **Measured, partially ([exp06](exp06-scaling.md), job `12473198`).** The 30B
-> holds **25.54% MFU at 64N** and decays **1.75% per doubling** against the
+> holds **25.54% MFU at 64N** and decays **1.42% per doubling** against the
 > 2B's **13.96%** -- an 8x better rate, supporting the mechanism above.
 >
 > Two honest caveats this section should carry:
@@ -396,6 +406,47 @@ Stated separately so nobody cites it as evidence.
 - **EP gets fixed** -> the MoE option dominates dense and this plan should be
   revisited.
 
+## Status of the 30B itself (2026-08-30)
+
+The convergence experiment is **finished**, not in progress. On Sunspot, over
+a four-job chain ending with `12473545` (`rc=0`, `Exit_status=0`, 2h58 of a 6h
+allocation):
+
+- **2000 / 2000 steps**, loss **12.028 -> 2.115**, **zero NaN/inf in any of
+  the four jobs**.
+- Steady state to the end: 496 tps, **28.3% MFU**, memory flat at 38.29 GiB
+  (59.84%), grad_norm descending 0.26 -> 0.074.
+- Save -> resume -> continue -> save verified **under compile** on the
+  `partial_dtensor` pin. Nine checkpoints on disk (400 through 2000), 2.6 T.
+
+**First downstream numbers** (job `12473637`, step-2000 converted to HF,
+zero-shot, `acc_norm` where defined):
+
+| task | score | stderr | chance | sigma |
+|---|---:|---:|---:|---:|
+| `arc_challenge` | 26.11% | 1.28 | 25% | +0.9 |
+| `arc_easy` | 25.67% | 0.90 | 25% | +0.8 |
+| **`hellaswag`** | **27.14%** | 0.44 | 25% | **+4.8** |
+| **`mmlu`** | **26.24%** | 0.37 | 25% | **+3.3** |
+| `piqa` | 51.20% | 1.17 | 50% | +1.0 |
+| `winogrande` | 51.38% | 1.40 | 50% | +1.0 |
+
+Combined across all six (Stouffer): **+4.81 sigma.**
+
+**Read this as direction and a working export path, not capability.** It is
+1-2pp over random on benchmarks where useful models score 60-70%, off 3.93B
+tokens -- roughly 1/1000th of the completed 2B chain. The two individually
+significant tasks are the two with the most requests (hellaswag 40,168,
+mmlu 56,168); every task shows the same small positive offset and only the
+high-power ones can resolve it. That is one effect seen through six lenses,
+not four nulls and two hits. Full analysis, including the mmlu subject split
+and why it should *not* be read as subject competence:
+[exp08](exp08-convergence.md#downstream-eval-hellaswag-is-above-chance-job-12473637).
+
+**Still open:** HSDP fails between 20B and 30B ([exp05](exp05-2n-performance.md)),
+and 512N remains unmeasured -- 64N is the largest point, and Sunspot cannot
+settle it.
+
 ## Experiments
 
 Claims in Sections 2-4 are being tested rather than asserted. See
@@ -418,5 +469,5 @@ important question is being economised on -- that one needs the 1B proxy.
   -- the fp32/bf16 investigation Section 6 refers to
 - [`../../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md`](../../../experiments/agpt/sunspot/20260728-2b-mds-anneal-and-datamix.md)
   -- the anneal vs data-mix A/B
-- [`../../POST-TRAINING-2B.md`](../POST-TRAINING-2B.md) -- post-training
+- [`../../POST-TRAINING-2B.md`](../../POST-TRAINING-2B.md) -- post-training
   counterpart: accuracy lives in SFT structure, not RL

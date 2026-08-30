@@ -1,7 +1,17 @@
 # B3 cold-start SFT design: combined instruct + CoT rebuild from gs138650
 
 Date: 2026-07-22
-Status: approved (brainstorming), pending implementation plan
+Status when written: approved (brainstorming), pending implementation plan
+
+> **Last updated: 2026-08-30.** This is the original design document and is
+> kept as written. It has since been **built and run**: the plan is
+> [`implementation-plan.md`](implementation-plan.md) in this directory, and
+> B3 was trained and evaluated. **It lost** -- 0.05 cot_accuracy against
+> B2's 0.205, a long-CoT dilution regression. The follow-up attempts to
+> recover it (B4a/B4b) also lost. Results and verdict:
+> [`../b4-finish-and-reweight/README.md`](../b4-finish-and-reweight/README.md).
+> Nothing in this line is running; the recommendation on record is not to
+> pursue further single-stage rebuilds.
 
 ## Motivation
 

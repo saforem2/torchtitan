@@ -5,16 +5,34 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-30
 >
-> Status: **COMPLETE — target reached.** Chain at step **92,859** =
+> Status: **COMPLETE — target reached** (2026-06-29). Nothing has been
+> dispatched against this chain since, and nothing needs to be: it has
+> no budget left. Chain at step **92,859** =
 > **4.674T tokens (100.0%** of the 4.67T target). The final dispatch
 > `8558531` (cont12) finished **clean** (exit 0, ~10.2h walltime run) on
 > 2026-06-29 at step-92,859 = the full pre-training budget. Continuation
-> `8558532` (cont13) is queued behind it but has <1 checkpoint-interval
-> (~90 steps) of slack to the target -- effectively a no-op. This v2 2B
+> `8558532` (cont13) was queued behind it but has <1 checkpoint-interval
+> (~90 steps) of slack to the target -- effectively a no-op, and it never
+> advanced the chain. This v2 2B
 > 256N pre-training run is done; subsequent tokens would be continued
 > pre-training (CPT), not the base run.
+>
+> **Do not read the 2026-08-26 2B-256 activity as this chain.** Umbrella
+> `8773440` (the last job to train anything on Aurora, 5h13m of a 12h slot,
+> `Exit_status=-14`) had a 2B-256 seat, `t4`, that ran **782 steps, 2.56449
+> -> 2.54807**. That is **not** this chain: this one finished at step-92,859
+> with loss 2.652 and has no budget left, and 2.56449 matches no point on it.
+> The [2026-08-21 seat audit](../../../../experiments/agpt/aurora/20260821-umbrella-seat-audit.md)
+> re-pointed `t4` at a **256N stage-2 dolmino** arm seeded model-only from
+> this chain's `step-92859` into a separate checkpoint dir, which is the
+> likely identity -- though the seat-to-chain mapping for `8773440` itself
+> has not been reconfirmed from that job's own logs here. Either way it adds
+> no tokens to this chain. Aurora has trained nothing since 2026-08-26; the
+> successor umbrella `8784460` has been `Q` since 2026-08-26 13:22 UTC with
+> 101h+ eligible time and `score_boost = 0` (ticket drafted, **NOT sent**:
+> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
 >
 > Earlier 2026-06-28: a 2h "sneak" run `8572612` advanced step-86,200 ->
 > 86,674 (256N, +474 steps / 19 ckpts, loss **2.65**) -- the first run
@@ -158,10 +176,10 @@ shifts the four-metric vector by <1pp in any direction now that we're
   target under cont12 (`8558531`, clean exit 0 on 2026-06-29). cont9
   (`8521626`) and cont10 (`8521630`) landed and advanced the run
   through step-80,400 along the way; see the Progress table above.
-  cont13 (`8558532`) remains held behind cont12 as a no-op backstop
-  (<1 ckpt-interval to target). No further base-run dispatches are
-  needed; additional tokens would be continued pre-training (CPT), not
-  the base run.
+  cont13 (`8558532`) sat behind cont12 as a no-op backstop
+  (<1 ckpt-interval to target) and never advanced the chain. No further
+  base-run dispatches are needed or planned; additional tokens would be
+  continued pre-training (CPT), not the base run.
 - Submit script: `scripts/submit_agpt_2b_aurora_venv_failover.sh`
   with the same env (LBS=2, GBS=6144, SophiaG LR=2.28e-5, fp32 master,
   async ckpt mode, ckpt-interval=100, keep-latest-k=0).
