@@ -201,11 +201,26 @@ def run_worker(args: argparse.Namespace) -> int:
     ]
 
     config = ConfigManager().parse_args(argv)
-    config.optimizer = default_adamw(lr=args.lr)
+    # muP changes BOTH halves and needs both to be measured together: the
+    # d^-1 readout init does nothing on its own under Adam (which is
+    # scale-invariant in the gradient), and the eta/m hidden LR group does
+    # nothing without it. Running one without the other is a coordinate check
+    # of neither parametrization.
+    if args.mup:
+        from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
+
+        config.optimizer = default_mup_adamw(
+            lr=args.lr,
+            dim=dim,
+            base_dim=args.mup_base_dim,
+            independent_weight_decay=args.mup_independent_wd,
+        )
+    else:
+        config.optimizer = default_adamw(lr=args.lr)
 
     # THE WIDTH SWAP. Replace the whole model config, built by the one entry
     # point that threads dim into tok_embeddings / layers / norm / lm_head.
-    model_cfg = _build_agpt_config(
+    build_kwargs = dict(
         dim=dim,
         n_layers=args.n_layers,
         n_heads=n_heads,
@@ -215,6 +230,21 @@ def run_worker(args: argparse.Namespace) -> int:
         hidden_dim=hidden_dim,
         max_context_length=args.seq_len,
     )
+    if args.mup:
+        from torchtitan.experiments.ezpz.agpt.mup import build_mup_agpt_config
+
+        # base_head_dim is pinned to the BASE rung's head_dim, not this rung's.
+        # Defaulting it per-rung would make the attention scale reduce to
+        # 1/sqrt(head_dim) at every width -- correct on a fixed-head_dim ladder
+        # and silently wrong on one that grows head_dim, which is exactly the
+        # ladder the attention term exists for.
+        model_cfg = build_mup_agpt_config(
+            base_dim=args.mup_base_dim,
+            base_head_dim=args.head_dim,
+            **build_kwargs,
+        )
+    else:
+        model_cfg = _build_agpt_config(**build_kwargs)
     config.model_spec.model = model_cfg
     if hasattr(config.loss, "global_vocab_size"):
         config.loss.global_vocab_size = int(args.vocab_size)
@@ -610,6 +640,14 @@ def _plot(summary: dict[str, Any], out_dir: str) -> str | None:
 
 def run_driver(args: argparse.Namespace) -> int:
     widths = [int(w) for w in args.widths.split(",") if w.strip()]
+    if args.mup and args.mup_base_dim <= 0:
+        # Base = the smallest rung, so it gets m=1 and is parametrization-
+        # neutral. Resolved HERE, once, because a per-worker default would
+        # make every rung its own base, every m equal 1, and the coordinate
+        # check flat for a reason that has nothing to do with muP.
+        args.mup_base_dim = min(widths)
+        print(f"[coord-check] muP base_dim resolved to {args.mup_base_dim}")
+
     if len(widths) < 3:
         raise ValueError(
             f"a coordinate check needs at least 3 widths to fit a slope, got {widths}"
@@ -664,6 +702,14 @@ def run_driver(args: argparse.Namespace) -> int:
                 "--config",
                 args.config,
             ]
+            if args.mup:
+                cmd += [
+                    "--mup",
+                    "--mup-base-dim",
+                    str(args.mup_base_dim),
+                ]
+                if args.mup_independent_wd:
+                    cmd.append("--mup-independent-wd")
             if args.extra:
                 cmd += ["--extra", *args.extra]
             print(f"[coord-check] launching width={w} ...", flush=True)
@@ -730,6 +776,37 @@ def build_parser() -> argparse.ArgumentParser:
         "the weights at init and fake a flat check",
     )
     ap.add_argument("--config", default="ezpz_agpt_debugmodel")
+    ap.add_argument(
+        "--mup",
+        action="store_true",
+        help=(
+            "build every rung under muP (d^-1 readout init, muP attention "
+            "scale, four LR groups with hidden at eta/m) instead of the "
+            "current standard parametrization. Without this the check "
+            "measures SP, which is what it was built to reproduce."
+        ),
+    )
+    ap.add_argument(
+        "--mup-base-dim",
+        type=int,
+        default=0,
+        help=(
+            "width eta is tuned at; m = dim / base_dim. Defaults to the "
+            "SMALLEST swept width, so the base rung gets m=1 and is "
+            "parametrization-neutral."
+        ),
+    )
+    ap.add_argument(
+        "--mup-independent-wd",
+        action="store_true",
+        help=(
+            "decouple weight decay from the per-group lr. PyTorch AdamW "
+            "decays by (1 - lr*wd), so scaling the hidden lr by 1/m also "
+            "scales its decay by 1/m -- per the audit this is one of the "
+            "three things documented to break muP transfer, so it is the "
+            "first thing to try if the check fails."
+        ),
+    )
     ap.add_argument("--no-plot", action="store_true")
     ap.add_argument(
         "--reuse", action="store_true", help="skip widths whose JSON already exists"

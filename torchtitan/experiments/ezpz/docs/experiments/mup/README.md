@@ -449,6 +449,63 @@ Two operational notes for whoever runs it:
   Divergence accumulates, so a short check understates it and could read as a
   muP pass when it is really a too-short run. Use at least 8 steps.
 
+## 5.6 FIRST COORDINATE CHECK RUN: hidden layers pass, the readout does not
+
+Bridged the harness to the muP builders (`--mup`, `--mup-base-dim`,
+`--mup-independent-wd`) and ran it. 4 widths x 8 steps, lr 1e-4, login node,
+CPU. Same geometry both times, so the columns are directly comparable:
+
+| module | SP slope | muP slope |
+|---|---:|---:|
+| `layers.5.attention` | **1.42** | **-0.010** |
+| `layers.4.attention` | 1.32 | 0.020 |
+| `layers.3.attention` | 1.13 | (flat) |
+| `layers.5.feed_forward` | -- | -0.011 |
+| `lm_head` | 0.22 | **-0.130** |
+| `tok_embeddings` [control] | 0.001 | 0.001 |
+
+Slope is `d log2(l1) / d log2(width)`; 0 is what muP promises. Tolerance 0.05.
+
+**The hidden layers pass.** Attention went from 1.42 to -0.010 and the
+feed-forwards sit at ~0.000. That is the `eta/m` LR grouping doing exactly
+what it is supposed to do, and it is the bulk of the parametrization.
+
+**The readout fails, and it fails in the interesting direction.** `lm_head` is
+at -0.130: **negative**, meaning over-scaled DOWN, not left un-scaled.
+Coordinates fall 0.0696 -> 0.0542 as width grows 8x. Its absolute magnitude
+also dropped ~10x from SP (0.785 -> 0.070), which confirms the `d^-1` init is
+taking effect -- the problem is not that the change did not land.
+
+A negative slope on the readout specifically is what you would expect if the
+`d^-1` init and the `O(1)` LR group are BOTH applying where Table 8 wants the
+scaling split differently between init and forward multiplier. This is exactly
+the uncertainty flagged in section 4: whether init-plus-LR-group fully
+substitutes for the forward multiplier under Adam. The coordinate check says
+not quite -- which is what it is for.
+
+**Independent weight decay is not the cause.** `--mup-independent-wd` gives an
+identical 0.130. Sensible on reflection: over 8 steps at lr 1e-4 the decay term
+moves almost nothing. Section 5.1's warning about weight decay breaking
+transfer is about full training runs, not an 8-step check, so this does not
+contradict it -- it just means WD is not the knob that fixes the readout.
+
+### What to try next, in order
+
+1. **The forward-multiplier form.** Keep `std = d^-1/2` and apply Table 8's
+   `1/m` multiplier on the logits instead of folding it into the init. Route
+   (a) in section 4 -- the audit preferred route (b) for blast radius, and the
+   measurement now argues for (a).
+2. **Readout LR.** If the multiplier form alone does not flatten it, the
+   readout group's `O(1)` LR may need to be `O(1/m)` in combination with the
+   `d^-1` init. Cheap to test: two runs.
+3. **Only then** look at trainable norm gains and the attention scale. Norms
+   are already flat (-0.000) and the attention knob is inert on a fixed
+   head_dim ladder, so neither is implicated by this data.
+
+Note the failing modality is a single module with a clean, reproducible signal
+-- not a diffuse failure. That is a good position: the remaining work is
+bounded.
+
 ## 6. Staged plan
 
 Each stage is gated on the previous one and produces a decision, not just an
