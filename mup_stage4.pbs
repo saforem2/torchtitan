@@ -1,0 +1,97 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=16
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N mup-stage4
+#PBS -j oe
+set -o pipefail
+
+# muP stage 4: does an LR tuned at a small width transfer to a large one?
+#
+# The coordinate check (scripts/mup_coord_check.py) already showed the
+# parametrization is internally consistent -- activation coordinates are
+# width-invariant, max |slope| 0.020 against a 0.05 tolerance. That says
+# nothing about the PAYOFF, which is the only reason to want muP: that the
+# optimum measured on a cheap proxy is still the optimum on the expensive
+# target. This measures that.
+#
+# LADDER (verified before submission): dim 1536 / 3072 / 6144, everything
+# else pinned -- L=64, head_dim=128, H/dim=2.667 exactly, vocab=100352. The
+# top rung IS the production 30B geometry, so a positive result transfers to
+# something we actually run.
+#
+# WHY NOT ezpz/lr_finder.py. It writes one curr_lr into every param group
+# (lr_finder.py:141-143, 193-196), which erases muP's per-group ratios: the
+# hidden group must sit at eta/m while embeddings, readout and norms sit at
+# eta. A finder run would measure a model that is not parametrized the way
+# its config says. Discrete fixed-LR runs keep the grouping intact.
+#
+# WHY MUP_ETA AND NOT A CLI FLAG. tyro overrides exactly the param group it is
+# named, and the groups hold a RATIO rather than a common value. A rehearsal
+# swept --optimizer.param-groups.0...lr and moved only the embedding group's
+# single parameter; the 42-parameter hidden group stayed at the default, every
+# run trained at the same effective LR, and the harness reported a confident
+# NO TRANSFER from 0.006 nats of noise. MUP_ETA rebuilds the whole optimizer
+# config per run.
+#
+# GRID. 5 points spanning 256x, chosen from the tiny-ladder rehearsal where
+# that span moved the loss 1.6 nats and produced an interior minimum at every
+# width. A narrower grid cannot locate an optimum; see above.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+export PYTHONPATH=$PWD
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
+
+OUT="$HOME/.cache/mup_stage4/real_$PBS_JOBID"
+mkdir -p "$OUT"
+echo "HEAD=$(git log --oneline -1)"
+echo "OUT=$OUT"
+echo ""
+
+# Each arm is one short training run at a fixed eta. Launched through
+# `ezpz launch` so all 16 nodes participate; the harness itself only
+# orchestrates and parses.
+LRS="1e-4,4e-4,1.6e-3,6.4e-3,2.56e-2"
+STEPS=60
+SEQ=2048
+
+for FLAVOR in agpt_mup_1536 agpt_mup_3072 agpt_mup_6144; do
+  for LR in ${LRS//,/ }; do
+    TAG="${FLAVOR}_lr${LR}"
+    LOG="$OUT/$TAG.log"
+    echo "### $TAG"
+    MUP_ETA="$LR" timeout 2400 ezpz launch --nproc 192 -ppn 12 -- \
+      python3 -m torchtitan.experiments.ezpz.train \
+        --module ezpz.agpt --config "$FLAVOR" \
+        --training.steps=$STEPS \
+        --training.max-context-length=$SEQ \
+        --training.num-tokens-per-microbatch-per-dp-rank=$SEQ \
+        --compile.no-enable --checkpoint.no-enable \
+        --validator.no-enable --metrics.no-enable-wandb \
+        --debug.seed=42 \
+        --lr-scheduler.warmup-steps=1 \
+        --lr-scheduler.decay-ratio=0.0 \
+        > "$LOG" 2>&1
+    rc=$?
+    last=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | tail -1)
+    n=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE 'step: [0-9]+ +loss:')
+    printf "  rc=%-4s steps=%-4s %s\n" "$rc" "$n" "${last:-NO LOSS LINES}"
+    if [ "$n" -eq 0 ]; then
+      sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -aoE '(Unrecognized|TypeError|ImportError|RuntimeError|ValueError|AssertionError): .*' \
+        | sort -u | head -2 | sed 's/^/      /'
+    fi
+  done
+done
+
+echo ""
+echo "MUP_STAGE4_DONE"
