@@ -49,12 +49,19 @@ plt.rcParams["mathtext.tt"] = "Iosevka"
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 SEQ_LEN = 4096
 GBS = 960  # sequences per train step; tokens/step = GBS * SEQ_LEN
+BIN = 250  # steps per bin for the crossover trend line
 
 # Colors held fixed per optimizer so every figure in this experiment agrees.
+# The log dir suffix is the arm's TAG, not always the optimizer name: the
+# fresh SophiaG replicate writes to optcmp-sophiag-fresh-seed1234 so it does
+# not collide with the original arm's chain.
 ARMS = {
     "adamw": ("AdamW  (lr 3.05e-05)", "#1f77b4"),
     "mano": ("Mano  (lr 5.61e-05)", "#d62728"),
     "sophiag": ("SophiaG  (lr 3.55e-05)", "#2ca02c"),
+    "sophiag-fresh-seed1234": (
+        "SophiaG  fresh, seed 1234", "#9467bd",
+    ),
 }
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -140,9 +147,25 @@ def main() -> int:
         tokens = [s * GBS * SEQ_LEN / 1e9 for s in common]
         delta = [mi[s] - ai[s] for s in common]
         ax.axhline(0.0, color="#888", lw=1.0, ls="--")
-        ax.plot(tokens, delta, color="#d62728", lw=1.8)
-        ax.fill_between(tokens, delta, 0, where=[d < 0 for d in delta],
+        # Raw per-step delta is mostly step noise at this length: single-point
+        # readings taken live during the run ranged -0.064 to -0.154 while the
+        # binned trend moved smoothly from -0.138 to -0.079. Plot the raw
+        # series faintly for honesty and the 250-step binned mean on top,
+        # since the binned curve is what the README's claims rest on.
+        ax.plot(tokens, delta, color="#d62728", lw=0.6, alpha=0.25)
+        binned: dict[int, list[float]] = {}
+        for s, d in zip(common, delta):
+            binned.setdefault(s // BIN * BIN, []).append(d)
+        b_tokens = [
+            (k + BIN / 2) * GBS * SEQ_LEN / 1e9 for k in sorted(binned)
+        ]
+        b_delta = [sum(v) / len(v) for _, v in sorted(binned.items())]
+        ax.plot(b_tokens, b_delta, color="#d62728", lw=2.0,
+                label=f"{BIN}-step mean")
+        ax.fill_between(b_tokens, b_delta, 0,
+                        where=[d < 0 for d in b_delta],
                         color="#d62728", alpha=0.15)
+        ax.legend(frameon=False, fontsize=9)
         ax.set_xlabel("tokens (B)")
         ax.set_ylabel("Mano loss  -  AdamW loss  (nats)")
         ax.set_title("Mano overtakes AdamW  (below zero = Mano ahead)")

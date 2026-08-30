@@ -306,11 +306,28 @@ and should be run after any upstream sync -- it reports zero undefined names in
 `trainer.py` now.
 
 
-## Phase 2 interim results (chain 1, ~1.95B tokens per arm)
+## Loss curves (final, all four arms)
 
-![Loss and gradient norm, three optimizers at GBS=960](figures/optcmp_30b_gbs960.svg)
+![Loss and gradient norm, four arms at GBS=960](figures/optcmp_30b_gbs960.svg)
+
+Left panel is loss against tokens; right is pre-clip `grad_norm` on a log
+axis, which is where the SophiaG arms separate. AdamW and Mano run to step
+6000 (23.59B tokens); the original SophiaG arm stops at 1976 where it was
+abandoned post-blow-up; the fresh seeded replicate runs to ~4861 and shows
+both of its onsets as vertical excursions of four to five orders of magnitude
+against the healthy arms' flat sub-1.0 band.
+
+The grad_norm panel is the one to read for stability. The loss panel alone
+makes SophiaG look merely worse; the log-scale gradient axis is what shows it
+is a different failure mode rather than a slower optimizer.
 
 ![Mano minus AdamW loss; below zero means Mano is ahead](figures/optcmp_30b_crossover.svg)
+
+The faint line is the raw per-step difference and the solid one is its
+250-step mean. Both are plotted deliberately: single-point readings taken live
+during this run ranged from -0.064 to -0.154 and each looked like the gap
+collapsing or widening, while the binned trend moved smoothly from -0.138 to
+-0.079. Every claim in this document rests on the solid line.
 
 Regenerate with `python3 torchtitan/experiments/ezpz/scripts/plot_optcmp.py`.
 It reads the arms' `train.log` files directly rather than W&B, so the figures
