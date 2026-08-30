@@ -408,6 +408,47 @@ time, no per-tensor attributes -- transplants cleanly onto our config-driven
 
 ---
 
+## 5.5 Stages 1-3 are built, and there is a gap between them
+
+Implemented 2026-08-30:
+
+- **`scripts/mup_coord_check.py`** -- the harness. Verified to reproduce the SP
+  divergence signature: at 4 widths x 8 steps, `layers.5.attention` has slope
+  1.42 while the width-independent `tok_embeddings` control sits at 0.001.
+  Every gate is negative-tested, including a synthetic flat sweep that reports
+  "HARNESS FAILURE, not a muP pass" and exits 2.
+- **`agpt/mup.py`** -- the parametrization. Six flavors (`mup_1536` /
+  `mup_3072` / `mup_6144` plus a CPU-sized `mup_tiny_*` ladder), 18 regression
+  tests. Verified: across 1536 -> 6144, lm_head std scales 4.000 (muP wants
+  `1/d`) and hidden 2.000 (wants `1/sqrt(d)`). All 56 pre-existing flavors are
+  fingerprint-identical.
+
+**They do not yet connect.** The harness varies width by calling
+`_build_agpt_config` directly (`mup_coord_check.py:208`) and never references
+`agpt_configs` or `register_mup_flavors` -- confirmed by grep, 0 occurrences of
+either. So every rung it builds is standard parametrization, and there is no
+flag that makes it emit a muP model. **The coordinate check cannot validate muP
+until that bridge exists**, and a run today measures only what SP does.
+
+This is a real gap, not a naming detail: the two halves were built
+concurrently against the same design and each is correct alone. Bridging it
+means either teaching the harness to build through the registered muP flavors,
+or giving `_build_agpt_config` a muP switch that the harness can pass through.
+The former is cleaner -- the flavors already pin the ladder geometry (L=64,
+head_dim=128, H/dim=2.667, vocab=100352) that the harness currently takes as
+loose flags, so routing through them also removes a class of
+mismatched-geometry error.
+
+Two operational notes for whoever runs it:
+
+- **`TORCH_DEVICE=cpu` is required.** Without it the trainer resolves a CUDA
+  device and dies with `AttributeError: module 'torch._C' has no attribute
+  '_cuda_setDevice'` on this XPU box.
+- **Step count matters more than it looks.** A 6-step run gives max slope 0.114
+  against a 0.05 tolerance -- a pass, but only just. The 8-step run gives 1.42.
+  Divergence accumulates, so a short check understates it and could read as a
+  muP pass when it is really a too-short run. Use at least 8 steps.
+
 ## 6. Staged plan
 
 Each stage is gated on the previous one and produces a decision, not just an
