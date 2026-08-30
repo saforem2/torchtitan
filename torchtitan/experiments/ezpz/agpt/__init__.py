@@ -927,6 +927,34 @@ agpt_configs["2b_relu2"] = agpt_configs["2B_relu2"]
 agpt_configs["2b_kitchen_sink"] = agpt_configs["2B_kitchen_sink"]
 
 
+# ---------------------------------------------------------------------------
+# muP (Maximal Update Parametrization) -- OPT-IN, purely additive
+# ---------------------------------------------------------------------------
+# Registers the muP width-ladder flavors (mup_1536 / mup_3072 / mup_6144 and a
+# CPU-sized mup_tiny_* ladder). Every existing flavor above is untouched: the
+# muP flavors are NEW keys, built by a separate builder, and
+# register_mup_flavors raises rather than overwrite a name that already exists.
+#
+# Imported at the BOTTOM because agpt.mup imports the SDPA wrappers from this
+# module to subclass them; at this point the module is fully populated, so the
+# cycle resolves. See agpt/mup.py for the design and
+# docs/experiments/mup/README.md for the audit.
+from torchtitan.experiments.ezpz.agpt.mup import (  # noqa: E402
+    default_mup_adamw,
+    MupScaledDotProductAttention,
+    MupXPUScaledDotProductAttention,
+    register_mup_flavors,
+)
+
+register_mup_flavors(agpt_configs)
+
+__all__ += [
+    "default_mup_adamw",
+    "MupScaledDotProductAttention",
+    "MupXPUScaledDotProductAttention",
+]
+
+
 def model_registry(
     flavor: str,
     attn_backend: str = "sdpa",
