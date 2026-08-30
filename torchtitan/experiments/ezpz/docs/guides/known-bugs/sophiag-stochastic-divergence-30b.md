@@ -381,6 +381,49 @@ PEAK magnitude collapses and whether loss resumes descending.
 Tally across four arms: 4/4 onset, and of the three followed well past onset,
 **two escaped and one did not**.
 
+### The escape was not permanent: a SECOND onset at ~4106
+
+The escape section above is correct but incomplete as a conclusion. The arm
+held the good state for ~2,200 steps -- reaching loss 2.4984, BELOW the
+AdamW arm's final 2.51357 -- and then went again, from a completely quiet
+state:
+
+| step | loss | grad_norm |
+|---|---|---|
+| 4105 | 2.52557 | 0.0875 |
+| 4106 | 2.50375 | 4.7431 |
+| 4108 | 2.51449 | 0.5845 |
+| 4109 | 2.86697 | 112.6056 |
+| 4110 | 4.88487 | 177.2523 |
+
+Loss 2.51 -> 4.88 in five steps. Same escalating shape as its first onset at
+~1550.
+
+The run-up is even quieter than the first time -- six consecutive 100-step
+windows at exactly zero excursions, max never above 0.24:
+
+| window | over 2.0 | rate | max gn | mean loss |
+|---|---|---|---|---|
+| 3400 | 0/100 | 0.0% | 0.20 | 2.5547 |
+| 3500 | 0/100 | 0.0% | 0.22 | 2.5500 |
+| 3600 | 0/100 | 0.0% | 0.24 | 2.5447 |
+| 3700 | 0/100 | 0.0% | 0.22 | 2.5357 |
+| 3800 | 0/100 | 0.0% | 0.17 | 2.5244 |
+| 3900 | 0/100 | 0.0% | 0.17 | 2.5151 |
+| 4000 | 0/100 | 0.0% | 1.84 | 2.5113 |
+| 4100 | 3/11 | **27.3%** | **177.25** | 2.7608 |
+
+**Two consequences.**
+
+First, read "escaped" as "returned to the metastable good state", not as
+"recovered". A SophiaG arm that has escaped is a SophiaG arm that can diverge
+again, and this one did so while training better than the AdamW baseline.
+
+Second, this is now TWO independent onsets in a single arm, each preceded by
+nothing -- 1,529 clean steps before the first, ~2,200 before the second. The
+no-precursor result no longer rests on one observation. There is no quiet
+streak long enough to certify a SophiaG run as safe.
+
 ### Method note
 
 This arm was characterized three times in three readings -- "healthy", then
