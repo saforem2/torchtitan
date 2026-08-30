@@ -1312,6 +1312,61 @@ def agpt_30b_olmo2tok_muon_norescale() -> FaultTolerantTrainer.Config:
     return _use_fineweb_edu(cfg)
 
 
+# ---------------------------------------------------------------------------
+# muP ladder entry points
+# ---------------------------------------------------------------------------
+# agpt/mup.py registers the muP widths into `agpt_configs`, which is the MODEL
+# FLAVOR registry. `--config` does not read that -- it resolves the callables
+# in THIS module (see the "Config function not found" error, which lists them).
+# Without these wrappers the muP flavors can be inspected but never trained,
+# which is how a stage-4 rehearsal failed 9/9 with rc=1 before the first real
+# allocation was spent.
+#
+# Each pairs the muP model flavor with `default_mup_adamw` at the SAME base_dim.
+# That pairing is not optional: the readout init and the per-group LRs are two
+# halves of one parametrization, and mixing a muP model with a plain AdamW
+# config silently produces neither (see mup.py's module docstring).
+
+
+def _mup_cfg(flavor: str, *, dim: int, base_dim: int) -> FaultTolerantTrainer.Config:
+    """agpt under muP at one rung of the ladder."""
+    from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
+
+    cfg = agpt(flavor)
+    cfg.optimizer = default_mup_adamw(8e-4, dim=dim, base_dim=base_dim)
+    return cfg
+
+
+def agpt_mup_1536() -> FaultTolerantTrainer.Config:
+    """muP base rung. m=1, so this is the width eta is tuned at."""
+    return _mup_cfg("mup_1536", dim=1536, base_dim=1536)
+
+
+def agpt_mup_3072() -> FaultTolerantTrainer.Config:
+    """muP ladder, m=2."""
+    return _mup_cfg("mup_3072", dim=3072, base_dim=1536)
+
+
+def agpt_mup_6144() -> FaultTolerantTrainer.Config:
+    """muP ladder top rung, m=4. Production 30B geometry."""
+    return _mup_cfg("mup_6144", dim=6144, base_dim=1536)
+
+
+def agpt_mup_tiny_256() -> FaultTolerantTrainer.Config:
+    """CPU-sized muP base rung -- 6 layers, vocab 32000. Rehearsal only."""
+    return _mup_cfg("mup_tiny_256", dim=256, base_dim=256)
+
+
+def agpt_mup_tiny_512() -> FaultTolerantTrainer.Config:
+    """CPU-sized muP ladder, m=2."""
+    return _mup_cfg("mup_tiny_512", dim=512, base_dim=256)
+
+
+def agpt_mup_tiny_1024() -> FaultTolerantTrainer.Config:
+    """CPU-sized muP ladder, m=4."""
+    return _mup_cfg("mup_tiny_1024", dim=1024, base_dim=256)
+
+
 def ezpz_agpt_50b() -> FaultTolerantTrainer.Config:
     return agpt("50b")
 
