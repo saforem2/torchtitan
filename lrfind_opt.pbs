@@ -18,6 +18,7 @@ set -o pipefail
 #   qsub -v OPT=mano    lrfind_opt.pbs
 #   qsub -v OPT=sophiag lrfind_opt.pbs
 #   qsub -v OPT=muon    lrfind_opt.pbs
+#   qsub -v OPT=muon_ffn lrfind_opt.pbs
 #
 # MUON (added 2026-08-30) is a fourth arm run against the same protocol. Read
 # its suggestion with one caveat the other three do not have: Muon partitions
@@ -70,7 +71,19 @@ case "$OPT" in
   # "Muon wants a high base" from "the AdamW-path 78.5% is anchoring the
   # curve". See docs/experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md.
   muon_norescale) CONFIG=agpt_30b_olmo2tok_muon_norescale ;;
-  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon|muon_norescale (got: ${OPT:-empty})"; exit 1 ;;
+  # muon_ffn: muon_max_dim=20000, so w1/w2/w3 join the Muon path and the share
+  # goes 21.5% -> 95.3%. This is the arm where a result is about Muon rather
+  # than about the AdamW majority. It needs its OWN finder: the 5.68e-04 above
+  # was measured on the 21.5% partition, and the norescale arm showed that
+  # number tracks the AdamW path this config removes.
+  #
+  # ONE MORE READING CAVEAT, unique to this arm. The 0.2*sqrt(max(A,B))
+  # rescale is per-tensor, and with the FFN included the shapes are no longer
+  # all 6144: attention gets 0.2*sqrt(6144) = 15.677x, the FFN gets
+  # 0.2*sqrt(16384) = 25.6x. The other Muon arms have a single uniform factor
+  # and this one does not, so "effective LR" is not one number here.
+  muon_ffn) CONFIG=agpt_30b_olmo2tok_muon_ffn ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon|muon_norescale|muon_ffn (got: ${OPT:-empty})"; exit 1 ;;
 esac
 
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
