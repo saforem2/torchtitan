@@ -4,7 +4,7 @@
 UPSTREAM `torchtitan.experiments.rl` path (Monarch actors + TorchStore weight
 store + vLLM generation), the architecture we ABANDONED for TRL vllm-serve
 because of the USM/PMIx trainer-side wall (see
-[history/upstream-rl-port-status.md](history/upstream-rl-port-status.md)). The
+[history/upstream-rl-port-status.md](upstream-rl-port-status.md)). The
 fork claimed the full path works on Borealis; the question was whether it crosses
 our wall on Sunspot.
 

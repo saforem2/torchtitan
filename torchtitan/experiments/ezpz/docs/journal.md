@@ -2614,7 +2614,7 @@ differently than mpiexec'd processes, or our custom-built vllm-xpu-
 kernels somehow taint the allocator pool. Disabling its custom ops
 didn't help, so leaning toward the first cause.
 
-Full writeup: [`docs/rl/2026-06-14_monarch-torch213-deep-dive.md`](rl/history/2026-06-14_monarch-torch213-deep-dive.md).
+Full writeup: [`docs/rl/2026-06-14_monarch-torch213-deep-dive.md`](production/rl/history/2026-06-14_monarch-torch213-deep-dive.md).
 
 Next options when resumed:
 1. Get an Intel torch.xpu engineer to look at `DNNL_VERBOSE=2`
@@ -2661,7 +2661,7 @@ Full writeup: [`docs/rl/grpo-on-xpu-status.md`](rl/grpo-on-xpu-status.md).
 ## 2026-06-13 (sunspot eve) — vLLM-XPU + Monarch RL actor infra
 
 Kicked off the long-deferred wiring of vLLM into ezpz/rl. Per
-[`docs/rl/vllm-xpu-wiring-plan.md`](rl/history/vllm-xpu-wiring-plan.md),
+[`docs/rl/vllm-xpu-wiring-plan.md`](production/rl/history/vllm-xpu-wiring-plan.md),
 two parallel paths:
 
 - **Track 2 (TRL `vllm_mode="server"`)** — wires existing TRL-based
@@ -2749,7 +2749,7 @@ vLLM server workers. Main `.venv` stays unchanged for everything else.
   vLLM via plain python (no `ezpz launch`).
 - 🔍 `12468752` (env-scrubbed PBS submit of the bare smoke) — queued.
   Verifies the fix works under PBS-direct, not just interactive SSH.
-- See [`docs/rl/vllm-xpu-current-status.md`](rl/history/vllm-xpu-current-status.md)
+- See [`docs/rl/vllm-xpu-current-status.md`](production/rl/history/vllm-xpu-current-status.md)
   for the full debug chain, root cause, and fix.
 
 ---
@@ -4662,7 +4662,7 @@ Reports: [`agpt/sunspot/20260520-smoke-n2-pr3386-merge-followup.md`](experiments
   signature. 37th sync did **not** fix it (didn't expect it to — bug is
   in PyTorch, not torchtitan). Standing workaround (compile=OFF for
   80B-family on torch 2.13, or stay on torch 2.10) still the only
-  option. See [`project_80b_devmesh_bisect`](../../../../../home/foremans/.claude/projects/-lus-tegu-projects-datascience-foremans-projects-saforem2-torchtitan/memory/project_80b_devmesh_bisect.md).
+  option. See `project_80b_devmesh_bisect`.
 
 ### Action items dropped on the floor
 
