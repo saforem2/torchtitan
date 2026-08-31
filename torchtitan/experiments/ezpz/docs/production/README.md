@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-08-30
+> Last updated: 2026-08-31
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -61,7 +61,7 @@
 One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
 **No row is advancing** -- see the idle banner above; every state below is
 where its chain stopped. Post-training stages (CPT / SFT / RL-GRPO) are in the
-[next table](#post-training-stages-cpt--sft--rl). Detail + per-dispatch history
+[next table](#post-training-stages-cpt-sft-rl). Detail + per-dispatch history
 in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
@@ -132,7 +132,16 @@ has its own token/step goal in the linked page.
 </details>
 
 <details>
-<summary><strong>80B status (2026-07-06): SophiaG NaN'd — needs a new optimizer</strong> (full analysis)</summary>
+<summary><strong>80B: the 2026-07-06 SophiaG-NaN analysis</strong> — SUPERSEDED by the dp-wall finding (kept for the LR-finder data)</summary>
+
+> [!WARNING]
+> This block predates the current reading. The 80B blocker is now understood as
+> an **optimizer-independent grad-path overflow at `dp > ~186`**, not a SophiaG
+> Hessian bug -- see the `80B` row in the glance table. The "TEAM DECISION OPEN:
+> SophiaG vs mano" below is therefore answered differently than it poses: the
+> choice of optimizer is not what unblocks 80B. The LR-finder numbers and the
+> job history remain accurate.
+
 
 > The 512N head (8574385) finally placed and ran a full 12h window (2026-07-03),
 > but **diverged to NaN at step 14** (SophiaG LR=1e-6, warmup=4650, constant):
@@ -179,7 +188,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **46,429** (FINAL) | **2.687** | **4.67T** (100.0%) | — chain complete | ✅ **COMPLETE 2026-08-13 19:11 UTC.** Finished the full olmo-mix-1124 budget as trainer 0 of umbrella 8744247: step 46,429/46,429, exit 0 (`FAILOVER STOP: success`), final ckpt step-46429 with 6,144 shards + `.metadata`. Do NOT submit continuations against this ckpt dir -- there is no budget left. Post-training and stage-2 work seed from step-46429. |
-| 20B | 512 | **10,600** (persisted) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | ⏸️ **IDLE since 2026-08-26.** Its seat in the last umbrella to run logged 0 steps; the last real advance was `8764675` on 08-20. Now waiting on `8784460` (Q 101h+). *History:* had been frozen at step-4400 since 05-29: its last advance was as trainer-1 in umbrella 8568429, which died at init on bad node x4410 and the legacy `failover_lib.sh` blind-swapped the wrong nodes (scraper can't parse the hostname from `signal 11`), exhausting retries. Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned runs/agpt-20b-v2 clone (ezpz upgraded 0.16->0.21.3 for `--auto-retry`; resume step-4400 CONFIRMED by 2N smoke 8638756: `Training starts at step 4401`). NOTE step-4500 is an empty/aborted save (not resumable); step-4400 is the last valid ckpt. Legacy sync jobs 8521632/8534295 qdel'd to avoid ckpt-dir collision. head 8638793 + cont 8638795 (afterany). |
+| 20B | 512 | **10,600** (persisted) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | ⏸️ **IDLE since 2026-08-26.** Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
@@ -191,7 +200,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). The final step-92,859 checkpoint **has since been evaluated** (job 8638581): see [`evals/agpt/2b/`](../evals/agpt/2b/README.md). |
-| 20B | 256 | **12,000** (persisted) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | ⏸️ **IDLE since 2026-08-26.** The only pre-training chain the last umbrella actually moved: **+201 steps, loss 2.31488 -> 2.24577**. Now waiting on `8784460` (Q 101h+). Per-token comparator to the canonical 512N. *History:* carried step-1,100 → 3,100 via the relocated `agpt-20b-n256/` clone chain (8558548 + cont1 8558549); relocated 2026-06-12 (spmd_types fixed 2026-06-16). |
+| 20B | 256 | **12,000** (persisted) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | ⏸️ **IDLE since 2026-08-26.** The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
 
 ### Every dispatch (individual + umbrella)
 
@@ -204,6 +213,9 @@ ran for hours "failed" if it was later SIGTERM'd.
 
 ### Other jobs
 
+<details>
+<summary>Six one-off / crashed jobs from 2026-05 (1024N init crashes, gloo timeouts, the sqrt2-LR fork)</summary>
+
 | Job ID | Date | Model | Nodes | Walltime | Status |
 |--------|------|-------|------:|---------:|--------|
 | [`8463182`](agpt/2b/n1024/README.md#log-8463182) | 2026-05-04 | 2B | 1024 | 12h | **Crashed @ startup (211s, std::bad_alloc)** |
@@ -212,6 +224,8 @@ ran for hours "failed" if it was later SIGTERM'd.
 | [`8466848`](agpt/20b/n512/README.md#log-8466848) | 2026-05-07 | 20B | 512 | — | **Crashed @ startup** (`set_determinism` `std::bad_alloc`); didn't reproduce on 8479579 retry |
 | [`8467141`](agpt/2b/n512/README.md#log-8467141)/[`8467142`](agpt/2b/n512/README.md#log-8467142) | 2026-05-07/11 | 2B | 512 | 12h | √2-LR fork — chain1 ran 4h, chain2 ran 1h53m; both done. Tests `LR=3.22e-5` at GBS=12,288 (separate ckpt dir `gbs12288-lr3.22e-5`) |
 | [`8470102`](agpt/20b/n256/README.md#log-8470102)/[`8470103`](agpt/20b/n256/README.md#log-8470103) | 2026-05-08 | 20B | 256 | — | Both **crashed** with gloo TCP timeouts at ~3h elapsed |
+
+</details>
 
 ### Dense (agpt) — bf16-tainted (superseded, kept for record)
 
@@ -222,6 +236,39 @@ See per-model READMEs (`agpt/2b/`, `agpt/20b/`, `agpt/80b/`).
 | Run | Model | Nodes | Status |
 |-----|-------|------:|--------|
 | [10B_2B EP=12](moe/10b_2b_sdpa_ep/) | 10B_2B_sdpa | TBD | Planned |
+
+### 20B 512N history (May/June 2026)
+
+<details>
+<summary>How this chain got unstuck after being frozen at step-4400 for a month</summary>
+
+Frozen at step-4400 since 05-29. Its last advance was as trainer-1 in umbrella
+`8568429`, which died at init on bad node `x4410`; the legacy `failover_lib.sh`
+blind-swapped the wrong nodes (the scraper cannot parse a hostname out of
+`signal 11`) and exhausted its retries.
+
+Relaunched via `submit_agpt_20b_autoretry.sh` from the pinned
+`runs/agpt-20b-v2` clone, with ezpz upgraded 0.16 -> 0.21.3 for `--auto-retry`.
+Resume from step-4400 was confirmed by 2N smoke `8638756`
+(`Training starts at step 4401`).
+
+`step-4500` is an empty/aborted save and is NOT resumable; step-4400 was the
+last valid checkpoint. Legacy sync jobs `8521632` / `8534295` were qdel'd to
+avoid a checkpoint-dir collision. Head `8638793` + continuation `8638795`
+(`afterany`).
+
+</details>
+
+### 20B 256N history (June 2026)
+
+<details>
+<summary>Clone relocation and the step-1,100 -> 3,100 leg</summary>
+
+Carried step-1,100 -> 3,100 via the relocated `agpt-20b-n256/` clone chain
+(`8558548` + cont1 `8558549`). Relocated 2026-06-12; `spmd_types` fixed
+2026-06-16.
+
+</details>
 
 ## Known Issues
 
@@ -237,10 +284,20 @@ See per-model READMEs (`agpt/2b/`, `agpt/20b/`, `agpt/80b/`).
    all ckpts) so `step-N00` snapshots survive the failure.
 3. **torch.compile OOM at 512N** — 2B OOMs on GPU, 80B OOMs on CPU.
    Use `--compile.no-enable` for 512+ node jobs.
-4. **SophiaG/Muon broken at 80B** — bf16 overflow in Hessian/Newton-Schulz.
-   Use AdamW only at 80B.
-5. **80B AdamW LR=1.1e-5 → NaN** — loss diverges at step 138 (256N) and
-   step 15 (512N). Pending v2 restart with LR=1e-6.
+4. **Muon is broken at 80B** — bf16 overflow in Newton-Schulz at dim=9216
+   (NaN from step 7 at any LR). SophiaG is NOT broken at 80B in general: it
+   NaN'd at GBS=192 but runs clean at the production GBS=6144, where larger
+   batch smooths the Hessian estimate below the overflow threshold.
+   **Do NOT "use AdamW only at 80B"** -- that earlier guidance is reversed.
+   At GBS~6144 the measured ranking is mano (safest, broad U-min, ~3e-6) or
+   sophiag (lowest loss, narrower band, ~1e-6); **AdamW is the worst of the
+   three**. See
+   [lr-finder/agpt](../experiments/lr-finder/agpt/README.md#2026-06-27----80b-at-the-production-batch-gbs6144-sunspot).
+5. **80B AdamW sits on a NaN cliff at production batch** — at GBS=6144 the
+   usable LR ceiling is only ~7e-7 and NaN onset is 1.36e-6, so the once-
+   recommended **LR=1e-6 is PAST the last stable point**. If staying on AdamW
+   use ~5e-7; prefer mano/sophiag. The small-batch "AdamW 1.1e-5" finder number
+   does not transfer -- the ceiling is ~14x lower at production batch.
 6. **yeet-env saturates flare at 512N (RESOLVED via tarball mode)** —
    the per-file rsync mode used to take hours and saturate Lustre. The
    tarball mode (`ezpz yeet-env --src .venv.tar.gz`, default in v2
