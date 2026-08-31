@@ -145,6 +145,26 @@ if [[ "$fill_rc" -ne 0 ]]; then
     exit "$overall_rc"
 fi
 
+# Same gate for the chart stage. charts_rc was computed and REPORTED but not
+# consulted here, so a run with failing plotters still auto-committed whatever
+# the surviving ones wrote. On 2026-08-30 that shipped cpt_loss.svg with a data
+# series silently dropped (a broken style import made the plotter fall back to
+# matplotlib defaults and exit 0), and it committed in-progress script edits on
+# 2026-08-31. A chart step that failed means the figure set is INCONSISTENT --
+# some regenerated, some not -- which is exactly what should not be committed
+# as an atomic "auto-refresh" commit.
+#
+# Note this counts FAILED only. update_all_charts.sh reports SKIPPED separately
+# for plotters whose source data is cluster-only and legitimately absent
+# off-cluster; those do not block the commit, they just leave their committed
+# figure alone.
+if [[ "$charts_rc" -ne 0 ]]; then
+    echo "(chart stage failed rc=$charts_rc; skipping auto-commit -- the figure"
+    echo " set is inconsistent. Review the working tree, fix or revert the"
+    echo " partial regeneration, then commit manually.)"
+    exit "$overall_rc"
+fi
+
 # Stage ONLY known generated subpaths (never code, never hand-written docs
 # like journal.md / meeting-notes). This keeps the auto-commit's blast
 # radius to exactly what the refresh produces.
