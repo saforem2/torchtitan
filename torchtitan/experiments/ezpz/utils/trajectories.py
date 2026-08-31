@@ -57,6 +57,13 @@ _20B_V2 = RUNS / "agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints"
 _20B_N256 = RUNS / "agpt-20b-n256/torchtitan-ezpz/outputs/checkpoints"
 _80B_V2 = RUNS / "agpt-80b-v2/torchtitan-ezpz/checkpoints"
 
+# Polaris is a different machine AND a different filesystem: its clone lives
+# on /eagle, not /flare. Reusing RUNS here would silently point every Polaris
+# path at an Aurora directory that does not exist.
+_POLARIS_20B = Path(
+    "/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan/outputs/checkpoints"
+)
+
 # 4.67T is the olmo-mix-1124 token budget shared by every current
 # production trajectory. Kept as a named constant so a future model with
 # a different corpus carries its own target in its record.
@@ -621,6 +628,67 @@ TRAJECTORIES: list[dict] = [
         # so it belongs on the board and in prod_dash but is not required on
         # the canonical overlay charts (which the live-chain guard enforces).
         "cls": "wandb_only",
+    },
+    # ---- Polaris (A100), dolma corpus ----
+    {
+        "key": "20b_polaris_128",
+        "model": "20b",
+        "version": "v2",
+        "num_nodes": 128,
+        # Polaris lives in its OWN clone under /eagle (not /flare): a
+        # separate checkout with separate outputs/checkpoints. See
+        # docs/production/polaris/README.md.
+        "ckpt_dir": str(
+            _POLARIS_20B / "agpt-20b-sophiag-dolma-n128-gbs1024"
+        ),
+        "readme": "torchtitan/experiments/ezpz/docs/production/polaris/README.md",
+        "gbs": 1024,
+        "seq_len": SEQ_LEN,
+        # dolma, NOT olmo-mix: no fixed token budget has been assigned to
+        # the Polaris chains, so tokens are reported absolute rather than as
+        # a % of a target. Consumers must treat None as "no % column".
+        "token_target": None,
+        # Verified against W&B 2026-08-31 (every leg queried directly): the
+        # chain runs step 1 -> 5605 with NO gaps; each boundary is a resume
+        # overlap because a leg restarts from the last 100-step checkpoint.
+        # Head 5605 agrees with the step-5600 checkpoint on disk.
+        #
+        # ORDER IS SEMANTIC: concat_chain lets the LAST-listed run win a
+        # contested step. rnf9tfhw and wac80rns BOTH start at 2401;
+        # wac80rns is the later dispatch and reaches 2804, so it must stay
+        # after rnf9tfhw. Do not sort this list by anything but resume order.
+        #
+        # Two 130-node Polaris runs are deliberately NOT here: n1agn8uh
+        # (2026-07-05, step 5381) and yx4lymcu (2026-07-29, step 401) each
+        # start at step 1 with loss ~12.96 -- independent from-scratch runs,
+        # not legs of this chain.
+        "wandb_run_ids": [
+            "jgjd0qbf",  # leg1     1-398
+            "h8uzg2om",  # leg2   301-704
+            "u81yhgtb",  # leg3   701-1099
+            "j56diiz9",  # leg4  1001-1399
+            "nm41nsbj",  # leg5  1301-1448
+            "nvmf9hnj",  # leg6  1401-1802 (restart after NVLink fault)
+            "j0jnww7s",  # leg7  1701-2095
+            "8snyuaxk",  # leg8  2001-2404
+            "rnf9tfhw",  # leg9  2401-2499
+            "wac80rns",  # leg10 2401-2804
+            "a1xhz7lz",  # leg11 2801-3204
+            "3czoa3j1",  # leg12 3201-3596
+            "whaml9cf",  # leg13 3501-3899
+            "simu81ix",  # leg14 3801-4200
+            "4nbdynj0",  # leg15 4101-4503
+            "k944ah6j",  # leg16 4501-4902
+            "rlxko4n7",  # leg17 4901-5299
+            "5u38mvef",  # leg18 5201-5605
+        ],
+        # .o-log fallbacks are Polaris-only paths under /eagle; they are
+        # unreachable off-cluster, and every leg above returned rows from
+        # scan_history on 2026-08-31, so none is needed today. Kept as a
+        # pointer for whoever hits the empty-history quirk again.
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
     },
     {
         "key": "80b_v2_4_smoke",
