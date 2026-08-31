@@ -190,7 +190,12 @@ def _token_target_label(readme_path: Path) -> str:
     for t in TRAJECTORIES:
         rdm = t.get("readme")
         if rdm and rp.endswith(rdm):
-            return _fmt_token_target(t["token_target"])
+            # token_target is None for chains with no assigned budget (the
+            # Polaris dolma chains): report tokens absolute, no % column.
+            tt = t.get("token_target")
+            if tt is None:
+                return "n/a"
+            return _fmt_token_target(tt)
     return _DEFAULT_TOKEN_TARGET_LABEL
 
 
