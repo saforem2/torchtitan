@@ -290,9 +290,17 @@ else:
 # gsm8k is deliberately absent: it pins its own num_fewshot=5 in its YAML, so
 # the fallback cannot mis-shoot it.
 _FEWSHOT_CONVENTION = {"mmlu": 5, "arc_challenge": 25, "mmlu_pro": 5}
+# A task is only mis-shot if it NEVER runs at its convention. Running it at
+# the right count AND an extra one (arc_challenge 0-shot for the legacy
+# dashboard plus 25-shot for the modern suite) is fine: both are namespaced
+# @Nshot in the output, so neither is silent.
+_seen = {}
+for _sh, _ts in groups:
+    for _t in _ts:
+        _seen.setdefault(_t.strip(), set()).add(_sh)
 _misshot = sorted(
-    {t for shots, tset in groups for t in tset
-     if shots != _FEWSHOT_CONVENTION.get(t.strip(), shots)}
+    t for t, shotset in _seen.items()
+    if t in _FEWSHOT_CONVENTION and _FEWSHOT_CONVENTION[t] not in shotset
 )
 # The escape hatch is a separate variable, not a shot count, so that choosing
 # an off-convention shot count is a deliberate act recorded in the launcher
@@ -313,6 +321,7 @@ if _misshot:
     )
 
 merged = {}
+n_shot = {}
 for shots, tset in groups:
     if not tset:
         continue
@@ -326,7 +335,27 @@ for shots, tset in groups:
         device="xpu:0",
         limit=eval_limit,
     )
-    merged.update(r["results"])
+    # Ported from eval-20b-v2.sh, which already solved this. A task can appear
+    # in more than one shot group (arc_challenge runs 0-shot in the commonsense
+    # block AND 25-shot in the modern block). Writing both to the bare task key
+    # makes the later group silently overwrite the earlier, producing a column
+    # that mixes shot counts with no way to tell which is which. Namespace every
+    # task by its shot count, and keep the bare key pointing at the LAST write
+    # so older readers/plotters still work.
+    for _task, _metrics in r["results"].items():
+        merged[f"{_task}@{shots}shot"] = _metrics
+        merged[_task] = _metrics
+    # lm-eval reports the shots actually used per task; preserve it so a
+    # results.json is self-describing even for the bare keys. Dropping this
+    # block is why the 30B 0-shot MMLU had to be diagnosed from job stdout.
+    # n_shot is kept OUT of merged: a key inside the results dict would look
+    # like a task to every reader that iterates it.
+    for _task, _n in (r.get("n-shot") or {}).items():
+        n_shot[_task] = _n
+        n_shot[f"{_task}@{shots}shot"] = _n
+    for _task in r["results"]:
+        n_shot.setdefault(_task, shots)
+        n_shot.setdefault(f"{_task}@{shots}shot", shots)
 
 # Merge into any existing results.json so the 0-shot dashboard and the modern
 # suite coexist (a step may be re-run to ADD tasks, not replace them).
@@ -338,6 +367,10 @@ if os.path.exists(out_path):
     except Exception:
         existing = {}
 existing.update(merged)
+if n_shot:
+    _prev = existing.get("n-shot") or {}
+    _prev.update(n_shot)
+    existing["n-shot"] = _prev
 with open(out_path, "w") as f:
     json.dump(existing, f, indent=2)
 for task, metrics in merged.items():

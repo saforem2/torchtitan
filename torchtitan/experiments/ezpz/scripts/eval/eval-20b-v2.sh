@@ -250,9 +250,17 @@ else:
 # gsm8k is deliberately absent: it pins its own num_fewshot=5 in its YAML, so
 # the fallback cannot mis-shoot it.
 _FEWSHOT_CONVENTION = {"mmlu": 5, "arc_challenge": 25, "mmlu_pro": 5}
+# A task is only mis-shot if it NEVER runs at its convention. Running it at
+# the right count AND an extra one (arc_challenge 0-shot for the legacy
+# dashboard plus 25-shot for the modern suite) is fine: both are namespaced
+# @Nshot in the output, so neither is silent.
+_seen = {}
+for _sh, _ts in groups:
+    for _t in _ts:
+        _seen.setdefault(_t.strip(), set()).add(_sh)
 _misshot = sorted(
-    {t for shots, tset in groups for t in tset
-     if shots != _FEWSHOT_CONVENTION.get(t.strip(), shots)}
+    t for t, shotset in _seen.items()
+    if t in _FEWSHOT_CONVENTION and _FEWSHOT_CONVENTION[t] not in shotset
 )
 # The escape hatch is a separate variable, not a shot count, so that choosing
 # an off-convention shot count is a deliberate act recorded in the launcher
