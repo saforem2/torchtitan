@@ -27,6 +27,7 @@ Run:
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 
 import matplotlib
@@ -454,6 +455,17 @@ def main() -> None:
             series.append({**traj, "steps": steps, "tokens_b": tokens_b,
                            "loss": loss, "tps": tps, "mfu": mfu})
         else:  # mds
+            # The MDS CSV is gitignored -- that data is pulled from its own
+            # W&B project and has never been tracked -- so off-cluster it is
+            # legitimately absent. Drop the trajectory with a clear line
+            # instead of dying in open(); the other trajectories still plot.
+            if not os.path.exists(traj["csv_path"]):
+                print(
+                    f"  SKIP {traj.get('label', 'mds')}: "
+                    f"{os.path.basename(traj['csv_path'])} not present "
+                    f"(gitignored, cluster-only)"
+                )
+                continue
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
             print(f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
