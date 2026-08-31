@@ -1365,6 +1365,35 @@ def agpt_mup_6144() -> FaultTolerantTrainer.Config:
     return _mup_cfg("mup_6144", dim=6144, base_dim=1536)
 
 
+def agpt_30b_olmo2tok_mup() -> FaultTolerantTrainer.Config:
+    """muP stage 5: the 30B arm, comparable to the optcmp AdamW baseline.
+
+    agpt_mup_6144 has the right GEOMETRY but not the right data. The optimizer
+    comparison's arms all read fineweb-edu through _use_fineweb_edu() and use
+    the OLMo-2 tokenizer assets; a muP arm on different data could not be
+    compared against AdamW's measured 2.51357 at 23.59B tokens, which is the
+    entire point of stage 5.
+
+    So this is agpt_mup_6144's parametrization on agpt_30b_olmo2tok's data
+    path. The only intended difference from agpt_30b_olmo2tok_optcmp_adamw is
+    muP itself: the readout init, the muP attention scale, and four LR groups
+    with hidden at eta/m instead of one catch-all.
+
+    LR comes from stage 4, which is the whole argument for doing this. The
+    transfer measurement put the optimum at eta=6.4e-5 at BOTH dim 3072 and
+    6144, with interior minima on each. Passed via MUP_ETA (see _mup_cfg for
+    why it is an env var and not a CLI flag).
+
+    NOT a resume target for any optcmp checkpoint -- the optimizer state has
+    four param groups where those have one. Fresh run, own checkpoint folder.
+    """
+    from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
+
+    cfg = agpt("mup_6144", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_mup_adamw(6.4e-5, dim=6144, base_dim=1536)
+    return _use_fineweb_edu(cfg)
+
+
 def agpt_mup_tiny_256() -> FaultTolerantTrainer.Config:
     """CPU-sized muP base rung -- 6 layers, vocab 32000. Rehearsal only."""
     return _mup_cfg("mup_tiny_256", dim=256, base_dim=256)

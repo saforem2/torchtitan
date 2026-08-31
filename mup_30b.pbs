@@ -1,0 +1,87 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=16
+#PBS -l walltime=08:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N mup-30b
+#PBS -j oe
+set -o pipefail
+
+# muP stage 5: a 30B arm under muP, against the optimizer comparison's
+# measured AdamW baseline (2.51357 at 23.59B tokens, step 6000).
+#
+# Everything except the parametrization is held to the baseline: same
+# geometry (verified identical -- dim 6144, 64 layers, 48 heads, hidden
+# 16384, vocab 100352), same fineweb-edu shards, same GBS=960, same constant
+# LR after a 20-step warmup, same GrainDataLoader.
+#
+# THE LR IS THE POINT. eta=6.4e-5 is not tuned at 30B -- it is what stage 4
+# measured at dim 3072 and found unchanged at 6144. If muP works, an LR
+# measured on a 4x smaller model should be competitive here. That is the
+# claim under test, and it is the reason to run this rather than just tuning
+# 30B directly.
+#
+# Note the arms differ in LR as well as parametrization: the AdamW baseline
+# ran at 3.05e-5 from its own finder. That is inherent -- muP prescribes its
+# own optimum and the comparison is between two complete recipes, not an
+# LR-matched ablation.
+#
+# NOT a resume target for any optcmp checkpoint: four param groups vs one.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2-grain/bin/activate
+unset PYTHONPATH
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
+export WANDB_PROJECT="${WANDB_PROJECT:-agpt-30b-optcmp}"
+export WANDB_RUN_GROUP="mup-6144"
+
+CKPT="$PWD/checkpoints/agpt-30b-mup-6144"
+LOGD="$PWD/outputs/logs/mup-6144/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/train.log"; : > "$LOG"
+mkdir -p "$CKPT"
+lfs setstripe -c 2 -i 0 -o 0,1 "$CKPT" 2>/dev/null || echo "  WARNING: setstripe failed"
+
+LAST=""
+for d in $(ls -1d "$CKPT"/step-* 2>/dev/null | sed "s#.*/step-##" | sort -rn); do
+    if [ -f "$CKPT/step-$d/.metadata" ]; then LAST="$d"; break; fi
+    echo "  IGNORING step-$d: no .metadata"
+done
+
+echo "arm:    muP 30B (eta 6.4e-5 from stage 4 @ dim 3072)"
+echo "ckpt:   $CKPT"
+echo "resume: ${LAST:-none (fresh start)}"
+echo "baseline to beat: AdamW 2.51357 @ step 6000 / 23.59B"
+echo ""
+
+timeout 25200 ezpz launch --nproc 192 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_30b_olmo2tok_mup \
+    --training.steps=6000 --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=20480 \
+    --training.num-tokens-per-train-step=3932160 \
+    --parallelism.tensor-parallel-degree=1 \
+    --lr-scheduler.warmup-steps=20 \
+    --lr-scheduler.decay-ratio=0.0 \
+    --checkpoint.enable \
+    --checkpoint.folder="$CKPT" \
+    --checkpoint.interval=500 \
+    --checkpoint.keep-latest-k=0 \
+    --nan-abort-consecutive=5 \
+    >> "$LOG" 2>&1
+rc=$?
+
+C=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG")
+echo ""
+echo "########## muP 30B ##########"
+echo "  first step: $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | head -1)"
+echo "  last step:  $(printf '%s' "$C" | grep -aoE 'step: [0-9]+ +loss: +[0-9.]+' | tail -1)"
+echo "  NaN/inf:    $(printf '%s' "$C" | grep -acE 'nan|inf' )"
+echo "  W&B:        $(printf '%s' "$C" | grep -aoE 'https://wandb.ai/[^ ]*/runs/[a-z0-9]+' | tail -1)"
+echo "  rc=$rc  (124 = inner timeout, the EXPECTED clean stop)"
+echo "MUP30B_DONE"
