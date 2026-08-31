@@ -71,6 +71,12 @@ declare -A SCRIPTS=(
     # here is what puts them under refresh_all.sh's catch-all.
     [cpt_loss]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_loss.py"
     [cpt_eval]="torchtitan/experiments/ezpz/docs/production/cpt/plot_cpt_eval.py"
+    # Polaris 20B. These were never wired in, so refresh_all exited 0 for weeks
+    # while both figures sat at 2026-07-22 -- 40 days stale. The /eagle paths in
+    # plot_polaris_20b.py are only .o-log FALLBACKS; the primary source is W&B,
+    # which works from anywhere. Verified rendering off-cluster.
+    [polaris_20b]="torchtitan/experiments/ezpz/utils/plot_polaris_20b.py"
+    [polaris_20b_evals]="torchtitan/experiments/ezpz/utils/plot_polaris_20b_evals.py"
     [mds_2b_loss]="torchtitan/experiments/ezpz/docs/production/agpt/2b-mds/loss_data/plot_loss.py"
     [sft_curves]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix/scripts/plot_sft_curves.py"
     [sft_curves_full]="torchtitan/experiments/ezpz/docs/production/sft/agpt/2b-mds/tulu_math_uc_mix_full/scripts/plot_sft_curves.py"
@@ -104,9 +110,24 @@ for name in "${!SCRIPTS[@]}"; do
 done
 
 fail=0
+skipped=0
+wrote=0
 for name in "${!PIDS[@]}"; do
     if wait "${PIDS[$name]}"; then
-        echo "  [$name] OK ($(wc -l < "${LOGS[$name]}") lines)"
+        # rc=0 alone does not mean a figure was produced. Several plotters
+        # correctly print "skip: <data> not found" and exit 0 when their source
+        # lives on a cluster filesystem -- reporting those as OK is
+        # indistinguishable from real work, so five charts sat two weeks stale
+        # while every run said OK. Separate the two.
+        if grep -qiE "^\s*(skip|SKIP|REFUSING)" "${LOGS[$name]}" 2>/dev/null; then
+            reason=$(grep -iE "^\s*(skip|SKIP|REFUSING)" "${LOGS[$name]}" \
+                     | head -1 | cut -c1-96)
+            echo "  [$name] SKIPPED -- $reason"
+            skipped=$((skipped + 1))
+        else
+            echo "  [$name] OK ($(wc -l < "${LOGS[$name]}") lines)"
+            wrote=$((wrote + 1))
+        fi
     else
         echo "  [$name] FAILED (rc=$?, see ${LOGS[$name]})"
         fail=$((fail + 1))
@@ -118,5 +139,9 @@ n_files=$(find torchtitan/experiments/ezpz/docs -type f \
     \( -name "*.svg" -o -name "*.png" \) \
     -newer "$LOGDIR" 2>/dev/null | wc -l)
 echo ""
-echo "=== done in ${elapsed}s — $n_files figure files updated; $fail/${#SCRIPTS[@]} scripts failed ==="
+echo "=== done in ${elapsed}s -- $n_files figure files updated; ${wrote} plotted, ${skipped} skipped (no local data), $fail/${#SCRIPTS[@]} failed ==="
+if [[ "$skipped" -gt 0 ]]; then
+    echo "    NOTE: skipped charts keep their COMMITTED figures, which may be"
+    echo "    stale. Regenerate them where the source data lives."
+fi
 exit $fail
