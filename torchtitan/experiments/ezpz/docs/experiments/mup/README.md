@@ -537,17 +537,41 @@ and 6144 IS the production 30B geometry. That is the transfer signal.
 boundary gate refuses the run. Correctly: a three-rung claim cannot rest on a
 rung that never bracketed its minimum.
 
-**12474332 -- grid extended right** (1.6e-5 .. 1.024e-3) to bracket 1536,
-dropping the two leftmost points that were far up the slope at every width.
+**12474332 -- grid extended right, every rung now bracketed:**
+
+| eta | 1536 | 3072 | 6144 |
+|---:|---:|---:|---:|
+| 1.6e-5 | 7.322 | 6.544 | 6.176 |
+| **6.4e-5** | 5.877 | **5.510** | **5.520** |
+| **2.56e-4** | **5.672** | 6.022 | 5.952 |
+| 1.024e-3 | 6.390 | 7.084 | 6.624 |
+
+All three have interior minima. **3072 and 6144 agree exactly at 6.4e-5**;
+**1536 sits one grid step away at 2.56e-4**, and that is now a real minimum
+rather than the boundary artifact of the previous run.
+
+Verdict: transfer within one grid step. The STRUCTURE is more informative than
+the label -- the two upper rungs agree perfectly and the base rung is the
+outlier, which is what muP working asymptotically looks like. The smallest
+rung being too narrow for the theory to hold cleanly is a documented effect,
+and 1536 is the rung a practitioner cares least about.
+
+Reproducibility check: 1536 at 1.6e-5 and 6.4e-5 came out 7.32164 / 5.87685
+here against 7.322 / 5.868 in 12474330. These runs are not
+`--debug.deterministic`, so small differences are expected; the agreement
+says the measurement is stable rather than noise-dominated.
 
 ### What can be said now, and what cannot
 
 **Can:** between 3072 and 6144, at fixed head_dim=128 / L=64 / H/dim=2.667,
-the muP optimum does not move. Those are the two widths closest to production
-and the ones a transfer claim would be used for.
+the muP optimum does not move -- both at 6.4e-5, both bracketed. Those are the
+two widths closest to production. The practical form: **tune at 3072, deploy
+at 6144** -- a 4x parameter reduction on the tuning run, with the optimum
+verified to hold at production geometry.
 
-**Cannot:** that muP transfers across the full 4x ladder. 1536's optimum is
-unmeasured. Nor that it transfers at production TOKEN scale -- these are
+**Cannot:** that the optimum is invariant across the whole 4x ladder. 1536
+lands one grid step higher (2.56e-4), so the claim is "transfer within one
+grid step across 4x, exact across the upper 2x", not "transfer, full stop". Nor that it transfers at production TOKEN scale -- these are
 60-step runs at seq 2048, and the failure modes documented in section 5.1
 (trainable norm gains, weight decay) are about full training runs.
 
