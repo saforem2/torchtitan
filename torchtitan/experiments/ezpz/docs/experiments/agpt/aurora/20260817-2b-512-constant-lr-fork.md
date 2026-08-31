@@ -2,9 +2,13 @@
 
 **Date:** 2026-08-17 (fork launched 2026-08-13)
 **Chain key:** `2b_v2_512_constlr_from9200` (`cls: wandb_only`)
-**W&B runs:** `ww88slec` (8744247 t3), `ijfo395o` (8756070 t3), `xii94czx` (8756957 t3, live)
+**W&B runs:** `ww88slec` (8744247 t3), `ijfo395o` (8756070 t3), `xii94czx` (8756957 t3)
 **Checkpoints:** `/flare/AuroraGPT/foremans/runs/agpt-2b-constlr-from9200/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200`
-**Status:** running, step ~21,092
+**Status (as of 2026-08-31):** IDLE at step 21,307 since 2026-08-26.
+A 2B-512 seat of umbrella `8773440` advanced it +504 steps (2.74535 ->
+2.73836) on 08-26 and nothing has run since; the chain is waiting on
+`8784460`, queued ~120h. This page's analysis below was written at step
+~21,092 and is unchanged by those 504 steps.
 
 ## The question
 

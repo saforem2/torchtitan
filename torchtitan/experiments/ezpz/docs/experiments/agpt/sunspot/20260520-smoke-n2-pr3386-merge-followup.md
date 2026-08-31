@@ -13,7 +13,7 @@ Two configs were exercised:
 2. **`agpt_50b_wide`** — known torch-2.13 DeviceMesh-in-saved-tensors
    crash repro. Re-confirms the bug still reproduces post-merge
    (i.e. the 80B-family compile=ON workaround
-   [`project_80b_devmesh_bisect`](../../../../../../home/foremans/.claude/projects/-lus-tegu-projects-datascience-foremans-projects-saforem2-torchtitan/memory/project_80b_devmesh_bisect.md)
+   `project_80b_devmesh_bisect`
    still applies — nothing in this merge accidentally fixed it).
 
 ## Environment
@@ -107,7 +107,7 @@ expected all tensors_saved_with_vc_check to be Tensors, got types: [
 `tensors_saved_with_vc_check` list inside AOT autograd's
 `save_from_forward`. Same root cause as the bisect on 2026-05-05
 (jobs 12465952 + 12465962) — see
-[`project_80b_devmesh_bisect`](../../../../../../home/foremans/.claude/projects/-lus-tegu-projects-datascience-foremans-projects-saforem2-torchtitan/memory/project_80b_devmesh_bisect.md):
+`project_80b_devmesh_bisect`:
 **bug is torch-2.13-sensitive**, fires on every 80B-family config,
 smallest known repro is `agpt_50b_wide` 2N (~30s to crash) — which
 this run reproduces in ~121s (extra compile + dataset-build time vs
@@ -156,6 +156,6 @@ agpt_2b run with byte-identical memory confirms no regression there.
 - Upstream PRs: [pytorch/torchtitan#3386](https://github.com/pytorch/torchtitan/pull/3386), [pytorch/torchtitan#3346](https://github.com/pytorch/torchtitan/pull/3346)
 - Prior post-resync smoke: [`20260520-smoke-n2-postresync.md`](20260520-smoke-n2-postresync.md)
 - 37th sync entry: [`docs/upstream-sync.md`](../../../upstream-sync.md)
-- 80B DeviceMesh regression bisect: [`memory/project_80b_devmesh_bisect.md`](../../../../../../home/foremans/.claude/projects/-lus-tegu-projects-datascience-foremans-projects-saforem2-torchtitan/memory/project_80b_devmesh_bisect.md)
+- 80B DeviceMesh regression bisect: `memory/project_80b_devmesh_bisect.md`
 - DeviceMesh toy repro: [`../../../upstream-issues/repro_devicemesh_in_saved_tensors.py`](../../../upstream-issues/repro_devicemesh_in_saved_tensors.py)
 - Sibling MoE follow-up: [`../../moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md`](../../moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md)
