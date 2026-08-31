@@ -152,6 +152,43 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
 
     data_iterator = trainer.batch_generator(trainer.dataloader)
 
+    # SUSPEND THE LR SCHEDULER FOR THE DURATION OF THE SWEEP.
+    #
+    # Without this the finder does not sweep the learning rate at all. It
+    # writes param_group["lr"], then trainer.train_step() runs and ends with an
+    # unconditional self.lr_schedulers.step() (trainer.py:1073) that recomputes
+    # base_lr * lambda(step) and discards the write. This file previously had
+    # no reference to the scheduler at all.
+    #
+    # MEASURED on the muon run's own settings (base_lr 3.0e-4, warmup_steps
+    # 200): the plotted axis spans 1e-6 -> 1e-1, five decades, while the LR
+    # actually used ramped 3.0e-6 -> 1.5e-4 -- about one decade, never
+    # exceeding base_lr. Step 11 ran at 18x its recorded value, step 100 at
+    # 0.002x. Every curve produced before this fix is a warmup ramp plotted
+    # against a fictional axis, so EVERY LR-finder number in this repo
+    # predating it has to be re-measured.
+    #
+    # Restored after the loop rather than in a finally: try/finally would mean
+    # re-indenting the whole loop body, and a botched re-indent is a worse bug
+    # than this one. An exception mid-sweep leaves it suspended, which is
+    # acceptable -- the finder is the whole job in every launcher we have.
+    _sched = getattr(trainer, "lr_schedulers", None)
+    _orig_step = getattr(_sched, "step", None) if _sched is not None else None
+    if _orig_step is not None:
+        _sched.step = lambda *a, **k: None
+        logger.info(
+            "LR Finder: LR scheduler suspended for the sweep "
+            "(it would otherwise overwrite every swept LR)"
+        )
+    else:
+        # Not fatal, but if a scheduler IS active the curve is meaningless in
+        # exactly the way described above. Say so rather than emit a fiction.
+        logger.warning(
+            "LR Finder: no trainer.lr_schedulers.step to suspend. If a "
+            "scheduler is active it will overwrite every swept LR and the "
+            "resulting curve will be meaningless."
+        )
+
     for i in range(total_iters):
         trainer.step += 1
         in_warmup = i < warmup_steps
@@ -193,6 +230,10 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             for optimizer in trainer.optimizers.optimizers:
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = curr_lr
+
+    if _orig_step is not None:
+        _sched.step = _orig_step
+        logger.info("LR Finder: LR scheduler restored")
 
     # Save results on rank 0
     rank = int(os.environ.get("RANK", "0"))
