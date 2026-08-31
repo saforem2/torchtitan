@@ -38,6 +38,10 @@ import sys
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 
+# Minimum loss span across the grid, per width, for the sweep to be
+# considered to have discriminated at all.
+MIN_RESPONSE = 0.05
+
 
 def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
             out_dir: str, mup: bool, port: int) -> dict:
@@ -149,8 +153,45 @@ def main() -> int:
     uniq = {v for v in argmins.values() if v is not None}
     idx = {lr: i for i, lr in enumerate(lrs)}
     spread = (max(idx[v] for v in uniq) - min(idx[v] for v in uniq)) if uniq else -1
+
+    # BOUNDARY GATE. An argmin sitting on the first or last grid point means
+    # the grid did not bracket the optimum -- the true minimum is outside it.
+    # Every width agreeing on a boundary point is three identical ARTIFACTS,
+    # not three measurements, and reporting that as "same argmin -> TRANSFER"
+    # is a false positive. This happened: run 12474329 had all three widths
+    # pinned to the leftmost point with loss rising monotonically from there,
+    # because the grid was reused from a 6-layer rehearsal and this ladder is
+    # 64 layers.
+    edges = {lrs[0], lrs[-1]}
+    pinned = sorted(f for f, a in argmins.items() if a in edges)
+
+    # RESPONSE GATE. If loss barely moves across the whole grid, the argmin is
+    # being read out of noise. Run 12474329's predecessor varied 0.006 nats
+    # across a 16x span while differing 0.2 nats BETWEEN widths, and reported
+    # a confident NO TRANSFER.
+    spans = []
+    for flavor in flavors:
+        vals = [r["tail_mean"] for r in rows
+                if r["flavor"] == flavor and r["tail_mean"] is not None]
+        if len(vals) >= 2:
+            spans.append(max(vals) - min(vals))
+    min_span = min(spans) if spans else 0.0
+
     if not uniq:
         verdict = "NO DATA -- every run produced zero loss lines"
+    elif min_span < MIN_RESPONSE:
+        verdict = (
+            f"INCONCLUSIVE (grid does not discriminate) -- loss varies only "
+            f"{min_span:.4f} nats across the whole grid at some width, so the "
+            f"argmin is noise. Widen the grid or run more steps. NOT a result."
+        )
+    elif pinned:
+        verdict = (
+            f"INCONCLUSIVE (argmin on a grid boundary) -- {', '.join(pinned)} "
+            f"bottom out at an edge point, so the optimum is OUTSIDE the grid "
+            f"and was never bracketed. Agreement here is a shared artifact, "
+            f"not transfer. Re-centre the grid. NOT a result."
+        )
     elif len(uniq) == 1:
         verdict = "TRANSFER -- the optimum is the SAME grid point at every width"
     elif spread <= 1:
@@ -163,7 +204,8 @@ def main() -> int:
 
     summary = {"flavors": flavors, "lrs": lrs, "steps": args.steps,
                "mup": not args.sp, "argmins": argmins,
-               "argmin_grid_spread": spread, "verdict": verdict, "rows": rows}
+               "argmin_grid_spread": spread, "boundary_pinned": pinned,
+               "min_loss_span": min_span, "verdict": verdict, "rows": rows}
     sp = os.path.join(args.out, "transfer_summary.json")
     with open(sp, "w") as fh:
         json.dump(summary, fh, indent=2)
