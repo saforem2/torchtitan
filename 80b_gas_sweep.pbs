@@ -1,0 +1,171 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=04:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-gas-sweep
+#PBS -j oe
+set -o pipefail
+
+# DOES THE NaN RATE TRACK dp, OR GBS? Every 80B run to date confounds them.
+#
+# THE CONFOUND. More ranks means both more dp AND a bigger global batch, so
+# "the wall is LBS>1 and dp_degree > ~186" has never separated the two. The
+# depth bisect (12474403) inherited it: it ran GAS=1 at 4096 tokens/rank x 192
+# dp = 786K tokens/step, which is 1/32 of the production GBS=6144 (25.2M
+# tokens/step). All three arms survived 60 steps -- plausibly because the
+# batch was 32x too small, not because depth is harmless.
+#
+# GRADIENT ACCUMULATION BREAKS THE CONFOUND. dp is fixed by the node count;
+# GAS multiplies the batch without touching it. So:
+#
+#   arm   dp    GAS   GBS(tokens)   what it isolates
+#   G1    192     1        786K     the bisect baseline (8 events, survived)
+#   G8    192     8        6.3M     GBS up 8x at FIXED dp
+#   G32   192    32       25.2M     PRODUCTION GBS at fixed dp
+#
+# If the event rate rises with GAS, GBS is the driver and "large dp_degree"
+# has been the wrong trigger for months. If it does not, dp is genuinely the
+# variable and the bisect simply needed longer.
+#
+# A CONFOUND THIS DESIGN INTRODUCES, stated because it changes the reading.
+# Gradients accumulate across microbatches into ONE buffer and the non-finite
+# check runs ONCE PER OPTIMIZER STEP (trainer.py:990-1016, then :1063). So a
+# single bad microbatch poisons the whole step, and more microbatches per step
+# mechanically means more chances per step -- independent of any batch-size
+# effect.
+#
+# That is testable rather than fatal. If events are per-microbatch Bernoulli
+# with rate p, the per-STEP rate is 1-(1-p)^GAS, which is ~linear in GAS for
+# small p. The report below computes the PER-MICROBATCH rate for each arm and
+# compares. Flat per-microbatch rate across arms => pure exposure, GBS is
+# irrelevant. Rising per-microbatch rate => genuine batch-size effect.
+#
+# 84 LAYERS ONLY. Depth is settled enough by the bisect; this varies batch.
+#
+# STEP BUDGET. G1 gets 60 steps to reproduce the bisect (8 events expected).
+# G8 and G32 get fewer STEPS but the same MICROBATCH count, so each arm sees
+# the same number of forward/backward passes and the comparison is per-unit-
+# work rather than per-step: 60 / 8 / 2 steps = 60 / 64 / 64 microbatches.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python and
+# only the -grain venv has it. Job 12474399 aborted on exactly this.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-gas-sweep/$PBS_JOBID"; mkdir -p "$LOGD"
+
+arm() {  # arm <label> <gas> <steps>
+  local label="$1" gas="$2" steps="$3" log="$LOGD/$1.log"
+  echo ""
+  echo "===== $label  GAS=$gas  steps=$steps  (microbatches=$((gas*steps))) ====="
+  # num-tokens-per-train-step = tokens/rank * dp * GAS. dp is 192 here
+  # (768 ranks / TP=4), so GAS is the only thing that moves GBS.
+  local ntok=$(( 4096 * 192 * gas ))
+  timeout 4200 ezpz launch --nproc 768 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_80b \
+      --training.steps="$steps" \
+      --training.max-context-length=4096 \
+      --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+      --training.num-tokens-per-train-step="$ntok" \
+      --parallelism.tensor-parallel-degree=4 \
+      --compile.no-enable \
+      --diagnostics --diagnostics-attention \
+      --diagnostics-per-layer --diagnostics-interval=1 \
+      --checkpoint.no-enable \
+      --debug.seed=42 \
+      > "$log" 2>&1
+  echo "  rc=$?"
+  local c; c=$(sed "s/\x1b\[[0-9;]*m//g" "$log")
+  echo "    GAS reported: $(printf "%s" "$c" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
+  echo "    events: $(printf "%s" "$c" | grep -ac 'non-finite grad_norm')"
+  printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *[0-9.a-z]+ +grad_norm: *[0-9.a-z]+" | tail -2 | sed 's/^/    /'
+}
+
+arm G1   1  60
+arm G8   8   8
+arm G32 32   2
+
+echo ""
+echo "########## 80B GAS sweep: does the NaN rate track dp or GBS? ##########"
+python3 - <<'PY'
+import os, re
+
+logd = os.environ["LOGD"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+ROW = re.compile(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)")
+
+ARMS = (("G1", 1, 60), ("G8", 8, 8), ("G32", 32, 2))
+out = {}
+for label, gas, steps in ARMS:
+    p = f"{logd}/{label}.log"
+    if not os.path.exists(p):
+        out[label] = None
+        continue
+    txt = ansi.sub("", open(p, errors="replace").read())
+    rows = ROW.findall(txt)
+    ev = len(re.findall(r"non-finite grad_norm", txt))
+    died = next((int(s) for s, l, g in rows if l in ("nan", "inf")), None)
+    mb = gas * len(rows) if rows else 0
+    out[label] = {"gas": gas, "steps": len(rows), "events": ev,
+                  "microbatches": mb, "died": died,
+                  "per_step": ev / len(rows) if rows else float("nan"),
+                  "per_mb": ev / mb if mb else float("nan")}
+
+print(f"{'arm':>4} {'GAS':>4} {'steps':>6} {'mbatch':>7} {'events':>7} "
+      f"{'per-step':>9} {'per-mbatch':>11} {'died':>6}")
+for label, _, _ in ARMS:
+    v = out.get(label)
+    if not v:
+        print(f"{label:>4} {'--':>4} {'MISSING':>6}")
+        continue
+    print(f"{label:>4} {v['gas']:>4} {v['steps']:>6} {v['microbatches']:>7} "
+          f"{v['events']:>7} {v['per_step']:>9.4f} {v['per_mb']:>11.4f} "
+          f"{str(v['died']) if v['died'] else 'no':>6}")
+
+got = [v for v in out.values() if v]
+print()
+if len(got) < 3:
+    print("VERDICT: incomplete -- an arm did not run. No conclusion.")
+else:
+    pm = [out[l]["per_mb"] for l, _, _ in ARMS]
+    ps = [out[l]["per_step"] for l, _, _ in ARMS]
+    lo, hi = min(pm), max(pm)
+    spread = (hi / lo) if lo > 0 else float("inf")
+    print(f"  per-microbatch rate: {[f'{x:.4f}' for x in pm]}  spread {spread:.2f}x")
+    print(f"  per-step rate:       {[f'{x:.4f}' for x in ps]}")
+    print()
+    if lo == 0 and hi == 0:
+        print("  VERDICT: no events anywhere. This batch range does not reach")
+        print("  the failure. Neither dp nor GBS is implicated by this run.")
+    elif spread < 2.0:
+        print("  VERDICT: per-microbatch rate is FLAT across a 32x GBS range.")
+        print("  The events are per-microbatch exposure, NOT a batch-size")
+        print("  effect -- bigger GBS fails sooner only because it runs more")
+        print("  microbatches per step. GBS is not the driver.")
+    elif pm[-1] > pm[0]:
+        print("  VERDICT: per-microbatch rate RISES with GBS. That is a genuine")
+        print("  batch-size effect on top of exposure, and it means the")
+        print("  'large dp_degree' trigger has been crediting dp for something")
+        print("  GBS was doing.")
+    else:
+        print("  VERDICT: per-microbatch rate FALLS with GBS -- larger batches")
+        print("  are more stable per unit work. Check the arms for a confound")
+        print("  before believing it.")
+PY
+echo "GAS_SWEEP_DONE"
