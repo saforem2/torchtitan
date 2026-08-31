@@ -53,6 +53,15 @@ TITLE = "30B optimizer comparison: AdamW vs Mano vs SophiaG (GBS=960, constant L
 # Groups, not run ids. These are set at launch (WANDB_RUN_GROUP in the PBS
 # scripts), so a new chain link joins its arm automatically.
 ARM_GROUPS = ["adamw", "mano", "sophiag"]
+
+# Any group starting with one of these is a VARIANT arm -- a replicate of a
+# base arm under a different TAG (own checkpoint dir, own wandb group). They
+# are discovered by PREFIX rather than enumerated, because enumerating is what
+# broke this report twice: `sophiag-fresh-seed1234` (10 runs) and
+# `sophiag-lowlr-seed1234` (3 runs) both existed in wandb, were collected by
+# _discover, and were then displayed by nothing, silently, at exit 0. A new
+# `-v TAG=...` arm now joins the report without editing this file.
+VARIANT_PREFIXES = tuple(f"{a}-" for a in ARM_GROUPS)
 LRFIND_GROUPS = ["lrfind-adamw", "lrfind-mano", "lrfind-sophiag"]
 # Each SophiaG divergence replicate has its own rerun-* group, so they stay
 # distinguishable from each other and from the original arm.
@@ -398,7 +407,10 @@ def _discover(api) -> dict[str, list]:
     kept = {}
     for group, runs in by_group.items():
         longest = max((r.summary.get("_step") or 0) for r in runs)
-        if group.startswith(RERUN_GROUP_PREFIX) and longest < MIN_RERUN_STEPS:
+        if (
+            group.startswith(RERUN_GROUP_PREFIX)
+            or group.startswith(VARIANT_PREFIXES)
+        ) and longest < MIN_RERUN_STEPS:
             print(f"  SKIP {group}: longest run reached step {longest} "
                   f"(< {MIN_RERUN_STEPS}), an aborted launch rather than a "
                   "replicate")
@@ -418,7 +430,11 @@ def main() -> int:
     api = wandb.Api()
     by_group = _discover(api)
 
-    rerun_groups = sorted(g for g in by_group if g.startswith(RERUN_GROUP_PREFIX))
+    rerun_groups = sorted(
+        g
+        for g in by_group
+        if g.startswith(RERUN_GROUP_PREFIX) or g.startswith(VARIANT_PREFIXES)
+    )
     expected = ARM_GROUPS + LRFIND_GROUPS
     missing = [g for g in expected if g not in by_group]
     if missing:
