@@ -1061,6 +1061,61 @@ class FaultTolerantTrainer(Trainer):
         # async save un-awaited.
         self.checkpointer.maybe_wait_for_staging()
         if not math.isfinite(float(grad_norm.item())):
+            # CAPTURE BEFORE ZEROING. zero_grad() below destroys the gradients,
+            # and the diagnostics that would characterize this step do not run
+            # until ~90 lines later (collect_param_stats), by which point there
+            # is nothing left to measure. So the ONE step that matters -- the
+            # non-finite one -- was the only step with no gradient data.
+            #
+            # Found on job 12474403 (80B depth bisect): the L72 arm hit a NaN
+            # grad_norm at step 55 and recovered at 56, and step 55 is absent
+            # from W&B entirely while 51-54 and 56-57 logged normally. Every
+            # neighbouring step looks ordinary (qk_q_absmax ~61, grad_absmax
+            # ~0.02), so the event is invisible from both sides.
+            #
+            # This runs only on non-finite steps -- rare by construction, 1 in
+            # 60 in that arm -- so the O(params) scan is affordable here even
+            # though it is gated behind an interval in the normal path.
+            try:
+                from torchtitan.experiments.ezpz import diagnostics as _diag_nan
+
+                _nan_stats = _diag_nan.collect_param_stats(
+                    self.model_parts, per_layer=True
+                )
+                _bad = [
+                    k for k, v in _nan_stats.items()
+                    if isinstance(v, float) and not math.isfinite(v)
+                ]
+                logger.error(
+                    "NON-FINITE GRADIENT CAPTURE step %s: %s",
+                    self.step,
+                    ", ".join(
+                        f"{k}={v:.6g}" if isinstance(v, float) else f"{k}={v}"
+                        for k, v in sorted(_nan_stats.items())
+                    ),
+                )
+                if _bad:
+                    logger.error(
+                        "NON-FINITE GRADIENT CAPTURE step %s: metrics that are "
+                        "THEMSELVES non-finite (these name the affected "
+                        "tensors): %s",
+                        self.step,
+                        ", ".join(sorted(_bad)),
+                    )
+                # NOT pushed to W&B here. This trainer's processor takes
+                # log(step, avg_loss, max_loss, grad_norm, extra_metrics=...)
+                # -- the losses are positional and are not yet reduced at this
+                # point in the step (that happens ~30 lines below). Calling it
+                # early would either need fabricated loss values or a second
+                # partial row at the same step. The console capture above is
+                # the record; W&B still shows the hole, and the log names the
+                # tensors, which is what the hole was hiding.
+            except Exception as _e:  # instrumentation must not kill the run
+                logger.error(
+                    "NON-FINITE GRADIENT CAPTURE step %s FAILED: %s: %s",
+                    self.step, type(_e).__name__, _e,
+                )
+
             self.optimizers.zero_grad()
             logger.error(
                 f"non-finite grad_norm ({grad_norm}) at step {self.step}: "
