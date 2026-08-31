@@ -36,9 +36,23 @@ set -o pipefail
 # NO TRANSFER from 0.006 nats of noise. MUP_ETA rebuilds the whole optimizer
 # config per run.
 #
-# GRID. 5 points spanning 256x, chosen from the tiny-ladder rehearsal where
-# that span moved the loss 1.6 nats and produced an interior minimum at every
-# width. A narrower grid cannot locate an optimum; see above.
+# GRID. 5 points spanning 256x, now centred two decades LOWER than the first
+# attempt. That attempt reused the tiny-ladder rehearsal's 1e-4..2.56e-2 span
+# and every width bottomed out at the leftmost point (1536: 5.485, 3072:
+# 5.437, 6144: 5.308, all rising monotonically from there). The harness would
+# have called that "same argmin at every width -- TRANSFER"; it is a boundary
+# artifact, not a measurement, because the grid never bracketed the optimum.
+#
+# The tiny ladder is 6 layers and this one is 64, and depth pushes the usable
+# LR band down -- reusing its grid was the error. 1e-6..2.56e-4 brackets where
+# the production arms actually sit (AdamW 3.05e-05, Mano 5.61e-05, SophiaG
+# 3.55e-05), so an interior minimum should exist at every rung.
+#
+# The first attempt did produce one real signal worth keeping: at 6.4e-3 the
+# loss went 7.16 / 12.71 / 41.53 as width grew, so the blow-up threshold is
+# strongly width-DEPENDENT up there. Under working muP it should not be. That
+# is evidence against transfer in the upper range, confounded by the missing
+# optimum.
 
 cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
 module use /opt/aurora/26.181.0/modulefiles
@@ -60,7 +74,7 @@ echo ""
 # Each arm is one short training run at a fixed eta. Launched through
 # `ezpz launch` so all 16 nodes participate; the harness itself only
 # orchestrates and parses.
-LRS="1e-4,4e-4,1.6e-3,6.4e-3,2.56e-2"
+LRS="1e-6,4e-6,1.6e-5,6.4e-5,2.56e-4"
 STEPS=60
 SEQ=2048
 
