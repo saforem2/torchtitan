@@ -1,0 +1,266 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=03:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-depth-bisect
+#PBS -j oe
+set -o pipefail
+
+# DOES THE 80B NaN DEPEND ON DEPTH? The experiment the stated root cause
+# rests on, which has never been run.
+#
+# THE CLAIM UNDER TEST. docs say the NaN is bf16 accumulation in the 84-layer
+# pre-norm residual stream, and that at dim 9216 x 84L x ffn 25600 this
+# reaches a regime 2B/20B never hit. If depth is the variable, fewer layers
+# should survive longer or not fail at all.
+#
+# WHY IT IS STILL OPEN, despite the ladder existing since 2026-05-03. The
+# ladder was built for exactly this bisect, then immediately hit an UNRELATED
+# torch-2.13 AOT-autograd crash (`save_from_forward` DeviceMesh assertion)
+# that killed all three configs in ~30s, and the investigation pivoted to that
+# crash. The NaN question was never revisited with it. That crash needs
+# `compile + AC + TP>1`; --compile.no-enable avoids it and costs ~nothing here
+# (known-issues.md: "85 vs 83 tps for 80B ... compile provided minimal benefit
+# with TP anyway").
+#
+# THE LADDER IS A CLEAN BISECT -- verified, not assumed:
+#   agpt_50b_wide  dim=9216  L=48  vocab=256128  48.2B params
+#   agpt_70b_wide  dim=9216  L=72  vocab=256128  70.0B params
+#   agpt_80b       dim=9216  L=84  vocab=256128  80.8B params
+# Identical per-layer shape and vocab; depth is the only variable.
+#
+# EVERYTHING ELSE IS HELD FIXED, and that is the point. Same nodes, same TP=4,
+# same LBS=1, same dp, same optimizer, same seed, same data. The existing
+# evidence is confounded precisely because it is not: the "clean" fp32 run
+# (8537349) is recorded as TP=4 with NO node count, while the NaN runs are
+# 64N/dp=192, so precision and scale vary together and the "sublayer GEMM"
+# conclusion does not follow.
+#
+# WHAT EACH OUTCOME MEANS:
+#   48L clean, 84L NaN     -> depth IS the variable; the stated mechanism
+#                             survives and the bisect brackets it.
+#   all three NaN alike    -> depth is NOT the variable; the residual-depth
+#                             mechanism is dead and dp is the thing to chase.
+#   monotone step-to-NaN   -> accumulation, consistent with precision loss
+#     (48L latest, 84L earliest)  rather than a threshold effect.
+#
+# QK MAGNITUDES COME FREE HERE, and nobody has ever collected them in the
+# failing regime. NOT ONE activation magnitude has been measured anywhere in
+# this investigation -- every mechanism claim on every side, including the
+# "bf16 overflow" framing, is inference from run outcomes.
+#
+# The probe (diagnostics/attention.py) is wired and called at
+# agpt/__init__.py:141, but observe() returns immediately under
+# torch.compiler.is_compiling(): it calls .item(), a host sync dynamo cannot
+# express, which killed job 12473689 before step 1. Production runs are
+# compiled, so QK stats have never fired in one.
+#
+# This job already passes --compile.no-enable to dodge the May AOT-autograd
+# crash, which is exactly the condition where the probe DOES fire. So
+# --diagnostics --diagnostics-attention costs nothing extra and turns three
+# outcome observations into three measurements: diag/qk_q_absmax_local,
+# diag/qk_k_absmax_local and the logit bound estimate, per arm, in W&B.
+#
+# If the magnitudes are far below the bf16 ceiling (3.39e38) in every arm,
+# "overflow" is dead as a mechanism regardless of what the bisect says about
+# depth, and the search moves to precision loss or something non-numerical.
+#
+# PER-LAYER STATS, EVERY STEP -- the other half of the measurement.
+#
+# diagnostics/__init__.py already collects what this investigation has been
+# missing and nobody turned it on for an 80B run:
+#
+#   diag/top{i}_gradnorm      WHICH LAYERS carry the largest gradients (by
+#                             name, so a layer INDEX comes out -- directly
+#                             addresses "is it depth")
+#   diag/layer_gradnorm_max / _mean / _skew
+#                             the distribution, not just the global norm. A
+#                             global grad_norm dead-flat at ~6.0 while one
+#                             layer's is exploding is invisible in the scalar
+#                             and obvious in the skew.
+#   diag/grad_absmax_local    the magnitude question, on gradients
+#   diag/weight_absmax_local  the magnitude question, on weights
+#   diag/clip_*               whether clipping is masking the runup
+#
+# INTERVAL=1, NOT THE DEFAULT 50. The failures land at steps 14-37. At the
+# default this job would sample once, maybe twice, before the NaN and produce
+# nothing about the approach to it. These collectors are O(params) so this is
+# expensive -- acceptable for 60 steps of a diagnostic run, and NOT a setting
+# to copy into production.
+#
+# What this turns the job into: not just "does depth matter" but "which layer
+# goes first, and how large does anything actually get". If the top-gradnorm
+# layers cluster at high indices, depth is implicated directly. If they are
+# scattered, it is not a depth-accumulation story at all.
+#
+# READ grad_norm, NOT loss. The documented signature is grad_norm dead-flat
+# ~6.0 then a step to inf with no runup; loss looks fine until it does not.
+#
+# STEP BUDGET 60. Known NaN steps are 14-19 (bf16) and ~37 (full-depth fp32
+# residual). 60 clears the latest known failure with margin. Note this is the
+# flaw in citing 8537349's "CLEAN 20 steps" as proof of a fix -- it outlasted
+# the failure window by 1-3 steps.
+#
+# NO CHECKPOINTING. Writes nothing durable.
+
+# VENV: -rc2-grain, NOT -rc2. The post-#4088 dataloader imports grain.python,
+# which only the -grain venv has; 30b_smoke.pbs predates that and points at
+# plain -rc2. Copying its header cost job 12474399, which aborted in the
+# config gate with ModuleNotFoundError: No module named 'grain'. The gate
+# worked; the venv was wrong.
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+# Diagnostics go to W&B by default; this echoes them to the CONSOLE too
+# (trainer.py:1188) so the .o file is self-contained. Job 12474403 collected
+# them correctly and logged none of them locally without this.
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+# CONFIG GATE on a printed sentinel, not the pipeline exit status: a stderr
+# warning under `set -o pipefail` aborted a good config once (job 12473193).
+CHK="$REPO/outputs/logs/depth-bisect-cfg.$PBS_JOBID.txt"
+mkdir -p "$(dirname "$CHK")"
+python3 -c "
+from torchtitan.experiments.ezpz.agpt import config_registry as cr
+seen = []
+for fn in ('agpt_50b_wide', 'agpt_70b_wide', 'agpt_80b'):
+    m = getattr(cr, fn)().model_spec.model
+    seen.append((m.dim, m.vocab_size))
+    print(f'  CFG_OK {fn:14s} dim={m.dim} L={len(m.layers)} vocab={m.vocab_size}')
+assert len(set(seen)) == 1, f'NOT a clean bisect, geometry differs: {seen}'
+print('  CFG_OK bisect is clean: depth is the only variable')
+" > "$CHK" 2>&1
+grep -a "CFG_OK" "$CHK" || true
+if [ "$(grep -ac 'CFG_OK' "$CHK")" -lt 4 ]; then
+  echo "ABORT: ladder failed to resolve or is not a clean bisect."
+  # Print the REAL traceback tail, not a regex guess at which exception it was.
+  # Job 12474399 aborted here and printed NOTHING actionable, because the
+  # actual error was ModuleNotFoundError -- not in my hardcoded alternation.
+  # An abort message that omits the error is a wasted job.
+  echo "  --- last 15 lines of $CHK ---"
+  tail -15 "$CHK" | sed 's/^/    /'
+  echo "DEPTH_BISECT_DONE"; exit 7
+fi
+
+export LOGD="$REPO/outputs/logs/80b-depth-bisect/$PBS_JOBID"; mkdir -p "$LOGD"
+STEPS="${STEPS:-60}"
+
+arm() {  # arm <label> <config>
+  local label="$1" cfg="$2" log="$LOGD/$1.log"
+  echo ""
+  echo "===== $label ($cfg) ====="
+  # --compile.no-enable avoids the torch-2.13 save_from_forward assertion that
+  # killed this ladder in May. TP=4 and LBS=1 match the corner the 80B work
+  # settled on; dp is then fixed by the node count, identically for all arms.
+  timeout 3000 ezpz launch --nproc 768 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config "$cfg" \
+      --training.steps="$STEPS" \
+      --training.max-context-length=4096 \
+      --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+      --parallelism.tensor-parallel-degree=4 \
+      --compile.no-enable \
+      --diagnostics --diagnostics-attention \
+      --diagnostics-per-layer --diagnostics-interval=1 \
+      --checkpoint.no-enable \
+      --debug.seed=42 \
+      > "$log" 2>&1
+  echo "  rc=$?"
+  local c; c=$(sed "s/\x1b\[[0-9;]*m//g" "$log")
+  # grad_norm is the signal; loss lags it.
+  printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *[0-9.a-z]+ +grad_norm: *[0-9.a-z]+" \
+    | tail -4 | sed 's/^/    /'
+  local first
+  first=$(printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *(nan|inf)" | head -1)
+  echo "    first non-finite: ${first:-NONE}"
+  echo "    steps reached: $(printf "%s" "$c" | grep -acE 'step: *[0-9]+ +loss:')"
+  # The diagnostics land in W&B; echo the last sample here so the .o file is
+  # self-contained if W&B is unreachable later.
+  printf "%s" "$c" | grep -aoE "diag/(top[0-9]_gradnorm|layer_gradnorm_(max|skew)|grad_absmax_local|weight_absmax_local|qk_[qk]_absmax_local)=[0-9.e+-]+" \
+    | tail -12 | sed 's/^/      /'
+}
+
+arm L48 agpt_50b_wide
+arm L72 agpt_70b_wide
+arm L84 agpt_80b
+
+echo ""
+echo "########## 80B depth bisect: does the NaN track depth? ##########"
+python3 - <<'PY'
+import os, re
+
+logd = os.environ["LOGD"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+ROW = re.compile(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)")
+
+out = {}
+for label, depth in (("L48", 48), ("L72", 72), ("L84", 84)):
+    p = f"{logd}/{label}.log"
+    if not os.path.exists(p):
+        out[label] = None
+        continue
+    txt = ansi.sub("", open(p, errors="replace").read())
+    rows = ROW.findall(txt)
+    bad = next((int(s) for s, l, g in rows if l in ("nan", "inf") or g in ("nan", "inf")), None)
+    finite = [float(g) for _, _, g in rows if g not in ("nan", "inf")]
+    out[label] = {
+        "depth": depth,
+        "steps": len(rows),
+        "nan_at": bad,
+        "max_gn": max(finite) if finite else None,
+        "last_gn": finite[-1] if finite else None,
+    }
+
+print(f"{'arm':>5} {'depth':>6} {'steps':>6} {'NaN at':>7} {'max gn':>9} {'last gn':>9}")
+for k in ("L48", "L72", "L84"):
+    v = out[k]
+    if v is None:
+        print(f"{k:>5} {'-':>6} {'MISSING':>6}")
+        continue
+    print(f"{k:>5} {v['depth']:>6} {v['steps']:>6} "
+          f"{str(v['nan_at']) if v['nan_at'] else 'none':>7} "
+          f"{v['max_gn'] if v['max_gn'] is not None else float('nan'):>9.2f} "
+          f"{v['last_gn'] if v['last_gn'] is not None else float('nan'):>9.2f}")
+
+got = [v for v in out.values() if v]
+print()
+if len(got) < 3:
+    print("VERDICT: incomplete -- an arm did not run. No conclusion.")
+else:
+    nans = {v["depth"]: v["nan_at"] for v in got}
+    failed = {d: s for d, s in nans.items() if s}
+    if not failed:
+        print("VERDICT: NO arm NaN'd. Either this scale is below the wall, or")
+        print("--compile.no-enable changed the regime. Compare dp against the")
+        print("64N/dp=192 runs before concluding anything about depth.")
+    elif len(failed) == 3:
+        steps = [nans[d] for d in (48, 72, 84)]
+        if steps == sorted(steps, reverse=True):
+            print("VERDICT: all three NaN, and LATER at lower depth "
+                  f"({steps[0]} > {steps[1]} > {steps[2]}). Depth ACCELERATES")
+            print("the failure without being necessary -- consistent with an")
+            print("accumulating precision effect, not a depth threshold.")
+        else:
+            print(f"VERDICT: all three NaN at {steps} with no depth ordering.")
+            print("Depth is NOT the variable. The residual-depth mechanism is")
+            print("dead; chase dp instead.")
+    else:
+        surv = sorted(d for d in nans if not nans[d])
+        print(f"VERDICT: depth {surv} survived, {sorted(failed)} failed.")
+        print("Depth IS the variable and the wall is bracketed between them.")
+        print("This is the outcome the stated root cause predicts.")
+PY
+echo "DEPTH_BISECT_DONE"

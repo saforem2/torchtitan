@@ -22,10 +22,15 @@
 > Full-machine maintenance `M8787441` took all 10,624 nodes at 14:00 UTC today,
 > so nothing places before it clears.
 >
-> **80B (item 6): the diagnosis has not changed and there is still no
-> production run.** Wall 1 is root-caused, the TP=4/LBS=1/bf16 corner is
-> confirmed 4/4 to ~62N, and 80B at 1024N has never left the queue. One new
-> item: **z-loss is a third score-bounding route and has never been tried.**
+> **80B (item 6): the diagnosis is NOT closed, and this entry originally said
+> it was.** Re-examined 2026-08-31: the stated mechanism (bf16 residual
+> accumulation) is refuted by its own follow-up experiment, "overflow" is the
+> wrong word (bf16 and fp32 have the SAME exponent range -- measured), the
+> "stable corner" NaN'd 3/3 at production batch, and NOT ONE activation
+> magnitude has ever been measured in the failing regime. What IS solid:
+> optimizer-independence, and fp32 activations holding 120/120 steps at the dp
+> where bf16 dies. Still no production run since July. One new item:
+> **z-loss is a third score-bounding route and has never been tried.**
 > The two routes in the standing list (softcap, QK-Norm) both bound ATTENTION
 > scores and are both blocked on this stack; nothing here bounds the OUTPUT
 > logits, and a repo-wide search finds zero implementations -- every hit is
@@ -274,29 +279,108 @@ which write nothing, and wrong for the combined plotter, which writes a
 *degraded* artifact. Same symptom, opposite correct response.
 
 
-### 6. 80B: definitive status (unchanged diagnosis, one new candidate fix)
+### 6. 80B: the diagnosis is not closed
 
-Restated because the standing write-up is from 2026-08-03 and the status keeps
-being read as open. **The 80B NaN is root-caused and there is a
-confirmed-stable corner. Nothing since has contradicted it, and nothing since
-has produced a production run.**
+I first wrote this section restating the 2026-08-03 write-up as settled --
+"root-caused, with a confirmed-stable corner". Re-examining the evidence the
+same day, **neither half holds.** The failure is real, reproducible and
+dp-sensitive; the mechanism is unknown, and the corner marked CONFIRMED has
+since NaN'd 3/3 at production batch.
 
-| | status |
+The table below separates what is measured from what was inferred, because the
+inferred parts have been quoted as fact in three successive write-ups. Nothing
+here says the 80B cannot train -- fp32 activations hold 120/120 steps at
+production dp. It says we do not know WHY bf16 fails, and that the experiments
+which would tell us have not been run.
+
+> [!CAUTION]
+> **Rewritten 2026-08-31. The earlier version of this table said the diagnosis
+> was CLOSED and the stable corner CONFIRMED. Neither survives its own
+> evidence.** What follows separates what is measured from what was inferred.
+> The failure is real and reproducible; the MECHANISM is not known.
+
+| claim | status |
 |---|---|
-| Diagnosis | **CLOSED.** Wall 1, bf16 forward-activation overflow (2026-07-14). Optimizer-independent: SophiaG (512N) and mano (62N) NaN with the identical signature, and mano has no Hessian term. Smoking gun: the fp32-activations run `8537349` trains clean and reveals TRUE grad_norms of 21K-79K that bf16 masks to ~5-7. |
-| Stable corner | **CONFIRMED 4/4** (`12469494`/`509`/`510`/`511`): TP=4, LBS=1, bf16, batch via GAS. Three landed at identical loss 9.69-9.70. Validated only to ~62N. |
-| Production run | **NONE, and none since July.** 80B at 1024N has never run (`8574386` never left the queue). |
-| The open question | Not "can 80B train" but "where does the stable corner break". Wall 1's real boundary has never been bracketed. |
+| Optimizer-independent | **SUPPORTED.** Three optimizers fail in one controlled corner. (The "identical signature" argument is weaker than it reads -- several runs show a clear runup, so the support is the controlled sweep, not the signature.) |
+| fp32 activations fix it at production dp | **SUPPORTED, and the strongest fact here.** 120/120 steps, zero NaN, at the same dp where bf16 dies. Flagged as LR-confounded. |
+| fp32 residual stream is sufficient | **REFUTED.** Per-block NaNs at dp=192 step 19 (`8671243`); full-depth NaNs at ~step 37 (`8673658`). Full depth roughly DOUBLES survival without preventing failure. |
+| Mechanism = bf16 residual accumulation | **REFUTED BY ITS OWN FOLLOW-UP.** The direct test of the stated mechanism failed twice (row above). The docs concede this in the same section that calls the diagnosis closed. |
+| Mechanism = "overflow" | **WRONG WORD.** MEASURED on this stack: bf16 max 3.390e38 vs fp32 3.403e38 -- the SAME exponent range. bf16 loses mantissa, not range (fp16 is the one that dies at 6.55e4). |
+| "bf16 masks true grad_norms of 21K-79K to ~5-7" | **ARITHMETICALLY IMPOSSIBLE as stated.** 7.9e4 converts to bf16 exactly (7.885e4, not inf) -- 33 orders below the ceiling. Whatever the fp32-vs-bf16 grad_norm gap is, it is not masking by overflow. |
+| Site = "a bf16 sublayer GEMM" | **UNSUPPORTED.** Inferred from the delta between `8673658` (64N/**dp=192**) and `8537349` (TP=4, **node count recorded NOWHERE**). The failure is documented as dp-dependent, so those runs differ in precision AND scale. |
+| Stable corner CONFIRMED 4/4 | **REFUTED.** The exact recipe (TP=4, LBS=1, bf16, GAS) NaN'd **3/3 with three different optimizers at production batch**, one at step 30 at dp=192. The 4/4 clean runs are 20-30 steps against NaN onsets of 14-37 -- the windows overlap almost entirely. |
+| Trigger = large dp_degree | **NOT SUPPORTED AS STATED.** dp=192 both NaN'd and ran clean; the one LBS=1 dp-axis NaN is confounded by TP; 20B trains fine at comparable dp. |
+| Trigger = LBS>1 | **WEAK.** Rests on a SINGLE run that was never repeated, contrasted against a cell with four repeats. |
+| Production run | **NONE since July.** 80B at 1024N has never run (`8574386` never left the queue). |
+
+### FIRST MEASUREMENT IN THE FAILING REGIME (job `12474403`, 2026-08-31)
+
+The depth bisect (48L / 72L / 84L at fixed dp, identical per-layer shape) is
+running with per-layer diagnostics at `--diagnostics-interval=1`. The L48 arm's
+first 8 steps are the first magnitudes ever recorded at dp=192.
+
+**Overflow is dead as a mechanism -- measured, not argued.**
+
+| quantity | value at dp=192 | vs bf16 ceiling 3.39e38 |
+|---|---:|---|
+| `diag/qk_q_absmax_local` | **61** (flat across 8 steps) | 36 orders below |
+| `diag/qk_k_absmax_local` | 2.9 - 3.1 | 38 orders below |
+| `diag/grad_absmax_local` | 0.001 - 0.02 | 40 orders below |
+| `diag/layer_gradnorm_max` | 0.03 - 0.69 | -- |
+
+The only prior amax run (`12472477`) was at 4N/dp=12 in the CLEAN regime and
+recorded a peak of 62.25. **At dp=192 the same quantity reads 61.** The
+activations in the failing configuration are indistinguishable from those in
+the healthy one. Nothing is within 36 orders of magnitude of a numerical
+limit.
+
+**The monitored grad_norm is the PRE-CLIP value.** `diag/clip_fired = 1` on
+every step and `diag/grad_norm_postclip = 1` always, while the logged
+`grad_norm` swings 6.19 / 97.18 / 11.36 / 98.77 / 14.00 / 58.63 / 65.69 /
+11.32. Clipping at `max_norm=1.0` is the framework DEFAULT, not something this
+config sets -- so this is not an anomaly. But it does mean the number the
+whole investigation reasoned from is a quantity the optimizer never applies,
+and "flat ~6.0 then a step to inf with no runup" is a statement about the
+pre-clip aggregate. A runup would not necessarily be visible in it.
+
+**Gradient mass is extremely concentrated.** `diag/layer_gradnorm_skew` runs
+39-320 while `diag/layer_gradnorm_mean` sits at 0.001-0.002 and
+`top1_gradnorm` at ~0.005: a few layers carry nearly everything.
+**No baseline exists for this** -- no run in the project's history has
+recorded `layer_gradnorm_skew` before, so whether 39-320 is pathological or
+normal for this architecture is unknown. The deeper arms of this same job are
+the comparison.
+
+**Still open:** the depth question itself. L48 had not failed as of step 8;
+L72 and L84 have not run.
+
+**The gap this closes, and the one it does not: BEFORE THIS RUN, NOT ONE
+ACTIVATION MAGNITUDE HAD EVER BEEN MEASURED IN THE FAILING REGIME.** There is no amax artifact anywhere in the repo. Every
+mechanism claim on every side is inference from run outcomes. The QK probe
+(`diagnostics/attention.py`) IS wired and called (`agpt/__init__.py:141`), but
+`observe()` returns immediately under `torch.compiler.is_compiling()` -- it
+calls `.item()`, a host sync dynamo cannot express, which killed job
+`12473689` before step 1. Production runs are compiled, so it has never fired
+in one.
+
+**Also worth knowing before citing the evidence table:** every `8xxxxxx` job in
+it is Aurora-side and doc-sourced. Aurora is currently unreachable, so not one
+of those logs has been re-opened. The "7-job factorial" is a naming artifact --
+the table has 11 rows and the run-list 13 jobs, across three revisions in
+which the headline conclusion changed.
 
 **Attempted fixes, unchanged ranking:**
 
-1. `--training.mixed-precision-param=float32` @ TP=4 -- the one config with
-   confirmed-clean training. ~3-5x slower. The guaranteed unblock.
-2. fp32 residual stream -- necessary, NOT sufficient. Per-block prototype
-   trains clean at 4N but still NaNs at dp=192 (`8671243`), full-depth NaNs at
-   ~step 37 (`8673658`). This narrows the overflow to a **bf16 sublayer GEMM**
-   (attention QK^T or the FFN SwiGLU intermediate) rather than the residual
-   add.
+1. `--training.mixed-precision-param=float32` -- 120/120 steps clean at
+   production dp, ~3-5x slower. The best-supported unblock, with the caveat
+   that it is LR-confounded and that it changes EVERY tensor, so it localizes
+   nothing.
+2. fp32 residual stream -- NOT sufficient. Per-block NaNs at dp=192 step 19
+   (`8671243`), full-depth at ~step 37 (`8673658`). The docs read this as
+   narrowing the site to a bf16 sublayer GEMM; that inference does not hold
+   (see the table above -- the comparison run's scale is unrecorded). What it
+   DOES show is that fp32 residual delays failure roughly 2x, which is the
+   signature of something accumulating, not of a threshold.
 3. Score-bounding -- both known routes blocked on this stack. Softcap
    hard-codes `torch.compile(flex_attention)`, which `--compile.no-enable`
    cannot switch off and which is broken/eager on XPU. QK-Norm crashes in

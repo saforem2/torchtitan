@@ -1,0 +1,165 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=2
+#PBS -l walltime=01:30:00
+#PBS -l filesystems=tegu:home
+#PBS -N zloss-smoke
+#PBS -j oe
+set -o pipefail
+
+# 2N plumbing smoke for output z-loss (experiments/ezpz/zloss.py).
+#
+# PURPOSE IS MECHANICAL, NOT SCIENTIFIC. 2B has never had a logit-overflow
+# problem, so z-loss is NOT expected to improve anything here. What this
+# checks is that the thing runs at all under real distributed training, since
+# the unit tests are single-process CPU:
+#
+#   1. the config resolves and the trainer builds with it
+#   2. loss stays finite for 20 steps
+#   3. the z_loss metric is actually REPORTED (a penalty folded invisibly into
+#      the total is untunable, and a metrics dict that never reaches the
+#      logger is the silent-no-op this codebase specializes in)
+#   4. throughput is not wrecked -- the extra logsumexp is over the full vocab
+#   5. the baseline arm is UNCHANGED, so any difference is attributable
+#
+# TWO ARMS, and the baseline is the point. Running only the z-loss arm would
+# prove it does not crash, not that it does anything. The pair also tests the
+# claim the unit tests make in-process: that coef=0 is bit-identical to plain
+# CE. If arm A and arm B disagree at step 1, the bypass is not a bypass.
+#
+# NO CHECKPOINTING (--checkpoint.no-enable). This writes nothing durable and
+# must not contend with production checkpoint dirs.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+# CONFIG GATE, on a printed sentinel rather than the pipeline's exit status.
+# A harmless stderr warning under `set -o pipefail` aborted a good config once
+# (job 12473193); capture to a file and grep for proof of success instead.
+CHK="$REPO/outputs/logs/zloss-cfgcheck.$PBS_JOBID.txt"
+mkdir -p "$(dirname "$CHK")"
+python3 -c "
+from torchtitan.experiments.ezpz.agpt.config_registry import agpt_2b, agpt_2b_zloss
+base = agpt_2b().loss
+z = agpt_2b_zloss().loss
+print(f'  CFG_OK baseline {type(base).__qualname__} '
+      f'has_coef={hasattr(base, \"z_loss_coef\")}')
+print(f'  CFG_OK zloss    {type(z).__qualname__} '
+      f'coef={getattr(z, \"z_loss_coef\", None)} '
+      f'vocab={getattr(z, \"global_vocab_size\", None)}')
+" > "$CHK" 2>&1
+grep -a "CFG_OK" "$CHK" || true
+if [ "$(grep -ac 'CFG_OK' "$CHK")" -lt 2 ]; then
+  echo "ABORT: a z-loss config failed to resolve -- real error:"
+  grep -aoE "(ImportError|AttributeError|KeyError|TypeError|ValueError): .*" \
+    "$CHK" | sort -u | head -3 | sed 's/^/    /'
+  echo "ZLOSS_SMOKE_DONE"; exit 7
+fi
+
+# EXPORTED so the report block below reads THIS job's logs. Without the
+# export it falls back to a glob of the newest zloss-smoke dir, which is a
+# different job whenever two run close together.
+export LOGD="$REPO/outputs/logs/zloss-smoke/$PBS_JOBID"; mkdir -p "$LOGD"
+STEPS="${STEPS:-20}"
+
+arm() {  # arm <label> <config>
+  local label="$1" cfg="$2"
+  local log="$LOGD/$label.log"
+  echo ""
+  echo "===== arm: $label  ($cfg) ====="
+  timeout 2400 ezpz launch --nproc 24 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config "$cfg" \
+      --training.steps="$STEPS" \
+      --training.max-context-length=4096 \
+      --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+      --training.num-tokens-per-train-step=98304 \
+      --parallelism.tensor-parallel-degree=1 \
+      --checkpoint.no-enable \
+      > "$log" 2>&1
+  echo "  rc=$? log=$log"
+  local c
+  c=$(sed "s/\x1b\[[0-9;]*m//g" "$log")
+  printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | head -3 | sed 's/^/    /'
+  printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *[0-9.]+" | tail -2 | sed 's/^/    /'
+  echo "    nan/inf lines: $(printf "%s" "$c" | grep -acE 'loss: *(nan|inf)')"
+  echo "    z_loss reported: $(printf "%s" "$c" | grep -ac 'z_loss')"
+  printf "%s" "$c" | grep -aoE "z_loss[\": ]+[0-9.e+-]+" | tail -2 | sed 's/^/    /'
+  printf "%s" "$c" | grep -aoE "tps: +[0-9,]+" | tail -1 | sed 's/^/    /'
+}
+
+arm baseline agpt_2b
+arm zloss    agpt_2b_zloss
+
+echo ""
+echo "########## z-loss 2N smoke ##########"
+python3 - <<'PY'
+import os, re, glob
+
+logd = os.environ.get("LOGD") or glob.glob(
+    "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
+    "outputs/logs/zloss-smoke/*")[-1]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def steps(path):
+    if not os.path.exists(path):
+        return {}
+    txt = ansi.sub("", open(path, errors="replace").read())
+    out = {}
+    for m in re.finditer(r"step: *(\d+) +loss: *([0-9.]+)", txt):
+        out[int(m.group(1))] = float(m.group(2))
+    return out, txt
+
+
+b = steps(f"{logd}/baseline.log")
+z = steps(f"{logd}/zloss.log")
+if not b or not z:
+    print("  MISSING an arm; nothing to compare")
+    raise SystemExit(0)
+(bs, btxt), (zs, ztxt) = b, z
+
+common = sorted(set(bs) & set(zs))
+print(f"  steps compared: {len(common)}")
+if common:
+    s0 = common[0]
+    print(f"  step {s0}: baseline {bs[s0]:.5f}  zloss {zs[s0]:.5f}  "
+          f"delta {zs[s0]-bs[s0]:+.5f}")
+    last = common[-1]
+    print(f"  step {last}: baseline {bs[last]:.5f}  zloss {zs[last]:.5f}  "
+          f"delta {zs[last]-bs[last]:+.5f}")
+
+nan_b = len(re.findall(r"loss: *(nan|inf)", btxt))
+nan_z = len(re.findall(r"loss: *(nan|inf)", ztxt))
+zrep = len(re.findall(r"z_loss", ztxt))
+print(f"  nan/inf: baseline {nan_b}, zloss {nan_z}")
+print(f"  z_loss mentions in the zloss arm: {zrep}")
+
+print()
+if nan_z:
+    print("  VERDICT: z-loss arm produced NaN -- plumbing is broken, stop here.")
+elif not common:
+    print("  VERDICT: no comparable steps; read the logs.")
+elif zrep == 0:
+    print("  VERDICT: runs clean but z_loss is NEVER REPORTED. The penalty may")
+    print("  be applied and invisible, which makes it untunable -- check that")
+    print("  the metrics dict reaches the logger before using this at 80B.")
+else:
+    print("  VERDICT: plumbing OK -- trains, finite, penalty reported.")
+    print("  This says NOTHING about whether z-loss helps; 2B has no logit")
+    print("  overflow to fix. The 80B arm is the test that matters.")
+PY
+echo "ZLOSS_SMOKE_DONE"
