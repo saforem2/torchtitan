@@ -119,6 +119,10 @@ export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
 export CCL_LOG_LEVEL=ERROR
+# Diagnostics go to W&B by default; this echoes them to the CONSOLE too
+# (trainer.py:1188) so the .o file is self-contained. Job 12474403 collected
+# them correctly and logged none of them locally without this.
+export EZPZ_DIAG_ECHO=1
 module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
 module load frameworks/2026.1.0 >/dev/null 2>&1
 export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH

@@ -313,8 +313,49 @@ which would tell us have not been run.
 | Trigger = LBS>1 | **WEAK.** Rests on a SINGLE run that was never repeated, contrasted against a cell with four repeats. |
 | Production run | **NONE since July.** 80B at 1024N has never run (`8574386` never left the queue). |
 
-**The gap under all of it: NOT ONE ACTIVATION MAGNITUDE HAS EVER BEEN MEASURED
-IN THE FAILING REGIME.** There is no amax artifact anywhere in the repo. Every
+### FIRST MEASUREMENT IN THE FAILING REGIME (job `12474403`, 2026-08-31)
+
+The depth bisect (48L / 72L / 84L at fixed dp, identical per-layer shape) is
+running with per-layer diagnostics at `--diagnostics-interval=1`. The L48 arm's
+first 8 steps are the first magnitudes ever recorded at dp=192.
+
+**Overflow is dead as a mechanism -- measured, not argued.**
+
+| quantity | value at dp=192 | vs bf16 ceiling 3.39e38 |
+|---|---:|---|
+| `diag/qk_q_absmax_local` | **61** (flat across 8 steps) | 36 orders below |
+| `diag/qk_k_absmax_local` | 2.9 - 3.1 | 38 orders below |
+| `diag/grad_absmax_local` | 0.001 - 0.02 | 40 orders below |
+| `diag/layer_gradnorm_max` | 0.03 - 0.69 | -- |
+
+The only prior amax run (`12472477`) was at 4N/dp=12 in the CLEAN regime and
+recorded a peak of 62.25. **At dp=192 the same quantity reads 61.** The
+activations in the failing configuration are indistinguishable from those in
+the healthy one. Nothing is within 36 orders of magnitude of a numerical
+limit.
+
+**The monitored grad_norm is the PRE-CLIP value.** `diag/clip_fired = 1` on
+every step and `diag/grad_norm_postclip = 1` always, while the logged
+`grad_norm` swings 6.19 / 97.18 / 11.36 / 98.77 / 14.00 / 58.63 / 65.69 /
+11.32. Clipping at `max_norm=1.0` is the framework DEFAULT, not something this
+config sets -- so this is not an anomaly. But it does mean the number the
+whole investigation reasoned from is a quantity the optimizer never applies,
+and "flat ~6.0 then a step to inf with no runup" is a statement about the
+pre-clip aggregate. A runup would not necessarily be visible in it.
+
+**Gradient mass is extremely concentrated.** `diag/layer_gradnorm_skew` runs
+39-320 while `diag/layer_gradnorm_mean` sits at 0.001-0.002 and
+`top1_gradnorm` at ~0.005: a few layers carry nearly everything.
+**No baseline exists for this** -- no run in the project's history has
+recorded `layer_gradnorm_skew` before, so whether 39-320 is pathological or
+normal for this architecture is unknown. The deeper arms of this same job are
+the comparison.
+
+**Still open:** the depth question itself. L48 had not failed as of step 8;
+L72 and L84 have not run.
+
+**The gap this closes, and the one it does not: BEFORE THIS RUN, NOT ONE
+ACTIVATION MAGNITUDE HAD EVER BEEN MEASURED IN THE FAILING REGIME.** There is no amax artifact anywhere in the repo. Every
 mechanism claim on every side is inference from run outcomes. The QK probe
 (`diagnostics/attention.py`) IS wired and called (`agpt/__init__.py:141`), but
 `observe()` returns immediately under `torch.compiler.is_compiling()` -- it
