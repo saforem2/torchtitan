@@ -37,6 +37,38 @@ Running log of what's happening, session by session. Most recent first.
   moved the optimum 12%, so the AdamW-path majority anchors the curve. Read
   5.68e-04 as a property of the hybrid, not of Muon.
   [lr-finder/agpt/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md).
+- **Muon's shape cutoff is now a parameter, and a real-Muon arm exists.** The
+  gate was `max(p.shape) <= 10000`, hardcoded at three sites, with the code's
+  own comment reading "need to change this!!!". Its intent is to keep
+  embeddings and the head off the Muon path; at 30B it also excludes
+  `w1/w2/w3` at 16384. Measured on a meta-device build of each config:
+
+  | config | `muon_max_dim` | params on Muon |
+  |---|---:|---|
+  | `agpt_30b_olmo2tok_muon` | 10000 | 21.5% (5.64B of 26.20B) |
+  | `agpt_30b_olmo2tok_muon_ffn` | 20000 | 95.3% (24.96B of 26.20B) |
+
+  `muon_max_dim` defaults to 10000, so every existing arm's partition is
+  unchanged. `muon_ffn` is wired into both `lrfind_opt.pbs` and `optcmp.pbs`,
+  which closes the "needs its own case entry" gap the finder doc flagged.
+  Its LR is deliberately a placeholder: 5.68e-04 was measured on the 21.5%
+  partition, and the norescale result above says that number tracks the
+  population `muon_ffn` removes -- job `12474361` sweeps the new partition
+  under the identical protocol. One caveat unique to this arm: with the FFN
+  included, `0.2*sqrt(max(A,B))` is 15.677x on attention (6144) and 25.6x on
+  the FFN (16384), so "the effective LR" is not a single number here.
+- **The muP width-dependent blow-up is partly explained, and recorded as
+  partly.** Stage 4 found the optimum width-invariant while the divergence
+  threshold was not (loss 7.16 / 12.71 / 41.53 at eta=6.4e-3). muP scales only
+  the hidden matrices by 1/m; the unscaled groups (embedding, readout, norms)
+  grow in ABSOLUTE size with width -- 308M / 617M / 1,234M -- while still
+  running at full eta, so the widest model takes an identical oversized step
+  on 4x as many unprotected parameters. That accounts for the direction and
+  for why it does not threaten the transfer result (near the optimum the
+  hidden group is 95% of the model). It does NOT account for the magnitude:
+  excess loss grows 5.58x and 27.91x where the unscaled count grows 2x and 4x,
+  roughly the square. Three points cannot fit an exponent, so section 5.8 says
+  so rather than proposing one.
 - **SophiaG at half LR (1.78e-5) cleared all four prior onset steps** --
   1,052 in-window steps, **zero** excursions, max grad_norm 0.94, loss 2.879 at
   step 1579. First arm to get past 1048.
