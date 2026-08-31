@@ -152,8 +152,14 @@ if tasks:
 # for the classic MC tasks, so an off-convention shot count yields a plausible
 # at-chance number, a complete results.json and exit 0.
 _FEWSHOT_CONVENTION = {"mmlu": 5, "arc_challenge": 25, "mmlu_pro": 5}
-_misshot = sorted({t for sh, ts in groups for t in ts
-                   if sh != _FEWSHOT_CONVENTION.get(t.strip(), sh)})
+# Only mis-shot if the task NEVER runs at its convention; running it at the
+# right count plus an extra one is fine (both are labelled in the output).
+_seen = {}
+for _sh, _ts in groups:
+    for _t in _ts:
+        _seen.setdefault(_t.strip(), set()).add(_sh)
+_misshot = sorted(t for t, shotset in _seen.items()
+                  if t in _FEWSHOT_CONVENTION and _FEWSHOT_CONVENTION[t] not in shotset)
 if _misshot and os.environ.get("ALLOW_OFF_CONVENTION_SHOTS", "").strip() == "1":
     print("  WARNING: off-convention shots for " + ", ".join(_misshot), flush=True)
     _misshot = []
