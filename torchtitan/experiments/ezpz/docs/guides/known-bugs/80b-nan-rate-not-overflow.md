@@ -122,6 +122,35 @@ or it could reflect ordinary run-to-run variance in a stochastic process --
 nothing here bounds that. The monotone ordering across three points is
 suggestive, not a measurement of a rate.
 
+### REPLICATE RESULT: the event count is NOISY, and 0/1/8 was over-read
+
+G1 finished. **2 events (steps 53, 59), 60 steps, zero loss NaNs** -- against
+L84's **8** in the identical configuration, differing only in data order.
+
+| run | config | events |
+|---|---|---:|
+| bisect L84 | 84L, dp=192, GAS=1 | 8 |
+| GAS G1 | 84L, dp=192, GAS=1 | **2** |
+
+**A 4x spread from run-to-run variance alone.** So the bisect's 0 / 1 / 8
+across 48 / 72 / 84 layers cannot carry a monotone depth trend: if one
+configuration spans 2-8, then L72's 1 and L84's 8 are not clearly
+distinguishable from each other.
+
+**What survives:** L48 produced ZERO events in 60 steps where both 84L runs
+produced some (8 and 2). That is suggestive of a depth effect at the extremes
+and is still a single run per depth.
+
+**What does not:** any claim about the SHAPE of the depth relationship, the
+"rate scales with depth" phrasing, or reading L84's early step-2 event as a
+depth signature -- G1 had no early event at all, so that one was variance.
+
+I recorded this limit before the data arrived rather than after, which is the
+only reason this is a sharpening and not a retraction of something published
+as settled. The lesson is the same one that produced the two withdrawn claims
+above: a suggestive pattern over unreplicated points is a hypothesis, and I
+stated it as a result.
+
 **A replicate arrives for free.** Job `12474423`'s G1 arm is agpt_80b at
 GAS=1, dp=192, 60 steps -- the same configuration as the bisect's L84 arm,
 differing only in data order. If it produces ~8 events, the depth trend is
