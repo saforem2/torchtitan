@@ -39,6 +39,7 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E4
 
 apply_style()
 
+from torchtitan.experiments.ezpz.utils.trajectories import by_key  # noqa: E402
 from torchtitan.experiments.ezpz.utils.plot_production_wandb import (  # noqa: E402
     _savefig_both,
     concat_runs,
@@ -47,37 +48,17 @@ from torchtitan.experiments.ezpz.utils.plot_production_wandb import (  # noqa: E
 
 import wandb  # noqa: E402
 
-# W&B run-ids for the Polaris 20B chain, oldest first (resume order).
-# leg1 7237948 -> leg2 7237949 -> leg3 7243413 -> leg4 7247525 -> leg5 7252666
-# -> leg6 7260480 (post-NVLink-fault restart) -> leg7 7260483.
-# Append the next leg's run-id here as each leg starts logging.
-RUN_IDS = [
-    "jgjd0qbf",  # leg1  steps 1-398
-    "h8uzg2om",  # leg2  steps 301-704
-    "u81yhgtb",  # leg3  steps 701-1099
-    "j56diiz9",  # leg4  steps 1001-1399
-    "nm41nsbj",  # leg5  steps 1301-1448
-    "nvmf9hnj",  # leg6  steps 1401-1804 (restart after NVLink fault)
-    "j0jnww7s",  # leg7  steps 1701-2096
-    "8snyuaxk",  # leg8  steps 2001-2405
-    "rnf9tfhw",  # leg9  steps 2401-2500 (then stuck-resume -> chain went dry)
-]
+# Run-ids and .o-log fallbacks come from the trajectory registry, NOT from a
+# copy kept here. This script used to own its own RUN_IDS list; it fell nine
+# legs behind the chain on disk (stopped at step 2499 while the checkpoint was
+# step-5600) and nothing noticed, because a private list is cross-checked by
+# nothing. trajectories.py is the single source of truth -- append new legs
+# there.
+_TRAJ = by_key("20b_polaris_128")
+RUN_IDS = _TRAJ["wandb_run_ids"]
+OLOG_FALLBACKS = _TRAJ["olog_fallbacks"] or {}
 
-# Some legs' W&B history() carries all rows but scan_history(keys=...) --
-# what plot_production_wandb.fetch_run uses -- returns 0 rows (a wandb
-# server-side quirk seen on the leg6/leg7 runs). concat_runs falls back to
-# parsing the PBS .o log when a run's history is empty; the Polaris per-step
-# lines match plot_production_wandb._OLOG_STEP_RE. Point those legs at their
-# .o logs on the Polaris eagle filesystem (this script runs on Polaris).
-_REPO = "/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan"
-OLOG_FALLBACKS = {
-    "nvmf9hnj": f"{_REPO}/agpt-20b-autoretry.o7260480",
-    "j0jnww7s": f"{_REPO}/agpt-20b-autoretry.o7260483",
-    "8snyuaxk": f"{_REPO}/agpt-20b-autoretry.o7262999",
-    "rnf9tfhw": f"{_REPO}/agpt-20b-autoretry.o7263000",
-}
-
-NUM_NODES = 128
+NUM_NODES = _TRAJ["num_nodes"]
 GPUS_PER_NODE = 4  # Polaris A100 (Aurora is 12)
 COLOR = "#D32F2F"  # 20B red, matching MODEL_COLORS in plot_production_wandb
 
