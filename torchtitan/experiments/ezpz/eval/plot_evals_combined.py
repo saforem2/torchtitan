@@ -495,8 +495,13 @@ def main() -> None:
 
     if n_series == 0:
         plt.close()
-        raise SystemExit(
-            "REFUSING to write an empty chart: not one trajectory yielded a\n"
+        # SKIP with rc=0, not rc=1. The guard itself stays -- nothing is
+        # written -- but "the cluster-only data is not here" is the expected
+        # case off-cluster, and reporting it as a FAILURE every run is what
+        # trains people to ignore refresh_all's failure count. A non-zero exit
+        # is reserved for something actually wrong.
+        print(
+            "SKIP: not one trajectory yielded a\n"
             f"single point. Looked under: {EVALS_DIR}\n"
             "\n"
             "Eval results live on Aurora, not in the repo. Regenerate there:\n"
@@ -509,6 +514,7 @@ def main() -> None:
             "real chart at a glance -- that is how an empty figure reached the\n"
             "branch on 2026-08-16. Do not 'fix' this by removing the check."
         )
+        raise SystemExit(0)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(OUT_PATH, dpi=150, bbox_inches="tight", transparent=True)

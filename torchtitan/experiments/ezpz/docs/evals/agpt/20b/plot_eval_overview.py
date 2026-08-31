@@ -389,12 +389,17 @@ def main() -> None:
     out_path = FIG_DIR / "eval_overview.svg"
     loaded_points = sum(len(t) for t in v2_by_nodes.values()) + len(mds)
     if loaded_points == 0 and out_path.exists():
-        raise SystemExit(
-            f"refusing to overwrite {out_path}: every disk-backed series\n"
-            f"  loaded 0 steps. Eval results are gitignored (outputs/evals)\n"
-            f"  and live on the cluster -- run this where the data is, or\n"
-            f"  leave the committed figure alone."
+        # SKIP, not fail -- see the 2b twin. rc=0 keeps the guard (the
+        # committed figure is untouched) without reporting a FAILURE on every
+        # off-cluster run, which is the expected case since the source data is
+        # gitignored and cluster-only.
+        print(
+            f"SKIP {out_path.name}: every disk-backed series loaded 0 steps,\n"
+            f"  so the committed figure is left alone. Eval results are\n"
+            f"  gitignored (outputs/evals) and live on the cluster -- run this\n"
+            f"  where the data is."
         )
+        raise SystemExit(0)
 
     plot_per_task(V1_RESULTS, v2_by_nodes, v2_gbs, mds, out_path)
     print_table(V1_RESULTS, v2_by_nodes, v2_gbs)

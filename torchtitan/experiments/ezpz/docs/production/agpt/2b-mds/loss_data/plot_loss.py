@@ -288,6 +288,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # train_metrics.csv is gitignored -- MDS data is pulled from its own W&B
+    # project and has never been tracked. Off-cluster its absence is expected,
+    # so skip with rc=0 and say why, rather than dying in open() with a
+    # FileNotFoundError traceback that reads like a broken script.
+    csv_path = DATA_DIR / "train_metrics.csv"
+    if not csv_path.exists():
+        print(
+            f"SKIP {csv_path.name}: not present. MDS metrics are gitignored\n"
+            f"  (pulled separately from the MDS W&B project), so there is\n"
+            f"  nothing to plot here. Run this where the data is."
+        )
+        raise SystemExit(0)
+
     train_iters, train_cols = load_train_metrics(
         DATA_DIR / "train_metrics.csv", args.start_iter,
     )
