@@ -2,6 +2,234 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-30 (sunspot) -- muP passes the coordinate check; Muon at 30B wants 18.6x AdamW's LR
+
+- **muP for AdamW went from a design audit to a passing coordinate check in a
+  day.** Six registered flavors plus an `mup_tiny` CPU ladder, and a
+  subprocess-per-width harness that first reproduced the standard-parametrization
+  divergence signature before bridging to muP. Slopes
+  (`d log2(l1) / d log2(width)`, 4 widths x 8 steps, tolerance 0.05):
+  `layers.5.attention` 1.42 -> -0.010, `layers.4.attention` 1.32 -> 0.020,
+  `tok_embeddings` control 0.001 -> 0.001. Max `|slope|` 0.020.
+- **The readout was the whole fight, and the first fix made it worse.** The port
+  paired Table 3's `d^-1` init with Table 8's O(1) LR, leaving `lm_head` at
+  -0.130 while every hidden module sat near zero. Scaling the readout LR to
+  `eta/m` drove it to -0.483. A negative slope means over-scaled DOWN, so the
+  `d^-1` init was itself the problem: keeping agpt's existing `fan_in^-1/2` with
+  an O(1) readout LR gives 0.001 and passes. 19/19 muP tests, all 56
+  pre-existing agpt flavors still build.
+- Stages 1-3 ran on a login node, on CPU, with no allocation.
+- **Two muP bugs that made the flavors unreachable.** They had no `--config`
+  entry point, so nothing could run them, and the sweep moved only one param
+  group until `MUP_ETA` was threaded through.
+- **Muon at 30B wants 5.68e-04** (job `12474326`, `rc=0`, 90 rows) -- first time
+  Muon has run at this scale. Blow-up at 5.68e-03. That is 18.6x AdamW's
+  3.05e-05 and 10.1x Mano's 5.61e-05, so the usable bands barely overlap.
+- That number is two numbers. The finder sweeps the BASE; Muon rescales by
+  `0.2*sqrt(max(A,B))` -- a uniform 15.677x on the 21.5% of params it owns. So
+  the Muon path runs at 8.90e-03 while the AdamW-path 78.5% runs at 5.68e-04. A
+  no-rescale arm (`adjuster_lr_ref=False`, job `12474327`) was launched to
+  separate them, with the prediction written into the config docstring before
+  the result.
+- **The fresh SophiaG replicate leads on loss.** 5,080 steps from random init
+  ending at 2.43156, about 0.08 nats ahead of Mano and 0.17 ahead of AdamW at
+  every matched step from 3000 on -- after diverging twice and peaking at
+  grad_norm 16,532.
+- Correction: "the fresh SophiaG arm escaped" was a fair observation and a wrong
+  conclusion. It held the good state ~2,200 steps, reached loss 2.4984 (below
+  AdamW's final 2.51357), then diverged a SECOND time at ~step 4106 -- after six
+  consecutive 100-step windows at exactly zero excursions, max never above 0.24.
+  Quiet is not recovery.
+
+## 2026-08-30 (aurora) -- moe coverage closed at TP=4 and compiled; libglog verified on hardware
+
+- **All five moe corners pass** (job `8792615`, 1N x 4 ranks, 5 steps):
+
+  | arm | step 1 -> 5 | max delta vs eager |
+  |---|---|---|
+  | TP=1 control | 12.93609 -> 11.32376 | -- |
+  | TP=2 eager | 12.94930 -> 11.49335 | -- |
+  | TP=2 compiled | 12.94907 -> 11.49342 | 0.00033 |
+  | TP=4 eager | 12.86241 -> 11.75634 | -- |
+  | TP=4 compiled | 12.86258 -> 11.75609 | 0.00041 |
+
+  Compiled tracks eager to ~3-4e-4, so compile is doing the same math. Losses
+  differ ACROSS TP degrees (0.196 at TP=2, 0.433 at TP=4) -- different sharding,
+  different reduction order -- and memory per rank falls 2.80 / 1.94 / 1.38 GiB.
+- The first attempt died in all five arms on `ImportError: cannot import name
+  'SpmdType'`. Core `parallel_dims.py` imports it; the venv's pinned
+  `spmd_types` 0.2.1 does not export it. 0.2.5 does. Two silent install failures
+  preceded the fix -- no `uv` on Aurora, and `pip` needs the ALCF proxy
+  exported. The failing run still printed a pip upgrade notice and looked fine.
+- **The libglog trap is now verified on hardware, not from notes** (job
+  `8792135`). Six of seven claims confirmed, including the exact frames
+  (`distributed_c10d.py:151` -> `torchcomms/__init__.py:45` -> `:42`) and 0
+  matches for the fw lib dir in `LD_LIBRARY_PATH` after `module load`.
+- Two corrections there. The page said "the soname went backwards" -- measured,
+  BOTH went backwards: `libglog.so.2 -> .so.0` and `0.7.1 -> 0.4.0`. And a probe
+  using `env -u LD_LIBRARY_PATH` reported `libmkl_intel_lp64.so.3` as the first
+  failure, which looked like several missing libraries; that is an artifact of
+  the probe discarding paths the module legitimately sets. With the module
+  environment untouched the first and only failure is `libglog.so.0`. The
+  one-line workaround is complete.
+- **The production docs said things that were not true.** `agpt/20b/n256` marked
+  job `8681340` (2026-07-23) as RUNNING; `agpt/2b` marked the 512N chain LIVE
+  when it completed 2026-08-13; `20b/n512` contradicted itself, heading step
+  6,100 while its own Latest-checkpoint line said 8,700 and told the reader to
+  trust that line. Disk says 10,600. 33 files reconciled.
+- I called `docs/production/metrics/*.csv` authoritative and was wrong --
+  `manifest.json` says `exported_at 2026-08-17`, so it predates the 08-20 and
+  08-26 legs. Heads audited on disk instead: 20b-256 `step-12000` (137 ckpt
+  dirs, mtime Aug 26 09:27), 20b-512 `step-10600` (126).
+- Reverted 14 files whose only change was a Last-updated bump with no content
+  edit. Marking an unchanged page as freshly reviewed is the habit that made
+  these docs untrustworthy in the first place.
+- **`refresh_all.sh` auto-committed a degraded chart.** It reported 7 chart
+  failures and committed anyway; `cpt_loss.svg` lost the `#838383` series and
+  gained default-theme chrome. Root cause is upstream in `ambivalent`:
+  matplotlib 3.11 removed `style.core` from the `style` namespace, the style
+  import dies, the plotter falls back to defaults and exits 0. Reverted, and
+  fixed upstream in `saforem2/ambivalent#6`; `#7` restores nine stylefiles that
+  ship on PyPI but exist nowhere in that repo's git history.
+
+## 2026-08-30 (polaris) -- zombie-GPU drain ticket filed; the 20B is stalled, not advancing
+
+- **The drain ticket went to ALCF** covering three nodes with a stuck GPU left
+  by another user's job. PBS still advertises `ngpus=4` on them and reassigns
+  them, so rotation cannot win -- correct attribution was necessary and not
+  sufficient.
+- The Polaris 20B page now records the chain as stalled rather than advancing.
+- Correction: the reconcile commit claimed figures could not be regenerated
+  because the plotters need cluster data. They pull from the W&B API over the
+  network; the only blocker was a missing API key.
+
+## 2026-08-29 (aurora) -- production has not trained since 08-26, and the queue is why
+
+- **`8784460` has been queued since Wed Aug 26 13:22 UTC** -- 2,098 nodes,
+  `large`, `score_boost = 0`. It fits: at 18:23 there were 2,206 free nodes
+  against the 2,098 ask, and it did not start. Five minutes later free was 166.
+- No job of 2,000+ nodes is running at all; the largest is 516, then
+  512/512/260/256. Small jobs consume capacity continuously, so a 2,098-node
+  request never accumulates a contiguous block whatever its eligible time.
+- On 08-29 job `8791192` (2,304 nodes, another project, 22 minutes eligible,
+  same zero boost) started ahead of it.
+- Ruled out before filing: reservations total 134 nodes, `max_queued` is 10
+  against our 2, 2,098 sits inside the 2000-10624 range, `Hold_Types = n`, and
+  the `beforeany` is our own chain successor. AuroraGPT has +1,269,842.6
+  node-hours -- the negative balance is `datascience`, a different project.
+- The first draft of the ticket led with the scheduler comment moving to `Node
+  is in an ineligible state: down`. That message was transient and reverted the
+  next day, so the draft was replaced rather than amended.
+
+## 2026-08-29 (sunspot) -- the optimizer comparison finished: Mano 2.43889 vs AdamW 2.51357
+
+- **Both healthy arms ran to the `training.steps=6000` ceiling** at 23.59B
+  tokens each, `rc=0`, zero NaN/inf, zero skipped gradients. Mano led from ~1.0B
+  onward and never gave the lead back.
+- One seed per arm and no decay phase. The documented prior is that Muon-family
+  wins short runs and AdamW takes it back in decay, so this is consistent with
+  the prior rather than a refutation of it.
+
+## 2026-08-28 (aurora) -- all five RC corners pass, including compiled agpt TP=2
+
+- Job `8789506`, 2N x 4 ranks, 5 steps each: `agpt` tp=1 10.78117 -> 10.32300,
+  tp=2 eager 10.88838 -> 10.43820, **tp=2 compiled 10.88835 -> 10.43784**,
+  `moe` tp=1 12.93609 -> 11.32376, tp=2 12.94930 -> 11.49335.
+- **Compiled `agpt` at TP=2 works on the RC.** On the production `.venv` that
+  corner dies in `tensors_saved_with_vc_check` with a `DeviceMesh` in
+  saved-for-backward. Compiled and eager agree to 3.6e-4, so it is a real pass
+  and not a different code path. Confirm at 80B before retiring `compile=OFF`
+  generally -- that is where the assertion was characterised.
+- **The moe fix is not version-dependent.** Both moe arms reproduce job
+  `8787243`'s losses to the five decimals stdout prints, across a different
+  torch build and oneCCL. That is reported precision, not a bitwise check.
+- `-P torch -P pytorch-triton-xpu` does not protect the XPU build. Job
+  `8784535`: the resolver pulled a generic PyPI `torch-2.13.0` straight over it,
+  all 14 installs printed `ok`, and only an explicit `torch.__version__` assert
+  caught it.
+
+## 2026-08-28 (sunspot) -- SophiaG is 4/4, and a clean run buys no warning
+
+- An independent from-scratch arm with `--debug.seed=1234` diverged too. Onsets
+  across the four: 1048, 1176, 1071, ~1550.
+- Escalation over four steps: 0.20 -> 4.95 -> 36.14 -> 98.98 -> 731.80, under a
+  nearly flat loss (2.952 -> 3.641). Read `grad_norm`, never loss -- the loss
+  dips look like recovery.
+- The guard's first live catch: replicate 3 stopped at `grad_norm` 53.49, 133x
+  the trailing median, `rc=0` after 55 minutes instead of ~8h.
+- Correction: the relapse section concluded the arm "both diverged and stayed
+  diverged". It did not.
+
+## 2026-08-27 (aurora) -- moe trains at TP>1: the SDPA wrapper returned 4D from a 3D contract
+
+- **Two lines.** `moe/__init__.py` unflattened `[T,N,H] -> [B,L,N,H]` going in
+  and never re-flattened coming out, so MLA reshaped against a batch leading dim
+  instead of a token one and `wo` got `Shard(dim=0)` where row-parallel wants
+  `Partial(sum)`. `agpt` had the re-flatten all along, with a comment warning
+  about exactly this. The port copied the input half and dropped the output half.
+- **A wrong fix shipped first and only the TP=1 arm caught it.** Copying `agpt`'s
+  `view(out.shape[0], -1)` verbatim reads moe's BATCH axis:
+  `mat1 and mat2 shapes cannot be multiplied (1x1048576 and 2048x256)`. That
+  broke TP=1, which had always worked.
+- Twelve hypotheses died first, every one about configuration. Job `8789506`
+  shows both models' SDPA wrapped on the same mesh `('tp',)(2,)` declaring
+  identical axes. The difference was never config; it was four characters of
+  arithmetic.
+- Correction: "XPU graph capture cannot include oneCCL collectives" is wrong.
+  `CCL_OP_SYNC=1` was the blocker, and the Intel ask on that page must not be
+  filed.
+
+## 2026-08-27 (polaris) -- failover names the real bad node now: two bugs, FQDN and rc=124
+
+- `get_machine()` returned a login FQDN against bare registry keys, so the
+  patterns that existed were unreachable -- `ModuleNotFoundError` on
+  `patterns.polaris-login-04`, and the scraper blamed an innocent rank-0 node.
+- The rc=124 path filed a recoverable bad-node timeout as terminal.
+- Cost: job `7550301` ~1h of 130 nodes with zero training steps; `7560196` 3h03m
+  at `Exit_status=124`.
+- Three green gates in this window were testing the policy and not the binding.
+  The grad-norm guard is the canonical case: validated by replaying finished
+  logs, it read a name local to `train_step`, `NameError`'d on step 1, and PBS
+  still reported `Exit_status=0` with the done-marker written.
+
+## 2026-08-26 (aurora) -- torchtitan and ezpz train on frameworks/2026.1.0
+
+- Job `8784615`, 2N x 12: 10/10 steps, 10.86492 -> 9.05897, monotonic, finite
+  grad norms, `rc=0`. First AuroraGPT training of any kind on the RC, after
+  about eight jobs of environment plumbing.
+- **Production ran once and has not run since.** Umbrella `8773440` started Wed
+  04:14 UTC and used 5h13m of a 12h slot. Three of five seats trained: 20b-n256
+  201 steps (2.31488 -> 2.24577), 2b-n512 504 steps (2.74535 -> 2.73836),
+  2b-n256 782 steps (2.56449 -> 2.54807). Both 512N seats never started, and the
+  reason is not established.
+- `8775285` (30B LR-finder umbrella) ran 1h32m and exited 0 with all four seats
+  at `rc=143` and no suggested LR in any log -- a clean exit that produced
+  nothing.
+- Provenance: the 08-26 handoff recorded only the bare step counts 201/504/782.
+  The loss deltas above were read off the seat logs on 08-30 and are filed here
+  because that is when the work happened, not when it was measured.
+- `8773440` lost 7 of its 12 hours to a regex: ezpz 0.21's progress detector
+  matched `\bstep=\d+` while torchtitan prints `step: 21800`. Measured on that
+  job's own logs, seats that had trained 201 / 504 / 782 steps all scored
+  no-progress under 0.21 and all three score correctly under 0.27.3.
+- And about 5 more hours to seats that exited and left their slice idle. Every
+  seat was gone by 04:27; PBS did not kill the shell until 09:29.
+
+## 2026-08-26 (polaris) -- the 20B page was 3,200 steps stale
+
+- Every claim on it said step 2,400; the chain is at 5,600. Census: 56
+  checkpoint dirs, step-100..step-5600 at interval 100, all carrying
+  `.metadata`, 234 GB each = 13 TB. The page had claimed ~700 GB.
+- Correction, same day: "58 ckpt dirs" was the directory's hard-link count, not
+  a file count.
+
+## 2026-08-26 (sunspot) -- the 30B optimizer comparison hits its 10B budget
+
+- Mano 2.7701 vs AdamW 2.9134 at step 2,543 / 9.99B tokens, gap -0.1433.
+- Correction: four claims were walked back in one day, all the same failure mode
+  -- fitting a trend across too few points and calling it a direction. Bin into
+  windows and compare a sequence.
+
 ## 2026-08-25 (polaris) -- BlendCorpus never got the #4121 fold
 
 - **The post-sync crash was a dataloader layout mismatch, and both earlier
