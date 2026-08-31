@@ -1,0 +1,196 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=tegu:home
+#PBS -j oe
+set -o pipefail
+
+# MMLU FORMAT A/B, SUBSAMPLED. Letter-binding (MCF) vs cloze (CF) on one 30B
+# checkpoint, 5-shot both, --limit N questions per subject.
+#
+# WHY A SECOND SCRIPT. The full-size version (mmlu_format.pbs, job 12474365)
+# cannot finish. lm-eval's own ETA at 1.71 s/it over 56,168 requests is
+# ~26 HOURS PER ARM against that script's 12h timeout, so each arm is killed
+# around 43% and writes NOTHING -- lm-eval serializes results only at
+# completion. The job would exit having produced two empty directories and a
+# DONE marker.
+#
+# THE BUDGET ERROR, recorded so it is not repeated: 6.8h was MEASURED for
+# 0-shot mmlu on this model. I scaled that to 12h for 5-shot. But 5-shot
+# prompts carry five exemplars each, so they are roughly 6x longer, and the
+# real cost is ~26h. Few-shot cost does not scale with the request COUNT --
+# it scales with request count times prompt length.
+#
+# WHY SUBSAMPLING IS SOUND HERE. The question is whether cloze scoring clears
+# chance where letter scoring does not. The effects reported in the
+# literature are large: SmolLM2 (arXiv:2502.02737 Sec 4.3) and OLMES
+# (arXiv:2406.08446) both describe CF carrying signal while MCF is at chance,
+# a double-digit gap. At --limit 40 per subject (2,280 questions) the binomial
+# SE is ~0.0091 against 0.0036 at full size -- still an order of magnitude
+# below the gap worth detecting. What subsampling would NOT support is a
+# precise headline number, and this job is not for that.
+#
+# --limit in lm-eval is PER TASK, and mmlu expands to 57 subject tasks, so
+# LIMIT=40 keeps all 57 subjects rather than truncating to the first few.
+# Stratification is what makes the macro average comparable to the full run.
+#
+# SEPARATE OUTPUT DIRECTORY. 12474365 may still be running and writing to
+# results-5shot/. Concurrent jobs writing one path is a documented failure
+# here, so this writes results-5shot-limit${LIMIT}/ and cannot collide.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+
+STEP="${STEP:-2000}"
+LIMIT="${LIMIT:-40}"
+BASE="$PWD/outputs/evals/agpt-30b-olmo2tok/step-${STEP}"
+HF="$BASE/hf"
+ASSETS="$PWD/assets/hf/OLMo-2-1124-7B"
+RES="$BASE/results-5shot-limit${LIMIT}"
+LOGD="$RES/logs"; mkdir -p "$RES" "$LOGD"
+
+echo "step:   $STEP"
+echo "limit:  $LIMIT per subject (57 subjects -> ~$((LIMIT*57)) questions/arm)"
+echo "hf:     $HF"
+echo "out:    $RES"
+
+if [ ! -f "$HF/model.safetensors.index.json" ] || [ ! -f "$HF/config.json" ]; then
+    echo "ABORT: no usable HF export at $HF"
+    echo "MMLU_FMT_FAST_${STEP}_DONE"; exit 1
+fi
+
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+# BUDGETS, and the two mistakes they correct.
+#
+# 1. REQUESTS ARE NOT QUESTIONS. lm-eval issues one loglikelihood request PER
+#    ANSWER CHOICE, and MMLU is 4-way. So --limit N costs N*4*57 requests, not
+#    N*57. eval30b.pbs already documents this ("arc_challenge is 4687
+#    requests, not the 1172 documents I assumed -- 4x each") and I got it
+#    wrong anyway: an earlier revision of this script budgeted LIMIT*57*2*3
+#    and would have been killed at ~48%.
+#
+# 2. THE TWO ARMS DO NOT COST THE SAME. mmlu scores a single letter token per
+#    choice; mmlu_continuation scores the full answer TEXT, many tokens per
+#    choice. MEASURED for MCF: 3.13 s/it (job 12474379). CF is unmeasured and
+#    assumed ~2.5x that; the budget below allows 3x. If the CF arm times out,
+#    that assumption is the first thing to check.
+#
+# At LIMIT=10: 2,280 requests/arm -> MCF ~2.0h, CF ~5.0h, ~7h total inside a
+# 12h walltime. Per-arm budgets are asymmetric for the same reason.
+REQ=$(( LIMIT * 4 * 57 ))
+BUDGET_MCF=$(( REQ * 4 ))
+BUDGET_CF=$(( REQ * 10 ))
+echo "requests/arm: $REQ   budgets: MCF ${BUDGET_MCF}s  CF ${BUDGET_CF}s"
+
+for ARM in "mmlu:MCF-letters" "mmlu_continuation:CF-cloze"; do
+    TASK="${ARM%%:*}"; LABEL="${ARM##*:}"
+    if compgen -G "$RES/$TASK/**/results*.json" > /dev/null 2>&1; then
+        echo "   [$TASK] already has results, skipping"
+        continue
+    fi
+    echo ""
+    if [ "$TASK" = "mmlu" ]; then B="$BUDGET_MCF"; else B="$BUDGET_CF"; fi
+    echo "== $TASK ($LABEL) 5-shot, limit $LIMIT, budget ${B}s =="
+    mkdir -p "$RES/$TASK"
+    timeout "$B" stdbuf -oL -eL python3 -m lm_eval \
+      --model hf \
+      --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
+      --tasks "$TASK" \
+      --num_fewshot 5 \
+      --limit "$LIMIT" \
+      --batch_size 4 \
+      --device xpu \
+      --output_path "$RES/$TASK" \
+      > "$LOGD/$TASK.log" 2>&1
+    rc=$?
+    echo "   [$TASK] rc=$rc $( [ $rc -eq 124 ] && echo '(TIMED OUT -- no results written)' )"
+    tail -3 "$LOGD/$TASK.log" 2>/dev/null | sed 's/^/       /'
+done
+
+echo ""
+echo "########## MMLU format A/B: step-$STEP, 5-shot, limit $LIMIT ##########"
+RES="$RES" LIMIT="$LIMIT" python3 - <<'PY'
+import glob, json, math, os
+
+res = os.environ["RES"]
+limit = int(os.environ["LIMIT"])
+CATS = {"humanities", "stem", "social_sciences", "other"}
+
+
+def leaf(d, suffix):
+    out = {}
+    for k, v in d.items():
+        if not k.startswith("mmlu_") or not isinstance(v, dict):
+            continue
+        if "acc,none" not in v:
+            continue
+        name = k[len("mmlu_"):]
+        if suffix:
+            if not name.endswith(suffix):
+                continue
+            name = name[: -len(suffix)]
+        if name in CATS:
+            continue
+        out[name] = v["acc,none"]
+    return out
+
+
+rows = {}
+for task, suffix, label in (("mmlu", "", "MCF (letter A/B/C/D)"),
+                            ("mmlu_continuation", "_continuation", "CF  (cloze text)")):
+    hits = sorted(glob.glob(f"{res}/{task}/**/results*.json", recursive=True))
+    if not hits:
+        print(f"  {label:24s} NO RESULTS")
+        continue
+    d = json.load(open(hits[-1]))
+    acc = leaf(d.get("results", d), suffix)
+    if not acc:
+        print(f"  {label:24s} no leaf subjects parsed")
+        continue
+    vals = list(acc.values())
+    macro = sum(vals) / len(vals)
+    n = len(vals) * limit
+    se = math.sqrt(0.25 * 0.75 / n)
+    ns = d.get("n-shot", {}) or {}
+    shots = sorted({v for k, v in ns.items() if k.startswith("mmlu")}) or "unrecorded"
+    rows[task] = macro
+    print(f"  {label:24s} macro={macro:.4f}  {len(vals)} subj x {limit} = {n} q  "
+          f"SE~{se:.4f}  above_chance={sum(v > 0.25 for v in vals)}/{len(vals)}  "
+          f"n-shot={shots}")
+
+if len(rows) == 2:
+    mcf, cf = rows["mmlu"], rows["mmlu_continuation"]
+    gap = cf - mcf
+    n = 57 * limit
+    se_gap = math.sqrt(2 * 0.25 * 0.75 / n)
+    print()
+    print(f"  CF - MCF = {gap:+.4f}   (SE of the gap ~{se_gap:.4f}, "
+          f"so |gap| > {2 * se_gap:.3f} is 2-sigma)")
+    print()
+    print("  Constant-letter baselines (full MMLU key distribution):")
+    print("    always-A 0.2295   always-B 0.2465   always-C 0.2551   always-D 0.2689")
+    print("  A letter-guessing model scores in that BAND, not at 0.25. Read any")
+    print("  MCF number against 0.2689, not against chance.")
+    print()
+    if gap > 2 * se_gap:
+        print("  READ: cloze clears where letters do not -> the knowledge is")
+        print("  present and letter-binding is the barrier. Consistent with")
+        print("  SmolLM2 (MCF only clears chance after 6T tokens) and OLMES")
+        print("  (CF has signal below ~400B where MCF is random).")
+    elif abs(gap) <= 2 * se_gap:
+        print("  READ: no significant gap at this sample size. Either both")
+        print("  formats are at chance (knowledge genuinely absent) or the")
+        print("  effect is smaller than this subsample resolves. A null here")
+        print("  is weaker evidence than a positive -- full-size before")
+        print("  publishing a null.")
+    else:
+        print("  READ: letters BEAT cloze, which contradicts the literature.")
+        print("  Suspect a plumbing difference between the two tasks before")
+        print("  believing it.")
+PY
+echo "MMLU_FMT_FAST_${STEP}_DONE"
