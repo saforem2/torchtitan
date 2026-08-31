@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -A datascience
+#PBS -l walltime=00:30:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+#PBS -N b3-probe
+set -o pipefail
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 9
+source /usr/share/lmod/lmod/init/bash 2>/dev/null
+module load oneapi/release/2025.3.1 hdf5 pti-gpu >/dev/null 2>&1
+export CCL_ROOT=/opt/aurora/26.26.0/oneapi/ccl/latest
+export LD_LIBRARY_PATH=/opt/cray/libfabric/2.3.1/lib64:/opt/aurora/26.26.0/oneapi/2025.3/opt/mpi/libfabric/lib:$CCL_ROOT/lib:/opt/aurora/26.26.0/oneapi/2025.3/lib:$LD_LIBRARY_PATH
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export ZE_AFFINITY_MASK=0
+export ZES_ENABLE_SYSMAN=1
+export TORCHINDUCTOR_MAX_AUTOTUNE=0 VLLM_ENABLE_V1_MULTIPROCESSING=1
+export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export PATH="/opt/pbs/bin:$PATH"
+HF=$REPO/outputs/evals/cot/b3-3605-hf-diag
+PY=$REPO/venvs/rl-vllm/bin/python
+echo "B3-PROBE START $(date +%T) host=$(hostname)"
+"$PY" -u "$REPO/torchtitan/experiments/ezpz/scripts/eval/oneoff/b3_probe_gen.py" "${HF}" 8
+echo "B3-PROBE EXIT rc=$? $(date +%T)"
