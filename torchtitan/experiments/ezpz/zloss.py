@@ -72,6 +72,37 @@ def _gather_vocab(logits: torch.Tensor) -> torch.Tensor:
     return logits
 
 
+# LAST OBSERVED PENALTY, for reporting. Every core call site DISCARDS the
+# metrics dict a loss returns -- `loss_sum, _ =` in components/validate.py:258,
+# `loss, _ =` in distributed/pipeline_parallel.py:319 -- so the dict returned
+# from __call__ below reaches nothing. Only ChunkedLossWrapper keeps its
+# chunk_metrics, and z-loss cannot be used with chunking.
+#
+# MEASURED on the 2N smoke (job 12474386): the penalty was demonstrably
+# applied -- the arms diverge, mean delta -0.27 nats over 20 steps -- and the
+# string "z_loss" appeared exactly ONCE in the whole log, as the
+# "z_loss_coef": 0.0001 line of the config dump. The magnitude was invisible,
+# which makes the coefficient untunable: at 80B the thing you need to know is
+# whether the term contributes 0.001 nats or 10.
+#
+# So expose it the way ezpz already exposes diagnostics -- a module-level
+# latest-value plus a drain() the caller polls -- rather than relying on a
+# return value nobody reads. Kept a plain float, not a tensor, so nothing
+# holds a reference to the autograd graph.
+_LATEST: dict[str, float] = {}
+
+
+def drain() -> dict[str, float]:
+    """Return and clear the last computed z-loss metrics.
+
+    Mirrors ``diagnostics/attention.py:drain``. Safe to call when no z-loss
+    has run: returns an empty dict.
+    """
+    global _LATEST
+    out, _LATEST = _LATEST, {}
+    return out
+
+
 def z_loss_term(logits: torch.Tensor, coef: float) -> torch.Tensor:
     """``coef * sum((log Z)^2)`` over tokens, computed in fp32.
 
@@ -136,8 +167,18 @@ class CrossEntropyWithZLoss(BaseLoss):
         z = z_loss_term(pred, self.z_loss_coef)
         if global_valid_tokens is not None:
             z = z / global_valid_tokens
+
+        # Both channels: the metrics dict for any caller that reads it (only
+        # ChunkedLossWrapper does today), and the module-level drain for the
+        # ones that do not, which is all of them. Without the second, the
+        # penalty is applied but invisible -- see the _LATEST comment.
         metrics = dict(metrics)
-        # Report the penalty separately so a run shows whether it is doing
-        # anything. A z-loss folded invisibly into the total is untunable.
         metrics["z_loss"] = z.detach()
+        try:
+            global _LATEST
+            _LATEST = {"loss/z_loss": float(z.detach().item())}
+        except Exception:
+            # Reporting must never take down a training run. An unreadable
+            # metric costs a number; an exception here costs the job.
+            pass
         return loss + z, metrics

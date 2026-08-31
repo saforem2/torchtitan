@@ -1115,6 +1115,25 @@ class FaultTolerantTrainer(Trainer):
             "lr": lr,
         }
 
+        # z-loss penalty, if the configured loss computes one. UNGATED, unlike
+        # the diagnostics block below: this is O(1), and a penalty term whose
+        # magnitude you cannot see is untunable -- the whole point of z-loss is
+        # choosing a coefficient, which needs the number every step.
+        #
+        # Polled rather than read off the loss's return value because every
+        # core call site discards the metrics dict a loss returns
+        # (components/validate.py:258, distributed/pipeline_parallel.py:319).
+        # Measured on job 12474386: the penalty was applied and completely
+        # invisible in the logs.
+        try:
+            from torchtitan.experiments.ezpz import zloss as _zloss
+
+            extra_metrics.update(_zloss.drain())
+        except Exception:
+            # Reporting must never take down a run; drain() is already
+            # exception-safe, this covers the import on stacks without it.
+            pass
+
         # Extended diagnostics. Gated on its own interval, not log_freq: these
         # are O(params) rather than O(1), so they must not run every step.
         # Collected AFTER the optimizer step, so update_ratio compares the
