@@ -46,6 +46,27 @@ set -o pipefail
 #   monotone step-to-NaN   -> accumulation, consistent with precision loss
 #     (48L latest, 84L earliest)  rather than a threshold effect.
 #
+# QK MAGNITUDES COME FREE HERE, and nobody has ever collected them in the
+# failing regime. NOT ONE activation magnitude has been measured anywhere in
+# this investigation -- every mechanism claim on every side, including the
+# "bf16 overflow" framing, is inference from run outcomes.
+#
+# The probe (diagnostics/attention.py) is wired and called at
+# agpt/__init__.py:141, but observe() returns immediately under
+# torch.compiler.is_compiling(): it calls .item(), a host sync dynamo cannot
+# express, which killed job 12473689 before step 1. Production runs are
+# compiled, so QK stats have never fired in one.
+#
+# This job already passes --compile.no-enable to dodge the May AOT-autograd
+# crash, which is exactly the condition where the probe DOES fire. So
+# --diagnostics --diagnostics-attention costs nothing extra and turns three
+# outcome observations into three measurements: diag/qk_q_absmax_local,
+# diag/qk_k_absmax_local and the logit bound estimate, per arm, in W&B.
+#
+# If the magnitudes are far below the bf16 ceiling (3.39e38) in every arm,
+# "overflow" is dead as a mechanism regardless of what the bisect says about
+# depth, and the search moves to precision loss or something non-numerical.
+#
 # READ grad_norm, NOT loss. The documented signature is grad_norm dead-flat
 # ~6.0 then a step to inf with no runup; loss looks fine until it does not.
 #
@@ -111,6 +132,7 @@ arm() {  # arm <label> <config>
       --training.num-tokens-per-microbatch-per-dp-rank=4096 \
       --parallelism.tensor-parallel-degree=4 \
       --compile.no-enable \
+      --diagnostics --diagnostics-attention \
       --checkpoint.no-enable \
       --debug.seed=42 \
       > "$log" 2>&1
