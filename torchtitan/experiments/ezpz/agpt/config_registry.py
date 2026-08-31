@@ -1511,6 +1511,79 @@ def agpt_80b_real() -> FaultTolerantTrainer.Config:
     return _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
 
 
+def _set_z_loss(
+    cfg: FaultTolerantTrainer.Config, coef: float = 1e-4
+) -> FaultTolerantTrainer.Config:
+    """Swap the loss for cross entropy plus an output z-loss penalty.
+
+    Adds ``coef * (log Z)^2``, which removes cross entropy's invariance to a
+    constant logit shift and keeps the output logits at a bounded scale.
+    PaLM's coefficient is 1e-4 (arXiv:2204.02311 Sec 5); OLMo-2 cites z-loss
+    among its stability changes.
+
+    Carries over ``global_vocab_size`` if the incoming loss config had it --
+    it is set from the model spec further up and is needed by the
+    spmd_types loss-parallel path.
+
+    Refuses to silently drop a ChunkedLossWrapper: chunked CE never
+    materializes the full logits, so there is nothing to take a logsumexp
+    over, and quietly replacing it would change memory behaviour as well as
+    the loss. Use a non-chunked flavor as the base.
+    """
+    from torchtitan.experiments.ezpz.zloss import CrossEntropyWithZLoss
+
+    # __qualname__, NOT __name__. Every nested loss config here is literally
+    # named "Config" (ChunkedLossWrapper.Config, CrossEntropyLoss.Config...),
+    # so a __name__ check matches nothing and the guard never fires. Verified
+    # the hard way: the first version silently swapped a chunked config.
+    if "ChunkedLossWrapper" in type(cfg.loss).__qualname__:
+        raise ValueError(
+            "z-loss cannot wrap ChunkedLossWrapper: chunked cross entropy "
+            "never materializes full logits, so log Z is not available. "
+            "Start from a non-chunked flavor."
+        )
+    vocab = getattr(cfg.loss, "global_vocab_size", None)
+    cfg.loss = CrossEntropyWithZLoss.Config(
+        z_loss_coef=coef, global_vocab_size=vocab
+    )
+    return cfg
+
+
+def agpt_2b_zloss() -> FaultTolerantTrainer.Config:
+    """agpt_2b with output z-loss at PaLM's 1e-4. THE SMOKE TARGET.
+
+    2B is where z-loss should be validated before anything larger: it trains
+    in minutes at 2N, and the thing to confirm is mechanical -- that the
+    penalty is reported in metrics, that loss stays finite, and that
+    throughput does not collapse. 2B has never had a logit-overflow problem,
+    so this flavor is NOT expected to improve anything. It exists to prove the
+    plumbing before the 80B arm below is worth running.
+    """
+    return _set_z_loss(agpt_2b(), coef=1e-4)
+
+
+def agpt_80b_zloss() -> FaultTolerantTrainer.Config:
+    """agpt_80b with output z-loss at PaLM's 1e-4. THE ACTUAL TARGET.
+
+    The 80B NaN is a bf16 overflow, and the two score-bounding remedies
+    already tried both bound ATTENTION scores and are both blocked on this
+    stack: softcap hard-codes compiled flex_attention (broken on XPU) and
+    QK-Norm crashes in backward at 4N/TP=4 where plain agpt_80b is 10/10
+    clean. Nothing bounds the OUTPUT logits, and z-loss needs no
+    flex_attention, no compile and no new backward kernel.
+
+    NOT A PREDICTED FIX. The fp32-residual result (clean at 4N, still NaN at
+    dp=192) narrowed the overflow to a bf16 SUBLAYER GEMM -- attention QK^T or
+    the FFN SwiGLU intermediate -- and bounding the output logits may not
+    reach either. This is the cheapest untried item on the list, not a
+    prediction. Run it against the CONFIRMED-STABLE corner (TP=4, LBS=1,
+    bf16, batch via GAS, >=4N) so a NaN means something.
+
+    Smoke agpt_2b_zloss first.
+    """
+    return _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
+
+
 def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
     """agpt_80b with the fp32 residual-stream fix (task #21/#24).
 
