@@ -115,6 +115,25 @@ dp=192 will record it.
 dp is not tested by this bisect. If dp raises the rate the same way, the two
 triggers unify.
 
+## The 0/1/8 counts are SINGLE RUNS with no error bar
+
+Each arm ran once. An event count of 8 versus 1 versus 0 could reflect depth,
+or it could reflect ordinary run-to-run variance in a stochastic process --
+nothing here bounds that. The monotone ordering across three points is
+suggestive, not a measurement of a rate.
+
+**A replicate arrives for free.** Job `12474423`'s G1 arm is agpt_80b at
+GAS=1, dp=192, 60 steps -- the same configuration as the bisect's L84 arm,
+differing only in data order. If it produces ~8 events, the depth trend is
+robust. If it produces 2 or 20, the single-run counts cannot carry the weight
+the 0/1/8 table puts on them, and the depth claim needs restating with much
+weaker language.
+
+Noted before that result lands so it cannot look like a retrofit either way.
+Related: G1's step-1 grad_norm is 7.96 against L84's 6.19 at the same step and
+seed -- data order alone moves it, which is a reminder not to read small
+between-run differences as signal.
+
 ## Design caveat
 
 Fewer layers is also a smaller model -- less memory pressure, different FSDP
