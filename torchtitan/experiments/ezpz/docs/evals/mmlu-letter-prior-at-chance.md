@@ -220,6 +220,46 @@ story: dolmino's lower entropy (more DCLM-filtered, more peS2o) yields lower
 loss on its own distribution while moving the model away from the eval
 distribution.
 
+### RESULT (2026-08-31): cloze does NOT rescue this checkpoint
+
+Job `12474382` ran both formats on 30B step-2000, 5-shot, same checkpoint and
+tokenizer, `--limit 10` per subject. The only variable was `doc_to_choice`.
+
+| format | task | macro | above chance |
+|---|---|---:|---:|
+| MCF (letters) | `mmlu` | 0.2281 | 21/57 |
+| CF (cloze) | `mmlu_continuation` | 0.2386 | 24/57 |
+
+**CF - MCF = +0.0105, against a gap SE of 0.0256.** Not significant. Cloze
+scoring does not clear chance where letter scoring does not.
+
+**What this rules out, and what it does not.** At 570 questions per arm the
+test resolves gaps above ~0.051, so it excludes the LARGE CF-vs-MCF gap the
+literature reports (SmolLM2 and OLMES both describe double-digit differences)
+and cannot exclude a small one. A null here is weaker evidence than a positive
+would have been.
+
+Two caveats that matter more than the statistics:
+
+* **Step-2000 is 3.93B tokens** -- a very early checkpoint, arguably too early
+  for either format to show knowledge. That weakens the null considerably.
+  The right target is the flagship 2B at 4.674T, which needs Aurora.
+* **The subsamples are noisy.** The same checkpoint and shot count scored
+  0.2281 at `--limit 10` and **0.2561** at `--limit 40` (2,280 questions) --
+  a 0.028 spread from sampling alone. Neither is a publishable MMLU value; the
+  limit-10 pair is internally consistent, which is what the GAP test needs.
+  The fitted letter priors also disagree between subsamples (A-weighted at
+  limit 10, D-weighted at limit 40), so R2 falls to 0.04-0.11 and **neither
+  subsample can test the letter-prior hypothesis** -- only the full-size runs
+  can.
+
+**Consequence for the program.** The format explanation was the live
+alternative to the data explanation: knowledge present but unreadable through
+letter scoring. At the available resolution it is not what is happening here.
+Combined with dolmino stage 2 having already run without moving MMLU, that
+points back at data COMPOSITION, where the FineWeb-Edu evidence already
+pointed.
+
 **Open question this does NOT settle.** OLMo-2 evaluates with OLMES, which
 recommends reporting max(CF, MCF). If their +17.4 is a cloze or max number
 while ours is letters-only, the two are not the same measurement and Dolmino
