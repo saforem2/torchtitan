@@ -205,6 +205,9 @@ Running log of what's happening, session by session. Most recent first.
 - `8775285` (30B LR-finder umbrella) ran 1h32m and exited 0 with all four seats
   at `rc=143` and no suggested LR in any log -- a clean exit that produced
   nothing.
+- Provenance: the 08-26 handoff recorded only the bare step counts 201/504/782.
+  The loss deltas above were read off the seat logs on 08-30 and are filed here
+  because that is when the work happened, not when it was measured.
 - `8773440` lost 7 of its 12 hours to a regex: ezpz 0.21's progress detector
   matched `\bstep=\d+` while torchtitan prints `step: 21800`. Measured on that
   job's own logs, seats that had trained 201 / 504 / 782 steps all scored
