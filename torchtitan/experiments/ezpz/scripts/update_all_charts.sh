@@ -36,8 +36,24 @@ export PYTHONPATH=.
 # the ALCF proxy, or the fetch fails and the charts silently stay stale
 # (refresh_all.sh treats the chart step as non-fatal). Export the proxy if
 # it isn't already set so an unattended refresh actually regenerates them.
-export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
-export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+# ...but ONLY on a host that can actually reach it. Off-cluster (a laptop) the
+# proxy is unroutable, so every W&B call hangs until wandb's service process
+# gives up and reports
+#   AuthenticationError: Failed to verify credentials with https://api.wandb.ai:
+#   Failed to execute API request: the service process is busy ...
+# which names credentials and is not about credentials -- the same call with no
+# proxy set authenticates instantly. Probe once, cheaply, and only export on a
+# hit.
+_ALCF_PROXY="http://proxy.alcf.anl.gov:3128"
+if [[ -z "${http_proxy:-}${https_proxy:-}" ]]; then
+    if curl -s -o /dev/null --max-time 3 --proxy "$_ALCF_PROXY" https://api.wandb.ai 2>/dev/null; then
+        export http_proxy="$_ALCF_PROXY"
+        export https_proxy="$_ALCF_PROXY"
+        echo "ALCF proxy reachable -- exporting it for the W&B fetches"
+    else
+        echo "ALCF proxy not reachable -- going direct (expected off-cluster)"
+    fi
+fi
 
 declare -A SCRIPTS=(
     # plot_production.py (PBS-.o-file plotter) dropped 2026-06-24: it is
@@ -79,23 +95,7 @@ echo "Per-script logs: $LOGDIR"
 
 t0=$SECONDS
 
-# Scripts that pull history from the W&B API. They must NOT run concurrently
-# with each other: wandb routes calls through a shared service process, and two
-# fetches in parallel make it miss its deadline. The failure surfaces as
-#   AuthenticationError: Failed to verify credentials with https://api.wandb.ai:
-#   Failed to execute API request: the service process is busy ...
-# which looks like a credential problem and is not -- either script alone
-# authenticates and runs fine. Everything else still runs in parallel.
-WANDB_SCRIPTS=(production_wandb production_combined)
-
-is_wandb_script () {
-    local n="$1" w
-    for w in "${WANDB_SCRIPTS[@]}"; do [ "$n" = "$w" ] && return 0; done
-    return 1
-}
-
 for name in "${!SCRIPTS[@]}"; do
-    is_wandb_script "$name" && continue
     log="$LOGDIR/$name.log"
     LOGS[$name]="$log"
     echo "  [$name] launching: $PY ${SCRIPTS[$name]}"
@@ -109,20 +109,6 @@ for name in "${!PIDS[@]}"; do
         echo "  [$name] OK ($(wc -l < "${LOGS[$name]}") lines)"
     else
         echo "  [$name] FAILED (rc=$?, see ${LOGS[$name]})"
-        fail=$((fail + 1))
-    fi
-done
-
-# W&B scripts, one at a time.
-for name in "${WANDB_SCRIPTS[@]}"; do
-    [ -n "${SCRIPTS[$name]:-}" ] || continue
-    log="$LOGDIR/$name.log"
-    LOGS[$name]="$log"
-    echo "  [$name] launching (serial, W&B): $PY ${SCRIPTS[$name]}"
-    if "$PY" "${SCRIPTS[$name]}" > "$log" 2>&1; then
-        echo "  [$name] OK ($(wc -l < "$log") lines)"
-    else
-        echo "  [$name] FAILED (rc=$?, see $log)"
         fail=$((fail + 1))
     fi
 done
