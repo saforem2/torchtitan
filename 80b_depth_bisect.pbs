@@ -105,6 +105,11 @@ set -o pipefail
 #
 # NO CHECKPOINTING. Writes nothing durable.
 
+# VENV: -rc2-grain, NOT -rc2. The post-#4088 dataloader imports grain.python,
+# which only the -grain venv has; 30b_smoke.pbs predates that and points at
+# plain -rc2. Copying its header cost job 12474399, which aborted in the
+# config gate with ModuleNotFoundError: No module named 'grain'. The gate
+# worked; the venv was wrong.
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
 
@@ -116,8 +121,8 @@ export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
 export CCL_LOG_LEVEL=ERROR
 module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
 module load frameworks/2026.1.0 >/dev/null 2>&1
-export PATH="$REPO/venvs/fw-2026.1-rc2/bin:$PATH"; unset PYTHONPATH
-source "$REPO/venvs/fw-2026.1-rc2/bin/activate" 2>/dev/null
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
 python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 
 # CONFIG GATE on a printed sentinel, not the pipeline exit status: a stderr
@@ -136,9 +141,13 @@ print('  CFG_OK bisect is clean: depth is the only variable')
 " > "$CHK" 2>&1
 grep -a "CFG_OK" "$CHK" || true
 if [ "$(grep -ac 'CFG_OK' "$CHK")" -lt 4 ]; then
-  echo "ABORT: ladder failed to resolve or is not a clean bisect:"
-  grep -aoE "(AssertionError|ImportError|AttributeError|KeyError): .*" "$CHK" \
-    | sort -u | head -3 | sed 's/^/    /'
+  echo "ABORT: ladder failed to resolve or is not a clean bisect."
+  # Print the REAL traceback tail, not a regex guess at which exception it was.
+  # Job 12474399 aborted here and printed NOTHING actionable, because the
+  # actual error was ModuleNotFoundError -- not in my hardcoded alternation.
+  # An abort message that omits the error is a wasted job.
+  echo "  --- last 15 lines of $CHK ---"
+  tail -15 "$CHK" | sed 's/^/    /'
   echo "DEPTH_BISECT_DONE"; exit 7
 fi
 
