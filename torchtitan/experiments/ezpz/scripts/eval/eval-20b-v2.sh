@@ -235,6 +235,43 @@ if shots_spec:
 else:
     groups = [(0, os.environ["TASKS"].split(","))]
 
+# ABORT rather than silently measure the wrong thing. lm-eval does NOT pin
+# few-shot for the classic MC tasks -- mmlu/arc_challenge/hellaswag all default
+# to num_fewshot=0 -- so a task whose PUBLISHED convention is few-shot will
+# evaluate at 0-shot, return a plausible at-chance number, write a complete
+# results.json and exit 0. Nothing in the output says the shot count was wrong.
+#
+# This is not hypothetical: agpt-30b-olmo2tok steps 1000/1500/2000 carry
+# n-shot=[0] for mmlu, and oneoff/reeval-ropefix-sweep.sh puts mmlu in TASKS
+# with no SHOTS_SPEC, so its 2B-512 steps land 0-shot in the same directory
+# family as the 5-shot backfill results. Mixing the two is how a comparison
+# silently becomes meaningless.
+#
+# gsm8k is deliberately absent: it pins its own num_fewshot=5 in its YAML, so
+# the fallback cannot mis-shoot it.
+_FEWSHOT_CONVENTION = {"mmlu": 5, "arc_challenge": 25, "mmlu_pro": 5}
+_misshot = sorted(
+    {t for shots, tset in groups for t in tset
+     if shots != _FEWSHOT_CONVENTION.get(t.strip(), shots)}
+)
+# The escape hatch is a separate variable, not a shot count, so that choosing
+# an off-convention shot count is a deliberate act recorded in the launcher
+# rather than something a bare SHOTS_SPEC can do by accident.
+if _misshot and os.environ.get("ALLOW_OFF_CONVENTION_SHOTS", "").strip() == "1":
+    print("  [lm-eval] WARNING: off-convention shot count for {} "
+          "(ALLOW_OFF_CONVENTION_SHOTS=1)".format(", ".join(_misshot)), flush=True)
+    _misshot = []
+if _misshot:
+    want = ";".join(f"{_FEWSHOT_CONVENTION[t]}:{t}" for t in _misshot)
+    raise SystemExit(
+        "ABORT: {} requested at the wrong shot count.\n"
+        "  These report few-shot by convention and lm-eval will NOT apply it "
+        "for you.\n"
+        "  Pass SHOTS_SPEC, e.g. SHOTS_SPEC=\"{}\"\n"
+        "  Set it explicitly to 0 in SHOTS_SPEC if 0-shot is genuinely "
+        "intended.".format(", ".join(_misshot), want)
+    )
+
 merged = {}
 n_shot = {}
 for shots, tset in groups:
