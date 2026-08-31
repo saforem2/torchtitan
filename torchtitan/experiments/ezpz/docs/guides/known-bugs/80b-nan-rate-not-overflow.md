@@ -10,11 +10,19 @@ Three arms, identical in everything but depth: same dp_shard=192, TP=4,
 world_size=768, seed 42, data, and per-layer geometry (dim 9216, ffn 25600,
 vocab 256128). 60 steps each, uncompiled, per-layer diagnostics at interval 1.
 
-| arm | layers | params | non-finite grad events | outcome |
-|---|---:|---:|---:|---|
-| L48 | 48 | 48.2B | **0** | survived 60 steps, loss 12.93 -> 6.54 |
-| L72 | 72 | 70.0B | **1** (step 55) | survived 60 steps, loss -> 6.80 |
-| **L84** | **84** | **80.8B** | **8** | **loss NaN at step 40 -- DIED** |
+| arm | layers | params | grad events | loss NaNs | final state |
+|---|---:|---:|---:|---:|---|
+| L48 | 48 | 48.2B | **0** | 0 | loss 6.54, healthy |
+| L72 | 72 | 70.0B | **1** (step 55) | 0 | loss 6.80, healthy |
+| L84 | 84 | 80.8B | **8** | **2** (40, 59) | loss 6.66, **healthy** |
+
+> [!CAUTION]
+> **NO ARM DIED, AND I REPORTED TWICE THAT ONE DID.** L84's loss went
+> non-finite at step 40 and at step 59, and it recovered IMMEDIATELY both
+> times -- step 41 reads loss 6.98 / grad_norm 7.42, step 60 reads loss 6.66 /
+> grad_norm 3.73. I called step 40 terminal without reading step 41, then
+> built a "two back-to-back events are fatal" mechanism on top of it. Both
+> claims are withdrawn. **The production failure was NOT reproduced.**
 
 W&B: [L48 `gvkphx8l`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/gvkphx8l)
 · [L72 `lwwffftb`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/lwwffftb)
@@ -38,13 +46,15 @@ A long quiet stretch, then events crowding together until the loss itself goes
 non-finite. **That gap collapse is the runup everyone was looking for.** It
 was always there, in a quantity nobody logged.
 
-**The terminal step is the gap collapse, exactly.** L84's loss went non-finite
-at **step 40** -- the second of the back-to-back pair at 39, 40, the first
-time the gap reached 1. Two consecutive skipped optimizer steps and the model
-does not recover; the run continued to step 60 with a non-finite loss. So the
-failure condition is not a magnitude threshold but **two events close enough
-together that recovery fails between them**, which is why the same model
-survives 37 isolated steps and then dies in two.
+**WITHDRAWN: "the terminal step is the gap collapse".** I claimed the
+back-to-back pair at 39, 40 was fatal. It was not -- step 41 recovered to loss
+6.98 and the run finished healthy at step 60. The gap sequence is real; the
+fatality attached to it was not, and the mechanism built on it is withdrawn.
+
+What survives is weaker and still worth having: the model **absorbs** these
+events. Every one of L84's 8 grad events and both of its loss NaNs was
+followed by a normal step. Over 60 steps at this batch size, a rising event
+rate does not compound into termination.
 
 Each individual event is instantaneous: the gradient is non-finite for one
 step, the trainer's guard skips the optimizer step
@@ -53,8 +63,12 @@ between events is unremarkable. So the documented signature -- "grad_norm
 dead-flat ~6.0, then a sudden step to inf, no runup" -- is **an artifact of
 watching the wrong quantity**. The degradation lives in the event RATE.
 
-A run dies when the events come close enough together that the model cannot
-recover between skipped steps.
+**How a run eventually dies is NOT established by this experiment.** Every
+event here was absorbed. The bridge from "transient events at a
+depth-dependent rate" to "production runs terminate" is inference, not
+observation: 60 steps at this batch size was not enough, and the production
+failures occurred at production batch -- a variable this bisect deliberately
+held fixed.
 
 ## Why the previous explanations failed
 
