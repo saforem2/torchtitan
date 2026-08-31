@@ -9,7 +9,16 @@
 > stopped in July and none of it has restarted: the olmo50-dolmino50
 > constant-2e6 stage-2 chain last wrote a checkpoint 2026-07-18, the
 > dolmino-100 gentle-LR retry last wrote one 2026-07-10, and the
-> `olmo25-dolmino75` arm never ran at all. Per the
+> `olmo25-dolmino75` arm never ran at all.
+>
+> **This page tracks the `864xxxx` job family only.** The
+> [2026-07 sync notes](../../meeting-notes/agpt-sync.md) record a LATER
+> gentle-LR relaunch under different umbrellas -- `8663177`
+> (olmo50-dolmino50 @ 2e-6 constant) and `8662867` (dolmino-100 gentle-LR)
+> -- which this page does not track and whose status is not asserted here.
+> Read "nothing is running" as scoped to the jobs named above, not as a
+> claim that the LR-shock hypothesis was abandoned. Check the sync notes
+> and Aurora before concluding the gentle-LR question is dead. Per the
 > [2026-07 sync notes](../../meeting-notes/agpt-sync.md), the ratio
 > sweep was superseded by the data-mix experiment; the gentle-LR arms
 > are kept as reference, not as an active front. Read the sections
@@ -76,6 +85,23 @@ Both pilots forked the base (model-weights-only via
 | HellaSwag (acc_norm) | **0.560** | 0.486 (-7.4pp) | 0.491 (-6.9pp) |
 | ARC-Easy (acc) | **0.651** | 0.547 (-10.4pp) | **0.610 (-4.1pp)** |
 | PIQA (acc_norm) | **0.733** | 0.687 | ~0.69 |
+
+> [!IMPORTANT]
+> **No CPT checkpoint has ever been scored on MMLU.** The 12-point screen
+> above is HellaSwag / ARC-Easy / PIQA and the other commonsense tasks. So
+> the intervention with the strongest published MMLU effect -- OLMo-2's 1B
+> gains **MMLU 26.9 -> 44.3 (+17.4) from Dolmino mid-training alone**
+> (arXiv:2501.00656 Table 9), on the same `olmo-mix-1124` base we use --
+> has never been measured here on the metric it is supposed to move.
+>
+> That matters because the damage modes below are both on tasks that score
+> ANSWER TEXT, while MMLU as we run it scores LETTERS. A recipe can degrade
+> one and move the other; nothing in this table rules that out. Every
+> AuroraGPT MMLU number is at chance for reasons that are about letter
+> binding, not knowledge -- see
+> [`evals/mmlu-letter-prior-at-chance.md`](../../evals/mmlu-letter-prior-at-chance.md).
+> Scoring the existing CPT checkpoints (both `mmlu` and `mmlu_continuation`)
+> costs eval time only, no training, and would close this.
 
 **Two distinct damage modes:**
 1. **Immediate, ratio-independent HellaSwag drop** (~-6-7pp at step-1000, both
