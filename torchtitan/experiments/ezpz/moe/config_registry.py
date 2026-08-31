@@ -324,6 +324,13 @@ def moe_16b() -> FaultTolerantTrainer.Config:
     cfg.training.steps = 1000
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
     cfg.parallelism.expert_parallel_degree = 8
+    # This flavor is attn_backend="flex", and flex needs per-token positions to
+    # build its BlockMask. Without them the mask is None and attention runs
+    # UNMASKED across document boundaries -- silently, with no error and a
+    # plausible loss. That was one of the two stacked bugs fixed 2026-08-19
+    # (known-bugs/moe-flex-attention-blockmask.md); moe_small and moe_10b_2b
+    # got the opt-in then and this flavor was missed.
+    cfg.dataloader.emit_positions = True
     cfg.compile = CompileConfig(enable=True, components=["loss"])
     return cfg
 
