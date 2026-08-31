@@ -69,6 +69,51 @@ Running log of what's happening, session by session. Most recent first.
   excess loss grows 5.58x and 27.91x where the unscaled count grows 2x and 4x,
   roughly the square. Three points cannot fit an exponent, so section 5.8 says
   so rather than proposing one.
+- **The 80B "root cause" does not survive examination, and the depth bisect
+  that would test it had never been run.** Asked to state definitively why the
+  80B NaNs, I went back through the evidence. The documented mechanism (bf16
+  accumulation in the 84-layer residual stream) fails three independent ways:
+  bf16 and fp32 share an 8-bit exponent (3.3895e38 vs 3.4028e38, MEASURED), so
+  fp32 cannot fix a range problem; fp32-ing the residual add -- the direct
+  test -- fails to prevent the NaN; and the "bf16 masks true grad_norms of
+  21K-79K down to ~5-7" smoking gun describes an operation that does not exist
+  (bf16 holds those values to 0.29%, and overflow yields inf, which propagates
+  through a norm). The run underpinning it all (`8537349`) ran at n32/GBS=96,
+  inside the regime where bf16 also trains clean -- retracted 2026-08-14 and
+  never propagated to the meeting notes.
+  [known-bugs/80b-nan-rate-not-overflow.md](guides/known-bugs/80b-nan-rate-not-overflow.md).
+- **The bisect ran (job `12474403`) and found a real depth effect that is NOT
+  the stated one.** Three arms, identical but for depth, at dp=192 / TP=4 --
+  the exact configuration where three prior runs NaN'd:
+
+  | arm | layers | grad events | loss NaNs | final |
+  |---|---:|---:|---:|---|
+  | L48 | 48 | 0 | 0 | loss 6.54, healthy |
+  | L72 | 72 | 1 | 0 | loss 6.80, healthy |
+  | L84 | 84 | 8 | 2 | loss 6.66, healthy |
+
+  Transient non-finite gradients occur at a rate that scales monotonically
+  with depth. And `qk_q_absmax_local` reads **61.2 at all three depths**
+  (62.25 at dp=12 in the clean regime) -- 36 orders below the bf16 ceiling,
+  with `grad_absmax` peaking at 0.03. Overflow is now refuted by measurement
+  in the failing regime, not only by argument.
+- **I reported twice that the deepest arm died. It did not, and both the claim
+  and the mechanism I built on it are withdrawn.** L84's loss went non-finite
+  at steps 40 and 59 and recovered immediately each time (step 41: loss 6.98,
+  grad_norm 7.42; step 60: loss 6.66, grad_norm 3.73). I read the failure off
+  step 40 without reading step 41, then derived "two back-to-back events are
+  fatal" from it and called the mechanism conclusive. **No arm died; the
+  production failure was not reproduced.** How a run actually terminates is
+  open again -- 60 steps at this batch was not enough, and the production
+  failures were at production batch, which the bisect held fixed.
+- **The one step that mattered had no data, and now does.** `trainer.py`
+  zeroed the gradients ~90 lines before the diagnostics ran, so a non-finite
+  step logged one error line and nothing else -- L72's step-55 event is absent
+  from W&B while 51-54 and 56-57 logged normally. Fixed (`f01548f6a`):
+  `collect_param_stats(per_layer=True)` now runs inside the non-finite branch
+  before zeroing, and separately logs the metrics that are themselves
+  non-finite, which name the affected tensors. 6/6 tests. Which tensor goes
+  first is the remaining unknown, and the next 80B run at dp=192 records it.
 - **SophiaG at half LR (1.78e-5) cleared all four prior onset steps** --
   1,052 in-window steps, **zero** excursions, max grad_norm 0.94, loss 2.879 at
   step 1579. First arm to get past 1048.
