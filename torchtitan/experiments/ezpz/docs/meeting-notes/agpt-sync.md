@@ -351,8 +351,53 @@ recorded `layer_gradnorm_skew` before, so whether 39-320 is pathological or
 normal for this architecture is unknown. The deeper arms of this same job are
 the comparison.
 
-**Still open:** the depth question itself. L48 had not failed as of step 8;
-L72 and L84 have not run.
+### DEPTH SCALES THE AGGREGATE AND NOTHING ELSE (L48 vs L72, same job)
+
+Two arms in, at **dp_shard=192, TP=4, world_size=768** -- the exact
+configuration where `8671243` NaN'd at step 19, `8673658` at ~37, and bf16
+`12473142` at step 30. This bisect is in the failure regime, not beside it.
+
+| | L48 (48L, 48.2B) | L72 (72L, 70.0B) | ratio |
+|---|---:|---:|---:|
+| median `grad_norm` | 10.8 | **36.0** | 3.3x |
+| max `grad_norm` | 98.8 | **251.3** | 2.5x |
+| median `layer_gradnorm_skew` | 424 | 525 | 1.24x |
+| max `layer_gradnorm_skew` | 430 | 634 | 1.47x |
+| median `qk_q_absmax_local` | **61.2** | **61.2** | **1.00x** |
+| max `layer_gradnorm_max` | 0.99 | 0.99 | **1.00x** |
+
+**The global gradient norm scales with depth. Every per-tensor magnitude does
+not.** `qk_q_absmax_local` is 61.2 at both depths -- and 62.25 at dp=12 in the
+clean regime (`12472477`). Three configurations spanning a 16x change in dp
+and a 1.75x change in depth, and the activation peak does not move.
+Per-layer max gradient is 0.99 in both arms.
+
+So the global norm grows because MORE LAYERS SUM INTO IT, while nothing
+individual grows. That is arithmetic, not instability -- and it means the
+metric this investigation has watched throughout is **depth-confounded**: a
+"flat ~6.0" at one depth and a spike at another can reflect nothing but layer
+count.
+
+**Correction to the first-measurement section above:** L48's skew is a median
+of 424 over 60 steps, not the 39-320 I recorded from its first 8. Early steps
+understate it; that was warmup transient, the same trap as reading muP's
+grad_norm off three steps.
+
+**L48 result: 60/60 steps CLEAN, zero NaN, loss 12.93 -> 6.54.** Past every
+documented onset (14 / 17 / 18 / 19 / 30 / 37) at the dp where 84 layers fail.
+
+**Caveat on the design, stated before L84 lands.** Depth is the intended
+variable and per-layer shape is identical across arms, but fewer layers also
+means a smaller model -- less memory pressure, different FSDP sharding. "Fewer
+layers" and "smaller model" are not fully separable here. If L72 also survives
+and only L84 fails, the wall is bracketed between 72 and 84 and the
+confounding shrinks; if L72 fails, it is bracketed between 48 and 72.
+
+**Still open:** L72 was at step 24 clean (past `8671243`'s step-19); L84 has
+not started.
+
+W&B: [L48 `gvkphx8l`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/gvkphx8l),
+[L72 `lwwffftb`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/lwwffftb).
 
 **The gap this closes, and the one it does not: BEFORE THIS RUN, NOT ONE
 ACTIVATION MAGNITUDE HAD EVER BEEN MEASURED IN THE FAILING REGIME.** There is no amax artifact anywhere in the repo. Every
