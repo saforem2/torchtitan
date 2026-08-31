@@ -23,6 +23,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-08-31 | [muP for agpt: audit, design, and staged plan](./experiments/mup/README.md) |
+| 2026-08-31 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-30 | [Week ending 2026-08-29](./summaries/2026-08-29.md) |
 | 2026-08-30 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-08-30 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-30 | [Production Training — MoE 10B_2B_sdpa EP=12](./production/moe/10b_2b_sdpa_ep/README.md) |
 | 2026-08-30 | [Production Training Metrics -- Ground-Truth Store](./production/metrics/README.md) |
 | 2026-08-30 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-| 2026-08-30 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-08-30 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-08-30 | [agpt 30B-exp -- a proposed next flagship](./production/agpt/30b-exp/README.md) |
 | 2026-08-30 | [30B-exp experiment log](./production/agpt/30b-exp/EXPERIMENTS.md) |
 | 2026-08-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
@@ -72,7 +73,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-30 | [TorchTitan on Aurora -- quickstart (validation queue + frameworks/2026.1.0)](./guides/aurora-quickstart-frameworks-rc.md) |
 | 2026-08-30 | [Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG](./experiments/optimizer-comparison/README.md) |
 | 2026-08-30 | [30B LR finder: Muon at GBS=960](./experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md) |
-| 2026-08-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-29 | [Summaries](./summaries/README.md) |
 | 2026-08-29 | [Polaris failover patterns were correct and UNREACHABLE](./guides/known-bugs/polaris-failover-detect-machine-fqdn.md) |
 | 2026-08-28 | [Upstream Sync Log](./upstream-sync.md) |

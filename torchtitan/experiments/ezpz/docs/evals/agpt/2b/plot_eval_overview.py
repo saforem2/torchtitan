@@ -337,12 +337,20 @@ def main() -> None:
     out_path = FIG_DIR / "eval_overview.svg"
     total_points = sum(len(t) for t in v2_by_nodes.values()) + len(mds)
     if total_points == 0 and out_path.exists():
-        raise SystemExit(
-            f"refusing to overwrite {out_path}: every series loaded 0 steps.\n"
-            f"  eval results are gitignored (outputs/evals) and live on the\n"
-            f"  cluster -- run this where the data is, or leave the committed\n"
-            f"  figure alone."
+        # SKIP, not fail. The committed figure is good and the source data is
+        # gitignored (outputs/evals, cluster-only), so having nothing to plot
+        # off-cluster is the expected case -- not an error. Exiting 1 here made
+        # refresh_all report a FAILURE on every off-cluster run, which trains
+        # everyone to ignore its failure count. rc=0 with a clear line keeps
+        # the guard (the committed figure is still not overwritten) while
+        # reserving a non-zero exit for something actually wrong.
+        print(
+            f"SKIP {out_path.name}: every series loaded 0 steps, so the "
+            f"committed figure is left alone.\n"
+            f"  eval results are gitignored (outputs/evals) and live on the "
+            f"cluster -- run this where the data is."
         )
+        raise SystemExit(0)
 
     plot_per_task(v2_by_nodes, v2_gbs, mds, out_path)
     print_table(v2_by_nodes, v2_gbs)
