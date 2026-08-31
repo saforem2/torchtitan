@@ -10,6 +10,15 @@ from torch import Tensor
 # This code snippet is a modified version adapted from the following GitHub repository:
 # https://github.com/KellerJordan/Muon/blob/master/muon.py
 # and https://github.com/MoonshotAI/Moonlight/blob/master/examples/toy_train.py
+# Largest tensor dimension for which the bf16 Newton-Schulz iteration below is
+# numerically safe. The docstring's 9216 figure is the observed 80B failure
+# point; 10000 is the cutoff this codebase has always shipped and is the
+# largest value with a clean track record (agpt 30B attention, 6144). The 30B
+# FFN at 16384 is measured NaN. Raising this requires fp32 accumulation in
+# A @ A and A @ A @ A, not just a bigger number.
+_NS_BF16_SAFE_DIM = 10000
+
+
 @torch.compile
 def zeropower_via_newtonschulz5(G, steps):
     """
@@ -77,6 +86,38 @@ class Muon(torch.optim.Optimizer):
             for k, v in defaults.items():
                 group.setdefault(k, v)
 
+            # BF16 OVERFLOW CEILING, checked before anything else because it
+            # is a shape property and needs no gradients. Newton-Schulz runs in
+            # bf16 (zeropower_via_newtonschulz5 casts G.bfloat16()) and A @ A
+            # overflows for large dimensions -- see that function's docstring.
+            #
+            # MEASURED on agpt 30B: muon_max_dim=20000 put the 16384 x 6144 FFN
+            # tensors on the Muon path and training went NaN on the SECOND
+            # optimizer step at lr=1e-6 (job 12474361, loss 11.9940 -> nan).
+            # Not an LR problem -- every LR is NaN, and an LR finder reports no
+            # suggestion rather than an error, so the run looks merely
+            # inconclusive.
+            #
+            # So the historical 10000 cutoff was doing two jobs, not one:
+            # excluding the embedding/head AND keeping the FFN under the bf16
+            # overflow threshold. Raising it without fixing the precision buys
+            # a silently all-NaN run. Remove this ceiling only together with
+            # fp32 accumulation in the NS inner products.
+            _mx = group.get("muon_max_dim", 10000)
+            for _p in group["params"]:
+                if _p.ndim != 2:
+                    continue
+                _d = max(_p.shape)
+                if _d <= _mx and _d > _NS_BF16_SAFE_DIM:
+                    raise ValueError(
+                        f"muon_max_dim={_mx} puts a {tuple(_p.shape)} tensor on "
+                        f"the Muon path, but Newton-Schulz runs in bf16 and "
+                        f"A @ A overflows above dim {_NS_BF16_SAFE_DIM} "
+                        f"(measured: NaN on step 2 at lr=1e-6, job 12474361). "
+                        f"Keep muon_max_dim <= {_NS_BF16_SAFE_DIM}, or make "
+                        f"zeropower_via_newtonschulz5 accumulate in fp32 first."
+                    )
+
             # Mark parameters as using Muon or AdamW
             group["use_muon_list"] = []
 
@@ -105,6 +146,7 @@ class Muon(torch.optim.Optimizer):
                 if use_muon and max(p.shape) > mx:
                     use_muon = False
 
+                # HARD CEILING, separate from muon_max_dim. Newton-Schulz runs
                 group["use_muon_list"].append(use_muon)
 
                 # Initialize parameter state

@@ -1383,12 +1383,31 @@ def agpt_30b_olmo2tok_muon_ffn() -> FaultTolerantTrainer.Config:
     That takes the Muon path from 21.5% to roughly 95% of parameters, so this
     is the first agpt config where a Muon result is a statement about Muon.
 
-    LR IS A PLACEHOLDER AND MUST BE MEASURED. The 5.68e-04 from job 12474326
-    was measured on the 21.5% hybrid, and the no-rescale arm demonstrated that
-    number tracks the AdamW-path majority -- which this config removes. Run a
-    finder against THIS config before any comparison arm; inheriting the
-    hybrid's LR here would repeat the exact error the Phase 1 sweeps existed
-    to prevent.
+    BLOCKED: THIS CONFIG DOES NOT TRAIN. Muon raises at construction because
+    the FFN tensors exceed the bf16 Newton-Schulz overflow ceiling
+    (muon.py:_NS_BF16_SAFE_DIM). Kept in the registry because the partition
+    measurement it produced is worth having and because it documents a real
+    constraint, not as a runnable arm.
+
+    HOW THAT WAS LEARNED. Job 12474361 ran this config through the LR finder:
+    step 1 loss 11.9940 (correct for a fresh 30B init), step 2 NaN, at
+    lr=1e-6, and every one of the 90 sweep points thereafter NaN. The finder
+    then reports no suggestion, so the run reads as "inconclusive" rather than
+    "broken" -- the failure mode this codebase keeps producing.
+
+    The cause was already documented in zeropower_via_newtonschulz5's own
+    docstring: Newton-Schulz casts to bf16 and A @ A overflows at large
+    dimensions. The historical 10000 cutoff was therefore doing TWO jobs, not
+    one -- excluding the embedding/head AND keeping the 16384-dim FFN below
+    that threshold. The comment in an earlier revision of this file, that
+    20000 is "what the gate was always trying to express", was wrong about
+    half its purpose.
+
+    TO UNBLOCK, in order: make zeropower_via_newtonschulz5 accumulate A @ A
+    and A @ A @ A in fp32, verify no NaN on a 2N smoke, raise
+    _NS_BF16_SAFE_DIM, and only then measure an LR. Do NOT inherit 5.68e-04 --
+    that was measured on the 21.5% hybrid and the no-rescale arm showed it
+    tracks the AdamW-path majority this config removes.
 
     NOT a resume target for any other arm: the Muon/AdamW parameter split
     differs, so the optimizer state shapes do not match.

@@ -297,10 +297,42 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
                     )
             else:
                 suggested = None
-                logger.warning(
-                    "LR Finder: could not detect blow-up point. "
-                    "Try increasing max_lr or fraction."
-                )
+                # DISTINGUISH "the sweep never blew up" FROM "the model was
+                # broken the whole time". Both reach this branch, and the
+                # generic advice ("increase max_lr") is actively wrong for the
+                # second: job 12474361 swept a config that was NaN from step 2
+                # at lr=1e-6, wrote 90 rows of NaN to CSV/NPZ/PNG, logged only
+                # this warning, and exited rc=0. Every artifact of a healthy
+                # run, none of the signal -- and the advice pointed away from
+                # the cause (bf16 overflow in Muon's Newton-Schulz, see
+                # optimizer/muon.py:_NS_BF16_SAFE_DIM).
+                import math as _math
+
+                _finite = [x for x in losses if x is not None and _math.isfinite(x)]
+                _n_bad = len(losses) - len(_finite)
+                if not _finite:
+                    logger.error(
+                        f"LR Finder: ALL {len(losses)} loss values are "
+                        f"NaN/inf. The sweep measured nothing -- this is a "
+                        f"broken model or optimizer, NOT a learning-rate "
+                        f"range problem, and raising max_lr will not help. "
+                        f"Check the first sweep step: if it is already NaN at "
+                        f"the smallest LR, the failure is numerical (dtype "
+                        f"overflow, bad init, or an unstable optimizer path). "
+                        f"The saved CSV/NPZ/plot contain only NaN."
+                    )
+                elif _n_bad:
+                    logger.warning(
+                        f"LR Finder: could not detect blow-up point, and "
+                        f"{_n_bad} of {len(losses)} points are NaN/inf. "
+                        f"Treat the suggestion as unreliable and inspect the "
+                        f"curve before using it."
+                    )
+                else:
+                    logger.warning(
+                        "LR Finder: could not detect blow-up point. "
+                        "Try increasing max_lr or fraction."
+                    )
         except Exception as e:
             suggested = None
             logger.warning(f"LR Finder: derivative analysis failed: {e}")
