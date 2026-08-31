@@ -416,7 +416,17 @@ def _assert_no_missing_live_chains() -> None:
     """
     from torchtitan.experiments.ezpz.utils.trajectories import TRAJECTORIES as _ALL
 
-    live = {t["key"] for t in _ALL if t.get("cls") == "live"}
+    # Aurora/Sunspot (Intel XPU, olmo-mix) only. The Polaris chain is a
+    # different machine, a different corpus (dolma) and a different token
+    # budget, so overlaying it on "all canonical chains" would invite a
+    # cross-machine comparison the axes do not support. It has its own charts
+    # under docs/production/polaris/. Excluded by key, not by weakening the
+    # guard -- any OTHER live chain that goes missing must still hard-fail.
+    _OTHER_MACHINE = {"20b_polaris_128"}
+    live = {
+        t["key"] for t in _ALL
+        if t.get("cls") == "live" and t["key"] not in _OTHER_MACHINE
+    }
     shown = {t.get("key") for t in TRAJECTORIES if t.get("source") == "wandb"}
     missing = sorted(live - shown)
     if missing:
