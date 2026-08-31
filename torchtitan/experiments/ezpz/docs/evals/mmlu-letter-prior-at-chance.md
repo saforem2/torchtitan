@@ -164,10 +164,68 @@ The closest precedent is our own twin. **OLMo-2 uses the same
 `olmo-mix-1124`**, and its 1B gains **MMLU 26.9 -> 44.3 (+17.4) from Dolmino
 mid-training alone** (arXiv:2501.00656 Table 9). At 7B/13B the same
 intervention is worth only +3.9/+4.1, so at small scale mid-training is
-nearly the entire MMLU signal. We skip that stage:
-`data-lists/aurora/dolmino-mix-1124.txt` exists locally (324 files, including
-1.97% FLAN) and is unused by the 2B production path. `fineweb_edu_local` is
-already registered in `datasets.py`.
+nearly the entire MMLU signal.
+
+### We did not skip Dolmino, and it did not help
+
+An earlier draft of this document said we skip that stage. **That was wrong,
+and it was wrong twice over.**
+
+1. The torchtitan CPT sweep forked the plateaued 2B base onto dolmino at
+   three blend ratios (`docs/production/cpt/README.md`, 2026-07). It
+   DEGRADED benchmarks: HellaSwag -7.4pp, ARC-Easy -10.4pp, while train loss
+   IMPROVED 0.31 nats. That doc attributes the damage to an LR re-warm shock
+   (a converged base re-warmed to peak 2.28e-5) and calls the hypothesis
+   open.
+2. The pre-torchtitan Megatron-DeepSpeed 2B ran dolmino as its actual stage
+   2, with no shock to blame:
+   `DATA_FILE_LIST=ALCF/data-lists/aurora/dolmino-mix-1124-fused-file-list.txt`,
+   `LR=2.17e-5`, `LR_DECAY_STYLE=constant`
+   ([train_aGPT_2B_sophiag_stage2.sh](https://github.com/argonne-lcf/Megatron-DeepSpeed/blob/main/train_aGPT_2B_sophiag_stage2.sh)).
+   The W&B report shows that model cycling three data lists across its
+   lifetime -- `olmo-mix-1124`, `dolmino-mix-1124-fused`, and
+   `stage1-33-stage2-33-stage3-34` -- at gbs 6144 out past 7T tokens.
+   **It scores MMLU 0.2413, the lowest number in the table above.**
+
+### Why: Dolmino is not the intervention the literature credits
+
+Measured over the data-lists themselves, grouping weights by corpus:
+
+| corpus | olmo-mix-1124 | dolmino-mix-1124 |
+|---|---:|---:|
+| dclm | 94.80% | **89.18%** |
+| pes2o | 1.47% | 6.88% |
+| flan | -- | 1.97% |
+| math | 0.32% | 1.36% |
+| wiki | 0.09% | 0.44% |
+| stackexchange | -- | 0.16% |
+| starcoder | 2.46% | -- |
+| arxiv | 0.53% | -- |
+
+(1,438 and 324 files respectively; olmo's weights sum to 2.717 and dolmino's
+to 1.0, so both are normalized above.)
+
+**The "high-quality mid-training mix" is still 89% DCLM.** It differs from
+stage 1 by about 5.6 points of DCLM redistributed into peS2o, plus 2% FLAN
+and 1.4% math. It is the same DCLM-dominated web distribution with a larger
+academic slice -- not a different kind of data.
+
+Contrast what the literature credits for MMLU: SmolLM2 stage 1 is **60%
+FineWeb-Edu / 40% DCLM**, and FineWeb-Edu's own ablation reaches 33.6% MMLU
+at 38B tokens via *classifier-filtered educational content*. That is a change
+of kind. Dolmino is a change of degree.
+
+This also explains the CPT loss/benchmark divergence without needing the LR
+story: dolmino's lower entropy (more DCLM-filtered, more peS2o) yields lower
+loss on its own distribution while moving the model away from the eval
+distribution.
+
+**Open question this does NOT settle.** OLMo-2 evaluates with OLMES, which
+recommends reporting max(CF, MCF). If their +17.4 is a cloze or max number
+while ours is letters-only, the two are not the same measurement and Dolmino
+may have moved something we never scored. No CPT or MDS checkpoint has ever
+been scored on MMLU in cloze format. That is eval-only work on checkpoints
+that already exist.
 
 **Cosmopedia is a red herring** -- 4% of SmolLM2 *stage 4* only, absent from
 SmolLM3, no controlled ablation isolating it, and SmolLM v1 noted textbook
