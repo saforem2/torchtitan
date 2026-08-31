@@ -1,5 +1,13 @@
 # AuroraGPT-2B Scaling
 
+> **Chain-state note (added 2026-08-31).** The 512N row below says "we have a 2B
+> 512N production chain running". That chain is **COMPLETE** -- it finished
+> 2026-08-13 at step 46,429 (loss 2.68687, 4.674T tokens, 100% of budget), and
+> the 2B 256N chain is complete at step 92,859. Production last trained
+> 2026-08-26 and nothing is running now. The scaling numbers on this page are
+> bench measurements and are unaffected; only the liveness wording is stale.
+> See [`production/README.md`](../production/README.md).
+
 ## Aurora Weak Scaling (torch 2.13 + `ezpz yeet-env` tarball)
 
 > Single sweep across 4 → 256 nodes with `ezpz yeet-env` tarball
@@ -19,7 +27,7 @@
 | 256   | 3,072| 6,144  | 5,002   | 15,366,144 | 18.77% | 68.1%            | 2026-05-29 sweep |
 | **512 (LBS=1)** | 6,144| 6,144 | 1,988 | 12,214,272 | 7.46% | 27.1% | 8437389 (2026-04-16, GBS=6,144 because that sweep ran with LBS=1) |
 | 512 (LBS=2) | 6,144 | 12,288 | — | — | — | — | Bare-launch path blocked: `set_determinism` `std::bad_alloc` at 6,144 ranks. Production failover path works (we have a 2B 512N production chain running). Retry via failover wrapper pending. |
-| 1,024 | 12,288| 24,576| —       | —          | —      | —                | Blocked: `set_determinism` init crash, see [project_1024n_init_crash](.) |
+| 1,024 | 12,288| 24,576| —       | —          | —      | —                | Blocked: `set_determinism` init crash, see `memory/project_1024n_init_crash.md` and [`guides/known-bugs/umbrella-bad-alloc-init.md`](../guides/known-bugs/umbrella-bad-alloc-init.md) |
 | 2,048 | 24,576| 49,152| —       | —          | —      | —                | Blocked: same as 1,024 |
 | 4,096 | 49,152| 98,304| —       | —          | —      | —                | Blocked: same as 1,024 |
 
@@ -62,7 +70,8 @@ bugs in the scaling wrapper. All resolved by 2026-06-06:
 
 512N+ NO_OUTPUT is a distinct failure mode: at ≥6,144 ranks the
 init wall is an XCCL communicator segfault or `set_determinism
-std::bad_alloc`; see [`memory/project_1024n_init_crash.md`](.). The
+std::bad_alloc`; see `memory/project_1024n_init_crash.md` and
+[`guides/known-bugs/umbrella-bad-alloc-init.md`](../guides/known-bugs/umbrella-bad-alloc-init.md). The
 yeet helped at N=256 but doesn't fully clear the larger-N init
 scaling wall.
 

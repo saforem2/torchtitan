@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-08-30
+> Last updated: 2026-08-31
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -19,7 +19,7 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
 
-## Headline (2026-08-30): production is idle
+## Headline (2026-08-31): production is idle
 
 **Nothing has trained on Aurora since 2026-08-26**, and the blocker is the
 queue rather than the code.
@@ -45,13 +45,16 @@ queue rather than the code.
   all four seats at `rc=143` and no suggested LR in any log -- a clean exit
   that produced nothing. Exit code 0 is not evidence a job did anything.
 - **`8784460`** (2,098 nodes, `large`, project `AuroraGPT`) has been `Q` since
-  Wed Aug 26 13:22 UTC with **101h+ eligible time** and `score_boost = 0`.
-  `8784462` is held behind it on `afterany`. The previous incarnation of this
+  Wed Aug 26 13:22 UTC -- **~120h eligible as of 2026-08-31** -- with
+  `score_boost = 0`. `8784462` is held behind it on `afterany`. The previous incarnation of this
   chain pair carried a ~10M boost and started within a day; this pair lost it
   on resubmit, and a fresh `qsub` starts at 0. Reservations, allocation, queue
   limits, holds and node pinning were all ruled out locally. ALCF ticket
   **drafted but NOT SENT**:
   [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+- **Full-machine maintenance takes the machine 2026-08-31 14:00 UTC to Tue
+  04:00** (`M8787441`, 10,624 nodes), so nothing seats across that window
+  either.
 - **The 30B is a Sunspot experiment, not Aurora production.** It is not one of
   the chains above and does not compete for these nodes. It **COMPLETED**
   2000/2000 steps -- see [30b-exp/](30b-exp/README.md).
@@ -192,10 +195,20 @@ HSn **0.5552**, ARC-E **0.5939**, ARC-C **0.3294**, **Wino 0.5627 (best yet)**. 
 | `8534295` | 2026-06-10 | 12h | (cont13) | — | Held (`afterany:8521632`). |
 
 **As far as the table above goes**: step **4,500** · loss **~2.51** ·
-**~453.0B tokens** (9.7% of target). The chain has since advanced to step
-**9,690** (loss **~2.40**, **~975.4B tokens**, 20.9%) and is **IDLE since
-2026-08-26** -- its seat in `8773440` never started. Intervening dispatches
-are in the [dispatch log](../dispatch-log.md).
+**~453.0B tokens** (9.7% of target). The chain has since advanced to a
+disk-audited head of step **10,600** (loss **~2.40**, **~1,067.0B tokens**,
+22.8%) and is **IDLE since 2026-08-20** -- its last real advance was
+`8764675`, and its seat in the 08-26 umbrella `8773440` never started.
+Intervening dispatches are in the [dispatch log](../dispatch-log.md).
+
+> **Corrected 2026-08-31.** This paragraph read "step 9,690 ... 975.4B
+> tokens, 20.9% ... IDLE since 2026-08-26". Both halves were wrong. 9,690
+> was the 2026-08-26 sync census figure, superseded by the 2026-08-30 disk
+> audit (126 checkpoint dirs, head `step-10600`); the committed
+> [metrics store](../metrics/README.md) also stops short at 9,694 because it
+> was exported 2026-08-17. And 08-26 is the date the *machine* went idle --
+> this particular chain stopped on 08-20, since its 08-26 seat logged zero
+> steps.
 
 **🏁 Eval headline (35+ ckpts, step-900 → step-4,400)**: ARC-Easy `acc` 0.463 → **0.664** (+20pp), HellaSwag `acc_norm`
 0.296 → **0.635** (+34pp), ARC-C `acc_norm` 0.224 → **0.380** (+16pp), Winogrande 0.493 → 0.586 (+9pp).

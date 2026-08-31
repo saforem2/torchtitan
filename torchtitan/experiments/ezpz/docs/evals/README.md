@@ -39,6 +39,14 @@ Regenerate with:
 | [agpt 20B](agpt/20b/) | torchtitan DCP (v1 + v2 512N sync + v2 256N) | v2 512N through step-6,050 + v2 256N through step-5,900 | **🏁 20B 512N sync beats 2B 256N async per token on every benchmark (2026-05-27)** -- see the RoPE note below |
 | [agpt 2B (MDS)](agpt/2b-mds/) | Megatron-DeepSpeed SophiaG | steps 5K–140K (28 unique × 3 replicates) | Done — clean reference baseline |
 
+> **Chain-state note (added 2026-08-31).** The "Steps Evaluated" column and the
+> 2026-07-24 headline above are a July snapshot; the chains have since advanced
+> and then STOPPED. Current disk-audited heads: **20B-256 step-12,000**,
+> **20B-512 step-10,600**, both idle since 2026-08-26; **2B-256 COMPLETE at
+> step-92,859** and **2B-512 COMPLETE at step-46,429** (2.68687, 4.674T, 100% of
+> budget). Production last trained 2026-08-26. Nothing here is live -- see
+> [`production/README.md`](../production/README.md) for the authoritative state.
+>
 > **RoPE note on the 20B row (added 2026-08-17).** Both step figures above
 > (512N step-6,050, 256N step-5,900) sit past those chains' RoPE-convention
 > switches (4,401 and 3,101), so the numbers behind that headline came from
@@ -50,6 +58,10 @@ Regenerate with:
 > it should be re-derived from the corrected exports rather than assumed to
 > survive. The re-eval sweep is producing them now; the 2B-256 side needs no
 > redo (that chain never switched).
+> *(2026-08-31: the sweep completed -- 72/72 with 32 series, per the
+> 2026-08-21 session record -- and the corrected data is what
+> `all_production_evals.svg` now plots. The comparison itself has still not
+> been re-derived from the corrected exports.)*
 
 ## Pipelines
 

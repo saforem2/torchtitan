@@ -4,6 +4,32 @@ Snapshot of session `b09e4b10-ba26-4278-92b7-9cdc17634795` at handoff to
 `mbph`. Written so the resumed session does not have to reconstruct this
 from the transcript.
 
+> [!NOTE]
+> **Status notes added 2026-08-31. This is a point-in-time record of
+> 2026-08-26 and the "Live state" table below is NOT current.** Kept
+> unrewritten: the cold resume verification, the two-clones warning and the
+> two bug writeups are all still the reference for this chain.
+>
+> - **The handoff blockers named at the top are cleared** -- that was already
+>   true when this page was written (ALCF ssh non-interactive, checkout at
+>   `3bf235f52` with `40de81570` an ancestor) and it still holds.
+> - **Both bugs in "Two bugs caught in this session" are FIXED and on
+>   `ezpz` HEAD.** `42f4edfaa` (fold the dataloader to flat `[T]`, the
+>   correct fix for the silent `[B, L*N, H]` no-op) and `40de81570` (the
+>   grad-norm guard NameError) are both ancestors of HEAD as of 2026-08-31.
+> - **The chain did NOT advance.** Jobs `7560196` and `7560197` in the table
+>   below both ran and trained **zero** steps (`Exit_status=124`), as did
+>   `7567541` after them; `7560196` burned 3h03m to the `_detect_machine()`
+>   FQDN bug and `7560197` 4h04m to blind rotation exhausting the spares.
+>   The chain head is still **step-5600**, unchanged since 2026-08-16, so
+>   the "What to check the moment it starts" list below has not yet been
+>   exercised on hardware. Current state and the full leg-by-leg census:
+>   [`production/polaris/README.md`](production/polaris/README.md).
+> - A zombie-GPU drain ticket went to ALCF on 2026-08-30 covering three
+>   nodes left with a stuck GPU by another user's job -- PBS still
+>   advertises `ngpus=4` on them and reassigns them, so rotation cannot win.
+>   [`ops/alcf-ticket-zombie-gpu-nodes-20260827.md`](ops/alcf-ticket-zombie-gpu-nodes-20260827.md).
+
 **Status: handoff COMPLETE.** The session is running on `mbph` as of
 2026-08-27 03:29 UTC -- transcript slug
 `-Users-sam-projects-saforem2-torchtitan`, embedded `cwd` rewritten, memory
@@ -14,7 +40,7 @@ at `3bf235f52` with the grad-norm fix `40de81570` as an ancestor. Do not
 re-run the script from `mbph` -- it targets `mbph` as the remote and there
 is no `mbph` ssh identity in this account.
 
-## Live state
+## Live state (as of 2026-08-26; superseded -- see the note above)
 
 | Job | State | Notes |
 |---|---|---|

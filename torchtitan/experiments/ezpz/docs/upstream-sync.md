@@ -1,7 +1,28 @@
 # Upstream Sync Log
 
 
-## Sync 82 (2026-08-28): TRIAL MERGE DONE, NOT LANDED -- moe is broken
+## Sync 82 (2026-08-28): LANDED 2026-08-29 -- moe break ported, sync 83 on top
+
+> [!NOTE]
+> **CORRECTED 2026-08-31.** This heading used to read "TRIAL MERGE DONE, NOT
+> LANDED -- moe is broken", and the section below is written from that
+> moment. Both halves of that claim are now stale:
+>
+> - **It landed.** Merge `09b4ef235` (2026-08-29) is an ancestor of `ezpz`
+>   HEAD.
+> - **The moe break is fixed.** `c52bb0ddd` ported `moe/model.py` to
+>   `get_nparams_and_active_nparams` plus explicit FLOP composition, exactly
+>   as the port table below prescribes. A second break the trial merge did
+>   NOT catch -- `EzpzValidator` calling the `post_dataloading_process` hook
+>   that #4116 removed -- was ported in `5d8c85b74`. Both import clean on
+>   this tree.
+> - **Sync 83 landed on top of it** (`602bd715c`, merge `609777a0e`,
+>   2026-08-31): 6 upstream commits, clean, no ezpz ports required. It has
+>   no section of its own in this log yet.
+>
+> Everything below is left as written. It is the record of the trial merge,
+> and the `ImportError` string is still what someone would grep for.
+
 
 21 commits behind `upstream/main` (2,564 ahead). Merged into a scratch clone
 `../tt-sync82` to test ahead of landing. **The merge itself is clean: zero
@@ -22,7 +43,7 @@ right now are unaffected by anything in this sync.
 `SpmdLayout` (removed by #4265) appears in ezpz only in comments and as a
 local variable name `attn_x_layout` -- no imports, no annotations. Not a break.
 
-### What breaks: ezpz/moe
+### What breaks: ezpz/moe (RESOLVED 2026-08-28 in `c52bb0ddd`)
 
 ```
 ImportError: cannot import name 'get_moe_model_nparams_and_flops'

@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 136
+The 25 most-recently-changed docs by git commit date (across all 264
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -172,7 +172,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe | 2026-08-28 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-08-31 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
@@ -180,4 +180,4 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [TODO](./TODO.md) | Open work items | 2026-05-05 |
+| [TODO](./TODO.md) | Open work items. Audited 2026-08-31: the docs restructure and the 80B TP=2 OOM are done, the Aurora scaling study largely so; the 80B compile item and the production plan are superseded; MoE throughput is partly answered. The blendcorpus/Megatron aliasing item (the second `## 6.`) is the only fully open one. | 2026-08-31 |

@@ -1,5 +1,41 @@
 # Handoff -- Aurora, 2026-08-26
 
+> [!NOTE]
+> **Status notes added 2026-08-31. This page is a point-in-time record of
+> 2026-08-26 and is NOT current state** -- it is kept, unrewritten, because
+> its environment gotchas and the `CCL_OP_SYNC` finding are still live and
+> its symptom strings are still what someone would grep for.
+>
+> Three things below have since changed:
+>
+> - **Open item 1 (MoE at TP>1) is RESOLVED.** Fixed 2026-08-27 in
+>   `6e4e1996f`. The bug was in the SDPA wrapper, not in `wo`, not in the
+>   sharding config, and not in the `local_map` -- so the "the conversion is
+>   not happening, fix that" instruction below points at the wrong place.
+>   `moe/__init__.py` unflattened `[T,N,H] -> [B,L,N,H]` on the way in and
+>   never re-flattened on the way out, so MLA reshaped against a batch
+>   leading dim. Coverage was closed by job `8792615` (2026-08-30): TP=2 and
+>   TP=4, eager and compiled, all pass. The WARNING below -- do not make the
+>   unflatten TP-aware -- was correct and held.
+>   Writeup: [`known-bugs/moe-tp2-wo-placement.md`](guides/known-bugs/moe-tp2-wo-placement.md).
+> - **Open item 2 (probes still in the tree) is RESOLVED.** The
+>   `EZPZ_MLA_PLACEMENT_PROBE` instrumentation was removed from
+>   `moe/model.py` and `agpt/__init__.py` in `ca376d94d` (2026-08-27). Three
+>   `scripts/*.sh` still export the variable; it is now inert.
+> - **The Aurora frameworks RC is no longer a one-off 2N result.** Job
+>   `8789506` (2026-08-28) ran a five-corner matrix green on
+>   `frameworks/2026.1.0`, including **compiled agpt at TP=2**, which the
+>   June `.venv` cannot do. See
+>   [the RC quickstart](guides/aurora-quickstart-frameworks-rc.md).
+>   Note the side result recorded below -- "agpt TP=2 needs
+>   `--compile.no-enable`" -- is a `.venv`-stack statement, not an RC one.
+>
+> **Production has not trained since this handoff.** Umbrella `8773440`
+> (2026-08-26) is still the last job that trained. `8784460` has been queued
+> roughly 120 h at `score_boost = 0`, and Aurora went into maintenance
+> 08-31 14:00 UTC until Tue 04:00. Current state lives in
+> [`production/README.md`](production/README.md).
+
 Session `b7be7bc5-96dd-437e-a979-6734b7d7b0d4` (`aurora-tt-ezpz`), handed to
 `mbph`. Resume with:
 
@@ -54,7 +90,7 @@ seven traps are in the [experiment README](../README.md).
 `/tmp`; and the local cache writer, which never existed -- `_cached_payload`
 read a file nothing in the codebase wrote.
 
-## Open item 1: MoE at TP>1
+## Open item 1: MoE at TP>1 -- RESOLVED 2026-08-27 (`6e4e1996f`)
 
 `wo` receives `Shard(dim=0)` where `rowwise_config` expects `Partial(sum)`.
 Measured (job `8785537`):
@@ -88,7 +124,7 @@ Side result: **agpt TP=2 needs `--compile.no-enable`** -- the torch-2.13
 compile+AC+TP `DeviceMesh` AOT assertion, previously recorded only for the 80B
 family, fires at `agpt_debugmodel` scale too.
 
-## Open item 2: probes still in the tree
+## Open item 2: probes still in the tree -- RESOLVED 2026-08-27 (`ca376d94d`)
 
 `EZPZ_MLA_PLACEMENT_PROBE=1`-gated instrumentation in **both**
 `moe/model.py` and `agpt/__init__.py`. Silent when unset, but it is temporary

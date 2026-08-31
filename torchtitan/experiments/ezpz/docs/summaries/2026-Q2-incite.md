@@ -242,6 +242,11 @@ A full post-training path now runs end-to-end on Intel XPU:
 
 Detail: [rl/README](../rl/README.md),
 [grpo-on-xpu-status](../rl/grpo-on-xpu-status.md).
+*(Path note, 2026-08-31: `docs/rl/` was consolidated into
+[`docs/production/rl/`](../production/rl/README.md) in `41fbd924b`, and
+`grpo-on-xpu-status.md` was renamed `trl.md` in `a20404e0d`. The links above
+no longer resolve; that commit deliberately left point-in-time summaries
+naming the old paths.)*
 
 ### 6.3 Production resilience infrastructure
 
@@ -324,6 +329,15 @@ list in [guides/known-issues.md](../guides/known-issues.md)):
    around, but the underlying bug is still open and upstream-worthy.
 4. **80B optimizer decision open** — SophiaG (lowest loss, narrow band)
    vs mano (wider stability margin) for the long unattended run.
+   *(DECIDED, and reframed, after this report was written -- annotated
+   2026-08-31. The 80B blocker was re-root-caused as an
+   optimizer-INDEPENDENT bf16 grad-path overflow at `dp > ~186`, so the
+   optimizer choice is not what unblocks 80B; see
+   [`production/README.md`](../production/README.md) and
+   [`experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md`](../experiments/agpt/aurora/2026-07-14-80b-fp32-residual-fix.md).
+   At GBS=6144 the usable picks are mano ~3e-6 or sophiag ~1e-6; AdamW is the
+   worst of the three and its documented 1e-6 default sits PAST the NaN cliff
+   (last stable 7.4e-7, first NaN 1.36e-6). Muon stays broken at dim=9216.)*
 
 ---
 
@@ -333,6 +347,9 @@ list in [guides/known-issues.md](../guides/known-issues.md)):
    step-92,859 checkpoint (post-maintenance #1 action).
 2. **Drive the 80B production run** — confirm the brackets start, settle
    the optimizer decision, and characterize behavior above 512N.
+   *(Outcome, annotated 2026-08-31: not achieved this way. The 512N SophiaG
+   head NaN'd 2026-07-03 and the effort is dormant -- the blocker is the
+   `dp > ~186` grad-path overflow, not the optimizer.)*
 3. **Advance the 20B chain** past the queue/init-crash blockers toward a
    meaningful token count.
 4. **Resolve 512N scheduling** at the program level (reservation /

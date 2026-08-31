@@ -1,6 +1,26 @@
 # TODO
 
+> Last updated: 2026-08-31 (each item audited against the tree and `git log`;
+> completed items are marked DONE and collapsed rather than deleted, so the
+> original proposal stays readable).
+
 ## 1. Docs Restructure
+
+**Status: DONE.**
+
+> **DONE.** The proposed layout is what the tree looks like today. Verified
+> 2026-08-31: `configs/{dense,moe}.md`, `guides/`, `scaling/`,
+> `production/`, and `experiments/` all exist, and none of
+> `benchmarks.md`, `benchmark-80B.md`, `scaling-study.md`,
+> `scaling-study-torch213.md`, `dense-configs.md`, `moe-configs.md` or
+> `production-training/` remain at the docs root. The realized tree went
+> further than this plan (it also grew `evals/`, `summaries/`,
+> `meeting-notes/`, `competitions/`, `upstream-issues/`, `notes/`, `ops/`,
+> `baselines/`, and `production/{cpt,rl,sft,polaris,metrics}/`) -- see
+> [`TREE.md`](./TREE.md) for the current map.
+
+<details>
+<summary>Original proposal (2026-04-13), kept for the rationale</summary>
 
 ### Problem
 Scaling results, benchmarks, and throughput data are scattered across
@@ -40,7 +60,35 @@ docs/
   into the appropriate subdirectory
 - `experiments/` stays as-is (raw per-run logs)
 
+</details>
+
 ## 2. 80B compile + AC on torch 2.13
+
+**Status: SUPERSEDED.**
+
+> **SUPERSEDED 2026-08-31.** Two things moved under this item.
+>
+> **The compile assertion is no longer the 80B's blocker.** The 80B is
+> blocked at scale by a bf16 forward-activation overflow that is
+> optimizer-independent -- see the
+> [80B production README](./production/agpt/80b/README.md). The compile+AC
+> `DeviceMesh` assertion is tracked separately in
+> [`guides/known-bugs/agpt-full-dtensor-vc-check.md`](./guides/known-bugs/agpt-full-dtensor-vc-check.md),
+> which records it as OPEN upstream but NOT BLOCKING: every ezpz config is
+> pinned to `spmd_backend = "partial_dtensor"` (`b2ff09632`), and
+> `full_dtensor` was deleted upstream by #4217 -- it is no longer even a
+> legal value of the field.
+>
+> **The assertion does not fire on the frameworks RC.** Job `8789506`
+> (2026-08-28) ran compiled `agpt` at TP=2 green on `frameworks/2026.1.0`,
+> agreeing with eager to 3.6e-4. That is 2-node debug scale; the 80B corner
+> where the assertion was originally characterized has NOT been re-run, so
+> the `--compile.no-enable` workaround should not be retired for the 80B on
+> that evidence alone. See
+> [the RC quickstart](./guides/aurora-quickstart-frameworks-rc.md).
+
+<details>
+<summary>Original item (2026-04), kept for the symptom string</summary>
 
 ### Problem
 80B TP=2 with compile + activation checkpointing crashes on torch 2.13
@@ -56,7 +104,45 @@ the AC version check rejects non-Tensor objects.
 - The 80B works with compile on torch 2.10 + IPEX (22.5 tflops / 7.5% MFU)
 - Needs upstream PyTorch fix in `torch/_functorch/_aot_autograd/runtime_wrappers.py`
 
+</details>
+
 ## 3. MoE Throughput Optimization
+
+**Status: PARTIALLY DONE.**
+
+> [!WARNING]
+> **The commands in "Experiments to run" below would abort in flag parsing
+> today.** Audited 2026-08-31. `--training.local_batch_size` was removed by
+> upstream #4121 (the replacement is
+> `--training.num-tokens-per-microbatch-per-dp-rank`, which must EQUAL
+> `--training.max-context-length`), and
+> `--parallelism.expert_parallel_comm_backend` does not exist as a CLI flag
+> on this tree -- the comm backend is a `model_registry(...,
+> moe_comm_backend=...)` argument, which is how `moe_10b_2b_sdpa_hybridep`
+> sets it. See
+> [`guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md`](./guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md)
+> for the full dead-flag table. The sweeps below are kept as a statement of
+> intent; re-derive the flags before running one.
+
+> **What has since been answered:**
+>
+> - **TP for MoE is DONE and it works.** "Currently all MoE runs use TP=1"
+>   is no longer true. `moe` trains at TP>1 since `6e4e1996f` (2026-08-27),
+>   and job `8792615` (2026-08-30) closed the corners: TP=1 / TP=2 eager /
+>   TP=2 compiled / TP=4 eager / TP=4 compiled all pass, with compiled
+>   tracking eager to 4.1e-4 and per-rank memory falling 2.80 -> 1.94 ->
+>   1.38 GiB across TP=1/2/4. Writeup:
+>   [`guides/known-bugs/moe-tp2-wo-placement.md`](./guides/known-bugs/moe-tp2-wo-placement.md).
+> - **HybridEP is closed WONTFIX** -- the upstream feature is NVIDIA-only by
+>   design, see
+>   [`guides/known-bugs/hybridep-is-nvidia-only.md`](./guides/known-bugs/hybridep-is-nvidia-only.md).
+>   Do not spend nodes on that knob.
+> - **The EP sweep has partly run.** Results and the two distinct EP failure
+>   modes are recorded in
+>   [`guides/known-bugs/moe-ep-a2a-degrades-with-size.md`](./guides/known-bugs/moe-ep-a2a-degrades-with-size.md).
+>
+> Still open: CP, per-block vs loss-only compile, Float8, and the batch-size
+> sweep.
 
 ### Problem
 MoE models currently get 4-11% MFU on Aurora. torch.compile hurts MoE (-35%
@@ -107,6 +193,20 @@ done
 
 ## 4. Aurora Scaling Study
 
+**Status: LARGELY DONE.**
+
+> **LARGELY DONE (audited 2026-08-31).** The Aurora sweep ran and its
+> results are published: [`scaling/agpt-2b.md`](./scaling/agpt-2b.md) carries
+> a 4N -> 512N Aurora weak-scaling table on torch 2.13 with the yeet-env
+> tarball, and [`scaling/agpt-20b.md`](./scaling/agpt-20b.md) has an Aurora
+> section of its own. `scripts/run_scaling_study_aurora.sh` is the script
+> item 4 of the plan asked for.
+>
+> What is NOT done: the 1,024N / 2,048N / 4,096N rows are still blocked on
+> the `set_determinism` init crash on the bare-launch path, and the plan's
+> `moe_*` arms on Aurora were not swept. Read the published tables before
+> re-running anything here.
+
 ### Goal
 Reproduce the Sunspot scaling study (2-128 nodes) on Aurora to measure
 weak and strong scaling efficiency.
@@ -135,6 +235,36 @@ weak and strong scaling efficiency.
 - MoE expert parallelism becomes relevant at higher node counts
 
 ## 5. Production Multi-Stage Training Plan
+
+**Status: SUPERSEDED by the live production chains.**
+
+> [!IMPORTANT]
+> **SUPERSEDED 2026-08-31.** This section was written before production
+> started; its "IN PROGRESS" / "SUBMITTED" status block is from 2026-04 and
+> describes the very first 20B submission. Do not read it as current state.
+> The canonical place for what actually trained is
+> [`production/README.md`](./production/README.md).
+>
+> Audited chain heads on disk, 2026-08-31:
+>
+> | chain | state |
+> |---|---|
+> | 2B 512N | **COMPLETE** at step 46,429 -- loss 2.68687, 4.674T tokens |
+> | 2B 256N | **COMPLETE** at step 92,859 |
+> | 20B 512N | step 10,600 |
+> | 20B 256N | step 12,000 |
+>
+> **Nothing has trained since 2026-08-26** (umbrella `8773440`). Its
+> successor `8784460` has been queued roughly 120 h at `score_boost = 0`,
+> and Aurora went into maintenance 08-31 14:00 UTC until Tue 04:00. Ticket:
+> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](./ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+>
+> Two of the recommended configs below are also stale on their own terms:
+> the `seq_len` / `LBS` fields do not exist post-#4121 (see the warning on
+> item 3), and the 80B's "LR ~1e-4 (AdamW, extrapolated)" is now known to be
+> wrong -- at GBS=6144 the working optimizers are mano (~3e-6) or sophiag
+> (~1e-6); AdamW is the WORST of the three and 1e-6 is past the NaN cliff
+> (onset 1.36e-6, ceiling 7.4e-7). Muon is broken at dim=9216.
 
 ### Goal
 Design configs for a production training run combining optimal LRs
@@ -211,6 +341,20 @@ For large-scale runs, consider:
 - Stage 3: Cooldown with reduced LR for final quality
 
 ## 6. Debug 80B TP=2 Aurora OOM
+
+**Status: RESOLVED 2026-04-18.** 80B TP=2 came back on Aurora, and the fix was
+none of the six steps in the debugging plan below: it was **removing
+`import intel_extension_for_pytorch` (IPEX)**, still on `torch==2.10` from
+`aurora_frameworks-2025.3.1`. Report:
+[`experiments/agpt/aurora/20260418-80b-tp2-restored.md`](./experiments/agpt/aurora/20260418-80b-tp2-restored.md).
+
+The 80B's *current* blocker is unrelated and lives elsewhere: a bf16
+forward-activation overflow at scale, optimizer-independent, tracked on the
+[80B production README](./production/agpt/80b/README.md). The plan below is
+kept because its symptom string
+(`UR_RESULT_ERROR_OUT_OF_RESOURCES` from Level Zero) still turns up on other
+configs, and the "not a PyTorch OOM" distinction it draws is still the right
+first question.
 
 ### Problem
 80B at TP=2 OOMs on Aurora with `aurora_frameworks-2025.3.1` at model

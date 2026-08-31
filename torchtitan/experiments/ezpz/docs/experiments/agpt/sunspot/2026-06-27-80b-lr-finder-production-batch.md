@@ -1,5 +1,25 @@
 # 80B LR-finder at the production batch (GBS=6144) -- Sunspot, 2026-06-27
 
+> **Follow-ups RESOLVED -- annotated 2026-08-31. The three open items below all
+> landed; nothing in the measured curves changed.**
+>
+> * **muon/sophiag rows are no longer TBD.** sophiag is **NOT broken at this
+>   batch** -- 0/15 NaN, a real U-min at lr~2.5e-6, and the *lowest* loss of all
+>   four (12.60). Only muon is broken as documented (NaN from step 7). The
+>   "both NaN regardless of LR" line came from the GBS=192 finder.
+> * **The head-to-head convergence run happened (2026-06-30) and OVERTURNED the
+>   ranking.** At their finder LRs as CONSTANT LRs, all three NaN'd within 5-12
+>   steps -- mano @ 3e-6 first (step 5), AdamW @ 5e-7 (step 9), sophiag @ 1e-6
+>   (step 12). The finder's ramping LR masked the instability. See
+>   [2026-06-30-80b-convergence-gbs6144.md](2026-06-30-80b-convergence-gbs6144.md).
+> * **The "do not run AdamW @ 1e-6" call below still stands** and is the
+>   tree-wide position: at GBS=6144 use mano ~3e-6 or sophiag ~1e-6; AdamW is
+>   the worst of the three and 1e-6 is past the cliff (last stable 7.4e-7, first
+>   NaN 1.36e-6).
+>
+> The consolidated per-optimizer table lives in
+> [`lr-finder/agpt/80b/README.md`](../../lr-finder/agpt/80b/README.md).
+
 The earlier LR-finder ran at **GBS=192** (world_size x LBS / TP, no GAS)
 -- ~32x below the ~6144 production target. Optimal LR is batch-size
 dependent, so that sweep could not calibrate production. This run sweeps
@@ -83,8 +103,8 @@ batch.
 |---|---|---|---|---|---|
 | adamw | 12469723 | **cliff** -- NaN @ 1.36e-6 | ~7.4e-7 (cliff-bounded) | 12.78 @ 7.4e-7 | DONE |
 | mano | 12469724 | **clean U-curve** -- no NaN through 5.4e-5 | ~1.6e-5 (minimum-bounded) | **12.62 @ 1.6e-5** | DONE |
-| muon | 12469725 | expected NaN early (bf16 overflow dim=9216) | TBD | TBD | queued |
-| sophiag | 12469726 | expected NaN early (bf16 overflow dim=9216) | TBD | TBD | queued |
+| muon | 12469725 | NaN from step 7 (bf16 overflow dim=9216) | -- | (12.91) | DONE -- broken as documented |
+| sophiag | 12469726 | real **U-min**, blow-up onset ~4.6e-6 | ~2.5e-6 | **12.60** (lowest of all four) | DONE -- **NOT broken at this batch** |
 
 **mano is dramatically better-behaved than AdamW at the production batch:**
 
@@ -122,6 +142,11 @@ headroom). Worth a head-to-head convergence run (mano @ ~3e-6 vs AdamW @
   AdamW @ ~5e-7 at GBS=6144 -- to confirm the finder ranking holds over
   more steps before locking the production config. (The finder measures
   early-step stability/descent, not full convergence.)
+  **DONE 2026-06-30, and it did NOT hold:** at constant finder LRs all three
+  optimizers NaN'd within 5-12 steps (mano step 5, AdamW step 9, sophiag step
+  12). No finder LR is production-safe as a constant LR here -- a long warmup
+  (>=200 steps) plus grad clipping is required.
+  [Report](2026-06-30-80b-convergence-gbs6144.md).
 - This finally gives a *measured* basis for the 80B production LR, vs the
   prior "1e-6 because 1.1e-5 NaN'd" heuristic (which bracketed the ceiling
   from above but never located it).
@@ -137,7 +162,7 @@ adamw/muon in the GBS=192 finder no longer fires.
 
 ## Caveats / open
 
-- mano/muon/sophiag ceilings pending (cluster-queued).
+- ~~mano/muon/sophiag ceilings pending (cluster-queued).~~ **All landed** -- see the corrected optimizer table above.
 - The adamw curve has 8 finite points then NaN; the exact ceiling is
   between 7.4e-7 and 1.36e-6. A finer sweep in [5e-7, 1.5e-6] would
   localize it, but ~7e-7 is sufficient for the "drop to 5e-7" call.

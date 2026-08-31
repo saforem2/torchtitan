@@ -2,7 +2,18 @@
 
 > **Living document** — updated as CPT runs complete and are evaluated.
 >
-> Last updated: 2026-08-30
+> Last updated: 2026-08-31
+>
+> **If you arrived here from the "2B 512N stage-2 dolmino" row of the
+> [production status page](../README.md), this is the wrong page for that
+> chain.** That chain is the pure-dolmino stage-2 arm
+> (`agpt-2b-stage2-dolmino-n512-gbs12288`), seeded from 2B-512 step-46429 and
+> tracked with the umbrella; its position and status live in
+> [`../README.md`](../README.md) and [`../dispatch-log.md`](../dispatch-log.md).
+> The stage-2 chain described at the bottom of THIS page is a different,
+> earlier arm (`olmo50-dolmino50` at constant 2e-6) that stopped in July and
+> whose step-3801..6600 checkpoints are NaN-poisoned. Do not read one for the
+> other.
 >
 > **Nothing on this page is running.** The two 300B pilots finished
 > 2026-07-06 and are the durable result. Everything launched after them

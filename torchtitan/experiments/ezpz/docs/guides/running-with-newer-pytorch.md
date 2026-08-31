@@ -1,5 +1,7 @@
 # Running with Newer PyTorch (>= 2.10)
 
+**Last updated:** 2026-08-31
+
 > [!NOTE]
 > We will use the alias `uvi`:
 >
@@ -90,8 +92,25 @@
        --config="${CONFIG}" \
        --training.steps=10 \
        --checkpoint.no-enable \
-       --training.local-batch-size=2
+       --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+       --training.max-context-length=8192
    ```
+
+   > [!NOTE]
+   > Batch sizes are counted in TOKENS since upstream #4121 (80th sync).
+   > `--training.local-batch-size`, `--training.global-batch-size` and
+   > `--training.seq-len` no longer exist, and a command carrying any of them
+   > dies in flag parsing with `Unrecognized options:` before step 1. The
+   > mapping is `tokens = batch_size * seq_len`, and
+   > `num_tokens_per_microbatch_per_dp_rank` must EQUAL `max_context_length`
+   > on the blendcorpus path -- the loader folds `[B, L] -> [T]`, so a second
+   > row overruns the RoPE cache. That is why the old `LBS=2` above becomes
+   > `8192` (one row of `seq_len=8192`) and not `16384`. Raise the global
+   > batch with `--training.num-tokens-per-train-step` instead, which sets
+   > gradient accumulation. See
+   > [known-bugs/dead-cli-flags-in-repo-root-pbs.md](known-bugs/dead-cli-flags-in-repo-root-pbs.md)
+   > and
+   > [known-bugs/blendcorpus-fold-batch-dim.md](known-bugs/blendcorpus-fold-batch-dim.md).
 
    - <details closed><summary>AuroraGPT-20B:</summary>
 
@@ -103,7 +122,8 @@
          --config="${CONFIG}" \
          --training.steps=10 \
          --checkpoint.no-enable \
-         --training.local-batch-size=2
+         --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+         --training.max-context-length=8192
      ```
 
      </details>
@@ -118,7 +138,8 @@
          --config="${CONFIG}" \
          --training.steps=10 \
          --checkpoint.no-enable \
-         --training.local-batch-size=1 \
+         --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+         --training.max-context-length=8192 \
          --optimizer=adamw \
          --optimizer.lr=1e-6 \
          --parallelism.tensor-parallel-degree=2 \
@@ -289,7 +310,8 @@ For more detail (full sweep, plots, methodology) see the
        --config=agpt_2b \
        --training.steps=10 \
        --checkpoint.no-enable \
-       --training.local-batch-size=2
+       --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+       --training.max-context-length=8192
    ```
 
 > [!IMPORTANT]

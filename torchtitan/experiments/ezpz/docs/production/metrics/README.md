@@ -1,6 +1,17 @@
 # Production Training Metrics -- Ground-Truth Store
 
-> Last updated: 2026-08-30
+> Last updated: 2026-08-31
+>
+> **This store is a 2026-08-17 snapshot and is NOT authoritative for where
+> any chain stands today.** `manifest.json` reads
+> `exported_at 2026-08-17T07:41:18+0000`; production trained twice more after
+> that (umbrellas `8764675` on 08-20 and `8773440` on 08-26) and the export
+> has not been re-run. Concretely, the 20B chains sit at disk-audited
+> `step-12000` (20B-256) and `step-10600` (20B-512) while this store stops at
+> 10,380 and 9,694. Use it for curve shape and for the irreplaceable `olog`
+> rows; take a chain HEAD from disk, and a chain's current status from
+> [`../README.md`](../README.md). Regenerating requires Aurora -- see
+> [Regenerating](#regenerating).
 
 Committed, offline copies of the per-step training metrics for every
 AuroraGPT production chain. This exists so plots, dashboards, and README
@@ -161,10 +172,20 @@ however long ago the export ran. Check `exported_at` in the manifest before
 treating a chain tip as current. The store is not a live feed and will not
 update itself.
 
+**How far behind it is right now (2026-08-31): 14 days and two umbrellas.**
+The export predates `8764675` (08-20) and `8773440` (08-26). Nothing has
+trained since 08-26, so the lag is bounded and will not grow until the queue
+moves -- but it is already large enough that quoting a tip from here as a
+chain head is wrong. The four production tips it carries are 10,380
+(`20b_v2_256`), 9,694 (`20b_v2_512`), 7,730 (`2b_v2_512_stage2_dolmino`) and
+21,307 (`2b_v2_512_constlr_from9200`).
+
 ## Known gaps
 
 Reported in the manifest per chain, and re-derived on every export. As of the
-2026-08-17 07:41 UTC export (`exported_at` in `manifest.json`):
+2026-08-17 07:41 UTC export (`exported_at` in `manifest.json`) -- **still the
+newest export as of 2026-08-31**, so every step range below is a floor, not a
+chain head:
 
 | Chain | Rows (full) | Steps | `olog` rows | Summary rows / stride | Gaps (50+ steps) |
 | --- | ---: | --- | ---: | ---: | --- |

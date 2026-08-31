@@ -4,6 +4,9 @@
 > `12473338` (PRE reference) through `12473368` (POST7), plus MoE sweep
 > `12473367`.
 
+> Last updated: 2026-08-31 (one correction added below: the `full_dtensor`
+> pin was reversed on 2026-08-20 and that value is now illegal).
+
 ## Result
 
 | arm | PRE (`12473338`) | POST7 (`12473368`) |
@@ -36,6 +39,14 @@ optimizer components), breaking four ezpz registries (`be5749ee0`).
 `spmd_backend` is pinned to `full_dtensor` (`621ac2406`) because #4 was found
 after the pin; with the rope annotation in place, revisiting spmd_types is now
 a reasonable follow-up rather than a blocker.
+
+> [!WARNING]
+> **Superseded the next day; do not set `full_dtensor` today.** `b2ff09632`
+> (2026-08-20) repinned both `agpt` and `moe` to `partial_dtensor` because
+> upstream #4217 deletes the `full_dtensor` backend. It is no longer a legal
+> value of the field -- `parallelism.spmd_backend` is
+> `Literal["partial_dtensor", "spmd_types"]` on this tree and anything else
+> raises. The rest of this page is unaffected.
 
 ## What defect #4 says about SPMD migration
 
