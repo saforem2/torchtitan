@@ -2,6 +2,63 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR clears every prior onset step
+
+- **muP stage 4 answered the question the coordinate check could not.** A
+  passing coordinate check proves the parametrization is internally
+  consistent; it says nothing about the payoff. Three grids of discrete
+  fixed-LR runs (12 to 15 arms each, ~1h per grid) measured whether the
+  optimum actually moves with width:
+
+  | eta | 1536 | 3072 | 6144 |
+  |---:|---:|---:|---:|
+  | 1.6e-5 | 7.322 | 6.544 | 6.176 |
+  | **6.4e-5** | 5.877 | **5.510** | **5.520** |
+  | **2.56e-4** | **5.672** | 6.022 | 5.952 |
+  | 1.024e-3 | 6.390 | 7.084 | 6.624 |
+
+  **3072 and 6144 agree exactly at 6.4e-5**, both with interior minima. 1536
+  lands one grid step higher. The usable claim: **tune at 3072, deploy at
+  6144** -- 4x fewer parameters on the tuning run, verified at production 30B
+  geometry. Writeup: [experiments/mup/README.md](experiments/mup/README.md).
+- **The first two grids produced confident WRONG verdicts at rc=0**, which is
+  the more useful part of the story. Grid 1 reused the tiny ladder's LR range
+  (6 layers, where this ladder is 64), every width bottomed out at the leftmost
+  point, and the harness reported "same argmin -- TRANSFER" from three
+  identical boundary artifacts. Before that, a rehearsal swept
+  `--optimizer.param-groups.0...lr` and moved only the embedding group's single
+  parameter, leaving the 42-parameter hidden group at default -- loss varied
+  0.006 nats across a 16x span and the harness reported NO TRANSFER from noise.
+  Both are now gated, and each gate was tested against the real data that
+  fooled it plus a synthetic interior-minimum case that must still pass.
+- **Muon's high LR is not Muon's.** The no-rescale arm (`adjuster_lr_ref=False`,
+  job `12474327`) suggested 5.09e-04 against the rescaled arm's 5.68e-04 -- a
+  factor of **1.12**. Removing a 15.677x multiplier from 21.5% of parameters
+  moved the optimum 12%, so the AdamW-path majority anchors the curve. Read
+  5.68e-04 as a property of the hybrid, not of Muon.
+  [lr-finder/agpt/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md).
+- **SophiaG at half LR (1.78e-5) cleared all four prior onset steps** --
+  1,052 in-window steps, **zero** excursions, max grad_norm 0.94, loss 2.879 at
+  step 1579. First arm to get past 1048.
+- **That is not yet evidence the lower LR helps.** At every matched step the
+  full-LR arm was equally clean: 0 excursions in 574 in-window steps below
+  1081, and it diverged anyway at ~1550 on a different trajectory. The fresh
+  arm's SECOND onset came at ~4106 after 2,200 clean steps; this arm has run
+  1,052. The loss cost of halving is near zero (2.879 vs 2.910), so if lower LR
+  did buy stability it would be nearly free -- but the case is indeterminate,
+  not made. Settling it needs ~4200 steps, about 5 more links.
+- **The W&B report was silently omitting two entire arms.**
+  `sophiag-fresh-seed1234` (10 runs, to step 5079) and `sophiag-lowlr-seed1234`
+  (3 runs) were in wandb, collected by `_discover`, and displayed by nothing --
+  including the replicate that finished FIRST on loss. `ARM_GROUPS` enumerated
+  three names and the variant filter knew only the `rerun-` prefix. Now matched
+  by prefix, so a future `-v TAG=...` arm joins without editing the file.
+  Report: 10 groups, 55 runs.
+  [Report](https://wandb.ai/aurora_gpt/agpt-30b-optcmp/reports/30B-optimizer-comparison:-AdamW-vs-Mano-vs-SophiaG-(GBS=960,-constant-LR)--VmlldzoxNzg0MDgwNg==)
+- One tension stays open: the divergence threshold moves sharply with width
+  (loss 7.16 / 12.71 / 41.53 at eta=6.4e-3 across the ladder) while the optimum
+  does not. muP predicts both should be width-invariant; only one is.
+
 ## 2026-08-30 (sunspot) -- muP passes the coordinate check; Muon at 30B wants 18.6x AdamW's LR
 
 - **muP for AdamW went from a design audit to a passing coordinate check in a
