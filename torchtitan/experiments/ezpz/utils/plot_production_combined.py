@@ -470,8 +470,13 @@ def main() -> None:
                     f"{traj.get('label', 'the MDS trajectory')} needs "
                     f"{os.path.basename(traj['csv_path'])}, which is "
                     f"gitignored and lives on the cluster.\n"
-                    f"  Regenerate where the data is, or leave the committed "
-                    f"figures alone."
+                    f"  Rebuild it from W&B (works from anywhere):\n"
+                    f"    python3 torchtitan/experiments/ezpz/utils/"
+                    f"fetch_mds_metrics.py\n"
+                    f"  The source is the aurora_gpt/AuroraGPT project -- a\n"
+                    f"  CHAIN of ~356 runs, with namespaced metric keys\n"
+                    f"  ('loss/lm loss', 'loss/iteration'), which is why it is\n"
+                    f"  not findable by searching for one run or a bare key."
                 )
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
