@@ -16,11 +16,33 @@
 > with `score_boost = 0`. On 08-29 a *larger* job -- `8791192`, 2,304 nodes,
 > 22 minutes eligible, same zero boost -- started ahead of it. On 08-30 there
 > were 2,206 free nodes against our 2,098 ask and it still did not place. The
-> ALCF ticket is written and **has not been sent**. That is the decision this
+> [ALCF ticket](../ops/alcf-ticket-8784460-not-scheduling-20260830.md) is written and **has not been sent**. That is the decision this
 > meeting should make.
 >
 > Full-machine maintenance `M8787441` took all 10,624 nodes at 14:00 UTC today,
 > so nothing places before it clears.
+>
+> **80B (item 6): the diagnosis has not changed and there is still no
+> production run.** Wall 1 is root-caused, the TP=4/LBS=1/bf16 corner is
+> confirmed 4/4 to ~62N, and 80B at 1024N has never left the queue. One new
+> item: **z-loss is a third score-bounding route and has never been tried.**
+> The two routes in the standing list (softcap, QK-Norm) both bound ATTENTION
+> scores and are both blocked on this stack; nothing here bounds the OUTPUT
+> logits, and a repo-wide search finds zero implementations -- every hit is
+> vendored HuggingFace MoE *router* z-loss, a different mechanism. It needs no
+> flex_attention, no compile and no new backward kernel.
+>
+> **MMLU (item 7): the 08-10 "settled" conclusion needs one correction.** Its
+> table stands, but the models are answering with a measured fixed LETTER
+> PRIOR -- p(A,B,C,D) ~ (0.37, 0.32, 0.20, 0.11), which collapses the
+> per-subject variance to the binomial floor. Computed from the real answer
+> keys, **always-D scores 0.2689** and always-A scores 0.2295, so "chance" is
+> a BAND and every number we have sits inside it. The 08-10 implication (buy
+> academic MC data) may hold, but a second explanation was never tested: we
+> score LETTERS while ARC/HellaSwag score TEXT, and both SmolLM2 and OLMES
+> report that distinction dominating below our scale. Job `12474379` tests it
+> directly. Three code paths were also silently evaluating MMLU at 0-shot;
+> fixed and guarded.
 
 ### 1. Aurora production: still nothing
 
@@ -53,8 +75,8 @@ project), queue limits (`max_queued = 10` against our 2; 2,098 inside the
 
 **Open questions for the meeting:**
 
-- **Send the ticket?** It has sat unsent a day while production has been idle
-  five. The Polaris zombie-GPU drain ticket *was* filed 08-30 (three nodes),
+- **Send [the ticket](../ops/alcf-ticket-8784460-not-scheduling-20260830.md)?** It has sat unsent a day while production has been idle
+  five. The [Polaris zombie-GPU drain ticket](../ops/alcf-ticket-zombie-gpu-nodes-20260827.md) *was* filed 08-30 (three nodes),
   so there is a working precedent.
 - **Chase the boost separately?** The previous incarnation of this chain pair
   carried ~10M and started within a day; this pair reads 0 after resubmit. If
@@ -83,6 +105,10 @@ contradicted itself, headed "step 6,100" while its own Latest-checkpoint line
 said 8,700.
 
 ### 2. The 30B optimizer comparison is finished (Sunspot)
+
+![30B optimizer comparison, GBS 960](../experiments/optimizer-comparison/figures/optcmp_30b_gbs960.svg)
+
+Full write-up: [experiments/optimizer-comparison/README.md](../experiments/optimizer-comparison/README.md). SophiaG divergence: [known-bugs/sophiag-stochastic-divergence-30b.md](../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
 
 Both healthy arms ran to the `training.steps=6000` ceiling at 23.59B tokens
 each, `rc=0`, zero NaN/inf, zero skipped gradients.
@@ -122,6 +148,10 @@ of ~8h.
   instrumenting the Hessian-estimate norm, which nobody has run.
 
 ### 3. muP passes, and transfers (Sunspot)
+
+![muP coordinate check: SP vs muP slopes](../experiments/mup/figures/mup_coord_check_slopes.svg)
+
+Full write-up: [experiments/mup/README.md](../experiments/mup/README.md).
 
 muP for AdamW went from an audit to a passing coordinate check in one day, on
 a login node, with no allocation. Slope is `d log2(l1) / d log2(width)`, so 0
@@ -242,6 +272,263 @@ reporting an error. Reverted. The lesson is narrow and worth keeping:
 "do not fail on expected-absent data" was right for the four eval scripts,
 which write nothing, and wrong for the combined plotter, which writes a
 *degraded* artifact. Same symptom, opposite correct response.
+
+
+### 6. 80B: definitive status (unchanged diagnosis, one new candidate fix)
+
+Restated because the standing write-up is from 2026-08-03 and the status keeps
+being read as open. **The 80B NaN is root-caused and there is a
+confirmed-stable corner. Nothing since has contradicted it, and nothing since
+has produced a production run.**
+
+| | status |
+|---|---|
+| Diagnosis | **CLOSED.** Wall 1, bf16 forward-activation overflow (2026-07-14). Optimizer-independent: SophiaG (512N) and mano (62N) NaN with the identical signature, and mano has no Hessian term. Smoking gun: the fp32-activations run `8537349` trains clean and reveals TRUE grad_norms of 21K-79K that bf16 masks to ~5-7. |
+| Stable corner | **CONFIRMED 4/4** (`12469494`/`509`/`510`/`511`): TP=4, LBS=1, bf16, batch via GAS. Three landed at identical loss 9.69-9.70. Validated only to ~62N. |
+| Production run | **NONE, and none since July.** 80B at 1024N has never run (`8574386` never left the queue). |
+| The open question | Not "can 80B train" but "where does the stable corner break". Wall 1's real boundary has never been bracketed. |
+
+**Attempted fixes, unchanged ranking:**
+
+1. `--training.mixed-precision-param=float32` @ TP=4 -- the one config with
+   confirmed-clean training. ~3-5x slower. The guaranteed unblock.
+2. fp32 residual stream -- necessary, NOT sufficient. Per-block prototype
+   trains clean at 4N but still NaNs at dp=192 (`8671243`), full-depth NaNs at
+   ~step 37 (`8673658`). This narrows the overflow to a **bf16 sublayer GEMM**
+   (attention QK^T or the FFN SwiGLU intermediate) rather than the residual
+   add.
+3. Score-bounding -- both known routes blocked on this stack. Softcap
+   hard-codes `torch.compile(flex_attention)`, which `--compile.no-enable`
+   cannot switch off and which is broken/eager on XPU. QK-Norm crashes in
+   BACKWARD (`tensor does not have a device`) at 4N/TP=4, on the exact config
+   where plain `agpt_80b` is 10/10 clean.
+
+**NEW (2026-08-31): there is a third score-bounding route and it was never
+tried.** Items 3's two blocked routes both bound ATTENTION scores. **Nothing
+in this codebase bounds the OUTPUT logits.** Cross-entropy is invariant to a
+constant logit shift, so `log Z = logsumexp(logits)` is free to drift, and
+z-loss (`+ coef * (log Z)^2`) is the standard remedy -- PaLM
+(arXiv:2204.02311 Sec 5, coef 1e-4), Chinchilla, and OLMo-2
+(arXiv:2501.00656, which cites it among its stability changes).
+
+A repo-wide search found **zero** implementations. Every hit is vendored
+HuggingFace code implementing the MoE ROUTER z-loss of the Switch Transformer
+work (arXiv:2202.08906) -- a different mechanism that regularizes expert
+selection and does nothing for a dense model.
+
+This is worth trying because it is cheap and because it attacks the same
+class of failure by a route neither blocker touches: it needs no
+flex_attention, no compile, and no new backward kernel -- just a term in the
+loss. It is NOT a claim that z-loss fixes Wall 1; the evidence points at a
+sublayer GEMM, and bounding the output logits may not reach it. It is the
+cheapest untried item on the list.
+
+### 7. MMLU: the 08-10 conclusion needs one correction (Sunspot)
+
+The 2026-08-10 entry ("MMLU: settled by controlled experiment") is right that
+MMLU never leaves the chance floor and right to eliminate tokens, scale,
+tokenizer and harness. Its table stands. **Its stated implication is
+incomplete, and one number in the surrounding discussion was wrong.**
+
+**What is new: the models are answering with a fixed LETTER PRIOR, measured.**
+Fitting the question-blind model `acc(subject) = sum_L p_L * keyfreq_L(subject)`
+recovers `p(A,B,C,D) ~ (0.37, 0.32, 0.20, 0.11)` and collapses the per-subject
+residual variance to the binomial floor (1.97 -> 0.88 on owm75). Per-subject
+accuracy correlates **+0.64 to +0.76** with how often that subject's answer key
+is "A".
+
+**Constant-letter baselines, computed from the 14,042 `cais/mmlu` answer keys:**
+
+| strategy | score |
+|---|---:|
+| always A | 0.2295 |
+| always B | 0.2465 |
+| always C | 0.2551 |
+| **always D** | **0.2689** |
+
+The key is not uniform, so "chance" for a letter-guesser is the **band
+0.2295-0.2689**, not 0.25 -- a 0.0395 spread against a 0.0036 standard error.
+**Every AuroraGPT MMLU number sits inside that band, and most lose to
+always-D.** No ordering among them is interpretable.
+
+**Why this changes the implication.** The 08-10 entry concluded that MMLU needs
+academic multiple-choice content deliberately added to pretraining -- a
+data-acquisition decision. That may still be true, but it is not established,
+because a second explanation was never tested: our `mmlu` task scores LETTERS
+(`doc_to_choice: ["A","B","C","D"]`) while ARC and HellaSwag score answer
+TEXT. Two primary sources say that distinction dominates at our scale:
+
+* **SmolLM2** (arXiv:2502.02737 Sec 4.3, Fig 6) saw above-chance MMLU in the
+  cloze formulation while the multiple-choice formulation **only cleared
+  chance after 6T tokens**.
+* **OLMES** (arXiv:2406.08446) on OLMo-7B: *"Around 400B tokens, the model
+  starts gaining the ability on the MCF format... Before that point, there is
+  good signal from CF while MCF is random."* It recommends reporting
+  **max(CF, MCF)**.
+
+That also bears on the OLMo-2 comparison: **OLMo-2 evaluates with OLMES.** If
+its 1B's +17.4 MMLU from Dolmino is a cloze or max number and every number of
+ours is letters-only, the two were never the same measurement.
+
+Job `12474379` runs both formats on 30B step-2000, 5-shot, same checkpoint and
+tokenizer, `--limit 40` per subject -- the only variable is `doc_to_choice`.
+
+**And a correction to the dolmino discussion.** Dolmino was treated as the
+higher-quality mid-training mix. Measured over the data-lists directly:
+
+| corpus | olmo-mix-1124 | dolmino-mix-1124 |
+|---|---:|---:|
+| dclm | 94.80% | **89.18%** |
+| pes2o | 1.47% | 6.88% |
+| flan | -- | 1.97% |
+| math | 0.32% | 1.36% |
+
+Dolmino is **still 89% DCLM** -- the same web distribution with ~5.6 points
+moved into peS2o plus 2% FLAN. Compare SmolLM2 stage 1 at **60% FineWeb-Edu /
+40% DCLM**, where FineWeb-Edu's own ablation reaches 33.6% MMLU at 38B tokens.
+That is a change of KIND; dolmino is a change of DEGREE. It is consistent with
+the MDS dolmino arm scoring 0.2413 in the 08-10 table -- the lowest row.
+
+**Eval bugs found and fixed while establishing the above** (commits
+`60fe6bb24`, `5ab9e50f6`):
+
+* **Three code paths evaluated MMLU at 0-shot** while reporting normally.
+  `eval30b.pbs:191` passes `--num_fewshot 0` explicitly;
+  `oneoff/reeval-ropefix-sweep.sh` put mmlu in `TASKS` with no `SHOTS_SPEC` and
+  carried its own inline driver that never passed `num_fewshot` at all. Every
+  30B MMLU number on disk is 0-shot (`n-shot=[0]` in the result files). The ten
+  backfill scripts DID set 5-shot, so the 2B/20B ladder numbers are unaffected.
+* The drivers now **abort** when a task is requested at a shot count other than
+  its published convention, with `ALLOW_OFF_CONVENTION_SHOTS=1` as an explicit
+  escape hatch. 9 test cases including the four that must still pass.
+* `n-shot` is now **persisted** to `results.json`; previously it was discarded,
+  which is why the 0-shot diagnosis had to be recovered from job stdout.
+* Aggregating all 61 `mmlu_*` keys **double-counts** the four category rollups
+  and reads ~0.005 high. Publish lm-eval's own sample-weighted `mmlu` group
+  key: 0.2476 / 0.2482 / 0.2393 for edu100 / owm100 / owm75.
+
+Tool: `scripts/eval/mmlu_letter_baseline.py` prints the constant-letter
+baselines and fits the letter prior to any results.json. Write-up:
+[`evals/mmlu-letter-prior-at-chance.md`](../evals/mmlu-letter-prior-at-chance.md).
+
+### 8. Dolmino stage 2 DID run, at a gentle LR, and MMLU did not move (Sunspot)
+
+[The CPT page](../production/cpt/README.md) calls the LR-shock hypothesis
+open: its dolmino pilot re-warmed a
+converged base to peak 2.28e-5 and lost 7.4pp HellaSwag / 10.4pp ARC-Easy, and
+the gentle-LR retry stopped at step-1200 without an eval. **That question is
+already answered by the MDS 2B, at 8x the pilot's budget.**
+
+MDS stage 2 is dolmino:
+`DATA_FILE_LIST=ALCF/data-lists/aurora/dolmino-mix-1124-fused-file-list.txt`,
+`LR=2.17e-5`, `LR_DECAY_STYLE=constant`, no re-warm
+([train_aGPT_2B_sophiag_stage2.sh](https://github.com/argonne-lcf/Megatron-DeepSpeed/blob/main/train_aGPT_2B_sophiag_stage2.sh)).
+
+**The 0.2413 checkpoint is the stage-2 TERMINUS**, established by arithmetic
+rather than by a label: `global_step140352` x (GBS 6144 x seq 8192) =
+7,064,147,460,096 tokens, matching W&B `consumed_train_tokens` exactly, and
+140,353 would overshoot the stage-2 `TRAIN_TOKENS` budget. Stage boundaries
+recover to the exact iteration -- 92,859 (stage 1 -> 2) and 140,352 (stage 2 ->
+3) -- which `utils/plot_production_combined.py:69` independently hardcodes.
+
+| stage | iters | tokens | mix | MMLU |
+|---|---|---|---|---:|
+| 1 | 0 - 92,859 | 4.674T | olmo-mix-1124 | 0.2579 (flagship) |
+| **2** | **92,860 - 140,352** | **2.390T** | **dolmino-mix-1124-fused** | **0.2413** |
+| 3 (mix) | 140,353 - 154,391 | 0.707T | stage3-mix | 0.2463 |
+| 3 (math/code) | 140,353 - 154,391 | 0.707T | nvidia-math1-code2 | 0.2591 |
+
+**So the hypothesis splits, and both halves matter:**
+
+* **For MMLU it is answered, negatively.** 2.390T dolmino tokens at a constant,
+  never-re-warmed LR left MMLU at 0.2413 -- below always-D (0.2689) and below
+  the stage-1 flagship. Not an LR artifact.
+* **For the commonsense benchmarks the pilot damaged, the LR-shock explanation
+  SURVIVES.** Across the stage-1 -> 2 boundary MDS *improved* every one:
+  HellaSwag +1.17pp, ARC-Easy +4.16pp (climbing to a 0.6985 peak mid-stage-2),
+  ARC-C +2.61pp, Winogrande -0.10pp. Same mix family, opposite sign from the
+  re-warmed pilot's -7.4 / -10.4. The CPT doc's own diagnosis holds for those
+  tasks.
+
+**Why dolmino was never the MMLU lever anyway.** Measured over the data-lists
+(1,438 and 324 files, both normalized):
+
+| corpus | olmo-mix-1124 | dolmino-mix-1124 |
+|---|---:|---:|
+| dclm | 94.80% | **89.18%** |
+| pes2o | 1.47% | 6.88% |
+| flan | -- | 1.97% |
+| math | 0.32% | 1.36% |
+
+Dolmino is still **89% DCLM** -- the same web distribution with ~5.6 points
+moved into peS2o plus 2% FLAN. SmolLM2 stage 1 is 60% FineWeb-Edu / 40% DCLM,
+and FineWeb-Edu's ablation reaches 33.6% MMLU at 38B tokens. Change of KIND vs
+change of DEGREE.
+
+**Two data cautions found on the way, both worth knowing before anyone plots
+MDS again:**
+
+1. The cluster-local `2b-mds/loss_data/train_metrics.csv` (gitignored, not in
+   the repo) is **contaminated with a foreign run family** -- 20 of 78 run
+   segments carry median grad_norm 3.1-36.1 against the production SophiaG
+   signature of ~0.48, interleaved throughout rather than confined to a stage.
+   The apparent loss "cliffs" at both stage boundaries are the CSV switching
+   run families, NOT data-mix transitions; filtered to production segments the
+   stage-1 -> 2 transition is a smooth 2.635 -> 2.487. `pull_wandb_loss.py`
+   filters on optimizer/hidden_size/num_layers/seq_length/global_batch_size,
+   which does not exclude them. (Reported by the analysis agent; I could not
+   re-verify it from this checkout because the CSV is gitignored.)
+2. The 28-checkpoint MDS eval sweep **never ran MMLU** -- `eval_mds_sweep.sh`
+   hardcodes hellaswag/arc_easy/arc_challenge/winogrande at `num_fewshot=0`.
+   That is why the MMLU numbers came separately from job `8736655`.
+
+Also: `eval-mmlu-harness-check.sh:19` and the 2b-mds READMEs still label this
+checkpoint "stage-3 / 7.77T". It is stage-2 / 7.064T. The correction exists in
+`journal.md:1345` (the `ntok7770B` directory name is a naming-convention
+TARGET, not consumed tokens) but was never applied in place.
+
+### 9. Muon at 30B is a 21.5% hybrid, and the real thing does not run
+
+`agpt_30b_olmo2tok_muon` is **not a Muon run.** Muon partitions by tensor
+shape (`p.ndim == 2 and max(p.shape) <= muon_max_dim`), and at dim 6144 /
+ffn 16384 that leaves only the attention projections on the Muon path.
+Measured on a meta-device build: **21.5% of parameters (5.64B of 26.20B).**
+The other 78.5% run an internal AdamW branch.
+
+The LR follows the majority, which was measured rather than assumed: the
+no-rescale arm ([`12474327`](../experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md), `adjuster_lr_ref=False`) suggested 5.09e-04
+against the rescaled arm's 5.68e-04 -- **a factor of 1.12 for a 15.677x change
+in how the Muon minority is stepped.** So 5.68e-04 is close to what the
+AdamW-path parameters want, not what Muon wants.
+
+**The hybrid is stable where it has been run.** At agpt_2b/2N/1000 steps
+`speedrun_2b_muon` won its competition outright at loss **3.557** (vs
+AdamW+QK-Norm 3.569), six Muon variants all completed, and 2x the winning LR
+(4.8e-3) degraded gracefully to 4.391 rather than NaN. `torch.optim.Muon`
+matches our custom implementation on XPU. Caveat: agpt_2b is dim 2048, so
+everything is under the cutoff -- that run was far MORE than 21.5% Muon. The
+30B hybrid has only ever been swept, never trained to convergence.
+
+**Attempting the real thing failed, and the reason was already documented.**
+Raising the cutoff to 20000 (`agpt_30b_olmo2tok_muon_ffn`, 95.3% of params on
+Muon) went **NaN on the second optimizer step at lr=1e-6** -- job `12474361`,
+loss 11.9940 -> nan, all 90 sweep points NaN. Newton-Schulz casts to bf16 and
+`A @ A` overflows at large dimensions; `zeropower_via_newtonschulz5`'s own
+docstring says so and adds *"Muon is not currently viable for 80B dense
+models."* **The 10000 cutoff was doing two jobs, not one:** excluding the
+embedding/head AND keeping the FFN under the bf16 overflow threshold.
+
+Fixed (`37c6b90c8`): a `_NS_BF16_SAFE_DIM` ceiling that refuses such a config
+at construction, naming the offending tensor. `muon_ffn` is kept marked
+BLOCKED with the unblock recipe (fp32 NS accumulation -> 2N smoke -> raise the
+ceiling -> only then measure an LR).
+
+**A separate silent-failure fix (`c9655aa56`).** That job exited **rc=0** having
+written 90 rows of NaN to CSV, an NPZ and a PNG, warning only *"could not
+detect blow-up point. Try increasing max_lr or fraction"* -- advice pointing
+away from the cause, since the model was NaN at the smallest swept LR. The LR
+finder now reports an ERROR distinguishing "every loss is NaN, this is a broken
+model not an LR range" from "the sweep never blew up".
 
 
 ## 2026-08-26
