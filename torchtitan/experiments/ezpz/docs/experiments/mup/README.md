@@ -506,6 +506,57 @@ Note the failing modality is a single module with a clean, reproducible signal
 -- not a diffuse failure. That is a good position: the remaining work is
 bounded.
 
+## 5.7 STAGE 4: the two upper rungs transfer; the base rung needs a wider grid
+
+Three runs. The first two are recorded because each was a wrong verdict the
+harness produced at rc=0, and the gates that now catch them were written from
+these cases.
+
+**12474329 -- grid two decades too high.** Every width bottomed out at the
+leftmost point (1536: 5.485, 3072: 5.437, 6144: 5.308) with loss rising
+monotonically from there. The harness reported "same argmin at every width --
+TRANSFER". Three identical boundary artifacts, not three measurements. Cause:
+the grid was reused from the tiny-ladder rehearsal, which is 6 layers where
+this ladder is 64, and depth pushes the usable LR band down.
+
+**12474330 -- corrected grid, real minima at the top two rungs:**
+
+| eta | 1536 | 3072 | 6144 |
+|---:|---:|---:|---:|
+| 1e-6 | 9.826 | 9.540 | 9.158 |
+| 4e-6 | 8.713 | 8.059 | 7.345 |
+| 1.6e-5 | 7.322 | 6.544 | 6.176 |
+| **6.4e-5** | 5.868 | **5.521** | **5.505** |
+| 2.56e-4 | **5.672** | 6.010 | 5.966 |
+
+**3072 and 6144 both minimize at 6.4e-5**, with genuine interior minima --
+curves turning up on both sides. A 2x width step moved the optimum not at all,
+and 6144 IS the production 30B geometry. That is the transfer signal.
+
+1536 is pinned to the right edge, so its optimum is outside the grid and the
+boundary gate refuses the run. Correctly: a three-rung claim cannot rest on a
+rung that never bracketed its minimum.
+
+**12474332 -- grid extended right** (1.6e-5 .. 1.024e-3) to bracket 1536,
+dropping the two leftmost points that were far up the slope at every width.
+
+### What can be said now, and what cannot
+
+**Can:** between 3072 and 6144, at fixed head_dim=128 / L=64 / H/dim=2.667,
+the muP optimum does not move. Those are the two widths closest to production
+and the ones a transfer claim would be used for.
+
+**Cannot:** that muP transfers across the full 4x ladder. 1536's optimum is
+unmeasured. Nor that it transfers at production TOKEN scale -- these are
+60-step runs at seq 2048, and the failure modes documented in section 5.1
+(trainable norm gains, weight decay) are about full training runs.
+
+**Also worth holding onto:** run 12474329 showed the blow-up threshold moving
+sharply with width in the upper LR range -- at 6.4e-3, loss 7.16 / 12.71 /
+41.53 across the ladder. Under working muP that should be roughly
+width-invariant. The optimum transferring while the divergence threshold does
+not is a real tension, not yet resolved.
+
 ## 6. Staged plan
 
 Each stage is gated on the previous one and produces a decision, not just an

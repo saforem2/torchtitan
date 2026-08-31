@@ -48,6 +48,14 @@ set -o pipefail
 # the production arms actually sit (AdamW 3.05e-05, Mano 5.61e-05, SophiaG
 # 3.55e-05), so an interior minimum should exist at every rung.
 #
+# THIRD GRID (12474331). 12474330 found genuine interior minima at 3072 and
+# 6144, both at 6.4e-5 -- the transfer signal, at production geometry. But
+# 1536 was pinned to the RIGHT edge (2.56e-4), so its optimum was still
+# outside the grid and the boundary gate correctly refused the run. This grid
+# drops the two points nothing needed (1e-6, 4e-6 were far up the left slope
+# at every width) and adds 1.024e-3 to bracket 1536. Four points, same
+# per-arm cost, one fewer arm per rung.
+#
 # The first attempt did produce one real signal worth keeping: at 6.4e-3 the
 # loss went 7.16 / 12.71 / 41.53 as width grew, so the blow-up threshold is
 # strongly width-DEPENDENT up there. Under working muP it should not be. That
@@ -74,7 +82,7 @@ echo ""
 # Each arm is one short training run at a fixed eta. Launched through
 # `ezpz launch` so all 16 nodes participate; the harness itself only
 # orchestrates and parses.
-LRS="1e-6,4e-6,1.6e-5,6.4e-5,2.56e-4"
+LRS="1.6e-5,6.4e-5,2.56e-4,1.024e-3"
 STEPS=60
 SEQ=2048
 
