@@ -4,13 +4,26 @@
 **Merged:** 48 commits past `c537bca68`. 1 textual conflict (torchft/trainer.py,
 upstream-owned, took theirs).
 
+> [!IMPORTANT]
+> **Status updated 2026-08-31: the #4121 blocker is cleared.** The
+> "Remaining blocker" section at the bottom is a record of what the port
+> cost, not an open item. `agpt_2b`, `agpt_20b` and `agpt_30b_olmo2tok` all
+> build on this tree at `num_tokens_per_microbatch_per_dp_rank = 8192 ==
+> max_context_length`, and syncs 82 and 83 have landed on top of the 80th
+> (see [`upstream-sync.md`](./upstream-sync.md)).
+>
+> The **data-mix arms are still deferred** -- the `NotImplementedError` in
+> `blendcorpus_builder.py:201` and the `c4_test` raise in
+> `agpt/config_registry.py:414` are both still in the tree, for the reasons
+> given below. That part of this page stands.
+
 ## Status
 
 | | |
 |---|---|
 | imports clean | trainer, agpt/moe config_registry, blendcorpus |
-| production configs BUILD | not yet -- blocked on the `local_batch_size` unit change |
-| data-mix arms | **BROKEN by design** (see below) |
+| production configs BUILD | **yes, as of 2026-08-31** -- the `local_batch_size` unit change is ported |
+| data-mix arms | **BROKEN by design** (see below) -- still true |
 
 ## What the deferral actually costs
 
@@ -48,7 +61,7 @@ the honest failure.
 `stopping_strategy="all_exhausted"` also has no analogue, and
 `loader.py:92-97` raises outright when `dp_world_size > 1 and not repeat`.
 
-## Remaining blocker
+## The #4121 port (was "Remaining blocker"; DONE as of 2026-08-31)
 
 `TrainingConfig` no longer accepts `local_batch_size`. This is #4121's
 sequences -> tokens change, NOT a rename:

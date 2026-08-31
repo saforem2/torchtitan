@@ -2,14 +2,14 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-07-24
+> Last updated: 2026-08-31
 >
 > **NOTE (2026-07-24):** the 2B 256N chain is **DONE** at step-92,859 =
 > 4.674T tokens (100%), loss ~2.65. The scores below now run through the
 > final **step-92,859** -- the tail backfill (step-86,500 -> 92,859 at
 > 500-step cadence + the final step-92,859 checkpoint, 14 ckpts, job
 > 8638581, script
-> [`scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh`](../../../scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh))
+> [`scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh`](../../../../scripts/eval/oneoff/eval-backfill-2b-256n-tail-86500-92859.sh))
 > has landed and is reflected in the canonical table below.
 > The modern eval suite (mmlu 5-shot, gsm8k 5-shot, arc_challenge 25-shot)
 > was backfilled 2026-07-24 across the 2B chains (2B 256N: mmlu ~8 steps +
@@ -112,6 +112,16 @@ LR=3.22e-5 (vs canonical LR=2.28e-5).
 - Will be evaluated at step 1000/2000 with the same lm-eval pipeline,
   then plotted on the same v2-vs-MDS figure as a third v2 line
   (LR=3.22e-5).
+
+> **OUTCOME 2026-08-31: this never happened, and the open question is
+> unanswered.** Both jobs ran and finished (8467141 ~4h, 8467142 ~1h53m) but the
+> fork only reached **step 200** -- an order of magnitude short of the
+> step-1000/2000 comparison points. It is `wandb_only` in
+> [`production/metrics/manifest.json`](../../../production/metrics/manifest.json)
+> (`2b_v2_512_lr3.22e-5`, rows 200, steps 1..200, 0 checkpoints on disk), so no
+> lm-eval was ever run against it and there is no third line in the figure above
+> -- `plot_eval_overview.py` lists only the `256n` and `512n` eval dirs. Whether
+> sqrt(2)-LR scaling closes the per-token gap is still untested.
 
 ## v2 — full sweep (canonical table)
 

@@ -21,6 +21,11 @@ All at TP=4 / LBS=1 / bf16 / AdamW (except the LR-finder optimizer sweep),
   **CAVEAT:** this finder ran at GBS=192, ~32x below the ~6144 production
   target, and optimal LR shifts with batch -- a corrected GBS=6138 sweep
   (jobs 12469715-18) is running; these are provisional / a ranking only.
+  **The corrected sweep LANDED (2026-06-27, at GBS=6144) and the numbers below
+  do not transfer:** AdamW's ceiling collapses to ~7.4e-7 (NaN at 1.36e-6),
+  mano U-mins at 1.6e-5, sophiag at 2.5e-6 with the lowest loss. See
+  [2026-06-27-80b-lr-finder-production-batch.md](2026-06-27-80b-lr-finder-production-batch.md).
+  A later convergence run then showed none of those hold as CONSTANT LRs.
 - **Do NOT linearly scale LR up with batch.** The GBS=5952 (16x) run with
   a 16x-linear-scaled LR=1.6e-5 NaN'd at **step 7** -- *far worse* than
   the same batch at flat LR=1e-6 (step 29). 1.6e-5 sits at the LR-finder's
@@ -107,13 +112,20 @@ boundary. The bisect raised N at fixed TP=4/LBS=1/GAS=1:
 |---|---|---|---|---|---|
 | 12469628 | 64 | 192 | 1.03x | loss 9.68, grad_norm 16.5 | **clean, 0 NaN** |
 | 12469629 | 88 | 264 | 1.42x | loss 9.69, grad_norm 13.0 | **clean, 0 NaN** |
-| 12469630 | 108 | 324 | 1.74x | (queued) | pending |
+| 12469630 | 108 | 324 | 1.74x | -- | **never ran** -- qdel'd 2026-07-01 (see note) |
 
 **dp=192 and dp=264 both ran 30 NaN-free steps.** The only NaN ever seen
 on the dp-degree axis remains 12469492 (TP=2, dp=372). So the safe corner
 extends past 186 -- at least to 264, with 324 pending. The exact cliff is
 somewhere in (264, 372], still unmapped (dp=372 needs 124N, beyond
 Sunspot's 114 usable nodes; confirmable only on Aurora).
+
+> **NOTE 2026-08-31 -- dp=324 was never run.** `12469630` sat queued ~5 days at
+> 112N and was **qdel'd 2026-07-01** as queue hygiene, to unblock the 80B
+> convergence jobs. The dp ceiling had already been disproved by dp=192 and
+> dp=264, so the run was judged low-value; it is a cancellation, not a result.
+> The exact cliff in (264, 372] is therefore still unmapped. This does not
+> change the section's conclusion, which rests on the two arms that DID run.
 
 ## Synthesis: what actually bounds the 80B corner
 
@@ -135,10 +147,14 @@ raise LR for larger batches.
 
 - adamw + muon LR-finder curves are missing (cold-cache race); rerun on a
   warm cache to complete the optimizer comparison.
-- dp=324 (12469630) still queued; dp=372 needs Aurora.
+- ~~dp=324 (12469630) still queued~~ -- **qdel'd 2026-07-01, never ran**
+  (see the note in section 3); dp=372 needs Aurora.
 - Reproducibility of the flat-LR GBS=5952 step-29 NaN (12469699, queued)
   not yet in -- whether that mild batch effect is deterministic vs
-  XPU-execution-order nondeterminism is still open.
+  XPU-execution-order nondeterminism is still open. **Still open as of
+  2026-08-31:** no result for `12469699` is recorded anywhere in this tree.
+  The 80B effort went dormant after the 2026-07-03 512N NaN, so this was
+  never revisited.
 - The LR-finder ran at GBS=192 (corrected sweep at GBS=6138 in flight); a batch-size sweep of the LR curve itself
   (does the optimum shift with GBS?) was not done.
 
@@ -151,5 +167,5 @@ raise LR for larger batches.
 | 12469698 | GBS=5952 + LR=1.6e-5 (16x) | NaN @ step 7 (LR too high) |
 | 12469628 | dp=192 bisect | clean 30 steps |
 | 12469629 | dp=264 bisect | clean 30 steps |
-| 12469630 | dp=324 bisect | queued |
-| 12469699 | GBS=5952 flat-LR reproducibility | queued |
+| 12469630 | dp=324 bisect | **qdel'd 2026-07-01, never ran** |
+| 12469699 | GBS=5952 flat-LR reproducibility | no recorded result (still open) |

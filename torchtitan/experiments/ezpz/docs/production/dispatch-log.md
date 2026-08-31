@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-08-25
+> Last updated: 2026-08-31
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -35,6 +35,7 @@ Reading rules:
 | `8756957` | 08-16 | **12h00m / 12h (100%)** | **2B-512 STAGE 2 3,301->7,731** (dolmino CPT) | 20B-512 9,101->9,695 | CCL KVS timeout at init | 2B-512clr 16,901->21,309 | **ckpt-key (3rd time)** | 3/5 |
 | `8760249` | 08-17 | **12h00m / 12h (100%)** | CCL KVS timeout -> **bad_alloc** at init | 20B-512 9,601->10,200 | 20B-256 10,301->11,100 | CCL KVS segfault at init | **ckpt-key, 4th time -- OPTIMIZER namespace** | 2/5 |
 | `8764675` | 08-20 | **12h00m31s / 12h (100%)** | CCL KVS timeout -> segfault at init | 20B-512 10,101->10,699 | 20B-256 11,001->11,800 | **bad_alloc** | SophiaG `update_hessian`: `'dict' object has no attribute 'mul_'` | 2/5 |
+| `8773440` | 08-26 | 5h13m / 12h (43%) | no-start | no-start | 20B-256 **+201** (2.31488 -> 2.24577) | 2B-512clr **+504** (2.74535 -> 2.73836) | 2B-256 **+782** (2.56449 -> 2.54807) | 3/5 |
 
 **Walltime column.** `8744247` and `8756070` are `resources_used.walltime` from
 `qstat -xf` (authoritative). The rest predate PBS history retention and are
@@ -55,7 +56,8 @@ seat actually did; the umbrella log is not authoritative for anything after
 its final line.
 
 Read the percentage as *allocation actually used*, not as success -- `8714502`
-burned 67% of a 24h slot on nothing, and six of nine umbrellas used under 40%.
+burned 67% of a 24h slot on nothing, and seven of the twelve non-smoke
+umbrellas in this table used under 40%.
 That is the single largest source of wasted 2,098-node allocation in this
 table, and it is almost entirely startup faults and infra kills rather than
 training problems.
@@ -65,9 +67,9 @@ training problems.
 asked for 12h or less; the 24h dispatches that kept dying young are the
 contrast. Treat 12h as the default ask.
 
-What the last two add to the taxonomy: **t0 died at init in both**, so the 2B
-stage-2 chain has been stalled since 08-16 while t1/t2 (the two 20B chains) ran
-the full window each time. That is where the +910 and +1,431 steps the
+What `8760249` and `8764675` add to the taxonomy: **t0 died at init in both**,
+so the 2B stage-2 chain has been stalled since 08-16 while t1/t2 (the two 20B
+chains) ran the full window each time. That is where the +910 and +1,431 steps the
 dashboard was missing came from. And the t4 seat's failure has moved PAST the
 checkpoint-key rename this log records three times -- in `8760249` the shim
 fired but `optimizer.state...qkv_linear.wq.weight.step` was still missing, and
@@ -75,6 +77,24 @@ in `8764675` the load SUCCEEDED (62s) and then 3,073 ranks died in SophiaG
 `update_hessian` on `'dict' object has no attribute 'mul_'`, i.e. the
 pre-#3623 nested->flat optimizer format. Converting step-9500 fixed it: smoke
 `8772046` loaded the converted seed in 10.42s and trained 8 clean steps.
+
+**That streak ended with `8773440`** (08-26), which used 5h13m of a 12h slot
+(`Exit_status=-14`) -- 43%. Two separate losses, neither a training fault:
+ezpz 0.21's progress detector matched `\bstep=\d+` while torchtitan prints
+`step: `, so all three seats that were training scored no-progress, were filed
+`stuck_pre_training`, and were abandoned (fixed in ezpz 0.27.3, pinned by
+`tests/failover/test_progress_marker_contract.py`); and every seat was gone by
+04:27 while PBS did not reap the shell until 09:29, leaving the slices idle
+(`supervise_trainer()` now relaunches, guarded by a `qstat` deadline, a
+quick-death cap, `rc=0`, and an off switch). **Both 512N seats never started
+and the reason is not established.** Seat-to-chain attribution here is by node
+count plus the seat's reported loss: the +504 seat's 2.74535 matches the
+constant-LR fork's tip, while the 2B-256 seat's 2.56449 matches no canonical
+chain (the canonical 2B-256 finished at 4.674T / 2.652), so read the t3/t4
+labels as the umbrella's slot map, not as a disk-verified chain mapping.
+
+**`8773440` is the last job that trained anything.** As of 2026-08-31 nothing
+has run since 2026-08-26 -- see "Queued and unproductive since 08-26" below.
 
 **`8756957` is the first umbrella to use 100% of its allocation** (12h00m23s of
 12h, `Exit_status = -29` = walltime expiry, not a fault), beating `8744247`'s
@@ -184,6 +204,25 @@ resumable as-is. Fixed in `cc4e22cfa`.
 | `8756071` | 08-14 | 20B-256 | 266 | **Q.** Continuation from step-9,800 (umbrella 8744247 ended at walltime) |
 | `8756072` | 08-14 | 2B-512 constlr | 522 | **Q.** Continuation from step-16,900 (umbrella t3 lost a node at 16,984) |. |
 
+### Queued and unproductive since 08-26 (state as of 2026-08-31)
+
+Nothing in this section trained a production step. They are here because the
+scope of this log is *every job that targets a production chain*, and a job
+that held nodes and produced nothing is exactly what the per-chain READMEs
+cannot show.
+
+| Job | Date | Chain | Nodes | Outcome |
+|-----|------|-------|------:|---------|
+| `8769730` | 08-21 | umbrella (2098N successor) | 2098 | **qdel'd, never ran.** Submitted ~61s after the per-seat RoPE fix `efcae5419`, and PBS snapshots the script at qsub, so it very likely captured the pre-fix `complex` t3 row. Replaced with `8773440` (submitted and confirmed `Q` BEFORE the `qdel`, so no window without a successor). |
+| `8773440` | 08-26 | umbrella (5 seats) | 2098 | **The last job that trained anything.** 5h13m / 12h, `Exit_status=-14`. See the umbrella table above. |
+| `8775285` | 08-26 | 30B LR-finder umbrella | -- | **Ran 1h32m, exited 0, produced nothing.** All four seats `rc=143`, no suggested LR in any log. Exit code 0 is not evidence a job did anything. Not a pre-training chain job; recorded here because it consumed a dispatch. |
+| `8784460` | 08-26 | umbrella (2098N) | 2098 | **`Q` since Wed 08-26 13:22 UTC**, `score_boost = 0`, ~120h eligible as of 2026-08-31 and still not started. Reservations, allocation, queue limits, holds and node pinning were all ruled out locally; the previous incarnation of this pair carried a ~10M boost and started within a day, and a fresh `qsub` starts at 0. ALCF ticket **drafted but NOT SENT**: [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../ops/alcf-ticket-8784460-not-scheduling-20260830.md). |
+| `8784462` | 08-26 | umbrella continuation | 2098 | **`H`** on `afterany:8784460`. Cannot move until its predecessor does. |
+
+**Full-machine maintenance `M8787441` (10,624 nodes) runs 2026-08-31 14:00 UTC
+to Tue 04:00**, so nothing seats across that window either. The gap since
+08-26 is a queue and calendar problem, not a training one.
+
 ## Evals (capacity queue)
 
 All complete; none queued as of 2026-08-10.
@@ -196,10 +235,24 @@ All complete; none queued as of 2026-08-10.
 | `8736838` | MMLU harness validation vs public models | complete -- Llama-3.2-1B 0.3121, Llama-3.1-8B 0.6530 |
 | `8744298` / `8744299` | 256n 7,900-8,300 / 512n 7,150-7,600 | complete; first evals fully under shot-namespaced keys |
 
-**Coverage vs disk:** 20B-256 evaluated through 8,300 = its head. 20B-512
-evaluated through 7,600 but the chain is at 8,000 and still advancing under
-8744245 -- wait for that job to finish, then eval the whole tail at once rather
-than chasing a moving head.
+**Coverage vs disk (2026-08-31).** The table above evaluated 20B-256 through
+step 8,300 and 20B-512 through 7,600. Both chains have moved a long way past
+that and neither is advancing: the disk-audited heads are **20B-256
+step-12,000** and **20B-512 step-10,600**, idle since 2026-08-26. So there is
+now a ~3,700-step and ~3,000-step uneval'd tail, and the old advice to "wait
+for the job to finish rather than chase a moving head" no longer applies --
+the head has not moved in five days, so the whole tail can be eval'd in one
+pass whenever capacity is available.
+
+<details>
+<summary>Original note (kept -- it is what the 08-25 revision said)</summary>
+
+> **Coverage vs disk:** 20B-256 evaluated through 8,300 = its head. 20B-512
+> evaluated through 7,600 but the chain is at 8,000 and still advancing under
+> 8744245 -- wait for that job to finish, then eval the whole tail at once
+> rather than chasing a moving head.
+
+</details>
 
 ## Keeping this current
 

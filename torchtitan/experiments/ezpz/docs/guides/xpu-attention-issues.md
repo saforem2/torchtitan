@@ -1,5 +1,7 @@
 # XPU Attention Issues
 
+**Last updated:** 2026-08-31
+
 Summary of SDPA, Flash Attention, and FlexAttention issues on Intel XPU
 (Aurora / Sunspot) with `aurora_frameworks-2025.3.1` (PyTorch 2.10.0a0).
 
@@ -128,10 +130,41 @@ torch.bfloat16, torch.float16 currently.
 ```
 
 For SDPA configs this is a **non-fatal warning** (autocast silently disables).
-For FlexAttention, the Triton compilation path interacts differently with
-the disabled autocast, causing failures.
+
+> [!IMPORTANT]
+> **CORRECTED 2026-08-19: the fp32 autocast warning was never what broke
+> FlexAttention on XPU.** The warning above is real and still fires, but it is
+> cosmetic on both paths. The flex configs were failing for two unrelated
+> reasons, both since fixed:
+>
+> 1. blendcorpus never emitted `positions`, so core never built the
+>    `BlockMask` and the model got `None` (`AssertionError: attention_masks
+>    must be instance of BlockMask, got <class 'NoneType'>`).
+> 2. the EOD token id was read off `_bc_cfg`, a blendcorpus-owned object that
+>    does not expose it, so `getattr(..., None)` silently returned `None`.
+>
+> Fixing those exposed a third issue -- FullAC re-runs the MoE router on the
+> recompute pass and reassigns tokens (560 vs 559) -- which selective AC
+> solves, because it keeps `aten.topk.default` as MUST_SAVE. See
+> [known-bugs/moe-flex-attention-blockmask.md](known-bugs/moe-flex-attention-blockmask.md).
 
 ### Affected configs
+
+| Config | Attention | XPU status |
+|--------|-----------|-----------|
+| moe debugmodel, 500M, 2B, 4B, 7B | SDPA | OK (warning only) |
+| `moe_10b_2b` | FlexAttention | **OK** (fixed 2026-08-19, 5/5 at 79.95% mem) |
+| `moe_10b_2b_sdpa` | SDPA | **OK** (control) |
+| `moe_small` | FlexAttention | **OK** (fixed 2026-08-19, 5/5 at 72.64% mem) |
+| `moe_16b`, `moe_671b` | FlexAttention | untested since the fix |
+
+Both fixed flex configs run with **no flags** (job 12473388, 2N, 5 steps,
+defaults only). `moe_16b` and `moe_671b` are also `attn_backend="flex"` but
+do not set `dataloader.emit_positions = True`, and neither has been run since
+the fix -- their status here is "unknown", not "working". (There is no
+`moe_236b` in the registry; the old row named a flavor that is not a config.)
+
+<details closed><summary>Previous (incorrect) status table, kept for search</summary>
 
 | Config | Attention | XPU status |
 |--------|-----------|-----------|
@@ -140,9 +173,15 @@ the disabled autocast, causing failures.
 | moe 10B_2B_sdpa | SDPA | **OK** (workaround) |
 | moe small, 16B, 236B, 671B | FlexAttention | **Broken** |
 
-### Fix
+</details>
 
-Created `_sdpa` variants that replace FlexAttention with SDPA:
+### The `_sdpa` variants
+
+These predate the flex fix and were the workaround at the time. They are
+**still useful, now as controls** rather than as the required path: they
+passed 5/5 before and after both fixes (74.05% and 94.54% memory, unchanged),
+which is the evidence that the maskless path was not perturbed. Keep them in
+the test matrix for that reason.
 
 ```python
 def _10b_2b_sdpa() -> moeModel.Config:
@@ -175,7 +214,10 @@ os.environ.setdefault("DISABLE_LLVM_OPT", "1")
 Upstream PR pytorch/pytorch#179586 fixed the Triton pin, and torchtitan
 commit `878041cb` removed the `DISABLE_LLVM_OPT` workaround.
 
-Not relevant for ezpz XPU configs (we use SDPA, not FlexAttention).
+This section used to end "not relevant for ezpz XPU configs (we use SDPA, not
+FlexAttention)". That is no longer true: `moe_small` and `moe_10b_2b` run
+FlexAttention on XPU as of 2026-08-19. The Triton/LLVM issue itself stays
+resolved -- neither config needs `DISABLE_LLVM_OPT`.
 
 ---
 
@@ -221,7 +263,15 @@ is to **not use compile for MoE models**.
 |-----------|-----------|---------|-------|
 | agpt (dense) | `XPUScaledDotProductAttention` | **Yes** (+8-31%) | Auto-selected on XPU |
 | MoE (SDPA variants) | `ScaledDotProductAttention` | **No** (-35%) | Dynamic routing breaks compile |
-| MoE (FlexAttention) | — | — | **Not supported on XPU** |
+| MoE (FlexAttention) | `FlexAttention` | not separately measured | Works since 2026-08-19; needs `emit_positions` + selective AC, both already the config default |
+
+FlexAttention MoE is no longer "not supported on XPU" -- that row said so
+until 2026-08-19. `moe_small` and `moe_10b_2b` pass 5/5 with no flags
+(job 12473388). Note that "defaults only" there includes `compile=True`
+(the `moe()` default), so the flex path passes *with* compile on; the -35%
+figure in the row above was measured on the SDPA variants and has not been
+re-measured for flex. `moe_16b` and `moe_671b` are also flex but have not
+been run since the fix.
 
 ### Code locations
 

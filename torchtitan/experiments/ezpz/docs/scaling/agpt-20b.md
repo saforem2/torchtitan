@@ -1,5 +1,10 @@
 # AuroraGPT-20B Scaling
 
+> **Chain-state note (added 2026-08-31).** The tables below are 2026-04/06 bench
+> sweeps and stand as measured. For the production chains, disk-audited heads
+> are **20B-256 step-12,000** and **20B-512 step-10,600**, both idle since
+> 2026-08-26 -- see [`production/agpt/20b/README.md`](../production/agpt/20b/README.md).
+
 ## Sunspot Weak Scaling (torch 2.10, 1–64 nodes)
 
 | Nodes | GPUs | TPS/GPU | Total TPS | MFU | Memory | Efficiency |
@@ -31,7 +36,7 @@
 | 128 (LBS=2) | 1,536 | 3,072 | 480 | 71.45 | 23.96% | 39.84 GiB (62%) | — | Complete | [8529081](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/rvueahwe) (2026-06-07) |
 | **256 (LBS=1)** | 3,072 | 6,144 | 304 | 45.28 | 15.18% | 40.94 GiB (64%) | — | Complete | 8437387 (2026-04-16) |
 | **512 (LBS=1)** | 6,144 | 12,288 | 241 | 35.79 | 12.00% | 41.02 GiB (64%) | — | Complete | 8437389 (2026-04-16) |
-| 1024–4096 | — | — | — | — | — | — | — | Blocked: `set_determinism` init crash via bare ezpz launch (see [project_1024n_init_crash](.)). Production failover path may unblock, retry pending. |
+| 1024–4096 | — | — | — | — | — | — | — | Blocked: `set_determinism` init crash via bare ezpz launch (see `memory/project_1024n_init_crash.md` and [`guides/known-bugs/umbrella-bad-alloc-init.md`](../guides/known-bugs/umbrella-bad-alloc-init.md)). Production failover path may unblock, retry pending. |
 
 **Config:** SophiaG LR=2.28e-5, compile=on, seq_len=8192, olmo-mix-1124
 

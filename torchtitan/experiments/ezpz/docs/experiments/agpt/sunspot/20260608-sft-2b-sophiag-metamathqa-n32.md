@@ -3,8 +3,12 @@
 **Date:** 2026-06-08
 **Machine:** Sunspot
 **Job:** (filled in after submission)
-**Config:** 4N → 32N scaleup of the verified 50-step SFT smoke
-([12468212 path](20260607-sft-smoke-n4-aurora2b-gsm8k.md), if that doc exists).
+**Config:** 4N → 32N scaleup of the verified 50-step SFT smoke (job 12468212).
+
+> **Link removed 2026-08-31.** This line and the "Next steps" item below both
+> pointed at `20260607-sft-smoke-n4-aurora2b-gsm8k.md` while hedging "if that
+> doc exists". It does not, and never did -- `git log --all` shows the path was
+> never added. The 12468212 smoke is recorded only in its job logs.
 
 ## Goal
 
@@ -89,10 +93,10 @@ Once the run completes:
    `train_grpo --task arithmetic` at it as
    `--model_name_or_path
    outputs/sft/aurora2b-sophiag-metamathqa-32n/final` and
-   running the same 25-step verification harness from
-   [`20260607-sft-smoke-n4-aurora2b-gsm8k.md`](20260607-sft-smoke-n4-aurora2b-gsm8k.md)
-   (if it exists; otherwise use the prompt format from the
-   parent `docs/rl/README.md` "Sample completions" section).
+   running the same 25-step verification harness from job 12468212
+   (that report was never written -- see the note at the top; use the prompt
+   format from the RL hub's "Sample completions" section instead, now at
+   [`docs/production/rl/README.md`](../../../production/rl/README.md)).
 2. **Compare** the step-1 completion table from the SFT'd ckpt vs
    the raw sophiag ckpt — should see far fewer "What is the load
    bearing wall?" cold-start derailments.

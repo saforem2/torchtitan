@@ -3,6 +3,13 @@
 > **Status: A/B MEASURED at steps 5000 AND 6000. There is no capability
 > regression -- the model improved throughout. Step 7600 pending.**
 >
+> *(Last updated 2026-08-31. Step 7600 is covered by the 20b-512 `STEPS` list in
+> `scripts/eval/oneoff/reeval-ropefix-sweep.sh`; whether that step's corrected
+> result has landed is not verifiable from this repo -- the eval outputs live on
+> the cluster. Check with `scripts/eval/oneoff/ropefix_sweep_status.sh`. The
+> conclusion does not depend on it -- see "Step 7600 is still worth having"
+> below.)*
+>
 > **This page previously argued the opposite and was WRONG.** The original
 > argument is preserved verbatim in
 > [What I got wrong](#what-i-got-wrong-and-why-the-argument-was-seductive),
@@ -281,4 +288,10 @@ significance, but the magnitude at 2B has not been measured.
 
 - [`rope-flavor-mismatch.md`](../../../guides/known-bugs/rope-flavor-mismatch.md)
   -- mechanism, per-step registry, shipped fail-loud mitigation.
-- `scripts/eval/oneoff/reeval-20b-512-rope-ab2.sh` -- the pending 6000/7600 run.
+- `scripts/eval/oneoff/reeval-ropefix-sweep.sh` -- the corrected-export sweep,
+  run as `qsub -v CHAIN=20b-512|20b-256|2b-512`. **Path corrected 2026-08-31:**
+  this page previously named `reeval-20b-512-rope-ab2.sh`, which does not exist
+  on disk -- the two-point A/B was folded into the parameterized sweep. Its
+  20b-512 `STEPS` list already covers 6000 (whose result is reported above) and
+  7600. Companion completeness check:
+  `scripts/eval/oneoff/ropefix_sweep_status.sh`.

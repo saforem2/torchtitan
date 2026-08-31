@@ -287,8 +287,20 @@ stand; only the "all" is wrong.
 **A low-LR SophiaG arm is live and unfinished.** Job 12474322, lr **1.78e-5**
 (half the 3.55e-5 suggestion), `--debug.seed=1234` pinned, 6000 steps
 configured. As of 2026-08-30 it is at step ~331, loss 6.04 -- still in ordinary
-early training and far short of the earliest onset observed anywhere (1048). It
-currently proves nothing in either direction; do not pre-judge it. Note also
+early training and far short of the earliest onset observed anywhere (1048).
+
+> **UPDATE 2026-08-31 -- the arm has advanced, and it is still indeterminate.**
+> It has since cleared all four prior onset steps: **1,052 in-window steps, zero
+> excursions, loss 2.879 at step 1579**
+> ([`summaries/2026-08-31.md`](../../summaries/2026-08-31.md) SS2). That does NOT
+> show lower LR helps. At every matched step the full-LR arm was equally clean
+> -- 0 excursions in 574 in-window steps below 1081 -- and diverged anyway at
+> ~1550. The loss cost of halving is near zero (2.879 vs 2.910), so the trade
+> would be nearly free if it worked, but the comparison is indeterminate rather
+> than favourable. Settling it needs ~4200 steps, past where the fresh arm's
+> second onset fired. The "do not pre-judge it" reading below still stands.
+
+It currently proves nothing in either direction; do not pre-judge it. Note also
 what it can and cannot settle: clearing 1,550 would only show delay, and the
 fresh arm's second onset at ~4106 came after ~2,200 clean steps, so the honest
 stopping condition is behavioural (no divergence for N steps) rather than a step
@@ -322,8 +334,10 @@ estimate degrades before onset. Another LR arm does not discriminate it.
   counts (19.98B vs 23.59B). Compare at matched step or not at all.
 * **NOT** that a healthy-looking SophiaG run is a safe one. 1,529 and ~2,200
   clean steps each preceded an onset.
-* **NOT** that lower LR fixes SophiaG. That arm is running now and is 331 steps
-  in.
+* **NOT** that lower LR fixes SophiaG. As of 2026-08-31 that arm is at step
+  1579 with zero excursions, past all four prior onsets -- and it is still
+  indeterminate, because the full-LR arm was equally clean at every matched
+  step and diverged anyway. See the Open questions UPDATE above.
 * **NOT** that any of this measures seed variance, or transfers to GBS=15360
   production without re-measuring the LR at that batch.
 

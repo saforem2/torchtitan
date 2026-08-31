@@ -2,10 +2,10 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-08-30 (queue state re-checked against `qstat`; the
-> 08-27 reconciliation of the 20B body held, but the chain has advanced
-> two more legs -- 7560196/97 and 7567541 -- all of which trained zero
-> steps)
+> Last updated: 2026-08-31 (only the stale forward-looking start estimate
+> for `7567542` was corrected; the queue was NOT re-checked on 08-31, so the
+> 20B position below is as of the 2026-08-30 check: the chain had advanced
+> two more legs -- 7560196/97 and 7567541 -- all of which trained zero steps)
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -216,15 +216,29 @@ chain went dry twice because it was only 1-2 deep at the time. The
 7270694+3 restart ran **4-deep**; the current queue is **1-deep**
 (7567542 alone).
 
-**Current state (2026-08-30):** step **5,600** persisted, last logged
+**Current state (last disk/queue check 2026-08-30):** step **5,600** persisted, last logged
 step **5,606** (the 6 steps past the last save are lost on resume).
 Validation loss at step-5600 is **2.3621**; last logged train loss 2.319
 (grad_norm 0.220, memory 20.28 GiB / 51.34%). Tokens **47.0B** =
 `1024 x 8192 x 5600`. Those numbers are unchanged since 2026-08-16 --
 the `step-5600` dir has an `mtime` of Aug 16 08:05 and nothing has
-written to the chain since. Queued **7567542** resumes from step-5600;
-PBS currently estimates a start of 2026-08-30 21:46 UTC after
-`eligible_time` 46h.
+written to the chain since. Queued **7567542** resumes from step-5600.
+
+> **The start estimate below has elapsed.** As of 2026-08-31 this page's
+> queue state has not been re-checked against `qstat`, so whether `7567542`
+> seated, is still `Q`, or died is **unknown here** -- do not read the
+> numbers above as a live position. Re-check before acting on them. Note the
+> three preceding legs all ran for hours and trained zero steps, so "the job
+> started" is not by itself evidence the chain advanced; confirm against the
+> `step-5700` dir and its `.metadata`.
+>
+> <details>
+> <summary>What was recorded on 2026-08-30</summary>
+>
+> > PBS currently estimates a start of 2026-08-30 21:46 UTC after
+> > `eligible_time` 46h.
+>
+> </details>
 
 > Read the **validation** number, not the last train loss. Each leg
 > restarts the BlendCorpus shuffle rather than restoring the loader

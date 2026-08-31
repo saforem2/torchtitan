@@ -1,6 +1,6 @@
 # SFT on the completed v2 2B base (step-92,859): conversion + transfer + smoke
 
-**Date:** 2026-07-06
+**Date:** 2026-07-06 | **Last updated:** 2026-08-31
 **Machine:** Sunspot (SFT) + Aurora (checkpoint conversion)
 **Purpose:** Run the proven `tulu_math_uc_mix` SFT recipe on the COMPLETED v2
 2B production base (step-92,859 = 4.674T tokens) for the first time. All prior
@@ -81,6 +81,18 @@ for the gemma tokenizer on every rank. Identical to what the gs138650
 production SFT saw (same gemma-7b tokenizer files); not a blocker.
 
 ## Next (pending go-ahead)
+
+> **RESOLVED 2026-08-31 -- it ran, and it did NOT deliver.** The 32N SFT below
+> was launched as job **12470088** (2026-07-06) and the recipe page exists at
+> [`production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/`](../../../production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md),
+> but its status is **NOT DELIVERED (blocked)**: the v2 base deterministically
+> hits a scale-only oneCCL GPU fault at 384 ranks (jobs `12470254/258/262`,
+> unsolved; 1-tile and 2N are clean), and the output dir holds **zero**
+> `checkpoint-*` as of 2026-08-30. The `checkpoint-100 saved` line in that
+> run's log did not survive to disk. The workaround was to SFT the older
+> `gs138650` base instead
+> ([2026-07-10 report](2026-07-10-sft-2b-gs138650-big-mix-32n.md)); post-training
+> effort has since moved to the `2b-mds` lineage.
 
 Full 32N SFT on Sunspot: copy `aurora2b_tulu_mix_32n_gbs6144.sh`, swap
 BASE_MODEL + fresh CKPT_DIR, recipe otherwise identical (GBS=6144, 3 epochs,

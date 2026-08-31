@@ -1,5 +1,27 @@
 # Session resume notes -- 2026-08-21
 
+> [!NOTE]
+> **Status notes added 2026-08-31. The cluster-state table in section 2 is a
+> 2026-08-21 snapshot and is NOT current.** The page is kept as written: the
+> `initial_load_path` precedence finding in section 4 is the reusable
+> result, and the dashboard restart in section 3 is still the procedure.
+>
+> - **Section 2 is superseded.** `8769730` is no longer the pending
+>   production cycle. Umbrella `8773440` ran on 2026-08-26 (5h13m of a 12h
+>   slot, three of five seats trained) and **nothing has trained since**.
+>   Its successor `8784460` has been queued roughly 120 h at
+>   `score_boost = 0`; Aurora went into maintenance 08-31 14:00 UTC until
+>   Tue 04:00. Ticket:
+>   [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+>   Current chain heads: 2B-512 **COMPLETE** at step 46,429 (2.68687,
+>   4.674T tokens), 2B-256 **COMPLETE** at step 92,859, 20B-512 at step
+>   10,600, 20B-256 at step 12,000. See
+>   [`production/README.md`](production/README.md).
+> - **Section 7 (re-arm monitors) is moot** -- the job it names, `8769730`,
+>   is not the one to watch.
+> - Section 4 is already marked RESOLVED and needs nothing; its `c2131f3f2`
+>   fix and the "grep the trainer console, not the `.o`" lesson both stand.
+
 Written before a Claude session restart. Nothing here requires the old session;
 every long-running thing lives on the cluster (PBS) or is a one-line restart.
 
@@ -11,7 +33,7 @@ below keeps running regardless.
 
 The only local process worth restarting is the dashboard web server.
 
-## 2. Cluster state (as of 2026-08-21 ~12:45 UTC)
+## 2. Cluster state (as of 2026-08-21 ~12:45 UTC) -- SUPERSEDED, see the note above
 
 | job | state | what it is |
 |---|---|---|

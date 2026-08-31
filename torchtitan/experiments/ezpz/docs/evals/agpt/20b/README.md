@@ -58,6 +58,14 @@ python3 torchtitan/experiments/ezpz/docs/evals/agpt/20b/plot_eval_overview.py
 > 20B-256 is LIVE at ~step-5,900; both have the modern eval suite (mmlu 5-shot
 > / gsm8k 5-shot / arc_challenge 25-shot) backfilled. The step-4,400-vs-69,900
 > comparison below is the dated 2026-06-10 finding, kept as the record.
+>
+> **Superseded 2026-08-31 -- neither chain is LIVE.** Both stopped 2026-08-26
+> and production has not trained since. Disk-audited heads are **20B-256
+> step-12,000** (loss 2.24577 last logged) and **20B-512 step-10,600** (2.41076
+> at step 10,699). The step figures in this paragraph are a July TRAINING
+> snapshot, not the eval coverage; see
+> [`production/agpt/20b/README.md`](../../../production/agpt/20b/README.md) for
+> the authoritative chain state.
 
 > [!CAUTION]
 > **RoPE-permute correction (2026-08-16): every 20B eval past the switch is
