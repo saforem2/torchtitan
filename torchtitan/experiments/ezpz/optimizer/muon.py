@@ -54,6 +54,7 @@ class Muon(torch.optim.Optimizer):
         adamw_betas=(0.95, 0.95),
         adamw_eps=1e-8,
         adjuster_lr_ref=True,  # original moonlight lr adjustment
+        muon_max_dim=10000,
     ):
         defaults = dict(
             lr=lr,
@@ -64,6 +65,7 @@ class Muon(torch.optim.Optimizer):
             adamw_betas=adamw_betas,
             adamw_eps=adamw_eps,
             adjuster_lr_ref=adjuster_lr_ref,
+            muon_max_dim=muon_max_dim,
         )
 
         # Initialize the base optimizer with all parameter groups
@@ -84,8 +86,23 @@ class Muon(torch.optim.Optimizer):
 
                 use_muon = p.ndim == 2
 
-                # If parameter is 2D but has a large dimension, it's likely an embedding or LM head, need to change this!!!
-                if use_muon and max(p.shape) > 10000:
+                # SHAPE GATE. The intent is to keep embeddings and the LM head
+                # off the Muon path -- they are 2D but not the kind of matrix
+                # Muon's orthogonalization is for. The mechanism is a size
+                # threshold, which is a proxy and a leaky one: at agpt 30B
+                # (dim 6144, hidden_dim 16384, vocab 100352) it correctly
+                # excludes the embedding and head, but ALSO excludes w1/w2/w3,
+                # leaving only the attention projections -- 21.5% of params --
+                # on Muon. A 30B "Muon" run is therefore 78.5% AdamW by
+                # parameter count, and a no-rescale LR sweep showed that
+                # majority is what anchors the measured optimum (5.09e-04 vs
+                # 5.68e-04, a factor of 1.12 for a 15.677x change).
+                #
+                # muon_max_dim makes the threshold explicit so that claim can
+                # be tested rather than inherited. Default 10000 preserves the
+                # historical behaviour exactly.
+                mx = group["muon_max_dim"]
+                if use_muon and max(p.shape) > mx:
                     use_muon = False
 
                 group["use_muon_list"].append(use_muon)
@@ -175,7 +192,7 @@ class Muon(torch.optim.Optimizer):
                     # Default determination of whether to use Muon
                     use_muon = p.ndim == 2
                     # Don't use Muon for embeddings/LM heads (approximated by large dimension check)
-                    if use_muon and max(p.shape) > 10000:
+                    if use_muon and max(p.shape) > group["muon_max_dim"]:
                         use_muon = False
                     group["use_muon_list"].append(use_muon)
 
@@ -193,7 +210,7 @@ class Muon(torch.optim.Optimizer):
                     use_muon = False
                     if p.ndim == 2:
                         # Don't use Muon for embeddings/LM heads (approximated by large dimension check)
-                        use_muon = max(p.shape) <= 10000
+                        use_muon = max(p.shape) <= group["muon_max_dim"]
 
                     state["use_muon"] = use_muon
 

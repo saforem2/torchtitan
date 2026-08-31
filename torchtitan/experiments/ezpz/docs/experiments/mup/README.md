@@ -581,6 +581,55 @@ sharply with width in the upper LR range -- at 6.4e-3, loss 7.16 / 12.71 /
 width-invariant. The optimum transferring while the divergence threshold does
 not is a real tension, not yet resolved.
 
+## 5.8 The width-dependent blow-up: partly explained, not fully
+
+Stage 4 left a tension: the OPTIMUM is width-invariant (6.4e-5 at both 3072
+and 6144) while the DIVERGENCE THRESHOLD is not -- at eta=6.4e-3 the loss
+went 7.16 / 12.71 / 41.53 across the ladder. muP predicts both should be
+width-invariant.
+
+**The mechanism is that muP does not scale every group.** Only hidden
+matrices get `eta/m`; embeddings, the readout, and norms keep `eta` by design
+(Table 8). Those unscaled groups shrink as a FRACTION of the model but grow in
+ABSOLUTE size:
+
+| rung | unscaled params | hidden params | unscaled share |
+|---|---:|---:|---:|
+| 1536 | 308.5M | 1,560M | 8.2% + 8.2% |
+| 3072 | 617.0M | 6,241M | 4.5% + 4.5% |
+| 6144 | 1,233.9M | 24,965M | 2.4% + 2.4% |
+
+So at eta=6.4e-3 the 6144 model is taking an identical oversized step on 1.2B
+parameters where 1536 takes it on 308M. Four times the population at an
+unscaled LR, and no `1/m` protecting them.
+
+This also explains why the tension does not undermine the transfer result:
+near the optimum the hidden group is 95% of the model and its `eta/m` scaling
+dominates, so the unscaled minority only asserts itself far above the optimum
+where training is already unstable.
+
+**But the magnitude does not fit.** If the mechanism were simply "more
+parameters taking a bad step", excess loss over the optimum should scale like
+the unscaled count:
+
+| rung | excess loss | vs 1536 | unscaled vs 1536 |
+|---|---:|---:|---:|
+| 1536 | 1.29 | 1.00x | 1.00x |
+| 3072 | 7.20 | **5.58x** | 2.00x |
+| 6144 | 36.01 | **27.91x** | 4.00x |
+
+Excess loss grows roughly as the SQUARE of the unscaled-parameter ratio
+(2^2=4 vs 5.58, 4^2=16 vs 27.91 -- same order, still not exact). A linear
+count does not explain it. Candidate mechanisms not tested here: the
+unscaled-group updates compound through depth, or the readout's contribution
+to the loss is itself width-dependent, or the blow-up is not a
+parameter-count effect at all and the correlation is coincidental across
+three points.
+
+**Status: partial explanation.** The direction is accounted for and the
+transfer result is not threatened. The exponent is not explained, and three
+points is too few to fit one. Recorded rather than resolved.
+
 ## 6. Staged plan
 
 Each stage is gated on the previous one and produces a decision, not just an
