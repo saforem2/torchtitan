@@ -27,6 +27,7 @@ Run:
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 
 import matplotlib
@@ -454,6 +455,29 @@ def main() -> None:
             series.append({**traj, "steps": steps, "tokens_b": tokens_b,
                            "loss": loss, "tps": tps, "mfu": mfu})
         else:  # mds
+            # The MDS CSV is gitignored -- that data is pulled from its own
+            # W&B project and has never been tracked -- so off-cluster it is
+            # legitimately absent. Drop the trajectory with a clear line
+            # instead of dying in open(); the other trajectories still plot.
+            if not os.path.exists(traj["csv_path"]):
+                # Do NOT quietly drop the trajectory. The CSV is gitignored
+                # (cluster-only), so off-cluster this fires every run -- and
+                # skipping it writes a chart with one fewer series while
+                # exiting 0, which is the silent-degradation failure this repo
+                # has already been bitten by twice. Refuse to write instead.
+                raise SystemExit(
+                    f"REFUSING to write a thinner chart: "
+                    f"{traj.get('label', 'the MDS trajectory')} needs "
+                    f"{os.path.basename(traj['csv_path'])}, which is "
+                    f"gitignored and lives on the cluster.\n"
+                    f"  Rebuild it from W&B (works from anywhere):\n"
+                    f"    python3 torchtitan/experiments/ezpz/utils/"
+                    f"fetch_mds_metrics.py\n"
+                    f"  The source is the aurora_gpt/AuroraGPT project -- a\n"
+                    f"  CHAIN of ~356 runs, with namespaced metric keys\n"
+                    f"  ('loss/lm loss', 'loss/iteration'), which is why it is\n"
+                    f"  not findable by searching for one run or a bare key."
+                )
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
             print(f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")

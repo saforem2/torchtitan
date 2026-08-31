@@ -22,7 +22,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-08-31 | [Summaries](./summaries/README.md) |
+| 2026-08-31 | [Two days ending 2026-08-31](./summaries/2026-08-31.md) |
+| 2026-08-31 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
+| 2026-08-31 | [Development Journal](./journal.md) |
 | 2026-08-31 | [muP for agpt: audit, design, and staged plan](./experiments/mup/README.md) |
+| 2026-08-31 | [2026-08-16 -- umbrella 8756070: 9h13m, first real stage-2 dolmino steps, killed by an unexplained PBS -14](./experiments/agpt/aurora/20260816-umbrella-8756070.md) |
+| 2026-08-31 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
+| 2026-08-31 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-08-31 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-08-30 | [Week ending 2026-08-29](./summaries/2026-08-29.md) |
 | 2026-08-30 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
@@ -40,6 +47,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-30 | [Teaching agpt-2b Chain-of-Thought Reasoning (plan)](./production/rl/plans/cot.md) |
 | 2026-08-30 | [GRPO+LoRA on XPU: Monarch + TorchStore + vLLM](./production/rl/monarch.md) |
 | 2026-08-30 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./production/rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-08-30 | [GRPO recipe: AuroraGPT-2B-sft-tulu-mix x sum_digits arithmetic (8N)](./production/rl/grpo/aurora2b/sft_arithmetic/README.md) |
 | 2026-08-30 | [Production GRPO](./production/rl/grpo/README.md) |
 | 2026-08-30 | [RL (GRPO) on Intel XPU](./production/rl/README.md) |
@@ -47,12 +60,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-30 | [Production Training — MoE 10B_2B_sdpa EP=12](./production/moe/10b_2b_sdpa_ep/README.md) |
 | 2026-08-30 | [Production Training Metrics -- Ground-Truth Store](./production/metrics/README.md) |
 | 2026-08-30 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-08-30 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
 | 2026-08-30 | [agpt 30B-exp -- a proposed next flagship](./production/agpt/30b-exp/README.md) |
 | 2026-08-30 | [30B-exp experiment log](./production/agpt/30b-exp/EXPERIMENTS.md) |
@@ -65,19 +72,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-30 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-08-30 | [ALCF ticket -- Polaris nodes with a stuck GPU](./ops/alcf-ticket-zombie-gpu-nodes-20260827.md) |
 | 2026-08-30 | [ALCF ticket: job 8784460 has not scheduled in 101 hours](./ops/alcf-ticket-8784460-not-scheduling-20260830.md) |
-| 2026-08-30 | [Development Journal](./journal.md) |
 | 2026-08-30 | [SophiaG: a RECURRENT grad-norm blow-up at 30B](./guides/known-bugs/sophiag-stochastic-divergence-30b.md) |
 | 2026-08-30 | [MoE at TP>1: wo gets Shard(0) where row-parallel wants Partial(sum)](./guides/known-bugs/moe-tp2-wo-placement.md) |
 | 2026-08-30 | [frameworks/2026.1.0 on Aurora: import torch dies on libglog.so.0](./guides/known-bugs/fw-rc-libglog-not-on-loader-path.md) |
 | 2026-08-30 | [Dead CLI flags: 99 PBS scripts at the repo root would abort today](./guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md) |
 | 2026-08-30 | [TorchTitan on Aurora -- quickstart (validation queue + frameworks/2026.1.0)](./guides/aurora-quickstart-frameworks-rc.md) |
 | 2026-08-30 | [Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG](./experiments/optimizer-comparison/README.md) |
-| 2026-08-30 | [30B LR finder: Muon at GBS=960](./experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md) |
-| 2026-08-29 | [Summaries](./summaries/README.md) |
-| 2026-08-29 | [Polaris failover patterns were correct and UNREACHABLE](./guides/known-bugs/polaris-failover-detect-machine-fqdn.md) |
-| 2026-08-28 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-08-28 | [TorchTitan on Aurora -- quickstart (shared torch 2.13 tarball)](./guides/aurora-quickstart-tarball.md) |
-| 2026-08-27 | [XPU graphs cannot capture oneCCL collectives (2026-08-16)](./guides/known-bugs/xpu-graphs-block-oneccl-collectives.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -112,7 +112,7 @@ ARC-Challenge / Winogrande vs the (frozen-norm) v1 baseline.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [agpt 2B evals](./evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-07-24 |
-| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-25 |
+| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-08-31 |
 | [agpt 2B-MDS evals](./evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-07-09 |
 | [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-08-17 |
 
@@ -133,11 +133,11 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-30 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-08-31 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-08-26 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-14 |
-| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-08-29 |
+| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-08-31 |
 
 ## Setup & Reference
 
