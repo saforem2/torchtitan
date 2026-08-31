@@ -14,7 +14,7 @@ vocab 256128). 60 steps each, uncompiled, per-layer diagnostics at interval 1.
 |---|---:|---:|---:|---|
 | L48 | 48 | 48.2B | **0** | survived 60 steps, loss 12.93 -> 6.54 |
 | L72 | 72 | 70.0B | **1** (step 55) | survived 60 steps, loss -> 6.80 |
-| **L84** | **84** | **80.8B** | **8** | **loss NaN at step 59 -- DIED** |
+| **L84** | **84** | **80.8B** | **8** | **loss NaN at step 40 -- DIED** |
 
 W&B: [L48 `gvkphx8l`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/gvkphx8l)
 · [L72 `lwwffftb`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/lwwffftb)
@@ -37,6 +37,14 @@ gaps are:
 A long quiet stretch, then events crowding together until the loss itself goes
 non-finite. **That gap collapse is the runup everyone was looking for.** It
 was always there, in a quantity nobody logged.
+
+**The terminal step is the gap collapse, exactly.** L84's loss went non-finite
+at **step 40** -- the second of the back-to-back pair at 39, 40, the first
+time the gap reached 1. Two consecutive skipped optimizer steps and the model
+does not recover; the run continued to step 60 with a non-finite loss. So the
+failure condition is not a magnitude threshold but **two events close enough
+together that recovery fails between them**, which is why the same model
+survives 37 isolated steps and then dies in two.
 
 Each individual event is instantaneous: the gradient is non-finite for one
 step, the trainer's guard skips the optimizer step

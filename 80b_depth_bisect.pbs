@@ -214,32 +214,47 @@ for label, depth in (("L48", 48), ("L72", 72), ("L84", 84)):
         continue
     txt = ansi.sub("", open(p, errors="replace").read())
     rows = ROW.findall(txt)
-    bad = next((int(s) for s, l, g in rows if l in ("nan", "inf") or g in ("nan", "inf")), None)
+    # TERMINAL means the LOSS went non-finite -- the run is over. A non-finite
+    # GRAD_NORM is survivable: trainer.py:1063 skips the optimizer step and
+    # training resumes. Conflating them made the first run of this script
+    # report "L72 failed" when L72 completed all 60 steps with a finite loss
+    # and one transient gradient event at step 55.
+    bad = next((int(s) for s, l, g in rows if l in ("nan", "inf")), None)
+    events = [int(s) for s, l, g in rows if g in ("nan", "inf")]
     finite = [float(g) for _, _, g in rows if g not in ("nan", "inf")]
     out[label] = {
         "depth": depth,
         "steps": len(rows),
         "nan_at": bad,
+        "events": events,
         "max_gn": max(finite) if finite else None,
         "last_gn": finite[-1] if finite else None,
     }
 
-print(f"{'arm':>5} {'depth':>6} {'steps':>6} {'NaN at':>7} {'max gn':>9} {'last gn':>9}")
+print(f"{'arm':>5} {'depth':>6} {'steps':>6} {'events':>7} {'died at':>8} {'max gn':>9}")
 for k in ("L48", "L72", "L84"):
     v = out[k]
     if v is None:
         print(f"{k:>5} {'-':>6} {'MISSING':>6}")
         continue
     print(f"{k:>5} {v['depth']:>6} {v['steps']:>6} "
-          f"{str(v['nan_at']) if v['nan_at'] else 'none':>7} "
-          f"{v['max_gn'] if v['max_gn'] is not None else float('nan'):>9.2f} "
-          f"{v['last_gn'] if v['last_gn'] is not None else float('nan'):>9.2f}")
+          f"{len(v['events']):>7} "
+          f"{str(v['nan_at']) if v['nan_at'] else 'survived':>8} "
+          f"{v['max_gn'] if v['max_gn'] is not None else float('nan'):>9.2f}")
+    if v["events"]:
+        print(f"        event steps: {v['events']}")
 
 got = [v for v in out.values() if v]
 print()
 if len(got) < 3:
     print("VERDICT: incomplete -- an arm did not run. No conclusion.")
 else:
+    # counts are the result; "died" is a separate, stricter fact
+    counts = {v["depth"]: len(v["events"]) for v in got}
+    print(f"  EVENT COUNTS by depth: {counts}")
+    seq = [counts[d] for d in sorted(counts)]
+    if seq == sorted(seq) and seq[0] < seq[-1]:
+        print("  Event count is MONOTONE in depth -- the rate scales with depth.")
     nans = {v["depth"]: v["nan_at"] for v in got}
     failed = {d: s for d, s in nans.items() if s}
     if not failed:
