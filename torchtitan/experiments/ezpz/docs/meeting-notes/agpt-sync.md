@@ -145,8 +145,20 @@ Two bugs had made the muP flavors unreachable: no `--config` entry point, so
 nothing could run them, and the sweep moved only one param group until
 `MUP_ETA` was threaded through.
 
-**Muon at 30B wants 5.68e-04** (job `12474326`, `rc=0`, 90 rows) -- first time
-Muon has run at this scale. Blow-up at 5.68e-03. That is 18.6x AdamW's
+> [!CAUTION]
+> **The Muon LR numbers below are not trustworthy and should not be acted on
+> at the meeting.** A review on 08-31 found that `lr_finder.py` writes
+> `param_group["lr"]` directly while `train_step` then calls
+> `lr_schedulers.step()` unconditionally, which overwrites it with
+> `base_lr * lambda(...)`. The finder never disables the scheduler -- there is
+> no reference to it in the file. So the LR recorded against each swept point
+> is **not** the LR that ran, and the first swept point went at ~16.5x its
+> recorded value. This affects the sweep mechanism, so **every LR-finder
+> number in this repo is suspect, not just Muon's.** Re-run before using any
+> of them. Verified independently, not taken from the review.
+
+**Muon at 30B reportedly wants 5.68e-04** (job `12474326`, `rc=0`, 90 rows) --
+first time Muon has run at this scale. Reported blow-up at 5.68e-03. That is 18.6x AdamW's
 3.05e-05 and 10.1x Mano's 5.61e-05, so the usable bands barely overlap.
 
 That number is really two numbers. The finder sweeps the BASE; Muon rescales
