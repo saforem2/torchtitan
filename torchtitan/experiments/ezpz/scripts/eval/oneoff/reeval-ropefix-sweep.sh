@@ -66,7 +66,14 @@ case "$CHAIN" in
     OUT=$MAIN/outputs/evals/agpt-2b-v2-512n-ropefix
     FLAVOR=2b_real; CFG=agpt_2b_config.json
     STEPS="${STEPS:-35000 37000 39000 39600}"
-    TASKS="${TASKS:-mmlu,arc_challenge,arc_easy,hellaswag,winogrande,piqa,openbookqa,boolq}" ;;
+    TASKS="${TASKS:-arc_easy,hellaswag,winogrande,piqa,openbookqa,boolq}"
+    # mmlu and arc_challenge moved OUT of TASKS and into SHOTS_SPEC. Left
+    # in TASKS they took the driver's 0-shot fallback, which wrote
+    # at-chance 0-shot mmlu into the same agpt-2b-v2-512n-ropefix
+    # directory family as the 5-shot backfill results -- two different
+    # shot counts under one name. The driver now aborts on this rather
+    # than measuring it silently.
+    SHOTS_SPEC="${SHOTS_SPEC:-5:mmlu;25:arc_challenge}" ;;
   *) echo "FATAL: unknown CHAIN=$CHAIN"; exit 2 ;;
 esac
 
@@ -117,19 +124,56 @@ sys.exit(0 if want <= have else 1)
 
     echo "=== [$CHAIN] step $step: lm-eval ==="
     source venvs/aurora/tt-lm-eval/bin/activate
-    HF_DIR="$HF" RES_DIR="$RES" TASKS="$TASKS" python3 <<'PYEOF'
+    HF_DIR="$HF" RES_DIR="$RES" TASKS="$TASKS" SHOTS_SPEC="${SHOTS_SPEC:-}" python3 <<'PYEOF'
 import os, json
 import transformers.modeling_utils as mu
 mu.caching_allocator_warmup = lambda *a, **k: None
 from lm_eval import evaluator
 hf, res = os.environ["HF_DIR"], os.environ["RES_DIR"]
-out = evaluator.simple_evaluate(
-    model="hf",
-    model_args=f"pretrained={hf},dtype=bfloat16,trust_remote_code=True",
-    tasks=os.environ["TASKS"].split(","), device="xpu:0", batch_size=8,
-)
+
+# SHOTS_SPEC ("shots:task,task;shots:task") because one simple_evaluate call
+# takes a single global num_fewshot. This driver previously omitted the
+# num_fewshot argument entirely -- lm-eval's default is 0 -- so every task ran
+# 0-shot with no way to say otherwise, and mmlu was in TASKS.
+shots_spec = os.environ.get("SHOTS_SPEC", "").strip()
+groups = []
+if shots_spec:
+    for grp in shots_spec.split(";"):
+        grp = grp.strip()
+        if not grp:
+            continue
+        shots_str, _, tlist = grp.partition(":")
+        groups.append((int(shots_str), [t for t in tlist.split(",") if t]))
+tasks = [t for t in os.environ["TASKS"].split(",") if t]
+if tasks:
+    groups.append((0, tasks))
+
+# Same guard as the main driver (eval-2b-v2.sh). lm-eval does not pin few-shot
+# for the classic MC tasks, so an off-convention shot count yields a plausible
+# at-chance number, a complete results.json and exit 0.
+_FEWSHOT_CONVENTION = {"mmlu": 5, "arc_challenge": 25, "mmlu_pro": 5}
+_misshot = sorted({t for sh, ts in groups for t in ts
+                   if sh != _FEWSHOT_CONVENTION.get(t.strip(), sh)})
+if _misshot and os.environ.get("ALLOW_OFF_CONVENTION_SHOTS", "").strip() == "1":
+    print("  WARNING: off-convention shots for " + ", ".join(_misshot), flush=True)
+    _misshot = []
+if _misshot:
+    raise SystemExit("ABORT: " + ", ".join(_misshot) + " at the wrong shot count; "
+                     "pass SHOTS_SPEC (e.g. 5:mmlu;25:arc_challenge)")
+
+merged = {}
+for shots, tset in groups:
+    if not tset:
+        continue
+    print("  [lm-eval] {}-shot: {}".format(shots, ",".join(tset)), flush=True)
+    out = evaluator.simple_evaluate(
+        model="hf",
+        model_args=f"pretrained={hf},dtype=bfloat16,trust_remote_code=True",
+        tasks=tset, device="xpu:0", batch_size=8, num_fewshot=shots,
+    )
+    merged.update(out["results"])
 with open(os.path.join(res, "results.json"), "w") as fh:
-    json.dump(out["results"], fh, indent=2)
+    json.dump(merged, fh, indent=2)
 PYEOF
 
     if [[ -f "$RES/results.json" ]]; then

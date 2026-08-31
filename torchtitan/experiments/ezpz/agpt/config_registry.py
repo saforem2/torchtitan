@@ -1365,6 +1365,39 @@ def agpt_mup_6144() -> FaultTolerantTrainer.Config:
     return _mup_cfg("mup_6144", dim=6144, base_dim=1536)
 
 
+def agpt_30b_olmo2tok_muon_ffn() -> FaultTolerantTrainer.Config:
+    """Muon at 30B with the FFN on the Muon path, not just attention.
+
+    agpt_30b_olmo2tok_muon is a Muon/AdamW hybrid by accident: the shape gate
+    (muon.py, `max(p.shape) <= muon_max_dim`) is meant to exclude embeddings
+    and the LM head, but at dim=6144 / hidden_dim=16384 it also excludes
+    w1/w2/w3. Only the attention projections -- 21.5% of parameters -- run on
+    Muon, and the no-rescale LR sweep showed the AdamW-path majority is what
+    sets the measured optimum.
+
+    Raising muon_max_dim to 20000 puts w1/w2/w3 on Muon while leaving the
+    embedding and head (100352) off, which is what the gate was always trying
+    to express. Verified on the real 30B shapes: 2 of 5 distinct shapes on
+    Muon at the default, 4 of 5 at 20000, embedding excluded in both.
+
+    That takes the Muon path from 21.5% to roughly 95% of parameters, so this
+    is the first agpt config where a Muon result is a statement about Muon.
+
+    LR IS A PLACEHOLDER AND MUST BE MEASURED. The 5.68e-04 from job 12474326
+    was measured on the 21.5% hybrid, and the no-rescale arm demonstrated that
+    number tracks the AdamW-path majority -- which this config removes. Run a
+    finder against THIS config before any comparison arm; inheriting the
+    hybrid's LR here would repeat the exact error the Phase 1 sweeps existed
+    to prevent.
+
+    NOT a resume target for any other arm: the Muon/AdamW parameter split
+    differs, so the optimizer state shapes do not match.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = default_muon(lr=3.0e-4, muon_max_dim=20000)
+    return _use_fineweb_edu(cfg)
+
+
 def agpt_30b_olmo2tok_mup() -> FaultTolerantTrainer.Config:
     """muP stage 5: the 30B arm, comparable to the optcmp AdamW baseline.
 

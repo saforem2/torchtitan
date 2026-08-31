@@ -14,6 +14,7 @@ set -o pipefail
 #   qsub -v OPT=adamw,LR=8e-4   -N cmp-adamw   optcmp.pbs
 #   qsub -v OPT=mano,LR=...     -N cmp-mano    optcmp.pbs
 #   qsub -v OPT=sophiag,LR=...  -N cmp-sophiag optcmp.pbs
+#   qsub -v OPT=muon_ffn,LR=... -N cmp-muonffn optcmp.pbs
 #
 # The LR flag is --optimizer.param-groups.0.optimizer-kwargs.lr, NOT
 # --optimizer.lr (which does not exist). Each of these configs builds a
@@ -21,7 +22,9 @@ set -o pipefail
 # with more groups would need one flag per group.
 #
 # LR IS REQUIRED AND HAS NO DEFAULT. It comes from the Phase 1 finder run at
-# THIS batch size (jobs 12473711/12/13). A default would silently reintroduce
+# THIS batch size (jobs 12473711/12/13; muon_ffn from 12474361, which sweeps
+# its OWN partition -- the muon 5.68e-04 from 12474326 was measured at the
+# 21.5% cutoff and does not carry over). A default would silently reintroduce
 # the exact failure this experiment exists to avoid: an inherited constant that
 # makes the comparison measure luck rather than the optimizer. Mano alone spans
 # 4.79e-03 (2B) to 1.29e-04 (30B/GBS=480) to ~3e-06 (80B/GBS=6144).
@@ -55,7 +58,18 @@ case "$OPT" in
   adamw)   CONFIG=agpt_30b_olmo2tok_optcmp_adamw ;;
   mano)    CONFIG=agpt_30b_olmo2tok_mano ;;
   sophiag) CONFIG=agpt_30b_olmo2tok_sophiag ;;
-  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag (got: ${OPT:-empty})"; exit 1 ;;
+  # muon_ffn is the real-Muon arm: muon_max_dim=20000 puts w1/w2/w3 on the
+  # Muon path, 95.3% of params vs 21.5% for the default cutoff. Deliberately
+  # NOT offering a plain `muon` arm -- at 21.5% the result would describe a
+  # Muon/AdamW hybrid, and the norescale sweep showed the AdamW majority is
+  # what sets its measured LR.
+  #
+  # PASS THE BASE LR. Muon applies 0.2*sqrt(max(A,B)) internally, so a
+  # pre-multiplied value would run attention at 246x the intended rate. Note
+  # the factor is per-tensor here: 15.677x on attention (6144), 25.6x on the
+  # FFN (16384).
+  muon_ffn) CONFIG=agpt_30b_olmo2tok_muon_ffn ;;
+  *) echo "ABORT: pass -v OPT=adamw|mano|sophiag|muon_ffn (got: ${OPT:-empty})"; exit 1 ;;
 esac
 [ -n "${LR:-}" ] || { echo "ABORT: pass -v LR=<value> from the Phase 1 finder; there is no safe default"; exit 1; }
 

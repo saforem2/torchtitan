@@ -1,0 +1,160 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1
+#PBS -l walltime=24:00:00
+#PBS -l filesystems=tegu:home
+#PBS -j oe
+set -o pipefail
+
+# MMLU FORMAT A/B on the 30B: letter-binding (MCF) vs cloze (CF), same
+# checkpoint, same tokenizer, same harness, 5-shot both. The ONLY variable is
+# doc_to_choice.
+#
+# WHY. Our `mmlu` task is `doc_to_choice: ["A","B","C","D"]` -- the model must
+# bind an answer to a letter. `mmlu_continuation` is `doc_to_choice:
+# "{{choices}}"` -- it scores the answer text directly. These measure
+# different things at small scale, and the literature says the gap is large:
+#
+#   * SmolLM2 (arXiv:2502.02737 Sec 4.3, Fig 6): above-chance MMLU appears in
+#     the cloze formulation; MCF only clears chance after 6T tokens.
+#   * OLMES (arXiv:2406.08446) on OLMo-7B: "Around 400B tokens, the model
+#     starts gaining the ability on the MCF format... Before that point, there
+#     is good signal from CF while MCF is random." It recommends reporting
+#     max(CF, MCF).
+#
+# Every AuroraGPT MMLU number we have is MCF, and every one is at chance
+# (2B 0.2579 at 4.674T, 20B 0.2599/0.2655, 30B 0.2440-0.2649). That is
+# consistent with "no knowledge" AND with "knowledge present, cannot do letter
+# binding at this scale". This job separates them. A CF score meaningfully
+# above 0.25 on a checkpoint whose MCF is 0.2649 means the knowledge is there
+# and the format is the barrier.
+#
+# ALSO FIXES THE SHOT COUNT. eval30b.pbs:191 passes `--num_fewshot 0`
+# explicitly, so every 30B MMLU number on disk is 0-shot -- confirmed by
+# n-shot=[0] in the results files. MMLU is reported 5-shot by convention.
+# Both arms here run 5-shot, so the MCF arm is also the first correct 5-shot
+# MMLU for this model and is directly comparable to the 2B/20B ladder.
+#
+# COST. The three step-{1000,1500,2000} HF exports already exist (98G each,
+# converted 2026-08-22/23), so the expensive DCP->HF step is already paid for
+# and this is lm-eval time only.
+#
+# BUDGET. Measured on this model at ~2.3 it/s: mmlu is 56,168 requests = 6.8h
+# at 0-shot. 5-shot prompts are longer, so budget 12h per arm inside a 24h
+# walltime. Per-task invocation because lm_eval serializes only at completion
+# (job 12473627 reached 77% in 8.5h and wrote nothing).
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+
+STEP="${STEP:-2000}"
+BASE="$PWD/outputs/evals/agpt-30b-olmo2tok/step-${STEP}"
+HF="$BASE/hf"
+ASSETS="$PWD/assets/hf/OLMo-2-1124-7B"
+RES="$BASE/results-5shot"
+LOGD="$RES/logs"; mkdir -p "$RES" "$LOGD"
+
+echo "step:   $STEP"
+echo "hf:     $HF"
+echo "out:    $RES"
+
+# The export must already exist. Reconverting is 90 min and this job exists
+# precisely because it does not have to.
+if [ ! -f "$HF/model.safetensors.index.json" ]; then
+    echo "ABORT: no HF export at $HF -- run eval30b.pbs to convert first"
+    echo "MMLU_FORMAT_${STEP}_DONE"; exit 1
+fi
+if [ ! -f "$HF/config.json" ]; then
+    echo "ABORT: no config.json beside the weights"
+    echo "MMLU_FORMAT_${STEP}_DONE"; exit 1
+fi
+
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+for ARM in "mmlu:MCF-letters" "mmlu_continuation:CF-cloze"; do
+    TASK="${ARM%%:*}"; LABEL="${ARM##*:}"
+    if compgen -G "$RES/$TASK/**/results*.json" > /dev/null 2>&1; then
+        echo "   [$TASK] already has results, skipping"
+        continue
+    fi
+    echo ""
+    echo "== $TASK ($LABEL) 5-shot, budget 12h =="
+    mkdir -p "$RES/$TASK"
+    timeout 43200 stdbuf -oL -eL python3 -m lm_eval \
+      --model hf \
+      --model_args "pretrained=$HF,tokenizer=$ASSETS,dtype=bfloat16,trust_remote_code=True" \
+      --tasks "$TASK" \
+      --num_fewshot 5 \
+      --batch_size 4 \
+      --device xpu \
+      --output_path "$RES/$TASK" \
+      > "$LOGD/$TASK.log" 2>&1
+    rc=$?
+    echo "   [$TASK] rc=$rc $( [ $rc -eq 124 ] && echo '(TIMED OUT -- incomplete)' )"
+    tail -3 "$LOGD/$TASK.log" 2>/dev/null | sed 's/^/       /'
+done
+
+echo ""
+echo "########## MMLU format A/B: step-$STEP, 5-shot ##########"
+RES="$RES" python3 - <<'PY'
+import glob, json, os
+
+res = os.environ["RES"]
+# The four category rollups are not subjects; averaging them alongside the 57
+# double-counts. Leaf subjects only.
+CATS = {"humanities", "stem", "social_sciences", "other"}
+
+
+def leaf(d, suffix):
+    out = {}
+    for k, v in d.items():
+        if not k.startswith("mmlu_") or not isinstance(v, dict):
+            continue
+        if "acc,none" not in v:
+            continue
+        name = k[len("mmlu_"):]
+        if suffix and name.endswith(suffix):
+            name = name[: -len(suffix)]
+        elif suffix:
+            continue
+        if name in CATS:
+            continue
+        out[name] = v["acc,none"]
+    return out
+
+
+rows = {}
+for task, suffix, label in (("mmlu", "", "MCF (letter A/B/C/D)"),
+                            ("mmlu_continuation", "_continuation", "CF  (cloze text)")):
+    hits = sorted(glob.glob(f"{res}/{task}/**/results*.json", recursive=True))
+    if not hits:
+        print(f"  {label:24s} NO RESULTS")
+        continue
+    d = json.load(open(hits[-1]))
+    acc = leaf(d.get("results", d), suffix)
+    if not acc:
+        print(f"  {label:24s} no leaf subjects parsed")
+        continue
+    vals = list(acc.values())
+    macro = sum(vals) / len(vals)
+    ns = d.get("n-shot", {}) or {}
+    shots = sorted({v for k, v in ns.items() if k.startswith("mmlu")}) or "unrecorded"
+    rows[task] = (macro, acc)
+    print(f"  {label:24s} macro={macro:.4f}  n={len(vals)} subj  "
+          f"max={max(vals):.3f}  above_chance={sum(v > 0.25 for v in vals)}/{len(vals)}  "
+          f"n-shot={shots}")
+
+if len(rows) == 2:
+    mcf = rows["mmlu"][0]
+    cf = rows["mmlu_continuation"][0]
+    print()
+    print(f"  CF - MCF = {cf - mcf:+.4f}   (chance 0.25, binomial SE ~0.004)")
+    print("  READ: a CF score clearly above chance while MCF sits at it means")
+    print("  the knowledge is present and letter-binding is the barrier. Both")
+    print("  at chance means the knowledge is absent. Do not read a <0.01 gap")
+    print("  as either -- that is inside noise.")
+PY
+echo "MMLU_FORMAT_${STEP}_DONE"
