@@ -460,12 +460,19 @@ def main() -> None:
             # legitimately absent. Drop the trajectory with a clear line
             # instead of dying in open(); the other trajectories still plot.
             if not os.path.exists(traj["csv_path"]):
-                print(
-                    f"  SKIP {traj.get('label', 'mds')}: "
-                    f"{os.path.basename(traj['csv_path'])} not present "
-                    f"(gitignored, cluster-only)"
+                # Do NOT quietly drop the trajectory. The CSV is gitignored
+                # (cluster-only), so off-cluster this fires every run -- and
+                # skipping it writes a chart with one fewer series while
+                # exiting 0, which is the silent-degradation failure this repo
+                # has already been bitten by twice. Refuse to write instead.
+                raise SystemExit(
+                    f"REFUSING to write a thinner chart: "
+                    f"{traj.get('label', 'the MDS trajectory')} needs "
+                    f"{os.path.basename(traj['csv_path'])}, which is "
+                    f"gitignored and lives on the cluster.\n"
+                    f"  Regenerate where the data is, or leave the committed "
+                    f"figures alone."
                 )
-                continue
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
             print(f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
