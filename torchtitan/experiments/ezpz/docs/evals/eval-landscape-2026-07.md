@@ -1,6 +1,6 @@
 # AuroraGPT evaluation strategy: modern-suite review (2026-07)
 
-> Last updated: 2026-08-23
+> Last updated: 2026-08-25
 
 Decision-focused review of what we evaluate, what modern peers evaluate, and how
 we compare. Grounded in a fact-checked research pass over primary sources (model
