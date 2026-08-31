@@ -544,7 +544,11 @@ def _print_table(summary: dict[str, Any]) -> None:
     steps = summary["steps"]
     print()
     print("=" * 78)
-    print("muP COORDINATE CHECK -- agpt, current (standard) parametrization")
+    # summary["mup"] already records which parametrization was built; the
+    # label used to hardcode "standard", so a --mup run printed and SAVED a
+    # figure claiming to be the SP baseline.
+    _pname = "muP" if summary.get("mup") else "current (standard)"
+    print(f"muP COORDINATE CHECK -- agpt, {_pname} parametrization")
     print("=" * 78)
     hdr = f"{'width':>8} {'heads':>6} {'hidden':>7} {'params':>12}  final_loss"
     print(hdr)
@@ -639,7 +643,8 @@ def _plot(summary: dict[str, Any], out_dir: str) -> str | None:
     for idx in range(len(mods), nrow * ncol):
         axes[idx // ncol][idx % ncol].axis("off")
     fig.suptitle(
-        "agpt coordinate check -- standard parametrization\n"
+        f"agpt coordinate check -- "
+        f"{'muP' if summary.get('mup') else 'standard'} parametrization\n"
         "l1 = |activation|.mean() vs width; flat lines = muP, rising = SP",
         fontsize=10,
     )
@@ -748,7 +753,18 @@ def run_driver(args: argparse.Namespace) -> int:
     print(f"[coord-check] summary -> {os.path.join(out_dir, 'summary.json')}")
     # Exit non-zero when the harness fails its own test, so a wrapper cannot
     # mistake "produced a flat figure" for "muP confirmed".
-    return 0 if summary["width_dependence_detected"] else 2
+    #
+    # The polarity DEPENDS on which parametrization was built, and 777181ba6
+    # made the verdict string aware of that but left this return alone:
+    #   SP  baseline: width dependence is EXPECTED, so detecting it is success.
+    #   muP run:      width dependence is the FAILURE, so detecting it is a fail.
+    # Without the branch, a passing muP run printed "muP PASS" and exited 2,
+    # while a broken one exited 0 -- inverted for every rc-gating wrapper
+    # (PBS, CI, `&&` chains, set -o pipefail).
+    detected = summary["width_dependence_detected"]
+    if args.mup:
+        return 2 if detected else 0
+    return 0 if detected else 2
 
 
 def build_parser() -> argparse.ArgumentParser:

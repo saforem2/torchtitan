@@ -12,11 +12,18 @@ this guide assumes you've done that and have a working `.venv/` +
 > [!IMPORTANT]
 > Read these caveats first:
 >
-> - **Optimizer**: AdamW only. SophiaG/Muon overflow Hessian/Newton-Schulz
->   in bf16 at `dim=9216`.
-> - **LR**: `1e-6`. `LR=1.1e-5` NaN'd at production GBS (1536–3072).
->   The 256N attempt 8530891 at `LR=1e-6` still NaN'd at step 2 — open
->   issue, see [Known issues](#known-issues) below.
+> - **Optimizer**: **mano** (~3e-6, safest -- broad U-min) or **sophiag**
+>   (~1e-6, lowest loss but a narrower band). Only **Muon** is broken at 80B
+>   (bf16 Newton-Schulz overflow at `dim=9216`). SophiaG is NOT broken at the
+>   production batch: it NaN'd at GBS=192 but runs all 15 finder steps finite
+>   at GBS=6144, where the larger batch smooths the Hessian estimate.
+> - **LR**: **do not use AdamW at `1e-6`.** At the production GBS=6144 the
+>   measured AdamW NaN onset is **1.36e-6** with a usable ceiling of ~7.4e-7,
+>   so `1e-6` sits PAST the last stable point -- which is why 8530891 NaN'd at
+>   step 2. If you must stay on AdamW use ~5e-7; prefer mano or sophiag. The
+>   small-batch "AdamW 1.1e-5" number does not transfer (~14x lower ceiling at
+>   production batch). Measurements:
+>   [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
 > - **`compile=OFF`**. `compile=ON` triggers a
 >   `DeviceMesh`-in-saved-tensors AOT autograd crash on torch 2.13 for
 >   every 80B-family config (smallest reproducer: `agpt_50b_wide`,
@@ -133,12 +140,22 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.train \
     --optimizer=adamw \
     --optimizer.lr=1e-6 \
     --parallelism.tensor-parallel-degree=2 \
-    --training.local-batch-size=1 \
-    --training.global-batch-size=24 \
-    --training.seq-len=8192 \
+    --training.num-tokens-per-microbatch-per-dp-rank=8192 \
+    --training.max-context-length=8192 \
+    --training.num-tokens-per-train-step=196608 \
     --training.steps=10 \
     --compile.no-enable
 ```
+
+> [!NOTE]
+> Batch sizes are counted in TOKENS since upstream #4121. `local_batch_size`,
+> `global_batch_size` and `seq_len` no longer exist and a command carrying them
+> dies in flag parsing with `Unrecognized options:` before step 1. The mapping
+> is `tokens = batch_size * seq_len`, and
+> `num_tokens_per_microbatch_per_dp_rank` must EQUAL `max_context_length`. So
+> the old LBS=1 / GBS=24 / seq=8192 shape is 8192 and 24*8192 = 196,608 above.
+> See [known-bugs/dead-cli-flags-in-repo-root-pbs.md](../known-bugs/dead-cli-flags-in-repo-root-pbs.md).
+
 
 Expected outcome (per [4N validation](../../production/agpt/80b/n4/README.md)):
 

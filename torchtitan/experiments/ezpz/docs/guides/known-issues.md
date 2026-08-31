@@ -278,21 +278,45 @@ forward, causing mismatched tensor shapes.
 **Trade-off:** Disabling AC increases memory usage significantly. The moe 7B
 config uses 35 GiB (89%) with AC=none on Polaris A100-40GB.
 
-## MoE + Tensor Parallelism (TP > 1)
+## MoE + Tensor Parallelism (TP > 1) -- RESOLVED 2026-08-27
+
+> [!NOTE]
+> **Fixed in `6e4e1996f`. MoE trains at TP=2 and TP=4, eager and compiled.**
+> Do not use TP=1 as a workaround.
+>
+> The SDPA wrapper unflattened `[T,N,H] -> [B,L,N,H]` on input and never
+> re-flattened on output, so MLA reshaped against a batch leading dim instead
+> of a token one and `wo` got `Shard(dim=0)` where row-parallel wants
+> `Partial(sum)`. Two lines.
+>
+> Measured, job `8792615` (1N x 4 ranks, 5 steps): TP=1 12.93609 -> 11.32376,
+> TP=2 12.94930 -> 11.49335, TP=4 12.86241 -> 11.75634, with compiled tracking
+> eager to 3.3e-4 (TP=2) and 4.1e-4 (TP=4). Memory per rank falls 2.80 / 1.94 /
+> 1.38 GiB. Job `8789506` reproduces the TP=2 numbers on the frameworks RC.
+>
+> Full writeup: [known-bugs/moe-tp2-wo-placement.md](known-bugs/moe-tp2-wo-placement.md).
+>
+> The root cause recorded below was also wrong: a placement probe measured all
+> three of q/k/v arriving correctly as `Shard(dim=1)`. The `v` tensor was never
+> replicated.
+
+<details>
+<summary>Original (incorrect) diagnosis, kept because the symptom string is still what you would grep for</summary>
 
 **Symptoms:** `AssertionError: q, k, v must have the same placements, but got
 q=(Shard(dim=2),), k=(Shard(dim=2),), v=(Replicate())`
 
-**Affected:** All MoE configs with `--parallelism.tensor_parallel_degree > 1`.
+**Root cause (DISPROVED):** thought to be the MLA LoRA-based KV projection
+leaving `v` replicated under TP.
 
-**Root cause:** The MoE MLA (Multi-head Latent Attention) implementation uses
-LoRA-based KV projection with asymmetric sharding. When TP shards q and k
-across heads, the v tensor from `wkv_b` remains replicated because its
-projection shape doesn't match the TP sharding pattern.
+</details>
 
-**Workaround:** Use TP=1 for MoE models. Expert parallelism (EP>1) is also
-blocked on `aurora_frameworks-2025.3.1` (missing `ShardPlacementResult`).
-MoE scaling requires a newer PyTorch version.
+**Expert parallelism (EP > 1)** is a separate, still-open issue -- but not for
+the reason stated here previously. It is not a missing `ShardPlacementResult`
+on `aurora_frameworks-2025.3.1` (a stack we no longer run); the current blocker
+is an Intel `ur_die: urEventWait must not be called for an internal event`
+fault in the a2a. See
+[known-bugs/moe-ep-a2a-degrades-with-size.md](known-bugs/moe-ep-a2a-degrades-with-size.md).
 
 ## Context Parallelism (CP > 1) on agpt
 

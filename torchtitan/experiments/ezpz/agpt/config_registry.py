@@ -1345,7 +1345,13 @@ def _mup_cfg(flavor: str, *, dim: int, base_dim: int) -> FaultTolerantTrainer.Co
     from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
 
     eta = float(os.environ.get("MUP_ETA", "8e-4"))
-    cfg = agpt(flavor)
+    # The muP ladder is built at OLMo-2 vocab (100,352). agpt()'s default
+    # hf_assets_path is gemma-7b (vocab 256,128), so omitting this loads the
+    # WRONG tokenizer -- the model trains and reports a plausible loss while
+    # the token ids mean something else, which is exactly the Polaris 20B
+    # eval-gibberish failure. mup.py's own _mup_trainer_config already passes
+    # this; these config_registry copies dropped it.
+    cfg = agpt(flavor, hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     cfg.optimizer = default_mup_adamw(eta, dim=dim, base_dim=base_dim)
     return cfg
 
