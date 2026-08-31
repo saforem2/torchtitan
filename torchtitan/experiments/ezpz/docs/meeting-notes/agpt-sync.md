@@ -4,6 +4,234 @@
 
 ---
 
+## 2026-08-31
+
+> [!IMPORTANT]
+> **Headline:** muP passes its coordinate check and transfers at production
+> width -- tune at dim 3072, deploy at 6144, same optimum. Max `|slope|` 0.020
+> against a 0.05 tolerance. The 30B muP arm is submitted.
+>
+> **Aurora production has not trained in five days and the blocker is the
+> scheduler.** `8784460` (2,098 nodes) has been `Q` since Wed Aug 26 13:22 UTC
+> with `score_boost = 0`. On 08-29 a *larger* job -- `8791192`, 2,304 nodes,
+> 22 minutes eligible, same zero boost -- started ahead of it. On 08-30 there
+> were 2,206 free nodes against our 2,098 ask and it still did not place. The
+> ALCF ticket is written and **has not been sent**. That is the decision this
+> meeting should make.
+>
+> Full-machine maintenance `M8787441` took all 10,624 nodes at 14:00 UTC today,
+> so nothing places before it clears.
+
+### 1. Aurora production: still nothing
+
+Five days, zero steps. The last umbrella to seat, `8773440` on 08-26, used
+5h13m of a 12h slot (`Exit_status=-14`):
+
+| seat | chain | steps | loss |
+|---|---|---|---|
+| `t0` | 2B 512N | 0 | never started |
+| `t1` | 20B 512N | 0 | never started |
+| `t2` | 20B 256N | +201 | 2.31488 -> 2.24577 |
+| `t3` | 2B 512N | +504 | 2.74535 -> 2.73836 |
+| `t4` | 2B 256N | +782 | 2.56449 -> 2.54807 |
+
+`8775285` (30B LR-finder umbrella) ran 1h32m and exited 0 with all four seats
+at `rc=143` and no suggested LR in any log -- a clean exit that produced
+nothing.
+
+**Why the queue explanation does not hold.** No job of 2,000+ nodes is running
+at all; the largest is 516, then 512/512/260/256. Around 20:22 UTC on 08-29
+roughly 3,600 nodes were released at once (free 1,704 -> 5,292) and `8784460`
+did not start in the following 30 minutes.
+
+Ruled out before drafting, so ALCF does not repeat it: reservations
+(`R8782410` 128 nodes, `M8789605` 6), allocation (`AuroraGPT` holds
++1,269,842.6 node-hours; the negative balance is `datascience`, a different
+project), queue limits (`max_queued = 10` against our 2; 2,098 inside the
+2000-10624 range; 12h inside the 24h max), holds (`Hold_Types = n`; the
+`beforeany` is our own chain successor), and node pinning.
+
+**Open questions for the meeting:**
+
+- **Send the ticket?** It has sat unsent a day while production has been idle
+  five. The Polaris zombie-GPU drain ticket *was* filed 08-30 (three nodes),
+  so there is a working precedent.
+- **Chase the boost separately?** The previous incarnation of this chain pair
+  carried ~10M and started within a day; this pair reads 0 after resubmit. If
+  the boost is the whole fix, that is a conversation, not a ticket.
+- **Is the 2,098-node umbrella shape itself the problem?** Nothing that size
+  is scheduling for anyone. Splitting into 512N asks that actually place would
+  trade the umbrella pattern for throughput.
+- **After Tue 04:00, sit or resubmit?** The June lesson says re-qsub resets
+  priority and is what cost this pair its boost. But if the boost is already
+  0, the accrued eligible time may be buying nothing.
+
+Chain heads were **audited on disk**, not read off a doc: 20B-256 `step-12000`
+(137 ckpt dirs), 20B-512 `step-10600` (126). Two corrections fall out of that.
+I had called `docs/production/metrics/*.csv` authoritative and was wrong --
+its `manifest.json` reads `exported_at 2026-08-17`, so it predates the 08-20
+and 08-26 legs and stops at 10,380 / 9,694. And `production/README.md`'s
+glance table still carried the 08-26 census figures while the leaf pages
+carried the audited ones; the rollup is reconciled as of this entry.
+
+The production tree was reconciled against the cluster more broadly -- 33
+files. Three claims would have misled anyone checking what is running:
+`agpt/20b/n256` marked job `8681340` (2026-07-23) **RUNNING** when it has aged
+out of PBS entirely; `agpt/2b` marked the v2 512N chain **LIVE** when it
+completed 2026-08-13 at step 46,429 / 2.68687 / 4.674T; and `20b/n512`
+contradicted itself, headed "step 6,100" while its own Latest-checkpoint line
+said 8,700.
+
+### 2. The 30B optimizer comparison is finished (Sunspot)
+
+Both healthy arms ran to the `training.steps=6000` ceiling at 23.59B tokens
+each, `rc=0`, zero NaN/inf, zero skipped gradients.
+
+| arm | final loss | at 10B (step 2,543) |
+|---|---|---|
+| Mano | **2.43889** | 2.7701 |
+| AdamW | 2.51357 | 2.9134 |
+
+Mano led from ~1.0B onward and never gave the lead back. **One seed per arm
+and no decay phase** -- the documented prior is that Muon-family wins short
+runs and AdamW takes it back in cosine decay, so this is consistent with the
+prior rather than a refutation of it.
+
+**SophiaG is disqualified at 4/4.** Onsets 1048, 1176, 1071, ~1550. The fourth
+was an independent from-scratch arm with the seed pinned, which is what killed
+the "it is the checkpoint" theory. Escalation over four steps: 0.20 -> 4.95 ->
+36.14 -> 98.98 -> 731.80, under a nearly flat loss (2.952 -> 3.641). Read
+`grad_norm`, never loss -- the loss dips look like recovery.
+
+The awkward part: **the fresh SophiaG replicate leads on loss.** 5,080 steps
+from random init ending at 2.43156, about 0.08 nats ahead of Mano and 0.17
+ahead of AdamW at every matched step from 3000 on -- after diverging twice and
+peaking at `grad_norm` 16,532.
+
+The grad-norm guard made its first live catch: replicate 3 stopped at
+`grad_norm` 53.49, 133x the trailing median, `rc=0` after 55 minutes instead
+of ~8h.
+
+**Open questions:**
+
+- Does Mano's lead survive a decay phase? This argues for testing Mano *with*
+  decay, not for switching production.
+- Should `--grad-norm-abort=20.0` be on by default for 30B+ runs? It is
+  currently 0.0 (off).
+- Is SophiaG closed? The mechanism is unresolved. The discriminating test is
+  instrumenting the Hessian-estimate norm, which nobody has run.
+
+### 3. muP passes, and transfers (Sunspot)
+
+muP for AdamW went from an audit to a passing coordinate check in one day, on
+a login node, with no allocation. Slope is `d log2(l1) / d log2(width)`, so 0
+is what muP promises:
+
+| module | SP | muP |
+|---|---|---|
+| `layers.5.attention` | 1.42 | -0.010 |
+| `layers.4.attention` | 1.32 | 0.020 |
+| `tok_embeddings` (control) | 0.001 | 0.001 |
+
+**The readout was the whole fight, and the first fix made it worse.** Tensor
+Programs V Table 3 prescribes `d^-1` init for `lm_head`; that left it at
+-0.130 while every hidden module sat near zero. Scaling the readout LR to
+`eta/m` to "complete" Table 3 drove it to **-0.483**. That was the informative
+result -- a negative slope means over-scaled *down*, so scaling harder was the
+wrong direction. Keeping agpt's existing `fan_in^-1/2` with an O(1) readout LR
+gives 0.001.
+
+Two bugs had made the muP flavors unreachable: no `--config` entry point, so
+nothing could run them, and the sweep moved only one param group until
+`MUP_ETA` was threaded through.
+
+**Muon at 30B wants 5.68e-04** (job `12474326`, `rc=0`, 90 rows) -- first time
+Muon has run at this scale. Blow-up at 5.68e-03. That is 18.6x AdamW's
+3.05e-05 and 10.1x Mano's 5.61e-05, so the usable bands barely overlap.
+
+That number is really two numbers. The finder sweeps the BASE; Muon rescales
+by `0.2*sqrt(max(A,B))`, a uniform 15.677x on the 21.5% of params it owns. So
+the Muon path runs at 8.90e-03 while the AdamW-path 78.5% runs at 5.68e-04. A
+no-rescale arm (`adjuster_lr_ref=False`, job `12474327`) was launched to
+separate them, with the prediction written into the config docstring before
+the result.
+
+### 4. MoE trains at TP>1, and the frameworks RC is validated (Aurora)
+
+**`moe` at TP>1 was two lines.** The SDPA wrapper unflattened
+`[T,N,H] -> [B,L,N,H]` going in and never re-flattened coming out, so MLA
+reshaped against a batch leading dim instead of a token one and `wo` got
+`Shard(dim=0)` where row-parallel wants `Partial(sum)`. `agpt` had the
+re-flatten all along, with a comment warning about exactly this; the port
+copied the input half and dropped the output half.
+
+A wrong fix shipped first and only the TP=1 regression arm caught it. Copying
+`agpt`'s `view(out.shape[0], -1)` verbatim reads moe's *batch* axis and broke
+TP=1, which had always worked. Twelve hypotheses died before that, every one
+about configuration -- both models' SDPA wrap on the same mesh declaring
+identical axes. The difference was arithmetic, not config.
+
+Coverage is now closed (job `8792615`, 1N x 4 ranks, 5 steps):
+
+| arm | step 1 -> 5 | vs eager |
+|---|---|---|
+| TP=1 control | 12.93609 -> 11.32376 | -- |
+| TP=2 eager | 12.94930 -> 11.49335 | -- |
+| TP=2 compiled | 12.94907 -> 11.49342 | 0.00033 |
+| TP=4 eager | 12.86241 -> 11.75634 | -- |
+| TP=4 compiled | 12.86258 -> 11.75609 | 0.00041 |
+
+Memory per rank falls 2.80 / 1.94 / 1.38 GiB at TP=1/2/4.
+
+**`frameworks/2026.1.0`**: first AuroraGPT training of any kind on the RC (job
+`8784615`, 2N x 12, 10/10 steps, 10.86492 -> 9.05897), then all five corners
+green (job `8789506`) -- including **compiled `agpt` at TP=2**, which the
+production `.venv` cannot do (it dies in `tensors_saved_with_vc_check` with a
+`DeviceMesh` in saved-for-backward). Compiled and eager agree to 3.6e-4.
+Confirm at 80B before retiring `compile=OFF` generally; that is where the
+assertion was characterised, and this is `agpt_debugmodel` at 5 steps.
+
+One trap worth knowing before anyone else hits it: every `import torch` on the
+RC dies with `OSError: libglog.so.0`. The library ships in the module's own
+`$FW/lib` and the modulefile does not export it. One line fixes it. Verified
+on hardware (job `8792135`), and both the soname and version went *backwards*
+between releases (`libglog.so.2`/0.7.1 -> `.so.0`/0.4.0).
+
+### 5. Tooling: refresh_all went 6 failures -> 0
+
+Worth reporting because five of those failures were **lying**.
+
+- **Four were guards firing correctly** on gitignored, cluster-only data. The
+  plotters printed `skip:` and exited 0; the runner collapsed that into `OK`,
+  indistinguishable from real work. Five figures sat two weeks stale while
+  every run said OK. The runner now reports `SKIPPED` with the reason, and the
+  summary reads `N plotted, M skipped, F failed`.
+- **The two W&B failures were the ALCF proxy**, exported unconditionally.
+  Unroutable off-cluster, so every W&B call hung until wandb's service gave up
+  and reported it as `AuthenticationError` -- which is not what it is. Now
+  probed before export.
+- **The Polaris 20B charts were never registered** in `update_all_charts.sh`
+  at all, so `refresh_all` exited 0 for weeks while both figures sat at
+  2026-07-22, 40 days stale.
+- **The MDS `train_metrics.csv` was rebuilt** from `aurora_gpt/AuroraGPT`:
+  356 runs, 154,391 rows, 12.65 -> 0.88, all three stage boundaries present.
+  Two things had hidden it -- it is a *chain*, not one long run, and the
+  metric keys are namespaced (`loss/lm loss`, not `lm_loss`). There is a
+  `fetch_mds_metrics.py` now so nobody repeats that search.
+
+Two upstream `ambivalent` PRs merged: matplotlib 3.11 compatibility (3.11
+removed `style.core` from the `style` namespace, and the failure is silent --
+the plotter falls back to defaults and exits 0), and nine stylefiles that ship
+on PyPI but were missing from git entirely.
+
+**A chart did get committed with a series silently dropped**, caught by
+distinct-colour count against the previous commit rather than by anything
+reporting an error. Reverted. The lesson is narrow and worth keeping:
+"do not fail on expected-absent data" was right for the four eval scripts,
+which write nothing, and wrong for the combined plotter, which writes a
+*degraded* artifact. Same symptom, opposite correct response.
+
+
 ## 2026-08-26
 
 > [!IMPORTANT]
