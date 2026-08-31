@@ -67,6 +67,34 @@ set -o pipefail
 # "overflow" is dead as a mechanism regardless of what the bisect says about
 # depth, and the search moves to precision loss or something non-numerical.
 #
+# PER-LAYER STATS, EVERY STEP -- the other half of the measurement.
+#
+# diagnostics/__init__.py already collects what this investigation has been
+# missing and nobody turned it on for an 80B run:
+#
+#   diag/top{i}_gradnorm      WHICH LAYERS carry the largest gradients (by
+#                             name, so a layer INDEX comes out -- directly
+#                             addresses "is it depth")
+#   diag/layer_gradnorm_max / _mean / _skew
+#                             the distribution, not just the global norm. A
+#                             global grad_norm dead-flat at ~6.0 while one
+#                             layer's is exploding is invisible in the scalar
+#                             and obvious in the skew.
+#   diag/grad_absmax_local    the magnitude question, on gradients
+#   diag/weight_absmax_local  the magnitude question, on weights
+#   diag/clip_*               whether clipping is masking the runup
+#
+# INTERVAL=1, NOT THE DEFAULT 50. The failures land at steps 14-37. At the
+# default this job would sample once, maybe twice, before the NaN and produce
+# nothing about the approach to it. These collectors are O(params) so this is
+# expensive -- acceptable for 60 steps of a diagnostic run, and NOT a setting
+# to copy into production.
+#
+# What this turns the job into: not just "does depth matter" but "which layer
+# goes first, and how large does anything actually get". If the top-gradnorm
+# layers cluster at high indices, depth is implicated directly. If they are
+# scattered, it is not a depth-accumulation story at all.
+#
 # READ grad_norm, NOT loss. The documented signature is grad_norm dead-flat
 # ~6.0 then a step to inf with no runup; loss looks fine until it does not.
 #
@@ -133,6 +161,7 @@ arm() {  # arm <label> <config>
       --parallelism.tensor-parallel-degree=4 \
       --compile.no-enable \
       --diagnostics --diagnostics-attention \
+      --diagnostics-per-layer --diagnostics-interval=1 \
       --checkpoint.no-enable \
       --debug.seed=42 \
       > "$log" 2>&1
@@ -145,6 +174,10 @@ arm() {  # arm <label> <config>
   first=$(printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *(nan|inf)" | head -1)
   echo "    first non-finite: ${first:-NONE}"
   echo "    steps reached: $(printf "%s" "$c" | grep -acE 'step: *[0-9]+ +loss:')"
+  # The diagnostics land in W&B; echo the last sample here so the .o file is
+  # self-contained if W&B is unreachable later.
+  printf "%s" "$c" | grep -aoE "diag/(top[0-9]_gradnorm|layer_gradnorm_(max|skew)|grad_absmax_local|weight_absmax_local|qk_[qk]_absmax_local)=[0-9.e+-]+" \
+    | tail -12 | sed 's/^/      /'
 }
 
 arm L48 agpt_50b_wide
