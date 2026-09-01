@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 import spmd_types as spmd
-
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -123,6 +122,8 @@ class GroupedExperts(Module):
 class RoutedExperts(Module):
     """Routed-expert ``local_map`` region: composes token_dispatcher + inner_experts
     as sibling nodes so each can be overridden independently."""
+
+    includes_shared_experts = False
 
     @dataclass(kw_only=True, slots=True)
     class Config(Module.Config):
@@ -444,9 +445,11 @@ class MoE(Module):
             num_local_tokens_per_expert_E,
         )
 
-        shared_out_TD = (
-            self.shared_experts(x_TD) if self.shared_experts is not None else None
-        )
+        shared_out_TD = None
+        if not getattr(self.routed_experts, "includes_shared_experts", False):
+            shared_out_TD = (
+                self.shared_experts(x_TD) if self.shared_experts is not None else None
+            )
 
         if shared_out_TD is not None:
             out_TD = out_TD + shared_out_TD
