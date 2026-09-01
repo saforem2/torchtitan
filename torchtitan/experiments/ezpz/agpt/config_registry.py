@@ -1496,6 +1496,28 @@ def ezpz_agpt_80b() -> FaultTolerantTrainer.Config:
 
 
 def agpt_80b() -> FaultTolerantTrainer.Config:
+    """agpt 80B. YOU MUST OVERRIDE THE LEARNING RATE.
+
+    This inherits `agpt()`'s shared default of **lr=8e-4** (line ~330), which
+    is reasonable at 2B and roughly **1000x past the stable point at 80B**.
+    Measured, in docs/guides/training/agpt_80b.md: at production batch the
+    AdamW NaN onset is **1.36e-6** with a usable ceiling of **~7.4e-7**, and
+    job 8530891 NaN'd at STEP 2 at 1e-6 -- already 800x below the default.
+
+    Pass `--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7` for AdamW, or
+    prefer mano/sophiag. Without it the model blows up on the first optimizer
+    step and every downstream measurement is an artifact of the LR.
+
+    NOT fixed by changing the default here: several arms in flight resume from
+    checkpoints trained at specific LRs, and silently re-pointing them is worse
+    than an explicit flag. The docstring is the guard.
+
+    Cost of not knowing this, recorded so it is not repeated: jobs 12474403
+    (depth bisect) and 12474423 (GAS sweep) both ran at 8e-4. Their step-2
+    blow-ups were read as a depth effect and then as a batch-size effect
+    before the LR was checked; both readings were withdrawn. See
+    docs/guides/known-bugs/80b-nan-rate-not-overflow.md.
+    """
     return agpt("80B", tensor_parallel_degree=2)
 
 
