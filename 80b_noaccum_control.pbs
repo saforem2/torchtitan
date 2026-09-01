@@ -55,6 +55,17 @@ set -o pipefail
 # 12 STEPS. G8 was frozen by step 2 and stayed frozen through 8; 12 clears that
 # with margin without paying for a long run.
 
+# LEARNING RATE IS NOT OPTIONAL HERE. agpt_80b's config default is 8e-4. The
+# 80B training guide (docs/guides/training/agpt_80b.md) documents the AdamW NaN
+# onset at production batch as 1.36e-6 with a usable ceiling of ~7.4e-7, and
+# records job 8530891 NaN-ing at STEP 2 at 1e-6. The default is therefore ~1000x
+# past the last stable point.
+#
+# Jobs 12474403 (depth bisect) and 12474423 (GAS sweep) both ran at the default
+# and their step-2 blow-ups are that, not a finding. This arm uses 5e-7, the
+# value the guide recommends if staying on AdamW. Without it, this control
+# would reproduce the same artifact and "prove" whatever the artifact does.
+
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
 
@@ -75,6 +86,18 @@ python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 export LOGD="$REPO/outputs/logs/80b-noaccum/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/noaccum.log"
 
+# Confirm the LR the CONFIG ends up with, not the one on the command line --
+# a flag that silently fails to bind is this codebase's signature failure.
+CHK="$LOGD/lrcheck.txt"
+python3 -c "
+from torchtitan.experiments.ezpz.agpt import config_registry as cr
+lr = cr.agpt_80b().optimizer.param_groups[0].optimizer_kwargs.get('lr')
+print(f'CONFIG_DEFAULT_LR {lr}')
+" > "$CHK" 2>&1
+cat "$CHK" | grep -a CONFIG_DEFAULT_LR || true
+echo "  (the --optimizer.param-groups.0... flag below overrides it to 5e-7;"
+echo "   the run's own printed config is the authority -- check it in the log)"
+
 echo "===== NOACC: GBS=1,536 seqs as ONE microbatch (32768 tok/rank, GAS=1) ====="
 timeout 6000 ezpz launch --nproc 768 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
@@ -84,6 +107,7 @@ timeout 6000 ezpz launch --nproc 768 -ppn 12 -- \
     --training.num-tokens-per-microbatch-per-dp-rank=32768 \
     --training.num-tokens-per-train-step=6291456 \
     --parallelism.tensor-parallel-degree=4 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 \
     --compile.no-enable \
     --diagnostics --diagnostics-attention \
     --diagnostics-per-layer --diagnostics-interval=1 \
@@ -106,6 +130,11 @@ gas = re.findall(r"gradient accumulation steps (\d+)", txt)
 tok = re.findall(r"tokens/train-step (\d+)", txt)
 oom = bool(re.search(r"out of memory|OutOfMemory|UR_RESULT_ERROR_OUT_OF", txt, re.I))
 
+lr = re.findall(r'"lr": *([0-9.e+-]+)', txt)
+print(f"  LR in effect: {lr[0] if lr else '?'}  (MUST be 5e-07, NOT 0.0008)")
+if lr and float(lr[0]) > 1e-6:
+    print("  *** LR IS PAST THE DOCUMENTED CEILING (~7.4e-7). This arm measures")
+    print("  *** the LR, not the accumulation question. Treat it as VOID.")
 print(f"  GAS reported: {gas[0] if gas else '?'}  (MUST be 1)")
 print(f"  tokens/step:  {tok[0] if tok else '?'}  (MUST be 6291456, same as G8)")
 print(f"  steps: {len(rows)}   events: {ev}")

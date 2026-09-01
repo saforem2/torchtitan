@@ -1,4 +1,39 @@
-# The 80B NaN: an accelerating rate of transient non-finite gradients
+# The 80B NaN
+
+> [!CAUTION]
+> **EVERY EXPERIMENT IN THIS DOCUMENT RAN AT THE WRONG LEARNING RATE.**
+> Jobs `12474403` (depth bisect) and `12474423` (GAS sweep) used
+> `agpt_80b`'s config default of **8e-4**. The 80B training guide
+> ([`guides/training/agpt_80b.md`](../training/agpt_80b.md)) documents the
+> AdamW NaN onset at production batch as **1.36e-6**, with a usable ceiling of
+> **~7.4e-7** -- so these runs were roughly **1000x past the last stable
+> point**. The guide even records job `8530891` NaN-ing at step 2 at `1e-6`,
+> which is already 800x below what I used.
+>
+> **So the step-2 blow-up characterized throughout this document is expected
+> behaviour at that LR, not a discovery.** Invalidated: the depth bisect's
+> 0/1/8 event counts, the "GBS not dp" conclusion, the frozen-at-43
+> characterization, and the accumulation analysis. All of it measured an 80B
+> driven far past its stable LR.
+>
+> The guide also already contains the batch relationship, in the direction
+> opposite to what I concluded: *"it NaN'd at GBS=192 but runs all 15 finder
+> steps finite at GBS=6144, where the larger batch smooths the Hessian
+> estimate."*
+>
+> **What survives, because it does not depend on my runs:**
+> - The three refutations of the documented root cause (below). They come from
+>   that diagnosis's OWN evidence and from arithmetic -- same exponent range,
+>   fp32-residual failing its own test, and a "masking" claim that describes an
+>   impossible operation.
+> - The magnitude measurements. `qk_q_absmax_local` = 61.2 across every arm and
+>   36 orders below the bf16 ceiling. Activation scale does not depend on the
+>   LR being correct, and the same value appears in the clean-regime run at
+>   dp=12 (`12472477`, 62.25).
+>
+> **I should have read the training guide before launching an 80B job.** The
+> LR ceiling is in it, stated plainly, with the failing job id.
+: an accelerating rate of transient non-finite gradients
 
 > 2026-08-31. Job `12474403`, the depth bisect. **This supersedes the
 > "bf16 forward-activation overflow" diagnosis**, which is refuted on three
