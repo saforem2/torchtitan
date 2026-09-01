@@ -82,6 +82,18 @@ Running log of what's happening, session by session. Most recent first.
   inside the regime where bf16 also trains clean -- retracted 2026-08-14 and
   never propagated to the meeting notes.
   [known-bugs/80b-nan-what-we-know.md](guides/known-bugs/80b-nan-what-we-know.md).
+- **muP 30B stage 5 COMPLETE: 1,081 steps, loss 11.99 -> 3.85, zero NaN,
+  `Exit_status=0`.** The first sustained muP run at production width (dim
+  6144), across three chained links with clean `rc=124` resumes between them.
+  All 51 grad_norm excursions above 2.0 sit in the warmup window -- binned
+  into 50-step buckets the rate is 42/49 in window 0, 9/50 in window 50, then
+  **zero from step 100 onward** with max decaying 1.61 -> 1.26. Peak 38.34 is
+  a step-6-to-8 initialization transient, not instability.
+
+  This is the payoff of the stage-4 transfer result: the parametrization was
+  validated by coordinate check and by a discrete-grid LR sweep at 1536/3072/
+  6144, and it now trains at production width without special handling.
+
 - **RETRACTED SAME DAY: the bisect and the GAS sweep both ran at lr=8e-4,
   ~1000x past the documented ~7.4e-7 ceiling.** Their step-2 blow-ups are that,
   not a finding -- the depth counts, the "GBS not dp" conclusion and the
