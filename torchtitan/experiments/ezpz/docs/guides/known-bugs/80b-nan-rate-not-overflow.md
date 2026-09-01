@@ -163,6 +163,42 @@ Related: G1's step-1 grad_norm is 7.96 against L84's 6.19 at the same step and
 seed -- data order alone moves it, which is a reminder not to read small
 between-run differences as signal.
 
+## GBS, NOT dp: the non-recovering state reproduced at fixed dp (job 12474423)
+
+The GAS sweep pins dp=192 and varies only the global batch. **In progress, but
+the qualitative result is already unambiguous.**
+
+| arm | GAS | GBS | events | behaviour |
+|---|---:|---|---:|---|
+| G1 | 1 | 192 seqs | 2 in 60 steps | **recovered immediately, every time** |
+| G8 | 8 | 1,536 seqs | 4 CONSECUTIVE (steps 2-5) | **STUCK: loss frozen at ~43** |
+
+G1: loss returns to ~7 within one step of every event, across 60 steps.
+G8: loss jumps to 43.05 at step 2 -- 3.3x above initialization -- and stays
+there (43.05 / 43.03 / 42.99 / 43.02) while every optimizer step is skipped.
+The tiny drift is data variation through frozen weights.
+
+**Same dp. Only the batch changed.** This is the first reproduction of a
+non-recovering state in this investigation, and it appeared as soon as GBS
+grew 8x at constant dp.
+
+**That inverts the documented trigger.** "The wall is LBS>1 AND dp_degree >
+~186" has stood for months, but every run supporting it moved dp and GBS
+together. This is the first experiment to separate them, and the failure
+follows GBS.
+
+**The magnitudes hold up under the strongest possible test.** Inside the stuck
+state, `qk_q_absmax_local` reads **61.5** -- the same value as every healthy
+run today and at dp=12 in the clean regime. `grad_absmax_local` reads 0
+because the gradients were already zeroed. Nothing is large even while the
+model is completely stuck. Overflow is not what this is.
+
+**Caveats.** Four steps, one arm, and the events begin at step 2 where warmup
+transients live. Unlike the depth result this is a QUALITATIVE change rather
+than a count against a noisy baseline -- G1 never showed anything like it in
+60 steps -- but G32 at production batch (6,144 seqs) is the confirmation, and
+the depth arms taught me what a single unreplicated run is worth.
+
 ## Design caveat
 
 Fewer layers is also a smaller model -- less memory pressure, different FSDP
