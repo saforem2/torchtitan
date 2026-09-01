@@ -82,6 +82,14 @@ Running log of what's happening, session by session. Most recent first.
   inside the regime where bf16 also trains clean -- retracted 2026-08-14 and
   never propagated to the meeting notes.
   [known-bugs/80b-nan-rate-not-overflow.md](guides/known-bugs/80b-nan-rate-not-overflow.md).
+- **RETRACTED SAME DAY: the bisect and the GAS sweep both ran at lr=8e-4,
+  ~1000x past the documented ~7.4e-7 ceiling.** Their step-2 blow-ups are that,
+  not a finding -- the depth counts, the "GBS not dp" conclusion and the
+  frozen-at-43 reading are all invalidated. The control (job `12474431`) at
+  **lr=5e-7** trains clean on the same 64 nodes: 12 steps, 0 events, loss
+  12.948 -> 12.795, grad_norm 7.9. What survives is the refutation of the
+  stated MECHANISM and the magnitude measurements, neither of which depends on
+  the LR. `agpt_80b`'s docstring now warns about the default.
 - **The bisect ran (job `12474403`) and found a real depth effect that is NOT
   the stated one.** Three arms, identical but for depth, at dp=192 / TP=4 --
   the exact configuration where three prior runs NaN'd:

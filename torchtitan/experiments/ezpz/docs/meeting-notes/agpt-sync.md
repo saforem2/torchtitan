@@ -315,6 +315,28 @@ which would tell us have not been run.
 
 ### FIRST MEASUREMENT IN THE FAILING REGIME (job `12474403`, 2026-08-31)
 
+> [!CAUTION]
+> **RETRACTED THE SAME DAY.** Every 80B experiment below ran at `agpt_80b`'s
+> config default of **lr=8e-4**. The 80B training guide documents the AdamW
+> NaN onset at production batch as **1.36e-6** with a usable ceiling of
+> **~7.4e-7** -- these runs were ~1000x past the last stable point, so the
+> step-2 blow-ups they characterize are the expected consequence of that, not
+> a finding.
+>
+> **Invalidated:** the depth bisect's 0/1/8 event counts, the "GBS not dp"
+> conclusion, and the frozen-at-43 characterization.
+>
+> **Confirmed by the control (job 12474431):** at **lr=5e-7** the same 80B on
+> the same 64 nodes trains clean -- 12 steps, zero non-finite gradients, loss
+> 12.948 -> 12.795, grad_norm flat at 7.9. The only change is the LR.
+>
+> **Still standing**, because it does not depend on these runs: the three
+> refutations of the documented root cause, and the magnitude measurements
+> (`qk_q_absmax_local` = 61.2, 36 orders below the bf16 ceiling).
+>
+> Full account: [`known-bugs/80b-nan-rate-not-overflow.md`](../guides/known-bugs/80b-nan-rate-not-overflow.md).
+
+
 The depth bisect (48L / 72L / 84L at fixed dp, identical per-layer shape) is
 running with per-layer diagnostics at `--diagnostics-interval=1`. The L48 arm's
 first 8 steps are the first magnitudes ever recorded at dp=192.
