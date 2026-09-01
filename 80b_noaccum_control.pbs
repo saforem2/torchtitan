@@ -1,0 +1,142 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-noaccum
+#PBS -j oe
+set -o pipefail
+
+# IS IT THE BATCH, OR THE ACCUMULATION? The control the GAS sweep needs.
+#
+# THE AMBIGUITY. The GAS sweep's G8 arm (GBS=1,536 via GAS=8) froze: 7
+# non-finite gradients across 8 steps, loss pinned at ~43, weights bit-identical
+# at 1756.8471056374897 while G1 (GBS=192, GAS=1) recovered from every event
+# across 60 steps. Same dp=192. I read that as a batch-size effect. But GAS=8
+# means EIGHT SEQUENTIAL BACKWARD PASSES ACCUMULATING INTO ONE bf16 BUFFER, and
+# that is a second explanation the sweep cannot separate from batch size.
+#
+# WHAT IS ALREADY RULED OUT. Gradient SCALING is correct: local_valid_tokens
+# sums over all microbatches in the step (trainer.py:964) BEFORE the all-reduce,
+# so each microbatch loss divides by the true per-step token count and the
+# accumulated gradient is a proper mean, not an 8x oversized update. Verified in
+# the source, not assumed.
+#
+# WHAT IS NOT RULED OUT. Any single non-finite microbatch poisons the whole
+# accumulated buffer, so GAS=8 carries 8x the exposure per step. Pure-exposure
+# arithmetic does NOT cover the observation -- Bernoulli at G1's per-microbatch
+# rate predicts a per-step rate of 0.238 against 0.875 observed -- but that
+# calculation treats 7 CONSECUTIVE steps in a frozen state as independent
+# trials, which they are not, and G1's own count spans 2-8 across replicates.
+# So the arithmetic is suggestive and not decisive either.
+#
+# THE CONTROL. Same GBS=1,536 sequences, delivered as ONE microbatch instead of
+# eight: tokens/microbatch/dp-rank 32768 (8x G8's 4096), GAS=1.
+#
+#   arm    per-rank tokens   GAS   GBS          differs from G8 by
+#   NOACC  32768               1   1,536 seqs   accumulation only
+#
+#   G8 (already run)  4096      8   1,536 seqs
+#   G1 (already run)  4096      1     192 seqs
+#
+# READ IT:
+#   NOACC stable  -> ACCUMULATION is the cause. The batch is fine; eight
+#                    sequential bf16 accumulations are not. That would make the
+#                    "GBS not dp" conclusion wrong and point at the accumulation
+#                    path instead.
+#   NOACC freezes -> BATCH SIZE is the cause, accumulation is incidental, and
+#                    the GAS sweep's reading holds.
+#
+# MEMORY. G8 ran at 23.44% of 64 GiB, so 8x the per-rank tokens has room. If it
+# OOMs that is itself the answer to whether this control is runnable, and the
+# fallback is GBS=768 via 16384 tokens/rank against a matched GAS=4 arm.
+#
+# 12 STEPS. G8 was frozen by step 2 and stayed frozen through 8; 12 clears that
+# with margin without paying for a long run.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-noaccum/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/noaccum.log"
+
+echo "===== NOACC: GBS=1,536 seqs as ONE microbatch (32768 tok/rank, GAS=1) ====="
+timeout 6000 ezpz launch --nproc 768 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_80b \
+    --training.steps=12 \
+    --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=32768 \
+    --training.num-tokens-per-train-step=6291456 \
+    --parallelism.tensor-parallel-degree=4 \
+    --compile.no-enable \
+    --diagnostics --diagnostics-attention \
+    --diagnostics-per-layer --diagnostics-interval=1 \
+    --checkpoint.no-enable \
+    --debug.seed=42 \
+    > "$LOG" 2>&1
+echo "  rc=$?"
+
+echo ""
+echo "########## batch, or accumulation? ##########"
+LOG="$LOG" python3 - <<'PY'
+import os, re
+
+log = os.environ["LOG"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+txt = ansi.sub("", open(log, errors="replace").read()) if os.path.exists(log) else ""
+rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)", txt)
+ev = len(re.findall(r"non-finite grad_norm", txt))
+gas = re.findall(r"gradient accumulation steps (\d+)", txt)
+tok = re.findall(r"tokens/train-step (\d+)", txt)
+oom = bool(re.search(r"out of memory|OutOfMemory|UR_RESULT_ERROR_OUT_OF", txt, re.I))
+
+print(f"  GAS reported: {gas[0] if gas else '?'}  (MUST be 1)")
+print(f"  tokens/step:  {tok[0] if tok else '?'}  (MUST be 6291456, same as G8)")
+print(f"  steps: {len(rows)}   events: {ev}")
+for s, l, g in rows[:6]:
+    print(f"    step {s:>3}  loss {l:>9}  grad_norm {g:>9}")
+
+# is the loss frozen high, the G8 signature?
+finite = [float(l) for _, l, _ in rows if l not in ("nan", "inf")]
+frozen = (len(finite) >= 3 and max(finite[1:]) - min(finite[1:]) < 1.0
+          and min(finite[1:]) > 20)
+
+print()
+if oom:
+    print("  VERDICT: OOM. The control did not run -- 32768 tok/rank does not")
+    print("  fit. Fall back to GBS=768 (16384 tok/rank) vs a matched GAS=4 arm.")
+elif not rows:
+    print("  VERDICT: no steps. Read the log; nothing concluded.")
+elif gas and gas[0] != "1":
+    print(f"  VERDICT: GAS came out {gas[0]}, not 1. The control did not test")
+    print("  what it claims; the arm is void.")
+elif frozen or ev >= len(rows) - 1:
+    print("  VERDICT: FROZEN like G8 -> BATCH SIZE is the cause. Accumulation is")
+    print("  incidental and the GAS sweep's 'GBS not dp' reading holds.")
+elif ev == 0:
+    print("  VERDICT: CLEAN at the same GBS G8 froze at -> ACCUMULATION is the")
+    print("  cause, not batch size. The 'GBS not dp' conclusion is WRONG and the")
+    print("  target is the accumulation path (8 sequential bf16 backward passes")
+    print("  into one buffer), not the batch.")
+else:
+    print(f"  VERDICT: intermediate -- {ev} events in {len(rows)} steps, not")
+    print("  frozen. Neither explanation is clean; report the counts and do not")
+    print("  pick a story.")
+PY
+echo "NOACCUM_DONE"
