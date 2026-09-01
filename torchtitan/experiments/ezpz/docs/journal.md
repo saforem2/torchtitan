@@ -81,7 +81,7 @@ Running log of what's happening, session by session. Most recent first.
   through a norm). The run underpinning it all (`8537349`) ran at n32/GBS=96,
   inside the regime where bf16 also trains clean -- retracted 2026-08-14 and
   never propagated to the meeting notes.
-  [known-bugs/80b-nan-rate-not-overflow.md](guides/known-bugs/80b-nan-rate-not-overflow.md).
+  [known-bugs/80b-nan-what-we-know.md](guides/known-bugs/80b-nan-what-we-know.md).
 - **RETRACTED SAME DAY: the bisect and the GAS sweep both ran at lr=8e-4,
   ~1000x past the documented ~7.4e-7 ceiling.** Their step-2 blow-ups are that,
   not a finding -- the depth counts, the "GBS not dp" conclusion and the

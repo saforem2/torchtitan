@@ -334,7 +334,7 @@ which would tell us have not been run.
 > refutations of the documented root cause, and the magnitude measurements
 > (`qk_q_absmax_local` = 61.2, 36 orders below the bf16 ceiling).
 >
-> Full account: [`known-bugs/80b-nan-rate-not-overflow.md`](../guides/known-bugs/80b-nan-rate-not-overflow.md).
+> Full account: [`known-bugs/80b-nan-what-we-know.md`](../guides/known-bugs/80b-nan-what-we-know.md).
 
 
 The depth bisect (48L / 72L / 84L at fixed dp, identical per-layer shape) is
