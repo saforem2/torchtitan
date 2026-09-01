@@ -266,6 +266,34 @@ The `80b_noaccum_control.pbs` arm (job `12474428`) still decides it directly:
 same 6,291,456 tokens/step as G8, delivered as ONE microbatch instead of
 eight.
 
+## CONTROL RESULT (job 12474431): the 80B trains fine at the right LR
+
+| arm | lr | GAS | tokens/step | steps | events | outcome |
+|---|---|---:|---:|---:|---:|---|
+| ACCUM | 5e-07 | 4 | 3,145,728 | 12 | **0** | loss 12.948 -> 12.795, grad_norm ~7.9 |
+| NOACC | 5e-07 | 1 | 3,145,728 | 0 | -- | SIGTERM in the first forward |
+
+**ACCUM is the first healthy 80B training produced in this investigation.**
+Twelve steps, zero non-finite gradients, loss descending smoothly, grad_norm
+flat at 7.9. Same model, same 64 nodes, same dp=192, same batch family as the
+runs that blew up at step 2 -- **the only change is 8e-4 -> 5e-7.**
+
+That is the cleanest possible confirmation that everything characterized
+earlier in this document was the learning rate.
+
+**It also answers the accumulation question in one direction.** The arm WITH
+accumulation (GAS=4, four sequential backward passes into one buffer) is the
+clean one. If accumulation were corrupting gradients, this is where it would
+show. It did not.
+
+**What remains unanswerable by this method:** the no-accumulation comparison.
+NOACC needs the whole batch in one microbatch, and 16,384 tokens/rank SIGTERMs
+in the first forward exactly as 32,768 did -- per-rank activation memory is
+the binding constraint. To hold GBS fixed while removing accumulation you must
+raise per-rank tokens, and that does not fit. **On this hardware, at any batch
+large enough to be interesting, accumulation and batch size cannot be
+separated by this design.** That is a real constraint, not a failed run.
+
 ## Design caveat
 
 Fewer layers is also a smaller model -- less memory pressure, different FSDP
