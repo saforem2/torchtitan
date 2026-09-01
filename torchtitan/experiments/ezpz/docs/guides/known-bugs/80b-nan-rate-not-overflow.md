@@ -199,6 +199,38 @@ than a count against a noisy baseline -- G1 never showed anything like it in
 60 steps -- but G32 at production batch (6,144 seqs) is the confirmation, and
 the depth arms taught me what a single unreplicated run is worth.
 
+## GAS SWEEP COMPLETE: both large-batch arms blow up at the FIRST update
+
+| arm | GBS | step 1 | step 2 | outcome |
+|---|---|---:|---|---|
+| G1 | 192 seqs | 12.95 | normal | 60 steps, 2 events, **recovered from both** |
+| G8 | 1,536 seqs | 12.95 | **43.05 + NaN** | frozen all 8 steps |
+| G32 | 6,144 seqs | 12.95 | **46.20 + NaN** | same, ran out of steps |
+
+All three start identically at ~12.95. **Both large-batch arms jump to 43-46
+and go non-finite at step 2 -- the first optimizer step.** G1 never does this
+in 60 steps.
+
+**My report metric was wrong and its verdict should be ignored.** It computed
+a per-microbatch event rate and concluded "larger batches are MORE stable per
+unit work" because G32's rate is 0.0156 -- but G32 ran TWO STEPS and blew up
+on the second. It did not survive; it ran out of steps. A rate normalizer
+assumes events are scattered occurrences; this is a single deterministic
+blow-up at the first update, which a rate cannot represent. The verdict logic
+was tested against synthetic *rate* patterns and passed all five, which is
+exactly why it did not catch this: I tested the metric, not whether the metric
+was the right one.
+
+**This also weighs against the accumulation-exposure explanation.** G32 uses
+32 microbatches per step and G8 uses 8. If a poisoned accumulation buffer were
+the mechanism, G32 should be ~4x worse. The two are indistinguishable -- same
+step, same jump, same freeze. Exposure predicts a difference that is not
+there.
+
+The `80b_noaccum_control.pbs` arm (job `12474428`) still decides it directly:
+same 6,291,456 tokens/step as G8, delivered as ONE microbatch instead of
+eight.
+
 ## Design caveat
 
 Fewer layers is also a smaller model -- less memory pressure, different FSDP
