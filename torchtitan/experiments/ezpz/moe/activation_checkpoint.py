@@ -33,13 +33,16 @@ hierarchy. The pre-refactor monkey-patch (intercepting the module-level
 for. Reference in config registries with ``MoeSelectiveAC.Config()``.
 """
 
+from dataclasses import dataclass
+
 import torch
 
 from torchtitan.distributed.activation_checkpoint import (
-    _get_default_save_ops,
     SelectiveAC,
+    _disable_dynamo_lru_cache,
+    _get_default_save_ops,
 )
-
+from torchtitan.tools.logging import logger
 
 _A2A_OP = torch.ops._c10d_functional.all_to_all_single.default
 
@@ -55,3 +58,21 @@ class MoeSelectiveAC(SelectiveAC):
         save_ops = _get_default_save_ops()
         save_ops.discard(_A2A_OP)
         return save_ops
+
+
+class AuroraMoeSelectiveAC(MoeSelectiveAC):
+    """Checkpoint attention while leaving the nested Aurora MoE graph intact."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(MoeSelectiveAC.Config):
+        pass
+
+    def apply(self, model) -> None:
+        _disable_dynamo_lru_cache()
+        layers = model.get_submodule("layers")
+        for layer_id, transformer_block in layers.named_children():
+            transformer_block.attention = self._wrap_block(
+                transformer_block.attention,
+                base_fqn=f"layers.{layer_id}.attention",
+            )
+        logger.info("Applied Aurora selective AC to model attention modules")

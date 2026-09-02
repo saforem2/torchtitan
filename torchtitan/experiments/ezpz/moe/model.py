@@ -6,7 +6,6 @@
 
 import math
 import os
-import dataclasses
 from dataclasses import dataclass
 
 import spmd_types as spmd
@@ -14,9 +13,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from torchtitan.experiments.ezpz.logging import warn_once
 from torchtitan.models.common.attention import (
     AttentionMasksType,
     BaseAttention,
+    GQAttention,
     ScaledDotProductAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
@@ -32,7 +33,6 @@ from torchtitan.models.utils import (
     quadratic_attention_flops_per_token,
 )
 from torchtitan.protocols.module import Module
-from torchtitan.experiments.ezpz.logging import warn_once
 from torchtitan.tools.logging import logger
 from torchtitan.tools.utils import has_cuda_capability
 
@@ -195,7 +195,7 @@ class Attention(BaseAttention):
         return self.wo(output)
 
 
-class moeTransformerBlock(TransformerBlock):  # noqa: N801
+class moeTransformerBlock(TransformerBlock):
     """
     moe Transformer block with attention and feed-forward layers.
     """
@@ -233,7 +233,7 @@ class moeTransformerBlock(TransformerBlock):  # noqa: N801
         return x
 
 
-class moeModel(Decoder):  # noqa: N801
+class moeModel(Decoder):
     """
     moe Transformer model with attention and feed-forward layers.
     """
@@ -359,13 +359,23 @@ class moeModel(Decoder):  # noqa: N801
             attention_op_flops = 0
             for layer in self.layers:
                 attention = layer.attention
-                assert isinstance(attention, Attention.Config)
+                if isinstance(attention, Attention.Config):
+                    qk_head_dim = (
+                        attention.qk_nope_head_dim + attention.qk_rope_head_dim
+                    )
+                    v_head_dim = attention.v_head_dim
+                elif isinstance(attention, GQAttention.Config):
+                    qk_head_dim = attention.head_dim or self.dim // attention.n_heads
+                    v_head_dim = qk_head_dim
+                else:
+                    raise TypeError(
+                        "MoE FLOP accounting supports MLA or GQA attention, got "
+                        f"{type(attention).__name__}"
+                    )
                 attention_op_flops += quadratic_attention_flops_per_token(
                     num_heads=attention.n_heads,
-                    qk_head_dim=(
-                        attention.qk_nope_head_dim + attention.qk_rope_head_dim
-                    ),
-                    v_head_dim=attention.v_head_dim,
+                    qk_head_dim=qk_head_dim,
+                    v_head_dim=v_head_dim,
                     seq_len=seq_len,
                 )
 
