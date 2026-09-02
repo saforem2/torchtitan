@@ -1,5 +1,39 @@
 # SophiaG: a RECURRENT grad-norm blow-up at 30B
 
+
+> [!IMPORTANT]
+> **RESOLVED 2026-09-01: halving the LR prevents the divergence.** The
+> `1.78e-5` arm (half of `3.56e-5`) cleared **every** documented onset and ran
+> 3,586 in-window steps with **2 excursions above 2.0, max 2.65**. At each
+> onset step the full-LR arms exploded and this one did not move:
+>
+> | onset step | full-LR arms | half-LR arm |
+> |---:|---|---|
+> | 1048 | first divergence | grad_norm 0.2163 |
+> | 1071 | divergence | 0.2601 |
+> | 1176 | divergence | 0.2255 |
+> | ~1550 | divergence (fresh seeded replicate) | 0.1786 |
+> | **~4106** | **second onset, 731.8 and climbing** | **0.1232** |
+>
+> The comparison at 4106 is the decisive one: the fresh arm escalated
+> `0.20 -> 4.95 -> 36.1 -> 99.0 -> 731.8` over five steps, after 2,200 clean
+> steps. This arm passed through at 0.1232 with loss still descending
+> (2.4594 -> 2.4437 across the window), having by then run **3,586** clean
+> window steps -- 1,386 longer than the diverging arm's best.
+>
+> Peak grad_norm over the whole run is **2.65** against the full-LR arms'
+> **100,611**. Loss cost of halving is near zero.
+>
+> **Why this one holds up where today's 80B conclusions did not:** the test
+> point (4106), the metric (excursions >2.0 within the loss<5.0 window) and
+> the control (the full-LR arm at matched steps) were all fixed BEFORE the
+> data existed. The arm was extended twice purely to reach the pre-registered
+> step, not to reach a result.
+>
+> Still bounded: this is ONE arm at ONE halved LR. It shows 1.78e-5 avoids
+> every onset observed at 3.56e-5; it does not locate the threshold between
+> them, and it does not prove no onset exists beyond 4,113.
+
 **Seen:** 2026-08-25, job 12473783 (30B, GBS=960, constant LR 3.55e-05).
 **Status:** RECURRENT. 2 of 2 runs from the same seed diverged, at different
 steps. An earlier version of this document concluded the opposite -- see
