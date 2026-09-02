@@ -290,6 +290,16 @@ configured. As of 2026-08-30 it is at step ~331, loss 6.04 -- still in ordinary
 early training and far short of the earliest onset observed anywhere (1048).
 
 > **UPDATE 2026-08-31 -- the arm has advanced, and it is still indeterminate.**
+> [!CAUTION]
+> **SUPERSEDED 2026-09-02: the arm DIVERGED at step 4163.** It cleared the
+> four early onsets and the 4106 test point, then blew up 50 steps later --
+> `4.18 -> 12.51 -> 50.70 -> 87.60 -> 144.81 -> 346.69`, peak **4,341.22**,
+> 30 excursions by the end. Final: 5,083 steps, 4,536 in-window.
+>
+> **Halving the LR DELAYS the onset ~4x (1048 -> 4163) and cuts the peak ~23x
+> (100,611 -> 4,341). It does not prevent it.** Details and the retracted
+> claim: [`known-bugs/sophiag-stochastic-divergence-30b.md`](../../guides/known-bugs/sophiag-stochastic-divergence-30b.md).
+>
 > It has since cleared all four prior onset steps: **1,052 in-window steps, zero
 > excursions, loss 2.879 at step 1579**
 > ([`summaries/2026-08-31.md`](../../summaries/2026-08-31.md) SS2). That does NOT

@@ -2,7 +2,7 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR clears every prior onset step
+## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR DELAYS divergence 4x but does not prevent it
 
 - **muP stage 4 answered the question the coordinate check could not.** A
   passing coordinate check proves the parametrization is internally
@@ -134,6 +134,14 @@ Running log of what's happening, session by session. Most recent first.
   before zeroing, and separately logs the metrics that are themselves
   non-finite, which name the affected tensors. 6/6 tests. Which tensor goes
   first is the remaining unknown, and the next 80B run at dp=192 records it.
+- **CORRECTED 2026-09-02: the half-LR arm DIVERGED at step 4163.** It
+  cleared the four early onsets AND the 4106 test point, then blew up 50
+  steps later (peak **4,341**, 30 excursions, final 5,083 steps). Halving
+  the LR moves the onset 1048 -> 4163 and cuts the peak 100,611 -> 4,341:
+  a ~4x delay and a ~23x smaller spike, **not prevention**. I published
+  "resolved" minutes after it passed 4106 while it was still running --
+  a pre-registered threshold stops you moving goalposts, not declaring
+  victory on crossing one.
 - **SophiaG at half LR (1.78e-5) cleared all four prior onset steps** --
   1,052 in-window steps, **zero** excursions, max grad_norm 0.94, loss 2.879 at
   step 1579. First arm to get past 1048.
