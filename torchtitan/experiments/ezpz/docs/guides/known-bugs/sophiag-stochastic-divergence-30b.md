@@ -1,8 +1,26 @@
 # SophiaG: a RECURRENT grad-norm blow-up at 30B
 
 
-> [!IMPORTANT]
-> **RESOLVED 2026-09-01: halving the LR prevents the divergence.** The
+> [!CAUTION]
+> **RETRACTED WITHIN THE HOUR. The claim below is WRONG -- the arm diverged at
+> step 4163, 50 steps after the test point I declared it had cleared.**
+> Onset: `4.18 -> 12.51 -> 50.70 -> 87.60 -> 144.81 -> 346.69`, peaking at
+> **4,341.22**, 30 excursions by step 4,580.
+>
+> Kept below as written, because the error is instructive. I picked 4106 as
+> the decision point from the fresh arm's second onset, watched this arm pass
+> it at grad_norm 0.1232, and published within minutes. **A pre-registered
+> threshold stops you moving the goalposts after seeing data; it does nothing
+> about declaring victory the instant one is crossed.** The arm was still
+> running with 400+ steps of its own runway left, and there was no reason not
+> to wait.
+>
+> The corrected result follows the retracted block.
+
+> 
+> --- THE RETRACTED CLAIM, AS WRITTEN ---
+>
+> ~~**RESOLVED 2026-09-01: halving the LR prevents the divergence.**~~ The
 > `1.78e-5` arm (half of `3.56e-5`) cleared **every** documented onset and ran
 > 3,586 in-window steps with **2 excursions above 2.0, max 2.65**. At each
 > onset step the full-LR arms exploded and this one did not move:
@@ -33,6 +51,26 @@
 > Still bounded: this is ONE arm at ONE halved LR. It shows 1.78e-5 avoids
 > every onset observed at 3.56e-5; it does not locate the threshold between
 > them, and it does not prove no onset exists beyond 4,113.
+
+### CORRECTED: halving the LR DELAYS the onset ~4x, it does not prevent it
+
+| | full LR 3.56e-5 | half LR 1.78e-5 |
+|---|---|---|
+| first onset | step 1048 | **step 4163** |
+| peak grad_norm | 100,611 | **4,341** |
+| escalation | 0.20 / 4.95 / 36.1 / 99.0 / 731.8 | 4.18 / 12.5 / 50.7 / 87.6 / 144.8 / 346.7 |
+
+**Onset moves 1048 -> 4163 -- about 4x later for a 2x LR reduction -- and the
+peak is ~23x smaller.** Both effects are real and useful. Neither is
+prevention. The signature is otherwise identical: quiet baseline, no
+precursor, monotone escalation over a handful of steps.
+
+**This is now the strongest evidence for the original finding in this
+document.** The arm held grad_norm at 0.11-0.13 for 3,586 in-window steps and
+then reached 4,341 within 20 steps. A clean 3,500-step stretch carries no
+information about what comes next, and every optimistic read of a quiet
+pre-onset record -- including mine, an hour ago -- has been wrong.
+
 
 **Seen:** 2026-08-25, job 12473783 (30B, GBS=960, constant LR 3.55e-05).
 **Status:** RECURRENT. 2 of 2 runs from the same seed diverged, at different
