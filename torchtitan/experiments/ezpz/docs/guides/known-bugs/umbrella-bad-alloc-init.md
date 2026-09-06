@@ -1,6 +1,27 @@
 # Umbrella `std::bad_alloc` at init -- intermittent, not yet root-caused
 
-> Last updated: 2026-08-10
+> Last updated: 2026-09-06
+
+> [!NOTE]
+> **2026-09-06 narrowing.** Three consecutive umbrellas (`8773440`, `8784460`,
+> `8784462`) lost the SAME seat -- `t0`, the 2B stage-2 dolmino chain -- to this
+> at 512N init. Four hypotheses eliminated:
+>
+> | ruled out | evidence |
+> |---|---|
+> | bad hardware | the two failing runs shared **zero** hosts (`comm -12` over the two `trainer-0.hostfile`s returns 0) |
+> | a 512N / 6144-rank ceiling | `t3` is the identical `2b n=512 nproc=6144 gbs=12288` shape and trained to step 27,917 in the same job |
+> | a `t0`+`t1` 512N pair | `t1` (20B-512) trained to step 9,562 in `8784462`; only `t0` is consistent |
+> | oneCCL PMI as root cause | `pmrt_kvs_get` appears on one attempt but the terminal error is `MemoryError: std::bad_alloc`; the PMI line is downstream |
+>
+> What still distinguishes `t0` from the seat that works: the checkpoint it
+> resumes (`checkpoints/agpt-2b-stage2-dolmino-n512-gbs12288`) and its step
+> target (23,746 vs `t3`'s 46,429). A stage-2 resume reads a different
+> checkpoint shape, which is the obvious next thing to test.
+>
+> Operationally: `supervise_trainer` correctly gives up after 2 quick deaths,
+> but **no failover ever runs** -- 0 scrape/rotate lines and 10 spares unused in
+> both jobs. The seat costs ~522 nodes for the full 12h window.
 
 **Status: OPEN.** Costs whole trainer slots on a ~2098-node allocation. A
 plausible mechanism (concurrent-init contention) is identified but NOT proven --
