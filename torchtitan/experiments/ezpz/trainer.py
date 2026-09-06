@@ -28,6 +28,12 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.experiments.ezpz.native_ddp import (
+    install_agpt_dtype_probe,
+    record_native_ddp_grad_streams,
+    validate_native_ddp,
+    wrap_native_ddp,
+)
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
     TorchFTManager as FTManager,
@@ -558,6 +564,19 @@ class FaultTolerantTrainer(Trainer):
         )
         assert self.gradient_accumulation_steps > 0
 
+        # Native-DDP preflight. Inert unless the config opts in; it rejects
+        # combinations that would silently mis-train (wrong loss scaling,
+        # incompatible GAS) rather than letting them run.
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            validate_native_ddp(
+                model_name=model_spec.name,
+                parallel_dims=parallel_dims,
+                training=config.training,
+                parallelism=config.parallelism,
+                loss_fn=self.loss_fn,
+                gradient_accumulation_steps=self.gradient_accumulation_steps,
+            )
+
         # How many pipeline microbatches make up one local batch. This is 1
         # whenever PP is off, so the extra loop it drives in train_step is a
         # no-op for every non-PP run. Mirrors the base Trainer
@@ -677,12 +696,32 @@ class FaultTolerantTrainer(Trainer):
                 dump_folder=config.dump_folder,
             )
 
+            # Native DDP wraps AFTER parallelize, so it sees the already-
+            # sharded module. Guarded: inert unless the config opts in.
+            if getattr(
+                config.parallelism, "enable_data_parallel_native_ddp", False
+            ):
+                model = wrap_native_ddp(
+                    model,
+                    parallel_dims.get_mesh("dp_replicate"),
+                    config.parallelism.native_ddp_bucket_cap_mb,
+                    config.parallelism.native_ddp_compute_policy,
+                    config.parallelism.native_ddp_bucketize_first_iteration,
+                )
+
             model.to_empty(device=init_device)
             with torch.no_grad():
                 cast(BaseModel, model).init_states(buffer_device=buffer_device)
             model.train()
 
             self.model_parts = [model]
+
+        # Opt-in dtype probe, env-gated rather than config-gated because it is
+        # a debugging aid rather than a run mode.
+        if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
+            if parallel_dims.pp_enabled or len(self.model_parts) != 1:
+                raise ValueError("AGPT dtype probe requires a non-pipeline model")
+            install_agpt_dtype_probe(self.model_parts[0])
 
         # Set lm_head reference for ChunkedLossWrapper after model construction.
         # Replayed from upstream torchtitan/trainer.py (lines 391-411). Required
@@ -1030,6 +1069,12 @@ class FaultTolerantTrainer(Trainer):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
             _attn.set_step(self.step)
 
+        if getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            # Experimental mixed-precision DDP restores FP32 gradients on an
+            # upcast stream; ordinary DDP/autocast makes this a no-op.
+            record_native_ddp_grad_streams(self.model_parts[0])
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,
