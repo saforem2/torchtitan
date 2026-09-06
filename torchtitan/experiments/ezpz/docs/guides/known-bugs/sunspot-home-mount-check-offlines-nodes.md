@@ -1,112 +1,137 @@
-# Sunspot: the `home` mount check offlines nodes and requeues jobs forever
+# Sunspot: rack x1921 fails the `home` mount check; 64N jobs cannot run
 
-**Status (2026-09-06): live site issue. 28 of 129 nodes offline from this
-cause alone; only 22 free.** Not caused by our jobs -- the offlining jobs
-belong to other users -- but it blocks every multi-node submission we make.
+**Status (2026-09-06): live site issue, ALCF-side. Rack `x1921` is 36 offline
+/ 28 job-exclusive -- ZERO free. Rack `x1922` is healthy.** Ongoing since
+Fri Sep 4. Not caused by our jobs.
 
 ## Symptom
 
-A multi-node job never starts. `qstat` shows it cycling `Q -> R -> E -> Q`
-with no walltime accumulated, no `.o` file, and no log directory. The exit
-status is the tell:
+A 64-node job never starts. It cycles `Q -> R -> E -> Q` with no walltime
+accumulated, no `.o` file, and no log directory:
 
 ```
 Exit_status = -3
-run_count = 16
+run_count = 19
 ```
 
-`-3` is PBS for "exec failed, requeue". Each retry grabs a fresh node set,
-fails the same way, and the counter climbs. Job `12474709` reached
-`run_count = 16` without ever running a single line of its script.
+`-3` is PBS for "exec failed, requeue". Job `12474709` reached `run_count=19`
+without executing a line of its script.
 
 ## Cause
 
-The PBS prologue runs a filesystem mount check on every allocated node.
-When it fails, PBS **takes the node offline and requeues the job**:
+The PBS prologue mount-checks each allocated node. On `x1921` the `home`
+check fails; the node is taken offline and the job requeued:
 
 ```
 EXECJOB_BEGIN: failed mount check: home not mounted(job 12474677)
 ```
 
-`/home` is mounted on the login nodes, so nothing looks wrong interactively.
-It is the compute-node mount that is failing.
+**All 29 mount-check failures are in `x1921`. Zero in `x1922`.** `/home` is
+mounted normally on the login nodes, so nothing looks wrong interactively.
 
-This is self-amplifying **for the job that first hits a healthy node**:
-that node goes offline and the pool shrinks for everyone.
+The scale threshold follows directly. `x1922` has 22 free nodes, so:
 
-But a requeuing job is not necessarily the one doing the damage. Ours
-(`12474709`, `run_count` 19) appears in **no** node comment -- every one of
-the 29 offlined nodes names one of five jobs belonging to `brianhol` and
-`zippy`. It was landing on already-dead nodes and bouncing. Check before you
-attribute:
+- a job needing <= 22 nodes can be satisfied entirely from `x1922` and runs;
+- a **64-node job cannot**, so it necessarily draws from `x1921`, hits a bad
+  node, and requeues -- forever.
 
-```bash
-pbsnodes -l | grep -c "<your job id>"      # 0 = your job offlined nothing
-pbsnodes -l | grep -oE "job [0-9]+" | sort | uniq -c | sort -rn
+## There is no client-side workaround
+
+**Dropping `home` from `#PBS -l filesystems=` does NOT help.** That was the
+obvious fix and it is wrong. A matched pair of 8-node probes settles it:
+
+| probe | filesystems | landed on | run_count | result |
+|-------|-------------|-----------|-----------|--------|
+| 12474714 | `tegu:home` | x1922 | 1 | `Exit_status = 0`, ran |
+| 12474715 | `tegu` | x1922 | 1 | `Exit_status = 0`, ran |
+
+**The probe that requested `home` succeeded.** The flag is not the variable;
+the rack is. Both probes drew from `x1922` and both passed.
+
+Until ALCF restores `x1921`, a 64N job here cannot be made to run by any
+change to our scripts. Options are: wait for the rack, or run at <= 22 nodes.
+
+A 64N probe requesting `tegu` alone (`12474713`) confirms it. Both of its
+attempts drew the identical set -- 36 `x1922` + 28 `x1921` -- because that is
+the only 64 nodes outside the offline pool, and both failed:
+
+```
+run_count = 2      nodes: 64   Counter({'x1922': 36, 'x1921': 28})
 ```
 
-The practical consequence differs: a job that offlines nodes should be
-stopped promptly; a job that merely bounces is only costing you the 64-node
-allocation it grabs on each attempt -- which still starves anything queued
-behind it.
+The scheduler has no other allocation to give. Note those 28 `x1921` nodes are
+`job-exclusive`, not offline -- they bounce jobs at the mount check **without
+being offlined themselves** (`pbsnodes -l | grep -c 12474713` returns 0). So
+the offline count understates the damage: 29 nodes are marked bad, but the
+whole rack is unusable.
 
-## How to tell it apart from a bad script
+## PBS gives up on its own
 
-Ladder up. The scale at which it starts failing is the diagnosis, and this
-took three probes to pin down because the first two readings each pointed
-somewhere wrong:
+After enough failures PBS system-holds the job:
+
+```
+job_state = H
+Hold_Types = s
+comment = job held, too many failed attempts to run
+run_count = 21
+```
+
+Worth knowing before you intervene -- our capture job reached this state by
+itself. A system hold is released with `qrls`, but do not release it until the
+rack is back or it will simply resume burning attempts.
+
+## Diagnosis path, and two dead ends worth knowing
+
+Ladder the scale with a TRIVIAL payload -- the scale at which it breaks is
+the diagnosis:
 
 | probe | scale | payload | run_count | result |
 |-------|-------|---------|-----------|--------|
-| 12474711 | 1N | `echo` | 1 | `Exit_status = 0`, output written |
-| 12474712 | 64N | `echo` | 2+ | requeued, same as the real job |
-| 12474709 | 64N | 80B train | 16 | never started |
+| 12474711 | 1N | `echo` | 1 | `Exit_status = 0` |
+| 12474712 | 64N | `echo` | 4 | `-3`, never ran |
+| 12474709 | 64N | 80B train | 19 | never ran |
 
-**A trivial `echo` at 64 nodes fails identically to a real training job.**
-That is what rules out your script. Do not skip the trivial-payload probe:
-without 12474712 the evidence pointed straight at the one job, and the
-obvious next move -- qdel and resubmit -- would have changed nothing while
-offlining another sweep of nodes.
+A bare `echo` at 64N failing identically to the real job is what rules out
+your script.
 
-Two readings that looked right and were not:
+Then split the suspected variable with a **matched pair at a scale that
+runs** -- that is what turned "drop the flag" from a plausible fix into a
+refuted one, for the cost of two 5-minute jobs. A fix you have not tested
+against its own control is a guess.
 
-- *"10 of the 64 nodes are unreachable."* An artifact of parsing wrapped
-  `qstat -f` output with `tr -d '\n'`, which splices hostnames together.
-  PBS wraps continuation lines with a leading tab; strip `\n\t`, not `\n`.
-  All 64 nodes were `job-exclusive` and healthy.
-- *"My own retries offlined these nodes."* The job ids in the node comments
-  (`12474677`, `12474689`, `12474690`, ...) belong to `brianhol` and
-  `zippy`. Read the owner off the id before claiming the blame -- or
-  assigning it.
+Dead ends:
 
-## Workaround
+- *"10 of the 64 nodes are unreachable."* A parsing artifact: `qstat -f`
+  wraps continuation lines with a **leading tab**, so `tr -d '\n'` splices
+  hostnames together. Strip `\n\t`, not `\n`. All 64 were healthy.
+- *"My retries offlined these nodes."* `12474709` appears in **zero** node
+  comments; all 29 name jobs owned by `brianhol` and `zippy`. It was bouncing
+  off nodes that were already dead. Check with
+  `pbsnodes -l | grep -c "<job id>"` before claiming or assigning blame.
 
-Drop `home` from the filesystems request when the job does not need it:
+Also: `E` is a normal transition, not a failure, and `job_state = R` with an
+empty `stime` means PBS has allocated but not started. Read `run_count`
+before concluding anything from a state letter.
+
+## Operational notes
+
+A job in an exec-failure loop **outruns a plain `qdel`** -- PBS requeues it
+faster than the delete lands. Hold it first:
 
 ```bash
-#PBS -l filesystems=tegu      # not tegu:home
+qhold <id> && qdel -W force <id>
 ```
-
-Our 80B jobs keep repo, venv, logs and checkpoints on tegu and reference
-`$HOME` nowhere, so the `home` in that line was vestigial -- and it is the
-only reason the check applied. Confirm with a grep for HOME references on
-the script before removing it; the module stack or a conda base can reach
-into `$HOME` even when your own lines do not.
 
 ## Reporting
 
-Worth a ticket because it degrades the machine for everyone and the offlined
-nodes do not come back on their own. Include: the `pbsnodes -l` lines naming
-the failure, the count (28 nodes), and the point that `/home` is mounted on
-the login node so the failure is compute-side only.
-
-Collect the current list with:
+Ticket drafted at `sunspot-home-mount-ticket-draft.md`. Regenerate the counts
+before sending:
 
 ```bash
 pbsnodes -l | grep "not mounted"
-pbsnodes -l | grep -oE "failed mount check: [a-z]+ not mounted" | sort | uniq -c
+pbsnodes -l | grep "not mounted" | awk '{print $1}' | cut -c1-5 | sort | uniq -c
+pbsnodes -avSj | tail -n +3 | awk '{print substr($1,1,5), $2}' | sort | uniq -c
 ```
 
 Related: `project_silent_noop_exit_zero` -- the sibling shape, where work
-reports success having done nothing. Here the job reports nothing at all,
-which is at least honest, but the 16 silent retries cost an afternoon.
+reports success having done nothing.

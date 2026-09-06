@@ -7,15 +7,15 @@
 #PBS -N 80b-depth-bisect
 #PBS -j oe
 #
-# FILESYSTEMS: tegu only, NOT tegu:home. 2026-09-06. The PBS prologue runs a
-# per-node mount check for every filesystem named here, and sunspot's compute
-# nodes are currently failing it for `home`: the node is taken OFFLINE and the
-# job is REQUEUED, so a job cycles Q->R->E->Q forever at Exit_status=-3 without
-# executing a line. Job 12474709 reached run_count=18 that way, and a trivial
-# 64N `echo` (12474712) failed identically -- it is not the script.
-# This job keeps repo, venv, logs and checkpoints on tegu and references $HOME
-# nowhere, so naming `home` only bought us the check.
-# See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
+# FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
+# sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
+# offline, job requeues, Exit_status=-3 forever; 12474709 hit run_count=19).
+# Dropping `home` was the obvious workaround and a matched 8N pair REFUTED it:
+# the probe requesting tegu:home ran fine (12474714, rc=1, exit 0). The rack is
+# the variable, not the flag. x1922 has only 22 free nodes, so a 64N job must
+# reach into x1921 and cannot run until ALCF restores it.
+# `tegu` alone is still correct here (this job touches no $HOME), just not
+# curative. See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
 set -o pipefail
 
 # DOES THE 80B NaN DEPEND ON DEPTH? The experiment the stated root cause
