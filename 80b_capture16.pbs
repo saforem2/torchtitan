@@ -1,11 +1,26 @@
 #!/bin/bash -l
 #PBS -A datascience
 #PBS -q workq
-#PBS -l select=64
+#PBS -l select=16
 #PBS -l walltime=04:00:00
 #PBS -l filesystems=tegu
-#PBS -N 80b-capture
+#PBS -N 80b-cap16
 #PBS -j oe
+#
+# SIXTEEN NODES, NOT 64. 2026-09-06. Rack x1921 fails the PBS prologue `home`
+# mount check, so a 64N job cannot get a clean allocation and requeues forever
+# (12474709 hit run_count=21 and PBS system-held it). x1922 is healthy but has
+# only 22 free nodes -- so this runs at 16N, entirely inside the good rack.
+#
+# GBS IS UNCHANGED, which is what makes this a valid reproduction rather than
+# a different experiment: 192 ranks / TP4 = 48 dp, and 25,165,824 / (4096*48)
+# = GAS 128 exactly. Same tokens/train-step as the 64N version, same value the
+# SophiaG lr=1e-6 calibration was built against.
+#
+# The 80B has trained at 5 nodes here (80b_bisect.pbs, 80b_rc_smoke.pbs, both
+# real agpt_80b at TP=4), so 16N is not a memory risk.
+#
+# See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
 #
 # FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
 # sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
@@ -42,10 +57,10 @@ set -o pipefail
 #   warmup 4650, decay_ratio=0, compile OFF, AC=full -> flat grad_norm ~6.17,
 #   step-14 inf, NaN step-18.
 #
-# HERE: 64N (510 not available; 86 free). dp = 768/4 = 192. GBS is what the LR
+# HERE: 16N, inside healthy rack x1922. dp = 192/4 = 48. GBS is what the LR
 # was calibrated against and the source doc states GAS compensates for node
-# count, so GAS=32 holds GBS at 6144 -- within 0.4% of the original 6120.
-#   4096 tok/rank x 192 dp x 32 = 25,165,824 tokens = 6,144 seqs.
+# count, so GAS=128 holds GBS at 6144 -- within 0.4% of the original 6120.
+#   4096 tok/rank x 48 dp x 128 = 25,165,824 tokens = 6,144 seqs.
 #
 # Same warmup 4650 and decay_ratio=0: at step ~18 the schedule is still deep in
 # warmup, so the effective LR there is what matters and it must match.
@@ -80,11 +95,11 @@ export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
 source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
 python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 
-export LOGD="$REPO/outputs/logs/80b-capture/$PBS_JOBID"; mkdir -p "$LOGD"
+export LOGD="$REPO/outputs/logs/80b-cap16/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/capture.log"
 
 echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
-timeout 12000 ezpz launch --nproc 768 -ppn 12 -- \
+timeout 12000 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_80b_sophiag \
     --training.steps=40 \
@@ -120,7 +135,7 @@ rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+
 events = re.findall(r"non-finite grad_norm \([^)]*\) at step (\d+)", txt)
 
 print(f"  optimizer {opt}   lr {lr}   GAS {gas}   tokens/step {tok}")
-print(f"  (target: SophiaG, 1e-06, 32, 25165824)")
+print(f"  (target: SophiaG, 1e-06, 128, 25165824)")
 print(f"  steps {len(rows)}   non-finite events {len(events)}"
       f"{' at ' + ','.join(events[:8]) if events else ''}")
 

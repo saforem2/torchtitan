@@ -3,9 +3,19 @@
 #PBS -q workq
 #PBS -l select=64
 #PBS -l walltime=03:00:00
-#PBS -l filesystems=tegu:home
+#PBS -l filesystems=tegu
 #PBS -N 80b-depth-bisect
 #PBS -j oe
+#
+# FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
+# sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
+# offline, job requeues, Exit_status=-3 forever; 12474709 hit run_count=19).
+# Dropping `home` was the obvious workaround and a matched 8N pair REFUTED it:
+# the probe requesting tegu:home ran fine (12474714, rc=1, exit 0). The rack is
+# the variable, not the flag. x1922 has only 22 free nodes, so a 64N job must
+# reach into x1921 and cannot run until ALCF restores it.
+# `tegu` alone is still correct here (this job touches no $HOME), just not
+# curative. See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
 set -o pipefail
 
 # DOES THE 80B NaN DEPEND ON DEPTH? The experiment the stated root cause
