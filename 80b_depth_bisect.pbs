@@ -110,6 +110,22 @@ set -o pipefail
 # plain -rc2. Copying its header cost job 12474399, which aborted in the
 # config gate with ModuleNotFoundError: No module named 'grain'. The gate
 # worked; the venv was wrong.
+# LEARNING RATE, ADDED 2026-09-06. The first run of this script (job
+# 12474403) set NO lr and therefore inherited agpt()'s shared 8e-4 default --
+# roughly 1000x past the ~7.4e-7 ceiling the 80B guide documents. Its step-2
+# blow-ups were read first as a depth effect and then as a batch-size effect;
+# both readings were withdrawn, and the whole run is void. See
+# docs/guides/known-bugs/80b-nan-what-we-know.md.
+#
+# 5e-7 is the value the guide recommends for AdamW, and it is the LR at which
+# the 80B demonstrably trains clean (job 12474431: 12 steps, 0 non-finite
+# gradients, loss 12.948 -> 12.795). Running the depth ladder there means a
+# difference BETWEEN arms is attributable to depth rather than to every arm
+# being over-driven equally.
+#
+# The report below already voids itself on a bad LR; this makes the good case
+# the default rather than something the operator has to remember.
+
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
 
@@ -172,6 +188,7 @@ arm() {  # arm <label> <config>
       --training.max-context-length=4096 \
       --training.num-tokens-per-microbatch-per-dp-rank=4096 \
       --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 \
       --compile.no-enable \
       --diagnostics --diagnostics-attention \
       --diagnostics-per-layer --diagnostics-interval=1 \
