@@ -31,8 +31,24 @@ EXECJOB_BEGIN: failed mount check: home not mounted(job 12474677)
 `/home` is mounted on the login nodes, so nothing looks wrong interactively.
 It is the compute-node mount that is failing.
 
-This is self-amplifying: every requeue lands on new nodes, offlines those
-too, and shrinks the pool the next attempt draws from.
+This is self-amplifying **for the job that first hits a healthy node**:
+that node goes offline and the pool shrinks for everyone.
+
+But a requeuing job is not necessarily the one doing the damage. Ours
+(`12474709`, `run_count` 19) appears in **no** node comment -- every one of
+the 29 offlined nodes names one of five jobs belonging to `brianhol` and
+`zippy`. It was landing on already-dead nodes and bouncing. Check before you
+attribute:
+
+```bash
+pbsnodes -l | grep -c "<your job id>"      # 0 = your job offlined nothing
+pbsnodes -l | grep -oE "job [0-9]+" | sort | uniq -c | sort -rn
+```
+
+The practical consequence differs: a job that offlines nodes should be
+stopped promptly; a job that merely bounces is only costing you the 64-node
+allocation it grabs on each attempt -- which still starves anything queued
+behind it.
 
 ## How to tell it apart from a bad script
 
