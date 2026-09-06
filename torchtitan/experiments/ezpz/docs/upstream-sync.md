@@ -3609,3 +3609,66 @@ Merged upstream/main (was 2 behind). Both commits touch NOTHING on our XPU/dense
 - `b3a13eed9` MinimalAsyncEP int32 overflow fix in top-k kernels (#3969): MoE expert-parallel
   kernel; we run dense agpt-2b, not MoE -- irrelevant to current work, harmless hygiene.
 Merge clean (5 files, zero ezpz files touched, zero conflicts). Now 0 behind upstream.
+
+## Survey 2026-09-06 (966befce6) -- 64 commits pending, NOT merged; here is what to watch
+
+Surveyed, not merged. Two 80B captures were mid-flight and folding in 64
+commits would make any new failure ambiguous. Recording the analysis so the
+merge is cheap when the machine is quiet.
+
+Diverged at `6ee6d5d53` (2026-08-30); upstream tip `966befce6`.
+
+**Zero upstream commits touch `experiments/ezpz`** -- `git diff --name-only
+ezpz...upstream/main | grep -c experiments/ezpz` returns 0. So no conflicts in
+our own code; the risk is entirely in core files we import from.
+
+### Symbols we import that upstream changed
+
+`torchtitan/components/loss.py` -- we import `BaseLoss`, `CrossEntropyLoss`,
+`ChunkedLossWrapper`, `IGNORE_INDEX`. **All four still present.** The only
+signature change is a method rename:
+
+```
+-    def typecheck_forward(
++    def spmd_typecheck(
+```
+
+`zloss.py` overrides only `__init__` and `__call__`, so it does not inherit
+that rename -- checked, not assumed. A preserved NAME with a changed contract
+is the dangerous case here, not a deleted one.
+
+### The four to watch, in the order I would actually worry
+
+1. **`#4398` [data] Compute valid-token counts during collation.** Rewrites the
+   per-microbatch `IGNORE_INDEX` scan that used to run host-side in
+   `Trainer.train_step`. That is the gradient-accumulation path -- the same one
+   examined for the GAS work, where `local_valid_tokens` sums all microbatches
+   before the all-reduce. Highest chance of a silent numerics shift.
+2. **Checkpoint cluster `#4187` / `#4188` / `#4197` / `#4270` / `#4474`** --
+   moves discovery and retention into `BaseCheckpointManager`, routes saves
+   through a `torch_checkpointing` backend, adds retention exemptions, and
+   fixes partially-initialized optimizer state. We subclass `CheckpointManager`.
+   Relevant precedent: pinned prod clones already break on optim-statedict
+   changes (see the pre-#3623 note), so this cluster deserves a resume test on
+   a real checkpoint, not just an import check.
+3. **`#4382` Preserve Adam first-step state during optimizer initialization.**
+   Optimizer init, adjacent to the SophiaG/NaN work. Worth a numerics check
+   with `--debug.seed=42 --debug.deterministic`.
+4. **`#4328` refactor max_context_length.** I first called this the highest
+   risk and that was wrong. `max_context_length` is UNCHANGED upstream --
+   still `configs.py:51`, same 2048 default, with a validation guard added.
+   The PR changes `seq_len` in model specs and config registries, not the
+   `--training.max-context-length` flag our scripts pass. The one seam is
+   `agpt/config_registry.py:291`, where our own `agpt(seq_len=...)` parameter
+   assigns `cfg.training.max_context_length = seq_len`. Verify that line
+   post-merge; do not assume the flag carries.
+
+Also present but irrelevant to us: DeepSeek V4 (`#3634`), Kimi K3 EP
+(`#4314`/`#4446`), Qwen3.8 (`#4355`), an MxFP8 overhaul (`#4203`), and Forge
+deprecated under experimental (`#4456`).
+
+### Recommended order when merging
+
+Smoke at 2N first per the standing rule, then check in this order: a resume
+from a real checkpoint (2), a seeded loss/grad_norm comparison (1 and 3), and
+`config_registry.py:291` by inspection (4).
