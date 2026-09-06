@@ -1495,6 +1495,33 @@ def ezpz_agpt_80b() -> FaultTolerantTrainer.Config:
     return agpt("80B", tensor_parallel_degree=2)
 
 
+def agpt_80b_sophiag() -> FaultTolerantTrainer.Config:
+    """agpt 80B with SophiaG at 1e-6 -- the ONE 80B failure that is not an LR
+    artifact, kept reproducible so it can be instrumented.
+
+    Job `8574385` ran this: 510N, TP=4, LBS=1, GAS=4, GBS 6120, SophiaG at
+    lr=1e-6, warmup 4650, decay_ratio=0, compile OFF -- and NaN'd at step 18
+    with a flat grad_norm ~6.17 beforehand.
+
+    **Why this configuration matters more than the others.** 1e-6 is BELOW the
+    LR-finder's ~2.5e-6 SophiaG optimum and well below its ~4.6e-6 blow-up
+    onset, so unlike every 80B run in the 2026-08-31 session (which used the
+    inherited 8e-4 default, ~1000x past the AdamW ceiling), this one cannot be
+    dismissed as a learning-rate error. It is the failure that is actually
+    unexplained.
+
+    The LR is set here rather than left to a flag because `--optimizer.name`
+    does not exist in the parser -- the optimizer is a config-level choice, and
+    passing a nonexistent flag aborts at parse time.
+
+    Pair with `--lr-scheduler.warmup-steps=4650 --lr-scheduler.decay-ratio=0`
+    (both real flags, verified) and a GBS near 6144 to match the calibration.
+    """
+    cfg = ezpz_agpt_80b()
+    cfg.optimizer = default_sophiag(lr=1.0e-6)
+    return cfg
+
+
 def agpt_80b() -> FaultTolerantTrainer.Config:
     """agpt 80B. YOU MUST OVERRIDE THE LEARNING RATE.
 
