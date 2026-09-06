@@ -48,8 +48,28 @@ obvious fix and it is wrong. A matched pair of 8-node probes settles it:
 **The probe that requested `home` succeeded.** The flag is not the variable;
 the rack is. Both probes drew from `x1922` and both passed.
 
-Until ALCF restores `x1921`, a 64N job here cannot be made to run by any
-change to our scripts. Options are: wait for the rack, or run at <= 22 nodes.
+**It is the OFFLINE COUNT, not the rack, that sets the ceiling.** A 16N
+capture (`12474716`) drew all 16 of its nodes from `x1921` -- the "bad" rack --
+and started on the first attempt. x1921's healthy nodes are fine; only the 36
+offline ones are poison, and PBS will not schedule onto those anyway.
+
+So the rule is simply: **a job that can be satisfied entirely from healthy
+nodes runs; one that cannot, requeues forever.** With 36 of 129 nodes offline,
+64N had no clean allocation to draw and 16N had many. Reducing N is a real
+workaround, not a rack-affinity trick -- and there is no way to express "avoid
+the sick nodes" in the submit, because PBS already believes it is.
+
+Reduce N while holding the science fixed. For the 80B capture that meant
+keeping GBS identical and moving the compensation into GAS:
+
+```
+64N:  768 ranks / TP4 = 192 dp,  25,165,824 / (4096*192) = GAS  32
+16N:  192 ranks / TP4 =  48 dp,  25,165,824 / (4096* 48) = GAS 128
+```
+
+Same tokens/train-step, so it stays a reproduction rather than a new
+experiment. Check the arithmetic divides exactly -- 12N and 20N give
+fractional GAS and would silently shift GBS.
 
 A 64N probe requesting `tegu` alone (`12474713`) confirms it. Both of its
 attempts drew the identical set -- 36 `x1922` + 28 `x1921` -- because that is
@@ -64,6 +84,58 @@ The scheduler has no other allocation to give. Note those 28 `x1921` nodes are
 being offlined themselves** (`pbsnodes -l | grep -c 12474713` returns 0). So
 the offline count understates the damage: 29 nodes are marked bad, but the
 whole rack is unusable.
+
+## Pinning to "free" nodes is NOT enough (2026-09-06, later)
+
+The host-pinned 64N capture (`12474718`) launched correctly -- 768/768 GPUs on
+all 64 named hosts, right command -- and died at 59 seconds with 0 training
+steps:
+
+```
+x1922c7s2b0n0...: rank 744 exited with code 127
+Couldn't change directory to /lus/tegu/.../torchtitan: No such file or directory
+  (57 of these, ~4-5 nodes' worth, out of 768 ranks)
+rc=143
+```
+
+Exit 127 is command-not-found: that node could not `cd` into the repo, so it
+could not find python. One rank dying takes all 768 down with it.
+
+**The fault is not specific to `home`. Some nodes cannot see `tegu` either.**
+And the damning detail:
+
+```
+$ pbsnodes x1922c7s2b0n0 | grep state
+     state = free
+```
+
+PBS considered that node healthy. The prologue mount check did not catch it --
+which makes sense, since the failing check is what OFFLINES a node, so a node
+whose check silently passes (or never runs for that filesystem) stays `free`
+while being unusable.
+
+**So `free` is not the same as usable, and a host list filtered by `pbsnodes`
+state is not a safe select.** Filter by an actual access test instead: run a
+`stat` of a known repo path from every candidate node and keep only the ones
+that answer.
+
+```bash
+# survey: one rank per candidate node, stat a path on the target filesystem
+mpiexec --envall --np $N --ppn 1 /usr/bin/stat -c OKNODE /lus/tegu/.../some_file
+```
+
+Nodes that print `OKNODE` are usable; nodes that print `No such file or
+directory` are not, whatever `pbsnodes` says about them.
+
+### Reading these logs in the right order
+
+The log is dominated by `Couldn't change directory` -- 57 lines of it -- and
+it is tempting to read that as the cause. It is BOTH: the cause on the few
+nodes that cannot see the filesystem, and teardown noise everywhere else once
+mpiexec starts killing ranks. The line that actually identifies the failure is
+the single `exited with code 127`, which names the node. Grep for the exit
+codes first, then the signals, and treat repeated messages as an effect until
+proven otherwise.
 
 ## PBS gives up on its own
 
