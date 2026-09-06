@@ -2,6 +2,81 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-06 (sunspot) -- every job silently requeued for hours; the cause was nodes PBS calls healthy, and the fix exposed that the 80B dies at an LR four orders below its documented ceiling
+
+- **Nothing could launch, and nothing said so.** Multi-node jobs cycled
+  `Q -> R -> E -> Q` with `Exit_status = -3`, no output file, no log
+  directory, no error. The 80B capture reached **`run_count = 21`** without
+  executing a line before PBS system-held it. `-3` is "exec failed, requeue",
+  and the requeue is what makes it silent: the job looks queued, not broken.
+- **The cause was in the node comments, not the job.** The PBS prologue
+  mount-checks every filesystem named in `#PBS -l filesystems=`; a failure
+  offlines the node and requeues the job. 29 nodes were down for
+  `home not mounted`, all from other users' jobs, ongoing since Sep 4.
+- **Ladder the scale with a TRIVIAL payload.** 1N `echo` ran clean; 64N `echo`
+  requeued exactly like the real job. That is what rules out your script, and
+  without it the evidence pointed at qdel-and-resubmit, which would have fixed
+  nothing.
+
+- **I published three fixes that testing then refuted.** Each read as obviously
+  correct:
+  1. *Drop `home` from `filesystems=`.* Refuted by a matched 8N pair -- the
+     probe that REQUESTED `tegu:home` ran fine. The flag was never the
+     variable. I had already committed and pushed it.
+  2. *Rack x1921 is the ceiling.* Refuted -- a 16N job drew all 16 nodes from
+     x1921 and started fine.
+  3. *Host pinning is sufficient.* Refuted -- the pinned 64N launched
+     perfectly (768/768 GPUs) and died at **0 training steps**.
+- **`free` is not `usable`.** The pinned run was killed by `x1922c7s2b0n0`,
+  which reports `state = free` with **no comment** and on which `/lus/tegu` is
+  unreachable. A rank there cannot `cd` to the repo, python is not found, it
+  exits 127, and mpiexec tears down all 768. **No `pbsnodes` query finds
+  these.** Six such nodes now known, in both racks.
+- **So filter by an access test, not by scheduler state.**
+  `scripts/cluster/survey_nodes.sh` stats a repo path from every candidate and
+  keeps the ones that answer; it rediscovered the killer node independently.
+  68 nodes verified. Survey in small batches -- a 70-node survey requeues on
+  the same lottery it exists to map.
+
+- **The warmup clamp voids any short reproduction, and the banner lies about
+  it.** torchtitan clamps `warmup_steps` to `total_steps`
+  (`lr_scheduler.py:105-112`) with only a warning, and the trainer banner
+  prints the UNCLAMPED value on the very next line:
+
+  ```
+  [W] Warmup steps (4650) exceed total steps (25). Adjusting warmup steps to 25.
+  [I] Trainer is initialized with ... total steps 25 (warmup 4650)
+  ```
+
+  Checking the banner -- the natural place to look -- confirms the wrong
+  number. Shortening a run makes the clamp TIGHTER, so my "warmup-matched"
+  25-step run was at **186x** the original LR, worse than the 116x run it
+  replaced. Matching honestly needs ~2325 steps = **~55 days** at 34 min/step.
+- **Fix: rescale the peak instead of fighting the clamp.** Under linear warmup
+  `lr(n) = peak * n / warmup`, so `5.376344e-09` with warmup 25 reproduces
+  `1e-6` with warmup 4650 **exactly** -- verified to 2.2e-16 across steps 1-25.
+
+- **THE FINDING. `8574385` died at an effective LR of 3.87e-9.** That is four
+  orders of magnitude BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents.
+  **The 80B's real failure is not an over-large learning rate.** Reading the
+  flag would never have shown this; it took computing the effective schedule
+  the flag produced. Every prior 80B run at 8e-4 was void on its own terms --
+  this configuration is the one that was always worth instrumenting.
+
+- **A run that fails its designed purpose is not automatically waste.** I was
+  about to kill the clamped job. Computing what it IS doing showed it ramps
+  4e-8 -> 1e-6, crossing the documented ceiling at step 18.5 with the capture
+  armed -- a real test of whether that ceiling transfers to SophiaG. Kept it.
+- **Ended with two concurrent 32N captures** (`12474733` fixed-LR stability,
+  `12474740` ceiling sweep), per-layer diagnostics confirmed emitting, and
+  `80b_capture_rescaled.pbs` ready as the true reproduction. First 80B
+  training steps of the day: loss 12.95721 -> 12.94267, grad_norm ~8.03, zero
+  non-finite events.
+- **Still open:** the ALCF ticket is drafted and unsent (29 nodes stay offline
+  until it goes), and 64 upstream commits are pending -- `#4398`
+  (valid-token counts in collation) and the checkpoint cluster
+  (`#4187/#4188/#4197/#4270/#4474`) are the ones that touch our paths.
+
 ## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR DELAYS divergence 4x but does not prevent it
 
 - **muP stage 4 answered the question the coordinate check could not.** A

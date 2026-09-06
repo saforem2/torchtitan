@@ -1,5 +1,103 @@
 # Claude Session Log
 
+## 2026-09-06 (sunspot)
+
+### Summary
+
+Sunspot could not launch a single multi-node job for most of the day, and said
+nothing about it. Ended with two concurrent 32-node 80B captures running with
+per-layer diagnostics live. The diagnosis took five attempts; the detour
+through it surfaced the more valuable result -- the 80B's documented failure
+happens at a learning rate four orders of magnitude below its documented
+ceiling.
+
+### The silent failure
+
+Jobs cycled `Q -> R -> E -> Q` with `Exit_status = -3`, no output file, no log
+directory, no error. The 80B capture reached `run_count = 21` without
+executing a line. `-3` means "exec failed, requeue", and the requeue is what
+hides it: the job looks queued, not broken.
+
+Cause: the PBS prologue mount-checks each filesystem in
+`#PBS -l filesystems=`; on failure it OFFLINES the node and requeues the job.
+29 nodes were down for `home not mounted`, all attributable to other users'
+jobs (`brianhol`, `zippy`), ongoing since Sep 4.
+
+**Diagnostic that settles it:** ladder the scale with a trivial payload. 1N
+`echo` ran clean, 64N `echo` requeued identically to the real job. Without
+that probe the evidence pointed at qdel-and-resubmit, which fixes nothing and
+offlines another sweep of nodes.
+
+### Three fixes I shipped and then refuted
+
+Each looked obviously right:
+
+1. **Drop `home` from `filesystems=`.** Committed and pushed before testing. A
+   matched 8N pair refuted it -- the probe that REQUESTED `tegu:home` ran fine.
+2. **Rack x1921 is the ceiling.** A 16N job drew all 16 nodes from x1921 and
+   started fine.
+3. **Host pinning is sufficient.** The pinned 64N launched perfectly (768/768
+   GPUs) and died at 0 training steps.
+
+### The actual cause: `free` is not `usable`
+
+The pinned run was killed by `x1922c7s2b0n0` -- `state = free`, **no comment**,
+`/lus/tegu` unreachable. A rank there cannot `cd` to the repo, python is not
+found, it exits 127, and mpiexec tears down all 768 ranks. **No `pbsnodes`
+query finds these.** Six now known, across both racks.
+
+Fix: `scripts/cluster/survey_nodes.sh` stats a repo path from each candidate
+node and keeps the ones that answer. It rediscovered the killer node
+independently. 68 nodes verified. Survey in SMALL batches -- a 70-node survey
+requeues on the same lottery it exists to map.
+
+### The warmup clamp, and a banner that lies
+
+torchtitan clamps `warmup_steps` to `total_steps`
+(`lr_scheduler.py:105-112`) with only a warning, and the trainer banner prints
+the unclamped value on the very next line:
+
+```
+[W] Warmup steps (4650) exceed total steps (25). Adjusting warmup steps to 25.
+[I] Trainer is initialized with ... total steps 25 (warmup 4650)
+```
+
+Shortening a run TIGHTENS the clamp, so my "warmup-matched" 25-step run sat at
+186x the original LR -- worse than the 116x run it replaced. Matching honestly
+needs ~2325 steps = ~55 days at 34 min/step.
+
+Fix: rescale the peak rather than fight the clamp. `5.376344e-09` with warmup
+25 reproduces `1e-6` with warmup 4650 exactly (verified to 2.2e-16 across
+steps 1-25).
+
+### The finding
+
+**Job `8574385` died at an effective LR of 3.87e-9** -- four orders of
+magnitude BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents. The 80B's real
+failure is not an over-large learning rate. Reading the flag would never have
+shown this; it took computing the effective schedule the flag produced.
+
+### Habits earned
+
+- Grep the log for what the framework DECIDED, not for what you asked. A
+  silently-adjusted config leaves a correct-looking command line behind.
+- A run that fails its designed purpose is not automatically waste. I nearly
+  killed the clamped job; computing what it IS doing showed it ramps
+  4e-8 -> 1e-6, crossing the documented ceiling at step 18.5 with the capture
+  armed. Kept it as a ceiling sweep.
+- A job in an exec-failure loop outruns a plain `qdel`. `qhold` first, then
+  `qdel -W force`.
+
+### Left running
+
+- `12474733` -- 32N, fixed lr=1e-6, stability datapoint. Steps 1-2 clean:
+  loss 12.95721 -> 12.94267, grad_norm ~8.03, zero non-finite.
+- `12474740` -- 32N, LR sweep crossing ~7.4e-7 at step 19.
+- `80b_capture_rescaled.pbs` -- the true reproduction, committed, awaiting
+  nodes.
+- Open: ALCF ticket drafted and unsent; 64 upstream commits pending, with
+  `#4398` and the checkpoint cluster the ones touching our paths.
+
 ## 2026-07-18
 
 ### Summary
