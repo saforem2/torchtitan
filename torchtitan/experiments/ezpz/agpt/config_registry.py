@@ -1491,7 +1491,48 @@ def agpt_70b_wide() -> FaultTolerantTrainer.Config:
     return agpt("70B_wide", tensor_parallel_degree=2)
 
 
+# Measured in docs/guides/training/agpt_80b.md at production batch: AdamW NaN
+# onset 1.36e-6, usable ceiling ~7.4e-7. 1e-6 already NaN'd at step 2 in job
+# 8530891. Anything at or above the onset blows up on the first optimizer step.
+_AGPT_80B_LR_ONSET = 1.36e-6
+
+
+def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
+    """Refuse to hand back an 80B config that will NaN on its first update.
+
+    agpt() shares one lr=8e-4 default across every size. That is reasonable at
+    2B and 588x past the measured 80B NaN onset. The docstring on agpt_80b()
+    has said so since 2026-09-01, and a docstring only helps a reader: jobs
+    12474403 and 12474423 both ran at 8e-4 anyway, and their step-2 blow-ups
+    were read as a depth effect and then as a batch-size effect before anyone
+    checked the LR. Both readings were withdrawn.
+
+    This raises instead of clamping. Silently re-pointing the LR is the failure
+    mode the docstring warns about -- arms in flight resume from checkpoints
+    trained at a specific LR, and changing it under them is worse than an
+    explicit flag. So: refuse, name the number, and say what to pass.
+    """
+    try:
+        lr = float(cfg.optimizer.param_groups[0].optimizer_kwargs["lr"])
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return  # non-standard optimizer shape; not ours to police
+    if lr >= _AGPT_80B_LR_ONSET:
+        raise ValueError(
+            f"agpt 80B built with lr={lr:g}, at or above the measured NaN "
+            f"onset of {_AGPT_80B_LR_ONSET:g} (usable ceiling ~7.4e-7). This "
+            f"blows up on the first optimizer step and every measurement "
+            f"downstream of it is an artifact of the LR.\n"
+            f"  Pass e.g. "
+            f"--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 for AdamW, "
+            f"or prefer mano (~3e-6 at its own finder optimum) or sophiag.\n"
+            f"  Measurements: docs/guides/training/agpt_80b.md"
+        )
+
+
 def ezpz_agpt_80b() -> FaultTolerantTrainer.Config:
+    # No guard here: callers legitimately set the LR AFTER this returns
+    # (agpt_80b_sophiag does exactly that). The guard runs on the finished
+    # config, in each leaf below.
     return agpt("80B", tensor_parallel_degree=2)
 
 
@@ -1545,19 +1586,24 @@ def agpt_80b() -> FaultTolerantTrainer.Config:
     before the LR was checked; both readings were withdrawn. See
     docs/guides/known-bugs/80b-nan-rate-not-overflow.md.
     """
-    return agpt("80B", tensor_parallel_degree=2)
+    cfg = agpt("80B", tensor_parallel_degree=2)
+    _assert_80b_lr_is_survivable(cfg)
+    return cfg
 
 
 def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
     """agpt_80b with ChunkedLossWrapper. See agpt_2b_chunkedce for rationale."""
     cfg = ezpz_agpt_80b()
     cfg.loss = ChunkedLossWrapper.Config(num_chunks=8)
+    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 
 def agpt_80b_real() -> FaultTolerantTrainer.Config:
     """agpt_80b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
-    return _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+    cfg = _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+    _assert_80b_lr_is_survivable(cfg)
+    return cfg
 
 
 def _set_z_loss(
@@ -1630,7 +1676,9 @@ def agpt_80b_zloss() -> FaultTolerantTrainer.Config:
 
     Smoke agpt_2b_zloss first.
     """
-    return _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
+    cfg = _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
+    _assert_80b_lr_is_survivable(cfg)
+    return cfg
 
 
 def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
@@ -1641,7 +1689,9 @@ def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
     cheaper than mixed-precision-param=float32 (which fp32s ALL activations).
     Validate NaN-free + throughput before production use.
     """
-    return _set_fp32_residual(ezpz_agpt_80b())
+    cfg = _set_fp32_residual(ezpz_agpt_80b())
+    _assert_80b_lr_is_survivable(cfg)
+    return cfg
 
 
 def agpt_80b_real_fp32res() -> FaultTolerantTrainer.Config:
