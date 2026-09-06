@@ -47,6 +47,33 @@ The genuine reproduction is `80b_capture_rescaled.pbs`, which rescales the peak
 to `5.376344e-09` so `lr(n) = 5.376344e-09 * n/25` matches `1e-6 * n/4650`
 exactly (verified to 2.2e-16).
 
+## The running jobs carry the PRE-FIX capture (read results accordingly)
+
+`12474733` and `12474740` both launched before commit `3c17d3b55`, and python
+loaded its modules at launch. **They are running the version of
+`collect_param_stats` that cannot name a tensor.**
+
+If either fires tonight, expect:
+
+```
+NON-FINITE GRADIENT CAPTURE step N: metrics that are THEMSELVES non-finite
+  (these name the affected tensors): diag/grad_absmax_local, diag/top0_gradnorm
+```
+
+Those are global aggregates. The parenthetical in that message is wrong -- it
+was written believing the metrics named tensors, which is the bug `3c17d3b55`
+fixes. Such an event still establishes **that** and **when** an overflow
+happened at a known effective LR, which is worth having; it does not establish
+**where**.
+
+The fix applies to the next launch. `80b_capture_rescaled.pbs` -- the true
+reproduction of `8574385` -- will pick it up, which is the run where the site
+actually matters.
+
+Do not restart the current jobs to pick up the fix: they are hours into a
+scarce allocation on verified nodes, and the LR trajectory they are sweeping is
+reproducible while the node availability may not be.
+
 ## Status
 
 Running as of 2026-09-06, 32N on access-verified hosts, GBS 25,165,824,
