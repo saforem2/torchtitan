@@ -1,0 +1,183 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=16
+#PBS -l walltime=04:00:00
+#PBS -l filesystems=tegu
+#PBS -N 80b-cap16
+#PBS -j oe
+#
+# SIXTEEN NODES, NOT 64. 2026-09-06. Rack x1921 fails the PBS prologue `home`
+# mount check, so a 64N job cannot get a clean allocation and requeues forever
+# (12474709 hit run_count=21 and PBS system-held it). x1922 is healthy but has
+# only 22 free nodes -- so this runs at 16N, entirely inside the good rack.
+#
+# GBS IS UNCHANGED, which is what makes this a valid reproduction rather than
+# a different experiment: 192 ranks / TP4 = 48 dp, and 25,165,824 / (4096*48)
+# = GAS 128 exactly. Same tokens/train-step as the 64N version, same value the
+# SophiaG lr=1e-6 calibration was built against.
+#
+# The 80B has trained at 5 nodes here (80b_bisect.pbs, 80b_rc_smoke.pbs, both
+# real agpt_80b at TP=4), so 16N is not a memory risk.
+#
+# See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
+#
+# FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
+# sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
+# offline, job requeues, Exit_status=-3 forever; 12474709 hit run_count=19).
+# Dropping `home` was the obvious workaround and a matched 8N pair REFUTED it:
+# the probe requesting tegu:home ran fine (12474714, rc=1, exit 0). The rack is
+# the variable, not the flag. x1922 has only 22 free nodes, so a 64N job must
+# reach into x1921 and cannot run until ALCF restores it.
+# `tegu` alone is still correct here (this job touches no $HOME), just not
+# curative. See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
+set -o pipefail
+
+# WHICH TENSOR GOES NON-FINITE FIRST? The measurement nobody has ever taken.
+#
+# The 80B NaN has never had its SITE measured -- every mechanism claim, in the
+# docs and in my own withdrawn ones, is inference from run outcomes. The
+# instrumentation now exists (commit f01548f6a): the non-finite branch runs
+# collect_param_stats(per_layer=True) BEFORE zero_grad destroys the gradients,
+# and separately logs the metrics that are THEMSELVES non-finite -- which name
+# the affected tensors. Nothing has ever run through it.
+#
+# THE HARD PART IS PRODUCING A LEGITIMATE FAILURE. At lr=5e-7 the 80B trains
+# clean (job 12474431: 12 steps, 0 events), so the capture would never fire.
+# And my previous runs at the config default of 8e-4 are void -- ~1000x past
+# the documented ~7.4e-7 AdamW ceiling, which is why their step-2 blow-ups
+# taught nothing. See docs/guides/known-bugs/80b-nan-what-we-know.md.
+#
+# So this reproduces the ONE failure that is not an LR artifact:
+# job 8574385, SophiaG at lr=1e-6 -- BELOW the finder's ~2.5e-6 SophiaG optimum
+# and well below its ~4.6e-6 blow-up onset -- which NaN'd at step 18 anyway.
+# That is the unexplained failure, and it is the right one to instrument.
+#
+# ORIGINAL (8574385): 510N, TP=4, LBS=1, GAS=4, GBS 6120, sophiag lr=1e-6,
+#   warmup 4650, decay_ratio=0, compile OFF, AC=full -> flat grad_norm ~6.17,
+#   step-14 inf, NaN step-18.
+#
+# HERE: 16N, inside healthy rack x1922. dp = 192/4 = 48. GBS is what the LR
+# was calibrated against and the source doc states GAS compensates for node
+# count, so GAS=128 holds GBS at 6144 -- within 0.4% of the original 6120.
+#   4096 tok/rank x 48 dp x 128 = 25,165,824 tokens = 6,144 seqs.
+#
+# Same warmup 4650 and decay_ratio=0: at step ~18 the schedule is still deep in
+# warmup, so the effective LR there is what matters and it must match.
+#
+# WHAT COMES OUT. If it reproduces, the log carries lines like
+#   NON-FINITE GRADIENT CAPTURE step N: <all per-layer stats>
+#   NON-FINITE GRADIENT CAPTURE step N: metrics that are THEMSELVES non-finite: ...
+# and that second line names the tensors. That is the first direct evidence of
+# WHERE, as opposed to inference from which config survived.
+#
+# IF IT DOES NOT REPRODUCE that is also worth knowing: it would mean the
+# failure needs the 510N scale and not merely the batch, which contradicts the
+# "GAS compensates" assumption the original bracket was built on.
+#
+# 40 steps: the original died at 18, and 40 gives margin without paying for a
+# long run.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-cap16/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/capture.log"
+
+echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
+timeout 12000 ezpz launch --nproc 192 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_80b_sophiag \
+    --training.steps=40 \
+    --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+    --training.num-tokens-per-train-step=25165824 \
+    --parallelism.tensor-parallel-degree=4 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+    --lr-scheduler.warmup-steps=4650 \
+    --lr-scheduler.decay-ratio=0 \
+    --compile.no-enable \
+    --diagnostics --diagnostics-attention \
+    --diagnostics-per-layer --diagnostics-interval=1 \
+    --checkpoint.no-enable \
+    --debug.seed=42 \
+    > "$LOG" 2>&1
+echo "  rc=$?"
+
+echo ""
+echo "########## which tensor went non-finite? ##########"
+LOG="$LOG" python3 - <<'PY'
+import os, re
+
+log = os.environ["LOG"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+txt = ansi.sub("", open(log, errors="replace").read()) if os.path.exists(log) else ""
+
+lr = (re.findall(r'"lr": *([0-9.e+-]+)', txt) or ["?"])[0]
+gas = (re.findall(r"gradient accumulation steps (\d+)", txt) or ["?"])[0]
+tok = (re.findall(r"tokens/train-step (\d+)", txt) or ["?"])[0]
+opt = (re.findall(r'"optimizer_name": *"([A-Za-z]+)"', txt) or ["?"])[0]
+rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)", txt)
+events = re.findall(r"non-finite grad_norm \([^)]*\) at step (\d+)", txt)
+
+print(f"  optimizer {opt}   lr {lr}   GAS {gas}   tokens/step {tok}")
+print(f"  (target: SophiaG, 1e-06, 128, 25165824)")
+print(f"  steps {len(rows)}   non-finite events {len(events)}"
+      f"{' at ' + ','.join(events[:8]) if events else ''}")
+
+# the capture lines -- this is the payload
+named = re.findall(
+    r"NON-FINITE GRADIENT CAPTURE step (\d+): metrics that are THEMSELVES "
+    r"non-finite[^:]*: ([^\n]+)", txt)
+print()
+if named:
+    print("  THE ANSWER -- tensors whose metrics went non-finite:")
+    for st, which in named[:5]:
+        print(f"    step {st}: {which}")
+else:
+    dumps = re.findall(r"NON-FINITE GRADIENT CAPTURE step (\d+): (diag/[^\n]+)", txt)
+    if dumps:
+        print("  Capture fired but named no non-finite METRIC. Full stats at the"
+              " event (the aggregate went non-finite without any per-layer")
+        print("  metric doing so -- itself informative):")
+        for st, d in dumps[:2]:
+            print(f"    step {st}: {d[:300]}")
+    else:
+        print("  Capture did NOT fire.")
+
+print()
+if lr not in ("1e-06", "1.0e-06", "1e-6"):
+    print("  VOID: lr is not 1e-6. This did not reproduce 8574385's condition.")
+elif tok != "25165824":
+    print(f"  VOID: tokens/step {tok} != 25165824, so GBS does not match the"
+          " calibration.")
+elif not rows:
+    print("  No steps. Read the log.")
+elif not events:
+    print("  DID NOT REPRODUCE: 40 steps, zero non-finite gradients, where")
+    print("  8574385 died at step 18. Since LR, optimizer and GBS all match,")
+    print("  the difference is SCALE (192 dp here vs 510N/dp~1275 there) --")
+    print("  which contradicts the 'GAS compensates for node count' assumption")
+    print("  the original bracket was designed around. That is a real finding.")
+elif named:
+    print("  REPRODUCED AND LOCALIZED. The tensors above are the first direct")
+    print("  evidence of WHERE the 80B failure originates, as opposed to")
+    print("  inference from which configuration survived.")
+else:
+    print("  REPRODUCED but not localized -- see the capture output above.")
+PY
+echo "CAPTURE_DONE"
