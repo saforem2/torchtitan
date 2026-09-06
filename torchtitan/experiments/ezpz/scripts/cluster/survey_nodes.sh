@@ -41,6 +41,14 @@ N=$(wc -l < "$OUT/candidates.txt")
 echo "candidates: $N"
 [ "$N" -eq 0 ] && { echo "no free nodes"; exit 1; }
 
+# Job scripts go in a SEPARATE directory. Writing them beside the batch files
+# makes the glob below pick up `sv_batch_00.pbs` as if it were a node list --
+# which yields a nonsense 3-node job named `sv_sv_batch_00` and silently drops
+# real candidates.
+JOBS="$OUT/svjobs"
+rm -rf "$JOBS"; mkdir -p "$JOBS"
+# Stale .o files from an earlier survey would be read as current results.
+rm -f "$REPO"/sv_batch_*.o*
 rm -f "$OUT"/sv_batch_* "$OUT"/sv_*.pbs
 split -l "$BATCH" -d "$OUT/candidates.txt" "$OUT/sv_batch_"
 
@@ -56,12 +64,12 @@ for b in "$OUT"/sv_batch_*; do
     echo "#PBS -l select=$sel"
     echo "#PBS -l walltime=00:04:00"
     echo "#PBS -l filesystems=tegu:home"
-    echo "#PBS -N sv_$tag"
+    echo "#PBS -N $tag"
     echo "#PBS -j oe"
     echo "cd /tmp"
     echo "mpiexec --envall --np $n --ppn 1 -- /bin/sh -c \"/usr/bin/stat -c OK $PROBE >/dev/null 2>&1 && echo GOOD:\\\$(hostname -s) || echo BAD:\\\$(hostname -s)\""
-  } > "$OUT/$tag.pbs"
-  id=$(qsub "$OUT/$tag.pbs" 2>&1 | head -1 | cut -d. -f1)
+  } > "$JOBS/$tag.pbs"
+  id=$(qsub "$JOBS/$tag.pbs" 2>&1 | head -1 | cut -d. -f1)
   ids="$ids $id"
   echo "  $tag -> $id"
 done
@@ -76,11 +84,22 @@ for _ in $(seq 1 40); do
   sleep 30
 done
 
-cat sv_batch_*.o* 2>/dev/null | grep '^GOOD:' | sed 's/^GOOD://' | sort -u \
+# PBS writes .o files to the SUBMISSION directory, which is $REPO (we cd'd
+# there at the top), not $OUT. Be explicit so this still works if the caller
+# invokes the script from somewhere else.
+OFILES=$(ls -1 "$REPO"/sv_batch_*.o* 2>/dev/null)
+if [ -z "$OFILES" ]; then
+  echo "no survey output found in $REPO -- every batch failed to run."
+  echo "That is itself the finding: the free pool is bad enough that even a"
+  echo "$BATCH-node job cannot land. Try a smaller BATCH, or wait."
+  exit 1
+fi
+# shellcheck disable=SC2086
+cat $OFILES 2>/dev/null | grep '^GOOD:' | sed 's/^GOOD://' | sort -u \
   > "$OUT/verified_good.txt"
 echo "verified good: $(wc -l < "$OUT/verified_good.txt") / $N"
 echo "failed the access test (PBS still calls these free):"
-cat sv_batch_*.o* 2>/dev/null | grep '^BAD:' | sed 's/^BAD:/  /' | sort -u
-unclassified=$((N - $(wc -l < "$OUT/verified_good.txt") - $(cat sv_batch_*.o* 2>/dev/null | grep -c '^BAD:')))
+cat $OFILES 2>/dev/null | grep '^BAD:' | sed 's/^BAD:/  /' | sort -u
+unclassified=$((N - $(wc -l < "$OUT/verified_good.txt") - $(cat $OFILES 2>/dev/null | grep -c '^BAD:')))
 [ "$unclassified" -gt 0 ] && echo "unclassified (their batch never completed): $unclassified"
 echo "list: $OUT/verified_good.txt"
