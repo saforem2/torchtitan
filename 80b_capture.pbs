@@ -3,9 +3,19 @@
 #PBS -q workq
 #PBS -l select=64
 #PBS -l walltime=04:00:00
-#PBS -l filesystems=tegu:home
+#PBS -l filesystems=tegu
 #PBS -N 80b-capture
 #PBS -j oe
+#
+# FILESYSTEMS: tegu only, NOT tegu:home. 2026-09-06. The PBS prologue runs a
+# per-node mount check for every filesystem named here, and sunspot's compute
+# nodes are currently failing it for `home`: the node is taken OFFLINE and the
+# job is REQUEUED, so a job cycles Q->R->E->Q forever at Exit_status=-3 without
+# executing a line. Job 12474709 reached run_count=18 that way, and a trivial
+# 64N `echo` (12474712) failed identically -- it is not the script.
+# This job keeps repo, venv, logs and checkpoints on tegu and references $HOME
+# nowhere, so naming `home` only bought us the check.
+# See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
 set -o pipefail
 
 # WHICH TENSOR GOES NON-FINITE FIRST? The measurement nobody has ever taken.
