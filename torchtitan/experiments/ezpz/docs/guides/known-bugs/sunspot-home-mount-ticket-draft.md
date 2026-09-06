@@ -86,3 +86,42 @@ pbsnodes -avSj | awk 'NR>2{print $2}' | sort | uniq -c
 Our own workaround (drop `home` from the filesystems request when unused) and
 the diagnosis path are documented in
 `docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md`.
+
+---
+
+## Second, distinct fault: nodes that fail silently and are NOT offlined
+
+Added 2026-09-06 after surveying. This is separate from the mount-check
+offlines above and, from a user's perspective, worse -- the scheduler shows no
+sign of it.
+
+**Six nodes cannot reach `/lus/tegu`, and PBS reports all six as healthy:**
+
+```
+x1921c1s7b0n0   state = free
+x1921c5s3b0n0   state = job-exclusive   <- currently running someone's job
+x1921c7s3b0n0   state = free
+x1922c2s6b0n0   state = free
+x1922c5s3b0n0   state = free
+x1922c7s2b0n0   state = free
+```
+
+None is offline. None carries a comment.
+
+**Impact.** A rank landing on one cannot `cd` into a project directory, so the
+interpreter is not found, the rank exits 127, and mpiexec tears down the whole
+job. Our 64-node job `12474718` launched correctly on 768 ranks and died at
+**zero training steps** for this reason. There is no way to avoid these nodes
+from the submit side, because the scheduler believes they are fine.
+
+**How they were found.** One rank per node, `stat`-ing a known path on the
+target filesystem, in 10-node batches. Of 53 free nodes surveyed, 37 passed
+and 3 failed (the rest were in batches that could not land). Across the day,
+6 distinct nodes failed out of ~90 tested -- roughly a **7% silent failure
+rate** among nodes PBS advertises as usable.
+
+**Ask.** Whatever health check offlines a node for `failed mount check` does
+not appear to cover this case. If the prologue verified read access to each
+requested filesystem on every allocated node -- not just that a mount exists
+-- these would be caught and offlined like the others, instead of being handed
+out as healthy.
