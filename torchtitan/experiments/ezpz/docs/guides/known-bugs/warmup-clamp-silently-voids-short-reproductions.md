@@ -39,6 +39,54 @@ is the one worth instrumenting.
 Reading the flag would never have shown this. It took reading the effective
 schedule the flag produced.
 
+## The banner lies on the very next line
+
+Caught live, job `12474740`, two consecutive log lines:
+
+```
+[W][optimizer/lr_scheduler:108:build] Warmup steps (4650) exceed total steps (25). Adjusting warmup steps to 25.
+[I][ezpz/trainer:852:__init__] Trainer is initialized with ... total steps 25 (warmup 4650)
+```
+
+**The trainer banner reports `warmup 4650` AFTER the scheduler clamped it to
+25.** The banner prints the config object; the scheduler holds the schedule.
+Reading the banner -- the natural place to check -- confirms the wrong number.
+
+## Shortening a run makes the clamp WORSE, not better
+
+The guard is `if warmup_steps > total_steps` (`lr_scheduler.py:105-112`), so
+every short run is clamped and a shorter one is clamped harder:
+
+| total_steps | warmup becomes | lr@18 | vs original |
+|-------------|----------------|-------|-------------|
+| 25   | 25   | 7.200e-07 | 186x |
+| 40   | 40   | 4.500e-07 | 116x |
+| 500  | 500  | 3.600e-08 | 9x   |
+| 4650 | 4650 | 3.871e-09 | 1x (the original) |
+
+I built a "matched" 25-step run believing a longer `warmup` flag would survive
+if the run were short enough. It is the exact inverse. Matching the original
+warmup needs `total_steps >= ~2325`, which at ~34 min/step is **~55 days**.
+
+## The fix: rescale the peak, do not fight the clamp
+
+The schedule is only a means to an LR. Under linear warmup
+`lr(n) = peak * n / warmup`, so scaling the peak by the same factor as the
+warmup reproduces the trajectory exactly:
+
+| | peak | warmup | lr@18 |
+|---|------|--------|-------|
+| original `8574385` | 1.000000e-06 | 4650 | 3.8710e-09 |
+| rescaled | **5.376344e-09** | 25 | 3.8710e-09 |
+
+`5.376344e-09 = 1e-6 * 25/4650`. Verified equal at steps 1, 5, 10, 15, 18, 20,
+25 to **2.2e-16**. Same trajectory in 25 steps instead of 4650. See
+`80b_capture_rescaled.pbs`.
+
+The nominal `lr` in that run's log reads `5.376344e-09`, not `1e-6`. Anything
+checking for the original value would flag it as wrong, so the void guard
+checks for the rescaled value instead.
+
 ## What to do
 
 - **Keep the original warmup and shorten by `--training.steps` only** if the
