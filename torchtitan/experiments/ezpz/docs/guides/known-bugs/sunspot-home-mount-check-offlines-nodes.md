@@ -48,8 +48,28 @@ obvious fix and it is wrong. A matched pair of 8-node probes settles it:
 **The probe that requested `home` succeeded.** The flag is not the variable;
 the rack is. Both probes drew from `x1922` and both passed.
 
-Until ALCF restores `x1921`, a 64N job here cannot be made to run by any
-change to our scripts. Options are: wait for the rack, or run at <= 22 nodes.
+**It is the OFFLINE COUNT, not the rack, that sets the ceiling.** A 16N
+capture (`12474716`) drew all 16 of its nodes from `x1921` -- the "bad" rack --
+and started on the first attempt. x1921's healthy nodes are fine; only the 36
+offline ones are poison, and PBS will not schedule onto those anyway.
+
+So the rule is simply: **a job that can be satisfied entirely from healthy
+nodes runs; one that cannot, requeues forever.** With 36 of 129 nodes offline,
+64N had no clean allocation to draw and 16N had many. Reducing N is a real
+workaround, not a rack-affinity trick -- and there is no way to express "avoid
+the sick nodes" in the submit, because PBS already believes it is.
+
+Reduce N while holding the science fixed. For the 80B capture that meant
+keeping GBS identical and moving the compensation into GAS:
+
+```
+64N:  768 ranks / TP4 = 192 dp,  25,165,824 / (4096*192) = GAS  32
+16N:  192 ranks / TP4 =  48 dp,  25,165,824 / (4096* 48) = GAS 128
+```
+
+Same tokens/train-step, so it stays a reproduction rather than a new
+experiment. Check the arithmetic divides exactly -- 12N and 20N give
+fractional GAS and would silently shift GBS.
 
 A 64N probe requesting `tegu` alone (`12474713`) confirms it. Both of its
 attempts drew the identical set -- 36 `x1922` + 28 `x1921` -- because that is
