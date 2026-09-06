@@ -85,6 +85,58 @@ being offlined themselves** (`pbsnodes -l | grep -c 12474713` returns 0). So
 the offline count understates the damage: 29 nodes are marked bad, but the
 whole rack is unusable.
 
+## Pinning to "free" nodes is NOT enough (2026-09-06, later)
+
+The host-pinned 64N capture (`12474718`) launched correctly -- 768/768 GPUs on
+all 64 named hosts, right command -- and died at 59 seconds with 0 training
+steps:
+
+```
+x1922c7s2b0n0...: rank 744 exited with code 127
+Couldn't change directory to /lus/tegu/.../torchtitan: No such file or directory
+  (57 of these, ~4-5 nodes' worth, out of 768 ranks)
+rc=143
+```
+
+Exit 127 is command-not-found: that node could not `cd` into the repo, so it
+could not find python. One rank dying takes all 768 down with it.
+
+**The fault is not specific to `home`. Some nodes cannot see `tegu` either.**
+And the damning detail:
+
+```
+$ pbsnodes x1922c7s2b0n0 | grep state
+     state = free
+```
+
+PBS considered that node healthy. The prologue mount check did not catch it --
+which makes sense, since the failing check is what OFFLINES a node, so a node
+whose check silently passes (or never runs for that filesystem) stays `free`
+while being unusable.
+
+**So `free` is not the same as usable, and a host list filtered by `pbsnodes`
+state is not a safe select.** Filter by an actual access test instead: run a
+`stat` of a known repo path from every candidate node and keep only the ones
+that answer.
+
+```bash
+# survey: one rank per candidate node, stat a path on the target filesystem
+mpiexec --envall --np $N --ppn 1 /usr/bin/stat -c OKNODE /lus/tegu/.../some_file
+```
+
+Nodes that print `OKNODE` are usable; nodes that print `No such file or
+directory` are not, whatever `pbsnodes` says about them.
+
+### Reading these logs in the right order
+
+The log is dominated by `Couldn't change directory` -- 57 lines of it -- and
+it is tempting to read that as the cause. It is BOTH: the cause on the few
+nodes that cannot see the filesystem, and teardown noise everywhere else once
+mpiexec starts killing ranks. The line that actually identifies the failure is
+the single `exited with code 127`, which names the node. Grep for the exit
+codes first, then the signals, and treat repeated messages as an effect until
+proven otherwise.
+
 ## PBS gives up on its own
 
 After enough failures PBS system-holds the job:
