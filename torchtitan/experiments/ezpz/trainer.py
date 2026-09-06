@@ -1086,6 +1086,20 @@ class FaultTolerantTrainer(Trainer):
                     k for k, v in _nan_stats.items()
                     if isinstance(v, float) and not math.isfinite(v)
                 ]
+                # The float scan above finds only AGGREGATES
+                # (grad_absmax_local, top0_gradnorm) -- true but useless, since
+                # a non-finite grad_norm already told us something overflowed.
+                # The layer NAMES arrive as str values, so pull them out
+                # explicitly; `diag/topN_gradnorm_layer` paired with a
+                # non-finite `diag/topN_gradnorm` is what actually answers
+                # "which tensor".
+                _named = [
+                    f"{_nan_stats[k]} (gradnorm={_nan_stats.get(k[:-6], '?')})"
+                    for k in sorted(_nan_stats)
+                    if k.endswith("_layer")
+                    and isinstance(_nan_stats.get(k[:-6]), float)
+                    and not math.isfinite(_nan_stats[k[:-6]])
+                ]
                 logger.error(
                     "NON-FINITE GRADIENT CAPTURE step %s: %s",
                     self.step,
@@ -1094,11 +1108,19 @@ class FaultTolerantTrainer(Trainer):
                         for k, v in sorted(_nan_stats.items())
                     ),
                 )
-                if _bad:
+                if _named:
                     logger.error(
-                        "NON-FINITE GRADIENT CAPTURE step %s: metrics that are "
-                        "THEMSELVES non-finite (these name the affected "
-                        "tensors): %s",
+                        "NON-FINITE GRADIENT CAPTURE step %s: THE TENSORS THAT "
+                        "WENT NON-FINITE: %s",
+                        self.step,
+                        "; ".join(_named),
+                    )
+                elif _bad:
+                    logger.error(
+                        "NON-FINITE GRADIENT CAPTURE step %s: non-finite "
+                        "AGGREGATES only (%s) -- no per-layer name. The "
+                        "overflow is real but its site is unidentified; check "
+                        "that collect_param_stats ran with per_layer=True.",
                         self.step,
                         ", ".join(sorted(_bad)),
                     )

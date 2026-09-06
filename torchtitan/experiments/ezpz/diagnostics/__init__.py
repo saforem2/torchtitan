@@ -133,18 +133,39 @@ def collect_param_stats(
     # here: one exploding block raises max/mean long before the global norm
     # (which is an L2 over everything) moves enough to notice.
     if per_layer and per_layer_gn:
+        # NON-FINITE LAYERS ARE THE POINT, so they are counted here rather than
+        # filtered. The finite-only filter below applies to max/mean/skew only,
+        # because one inf would saturate those and destroy their resolution --
+        # but a layer that went non-finite must still be NAMED, since naming it
+        # is the entire purpose of the capture path in trainer.py.
+        nonfinite_layers = [nm for nm, v in per_layer_gn if not math.isfinite(v)]
+        out["diag/n_layers_nonfinite"] = float(len(nonfinite_layers))
+
         vals = [v for _, v in per_layer_gn if math.isfinite(v)]
         if vals:
             mx, mean = max(vals), sum(vals) / len(vals)
             out["diag/layer_gradnorm_max"] = mx
             out["diag/layer_gradnorm_mean"] = mean
             out["diag/layer_gradnorm_skew"] = mx / mean if mean > 0 else float("nan")
-            worst = sorted(per_layer_gn, key=lambda kv: -kv[1])[:top_k]
-            for i, (nm, v) in enumerate(worst):
-                # rank-ordered so the KEY is stable across steps even as the
-                # offending layer changes; the layer name goes in the value's
-                # companion key below
-                out[f"diag/top{i}_gradnorm"] = v
+
+        # Rank-ordered keys so a key is stable across steps even as the
+        # offending layer changes. Non-finite sorts first: `-v` puts inf/nan at
+        # the front, which is what we want when something has overflowed.
+        worst = sorted(
+            per_layer_gn,
+            key=lambda kv: (0 if math.isfinite(kv[1]) else 1, kv[1]),
+            reverse=True,
+        )[:top_k]
+        for i, (nm, v) in enumerate(worst):
+            out[f"diag/top{i}_gradnorm"] = v
+            # THE COMPANION KEY. Its absence is why the non-finite capture
+            # could fire and still not say WHICH tensor blew up: every
+            # non-finite metric it could report (grad_absmax_local,
+            # top0_gradnorm) is a global aggregate. A str value here is
+            # deliberate -- callers that push to W&B filter on
+            # isinstance(v, float), so this reaches the log without breaking
+            # the metric path.
+            out[f"diag/top{i}_gradnorm_layer"] = nm
     return out
 
 
