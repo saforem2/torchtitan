@@ -108,6 +108,44 @@ largest intermediate magnitudes in the graph.
 `project_output_weight_lm_head_rename`). Same tensor. Anyone grepping older
 logs or checkpoints for the culprit needs both spellings.
 
+### The whole ranking is frozen, not just the top
+
+Five steps of `12474761`, every rank identical every time:
+
+| rank | tensor | gradnorm | spread over 5 steps |
+|------|--------|----------|---------------------|
+| top0 | `lm_head.weight` | 0.2520 | 0.5% |
+| top1 | `layers.65..attention.wo.weight` | 0.005693 | -- |
+| top2 | `layers.36..attention.wo.weight` | 0.005658 | -- |
+| top3 | `layers.57..attention.wo.weight` | 0.005624 | -- |
+| top4 | `layers.5..attention.wo.weight` | 0.005574 | -- |
+
+**No rotation at any rank across any step**, even though ranks 1-4 sit within
+**2%** of one another. Values that close would swap order constantly under
+sampling noise. They do not, so the ordering is a structural property of the
+model, not a measurement artifact.
+
+This corrects a looser reading earlier in this document: calling ranks 1-4 a
+"flat, depth-independent population" suggests they are interchangeable. They
+are not -- each holds a fixed position. What is depth-independent is the
+*pattern*: layers 65, 36, 57 and 5 are scattered through an 84-layer stack
+with no monotonic trend, so whatever fixes their relative magnitudes is not
+depth.
+
+Two things this rules in and out:
+
+- **Not sampling noise.** A 2% spread that never reorders across 5
+  independent steps is deterministic structure.
+- **Not depth ordering.** 65 > 36 > 57 > 5 is not monotonic in either
+  direction.
+
+Worth checking on the successor, which runs ~40 steps: whether the ranking
+survives as the LR climbs toward the failure point, and whether the tensor
+that eventually goes non-finite is `lm_head` (the dominant one) or one of the
+fixed runners-up. **A mismatch would be the more informative outcome** -- it
+would mean the overflow starts somewhere that was never carrying much
+gradient, which no magnitude-based hypothesis predicts.
+
 ### What this does NOT establish
 
 This is the gradient distribution at a **healthy** step, lr 2.15e-10, no
