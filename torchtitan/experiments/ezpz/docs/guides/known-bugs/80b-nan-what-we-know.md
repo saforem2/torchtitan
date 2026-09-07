@@ -1,7 +1,9 @@
 # The 80B NaN: what is known, what is refuted, what is open
 
-> Last rewritten 2026-08-31, after a day of experiments that were themselves
-> invalidated. Conclusions first; the investigation log is at the bottom.
+> Last rewritten 2026-08-31; substantially updated 2026-09-06 with the first
+> per-tensor measurements (`lm_head` dominance, clipping on every step, the
+> 3.87e-9 effective LR at the death point) and a correction to what the
+> capture instrumentation was capable of. Conclusions first; the investigation log is at the bottom.
 > Every number here is either measured on this stack or cited to the job that
 > produced it.
 
@@ -25,6 +27,10 @@ it have either not been run or were run wrong.
 | **It is NOT an overflow** | bf16 max **3.3895e38** vs fp32 **3.4028e38** -- the same 8-bit exponent (measured on this stack). fp32 cannot fix a range problem; it buys mantissa, 8 bits -> 24. |
 | **Nothing is anywhere near a numerical limit** | `qk_q_absmax_local` = **61.2** at 48, 72 and 84 layers, and **62.25** at dp=12 in the clean regime (`12472477`). 36 orders below the bf16 ceiling. `grad_absmax` peaks at 0.03. |
 | **fp32 activations prevent it at production dp** | `12473149`: 120/120 steps, zero NaN, loss 12.95 -> 8.098, where bf16 `12473142` died at step 30. Confounded by warmup (40 vs 200) in the favourable direction. ~3.4x slower. |
+| **Gradient mass concentrates in `lm_head.weight`** | `12474761` step 1-4: `top0 = lm_head.weight` at **0.2520**, next is `layers.65..attention.wo.weight` at **0.005693** -- **44x** smaller. Skew (max/mean) pinned at **217** across every step of three separate runs. Ranks 1-4 are `attention.wo` from layers 65/36/57/5, spanning 2% -- a flat, depth-independent population. |
+| **Clipping fires on 100% of steps** | `clip_fired = 1.0` every step; `grad_norm_preclip ~8.07 -> postclip 1.0`. `max_norm=1.0` is the core default and `agpt_80b` does not override it, so **every reported grad_norm in this document is pre-clip**, including `8574385`'s "flat ~6.17". The optimizer saw 1.0. |
+| **`8574385` died at an effective LR of 3.87e-9** | Its warmup was 4650 with peak 1e-6, so `lr(18) = 1e-6 * 18/4650`. That is **four orders of magnitude below** the ~7.4e-7 ceiling `agpt_80b.md` documents. Whatever kills it, an over-large LR is not it. |
+| **A single `inf` zeroes every other gradient** | `clip_grad_norm_` runs with `error_if_nonfinite=False`, so `scale = max_norm/inf = 0`. Measured: every finite gradient becomes exactly 0.0 while the offender becomes `nan` (`inf*0`). The step is a no-op **before** the trainer skips it -- which is how a run recovers from a non-finite step (`12474403` L72 recovered at 56). |
 | **The 80B trains cleanly at a correct LR** | `12474431`: lr 5e-7, 64N, dp=192, GAS=4 -- 12 steps, 0 non-finite gradients, loss 12.948 -> 12.795, grad_norm flat 7.9. |
 
 ## What is refuted
@@ -52,10 +58,16 @@ tensor in the model, so even taken at face value it localizes nothing.
 
 ## What is open
 
-- **The site.** No per-tensor capture has ever run in the failing regime. The
-  "it must be a bf16 sublayer GEMM" inference compares `8673658` (64N/dp=192)
-  against `8537349` (TP=4, **node count recorded nowhere**), so precision and
-  scale vary together.
+- **The site, at the moment of failure.** Still unmeasured -- no capture has
+  fired yet. But the gradient DISTRIBUTION is now measured, and it points
+  outside the transformer stack: `lm_head.weight` carries 44x the next tensor
+  (see "What is established"). **Both routes on the standing list -- softcap
+  and QK-Norm -- bound attention scores INSIDE the blocks, and neither
+  touches `lm_head`.** If the failure originates in the output head, they
+  were never going to bound it. Note the older "it must be a bf16 sublayer
+  GEMM" inference compares `8673658` (64N/dp=192) against `8537349` (TP=4,
+  **node count recorded nowhere**), so precision and scale vary together
+  there anyway.
 - **Why SophiaG failed at a safe LR.** `8574385` ran SophiaG at **1e-6**,
   below the finder's ~2.5e-6 optimum and well below its ~4.6e-6 blow-up onset,
   and NaN'd at step 18 anyway. **The historical failures are not an LR error.**
@@ -68,17 +80,38 @@ tensor in the model, so even taken at face value it localizes nothing.
 
 ## What to do next
 
-1. **Per-tensor amax capture in the failing regime.** The instrumentation now
-   exists: the non-finite branch captures `collect_param_stats(per_layer=True)`
-   *before* `zero_grad` destroys the gradients (`f01548f6a`), and logs the
-   metrics that are themselves non-finite -- which name the affected tensors.
-   Nothing has run through it yet.
+1. **Per-tensor amax capture in the failing regime.** The instrumentation
+   exists and, as of `3c17d3b55`, actually works. **The earlier version of
+   this item was wrong**: it claimed the non-finite metrics "name the affected
+   tensors". They did not. `collect_param_stats` filtered non-finite layer
+   norms out of its per-layer stats and emitted `diag/topN_gradnorm` with no
+   companion key for the NAME, so a capture would have logged two global
+   aggregates (`grad_absmax_local`, `top0_gradnorm`) and nothing else --
+   restating what a non-finite `grad_norm` already said. Driving it with a
+   poisoned gradient exposed this; reading it did not. It now prints
+   `THE TENSORS THAT WENT NON-FINITE: <name> (gradnorm=inf)`, with 4
+   regression tests.
+
+   Second, independent route to the site, from the clipping measurement
+   above: post-clip, **exactly one tensor is non-finite and every other is
+   exactly 0.0**. That identifies the culprit without relying on gradient
+   norms being distinguishable.
 2. **Re-run the depth bisect at lr=5e-7.** `80b_depth_bisect.pbs` is correct
    apart from the LR; the ladder (`agpt_50b_wide` 48L / `agpt_70b_wide` 72L /
    `agpt_80b` 84L) is verified to share dim 9216, vocab 256128 and per-layer
    shape.
-3. **Reproduce `8574385`'s configuration** -- SophiaG at 1e-6, 510N -- since
-   that is the failure nobody has explained and it is not an LR artifact.
+3. **Reproduce `8574385`'s configuration** -- IN FLIGHT as `12474765`
+   (successor to `12474761`). Not at 510N: the trajectory is reproduced
+   instead by rescaling the peak LR, since `lr(n) = peak * n / warmup` means
+   `5.376344e-09` with warmup 25 equals `1e-6` with warmup 4650 at every step
+   (verified to 2.2e-16). 32N on access-verified hosts, GBS held at
+   25,165,824 via GAS 64.
+
+   **Do not try to match the warmup by shortening the run.** torchtitan
+   clamps `warmup_steps` to `total_steps` and only warns, so a shorter run is
+   clamped HARDER -- and the trainer banner prints the unclamped value on the
+   next line. Two attempts died on this before the rescale. See
+   [`warmup-clamp-silently-voids-short-reproductions.md`](warmup-clamp-silently-voids-short-reproductions.md).
 
 ## Investigation log (2026-08-31) -- read this before repeating any of it
 
