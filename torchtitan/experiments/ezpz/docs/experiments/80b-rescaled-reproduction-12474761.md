@@ -158,6 +158,52 @@ directly and the two can be compared. **A mismatch would be the more
 interesting outcome** -- it would mean the overflow starts somewhere that was
 never carrying much gradient.
 
+## OUTCOME: step 18 passed clean
+
+`12474765`, the run whose LR trajectory matches `8574385` at every step:
+
+```
+step 14  loss 12.94641  grad_norm 8.0754      <- original logged its first inf here
+step 15  loss 12.94461  grad_norm 8.0347
+step 16  loss 12.94192  grad_norm 8.0412
+step 17  loss 12.93991  grad_norm 8.0512
+step 18  loss 12.93713  grad_norm 8.0249      <- original NaN'd here
+```
+
+**18 steps, ZERO non-finite events.** Effective LR at step 18 read
+`3.87096768e-09` against the intended `3.871e-09` -- the trajectory
+reproduction was exact to 9 significant figures. `lm_head.weight` held top0
+throughout at 0.252 +/- 0.4%.
+
+### What this licenses, per the criteria fixed at step 15
+
+This is the **weak** outcome, and the pre-registered reading applies
+unchanged: it is consistent with *"dp is the variable and 96 is safe"* and
+equally consistent with *"the failure is stochastic and this seed missed"*.
+
+**It does NOT show the LR trajectory is safe.** dp here is 96 against
+`8574385`'s ~1530 -- a 16x gap that could not be closed at 32 nodes while
+holding GBS fixed. The confound stated before the outcome remains
+unresolved by this run.
+
+What it does establish, narrowly:
+
+- The 80B completes 18 steps at production GBS on this stack with SophiaG at
+  the exact LR trajectory that killed `8574385`, when dp is 96.
+- So the failure is **not** a deterministic function of (LR trajectory, GBS,
+  optimizer, step count) alone. At least one further variable matters --
+  dp and seed being the obvious candidates.
+
+That is a real narrowing. Before this run, the LR trajectory could not be
+excluded as sufficient on its own; now it can, at this dp.
+
+### Next
+
+`12474768` is queued (`afterany`), same 32 nodes, same dp=96, same LR
+trajectory, GBS dropped 16x to 384 seqs. If both arms behave alike, GBS is not
+the variable at this dp -- which would leave dp itself, or the seed, as what
+distinguishes this clean run from `8574385`.
+
 ## The one axis this reproduction does NOT match: dp
 
 Written at step 15, before the outcome is known, so it cannot be shaped by it.
