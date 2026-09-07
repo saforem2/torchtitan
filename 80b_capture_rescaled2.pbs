@@ -2,7 +2,7 @@
 #PBS -A datascience
 #PBS -q workq
 #PBS -l select=1:ncpus=208:host=x1922c0s4b0n0+1:ncpus=208:host=x1922c0s5b0n0+1:ncpus=208:host=x1922c0s7b0n0+1:ncpus=208:host=x1922c1s0b0n0+1:ncpus=208:host=x1922c1s1b0n0+1:ncpus=208:host=x1922c1s2b0n0+1:ncpus=208:host=x1922c1s3b0n0+1:ncpus=208:host=x1922c1s4b0n0+1:ncpus=208:host=x1922c1s5b0n0+1:ncpus=208:host=x1922c1s6b0n0+1:ncpus=208:host=x1922c1s7b0n0+1:ncpus=208:host=x1922c2s0b0n0+1:ncpus=208:host=x1922c2s1b0n0+1:ncpus=208:host=x1922c2s2b0n0+1:ncpus=208:host=x1922c2s3b0n0+1:ncpus=208:host=x1922c2s4b0n0+1:ncpus=208:host=x1922c2s5b0n0+1:ncpus=208:host=x1922c2s7b0n0+1:ncpus=208:host=x1922c3s0b0n0+1:ncpus=208:host=x1922c3s1b0n0+1:ncpus=208:host=x1922c3s2b0n0+1:ncpus=208:host=x1922c3s3b0n0+1:ncpus=208:host=x1922c3s4b0n0+1:ncpus=208:host=x1922c3s5b0n0+1:ncpus=208:host=x1922c3s6b0n0+1:ncpus=208:host=x1922c3s7b0n0+1:ncpus=208:host=x1922c4s0b0n0+1:ncpus=208:host=x1922c4s2b0n0+1:ncpus=208:host=x1922c4s3b0n0+1:ncpus=208:host=x1922c4s4b0n0+1:ncpus=208:host=x1922c6s7b0n0+1:ncpus=208:host=x1922c7s0b0n0
-#PBS -l walltime=12:00:00
+#PBS -l walltime=24:00:00
 #PBS -l filesystems=tegu
 #PBS -N 80b-caprs2
 #PBS -j oe
@@ -115,9 +115,15 @@ echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
 # and its step-19 target was never reachable. A clean exit code and a full
 # step log make that look like a completed run rather than a truncated one.
 #
-# 41400s = 11h30m, leaving ~30 min of the 12h wall for init and the analysis
-# block. At ~34 min/step that is ~20 steps, which clears the step-18 point.
-timeout 41400 ezpz launch --nproc 384 -ppn 12 -- \
+# 84600s = 23h30m of a 24h wall (the queue max), leaving ~30 min for init and
+# the analysis block.
+#
+# WHY NOT 12h. Measured from 12474733/12474740: ~35 min from job start to step
+# 1, then ~34 min per step. A 11h30m timeout buys 19.3 steps against a step-18
+# target -- ONE step of margin. A slow init, a straggler rank, or a single
+# long step and an 11-hour run misses the only point it exists to reach.
+# 23h30m buys ~40 steps, so step 18 lands with the run less than half spent.
+timeout 84600 ezpz launch --nproc 384 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_80b_sophiag \
     --training.steps=25 \
