@@ -31,6 +31,7 @@ it have either not been run or were run wrong.
 | **Clipping fires on 100% of steps** | `clip_fired = 1.0` every step; `grad_norm_preclip ~8.07 -> postclip 1.0`. `max_norm=1.0` is the core default and `agpt_80b` does not override it, so **every reported grad_norm in this document is pre-clip**, including `8574385`'s "flat ~6.17". The optimizer saw 1.0. |
 | **`8574385` died at an effective LR of 3.87e-9** | Its warmup was 4650 with peak 1e-6, so `lr(18) = 1e-6 * 18/4650`. That is **four orders of magnitude below** the ~7.4e-7 ceiling `agpt_80b.md` documents. Whatever kills it, an over-large LR is not it. |
 | **A single `inf` zeroes every other gradient** | `clip_grad_norm_` runs with `error_if_nonfinite=False`, so `scale = max_norm/inf = 0`. Measured: every finite gradient becomes exactly 0.0 while the offender becomes `nan` (`inf*0`). The step is a no-op **before** the trainer skips it -- which is how a run recovers from a non-finite step (`12474403` L72 recovered at 56). |
+| **The LR trajectory alone does not cause the failure** | `12474765`: 25/25 steps, zero non-finite, at `8574385`'s effective LR *at every step* (3.87096768e-09 at step 18 against an intended 3.871e-09 -- exact to 9 significant figures), same optimizer, same GBS. dp was 96 against ~1530. So the failure is **not** a deterministic function of (LR trajectory, GBS, optimizer, step count) alone; at least one further variable matters. Read narrowly: also consistent with a stochastic miss. |
 | **The 80B trains cleanly at a correct LR** | `12474431`: lr 5e-7, 64N, dp=192, GAS=4 -- 12 steps, 0 non-finite gradients, loss 12.948 -> 12.795, grad_norm flat 7.9. |
 
 ## What is refuted
@@ -73,10 +74,22 @@ tensor in the model, so even taken at face value it localizes nothing.
   and NaN'd at step 18 anyway. **The historical failures are not an LR error.**
 - **Whether depth matters.** Untested. See the log below for why the attempt
   failed.
-- **Whether large batch matters.** Untested for the same reason. Note the
-  LR-finder found the opposite of what one might assume: AdamW "NaN'd at
-  GBS=192 but runs all 15 finder steps finite at GBS=6144, where the larger
-  batch smooths the Hessian estimate."
+- **Whether large batch matters.** **Tested at dp=96 on 2026-09-07, and the
+  answer is no.** Two arms differing ONLY in GBS (25,165,824 vs 1,572,864
+  tokens; 6,144 vs 384 seqs), same 32 nodes, same dp, same LR trajectory:
+  means agree to **0.03-0.20%** (`top0_gradnorm` 0.08%, skew 0.03%) while
+  variances scale **2.75-4.33x**. The variance ratios sit on **sqrt(16) = 4**,
+  which is what pure sampling noise predicts for a 16x batch reduction --
+  three of four within 8% of it. So the batch does exactly what averaging
+  says it should and nothing more, and the gradient STRUCTURE is
+  batch-independent. See
+  [`experiments/80b-gbs-vs-dp-separation.md`](../../experiments/80b-gbs-vs-dp-separation.md).
+
+  Scope: this holds AT dp=96. It does not exclude a batch-by-parallelism
+  interaction at dp~1530, which needs node counts that were not obtainable.
+  Also note the older LR-finder observation (AdamW "NaN'd at GBS=192 but runs
+  all 15 finder steps finite at GBS=6144") is not contradicted -- that was a
+  different optimizer at a different dp.
 
 ## What to do next
 
