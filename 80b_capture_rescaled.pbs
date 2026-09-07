@@ -107,7 +107,17 @@ export LOGD="$REPO/outputs/logs/80b-caprescaled/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/capture.log"
 
 echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
-timeout 12000 ezpz launch --nproc 384 -ppn 12 -- \
+#
+# INNER TIMEOUT MUST TRACK THE WALLTIME. 2026-09-06. This was `timeout 12000`
+# -- 3h20m -- carried over from the 4h version of this script while the PBS
+# walltime above says 12h. The inner timeout wins, so 12474740 exited
+# Exit_status=0 at exactly 03:20:41 after 5 steps, having been given 12 hours,
+# and its step-19 target was never reachable. A clean exit code and a full
+# step log make that look like a completed run rather than a truncated one.
+#
+# 41400s = 11h30m, leaving ~30 min of the 12h wall for init and the analysis
+# block. At ~34 min/step that is ~20 steps, which clears the step-18 point.
+timeout 41400 ezpz launch --nproc 384 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_80b_sophiag \
     --training.steps=25 \

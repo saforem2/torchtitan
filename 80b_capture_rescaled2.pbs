@@ -1,65 +1,44 @@
 #!/bin/bash -l
 #PBS -A datascience
 #PBS -q workq
-#PBS -l select=1:ncpus=208:host=x1921c1s1b0n0+1:ncpus=208:host=x1921c1s2b0n0+1:ncpus=208:host=x1921c1s4b0n0+1:ncpus=208:host=x1921c1s5b0n0+1:ncpus=208:host=x1921c3s2b0n0+1:ncpus=208:host=x1921c3s3b0n0+1:ncpus=208:host=x1921c3s4b0n0+1:ncpus=208:host=x1921c3s5b0n0+1:ncpus=208:host=x1921c3s7b0n0+1:ncpus=208:host=x1921c4s0b0n0+1:ncpus=208:host=x1921c4s2b0n0+1:ncpus=208:host=x1921c4s5b0n0+1:ncpus=208:host=x1921c5s0b0n0+1:ncpus=208:host=x1921c5s7b0n0+1:ncpus=208:host=x1921c6s0b0n0+1:ncpus=208:host=x1921c6s1b0n0+1:ncpus=208:host=x1921c6s2b0n0+1:ncpus=208:host=x1921c6s4b0n0+1:ncpus=208:host=x1921c7s2b0n0+1:ncpus=208:host=x1922c0s0b0n0+1:ncpus=208:host=x1922c0s1b0n0+1:ncpus=208:host=x1922c4s5b0n0+1:ncpus=208:host=x1922c4s6b0n0+1:ncpus=208:host=x1922c4s7b0n0+1:ncpus=208:host=x1922c5s1b0n0+1:ncpus=208:host=x1922c5s4b0n0+1:ncpus=208:host=x1922c6s0b0n0+1:ncpus=208:host=x1922c6s1b0n0+1:ncpus=208:host=x1922c6s3b0n0+1:ncpus=208:host=x1922c6s4b0n0+1:ncpus=208:host=x1922c6s5b0n0+1:ncpus=208:host=x1922c6s6b0n0
+#PBS -l select=1:ncpus=208:host=x1922c0s4b0n0+1:ncpus=208:host=x1922c0s5b0n0+1:ncpus=208:host=x1922c0s7b0n0+1:ncpus=208:host=x1922c1s0b0n0+1:ncpus=208:host=x1922c1s1b0n0+1:ncpus=208:host=x1922c1s2b0n0+1:ncpus=208:host=x1922c1s3b0n0+1:ncpus=208:host=x1922c1s4b0n0+1:ncpus=208:host=x1922c1s5b0n0+1:ncpus=208:host=x1922c1s6b0n0+1:ncpus=208:host=x1922c1s7b0n0+1:ncpus=208:host=x1922c2s0b0n0+1:ncpus=208:host=x1922c2s1b0n0+1:ncpus=208:host=x1922c2s2b0n0+1:ncpus=208:host=x1922c2s3b0n0+1:ncpus=208:host=x1922c2s4b0n0+1:ncpus=208:host=x1922c2s5b0n0+1:ncpus=208:host=x1922c2s7b0n0+1:ncpus=208:host=x1922c3s0b0n0+1:ncpus=208:host=x1922c3s1b0n0+1:ncpus=208:host=x1922c3s2b0n0+1:ncpus=208:host=x1922c3s3b0n0+1:ncpus=208:host=x1922c3s4b0n0+1:ncpus=208:host=x1922c3s5b0n0+1:ncpus=208:host=x1922c3s6b0n0+1:ncpus=208:host=x1922c3s7b0n0+1:ncpus=208:host=x1922c4s0b0n0+1:ncpus=208:host=x1922c4s2b0n0+1:ncpus=208:host=x1922c4s3b0n0+1:ncpus=208:host=x1922c4s4b0n0+1:ncpus=208:host=x1922c6s7b0n0+1:ncpus=208:host=x1922c7s0b0n0
 #PBS -l walltime=12:00:00
 #PBS -l filesystems=tegu
-#PBS -N 80b-capm
+#PBS -N 80b-caprs2
 #PBS -j oe
 #
-# WARMUP MUST NOT BE TRUNCATED. 2026-09-06. torchtitan clamps warmup_steps to
-# total_steps (lr_scheduler.py:107-112) with only a WARNING:
-#   "Warmup steps (4650) exceed total steps (40). Adjusting warmup steps to 40."
-# A 40-step run therefore ramps the LR 116x faster than the original did, and
-# the effective LR at a given step is nothing like the one being reproduced:
+# RESCALED PEAK LR -- the only way to match 8574385's trajectory in a short run.
 #
-#   step 18   original (warmup 4650): 3.871e-09
-#             a 40-step run:          4.500e-07     <- 116x higher
+# WHY NOT JUST PASS warmup=4650. torchtitan clamps warmup to total_steps
+# (lr_scheduler.py:105-112) whenever warmup > total_steps, and only warns. So a
+# short run ALWAYS gets clamped, and shortening it makes the clamp TIGHTER:
 #
-# That silently turns a reproduction into a different experiment. A NaN under
-# the fast ramp would not be evidence about 8574385.
+#   steps=  25 -> warmup  25, lr@18 = 7.200e-07   (186x the original)
+#   steps=  40 -> warmup  40, lr@18 = 4.500e-07   (116x)
+#   steps= 500 -> warmup 500, lr@18 = 3.600e-08   (9x)
+#   steps=4650 -> warmup 4650, lr@18 = 3.871e-09  <- the original
 #
-# THE NUMBER THAT REFRAMES THE BUG: 8574385 died at step 18 with an effective
-# LR of ~3.9e-9. That is four orders of magnitude below the ~7.4e-7 ceiling
-# the 80B guide documents. Whatever kills this model at that point, it is not
-# a learning rate that is too large -- which is why this configuration, not
-# the 8e-4 runs, is the one worth instrumenting.
+# Matching the original warmup needs total_steps >= ~2325, which at ~34 min/step
+# is ~55 DAYS. Not viable. An earlier version of this script set steps=25 with
+# warmup=4650 believing that avoided the clamp; it does the opposite.
 #
-# So: 25 steps (fits a 12h window at the ~34 min/step this GBS costs) with
-# warmup left at 4650, unclamped, giving step-for-step LR parity through the
-# step-18 death point with 7 steps of margin.
+# THE FIX. The schedule is only a means to an LR. Under linear warmup
+# lr(n) = peak * n / warmup, so rescaling the peak by the same factor as the
+# warmup reproduces the trajectory EXACTLY:
 #
-# HOSTS ARE VERIFIED, NOT MERELY "free". 2026-09-06. Sunspot has nodes that
-# PBS reports as `state = free` with NO comment, on which /lus/tegu is not
-# reachable. A rank landing there cannot cd to the repo, so python is not
-# found, it exits 127, and mpiexec tears down all ranks. That is exactly how
-# the 64N pinned attempt (12474718) died: 0 training steps, rc=143, killed by
-# x1922c7s2b0n0 -- a node PBS called healthy.
+#   original: 1.000000e-06 * n / 4650
+#   here:     5.376344e-09 * n /   25     (= 1e-6 * 25/4650)
 #
-# So this select was built from an ACCESS TEST, not from pbsnodes state: a
-# batch survey stat'd a repo path from every free node (jobs 12474724-32) and
-# kept only those that answered. 47 of 50 classified nodes passed; the three
-# that failed (x1922c2s6b0n0, x1922c5s3b0n0, x1922c7s2b0n0) all report
-# state=free with no comment. No scheduler query would have avoided them.
+# Verified equal at steps 1,5,10,15,18,20,25 to 2.2e-16 -- floating point noise.
+# Step 18, where 8574385 died, sees 3.8710e-09 in both.
 #
-# Survey in SMALL batches. A 70-node survey requeues on the same bad-node
-# lottery it exists to map (12474723 reached run_count=3); 10-node batches
-# schedule around it. Note a batch containing a bad node dies whole, so its
-# other nodes stay unclassified -- 3 of 9 batches were still cycling for that
-# reason and ~30 nodes remain unsurveyed.
+# THE NUMBER THAT REFRAMES THE BUG: that is four orders of magnitude BELOW the
+# ~7.4e-7 ceiling agpt_80b.md documents. Whatever kills the 80B at step 18, it
+# is not a learning rate that is too large -- which is why this configuration,
+# and not the void lr=8e-4 runs, is the one worth instrumenting.
 #
-# THE LIST IS A SNAPSHOT. Re-survey before resubmitting.
-# See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
-#
-# FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
-# sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
-# offline, job requeues, Exit_status=-3 forever; 12474709 hit run_count=19).
-# Dropping `home` was the obvious workaround and a matched 8N pair REFUTED it:
-# the probe requesting tegu:home ran fine (12474714, rc=1, exit 0). The rack is
-# the variable, not the flag. x1922 has only 22 free nodes, so a 64N job must
-# reach into x1921 and cannot run until ALCF restores it.
-# `tegu` alone is still correct here (this job touches no $HOME), just not
-# curative. See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
+# The nominal `lr` in the log will read 5.376344e-09, NOT 1e-6. That is correct
+# and the analysis block checks for it.
 set -o pipefail
 
 # WHICH TENSOR GOES NON-FINITE FIRST? The measurement nobody has ever taken.
@@ -124,7 +103,7 @@ export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
 source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
 python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 
-export LOGD="$REPO/outputs/logs/80b-capmatched/$PBS_JOBID"; mkdir -p "$LOGD"
+export LOGD="$REPO/outputs/logs/80b-caprescaled2/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/capture.log"
 
 echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
@@ -146,8 +125,8 @@ timeout 41400 ezpz launch --nproc 384 -ppn 12 -- \
     --training.num-tokens-per-microbatch-per-dp-rank=4096 \
     --training.num-tokens-per-train-step=25165824 \
     --parallelism.tensor-parallel-degree=4 \
-    --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
-    --lr-scheduler.warmup-steps=4650 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=5.376344e-09 \
+    --lr-scheduler.warmup-steps=25 \
     --lr-scheduler.decay-ratio=0 \
     --compile.no-enable \
     --diagnostics --diagnostics-attention \
@@ -174,7 +153,7 @@ rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+
 events = re.findall(r"non-finite grad_norm \([^)]*\) at step (\d+)", txt)
 
 print(f"  optimizer {opt}   lr {lr}   GAS {gas}   tokens/step {tok}")
-print(f"  (target: SophiaG, 1e-06, 64, 25165824)")
+print(f"  (target: SophiaG, 5.376344e-09 w/ warmup 25, 64, 25165824)")
 print(f"  steps {len(rows)}   non-finite events {len(events)}"
       f"{' at ' + ','.join(events[:8]) if events else ''}")
 
@@ -199,13 +178,9 @@ else:
         print("  Capture did NOT fire.")
 
 print()
-warm = (re.findall(r"Adjusting warmup steps to (\d+)", txt) or [None])[0]
-if warm:
-    print(f"  VOID: warmup was CLAMPED to {warm} steps. The effective LR at each")
-    print(f"  step is ~{4650/int(warm):.0f}x the original's, so a NaN here says")
-    print("  nothing about 8574385. Raise --training.steps or lower warmup.")
-elif lr not in ("1e-06", "1.0e-06", "1e-6"):
-    print("  VOID: lr is not 1e-6. This did not reproduce 8574385's condition.")
+if lr not in ("5.376344e-09", "5.376344e-9", "5.3763e-09"):
+    print("  VOID: lr is not 5.376344e-09, so the rescaled trajectory")
+    print("  does not match 8574385 step for step.")
 elif tok != "25165824":
     print(f"  VOID: tokens/step {tok} != 25165824, so GBS does not match the"
           " calibration.")
