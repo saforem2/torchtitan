@@ -1,5 +1,63 @@
 # Claude Session Log
 
+## 2026-09-07 (sunspot)
+
+### Summary
+
+Continues 2026-09-06. With the machine usable again, four questions about the
+80B instability got answers, and two of them close entries that had been open
+since August.
+
+### Results
+
+**Gradient mass lives in `lm_head.weight`** -- 44x the next tensor, with the
+whole ranking frozen (`lm_head`, then `attention.wo` from layers 65/36/57/5,
+same order every step despite ranks 1-4 sitting within 2%). Structure, not
+scatter. **It is outside the transformer stack**, so softcap and QK-Norm --
+the two routes on the standing list -- cannot reach it.
+
+**`8574385` died at an effective LR of 3.87e-9**, four orders below the
+documented ~7.4e-7 ceiling. Computed from `peak * n / warmup`; reading the
+flag would never have shown it.
+
+**The LR trajectory alone does not cause the failure.** 25/25 steps clean at
+that exact trajectory (3.87096768e-09 at step 18 vs an intended 3.871e-09).
+
+**Batch size is not the variable at dp=96.** Two arms differing only in GBS:
+means agree to 0.03-0.20%, variances scale 2.75-4.33x -- on sqrt(16)=4, what
+sampling predicts. First run in this investigation to vary GBS with dp fixed.
+
+**Remaining: dp (96 vs ~1530) or the seed.**
+
+### Two mechanics worth keeping
+
+**Clipping fires every step**, so every recorded grad_norm is pre-clip --
+including `8574385`'s documented "flat ~6.17". And one `inf` zeroes every
+*other* gradient while the offender becomes `nan`, which explains recovery
+from non-finite steps and gives a second route to the culprit: post-clip,
+exactly one tensor is non-finite among all-zeros.
+
+### Method
+
+Three mechanisms let a broken run report success: a warmup clamp whose banner
+echoed the unclamped value, a capture that logged global aggregates as if they
+named tensors, and an inner `timeout` shorter than the walltime exiting 0.
+Two of my own tools were also broken -- the capture fix and a survey script
+that globbed its own job files.
+
+**Every one was found by driving code or comparing outputs. None by reading.**
+The capture had passed a read-through; the survey passed `bash -n`.
+
+Also: pre-registering how to read an outcome, in writing, before it lands. At
+step 15 I recorded that a clean run would be the *weak* result because dp was
+unmatched. It came back clean and that reading held unchanged -- which is the
+point of writing it down first.
+
+### Left running
+
+`12474768` to step 40. `12474709`/`12474710` still held and recommended to
+stay held: both 64N, both superseded, both would resume the requeue loop.
+
 ## 2026-09-06 (sunspot)
 
 ### Summary

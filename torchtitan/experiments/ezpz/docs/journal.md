@@ -2,6 +2,63 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-07 (sunspot) -- the 80B failure is not caused by its LR trajectory or its batch size; gradient mass lives in `lm_head.weight`
+
+Continues the 2026-09-06 entry below, after the machine was made usable again.
+
+- **`lm_head.weight` carries 44x the gradient norm of any other tensor**, and
+  the whole ranking is frozen: `lm_head`, then `attention.wo` from layers 65,
+  36, 57, 5 -- same order every step, though ranks 1-4 sit within 2% of each
+  other. Values that close would reorder constantly under noise. They never
+  do, so this is structure, not scatter.
+
+  **It is outside the transformer stack.** Softcap and QK-Norm, the two routes
+  on the standing list, both bound attention scores *inside* the blocks and
+  neither touches the output head. If the failure originates there, they were
+  never going to bound it.
+
+  This had been measured five times and never named -- `collect_param_stats`
+  computed the layer name and discarded it. Found by driving the capture with
+  a poisoned gradient, not by reading it.
+
+- **`8574385` died at an effective LR of 3.87e-9** -- four orders of magnitude
+  BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents. Reading the flag would
+  never have shown this; it took computing `peak * n / warmup` at the death
+  step. The 80B's real failure is not an over-large learning rate, which
+  retires the framing every prior 80B run was built around.
+
+- **The LR trajectory alone does not cause it.** `12474765` ran 25/25 steps
+  clean at that exact trajectory -- 3.87096768e-09 at step 18 against an
+  intended 3.871e-09, exact to 9 significant figures -- same optimizer, same
+  GBS. So the failure is not a deterministic function of (LR trajectory, GBS,
+  optimizer, step count) alone.
+
+- **Batch size is not the variable either, at dp=96.** Two arms differing ONLY
+  in GBS (6,144 vs 384 seqs, same nodes, same dp, same LR): means agree to
+  **0.03-0.20%**, variances scale **2.75-4.33x**. Those ratios sit on
+  **sqrt(16) = 4** -- exactly what sampling noise predicts for a 16x batch
+  reduction, three of four within 8%. The batch does what averaging says and
+  nothing more. No run in this investigation had previously varied GBS with dp
+  held fixed; the 2026-08-31 attempt varied both and was void for it.
+
+- **What is left: dp (96 vs ~1530) or the seed.** A materially narrower
+  question than the session started with.
+
+- **Clipping fires on 100% of steps** (`preclip ~8.07 -> postclip 1.0`), so
+  every grad_norm in the record -- ours and `8574385`'s documented "flat
+  ~6.17" -- is the pre-clip value. The optimizer never saw it. And one `inf`
+  zeroes every *other* gradient (`scale = max_norm/inf = 0`) while the
+  offender becomes `nan`, which is both why a run can recover from a
+  non-finite step and a second way to identify the culprit: post-clip,
+  exactly one tensor is non-finite among all-zeros.
+
+- **Method note.** Three separate mechanisms let a broken run report success
+  tonight -- a warmup clamp whose banner echoed the unclamped value, a capture
+  that logged aggregates as if they named tensors, and an inner `timeout`
+  shorter than the walltime exiting 0. Plus two tools I wrote and had to fix.
+  Every one was found by driving code or comparing outputs; none by reading.
+  Recorded in [[project_runs_that_fail_successfully]].
+
 ## 2026-09-06 (sunspot) -- every job silently requeued for hours; the cause was nodes PBS calls healthy, and the fix exposed that the 80B dies at an LR four orders below its documented ceiling
 
 - **Nothing could launch, and nothing said so.** Multi-node jobs cycled
