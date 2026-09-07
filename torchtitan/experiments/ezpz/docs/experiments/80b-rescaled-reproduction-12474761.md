@@ -66,6 +66,60 @@ steps. That log could not name it. This run can: read
 If the dominant block is identifiable at a safe LR, it can be watched
 approaching the failure rather than autopsied after it.
 
+## RESULT: the dominant layer is `lm_head.weight`
+
+Step 1 of the valid reproduction, first time this has ever been named:
+
+```
+top0  lm_head.weight                                   0.2520
+top1  layers.65..attention.wo.weight                   0.005693     <- 44x smaller
+top2  layers.36..attention.wo.weight                   0.005658
+top3  layers.57..attention.wo.weight                   0.005624
+top4  layers.5..attention.wo.weight                    0.005574
+
+layer_gradnorm_skew = 217.40      clip_fired = 1.0
+grad_norm_preclip   = 8.066       lr = 2.1505376e-10
+```
+
+`lm_head.weight` -- the output projection -- carries **44x** the gradient norm
+of the next-largest tensor and ~217x the mean.
+
+### Why this matters
+
+**It is not in the transformer stack.** Every standing hypothesis about the
+80B instability targets attention scores inside the blocks: softcap, QK-norm,
+depth effects. The gradient mass is concentrated somewhere none of those
+interventions reach. If the failure originates here, the two routes on the
+standing list were never going to bound it.
+
+**Ranks 1-4 are depth-independent.** They are all `attention.wo` from layers
+65, 36, 57 and 5 -- scattered through the stack -- and their norms span 2%
+(0.005693 to 0.005574). That is a flat population, which is evidence against
+the depth-scaling story that three unreplicated points once suggested (see
+[`known-bugs/80b-nan-what-we-know.md`](../guides/known-bugs/80b-nan-what-we-know.md)).
+
+**`lm_head` is where bf16 range pressure would concentrate.** It is the widest
+matmul in the model -- hidden x vocab -- and the only place a full-vocabulary
+logit tensor exists. A 256k-vocab head is the natural candidate for the
+largest intermediate magnitudes in the graph.
+
+**Naming ambiguity to watch.** Production 2B/20B checkpoints spell this tensor
+`output.weight` while current code wants `lm_head.weight` (see
+`project_output_weight_lm_head_rename`). Same tensor. Anyone grepping older
+logs or checkpoints for the culprit needs both spellings.
+
+### What this does NOT establish
+
+This is the gradient distribution at a **healthy** step, lr 2.15e-10, no
+overflow. It says where the gradient mass sits, not that this tensor is what
+goes non-finite first. Those coincide only if the failure is a magnitude
+effect in the dominant tensor, which is a hypothesis, not a result.
+
+The run continues toward step 18. If a capture fires, it names the tensor
+directly and the two can be compared. **A mismatch would be the more
+interesting outcome** -- it would mean the overflow starts somewhere that was
+never carrying much gradient.
+
 ## Config
 
 32N on access-verified hosts, 384 ranks, TP=4, GAS 64, GBS 25,165,824 tokens,
