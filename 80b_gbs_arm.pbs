@@ -1,0 +1,236 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1:ncpus=208:host=x1922c0s4b0n0+1:ncpus=208:host=x1922c0s5b0n0+1:ncpus=208:host=x1922c0s7b0n0+1:ncpus=208:host=x1922c1s0b0n0+1:ncpus=208:host=x1922c1s1b0n0+1:ncpus=208:host=x1922c1s2b0n0+1:ncpus=208:host=x1922c1s3b0n0+1:ncpus=208:host=x1922c1s4b0n0+1:ncpus=208:host=x1922c1s5b0n0+1:ncpus=208:host=x1922c1s6b0n0+1:ncpus=208:host=x1922c1s7b0n0+1:ncpus=208:host=x1922c2s0b0n0+1:ncpus=208:host=x1922c2s1b0n0+1:ncpus=208:host=x1922c2s2b0n0+1:ncpus=208:host=x1922c2s3b0n0+1:ncpus=208:host=x1922c2s4b0n0+1:ncpus=208:host=x1922c2s5b0n0+1:ncpus=208:host=x1922c2s7b0n0+1:ncpus=208:host=x1922c3s0b0n0+1:ncpus=208:host=x1922c3s1b0n0+1:ncpus=208:host=x1922c3s2b0n0+1:ncpus=208:host=x1922c3s3b0n0+1:ncpus=208:host=x1922c3s4b0n0+1:ncpus=208:host=x1922c3s5b0n0+1:ncpus=208:host=x1922c3s6b0n0+1:ncpus=208:host=x1922c3s7b0n0+1:ncpus=208:host=x1922c4s0b0n0+1:ncpus=208:host=x1922c4s2b0n0+1:ncpus=208:host=x1922c4s3b0n0+1:ncpus=208:host=x1922c4s4b0n0+1:ncpus=208:host=x1922c6s7b0n0+1:ncpus=208:host=x1922c7s0b0n0
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=tegu
+#PBS -N 80b-gbsarm
+#PBS -j oe
+#
+# SMALL-GBS ARM: isolates batch size from parallelism. 2026-09-07.
+#
+# THE CONFOUND THIS RESOLVES. 12474765 reproduces 8574385's GBS (6144 seqs)
+# and its effective LR at every step, but NOT its dp: ~1530 there against 96
+# here. Holding GBS fixed on 32 nodes forces that trade -- dp and GAS multiply
+# to GBS, so at a fixed node count you cannot vary one without the other. The
+# canonical doc lists the failure as dp-SENSITIVE, so a clean 12474765 is
+# consistent with both "dp is the variable and 96 is safe" and "GBS is the
+# variable and this batch is safe". The two cannot be separated by that run.
+#
+# THIS ARM SEPARATES THEM. Same dp (96), same node count, same TP, same LR
+# trajectory -- only GBS differs:
+#
+#   12474765 (this run's twin):  GAS 64 -> 25,165,824 tok = 6,144 seqs
+#   this arm:                    GAS  4 ->  1,572,864 tok =   384 seqs
+#
+# Both arms at dp=96. If they behave the same, GBS is not the variable at this
+# dp. If they differ, it is. Either way the dp axis is held constant, which is
+# what no run in this investigation has managed -- the 2026-08-31 attempt
+# varied dp and GBS together and was void for it.
+#
+# CHEAP: 16x less compute per step, ~2 min/step against ~34, so 40 steps fits
+# in ~90 minutes.
+#
+# NOTE the LR trajectory is deliberately UNCHANGED. Peak stays 5.376344e-09
+# with warmup 25, so lr(n) matches 8574385 step for step in both arms. Only
+# the batch differs.
+#
+# RESCALED PEAK LR -- the only way to match 8574385's trajectory in a short run.
+#
+# WHY NOT JUST PASS warmup=4650. torchtitan clamps warmup to total_steps
+# (lr_scheduler.py:105-112) whenever warmup > total_steps, and only warns. So a
+# short run ALWAYS gets clamped, and shortening it makes the clamp TIGHTER:
+#
+#   steps=  25 -> warmup  25, lr@18 = 7.200e-07   (186x the original)
+#   steps=  40 -> warmup  40, lr@18 = 4.500e-07   (116x)
+#   steps= 500 -> warmup 500, lr@18 = 3.600e-08   (9x)
+#   steps=4650 -> warmup 4650, lr@18 = 3.871e-09  <- the original
+#
+# Matching the original warmup needs total_steps >= ~2325, which at ~34 min/step
+# is ~55 DAYS. Not viable. An earlier version of this script set steps=25 with
+# warmup=4650 believing that avoided the clamp; it does the opposite.
+#
+# THE FIX. The schedule is only a means to an LR. Under linear warmup
+# lr(n) = peak * n / warmup, so rescaling the peak by the same factor as the
+# warmup reproduces the trajectory EXACTLY:
+#
+#   original: 1.000000e-06 * n / 4650
+#   here:     5.376344e-09 * n /   25     (= 1e-6 * 25/4650)
+#
+# Verified equal at steps 1,5,10,15,18,20,25 to 2.2e-16 -- floating point noise.
+# Step 18, where 8574385 died, sees 3.8710e-09 in both.
+#
+# THE NUMBER THAT REFRAMES THE BUG: that is four orders of magnitude BELOW the
+# ~7.4e-7 ceiling agpt_80b.md documents. Whatever kills the 80B at step 18, it
+# is not a learning rate that is too large -- which is why this configuration,
+# and not the void lr=8e-4 runs, is the one worth instrumenting.
+#
+# The nominal `lr` in the log will read 5.376344e-09, NOT 1e-6. That is correct
+# and the analysis block checks for it.
+set -o pipefail
+
+# WHICH TENSOR GOES NON-FINITE FIRST? The measurement nobody has ever taken.
+#
+# The 80B NaN has never had its SITE measured -- every mechanism claim, in the
+# docs and in my own withdrawn ones, is inference from run outcomes. The
+# instrumentation now exists (commit f01548f6a): the non-finite branch runs
+# collect_param_stats(per_layer=True) BEFORE zero_grad destroys the gradients,
+# and separately logs the metrics that are THEMSELVES non-finite -- which name
+# the affected tensors. Nothing has ever run through it.
+#
+# THE HARD PART IS PRODUCING A LEGITIMATE FAILURE. At lr=5e-7 the 80B trains
+# clean (job 12474431: 12 steps, 0 events), so the capture would never fire.
+# And my previous runs at the config default of 8e-4 are void -- ~1000x past
+# the documented ~7.4e-7 AdamW ceiling, which is why their step-2 blow-ups
+# taught nothing. See docs/guides/known-bugs/80b-nan-what-we-know.md.
+#
+# So this reproduces the ONE failure that is not an LR artifact:
+# job 8574385, SophiaG at lr=1e-6 -- BELOW the finder's ~2.5e-6 SophiaG optimum
+# and well below its ~4.6e-6 blow-up onset -- which NaN'd at step 18 anyway.
+# That is the unexplained failure, and it is the right one to instrument.
+#
+# ORIGINAL (8574385): 510N, TP=4, LBS=1, GAS=4, GBS 6120, sophiag lr=1e-6,
+#   warmup 4650, decay_ratio=0, compile OFF, AC=full -> flat grad_norm ~6.17,
+#   step-14 inf, NaN step-18.
+#
+# HERE: 32N on VERIFIED-GOOD hosts. dp = 384/4 = 96. GBS is what the LR was
+# calibrated against and the source doc states GAS compensates for node count,
+# so GAS=64 holds GBS at 6144 -- within 0.4% of the original 6120.
+#   4096 tok/rank x 96 dp x 64 = 25,165,824 tokens = 6,144 seqs.
+#
+# Same warmup 4650 and decay_ratio=0: at step ~18 the schedule is still deep in
+# warmup, so the effective LR there is what matters and it must match.
+#
+# WHAT COMES OUT. If it reproduces, the log carries lines like
+#   NON-FINITE GRADIENT CAPTURE step N: <all per-layer stats>
+#   NON-FINITE GRADIENT CAPTURE step N: metrics that are THEMSELVES non-finite: ...
+# and that second line names the tensors. That is the first direct evidence of
+# WHERE, as opposed to inference from which config survived.
+#
+# IF IT DOES NOT REPRODUCE that is also worth knowing: it would mean the
+# failure needs the 510N scale and not merely the batch, which contradicts the
+# "GAS compensates" assumption the original bracket was built on.
+#
+# 40 steps: the original died at 18, and 40 gives margin without paying for a
+# long run.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-gbsarm/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/capture.log"
+
+echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
+#
+# INNER TIMEOUT MUST TRACK THE WALLTIME. 2026-09-06. This was `timeout 12000`
+# -- 3h20m -- carried over from the 4h version of this script while the PBS
+# walltime above says 12h. The inner timeout wins, so 12474740 exited
+# Exit_status=0 at exactly 03:20:41 after 5 steps, having been given 12 hours,
+# and its step-19 target was never reachable. A clean exit code and a full
+# step log make that look like a completed run rather than a truncated one.
+#
+# 84600s = 23h30m of a 24h wall (the queue max), leaving ~30 min for init and
+# the analysis block.
+#
+# WHY NOT 12h. Measured from 12474733/12474740: ~35 min from job start to step
+# 1, then ~34 min per step. A 11h30m timeout buys 19.3 steps against a step-18
+# target -- ONE step of margin. A slow init, a straggler rank, or a single
+# long step and an 11-hour run misses the only point it exists to reach.
+# 23h30m buys ~40 steps, so step 18 lands with the run less than half spent.
+timeout 19800 ezpz launch --nproc 384 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_80b_sophiag \
+    --training.steps=40 \
+    --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+    --training.num-tokens-per-train-step=1572864 \
+    --parallelism.tensor-parallel-degree=4 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=5.376344e-09 \
+    --lr-scheduler.warmup-steps=25 \
+    --lr-scheduler.decay-ratio=0 \
+    --compile.no-enable \
+    --diagnostics --diagnostics-attention \
+    --diagnostics-per-layer --diagnostics-interval=1 \
+    --checkpoint.no-enable \
+    --debug.seed=42 \
+    > "$LOG" 2>&1
+echo "  rc=$?"
+
+echo ""
+echo "########## which tensor went non-finite? ##########"
+LOG="$LOG" python3 - <<'PY'
+import os, re
+
+log = os.environ["LOG"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+txt = ansi.sub("", open(log, errors="replace").read()) if os.path.exists(log) else ""
+
+lr = (re.findall(r'"lr": *([0-9.e+-]+)', txt) or ["?"])[0]
+gas = (re.findall(r"gradient accumulation steps (\d+)", txt) or ["?"])[0]
+tok = (re.findall(r"tokens/train-step (\d+)", txt) or ["?"])[0]
+opt = (re.findall(r'"optimizer_name": *"([A-Za-z]+)"', txt) or ["?"])[0]
+rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)", txt)
+events = re.findall(r"non-finite grad_norm \([^)]*\) at step (\d+)", txt)
+
+print(f"  optimizer {opt}   lr {lr}   GAS {gas}   tokens/step {tok}")
+print(f"  (target: SophiaG, 5.376344e-09 w/ warmup 25, 4, 1572864)")
+print(f"  steps {len(rows)}   non-finite events {len(events)}"
+      f"{' at ' + ','.join(events[:8]) if events else ''}")
+
+# the capture lines -- this is the payload
+named = re.findall(
+    r"NON-FINITE GRADIENT CAPTURE step (\d+): metrics that are THEMSELVES "
+    r"non-finite[^:]*: ([^\n]+)", txt)
+print()
+if named:
+    print("  THE ANSWER -- tensors whose metrics went non-finite:")
+    for st, which in named[:5]:
+        print(f"    step {st}: {which}")
+else:
+    dumps = re.findall(r"NON-FINITE GRADIENT CAPTURE step (\d+): (diag/[^\n]+)", txt)
+    if dumps:
+        print("  Capture fired but named no non-finite METRIC. Full stats at the"
+              " event (the aggregate went non-finite without any per-layer")
+        print("  metric doing so -- itself informative):")
+        for st, d in dumps[:2]:
+            print(f"    step {st}: {d[:300]}")
+    else:
+        print("  Capture did NOT fire.")
+
+print()
+if lr not in ("5.376344e-09", "5.376344e-9", "5.3763e-09"):
+    print("  VOID: lr is not 5.376344e-09, so the rescaled trajectory")
+    print("  does not match 8574385 step for step.")
+elif tok != "1572864":
+    print(f"  VOID: tokens/step {tok} != 1572864, so this is not the small-GBS arm."
+          " calibration.")
+elif not rows:
+    print("  No steps. Read the log.")
+elif not events:
+    print("  DID NOT REPRODUCE: 40 steps, zero non-finite gradients, where")
+    print("  8574385 died at step 18. Since LR, optimizer and GBS all match,")
+    print("  the difference is SCALE (192 dp here vs 510N/dp~1275 there) --")
+    print("  which contradicts the 'GAS compensates for node count' assumption")
+    print("  the original bracket was designed around. That is a real finding.")
+elif named:
+    print("  REPRODUCED AND LOCALIZED. The tensors above are the first direct")
+    print("  evidence of WHERE the 80B failure originates, as opposed to")
+    print("  inference from which configuration survived.")
+else:
+    print("  REPRODUCED but not localized -- see the capture output above.")
+PY
+echo "CAPTURE_DONE"
