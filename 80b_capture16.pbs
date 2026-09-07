@@ -98,7 +98,18 @@ python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 export LOGD="$REPO/outputs/logs/80b-cap16/$PBS_JOBID"; mkdir -p "$LOGD"
 LOG="$LOGD/capture.log"
 
-echo "reproducing 8574385: sophiag lr=1e-6, GBS 6144 via GAS=32 at dp=192"
+# Derived from the flags actually passed below, not hardcoded. Every variant
+# of this script inherited a banner reading "GBS 6144 via GAS=32 at dp=192"
+# from the first 64N version and printed it regardless of what it ran -- so
+# 12474768, a 384-seq run at dp=96, announced itself as a 6144-seq run at
+# dp=192. A log header that lies is worse than none.
+_lr=$(grep -oE "optimizer-kwargs.lr=[0-9.e-]+" "$0" | head -1 | cut -d= -f2)
+_tok=$(grep -oE "num-tokens-per-train-step=[0-9]+" "$0" | head -1 | cut -d= -f2)
+_np=$(grep -oE "nproc [0-9]+" "$0" | head -1 | awk "{print \$2}")
+_tp=$(grep -oE "tensor-parallel-degree=[0-9]+" "$0" | head -1 | cut -d= -f2)
+_dp=$(( _np / _tp ))
+_gas=$(( _tok / 4096 / _dp ))
+echo "reproducing 8574385: sophiag lr=$_lr, $(( _tok / 4096 )) seqs via GAS=$_gas at dp=$_dp"
 timeout 12000 ezpz launch --nproc 192 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_80b_sophiag \
