@@ -158,6 +158,52 @@ directly and the two can be compared. **A mismatch would be the more
 interesting outcome** -- it would mean the overflow starts somewhere that was
 never carrying much gradient.
 
+## The one axis this reproduction does NOT match: dp
+
+Written at step 15, before the outcome is known, so it cannot be shaped by it.
+
+| | `8574385` | `12474761` / `12474765` |
+|---|---|---|
+| nodes | 510 | 32 |
+| **dp** | **~1530** | **96** |
+| GAS | 4 | 64 |
+| GBS | 6120 seqs | 6144 seqs (0.4% high) |
+| peak LR / warmup | 1e-6 / 4650 | 5.376344e-09 / 25 |
+| effective LR at step n | identical to 2.2e-16 | identical |
+
+Holding GBS fixed on 32 nodes requires trading dp for GAS -- there is no other
+way to reach 25M tokens/step at that node count. So dp is **16x lower** here.
+
+**The canonical doc lists the failure as dp-sensitive, in the ESTABLISHED
+column.** If dp is the operative variable rather than batch size, this
+configuration was never capable of reproducing the failure, and a clean run
+proves nothing about the mechanism. I should have stated that when building
+the run rather than after step 14 passed.
+
+### What each outcome would and would not license
+
+- **NaN at or near step 18.** Strong: the trajectory matched, the failure
+  followed, and the capture names the tensor. dp being 16x lower would then
+  argue the failure is NOT primarily dp-driven.
+- **Clean through step 18.** Weak on its own. It is consistent with "dp is
+  the variable and 96 is safe", and equally consistent with "the failure is
+  stochastic and this seed missed". It does NOT show the LR trajectory is
+  safe, because the confound is unresolved.
+- **Clean through ~40 steps.** Somewhat stronger -- it would make a
+  stochastic miss less likely -- but still cannot separate dp from batch.
+
+### The experiment that would separate them
+
+Two arms at the SAME dp, differing only in GBS, both at this LR trajectory.
+That isolates batch from parallelism. At 32N the reachable dp is 96, so the
+arms would be GAS 64 (GBS 6144) against GAS 4 (GBS 384). Cheap: the second
+arm is 16x less compute per step.
+
+Until that runs, "GBS not dp" and "dp not GBS" remain unseparated -- which is
+exactly the state the 2026-08-31 investigation left them in, for the same
+reason (see the void arms in
+[`known-bugs/80b-nan-what-we-know.md`](../guides/known-bugs/80b-nan-what-we-know.md)).
+
 ## Config
 
 32N on access-verified hosts, 384 ranks, TP=4, GAS 64, GBS 25,165,824 tokens,
