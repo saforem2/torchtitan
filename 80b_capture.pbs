@@ -153,11 +153,23 @@ elif tok != "25165824":
 elif not rows:
     print("  No steps. Read the log.")
 elif not events:
-    print("  DID NOT REPRODUCE: 40 steps, zero non-finite gradients, where")
-    print("  8574385 died at step 18. Since LR, optimizer and GBS all match,")
-    print("  the difference is SCALE (192 dp here vs 510N/dp~1275 there) --")
-    print("  which contradicts the 'GAS compensates for node count' assumption")
-    print("  the original bracket was designed around. That is a real finding.")
+    import re as _re
+    _n = len(rows)
+    _dp = None
+    _m = _re.search(r"--nproc (\d+)", txt)
+    _tp = _re.search(r"tensor-parallel-degree=(\d+)", txt)
+    if _m and _tp:
+        _dp = int(_m.group(1)) // int(_tp.group(1))
+    print(f"  DID NOT REPRODUCE: {_n} steps, zero non-finite gradients, where")
+    print("  8574385 died at step 18. LR trajectory, optimizer and GBS all")
+    print(f"  match, so the difference is dp: {_dp if _dp else '?'} here against")
+    print("  ~1530 there (510 nodes x 12 / TP4).")
+    print()
+    print("  READ THIS NARROWLY. A clean run at lower dp is consistent BOTH with")
+    print("  'dp is the variable' and with 'the failure is stochastic and this")
+    print("  seed missed'. What it does establish is that the failure is not a")
+    print("  deterministic function of (LR trajectory, GBS, optimizer, step")
+    print("  count) alone -- at least one further variable matters.")
 elif named:
     print("  REPRODUCED AND LOCALIZED. The tensors above are the first direct")
     print("  evidence of WHERE the 80B failure originates, as opposed to")
