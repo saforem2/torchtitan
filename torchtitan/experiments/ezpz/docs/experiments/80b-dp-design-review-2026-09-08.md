@@ -77,3 +77,44 @@ The review cost about ten minutes of wall time and returned one already-fixed
 critical, one wrong recommendation resting on a void run, and three sound
 methodological objections -- two of which (the non-ladder, the single-draw
 weakness) directly changed how the results here are written up.
+
+## Scored after the fact
+
+The review completed after the runs it was reviewing. Final tally:
+
+| objection | verdict |
+|-----------|---------|
+| Capture cannot name a tensor | **already fixed** (`3c17d3b55`), same defect, same method |
+| `8673658` is not the stock model | **correct**, and found independently here |
+| "This is not a ladder" | **correct**, GAS integral only at powers of two |
+| No checkpoint cadence | **correct** |
+| Single runs are weak vs an intermittent failure | **correct** |
+| Run `12474403`'s config instead | **wrong** -- that run is LR-void |
+| "Do not spend nodes on 16N; least informative point" | **wrong, and it was the most informative** |
+
+### The 16N call is worth dwelling on
+
+The critic reasoned that dp=48 sits *below* the known-clean dp=96, so it tests
+the direction the evidence already says is safe -- sound if the goal is
+locating a failure threshold. It was not. By the time nodes were free, the
+question had changed: the dp=96 vs dp=192 comparison had produced a *scaling*
+result (skew 217 -> 273), and the cheapest way to test a scaling law is a
+third point, in whichever direction is reachable.
+
+dp=48 returned **162.30 against a committed prediction of 172.7**, gave the
+third point that revealed the per-doubling ratio is *decelerating*
+(1.329 -> 1.259, invisible to two points), and cost 16 nodes for under two
+hours. 128N -- the "informative" direction -- was unreachable all night.
+
+The lesson is not that the critic reasoned badly. It is that **a design review
+scores the question you asked, and the question can move while the review
+runs.** This one took 53 minutes of wall time; the dp result that reframed it
+landed inside that window.
+
+### Reliability note
+
+Three of five agents stalled out (six attempts each, no progress) and the
+synthesis step never ran, so this is two critiques out of four plus manual
+scoring. The LR audit commissioned alongside it lost two of four agents to API
+errors. Roughly half the fleet returned across both workflows -- worth knowing
+when budgeting review passes against a deadline.
