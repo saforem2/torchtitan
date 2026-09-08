@@ -368,6 +368,50 @@ so the model is barely past uniform). A run at a converged checkpoint should
 show `lm_head` averaging like everything else -- and if it does not, this
 explanation is wrong.
 
+## MECHANISM TEST, INTERIM: the prediction is holding, and for the right reason
+
+`12474810` (dp=24, lr=1e-6) descends out of the near-uniform regime. Through
+step 9:
+
+| step | loss | `lm_head` | vs step 1 | mean layer | vs step 1 | skew |
+|------|------|-----------|-----------|------------|-----------|------|
+| 1 | 12.9443 | 0.262521 | +0.0% | 0.00195992 | +0.0% | 133.9 |
+| 5 | 12.6392 | 0.262113 | -0.2% | 0.00196029 | +0.0% | 133.7 |
+| 6 | 12.4739 | 0.253832 | -3.3% | 0.00194457 | -0.8% | 130.5 |
+| 7 | 12.3033 | 0.251279 | -4.3% | 0.00193646 | -1.2% | 129.8 |
+| 8 | 12.0666 | 0.240405 | -8.4% | 0.00191691 | -2.2% | 125.4 |
+| 9 | 11.8355 | 0.204738 | **-22.0%** | 0.00184192 | -6.0% | 111.2 |
+
+**The fall begins at step 6 -- exactly where loss crosses ln(256128) = 12.45,
+the uniform-prediction line.** Steps 1-5 sit above it and show nothing
+(-0.2% at step 5).
+
+### It is the NUMERATOR, which is what makes this a mechanism and not a
+### coincidence
+
+`lm_head` has fallen **22.0%**; the mean layer only **6.0%**. The skew drop is
+`lm_head`'s own gradient collapsing, not other layers rising.
+
+That is the **opposite signature** to the dp effect, and the contrast is the
+substance of the result:
+
+| what moves | `lm_head` | mean layer |
+|------------|-----------|------------|
+| dp, 12 -> 192 | **-3%** (flat) | **-67%** |
+| loss, 12.94 -> 11.84 | **-22%** | -6% |
+
+`lm_head` is invariant to *parallelism* and highly sensitive to *distance from
+a uniform prediction*. Both halves of the hypothesis, each with the correct
+variable moving.
+
+### Status
+
+Not the formal verdict: loss has travelled 1.1 of the ~4.5 needed to reach the
+pre-registered `< 10.0` threshold, and the monitor will report there. But the
+direction, the onset point, and the component decomposition all match the
+prediction that was committed before the run started -- and the falsifier
+(flat skew through the descent) is now excluded.
+
 ### A shortcut that does not work (recorded so it is not retried)
 
 I tried to test the common-mode claim without waiting for the descent arm, by
