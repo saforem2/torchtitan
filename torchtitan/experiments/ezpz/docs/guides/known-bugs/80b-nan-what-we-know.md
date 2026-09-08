@@ -31,6 +31,9 @@ it have either not been run or were run wrong.
 | **Clipping fires on 100% of steps** | `clip_fired = 1.0` every step; `grad_norm_preclip ~8.07 -> postclip 1.0`. `max_norm=1.0` is the core default and `agpt_80b` does not override it, so **every reported grad_norm in this document is pre-clip**, including `8574385`'s "flat ~6.17". The optimizer saw 1.0. |
 | **`8574385` died at an effective LR of 3.87e-9** | Its warmup was 4650 with peak 1e-6, so `lr(18) = 1e-6 * 18/4650`. That is **four orders of magnitude below** the ~7.4e-7 ceiling `agpt_80b.md` documents. Whatever kills it, an over-large LR is not it. |
 | **A single `inf` zeroes every other gradient** | `clip_grad_norm_` runs with `error_if_nonfinite=False`, so `scale = max_norm/inf = 0`. Measured: every finite gradient becomes exactly 0.0 while the offender becomes `nan` (`inf*0`). The step is a no-op **before** the trainer skips it -- which is how a run recovers from a non-finite step (`12474403` L72 recovered at 56). |
+| **Gradient concentration scales with dp** | Three arms, matched GBS (384 seqs), seed 42, LR trajectory, optimizer, model, verified hosts: `layer_gradnorm_skew` = **163.2** at dp=48 (`12474806`), **216.9** at dp=96 (`12474768`), **273.0** at dp=192 (`12474803`). Within-arm cv < 0.8% against between-arm gaps of 26-33%, so ~35 sigma. Driven by the DENOMINATOR -- mean layer gradnorm falls 22% per doubling while `lm_head`'s falls 2%. dp=48 was a **pre-registered prediction** (172.7 predicted, 162.3 observed, committed at `aa12e8d77` before the run). Per-doubling ratios 1.329 then 1.259 -- decelerating, so dp=384 projects to 325-344. |
+| **dp and GBS have opposite signatures** | A 16x GBS change leaves means invariant (0.03-0.20%) and scales variances by sqrt(16) (`12474765` vs `12474768`). A 4x dp change scales means monotonically and leaves variances alone (cv ratios 0.94-1.05). Batch size averages away noise; parallelism changes structure. |
+| **No archived failure was LR-voided** | Audit 2026-09-08 of `8574385`, `8661293`, `8673658`, `8671243`, `8537349`, `8530891`: all ran at 1e-6 or below. The 80B submit script sets `LR="${LR:-1e-6}"` (`submit_agpt_80b_aurora_venv_failover.sh:110`) and passes `--optimizer.lr` explicitly, so `agpt()`'s 8e-4 registry default is never reached by that path. A run whose writeup states no LR took 1e-6, not 8e-4. |
 | **The LR trajectory alone does not cause the failure** | `12474765`: 25/25 steps, zero non-finite, at `8574385`'s effective LR *at every step* (3.87096768e-09 at step 18 against an intended 3.871e-09 -- exact to 9 significant figures), same optimizer, same GBS. dp was 96 against ~1530. So the failure is **not** a deterministic function of (LR trajectory, GBS, optimizer, step count) alone; at least one further variable matters. Read narrowly: also consistent with a stochastic miss. |
 | **The 80B trains cleanly at a correct LR** | `12474431`: lr 5e-7, 64N, dp=192, GAS=4 -- 12 steps, 0 non-finite gradients, loss 12.948 -> 12.795, grad_norm flat 7.9. |
 
@@ -72,6 +75,15 @@ tensor in the model, so even taken at face value it localizes nothing.
 - **Why SophiaG failed at a safe LR.** `8574385` ran SophiaG at **1e-6**,
   below the finder's ~2.5e-6 optimum and well below its ~4.6e-6 blow-up onset,
   and NaN'd at step 18 anyway. **The historical failures are not an LR error.**
+- **Why the vocabulary projection resists averaging.** This is now the sharpest
+  question, and it is about the output layer and the loss rather than about
+  distribution. Every other tensor's gradient shrinks ~22% per dp doubling;
+  `lm_head.weight`'s shrinks 2%. Whatever makes it different is what
+  concentrates gradient there, and concentration is the only quantity measured
+  so far that grows monotonically toward the failing regime.
+- **Whether concentration causes the failure.** Conjecture. None of the three
+  dp arms failed, so this is healthy-regime structure. The hypothesis predicts
+  the failure threshold tracks skew rather than dp directly.
 - **Whether depth matters.** Untested. See the log below for why the attempt
   failed.
 - **Whether large batch matters.** **Tested at dp=96 on 2026-09-07, and the
