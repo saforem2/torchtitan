@@ -368,6 +368,24 @@ so the model is barely past uniform). A run at a converged checkpoint should
 show `lm_head` averaging like everything else -- and if it does not, this
 explanation is wrong.
 
+### Accidental control: skew is independent of learning rate
+
+The descent arm (`12474810`) runs dp=24 at **lr=1e-6**, a hundred times the
+`5.376344e-09` used by the dedicated dp=24 arm (`12474807`). Their skews:
+
+| arm | lr | skew |
+|-----|-----|------|
+| `12474807` | 5.376344e-09 | 131.75 (mean of 4 steps) |
+| `12474810` | 1e-6 | 133.90 (step 1) |
+
+**1.63% apart** -- roughly the per-step wobble plus arm-to-arm spread.
+
+So skew is set by dp and not by learning rate, across a 100x LR range. This
+was not designed as a control; `12474810` exists to test the mechanism, and
+the comparison fell out of it. It rules out a variable nobody had checked, and
+it means the descent arm's skew baseline is trustworthy: any movement as loss
+falls is a real within-run effect rather than an artifact of its LR.
+
 ## CONFOUND RESOLVED: it is dp, not GAS
 
 `12474809` held dp fixed at 192 and moved GAS 2 -> 1 (GBS halving 384 -> 192
