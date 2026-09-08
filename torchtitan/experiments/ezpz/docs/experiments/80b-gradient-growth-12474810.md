@@ -130,6 +130,47 @@ At this rate the clip headroom reaches zero within a few steps. What happens
 there is the interesting part: clipping has absorbed every step so far, and
 the optimizer has seen norm 1.0 throughout.
 
+## Step 15: ESCALATION, loss reversal, and an inverted excursion
+
+| step | loss | preclip | max | mean | max/preclip |
+|------|------|---------|-----|------|-------------|
+| 10 | 11.6605 | 8.85 | 0.481659 | 0.00230051 | **0.0544** |
+| 13 | 11.4454 | 23.00 | 0.376449 | 0.00208607 | 0.0164 |
+| 14 | 11.3909 | 25.95 | 0.351594 | 0.00206609 | 0.0136 |
+| 15 | **11.5990** | **48.05** | 0.140967 | 0.00169613 | **0.0029** |
+
+- **Loss reversed** for the first time in the run: 11.3909 -> 11.5990.
+- **preclip +85% in one step**, to ~6x the 8.1 baseline.
+- **`clip_headroom` 0.039 -> 0.021**, near saturation.
+- **Concentration collapsed 19x**: `max/preclip` 0.0544 -> 0.0029.
+
+### The excursion inverted
+
+It began as one tensor dominating (step 10: max doubles, global norm barely
+moves) and has become **the entire field lifting while the formerly dominant
+tensor shrinks** -- `lm_head` is down to 0.141 from a peak of 0.513, even
+though it still holds rank 0. The mean fell too. So the L2 growth is coming
+from the bulk of the distribution, not from its extremes.
+
+That is a different failure shape from "one block explodes", and it is the
+shape no previous 80B run could have revealed: earlier events are recorded
+only as a `grad_norm` spike after the fact.
+
+### A prediction I got wrong one step earlier
+
+At step 14 I read the increments (+2.9, +5.5, +5.8, **+3.0**) as deceleration
+and said recovery was a live possibility. Step 15 was **+22.1**. The
+"deceleration" was a single lower increment inside a rising sequence -- the
+same read-a-trend-off-three-points error that has recurred all session, and
+the reason the resolution watch was set to fire on thresholds rather than on
+my reading of the slope.
+
+### Still no non-finite gradient
+
+Zero, at step 15, with clipping absorbing every step and the optimizer seeing
+norm 1.0 throughout. Headroom at 0.021 means clipping is close to its limit,
+and what happens at saturation is the open question.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
