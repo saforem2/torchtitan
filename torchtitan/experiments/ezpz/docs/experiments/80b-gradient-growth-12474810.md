@@ -217,6 +217,41 @@ Zero at step 16, with `clip_headroom` at 0.0137. Clipping has absorbed every
 step and the optimizer has seen norm 1.0 throughout -- which is presumably why
 the loss degrades gradually rather than NaN-ing outright.
 
+## Correction: `clip_headroom` is `1/preclip`, and there is no saturation event
+
+Verified empirically at every step:
+
+```
+step 12  headroom 0.05798   1/preclip 0.05798
+step 13  headroom 0.04349   1/preclip 0.04349
+step 16  headroom 0.01367   1/preclip 0.01367
+```
+
+`clip_headroom` **is** the clip scale factor. It cannot reach zero -- it
+asymptotes as the gradient grows. So the repeated framing above ("headroom
+tightening", "near saturation", "what happens when clipping can't absorb it")
+is wrong. **Nothing runs out.** A headroom of 0.014 means the gradient is
+being scaled down 73x, and clipping will keep scaling by whatever factor is
+required, indefinitely.
+
+### What this changes about the failure mode
+
+This is a better account of why the loss degrades *gradually* instead of
+NaN-ing. The optimizer always receives a gradient of norm exactly 1.0 -- that
+is what clipping guarantees. What degrades is the **direction**: as one part
+of the field grows 9x relative to the rest, the unit-norm vector handed to the
+optimizer points more and more at whatever is blowing up, and less at the loss
+gradient.
+
+So the model is not being destroyed by large updates. It is being steered by
+increasingly bad ones of constant size. That predicts exactly what is
+observed: no non-finite values, no sudden collapse, loss rising smoothly by
++0.62 over two steps while gradients grow 9x.
+
+It also means the run may never produce a non-finite gradient at all -- and
+that the capture instrumentation, which only fires on non-finite, may be
+watching for the wrong event in this regime.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
