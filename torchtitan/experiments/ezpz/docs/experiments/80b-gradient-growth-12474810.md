@@ -440,6 +440,43 @@ warmup artifact. The run continues to step 150 and the LR is about to stop
 ramping, which will separate "the ramp caused it" from "that LR region caused
 it".
 
+## A SECOND excursion is starting -- at CONSTANT LR
+
+| step | lr | loss | preclip | layer_max |
+|------|-----|------|---------|-----------|
+| 22 | 1.0e-6 | 11.3480 | 16.18 | 0.305022 |
+| 26 | 1.0e-6 | 10.5492 | 12.60 | 0.360582 |
+| 27 | 1.0e-6 | 10.3590 | 14.96 | 0.414344 |
+| 28 | 1.0e-6 | 10.3580 | **31.83** | **0.298656** |
+
+Preclip doubled in one step while `layer_max` fell -- **the same
+anti-correlated signature as the first excursion**, where preclip peaked at
+73.16 exactly as layer_max bottomed at 0.0737.
+
+### This tests the "rate not level" hypothesis, and it fails it
+
+After the first excursion I proposed that the damage tracked the **rate** of
+LR increase (5e-8 per step) rather than the level, because recovery happened
+at a higher LR than the divergence.
+
+**The LR reached its 1e-6 peak at step 22 and has been flat for seven steps.**
+This second excursion is developing with no LR change at all. So the rate
+cannot be the driver -- or at least, it is not necessary for one.
+
+That leaves the level (1e-6 is above the documented ~7.4e-7 ceiling) or
+something intrinsic to this phase of training. The first excursion cannot
+distinguish those; this one is at least consistent with the level mattering.
+
+### Status
+
+Loss has stalled: 10.3590 -> 10.3580, essentially flat after seven steps of
+steady descent. Preclip at 31.83 has not reached the 40 threshold set for a
+"new excursion" alert, and the first excursion peaked at 73.2 -- so this may
+be smaller, or may be one step into the same shape.
+
+Worth watching but not yet worth a conclusion. The first excursion took four
+steps to reach its peak.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
