@@ -522,6 +522,54 @@ too small to leave the near-uniform regime.
 
 Still **zero non-finite gradients** across both excursions.
 
+## CORRECTION: not periodic -- an ATTENUATING sequence
+
+A threshold-independent count (local peaks in `grad_norm_preclip` above 25,
+rather than crossings of an arbitrary 40) gives four events, not two:
+
+| event | step | peak preclip |
+|-------|------|--------------|
+| 1 | 16 | **73.16** |
+| 2 | 19 | 68.06 |
+| 3 | 29 | 57.97 |
+| 4 | 41 | **36.18** |
+
+```
+peaks:  73 -> 68 -> 58 -> 36     monotonically attenuating
+gaps:        3    10    12       lengthening, not constant
+```
+
+**This is not a periodic instability.** The "13 steps apart" and then "14
+steps apart" figures I recorded both came from counting threshold crossings,
+which merged the step-16 and step-19 peaks into a single event and produced a
+spurious constant interval.
+
+What the data actually shows is a **decaying sequence with lengthening
+intervals** -- a transient settling out, not a recurring cycle. The fourth
+event peaked at half the first and resolved without any loss damage: loss went
+8.8716 -> 9.0161 -> **8.7764**, a new run minimum.
+
+### What this does to the earlier reframing
+
+The commit `eaec6c9fc` argued that if the documented NaN failures are draws
+from a *repeating* process, that would explain why the failure step was never
+reproducible. **That argument is weakened.** A decaying transient is much less
+likely to produce a NaN at step 37 of one run and step 9 of another; a
+stationary repeating process would.
+
+What survives: this run had four gradient events of decreasing severity, all
+survivable, none producing a non-finite value. Whether the documented NaN
+failures are the same phenomenon caught at a worse phase, or something else
+entirely, remains unresolved -- and the attenuation makes the "same
+phenomenon" reading harder to sustain, not easier.
+
+### The methodological point
+
+Both the "period" and its disappearance came from the same data. The
+difference was the event definition: a fixed threshold merges nearby peaks and
+invents regularity. Counting local maxima instead is threshold-free and gave
+the real structure immediately.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
