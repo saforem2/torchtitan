@@ -412,6 +412,47 @@ direction, the onset point, and the component decomposition all match the
 prediction that was committed before the run started -- and the falsifier
 (flat skew through the descent) is now excluded.
 
+### STEP 10: the trend reverses violently, and the global norm does not notice
+
+Skew fell 133.9 -> 111.2 over nine steps, then at step 10 jumped to **209.4**.
+Both components moved, and hard:
+
+| | step 9 | step 10 | change |
+|---|--------|---------|--------|
+| `lm_head` (max) | 0.204738 | **0.481659** | **+135%** |
+| mean layer | 0.00184192 | 0.00230051 | +25% |
+| **global `grad_norm_preclip`** | 8.108 | 8.848 | **+9%** |
+
+**The global gradient norm barely moved while the per-layer max more than
+doubled.** Over the whole run so far: preclip **+7.7%**, layer_max **+83.5%**.
+The `max/preclip` ratio sat at 0.032, drifted to 0.025, then doubled to 0.054
+in a single step.
+
+This is precisely the decoupling `diagnostics/__init__.py` was written to
+catch -- its own comment says one exploding block raises max/mean long before
+the global L2 moves enough to notice -- and this is the first time it has been
+observed live rather than argued for.
+
+Context that matters: **zero non-finite events**, loss still descending
+(11.8355 -> 11.6605), and the LR at step 10 is **4e-7**, still ramping under
+warmup toward the ~7.4e-7 ceiling `agpt_80b.md` documents.
+
+### What this does to the mechanism reading above
+
+It does not refute it -- steps 6-9 remain a clean monotone fall in `lm_head`
+that began exactly at the uniform-prediction crossing -- but it means the
+descent test can no longer be read as a simple monotone trend. Two things are
+now happening in the same run:
+
+1. `lm_head` weakening as the output distribution leaves uniform (steps 6-9)
+2. Something at step 10 that redistributes gradient sharply toward one block
+   while leaving the global norm nearly unchanged
+
+Whether (2) is the instability's precursor or an ordinary early-training event
+is exactly what the remaining ~140 steps will show. **The pre-registered
+verdict threshold (loss < 10) is unchanged, and this run is now more
+interesting than the test it was built for.**
+
 ### A shortcut that does not work (recorded so it is not retried)
 
 I tried to test the common-mode claim without waiting for the descent arm, by
