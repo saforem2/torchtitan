@@ -171,6 +171,52 @@ Zero, at step 15, with clipping absorbing every step and the optimizer seeing
 norm 1.0 throughout. Headroom at 0.021 means clipping is close to its limit,
 and what happens at saturation is the open question.
 
+## THE ANSWER: the divergence tracks the LR ramp into the documented ceiling
+
+Adding the LR column makes the whole excursion legible:
+
+| step | **lr** | loss | preclip | max | max/preclip |
+|------|--------|------|---------|-----|-------------|
+| 9 | 3.5e-7 | 11.8355 | 8.11 | 0.204738 | 0.0253 |
+| 10 | 4.0e-7 | 11.6605 | 8.85 | 0.481659 | 0.0544 |
+| 12 | 5.0e-7 | 11.4945 | 17.25 | 0.433992 | 0.0252 |
+| 14 | 6.0e-7 | **11.3909** (min) | 25.95 | 0.351594 | 0.0136 |
+| 15 | **6.5e-7** | 11.5990 | 48.05 | 0.140967 | 0.0029 |
+| 16 | **7.0e-7** | 12.0158 | 73.16 | 0.073690 | **0.0010** |
+
+**Loss bottoms at step 14 (lr 6.0e-7) and rises +0.62 by step 16.** Gradients
+reach **9x** baseline. This is a warmup ramp walking straight into the
+**~7.4e-7 usable ceiling** that `agpt_80b.md` documents -- and it fails
+essentially on arrival.
+
+### Why this is worth more than the mechanism test it replaced
+
+The ceiling was previously established from runs *started* above it
+(`8530891` NaN'd at step 2 at lr=1e-6). This is the first observation of the
+80B **walking into the ceiling from below under a warmup ramp**, with
+per-tensor telemetry the whole way. It is an independent confirmation from a
+direction nobody had tested, and it says the ceiling is a property of the LR
+rather than of how the run reached it.
+
+### The shape of the approach
+
+Concentration **collapses** as the LR rises: `max/preclip` 0.0544 -> 0.0010, a
+54x fall. `lm_head` peaks at 0.513 (step 11) and ends at 0.074 -- a 7x
+*decrease* while the global norm grows 8x. So approaching the ceiling does not
+look like one tensor exploding; it looks like **the entire gradient field
+lifting off together**, with the previously dominant tensor becoming
+relatively insignificant.
+
+That is the opposite of what a "one exploding block" model predicts, and it is
+why watching `layer_gradnorm_max` alone would have shown *improvement*
+throughout the divergence.
+
+### Still no non-finite gradient
+
+Zero at step 16, with `clip_headroom` at 0.0137. Clipping has absorbed every
+step and the optimizer has seen norm 1.0 throughout -- which is presumably why
+the loss degrades gradually rather than NaN-ing outright.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
