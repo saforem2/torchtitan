@@ -132,6 +132,54 @@ variances by sqrt(16) -- the two knobs have cleanly separated signatures:
 | GBS (16x) | invariant, 0.03-0.20% | scale by sqrt(16) |
 | dp (4x) | scale monotonically | unchanged, cv ratios 0.94-1.05 |
 
+### Correction: the runner-up ranking is NOT depth-independent across dp
+
+Earlier notes in this investigation (including mine) described ranks 1-4 as a
+"flat, depth-independent population" scattered through the stack. That holds
+*within* an arm. It does not hold *across* dp:
+
+| dp | layers occupying ranks 1-4 |
+|----|----------------------------|
+| 48 | 82, 50, 14, 11 |
+| 96 | 65, 57, 36, 5 |
+| 192 | **9, 8, 10, 21** |
+
+**The high-gradient layers migrate toward the input as dp rises.** At dp=192
+the four runners-up are layers 8, 9, 10 and 21 -- all early in an 84-layer
+stack. At dp=96 they sit mid-to-late (65, 57, 36). Only `lm_head.weight` holds
+rank 0 at every dp.
+
+Two consequences:
+
+1. **"Depth-independent" was an artifact of looking at one arm.** The scatter
+   within a single dp is real, but the *location* of the scatter moves with
+   parallelism, which is a stronger and more specific claim than either
+   "depth matters" or "depth does not".
+2. **The concentration result is unaffected.** Skew measures max/mean, and the
+   max is `lm_head` in every arm. Which layers occupy ranks 1-4 does not enter
+   it.
+
+Also worth recording: the ranking is not perfectly frozen even within an arm.
+At dp=192 the top four are identical across all 40 steps, but rank 5 alternates
+between layer 21 (29 steps) and layer 0 (11 steps). "Frozen top-5" was an
+overstatement from reading five steps of one arm; "frozen top-4, contested
+rank 5" is what the 40-step data shows.
+
+### `tok_embeddings` is the control that makes `lm_head` interesting
+
+`tok_embeddings.weight` has the **same shape** as `lm_head.weight` (vocab x
+dim, the two largest tensors in the model) and **never once enters the top-5**
+across 40 steps at any dp.
+
+So the concentration is not "the biggest tensor gets the biggest gradient". Two
+tensors of identical size sit at opposite ends of the distribution. Whatever
+distinguishes them is the mechanism, and the obvious candidate is that one is
+on the loss side of the network and the other is not.
+
+(Weight tying would have made them the same tensor and explained nothing --
+checked, and `enable_weight_tying` appears exactly once in the registry, in
+`agpt_2b_tied`. The 80B is untied.)
+
 ### What is still conjecture
 
 That concentration is what *breaks* the model. None of these runs failed, so
