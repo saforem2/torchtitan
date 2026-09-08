@@ -58,6 +58,61 @@ would mean the effect is real but not log-linear, and the two-point
 extrapolation is unreliable -- in which case dp=384 becomes necessary rather
 than confirmatory.
 
+## RESULT: confirmed. skew = 162.30 at dp=48
+
+`12474806`, step 1, matched GBS/seed/LR:
+
+| dp | skew | mean layer gradnorm |
+|----|------|---------------------|
+| **48** | **162.30** | 0.00156439 |
+| 96 | 217.06 | 0.00115764 |
+| 192 | 272.79 | 0.00090154 |
+
+**Predicted 172.7, observed 162.30** -- 6.0% error on a value extrapolated
+outside the measured interval and committed to git (`aa12e8d77`) before the
+run started.
+
+The predicted drop was 20.4%; the observed drop is **25.2%**. The effect is
+real and slightly *stronger* than the two-point fit implied.
+
+Per-doubling ratios across three points:
+
+```
+48 ->  96 : 1.3374
+96 -> 192 : 1.2567
+```
+
+Consistent to within 6%, so near log-linear in dp with a mild flattening as dp
+grows. Not the third case the falsifier anticipated (a much smaller drop), and
+emphatically not the flat-or-higher outcome that would have killed it.
+
+### What is now established
+
+**Gradient concentration in `lm_head.weight` scales monotonically with data
+parallelism**, over a 4x range of dp, at fixed GBS, seed, LR trajectory,
+optimizer and model. Each doubling of dp raises skew by ~26-34%, driven by the
+mean layer gradient falling while `lm_head`'s barely moves.
+
+Combined with the batch result -- 16x GBS leaves means invariant and scales
+variances by sqrt(16) -- the two knobs have cleanly separated signatures:
+
+| knob | means | variances |
+|------|-------|-----------|
+| GBS (16x) | invariant, 0.03-0.20% | scale by sqrt(16) |
+| dp (4x) | scale monotonically | unchanged, cv ratios 0.94-1.05 |
+
+### What is still conjecture
+
+That concentration is what *breaks* the model. None of these runs failed, so
+this is healthy-regime structure. The hypothesis predicts the failure
+threshold should track skew rather than dp directly, and that dp=384 gives
+skew ~343 -- testable when 128 nodes free up.
+
+The mechanism question this raises is sharper than the parallelism one: **why
+does the vocabulary projection resist averaging when every other tensor does
+not?** That is a question about the output layer and the loss, not about
+distribution.
+
 ## What it will not settle
 
 - Doubling dp at fixed GBS **halves GAS** (here 4 -> 8 going down to dp=48),
