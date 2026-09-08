@@ -453,6 +453,57 @@ is exactly what the remaining ~140 steps will show. **The pre-registered
 verdict threshold (loss < 10) is unchanged, and this run is now more
 interesting than the test it was built for.**
 
+## THE MECHANISM IS REFUTED: skew RISES as the model leaves the uniform regime
+
+`12474810` descended from loss 12.94 to 10.75 -- well past
+`ln(256128) = 12.45` -- and the pre-registered prediction failed.
+
+| | loss | skew | `lm_head` | mean layer |
+|---|------|------|-----------|------------|
+| baseline (steps 1-5) | 12.8222 | **132.5** | 0.262521 | 0.00195992 |
+| now (steps 23-25) | 10.9931 | **149.1** | 0.299380 | 0.00202200 |
+| change | **-1.83** | **+12.5%** | **+14%** | +3% |
+
+**Predicted: skew falls materially. Observed: skew rose 12.5%.** And it is
+the numerator again -- `lm_head`'s gradient norm is 14% *higher* at loss 10.75
+than it was at loss 12.82.
+
+### What this kills
+
+The hypothesis was: `lm_head`'s gradient is predicted-minus-true summed over
+the vocabulary, and early in training the prediction is near-uniform on every
+rank regardless of which tokens that rank saw, so the dominant term is
+common-mode and cannot average. It predicted the dp-invariance would weaken as
+the output distribution moved away from uniform.
+
+It does not weaken. **`lm_head`'s dominance is structural, not an artifact of
+the near-uniform regime.** That was the stated falsifier and it fired.
+
+This is the more interesting outcome, as recorded before the run: a structural
+property is a stronger fact about the model than a warmup artifact would have
+been. It also means the dp-invariance measured across five arms is not
+something that will quietly disappear once the 80B is properly trained.
+
+### The interim reading was wrong too
+
+Between steps 6 and 9 this document recorded skew falling -2.1%, -5.4%,
+-16.1%, called the onset "exactly where loss crosses the uniform line", and
+said the falsifier was "now excluded". All of that was the leading edge of the
+gradient excursion, not a mechanism effect -- the same excursion that then
+took skew to 209 and back. The apparent onset at the uniform crossing was
+coincidence.
+
+That is the sixth claim tonight overturned by later data, and the second where
+a clean monotone run of points pointed the wrong way.
+
+### What still stands
+
+The measurement is untouched: skew scales with dp as 93.7 / 132.2 / 163.2 /
+216.9 / 273.0 across dp 12-192, isolated against GBS, GAS, LR and tensor size.
+**What has no explanation is why.** The obvious candidate has been eliminated,
+which is progress of a kind, and the question is back to being about the
+output layer and the loss with no story attached.
+
 ### A shortcut that does not work (recorded so it is not retried)
 
 I tried to test the common-mode claim without waiting for the descent arm, by
