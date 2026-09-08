@@ -86,6 +86,37 @@ Consistent to within 6%, so near log-linear in dp with a mild flattening as dp
 grows. Not the third case the falsifier anticipated (a much smaller drop), and
 emphatically not the flat-or-higher outcome that would have killed it.
 
+### Multi-step means, and a deceleration the two-point fit could not see
+
+The result above reads step 1 of each arm. Across all available steps:
+
+| dp | n | mean skew | sd | cv |
+|----|---|-----------|-----|-----|
+| 48 | 2 | 163.18 | 0.88 | 0.54% |
+| 96 | 40 | 216.88 | 1.64 | 0.75% |
+| 192 | 35 | 273.04 | 1.99 | 0.73% |
+
+Within-arm cv is under 0.8% against between-arm gaps of 26-33%, so the arms
+are separated by roughly 35 standard deviations. The step-1 reading was not a
+fluke: ratios move only from (1.337, 1.257) to (1.329, 1.259).
+
+**The ratios are falling: 1.3291 then 1.2589, a drop of 0.070 per doubling.**
+The relationship is close to log-linear but decelerating, which two points
+could not have revealed. That changes the dp=384 forecast:
+
+| model | dp=384 skew |
+|-------|-------------|
+| log-linear (constant 1.2589) | **343.7** |
+| deceleration continues (1.1887) | **324.6** |
+
+My committed prediction quoted 342.8 from the log-linear fit. With three
+points the honest range is **325-344**, and a 128N run would discriminate at
+6%. The direction is unambiguous either way -- both are far above the 273 at
+dp=192.
+
+Caveat: the dp=48 arm has n=2 so far. Its mean will firm up as it runs, and
+the 48->96 ratio is the one most likely to move.
+
 ### What is now established
 
 **Gradient concentration in `lm_head.weight` scales monotonically with data
