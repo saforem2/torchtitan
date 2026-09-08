@@ -31,6 +31,7 @@ it have either not been run or were run wrong.
 | **Clipping fires on 100% of steps** | `clip_fired = 1.0` every step; `grad_norm_preclip ~8.07 -> postclip 1.0`. `max_norm=1.0` is the core default and `agpt_80b` does not override it, so **every reported grad_norm in this document is pre-clip**, including `8574385`'s "flat ~6.17". The optimizer saw 1.0. |
 | **`8574385` died at an effective LR of 3.87e-9** | Its warmup was 4650 with peak 1e-6, so `lr(18) = 1e-6 * 18/4650`. That is **four orders of magnitude below** the ~7.4e-7 ceiling `agpt_80b.md` documents. Whatever kills it, an over-large LR is not it. |
 | **A single `inf` zeroes every other gradient** | `clip_grad_norm_` runs with `error_if_nonfinite=False`, so `scale = max_norm/inf = 0`. Measured: every finite gradient becomes exactly 0.0 while the offender becomes `nan` (`inf*0`). The step is a no-op **before** the trainer skips it -- which is how a run recovers from a non-finite step (`12474403` L72 recovered at 56). |
+| **A 68% loss regression can occur with ZERO non-finite gradients** | `12474810`, during an LR warmup ramp: loss 12.944 -> 11.391 -> 12.442 -> recovered to 11.348 over 7 steps, `grad_norm_preclip` 8.1 -> 73.2 -> 22.8, **no NaN, no inf, no skipped step**. The NaN-triggered capture cannot see this class of failure at all. Worse, `layer_gradnorm_max` is ANTI-correlated with it -- it fell 7x while the global norm rose 9x, so the per-layer metric would have reported improvement at the worst moment. Only `grad_norm_preclip` and the loss showed it. |
 | **Gradient concentration scales with dp** | Three arms, matched GBS (384 seqs), seed 42, LR trajectory, optimizer, model, verified hosts: `layer_gradnorm_skew` = **163.2** at dp=48 (`12474806`), **216.9** at dp=96 (`12474768`), **273.0** at dp=192 (`12474803`). Within-arm cv < 0.8% against between-arm gaps of 26-33%, so ~35 sigma. Driven by the DENOMINATOR -- mean layer gradnorm falls 22% per doubling while `lm_head`'s falls 2%. dp=48 was a **pre-registered prediction** (172.7 predicted, 162.3 observed, committed at `aa12e8d77` before the run). Per-doubling ratios 1.329 then 1.259 -- decelerating, so dp=384 projects to 325-344. |
 | **dp and GBS have opposite signatures** | A 16x GBS change leaves means invariant (0.03-0.20%) and scales variances by sqrt(16) (`12474765` vs `12474768`). A 4x dp change scales means monotonically and leaves variances alone (cv ratios 0.94-1.05). Batch size averages away noise; parallelism changes structure. |
 | **No archived failure was LR-voided** | Audit 2026-09-08 of `8574385`, `8661293`, `8673658`, `8671243`, `8537349`, `8530891`: all ran at 1e-6 or below. The 80B submit script sets `LR="${LR:-1e-6}"` (`submit_agpt_80b_aurora_venv_failover.sh:110`) and passes `--optimizer.lr` explicitly, so `agpt()`'s 8e-4 registry default is never reached by that path. A run whose writeup states no LR took 1e-6, not 8e-4. |
@@ -75,12 +76,21 @@ tensor in the model, so even taken at face value it localizes nothing.
 - **Why SophiaG failed at a safe LR.** `8574385` ran SophiaG at **1e-6**,
   below the finder's ~2.5e-6 optimum and well below its ~4.6e-6 blow-up onset,
   and NaN'd at step 18 anyway. **The historical failures are not an LR error.**
-- **Why the vocabulary projection resists averaging.** This is now the sharpest
-  question, and it is about the output layer and the loss rather than about
-  distribution. Every other tensor's gradient shrinks ~22% per dp doubling;
-  `lm_head.weight`'s shrinks 2%. Whatever makes it different is what
-  concentrates gradient there, and concentration is the only quantity measured
-  so far that grows monotonically toward the failing regime.
+- **Why the vocabulary projection resists averaging.** Still the sharpest
+  question, and now with one candidate eliminated. Every other tensor's
+  gradient shrinks ~22% per dp doubling; `lm_head.weight`'s shrinks 2%.
+
+  **Tested and refuted (2026-09-08):** that the invariance is an artifact of
+  the near-uniform output distribution early in training -- the idea being
+  that `predicted - true` is common-mode across ranks while the prediction is
+  near uniform, so it cannot average. `12474810` descended from loss 12.94 to
+  10.75, well past `ln(256128) = 12.45`, and **skew ROSE 12.5%** (132.5 ->
+  149.1) with `lm_head`'s own gradient up 14%. The prediction was that it
+  would fall materially. See
+  [`experiments/80b-skew-vs-dp-prediction.md`](../../experiments/80b-skew-vs-dp-prediction.md).
+
+  So the dominance is **structural**, not a warmup artifact -- which also
+  means the dp-invariance will not disappear as the 80B trains.
 - **Whether concentration causes the failure.** Conjecture. None of the three
   dp arms failed, so this is healthy-regime structure. The hypothesis predicts
   the failure threshold tracks skew rather than dp directly.
