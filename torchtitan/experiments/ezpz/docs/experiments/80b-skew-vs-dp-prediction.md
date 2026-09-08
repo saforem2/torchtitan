@@ -144,10 +144,24 @@ Earlier notes in this investigation (including mine) described ranks 1-4 as a
 | 96 | 65, 57, 36, 5 |
 | 192 | **9, 8, 10, 21** |
 
-**The high-gradient layers migrate toward the input as dp rises.** At dp=192
-the four runners-up are layers 8, 9, 10 and 21 -- all early in an 84-layer
-stack. At dp=96 they sit mid-to-late (65, 57, 36). Only `lm_head.weight` holds
-rank 0 at every dp.
+**dp=192 is an outlier, not a trend.** Mean runner-up layer index:
+
+| dp | mean layer index | n |
+|----|------------------|---|
+| 48 | 39.2 | 20 |
+| 96 | 44.0 | 160 |
+| 192 | **10.6** | 160 |
+
+48 and 96 are both mid-stack and close together; 192 drops to layer ~10. That
+is a **step change at dp=192**, not a monotonic migration. An earlier version
+of this section said "the high-gradient layers migrate toward the input as dp
+rises", which reads a gradient into what is really two similar arms and one
+different one. Only `lm_head.weight` holds rank 0 at every dp.
+
+Caveats before anyone builds on this: dp=48 has n=20 (the arm is young), and
+each arm runs a different GAS (8 / 4 / 2) because GAS absorbs the dp change at
+fixed GBS. So "dp=192 behaves differently" is equally consistent with
+"GAS=2 behaves differently", and these data cannot separate them.
 
 Two consequences:
 
