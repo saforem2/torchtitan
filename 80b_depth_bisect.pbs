@@ -136,6 +136,24 @@ set -o pipefail
 # The report below already voids itself on a bad LR; this makes the good case
 # the default rather than something the operator has to remember.
 
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
+
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
 

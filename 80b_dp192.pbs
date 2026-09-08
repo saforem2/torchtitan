@@ -2,7 +2,7 @@
 #PBS -A datascience
 #PBS -q workq
 #PBS -l select=1:ncpus=208:host=x1921c0s0b0n0+1:ncpus=208:host=x1921c0s1b0n0+1:ncpus=208:host=x1921c0s2b0n0+1:ncpus=208:host=x1921c0s3b0n0+1:ncpus=208:host=x1921c0s4b0n0+1:ncpus=208:host=x1921c0s5b0n0+1:ncpus=208:host=x1921c0s6b0n0+1:ncpus=208:host=x1921c0s7b0n0+1:ncpus=208:host=x1921c1s0b0n0+1:ncpus=208:host=x1921c1s1b0n0+1:ncpus=208:host=x1921c1s2b0n0+1:ncpus=208:host=x1921c1s4b0n0+1:ncpus=208:host=x1921c1s5b0n0+1:ncpus=208:host=x1921c1s7b0n0+1:ncpus=208:host=x1921c2s1b0n0+1:ncpus=208:host=x1921c2s2b0n0+1:ncpus=208:host=x1921c2s3b0n0+1:ncpus=208:host=x1921c2s4b0n0+1:ncpus=208:host=x1921c2s5b0n0+1:ncpus=208:host=x1921c2s6b0n0+1:ncpus=208:host=x1921c2s7b0n0+1:ncpus=208:host=x1921c3s1b0n0+1:ncpus=208:host=x1921c3s2b0n0+1:ncpus=208:host=x1921c3s3b0n0+1:ncpus=208:host=x1921c3s4b0n0+1:ncpus=208:host=x1921c3s5b0n0+1:ncpus=208:host=x1921c3s6b0n0+1:ncpus=208:host=x1921c3s7b0n0+1:ncpus=208:host=x1921c4s2b0n0+1:ncpus=208:host=x1921c4s3b0n0+1:ncpus=208:host=x1921c4s4b0n0+1:ncpus=208:host=x1921c4s5b0n0+1:ncpus=208:host=x1921c4s6b0n0+1:ncpus=208:host=x1921c4s7b0n0+1:ncpus=208:host=x1921c5s0b0n0+1:ncpus=208:host=x1921c5s1b0n0+1:ncpus=208:host=x1921c5s2b0n0+1:ncpus=208:host=x1921c5s3b0n0+1:ncpus=208:host=x1921c5s4b0n0+1:ncpus=208:host=x1921c5s5b0n0+1:ncpus=208:host=x1921c5s6b0n0+1:ncpus=208:host=x1921c5s7b0n0+1:ncpus=208:host=x1921c6s0b0n0+1:ncpus=208:host=x1921c6s1b0n0+1:ncpus=208:host=x1921c6s2b0n0+1:ncpus=208:host=x1921c6s3b0n0+1:ncpus=208:host=x1921c6s4b0n0+1:ncpus=208:host=x1921c6s5b0n0+1:ncpus=208:host=x1921c6s7b0n0+1:ncpus=208:host=x1921c7s0b0n0+1:ncpus=208:host=x1921c7s1b0n0+1:ncpus=208:host=x1921c7s3b0n0+1:ncpus=208:host=x1921c7s5b0n0+1:ncpus=208:host=x1921c7s6b0n0+1:ncpus=208:host=x1921c7s7b0n0+1:ncpus=208:host=x1922c0s0b0n0+1:ncpus=208:host=x1922c0s1b0n0+1:ncpus=208:host=x1922c0s2b0n0+1:ncpus=208:host=x1922c0s3b0n0+1:ncpus=208:host=x1922c0s4b0n0+1:ncpus=208:host=x1922c0s5b0n0+1:ncpus=208:host=x1922c0s7b0n0+1:ncpus=208:host=x1922c1s0b0n0+1:ncpus=208:host=x1922c1s1b0n0
-#PBS -l walltime=04:00:00
+#PBS -l walltime=06:00:00
 #PBS -l filesystems=tegu
 #PBS -N 80b-dp192
 #PBS -j oe
@@ -40,6 +40,24 @@
 # this LR -- and 8540102's much higher LR becomes the next suspect.
 #
 # See docs/experiments/80b-gbs-vs-dp-separation.md
+
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
 
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
@@ -89,10 +107,10 @@ echo "reproducing 8574385: sophiag lr=$_lr, $(( _tok / 4096 )) seqs via GAS=$_ga
 # target -- ONE step of margin. A slow init, a straggler rank, or a single
 # long step and an 11-hour run misses the only point it exists to reach.
 # 23h30m buys ~40 steps, so step 18 lands with the run less than half spent.
-timeout 12600 ezpz launch --nproc 768 -ppn 12 -- \
+timeout 19800 ezpz launch --nproc 768 -ppn 12 -- \
   python3 -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_80b_sophiag \
-    --training.steps=20 \
+    --training.steps=40 \
     --training.max-context-length=4096 \
     --training.num-tokens-per-microbatch-per-dp-rank=4096 \
     --training.num-tokens-per-train-step=1572864 \

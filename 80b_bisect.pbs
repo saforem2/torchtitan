@@ -1,0 +1,113 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=5
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-segv-bisect
+#PBS -j oe
+#
+# 80B 4N/TP=4 SIGSEGV in the forward pass -- A/B vs the last known-clean commit.
+#
+# ESTABLISHED:
+#   - Job 12472452 (2026-08-03) ran THIS EXACT config (4N/TP=4/LBS=1, plain
+#     agpt_80b) for 10/10 clean steps.
+#   - Today at HEAD the same config SIGSEGVs (rc=139) inside step 1 at
+#     decoder.py:262 -> module.py:292 forward_with_redistribution ->
+#     module.py:705 _redistribute_outputs. Every rank dies.
+#   - So this is a REGRESSION between 01583f349 and HEAD, not the bf16 NaN and
+#     not 2N memory pressure (we are at the mandated >=4N).
+#
+# TEST: identical config at the 2026-08-03 commit and at HEAD.
+#   clean@old + segv@HEAD -> regression confirmed, bisect the range next
+#   segv on BOTH             -> not a code regression; suspect the stack
+#                               (torch/oneAPI) or node health -- check those
+#   clean on BOTH            -> intermittent; re-run before believing anything
+#
+# Uses a worktree so the live checkout is never moved out from under a job.
+set -o pipefail
+
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 9
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 8
+ezpz_setup .venv || exit 8
+
+TORCH_V=$(python3 -c 'import torch;print(torch.__version__)' 2>&1 | tail -1)
+echo "node0: $(hostname)   torch: $TORCH_V"
+case "$TORCH_V" in 2.*) : ;; *) echo "ABORT: no usable torch"; exit 7 ;; esac
+echo "nodes: $(sort -u "$PBS_NODEFILE" | sed 's/\..*//' | tr '\n' ' ')"
+
+WT="$REPO/.worktrees/segv-$PBS_JOBID"
+run_at() {  # run_at <label> <ref>
+  local label="$1" ref="$2"
+  local log="$REPO/outputs/logs/80b-segv/$label.$PBS_JOBID.log"
+  mkdir -p "$(dirname "$log")"
+  # remove -> prune -> add (this ORDER matters; rm -rf first orphans the
+  # registration and the next add silently fails)
+  git worktree remove --force "$WT" 2>/dev/null
+  rm -rf "$WT"
+  git worktree prune 2>/dev/null
+  if ! git worktree add --detach "$WT" "$ref" 2>"$REPO/tmp/wt.$label.err"; then
+    echo "  $label: worktree add FAILED"; sed 's/^/     /' "$REPO/tmp/wt.$label.err" | head -3
+    return
+  fi
+  local sha; sha=$(git -C "$WT" rev-parse --short HEAD)
+  # assets/hf is untracked -> absent from every worktree; tokenizer path is
+  # CWD-relative, so without this both refs die in tokenizer lookup and the
+  # bisect silently tests nothing.
+  ln -sfn "$REPO/assets/hf" "$WT/assets/hf"
+  if [ ! -e "$WT/assets/hf/gemma-7b/tokenizer.json" ]; then
+    echo "  $label: assets link FAILED"; return
+  fi
+  ( cd "$WT" && PYTHONPATH="$WT" timeout 1500 ezpz launch python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_80b \
+      --training.steps=10 --training.seq-len=8192 \
+      --training.local-batch-size=1 \
+      --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+      --checkpoint.no-enable --compile.no-enable \
+      --dataloader.num-workers=2 ) > "$log" 2>&1
+  local rc=$?
+  local step segv
+  step=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "step: *[0-9]+ +loss: *[a-z0-9.]+" | tail -1)
+  segv=$(grep -ac "Segmentation fault" "$log")
+  printf "RESULT %-6s %s rc=%-4s segv_lines=%-4s last=%s\n" \
+    "$label" "$sha" "$rc" "$segv" "${step:-NONE}"
+  if [ -z "$step" ] && [ "$segv" -eq 0 ]; then
+    echo "   NOT A VALID DATA POINT (died before training, not a segv):"
+    sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "(Error|error) parsing [a-z]*: .*|(ValueError|RuntimeError|ImportError|FileNotFoundError): .*" | head -2 | sed 's/^/      /'
+  fi
+  git worktree remove --force "$WT" 2>/dev/null
+}
+
+echo ""
+echo "########## 80B 4N/TP=4 SIGSEGV BISECT ##########"
+run_at "old"  "01583f349"
+run_at "head" "ezpz"
+echo ""
+echo "80B_SEGV_BISECT_DONE"
