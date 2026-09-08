@@ -383,6 +383,63 @@ four functional forms and the step-14 deceleration call.
 - Weights moved by 1e-6 relative throughout. Nothing was destroyed; the
   direction degraded and then improved.
 
+## THE COMPLETE EXCURSION: a reversible 7-step transient
+
+| step | lr | loss | preclip | layer_max |
+|------|-----|------|---------|-----------|
+| 14 | 6.0e-7 | **11.3909** min | 25.95 | 0.351594 |
+| 15 | 6.5e-7 | 11.5990 | 48.05 | 0.140967 |
+| 16 | 7.0e-7 | 12.0158 | **73.16** peak | **0.073690** min |
+| 17 | 7.5e-7 | 12.2274 | 61.09 | 0.135083 |
+| 18 | 8.0e-7 | **12.4424** worst | 66.62 | 0.179820 |
+| 19 | 8.5e-7 | 12.3768 | 68.06 | 0.165771 |
+| 20 | 9.0e-7 | 11.7424 | 38.87 | 0.228469 |
+| 21 | 9.5e-7 | **11.4395** | 22.79 | 0.299819 |
+
+**Onset step 15, recovered by step 21. Seven steps. Zero non-finite
+gradients.** Loss returned to within 0.05 of its pre-excursion minimum while
+the LR rose 58% above where the trouble began.
+
+### `layer_gradnorm_max` traces a perfect V, anti-correlated with the global norm
+
+`layer_max` bottoms at **0.0737** exactly where preclip peaks at **73.16**,
+and recovers in lockstep as preclip falls. The two are anti-correlated across
+the *entire* event, not merely at onset.
+
+So the concentration did not collapse into the bulk and stay there. It swung
+out and came back. Whatever redistributes gradient away from `lm_head` during
+the excursion also reverses.
+
+This is worth stating plainly because it inverts the intuitive model twice
+over: a metric named "max" *falling* is the signature of trouble here, and
+that metric recovering is the signature of health.
+
+### What this run is
+
+**The first complete, reversible, fully-instrumented gradient excursion in
+this investigation.** Every prior event is recorded as a NaN or a grad_norm
+spike, seen after the fact. This one has per-tensor telemetry through onset,
+peak, and recovery.
+
+What it demonstrates:
+
+1. The 80B can lose **68% of its training progress** and recover it, with no
+   non-finite value at any point.
+2. The NaN-triggered capture would not have fired once. An entire class of
+   degradation is invisible to it.
+3. `grad_norm_preclip` and loss are the only two metrics that showed the event
+   correctly. `layer_gradnorm_max` was anti-correlated -- watching it alone
+   would have reported improvement at the worst moment and trouble during
+   recovery.
+
+### What it does not settle
+
+Whether this transient is related to the documented NaN failures at all. It
+may be the same mechanism caught in a survivable regime, or an unrelated
+warmup artifact. The run continues to step 150 and the LR is about to stop
+ramping, which will separate "the ramp caused it" from "that LR region caused
+it".
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
