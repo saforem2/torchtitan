@@ -1,0 +1,177 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=1:ncpus=208:host=x1922c4s7b0n0+1:ncpus=208:host=x1922c5s1b0n0+1:ncpus=208:host=x1922c5s3b0n0+1:ncpus=208:host=x1922c5s4b0n0+1:ncpus=208:host=x1922c6s0b0n0+1:ncpus=208:host=x1922c6s1b0n0+1:ncpus=208:host=x1922c6s3b0n0+1:ncpus=208:host=x1922c6s4b0n0
+#PBS -l walltime=10:00:00
+#PBS -l filesystems=tegu
+#PBS -N 80b-descend
+#PBS -j oe
+#
+# DESCENT ARM: does lm_head's dp-invariance survive once the model leaves the
+# near-uniform output regime?
+#
+# THE CLAIM UNDER TEST. Across five arms at 16x dp, mean layer gradnorm decays
+# as dp^-0.394 while lm_head's decays as dp^-0.013 -- flat to 3%. Proposed
+# reason: lm_head's gradient is predicted-minus-true summed over the
+# vocabulary, and early in training the prediction is near-uniform on EVERY
+# rank regardless of which tokens that rank saw, so the dominant term is
+# common-mode and does not average. Ordinary layers depend on rank-specific
+# activations, so they do.
+#
+# If that is right, the invariance is a property of the near-uniform regime and
+# must WEAKEN as the model learns.
+#
+# WHY THE EXISTING ARMS CANNOT TEST IT. All five sit at loss 12.86-12.96
+# against ln(256128) = 12.45 -- barely past uniform, because they run the
+# rescaled 5.376344e-09 that reproduces 8574385's trajectory by design. Within
+# those arms skew drifts +0.04% (dp=192) and -0.21% (dp=96) over a 0.05 loss
+# change: opposite signs, both noise. That is a null from insufficient range,
+# not a passing test.
+#
+# THIS ARM DESCENDS. lr=1e-6 took job 12473149 from 12.95 to 8.098 in 120
+# steps -- a real move away from uniform. 150 steps at dp=24, GBS 384 seqs,
+# ~2 min/step, so ~5h.
+#
+# THE MEASUREMENT is WITHIN this single run, so no second arm and no dp
+# comparison is needed: track layer_gradnorm_skew and the lm_head/mean split
+# against loss as it falls.
+#
+#   skew falls materially as loss drops  -> invariance is a near-uniform
+#     artifact, the proposed mechanism holds
+#   skew flat from loss 12.9 to ~8       -> the mechanism is WRONG and
+#     lm_head's invariance is structural, which is the more interesting result
+#
+# NOTE the LR differs deliberately from the other arms. This one is not
+# comparable to them and is not trying to be; it tests a within-run trend.
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-descend/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/capture.log"
+
+# Derived from the flags actually passed below, not hardcoded. Every variant
+# of this script inherited a banner reading "GBS 6144 via GAS=32 at dp=192"
+# from the first 64N version and printed it regardless of what it ran -- so
+# 12474768, a 384-seq run at dp=96, announced itself as a 6144-seq run at
+# dp=192. A log header that lies is worse than none.
+_lr=$(grep -oE "optimizer-kwargs.lr=[0-9.e-]+" "$0" | head -1 | cut -d= -f2)
+_tok=$(grep -oE "num-tokens-per-train-step=[0-9]+" "$0" | head -1 | cut -d= -f2)
+_np=$(grep -oE "nproc [0-9]+" "$0" | head -1 | awk "{print \$2}")
+_tp=$(grep -oE "tensor-parallel-degree=[0-9]+" "$0" | head -1 | cut -d= -f2)
+_dp=$(( _np / _tp ))
+_gas=$(( _tok / 4096 / _dp ))
+echo "reproducing 8574385: sophiag lr=$_lr, $(( _tok / 4096 )) seqs via GAS=$_gas at dp=$_dp"
+#
+# INNER TIMEOUT MUST TRACK THE WALLTIME. 2026-09-06. This was `timeout 12000`
+# -- 3h20m -- carried over from the 4h version of this script while the PBS
+# walltime above says 12h. The inner timeout wins, so 12474740 exited
+# Exit_status=0 at exactly 03:20:41 after 5 steps, having been given 12 hours,
+# and its step-19 target was never reachable. A clean exit code and a full
+# step log make that look like a completed run rather than a truncated one.
+#
+# 84600s = 23h30m of a 24h wall (the queue max), leaving ~30 min for init and
+# the analysis block.
+#
+# WHY NOT 12h. Measured from 12474733/12474740: ~35 min from job start to step
+# 1, then ~34 min per step. A 11h30m timeout buys 19.3 steps against a step-18
+# target -- ONE step of margin. A slow init, a straggler rank, or a single
+# long step and an 11-hour run misses the only point it exists to reach.
+# 23h30m buys ~40 steps, so step 18 lands with the run less than half spent.
+timeout 34200 ezpz launch --nproc 96 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_80b_sophiag \
+    --training.steps=150 \
+    --training.max-context-length=4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank=4096 \
+    --training.num-tokens-per-train-step=1572864 \
+    --parallelism.tensor-parallel-degree=4 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+    --lr-scheduler.warmup-steps=20 \
+    --lr-scheduler.decay-ratio=0 \
+    --compile.no-enable \
+    --diagnostics --diagnostics-attention \
+    --diagnostics-per-layer --diagnostics-interval=1 \
+    --checkpoint.no-enable \
+    --debug.seed=42 \
+    > "$LOG" 2>&1
+echo "  rc=$?"
+
+echo ""
+echo "########## which tensor went non-finite? ##########"
+LOG="$LOG" python3 - <<'PY'
+import os, re
+
+log = os.environ["LOG"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+txt = ansi.sub("", open(log, errors="replace").read()) if os.path.exists(log) else ""
+
+lr = (re.findall(r'"lr": *([0-9.e+-]+)', txt) or ["?"])[0]
+gas = (re.findall(r"gradient accumulation steps (\d+)", txt) or ["?"])[0]
+tok = (re.findall(r"tokens/train-step (\d+)", txt) or ["?"])[0]
+opt = (re.findall(r'"optimizer_name": *"([A-Za-z]+)"', txt) or ["?"])[0]
+rows = re.findall(r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)", txt)
+events = re.findall(r"non-finite grad_norm \([^)]*\) at step (\d+)", txt)
+
+print(f"  optimizer {opt}   lr {lr}   GAS {gas}   tokens/step {tok}")
+print(f"  (target: SophiaG, 1e-6 w/ warmup 20, 16, 1572864) at dp=24, DESCENDING")
+print(f"  steps {len(rows)}   non-finite events {len(events)}"
+      f"{' at ' + ','.join(events[:8]) if events else ''}")
+
+# the capture lines -- this is the payload
+named = re.findall(
+    r"NON-FINITE GRADIENT CAPTURE step (\d+): metrics that are THEMSELVES "
+    r"non-finite[^:]*: ([^\n]+)", txt)
+print()
+if named:
+    print("  THE ANSWER -- tensors whose metrics went non-finite:")
+    for st, which in named[:5]:
+        print(f"    step {st}: {which}")
+else:
+    dumps = re.findall(r"NON-FINITE GRADIENT CAPTURE step (\d+): (diag/[^\n]+)", txt)
+    if dumps:
+        print("  Capture fired but named no non-finite METRIC. Full stats at the"
+              " event (the aggregate went non-finite without any per-layer")
+        print("  metric doing so -- itself informative):")
+        for st, d in dumps[:2]:
+            print(f"    step {st}: {d[:300]}")
+    else:
+        print("  Capture did NOT fire.")
+
+print()
+if lr not in ("1e-06", "1e-6", "1.0e-06"):
+    print("  VOID: lr is not 1e-6, so this arm is not the descent")
+    print("  condition (12473149 reached loss 8.098 at that LR).")
+elif tok != "1572864":
+    print(f"  VOID: tokens/step {tok} != 1572864, so this is not the small-GBS arm."
+          " calibration.")
+elif not rows:
+    print("  No steps. Read the log.")
+elif not events:
+    print("  DID NOT REPRODUCE: 40 steps, zero non-finite gradients, where")
+    print("  8574385 died at step 18. Since LR, optimizer and GBS all match,")
+    print("  the difference is SCALE (192 dp here vs 510N/dp~1275 there) --")
+    print("  which contradicts the 'GAS compensates for node count' assumption")
+    print("  the original bracket was designed around. That is a real finding.")
+elif named:
+    print("  REPRODUCED AND LOCALIZED. The tensors above are the first direct")
+    print("  evidence of WHERE the 80B failure originates, as opposed to")
+    print("  inference from which configuration survived.")
+else:
+    print("  REPRODUCED but not localized -- see the capture output above.")
+PY
+echo "CAPTURE_DONE"
