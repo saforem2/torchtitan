@@ -334,6 +334,55 @@ If production runs have been crossing the ceiling during warmup, this is what
 it looks like from the metrics -- and only `grad_norm_preclip` and the loss
 show it. `layer_gradnorm_max` *fell* 7x through the whole event.
 
+## Step 20: it RECOVERS -- at a higher LR than the divergence
+
+| step | lr | loss | preclip |
+|------|-----|------|---------|
+| 14 | 6.0e-7 | 11.3909 (min) | 25.95 |
+| 16 | 7.0e-7 | 12.0158 | 73.16 |
+| 18 | 8.0e-7 | **12.4424** (worst) | 66.62 |
+| 19 | 8.5e-7 | 12.3768 | 68.06 |
+| 20 | **9.0e-7** | **11.7424** | **38.87** |
+
+Step 20 is the largest single-step loss drop of the run (**-0.63**) with
+preclip falling 43% at the same time. Both metrics improving together, two
+steps running.
+
+**And the LR is higher than it was during the divergence.** The worst of the
+damage happened at 6.5e-7 to 8.0e-7; the recovery is happening at 9.0e-7 --
+well past the ~7.4e-7 ceiling.
+
+### This complicates the ceiling reading recorded above
+
+The earlier section here concluded that "the ~7.4e-7 ceiling is real and
+crossing it destroys training". That is now too strong. The model crossed the
+ceiling at step 17 and is training *better* at step 20, at a higher LR still.
+
+A reading that fits all the data: **the damage tracked the RATE of LR
+increase, not the level.** Every step of the divergence added 5e-8 to the LR;
+the model was chasing a moving target. What changed at step 20 is not the
+level -- it is that the loss surface had time to catch up. That is a
+hypothesis, and the clean test is a fixed-LR run at 9e-7, which this run
+cannot provide.
+
+The honest status of the ceiling claim: **`8530891` NaN-ing at step 2 at
+lr=1e-6 remains the evidence for it. This run does not confirm it and does not
+refute it** -- it shows a transient degradation during a ramp through that
+region, followed by recovery above it.
+
+I recorded the stronger claim two steps earlier. It was the natural reading of
+four monotone points, and the fifth point broke it -- the same pattern as the
+four functional forms and the step-14 deceleration call.
+
+### What survives unchanged
+
+- 68% of progress was given back, transiently, with **zero non-finite
+  gradients** -- a failure mode the NaN-triggered capture cannot see.
+- `layer_gradnorm_max` fell 7x through the entire event while
+  `grad_norm_preclip` rose 9x: the per-layer max is actively misleading here.
+- Weights moved by 1e-6 relative throughout. Nothing was destroyed; the
+  direction degraded and then improved.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
