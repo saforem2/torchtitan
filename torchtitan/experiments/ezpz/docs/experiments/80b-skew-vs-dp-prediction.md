@@ -303,6 +303,71 @@ Stopping here. The next honest step is not a fifth functional form but either
 of two, or (b) a mechanism that *predicts* a form, at which point the data can
 test it rather than generate it.
 
+## THE MECHANISM: `lm_head` is dp-invariant, everything else averages down
+
+Decomposing skew into its numerator and denominator across all five arms
+explains both the growth and why no functional form fit it.
+
+| dp | mean layer gradnorm | max (`lm_head`) |
+|----|---------------------|-----------------|
+| 12 | 0.00271945 | 0.253551 |
+| 24 | 0.00195052 | 0.257288 |
+| 48 | 0.00156761 | 0.256358 |
+| 96 | 0.00115758 | 0.251067 |
+| 192 | 0.00090003 | 0.245736 |
+
+Fitted across the full 16x range:
+
+```
+mean layer gradnorm  ~  dp^-0.394
+max (lm_head)        ~  dp^-0.013
+```
+
+**`lm_head.weight`'s gradient norm is flat to 3% across a 16x change in data
+parallelism** (0.2536 -> 0.2457), while the typical layer's falls by a factor
+of three.
+
+### Why this reframes everything above
+
+Skew is not a primitive that "scales with dp". **Skew grows because the
+denominator shrinks and the numerator does not.** The four failed functional
+forms were attempts to fit a ratio whose two components have different
+scalings and independent noise -- which is exactly the kind of quantity that
+looks like a clean power law over any two points and like nothing in
+particular over five.
+
+The right statement is the component one, and it is simpler:
+
+- every ordinary tensor's gradient averages down with more data-parallel ranks
+- `lm_head`'s does not
+
+### The number that does not fit naive averaging
+
+Pure sampling noise across `dp` independent replicas would give `dp^-0.5`.
+Ordinary layers give **-0.394** -- they average, but more slowly than
+independent samples would. Gradients across dp ranks are correlated, which is
+expected (same model, same step) but now quantified.
+
+`lm_head` at **-0.013** is not averaging at all. Whatever contributes to its
+gradient is nearly identical on every rank.
+
+### What would explain it
+
+`lm_head` is the vocabulary projection: its gradient is driven by the
+difference between predicted and true token distributions summed over the
+whole vocabulary. Early in training the predicted distribution is close to
+uniform on every rank regardless of which tokens that rank saw, so the
+dominant part of the gradient is the same everywhere and does not average.
+Ordinary layers depend on the specific activations of the specific tokens on
+that rank, so they do.
+
+That is a hypothesis with a sharp test: **the invariance should weaken as
+training proceeds and the output distribution stops being near-uniform.** All
+five arms here sit at steps 1-40 of warmup with loss ~12.9 (ln(256128) = 12.45,
+so the model is barely past uniform). A run at a converged checkpoint should
+show `lm_head` averaging like everything else -- and if it does not, this
+explanation is wrong.
+
 ### Caveat that has not gone away
 
 Every one of these four arms varies GAS inversely with dp (8/4/2 and now 16 at
