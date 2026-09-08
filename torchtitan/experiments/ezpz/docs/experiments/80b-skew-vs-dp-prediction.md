@@ -368,6 +368,32 @@ so the model is barely past uniform). A run at a converged checkpoint should
 show `lm_head` averaging like everything else -- and if it does not, this
 explanation is wrong.
 
+## CONFOUND RESOLVED: it is dp, not GAS
+
+`12474809` held dp fixed at 192 and moved GAS 2 -> 1 (GBS halving 384 -> 192
+seqs as a consequence). Geometry verified in the log: `tokens/train-step
+786432, gradient accumulation steps 1`, `Using [768/768] GPUs [64 hosts]`.
+
+40-step means against the GAS=2 twin:
+
+| | GAS=2 (`12474803`) | GAS=1 (`12474809`) | change |
+|---|---|---|---|
+| `layer_gradnorm_skew` | 273.04 | 273.15 | **+0.04%** |
+| mean layer gradnorm | 0.00090003 | 0.00090054 | +0.06% |
+| max (`lm_head`) | 0.245736 | 0.245995 | +0.11% |
+
+**Halving GAS changes nothing.** Every component agrees to within 0.11%,
+inside the ~0.7% within-arm noise floor -- and this despite GBS halving too.
+
+So the scaling is a property of **data parallelism**, not of gradient
+accumulation and not of batch size. Every "dp" statement in this document can
+drop the "-with-inverse-GAS" qualifier that has been attached to it since the
+first arm.
+
+It also independently re-confirms the earlier GBS result from a different
+direction: GBS moved 2x here with no effect on the means, consistent with the
+16x GBS experiment that found means invariant to 0.03-0.20%.
+
 ### Caveat that has not gone away
 
 Every one of these four arms varies GAS inversely with dp (8/4/2 and now 16 at
