@@ -2,6 +2,71 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-08 (sunspot) -- `lm_head` is dp-invariant: the gradient concentration has a mechanism, and four curve fits were wrong
+
+The machine came back (113 of 129 free, all 29 mount-check offlines cleared, a
+full survey returning 110 good / 0 bad), which made the dp question testable
+for the first time.
+
+- **The headline: `lm_head.weight`'s gradient norm is FLAT across a 16x change
+  in data parallelism.** Five arms at dp 12/24/48/96/192, matched on GBS,
+  seed, LR trajectory, optimizer and model:
+
+  ```
+  mean layer gradnorm  ~  dp^-0.394
+  max (lm_head)        ~  dp^-0.013      (0.2536 -> 0.2457, flat to 3%)
+  ```
+
+  So the concentration does not grow because `lm_head` grows -- **it grows
+  because everything else averages away and `lm_head` does not.** State the
+  components; the skew ratio is derived and misleads.
+
+- **Ordinary layers average at -0.394, not the -0.5 of independent sampling.**
+  dp-rank gradients are correlated, now quantified.
+
+- **`tok_embeddings` is the control that makes this interesting.** Same shape
+  as `lm_head` (vocab x dim, the two largest tensors), never once in the top-5
+  at any dp. Not "big tensor, big gradient". And the 80B is untied --
+  `enable_weight_tying` appears once in the registry, in `agpt_2b_tied` -- so
+  they are genuinely separate tensors.
+
+- **Four functional forms, four overturns.** 2 points said log-linear
+  (predicted 172.7, got 162.3), 3 said decelerating (predicted 116.6, got
+  131.2), 4 said a power law dp^0.358 (predicted 101.4, got 93.2), 5 fit
+  nothing better than 4.3% against a 0.7% noise floor. Each described its own
+  data and failed out of sample. **The monotonic finding survived all four
+  revisions; the shape claim was wrong every time.** Skew is a ratio of two
+  quantities with different scalings -- it looks like a clean power law over
+  any two points and like nothing over five. I have stopped proposing forms.
+
+- **The mechanism, with a test that can kill it.** `lm_head`'s gradient is
+  predicted-minus-true summed over the vocabulary; early in training the
+  prediction is near-uniform on every rank regardless of which tokens it saw,
+  so the dominant term is common-mode and does not average. All five arms sit
+  at loss 12.86-12.96 against ln(256128) = 12.45 -- barely past uniform. Job
+  `12474810` descends at lr=1e-6 (which took `12473149` from 12.95 to 8.098)
+  and tracks skew WITHIN one run. **Flat skew from 12.9 to ~8 falsifies the
+  explanation** and would make the invariance structural, which is the more
+  interesting outcome.
+
+- **A retraction I had to withdraw.** I claimed `8540102` inherited
+  `agpt()`'s `lr=8e-4` because its writeup states no LR, and retracted a sound
+  experiment on that basis. Wrong: the 80B submit script sets
+  `LR="${LR:-1e-6}"` and passes `--optimizer.lr` explicitly, so the registry
+  default is unreachable by that path. **A writeup that states no LR means
+  1e-6.** An audit commissioned to find MORE LR-voided failures found none --
+  all six checked ran at 1e-6 or below.
+
+- **Two "trends" that were artifacts.** "Runner-up layers migrate toward the
+  input as dp rises" was one anomalous arm (mean layer index 39/44/**10.6**,
+  not a gradient). "dp=24 skew is drifting monotonically" was the same
+  up-up-down-up wobble every arm shows in its first five steps. Both caught by
+  computing a summary statistic instead of reading three numbers.
+
+- **Still confounded:** dp and GAS move together at fixed GBS
+  (GBS = 4096 x dp x GAS), so all of the above is strictly "dp with inverse
+  GAS". `12474809` holds dp=192 and moves GAS 2 -> 1 to separate them.
+
 ## 2026-09-07 (sunspot) -- the 80B failure is not caused by its LR trajectory or its batch size; gradient mass lives in `lm_head.weight`
 
 Continues the 2026-09-06 entry below, after the machine was made usable again.

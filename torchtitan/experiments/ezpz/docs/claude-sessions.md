@@ -1,5 +1,80 @@
 # Claude Session Log
 
+## 2026-09-08 (sunspot)
+
+### Summary
+
+The machine recovered -- 113 of 129 nodes free, all 29 mount-check offlines
+cleared, a full survey returning 110 good / 0 bad -- which made the last open
+question testable. Five arms later the 80B gradient concentration has a
+mechanism, and four attempts to fit its functional form were all wrong.
+
+### The result
+
+**`lm_head.weight`'s gradient norm is flat across a 16x change in data
+parallelism.** dp 12/24/48/96/192, matched on GBS, seed, LR trajectory,
+optimizer, model:
+
+```
+mean layer gradnorm  ~  dp^-0.394
+max (lm_head)        ~  dp^-0.013      0.2536 -> 0.2457
+```
+
+The concentration grows because everything else averages away and `lm_head`
+does not. The components are the finding; the skew ratio is derived and
+misleads.
+
+Ordinary layers average at -0.394 rather than the -0.5 of independent
+sampling, so dp-rank gradients are correlated. `tok_embeddings` -- same shape
+as `lm_head`, the other largest tensor -- never enters the top-5 at any dp, so
+this is not about size. The 80B is untied, checked.
+
+### Four functional forms, four overturns
+
+| points | claimed | predicted next | actual |
+|--------|---------|----------------|--------|
+| 2 | log-linear | 172.7 | 162.3 |
+| 3 | decelerating | 116.6 | 131.2 |
+| 4 | power law dp^0.358 | 101.4 | 93.2 |
+| 5 | nothing fits (4.3% resid vs 0.7% noise) | -- | -- |
+
+Each fit its own data well and failed out of sample. Skew is a ratio of two
+quantities with different scalings, so it looks like a clean power law over
+any two points. **The monotonic finding survived every revision; the shape
+claim never did.** Stopped proposing forms.
+
+### The mechanism and its falsifier
+
+`lm_head`'s gradient is predicted-minus-true over the vocabulary; early in
+training the prediction is near-uniform on every rank whatever tokens it saw,
+so the dominant term is common-mode and cannot average. All five arms sit at
+loss ~12.9 against ln(256128) = 12.45.
+
+`12474810` descends at lr=1e-6 for 150 steps and tracks skew within one run.
+**Flat skew from 12.9 to ~8 kills the explanation** -- and would make the
+invariance structural, which is the better outcome.
+
+### Corrections
+
+- **Withdrew a retraction.** I claimed `8540102` inherited `lr=8e-4` because
+  its writeup states no LR. The submit script sets `LR="${LR:-1e-6}"` and
+  passes it explicitly, so the registry default is unreachable there. An audit
+  looking for MORE LR-voided runs found none of six.
+- **"Layers migrate toward the input with dp"** was one anomalous arm: mean
+  index 39.2 / 44.0 / **10.6**, a step change at dp=192, not a trend.
+- **"dp=24 is drifting"** was the up-up-down-up wobble every arm shows in its
+  first five steps. Mature arms' first-5 means sit within 0.06-0.32% of their
+  full-run means.
+
+Both caught by computing a statistic instead of reading three numbers. That is
+the recurring lesson of the session.
+
+### Still open
+
+dp and GAS are confounded at fixed GBS. `12474809` separates them. And whether
+concentration *causes* the failure remains conjecture -- none of these arms
+failed.
+
 ## 2026-09-07 (sunspot)
 
 ### Summary
