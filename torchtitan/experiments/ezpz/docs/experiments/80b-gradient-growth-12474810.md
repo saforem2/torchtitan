@@ -293,6 +293,47 @@ time, not more waking up from near-total dormancy.
 
 The corrected version is a cleaner correlation and needs no dramatic framing.
 
+## Step 18: 68% of all training progress given back, with no NaN
+
+| step | lr | loss | preclip |
+|------|-----|------|---------|
+| 1 | -- | 12.9443 | 8.22 |
+| **14** | 6.0e-7 | **11.3909** (min) | 25.95 |
+| 15 | 6.5e-7 | 11.5990 | 48.05 |
+| 16 | 7.0e-7 | 12.0158 | 73.16 |
+| 17 | 7.5e-7 | 12.2274 | 61.09 |
+| 18 | **8.0e-7** | **12.4424** | 66.62 |
+
+```
+progress made:  1.5534   (12.9443 -> 11.3909)
+progress lost:  1.0515   (11.3909 -> 12.4424)
+                = 68% given back in four steps
+```
+
+The LR is now **8.0e-7**, past the documented ~7.4e-7 ceiling, and still
+ramping to 1e-6 at step 20.
+
+Preclip has stopped escalating (73 -> 61 -> 67) and settled into a high,
+unstable plateau while the loss climbs steadily. So the failure mode is not
+runaway gradient growth -- it is **sustained misdirection**: gradients pinned
+at ~8x baseline, clipped to norm 1.0, pointing somewhere that undoes training.
+
+## What this run establishes
+
+**The ~7.4e-7 ceiling is real, and crossing it destroys training without ever
+producing a NaN.** Eighteen steps, zero non-finite gradients, weights that
+moved by 1e-6 relative -- and 68% of the run's progress erased.
+
+That reframes what "the 80B failure" means. The documented failures are NaN
+events, and the capture instrumentation built for them fires only on
+non-finite values. This run shows a **failure mode that instrumentation cannot
+see at all**: no NaN, no inf, no skipped step, nothing for the capture to
+catch, and the model quietly walking backwards.
+
+If production runs have been crossing the ceiling during warmup, this is what
+it looks like from the metrics -- and only `grad_norm_preclip` and the loss
+show it. `layer_gradnorm_max` *fell* 7x through the whole event.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
