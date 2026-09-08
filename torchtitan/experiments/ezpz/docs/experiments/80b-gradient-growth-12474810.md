@@ -252,6 +252,47 @@ It also means the run may never produce a non-finite gradient at all -- and
 that the capture instrumentation, which only fires on non-finite, may be
 watching for the wrong event in this regime.
 
+## Two things the full-precision data shows, and one I got backwards
+
+### The weights barely move at all
+
+`weight_norm_global` varies by **1.08e-06 relative** across the entire run
+(4967.650433 .. 4967.655816). `update_ratio_mean` runs ~1e-6 to 2.7e-6 --
+**three orders of magnitude below** the ~1e-3 this repo's own diagnostics call
+healthy.
+
+So the divergence is not the weights being blown apart. Through step 17 the
+parameters have hardly changed; what has changed is the *gradient field* being
+computed from them. Combined with the clipping analysis above -- the optimizer
+receives norm exactly 1.0 every step -- the picture is a model whose weights
+are nearly static while the direction it is being pushed degrades.
+
+### Parameter activation tracks the divergence
+
+| step | lr | frozen (of 759) | active | preclip | loss |
+|------|----|-----------------|--------|---------|------|
+| 1 | 1.0e-6* | 333 | 56.1% | 8.22 | 12.9443 |
+| 7 | 2.5e-7 | 154 | 79.7% | 8.35 | 12.3033 |
+| 11 | 4.5e-7 | 128 | **83.1%** | 11.75 | 11.5809 |
+| 14 | 6.0e-7 | 83 | 89.1% | 25.95 | 11.3909 |
+| 16 | 7.0e-7 | 54 | **92.9%** | 73.16 | 12.0158 |
+
+(*step 1 shows the pre-warmup value before the schedule takes over.)
+
+Activation climbs from 56% to 93% as the LR ramps, and the gradient growth
+begins around step 11 where activation crosses ~83%. Whether that is cause or
+co-symptom is not separable here -- both track the LR.
+
+### The mistake
+
+I first read this column as "92% of the model was frozen early on, and the LR
+woke it up". Backwards: the field is `n_params_frozen`, so 333 at step 1 is
+**56% active**, not 8%. The model was mostly training from the start, and the
+trend is the opposite of what I described -- fewer parameters frozen over
+time, not more waking up from near-total dormancy.
+
+The corrected version is a cleaner correlation and needs no dramatic framing.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
