@@ -368,6 +368,28 @@ so the model is barely past uniform). A run at a converged checkpoint should
 show `lm_head` averaging like everything else -- and if it does not, this
 explanation is wrong.
 
+### A shortcut that does not work (recorded so it is not retried)
+
+I tried to test the common-mode claim without waiting for the descent arm, by
+comparing `diag/grad_absmax_local` against `diag/grad_norm_global`. The idea:
+if `lm_head`'s gradient were identical on every rank the reduced norm would
+not benefit from averaging, and if independent the ratio would shrink as
+`1/sqrt(dp)`.
+
+Result across the five arms: **29.3, 29.4, 31.9, 32.8, 35.5** -- no trend,
+neither prediction visible.
+
+**The test was invalid before the data spoke.** `grad_absmax_local` is a
+per-rank max over one tensor's *elements*; `grad_norm_global` is an L2 over
+*all parameters*. Different quantities on different domains, so their ratio is
+not a common-mode diagnostic at all. Reading the metric definitions would have
+shown that faster than running the comparison.
+
+A real version of this test needs a per-rank norm of the SAME tensor before
+and after reduction, which the current diagnostics do not emit. That is a
+plausible small addition to `collect_param_stats` if the descent arm comes
+back ambiguous.
+
 ### Accidental control: skew is independent of learning rate
 
 The descent arm (`12474810`) runs dp=24 at **lr=1e-6**, a hundred times the
