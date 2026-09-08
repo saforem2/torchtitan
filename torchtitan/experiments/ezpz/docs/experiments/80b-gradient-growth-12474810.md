@@ -45,6 +45,51 @@ history: it cannot be dismissed as an over-driven learning rate.
 - `clip_headroom` tightening: 0.115 -> 0.085.
 - Clipping fires every step, as always, so the optimizer still sees norm 1.0.
 
+## Step 12: the global norm doubles, and the excursion is concentrated
+
+| step | loss | preclip | max | mean | skew |
+|------|------|---------|-----|------|------|
+| 9 | 11.8355 | 8.108 | 0.204738 | 0.00184192 | 111.2 |
+| 10 | 11.6605 | 8.848 | 0.481659 | 0.00230051 | 209.4 |
+| 11 | 11.5809 | 11.748 | 0.512776 | 0.00232208 | 220.8 |
+| 12 | 11.4945 | **17.246** | 0.433992 | 0.00219622 | 197.6 |
+
+Since step 9: **preclip +113%, max +112%, mean +19%.**
+
+Preclip has more than doubled -- from a baseline pinned near 8.1 for ten steps
+to **17.25** -- and it tracks the per-layer max almost exactly. The typical
+layer has barely moved. So the global L2 is being driven by a handful of large
+contributors rather than by broad growth: **the excursion is concentrated, not
+diffuse.**
+
+(An earlier reading here said the growth had "spread beyond the single block",
+because max dipped at step 12 while preclip rose. Over the excursion as a
+whole the two are matched to within 1%. The dip was one step of scatter.)
+
+## Which tensors carry it
+
+`lm_head.weight` holds rank 0 at every step of the excursion. The runners-up
+change character:
+
+| steps | top1 / top2 |
+|-------|-------------|
+| before | `attention.wo`, mid-stack layers |
+| 10-11 | **`layers.0.feed_forward.w2` and `w3`** -- the FIRST block's FFN |
+| 12 | `attention.wo` at layers **83 and 77** -- the LAST blocks |
+
+The disturbance appears at the output head, recruits the input-side FFN, then
+shows at the far end of the stack. This is the first per-tensor view of an
+excursion in progress in this investigation -- previous events were visible
+only as a grad_norm spike after the fact.
+
+## State at step 12
+
+- **Zero non-finite events.**
+- Loss still descending: 11.5809 -> 11.4945.
+- `clip_headroom` 0.085 -> **0.058** and tightening.
+- LR 5.0e-7, still ramping toward 1e-6 under a 20-step warmup, still below the
+  documented ~7.4e-7 ceiling.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
