@@ -194,6 +194,58 @@ on the loss side of the network and the other is not.
 checked, and `enable_weight_tying` appears exactly once in the registry, in
 `agpt_2b_tied`. The 80B is untied.)
 
+## FOUR POINTS: it is a power law, and my first two shape claims were noise
+
+`12474807` (dp=24) returned **131.15**, above BOTH standing predictions
+(decelerating 116.6, log-linear 122.8) by 12.5% and 6.8%.
+
+With four points the per-doubling ratios are **1.244, 1.329, 1.259** -- they do
+not decline monotonically, they peak in the middle. So "decelerating" was
+itself an artifact of having exactly three points, exactly as "log-linear" was
+an artifact of having two.
+
+A single power law fits all four to within 2.1%:
+
+```
+skew = 41.61 * dp^0.3584
+```
+
+| dp | observed | fit | residual |
+|----|----------|-----|----------|
+| 24 | 131.15 | 129.98 | +0.9% |
+| 48 | 163.18 | 166.64 | -2.1% |
+| 96 | 216.88 | 213.63 | +1.5% |
+| 192 | 273.04 | 273.88 | -0.3% |
+
+Residuals show no trend with dp, so the ratio wobble is scatter around a power
+law rather than structure. The exponent is **0.358**, close to 1/3.
+
+### The methodological point
+
+Three successive shape claims, each overturned by the next data point:
+
+| points | inferred shape | prediction for the next point | outcome |
+|--------|----------------|-------------------------------|---------|
+| 2 | log-linear | dp=48 -> 172.7 | 162.3, off by 6% but right direction |
+| 3 | decelerating | dp=24 -> 116.6 | **131.2, off by 12.5%** |
+| 4 | power law, exp 0.358 | dp=12 -> **101.4** | pending (`12474808`) |
+
+Every intermediate shape was a real pattern in the data available and wrong
+about the data that followed. The underlying finding -- **skew grows
+monotonically with dp** -- survived all three revisions unchanged, which is
+worth separating from the functional form, where I was wrong twice.
+
+The dp=12 arm is already running and discriminates cleanly: power law 101.4,
+decelerating 79.4, log-linear 92.4. Those are 9-28% apart.
+
+### Caveat that has not gone away
+
+Every one of these four arms varies GAS inversely with dp (8/4/2 and now 16 at
+dp=24), because GBS is held at 384 seqs. So this is a power law in
+*dp-with-inverse-GAS*. `12474809` holds dp=192 fixed and moves GAS 2 -> 1 to
+separate them; until it reports, the exponent 0.358 belongs to the pair, not
+to dp alone.
+
 ### What is still conjecture
 
 That concentration is what *breaks* the model. None of these runs failed, so
