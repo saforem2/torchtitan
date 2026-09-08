@@ -90,6 +90,46 @@ only as a grad_norm spike after the fact.
 - LR 5.0e-7, still ramping toward 1e-6 under a 20-step warmup, still below the
   documented ~7.4e-7 ceiling.
 
+## Step 13: a SECOND phase -- the growth broadens, and neither max nor mean sees it
+
+| step | preclip | max | mean | max/preclip | mean/preclip |
+|------|---------|-----|------|-------------|--------------|
+| 9 | 8.108 | 0.204738 | 0.00184192 | 0.0253 | 0.000227 |
+| 10 | 8.848 | 0.481659 | 0.00230051 | **0.0544** | 0.000260 |
+| 11 | 11.748 | 0.512776 | 0.00232208 | 0.0436 | 0.000198 |
+| 12 | 17.246 | 0.433992 | 0.00219622 | 0.0252 | 0.000127 |
+| 13 | **22.996** | 0.376449 | 0.00208607 | **0.0164** | 0.000091 |
+
+Since step 9: **preclip +184%, max +84%, mean +13%.**
+
+**The two phases are different, and this is the correction to the previous
+section.** Steps 10-11 were concentrated: max and preclip rose together and
+`max/preclip` jumped to 0.0544. From step 12 the global norm keeps climbing
+while the largest tensor *falls* -- `max/preclip` collapses 0.0544 -> 0.0164,
+a 3.3x drop, and `mean/preclip` falls too (0.000260 -> 0.000091).
+
+So the L2 is now being driven by tensors that are neither the maximum nor
+typical: **a broad middle band lifting together, which neither summary
+statistic reports.** Watching max alone would show recovery; watching mean
+alone would show almost nothing; only the global norm sees it.
+
+That is the mirror image of the step-10 lesson. There, the per-layer max led
+the global norm by a step. Here, the global norm is leading and the per-layer
+max is actively misleading. **Neither metric dominates -- they catch different
+phases, and the pair is what carries the information.**
+
+## State at step 13
+
+- **Zero non-finite events.**
+- Loss still descending, though slowly: 11.4945 -> 11.4454.
+- `clip_headroom` 0.058 -> **0.043**, roughly halving every two steps.
+- preclip 8.1 -> 23.0 over four steps, ~3x baseline.
+- LR ~5.5e-7, still ramping toward 1e-6, still under the documented ~7.4e-7.
+
+At this rate the clip headroom reaches zero within a few steps. What happens
+there is the interesting part: clipping has absorbed every step so far, and
+the optimizer has seen norm 1.0 throughout.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
