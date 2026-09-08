@@ -496,6 +496,30 @@ coincidence.
 That is the sixth claim tonight overturned by later data, and the second where
 a clean monotone run of points pointed the wrong way.
 
+### Cleaner version of the refutation: quiet steps only
+
+The measurement above mixed excursion steps into the comparison. Restricting
+to **quiet steps only** (`grad_norm_preclip < 25`, so both excursions are
+excluded) makes the refutation stronger:
+
+| | loss | skew | `lm_head` |
+|---|------|------|-----------|
+| early (steps 1-8) | 12.6193 | 131.0 | 0.255020 |
+| late (steps 31-33) | **9.7736** | **173.3** | 0.298742 |
+| change | **-2.85** | **+32.3%** | **+17.1%** |
+
+Skew rose **32%** as the loss fell 2.85 units below where it started -- and
+2.7 units below `ln(256128) = 12.45`, so the model is now decisively out of
+the near-uniform regime. The prediction was a material fall.
+
+The earlier figure of +12.5% understated it because excursion steps, where
+skew is suppressed, were included in the "late" window.
+
+**`lm_head`'s gradient is 17% larger at loss 9.77 than at 12.62.** Its
+dominance grows as the model trains. Whatever explains the dp-invariance has
+to explain that too, and "the output distribution is near uniform" explains
+the opposite.
+
 ### What still stands
 
 The measurement is untouched: skew scales with dp as 93.7 / 132.2 / 163.2 /
