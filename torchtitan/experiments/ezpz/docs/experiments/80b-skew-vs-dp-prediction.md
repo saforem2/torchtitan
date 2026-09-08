@@ -238,6 +238,71 @@ worth separating from the functional form, where I was wrong twice.
 The dp=12 arm is already running and discriminates cleanly: power law 101.4,
 decelerating 79.4, log-linear 92.4. Those are 9-28% apart.
 
+## FIVE POINTS: no functional form fits, and I should stop proposing them
+
+`12474808` (dp=12) returned **93.24**. Scored against the three standing
+predictions:
+
+| model | predicted | error |
+|-------|-----------|-------|
+| power law (4-point fit) | 101.4 | **-8.0%** |
+| log-linear | 92.4 | **+0.9%** |
+| decelerating | 79.4 | +17.4% |
+
+The log-linear model -- which I had discarded **twice** as an artifact of too
+few points -- was closest. That is not a vindication of log-linear; it is a
+coincidence of extrapolating from an endpoint. Refitting both on all five
+points shows neither works:
+
+| model | max residual |
+|-------|--------------|
+| power law `37.26 * dp^0.3826` | **4.3%** |
+| log-linear, ratio 1.3081 | **7.5%** |
+| measurement scatter (within-arm) | **~0.7%** |
+
+Both misfits are 6-10x the noise floor. The power law's residuals now
+alternate in sign (-3.3, +4.3, -0.4, +1.5, -2.0), which is the signature of a
+systematically wrong form rather than scatter.
+
+The five ratios are **1.407, 1.244, 1.329, 1.259** -- no monotone pattern.
+
+### The measurements, which are solid
+
+| dp | skew | n |
+|----|------|---|
+| 12 | 93.24 | 1 |
+| 24 | 131.15 | 1 |
+| 48 | 163.18 | 8 |
+| 96 | 216.88 | 40 |
+| 192 | 273.04 | 40 |
+
+Single-step points are good to ~1%: where multi-step means exist they sit
+within 0.7% of that arm's step-1 value.
+
+### What I am willing to claim
+
+**Skew grows monotonically with dp, by a factor of 2.9 over a 16x range.**
+That has survived every revision.
+
+**I do not know the functional form.** Four attempts, four overturns:
+
+| points | claimed shape | next prediction | error |
+|--------|---------------|-----------------|-------|
+| 2 | log-linear | 172.7 | -6% |
+| 3 | decelerating | 116.6 | +12.5% |
+| 4 | power law | 101.4 | -8% |
+| 5 | *none proposed* | -- | -- |
+
+Each fit described its own data well and failed out of sample. The pattern is
+not that I chose badly among candidates; it is that **four or five points
+spanning 16x cannot distinguish these forms**, and every time I named one I
+was reading precision the data does not contain.
+
+Stopping here. The next honest step is not a fifth functional form but either
+(a) more points, which needs node counts that do not exist between the powers
+of two, or (b) a mechanism that *predicts* a form, at which point the data can
+test it rather than generate it.
+
 ### Caveat that has not gone away
 
 Every one of these four arms varies GAS inversely with dp (8/4/2 and now 16 at
