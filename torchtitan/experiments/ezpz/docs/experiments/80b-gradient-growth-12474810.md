@@ -477,6 +477,51 @@ be smaller, or may be one step into the same shape.
 Worth watching but not yet worth a conclusion. The first excursion took four
 steps to reach its peak.
 
+## CONFIRMED: this is a REPEATING instability, not a warmup transient
+
+Two excursions, near-identical in shape, onsets **13 steps apart**:
+
+| | #1 (LR ramping) | #2 (LR **flat** at 1e-6) |
+|---|---|---|
+| onset | step 15 | step 28 |
+| preclip at onset+1 | 48.05 | 57.97 |
+| `layer_max` at onset+1 | 0.140967 | 0.123221 |
+| loss | rising | rising |
+
+The second excursion's step 29 reproduces the first's step 15 to within ~20%
+on preclip and ~13% on `layer_max`, with the same anti-correlation.
+
+### What this settles
+
+**It is not a warmup artifact.** The LR has been flat at 1e-6 since step 22;
+the second onset came six steps later. Whatever drives this recurs on its own.
+
+**It is not the LR ramp rate.** That hypothesis, offered after the first
+excursion, is dead -- there is no ramp during the second.
+
+**It is periodic, or at least repeating.** 13 steps between onsets. One
+interval is not a period, but it is now a quantity worth measuring, and the
+run has ~120 steps left to measure it in.
+
+### Why this matters beyond this run
+
+The documented 80B failures are single NaN events at steps 9, 17, 18, 37 in
+different jobs. If those are the tail of a *recurring* instability rather than
+isolated accidents, then:
+
+- the step number of a NaN is a draw from a repeating process, not a property
+  of the configuration -- which would explain why the failure step has never
+  been reproducible
+- a run that "trains cleanly" may simply have sampled the quiet phase
+- **the relevant measurement is the excursion RATE, not whether a given run
+  failed** -- and this run is the first to make that measurable
+
+That last point reframes every clean-run result in this investigation,
+including tonight's five dp arms, all of which ran 40 steps or fewer at LRs
+too small to leave the near-uniform regime.
+
+Still **zero non-finite gradients** across both excursions.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
