@@ -1,6 +1,23 @@
 # Umbrella `std::bad_alloc` at init -- intermittent, not yet root-caused
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-09
+
+> [!IMPORTANT]
+> **2026-09-09: `t0` ran a full 12h window.** Umbrella `8808931` finished 5/5
+> seats -- the first time any umbrella has -- with `t0` reaching step 11,100 /
+> loss 2.50685 after dying at ~150s in the three umbrellas before it
+> (`8773440`, `8784460`, `8784462`).
+>
+> **This is NOT a fix and the bug is NOT closed.** Nothing was changed on this
+> path: the 80B LR guard is 80B-only, and ezpz#243 is still open. The most
+> likely explanation is simply a different node set, which is what "intermittent"
+> already predicted -- so this is one more data point for intermittency, not
+> evidence against it.
+>
+> It does sharpen one thing: whatever the trigger is, it is not deterministic
+> in the stage-2 dolmino checkpoint shape. That was the leading hypothesis
+> below (it is the only seat-level difference from `t3`), and a clean 12h run
+> from the same checkpoint weakens it considerably.
 
 > [!NOTE]
 > **2026-09-06 narrowing.** Three consecutive umbrellas (`8773440`, `8784460`,
