@@ -570,6 +570,54 @@ difference was the event definition: a fixed threshold merges nearby peaks and
 invents regularity. Counting local maxima instead is threshold-free and gave
 the real structure immediately.
 
+## FINAL: 64 steps, loss 12.94 -> 8.07, zero non-finite, four attenuating events
+
+`Exit_status = 0` at 9h30m -- stopped by the inner `timeout 34200`, not by
+instability. 64 of a planned 150 steps.
+
+```
+loss     12.9443 -> 8.0747 (min)     no non-finite gradients in 64 steps
+events   step 16 (73.2), 19 (68.1), 29 (58.0), 41 (36.2)
+peaks    73 -> 68 -> 58 -> 36        attenuating
+gaps          3    10    12          lengthening
+last 23 steps: max preclip 14.6      quiet, no further events
+```
+
+The attenuation reading holds to the end. Four events, decreasing in
+magnitude, then nothing for the final third of the run.
+
+**Efficiency note:** this reached loss 8.0747 in 63 steps at dp=24 (8 nodes).
+Job `12473149` reached 8.098 in 120 steps at dp=192 (64 nodes). Comparable
+loss, half the steps, an eighth of the hardware -- though the two differ in
+precision settings (`12473149` ran fp32 activations) so this is not a clean
+throughput comparison.
+
+## The mechanism test, final answer: refuted by a factor of three
+
+Quiet steps only (`preclip < 25`, all four events excluded):
+
+| | loss | skew |
+|---|------|------|
+| early (steps 1-8) | 12.6193 | **131.0** |
+| late (final 5) | 8.1240 | **361.0** |
+| change | **-4.50** | **+175.5%** |
+
+**Predicted: skew falls materially as the model leaves the near-uniform
+regime. Observed: it nearly TRIPLED.**
+
+The model ended 4.3 loss units below `ln(256128) = 12.45` -- decisively out of
+the uniform regime -- and `lm_head`'s dominance grew by a factor of 2.75.
+
+This is the strongest form of the refutation. Earlier measurements gave +12.5%
+(contaminated by excursion steps) and +32.3% (quiet steps, loss 9.77). At loss
+8.12 it is +175%. **The further the model gets from a uniform output
+distribution, the more `lm_head` dominates** -- the exact opposite of the
+proposed mechanism, and a monotone relationship rather than a marginal one.
+
+Whatever explains `lm_head`'s dp-invariance has to explain this too: its
+dominance is not a warmup artifact, it is a property that strengthens as the
+model learns.
+
 ## What to watch
 
 If this reaches a non-finite gradient, the capture instrumentation fires on a
