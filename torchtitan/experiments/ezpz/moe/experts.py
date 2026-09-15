@@ -301,6 +301,17 @@ def _run_experts_aurora_sycl(
     AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
     call is slow. Imported lazily so every other backend stays usable
     without aurora-moe installed.
+
+    DOES NOT CURRENTLY WORK ON AURORA. Measured on a real compute node
+    (12 XPUs, torch 2.13.0.dev20260428+xpu, job 8829454, 2026-09-15): the
+    build SUCCEEDS -- both aurora_moe_one_mkl_exact_expert.so and
+    aurora_moe_swiglu_ops.so compile and cache -- but the first kernel
+    call dies in swiglu_forward_bf16 with "RuntimeError: Invalid argument"
+    followed by level_zero/opencl "UR_RESULT_ERROR_UNINITIALIZED" (37).
+    cpp_extension warns that the kernels build with icpx while this torch
+    was built with g++, which is the most likely cause and the same class
+    of SYCL/compiler skew seen elsewhere on this stack. Do not select this
+    backend in a real run until that is resolved.
     """
     try:
         from aurora_moe.torchtitan_experts import torchtitan_exact_experts
