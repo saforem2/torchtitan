@@ -90,6 +90,44 @@ Also outstanding: a 2N smoke, and a checkpoint resume against a real ckpt (the
 #4187/#4188/#4191/#4197/#4270 cluster rewrote discovery, retention, saves, and
 loads -- and this project has a standing scar from `keep-latest-k`).
 
+### What each method actually caught
+
+Worth recording, because the methods were not interchangeable:
+
+| method | found | missed |
+|--------|-------|--------|
+| AST import sweep | the 5 renames/moves | everything below |
+| real import (14 modules) | the 3 new required deps | all config-construction breaks |
+| `cfg.build()` on agpt | #4526, #4535 | **the entire moe surface** |
+| `cfg.build()` on moe | #4631 (0/14 building) | -- |
+| pytest suite | #4328, the 2 new trainer attrs | -- |
+| parallel surface audit | #4572/#4398 batch protocol | -- |
+
+**The moe row is the lesson.** moe imported 14/14 clean, so it was called
+healthy on that basis and only agpt got build-tested. Every one of its 14
+flavors was dead at config construction. An import proves a module can be
+loaded, nothing more.
+
+The batch-protocol break (#4572) is the other one to note: imports pass, meta
+builds pass, the whole pytest suite passes, and the run still dies at step 1
+because `batch_generator` yields one dict where ezpz unpacked two values.
+Nothing short of feeding the trainer real batches finds it.
+
+### One finding was refuted, and the refutation mattered
+
+An audit reported the router `gate` change as a SOFT break -- "degraded
+routing precision and a worse loss curve, not a traceback". An adversarial
+check reproduced it and found the opposite: construction raises `TypeError`
+before the gate is ever inspected, so the loss regression it predicted CANNOT
+occur. It also established that pre-merge already got FP32 gating from an
+explicit `torch.autocast` wrapper that the merge deleted in favour of
+`RouterGateLinear` -- so ezpz was never silently losing precision by passing a
+plain `Linear`.
+
+The port is the same either way (all three fields had to change), but the
+wrong diagnosis would have sent someone hunting a loss-curve regression that
+does not exist.
+
 ### Pre-existing, NOT caused by this merge
 
 `distributed.full_dtensor` (already guarded by `except ImportError`),
