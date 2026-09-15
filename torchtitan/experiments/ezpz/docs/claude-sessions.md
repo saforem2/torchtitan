@@ -1,5 +1,236 @@
 # Claude Session Log
 
+## 2026-09-08 (sunspot)
+
+### Summary
+
+The machine recovered -- 113 of 129 nodes free, all 29 mount-check offlines
+cleared, a full survey returning 110 good / 0 bad -- which made the last open
+question testable. Five arms later the 80B gradient concentration has a
+mechanism, and four attempts to fit its functional form were all wrong.
+
+### The result
+
+**`lm_head.weight`'s gradient norm is flat across a 16x change in data
+parallelism.** dp 12/24/48/96/192, matched on GBS, seed, LR trajectory,
+optimizer, model:
+
+```
+mean layer gradnorm  ~  dp^-0.394
+max (lm_head)        ~  dp^-0.013      0.2536 -> 0.2457
+```
+
+The concentration grows because everything else averages away and `lm_head`
+does not. The components are the finding; the skew ratio is derived and
+misleads.
+
+Ordinary layers average at -0.394 rather than the -0.5 of independent
+sampling, so dp-rank gradients are correlated. `tok_embeddings` -- same shape
+as `lm_head`, the other largest tensor -- never enters the top-5 at any dp, so
+this is not about size. The 80B is untied, checked.
+
+### Four functional forms, four overturns
+
+| points | claimed | predicted next | actual |
+|--------|---------|----------------|--------|
+| 2 | log-linear | 172.7 | 162.3 |
+| 3 | decelerating | 116.6 | 131.2 |
+| 4 | power law dp^0.358 | 101.4 | 93.2 |
+| 5 | nothing fits (4.3% resid vs 0.7% noise) | -- | -- |
+
+Each fit its own data well and failed out of sample. Skew is a ratio of two
+quantities with different scalings, so it looks like a clean power law over
+any two points. **The monotonic finding survived every revision; the shape
+claim never did.** Stopped proposing forms.
+
+### The mechanism and its falsifier
+
+`lm_head`'s gradient is predicted-minus-true over the vocabulary; early in
+training the prediction is near-uniform on every rank whatever tokens it saw,
+so the dominant term is common-mode and cannot average. All five arms sit at
+loss ~12.9 against ln(256128) = 12.45.
+
+`12474810` descends at lr=1e-6 for 150 steps and tracks skew within one run.
+**Flat skew from 12.9 to ~8 kills the explanation** -- and would make the
+invariance structural, which is the better outcome.
+
+### Corrections
+
+- **Withdrew a retraction.** I claimed `8540102` inherited `lr=8e-4` because
+  its writeup states no LR. The submit script sets `LR="${LR:-1e-6}"` and
+  passes it explicitly, so the registry default is unreachable there. An audit
+  looking for MORE LR-voided runs found none of six.
+- **"Layers migrate toward the input with dp"** was one anomalous arm: mean
+  index 39.2 / 44.0 / **10.6**, a step change at dp=192, not a trend.
+- **"dp=24 is drifting"** was the up-up-down-up wobble every arm shows in its
+  first five steps. Mature arms' first-5 means sit within 0.06-0.32% of their
+  full-run means.
+
+Both caught by computing a statistic instead of reading three numbers. That is
+the recurring lesson of the session.
+
+### Still open
+
+dp and GAS are confounded at fixed GBS. `12474809` separates them. And whether
+concentration *causes* the failure remains conjecture -- none of these arms
+failed.
+
+## 2026-09-07 (sunspot)
+
+### Summary
+
+Continues 2026-09-06. With the machine usable again, four questions about the
+80B instability got answers, and two of them close entries that had been open
+since August.
+
+### Results
+
+**Gradient mass lives in `lm_head.weight`** -- 44x the next tensor, with the
+whole ranking frozen (`lm_head`, then `attention.wo` from layers 65/36/57/5,
+same order every step despite ranks 1-4 sitting within 2%). Structure, not
+scatter. **It is outside the transformer stack**, so softcap and QK-Norm --
+the two routes on the standing list -- cannot reach it.
+
+**`8574385` died at an effective LR of 3.87e-9**, four orders below the
+documented ~7.4e-7 ceiling. Computed from `peak * n / warmup`; reading the
+flag would never have shown it.
+
+**The LR trajectory alone does not cause the failure.** 25/25 steps clean at
+that exact trajectory (3.87096768e-09 at step 18 vs an intended 3.871e-09).
+
+**Batch size is not the variable at dp=96.** Two arms differing only in GBS:
+means agree to 0.03-0.20%, variances scale 2.75-4.33x -- on sqrt(16)=4, what
+sampling predicts. First run in this investigation to vary GBS with dp fixed.
+
+**Remaining: dp (96 vs ~1530) or the seed.**
+
+### Two mechanics worth keeping
+
+**Clipping fires every step**, so every recorded grad_norm is pre-clip --
+including `8574385`'s documented "flat ~6.17". And one `inf` zeroes every
+*other* gradient while the offender becomes `nan`, which explains recovery
+from non-finite steps and gives a second route to the culprit: post-clip,
+exactly one tensor is non-finite among all-zeros.
+
+### Method
+
+Three mechanisms let a broken run report success: a warmup clamp whose banner
+echoed the unclamped value, a capture that logged global aggregates as if they
+named tensors, and an inner `timeout` shorter than the walltime exiting 0.
+Two of my own tools were also broken -- the capture fix and a survey script
+that globbed its own job files.
+
+**Every one was found by driving code or comparing outputs. None by reading.**
+The capture had passed a read-through; the survey passed `bash -n`.
+
+Also: pre-registering how to read an outcome, in writing, before it lands. At
+step 15 I recorded that a clean run would be the *weak* result because dp was
+unmatched. It came back clean and that reading held unchanged -- which is the
+point of writing it down first.
+
+### Left running
+
+`12474768` to step 40. `12474709`/`12474710` still held and recommended to
+stay held: both 64N, both superseded, both would resume the requeue loop.
+
+## 2026-09-06 (sunspot)
+
+### Summary
+
+Sunspot could not launch a single multi-node job for most of the day, and said
+nothing about it. Ended with two concurrent 32-node 80B captures running with
+per-layer diagnostics live. The diagnosis took five attempts; the detour
+through it surfaced the more valuable result -- the 80B's documented failure
+happens at a learning rate four orders of magnitude below its documented
+ceiling.
+
+### The silent failure
+
+Jobs cycled `Q -> R -> E -> Q` with `Exit_status = -3`, no output file, no log
+directory, no error. The 80B capture reached `run_count = 21` without
+executing a line. `-3` means "exec failed, requeue", and the requeue is what
+hides it: the job looks queued, not broken.
+
+Cause: the PBS prologue mount-checks each filesystem in
+`#PBS -l filesystems=`; on failure it OFFLINES the node and requeues the job.
+29 nodes were down for `home not mounted`, all attributable to other users'
+jobs (`brianhol`, `zippy`), ongoing since Sep 4.
+
+**Diagnostic that settles it:** ladder the scale with a trivial payload. 1N
+`echo` ran clean, 64N `echo` requeued identically to the real job. Without
+that probe the evidence pointed at qdel-and-resubmit, which fixes nothing and
+offlines another sweep of nodes.
+
+### Three fixes I shipped and then refuted
+
+Each looked obviously right:
+
+1. **Drop `home` from `filesystems=`.** Committed and pushed before testing. A
+   matched 8N pair refuted it -- the probe that REQUESTED `tegu:home` ran fine.
+2. **Rack x1921 is the ceiling.** A 16N job drew all 16 nodes from x1921 and
+   started fine.
+3. **Host pinning is sufficient.** The pinned 64N launched perfectly (768/768
+   GPUs) and died at 0 training steps.
+
+### The actual cause: `free` is not `usable`
+
+The pinned run was killed by `x1922c7s2b0n0` -- `state = free`, **no comment**,
+`/lus/tegu` unreachable. A rank there cannot `cd` to the repo, python is not
+found, it exits 127, and mpiexec tears down all 768 ranks. **No `pbsnodes`
+query finds these.** Six now known, across both racks.
+
+Fix: `scripts/cluster/survey_nodes.sh` stats a repo path from each candidate
+node and keeps the ones that answer. It rediscovered the killer node
+independently. 68 nodes verified. Survey in SMALL batches -- a 70-node survey
+requeues on the same lottery it exists to map.
+
+### The warmup clamp, and a banner that lies
+
+torchtitan clamps `warmup_steps` to `total_steps`
+(`lr_scheduler.py:105-112`) with only a warning, and the trainer banner prints
+the unclamped value on the very next line:
+
+```
+[W] Warmup steps (4650) exceed total steps (25). Adjusting warmup steps to 25.
+[I] Trainer is initialized with ... total steps 25 (warmup 4650)
+```
+
+Shortening a run TIGHTENS the clamp, so my "warmup-matched" 25-step run sat at
+186x the original LR -- worse than the 116x run it replaced. Matching honestly
+needs ~2325 steps = ~55 days at 34 min/step.
+
+Fix: rescale the peak rather than fight the clamp. `5.376344e-09` with warmup
+25 reproduces `1e-6` with warmup 4650 exactly (verified to 2.2e-16 across
+steps 1-25).
+
+### The finding
+
+**Job `8574385` died at an effective LR of 3.87e-9** -- four orders of
+magnitude BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents. The 80B's real
+failure is not an over-large learning rate. Reading the flag would never have
+shown this; it took computing the effective schedule the flag produced.
+
+### Habits earned
+
+- Grep the log for what the framework DECIDED, not for what you asked. A
+  silently-adjusted config leaves a correct-looking command line behind.
+- A run that fails its designed purpose is not automatically waste. I nearly
+  killed the clamped job; computing what it IS doing showed it ramps
+  4e-8 -> 1e-6, crossing the documented ceiling at step 18.5 with the capture
+  armed. Kept it as a ceiling sweep.
+- A job in an exec-failure loop outruns a plain `qdel`. `qhold` first, then
+  `qdel -W force`.
+
+### Left running
+
+- `12474733` -- 32N, fixed lr=1e-6, stability datapoint. Steps 1-2 clean:
+  loss 12.95721 -> 12.94267, grad_norm ~8.03, zero non-finite.
+- `12474740` -- 32N, LR sweep crossing ~7.4e-7 at step 19.
+- `80b_capture_rescaled.pbs` -- the true reproduction, committed, awaiting
+  nodes.
+- Open: ALCF ticket drafted and unsent; 64 upstream commits pending, with
+  `#4398` and the checkpoint cluster the ones touching our paths.
+
 ## 2026-07-18
 
 ### Summary

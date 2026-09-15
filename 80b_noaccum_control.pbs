@@ -1,0 +1,241 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-noaccum
+#PBS -j oe
+set -o pipefail
+
+# IS IT THE BATCH, OR THE ACCUMULATION? The control the GAS sweep needs.
+#
+# THE AMBIGUITY. The GAS sweep's G8 arm (GBS=1,536 via GAS=8) froze: 7
+# non-finite gradients across 8 steps, loss pinned at ~43, weights bit-identical
+# at 1756.8471056374897 while G1 (GBS=192, GAS=1) recovered from every event
+# across 60 steps. Same dp=192. I read that as a batch-size effect. But GAS=8
+# means EIGHT SEQUENTIAL BACKWARD PASSES ACCUMULATING INTO ONE bf16 BUFFER, and
+# that is a second explanation the sweep cannot separate from batch size.
+#
+# WHAT IS ALREADY RULED OUT. Gradient SCALING is correct: local_valid_tokens
+# sums over all microbatches in the step (trainer.py:964) BEFORE the all-reduce,
+# so each microbatch loss divides by the true per-step token count and the
+# accumulated gradient is a proper mean, not an 8x oversized update. Verified in
+# the source, not assumed.
+#
+# WHAT IS NOT RULED OUT. Any single non-finite microbatch poisons the whole
+# accumulated buffer, so GAS=8 carries 8x the exposure per step. Pure-exposure
+# arithmetic does NOT cover the observation -- Bernoulli at G1's per-microbatch
+# rate predicts a per-step rate of 0.238 against 0.875 observed -- but that
+# calculation treats 7 CONSECUTIVE steps in a frozen state as independent
+# trials, which they are not, and G1's own count spans 2-8 across replicates.
+# So the arithmetic is suggestive and not decisive either.
+#
+# THE CONTROL. Same GBS=1,536 sequences, delivered as ONE microbatch instead of
+# eight: tokens/microbatch/dp-rank 32768 (8x G8's 4096), GAS=1.
+#
+#   arm    per-rank tokens   GAS   GBS          differs from G8 by
+#   NOACC  32768               1   1,536 seqs   accumulation only
+#
+#   G8 (already run)  4096      8   1,536 seqs
+#   G1 (already run)  4096      1     192 seqs
+#
+# READ IT:
+#   NOACC stable  -> ACCUMULATION is the cause. The batch is fine; eight
+#                    sequential bf16 accumulations are not. That would make the
+#                    "GBS not dp" conclusion wrong and point at the accumulation
+#                    path instead.
+#   NOACC freezes -> BATCH SIZE is the cause, accumulation is incidental, and
+#                    the GAS sweep's reading holds.
+#
+# MEMORY. G8 ran at 23.44% of 64 GiB, so 8x the per-rank tokens has room. If it
+# OOMs that is itself the answer to whether this control is runnable, and the
+# fallback is GBS=768 via 16384 tokens/rank against a matched GAS=4 arm.
+#
+# 12 STEPS. G8 was frozen by step 2 and stayed frozen through 8; 12 clears that
+# with margin without paying for a long run.
+
+# LEARNING RATE IS NOT OPTIONAL HERE. agpt_80b's config default is 8e-4. The
+# 80B training guide (docs/guides/training/agpt_80b.md) documents the AdamW NaN
+# onset at production batch as 1.36e-6 with a usable ceiling of ~7.4e-7, and
+# records job 8530891 NaN-ing at STEP 2 at 1e-6. The default is therefore ~1000x
+# past the last stable point.
+#
+# Jobs 12474403 (depth bisect) and 12474423 (GAS sweep) both ran at the default
+# and their step-2 blow-ups are that, not a finding. This arm uses 5e-7, the
+# value the guide recommends if staying on AdamW. Without it, this control
+# would reproduce the same artifact and "prove" whatever the artifact does.
+
+# SIZING, SECOND ATTEMPT. The first (32768 tok/rank, GBS=1,536 to match G8)
+# was killed by SIGTERM 26 seconds after "Training starts at step 1" -- job
+# 12474429, rc=143, no Python traceback. Model load was only 0.63 GiB, so this
+# was the FIRST FORWARD allocating activations for a microbatch 8x larger than
+# anything previously run here. An XPU-side allocation failure kills the
+# process rather than raising, so there is no OOM text to grep; the tell is
+# SIGTERM immediately after training starts.
+#
+# All three config gates PASSED on that run (lr 5e-07, GAS 1, tokens/step
+# 6291456), so the design was right and only the sizing was not runnable.
+#
+# Fallback, which the original script named in advance: 16384 tok/rank ->
+# GBS=768 seqs at GAS=1. Half the per-rank activation memory. The comparison
+# arm is then G8-style GAS=4 at 4096 tok/rank, same 768 seqs -- still
+# accumulation-vs-batch with everything else fixed, just at a smaller batch.
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 1
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+export EZPZ_DIAG_ECHO=1
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+# -rc2-grain, NOT -rc2: the post-#4088 dataloader imports grain.python.
+export PATH="$REPO/venvs/fw-2026.1-rc2-grain/bin:$PATH"; unset PYTHONPATH
+source "$REPO/venvs/fw-2026.1-rc2-grain/bin/activate" 2>/dev/null
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+
+export LOGD="$REPO/outputs/logs/80b-noaccum/$PBS_JOBID"; mkdir -p "$LOGD"
+LOG="$LOGD/noaccum.log"
+
+# Confirm the LR the CONFIG ends up with, not the one on the command line --
+# a flag that silently fails to bind is this codebase's signature failure.
+CHK="$LOGD/lrcheck.txt"
+python3 -c "
+from torchtitan.experiments.ezpz.agpt import config_registry as cr
+lr = cr.agpt_80b().optimizer.param_groups[0].optimizer_kwargs.get('lr')
+print(f'CONFIG_DEFAULT_LR {lr}')
+" > "$CHK" 2>&1
+cat "$CHK" | grep -a CONFIG_DEFAULT_LR || true
+echo "  (the --optimizer.param-groups.0... flag below overrides it to 5e-7;"
+echo "   the run's own printed config is the authority -- check it in the log)"
+
+# TWO ARMS, SAME BATCH, IN THIS JOB. G8 from the sweep ran at 1,536 seqs and
+# this control is now 768, so G8 is no longer a matched comparison -- and both
+# arms must share a learning rate anyway. Same node set, same seed, same data.
+arm() {  # arm <label> <tok-per-rank> <gas-implied-by-tokens>
+  local label="$1" tokrank="$2" log="$LOGD/$1.log"
+  echo ""
+  echo "===== $label: 768 seqs, ${tokrank} tok/rank ====="
+  timeout 2700 ezpz launch --nproc 768 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config agpt_80b \
+      --training.steps=12 \
+      --training.max-context-length=4096 \
+      --training.num-tokens-per-microbatch-per-dp-rank="$tokrank" \
+      --training.num-tokens-per-train-step=3145728 \
+      --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 \
+      --compile.no-enable \
+      --diagnostics --diagnostics-attention \
+      --diagnostics-per-layer --diagnostics-interval=1 \
+      --checkpoint.no-enable \
+      --debug.seed=42 \
+      > "$log" 2>&1
+  echo "  rc=$?"
+  local c; c=$(sed "s/\x1b\[[0-9;]*m//g" "$log")
+  echo "    lr:     $(printf "%s" "$c" | grep -aoE '\"lr\": *[0-9.e+-]+' | head -1)"
+  echo "    GAS:    $(printf "%s" "$c" | grep -aoE 'gradient accumulation steps [0-9]+' | head -1)"
+  echo "    events: $(printf "%s" "$c" | grep -ac 'non-finite grad_norm')"
+  printf "%s" "$c" | grep -aoE "step: *[0-9]+ +loss: *[0-9.a-z]+ +grad_norm: *[0-9.a-z]+" | head -4 | sed 's/^/      /'
+}
+
+# ACCUM: 4096 tok/rank -> GAS 4. NOACC: 16384 tok/rank -> GAS 1. Same 768 seqs.
+arm ACCUM 4096
+arm NOACC 16384
+
+echo ""
+echo "########## batch, or accumulation? ##########"
+LOGD="$LOGD" python3 - <<'PY'
+import os, re
+
+logd = os.environ["LOGD"]
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def read(label):
+    p = f"{logd}/{label}.log"
+    if not os.path.exists(p):
+        return None
+    txt = ansi.sub("", open(p, errors="replace").read())
+    return {
+        "rows": re.findall(
+            r"step: *(\d+) +loss: *([0-9.]+|nan|inf) +grad_norm: *([0-9.]+|nan|inf)", txt),
+        "events": len(re.findall(r"non-finite grad_norm", txt)),
+        "lr": (re.findall(r'"lr": *([0-9.e+-]+)', txt) or ["?"])[0],
+        "gas": (re.findall(r"gradient accumulation steps (\d+)", txt) or ["?"])[0],
+        "tok": (re.findall(r"tokens/train-step (\d+)", txt) or ["?"])[0],
+        "sigterm": "finished with 143" in txt,
+    }
+
+
+A, N = read("ACCUM"), read("NOACC")
+print(f"{'arm':>6} {'lr':>9} {'GAS':>4} {'tokens/step':>12} {'steps':>6} {'events':>7}")
+for lab, v in (("ACCUM", A), ("NOACC", N)):
+    if v is None:
+        print(f"{lab:>6} {'MISSING':>9}")
+        continue
+    print(f"{lab:>6} {v['lr']:>9} {v['gas']:>4} {v['tok']:>12} "
+          f"{len(v['rows']):>6} {v['events']:>7}")
+    for st, l, g in v["rows"][:4]:
+        print(f"         step {st:>3}  loss {l:>9}  grad_norm {g:>9}")
+
+print()
+if A is None or N is None:
+    print("VERDICT: an arm is missing. Nothing concluded.")
+elif not A["rows"] or not N["rows"]:
+    dead = [l for l, v in (("ACCUM", A), ("NOACC", N)) if not v["rows"]]
+    why = " (SIGTERM during the first forward -- almost certainly per-rank " \
+          "activation memory)" if any(
+              (A, N)[i]["sigterm"] for i, l in enumerate(("ACCUM", "NOACC"))
+              if l in dead) else ""
+    print(f"VERDICT: {', '.join(dead)} produced no steps{why}. Nothing concluded.")
+elif A["lr"] != N["lr"] or A["tok"] != N["tok"]:
+    print("VERDICT: the arms do not match on lr or tokens/step. VOID -- this "
+          "is not a controlled comparison.")
+elif float(A["lr"]) > 1e-6:
+    print("VERDICT: lr is past the documented ~7.4e-7 ceiling. Both arms "
+          "measure the LR, not accumulation. VOID.")
+else:
+    ea, en = A["events"], N["events"]
+    print(f"  ACCUM (GAS=4) {ea} events   vs   NOACC (GAS=1) {en} events, "
+          f"same 768-seq batch")
+    if ea > 0 and en == 0:
+        print("VERDICT: ACCUMULATION is the cause. Same batch delivered in one "
+              "microbatch is clean; split across four it is not.")
+    elif ea == 0 and en == 0:
+        print("VERDICT: both clean at this batch. The failure needs a larger "
+              "batch than 768 seqs, and this pair cannot separate the two "
+              "explanations. Not a null for accumulation -- a null for the "
+              "batch size tested.")
+    elif ea > 0 and en > 0:
+        print("VERDICT: BOTH fail. Accumulation is not required, so the batch "
+              "(or the LR-batch interaction) is implicated, not the "
+              "accumulation path.")
+    else:
+        print("VERDICT: NOACC fails where ACCUM does not -- the opposite of "
+              "the accumulation hypothesis. Suspect a confound before "
+              "believing it.")
+PY
+echo "NOACCUM_DONE"

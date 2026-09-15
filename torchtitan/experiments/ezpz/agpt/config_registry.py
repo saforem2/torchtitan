@@ -1491,12 +1491,134 @@ def agpt_70b_wide() -> FaultTolerantTrainer.Config:
     return agpt("70B_wide", tensor_parallel_degree=2)
 
 
+# Measured in docs/guides/training/agpt_80b.md at production batch: AdamW NaN
+# onset 1.36e-6, usable ceiling ~7.4e-7. 1e-6 already NaN'd at step 2 in job
+# 8530891. Anything at or above the onset blows up on the first optimizer step.
+_AGPT_80B_LR_ONSET = 1.36e-6
+
+# Identify 80B by model_spec.flavor, NOT by geometry. Geometry does not
+# separate the sizes: ezpz_agpt_50b_wide and ezpz_agpt_70b_wide are BOTH
+# dim=9216, the same width as the 80B base flavor, so a `dim >= 8192` test
+# would block them on a ceiling measured for a different model. Every 80B
+# variant's flavor starts with "80B" (80B, 80B_alt, 80B_wide, 80B_deep,
+# 80B_deep_alt, 80B_qknorm, 80B_qknorm_softcap, 80B_softcap) and no other
+# size does -- verified by enumerating every agpt config in the registry.
+_AGPT_80B_FLAVOR_PREFIX = "80b"
+
+
+def _is_80b_config(cfg: FaultTolerantTrainer.Config) -> bool:
+    """True if *cfg* is an 80B-class agpt model."""
+    try:
+        flavor = cfg.model_spec.flavor
+    except AttributeError:
+        return False
+    if not isinstance(flavor, str):
+        return False
+    return flavor.lower().startswith(_AGPT_80B_FLAVOR_PREFIX)
+
+
+def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
+    """Refuse to run an 80B config that will NaN on its first update.
+
+    Call this AFTER the CLI is parsed and after any --optimizer rebuild, so
+    the lr seen here is the one the run will actually use. The original
+    placement (inside each 80B config function) ran pre-CLI and could only
+    ever see the registry default -- see the comment at the callsite in
+    experiments/ezpz/train.py.
+
+    Self-gating: returns immediately for non-80B configs, so the single
+    callsite does not need to know the size.
+
+    agpt() shares one lr=8e-4 default across every size. That is reasonable at
+    2B and 588x past the measured 80B NaN onset. The docstring on agpt_80b()
+    has said so since 2026-09-01, and a docstring only helps a reader: jobs
+    12474403 and 12474423 both ran at 8e-4 anyway, and their step-2 blow-ups
+    were read as a depth effect and then as a batch-size effect before anyone
+    checked the LR. Both readings were withdrawn.
+
+    This raises instead of clamping. Silently re-pointing the LR is the failure
+    mode the docstring warns about -- arms in flight resume from checkpoints
+    trained at a specific LR, and changing it under them is worse than an
+    explicit flag. So: refuse, name the number, and say what to pass.
+    """
+    if not _is_80b_config(cfg):
+        return
+    try:
+        lr = float(cfg.optimizer.param_groups[0].optimizer_kwargs["lr"])
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return  # non-standard optimizer shape; not ours to police
+    if lr >= _AGPT_80B_LR_ONSET:
+        raise ValueError(
+            f"agpt 80B built with lr={lr:g}, at or above the measured NaN "
+            f"onset of {_AGPT_80B_LR_ONSET:g} (usable ceiling ~7.4e-7). This "
+            f"blows up on the first optimizer step and every measurement "
+            f"downstream of it is an artifact of the LR.\n"
+            f"  Pass e.g. "
+            f"--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 for AdamW, "
+            f"or prefer mano (~3e-6 at its own finder optimum) or sophiag.\n"
+            f"  Measurements: docs/guides/training/agpt_80b.md"
+        )
+
+
 def ezpz_agpt_80b() -> FaultTolerantTrainer.Config:
+    # No guard here: callers legitimately set the LR AFTER this returns
+    # (agpt_80b_sophiag does exactly that). The guard runs on the finished
+    # config, in each leaf below.
     return agpt("80B", tensor_parallel_degree=2)
+
+
+def agpt_80b_sophiag() -> FaultTolerantTrainer.Config:
+    """agpt 80B with SophiaG at 1e-6 -- the ONE 80B failure that is not an LR
+    artifact, kept reproducible so it can be instrumented.
+
+    Job `8574385` ran this: 510N, TP=4, LBS=1, GAS=4, GBS 6120, SophiaG at
+    lr=1e-6, warmup 4650, decay_ratio=0, compile OFF -- and NaN'd at step 18
+    with a flat grad_norm ~6.17 beforehand.
+
+    **Why this configuration matters more than the others.** 1e-6 is BELOW the
+    LR-finder's ~2.5e-6 SophiaG optimum and well below its ~4.6e-6 blow-up
+    onset, so unlike every 80B run in the 2026-08-31 session (which used the
+    inherited 8e-4 default, ~1000x past the AdamW ceiling), this one cannot be
+    dismissed as a learning-rate error. It is the failure that is actually
+    unexplained.
+
+    The LR is set here rather than left to a flag because `--optimizer.name`
+    does not exist in the parser -- the optimizer is a config-level choice, and
+    passing a nonexistent flag aborts at parse time.
+
+    Pair with `--lr-scheduler.warmup-steps=4650 --lr-scheduler.decay-ratio=0`
+    (both real flags, verified) and a GBS near 6144 to match the calibration.
+    """
+    cfg = ezpz_agpt_80b()
+    cfg.optimizer = default_sophiag(lr=1.0e-6)
+    return cfg
 
 
 def agpt_80b() -> FaultTolerantTrainer.Config:
-    return agpt("80B", tensor_parallel_degree=2)
+    """agpt 80B. YOU MUST OVERRIDE THE LEARNING RATE.
+
+    This inherits `agpt()`'s shared default of **lr=8e-4** (line ~330), which
+    is reasonable at 2B and roughly **1000x past the stable point at 80B**.
+    Measured, in docs/guides/training/agpt_80b.md: at production batch the
+    AdamW NaN onset is **1.36e-6** with a usable ceiling of **~7.4e-7**, and
+    job 8530891 NaN'd at STEP 2 at 1e-6 -- already 800x below the default.
+
+    Pass `--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7` for AdamW, or
+    prefer mano/sophiag. Without it the model blows up on the first optimizer
+    step and every downstream measurement is an artifact of the LR.
+
+    NOT fixed by changing the default here: several arms in flight resume from
+    checkpoints trained at specific LRs, and silently re-pointing them is worse
+    than an explicit flag. The docstring is the guard.
+
+    Cost of not knowing this, recorded so it is not repeated: jobs 12474403
+    (depth bisect) and 12474423 (GAS sweep) both ran at 8e-4. Their step-2
+    blow-ups were read as a depth effect and then as a batch-size effect
+    before the LR was checked; both readings were withdrawn. See
+    docs/guides/known-bugs/80b-nan-rate-not-overflow.md.
+    """
+    cfg = agpt("80B", tensor_parallel_degree=2)
+    return cfg
 
 
 def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
@@ -1508,7 +1630,8 @@ def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
 
 def agpt_80b_real() -> FaultTolerantTrainer.Config:
     """agpt_80b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
-    return _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+    cfg = _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
+    return cfg
 
 
 def _set_z_loss(
@@ -1581,7 +1704,8 @@ def agpt_80b_zloss() -> FaultTolerantTrainer.Config:
 
     Smoke agpt_2b_zloss first.
     """
-    return _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
+    cfg = _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
+    return cfg
 
 
 def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
@@ -1592,7 +1716,8 @@ def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
     cheaper than mixed-precision-param=float32 (which fp32s ALL activations).
     Validate NaN-free + throughput before production use.
     """
-    return _set_fp32_residual(ezpz_agpt_80b())
+    cfg = _set_fp32_residual(ezpz_agpt_80b())
+    return cfg
 
 
 def agpt_80b_real_fp32res() -> FaultTolerantTrainer.Config:

@@ -1,0 +1,92 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=66
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-duration-dp192
+#PBS -j oe
+#
+# THE test the 80B campaign exists for: does the known-good corner survive
+# DURATION? Every clean 80B datapoint on record is <=40 steps; production is
+# 12h. bf16 NaNs have appeared at step 14/17/19/38 in past runs, so 500+ steps
+# clears the whole observed window by >12x.
+#
+# Corner: TP=4 / LBS=1 / bf16 / AdamW LR=1e-6 at 64N -> dp=192. Independently
+# clean for 30 steps (job 12469628) and the same corner the production script
+# defaults to.
+#
+# Runs on the RC stack (oneAPI 2026.1.0). The June .venv segfaults every
+# reducing collective on this machine (job 12473138); the RC does not.
+#
+# CKPT_FOLDER IS EXPLICIT AND FRESH. Attempt 1 (job 12473140) died before step 1
+# with "Missing key in checkpoint state_dict: layers.0.attention.wk.weight" --
+# a pre-refactor flat-attention key. With checkpointing enabled and no folder
+# given, it resolved a STALE 80B checkpoint tree and tried to resume from it.
+# Auto-retry then misread the crash as a bad node and blind-rotated a healthy
+# host. A fresh, uniquely named folder has nothing to resume from.
+set -o pipefail
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
+
+REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
+cd "$REPO" || exit 9
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export no_proxy=localhost,127.0.0.1,*.alcf.anl.gov
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
+export CCL_LOG_LEVEL=ERROR
+
+module use /opt/aurora/26.181.0/modulefiles >/dev/null 2>&1
+module load frameworks/2026.1.0 >/dev/null 2>&1
+VENV="$REPO/venvs/fw-2026.1-rc2"
+export PATH="$VENV/bin:$PATH"; unset PYTHONPATH
+source "$VENV/bin/activate" 2>/dev/null
+
+echo "CCL_ROOT=$CCL_ROOT"
+python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
+if ! python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry" >/dev/null 2>&1; then
+  echo "ABORT: config_registry import failed; nothing tested."; exit 7
+fi
+
+NH=$(sort -u "$PBS_NODEFILE" | wc -l)
+echo "nodes=$NH  (dp = ${NH}*12/4)"
+LOG="$REPO/outputs/logs/80b-duration.$PBS_JOBID.log"
+mkdir -p "$(dirname "$LOG")"
+
+# 64 training nodes; the 2 spare let auto-retry swap a bad node instead of
+# dying (a bare --hostfile with exactly N nodes reports "0 spare" and stops).
+timeout 20400 ezpz launch --auto-retry --spare-nodes auto --nproc 768 -ppn 12 -- \
+  python3 -m torchtitan.experiments.ezpz.train \
+    --module ezpz.agpt --config agpt_80b \
+    --training.steps=600 --training.seq-len=8192 \
+    --training.local-batch-size=1 \
+    --parallelism.tensor-parallel-degree=4 \
+    --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+    --lr-scheduler.warmup-steps=200 \
+    --checkpoint.enable --checkpoint.interval=100 \
+    --checkpoint.folder="checkpoints/agpt-80b-duration-dp192-rc" \
+    --compile.no-enable --dataloader.num-workers=2 \
+    --nan-abort-consecutive=5 > "$LOG" 2>&1
+rc=$?
+steps=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE "step: *[0-9]+ +loss:")
+last=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE "step: *[0-9]+ +loss: *[a-z0-9.]+" | tail -1)
+nan=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -acE "loss: *nan|grad_norm: *nan")
+echo "RESULT rc=$rc steps=$steps nan_lines=$nan last='$last'"
+echo "80B_DURATION_DONE"

@@ -1,5 +1,77 @@
 # SophiaG: a RECURRENT grad-norm blow-up at 30B
 
+
+> [!CAUTION]
+> **RETRACTED WITHIN THE HOUR. The claim below is WRONG -- the arm diverged at
+> step 4163, 50 steps after the test point I declared it had cleared.**
+> Onset: `4.18 -> 12.51 -> 50.70 -> 87.60 -> 144.81 -> 346.69`, peaking at
+> **4,341.22**, 30 excursions by step 4,580.
+>
+> Kept below as written, because the error is instructive. I picked 4106 as
+> the decision point from the fresh arm's second onset, watched this arm pass
+> it at grad_norm 0.1232, and published within minutes. **A pre-registered
+> threshold stops you moving the goalposts after seeing data; it does nothing
+> about declaring victory the instant one is crossed.** The arm was still
+> running with 400+ steps of its own runway left, and there was no reason not
+> to wait.
+>
+> The corrected result follows the retracted block.
+
+> 
+> --- THE RETRACTED CLAIM, AS WRITTEN ---
+>
+> ~~**RESOLVED 2026-09-01: halving the LR prevents the divergence.**~~ The
+> `1.78e-5` arm (half of `3.56e-5`) cleared **every** documented onset and ran
+> 3,586 in-window steps with **2 excursions above 2.0, max 2.65**. At each
+> onset step the full-LR arms exploded and this one did not move:
+>
+> | onset step | full-LR arms | half-LR arm |
+> |---:|---|---|
+> | 1048 | first divergence | grad_norm 0.2163 |
+> | 1071 | divergence | 0.2601 |
+> | 1176 | divergence | 0.2255 |
+> | ~1550 | divergence (fresh seeded replicate) | 0.1786 |
+> | **~4106** | **second onset, 731.8 and climbing** | **0.1232** |
+>
+> The comparison at 4106 is the decisive one: the fresh arm escalated
+> `0.20 -> 4.95 -> 36.1 -> 99.0 -> 731.8` over five steps, after 2,200 clean
+> steps. This arm passed through at 0.1232 with loss still descending
+> (2.4594 -> 2.4437 across the window), having by then run **3,586** clean
+> window steps -- 1,386 longer than the diverging arm's best.
+>
+> Peak grad_norm over the whole run is **2.65** against the full-LR arms'
+> **100,611**. Loss cost of halving is near zero.
+>
+> **Why this one holds up where today's 80B conclusions did not:** the test
+> point (4106), the metric (excursions >2.0 within the loss<5.0 window) and
+> the control (the full-LR arm at matched steps) were all fixed BEFORE the
+> data existed. The arm was extended twice purely to reach the pre-registered
+> step, not to reach a result.
+>
+> Still bounded: this is ONE arm at ONE halved LR. It shows 1.78e-5 avoids
+> every onset observed at 3.56e-5; it does not locate the threshold between
+> them, and it does not prove no onset exists beyond 4,113.
+
+### CORRECTED: halving the LR DELAYS the onset ~4x, it does not prevent it
+
+| | full LR 3.56e-5 | half LR 1.78e-5 |
+|---|---|---|
+| first onset | step 1048 | **step 4163** |
+| peak grad_norm | 100,611 | **4,341** |
+| escalation | 0.20 / 4.95 / 36.1 / 99.0 / 731.8 | 4.18 / 12.5 / 50.7 / 87.6 / 144.8 / 346.7 |
+
+**Onset moves 1048 -> 4163 -- about 4x later for a 2x LR reduction -- and the
+peak is ~23x smaller.** Both effects are real and useful. Neither is
+prevention. The signature is otherwise identical: quiet baseline, no
+precursor, monotone escalation over a handful of steps.
+
+**This is now the strongest evidence for the original finding in this
+document.** The arm held grad_norm at 0.11-0.13 for 3,586 in-window steps and
+then reached 4,341 within 20 steps. A clean 3,500-step stretch carries no
+information about what comes next, and every optimistic read of a quiet
+pre-onset record -- including mine, an hour ago -- has been wrong.
+
+
 **Seen:** 2026-08-25, job 12473783 (30B, GBS=960, constant LR 3.55e-05).
 **Status:** RECURRENT. 2 of 2 runs from the same seed diverged, at different
 steps. An earlier version of this document concluded the opposite -- see

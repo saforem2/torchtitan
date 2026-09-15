@@ -3,9 +3,19 @@
 #PBS -q workq
 #PBS -l select=64
 #PBS -l walltime=03:00:00
-#PBS -l filesystems=tegu:home
+#PBS -l filesystems=tegu
 #PBS -N 80b-depth-bisect
 #PBS -j oe
+#
+# FILESYSTEMS: tegu. 2026-09-06. Note this is NOT the fix it looks like --
+# sunspot rack x1921 is failing the PBS prologue `home` mount check (node goes
+# offline, job requeues, Exit_status=-3 forever; 12474709 hit run_count=19).
+# Dropping `home` was the obvious workaround and a matched 8N pair REFUTED it:
+# the probe requesting tegu:home ran fine (12474714, rc=1, exit 0). The rack is
+# the variable, not the flag. x1922 has only 22 free nodes, so a 64N job must
+# reach into x1921 and cannot run until ALCF restores it.
+# `tegu` alone is still correct here (this job touches no $HOME), just not
+# curative. See docs/guides/known-bugs/sunspot-home-mount-check-offlines-nodes.md
 set -o pipefail
 
 # DOES THE 80B NaN DEPEND ON DEPTH? The experiment the stated root cause
@@ -110,6 +120,40 @@ set -o pipefail
 # plain -rc2. Copying its header cost job 12474399, which aborted in the
 # config gate with ModuleNotFoundError: No module named 'grain'. The gate
 # worked; the venv was wrong.
+# LEARNING RATE, ADDED 2026-09-06. The first run of this script (job
+# 12474403) set NO lr and therefore inherited agpt()'s shared 8e-4 default --
+# roughly 1000x past the ~7.4e-7 ceiling the 80B guide documents. Its step-2
+# blow-ups were read first as a depth effect and then as a batch-size effect;
+# both readings were withdrawn, and the whole run is void. See
+# docs/guides/known-bugs/80b-nan-what-we-know.md.
+#
+# 5e-7 is the value the guide recommends for AdamW, and it is the LR at which
+# the 80B demonstrably trains clean (job 12474431: 12 steps, 0 non-finite
+# gradients, loss 12.948 -> 12.795). Running the depth ladder there means a
+# difference BETWEEN arms is attributable to depth rather than to every arm
+# being over-driven equally.
+#
+# The report below already voids itself on a bad LR; this makes the good case
+# the default rather than something the operator has to remember.
+
+# PREFLIGHT: refuse to run a schedule the framework will silently rewrite.
+# torchtitan clamps warmup_steps to total_steps (lr_scheduler.py:105-112) with
+# only a WARNING, and the trainer banner then prints the UNCLAMPED value -- so
+# the log looks correct while the model trains on a different LR curve. That
+# cost job 12474802: --training.steps=20 against warmup 25 clamped warmup to
+# 20, making the effective LR 1.25x its twin's at step 9 and breaking the
+# single-variable comparison the run existed to make. Caught at 3 minutes only
+# because the geometry check happened to print the clamp count.
+_steps=$(grep -oE "^[[:space:]]+--training\.steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+_warm=$(grep -oE "^[[:space:]]+--lr-scheduler\.warmup-steps=[0-9]+" "$0" | head -1 | grep -oE "[0-9]+$")
+if [ -n "$_steps" ] && [ -n "$_warm" ] && [ "$_warm" -gt "$_steps" ]; then
+  echo "PREFLIGHT ABORT: warmup ($_warm) > steps ($_steps)."
+  echo "  torchtitan will clamp warmup to $_steps and only warn, changing the"
+  echo "  effective LR at every step by $_warm/$_steps = $(python3 -c "print(f'{$_warm/$_steps:.2f}')")x."
+  echo "  Raise --training.steps above $_warm, or lower warmup deliberately."
+  exit 9
+fi
+
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "$REPO" || exit 1
 
@@ -172,6 +216,7 @@ arm() {  # arm <label> <config>
       --training.max-context-length=4096 \
       --training.num-tokens-per-microbatch-per-dp-rank=4096 \
       --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 \
       --compile.no-enable \
       --diagnostics --diagnostics-attention \
       --diagnostics-per-layer --diagnostics-interval=1 \
@@ -214,32 +259,47 @@ for label, depth in (("L48", 48), ("L72", 72), ("L84", 84)):
         continue
     txt = ansi.sub("", open(p, errors="replace").read())
     rows = ROW.findall(txt)
-    bad = next((int(s) for s, l, g in rows if l in ("nan", "inf") or g in ("nan", "inf")), None)
+    # TERMINAL means the LOSS went non-finite -- the run is over. A non-finite
+    # GRAD_NORM is survivable: trainer.py:1063 skips the optimizer step and
+    # training resumes. Conflating them made the first run of this script
+    # report "L72 failed" when L72 completed all 60 steps with a finite loss
+    # and one transient gradient event at step 55.
+    bad = next((int(s) for s, l, g in rows if l in ("nan", "inf")), None)
+    events = [int(s) for s, l, g in rows if g in ("nan", "inf")]
     finite = [float(g) for _, _, g in rows if g not in ("nan", "inf")]
     out[label] = {
         "depth": depth,
         "steps": len(rows),
         "nan_at": bad,
+        "events": events,
         "max_gn": max(finite) if finite else None,
         "last_gn": finite[-1] if finite else None,
     }
 
-print(f"{'arm':>5} {'depth':>6} {'steps':>6} {'NaN at':>7} {'max gn':>9} {'last gn':>9}")
+print(f"{'arm':>5} {'depth':>6} {'steps':>6} {'events':>7} {'died at':>8} {'max gn':>9}")
 for k in ("L48", "L72", "L84"):
     v = out[k]
     if v is None:
         print(f"{k:>5} {'-':>6} {'MISSING':>6}")
         continue
     print(f"{k:>5} {v['depth']:>6} {v['steps']:>6} "
-          f"{str(v['nan_at']) if v['nan_at'] else 'none':>7} "
-          f"{v['max_gn'] if v['max_gn'] is not None else float('nan'):>9.2f} "
-          f"{v['last_gn'] if v['last_gn'] is not None else float('nan'):>9.2f}")
+          f"{len(v['events']):>7} "
+          f"{str(v['nan_at']) if v['nan_at'] else 'survived':>8} "
+          f"{v['max_gn'] if v['max_gn'] is not None else float('nan'):>9.2f}")
+    if v["events"]:
+        print(f"        event steps: {v['events']}")
 
 got = [v for v in out.values() if v]
 print()
 if len(got) < 3:
     print("VERDICT: incomplete -- an arm did not run. No conclusion.")
 else:
+    # counts are the result; "died" is a separate, stricter fact
+    counts = {v["depth"]: len(v["events"]) for v in got}
+    print(f"  EVENT COUNTS by depth: {counts}")
+    seq = [counts[d] for d in sorted(counts)]
+    if seq == sorted(seq) and seq[0] < seq[-1]:
+        print("  Event count is MONOTONE in depth -- the rate scales with depth.")
     nans = {v["depth"]: v["nan_at"] for v in got}
     failed = {d: s for d, s in nans.items() if s}
     if not failed:

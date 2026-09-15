@@ -1,0 +1,89 @@
+#!/bin/bash -l
+#PBS -A datascience
+#PBS -q workq
+#PBS -l select=64
+#PBS -l walltime=05:00:00
+#PBS -l filesystems=tegu:home
+#PBS -N 80b-wall
+#PBS -j oe
+set -o pipefail
+
+# THE 80B question Sunspot CAN answer.
+#
+# The dp-ceiling ladder needs Aurora (min 256 nodes there; job 8766066).
+# But the WALL-1 NaN reproduces at dp=192 = 64 nodes at TP=4, which fits here.
+#
+# State of play: fp32 activations FIX the dp=192 NaN (job 12473149, 120/120
+# clean where bf16 died at step 30) -- but cost 3.4x throughput. That is a
+# brutal price for a production run. Three cheap score-bounding alternatives
+# exist in the registry and NONE has ever been run at the wall:
+#   agpt_80b_softcap         (Gemma-2 tanh logit cap, +/-30)  -- 0 docs
+#   agpt_80b_qknorm_softcap  (both levers)                    -- 0 docs
+#   agpt_80b_qknorm          (RMSNorm on Q,K per head)        -- 1 doc, never at 64N
+#
+# ARM 0 IS A CONTROL. If plain bf16 does NOT NaN today, every "fix" that
+# passes is meaningless -- the wall has to be standing before you test doors.
+# This is the mistake that produced a false 'fix confirmed' earlier in this
+# campaign, so the control runs FIRST and its verdict gates the reading.
+#
+# NOTE the registry variants default to tensor_parallel_degree=2. At 64 nodes
+# that is dp=384, NOT the dp=192 where the NaN was characterised. TP=4 is
+# passed explicitly on every arm so all four sit at the same dp.
+#
+# 60 steps: every recorded 80B bf16 NaN appeared by step 38 (14/17/19/30/38),
+# so 60 gives ~1.6x margin past the latest one.
+
+cd /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan || exit 1
+module use /opt/aurora/26.181.0/modulefiles
+module load frameworks/2026.1.0
+source venvs/fw-2026.1-rc2/bin/activate
+unset PYTHONPATH
+
+CFG_OK=0
+python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry" 2>/dev/null && CFG_OK=1
+[ "$CFG_OK" = "1" ] || { echo "ABORT: config_registry import failed"; exit 1; }
+
+LOGD="$PWD/outputs/logs/80b-wall/$PBS_JOBID"; mkdir -p "$LOGD"
+echo "avail nodes: $(sort -u "$PBS_NODEFILE" | wc -l)"
+
+arm() {  # arm <label> <config>
+  local label="$1" cfg="$2" log="$LOGD/$label.log"; : > "$log"
+  timeout 4200 ezpz launch --nproc 768 -ppn 12 -- \
+    python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt --config "$cfg" \
+      --training.steps=60 --training.seq-len=8192 \
+      --training.local-batch-size=1 \
+      --parallelism.tensor-parallel-degree=4 \
+      --optimizer.param-groups.0.optimizer-kwargs.lr=1e-6 \
+      --lr-scheduler.warmup-steps=200 \
+      --checkpoint.no-enable --compile.no-enable \
+      --dataloader.num-workers=2 > "$log" 2>&1
+  local rc=$? steps nan first_nan last
+  steps=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -acE "step: *[0-9]+ +loss:")
+  nan=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -acE "loss: *nan|grad_norm: *nan")
+  first_nan=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "step: *[0-9]+ +loss: *nan" | head -1 | grep -oE "[0-9]+" | head -1)
+  last=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -aoE "step: *[0-9]+ +loss: *[a-z0-9.]+" | tail -1)
+  local verdict
+  if   [ "$steps" -eq 0 ];  then verdict="VOID (never trained)"
+  elif [ "$nan" -gt 0 ];    then verdict="NaN@step${first_nan:-?}"
+  elif [ "$steps" -ge 60 ]; then verdict="CLEAN 60/60"
+  else                           verdict="INCOMPLETE ($steps/60)"; fi
+  printf "RESULT %-22s rc=%-4s steps=%-3s nan=%-3s %-18s %s\n" \
+    "$label" "$rc" "$steps" "$nan" "$verdict" "$last"
+  [ "$steps" -eq 0 ] && sed 's/\x1b\[[0-9;]*m//g' "$log" \
+    | grep -aoE "(RuntimeError|ValueError|OutOfMemory[A-Za-z]*|AssertionError): .*" | sort -u | head -2 | sed 's/^/       /'
+}
+
+echo ""
+echo "########## 80B Wall-1 at dp=192 (64N, TP=4, bf16, LBS=1) ##########"
+echo "## arm 0 is the CONTROL: it MUST NaN, or the rest proves nothing"
+arm "control-bf16"     agpt_80b
+arm "softcap"          agpt_80b_softcap
+arm "qknorm"           agpt_80b_qknorm
+arm "qknorm-softcap"   agpt_80b_qknorm_softcap
+
+echo ""
+echo "  reference: bf16 NaN'd at step 30 here (job 12473142);"
+echo "             fp32-acts ran 120/120 clean but at 3.4x the cost."
+echo "  READ THE CONTROL FIRST -- a clean control invalidates every other row."
+echo "80B_WALL_DONE"

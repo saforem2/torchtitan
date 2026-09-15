@@ -68,6 +68,50 @@ double-counts the four category rollups (`mmlu_stem`, `mmlu_other`,
 `mmlu_social_sciences`, `mmlu_humanities`) alongside the 57 subjects, and
 reads ~0.005 high.
 
+## The flagship number, verified from the artifact (2026-09-01)
+
+0.2579 had been cited across four documents without anyone re-opening the file
+it came from. Read directly:
+
+```
+/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/
+  outputs/evals/agpt-2b-v2-512n-ropefix/step-46429/results/results.json
+```
+
+| quantity | value |
+|---|---|
+| lm-eval `mmlu` group key | **0.25787 +/- 0.00369** |
+| leaf macro over 57 subjects | 0.2631 |
+| subjects above 0.25 | 34 / 57 |
+| range | 0.1696 - 0.3385 |
+| `n-shot` | **unrecorded** |
+| HellaSwag / ARC-C / ARC-E / Winogrande | 0.5384 / 0.3148 / 0.6132 / 0.5201 |
+
+**The published 0.2579 is correct.** It sits below always-D (0.2689) and above
+always-B (0.2465) -- inside the constant-letter band, as the letter-prior model
+predicts.
+
+Two things the artifact settles that the docs could not:
+
+* **The leaf macro is 0.2631, exactly 0.005 above the group key** -- the
+  category-rollup double-count, confirmed on real data rather than argued from
+  key names.
+* **`n-shot` is unrecorded in the file.** This eval predates the persistence
+  fix (`5ab9e50f6`), so the shot count still cannot be verified from the
+  artifact for this checkpoint.
+
+**Where it lives is itself worth recording.** These evals are under
+`/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz`, NOT the
+`runs/agpt-2b-v2/torchtitan-ezpz` path that `eval-2b-v2.sh` sets as
+`V2_REPO`. The latter holds only `agpt-2b-v2-256n/step-92859/hf` -- an HF
+export with no eval results. Searching the documented path finds nothing,
+which is why this artifact was unreachable for the whole prior session.
+
+**A chain-attribution trap while reading these:** HellaSwag is 0.5384 for
+2B-512 @4.674T (this file), 0.561 for 2B-256 @step-92,859 (docs), and ~0.61 for
+the 20B @604B (eval-landscape table). Three models, three numbers, all correct.
+Do not carry one chain's benchmark to another.
+
 ## Why this is not an eval bug
 
 Every plumbing hypothesis was checked and came back clean:

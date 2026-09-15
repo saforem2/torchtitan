@@ -39,6 +39,22 @@ cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/to
 # V2_REPO controls where the DCP checkpoints LIVE (env-overridable so we
 # can also eval ckpts in the legacy /flare/.../projects/saforem2/torchtitan/
 # clone, where the chain pre-2026-04-30 was written).
+# WHERE THE EVALS ACTUALLY ARE. This default points at runs/agpt-2b-v2, which
+# on Aurora holds only agpt-2b-v2-256n/step-92859/hf -- an HF export with NO
+# eval results. Every flagship 512n eval, including the ropefix re-scores, is
+# under a DIFFERENT clone:
+#
+#   /flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/evals/
+#     agpt-2b-v2-512n/            agpt-2b-v2-512n-ropefix/
+#
+# e.g. the flagship terminus is
+#   .../agpt-2b-v2-512n-ropefix/step-46429/results/results.json
+#   (mmlu 0.25787 +/- 0.00369, verified 2026-09-01)
+#
+# Searching the path below finds nothing, which is how that artifact stayed
+# unreachable through a whole session of looking for it. The default is left
+# alone because it is the CHECKPOINT source for conversion; override V2_REPO
+# when you want the eval outputs.
 V2_REPO="${V2_REPO:-/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz}"
 # USE_LEGACY_CONVERTER=1 -> call convert_to_hf_legacy.py (handles the
 # pre-qkv_linear FQN layout used by ckpts in the legacy clone). Default 0

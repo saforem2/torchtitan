@@ -2,7 +2,204 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR clears every prior onset step
+## 2026-09-08 (sunspot) -- `lm_head` is dp-invariant: the gradient concentration has a mechanism, and four curve fits were wrong
+
+The machine came back (113 of 129 free, all 29 mount-check offlines cleared, a
+full survey returning 110 good / 0 bad), which made the dp question testable
+for the first time.
+
+- **The headline: `lm_head.weight`'s gradient norm is FLAT across a 16x change
+  in data parallelism.** Five arms at dp 12/24/48/96/192, matched on GBS,
+  seed, LR trajectory, optimizer and model:
+
+  ```
+  mean layer gradnorm  ~  dp^-0.394
+  max (lm_head)        ~  dp^-0.013      (0.2536 -> 0.2457, flat to 3%)
+  ```
+
+  So the concentration does not grow because `lm_head` grows -- **it grows
+  because everything else averages away and `lm_head` does not.** State the
+  components; the skew ratio is derived and misleads.
+
+- **Ordinary layers average at -0.394, not the -0.5 of independent sampling.**
+  dp-rank gradients are correlated, now quantified.
+
+- **`tok_embeddings` is the control that makes this interesting.** Same shape
+  as `lm_head` (vocab x dim, the two largest tensors), never once in the top-5
+  at any dp. Not "big tensor, big gradient". And the 80B is untied --
+  `enable_weight_tying` appears once in the registry, in `agpt_2b_tied` -- so
+  they are genuinely separate tensors.
+
+- **Four functional forms, four overturns.** 2 points said log-linear
+  (predicted 172.7, got 162.3), 3 said decelerating (predicted 116.6, got
+  131.2), 4 said a power law dp^0.358 (predicted 101.4, got 93.2), 5 fit
+  nothing better than 4.3% against a 0.7% noise floor. Each described its own
+  data and failed out of sample. **The monotonic finding survived all four
+  revisions; the shape claim was wrong every time.** Skew is a ratio of two
+  quantities with different scalings -- it looks like a clean power law over
+  any two points and like nothing over five. I have stopped proposing forms.
+
+- **The mechanism, with a test that can kill it.** `lm_head`'s gradient is
+  predicted-minus-true summed over the vocabulary; early in training the
+  prediction is near-uniform on every rank regardless of which tokens it saw,
+  so the dominant term is common-mode and does not average. All five arms sit
+  at loss 12.86-12.96 against ln(256128) = 12.45 -- barely past uniform. Job
+  `12474810` descends at lr=1e-6 (which took `12473149` from 12.95 to 8.098)
+  and tracks skew WITHIN one run. **Flat skew from 12.9 to ~8 falsifies the
+  explanation** and would make the invariance structural, which is the more
+  interesting outcome.
+
+- **A retraction I had to withdraw.** I claimed `8540102` inherited
+  `agpt()`'s `lr=8e-4` because its writeup states no LR, and retracted a sound
+  experiment on that basis. Wrong: the 80B submit script sets
+  `LR="${LR:-1e-6}"` and passes `--optimizer.lr` explicitly, so the registry
+  default is unreachable by that path. **A writeup that states no LR means
+  1e-6.** An audit commissioned to find MORE LR-voided failures found none --
+  all six checked ran at 1e-6 or below.
+
+- **Two "trends" that were artifacts.** "Runner-up layers migrate toward the
+  input as dp rises" was one anomalous arm (mean layer index 39/44/**10.6**,
+  not a gradient). "dp=24 skew is drifting monotonically" was the same
+  up-up-down-up wobble every arm shows in its first five steps. Both caught by
+  computing a summary statistic instead of reading three numbers.
+
+- **Still confounded:** dp and GAS move together at fixed GBS
+  (GBS = 4096 x dp x GAS), so all of the above is strictly "dp with inverse
+  GAS". `12474809` holds dp=192 and moves GAS 2 -> 1 to separate them.
+
+## 2026-09-07 (sunspot) -- the 80B failure is not caused by its LR trajectory or its batch size; gradient mass lives in `lm_head.weight`
+
+Continues the 2026-09-06 entry below, after the machine was made usable again.
+
+- **`lm_head.weight` carries 44x the gradient norm of any other tensor**, and
+  the whole ranking is frozen: `lm_head`, then `attention.wo` from layers 65,
+  36, 57, 5 -- same order every step, though ranks 1-4 sit within 2% of each
+  other. Values that close would reorder constantly under noise. They never
+  do, so this is structure, not scatter.
+
+  **It is outside the transformer stack.** Softcap and QK-Norm, the two routes
+  on the standing list, both bound attention scores *inside* the blocks and
+  neither touches the output head. If the failure originates there, they were
+  never going to bound it.
+
+  This had been measured five times and never named -- `collect_param_stats`
+  computed the layer name and discarded it. Found by driving the capture with
+  a poisoned gradient, not by reading it.
+
+- **`8574385` died at an effective LR of 3.87e-9** -- four orders of magnitude
+  BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents. Reading the flag would
+  never have shown this; it took computing `peak * n / warmup` at the death
+  step. The 80B's real failure is not an over-large learning rate, which
+  retires the framing every prior 80B run was built around.
+
+- **The LR trajectory alone does not cause it.** `12474765` ran 25/25 steps
+  clean at that exact trajectory -- 3.87096768e-09 at step 18 against an
+  intended 3.871e-09, exact to 9 significant figures -- same optimizer, same
+  GBS. So the failure is not a deterministic function of (LR trajectory, GBS,
+  optimizer, step count) alone.
+
+- **Batch size is not the variable either, at dp=96.** Two arms differing ONLY
+  in GBS (6,144 vs 384 seqs, same nodes, same dp, same LR): means agree to
+  **0.03-0.20%**, variances scale **2.75-4.33x**. Those ratios sit on
+  **sqrt(16) = 4** -- exactly what sampling noise predicts for a 16x batch
+  reduction, three of four within 8%. The batch does what averaging says and
+  nothing more. No run in this investigation had previously varied GBS with dp
+  held fixed; the 2026-08-31 attempt varied both and was void for it.
+
+- **What is left: dp (96 vs ~1530) or the seed.** A materially narrower
+  question than the session started with.
+
+- **Clipping fires on 100% of steps** (`preclip ~8.07 -> postclip 1.0`), so
+  every grad_norm in the record -- ours and `8574385`'s documented "flat
+  ~6.17" -- is the pre-clip value. The optimizer never saw it. And one `inf`
+  zeroes every *other* gradient (`scale = max_norm/inf = 0`) while the
+  offender becomes `nan`, which is both why a run can recover from a
+  non-finite step and a second way to identify the culprit: post-clip,
+  exactly one tensor is non-finite among all-zeros.
+
+- **Method note.** Three separate mechanisms let a broken run report success
+  tonight -- a warmup clamp whose banner echoed the unclamped value, a capture
+  that logged aggregates as if they named tensors, and an inner `timeout`
+  shorter than the walltime exiting 0. Plus two tools I wrote and had to fix.
+  Every one was found by driving code or comparing outputs; none by reading.
+  Recorded in [[project_runs_that_fail_successfully]].
+
+## 2026-09-06 (sunspot) -- every job silently requeued for hours; the cause was nodes PBS calls healthy, and the fix exposed that the 80B dies at an LR four orders below its documented ceiling
+
+- **Nothing could launch, and nothing said so.** Multi-node jobs cycled
+  `Q -> R -> E -> Q` with `Exit_status = -3`, no output file, no log
+  directory, no error. The 80B capture reached **`run_count = 21`** without
+  executing a line before PBS system-held it. `-3` is "exec failed, requeue",
+  and the requeue is what makes it silent: the job looks queued, not broken.
+- **The cause was in the node comments, not the job.** The PBS prologue
+  mount-checks every filesystem named in `#PBS -l filesystems=`; a failure
+  offlines the node and requeues the job. 29 nodes were down for
+  `home not mounted`, all from other users' jobs, ongoing since Sep 4.
+- **Ladder the scale with a TRIVIAL payload.** 1N `echo` ran clean; 64N `echo`
+  requeued exactly like the real job. That is what rules out your script, and
+  without it the evidence pointed at qdel-and-resubmit, which would have fixed
+  nothing.
+
+- **I published three fixes that testing then refuted.** Each read as obviously
+  correct:
+  1. *Drop `home` from `filesystems=`.* Refuted by a matched 8N pair -- the
+     probe that REQUESTED `tegu:home` ran fine. The flag was never the
+     variable. I had already committed and pushed it.
+  2. *Rack x1921 is the ceiling.* Refuted -- a 16N job drew all 16 nodes from
+     x1921 and started fine.
+  3. *Host pinning is sufficient.* Refuted -- the pinned 64N launched
+     perfectly (768/768 GPUs) and died at **0 training steps**.
+- **`free` is not `usable`.** The pinned run was killed by `x1922c7s2b0n0`,
+  which reports `state = free` with **no comment** and on which `/lus/tegu` is
+  unreachable. A rank there cannot `cd` to the repo, python is not found, it
+  exits 127, and mpiexec tears down all 768. **No `pbsnodes` query finds
+  these.** Six such nodes now known, in both racks.
+- **So filter by an access test, not by scheduler state.**
+  `scripts/cluster/survey_nodes.sh` stats a repo path from every candidate and
+  keeps the ones that answer; it rediscovered the killer node independently.
+  68 nodes verified. Survey in small batches -- a 70-node survey requeues on
+  the same lottery it exists to map.
+
+- **The warmup clamp voids any short reproduction, and the banner lies about
+  it.** torchtitan clamps `warmup_steps` to `total_steps`
+  (`lr_scheduler.py:105-112`) with only a warning, and the trainer banner
+  prints the UNCLAMPED value on the very next line:
+
+  ```
+  [W] Warmup steps (4650) exceed total steps (25). Adjusting warmup steps to 25.
+  [I] Trainer is initialized with ... total steps 25 (warmup 4650)
+  ```
+
+  Checking the banner -- the natural place to look -- confirms the wrong
+  number. Shortening a run makes the clamp TIGHTER, so my "warmup-matched"
+  25-step run was at **186x** the original LR, worse than the 116x run it
+  replaced. Matching honestly needs ~2325 steps = **~55 days** at 34 min/step.
+- **Fix: rescale the peak instead of fighting the clamp.** Under linear warmup
+  `lr(n) = peak * n / warmup`, so `5.376344e-09` with warmup 25 reproduces
+  `1e-6` with warmup 4650 **exactly** -- verified to 2.2e-16 across steps 1-25.
+
+- **THE FINDING. `8574385` died at an effective LR of 3.87e-9.** That is four
+  orders of magnitude BELOW the ~7.4e-7 ceiling `agpt_80b.md` documents.
+  **The 80B's real failure is not an over-large learning rate.** Reading the
+  flag would never have shown this; it took computing the effective schedule
+  the flag produced. Every prior 80B run at 8e-4 was void on its own terms --
+  this configuration is the one that was always worth instrumenting.
+
+- **A run that fails its designed purpose is not automatically waste.** I was
+  about to kill the clamped job. Computing what it IS doing showed it ramps
+  4e-8 -> 1e-6, crossing the documented ceiling at step 18.5 with the capture
+  armed -- a real test of whether that ceiling transfers to SophiaG. Kept it.
+- **Ended with two concurrent 32N captures** (`12474733` fixed-LR stability,
+  `12474740` ceiling sweep), per-layer diagnostics confirmed emitting, and
+  `80b_capture_rescaled.pbs` ready as the true reproduction. First 80B
+  training steps of the day: loss 12.95721 -> 12.94267, grad_norm ~8.03, zero
+  non-finite events.
+- **Still open:** the ALCF ticket is drafted and unsent (29 nodes stay offline
+  until it goes), and 64 upstream commits are pending -- `#4398`
+  (valid-token counts in collation) and the checkpoint cluster
+  (`#4187/#4188/#4197/#4270/#4474`) are the ones that touch our paths.
+
+## 2026-08-31 (sunspot) -- muP LR transfer confirmed at production width; SophiaG at half LR DELAYS divergence 4x but does not prevent it
 
 - **muP stage 4 answered the question the coordinate check could not.** A
   passing coordinate check proves the parametrization is internally
@@ -69,6 +266,79 @@ Running log of what's happening, session by session. Most recent first.
   excess loss grows 5.58x and 27.91x where the unscaled count grows 2x and 4x,
   roughly the square. Three points cannot fit an exponent, so section 5.8 says
   so rather than proposing one.
+- **The 80B "root cause" does not survive examination, and the depth bisect
+  that would test it had never been run.** Asked to state definitively why the
+  80B NaNs, I went back through the evidence. The documented mechanism (bf16
+  accumulation in the 84-layer residual stream) fails three independent ways:
+  bf16 and fp32 share an 8-bit exponent (3.3895e38 vs 3.4028e38, MEASURED), so
+  fp32 cannot fix a range problem; fp32-ing the residual add -- the direct
+  test -- fails to prevent the NaN; and the "bf16 masks true grad_norms of
+  21K-79K down to ~5-7" smoking gun describes an operation that does not exist
+  (bf16 holds those values to 0.29%, and overflow yields inf, which propagates
+  through a norm). The run underpinning it all (`8537349`) ran at n32/GBS=96,
+  inside the regime where bf16 also trains clean -- retracted 2026-08-14 and
+  never propagated to the meeting notes.
+  [known-bugs/80b-nan-what-we-know.md](guides/known-bugs/80b-nan-what-we-know.md).
+- **muP 30B stage 5 COMPLETE: 1,081 steps, loss 11.99 -> 3.85, zero NaN,
+  `Exit_status=0`.** The first sustained muP run at production width (dim
+  6144), across three chained links with clean `rc=124` resumes between them.
+  All 51 grad_norm excursions above 2.0 sit in the warmup window -- binned
+  into 50-step buckets the rate is 42/49 in window 0, 9/50 in window 50, then
+  **zero from step 100 onward** with max decaying 1.61 -> 1.26. Peak 38.34 is
+  a step-6-to-8 initialization transient, not instability.
+
+  This is the payoff of the stage-4 transfer result: the parametrization was
+  validated by coordinate check and by a discrete-grid LR sweep at 1536/3072/
+  6144, and it now trains at production width without special handling.
+
+- **RETRACTED SAME DAY: the bisect and the GAS sweep both ran at lr=8e-4,
+  ~1000x past the documented ~7.4e-7 ceiling.** Their step-2 blow-ups are that,
+  not a finding -- the depth counts, the "GBS not dp" conclusion and the
+  frozen-at-43 reading are all invalidated. The control (job `12474431`) at
+  **lr=5e-7** trains clean on the same 64 nodes: 12 steps, 0 events, loss
+  12.948 -> 12.795, grad_norm 7.9. What survives is the refutation of the
+  stated MECHANISM and the magnitude measurements, neither of which depends on
+  the LR. `agpt_80b`'s docstring now warns about the default.
+- **The bisect ran (job `12474403`) and found a real depth effect that is NOT
+  the stated one.** Three arms, identical but for depth, at dp=192 / TP=4 --
+  the exact configuration where three prior runs NaN'd:
+
+  | arm | layers | grad events | loss NaNs | final |
+  |---|---:|---:|---:|---|
+  | L48 | 48 | 0 | 0 | loss 6.54, healthy |
+  | L72 | 72 | 1 | 0 | loss 6.80, healthy |
+  | L84 | 84 | 8 | 2 | loss 6.66, healthy |
+
+  Transient non-finite gradients occur at a rate that scales monotonically
+  with depth. And `qk_q_absmax_local` reads **61.2 at all three depths**
+  (62.25 at dp=12 in the clean regime) -- 36 orders below the bf16 ceiling,
+  with `grad_absmax` peaking at 0.03. Overflow is now refuted by measurement
+  in the failing regime, not only by argument.
+- **I reported twice that the deepest arm died. It did not, and both the claim
+  and the mechanism I built on it are withdrawn.** L84's loss went non-finite
+  at steps 40 and 59 and recovered immediately each time (step 41: loss 6.98,
+  grad_norm 7.42; step 60: loss 6.66, grad_norm 3.73). I read the failure off
+  step 40 without reading step 41, then derived "two back-to-back events are
+  fatal" from it and called the mechanism conclusive. **No arm died; the
+  production failure was not reproduced.** How a run actually terminates is
+  open again -- 60 steps at this batch was not enough, and the production
+  failures were at production batch, which the bisect held fixed.
+- **The one step that mattered had no data, and now does.** `trainer.py`
+  zeroed the gradients ~90 lines before the diagnostics ran, so a non-finite
+  step logged one error line and nothing else -- L72's step-55 event is absent
+  from W&B while 51-54 and 56-57 logged normally. Fixed (`f01548f6a`):
+  `collect_param_stats(per_layer=True)` now runs inside the non-finite branch
+  before zeroing, and separately logs the metrics that are themselves
+  non-finite, which name the affected tensors. 6/6 tests. Which tensor goes
+  first is the remaining unknown, and the next 80B run at dp=192 records it.
+- **CORRECTED 2026-09-02: the half-LR arm DIVERGED at step 4163.** It
+  cleared the four early onsets AND the 4106 test point, then blew up 50
+  steps later (peak **4,341**, 30 excursions, final 5,083 steps). Halving
+  the LR moves the onset 1048 -> 4163 and cuts the peak 100,611 -> 4,341:
+  a ~4x delay and a ~23x smaller spike, **not prevention**. I published
+  "resolved" minutes after it passed 4106 while it was still running --
+  a pre-registered threshold stops you moving goalposts, not declaring
+  victory on crossing one.
 - **SophiaG at half LR (1.78e-5) cleared all four prior onset steps** --
   1,052 in-window steps, **zero** excursions, max grad_norm 0.94, loss 2.879 at
   step 1579. First arm to get past 1048.
