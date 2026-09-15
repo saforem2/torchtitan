@@ -976,15 +976,28 @@ class FaultTolerantTrainer(Trainer):
         # INNER level is pipeline microbatches (the PP schedule consumes a
         # whole group at once). `num_pipeline_parallel_microbatches` is 1
         # whenever PP is off, so with PP disabled this is exactly the old
-        # flat `gas` loop -- one (input_dict, labels) pair per group.
-        microbatch_groups: list[list[tuple[dict[str, torch.Tensor], torch.Tensor]]] = []
+        # flat `gas` loop -- one batch dict per group.
+        #
+        # #4572 merged labels INTO the batch dict and #4398 added a
+        # precomputed num_valid_tokens, so core's batch_generator (which we
+        # call at :1484) now yields ONE dict rather than an (input_dict,
+        # labels) pair. Mirror core's train_step (trainer.py:888-891): pop the
+        # count, keep labels in the dict for preprocess_inputs. Fall back to
+        # counting when the key is absent, so a loader that has not been
+        # updated still works rather than KeyError-ing.
+        microbatch_groups: list[list[dict[str, torch.Tensor]]] = []
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
             microbatches = []
             for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
-                input_dict, labels = next(data_iterator)
-                local_valid_tokens += (labels != IGNORE_INDEX).sum()
-                microbatches.append((input_dict, labels))
+                input_dict = next(data_iterator)
+                if "num_valid_tokens" in input_dict:
+                    local_valid_tokens += input_dict.pop("num_valid_tokens")
+                else:
+                    local_valid_tokens += (
+                        input_dict["labels"] != IGNORE_INDEX
+                    ).sum()
+                microbatches.append(input_dict)
             microbatch_groups.append(microbatches)
 
         # All-reduce to get global token count across DP ranks
@@ -1012,26 +1025,25 @@ class FaultTolerantTrainer(Trainer):
         accumulated_losses = []
         for microbatches in microbatch_groups:
             input_dict_mbs = []
-            label_mbs = []
-            for input_dict, labels in microbatches:
-                # Move tensors to GPU
+            for input_dict in microbatches:
+                # Move tensors to GPU. labels now rides inside the dict
+                # (#4572), so this one loop covers it too.
                 for k, v in input_dict.items():
                     if isinstance(v, torch.Tensor):
                         input_dict[k] = v.to(self.device)
                 input_dict_mbs.append(input_dict)
-                label_mbs.append(labels.to(self.device))
 
             if parallel_dims.pp_enabled:
                 fwd_bwd_input_dict = input_dict_mbs
-                fwd_bwd_labels = label_mbs
             else:
-                assert len(input_dict_mbs) == len(label_mbs) == 1
+                assert len(input_dict_mbs) == 1
                 fwd_bwd_input_dict = input_dict_mbs[0]
-                fwd_bwd_labels = label_mbs[0]
 
+            # #4572 also dropped the `labels=` parameter from
+            # forward_backward_step; preprocess_inputs pulls labels out of the
+            # dict itself (trainer.py:772-774).
             loss = self.forward_backward_step(
                 input_dict=fwd_bwd_input_dict,
-                labels=fwd_bwd_labels,
                 # pyrefly: ignore [bad-argument-type]
                 global_valid_tokens=global_valid_tokens,
             )

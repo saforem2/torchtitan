@@ -122,10 +122,17 @@ class EzpzValidator(Validator):
 
         validation_dataloader = self._get_validation_dataloader()
 
-        for input_dict, labels in validation_dataloader:
+        # #4572 merged labels into the batch dict, so the loader yields ONE
+        # dict now. #4398 added num_valid_tokens; pop it like core does
+        # (components/validate.py:184) so the batch reaching the model holds
+        # only model kwargs. The count is recomputed below either way, so the
+        # pop is about not leaking a non-tensor into the forward.
+        for input_dict in validation_dataloader:
             if self.config.steps != -1 and num_steps >= self.config.steps:
                 break
 
+            input_dict.pop("num_valid_tokens", None)
+            labels = input_dict.pop("labels")
             self.metrics_processor.ntokens_since_last_log += labels.numel()
             for k, v in input_dict.items():
                 input_dict[k] = v.to(device_type)
