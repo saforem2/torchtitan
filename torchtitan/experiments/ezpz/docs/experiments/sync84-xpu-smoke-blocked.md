@@ -28,6 +28,32 @@ Nothing else on the machine helps: no venv under
 `AuroraGPT/foremans/.../torchtitan/venvs/` imports torch >= 2.13, and there is
 no 2.13 XPU wheel staged to build one from.
 
+## The `validation` queue does not help either -- two independent reasons
+
+Checked because the RC quickstart
+([aurora-quickstart-frameworks-rc.md](../guides/aurora-quickstart-frameworks-rc.md))
+is written around it ("qsub -q validation ... -l select=2 -I").
+
+**1. No access.** `foremans` is not in its `acl_users` (35 users, exact-matched
+two ways). Queues actually open to us: `debug`, `debug-scaling`, `small`,
+`medium`, `large`, `alcf_daos_cn`. Denied: `validation`, `run_next`.
+
+**2. The module it depends on is gone anyway.** That guide pins
+`FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0`. The entire
+`/opt/aurora/26.181.0` release no longer exists -- only `25.190.0`, `26.26.0`,
+and `default` remain. So even with queue access, `module load
+frameworks/2026.1.0` has nothing to load.
+
+**The RC quickstart guide is therefore stale end to end** -- both its queue and
+its module are unavailable. It should not be followed as written until a
+torch-2.13 stack returns.
+
+> Parsing note: `qstat -Qf` wraps `acl_users` across lines with a leading tab.
+> A naive `grep -c foremans` on the wrapped output returns 1 (substring hit on
+> another username) and reads as "you have access". Unwrap with
+> `tr -d '\n\t '` and match with `grep -x`. Same trap as the Sunspot
+> `qstat` line-wrapping bug.
+
 ## What is NOT the problem
 
 - **Queue access.** 977 nodes free; `debug-scaling` enabled, 1h max walltime,
