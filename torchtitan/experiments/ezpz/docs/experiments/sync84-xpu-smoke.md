@@ -149,6 +149,39 @@ root-caused this on 2026-08-20.
 ezpz's workaround was to pin `partial_dtensor`. **#4419 deleted that backend**,
 so the escape hatch is gone.
 
+### The baseline settles it: pre-merge TRAINS, merged does not
+
+`8829243`, pre-merge tree, same machine / venv / script / seed as `8829185`:
+
+```
+VERDICT: ok        all three arms rc=0, ZERO DTensor errors
+
+1-agpt_debugmodel  TP=1   10.88382  10.75382  10.48337
+2-agpt_debugmodel  TP=2   10.88071  10.70248  10.56243
+3-moe_debugmodel          12.90379  12.57026  11.45320
+```
+
+Merged, identical conditions: dead in FSDP setup on all three arms, 23 ranks
+each. **The trees differ on one line** -- `config_registry.py:252` pins
+`partial_dtensor` pre-merge, and #4419 deleted both the pin and the backend.
+
+The TP=2 arm passing matters on its own: that is the configuration the #4533
+local_map contract asserts under, so there is now a known-good reference to
+diff the merged tree against once it can run.
+
+### No configuration workaround exists
+
+Re-pinning is not an option. In merged core:
+
+```
+partial_dtensor references:  0
+spmd_backend  references:  0   (config field deleted outright)
+```
+
+The backend is removed, not merely unselected -- there is no flag, no config
+field, nothing to set. The merged tree cannot be made to train on Aurora by
+configuration alone.
+
 ### This is a TORCH FLOOR, not a defect in the sync ports
 
 The two trees differ on exactly one relevant line:
