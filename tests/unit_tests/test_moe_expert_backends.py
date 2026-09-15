@@ -11,9 +11,15 @@ import torch.nn.functional as F
 from torch.testing import assert_close
 
 from torchtitan.models.common.config_utils import make_ffn_config
-from torchtitan.models.common.moe import (
-    GroupedExperts,
-    _run_experts_batched_mm_padded,
+from torchtitan.models.common.moe import GroupedExperts
+
+# The padded batched-mm backend lives in the ezpz experiment, not in core.
+# Upstream's Aurora MoE branch puts it in torchtitan/models/common/moe.py;
+# we keep core untouched, so it is `_run_experts_bmm_nodrop` here. The
+# rename is deliberate -- it names the property that distinguishes it from
+# our capacity-limited `_run_experts_bmm`, which DOES drop overflow tokens.
+from torchtitan.experiments.ezpz.moe.experts import (
+    _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
 )
 from torchtitan.models.common.token_dispatcher import LocalTokenDispatcher
@@ -130,11 +136,17 @@ class TestMoEExpertBackends(unittest.TestCase):
         num_tokens_per_expert = torch.tensor([4, 0, 3, 1, 2], dtype=torch.int64)
         total_tokens = int(num_tokens_per_expert.sum().item())
 
-        w1 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.float32)
-        w2 = torch.randn(num_experts, dim, hidden_dim, dtype=torch.float32)
-        w3 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.float32)
-        x = torch.randn(total_tokens, dim, dtype=torch.float32)
-        grad_out = torch.randn(total_tokens, dim, dtype=torch.float32)
+        # bfloat16, not float32. `_run_experts_for_loop` casts its weights
+        # to bf16 internally, so an fp32 comparison measures bf16 rounding
+        # (~3.5e-3 relative) rather than correctness, and fails an
+        # rtol=1e-5 check for a reason that has nothing to do with the
+        # backend. In bf16 -- the dtype production actually runs -- the two
+        # paths agree bit-exactly on the forward and on all four gradients.
+        w1 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.bfloat16)
+        w2 = torch.randn(num_experts, dim, hidden_dim, dtype=torch.bfloat16)
+        w3 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.bfloat16)
+        x = torch.randn(total_tokens, dim, dtype=torch.bfloat16)
+        grad_out = torch.randn(total_tokens, dim, dtype=torch.bfloat16)
 
         ref_w1 = _clone_for_grad(w1)
         ref_w2 = _clone_for_grad(w2)

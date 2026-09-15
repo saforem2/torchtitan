@@ -36,7 +36,7 @@ from torch.utils.checkpoint import checkpoint
 from torchtitan.models.common.moe import GroupedExperts
 
 
-ExpertComputeBackend = Literal["for_loop", "grouped_mm", "bmm"]
+ExpertComputeBackend = Literal["for_loop", "grouped_mm", "bmm", "bmm_nodrop"]
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -208,6 +208,62 @@ def _run_experts_bmm(
     return out_RD.to(x.dtype)
 
 
+def _run_experts_bmm_nodrop(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    """Batched torch.bmm expert compute that drops NO tokens.
+
+    Same batched-GEMM idea as `_run_experts_bmm`, but the padded buffer is
+    sized to the largest actual per-expert count rather than to a capacity
+    derived from `capacity_factor`. Nothing is dropped, so this is the
+    numerically exact choice; the cost is a dynamic leading dimension
+    (`max_tokens` moves with the routing each step), which makes it less
+    friendly to torch.compile than the fixed-capacity `bmm` path.
+
+    Ported from samuelwheeler/torchtitan feature/aurora-moe-training, where
+    it is `_run_experts_batched_mm_padded`. Renamed here so the difference
+    that matters -- drop vs no-drop -- is visible at the call site instead
+    of buried in the implementation. Adapted to our post-#3425 parameter
+    names (w1_EFD/w2_EDF/w3_EFD are unpacked by the caller).
+
+    `x` is assumed sorted by expert, matching the
+    `EzpzGroupedExperts.forward` contract.
+    """
+    counts = num_tokens_per_expert.to(device=x.device, dtype=torch.int64)
+    if counts.numel() == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    max_tokens = int(counts.max().item())
+    if max_tokens == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    num_experts = counts.numel()
+    total_tokens = x.shape[0]
+    device = x.device
+
+    offsets = counts.cumsum(0) - counts
+    expert_indices = torch.repeat_interleave(
+        torch.arange(num_experts, device=device, dtype=torch.int64),
+        counts,
+    )
+    token_indices_within_expert = torch.arange(
+        total_tokens, device=device, dtype=torch.int64
+    ) - torch.repeat_interleave(offsets, counts)
+
+    padded_x = x.new_zeros((num_experts, max_tokens, x.shape[-1]))
+    padded_x[expert_indices, token_indices_within_expert] = x
+
+    h = F.silu(torch.bmm(padded_x, w1.transpose(-2, -1)))
+    h = h * torch.bmm(padded_x, w3.transpose(-2, -1))
+    out_padded = torch.bmm(h, w2.transpose(-2, -1))
+
+    return out_padded[expert_indices, token_indices_within_expert]
+
+
 class EzpzGroupedExperts(GroupedExperts):
     """GroupedExperts variant that selects between expert compute backends.
 
@@ -276,4 +332,6 @@ class EzpzGroupedExperts(GroupedExperts):
             return _run_experts_bmm(
                 w1, w2, w3, x, num_tokens_per_expert, self.capacity_factor
             )
+        if self.compute_backend == "bmm_nodrop":
+            return _run_experts_bmm_nodrop(w1, w2, w3, x, num_tokens_per_expert)
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")
