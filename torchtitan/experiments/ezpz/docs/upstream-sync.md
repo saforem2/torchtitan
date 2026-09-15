@@ -128,6 +128,29 @@ The port is the same either way (all three fields had to change), but the
 wrong diagnosis would have sent someone hunting a loss-curve regression that
 does not exist.
 
+### The checkpoint-retention cluster cannot touch ezpz runs
+
+#4187/#4188/#4190/#4191/#4197/#4270/#4278/#4279/#4292/#4420/#4474/#4528/#4574
+rewrote checkpoint discovery, retention, saves and loads. Given this project
+lost ~334 checkpoints to `keep-latest-k` once, that cluster got checked
+directly rather than reasoned about:
+
+```
+base.py:419-425   _should_purge() returns keep_latest_k > 0 and rank==0 and isdir(folder)
+                  -> keep_latest_k == 0 gates the ENTIRE purge path off
+every ezpz submit script:  CKPT_KEEP_LATEST_K="${CKPT_KEEP_LATEST_K:-0}"
+```
+
+All 10+ submit scripts under `submit/aurora/` and `submit/sunspot/` default it
+to **0**, so `_purge_stale_checkpoints` is unreachable on every ezpz run. Note
+core's own default is **10** (`base.py:566`) -- the ezpz scripts are what
+stands between a run and deletion, and they still do.
+
+A finding claimed the rewrite drops effective retention from 10 to 9. Verified
+otherwise: the purge moved from after the save to before it and now excludes
+the in-flight step (`base.py:482`, "reserve one retained slot for this save"),
+so the two changes compensate exactly. Moot for ezpz either way at k=0.
+
 ### Core's own CPU tests on the merged tree: 753 passed, 33 failed -- ALL environmental
 
 Run for completeness, since the merge changed 542 core files. The 33 failures
