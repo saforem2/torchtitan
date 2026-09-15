@@ -72,6 +72,45 @@ Both trees were confirmed to import 12/12 on the same venv before submitting,
 so a difference in the run is a difference in the code and not in the
 environment.
 
+## Run log
+
+| job | queue | tree | result |
+|---|---|---|---|
+| `8829080` | next-eval | merged | `import_failed` @10s -- **environmental** |
+| `8829104` | next-eval | pre-merge | `import_failed` @10s -- **identical**, rules out the merge |
+| `8829136` | debug-scaling | merged | `IMPORT_OK`, training arms running |
+
+### The next-eval failure was the venv, not the sync
+
+Both trees died with
+
+```
+ModuleNotFoundError: No module named 'torch'
+ModuleNotFoundError: No module named 'importlib.metadata'
+```
+
+A Python 3.12 stdlib module cannot be missing from a working interpreter --
+that second line means the venv's python was not executing at all. Cause, from
+`pyvenv.cfg`:
+
+```
+home = /opt/aurora/26.26.0/spack/.../python-3.12.12-nvje3vk/bin
+```
+
+Base interpreter from the **prod** image; `next-eval` runs the **test** BKC
+(`/opt/aurora/26.181.0`). Verified the complement on a prod node: the same
+interpreter exists and `importlib.metadata` imports fine.
+
+So `next-eval`'s distinct image -- the thing that makes it valuable, since
+`frameworks/2026.1.0` lives only there -- is the same thing that breaks a
+prod-built venv. One fact, two consequences. See
+[[project_aurora_venv_is_bkc_bound]].
+
+**The matched baseline is what made this readable in one glance.** Only the
+merged tree was under test; the pre-merge tree ran purely as a control and
+failed byte-identically. Without it, a 10-second import failure on a fresh
+merge looks like the merge.
+
 ## The rule
 
 **Do not characterize a cluster's software stack from a login node**, and when
