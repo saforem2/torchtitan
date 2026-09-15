@@ -4,7 +4,7 @@
 #PBS -l walltime=01:00:00
 #PBS -l filesystems=flare:home
 #PBS -l select=2
-#PBS -q next-eval
+#PBS -q debug-scaling
 #PBS -j oe
 
 # Aurora twin of sync_smoke.sh: post-upstream-sync smoke on XPU, 2 nodes.
@@ -13,11 +13,20 @@
 # deterministic train steps with a machine-greppable VERDICT), with three
 # deliberate differences:
 #
-#   1. Queue/filesystem are Aurora's. `next-eval` has NO acl_users, allows a
-#      6h walltime and 20 queued jobs per user, and -- the reason it matters
-#      here -- runs bkc_definition compute_aurora_test_*, where every other
-#      queue pins compute_aurora_prod_*. /opt/aurora/26.181.0 exists on those
-#      compute nodes and NOT on the login nodes.
+#   1. Queue/filesystem are Aurora's.
+#
+#      QUEUE CHOICE IS NOT FREE -- it is coupled to the venv. `next-eval` runs
+#      bkc_definition compute_aurora_test_* while every other queue pins
+#      compute_aurora_prod_*. The venv below has
+#        home = /opt/aurora/26.26.0/spack/.../python-3.12.12-nvje3vk/bin
+#      i.e. a base interpreter from the PROD image, so on next-eval its python
+#      does not exist and every import dies with a misleading
+#        ModuleNotFoundError: No module named 'importlib.metadata'
+#      (measured: jobs 8829080 and 8829104, both ~10 s, both trees identical).
+#      Hence debug-scaling, which runs the prod bkc. To use next-eval instead,
+#      either build a venv against the test image or `module load
+#      frameworks/2026.1.0` and let it supply the interpreter.
+#      Check `pyvenv.cfg`'s home line before changing this queue.
 #   2. No `ezpz yeet-env`. The sunspot script broadcasts a .venv.tar.gz to
 #      /tmp on every node; a freshly cloned sync tree has no tarball. This
 #      activates the existing project venv directly. Slower to start at scale,
