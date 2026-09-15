@@ -128,23 +128,18 @@ def parallelize_llama(
     # `spmd_backend == "spmd_types" or tp_enabled` (llama3/parallelize.py:40).
     # "full_dtensor" is kept in the tuple only until the sync lands, since it
     # is still a legal value on this tree.
-    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        model.parallelize(parallel_dims)
-    else:
-        # CP removed upstream (#4218): apply_cp_to_forward is gone, and the
-        # replacement validate_cp_backend() rejects cp>1 on anything but
-        # spmd_types. We pin partial_dtensor and every ezpz config sets
-        # context_parallel_degree=1, so this branch was already dead.
-        # TP via the config-based sharding API. The model's sharding_config
-        # declarations were filled in by update_from_config (see model.py).
-        # Upstream #3159 changed Module.parallelize to take ParallelDims (not a
-        # bare tp_mesh) so each Module can resolve its own SPMD submesh.
-        if parallel_dims.tp_enabled:
-            model.parallelize(parallel_dims)
-        # 78th sync (#4045): the maybe_enable_async_tp call that used to live
-        # here is gone -- apply_compile now enables async TP itself from
-        # parallel_dims. Calling it here would be an ImportError (the symbol
-        # was deleted upstream) and, if it still existed, a double-enable.
+    # #4419 deleted parallelism.spmd_backend; spmd_types is the only backend,
+    # so this is now unconditional, matching core llama3/parallelize.py:41.
+    # The backend branch that stood here is gone: #4419 deleted
+    # parallelism.spmd_backend, so this is unconditional, matching core
+    # llama3/parallelize.py:41. The old else-arm (TP-only parallelize for the
+    # partial_dtensor backend) is unreachable and was removed with it.
+    #
+    # TP goes through the config-based sharding API: the model's
+    # sharding_config declarations were filled in by update_from_config (see
+    # model.py), and #3159 made Module.parallelize take ParallelDims so each
+    # Module resolves its own SPMD submesh.
+    model.parallelize(parallel_dims)
 
     model_compile_enabled = (
         compile_config.enable and "model" in compile_config.components
@@ -179,14 +174,9 @@ def parallelize_llama(
     # which VOIDed every ezpz arm post-merge. Core added resolve_fsdp_mesh()
     # for exactly this and branches on the backend (llama3/parallelize.py:71);
     # mirror that here rather than hardcoding either name.
-    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
-    else:
-        names = (
-            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-        )
-        dp_mesh = parallel_dims.get_mesh(names)
-        dp_mesh_dims = None
+    # #4419 deleted parallelism.spmd_backend; unconditional now, matching core
+    # llama3/parallelize.py:65.
+    dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
 
     # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
     # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16

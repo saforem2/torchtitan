@@ -996,10 +996,22 @@ def model_registry(
         for c in converters:
             config = c.build().convert(config)
 
+    # #4328 made max_context_length a required ModelSpec field. Read it off the
+    # flavor's own RoPE config rather than restating a constant here: that is
+    # where _build_agpt_config already threaded it, so the spec cannot drift
+    # from the model it describes.
+    rope_cfg = config.layers[0].attention.rope
+    if rope_cfg is None:
+        raise ValueError(
+            f"agpt flavor {flavor!r} has no RoPE config, so max_context_length "
+            "cannot be derived for its ModelSpec"
+        )
+
     return FaultTolerantModelSpec(
         name="ezpz.agpt",
         flavor=flavor,
         model=config,
+        max_context_length=rope_cfg.max_context_length,
         parallelize_fn=parallelize_llama,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=None,

@@ -142,12 +142,10 @@ def parallelize_moe(
     # tp/ep (right for the legacy backend) leaves plain tensors when both are
     # off. Core: llama3/parallelize.py:42-53.
     # Upstream #4217 removed validate_config outright; deepseek_v3 (our base)
-    # now just calls model.parallelize. "full_dtensor" stays in the tuple only
-    # until the sync lands, since it is still a legal value on this tree.
-    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        model.parallelize(parallel_dims)
-    elif parallel_dims.tp_enabled or parallel_dims.ep_enabled:
-        model.parallelize(parallel_dims)
+    # now just calls model.parallelize. The sync landed: #4419 deleted
+    # parallelism.spmd_backend, so both arms collapse to one unconditional
+    # call, matching core.
+    model.parallelize(parallel_dims)
 
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
     # gone -- see the import-site note above.
@@ -176,34 +174,18 @@ def parallelize_moe(
             model.layers.register_module(layer_id, block)
 
     # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
-    # spmd_types/full_dtensor there is no flattened "fsdp" mesh axis -- asking
-    # for it raises ValueError: Invalid mesh dim: 'fsdp'. Mirror core's
-    # backend branch (llama3/parallelize.py:71) instead of hardcoding a name.
-    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        # BOTH meshes must come from the new resolvers. Resolving only the
-        # dense one and leaving edp on the legacy "efsdp" name makes both
-        # resolve to the same dp_shard mesh, and FSDP then refuses:
-        #   RuntimeError: Cannot concatenate overlapping meshes:
-        #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
-        # Core pairs them in one branch (gpt_oss/parallelize.py:108-110).
-        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
-        edp_mesh, edp_mesh_dims = resolve_sparse_fsdp_mesh(parallel_dims)
-    else:
-        dp_mesh_names = (
-            ["dp_replicate", "fsdp"] if parallel_dims.dp_replicate_enabled else ["fsdp"]
-        )
-        dp_mesh = parallel_dims.get_mesh(dp_mesh_names)
-        dp_mesh_dims = None
-        edp_mesh = None
-        edp_mesh_dims = None
-        if parallel_dims.ep_enabled:
-            edp_mesh_names = (
-                ["dp_replicate", "efsdp"]
-                if parallel_dims.dp_replicate_enabled
-                else ["efsdp"]
-            )
-            edp_mesh = parallel_dims.get_optional_mesh(edp_mesh_names)
-
+    # it there is no flattened "fsdp" mesh axis -- asking for it raises
+    # ValueError: Invalid mesh dim: 'fsdp'. #4419 then deleted the backend
+    # selector entirely, so the resolver path is the only one.
+    #
+    # BOTH meshes must come from the new resolvers. Resolving only the dense
+    # one and leaving edp on the legacy "efsdp" name makes both resolve to the
+    # same dp_shard mesh, and FSDP then refuses:
+    #   RuntimeError: Cannot concatenate overlapping meshes:
+    #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
+    # Core pairs them in one branch (gpt_oss/parallelize.py:108-110).
+    dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+    edp_mesh, edp_mesh_dims = resolve_sparse_fsdp_mesh(parallel_dims)
     apply_fsdp(
         model,
         dp_mesh,

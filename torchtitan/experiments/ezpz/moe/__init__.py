@@ -1253,10 +1253,21 @@ def model_registry(
             assert isinstance(q, QuantizationConverter.Config)
             q.build().convert(config)
 
+    # #4328 made max_context_length a required ModelSpec field. Read it off the
+    # flavor's own RoPE config (same approach as the agpt twin) so the spec
+    # cannot drift from the model it describes.
+    rope_cfg = config.layers[0].attention.rope
+    if rope_cfg is None:
+        raise ValueError(
+            f"moe flavor {flavor!r} has no RoPE config, so max_context_length "
+            "cannot be derived for its ModelSpec"
+        )
+
     return ModelSpec(
         name="moe",
         flavor=flavor,
         model=config,
+        max_context_length=rope_cfg.max_context_length,
         parallelize_fn=parallelize_moe,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=register_moe_load_balancing_hook,

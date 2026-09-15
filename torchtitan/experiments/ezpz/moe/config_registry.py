@@ -163,7 +163,13 @@ def moe(
     #      full_dtensor hits the vc_check DeviceMesh assertion
     # partial_dtensor is the supported fallback and what upstream itself
     # pins for its rl+hf CI suites (b64d3f6a9, #4228).
-    cfg.parallelism.spmd_backend = "partial_dtensor"
+    #
+    # SYNC 84: the pin is gone. #4419 deleted the DTensor FWD/BWD backend and
+    # parallelism.spmd_backend with it, so spmd_types -- the backend the
+    # plain-tensor ValueError above was recorded against -- is the only one
+    # left. UNVERIFIED whether that failure still fires; it needs a real
+    # multi-rank run. Same note as the agpt twin; see
+    # docs/guides/known-bugs/spmd-types-plain-tensor.md.
 
     # spmd_types loss-parallel CE needs the full vocab size, and it is the
     # caller's job to supply it: CrossEntropyLoss.Config declares

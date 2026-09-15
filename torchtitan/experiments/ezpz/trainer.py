@@ -566,18 +566,21 @@ class FaultTolerantTrainer(Trainer):
         # branch would AttributeError.
         self.num_pipeline_parallel_microbatches = _num_pp_microbatches
 
-        # Same reason again (third instance of this in this file): core's
-        # Trainer.__init__ calls dist_utils.set_spmd_backend(
-        # config.parallelism.spmd_backend) at trainer.py:319, and we never
-        # reach it. Without this the module-level default -- currently
-        # "spmd_types" -- stays live no matter what the config or CLI says,
-        # and components/loss.py:43 then fires a bare
-        #   assert get_spmd_backend() == "partial_dtensor"
-        # on any TP>1 run whose pred is a DTensor. Observed as an
-        # unexplained AssertionError with no message in job 12473496, on the
-        # partial_dtensor CONTROL arm, i.e. a config that should trivially
-        # satisfy the assert.
-        dist_utils.set_spmd_backend(config.parallelism.spmd_backend)
+        # The set_spmd_backend() mirror that used to live here is gone: #4419
+        # removed the DTensor FWD/BWD backend entirely, deleting
+        # parallelism.spmd_backend, set_spmd_backend, and get_spmd_backend.
+        # spmd_types is now the only backend, so there is nothing to select.
+        #
+        # THIS IS NOT PURELY MECHANICAL. ezpz pinned partial_dtensor because
+        # spmd_types failed every ezpz config with
+        #   ValueError: When dp_mesh_dims is provided, all parameters must be
+        #   DTensors on the full SPMD mesh ... Got plain tensor for parameter
+        # (docs/guides/known-bugs/spmd-types-plain-tensor.md). That pin is now
+        # unavailable and resolve_fsdp_mesh still guards only the
+        # storage_mesh.size() == 1 case (distributed/fsdp.py:48), which the bug
+        # doc records as insufficient at TP=1 with FSDP>1. Whether the failure
+        # still reproduces is UNTESTED here -- it needs a real multi-rank run,
+        # not a local import. Smoke at TP=1/FSDP>1 before trusting this path.
 
         # 78th sync (#3559 CUDA-graph capture + #4146 in-place loss accum):
         # the base Trainer.__init__ now builds a `fwd_bwd_fn` indirection and
@@ -593,6 +596,25 @@ class FaultTolerantTrainer(Trainer):
         # behaviour is identical to pre-merge unless explicitly enabled.
         # See experiments/ezpz/xpu_graph.py.
         self.fwd_bwd_fn = maybe_wrap_with_xpu_graph(self._forward_backward_body)
+
+        # Sync 84, same reason as every mirror above (no super().__init__()).
+        # Two attributes core's __init__ now sets that ezpz did not:
+        #
+        # #4333/#4334 added an SDC deterministic-replay engine. Core reads
+        # self.sdc_replayer on the step path, so a missing attribute is an
+        # AttributeError at step 1, not a disabled feature. None = replay off,
+        # which is the default and what ezpz wants (replay additionally
+        # REQUIRES debug.deterministic and forbids deterministic_warn_only).
+        self.sdc_replayer = None
+
+        # #4430 added a PP loss sentinel returned from non-last stages. The
+        # ezpz trainer pins fwd_bwd_fn to the dense body above and never takes
+        # core's pp branch, but forward_backward_step can still reach the
+        # accessor at trainer.py:870, so define it rather than leave a hole.
+        if parallel_dims.pp_enabled:
+            self._pp_loss_sentinel_on_non_last_stage = torch.full(
+                (1,), -1.0, device=self.device
+            )
 
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
@@ -806,10 +828,10 @@ class FaultTolerantTrainer(Trainer):
         # off (the kwarg is inert unless backend == "spmd_types").
         self.train_context = dist_utils.get_spmd_context(
             parallel_dims=parallel_dims,
-            spmd_typechecking=(
-                config.parallelism.spmd_backend == "spmd_types"
-                and config.debug.spmd_typechecking
-            ),
+            # #4419: spmd_types is the only backend now, so the former
+            # backend == "spmd_types" conjunct is always true and the debug
+            # flag alone decides.
+            spmd_typechecking=config.debug.spmd_typechecking,
         )
 
         # Build validator if validation is configured

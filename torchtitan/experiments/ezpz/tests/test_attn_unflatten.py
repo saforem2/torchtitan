@@ -81,10 +81,16 @@ _BLOCK = _committed_unflatten_block()
 
 # Derive the q/k/v variable names FROM the extracted block instead of hardcoding
 # them. The shape suffix is a naming convention that tracks upstream's local_map
-# keys (_BLNH -> _TNH in b5f6f712f), and hardcoding it here is what made this
-# test start failing silently the day that rename landed.
-_SUF = re.search(r"num_tokens, num_heads, head_dim = q_(\w+)\.shape", _BLOCK).group(1)
-_Q, _K, _V = f"q_{_SUF}", f"k_{_SUF}", f"v_{_SUF}"
+# keys (_BLNH -> _TNH in b5f6f712f, then _TNH -> q_THK/k_THK/v_THV in #4533),
+# and hardcoding it here is what made this test start failing silently the day
+# the first rename landed.
+#
+# Each name is derived independently: #4533 gave v a DIFFERENT suffix from q/k
+# (v_THV vs q_THK, because v's last axis is the value dim, not the key dim), so
+# one shared suffix is no longer a safe assumption.
+_Q = re.search(r"(q_\w+)\.shape", _BLOCK).group(1)
+_K = re.search(r"(k_\w+) = k_\w+\.view\(", _BLOCK).group(1)
+_V = re.search(r"(v_\w+) = v_\w+\.view\(", _BLOCK).group(1)
 
 
 def _roundtrip(B: int, L: int, N: int, H: int, n_kv: int | None = None):
