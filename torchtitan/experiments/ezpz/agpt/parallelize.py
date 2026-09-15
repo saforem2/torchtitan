@@ -53,7 +53,7 @@ from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 # which gained a keyword-only `parallel_dims`. Importing the old symbol is an
 # ImportError, so this replay is mandatory, not cosmetic.
 from torchtitan.models.llama3.model import Llama3Model
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 
 # [ezpz] max-autotune (and other torch.compile modes) on XPU.

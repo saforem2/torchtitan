@@ -23,7 +23,7 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torchtitan.models.common.attention import ScaledDotProductAttention
+from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import (
     get_attention_config,
     make_ffn_config,
@@ -51,31 +51,34 @@ from .parallelize import parallelize_moe
 from .state_dict_adapter import moeStateDictAdapter
 
 
-class EzpzScaledDotProductAttention(ScaledDotProductAttention):
+class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
     """SDPA variant that avoids set_priority=True in sdpa_kernel."""
 
     @dataclasses.dataclass(kw_only=True, slots=True)
-    class Config(ScaledDotProductAttention.Config):
+    class Config(ScaledDotProductInnerAttention.Config):
         pass
 
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_TNH: torch.Tensor,
-        k_TNH: torch.Tensor,
-        v_TNH: torch.Tensor,
+        q_THK: torch.Tensor,
+        k_THK: torch.Tensor,
+        v_THV: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        # Positional arg names MUST be the shape-suffixed q_TNH/k_TNH/v_TNH to
-        # match set_gqa_inner_attention_local_map's in_dst_shardings keys --
+        # Positional arg names MUST be the shape-suffixed q_THK/k_THK/v_THV to
+        # match set_gqa_inner_attention_local_spmd's in_dst_shardings keys --
         # the local_map contract check matches by positional-arg NAME and
         # asserts under TP>1 otherwise. Renamed from _BLNH 2026-08-25: #4121
         # (73aed7f6c) renamed the upstream keys and our port left the
         # parameters behind (MEASURED on the agpt twin, smoke 8781623 arm 2).
+        # Renamed AGAIN in sync 84: #4533 rekeyed in_dst_shardings a second
+        # time, _TNH -> q_THK/k_THK/v_THV, and renamed the contract fn to
+        # ..._local_spmd. See the agpt twin for the full history.
         #
         # This wrapper is a straight port of the agpt one -- moe reaches it
         # through the SAME BlendCorpusDataLoader (moe/config_registry.py:115),
@@ -92,7 +95,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # whole number of max_context_length sequences. The divisibility check
         # keeps that verified rather than assumed; a ragged batch must not
         # silently reshape into the wrong grid.
-        folded = q_TNH.ndim == 3
+        folded = q_THK.ndim == 3
         if folded:
             # Read agpt's module global rather than defining a second one.
             # trainer.py:443 only ever calls agpt.set_ezpz_max_context_length,
@@ -110,7 +113,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "unknown; the trainer must call "
                     "set_ezpz_max_context_length() before the first forward"
                 )
-            num_tokens, num_heads, head_dim = q_TNH.shape
+            num_tokens, num_heads, head_dim = q_THK.shape
             if num_tokens % seq_len != 0:
                 raise ValueError(
                     f"token count {num_tokens} is not a multiple of "
@@ -119,14 +122,14 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "ragged batch"
                 )
             batch = num_tokens // seq_len
-            q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
-            k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
-            v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
-        assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
+            q_THK = q_THK.view(batch, seq_len, num_heads, head_dim)
+            k_THK = k_THK.view(batch, seq_len, -1, head_dim)
+            v_THV = v_THV.view(batch, seq_len, -1, head_dim)
+        assert q_THK.ndim == 4, f"expected 4D, got {tuple(q_THK.shape)}"
         q, k, v = (
-            q_TNH.transpose(1, 2),
-            k_TNH.transpose(1, 2),
-            v_TNH.transpose(1, 2),
+            q_THK.transpose(1, 2),
+            k_THK.transpose(1, 2),
+            v_THV.transpose(1, 2),
         )
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
@@ -160,7 +163,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
     ]
 
 
-def _default_inner_attention() -> ScaledDotProductAttention.Config:
+def _default_inner_attention() -> ScaledDotProductInnerAttention.Config:
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         return XPUScaledDotProductAttention.Config()
     return EzpzScaledDotProductAttention.Config()
@@ -175,7 +178,7 @@ def _ezpz_get_attention_config(backend: str) -> Module.Config:
     mask_type separately (see `_build_moe_layers` which sets
     `_mask = "causal"` next to the call site). Returning a tuple
     here would break the downstream `inner_attention.sharding_config`
-    setattr in `moe/sharding.py:set_gqa_inner_attention_local_map`.
+    setattr in `moe/sharding.py:set_gqa_inner_attention_local_spmd`.
     """
     if backend == "sdpa":
         return _default_inner_attention()
@@ -1225,7 +1228,7 @@ def model_registry(
     moe_comm_backend: str = "standard",
     quantization: list | None = None,
 ) -> ModelSpec:
-    from torchtitan.components.quantization import QuantizationConverter
+    from torchtitan.config.transform.quantization import QuantizationConverter
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
 
     config = moe_configs[flavor]()

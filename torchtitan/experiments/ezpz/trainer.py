@@ -38,8 +38,8 @@ from torchtitan.experiments.torchft.optimizer import (
 )
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
-from torchtitan.tools.logging import logger
-from torchtitan.tools.profiler import Profiler
+from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.observability.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
@@ -435,7 +435,7 @@ class FaultTolerantTrainer(Trainer):
         # The SDPA wrapper needs max_context_length to unflatten #4121's flat
         # [T, N, H] batches back to [B, L, N, H] for scaled_dot_product_attention.
         # It cannot take it as an argument: the forward's positional-arg names
-        # are contract-checked under TP>1 (set_gqa_inner_attention_local_map
+        # are contract-checked under TP>1 (set_gqa_inner_attention_local_spmd
         # matches in_dst_shardings by name), so a module-level setter is used.
         # Set here -- after the dataloader, before the model is built -- so it
         # is in place well before the first forward.
@@ -475,7 +475,7 @@ class FaultTolerantTrainer(Trainer):
         model.verify_module_protocol()
 
         # Check if any quantization converter is on the model_config
-        from torchtitan.components.quantization.utils import has_quantization as _has_quantization
+        from torchtitan.quantization.utils import has_quantization as _has_quantization
         has_quantization = _has_quantization(model_config)
 
         # metrics logging (FT addition: ft_enable, ft_replica_id)
@@ -622,7 +622,7 @@ class FaultTolerantTrainer(Trainer):
 
         # apply parallelisms and initialization
         if parallel_dims.pp_enabled:
-            from torchtitan.components.metrics import ensure_pp_loss_visible
+            from torchtitan.observability.metrics import ensure_pp_loss_visible
 
             if not model_spec.pipelining_fn:
                 raise RuntimeError(

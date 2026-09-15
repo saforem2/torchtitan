@@ -8,7 +8,7 @@ import ezpz
 import torch
 
 from torchtitan.components.data.loader import BaseDataLoader
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 
 def _import_blendcorpus_modules():

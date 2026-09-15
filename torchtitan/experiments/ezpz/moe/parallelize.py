@@ -61,7 +61,7 @@ from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 # That is not a regression: the call below only ran under tp_enabled, and the
 # MoE path has never been validated with async TP on XPU.
 from torchtitan.experiments.ezpz.moe import moeModel
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 
 def disable_fsdp_gradient_division(model: nn.Module) -> None:

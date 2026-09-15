@@ -12,7 +12,7 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.components.metrics import MetricsProcessor
+from torchtitan.observability.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,

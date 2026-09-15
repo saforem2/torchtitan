@@ -63,7 +63,6 @@ import torch
 import torch.nn.functional as F
 from torch.distributed.tensor import DTensor, Partial, Shard
 
-from torchtitan.distributed.utils import get_spmd_backend
 from torchtitan.models.common import RMSNorm
 
 
@@ -89,17 +88,18 @@ class LocalShardRMSNorm(RMSNorm):
             # output type (heads on TP), mirroring local_qkv_head_split in
             # torchtitan/models/common/attention.py. spmd.local() and the
             # assert are no-ops at runtime when type checking is off, so the
-            # default-backend TP=1 case is just the base RMSNorm forward.
-            if get_spmd_backend() == "spmd_types":
-                with spmd.local():
-                    out = F.rms_norm(
-                        x, self.normalized_shape, self.weight, self.eps
-                    )
-                    spmd.assert_type(
-                        out, spmd.V, spmd.PartitionSpec("dp", "cp", "tp", None)
-                    )
-                return out
-            return super().forward(x)
+            # TP=1 case is just the base RMSNorm forward.
+            #
+            # This used to branch on get_spmd_backend() == "spmd_types" and
+            # fall back to super().forward(x) otherwise. #4419 removed the
+            # DTensor FWD/BWD backend and deleted get_spmd_backend, so
+            # spmd_types is the only backend and the fallback is unreachable.
+            with spmd.local():
+                out = F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
+                spmd.assert_type(
+                    out, spmd.V, spmd.PartitionSpec("dp", "cp", "tp", None)
+                )
+            return out
 
         # DTensor path (default backend, TP>1). The normalized
         # dims (the trailing len(normalized_shape) dims -- head_dim here) MUST

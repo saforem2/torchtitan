@@ -69,7 +69,7 @@ from __future__ import annotations
 
 import torch
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 
 _PATCHED_ATTR = "_ezpz_xccl_split_group_patched"

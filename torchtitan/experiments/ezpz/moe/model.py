@@ -17,7 +17,7 @@ from torch import nn
 from torchtitan.models.common.attention import (
     AttentionMasksType,
     BaseAttention,
-    ScaledDotProductAttention,
+    ScaledDotProductInnerAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
 from torchtitan.models.common.linear import Linear
@@ -33,7 +33,7 @@ from torchtitan.models.utils import (
 )
 from torchtitan.protocols.module import Module
 from torchtitan.experiments.ezpz.logging import warn_once
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.tools.utils import has_cuda_capability
 
 
@@ -319,11 +319,11 @@ class moeModel(Decoder):  # noqa: N801
 
             if parallelism.context_parallel_degree > 1 and not isinstance(
                 self.layers[0].attention.inner_attention,
-                ScaledDotProductAttention.Config,
+                ScaledDotProductInnerAttention.Config,
             ):
                 raise NotImplementedError(
                     "Context Parallel for MoE only supports "
-                    "ScaledDotProductAttention. Got "
+                    "ScaledDotProductInnerAttention. Got "
                     f"{type(self.layers[0].attention.inner_attention).__name__}."
                 )
 
