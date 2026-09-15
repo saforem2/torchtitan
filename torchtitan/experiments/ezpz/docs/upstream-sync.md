@@ -128,6 +128,33 @@ The port is the same either way (all three fields had to change), but the
 wrong diagnosis would have sent someone hunting a loss-curve regression that
 does not exist.
 
+### Core's own CPU tests on the merged tree: 753 passed, 33 failed -- ALL environmental
+
+Run for completeness, since the merge changed 542 core files. The 33 failures
+are NOT merge damage, and the reason matters more than the number:
+
+```
+28  RuntimeError: Expected out tensor to have device cpu, but got mps:0
+ 9  ModuleNotFoundError: cutlass       (attn-gym[linear], CUDA-only)
+ 8  ModuleNotFoundError: expecttest
+ 5  ModuleNotFoundError: torchvision
+```
+
+Every one is a macOS artifact. torchtitan resolves the default device to MPS
+on this machine (`torch.backends.mps.is_available()` is True) while these
+tests assume CPU -- a condition that cannot arise on the XPU clusters. The
+missing modules are optional deps, one of them CUDA-only.
+
+The pre-merge control had 1 failure (`test_flux_config_via_cli`), and it
+**still fails post-merge, identically** -- so nothing regressed, and the count
+jumped from 1 to 33 only because the merge ADDED test files (453 -> 753
+collected) that happen to trip the MPS path.
+
+**This is not evidence the merge is clean on core.** It is evidence that this
+Mac cannot test core, and that the ezpz results above -- which were compared
+against a pre-merge control on the same machine -- are the load-bearing ones.
+Core coverage has to come from CI or a cluster.
+
 ### Pre-existing, NOT caused by this merge
 
 `distributed.full_dtensor` (already guarded by `except ImportError`),
