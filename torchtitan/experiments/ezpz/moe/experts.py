@@ -259,11 +259,23 @@ def _run_experts_bmm_nodrop(
     padded_x = x.new_zeros((num_experts, max_tokens, x.shape[-1]))
     padded_x[expert_indices, token_indices_within_expert] = x
 
-    h = F.silu(torch.bmm(padded_x, w1.transpose(-2, -1)))
-    h = h * torch.bmm(padded_x, w3.transpose(-2, -1))
-    out_padded = torch.bmm(h, w2.transpose(-2, -1))
+    # Compute in bf16 and return in the caller's dtype, matching
+    # _run_experts_for_loop and _run_experts_bmm. Without this the GEMMs
+    # raise "expected scalar type Float but found BFloat16" whenever the
+    # parameters and the activations disagree -- which they do under
+    # mixed precision, where params stay fp32 and x arrives bf16. The sww
+    # original omitted the casts because on that branch the caller had
+    # already aligned the dtypes.
+    padded_x_bf16 = padded_x.bfloat16()
+    w1_bf16 = w1.bfloat16()
+    w2_bf16 = w2.bfloat16()
+    w3_bf16 = w3.bfloat16()
 
-    return out_padded[expert_indices, token_indices_within_expert]
+    h = F.silu(torch.bmm(padded_x_bf16, w1_bf16.transpose(-2, -1)))
+    h = h * torch.bmm(padded_x_bf16, w3_bf16.transpose(-2, -1))
+    out_padded = torch.bmm(h, w2_bf16.transpose(-2, -1))
+
+    return out_padded[expert_indices, token_indices_within_expert].type_as(x)
 
 
 def _run_experts_aurora_sycl(
