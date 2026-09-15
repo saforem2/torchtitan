@@ -28,6 +28,7 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.native_ddp import (
     install_agpt_dtype_probe,
     record_native_ddp_grad_streams,
@@ -157,6 +158,20 @@ class FaultTolerantTrainer(Trainer):
     class Config(Trainer.Config):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
         lr_finder: LRFinderConfig = field(default_factory=LRFinderConfig)
+
+        # Re-declare `parallelism` with the ezpz subclass so the native-DDP
+        # knobs exist without adding them to core ParallelismConfig. The
+        # upstream Aurora MoE branch puts these five fields in core; we do
+        # not need to, because the call sites were inverted into this file
+        # (see wrap_native_ddp below) and nothing in core ever reads them.
+        #
+        # tyro builds its CLI from the default_factory rather than the
+        # annotation, so this alone makes `--parallelism.native-ddp-*`
+        # parse. The subclass passes isinstance(ParallelismConfig), so every
+        # core annotation still accepts it.
+        parallelism: EzpzParallelismConfig = field(
+            default_factory=EzpzParallelismConfig
+        )
 
         # Batch-size ramp (analogous to LR warmup, but for global batch
         # size). Ramps the effective gradient-accumulation count -- and
