@@ -36,7 +36,9 @@ from torch.utils.checkpoint import checkpoint
 from torchtitan.models.common.moe import GroupedExperts
 
 
-ExpertComputeBackend = Literal["for_loop", "grouped_mm", "bmm", "bmm_nodrop"]
+ExpertComputeBackend = Literal[
+    "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl"
+]
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -264,6 +266,40 @@ def _run_experts_bmm_nodrop(
     return out_padded[expert_indices, token_indices_within_expert]
 
 
+def _run_experts_aurora_sycl(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    """Exact compact expert GEMMs via the optional aurora-moe SYCL kernels.
+
+    Routing and score application stay in the token dispatcher; this only
+    replaces the expert GEMMs. Ported from samuelwheeler/torchtitan
+    feature/aurora-moe-training, where it is the `aurora_sycl` backend.
+
+    Uses the standard w1/w2/w3 parameters, so it is checkpoint-transparent:
+    unlike that branch's scattermoe and aurora_full_* backends, selecting
+    this one does not change any registered parameter name.
+
+    The kernels are JIT-compiled by torch.utils.cpp_extension.load on first
+    call, which needs oneMKL headers and libmkl_sycl_blas.so.5 (found under
+    $MKLROOT, default /opt/aurora/<ver>/oneapi/mkl/<ver>). Set
+    AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
+    call is slow. Imported lazily so every other backend stays usable
+    without aurora-moe installed.
+    """
+    try:
+        from aurora_moe.torchtitan_experts import torchtitan_exact_experts
+    except ImportError as error:
+        raise ImportError(
+            "the aurora_sycl expert backend requires the aurora_moe package "
+            "(vendor/aurora_moe_dropin/src) on PYTHONPATH"
+        ) from error
+    return torchtitan_exact_experts(w1, w2, w3, x, num_tokens_per_expert)
+
+
 class EzpzGroupedExperts(GroupedExperts):
     """GroupedExperts variant that selects between expert compute backends.
 
@@ -334,4 +370,6 @@ class EzpzGroupedExperts(GroupedExperts):
             )
         if self.compute_backend == "bmm_nodrop":
             return _run_experts_bmm_nodrop(w1, w2, w3, x, num_tokens_per_expert)
+        if self.compute_backend == "aurora_sycl":
+            return _run_experts_aurora_sycl(w1, w2, w3, x, num_tokens_per_expert)
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")
