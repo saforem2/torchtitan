@@ -58,10 +58,28 @@ torch-2.13 stack returns.
 
 - **Queue access.** 977 nodes free; `debug-scaling` enabled, 1h max walltime,
   1 concurrent job per user. A 2N smoke would schedule fine.
-- **`next-eval`.** There is no such queue on Aurora. The closest name is
-  `run_next`, which is ACL-restricted to `allcock`, `richp`, `ylan` -- not
-  available to `foremans`. `debug-scaling` is the right queue for a 2N smoke
-  anyway.
+- **`next-eval`.** CORRECTION: this queue EXISTS and is the best one available
+  to us. An earlier revision of this page said "there is no such queue on
+  Aurora" -- that was wrong, and wrong through carelessness: `qstat -Q | head -22`
+  truncates the list above `next-eval`, and I read the truncated output as
+  absence instead of grepping for the name. `~/test.sh` submitted to it fine
+  (job 8828969). It was also already documented in
+  [aurora-quickstart-tarball.md](../guides/aurora-quickstart-tarball.md) since
+  2026-03-04.
+
+  ```
+  acl_user_enable = False                  no ACL -- open, unlike validation/run_next
+  resources_max.walltime = 06:00:00        vs debug-scaling's 01:00:00
+  max_queued = [u:PBS_GENERIC=20]          vs 1 concurrent job
+  bkc_definition = compute_aurora_test_20260831T195218_1c6eebc_93ee049
+  ```
+
+  **The BKC line is the important one.** `next-eval` runs a TEST bkc where
+  every other queue pins `compute_aurora_prod_20260828`. A different compute
+  image can carry a different software stack, so the torch-2.10 finding below
+  -- measured on a LOGIN node, which runs neither image -- may not hold there.
+  Probe job 8828980 was submitted to settle it. Do not treat the torch floor as
+  established until that reports.
 - **The clone.** `sync84-trial` is checked out cleanly at
   `/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/tt-sync84`. The
   production clone was left untouched (branch `ezpz`, 40 dirty files).
