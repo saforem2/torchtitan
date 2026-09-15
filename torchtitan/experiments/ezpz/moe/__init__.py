@@ -37,7 +37,10 @@ from torchtitan.protocols.model_spec import ModelSpec
 # `.moe` copy that was a byte-for-byte fork of `torchtitan/models/common/moe.py`;
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
+from torchtitan.models.common.activation import Sigmoid, Softmax
+from torchtitan.models.common.linear import RouterGateLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
+from torchtitan.models.deepseek_v3 import DeepSeekV3Router
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
@@ -197,21 +200,42 @@ def make_ezpz_router_config(
     num_expert_groups: int | None = None,
     num_limited_groups: int | None = None,
     bias: bool = False,
-) -> TokenChoiceTopKRouter.Config:
+) -> TokenChoiceTopKRouter.Config | DeepSeekV3Router.Config:
+    # Sync 84 reshaped this config three ways at once:
+    #   #4631 moved num_expert_groups/num_limited_groups OFF the stock router
+    #         and onto DeepSeekV3Router, which is now the only one that does
+    #         node-limited routing.
+    #   score_func became a UnaryActivationFn.Config instead of a string.
+    #   gate became a RouterGateLinear.Config instead of a plain Linear.Config.
+    # Route to whichever router actually supports what the flavor asks for,
+    # rather than passing group kwargs the stock router no longer accepts.
+    score_cfg = Sigmoid.Config() if score_func == "sigmoid" else Softmax.Config()
+    gate_cfg = RouterGateLinear.Config(
+        in_features=dim,
+        out_features=num_experts,
+        bias=bias,
+        param_init=gate_param_init,
+    )
+
+    if num_expert_groups is not None or num_limited_groups is not None:
+        return DeepSeekV3Router.Config(
+            num_experts=num_experts,
+            gate=gate_cfg,
+            top_k=top_k,
+            score_func=score_cfg,
+            route_norm=route_norm,
+            route_scale=route_scale,
+            num_expert_groups=num_expert_groups,
+            num_limited_groups=num_limited_groups,
+        )
+
     return TokenChoiceTopKRouter.Config(
         num_experts=num_experts,
-        gate=Linear.Config(
-            in_features=dim,
-            out_features=num_experts,
-            bias=bias,
-            param_init=gate_param_init,
-        ),
+        gate=gate_cfg,
         top_k=top_k,
-        score_func=score_func,
+        score_func=score_cfg,
         route_norm=route_norm,
         route_scale=route_scale,
-        num_expert_groups=num_expert_groups,
-        num_limited_groups=num_limited_groups,
     )
 
 
