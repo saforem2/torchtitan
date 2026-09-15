@@ -1,6 +1,103 @@
 # Upstream Sync Log
 
 
+## Sync 84 (2026-09-15): 148 commits, MERGED IN A TRIAL WORKTREE, not landed
+
+148 behind `upstream/main`, 2,824 ahead. Merged in a throwaway worktree
+(`../tt-sync84`, branch `sync84-trial`) rather than on the production clone.
+
+**Zero of the 148 commits touch `torchtitan/experiments/ezpz`.** Every break
+below is INDIRECT: upstream moved, renamed, or re-defaulted something ezpz
+imports, subclasses, or calls. This is the largest sync so far and the first
+one that was NOT clean.
+
+### The merge itself
+
+One conflict, in `.claude/skills/numerics_debugging/scripts/activation_tracer.py`
+-- upstream hoisted the logger to a module-level `logging.getLogger(__name__)`
+while our side had added `op_filter`/`min_numel` to the arming message. Kept
+upstream's logger and our message. 542 files changed.
+
+### What broke, and how it was found
+
+The AST import sweep found the renames. It could NOT find the last two, which
+hide behind the ImportErrors -- they only surface once the renames resolve and
+you actually construct a model. **Static analysis was necessary and not
+sufficient; the breaks that would have reached production were the ones only a
+real import and a real `cfg.build()` exposed.**
+
+| # | upstream | change | ezpz sites |
+|---|----------|--------|-----------|
+| #4628 | logging reorg | `tools.logging` DELETED the shared `logger`; `tools.profiler`, `components.metrics` -> `observability.*` | 16 |
+| #4630 | quantization/lora move | split: kernels -> `torchtitan.quantization`, converters -> `config.transform.*` | 5 |
+| #4444 | renderer | `experiments.rl.renderer` -> `components.renderer` | 2 |
+| #4648 | converters | `models.utils.validate_converter_order` -> `config.transform.converter` | 1 |
+| #4533 | attention rename | `ScaledDotProductAttention` -> `...InnerAttention`, `FlexAttention` -> `FlexInnerAttention`, contract fn -> `..._local_spmd`, keys `_TNH` -> `q_THK/k_THK/v_THV` | 9 |
+| #4419 | spmd backend | `get_spmd_backend` DELETED; `spmd_types` is the only backend | 2 |
+| #4526 | fused QKV | `make_gqa_config(fuse_qkv=)` removed; `QKVLinear` always fused | 5 |
+| #4535 | fused gate-up | `FeedForward.Config` w1/w3 -> single interleaved `w13` | 2 |
+
+### The one to be careful about: #4533
+
+It rekeyed the sharding contract a SECOND time. The check matches by
+positional-arg NAME and asserts **only under TP>1**, so a missed rename passes
+every TP=1 smoke and fails at TP=2. That is the third time this exact trap has
+fired here (#4121 in August, the 57th sync before it). The warning comments in
+both `agpt/__init__.py` and `moe/__init__.py` now record all three.
+
+**Rule: whenever a sync touches `decoder_sharding.py`, diff its
+`in_dst_shardings` keys against the ezpz `forward()` signatures BEFORE running
+anything at TP>1.**
+
+### THREE new required third-party deps
+
+`renderers==0.1.11` and `torch_remat` (a git pin, not PyPI) moved from optional
+to REQUIRED, and are hard-imported on paths ezpz reaches
+(`models/common/attention.py:22`, `feed_forward.py:10`,
+`hf_datasets/text_datasets.py:14`). `renderers` additionally pulls `openai` and
+`prime-pydantic-config` transitively.
+
+They **mask** every break above -- you get `ModuleNotFoundError` first, so
+installing them REVEALS the real breaks rather than fixing anything. On the
+clusters these must be installed before any ezpz import succeeds, and
+`torch_remat` being a git pin means no offline wheel.
+
+### Verification -- run, not read
+
+```
+14/14 ezpz modules import against the merged tree
+       (agpt, moe, trainer, validator, train, zloss, mup, sharding,
+        local_rmsnorm, both config registries)
+       pre-merge control: same 14 pass -> a real comparison, not a one-sided check
+12/12 agpt flavors build on meta device
+ 5/5  flavors have IDENTICAL param counts AND state-dict key names,
+       pre- vs post-merge -- including 2B_relu2 (feed-forward rewritten) and
+       2b-rl (the ex-fuse_qkv=True flavor)
+```
+
+Checkpoint compatibility is therefore **proven, not assumed**: upstream keeps
+the logical `wq/wk/wv` and gate/up keys through save/load hooks
+(`attention.py:742-743`, `feed_forward.py:74,84`).
+
+### NOT verified, and required before landing
+
+**Numerics.** Fused vs unfused QKV is a different compute path -- one GEMM
+instead of three -- and ezpz defaulted to unfused. Same for gate-up. A seeded
+loss/grad_norm comparison is still owed. Do NOT land this on a production clone
+on the strength of the import check alone.
+
+Also outstanding: a 2N smoke, and a checkpoint resume against a real ckpt (the
+#4187/#4188/#4191/#4197/#4270 cluster rewrote discovery, retention, saves, and
+loads -- and this project has a standing scar from `keep-latest-k`).
+
+### Pre-existing, NOT caused by this merge
+
+`distributed.full_dtensor` (already guarded by `except ImportError`),
+`hf_datasets` `HFDataSource` / `InterleavedHuggingFaceTextDataLoader`,
+`rl.components.batcher.BatchConfig`, and three `distributed.deepep` deferred
+imports. All absent from core on BOTH sides of the merge -- verified against
+`HEAD^1`, not assumed.
+
 ## Sync 82 (2026-08-28): LANDED 2026-08-29 -- moe break ported, sync 83 on top
 
 > [!NOTE]
