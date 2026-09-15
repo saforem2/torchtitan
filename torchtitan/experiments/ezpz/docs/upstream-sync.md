@@ -3807,3 +3807,44 @@ deprecated under experimental (`#4456`).
 Smoke at 2N first per the standing rule, then check in this order: a resume
 from a real checkpoint (2), a seeded loss/grad_norm comparison (1 and 3), and
 `config_registry.py:291` by inspection (4).
+
+---
+
+## Sync 84 addendum: installing the three new deps on ALCF
+
+`renderers==0.1.11` and `torch_remat` became REQUIRED and are hard-imported on
+paths ezpz reaches, so nothing imports until they are present. Two hazards:
+
+**1. `torch_remat` declares `torch>=2.10.0`.** A plain
+`pip install torch_remat` will happily resolve that by pulling **CUDA torch**
+over the XPU build. Always:
+
+```bash
+uv pip install --no-deps --no-cache --link-mode=copy \
+  'torch_remat @ git+https://github.com/meta-pytorch/remat.git@d302699b1c58f83fa2c7b03bc2593967e9530335'
+python -c "import torch; print(torch.__version__)"   # verify AFTER, every time
+```
+
+It is **pure Python, zero compiled extensions** (verified: no `.so` in the
+installed package), and `torch>=2.10.0` is satisfied by both the Polaris 2.10
+floor and the Aurora 2.13 stack. So it can be vendored or copied into a venv
+offline -- which matters because it is a **git pin, not a PyPI package**, and
+the compute nodes have no outbound git.
+
+**2. `renderers` drags in a transitive chain.** With `--no-deps` you get
+`ModuleNotFoundError` one layer at a time. The full set:
+
+```
+renderers==0.1.11
+  -> openai, prime-pydantic-config, openai-harmony, tiktoken, jinja2, numpy
+```
+
+None of these touch torch, so they are safe with ordinary resolution. The
+import chain that reaches them is
+`ezpz/trainer.py -> torchtitan/trainer.py -> components/validate.py ->
+hf_datasets/text_datasets.py:14 -> renderers`.
+
+**These deps MASK the sync-84 breaks.** Before they are installed every import
+dies with `ModuleNotFoundError`, so installing them REVEALS the real breaks
+rather than fixing anything. Do not read "it imports now" as "the sync is
+done" -- that is what the 0/14 moe build result already punished once.
