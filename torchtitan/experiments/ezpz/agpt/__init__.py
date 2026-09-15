@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from functools import partial
-from typing import Literal
+from typing import Any, Literal
 
 _EZPZ_MAX_CONTEXT_LENGTH: int | None = None
 
@@ -189,7 +189,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
     ]
 
 
-from torchtitan.models.common.feed_forward import FeedForward
+from torchtitan.models.common.activation import BinaryActivationFn
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_config
 
@@ -265,16 +265,36 @@ class SoftcappedFlexAttention(Module):
         return out.transpose(1, 2)
 
 
-class ReLUSquaredFeedForward(FeedForward):
-    """FFN with ReLU-squared activation instead of SiLU.
+class ReLUSquaredGLU(BinaryActivationFn):
+    """ReLU-squared gated activation: ``relu(gate)**2 * up``.
 
-    ReLU²(x) = max(0, x)². Used in NanoGPT speedrun entries for faster
-    convergence. The squared activation creates sharper sparsity patterns.
+    ReLU^2(x) = max(0, x)^2. Used in NanoGPT speedrun entries for faster
+    convergence; the squared activation creates sharper sparsity patterns.
+
+    This used to be a ReLUSquaredFeedForward subclass overriding forward() as
+    ``w2(relu(w1(x))**2 * w3(x))``. #4535 made the fused gate-up projection the
+    default: FeedForward.Config lost its w1/w3 fields for a single w13, and the
+    base forward() now unflattens the interleaved gate/up pair and delegates to
+    a configurable activation_fn. Expressing ReLU^2 as that activation keeps the
+    exact same math while inheriting the base's remat regions and fused layout.
     """
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = F.relu(self.w1(x))
-        return self.w2(h * h * self.w3(x))
+    @dataclass(kw_only=True, slots=True)
+    class Config(BinaryActivationFn.Config):
+        pass
+
+    def __init__(self, config: Config) -> None:
+        pass
+
+    def __call__(
+        self,
+        gate: torch.Tensor,
+        up: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del kwargs
+        h = F.relu(gate)
+        return h * h * up
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
@@ -361,7 +381,6 @@ def _build_agpt_layers(
     hidden_dim: int,
     rope: RoPE.Config,
     n_kv_heads: int | None = None,
-    fuse_qkv: bool = False,
     attn_backend: str = "sdpa",
     qk_norm: bool = False,
     logit_softcap: float | None = None,
@@ -389,27 +408,19 @@ def _build_agpt_layers(
     )
     layers = []
     for layer_id in range(n_layers):
+        # Both branches go through make_ffn_config now: #4535 fused w1/w3 into
+        # a single interleaved w13, so hand-building the Config would have to
+        # duplicate fused_gate_up_param_init's interleaving. ReLU^2 differs from
+        # the SwiGLU default only in the activation.
+        ffn_config = make_ffn_config(
+            dim=dim,
+            hidden_dim=hidden_dim,
+            w1_param_init=linear_init,
+            w2w3_param_init=_depth_init(dim, layer_id),
+        )
         if relu_squared:
-            ffn_config = ReLUSquaredFeedForward.Config(
-                w1=Linear.Config(
-                    in_features=dim, out_features=hidden_dim,
-                    param_init=linear_init,
-                ),
-                w2=Linear.Config(
-                    in_features=hidden_dim, out_features=dim,
-                    param_init=_depth_init(dim, layer_id),
-                ),
-                w3=Linear.Config(
-                    in_features=dim, out_features=hidden_dim,
-                    param_init=_depth_init(dim, layer_id),
-                ),
-            )
-        else:
-            ffn_config = make_ffn_config(
-                dim=dim,
-                hidden_dim=hidden_dim,
-                w1_param_init=linear_init,
-                w2w3_param_init=_depth_init(dim, layer_id),
+            ffn_config = dataclass_replace(
+                ffn_config, activation_fn=ReLUSquaredGLU.Config()
             )
         layers.append(
             Llama3TransformerBlock.Config(
@@ -424,7 +435,6 @@ def _build_agpt_layers(
                     wqkv_param_init=linear_init,
                     wo_param_init=_depth_init(dim, layer_id),
                     inner_attention=inner_attention,
-                    fuse_qkv=fuse_qkv,
                     rope=rope,
                     qk_norm=qk_norm_config,
                 ),
@@ -443,7 +453,6 @@ def _build_agpt_config(
     rope_theta: int,
     vocab_size: int,
     hidden_dim: int,
-    fuse_qkv: bool = False,
     attn_backend: str = "sdpa",
     rope_backend: Literal["complex", "cos_sin"] = "complex",
     scaling: Literal["none", "llama", "yarn"] = "none",
@@ -485,7 +494,6 @@ def _build_agpt_config(
             n_heads=n_heads,
             n_kv_heads=n_kv_heads,
             hidden_dim=hidden_dim,
-            fuse_qkv=fuse_qkv,
             attn_backend=attn_backend,
             rope=rope_cfg,
             qk_norm=qk_norm,
@@ -559,7 +567,10 @@ agpt_configs = {
         rope_theta=50000,
         vocab_size=256000,
         hidden_dim=11008,
-        fuse_qkv=True,
+        # fuse_qkv=True was here until sync 84: #4526 removed the kwarg and
+        # QKVLinear is now always fused, so this flavor's behavior is the
+        # default. Checkpoints are unaffected -- attention.py:742-743 hooks
+        # split/merge the logical wq/wk/wv keys on save/load.
         # flex: matches the proven-working fork run (v4/v5/v6). The RL vLLM
         # generator asserts varlen|flex (generator.py:799) then REPLACES
         # inner_attention with its own VLLMAttentionWrapper, so the generator

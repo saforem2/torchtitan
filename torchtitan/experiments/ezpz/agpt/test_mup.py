@@ -215,8 +215,13 @@ def test_prefix_anchored_pattern_would_break_under_ac():
 
 
 def test_param_groups_cover_qk_norm_and_fused_qkv():
-    """Both branches change the FQN set, so both can break the partition."""
-    for kw in ({"qk_norm": True}, {"fuse_qkv": True}, {"qk_norm": True, "fuse_qkv": True}):
+    """qk_norm changes the FQN set, so it can break the partition.
+
+    The fuse_qkv arm is gone: #4526 removed the kwarg and QKVLinear is now
+    always fused, so every case below is a fused-QKV case. The fused FQNs are
+    still what this asserts on.
+    """
+    for kw in ({}, {"qk_norm": True}):
         cfg = M.build_mup_agpt_config(
             dim=512, base_dim=256, n_layers=3, n_heads=8, n_kv_heads=2,
             vocab_size=1000, hidden_dim=2048, **kw,
