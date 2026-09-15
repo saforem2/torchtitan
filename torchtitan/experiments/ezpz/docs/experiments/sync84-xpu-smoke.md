@@ -51,6 +51,27 @@ per user, and runs a TEST bkc.
 Any one of these alone would have been caught by the others. Together they
 produced a confident, fully-documented, wrong conclusion.
 
+## The 2N smoke: submitted 2026-09-15
+
+Two matched jobs on `next-eval`, 2 nodes each, same venv, same script:
+
+| job | tree | |
+|---|---|---|
+| `8829080` | `tt-sync84` (merged) | |
+| `8829104` | `tt-sync84-pre` (merge commit's first parent) | baseline |
+
+`scripts/sync_smoke_aurora.sh`, three configs x 3 deterministic steps at seed
+42: `agpt_debugmodel` TP=1, `agpt_debugmodel` **TP=2**, `moe_debugmodel`.
+
+The TP=2 arm is the point. #4533 rekeyed the local_map/SPMD contract, which
+matches by positional-arg NAME and asserts ONLY under TP>1 -- a TP=1-only
+smoke passes straight over the exact class of break this sync was most likely
+to introduce. See [[project_tp_contract_rekeyed_third_time]].
+
+Both trees were confirmed to import 12/12 on the same venv before submitting,
+so a difference in the run is a difference in the code and not in the
+environment.
+
 ## The rule
 
 **Do not characterize a cluster's software stack from a login node**, and when
