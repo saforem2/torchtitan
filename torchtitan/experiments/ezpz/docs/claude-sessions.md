@@ -1,5 +1,98 @@
 # Claude Session Log
 
+## 2026-09-15 (local, mbph)
+
+### Summary
+
+Answered "are there any upstream commits to pull in from main" -- 148, not the
+64 surveyed a week earlier. Merged them in a throwaway worktree, found ten
+indirect breaks, ported and verified all ten. Nothing landed on `ezpz` or any
+production clone.
+
+### The shape of it
+
+Zero of the 148 commits touch `experiments/ezpz`. Every break is indirect:
+upstream moved, renamed, or re-defaulted something ezpz imports, subclasses,
+or calls.
+
+```
+#4628  deleted the shared logger; logging/metrics/profiler -> observability
+#4630  split quantization/lora across two new homes
+#4533  renamed the attention classes AND rekeyed the TP sharding contract
+#4419  deleted spmd_backend -- the backend ezpz was pinned to
+#4526  fused QKV became mandatory
+#4535  fused gate-up became the default
+#4631  reshaped the MoE router config three ways at once
+#4572  merged labels into the batch dict
+#4398  added num_valid_tokens to collation
+#4328  made ModelSpec.max_context_length required
+```
+
+### The lesson, earned the hard way
+
+I build-tested agpt, saw moe import 14/14 clean, and called the surface
+healthy. **Every one of moe's 14 flavors was dead at config construction.** A
+parallel audit found it, not me.
+
+Five methods, each catching what the previous could not:
+
+| method | caught | blind to |
+|--------|--------|----------|
+| AST import sweep | the renames | everything below |
+| real import | the 3 new deps | all construction breaks |
+| `cfg.build()` agpt | #4526, #4535 | **the whole moe surface** |
+| `cfg.build()` moe | #4631 (0/14) | -- |
+| pytest | #4328, 2 trainer attrs | -- |
+| surface audit | #4572 batch protocol | -- |
+
+An import proves a module loads. Nothing more. And #4572 clears imports, meta
+builds, AND all 82 tests while still killing the run at step 1 -- only real
+batches reach it.
+
+### Verification
+
+```
+14/14 ezpz modules import        (pre-merge control: same 14 -- a real comparison)
+12/12 agpt + 14/14 moe build     (moe was 0/14)
+82 passed, 2 skipped, 0 failed
+8 pass / 3 nonzero standalone    EXACTLY the pre-merge baseline
+param counts AND state-dict keys byte-identical pre- vs post-merge
+```
+
+Checkpoints load. Proven, not assumed.
+
+### Adversarial verification: 3 refuted of 24, none fake
+
+Every refuted finding had an accurate core-side claim and a wrong ezpz half:
+an inverted consequence (a "soft precision regression" that actually raises
+TypeError before the gate is read), a stale callsite (fixed three commits
+earlier, with a false causal story), and an unreachable path (`padding_mask`
+cannot arrive -- the block takes no `**kwargs`). Verified each independently
+rather than trusting the verdicts. Zero lines changed; two corrected the
+record in ways that would have misdirected later debugging.
+
+### NOT settled -- both need cluster hardware
+
+**`spmd_types` may be a live blocker.** ezpz pinned `partial_dtensor` because
+`spmd_types` failed every ezpz config with the plain-tensor ValueError. #4419
+deleted the pin and `resolve_fsdp_mesh` still guards only
+`storage_mesh.size() == 1`, which the bug doc calls insufficient at TP=1 with
+FSDP>1. Flagged inline in both config registries.
+
+**Numerics.** Fused vs unfused QKV is one GEMM instead of three. A seeded loss
+comparison and a 2N smoke are owed before this lands anywhere real.
+
+### Also
+
+Three new REQUIRED deps, one a git pin. They mask every break above, so
+installing them reveals rather than fixes. `torch_remat` declares
+`torch>=2.10.0` and will pull CUDA torch if installed carelessly -- it is pure
+Python with zero compiled extensions, so it can be vendored offline. Install
+procedure is in `upstream-sync.md`.
+
+Side fix: `MEMORY.md` had grown to 25.3KB against a 24.4KB limit, so part of
+it was silently not loading. Trimmed to 21.5KB, all 152 entries intact.
+
 ## 2026-09-08 (sunspot)
 
 ### Summary

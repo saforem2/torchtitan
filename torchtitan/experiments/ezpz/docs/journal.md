@@ -2,6 +2,64 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
+
+Asked whether there was anything upstream to pull in. 148 commits, not the 64
+I surveyed on 09-08. Merged in a throwaway worktree (`../tt-sync84`, branch
+`sync84-trial`); nothing landed on `ezpz` or a production clone.
+
+- **Zero of the 148 touch `experiments/ezpz`, and ten of them broke it
+  anyway.** All indirect -- upstream moved, renamed, or re-defaulted things
+  ezpz imports, subclasses, or calls. Module moves (#4628, #4630, #4444,
+  #4648), the attention rename (#4533), the spmd_backend deletion (#4419),
+  mandatory fused QKV and gate-up (#4526, #4535), the MoE router reshape
+  (#4631), the merged-batch protocol (#4572, #4398), and a newly-required
+  `ModelSpec.max_context_length` (#4328).
+
+- **The mistake worth writing down: moe imported 14/14 clean and built 0/14.**
+  I build-tested agpt, saw moe's imports pass, and inferred the surface was
+  healthy. Every flavor was dead at config construction
+  (`TokenChoiceTopKRouter.Config() got an unexpected keyword argument
+  num_expert_groups`). A parallel audit caught it, not me. `slots=True`
+  dataclasses reject an unknown keyword even when its value is None, which is
+  why it was 14/14 rather than the 2/14 that actually set the field.
+
+- **#4572 is the one no local check finds.** Core's `batch_generator` now
+  yields one dict where ezpz unpacked `(input_dict, labels)`. Imports pass,
+  meta builds pass, all 82 tests pass -- and the run dies at step 1. Ported
+  producer through consumer: blendcorpus yield, `train_step`, validator.
+
+- **#4533 rekeyed the TP sharding contract for the THIRD time**
+  (`BLNH -> TNH -> THK/THV`). It matches by positional-arg NAME and asserts
+  only under TP>1, so every miss sails through a TP=1 smoke. The warning
+  comments in both forks now record all three occurrences, and the rule:
+  whenever a sync touches `decoder_sharding.py`, diff its `in_dst_shardings`
+  keys against the ezpz `forward()` signatures BEFORE running at TP>1. Even
+  the test written to survive renames broke -- it assumed q/k/v share one
+  suffix, and #4533 gave v a different one.
+
+- **Verified by running it.** 14/14 imports (with a pre-merge control, so it
+  is a real comparison), 12/12 agpt and 14/14 moe meta builds, 82 passed /
+  0 failed, standalone scripts at exactly the pre-merge baseline. Param counts
+  AND state-dict key names are byte-identical pre- vs post-merge across every
+  flavor tested -- **existing checkpoints load**, proven rather than assumed.
+
+- **Adversarial verification: 3 of 24 findings refuted, none of them fake.**
+  Each had a correct core-side claim and a wrong ezpz half -- an inverted
+  consequence, a stale callsite, an unreachable code path. Changed zero lines;
+  two corrected reasoning that would have misdirected later debugging.
+
+- **Two things are NOT settled, and both need hardware.** `spmd_types` may be
+  a live blocker: ezpz pinned `partial_dtensor` precisely because
+  `spmd_types` failed every ezpz config, #4419 deleted that pin, and the
+  upstream guard is still as narrow as the bug doc says is insufficient.
+  And the numerics are unverified -- fused vs unfused QKV is one GEMM instead
+  of three. A seeded loss comparison and a 2N smoke are owed.
+
+- Three new REQUIRED deps, one a git pin (`torch_remat`, plus `renderers` and
+  its chain). They **mask** every break above, so installing them on the
+  clusters reveals rather than fixes. Install procedure in `upstream-sync.md`.
+
 ## 2026-09-08 (sunspot) -- `lm_head` is dp-invariant: the gradient concentration has a mechanism, and four curve fits were wrong
 
 The machine came back (113 of 129 free, all 29 mount-check offlines cleared, a
