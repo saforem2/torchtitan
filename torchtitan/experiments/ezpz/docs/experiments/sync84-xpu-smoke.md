@@ -1,4 +1,65 @@
-# Sync 84 XPU smoke: BLOCKED on the Aurora torch floor
+# Sync 84 XPU: NOT blocked -- retracted
+
+> [!CAUTION]
+> **This page previously claimed the XPU smoke was blocked on an Aurora torch
+> floor. THAT WAS WRONG, and wrong for three compounding reasons, all mine.
+> The merged tree imports 12/12 on Aurora XPU with torch 2.13.** The original
+> analysis is kept below the line because the three mistakes are worth not
+> repeating.
+
+## What is actually true (2026-09-15)
+
+```
+/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/.venv
+    torch 2.13.0.dev20260520+xpu          <- the dedicated XPU venv
+    DataParallelMeshDims: PRESENT
+    core torchtitan.distributed.fsdp: imports clean
+
+after adding sync 84's two new deps (uv, --no-deps on torch_remat):
+    12/12 ezpz modules import            agpt, moe, trainer, validator, train,
+                                         zloss, mup, sharding, both registries
+    torch unchanged: 2.13.0.dev20260520+xpu
+```
+
+Nothing about the torch version blocks the smoke. It is the ordinary sync-84
+dependency install, the same one documented for every other host.
+
+## The three mistakes
+
+**1. I looked in the wrong directory for venvs.** I checked
+`torchtitan/venvs/aurora/*` (two Feb/Mar 2026 dirs that fail on an MKL loader
+error), hit the error, and moved on to the system module instead of resolving
+it. `find -name pyvenv.cfg` across the project tree returns **19** venvs. The
+live one is `projects/saforem2/torchtitan-ezpz/.venv`.
+
+**2. I measured torch on a LOGIN node.** Login nodes run neither the prod nor
+the test compute image. This is not a small discrepancy:
+
+```
+/opt/aurora/26.181.0   login node:  DOES NOT EXIST
+                       next-eval compute node (x4000c5s6b0n0): EXISTS
+```
+
+That is the release holding `frameworks/2026.1.0`. I declared it "retired"
+from a login-node `ls`. It is compute-node-only. Probe job 8828980 showed it.
+
+**3. I truncated my own queue listing.** `qstat -Q | head -22` cuts off above
+`next-eval`, and I read that as "no such queue" while holding the name. See
+[[project_aurora_next_eval_queue]] -- it has no ACL, 6h walltime, 20 queued
+per user, and runs a TEST bkc.
+
+Any one of these alone would have been caught by the others. Together they
+produced a confident, fully-documented, wrong conclusion.
+
+## The rule
+
+**Do not characterize a cluster's software stack from a login node**, and when
+a venv path fails, find the right one (`find -name pyvenv.cfg`) rather than
+falling back to the system module and concluding from that.
+
+---
+
+# Original (WRONG) analysis, retained
 
 **Date:** 2026-09-15 · **Status:** cannot run today, and the reason is not the queue.
 
