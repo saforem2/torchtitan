@@ -111,6 +111,73 @@ merged tree was under test; the pre-merge tree ran purely as a control and
 failed byte-identically. Without it, a 10-second import failure on a fresh
 merge looks like the merge.
 
+## THE REAL FINDING: #4419 blocks the merge on Aurora
+
+Job `8829185` (merged tree, debug-scaling, 2N) got past import, past the
+tokenizer, built the model, and died in FSDP setup. All three arms, 23 ranks
+each, identically:
+
+```
+ValueError: When dp_mesh_dims is provided, all parameters must be DTensors on
+the full SPMD mesh (e.g. via distribute_module). Got plain tensor for
+parameter 'weight'.
+```
+
+**This is the exact failure the page flagged as UNVERIFIED before the run.**
+It was pre-registered in both config registries, and it reproduced.
+
+### Mechanism, measured on both machines
+
+Aurora's XPU torch, checked directly:
+
+```
+torch 2.13.0.dev20260520+xpu
+_fsdp_param.py                     1093 lines
+_resolve_spmd_types_for_storage       0
+self.is_spmd_types                    0
+get_local_type                        0
+```
+
+pytorch `da19cbd78` (#181519, 2026-06-23) added the `FSDPParam.__init__` block
+that converts an annotated plain tensor into a DTensor before the
+`is_spmd_mesh and not is_dtensor` check can fire. **Our torch predates it**, so
+an annotated plain tensor falls straight through to the raise. Perlmutter's
+`pytorch/2.13.0` shows the same gap at 1095 lines -- two independent builds,
+same conclusion. See `known-bugs/spmd-types-plain-tensor.md`, which
+root-caused this on 2026-08-20.
+
+ezpz's workaround was to pin `partial_dtensor`. **#4419 deleted that backend**,
+so the escape hatch is gone.
+
+### This is a TORCH FLOOR, not a defect in the sync ports
+
+The two trees differ on exactly one relevant line:
+
+```
+tt-sync84-pre  config_registry.py:252  cfg.parallelism.spmd_backend = "partial_dtensor"
+tt-sync84      (removed by #4419)      zero such pins
+```
+
+Baseline `8829243` runs the pre-merge tree on the same machine, same venv, same
+script, to discriminate: if it trains, #4419 is the cause and the ports are
+clean; if it fails identically, the cause is elsewhere.
+
+### What this means for landing
+
+Sync 84 **cannot land on Aurora** until one of:
+
+1. A torch carrying #181519 lands in an Aurora stack (the real fix).
+2. Upstream widens `resolve_fsdp_mesh`'s guard -- it still covers only
+   `storage_mesh.size() == 1` (`distributed/fsdp.py:48`), which the bug doc
+   records as insufficient at TP=1 with FSDP>1.
+3. ezpz carries a local shim that distributes the affected parameters. A
+   workaround in experiments/, not core -- and it needs its own justification,
+   since it re-implements what upstream torch will provide.
+
+Everything else in the sync is verified: 12/12 imports, 12/12 agpt + 14/14 moe
+builds, 82 tests, byte-identical checkpoint keys, and numerics cleared on
+Perlmutter. This one blocker is upstream of all of it.
+
 ## The rule
 
 **Do not characterize a cluster's software stack from a login node**, and when
