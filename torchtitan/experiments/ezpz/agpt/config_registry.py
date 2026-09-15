@@ -1496,9 +1496,38 @@ def agpt_70b_wide() -> FaultTolerantTrainer.Config:
 # 8530891. Anything at or above the onset blows up on the first optimizer step.
 _AGPT_80B_LR_ONSET = 1.36e-6
 
+# Identify 80B by model_spec.flavor, NOT by geometry. Geometry does not
+# separate the sizes: ezpz_agpt_50b_wide and ezpz_agpt_70b_wide are BOTH
+# dim=9216, the same width as the 80B base flavor, so a `dim >= 8192` test
+# would block them on a ceiling measured for a different model. Every 80B
+# variant's flavor starts with "80B" (80B, 80B_alt, 80B_wide, 80B_deep,
+# 80B_deep_alt, 80B_qknorm, 80B_qknorm_softcap, 80B_softcap) and no other
+# size does -- verified by enumerating every agpt config in the registry.
+_AGPT_80B_FLAVOR_PREFIX = "80b"
+
+
+def _is_80b_config(cfg: FaultTolerantTrainer.Config) -> bool:
+    """True if *cfg* is an 80B-class agpt model."""
+    try:
+        flavor = cfg.model_spec.flavor
+    except AttributeError:
+        return False
+    if not isinstance(flavor, str):
+        return False
+    return flavor.lower().startswith(_AGPT_80B_FLAVOR_PREFIX)
+
 
 def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
-    """Refuse to hand back an 80B config that will NaN on its first update.
+    """Refuse to run an 80B config that will NaN on its first update.
+
+    Call this AFTER the CLI is parsed and after any --optimizer rebuild, so
+    the lr seen here is the one the run will actually use. The original
+    placement (inside each 80B config function) ran pre-CLI and could only
+    ever see the registry default -- see the comment at the callsite in
+    experiments/ezpz/train.py.
+
+    Self-gating: returns immediately for non-80B configs, so the single
+    callsite does not need to know the size.
 
     agpt() shares one lr=8e-4 default across every size. That is reasonable at
     2B and 588x past the measured 80B NaN onset. The docstring on agpt_80b()
@@ -1512,6 +1541,8 @@ def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
     trained at a specific LR, and changing it under them is worse than an
     explicit flag. So: refuse, name the number, and say what to pass.
     """
+    if not _is_80b_config(cfg):
+        return
     try:
         lr = float(cfg.optimizer.param_groups[0].optimizer_kwargs["lr"])
     except (AttributeError, IndexError, KeyError, TypeError):
@@ -1587,7 +1618,6 @@ def agpt_80b() -> FaultTolerantTrainer.Config:
     docs/guides/known-bugs/80b-nan-rate-not-overflow.md.
     """
     cfg = agpt("80B", tensor_parallel_degree=2)
-    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 
@@ -1595,14 +1625,12 @@ def agpt_80b_chunkedce() -> FaultTolerantTrainer.Config:
     """agpt_80b with ChunkedLossWrapper. See agpt_2b_chunkedce for rationale."""
     cfg = ezpz_agpt_80b()
     cfg.loss = ChunkedLossWrapper.Config(num_chunks=8)
-    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 
 def agpt_80b_real() -> FaultTolerantTrainer.Config:
     """agpt_80b with real-valued (cos_sin) RoPE. See agpt_2b_real."""
     cfg = _set_rope_backend(ezpz_agpt_80b(), "cos_sin")
-    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 
@@ -1677,7 +1705,6 @@ def agpt_80b_zloss() -> FaultTolerantTrainer.Config:
     Smoke agpt_2b_zloss first.
     """
     cfg = _set_z_loss(ezpz_agpt_80b(), coef=1e-4)
-    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 
@@ -1690,7 +1717,6 @@ def agpt_80b_fp32res() -> FaultTolerantTrainer.Config:
     Validate NaN-free + throughput before production use.
     """
     cfg = _set_fp32_residual(ezpz_agpt_80b())
-    _assert_80b_lr_is_survivable(cfg)
     return cfg
 
 

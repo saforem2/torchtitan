@@ -448,6 +448,31 @@ def main(args: list[str] | None = None) -> None:
             "Using optimizer: %s (%s)", optimizer_name, type(config.optimizer).__name__
         )
 
+    # Check the 80B learning rate HERE, not in the config registry.
+    #
+    # The registry guard added in 607f1f623 ran inside the config function
+    # itself, which ConfigManager calls from _load_config() BEFORE tyro
+    # parses the CLI. It could therefore only ever see the registry default
+    # (8e-4), never the operator's --optimizer.lr. That made it exactly
+    # backwards: it hard-blocked 8 configs that a correct --optimizer.lr
+    # would have made safe (agpt_80b_zloss could not be launched at all),
+    # while 14 other 80B entry points returned 8e-4 with no complaint
+    # because no guard was wired to them.
+    #
+    # This callsite is after BOTH the CLI parse and the _build_optimizer_config
+    # rebuild below, so it sees the lr the run will actually use, whichever
+    # path produced it -- registry default, --optimizer.lr, or a bare
+    # --optimizer that discards the registry value entirely (see
+    # _build_optimizer_config: "base ... is ignored").
+    # Imported locally: train.py is the shared entrypoint for every ezpz
+    # module (agpt, moe, ...), and only agpt defines 80B flavors. A
+    # top-level import would make moe runs depend on the agpt registry.
+    from torchtitan.experiments.ezpz.agpt.config_registry import (
+        _assert_80b_lr_is_survivable,
+    )
+
+    _assert_80b_lr_is_survivable(config)
+
     trainer = None
 
     # Install the xccl split_group workaround BEFORE config.build(). It also
