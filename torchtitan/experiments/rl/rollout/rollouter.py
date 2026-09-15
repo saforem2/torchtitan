@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 
 from monarch.actor import ProcMesh, this_host
 
+from torchtitan.components.renderer import RendererConfig
+
+from torchtitan.components.tokenizer import HuggingFaceTokenizer
 from torchtitan.config import Configurable
 from torchtitan.experiments.rl.environment import MessageEnv, TokenEnv
 from torchtitan.experiments.rl.rollout.advantage import AdvantageEstimator
@@ -33,7 +36,6 @@ if TYPE_CHECKING:
     from torchtitan.experiments.rl.actors.generator import SamplingConfig
 
     from torchtitan.experiments.rl.actors.rollout_worker import RolloutWorkerActor
-    from torchtitan.experiments.rl.renderer import RendererConfig
 
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,7 @@ class Rollouter(Configurable):
     async def setup_async(
         self,
         *,
+        tokenizer_config: HuggingFaceTokenizer.Config,
         renderer_config: RendererConfig,
         hf_assets_path: str,
     ) -> None:
@@ -155,6 +158,7 @@ class Rollouter(Configurable):
             num_threads=self._config.num_threads_per_worker,
         )
         await self._worker_actors.setup_async.call(
+            tokenizer_config=tokenizer_config,
             renderer_config=renderer_config,
             hf_assets_path=hf_assets_path,
         )
@@ -241,11 +245,13 @@ class RolloutWorker(Configurable):
     async def setup_async(
         self,
         *,
+        tokenizer_config: HuggingFaceTokenizer.Config,
         renderer_config: RendererConfig,
         hf_assets_path: str,
     ) -> None:
         """Build runtime dependencies after the worker actor is spawned."""
-        self._renderer = renderer_config.build(tokenizer_path=hf_assets_path)
+        tokenizer = tokenizer_config.build(tokenizer_path=hf_assets_path)
+        self._renderer = renderer_config.build(tokenizer=tokenizer)
 
     def make_env_group(
         self,

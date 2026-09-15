@@ -11,6 +11,7 @@ from functools import partial
 import torch.nn as nn
 
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
+from torchtitan.config.transform import ModelConfigConverter, validate_converter_order
 from torchtitan.distributed.pipeline_parallel import pipeline_llm
 from torchtitan.models.common import (
     CosSinRoPE,
@@ -18,22 +19,18 @@ from torchtitan.models.common import (
     Linear,
     RMSNorm,
     RoPE,
+    RouterGateLinear,
+    Softmax,
     TransformerBlock,
 )
-from torchtitan.models.common.attention import (
-    FusedQKVLinear,
-    QKVLinear,
-    VarlenAttention,
-)
+from torchtitan.models.common.attention import QKVLinear, VarlenInnerAttention
 from torchtitan.models.common.config_utils import (
     get_attention_config,
     make_token_dispatcher_config,
 )
-from torchtitan.models.common.linear import ScaledBiasRowwiseLinear
+from torchtitan.models.common.linear import PartialBiasRowwiseLinear
 from torchtitan.models.common.moe import RoutedExperts, TokenChoiceTopKRouter
 from torchtitan.models.common.param_init import depth_scaled_std
-from torchtitan.models.utils import validate_converter_order
-from torchtitan.protocols.model import ModelConfigConverter
 from torchtitan.protocols.model_spec import ModelSpec
 from .model import Attention, GptOssModel, GptOssTransformerBlock
 from .moe import GptOssGroupedExperts, GptOssMoE
@@ -75,7 +72,6 @@ def _make_gptoss_attn_config(
     n_kv_heads: int = 8,
     head_dim: int = 64,
     sliding_window_size: int | None = None,
-    fuse_qkv: bool = True,
     rope: RoPE.Config,
 ) -> Attention.Config:
     """Build a fully-specified GPT-OSS Attention.Config for a single layer.
@@ -88,7 +84,7 @@ def _make_gptoss_attn_config(
     inner_attention = get_attention_config(attn_backend)
 
     if sliding_window_size is not None and isinstance(
-        inner_attention, VarlenAttention.Config
+        inner_attention, VarlenInnerAttention.Config
     ):
         inner_attention = dataclasses.replace(
             inner_attention, window_size=(sliding_window_size - 1, 0)
@@ -98,34 +94,17 @@ def _make_gptoss_attn_config(
         "sinks": partial(nn.init.trunc_normal_, std=depth_scaled_std(0.02, layer_id))
     }
 
-    if fuse_qkv:
-        qkv = FusedQKVLinear.Config(
-            head_dim=head_dim,
-            n_heads=n_heads,
-            n_kv_heads=n_kv_heads,
-            wqkv=Linear.Config(
-                in_features=dim,
-                out_features=(n_heads + 2 * n_kv_heads) * head_dim,
-                bias=True,
-                param_init=_depth_init(layer_id),
-            ),
-        )
-    else:
-        qkv = QKVLinear.Config(
-            head_dim=head_dim,
-            wq=Linear.Config(
-                in_features=dim,
-                out_features=n_heads * head_dim,
-                bias=True,
-                param_init=_depth_init(layer_id),
-            ),
-            wkv=Linear.Config(
-                in_features=dim,
-                out_features=n_kv_heads * head_dim,
-                bias=True,
-                param_init=_depth_init(layer_id),
-            ),
-        )
+    qkv = QKVLinear.Config(
+        head_dim=head_dim,
+        n_heads=n_heads,
+        n_kv_heads=n_kv_heads,
+        wqkv=Linear.Config(
+            in_features=dim,
+            out_features=(n_heads + 2 * n_kv_heads) * head_dim,
+            bias=True,
+            param_init=_depth_init(layer_id),
+        ),
+    )
 
     return Attention.Config(
         n_heads=n_heads,
@@ -133,7 +112,7 @@ def _make_gptoss_attn_config(
         head_dim=head_dim,
         dim=dim,
         qkv_linear=qkv,
-        wo=ScaledBiasRowwiseLinear.Config(
+        wo=PartialBiasRowwiseLinear.Config(
             in_features=n_heads * head_dim,
             out_features=dim,
             bias=True,
@@ -190,7 +169,6 @@ def _build_gptoss_layers(
     top_k: int,
     load_balance_coeff: float,
     attn_backend: str = "varlen",
-    fuse_qkv: bool = True,
     moe_comm_backend: str,
     non_blocking_capacity_factor: float | None = None,
     rope: RoPE.Config,
@@ -207,7 +185,6 @@ def _build_gptoss_layers(
             layer_id=layer_id,
             attn_backend=attn_backend,
             sliding_window_size=128 if layer_id % 2 == 0 else None,
-            fuse_qkv=fuse_qkv,
             rope=rope,
         )
         routed_experts_cfg = _make_gptoss_experts_config(
@@ -225,9 +202,9 @@ def _build_gptoss_layers(
             routed_experts=routed_experts_cfg,
             router=TokenChoiceTopKRouter.Config(
                 num_experts=num_experts,
-                score_func="softmax",
+                score_func=Softmax.Config(),
                 route_norm=True,
-                gate=Linear.Config(
+                gate=RouterGateLinear.Config(
                     in_features=dim,
                     out_features=num_experts,
                     bias=True,
@@ -249,6 +226,8 @@ def _build_gptoss_layers(
 def _debugmodel(
     moe_comm_backend: str,
     attn_backend: str = "varlen",
+    *,
+    seq_len: int,
 ) -> GptOssModel.Config:
     dim = 256
     hidden_dim = 2880
@@ -266,7 +245,6 @@ def _debugmodel(
             param_init=_output_linear_init(dim),
         ),
         layers=_build_gptoss_layers(
-            fuse_qkv=True,
             dim=dim,
             n_layers=n_layers,
             hidden_dim=hidden_dim,
@@ -277,7 +255,7 @@ def _debugmodel(
             moe_comm_backend=moe_comm_backend,
             rope=CosSinRoPE.Config(
                 dim=64,
-                max_context_length=131072,
+                max_context_length=seq_len,
                 theta=150000.0,
                 scaling="yarn",
                 rope_factor=32,
@@ -293,6 +271,8 @@ def _debugmodel(
 def _20b(
     moe_comm_backend: str,
     attn_backend: str = "varlen",
+    *,
+    seq_len: int,
 ) -> GptOssModel.Config:
     dim = 2880
     hidden_dim = 2880
@@ -310,7 +290,6 @@ def _20b(
             param_init=_output_linear_init(dim),
         ),
         layers=_build_gptoss_layers(
-            fuse_qkv=True,
             dim=dim,
             n_layers=n_layers,
             hidden_dim=hidden_dim,
@@ -321,7 +300,7 @@ def _20b(
             moe_comm_backend=moe_comm_backend,
             rope=CosSinRoPE.Config(
                 dim=64,
-                max_context_length=131072,
+                max_context_length=seq_len,
                 theta=150000.0,
                 scaling="yarn",
                 rope_factor=32,
@@ -337,6 +316,8 @@ def _20b(
 def _120b(
     moe_comm_backend: str,
     attn_backend: str = "varlen",
+    *,
+    seq_len: int,
 ) -> GptOssModel.Config:
     dim = 2880
     hidden_dim = 2880
@@ -354,7 +335,6 @@ def _120b(
             param_init=_output_linear_init(dim),
         ),
         layers=_build_gptoss_layers(
-            fuse_qkv=True,
             dim=dim,
             n_layers=n_layers,
             hidden_dim=hidden_dim,
@@ -365,7 +345,7 @@ def _120b(
             moe_comm_backend=moe_comm_backend,
             rope=CosSinRoPE.Config(
                 dim=64,
-                max_context_length=131072,
+                max_context_length=seq_len,
                 theta=150000.0,
                 scaling="yarn",
                 rope_factor=32,
@@ -379,21 +359,31 @@ def _120b(
 
 
 gptoss_configs = {
-    "debugmodel": _debugmodel,
-    "20b": _20b,
-    "120b": _120b,
+    "debugmodel": (_debugmodel, 131072),
+    "20b": (_20b, 131072),
+    "120b": (_120b, 131072),
 }
 
 
 def model_registry(
     flavor: str,
+    *,
+    seq_len: int | None = None,
     moe_comm_backend: str = "standard",
     attn_backend: str = "varlen",
     converters: list[ModelConfigConverter.Config] | None = None,
 ) -> ModelSpec:
-    config = gptoss_configs[flavor](
+    get_config, max_context_len = gptoss_configs[flavor]
+    context_len = seq_len or max_context_len
+    if context_len > max_context_len:
+        raise ValueError(
+            f"Requested seq_len {context_len} exceeds max context length "
+            f"{max_context_len} for flavor {flavor}"
+        )
+    config = get_config(
         moe_comm_backend=moe_comm_backend,
         attn_backend=attn_backend,
+        seq_len=context_len,
     )
     if converters is not None:
         validate_converter_order(converters)
@@ -403,6 +393,7 @@ def model_registry(
         name="gpt_oss",
         flavor=flavor,
         model=config,
+        max_context_length=context_len,
         parallelize_fn=parallelize_gptoss,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=register_moe_load_balancing_hook,

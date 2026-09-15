@@ -13,6 +13,7 @@ import unittest
 import warnings
 
 import tyro
+
 from torchtitan.trainer import Trainer
 
 _FROZEN_CLI_OPTIONS = frozenset(
@@ -22,6 +23,7 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "activation_checkpoint.force_recompute_mm_shapes_by_fqns",
         "activation_checkpoint.memory_budget",
         "activation_checkpoint.preserve_rng_state",
+        "activation_checkpoint.save_regions",
         "activation_checkpoint.visualize_memory_budget_pareto",
         "checkpoint.async_mode",
         "checkpoint.create_seed_checkpoint",
@@ -154,7 +156,6 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "parallelism.num_pp_microbatches",
         "parallelism.pipeline_parallel_schedule",
         "parallelism.pipeline_parallel_schedule_csv",
-        "parallelism.spmd_backend",
         "parallelism.tensor_parallel_degree",
         "profiler.enable_memory_snapshot",
         "profiler.enable_profiling",
@@ -361,8 +362,11 @@ _GUARDED_CONFIGS = (
     ("llama3", "llama3_debugmodel"),
     ("llama3", "sft_debugmodel"),
     ("deepseek_v3", "deepseek_v3_debugmodel"),
+    ("deepseek_v4", "deepseek_v4_debugmodel"),
     ("qwen3", "qwen3_debugmodel"),
     ("qwen3_5", "qwen35_debugmodel_moe"),
+    ("qwen3_6", "qwen36_debugmodel_moe"),
+    ("qwen3_8", "qwen38_debugmodel_moe"),
     ("gpt_oss", "gpt_oss_debugmodel"),
     ("flux", "flux_debugmodel"),
     ("kimi_k2_7", "kimi_k2_5_debugmodel"),

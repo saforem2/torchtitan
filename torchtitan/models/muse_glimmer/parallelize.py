@@ -8,6 +8,8 @@
 # various training techniques (e.g. activation checkpointing and compile) to the
 # Muse Glimmer model.
 
+import logging
+
 from torchtitan.config import (
     CompileConfig,
     ParallelismConfig,
@@ -22,9 +24,11 @@ from torchtitan.distributed.fsdp import (
     apply_fsdp_to_vision_encoder,
     resolve_fsdp_mesh,
 )
-from torchtitan.tools.logging import logger
 
 from .model import MuseGlimmerModel
+
+
+logger = logging.getLogger(__name__)
 
 
 def parallelize_muse_glimmer(
@@ -38,11 +42,6 @@ def parallelize_muse_glimmer(
     dump_folder: str,
     skip_dp: bool = False,
 ):
-    if parallelism.spmd_backend != "spmd_types":
-        raise NotImplementedError(
-            "Muse Glimmer only supports spmd_backend='spmd_types'; "
-            f"got '{parallelism.spmd_backend}'."
-        )
     # When the model owns the vision stack (multimodal flavor), the encoder +
     # adapter are submodules: TP is applied by ``model.parallelize`` (driven by
     # the sharding configs set in update_from_config), and AC/compile/FSDP are
@@ -50,10 +49,6 @@ def parallelize_muse_glimmer(
     has_vision = model.vision_encoder is not None
     if has_vision:
         assert model.vision_adapter is not None
-        if parallel_dims.cp_enabled:
-            raise NotImplementedError(
-                "context parallel is not supported for the Muse Glimmer vision encoder."
-            )
         if parallel_dims.tp_enabled:
             # pyrefly: ignore [missing-attribute]
             vision_num_heads = model.vision_encoder.num_heads
@@ -117,6 +112,7 @@ def parallelize_muse_glimmer(
                 reduce_dtype,
                 reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
                 pp_enabled=parallel_dims.pp_enabled,
+                cpu_offload=training.enable_cpu_offload,
                 dp_mesh_dims=dp_mesh_dims,
             )
 
@@ -129,7 +125,7 @@ def parallelize_muse_glimmer(
         cpu_offload=training.enable_cpu_offload,
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
         dp_mesh_dims=dp_mesh_dims,
-        enable_symm_mem=parallelism.enable_fsdp_symm_mem,
+        symm_mem_scope=parallelism.fsdp_symm_mem_scope,
     )
 
     logger.info("Applied fully_shard to the model")
@@ -138,82 +134,3 @@ def parallelize_muse_glimmer(
         logger.info("Applied CPU Offloading to the model")
 
     return model
-
-
-def pipeline_muse_glimmer(
-    model: MuseGlimmerModel,
-    *,
-    parallel_dims: ParallelDims,
-    parallelism: ParallelismConfig,
-    model_config,
-    **kwargs,
-):
-    """PP wrapper that assigns the owned vision stack to the first pipeline stage.
-
-    Delegates to ``pipeline_llm`` after injecting the multimodal modules into the
-    first stage's FQN list. The auto-generated LLM split only knows about
-    ``tok_embeddings`` + decoder layers + ``norm``/``lm_head``; it does not model
-    Muse Glimmer's vision modules, so without this they would be pruned to ``None`` on
-    every stage.
-
-    Muse Glimmer's owned vision stack runs inside ``MuseGlimmerModel.forward`` on the embedding
-    stage (where ``tok_embeddings`` lives): the encoder + adapter encode raw
-    images, and ``vision_projection`` + ``perception_emb_norm`` scatter the result
-    into the token embeddings. All present vision modules must therefore live on
-    stage 0. (For the standalone-encoder flavor only ``vision_projection`` +
-    ``perception_emb_norm`` exist; the per-module presence check handles that.)
-    """
-    import dataclasses
-
-    from torchtitan.distributed.pipeline_parallel import (
-        _generate_llm_fqn_per_model_part,
-        _get_pipeline_metadata,
-        pipeline_llm,
-    )
-
-    # NOTE: We cannot delegate to the generic ``pipeline_vlm`` here. That helper
-    # only injects a single ``vision_encoder`` FQN into stage 0; Muse Glimmer owns
-    # a multi-module vision stack (vision_encoder, vision_adapter,
-    # vision_projection, perception_emb_norm) whose membership varies by flavor
-    # (the standalone-encoder flavor has only vision_projection +
-    # perception_emb_norm). We therefore replicate ``pipeline_vlm``'s structure but
-    # inject the full, per-module presence-checked stack instead.
-    if parallelism.module_fqns_per_model_part is None:
-        (
-            num_virtual_stages,
-            num_layers,
-            input_weight,
-            output_weight,
-        ) = _get_pipeline_metadata(parallel_dims, parallelism, model_config)
-        fqn_per_part = _generate_llm_fqn_per_model_part(
-            num_virtual_stages, num_layers, input_weight, output_weight
-        )
-        # The owned vision stack lives on the first stage alongside
-        # tok_embeddings. This adds load to stage 0 that the auto split does not
-        # model (input_weight only accounts for tok_embeddings); for a heavy
-        # vision encoder, bump
-        # parallelism.pipeline_parallel_first_stage_less_layers to rebalance.
-        # Prepend in data-flow order so the resulting stage-0 list reads
-        # encoder -> adapter -> projection -> emb_norm -> tok_embeddings.
-        vision_fqns = [
-            fqn
-            for fqn in (
-                "vision_encoder",
-                "vision_adapter",
-                "vision_projection",
-                "perception_emb_norm",
-            )
-            if getattr(model, fqn, None) is not None
-        ]
-        fqn_per_part[0][:0] = vision_fqns
-        parallelism = dataclasses.replace(
-            parallelism, module_fqns_per_model_part=fqn_per_part
-        )
-
-    return pipeline_llm(
-        model,
-        parallel_dims=parallel_dims,
-        parallelism=parallelism,
-        model_config=model_config,
-        **kwargs,
-    )

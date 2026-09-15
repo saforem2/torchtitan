@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -18,8 +19,11 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import Shard
 
+from torchtitan.config import FSDPSymmMemScope
 from torchtitan.distributed.parallel_dims import ParallelDims
-from torchtitan.tools.logging import logger
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from torchtitan.models.common.decoder import Decoder
@@ -38,9 +42,6 @@ def resolve_fsdp_mesh(
     even at size 1) so FSDP can pick the DP submesh out of the multi-axis
     storage mesh inside ``DeviceMesh._concatenate([dp_mesh, tp_mesh])``.
     """
-    assert (
-        parallel_dims.spmd_backend == "spmd_types"
-    ), "resolve_fsdp_mesh is only meaningful under spmd_types"
     storage_mesh = parallel_dims.get_activated_mesh(_DENSE_STORAGE_AXES)
     assert storage_mesh is not None
 
@@ -71,9 +72,6 @@ def resolve_sparse_fsdp_mesh(
     storage mesh + sparse DP axes. The FSDP axis is ``efsdp`` and
     ``dp_replicate`` is shared with the dense path.
     """
-    assert (
-        parallel_dims.spmd_backend == "spmd_types"
-    ), "resolve_sparse_fsdp_mesh is only meaningful under spmd_types"
     if not parallel_dims.ep_enabled:
         return None, None
     sparse_mesh = parallel_dims.get_activated_mesh(_SPARSE_STORAGE_AXES)
@@ -99,14 +97,17 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
             module.set_gradient_divide_factor(1.0)
 
 
-def enable_fsdp_symm_mem(model: nn.Module) -> None:
-    """
-    Enable symmetric-memory communication optimizations for all FSDP modules.
-    """
+def enable_fsdp_symm_mem(model: nn.Module, scope: FSDPSymmMemScope) -> None:
+    """Enable symmetric-memory communication for the FSDP modules ``scope`` selects."""
+    if scope is None:
+        return
     for module in model.modules():
-        if isinstance(module, FSDPModule):
-            module.set_force_sum_reduction_for_comms(True)
-            module.set_symm_mem_for_comm()
+        if not isinstance(module, FSDPModule):
+            continue
+        if scope == "dense" and getattr(module, "moe_enabled", False):
+            continue
+        module.set_force_sum_reduction_for_comms(True)
+        module.set_symm_mem_for_comm()
 
 
 def get_fsdp_reshard_after_forward_policy(
@@ -143,6 +144,7 @@ def apply_fsdp_to_vision_encoder(
     reduce_dtype: torch.dtype,
     reshard_after_forward_policy: str = "default",
     pp_enabled: bool = False,
+    cpu_offload: bool = False,
     *,
     dp_mesh_dims: DataParallelMeshDims | None = None,
 ) -> None:
@@ -151,18 +153,27 @@ def apply_fsdp_to_vision_encoder(
     One all-gather for all vision params is more efficient than per-layer sharding
     (the vision encoder is small relative to the decoder). Call before
     ``apply_fsdp_to_decoder`` so the encoder is already sharded.
+
+    ``cpu_offload`` must match what the caller passes to ``apply_fsdp_to_decoder``.
+    Under ``training.enable_cpu_offload`` the trainer materializes the whole model
+    on CPU, so a vision encoder sharded without ``CPUOffloadPolicy`` keeps CPU
+    parameters while FSDP produces CUDA gradients for them, and backward dies with
+    "attempting to assign a gradient with device type 'cuda' to a tensor with
+    device type 'cpu'".
     """
     mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=reduce_dtype)
     reshard_after_forward = get_fsdp_reshard_after_forward_policy(
         reshard_after_forward_policy, pp_enabled=pp_enabled
     )
-    fully_shard(
-        vision_encoder,
-        mesh=dp_mesh,
-        mp_policy=mp_policy,
-        reshard_after_forward=reshard_after_forward,
-        dp_mesh_dims=dp_mesh_dims,
-    )
+    fsdp_config: dict[str, Any] = {
+        "mesh": dp_mesh,
+        "mp_policy": mp_policy,
+        "reshard_after_forward": reshard_after_forward,
+        "dp_mesh_dims": dp_mesh_dims,
+    }
+    if cpu_offload:
+        fsdp_config["offload_policy"] = CPUOffloadPolicy()
+    fully_shard(vision_encoder, **fsdp_config)
 
 
 def apply_fsdp_to_decoder(
@@ -177,7 +188,7 @@ def apply_fsdp_to_decoder(
     edp_mesh: DeviceMesh | None = None,
     dp_mesh_dims: "DataParallelMeshDims | None" = None,
     edp_mesh_dims: "DataParallelMeshDims | None" = None,
-    enable_symm_mem: bool = False,
+    symm_mem_scope: FSDPSymmMemScope = None,
 ):
     """
     Apply data parallelism (via FSDP2) to a decoder-style transformer model.
@@ -216,9 +227,8 @@ def apply_fsdp_to_decoder(
             strong enough to infer safely, and an explicit declaration
             avoids silent miscategorization when new mesh axes appear.
         edp_mesh_dims: Sibling of ``dp_mesh_dims`` for the sparse SPMD mesh
-            used by routed experts. ``None`` under partial_dtensor.
-        enable_symm_mem (bool): Whether to enable symmetric-memory FSDP
-            communication.
+            used by routed experts.
+        symm_mem_scope: Which FSDP modules use symmetric-memory communication.
     """
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -367,8 +377,7 @@ def apply_fsdp_to_decoder(
 
     fully_shard(model, **fsdp_config)
 
-    if enable_symm_mem:
-        enable_fsdp_symm_mem(model)
+    enable_fsdp_symm_mem(model, symm_mem_scope)
 
     # Disable FSDP's automatic gradient division for all FSDP modules
     disable_fsdp_gradient_division(model)

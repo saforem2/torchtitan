@@ -36,6 +36,8 @@ checkpoints.
 
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
@@ -43,11 +45,13 @@ from typing import Any, TYPE_CHECKING
 import spmd_types as spmd
 
 import torch
-from torch.distributed.tensor import DTensor
 
 from torchtitan.config import derive, override
 from torchtitan.models.common.rope import _maybe_check_max_pos, ComplexRoPE, CosSinRoPE
-from torchtitan.tools.logging import logger, warn_once
+from torchtitan.observability.logging import warn_once
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     # The type checker always sees helion as importable (resolved to Any via
@@ -709,25 +713,13 @@ if _HELION_IMPORT_ERROR is None:
     )
 
 
-def _to_local(tensor: torch.Tensor) -> torch.Tensor:
-    return tensor.to_local() if isinstance(tensor, DTensor) else tensor
-
-
-def _from_local(local: torch.Tensor, spec: torch.Tensor) -> torch.Tensor:
-    if isinstance(spec, DTensor):
-        return DTensor.from_local(
-            local, spec.device_mesh, spec.placements, run_check=False
-        )
-    return local
-
-
 def _resolve_positions(
     positions: torch.Tensor | None, query_local: torch.Tensor
 ) -> torch.Tensor:
     # ``positions=None`` means "0, 1, ..., T-1". The kernel gathers by index,
     # so make those IDs explicit.
     if positions is not None:
-        return _to_local(positions)
+        return positions
     return torch.arange(
         query_local.shape[0], device=query_local.device, dtype=torch.int32
     )
@@ -803,13 +795,13 @@ def _complex_eligible(
 
 if _HELION_IMPORT_ERROR is None:
 
-    def _helion_cossin_rope_fwd_tnh(xq, xk, cache, pos):
+    def _helion_cossin_rope_fwd_thk(xq, xk, cache, pos):
         xq_out, xk_out = _helion_cossin_rope_fwd(
             xq.unsqueeze(0), xk.unsqueeze(0), cache, pos.unsqueeze(0)
         )
         return xq_out.squeeze(0), xk_out.squeeze(0)
 
-    def _helion_complex_rope_fwd_tnh(xq, xk, cache, pos):
+    def _helion_complex_rope_fwd_thk(xq, xk, cache, pos):
         xq_out, xk_out = _helion_complex_rope_fwd(
             xq.unsqueeze(0), xk.unsqueeze(0), cache, pos.unsqueeze(0)
         )
@@ -827,9 +819,9 @@ if _HELION_IMPORT_ERROR is None:
         reserved for inputs the kernel cannot safely handle; the caller uses the
         PyTorch path for those cases.
         """
-        xq = _to_local(query)
-        xk = _to_local(key)
-        cache = _to_local(rope_cache)
+        xq = query
+        xk = key
+        cache = rope_cache
         pos = _resolve_positions(positions, xq)
         xq = xq.contiguous()
         xk = xk.contiguous()
@@ -860,11 +852,11 @@ if _HELION_IMPORT_ERROR is None:
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xq_TNH
+                ),  # xq_THK
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xk_TNH
+                ),  # xk_THK
                 {"dp": spmd.R, "cp": spmd.R, "tp": spmd.R},  # rope_cache_MD
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.R},
@@ -875,14 +867,14 @@ if _HELION_IMPORT_ERROR is None:
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xq_out_TNH
+                ),  # xq_out_THK
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xk_out_TNH
+                ),  # xk_out_THK
             ),
-        )(_helion_cossin_rope_fwd_tnh)(xq, xk, cache, pos)
-        return _from_local(xq_out, query), _from_local(xk_out, key)
+        )(_helion_cossin_rope_fwd_thk)(xq, xk, cache, pos)
+        return xq_out, xk_out
 
     def _apply_helion_complex_rope(
         query: torch.Tensor,
@@ -890,9 +882,9 @@ if _HELION_IMPORT_ERROR is None:
         rope_cache: torch.Tensor,
         positions: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        xq = _to_local(query)
-        xk = _to_local(key)
-        cache = _to_local(rope_cache)
+        xq = query
+        xk = key
+        cache = rope_cache
         pos = _resolve_positions(positions, xq)
         if not cache.is_complex():
             return None
@@ -920,11 +912,11 @@ if _HELION_IMPORT_ERROR is None:
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xq_TNH
+                ),  # xq_THK
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xk_TNH
+                ),  # xk_THK
                 {"dp": spmd.R, "cp": spmd.R, "tp": spmd.R},  # rope_cache_real
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.R},
@@ -935,14 +927,14 @@ if _HELION_IMPORT_ERROR is None:
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xq_out_TNH
+                ),  # xq_out_THK
                 (
                     {"dp": spmd.V, "cp": spmd.V, "tp": spmd.V},
                     spmd.PartitionSpec(("dp", "cp"), "tp", None),
-                ),  # xk_out_TNH
+                ),  # xk_out_THK
             ),
-        )(_helion_complex_rope_fwd_tnh)(xq, xk, cache_real, pos)
-        return _from_local(xq_out, query), _from_local(xk_out, key)
+        )(_helion_complex_rope_fwd_thk)(xq, xk, cache_real, pos)
+        return xq_out, xk_out
 
 else:
 
@@ -985,12 +977,16 @@ class HelionCosSinRoPE(CosSinRoPE):
     def forward(
         self,
         query: torch.Tensor,
-        key: torch.Tensor,
+        key: torch.Tensor | None = None,
         positions: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        *,
+        inverse: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if key is None or inverse:
+            return super().forward(query, key, positions, inverse=inverse)
         out = _apply_helion_cossin_rope(query, key, self.cache, positions)
         if out is None:
-            return super().forward(query, key, positions)
+            return super().forward(query, key, positions, inverse=inverse)
         return out
 
 
@@ -1016,12 +1012,16 @@ class HelionComplexRoPE(ComplexRoPE):
     def forward(
         self,
         query: torch.Tensor,
-        key: torch.Tensor,
+        key: torch.Tensor | None = None,
         positions: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        *,
+        inverse: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if key is None or inverse:
+            return super().forward(query, key, positions, inverse=inverse)
         out = _apply_helion_complex_rope(query, key, self.cache, positions)
         if out is None:
-            return super().forward(query, key, positions)
+            return super().forward(query, key, positions, inverse=inverse)
         return out
 
 

@@ -18,10 +18,11 @@ _supported_experiments = frozenset(
         "ezpz.moe",
         "ezpz.qwen3",
         "rl",
-        # RL examples own a per-example config_registry under rl/examples/<name>;
-        # listed here so `--module <name>` resolves (see ConfigManager).
+        # RL examples own a config_registry under rl/examples/<module path>;
+        # listed here so `--module <module path>` resolves (see ConfigManager).
         "alphabet_sort",
         "dapo_math",
         "search_r1",
+        "verifiers.dapo_math",
     ]
 )

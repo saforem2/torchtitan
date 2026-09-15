@@ -24,7 +24,6 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-from torch.distributed.tensor import DTensor
 
 from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
 from torchtitan.distributed import ParallelDims
@@ -54,9 +53,9 @@ def run_worker(args):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    config = qwen3_5_configs["debugmodel_moe"](
-        attn_backend="flex",
-        moe_comm_backend="standard",
+    build_config, max_context_length = qwen3_5_configs["debugmodel_moe"]
+    config = build_config(
+        attn_backend="flex", moe_comm_backend="standard", seq_len=max_context_length
     )
 
     parallel_dims = ParallelDims(
@@ -127,9 +126,6 @@ def run_worker(args):
             attention_masks=attention_masks,
             special_tokens={"image_id": 248056, "video_id": 248057},
         )
-
-    if isinstance(output, DTensor):
-        output = output.full_tensor()
 
     logits = output[0, 0, :10].float().tolist()
 

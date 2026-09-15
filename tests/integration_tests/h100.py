@@ -37,7 +37,7 @@ def build_h100_tests_list() -> list[OverrideDefinitions]:
         OverrideDefinitions(
             configs=[recipes.llama3_debugmodel_float8_fsdp2_tp2_pp2_asynctp_compile],
             test_descr="FSDP+async TP+PP+torch.compile+Float8",
-            test_name="fsdp+tp+cp+compile+float8",
+            test_name="fsdp+tp+pp+compile+float8",
             ngpu=8,
         ),
         OverrideDefinitions(
@@ -52,13 +52,6 @@ def build_h100_tests_list() -> list[OverrideDefinitions]:
             test_name="deepseek_v3_fsdp+hybridep+compile",
             ngpu=4,
             # deep_ep/NVSHMEM is CUDA-only, so skip on ROCm.
-            skip_rocm_test=True,
-        ),
-        OverrideDefinitions(
-            configs=[recipes.deepseek_v3_debugmodel_minimal_async_ep_fsdp2_tp2_cp2_ep8],
-            test_descr="DeepSeek V3 FSDP+CP+TP+MinimalAsyncEP",
-            test_name="deepseek_v3_fsdp+cp+tp+minimal_async_ep",
-            ngpu=8,
             skip_rocm_test=True,
         ),
         OverrideDefinitions(

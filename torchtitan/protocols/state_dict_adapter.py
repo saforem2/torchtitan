@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import json
+
+import logging
 import os
 import re
 from abc import ABC, abstractmethod
@@ -12,8 +14,10 @@ from typing import Any
 
 from torch.distributed.checkpoint import HuggingFaceStorageReader
 
-from torchtitan.tools.logging import logger
 from .model import BaseModel
+
+
+logger = logging.getLogger(__name__)
 
 
 class BaseStateDictAdapter(ABC):
@@ -116,11 +120,14 @@ class StateDictAdapter(BaseStateDictAdapter):
     ) -> None:
         for layer in self.model_config.layers:  # pyrefly: ignore [missing-attribute]
             rope = layer.attention.rope
+            # NoPE layers carry no rope config, so there is nothing to validate.
+            if rope is None:
+                continue
             if not isinstance(rope, expected_rope_cls):
                 expected_name = expected_rope_cls.__qualname__
                 raise ValueError(
                     f"HF checkpoint conversion assumes {expected_name}; "
-                    f"got {type(rope).__name__}."
+                    f"got {type(rope).__qualname__}."
                 )
 
     def get_hf_storage_reader(

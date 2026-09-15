@@ -15,27 +15,29 @@ from torch.nn.attention.flex_attention import and_masks, BlockMask
 
 from torchtitan.config import ParallelismConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
-from torchtitan.distributed.spmd_types import annotate_input_spmd_types
-from torchtitan.distributed.utils import get_spmd_backend, is_in_batch_invariant_mode
+from torchtitan.distributed.spmd_types import (
+    annotate_input_spmd_types,
+    spmd_local_context,
+)
+from torchtitan.distributed.utils import is_in_batch_invariant_mode
 from torchtitan.models.common.attention import (
     AttentionMasksType,
     create_attention_mask,
     create_varlen_metadata_for_document,
-    FlexAttention,
+    FlexInnerAttention,
     get_causal_mask_mod,
     get_efficient_causal_mask_mod_for_packed_document,
     get_sliding_window_mask_mod,
     GQAttention,
-    VarlenAttention,
+    VarlenInnerAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
 from torchtitan.models.common.decoder_sharding import decoder_input_sharding
 from torchtitan.models.common.embedding import Embedding
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.multimodal import (
-    get_vision_positions,
-    multimodal_context,
-    scatter_vision_embeds,
+    build_vision_bank_indices,
+    gather_vision_embeds,
 )
 from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.vision_encoder_sharding import multimodal_input_sharding
@@ -56,8 +58,9 @@ def _window_mask_key(window_size: int | None) -> str:
 class RMSGainCenterNorm(RMSNorm):
     """RMSNorm whose effective scale is ``weight + gain_center``.
 
-    The learnable ``weight`` is initialized to 0 so the norm starts centered
-    on ``gain_center`` (1.0 for pre/post norms, 0.0 for the final output norm).
+    Pre/post norms initialize ``weight`` to 0 with ``gain_center=1.0``.
+    The final output norm initializes ``weight`` to 1 with ``gain_center=0.0``,
+    so all of these norms start with unit effective scale.
     """
 
     @dataclass(kw_only=True, slots=True)
@@ -84,11 +87,6 @@ class Attention(GQAttention):
 
     @dataclass(kw_only=True, slots=True)
     class Config(GQAttention.Config):
-        # Muse Glimmer-specific per-layer iRoPE flag: the shared GQAttention always
-        # applies RoPE, so Muse Glimmer carries its own flag and guards the call in
-        # forward (NoPE layers still build a rope module so max_context_length
-        # discovery/resize in the base Decoder works uniformly).
-        use_rope: bool = True
         scale_query_by: float
         o_gate: Linear.Config | None = None
         # None = global attention (no sliding window) for this layer.
@@ -104,7 +102,6 @@ class Attention(GQAttention):
 
     def __init__(self, config: Config):
         super().__init__(config)
-        self.use_rope: bool = config.use_rope
         self.scale_query_by: float = config.scale_query_by
         self.window_size: int | None = config.window_size
         self.o_gate: Linear | None = None
@@ -128,7 +125,7 @@ class Attention(GQAttention):
             xk = self.k_norm(xk)
 
         # iRoPE: RoPE is skipped on NoPE layers (config-driven per layer).
-        if self.use_rope:
+        if self.rope is not None:
             xq, xk = self.rope(xq, xk, positions)
 
         # Select this layer's mask by its window ("global" key = full attention).
@@ -278,11 +275,9 @@ class MuseGlimmerModel(Decoder):
         # Dataclass fields are invariant, so pyrefly flags the (intentional) override.
         # pyrefly: ignore [bad-override]
         tok_embeddings: EmbeddingWithNorm.Config
-        # Optional LLM-side multimodal injection. When set, encoded vision
-        # features (already adapter-projected to ``vision_projection`` in_features)
-        # are projected to ``dim``, scaleless-normed, and scattered into the token
-        # embeddings at masked positions. Both default to None for the text-only
-        # model, leaving the text path untouched.
+        # Optional LLM-side multimodal injection. Preprocessing builds absolute
+        # packed-bank indices before CP; forward gathers the corresponding vision
+        # rows into the TP-replicated token embeddings.
         vision_projection: Linear.Config | None = None
         perception_emb_norm: RMSNorm.Config | None = None
         # Optional owned vision stack. When set, ``MuseGlimmerModel`` builds the encoder
@@ -301,14 +296,6 @@ class MuseGlimmerModel(Decoder):
         ) -> None:
             Decoder.Config.update_from_config(self, config=config, **kwargs)
             parallelism = config.parallelism
-
-            if parallelism.context_parallel_degree > 1 and isinstance(
-                self.layers[0].attention.inner_attention, VarlenAttention.Config
-            ):
-                raise NotImplementedError(
-                    "Context Parallel only supports SDPA and FlexAttention. "
-                    "Varlen attention is not supported with CP."
-                )
 
             from .sharding import set_muse_glimmer_sharding_config
 
@@ -376,31 +363,84 @@ class MuseGlimmerModel(Decoder):
         *,
         parallel_dims: ParallelDims,
         parallelism: ParallelismConfig,
+        max_num_documents: int | None = None,
+        max_context_length: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
-        """Build masks, CP-shard, SPMD-annotate, and return the batch."""
-        # Function-local import avoids a circular import.
-        from torchtitan.distributed.context_parallel.api import (
-            prepare_context_parallel_input,
-        )
+        """Build first-stage vision-bank indices and masks, then shard the batch."""
+        from .sharding import vision_bank_indices_placement
 
         batch: dict[str, Any] = dict(input_dict)
+        pixel_values = batch.get("pixel_values")
+        grid_thw = batch.get("grid_thw")
+        pixel_values_videos = batch.get("pixel_values_videos")
+        grid_thw_videos = batch.get("grid_thw_videos")
+        special_tokens = batch.get("special_tokens")
+        if pixel_values_videos is not None or grid_thw_videos is not None:
+            raise NotImplementedError(
+                "Muse Glimmer vision encoder does not support video inputs."
+            )
+        if pixel_values is not None:
+            vision_encoder_config = cast(
+                MuseGlimmerModel.Config, self.config
+            ).vision_encoder
+            if vision_encoder_config is None:
+                raise ValueError(
+                    "pixel_values were provided but the model config has no "
+                    "vision_encoder configured."
+                )
+            if grid_thw is None:
+                raise ValueError(
+                    "pixel_values were provided but grid_thw was not provided."
+                )
+            if special_tokens is None or "image_id" not in special_tokens:
+                raise ValueError(
+                    "pixel_values were provided but special_tokens with an "
+                    "'image_id' entry was not provided."
+                )
+            if self.tok_embeddings is not None:
+                batch["vision_bank_indices_T"] = build_vision_bank_indices(
+                    batch["input"],
+                    placeholder_id=special_tokens["image_id"],
+                )
+        batch.pop("special_tokens", None)
+
         positions = batch.get("positions", None)
+        padding_mask = batch.pop("padding_mask", None)
         if positions is not None:
             inner = getattr(self.config.first_attention, "inner_attention", None)
-            if isinstance(inner, (FlexAttention.Config, VarlenAttention.Config)):
-                batch["attention_masks"] = self.get_attention_masks(positions=positions)
+            if isinstance(
+                inner, (FlexInnerAttention.Config, VarlenInnerAttention.Config)
+            ):
+                batch["attention_masks"] = self.get_attention_masks(
+                    positions=positions,
+                    padding_mask=padding_mask,
+                    max_num_documents=max_num_documents,
+                    max_context_length=max_context_length,
+                )
 
-        input_sharding = {**decoder_input_sharding(), **multimodal_input_sharding()}
+        input_sharding = {
+            **decoder_input_sharding(),
+            **multimodal_input_sharding(include_cp_axis=True),
+        }
+        input_sharding["vision_bank_indices_T"] = vision_bank_indices_placement(
+            enable_sp=parallelism.enable_sequence_parallel
+        )
         if parallel_dims.cp_enabled:
-            batch = prepare_context_parallel_input(
-                batch,
-                input_sharding,
-                parallel_dims.get_mesh("cp"),
-                parallelism.context_parallel_load_balancer,
-                parallelism.context_parallel_ptrr_mask_key,
+            batch = self._cp_shard_inputs(
+                batch, input_sharding, parallel_dims, parallelism
             )
-        if parallelism.spmd_backend == "spmd_types":
-            batch = annotate_input_spmd_types(parallel_dims, batch, input_sharding)
+        if (
+            parallelism.enable_sequence_parallel
+            and parallel_dims.tp_enabled
+            and "vision_bank_indices_T" in batch
+        ):
+            batch["vision_bank_indices_T"] = spmd.shard(
+                batch["vision_bank_indices_T"],
+                parallel_dims.get_dense_tp_mesh().get_group(),
+                src=spmd.I,
+                dst=spmd.S(0),
+            )
+        batch = annotate_input_spmd_types(parallel_dims, batch, input_sharding)
 
         inputs = batch.pop("input")
         labels = batch.pop("labels")
@@ -422,107 +462,82 @@ class MuseGlimmerModel(Decoder):
         )
         return feats
 
+    def _prepare_multimodal_embeds(
+        self,
+        h_TD: torch.Tensor,
+        *,
+        pixel_values: torch.Tensor | None,
+        grid_thw: torch.Tensor | None,
+        vision_bank_indices_T: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Build and inject image embeddings on the embedding pipeline stage."""
+        if pixel_values is None:
+            return h_TD
+        assert grid_thw is not None
+        assert vision_bank_indices_T is not None
+        assert self.vision_projection is not None
+        assert self.perception_emb_norm is not None
+
+        vision_features_VD = self._get_vision_features(pixel_values, grid_thw)
+        vision_bank_VD = self.perception_emb_norm(
+            self.vision_projection(vision_features_VD)
+        )
+        return gather_vision_embeds(
+            h_TD,
+            vision_bank_VD=vision_bank_VD,
+            vision_bank_indices_T=vision_bank_indices_T,
+        )
+
     def forward(
         self,
         tokens: torch.Tensor,
         positions: torch.Tensor | None = None,
         attention_masks: AttentionMasksType | None = None,
         *,
+        padding_mask: torch.Tensor | None = None,
         pixel_values: torch.Tensor | None = None,
         grid_thw: torch.Tensor | None = None,
         pixel_values_videos: torch.Tensor | None = None,
         grid_thw_videos: torch.Tensor | None = None,
-        special_tokens: dict[str, int] | None = None,
+        vision_bank_indices_T: torch.Tensor | None = None,
     ):
+        # Video inputs are rejected by preprocess_inputs.
+        del padding_mask, pixel_values_videos, grid_thw_videos
+
         # Embedding stage: embed tokens (the scaleless norm is bundled inside
         # tok_embeddings) and inject vision features before the decoder layers.
         # On non-embedding pipeline stages tok_embeddings is None and the input
         # is already hidden states, so injection is skipped there.
-        with multimodal_context():
-            if self.tok_embeddings is not None:
-                h = self.tok_embeddings(tokens)
-                # The model owns the encoder: when packed pixel_values are passed,
-                # run encoder->adapter here to produce the features for injection.
-                # The placeholder mask is derived from tokens + special_tokens.
-                # TODO: Video is not implemented in the training forward. The
-                # encoder itself is video-capable; this path just lacks the
-                # video-specific glue that the image path (above) doesn't need:
-                #   1. Temporal frame packing -- group `patch_temporal` frames per
-                #      patch.
-                #   2. Spatial avg-pool compression between encoder and adapter
-                #      (pool_factor from compression_ratio); the image path goes
-                #      encoder->adapter directly with no compression.
-                #   3. Video grid sizing (with compression_ratio / max_num_tokens)
-                #      vs image grid sizing.
-                #   4. A separate video placeholder token + mask instead of the
-                #      image_id used below.
-                if pixel_values_videos is not None or grid_thw_videos is not None:
-                    raise NotImplementedError(
-                        "Muse Glimmer vision encoder does not support video inputs."
-                    )
-                if pixel_values is not None:
-                    if self.vision_encoder is None:
-                        raise ValueError(
-                            "pixel_values were provided but the model has no "
-                            "vision_encoder configured."
-                        )
-                    if grid_thw is None:
-                        raise ValueError(
-                            "pixel_values were provided but grid_thw was not provided."
-                        )
-                    if special_tokens is None or "image_id" not in special_tokens:
-                        raise ValueError(
-                            "pixel_values were provided but special_tokens with an "
-                            "'image_id' entry was not provided."
-                        )
-                    vision_features = self._get_vision_features(pixel_values, grid_thw)
-                    if (
-                        self.vision_projection is None
-                        or self.perception_emb_norm is None
-                    ):
-                        raise ValueError(
-                            "pixel_values were provided but the model has no "
-                            "vision_projection/perception_emb_norm configured."
-                        )
-                    vision_embeds = self.perception_emb_norm(
-                        self.vision_projection(vision_features)
-                    )
-                    downsample_factor = self.vision_encoder.downsample_factor
-                    num_tokens_per_item = (grid_thw[:, 1] // downsample_factor) * (
-                        grid_thw[:, 2] // downsample_factor
-                    )
-                    vision_positions = get_vision_positions(
-                        tokens,
-                        num_tokens_per_item,
-                        special_tokens["image_id"],
-                    )
-                    h = scatter_vision_embeds(
-                        h,
-                        vision_embeds=vision_embeds,
-                        vision_positions=vision_positions,
-                    )
-            else:
-                h = tokens
-
-        if get_spmd_backend() == "spmd_types":
-            # The scatter restores a token-aligned tensor, so text-model DP
-            # resumes sharding the leading token dimension.
-            spmd.assert_type(h, {"dp": spmd.S(0), "tp": spmd.R})
+        if self.tok_embeddings is not None:
+            h_TD = self.tok_embeddings(tokens)
+            with spmd_local_context("dp"):
+                h_TD = self._prepare_multimodal_embeds(
+                    h_TD,
+                    pixel_values=pixel_values,
+                    grid_thw=grid_thw,
+                    vision_bank_indices_T=vision_bank_indices_T,
+                )
+        else:
+            h_TD = tokens
 
         for layer in self.layers.values():
-            h = layer(h, attention_masks, positions)
+            h_TD = layer(h_TD, attention_masks, positions)
 
-        h = self.norm(h) if self.norm is not None else h
+        h_TD = self.norm(h_TD) if self.norm is not None else h_TD
 
         # _skip_lm_head is an attribute (not a kwarg) because PP backward calls
         # .requires_grad on all stage inputs, which fails on bool kwargs.
         if self._skip_lm_head:
-            return h
-        return self.lm_head(h) if self.lm_head is not None else h
+            return h_TD
+        return self.lm_head(h_TD) if self.lm_head is not None else h_TD
 
     def get_attention_masks(
         self,
         positions: torch.Tensor,
+        *,
+        padding_mask: torch.Tensor | None = None,
+        max_num_documents: int | None = None,
+        max_context_length: int | None = None,
     ) -> AttentionMasksType:
         attn_config = self.config.first_attention
         assert attn_config is not None
@@ -530,11 +545,16 @@ class MuseGlimmerModel(Decoder):
         # Varlen carries each layer's sliding window in its own kernel arg (baked at
         # build time), so all layers share one document-varlen metadata; only the
         # flex path needs the per-window BlockMask dict built below.
-        if isinstance(inner_attn, VarlenAttention.Config):
-            return create_varlen_metadata_for_document(positions)
-        if not isinstance(inner_attn, FlexAttention.Config):
+        if isinstance(inner_attn, VarlenInnerAttention.Config):
+            return create_varlen_metadata_for_document(
+                positions,
+                padding_mask=padding_mask,
+                max_num_documents=max_num_documents,
+                max_context_length=max_context_length,
+            )
+        if not isinstance(inner_attn, FlexInnerAttention.Config):
             raise TypeError(
-                "Muse Glimmer requires FlexAttention or VarlenAttention for "
+                "Muse Glimmer requires FlexInnerAttention or VarlenInnerAttention for "
                 f"sliding-window masks, got {type(inner_attn).__name__}"
             )
 
