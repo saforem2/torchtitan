@@ -19,6 +19,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 from torchtitan.components.data.loader import DataloaderExhaustedError
 from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
+from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
@@ -1014,6 +1015,19 @@ class FaultTolerantTrainer(Trainer):
             # tensor from dist_sum — upstream itself does the same; the
             # consumer (BaseLoss.__call__) accepts either at runtime.
             global_valid_tokens = float(local_valid_tokens.item())
+
+        # #3864 added LoggedAuxLoss, and core's train_step calls
+        # AuxLoss.set_step_denominator(global_valid_tokens) at trainer.py:914 so
+        # aux losses normalize on the same scale as the main loss. We do not
+        # call super().train_step(), so mirror it here.
+        #
+        # This is currently latent rather than load-bearing: no ezpz config
+        # builds an AuxLoss (every moe router has aux_loss=None), so
+        # AuxLoss.inject() is unreachable today. But inject() RAISES on an
+        # unset denominator rather than skipping -- aux_loss.py:186-190 -- so
+        # without this line the first config to enable one dies at the first
+        # forward with a ValueError that points at core, not here.
+        AuxLoss.set_step_denominator(global_valid_tokens)
 
         # Process each group: move to GPU, forward/backward, then free.
         # Under PP the WHOLE group (the microbatch list) goes to
