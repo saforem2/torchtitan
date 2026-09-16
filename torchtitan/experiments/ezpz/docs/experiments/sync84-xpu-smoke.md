@@ -129,6 +129,53 @@ could plausibly have been absent; it is not.
 
 **The question "is this an artifact of the prod image?" is now answered: no.**
 
+## torch 2.15 XPU nightly HAS #181519 -- first positive in six builds
+
+```
+Polaris  torch 2.15.0.dev20260916+cu130   1379 lines   PRESENT
+Aurora   torch 2.15.0.dev20260915+xpu     1379 lines   PRESENT
+   vs 1095 lines / 0 symbols on all five earlier builds
+```
+
+Both from the PUBLIC nightly index (`.../whl/nightly/xpu`), no special access.
+The patched source shows the mechanism: `_fsdp_param.py:293-299` sets
+`is_spmd_types` and calls `_resolve_spmd_types_for_storage()` to convert the
+annotated plain tensor to a DTensor, which runs BEFORE the
+`is_spmd_mesh and not is_dtensor` check at :561. The raise survives but can no
+longer fire for an annotated parameter.
+
+This also validates the symbol detector in BOTH directions -- five true
+negatives and one true positive -- after the earlier prose-based false positive.
+
+### The libsycl question, and why it did not bite
+
+`project_aurora_torch213_python314_weld` records a public nightly failing here
+because it wanted `libsycl.so.9` against Aurora's `.8`. This wheel wants `.9`
+too, and prod `26.26.0` still ships only `.8`:
+
+```
+ldd libtorch_xpu.so -> libsycl.so.9 => <venv>/lib/libsycl.so.9
+/opt/aurora/26.26.0/.../lib/  ->  libsycl.so, libsycl.so.8, libsycl.so.8.0.0
+```
+
+It resolves because **the wheel brings its own**. `uv` pulled a complete oneAPI
+2026.1.0 runtime as pip dependencies:
+
+```
+intel-sycl-rt 2026.1.0   dpcpp-cpp-rt 2026.1.0   intel-cmplr-lic-rt 2026.1.0
+onemkl-sycl-blas 2026.1.0   onemkl-sycl-lapack 2026.1.0   intel-pti 1.0.1
+```
+
+So the venv is self-contained at 2026.1.0 -- the same oneAPI generation as the
+TEST bkc, and a generation ahead of prod. That is a coherent stack by
+construction rather than by matching the node, which is the property
+`aurora-tt-ezpz`'s four-job analysis identified as the real discriminator
+(8829416/8829454/8829790/8831582: coherent stacks work, mismatched ones fail).
+
+**Unverified on hardware.** Login import succeeds but `xpu.device_count()` is 0
+there, so nothing has touched a GPU. Record which bkc `8831612` lands on with
+its result -- "the nightly works on Aurora" is wrong without that qualifier.
+
 ## Run log
 
 | job | queue | tree | result |
