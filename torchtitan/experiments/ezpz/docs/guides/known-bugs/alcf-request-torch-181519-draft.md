@@ -102,6 +102,28 @@ So this is not a request to develop anything -- the patch is three months old
 and ships in current nightlies. The ask is to pick it up in an Aurora
 frameworks build.
 
+## Controlled A/B: only torch differs
+
+Same tree, same script, same 2-node sunspot `workq` job shape, same deps.
+The ONLY variable is the torch build.
+
+| | `frameworks/2026.1.0` (torch 2.13.0a0+gitcf30153) | `torch 2.14.0+xpu` |
+|---|---|---|
+| FSDP wrapping | **`ValueError`, 46 ranks** | `Applied FSDP to the model` |
+| agpt TP=1 | no steps | **rc=0**, loss 10.87743 -> 10.75458 -> 10.48057 |
+| agpt TP=2 | no steps | **rc=0**, loss 10.88015 |
+| job | `12477660` | `12477656` |
+
+```
+torch 2.13:  ValueError: When dp_mesh_dims is provided, all parameters must be
+             DTensors on the full SPMD mesh ... Got plain tensor for parameter
+torch 2.14:  trains
+```
+
+Note the 2.13 run reached FSDP only after we fixed a bug of our own (a Python
+float where core keeps a tensor). With that fixed, the ONLY thing still
+stopping torch 2.13 is the missing patch.
+
 ## The concrete ask: ship `torch 2.14.0+xpu`
 
 A **stable release** carrying the patch already exists on PyTorch's own XPU
