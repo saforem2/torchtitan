@@ -302,37 +302,45 @@ def _run_experts_aurora_sycl(
     call is slow. Imported lazily so every other backend stays usable
     without aurora-moe installed.
 
-DOES NOT WORK UNDER THE PRODUCTION TRAINING VENV. Three
-    measurements on real Aurora compute nodes, 2026-09-15, all next-eval:
+WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
+    oneMKL must all come from the SAME Aurora release. Four measurements on
+    real compute nodes, 2026-09-15/16:
 
-      8829416  frameworks/2026.1.0 module python 3.12, image-matched
-               MKLROOT=/opt/aurora/26.181.0/.../mkl/latest
-               -> WORKS: build ok, forward finite, all four gradients,
-                  output tracking a torch per-expert reference.
-      8829454  yeeted /tmp/.venv (py3.14, torch 2.13.0.dev20260428+xpu),
-               MKLROOT=/opt/aurora/26.26.0/.../mkl/2025.3 -- WRONG image
-               -> fails, UR_RESULT_ERROR_UNINITIALIZED (37).
-      8829790  same venv, image-matched MKLROOT (.so.6 confirmed present)
-               -> STILL FAILS:
-                  oneapi::mkl::blas::gemm_bf16bf16bf16: unsupported device
-                  plus the same UR_RESULT_ERROR_UNINITIALIZED (37).
+      8829416  next-eval (TEST bkc). frameworks/2026.1.0 module python 3.12
+               + MKLROOT 26.181.0. Coherent -> WORKS.
+      8829454  next-eval (TEST bkc). Our yeeted /tmp/.venv (py3.14,
+               2.13.0.dev20260428+xpu) + MKLROOT 26.26.0. Mismatched ->
+               UR_RESULT_ERROR_UNINITIALIZED (37).
+      8829790  next-eval (TEST bkc). Same venv + MKLROOT 26.181.0. Still
+               mismatched, because that venv's torch is prod-era while the
+               image and compiler are test-era ->
+               oneapi::mkl::blas::gemm_bf16bf16bf16: unsupported device.
+      8831582  debug (PROD bkc). Same venv + MKLROOT 26.26.0/2025.3 + icpx
+               2025.3.2. All three from one release -> WORKS.
 
-    8829790 is the decisive one: correct oneMKL and it still failed, so
-    the image is not the whole story. The remaining difference is the
-    torch build -- it works under the 2026.1.0 module build and not under
-    the venv production trains with.
+    So the discriminator is coherence, not the venv and not the oneMKL
+    version on its own. An earlier revision of this docstring said the
+    backend "does not work under the production training venv"; that was
+    measured only against test-bkc images and was wrong.
 
-    bmm_nodrop ran in the SAME job on the SAME device and returned
-    rel_err 0.000e+00 against for_loop, so the failure is specific to the
-    aurora-moe SYCL path, not to XPU or to this venv.
+    Numerics on the coherent stack (8831582, vs the for_loop reference,
+    bf16, 4 experts with one empty):
 
-    Two environment requirements, necessary but between them not
-    sufficient: (a) MKLROOT must match the running image -- next-eval is
-    a TEST bkc (26.181.0, .so.6) while debug, small and
-    /opt/aurora/default are PROD (26.26.0, .so.5 only); (b) aurora_moe
-    hardcodes a libmkl_sycl_blas.so.5 check in THREE files
-    (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so it
-    refuses the .so.6 that image ships.
+      rel_err 4.4e-03, 14 of 1280 elements (1.09%) outside atol/rtol 0.05,
+      rowwise cosine min 0.999993
+
+    That is bf16 rounding, not a kernel defect. A single bf16 matmul on this
+    shape carries ~2e-03 and this is a three-matmul SwiGLU chain; the
+    mismatched elements are large-magnitude ones where the absolute
+    difference (max 8.0 against a reference max near 2000) is relatively
+    small. A structurally wrong kernel would break the cosine, not a
+    handful of elements. For contrast bmm_nodrop scored exactly 0.0 with 0
+    mismatches in the same job on the same device.
+
+    Requirement: aurora_moe hardcoded a libmkl_sycl_blas.so.5 check in three
+    files (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so
+    it refused the .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by
+    globbing the soname.
     """
     try:
         from aurora_moe.torchtitan_experts import torchtitan_exact_experts
