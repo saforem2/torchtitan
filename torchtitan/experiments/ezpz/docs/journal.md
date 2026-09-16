@@ -37,8 +37,20 @@ raise ValueError(
 A build matches BECAUSE it still raises. Grep for symbols a patch introduces,
 never prose. Prose in a `raise` is evidence the bug is present.
 
-`#181519` is ABSENT on all four reachable torch builds. That is a hard floor
-for sync 84 and nothing either session can patch around.
+`#181519` is ABSENT on all four reachable torch builds. The stronger evidence
+is execution, not inspection -- `sunspot-tt-ezpz` ran the merged tree on both
+images:
+
+| job | image | torch | result |
+|---|---|---|---|
+| `8829185` | prod `20260828` | `dev20260520+xpu` | dies in FSDP setup |
+| `8831522` | test `20260831` | `dev20260428+xpu` | identical, 72 `dtensor_err` / 3 arms |
+| `8829243` | prod, PRE-merge | | trains, ok |
+
+`8831522` reached `IMPORT_OK` and built the model before failing, so it is the
+FSDP path and not packaging. The test bkc was the last place the blocker could
+plausibly have been absent. A hard floor for sync 84, closed from both
+directions.
 
 ### Shipped
 
