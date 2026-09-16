@@ -1,5 +1,79 @@
 # Claude Session Log
 
+## 2026-09-15/16 (local -> aurora) -- sync 84 verified, blocked on a torch floor, and a two-session collision
+
+### Summary
+
+Merged 148 upstream commits, ported 11 indirect breaks, verified everything
+that can be verified off-cluster, and established that the one remaining
+blocker is not ours to fix. Nothing landed on `ezpz` or any production clone.
+
+### Cleared
+
+```
+12/12 ezpz modules import           (pre-merge control: same 12)
+12/12 agpt + 14/14 moe flavors build
+82 passed, 2 skipped, 0 failed
+param counts AND state-dict keys byte-identical pre/post merge
+numerics on A100: max rel err 1.3e-06, argmax + top-5 100% agreement
+```
+
+### Blocked: #181519 absent on all FOUR reachable torch builds
+
+The merged tree dies in FSDP setup before step 1. The pre-merge tree, same
+machine/venv/script/seed, trains clean (`VERDICT: ok`, agpt TP=1 and TP=2 and
+moe all rc=0). The trees differ on ONE line: `config_registry.py:252` pinned
+`partial_dtensor`, and #4419 deleted the pin AND the backend -- zero references
+left in core, so there is no configuration workaround.
+
+| build | lines | #181519 |
+|---|---|---|
+| `2.13.0.dev20260520+xpu` aurora projects | 1093 | absent |
+| `2.13.0.dev20260428+xpu` aurora runs (prod yeets this) | 1017 | absent |
+| `2.13.0a0+gitcf30153` frameworks/2026.1.0 (test BKC) | 1095 | absent |
+| `2.13.0+cu130` perlmutter | 1095 | absent |
+
+ALCF request drafted at
+`docs/guides/known-bugs/alcf-request-torch-181519-draft.md`. UNSENT.
+
+### DO NOT merge into `ezpz` yet
+
+`runs/agpt-80b-v2` tracks `origin/ezpz` at **0 commits behind**, so a merge puts
+an unrunnable tree on a production clone. Six production jobs are held/queued.
+The merge buys nothing until the torch floor lifts. `sync84-trial` is complete
+and ready to land the day it does.
+
+### The recurring failure mode, six times in two days
+
+Every one of these produced a confident-looking answer that was WRONG:
+
+| check | said | actually |
+|---|---|---|
+| 14/14 moe flavors imported | healthy | 0/14 built |
+| grep "full SPMD"/"plain tensor" | #181519 PRESENT | those strings ARE the raise text |
+| `qstat -Q \| head -22` | no next-eval queue | it was below the cutoff |
+| login-node `ls` | RC module retired | compute-only, it exists |
+| `[ -x $venv/bin/python ]` | venv fine | base interpreter absent on that BKC |
+| `${CONDA_PREFIX}/lib` | path set | unset -> silent bare `/lib:` |
+
+**The rule: ask what your check prints on the BROKEN state. If it prints the
+same thing, it is not a check.** Grep for symbols a patch INTRODUCES, never
+prose -- prose in a `raise` is evidence the bug is present.
+
+### Two sessions, one surface
+
+`aurora-tt-ezpz` was live on `feat/aurora-moe-port` the whole time and I did not
+notice until asked. Cost: four jobs rediscovering a compute-node venv trap it
+had already written to the SHARED memory store, plus shared-venv installs and
+queue contention under one allocation.
+
+Once coordinating, it was worth it in both directions: it caught that every
+torch build I had checked was login-reachable; I caught that its soname fix
+covered 1 of 3 files and that its #181519 PRESENT was a false positive. Neither
+of us would have reached the four-build answer alone.
+
+**Run `ListAgents` before touching a shared cluster.** One call.
+
 ## 2026-09-15 (local, mbph)
 
 ### Summary
