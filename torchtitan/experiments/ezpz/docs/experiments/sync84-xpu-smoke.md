@@ -100,6 +100,35 @@ it was COPIED to `venvs/sync84-testbkc` (8.5G) and upgraded there. Production
 stays pinned; `torch 2.13.0.dev20260428+xpu` verified unchanged after every
 install. 11/11 ezpz modules import on the copy.
 
+## FINAL: the blocker holds on BOTH bkc images
+
+`8831522` (next-eval, test bkc, `venvs/sync84-testbkc`,
+torch `2.13.0.dev20260428+xpu`):
+
+```
+IMPORT_OK
+1-agpt_debugmodel  rc=143      TP=1
+2-agpt_debugmodel  rc=143      TP=2
+3-moe_debugmodel   rc=143
+VERDICT: failed          dtensor_err = 72 across the three arms
+```
+
+Byte-for-byte the same `ValueError: When dp_mesh_dims is provided, all
+parameters must be DTensors on the full SPMD mesh`. It reached `IMPORT_OK` and
+built the model first, so the failure is the FSDP path, not packaging.
+
+| job | bkc | torch | outcome |
+|---|---|---|---|
+| `8829185` | prod `20260828` | `dev20260520+xpu` | dies in FSDP setup |
+| `8831522` | **test `20260831`** | `dev20260428+xpu` | **identical** |
+| `8829243` | prod, PRE-MERGE tree | `dev20260520+xpu` | **trains** -- `VERDICT: ok` |
+
+Two images, two torch builds, two venvs, one failure -- and a pre-merge control
+that trains on the same hardware. The test bkc was the last place the blocker
+could plausibly have been absent; it is not.
+
+**The question "is this an artifact of the prod image?" is now answered: no.**
+
 ## Run log
 
 | job | queue | tree | result |
