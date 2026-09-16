@@ -49,6 +49,15 @@ I surveyed on 09-08. Merged in a throwaway worktree (`../tt-sync84`, branch
   consequence, a stale callsite, an unreachable code path. Changed zero lines;
   two corrected reasoning that would have misdirected later debugging.
 
+- **The XPU blocker is now confirmed on BOTH compute images.** The first
+  writeup of this rested on `debug-scaling` (prod bkc) alone -- both earlier
+  `next-eval` jobs had died on the venv trap before any sync-84 code ran, so
+  the test bkc was reported as covered while being untested. Rerun on the test
+  bkc (`8831522`, a copy of the /home-based prod venv upgraded to
+  `spmd_types 0.2.5`): all three arms `rc=143`, 72 dtensor errors, byte-for-byte
+  the same `ValueError`. Prod `8829185` identical; pre-merge `8829243` TRAINS on
+  the same hardware. Two images by execution, four torch builds by inspection.
+
 - **Two things are NOT settled, and both need hardware.** `spmd_types` may be
   a live blocker: ezpz pinned `partial_dtensor` precisely because
   `spmd_types` failed every ezpz config, #4419 deleted that pin, and the

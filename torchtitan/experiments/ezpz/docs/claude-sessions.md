@@ -33,6 +33,22 @@ left in core, so there is no configuration workaround.
 | `2.13.0a0+gitcf30153` frameworks/2026.1.0 (test BKC) | 1095 | absent |
 | `2.13.0+cu130` perlmutter | 1095 | absent |
 
+Confirmed on BOTH compute images, not just one. An earlier revision of this
+entry said "the merged tree dies in FSDP setup" from `debug-scaling` alone --
+the PROD bkc. Both earlier `next-eval` jobs had died on the venv trap before any
+sync-84 code ran, so the test bkc was untested while being reported as covered.
+Rerun properly:
+
+| job | bkc | torch | outcome |
+|---|---|---|---|
+| `8829185` | prod `20260828` | `dev20260520+xpu` | dies in FSDP setup |
+| `8831522` | **test `20260831`** | `dev20260428+xpu` | identical, 72 dtensor_err / 3 arms |
+| `8829243` | prod, PRE-MERGE | `dev20260520+xpu` | **trains**, `VERDICT: ok` |
+
+Both failures come AFTER `IMPORT_OK` and model construction, so it is the FSDP
+path rather than packaging. Four builds by inspection plus two images by
+execution.
+
 ALCF request drafted at
 `docs/guides/known-bugs/alcf-request-torch-181519-draft.md`. UNSENT.
 
@@ -55,6 +71,7 @@ Every one of these produced a confident-looking answer that was WRONG:
 | login-node `ls` | RC module retired | compute-only, it exists |
 | `[ -x $venv/bin/python ]` | venv fine | base interpreter absent on that BKC |
 | `${CONDA_PREFIX}/lib` | path set | unset -> silent bare `/lib:` |
+| "tested on next-eval" | both images covered | both next-eval jobs died before any sync-84 code ran |
 
 **The rule: ask what your check prints on the BROKEN state. If it prints the
 same thing, it is not a check.** Grep for symbols a patch INTRODUCES, never
