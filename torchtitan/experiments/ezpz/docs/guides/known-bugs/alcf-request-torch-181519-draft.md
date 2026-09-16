@@ -37,7 +37,12 @@ Four reachable torch builds, none carrying the fix:
 | `2.13.0.dev20260520+xpu` | `projects/saforem2/torchtitan-ezpz/.venv` | 1093 | absent |
 | `2.13.0.dev20260428+xpu` | `runs/agpt-2b-v2/.../.venv` (production) | 1017 | absent |
 | `2.13.0a0+gitcf30153` | `frameworks/2026.1.0` (test BKC, 26.181.0) | 1095 | absent |
-| `2.13.0+cu130` | NERSC Perlmutter `pytorch/2.13.0`, for contrast | 1095 | absent |
+| `2.13.0+cu130` | NERSC Perlmutter `pytorch/2.13.0` | 1095 | absent |
+| `2.13.0+cu130` | **ALCF Polaris** `.venv-torch213` (CUDA/A100) | 1095 | absent |
+
+The last two are **CUDA** builds, so this is not an XPU or oneAPI issue -- no
+torch 2.13 we can reach on any ALCF or NERSC system carries the patch,
+regardless of vendor.
 
 Detection is by the symbols the patch introduces
 (`_resolve_spmd_types_for_storage`, `self.is_spmd_types`, `get_local_type`),
