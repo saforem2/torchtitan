@@ -590,6 +590,11 @@ class FaultTolerantTrainer(Trainer):
                 parallelism=config.parallelism,
                 loss_fn=self.loss_fn,
                 gradient_accumulation_steps=self.gradient_accumulation_steps,
+                fault_tolerance_enabled=config.fault_tolerance.enable,
+                create_seed_checkpoint=config.checkpoint.create_seed_checkpoint,
+                optimizer_has_param_groups=bool(
+                    getattr(config.optimizer, "param_groups", None)
+                ),
             )
 
         # How many pipeline microbatches make up one local batch. This is 1

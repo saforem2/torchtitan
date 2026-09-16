@@ -375,11 +375,17 @@ def validate_native_ddp(
         raise ValueError("native DDP does not yet support optimizer param_groups")
     if parallelism.enable_data_parallel_replicate_module:
         raise ValueError("native DDP and ReplicateModule are mutually exclusive")
-    if parallelism.enable_fsdp_async_all_reduce:
+    # These three fields exist on the upstream Aurora MoE branch's core
+    # ParallelismConfig but NOT on ours -- EzpzParallelismConfig deliberately
+    # ports only the five native-DDP fields our code reads, and core
+    # torchtitan has never had them. Reading them directly raised
+    # AttributeError on a slotted dataclass, so this validator could not run
+    # at all. getattr with the upstream default keeps the rejection
+    # meaningful if the fields are ever added, without inventing config.
+    if getattr(parallelism, "enable_fsdp_async_all_reduce", False):
         raise ValueError("native DDP does not use the FSDP async all-reduce path")
-    if (
-        parallelism.pipeline_parallel_fsdp_overlap
-        or parallelism.pipeline_parallel_fsdp_overlap_policy != "bulk"
+    if getattr(parallelism, "pipeline_parallel_fsdp_overlap", False) or (
+        getattr(parallelism, "pipeline_parallel_fsdp_overlap_policy", "bulk") != "bulk"
     ):
         raise ValueError("native DDP does not use pipeline FSDP overlap")
     if parallelism.native_ddp_bucket_cap_mb <= 0:
