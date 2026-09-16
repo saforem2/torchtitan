@@ -1,5 +1,56 @@
 # Claude Session Log
 
+## 2026-09-16 (aurora)
+
+### Summary
+
+Six instances in two days of one error shape: a check that returns the same
+answer whether or not the thing works. Two fixes shipped, two conclusions
+withdrawn, and the `#181519` question closed ABSENT on all four reachable torch
+builds.
+
+Worked alongside the `sunspot-tt-ezpz` session on the same ezpz surface. Both
+of its catches were things I would have shipped.
+
+### Shipped
+
+| commit / PR | what |
+|---|---|
+| `67d4f262f` | vendored `aurora_moe` refused `libmkl_sycl_blas.so.6`; globbed the soname in all three call sites |
+| `0dfa5fbe5` | `bmm_nodrop` raised on mixed precision; casts to bf16 and returns `type_as(x)` like the other backends |
+| `e29bcbcb0` | the 80B LR guard ran pre-CLI: 8 configs unreachable, 14 silently at `8e-4`. Moved after the parse |
+| `987177d73`, `831e0b24c`, `73824cf71` | MoE port steps 3-5, core torchtitan untouched |
+| ezpz #244 | PALS failover tagged the reporting parent instead of the dead child |
+| ezpz #245 | `rc=143` + `std::bad_alloc` misfiled as `walltime` |
+
+`tests/unit_tests/test_moe_expert_backends.py`: 7 failed / 2 passed -> 2 passed
+/ 3 skipped / 0 failed. Six separate incompatibilities, all from the sww branch
+forking before upstream refactors. The three skips name their reasons.
+
+### Withdrawn
+
+- `aurora_sycl` "works" -> "fails" -> "works" -> "fails". Final: works under the
+  frameworks module python, fails under the venv production trains with, even
+  with an image-matched oneMKL (`8829790`, `gemm_bf16bf16bf16: unsupported
+  device`).
+- `VERDICT_181519 PRESENT` was a false positive. The markers I grepped are the
+  text of the `raise` the patch removes.
+- "MKLROOT off `default` gives `.so.5`" is true only from a login node.
+  `/opt/aurora/default` -> `26.26.0` from login, `26.181.0` from compute.
+
+### Cost
+
+~10 failed probe jobs, none of which measured the thing under test. Every cause
+is handled by an existing submit script: 114/122 PBS scripts here use
+`#!/bin/bash --login`. Start from one; do not hand-roll.
+
+### Production
+
+No checkpoint has advanced since 2026-09-13. The chain is queued behind a full
+machine (9976 job-exclusive / 538 free), not broken. The depth monitor read
+`2` throughout, so a progress monitor keyed on checkpoint mtime now runs
+alongside it.
+
 ## 2026-09-08 (sunspot)
 
 ### Summary
