@@ -72,6 +72,34 @@ Both trees were confirmed to import 12/12 on the same venv before submitting,
 so a difference in the run is a difference in the code and not in the
 environment.
 
+## Correction: the first two next-eval runs never tested the merge
+
+Worth stating plainly, because an earlier revision of this page implied
+otherwise. Of five smoke jobs:
+
+```
+8829080  next-eval      Exit_status=1   died in 10s on the venv trap
+8829104  next-eval      Exit_status=1   same
+8829136  debug-scaling  Exit_status=1   tokenizer assets
+8829185  debug-scaling  Exit_status=1   <- the FSDP blocker
+8829243  debug-scaling  Exit_status=0   <- the passing baseline
+```
+
+**Both next-eval runs died before any sync-84 code executed.** Every conclusion
+about the merge came from `debug-scaling`, i.e. the PROD bkc. The blocker was
+never measured on the TEST bkc, which matters because that image is
+demonstrably a different runtime (aurora_sycl kernels fail under prod and work
+under 2026.1.0).
+
+`8831522` is the real test. It needed a venv that survives the test bkc:
+`runs/agpt-2b-v2`'s interpreter lives under `/home` (mounted everywhere) rather
+than in a prod-only spack tree, so that one works where `projects/saforem2`'s
+does not. But it carries production's pinned deps -- `spmd_types 0.2.1` against
+sync 84's required `0.2.5` -- and six production jobs are held against it, so
+it was COPIED to `venvs/sync84-testbkc` (8.5G) and upgraded there. Production
+stays pinned; `torch 2.13.0.dev20260428+xpu` verified unchanged after every
+install. 11/11 ezpz modules import on the copy.
+
 ## Run log
 
 | job | queue | tree | result |
