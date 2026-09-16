@@ -56,7 +56,7 @@
     "folder": "checkpoint",
     "interval": 500,
     "last_save_model_only": false,
-    "keep_latest_k": 2
+    "keep_latest_k": 0
   },
   "metrics": {"enable_wandb": true, "log_freq": 10},
   "comm": {"init_timeout_seconds": 1800, "train_timeout_seconds": 1800},

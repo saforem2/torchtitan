@@ -72,6 +72,29 @@ def _apply_config_overrides(
         if not hasattr(target, key):
             raise KeyError(f"Unknown config field {key!r} at path {path or '<root>'}.")
 
+        # keep_latest_k > 0 makes torchtitan's _purge_stale_checkpoints()
+        # delete every prior step-* dir on every save, irreversibly. One
+        # accidental override cost ~334 chain checkpoints on 2026-05-25
+        # (job 8505252).
+        #
+        # The submit scripts already guard the CKPT_KEEP_LATEST_K env var,
+        # but a JSON config sets the field directly and never passes through
+        # that check -- which is how two 50k-step 256-node configs arrived
+        # in moe_runs/ with keep_latest_k=2 (98 of 100 checkpoints deleted
+        # per run). Guard the JSON path too.
+        #
+        # Deliberately a hard error, not a clamp: silently rewriting a
+        # value the operator asked for is how the original loss looked
+        # like it had been configured on purpose.
+        if key == "keep_latest_k" and value not in (0, None):
+            raise ValueError(
+                f"keep_latest_k={value!r} at path {path or '<root>'} would "
+                "delete all but the newest checkpoints on every save. Use 0 "
+                "(keep all). If you genuinely want rotation, do it on a "
+                "separate experiment with its own checkpoint folder, never "
+                "on a canonical chain."
+            )
+
         current_value = getattr(target, key)
         field_path = f"{path}.{key}" if path else key
 
