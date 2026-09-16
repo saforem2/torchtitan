@@ -122,16 +122,32 @@ hash -r
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export CCL_PROCESS_LAUNCHER=pmix
-export CCL_ATL_TRANSPORT=mpi
-export CCL_KVS_MODE=mpi
-export CCL_KVS_CONNECTION_TIMEOUT=1800
-export CCL_KVS_USE_MPI_RANKS=1
-export CCL_CONFIGURATION_PATH=""
-export CCL_CONFIGURATION=cpu_gpu_dpcpp
 export CCL_OP_SYNC=1
-export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=100000
+# CCL_KVS_MODE=pmi, and deliberately nothing else CCL_*.
+#
+# ALCF support, 2026-09-16, on oneCCL bootstrap failures with the 2026.1.0
+# frameworks: the workaround is `unset CCL_KVS_MODE; export CCL_KVS_MODE=pmi`
+# with no other CCL_* vars set, while the oneCCL team investigates. Khalid
+# Hossain: "after dropping export CCL_KVS_MODE=mpi from the user's job script,
+# I could run their example as is in 2-nodes, PPN=1, each node from a
+# different rack." Nathan Nichols, on a user setting a tuning block much like
+# the one this file used to carry: "I would recommend that they don't do that."
+#
+# Removed here, all of which this file set before: CCL_ATL_TRANSPORT=mpi,
+# CCL_KVS_MODE=mpi (the one that breaks it), CCL_KVS_CONNECTION_TIMEOUT=1800,
+# CCL_KVS_USE_MPI_RANKS=1, CCL_CONFIGURATION_PATH, CCL_CONFIGURATION.
+#
+# Our production submits (scripts/submit_agpt_{multi,2b}_autoretry.sh) have
+# always set only CCL_PROCESS_LAUNCHER + CCL_OP_SYNC and never CCL_KVS_MODE,
+# so they are already consistent with this guidance.
+export CCL_KVS_MODE=pmi
+# CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=100000 dropped too -- the guidance
+# was "no other CCL_* vars", and we have no measurement showing this one helps
+# the MoE path. Restore it only with a before/after that justifies it.
 export FI_MR_CACHE_MONITOR=userfaultfd
-export MPIR_CVAR_ENABLE_GPU=1
+# MPIR_CVAR_ENABLE_GPU=1 dropped: same flagged family as the CCL block above.
+# ALCF called out unsetting the MPIR_CVAR_*COLL_SELECTION_TUNING_JSON_FILE
+# vars specifically; this is adjacent tuning we have no measurement for.
 export PYTHONUNBUFFERED=1
 export LOG_RANK=0
 unset TORCH_XCCL_BLOCKING_WAIT TORCH_XCCL_HIGH_PRIORITY
