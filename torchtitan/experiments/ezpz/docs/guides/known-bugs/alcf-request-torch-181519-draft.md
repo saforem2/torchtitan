@@ -80,17 +80,21 @@ The trees differ on one line. Everything else in the upgrade is verified:
 tests pass, checkpoint state-dict keys are byte-identical, and a numerics A/B
 on an A100 agrees to ~1e-6 relative with 100% argmax agreement.
 
-## A build WITH the fix exists on PyPI today
+## A STABLE build with the fix exists today
 
-Installed on Polaris from the public nightly index, no special access:
+`torch 2.14.0` is a released version -- not a nightly -- and carries the patch
+on both the XPU and CUDA builds:
 
 ```
-torch 2.15.0.dev20260916+cu130
-    _fsdp_param.py                     1379 lines   (vs 1095 without the patch)
+torch 2.14.0+xpu      (download.pytorch.org/whl/xpu, installed on Sunspot)
+torch 2.14.0+cu130    (PyPI, installed on Polaris)
+    _fsdp_param.py                     1329 lines   (vs 1095 without the patch)
     _resolve_spmd_types_for_storage        2
     self.is_spmd_types                     5
     get_local_type                         1
 ```
+
+So this is a version bump to a released wheel, not a backport request.
 
 The mechanism is visible in the source: `_fsdp_param.py:293-299` sets
 `is_spmd_types` and calls `_resolve_spmd_types_for_storage()` to convert the
@@ -145,23 +149,21 @@ frameworks module against torch 2.14.0+xpu"**, a released version.
 
 ## We ran it: the patch clears the blocker
 
-This is no longer inference from source inspection. On Sunspot, 2 nodes, with
-`torch 2.15.0.dev20260915+xpu` installed from the public nightly index
-(job `12477644`):
+This is no longer inference from source inspection. On Sunspot, 2 nodes /
+24 ranks, `torch 2.14.0+xpu` (job `12477656`):
 
 ```
 Applied FSDP to the model
-Trainer is initialized with tokens/microbatch/dp-rank 512
-  -> trainer.py:815 forward_backward_step -> loss.py:294
+agpt_debugmodel TP=1  rc=0   step 1 loss 10.87743  ->  step 3 loss 10.48057
+agpt_debugmodel TP=2  rc=0   step 1 loss 10.88015
 ```
 
-Every run on a torch WITHOUT the patch dies before that first line with the
-`Got plain tensor for parameter` ValueError. With the patch, the model wraps,
-the trainer builds, and execution reaches the forward/backward pass.
+It trains. The same tree on `frameworks/2026.1.0` (job `12477660`) dies at FSDP
+wrapping on 69 ranks with `Got plain tensor for parameter`.
 
-(That run then hit an unrelated `spmd_types 0.2.5` incompatibility with torch
-2.15 -- `assert_type()` calling `.ndim` on a Python float. Separate issue,
-downstream of FSDP, and not what this request is about.)
+The losses also track the pre-merge baseline to ~3 decimals (10.88382 /
+10.48337), so the newer torch is not changing results -- it is the difference
+between running and not running.
 
 ## Scope
 
