@@ -102,6 +102,25 @@ So this is not a request to develop anything -- the patch is three months old
 and ships in current nightlies. The ask is to pick it up in an Aurora
 frameworks build.
 
+## The concrete ask: ship `torch 2.14.0+xpu`
+
+A **stable release** carrying the patch already exists on PyTorch's own XPU
+index -- no backport, no nightly:
+
+```
+torch-2.14.0+xpu-cp312-cp312-manylinux_2_28_x86_64.whl
+  https://download.pytorch.org/whl/xpu
+  _fsdp_param.py 1329 lines, all three #181519 symbols PRESENT
+```
+
+Verified on Sunspot hardware: `xpu.is_available() True`, 12 devices, and the
+sync-84 tree reaches `Applied FSDP to the model` -- where the current
+`frameworks/2026.1.0` torch (`2.13.0a0+gitcf30153`, 1095 lines, patch absent)
+raises before FSDP wrapping.
+
+So the request is not "please backport a commit": it is **"please build a
+frameworks module against torch 2.14.0+xpu"**, a released version.
+
 ## We ran it: the patch clears the blocker
 
 This is no longer inference from source inspection. On Sunspot, 2 nodes, with
