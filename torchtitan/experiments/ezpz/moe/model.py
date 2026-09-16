@@ -123,7 +123,20 @@ class Attention(BaseAttention):
         x: torch.Tensor,
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
     ):
+        # #4594 added padding_mask to the block contract: Decoder.forward
+        # passes it by keyword to EVERY layer (models/common/decoder.py:249).
+        # Without it every rank dies in the first forward with
+        #   TypeError: moeTransformerBlock.forward() got an unexpected
+        #   keyword argument 'padding_mask'
+        # (job 12477668). The dense arms survived because
+        # Llama3TransformerBlock already accepts it.
+        #
+        # Consume and discard, exactly as llama3 does (llama3/model.py:53).
+        # It feeds varlen attention metadata, which this block does not build:
+        # blendcorpus emits fixed-length rows, so there is no padding to mask.
+        del padding_mask
         # Flat token layout (upstream #4121): x is [T, D], NOT [B, L, D]. The
         # loader folds [B, L] -> [T] unconditionally, so every reshape below
         # works on a token count rather than a (batch, seq) pair. Ported from
