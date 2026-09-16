@@ -18,7 +18,37 @@ param counts AND state-dict keys byte-identical pre/post merge
 numerics on A100: max rel err 1.3e-06, argmax + top-5 100% agreement
 ```
 
-### Blocked: #181519 absent on all FOUR reachable torch builds
+### RESOLVED: sync 84 TRAINS on XPU with torch 2.14.0+xpu
+
+```
+job 12477656   torch 2.14.0+xpu (STABLE), sunspot 2N/24 ranks
+  agpt TP=1  rc=0   10.87743 -> 10.75458 -> 10.48057
+  agpt TP=2  rc=0   10.88015          <- the #4533 contract arm
+  moe        rc=143 RuntimeError: Cannot unflatten unevenly sharded tensor
+```
+
+Losses track the pre-merge baseline to ~3 decimals (10.88382 / 10.48337).
+
+**Controlled A/B, only torch differs:**
+
+| | frameworks 2.13 (`12477660`) | torch 2.14.0+xpu (`12477656`) |
+|---|---|---|
+| FSDP | `ValueError`, 69 ranks | `Applied FSDP to the model` |
+| training | none | both dense arms rc=0 |
+
+Two REAL sync-84 bugs were found and fixed getting here:
+
+1. `global_valid_tokens` was a Python float where core keeps a tensor;
+   `spmd.assert_type()` does `.ndim` on it. Ours, not a `spmd_types` bug --
+   downgrading `spmd_types` would not have helped.
+2. The xccl shim declared 4 positional args; torch 2.15 added a 5th. Now
+   `*args/**kwargs` so it survives the next arity change too.
+
+Everything else between "merged" and "trains" was environment: prod-BKC venv,
+missing assets and blendcorpus cache, `impi-rt` shipping its own `mpiexec`,
+`mpi4py` built against the wheel's MPI, and a dozen absent deps.
+
+### Superseded: #181519 absent on all FOUR reachable torch builds
 
 The merged tree dies in FSDP setup before step 1. The pre-merge tree, same
 machine/venv/script/seed, trains clean (`VERDICT: ok`, agpt TP=1 and TP=2 and
