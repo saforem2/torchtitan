@@ -182,6 +182,60 @@ The backend is removed, not merely unselected -- there is no flag, no config
 field, nothing to set. The merged tree cannot be made to train on Aurora by
 configuration alone.
 
+### CLOSED 2026-09-16: #181519 is ABSENT on all FOUR reachable torch builds
+
+| build | where | `_fsdp_param.py` | #181519 |
+|---|---|---|---|
+| `2.13.0.dev20260520+xpu` | aurora `projects/saforem2/.venv` | 1093 | ABSENT |
+| `2.13.0.dev20260428+xpu` | aurora `runs/agpt-2b-v2/.venv` (what prod yeets) | 1017 | ABSENT |
+| `2.13.0+cu130` | perlmutter `pytorch/2.13.0` | 1095 | ABSENT |
+| `2.13.0a0+gitcf30153` | aurora `frameworks/2026.1.0` (test BKC) | 1095 | ABSENT |
+
+The fourth was the live candidate -- a genuinely different, newer runtime on the
+test image, invisible from login. It does not have the fix either.
+
+**A false PRESENT was caught and retracted.** A probe grepped for
+`"full SPMD"` / `"plain tensor"` and reported PRESENT on 2 and 1 hits. Those
+strings are **the raise text of the error the patch removes**
+(`_fsdp_param.py:345-350`), so a build scores 2/1 BECAUSE it still raises.
+Disproved two ways: a laptop CPU torch that certainly lacks the fix scores
+identically, and the 2026.1.0 tree printed the surrounding code showing both
+markers inside the `raise`. Grep for symbols the patch INTRODUCES, never prose.
+See [[project_present_in_both_states_is_not_evidence]].
+
+**Everything that looked like a stack obstacle was a probe bug.** Getting a
+trustworthy answer took five probes and cost more than the answer:
+
+```
+module: command not found      no module function in a PBS shell
+libglog.so.0                   module does not set its own libdir
+libmkl_intel_lp64.so.3         oneMKL libdir also absent
+libpti_view.so.0               and a third library
+edited-after-qsub              PBS froze the script; the fix never ran
+```
+
+The form that works, and which sidesteps all of it including the
+`default`-resolves-per-image trap:
+
+```bash
+module load frameworks/2026.1.0
+export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}"
+```
+
+`CONDA_PREFIX` is set by the module, so it names whichever tree actually
+loaded rather than one we guessed, and its `lib` covers all three libraries.
+
+### Three distinct failures, deliberately not blurred
+
+1. **`aurora_moe`'s hardcoded `.so.5` check** (3 files) refuses a working
+   oneMKL. Fixable upstream; `aurora-tt-ezpz` owns it.
+2. **`gemm_bf16bf16bf16: unsupported device`** with image-matched oneMKL and
+   `.so.6` present (job 8829790). Kernel/device support, not a loader problem.
+3. **#181519 absent on all four builds.** The sync-84 blocker. Not patchable
+   locally by either session.
+
+A write-up that fixed (1) would imply (2) and (3) were handled. They are not.
+
 ### This is a TORCH FLOOR, not a defect in the sync ports
 
 The two trees differ on exactly one relevant line:
