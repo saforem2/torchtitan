@@ -102,6 +102,26 @@ So this is not a request to develop anything -- the patch is three months old
 and ships in current nightlies. The ask is to pick it up in an Aurora
 frameworks build.
 
+## We ran it: the patch clears the blocker
+
+This is no longer inference from source inspection. On Sunspot, 2 nodes, with
+`torch 2.15.0.dev20260915+xpu` installed from the public nightly index
+(job `12477644`):
+
+```
+Applied FSDP to the model
+Trainer is initialized with tokens/microbatch/dp-rank 512
+  -> trainer.py:815 forward_backward_step -> loss.py:294
+```
+
+Every run on a torch WITHOUT the patch dies before that first line with the
+`Got plain tensor for parameter` ValueError. With the patch, the model wraps,
+the trainer builds, and execution reaches the forward/backward pass.
+
+(That run then hit an unrelated `spmd_types 0.2.5` incompatibility with torch
+2.15 -- `assert_type()` calling `.ndim` on a Python float. Separate issue,
+downstream of FSDP, and not what this request is about.)
+
 ## Scope
 
 Affects any Aurora user tracking torchtitan upstream past `#4419`
