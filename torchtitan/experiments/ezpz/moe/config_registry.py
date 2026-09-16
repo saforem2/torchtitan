@@ -14,12 +14,15 @@ import ezpz.distributed
 
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
+from torchtitan.components.metrics import MetricsProcessor
+
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.components.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.components.optimizer import (
+    LRSchedulersContainer,
+    default_adamw,
+)
 from torchtitan.components.quantization.float8 import (
     Float8GroupedExpertsConverter,
     Float8LinearConverter,
@@ -27,16 +30,17 @@ from torchtitan.components.quantization.float8 import (
 from torchtitan.config import (
     CommConfig,
     CompileConfig,
-    DebugConfig,
-    ParallelismConfig,
     TrainingConfig,
 )
+from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
-from torchtitan.distributed.activation_checkpoint import FullAC
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.moe.activation_checkpoint import (
+    AuroraMoeSelectiveAC,
+    MoeSelectiveAC,
+)
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 
@@ -56,7 +60,7 @@ def _load_json_overrides() -> dict[str, Any]:
         overrides = json.load(f)
 
     if not isinstance(overrides, dict):
-        raise ValueError(
+        raise TypeError(
             f"Expected top-level JSON object in {path!r}, got {type(overrides).__name__}."
         )
 
@@ -505,6 +509,55 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     cfg.training.steps = 1000
     cfg.checkpoint.interval = 100
     return cfg
+
+
+def agpt_12b2a_50k_moe_aurora() -> FaultTolerantTrainer.Config:
+    """Production configuration validated on 256 Aurora nodes."""
+    cfg = moe(
+        "AGPT_12B2A_50K_MOE_aurora_full_sonic",
+        local_batch_size=1,
+        activation_checkpoint_mode="none",
+        seq_len=2048,
+        compile=False,
+        checkpoint_interval=500,
+        hf_assets_path="./assets/hf/llama-2-32k-sp",
+    )
+    cfg.tokenizer.backend = "sptoken"
+    cfg.activation_checkpoint = AuroraMoeSelectiveAC.Config()
+    cfg.parallelism.data_parallel_replicate_degree = 256
+    cfg.parallelism.data_parallel_shard_degree = 12
+    cfg.parallelism.expert_parallel_degree = 12
+    cfg.parallelism.enable_data_parallel_replicate_module = True
+    cfg.training.steps = 50000
+    cfg.training.dtype = "float32"
+    cfg.training.mixed_precision_param = "bfloat16"
+    cfg.training.mixed_precision_reduce = "float32"
+    cfg.training.gc_freq = 200
+    cfg.training.disable_cuda_graphs = True
+    cfg.optimizer = default_adamw(lr=2.2e-4, fused=True)
+    cfg.lr_scheduler.warmup_steps = 1000
+    cfg.lr_scheduler.total_steps = 50000
+    cfg.lr_scheduler.decay_ratio = 0.8
+    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.dataloader.train_iters = 50000
+    cfg.dataloader.num_workers = 2
+    cfg.dataloader.persistent_workers = True
+    cfg.dataloader.prefetch_factor = 8
+    cfg.dataloader.pin_memory = False
+    cfg.checkpoint.last_save_model_only = False
+    cfg.checkpoint.keep_latest_k = 2
+    cfg.metrics.enable_wandb = True
+    cfg.metrics.log_freq = 10
+    cfg.comm.init_timeout_seconds = 1800
+    cfg.comm.train_timeout_seconds = 1800
+    cfg.debug.seed = 20260722
+    cfg.debug.print_config = True
+    return cfg
+
+
+def agpt_12b2a_50k_moe_aurora_from_json() -> FaultTolerantTrainer.Config:
+    return _config_from_json(agpt_12b2a_50k_moe_aurora)
 
 
 def smoke_moe_500m_50steps() -> FaultTolerantTrainer.Config:

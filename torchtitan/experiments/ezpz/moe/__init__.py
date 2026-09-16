@@ -7,14 +7,20 @@
 import dataclasses
 from collections.abc import Callable
 from functools import partial
-from typing import Literal
+from typing import ClassVar, Literal
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
+from torchtitan.experiments.ezpz.agpt import (
+    _depth_init as _agpt_depth_init,
+)
+from torchtitan.experiments.ezpz.agpt import (
+    _linear_init as _agpt_linear_init,
+)
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -23,14 +29,12 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torchtitan.models.common.attention import ScaledDotProductAttention
+from torchtitan.models.common.attention import GQAttention, ScaledDotProductAttention
 from torchtitan.models.common.config_utils import (
     get_attention_config,
     make_ffn_config,
+    make_gqa_config,
 )
-from torchtitan.models.common.param_init import depth_scaled_std
-from torchtitan.protocols.module import Module
-from torchtitan.protocols.model_spec import ModelSpec
 
 # MoE and TokenChoiceTopKRouter come straight from upstream — we have no
 # ezpz-specific override for them. Earlier this re-imported from a local
@@ -38,17 +42,19 @@ from torchtitan.protocols.model_spec import ModelSpec
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
+from torchtitan.models.common.param_init import depth_scaled_std
+from torchtitan.protocols.model_spec import ModelSpec
+from torchtitan.protocols.module import Module
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
+from .parallelize import parallelize_moe
+from .state_dict_adapter import moeStateDictAdapter
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-
-from .parallelize import parallelize_moe
-from .state_dict_adapter import moeStateDictAdapter
 
 
 class EzpzScaledDotProductAttention(ScaledDotProductAttention):
@@ -152,7 +158,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
     class Config(EzpzScaledDotProductAttention.Config):
         pass
 
-    sdpa_backends = [
+    sdpa_backends: ClassVar[list[SDPBackend]] = [
         SDPBackend.OVERRIDEABLE,
         SDPBackend.CUDNN_ATTENTION,
         SDPBackend.FLASH_ATTENTION,
@@ -277,6 +283,12 @@ def make_ezpz_experts_config(
         comm_backend=comm_backend,
         non_blocking_capacity_factor=non_blocking_capacity_factor,
     )
+    if compute_backend in {"aurora_full_loop", "aurora_full_sonic"}:
+        from .aurora import AuroraRoutedExperts
+
+        return AuroraRoutedExperts.Config(
+            inner_experts=inner, token_dispatcher=dispatcher
+        )
     return RoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
 
 
@@ -288,7 +300,12 @@ def make_ezpz_moe_config(
     shared_experts=None,
     load_balance_coeff: float | None = 1e-3,
 ) -> MoE.Config:
-    return MoE.Config(
+    moe_config = MoE.Config
+    from .aurora import AuroraMoE, AuroraRoutedExperts
+
+    if isinstance(routed_experts, AuroraRoutedExperts.Config):
+        moe_config = AuroraMoE.Config
+    return moe_config(
         num_experts=num_experts,
         load_balance_coeff=load_balance_coeff,
         router=router,
@@ -298,9 +315,9 @@ def make_ezpz_moe_config(
 
 
 __all__ = [
-    "parallelize_moe",
     "moeModel",
     "moe_configs",
+    "parallelize_moe",
 ]
 
 
@@ -1201,6 +1218,99 @@ def _10b_2b_sdpa() -> moeModel.Config:
     return cfg
 
 
+def _agpt_12b2a_50k_moe_aurora(
+    expert_backend: ExpertComputeBackend = "aurora_full_sonic",
+) -> moeModel.Config:
+    """AGPT 12.3B-total/2.0B-active GQA model used on Aurora."""
+    dim = 2048
+    n_layers = 24
+    n_heads = 16
+    n_kv_heads = 4
+    vocab_size = 50304
+    expert_hidden_dim = 2112
+    num_experts = 36
+    top_k = 3
+    rope = ComplexRoPE.Config(
+        dim=dim // n_heads,
+        max_context_length=131072,
+        theta=50000,
+        scaling="none",
+    )
+    layers = []
+    for layer_id in range(n_layers):
+        linear_init = _agpt_linear_init(dim)
+        depth_init = _agpt_depth_init(dim, layer_id)
+        layers.append(
+            moeTransformerBlock.Config(
+                attention_norm=RMSNorm.Config(
+                    normalized_shape=dim, param_init=_NORM_INIT
+                ),
+                ffn_norm=RMSNorm.Config(
+                    normalized_shape=dim, param_init=_NORM_INIT
+                ),
+                attention=make_gqa_config(
+                    dim=dim,
+                    n_heads=n_heads,
+                    n_kv_heads=n_kv_heads,
+                    wqkv_param_init=linear_init,
+                    wo_param_init=depth_init,
+                    inner_attention=_default_inner_attention(),
+                    rope=rope,
+                ),
+                feed_forward=None,
+                moe=make_ezpz_moe_config(
+                    num_experts=num_experts,
+                    load_balance_coeff=1e-3,
+                    router=make_ezpz_router_config(
+                        dim=dim,
+                        num_experts=num_experts,
+                        gate_param_init=depth_init,
+                        top_k=top_k,
+                        score_func="softmax",
+                        route_norm=False,
+                    ),
+                    routed_experts=make_ezpz_experts_config(
+                        dim=dim,
+                        hidden_dim=expert_hidden_dim,
+                        num_experts=num_experts,
+                        top_k=top_k,
+                        score_before_experts=False,
+                        comm_backend="standard",
+                        param_init={
+                            "w1_EFD": linear_init["weight"],
+                            "w2_EDF": depth_init["weight"],
+                            "w3_EFD": depth_init["weight"],
+                        },
+                        compute_backend=expert_backend,
+                    ),
+                    shared_experts=make_ffn_config(
+                        dim=dim,
+                        hidden_dim=expert_hidden_dim * 2,
+                        w1_param_init=linear_init,
+                        w2w3_param_init=depth_init,
+                    ),
+                ),
+            )
+        )
+
+    return moeModel.Config(
+        dim=dim,
+        vocab_size=vocab_size,
+        tok_embeddings=Embedding.Config(
+            num_embeddings=vocab_size,
+            embedding_dim=dim,
+            param_init=_EMBEDDING_INIT,
+        ),
+        norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
+        lm_head=Linear.Config(
+            in_features=dim,
+            out_features=vocab_size,
+            param_init=_output_linear_init(dim),
+        ),
+        layers=layers,
+    )
+
+
 moe_configs = {
     "debugmodel": _debugmodel,
     "debugmodel_flex_attn": _debugmodel_flex_attn,
@@ -1214,6 +1324,10 @@ moe_configs = {
     "671B": _671b,
     "10B_2B": _10b_2b,
     "10B_2B_sdpa": _10b_2b_sdpa,
+    "AGPT_12B2A_50K_MOE_aurora_full_loop": partial(
+        _agpt_12b2a_50k_moe_aurora, "aurora_full_loop"
+    ),
+    "AGPT_12B2A_50K_MOE_aurora_full_sonic": _agpt_12b2a_50k_moe_aurora,
 }
 
 moe_configs["debugmodel_hf"] = moe_configs["debugmodel"]
@@ -1257,5 +1371,9 @@ def model_registry(
         parallelize_fn=parallelize_moe,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=register_moe_load_balancing_hook,
-        state_dict_adapter=moeStateDictAdapter,
+        state_dict_adapter=(
+            None
+            if isinstance(config.layers[0].attention, GQAttention.Config)
+            else moeStateDictAdapter
+        ),
     )

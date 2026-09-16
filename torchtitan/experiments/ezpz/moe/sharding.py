@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import spmd_types as spmd
 
 from torchtitan.experiments.ezpz.moe.model import Attention
+from torchtitan.models.common.attention import GQAttention
 from torchtitan.models.common.decoder_sharding import (
     colwise_config,
     dense_activation_placement,
@@ -31,6 +32,7 @@ from torchtitan.models.common.decoder_sharding import (
     rowwise_config,
     set_decoder_sharding_config,
     set_dense_ffn_sharding,
+    set_gqa_attention_sharding,
     set_gqa_inner_attention_local_map,
 )
 from torchtitan.models.common.moe_sharding import (
@@ -59,6 +61,19 @@ _GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
     "w2_EDF": spmd.S(2),
     "w3_EFD": spmd.S(1),
 }
+
+_AURORA_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
+    "aurora_up_EDF": spmd.S(2),
+    "aurora_gate_EDF": spmd.S(2),
+    "aurora_down_EFD": spmd.S(1),
+}
+
+
+def _expert_param_layout(layer_cfg) -> dict[str, spmd.PerMeshAxisSpmdType]:
+    backend = layer_cfg.moe.routed_experts.inner_experts.compute_backend
+    if backend in {"aurora_full_loop", "aurora_full_sonic"}:
+        return _AURORA_EXPERTS_PARAM_LAYOUT
+    return _GROUPED_EXPERTS_PARAM_LAYOUT
 
 
 def set_moe_sharding_config(
@@ -100,9 +115,6 @@ def _set_moe_layer_sharding(
     stay replicated. Up-projections (wkv_b, wq_b, wq) are colwise.
     MoE FFN is routed through upstream's ``set_moe_sharding_config``.
     """
-    attention = layer_cfg.attention
-    assert isinstance(attention, Attention.Config)
-
     norm = norm_config(enable_sp=enable_sp)
     layer_cfg.attention_norm.sharding_config = norm
     layer_cfg.ffn_norm.sharding_config = norm
@@ -123,6 +135,30 @@ def _set_moe_layer_sharding(
         if enable_sp
         else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
+
+    attention = layer_cfg.attention
+    if isinstance(attention, GQAttention.Config):
+        set_gqa_attention_sharding(attention, enable_sp=enable_sp)
+        set_gqa_inner_attention_local_map(attention.inner_attention)
+        if layer_cfg.feed_forward is not None:
+            set_dense_ffn_sharding(
+                layer_cfg.feed_forward,
+                attn_x_layout=attn_x_layout,
+                enable_sp=enable_sp,
+            )
+        if layer_cfg.moe is not None:
+            _set_moe_block_sharding_config(
+                layer_cfg.moe,
+                enable_ep=enable_ep,
+                enable_sp=enable_sp,
+                expert_param_layout=_expert_param_layout(layer_cfg),
+            )
+        return
+    if not isinstance(attention, Attention.Config):
+        raise TypeError(
+            "MoE sharding supports MLA or GQA attention, got "
+            f"{type(attention).__name__}"
+        )
 
     # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
     # set_gqa_attention_sharding (decoder_sharding.py:201-203) as
@@ -196,5 +232,5 @@ def _set_moe_layer_sharding(
             layer_cfg.moe,
             enable_ep=enable_ep,
             enable_sp=enable_sp,
-            expert_param_layout=_GROUPED_EXPERTS_PARAM_LAYOUT,
+            expert_param_layout=_expert_param_layout(layer_cfg),
         )

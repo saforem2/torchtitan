@@ -27,32 +27,38 @@ Differences vs upstream `parallelize_deepseekv3`:
   FSDP world size.
 """
 
+import os
 from typing import Any
 
 import ezpz
 import ezpz.distributed
 import torch
 import torch.distributed
-import torch.nn as nn
 from ezpz.models import summarize_model
+from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    DataParallelMeshDims,
+    MixedPrecisionPolicy,
+    fully_shard,
+)
 from torch.distributed.tensor import Shard
 
 from torchtitan.config import (
+    TORCH_DTYPE_MAP,
     CompileConfig,
     ParallelismConfig,
-    TORCH_DTYPE_MAP,
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
-from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
+from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
 )
-from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
+
 # 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
 # now enabled inside apply_compile from parallel_dims. Importing it is an
 # ImportError. This file compiles per-block directly (see the compile block
@@ -101,6 +107,24 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     )
 
 
+def _use_ep_replicate_module(
+    parallel_dims: ParallelDims,
+    training: TrainingConfig,
+    parallelism: ParallelismConfig,
+) -> bool:
+    if not parallelism.enable_data_parallel_replicate_module:
+        return False
+    if parallel_dims.tp != 1 or parallel_dims.pp != 1 or parallel_dims.cp != 1:
+        raise ValueError("Aurora EP ReplicateModule requires TP=PP=CP=1")
+    if parallel_dims.ep <= 1 or parallel_dims.dp_shard != parallel_dims.ep:
+        raise ValueError(
+            "Aurora EP ReplicateModule requires dp_shard == expert_parallel > 1"
+        )
+    if training.enable_cpu_offload:
+        raise ValueError("Aurora EP ReplicateModule does not support CPU offload")
+    return True
+
+
 def parallelize_moe(
     model: moeModel,
     *,
@@ -123,6 +147,30 @@ def parallelize_moe(
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
+    aurora_backends = {
+        block.moe.routed_experts.inner_experts.compute_backend
+        for block in model.layers.values()
+        if block.moe_enabled
+    } & {"aurora_full_loop", "aurora_full_sonic"}
+    use_ep_replicate_module = _use_ep_replicate_module(
+        parallel_dims, training, parallelism
+    )
+    if aurora_backends:
+        from torchtitan.experiments.ezpz.moe.activation_checkpoint import (
+            AuroraMoeSelectiveAC,
+        )
+
+        if parallel_dims.tp_enabled or not parallel_dims.ep_enabled:
+            raise ValueError("Aurora full MoE requires TP=1 and EP>1")
+        if training.mixed_precision_param != "bfloat16":
+            raise ValueError("Aurora full MoE requires BF16 parameters")
+        if "aurora_full_sonic" in aurora_backends and os.environ.get(
+            "AURORA_MOE_ALLTOALLV"
+        ) != "1":
+            raise RuntimeError("Aurora full Sonic requires AURORA_MOE_ALLTOALLV=1")
+        if not isinstance(ac_config, AuroraMoeSelectiveAC.Config):
+            raise ValueError("Aurora full MoE requires AuroraMoeSelectiveAC")
+
     # CP: wrap inner attention forward BEFORE parallelize() so CP logic
     # runs inside the local_map boundary on local tensors.
     # CP removed upstream (#4218): apply_cp_to_forward is gone, and the
@@ -144,9 +192,11 @@ def parallelize_moe(
     # Upstream #4217 removed validate_config outright; deepseek_v3 (our base)
     # now just calls model.parallelize. "full_dtensor" stays in the tuple only
     # until the sync lands, since it is still a legal value on this tree.
-    if parallelism.spmd_backend in ("full_dtensor", "spmd_types"):
-        model.parallelize(parallel_dims)
-    elif parallel_dims.tp_enabled or parallel_dims.ep_enabled:
+    if (
+        parallelism.spmd_backend in ("full_dtensor", "spmd_types")
+        or parallel_dims.tp_enabled
+        or parallel_dims.ep_enabled
+    ):
         model.parallelize(parallel_dims)
 
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
@@ -174,6 +224,23 @@ def parallelize_moe(
         for layer_id, block in model.layers.named_children():
             block.compile(backend=compile_config.backend)
             model.layers.register_module(layer_id, block)
+
+    if use_ep_replicate_module:
+        apply_ep_replicate(
+            model,
+            batch_mesh=parallel_dims.get_mesh("batch"),
+            expert_dp_mesh=parallel_dims.get_optional_mesh("dp_replicate"),
+            expert_mp_mesh=parallel_dims.get_mesh("efsdp"),
+            param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
+            reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
+        )
+        logger.info(
+            "Applied node-local EP%d plus inter-node ReplicateModule DP%d",
+            parallel_dims.ep,
+            parallel_dims.dp_replicate,
+        )
+        logger.info(f"\n+{summarize_model(model)}")
+        return model
 
     # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
     # spmd_types/full_dtensor there is no flattened "fsdp" mesh axis -- asking
@@ -231,6 +298,60 @@ def parallelize_moe(
     return model
 
 
+def apply_ep_replicate(
+    model: nn.Module,
+    *,
+    batch_mesh: DeviceMesh,
+    expert_dp_mesh: DeviceMesh | None,
+    expert_mp_mesh: DeviceMesh,
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+) -> None:
+    """Apply heterogeneous replicated DP to a node-local-EP MoE model.
+
+    Wrap ``routed_experts`` rather than only ``inner_experts``: the Aurora
+    adapter owns the forward call and reads the inner weights directly, so
+    mixed-precision hooks must run at that outer execution boundary.
+    """
+    from torch.distributed._composable.replicate_with_fsdp import replicate
+
+    mp_policy = MixedPrecisionPolicy(
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        cast_forward_inputs=False,
+    )
+    config = {"mp_policy": mp_policy}
+    local_expert_counts = []
+    for block in model.layers.values():
+        if not block.moe_enabled:
+            continue
+        routed_experts = block.moe.routed_experts
+        experts = routed_experts.inner_experts
+        expert_param = next(experts.parameters())
+        local_expert_counts.append(expert_param.to_local().shape[0])
+        if expert_dp_mesh is None:
+            fully_shard(routed_experts, mesh=expert_mp_mesh, **config)
+        else:
+            replicate(routed_experts, mesh=expert_dp_mesh, **config)
+
+    if (
+        not local_expert_counts
+        or any(count <= 0 for count in local_expert_counts)
+        or len(set(local_expert_counts)) != 1
+    ):
+        raise ValueError(f"Invalid local expert counts: {local_expert_counts}")
+
+    shared_config = {"mesh": batch_mesh, **config}
+    if model.tok_embeddings is not None:
+        replicate(model.tok_embeddings, **shared_config)
+    for block in model.layers.values():
+        replicate(block, **shared_config)
+    if model.norm is not None and model.lm_head is not None:
+        replicate([model.norm, model.lm_head], **shared_config)
+    replicate(model, **shared_config)
+    disable_fsdp_gradient_division(model)
+
+
 # ---------------------------------------------------------------------------
 # Inlined from torchtitan.models.llama4.parallelize to avoid importing
 # ShardPlacementResult, which doesn't exist in Aurora's PyTorch framework
@@ -285,7 +406,7 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward_policy == "always",
         )
 
-    for layer_id, transformer_block in model.layers.items():
+    for transformer_block in model.layers.values():
         if transformer_block.moe_enabled:
             assert hasattr(transformer_block, "moe")
             expert_params = set(

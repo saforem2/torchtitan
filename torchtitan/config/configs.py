@@ -144,6 +144,13 @@ class ParallelismConfig:
     only `data_parallel_shard_degree` can be negative. 1 means disabled.
     """
 
+    enable_data_parallel_replicate_module: bool = False
+    """
+    Use FSDP2 ReplicateModule for the Aurora node-local expert-parallel path.
+    Routed expert shards reduce across matching local-tile coordinates on
+    other nodes, while shared parameters reduce across the full batch mesh.
+    """
+
     fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default"
     """
     `reshard_after_forward` specifies the policy for applying `reshard_after_forward`

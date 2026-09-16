@@ -7,7 +7,7 @@
 """ezpz expert compute backends for MoE.
 
 Subclasses upstream `GroupedExperts` to add a `compute_backend` selector
-without modifying core. Three backends are supported here:
+without modifying core. Five backends are supported here:
 
 - ``"grouped_mm"`` (default): defer to upstream's ``torch._grouped_mm``
   path. Requires SM90+ on CUDA; on XPU there is no grouped-mm fallback.
@@ -18,11 +18,13 @@ without modifying core. Three backends are supported here:
   buffer. On XPU ``torch.bmm`` lowers to a oneDNN batched matmul (a real
   grouped-GEMM equivalent), and unlike ``"for_loop"`` this path has
   static shapes (given a capacity) and is compile-friendly.
+- ``"aurora_full_loop"`` and ``"aurora_full_sonic"``: the complete Aurora
+  routed-and-shared expert runtime, selected through ``AuroraRoutedExperts``.
 """
 
-from dataclasses import dataclass
 import math
 import os
+from dataclasses import dataclass
 from typing import Literal
 
 import torch
@@ -35,8 +37,13 @@ from torch.utils.checkpoint import checkpoint
 # moe/__init__.py for the same import-re-route.
 from torchtitan.models.common.moe import GroupedExperts
 
-
-ExpertComputeBackend = Literal["for_loop", "grouped_mm", "bmm"]
+ExpertComputeBackend = Literal[
+    "for_loop",
+    "grouped_mm",
+    "bmm",
+    "aurora_full_loop",
+    "aurora_full_sonic",
+]
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -230,6 +237,45 @@ class EzpzGroupedExperts(GroupedExperts):
         super().__init__(config)
         self.compute_backend: ExpertComputeBackend = config.compute_backend
         self.capacity_factor: float = config.capacity_factor
+        self.dim = config.dim
+        self.hidden_dim = config.hidden_dim
+        if self.compute_backend in {"aurora_full_loop", "aurora_full_sonic"}:
+            del self.w1_EFD
+            del self.w2_EDF
+            del self.w3_EFD
+            self.aurora_up_EDF = torch.nn.Parameter(
+                torch.empty(config.num_experts, config.dim, config.hidden_dim)
+            )
+            self.aurora_gate_EDF = torch.nn.Parameter(
+                torch.empty(config.num_experts, config.dim, config.hidden_dim)
+            )
+            self.aurora_down_EFD = torch.nn.Parameter(
+                torch.empty(config.num_experts, config.hidden_dim, config.dim)
+            )
+
+    def _init_self_parameters(self) -> None:
+        if self.compute_backend not in {"aurora_full_loop", "aurora_full_sonic"}:
+            super()._init_self_parameters()
+            return
+        if self._param_init is None:
+            raise ValueError("Aurora experts require explicit parameter initializers")
+        required = {"w1_EFD", "w2_EDF", "w3_EFD"}
+        missing = required.difference(self._param_init)
+        if missing:
+            raise ValueError(f"Missing Aurora expert initializers: {sorted(missing)}")
+        self._param_init["w3_EFD"](self.aurora_up_EDF.transpose(-2, -1))
+        self._param_init["w1_EFD"](self.aurora_gate_EDF.transpose(-2, -1))
+        self._param_init["w2_EDF"](self.aurora_down_EFD.transpose(-2, -1))
+
+    def aurora_weights(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        weights = (
+            self.aurora_up_EDF,
+            self.aurora_gate_EDF,
+            self.aurora_down_EFD,
+        )
+        if isinstance(weights[0], DTensor):
+            return tuple(weight.to_local() for weight in weights)
+        return weights
 
     def forward(
         self,
@@ -245,6 +291,11 @@ class EzpzGroupedExperts(GroupedExperts):
         # `_run_experts_for_loop`.
         if self.compute_backend == "grouped_mm":
             return super().forward(x, num_tokens_per_expert)
+
+        if self.compute_backend in {"aurora_full_loop", "aurora_full_sonic"}:
+            raise RuntimeError(
+                "Aurora full experts must run through AuroraRoutedExperts"
+            )
 
         # Param names use Shazeer shape-suffix style post upstream PR #3425
         # (41st sync): w1_EFD, w2_EDF, w3_EFD.
