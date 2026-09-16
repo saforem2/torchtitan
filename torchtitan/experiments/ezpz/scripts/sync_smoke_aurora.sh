@@ -58,11 +58,12 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
 STEPS="${SMOKE_STEPS:-3}"
 SEED="${SEED:-42}"
-# Resolve the venv path. `/flare` is a symlink to `/lus/flare/projects`, and an
-# UNRESOLVED prefix breaks `ezpz launch`: it emits an mpiexec line with no
-# program and hydra rejects it with "argument matching returned error" in 0.1s.
-# Measured on 8831640 -- same node, same command, two venvs differing only in
-# prefix: /flare/... fails, /lus/flare/projects/... runs. Cost job 8831612.
+# Resolve the venv path. `/flare` is a symlink to `/lus/flare/projects`;
+# canonicalizing keeps log lines unambiguous. NOTE: an earlier version of this
+# comment claimed the unresolved prefix CAUSED an "argument matching returned
+# error" from mpiexec. That was wrong -- 8831657 used the resolved path and hit
+# the identical failure. The real cause of that failure is still unknown; see
+# docs/experiments/sync84-xpu-smoke.md.
 VENV="${SMOKE_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/.venv}"
 VENV="$(readlink -f "${VENV}")"
 
