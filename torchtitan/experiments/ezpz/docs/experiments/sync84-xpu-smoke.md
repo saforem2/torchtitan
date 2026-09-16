@@ -176,6 +176,47 @@ construction rather than by matching the node, which is the property
 there, so nothing has touched a GPU. Record which bkc `8831612` lands on with
 its result -- "the nightly works on Aurora" is wrong without that qualifier.
 
+## ANSWERED: #181519 LIFTS THE BLOCKER
+
+Job `12477644`, sunspot `workq`, 2N, torch `2.15.0.dev20260915+xpu`:
+
+```
+IMPORT_OK
+Building device mesh with parallelism: pp=1, dp_replicate=1, dp_shard=24, cp=1
+Applied FullAC activation checkpointing to the model
+Applied FSDP to the model                      <-- THE LINE THAT MATTERS
+Peak FLOPS used for computing MFU: 2.982e+14
+Trainer is initialized with tokens/microbatch/dp-rank 512
+...
+trainer.py:815  forward_backward_step
+trainer.py:829  _forward_backward_body
+loss.py:294     __call__
+AttributeError: 'float' object has no attribute 'ndim'
+
+DTENSOR_ERR = 0
+```
+
+**`Applied FSDP to the model` is the proof.** Every torch-2.13 run died BEFORE
+that line with `ValueError: ... Got plain tensor for parameter`. This run
+wrapped the model, built the trainer, and reached the loss computation. The
+sync-84 FSDP blocker is a torch version floor and `#181519` clears it.
+
+### The remaining failure is NOT the blocker
+
+`spmd_types 0.2.5` calls `assert_type()` on the loss **scalar** and does
+`tensor.ndim` on a Python float (`spmd_types/runtime.py:426`). That is a
+version-compat gap between `spmd_types 0.2.5` and torch 2.15, in
+`site-packages`, strictly downstream of FSDP. It says nothing about the merge.
+
+### What this changes
+
+The ALCF request is no longer "we believe this patch would help" -- it is
+**"we ran it and the blocker cleared."** A frameworks build carrying `#181519`
+unblocks sync 84 on XPU.
+
+It does NOT mean sync 84 is ready to land: torch 2.15 is a nightly, the
+`spmd_types` gap needs resolving, and no arm has produced a loss curve yet.
+
 ## Run log
 
 | job | queue | tree | result |
