@@ -58,7 +58,13 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
 STEPS="${SMOKE_STEPS:-3}"
 SEED="${SEED:-42}"
+# Resolve the venv path. `/flare` is a symlink to `/lus/flare/projects`, and an
+# UNRESOLVED prefix breaks `ezpz launch`: it emits an mpiexec line with no
+# program and hydra rejects it with "argument matching returned error" in 0.1s.
+# Measured on 8831640 -- same node, same command, two venvs differing only in
+# prefix: /flare/... fails, /lus/flare/projects/... runs. Cost job 8831612.
 VENV="${SMOKE_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/.venv}"
+VENV="$(readlink -f "${VENV}")"
 
 # max_context_length must EQUAL num-tokens-per-microbatch-per-dp-rank: the
 # blendcorpus fold emits fixed-length rows and the SDPA wrapper divides by it.
