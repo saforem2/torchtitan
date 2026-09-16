@@ -80,6 +80,28 @@ The trees differ on one line. Everything else in the upgrade is verified:
 tests pass, checkpoint state-dict keys are byte-identical, and a numerics A/B
 on an A100 agrees to ~1e-6 relative with 100% argmax agreement.
 
+## A build WITH the fix exists on PyPI today
+
+Installed on Polaris from the public nightly index, no special access:
+
+```
+torch 2.15.0.dev20260916+cu130
+    _fsdp_param.py                     1379 lines   (vs 1095 without the patch)
+    _resolve_spmd_types_for_storage        2
+    self.is_spmd_types                     5
+    get_local_type                         1
+```
+
+The mechanism is visible in the source: `_fsdp_param.py:293-299` sets
+`is_spmd_types` and calls `_resolve_spmd_types_for_storage()` to convert the
+annotated plain tensor into a DTensor, which runs **before** the
+`is_spmd_mesh and not is_dtensor` check at :561. The raise still exists, it
+simply can no longer fire for an annotated parameter.
+
+So this is not a request to develop anything -- the patch is three months old
+and ships in current nightlies. The ask is to pick it up in an Aurora
+frameworks build.
+
 ## Scope
 
 Affects any Aurora user tracking torchtitan upstream past `#4419`
