@@ -28,6 +28,45 @@ from torchtitan.models.common.config_utils import (
     get_attention_config,
     make_ffn_config,
 )
+
+
+def _dtensor_safe_fused_ffn_config(**kwargs):
+    """``make_ffn_config`` whose w13 init works on a dim-0-sharded DTensor.
+
+    #4535 made the fused gate/up projection the default, and core's
+    ``_make_fused_linear_init`` (models/common/config_utils.py:58) does
+
+        gate_up = t.unflatten(0, (-1, 2))
+
+    That requires dim 0 to be evenly divisible by the mesh when ``t`` is a
+    DTensor sharded on dim 0. ``parallelize_moe`` calls ``fully_shard`` with
+    ``Shard(0)`` over the whole transformer block, so ``shared_experts.w13``
+    arrives here as exactly that, and init_states raises
+
+        RuntimeError: Cannot unflatten unevenly sharded tensor: output
+        dimension 0 (size 1024) is not evenly divisible by mesh dimension 0
+        (size 24)
+
+    Measured on job 12477656: 52 ranks, always size 1024 (shared_experts),
+    never the dense 2048 -- the dense FFN is wrapped on a different path.
+
+    The interleaved layout is per-row, so each rank can initialize its own
+    shard independently: unflatten the LOCAL tensor instead of the global
+    one. Same values, no cross-rank divisibility requirement.
+
+    This wraps core rather than editing it, per the experiments-folder rule.
+    """
+    cfg = make_ffn_config(**kwargs)
+    inner = cfg.w13.param_init.get("weight") if cfg.w13.param_init else None
+    if inner is None:
+        return cfg
+
+    def _init_local(t):
+        local = t.to_local() if hasattr(t, "to_local") else t
+        inner(local)
+
+    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_local}
+    return cfg
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.protocols.module import Module
 from torchtitan.protocols.model_spec import ModelSpec
@@ -505,7 +544,7 @@ def _build_moe_layers(
         )
 
         if layer_id < n_dense_layers:
-            ffn_cfg = make_ffn_config(
+            ffn_cfg = _dtensor_safe_fused_ffn_config(
                 dim=dim,
                 hidden_dim=dense_hidden_dim,
                 w1_param_init=_LINEAR_INIT,
@@ -537,7 +576,7 @@ def _build_moe_layers(
                     param_init=_depth_experts_init(layer_id),
                     compute_backend=compute_backend,
                 ),
-                shared_experts=make_ffn_config(
+                shared_experts=_dtensor_safe_fused_ffn_config(
                     dim=dim,
                     hidden_dim=moe_hidden_dim * num_shared_experts,
                     w1_param_init=_LINEAR_INIT,
