@@ -47,7 +47,14 @@ def load_one_mkl_exact_expert_ops(verbose: bool = False) -> ModuleType:
     library = root / "lib"
     if not (include / "oneapi" / "mkl" / "blas.hpp").is_file():
         raise RuntimeError(f"oneMKL headers were not found under {root}")
-    if not (library / "libmkl_sycl_blas.so.5").is_file():
+    # Match any soname. This is a presence check ("is oneMKL SYCL BLAS here
+    # at all"), not a version assertion -- ABI compatibility is enforced by
+    # the linker at load time. Hardcoding .so.5 made it REFUSE a working
+    # oneMKL: Aurora's 26.181.0 image (the one behind the next-eval queue)
+    # ships libmkl_sycl_blas.so.6, while the 26.26.0 prod image ships .so.5.
+    # A bare 5 -> 6 bump would just relocate the wrong pin and reject .so.7
+    # on the next image.
+    if not any(library.glob("libmkl_sycl_blas.so.*")):
         raise RuntimeError(f"oneMKL SYCL BLAS library was not found under {root}")
     build_dir = os.environ.get("AURORA_MOE_SYCL_BUILD_DIR")
     if build_dir:
