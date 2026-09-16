@@ -44,6 +44,19 @@ Detection is by the symbols the patch introduces
 not by prose -- the obvious phrases live inside the raise itself, so a
 string-based check reports the fix as present on builds that lack it.
 
+## Reproduced on BOTH compute images
+
+Not a single-image artifact. The same `ValueError` appears on the prod BKC and
+the test BKC, with different torch builds and different venvs:
+
+| job | queue | bkc | venv / torch | result |
+|---|---|---|---|---|
+| `8829185` | `debug-scaling` | `compute_aurora_prod_20260828` | `projects/saforem2` `.venv`, `2.13.0.dev20260520+xpu` | dies in FSDP setup, 3/3 arms, 23 ranks |
+| `8831522` | `next-eval` | `compute_aurora_test_20260831` | `venvs/sync84-testbkc`, `2.13.0.dev20260428+xpu` | same error, 23 ranks |
+
+Both reach `IMPORT_OK` and build the model first, so this is not a packaging or
+environment failure -- it is the FSDP path.
+
 ## Evidence it is the only blocker
 
 Same machine, same venv, same script, same seed, 2 nodes:
