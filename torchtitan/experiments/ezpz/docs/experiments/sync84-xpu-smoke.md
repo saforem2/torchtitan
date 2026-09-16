@@ -238,7 +238,23 @@ loaded rather than one we guessed, and its `lib` covers all three libraries.
 > export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}"
 > ```
 >
-> Which of the two nodes is the special case is unresolved.
+> **RESOLVED: it is the shebang, not the node.** Job 8831446 landed on
+> `x4000c5s1b0n0` -- the very node that had produced UNSET -- and got both
+> answers from that one machine:
+>
+> ```
+> BEFORE module (--login):   UNSET
+> AFTER  module (--login):   /opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
+> AFTER  module (non-login): UNSET
+> ```
+>
+> `--login` sources the profile that initializes conda; only then does the
+> module set `CONDA_PREFIX`. Node variance is excluded rather than merely
+> unlikely, since the counter-example node reproduces both states. "BEFORE:
+> UNSET" also confirms nothing was inherited from the submitting environment.
+>
+> The guidance is unchanged -- this explains WHY the house form works, it does
+> not alter what to do. See [[feedback_copy_the_house_form]].
 
 ### Three distinct failures, deliberately not blurred
 
