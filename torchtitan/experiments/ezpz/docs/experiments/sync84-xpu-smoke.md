@@ -225,6 +225,21 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}"
 `CONDA_PREFIX` is set by the module, so it names whichever tree actually
 loaded rather than one we guessed, and its `lib` covers all three libraries.
 
+> [!WARNING]
+> **`CONDA_PREFIX` is not reliably set.** It worked on `aurora-tt-ezpz`'s node
+> and was **`<unset>`** on mine (job 8831433, `x4000c5s1b0n0`), from the same
+> `module load frameworks/2026.1.0`. Unset, that idiom silently expands to a
+> useless `/lib:` prefix and you get a confusing missing-library error instead
+> of "CONDA_PREFIX is not set". Guard it:
+>
+> ```bash
+> module load frameworks/2026.1.0
+> : "${CONDA_PREFIX:?unset after module load -- refusing to guess}"
+> export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}"
+> ```
+>
+> Which of the two nodes is the special case is unresolved.
+
 ### Three distinct failures, deliberately not blurred
 
 1. **`aurora_moe`'s hardcoded `.so.5` check** (3 files) refuses a working
