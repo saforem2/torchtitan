@@ -1004,17 +1004,24 @@ class FaultTolerantTrainer(Trainer):
         # All-reduce to get global token count across DP ranks
         # Move to GPU for distributed communication
         local_valid_tokens = local_valid_tokens.to(self.device)
+        # Core keeps a TENSOR on BOTH branches (trainer.py:902-908) and uses
+        # dist_sum_tensor, not dist_sum. That matters now: components/loss.py
+        # passes global_valid_tokens to spmd.assert_type(), which does
+        # `tensor.ndim`, so a Python float raises
+        #   AttributeError: 'float' object has no attribute 'ndim'
+        # on every rank once the SPMD mesh is live (torch 2.14 and 2.15, jobs
+        # 12477652 / 12477644, both right after FSDP wrapping succeeded).
+        #
+        # The float came from mirroring PR #3586 (2026-06-09), which retyped
+        # this as `float | None`. Upstream has since moved back to a tensor,
+        # so that justification describes a superseded contract.
         if parallel_dims.dp_enabled:
             batch_mesh = parallel_dims.get_mesh("batch")
-            global_valid_tokens = dist_utils.dist_sum(local_valid_tokens, batch_mesh)
+            global_valid_tokens = dist_utils.dist_sum_tensor(
+                local_valid_tokens, batch_mesh
+            )
         else:
-            # Upstream PR #3586 (2026-06-09) retyped global_valid_tokens
-            # as `float | None` and switched the no-DP branch to
-            # `float(local_valid_tokens.item())`. Mirror that here so the
-            # annotation contract holds. DP branch keeps returning a
-            # tensor from dist_sum — upstream itself does the same; the
-            # consumer (BaseLoss.__call__) accepts either at runtime.
-            global_valid_tokens = float(local_valid_tokens.item())
+            global_valid_tokens = local_valid_tokens
 
         # #3864 added LoggedAuxLoss, and core's train_step calls
         # AuxLoss.set_step_denominator(global_valid_tokens) at trainer.py:914 so
