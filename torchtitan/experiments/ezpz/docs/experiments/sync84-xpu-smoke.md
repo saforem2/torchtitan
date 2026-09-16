@@ -116,8 +116,12 @@ Not sync-84 issues, but each cost a job and will cost the next person one:
 | `PMIX_Init returned -25` | `mpi4py` built against the wheel's MPI; rebuild with `MPICC` on a compute node |
 | `No module named 'blendcorpus'` | editable install from `deps/blendcorpus` in the prod clone |
 
-See [[project_torch_xpu_wheel_ships_its_own_runtime]] -- a pip torch XPU wheel
-brings its own oneAPI, MPI and launchers, all of which shadow the system stack.
+The root cause of three of those: **a pip torch XPU wheel is not a library, it
+is a parallel runtime.** `uv pip install torch --index-url .../whl/xpu` also
+pulls `intel-sycl-rt`, `dpcpp-cpp-rt`, `onemkl-sycl-*` and `impi-rt`, and the
+last of those puts `mpiexec`, `mpirun`, `mpiexec.hydra` and the hydra proxies
+into `venv/bin`. Activating the venv shadows the system MPI. Check with
+`command -v mpiexec` inside vs outside the activated venv.
 
 ## Open
 

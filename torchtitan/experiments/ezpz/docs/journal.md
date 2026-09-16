@@ -189,7 +189,7 @@ Continues the 2026-09-06 entry below, after the machine was made usable again.
   that logged aggregates as if they named tensors, and an inner `timeout`
   shorter than the walltime exiting 0. Plus two tools I wrote and had to fix.
   Every one was found by driving code or comparing outputs; none by reading.
-  Recorded in [[project_runs_that_fail_successfully]].
+  Recorded in `project_runs_that_fail_successfully`.
 
 ## 2026-09-06 (sunspot) -- every job silently requeued for hours; the cause was nodes PBS calls healthy, and the fix exposed that the 80B dies at an LR four orders below its documented ceiling
 
@@ -2019,7 +2019,7 @@ root-causing and fixing a cascade (each documented in the
 6. **384-rank GPU page fault** (`Segmentation fault from GPU ... NotPresent
    Write`, rank 221) -- NOT bad node (reproduces across nodes), NOT OOV (full 53M
    scan max 255998 < vocab 256000); a real 384-rank scale fault
-   ([[project_sft_v2_base_oom_badnode]] class, base-independent). Bisect
+   (`project_sft_v2_base_oom_badnode` class, base-independent). Bisect
    (12470343/346/347/348/349): 2/4/8N clean, 12/16/32N segfault -> run at **8N**.
 
 Also: nudged huggingface/datasets PR #8318 (vectorized interleave) -- tagged
@@ -2791,7 +2791,7 @@ path that doesn't exist on Sunspot (SUSE -> /usr/lib64); patched to the
 bare soname. Only bites interactive live-`.venv` use, not yeet-env
 training (tarball torch doesn't bundle pyzes). NOT an LD_LIBRARY_PATH
 issue (chased that wrongly first). See
-[[project_venv_ld_library_path_ze_loader]].
+`project_venv_ld_library_path_ze_loader`.
 
 Filesystem was 100% full earlier today (amplified transient failures);
 cleaned ~6.3 TB of core dumps + test ckpts -> 57% used.

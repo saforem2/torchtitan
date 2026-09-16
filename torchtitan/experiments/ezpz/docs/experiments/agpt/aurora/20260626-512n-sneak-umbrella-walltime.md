@@ -202,7 +202,7 @@ PASS: no Missing-key, exit 0, chain still tops out at step-86200 (nothing
 written). DCP resharding 256N->8N also confirmed. The production chains
 will now resume cleanly.
 
-**Lesson** ([[feedback_clone_pull_can_break_ckpt_resume]]): to ship infra to
+**Lesson** (`feedback_clone_pull_can_break_ckpt_resume`): to ship infra to
 a production clone, do NOT blanket `git pull` -- pin the training code at
 the commit matching its checkpoints and only `cp` / `checkout` the specific
 infra paths. The durable fix is a checkpoint-compat shim (fused-key
