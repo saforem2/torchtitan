@@ -217,6 +217,55 @@ unblocks sync 84 on XPU.
 It does NOT mean sync 84 is ready to land: torch 2.15 is a nightly, the
 `spmd_types` gap needs resolving, and no arm has produced a loss curve yet.
 
+## SYNC 84 TRAINS ON XPU (job 12477656)
+
+`torch 2.14.0+xpu` (stable), sunspot, 2 nodes, 24 ranks:
+
+```
+1-agpt_debugmodel  rc=0    step 1 loss 10.87743   step 2 10.75458   step 3 10.48057
+2-agpt_debugmodel  rc=0    TP=2 -- step 1 loss 10.88015
+3-moe_debugmodel   rc=143  RuntimeError: Cannot unflatten unevenly sharded tensor
+```
+
+Both dense arms exit CLEAN, **including TP=2** -- the arm that exercises the
+#4533 local_map contract rekey, which asserts only under TP>1.
+
+### The losses match the pre-merge baseline
+
+| arm | pre-merge (2.13, job 8829243) | merged (2.14, job 12477656) |
+|---|---|---|
+| agpt TP=1 step 1 | 10.88382 | 10.87743 |
+| agpt TP=1 step 3 | 10.48337 | 10.48057 |
+| agpt TP=2 step 1 | 10.88071 | 10.88015 |
+
+Different torch versions, so not bitwise -- but ~3 decimal places of agreement
+says the merge did not change the math. Together with the Perlmutter numerics
+A/B (argmax 100%), the 11 ports are sound.
+
+### What it took
+
+Every blocker between "merged" and "trains", in order:
+
+```
+prod-BKC venv on a test-BKC node     -> use a /home-based venv
+missing assets/hf + blendcorpus cache -> symlink from the prod clone
+impi-rt shipping its own mpiexec      -> disable the bundled launchers
+mpi4py built against the wheel's MPI  -> rebuild with MPICC on a compute node
+xccl shim declaring 4 positional args -> *args/**kwargs (torch 2.15 added a 5th)
+global_valid_tokens as a Python float -> keep it a tensor, matching core
+torch 2.13 lacking #181519            -> torch 2.14.0+xpu
+```
+
+Only the last two are sync-84 findings; the rest were environment.
+
+### Open: the moe arm
+
+`RuntimeError: Cannot unflatten unevenly sharded tensor: output dimension 0`.
+Distinct from everything above, reached only after FSDP and the dense arms
+pass. Unknown whether it is a sync-84 regression or a pre-existing moe/XPU
+issue -- the pre-merge baseline ran moe on torch 2.13, so the comparison is
+not clean. Needs its own investigation.
+
 ## Run log
 
 | job | queue | tree | result |
