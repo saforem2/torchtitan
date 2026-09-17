@@ -12,26 +12,32 @@
 > Aurora/Sunspot (Intel XPU) only.
 
 > [!IMPORTANT]
-> **Aurora production is IDLE and has not trained since 2026-08-26.**
-> The last umbrella to seat, `8773440`, started Wed 08-26 04:14 UTC and used
-> **5h13m of a 12h slot** (`Exit_status=-14`); three of its five seats
-> trained (20B-256 +201 steps, 2B-512 +504, 2B-256 +782) and both 512N seats
-> never started. `8775285` (the 30B LR-finder umbrella) ran 1h32m and exited
-> 0 with all four seats at `rc=143` and no suggested LR -- a clean exit that
-> produced nothing. **Nothing has trained since.**
+> **Aurora production is TRAINING.** `8828611` (2,098 nodes, `large`) started
+> Thu 2026-09-17 02:26 UTC and is running **5/5 seats** -- the third
+> consecutive full-conversion umbrella. `8828612` is held behind it on
+> `afterany`.
 >
-> The blocker is the queue, not the code: **`8784460`** (2,098 nodes, `large`,
-> project `AuroraGPT`) has been `Q` since Wed Aug 26 13:22 UTC with
-> **101h+ eligible time** and `score_boost = 0` -- the previous incarnation of
-> this chain pair carried a ~10M boost and started within a day, and this pair
-> lost it on resubmit. `8784462` is held behind it on `afterany`. Reservations,
-> allocation, queue limits, holds and node pinning were all ruled out locally.
-> An ALCF ticket is **drafted but NOT SENT**:
-> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../ops/alcf-ticket-8784460-not-scheduling-20260830.md).
+> Live as of 2026-09-17 12:11 UTC:
 >
-> The tables below describe each chain's last *persisted* state. A "Trend"
-> cell describing an advance refers to the job that made it, not to anything
-> running now.
+> | seat | step | loss |
+> |---|---:|---:|
+> | 2B-512 stage2-dolmino | 21,553 | 2.48037 |
+> | 2B-256 stage2-dolmino | 26,938 | 2.47324 |
+> | 2B-512 constlr-from9200 | 39,152 | 2.65700 |
+> | 20B-512 | 10,800 | 2.25807 |
+> | 20B-256 | 15,077 | 2.25079 |
+>
+> **What happened to the 08-26 stall.** The `8784460` scheduling problem this
+> callout used to describe resolved itself: a later submission (`8828611`)
+> scheduled normally once the machine drained. The chain did sit idle a long
+> time -- no checkpoint advanced between 2026-09-13 and 2026-09-17, 93 hours,
+> because a 2,098-node request cannot place on a full machine (9,976 nodes
+> job-exclusive at the low point). That is capacity, not a queue defect, and
+> the drafted ALCF ticket was never sent.
+>
+> The tables below describe each chain's last *persisted* state and are
+> **behind the live numbers above**. A "Trend" cell describing an advance
+> refers to the job that made it.
 
 > [!NOTE]
 > **The per-step metrics behind these tables and charts are stored locally:**
@@ -188,7 +194,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **46,429** (FINAL) | **2.687** | **4.67T** (100.0%) | — chain complete | ✅ **COMPLETE 2026-08-13 19:11 UTC.** Finished the full olmo-mix-1124 budget as trainer 0 of umbrella 8744247: step 46,429/46,429, exit 0 (`FAILOVER STOP: success`), final ckpt step-46429 with 6,144 shards + `.metadata`. Do NOT submit continuations against this ckpt dir -- there is no budget left. Post-training and stage-2 work seed from step-46429. |
-| 20B | 512 | **10,600** (persisted) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | ⏸️ **IDLE since 2026-08-26.** Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
+| 20B | 512 | **10,600** (persisted) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
@@ -200,7 +206,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). The final step-92,859 checkpoint **has since been evaluated** (job 8638581): see [`evals/agpt/2b/`](../evals/agpt/2b/README.md). |
-| 20B | 256 | **12,000** (persisted) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | ⏸️ **IDLE since 2026-08-26.** The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
+| 20B | 256 | **12,000** (persisted) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
 
 ### Every dispatch (individual + umbrella)
 
