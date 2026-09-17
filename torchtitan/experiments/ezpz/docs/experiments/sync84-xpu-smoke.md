@@ -1,8 +1,11 @@
 # Sync 84 on XPU: it trains, on torch 2.14
 
-**Bottom line:** the sync-84 merge trains on Aurora/Sunspot XPU hardware --
-all three smoke arms, moe included -- but only on a torch carrying pytorch
-[#181519]. The `frameworks/2026.1.0` module
+**Bottom line:** the sync-84 merge trains on Sunspot XPU hardware -- all
+three smoke arms, moe included -- but only on a torch carrying pytorch
+[#181519]. **Sunspot is the only machine it has been RUN on.** Aurora and
+Polaris appear below only as torch-build inventory, not as runs; Perlmutter
+contributed a numerics A/B, not a training run. See "Where this has actually
+run". The `frameworks/2026.1.0` module
 ships torch `2.13.0a0+gitcf30153`, which predates that patch, and on it every
 run dies at FSDP wrapping. `torch 2.14.0+xpu` -- a stable release -- works.
 
@@ -130,6 +133,10 @@ core -- so there is no flag to set. A patched torch is the only route.
 
 ### Six builds checked, one has it
 
+The table below is a torch INVENTORY -- which build each machine ships and
+whether it carries the patch. A row here is NOT a claim that sync 84 ran on
+that machine. Only Sunspot has run it; see "Where this has actually run".
+
 | build | `_fsdp_param.py` | #181519 |
 |---|---|---|
 | aurora `projects/saforem2/.venv` `2.13.0.dev20260520+xpu` | 1093 | absent |
@@ -177,6 +184,22 @@ pulls `intel-sycl-rt`, `dpcpp-cpp-rt`, `onemkl-sycl-*` and `impi-rt`, and the
 last of those puts `mpiexec`, `mpirun`, `mpiexec.hydra` and the hydra proxies
 into `venv/bin`. Activating the venv shadows the system MPI. Check with
 `command -v mpiexec` inside vs outside the activated venv.
+
+## Where this has actually run
+
+| machine | what ran | what it proves |
+|---|---|---|
+| **sunspot** | `12477670` 3/3 arms; `12477675` moe 200 steps | dense TP=1/TP=2 + moe train on XPU |
+| **perlmutter** | numerics A/B, A100 login node | fused QKV/gate-up do not move the math (argmax 100%) |
+| **aurora** | nothing | -- |
+| **polaris** | nothing | -- |
+
+Aurora is the significant gap: it is the production machine, and while it
+shares Sunspot's Intel XPU lineage, "same vendor, same BKC family" is an
+inference, not evidence -- the BKC images differ per queue and venvs are
+BKC-bound. Polaris is CUDA, so it exercises a genuinely different backend
+and its `.venv-torch213` lacks #181519, meaning it needs a newer torch
+before it can run this at all.
 
 ## Open
 
