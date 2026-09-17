@@ -34,7 +34,7 @@ transport.
 
 ```bash
 module load oneapi/release/2025.3.1 hdf5 pti-gpu mpifileutils
-export PYTHONPATH="$PWD:$PWD/vendor/aurora_moe_dropin/src"
+export PYTHONPATH="$PWD:$PWD/torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src"
 
 python3 -m aurora_moe.build \
   --torchtitan-full-sonic \

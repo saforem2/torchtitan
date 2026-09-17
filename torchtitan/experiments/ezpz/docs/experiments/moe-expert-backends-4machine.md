@@ -42,7 +42,7 @@ Jobs: aurora `8835563`, sunspot `12478027`, polaris `7630674`, perlmutter
 ## What aurora_moe actually is
 
 `aurora_sycl` calls `aurora_moe.torchtitan_experts.torchtitan_exact_experts`.
-`aurora_moe` is **vendored inside PR #17** at `vendor/aurora_moe_dropin/src/`.
+`aurora_moe` is **vendored inside PR #17** at `torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src/`.
 It is not on PyPI and does not get pip-installed; it needs to be on
 `PYTHONPATH`.
 
@@ -65,7 +65,7 @@ Two requirements beyond that, both of which produce misleading errors:
 ```bash
 # from a PR#17 checkout, on a COMPUTE node (login nodes have no XPU/GPU)
 export PATH="$VENV/bin:$PATH"
-export PYTHONPATH="$PWD:$PWD/vendor/aurora_moe_dropin/src"
+export PYTHONPATH="$PWD:$PWD/torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src"
 mpiexec -n 1 python <driver>   # see jobs 8835563 / 12478027
 ```
 
