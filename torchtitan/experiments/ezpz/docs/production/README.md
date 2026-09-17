@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-08-31
+> Last updated: 2026-09-17
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -194,7 +194,7 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **46,429** (FINAL) | **2.687** | **4.67T** (100.0%) | — chain complete | ✅ **COMPLETE 2026-08-13 19:11 UTC.** Finished the full olmo-mix-1124 budget as trainer 0 of umbrella 8744247: step 46,429/46,429, exit 0 (`FAILOVER STOP: success`), final ckpt step-46429 with 6,144 shards + `.metadata`. Do NOT submit continuations against this ckpt dir -- there is no budget left. Post-training and stage-2 work seed from step-46429. |
-| 20B | 512 | **10,600** (persisted) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
+| 20B | 512 | **10,900** (live) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
@@ -206,7 +206,10 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). The final step-92,859 checkpoint **has since been evaluated** (job 8638581): see [`evals/agpt/2b/`](../evals/agpt/2b/README.md). |
-| 20B | 256 | **12,000** (persisted) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
+| 20B | 256 | **15,200** (live) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
+| 2B  | 512 | **22,300** (live) | 2.480 | stage-2 | [`8828611`](dispatch-log.md) t0 | 🟢 **TRAINING.** Stage-2 dolmino continuation; its step counter restarted, so this is not comparable to the 46,429 stage-1 endpoint above. |
+| 2B  | 256 | **28,000** (live) | 2.471 | stage-2 | [`8828611`](dispatch-log.md) t4 | 🟢 **TRAINING.** Stage-2 dolmino continuation. **No trajectory record and no evals** -- see the note below. |
+| 2B  | 512 | **39,200** (live) | 2.657 | constlr | [`8828611`](dispatch-log.md) t3 | 🟢 **TRAINING.** Constant-LR fork off step-9200, directly comparable step-for-step to the canonical chain. |
 
 ### Every dispatch (individual + umbrella)
 
