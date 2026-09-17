@@ -590,7 +590,9 @@ TRAJECTORIES: list[dict] = [
         "gbs": 12288,
         "seq_len": SEQ_LEN,
         "token_target": 2_390_375_382_006,
-        "wandb_run_ids": ["hllpaq4g", "6321d2hh"
+        "wandb_run_ids": [
+            "hllpaq4g",
+            "6321d2hh",
         # no8zak98=8808931 t0, qzhfr1zi=8808932 t0, f1pzca4k=8812215 t0,
         # pltbp016=8828611 t0 (added 2026-09-17: four umbrellas had run with
         # no registry entry, so every chart stopped at 08-26)
@@ -598,6 +600,51 @@ TRAJECTORIES: list[dict] = [
             "qzhfr1zi",
             "f1pzca4k",
             "pltbp016",
+        ],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
+    },
+    {
+        # 2B-256 stage-2 dolmino continuation -- the n256 sibling of the
+        # record above.
+        #
+        # Registered 2026-09-17 after SEVEN umbrellas had run it with no
+        # trajectory entry at all. Consequences of the omission, all of which
+        # looked like something else: it appeared on no chart, had no row on
+        # the production dashboard, and shows up in the eval audit as "never
+        # evaluated" -- because eval_trajectories() iterates this registry, so
+        # a chain that is not here cannot be scheduled for evals either.
+        #
+        # Same trap as 2b_v2_512_constlr_from9200 below, which carries its own
+        # note about going three umbrellas unregistered. Nothing adds a leg
+        # automatically.
+        #
+        # 3cw0s96d = 8773440 t4 (-> 774)
+        # 6kwew6kn = 8784460 t4 (-> 4,255)
+        # 9z4wy32o = 8784462 t4 (-> 8,400)
+        # yh2qo7d2 = 8808931 t4 (-> 12,653)
+        # 66pg6pzg = 8808932 t4 (-> 17,050)
+        # lchd8jrs = 8812215 t4 (-> 22,800)
+        # 3ki7erdc = 8828611 t4 (-> 28,035; disk head step-28000)
+        "key": "2b_v2_256_stage2_dolmino",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 256,
+        "ckpt_dir": str(_2B_V2 / "agpt-2b-stage2-dolmino-n256-gbs6144"),
+        "readme": f"{_DOCS}/2b/n256/README.md",
+        "gbs": 6144,
+        "seq_len": SEQ_LEN,
+        # Same stage-2 dolmino budget as the n512 sibling.
+        "token_target": 2_390_375_382_006,
+        "wandb_run_ids": [
+            "3cw0s96d",
+            "6kwew6kn",
+            "9z4wy32o",
+            "yh2qo7d2",
+            "66pg6pzg",
+            "lchd8jrs",
+            "3ki7erdc",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,
@@ -644,7 +691,10 @@ TRAJECTORIES: list[dict] = [
         # 1-50, and this fork BEGINS at 9,200, so they cannot be its steps.
         # That is the exact trap the detector warns about: writing the same
         # ckpt dir does not make a run part of the trajectory.
-        "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"
+        "wandb_run_ids": [
+            "ww88slec",
+            "ijfo395o",
+            "xii94czx",
         # ozcm9s2t=8808931 t3, q5pa4ssw=8812215 t3 (added 2026-09-17;
         # 8828611 t3 wrote no W&B id to its log)
             "ozcm9s2t",
