@@ -200,7 +200,7 @@ def mup_attention_scale(
 # `set_ezpz_max_context_length` is safe only because that value is genuinely
 # process-wide), and it is NOT a new positional parameter. The forwards below
 # re-declare the inherited positional parameter NAMES exactly, unchanged:
-# `set_gqa_inner_attention_local_map` (models/common/decoder_sharding.py:299-314)
+# `set_gqa_inner_attention_local_spmd` (models/common/decoder_sharding.py:299-314)
 # keys `in_dst_shardings` by positional-arg name, and the local_map contract
 # check asserts under TP>1 when a mapped input is missing. Renaming
 # q_TNH/k_TNH/v_TNH broke TP=2 once already -- see agpt/__init__.py:76-91.

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch.distributed as dist
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer

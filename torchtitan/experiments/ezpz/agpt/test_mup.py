@@ -46,7 +46,27 @@ _PRE_MUP_LM_HEAD_STD = {
 
 
 def _std(param_init) -> float:
-    return param_init["weight"].keywords["std"]
+    return _std_of(param_init["weight"])
+
+
+def _std_of(init) -> float:
+    """Recover the std from a linear init, fused or plain.
+
+    #4535 fused gate/up into one interleaved w13 whose init is the closure
+    built by config_utils._make_fused_linear_init -- it has no .keywords.
+    Reach through its cell vars to the gate slice's init, which is the one
+    these assertions are about.
+    """
+    kw = getattr(init, "keywords", None)
+    if kw is not None:
+        return kw["std"]
+    closure = getattr(init, "__closure__", None) or ()
+    names = getattr(getattr(init, "__code__", None), "co_freevars", ())
+    cells = dict(zip(names, (c.cell_contents for c in closure)))
+    gate_init = cells.get("gate_init")
+    if gate_init is None:
+        raise AssertionError(f"cannot recover std from init {init!r}")
+    return _std_of(gate_init)
 
 
 def test_non_mup_flavors_are_byte_identical():
@@ -61,7 +81,9 @@ def test_non_mup_flavors_are_byte_identical():
         # hidden inits still Megatron-DeepSpeed sqrt(2/(5d))
         dim = cfg.layers[0].attention.dim
         base = math.sqrt(2.0 / (5 * dim))
-        assert _std(cfg.layers[0].feed_forward.w1.param_init) == base, flavor
+        # #4535 fused w1/w3 into an interleaved w13; fused_gate_up_param_init
+        # composes the two slice inits, so the hidden std is unchanged.
+        assert _std(cfg.layers[0].feed_forward.w13.param_init) == base, flavor
 
 
 def test_ladder_varies_width_only():
@@ -72,7 +94,9 @@ def test_ladder_varies_width_only():
             len(c.layers),
             c.vocab_size,
             c.layers[0].attention.n_heads // c.layers[0].attention.n_kv_heads,
-            c.layers[0].feed_forward.w1.out_features / c.layers[0].attention.dim,
+            # w13 packs gate and up, so out_features is 2*hidden_dim.
+            (c.layers[0].feed_forward.w13.out_features / 2)
+            / c.layers[0].attention.dim,
         )
         for c in rungs
     ]
@@ -215,8 +239,13 @@ def test_prefix_anchored_pattern_would_break_under_ac():
 
 
 def test_param_groups_cover_qk_norm_and_fused_qkv():
-    """Both branches change the FQN set, so both can break the partition."""
-    for kw in ({"qk_norm": True}, {"fuse_qkv": True}, {"qk_norm": True, "fuse_qkv": True}):
+    """qk_norm changes the FQN set, so it can break the partition.
+
+    The fuse_qkv arm is gone: #4526 removed the kwarg and QKVLinear is now
+    always fused, so every case below is a fused-QKV case. The fused FQNs are
+    still what this asserts on.
+    """
+    for kw in ({}, {"qk_norm": True}):
         cfg = M.build_mup_agpt_config(
             dim=512, base_dim=256, n_layers=3, n_heads=8, n_kv_heads=2,
             vocab_size=1000, hidden_dim=2048, **kw,
@@ -241,7 +270,9 @@ def test_real_optimizer_moves_hidden_group_by_one_over_m():
     opt = OptimizersContainer(oc, model_parts=[model])
     named = dict(model.named_parameters())
     emb = named["tok_embeddings.weight"]
-    hid = named[next(n for n in named if "feed_forward.w1" in n)]
+    # named_parameters() exposes the fused w13; only the state_dict keeps the
+    # logical w1/w3 split (via the save/load hooks).
+    hid = named[next(n for n in named if "feed_forward.w13" in n)]
     e0, h0 = emb.detach().clone(), hid.detach().clone()
     for p in model.parameters():
         p.grad = torch.ones_like(p)

@@ -13,12 +13,13 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
 import cloudpickle
 import torch
 import torch.distributed as dist
 import torchstore as ts
+import tyro
 from monarch.actor import (
     Actor,
     Channel,
@@ -34,10 +35,9 @@ from torchtitan.distributed.spmd_types import (
     dtensor_to_plain_tensor_state_dict,
     plain_tensor_to_dtensor_state_dict,
 )
-from torchtitan.distributed.utils import get_spmd_backend, set_batch_invariance
+from torchtitan.distributed.utils import set_batch_invariance
 from torchtitan.experiments.rl.batch_invariance import (
     force_logprobs_fn_for_batch_invariance,
-    patch_bmm_for_batch_invariance,
 )
 from torchtitan.experiments.rl.models.vllm_registry import (
     InferenceParallelismConfig,
@@ -54,10 +54,10 @@ from torchtitan.experiments.rl.routing.intra_generator_router import (
     IntraGeneratorRouter,
 )
 from torchtitan.experiments.rl.types import Completion
-from torchtitan.models.common.attention import FlexAttention, VarlenAttention
+from torchtitan.models.common.attention import FlexInnerAttention, VarlenInnerAttention
 from torchtitan.observability import structured_logger as sl
+from torchtitan.observability.logging import init_logger
 from torchtitan.protocols.model_spec import ModelSpec
-from torchtitan.tools.logging import init_logger
 from torchtitan.tools.utils import has_cuda_capability
 from vllm import EngineArgs, LLMEngine, SamplingParams
 from vllm.config import AttentionConfig, CompilationConfig
@@ -762,10 +762,10 @@ class VLLMGenerator(Actor, Configurable):
         the new weights. No effect under strict-drain (engine idle at pull time); async hot-swap only.
         Default True to avoid reusing stale-weight KV."""
 
-        vllm_stat_logger: VllmOtelStatLogger.Config = field(
-            default_factory=VllmOtelStatLogger.Config
-        )
-        """Logger instantiated on TP rank 0 to export vLLM metrics."""
+        vllm_stat_logger: Annotated[
+            VllmOtelStatLogger.Config | None, tyro.conf.Suppress
+        ] = None
+        """Optional logger instantiated on TP rank 0 to export vLLM metrics."""
 
         def __post_init__(self):
             # The generator runs vLLM full expert parallelism: vLLM forms the EP
@@ -850,16 +850,12 @@ class VLLMGenerator(Actor, Configurable):
         attention_backend = model_spec.model.first_full_attention_backend
         assert isinstance(
             attention_backend,
-            (VarlenAttention.Config, FlexAttention.Config),
+            (VarlenInnerAttention.Config, FlexInnerAttention.Config),
         ), "Only varlen and flex attention backends are allowed."
 
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "0"
         set_batch_invariance(config.debug.batch_invariant)
         if config.debug.batch_invariant:
-            # batch_invariant_ops (via set_batch_invariance) covers
-            # mm/addmm/_log_softmax/mean but not bmm; the MoE router gate lowers
-            # to bmm in the vLLM inference graph, so override it generator-side.
-            patch_bmm_for_batch_invariance()
             # The vLLM v2 logprob Triton kernel bypasses the aten overrides above;
             # route it through trainer's function to match the trainer exactly.
             force_logprobs_fn_for_batch_invariance()
@@ -900,14 +896,14 @@ class VLLMGenerator(Actor, Configurable):
             attention_config=AttentionConfig(
                 backend=(
                     AttentionBackendEnum.FLEX_ATTENTION
-                    if isinstance(attention_backend, FlexAttention.Config)
+                    if isinstance(attention_backend, FlexInnerAttention.Config)
                     else AttentionBackendEnum.CUSTOM
                 ),
             ),
             # Enables RequestOutput.metrics, so generator metrics can be returned
             disable_log_stats=False,
         )
-        engine_kwargs["max_model_len"] = model_spec.model.max_context_length
+        engine_kwargs["max_model_len"] = model_spec.max_context_length
         engine_kwargs["max_num_seqs"] = self._max_num_seqs
         if config.max_num_batched_tokens is not None:
             engine_kwargs["max_num_batched_tokens"] = config.max_num_batched_tokens
@@ -934,22 +930,31 @@ class VLLMGenerator(Actor, Configurable):
             logger.info("Initializing LLMEngine from EngineArgs...")
             stat_loggers = None
             if self._tp_rank == 0:
-                logger_context = StatLoggerContext(
-                    rank=self._rank,
-                    tp_rank=self._tp_rank,
-                    dp_rank=self._dp_rank,
-                    generator_name=context().actor_instance.actor_id.actor_name,
-                    output_dir=output_dir,
-                )
-
-                def build_stat_logger(vllm_config, engine_index):
-                    return config.vllm_stat_logger.build(
-                        vllm_config=vllm_config,
-                        engine_index=engine_index,
-                        context=logger_context,
+                if config.vllm_stat_logger is None:
+                    logger.info(
+                        "VllmOtelStatLogger inactive because "
+                        "vllm_stat_logger=None. To record vLLM metrics, set it "
+                        "to VllmOtelStatLogger.Config() and set "
+                        "OTEL_METRICS_EXPORTER=jsonl or otlp"
+                    )
+                else:
+                    vllm_stat_logger_config = config.vllm_stat_logger
+                    logger_context = StatLoggerContext(
+                        rank=self._rank,
+                        tp_rank=self._tp_rank,
+                        dp_rank=self._dp_rank,
+                        generator_name=context().actor_instance.actor_id.actor_name,
+                        output_dir=output_dir,
                     )
 
-                stat_loggers = [build_stat_logger]
+                    def build_stat_logger(vllm_config, engine_index):
+                        return vllm_stat_logger_config.build(
+                            vllm_config=vllm_config,
+                            engine_index=engine_index,
+                            context=logger_context,
+                        )
+
+                    stat_loggers = [build_stat_logger]
             self._engine = LLMEngine.from_engine_args(
                 engine_args, stat_loggers=stat_loggers
             )
@@ -1329,17 +1334,9 @@ class VLLMGenerator(Actor, Configurable):
         # live trainer GPU tensors while optimizer steps may be mutating them.
         model = self._get_model()
         model_sd = model.model.state_dict()
-        if get_spmd_backend() == "spmd_types":
-            await self._get_spmd_state_dict(model_sd, model=model)
-        else:
-            await ts.get_state_dict(
-                "model_state_dict",
-                user_state_dict=model_sd,
-                strict=False,
-                direct_rdma=False,
-            )
+        await self._get_spmd_state_dict(model_sd, model=model)
         # state_dict() returns hook-produced copies for fused modules (e.g.
-        # FusedQKVLinear's wqkv -> wq/wk/wv), so the in-place fill above never
+        # QKVLinear's wqkv -> wq/wk/wv), so the in-place fill above never
         # reaches the real param. Re-apply via load_state_dict to run the merge hook.
         # Non-fused params share storage with model_sd, so reloading them is a
         # harmless self-copy; only the fused wqkv is actually rebuilt.

@@ -8,7 +8,8 @@ import ezpz
 import torch
 
 from torchtitan.components.data.loader import BaseDataLoader
-from torchtitan.tools.logging import logger
+from torchtitan.components.loss import IGNORE_INDEX
+from torchtitan.experiments.ezpz.logging import logger
 
 
 def _import_blendcorpus_modules():
@@ -456,10 +457,18 @@ class BlendCorpusDataLoader(BaseDataLoader):
             # positions restart at 0, so document structure survives the fold.
             input_ids = input_ids.flatten()
             labels = labels.flatten()
-            out: dict[str, torch.Tensor] = {"input": input_ids}
+            # #4572 merged labels into the batch dict: core's batch_generator
+            # now yields ONE dict and reads input_dict["labels"], and #4398
+            # added num_valid_tokens, which the trainer and validator pop.
+            # Match components/data/collators.py:113-119 exactly.
+            out: dict[str, torch.Tensor | int] = {
+                "input": input_ids,
+                "labels": labels,
+                "num_valid_tokens": int((labels != IGNORE_INDEX).sum()),
+            }
             if positions is not None:
                 out["positions"] = positions.flatten()
-            yield out, labels
+            yield out
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
         """Per-document position ids, or None when we cannot derive them.

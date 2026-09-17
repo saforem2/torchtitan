@@ -12,7 +12,7 @@ from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.components.metrics import MetricsProcessor
+from torchtitan.observability.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
@@ -249,7 +249,18 @@ def agpt(
     #      full_dtensor hits the vc_check DeviceMesh assertion
     # partial_dtensor is the supported fallback and what upstream itself
     # pins for its rl+hf CI suites (b64d3f6a9, #4228).
-    cfg.parallelism.spmd_backend = "partial_dtensor"
+    #
+    # SYNC 84: THE PIN IS GONE, AND THIS IS NOT A COSMETIC REMOVAL. #4419
+    # deleted the DTensor FWD/BWD backend along with parallelism.spmd_backend
+    # itself, so spmd_types -- the backend the failure above was recorded
+    # against -- is now the only one available. resolve_fsdp_mesh still guards
+    # only storage_mesh.size() == 1 (distributed/fsdp.py:48), which the bug doc
+    # says does NOT cover TP=1 with FSDP>1.
+    #
+    # Whether the plain-tensor ValueError still fires is UNVERIFIED: it needs a
+    # real multi-rank run and cannot be settled by a local import or a
+    # meta-device build. Treat the first 2N smoke after this sync as the test,
+    # and read docs/guides/known-bugs/spmd-types-plain-tensor.md first.
 
     # spmd_types loss-parallel CE needs the full vocab size, and it is the
     # caller's job to supply it: CrossEntropyLoss.Config declares

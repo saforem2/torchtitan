@@ -19,6 +19,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 from torchtitan.components.data.loader import DataloaderExhaustedError
 from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
+from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
@@ -38,8 +39,8 @@ from torchtitan.experiments.torchft.optimizer import (
 )
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
-from torchtitan.tools.logging import logger
-from torchtitan.tools.profiler import Profiler
+from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.observability.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
@@ -435,7 +436,7 @@ class FaultTolerantTrainer(Trainer):
         # The SDPA wrapper needs max_context_length to unflatten #4121's flat
         # [T, N, H] batches back to [B, L, N, H] for scaled_dot_product_attention.
         # It cannot take it as an argument: the forward's positional-arg names
-        # are contract-checked under TP>1 (set_gqa_inner_attention_local_map
+        # are contract-checked under TP>1 (set_gqa_inner_attention_local_spmd
         # matches in_dst_shardings by name), so a module-level setter is used.
         # Set here -- after the dataloader, before the model is built -- so it
         # is in place well before the first forward.
@@ -475,7 +476,7 @@ class FaultTolerantTrainer(Trainer):
         model.verify_module_protocol()
 
         # Check if any quantization converter is on the model_config
-        from torchtitan.components.quantization.utils import has_quantization as _has_quantization
+        from torchtitan.quantization.utils import has_quantization as _has_quantization
         has_quantization = _has_quantization(model_config)
 
         # metrics logging (FT addition: ft_enable, ft_replica_id)
@@ -566,18 +567,21 @@ class FaultTolerantTrainer(Trainer):
         # branch would AttributeError.
         self.num_pipeline_parallel_microbatches = _num_pp_microbatches
 
-        # Same reason again (third instance of this in this file): core's
-        # Trainer.__init__ calls dist_utils.set_spmd_backend(
-        # config.parallelism.spmd_backend) at trainer.py:319, and we never
-        # reach it. Without this the module-level default -- currently
-        # "spmd_types" -- stays live no matter what the config or CLI says,
-        # and components/loss.py:43 then fires a bare
-        #   assert get_spmd_backend() == "partial_dtensor"
-        # on any TP>1 run whose pred is a DTensor. Observed as an
-        # unexplained AssertionError with no message in job 12473496, on the
-        # partial_dtensor CONTROL arm, i.e. a config that should trivially
-        # satisfy the assert.
-        dist_utils.set_spmd_backend(config.parallelism.spmd_backend)
+        # The set_spmd_backend() mirror that used to live here is gone: #4419
+        # removed the DTensor FWD/BWD backend entirely, deleting
+        # parallelism.spmd_backend, set_spmd_backend, and get_spmd_backend.
+        # spmd_types is now the only backend, so there is nothing to select.
+        #
+        # THIS IS NOT PURELY MECHANICAL. ezpz pinned partial_dtensor because
+        # spmd_types failed every ezpz config with
+        #   ValueError: When dp_mesh_dims is provided, all parameters must be
+        #   DTensors on the full SPMD mesh ... Got plain tensor for parameter
+        # (docs/guides/known-bugs/spmd-types-plain-tensor.md). That pin is now
+        # unavailable and resolve_fsdp_mesh still guards only the
+        # storage_mesh.size() == 1 case (distributed/fsdp.py:48), which the bug
+        # doc records as insufficient at TP=1 with FSDP>1. Whether the failure
+        # still reproduces is UNTESTED here -- it needs a real multi-rank run,
+        # not a local import. Smoke at TP=1/FSDP>1 before trusting this path.
 
         # 78th sync (#3559 CUDA-graph capture + #4146 in-place loss accum):
         # the base Trainer.__init__ now builds a `fwd_bwd_fn` indirection and
@@ -593,6 +597,25 @@ class FaultTolerantTrainer(Trainer):
         # behaviour is identical to pre-merge unless explicitly enabled.
         # See experiments/ezpz/xpu_graph.py.
         self.fwd_bwd_fn = maybe_wrap_with_xpu_graph(self._forward_backward_body)
+
+        # Sync 84, same reason as every mirror above (no super().__init__()).
+        # Two attributes core's __init__ now sets that ezpz did not:
+        #
+        # #4333/#4334 added an SDC deterministic-replay engine. Core reads
+        # self.sdc_replayer on the step path, so a missing attribute is an
+        # AttributeError at step 1, not a disabled feature. None = replay off,
+        # which is the default and what ezpz wants (replay additionally
+        # REQUIRES debug.deterministic and forbids deterministic_warn_only).
+        self.sdc_replayer = None
+
+        # #4430 added a PP loss sentinel returned from non-last stages. The
+        # ezpz trainer pins fwd_bwd_fn to the dense body above and never takes
+        # core's pp branch, but forward_backward_step can still reach the
+        # accessor at trainer.py:870, so define it rather than leave a hole.
+        if parallel_dims.pp_enabled:
+            self._pp_loss_sentinel_on_non_last_stage = torch.full(
+                (1,), -1.0, device=self.device
+            )
 
         # Batch-size ramp config validation (see Config docstrings).
         self.batch_ramp_steps = config.batch_ramp_steps
@@ -622,7 +645,7 @@ class FaultTolerantTrainer(Trainer):
 
         # apply parallelisms and initialization
         if parallel_dims.pp_enabled:
-            from torchtitan.components.metrics import ensure_pp_loss_visible
+            from torchtitan.observability.metrics import ensure_pp_loss_visible
 
             if not model_spec.pipelining_fn:
                 raise RuntimeError(
@@ -806,10 +829,10 @@ class FaultTolerantTrainer(Trainer):
         # off (the kwarg is inert unless backend == "spmd_types").
         self.train_context = dist_utils.get_spmd_context(
             parallel_dims=parallel_dims,
-            spmd_typechecking=(
-                config.parallelism.spmd_backend == "spmd_types"
-                and config.debug.spmd_typechecking
-            ),
+            # #4419: spmd_types is the only backend now, so the former
+            # backend == "spmd_types" conjunct is always true and the debug
+            # flag alone decides.
+            spmd_typechecking=config.debug.spmd_typechecking,
         )
 
         # Build validator if validation is configured
@@ -954,31 +977,64 @@ class FaultTolerantTrainer(Trainer):
         # INNER level is pipeline microbatches (the PP schedule consumes a
         # whole group at once). `num_pipeline_parallel_microbatches` is 1
         # whenever PP is off, so with PP disabled this is exactly the old
-        # flat `gas` loop -- one (input_dict, labels) pair per group.
-        microbatch_groups: list[list[tuple[dict[str, torch.Tensor], torch.Tensor]]] = []
+        # flat `gas` loop -- one batch dict per group.
+        #
+        # #4572 merged labels INTO the batch dict and #4398 added a
+        # precomputed num_valid_tokens, so core's batch_generator (which we
+        # call at :1484) now yields ONE dict rather than an (input_dict,
+        # labels) pair. Mirror core's train_step (trainer.py:888-891): pop the
+        # count, keep labels in the dict for preprocess_inputs. Fall back to
+        # counting when the key is absent, so a loader that has not been
+        # updated still works rather than KeyError-ing.
+        microbatch_groups: list[list[dict[str, torch.Tensor]]] = []
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
             microbatches = []
             for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
-                input_dict, labels = next(data_iterator)
-                local_valid_tokens += (labels != IGNORE_INDEX).sum()
-                microbatches.append((input_dict, labels))
+                input_dict = next(data_iterator)
+                if "num_valid_tokens" in input_dict:
+                    local_valid_tokens += input_dict.pop("num_valid_tokens")
+                else:
+                    local_valid_tokens += (
+                        input_dict["labels"] != IGNORE_INDEX
+                    ).sum()
+                microbatches.append(input_dict)
             microbatch_groups.append(microbatches)
 
         # All-reduce to get global token count across DP ranks
         # Move to GPU for distributed communication
         local_valid_tokens = local_valid_tokens.to(self.device)
+        # Core keeps a TENSOR on BOTH branches (trainer.py:902-908) and uses
+        # dist_sum_tensor, not dist_sum. That matters now: components/loss.py
+        # passes global_valid_tokens to spmd.assert_type(), which does
+        # `tensor.ndim`, so a Python float raises
+        #   AttributeError: 'float' object has no attribute 'ndim'
+        # on every rank once the SPMD mesh is live (torch 2.14 and 2.15, jobs
+        # 12477652 / 12477644, both right after FSDP wrapping succeeded).
+        #
+        # The float came from mirroring PR #3586 (2026-06-09), which retyped
+        # this as `float | None`. Upstream has since moved back to a tensor,
+        # so that justification describes a superseded contract.
         if parallel_dims.dp_enabled:
             batch_mesh = parallel_dims.get_mesh("batch")
-            global_valid_tokens = dist_utils.dist_sum(local_valid_tokens, batch_mesh)
+            global_valid_tokens = dist_utils.dist_sum_tensor(
+                local_valid_tokens, batch_mesh
+            )
         else:
-            # Upstream PR #3586 (2026-06-09) retyped global_valid_tokens
-            # as `float | None` and switched the no-DP branch to
-            # `float(local_valid_tokens.item())`. Mirror that here so the
-            # annotation contract holds. DP branch keeps returning a
-            # tensor from dist_sum — upstream itself does the same; the
-            # consumer (BaseLoss.__call__) accepts either at runtime.
-            global_valid_tokens = float(local_valid_tokens.item())
+            global_valid_tokens = local_valid_tokens
+
+        # #3864 added LoggedAuxLoss, and core's train_step calls
+        # AuxLoss.set_step_denominator(global_valid_tokens) at trainer.py:914 so
+        # aux losses normalize on the same scale as the main loss. We do not
+        # call super().train_step(), so mirror it here.
+        #
+        # This is currently latent rather than load-bearing: no ezpz config
+        # builds an AuxLoss (every moe router has aux_loss=None), so
+        # AuxLoss.inject() is unreachable today. But inject() RAISES on an
+        # unset denominator rather than skipping -- aux_loss.py:186-190 -- so
+        # without this line the first config to enable one dies at the first
+        # forward with a ValueError that points at core, not here.
+        AuxLoss.set_step_denominator(global_valid_tokens)
 
         # Process each group: move to GPU, forward/backward, then free.
         # Under PP the WHOLE group (the microbatch list) goes to
@@ -990,26 +1046,25 @@ class FaultTolerantTrainer(Trainer):
         accumulated_losses = []
         for microbatches in microbatch_groups:
             input_dict_mbs = []
-            label_mbs = []
-            for input_dict, labels in microbatches:
-                # Move tensors to GPU
+            for input_dict in microbatches:
+                # Move tensors to GPU. labels now rides inside the dict
+                # (#4572), so this one loop covers it too.
                 for k, v in input_dict.items():
                     if isinstance(v, torch.Tensor):
                         input_dict[k] = v.to(self.device)
                 input_dict_mbs.append(input_dict)
-                label_mbs.append(labels.to(self.device))
 
             if parallel_dims.pp_enabled:
                 fwd_bwd_input_dict = input_dict_mbs
-                fwd_bwd_labels = label_mbs
             else:
-                assert len(input_dict_mbs) == len(label_mbs) == 1
+                assert len(input_dict_mbs) == 1
                 fwd_bwd_input_dict = input_dict_mbs[0]
-                fwd_bwd_labels = label_mbs[0]
 
+            # #4572 also dropped the `labels=` parameter from
+            # forward_backward_step; preprocess_inputs pulls labels out of the
+            # dict itself (trainer.py:772-774).
             loss = self.forward_backward_step(
                 input_dict=fwd_bwd_input_dict,
-                labels=fwd_bwd_labels,
                 # pyrefly: ignore [bad-argument-type]
                 global_valid_tokens=global_valid_tokens,
             )

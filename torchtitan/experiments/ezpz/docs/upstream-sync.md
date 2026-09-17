@@ -1,6 +1,191 @@
 # Upstream Sync Log
 
 
+## Sync 84 (2026-09-15): 148 commits, MERGED IN A TRIAL WORKTREE, not landed
+
+148 behind `upstream/main`, 2,824 ahead. Merged in a throwaway worktree
+(`../tt-sync84`, branch `sync84-trial`) rather than on the production clone.
+
+**Zero of the 148 commits touch `torchtitan/experiments/ezpz`.** Every break
+below is INDIRECT: upstream moved, renamed, or re-defaulted something ezpz
+imports, subclasses, or calls. This is the largest sync so far and the first
+one that was NOT clean.
+
+### The merge itself
+
+One conflict, in `.claude/skills/numerics_debugging/scripts/activation_tracer.py`
+-- upstream hoisted the logger to a module-level `logging.getLogger(__name__)`
+while our side had added `op_filter`/`min_numel` to the arming message. Kept
+upstream's logger and our message. 542 files changed.
+
+### What broke, and how it was found
+
+The AST import sweep found the renames. It could NOT find the last two, which
+hide behind the ImportErrors -- they only surface once the renames resolve and
+you actually construct a model. **Static analysis was necessary and not
+sufficient; the breaks that would have reached production were the ones only a
+real import and a real `cfg.build()` exposed.**
+
+| # | upstream | change | ezpz sites |
+|---|----------|--------|-----------|
+| #4628 | logging reorg | `tools.logging` DELETED the shared `logger`; `tools.profiler`, `components.metrics` -> `observability.*` | 16 |
+| #4630 | quantization/lora move | split: kernels -> `torchtitan.quantization`, converters -> `config.transform.*` | 5 |
+| #4444 | renderer | `experiments.rl.renderer` -> `components.renderer` | 2 |
+| #4648 | converters | `models.utils.validate_converter_order` -> `config.transform.converter` | 1 |
+| #4533 | attention rename | `ScaledDotProductAttention` -> `...InnerAttention`, `FlexAttention` -> `FlexInnerAttention`, contract fn -> `..._local_spmd`, keys `_TNH` -> `q_THK/k_THK/v_THV` | 9 |
+| #4419 | spmd backend | `get_spmd_backend` DELETED; `spmd_types` is the only backend | 2 |
+| #4526 | fused QKV | `make_gqa_config(fuse_qkv=)` removed; `QKVLinear` always fused | 5 |
+| #4535 | fused gate-up | `FeedForward.Config` w1/w3 -> single interleaved `w13` | 2 |
+
+### The one to be careful about: #4533
+
+It rekeyed the sharding contract a SECOND time. The check matches by
+positional-arg NAME and asserts **only under TP>1**, so a missed rename passes
+every TP=1 smoke and fails at TP=2. That is the third time this exact trap has
+fired here (#4121 in August, the 57th sync before it). The warning comments in
+both `agpt/__init__.py` and `moe/__init__.py` now record all three.
+
+**Rule: whenever a sync touches `decoder_sharding.py`, diff its
+`in_dst_shardings` keys against the ezpz `forward()` signatures BEFORE running
+anything at TP>1.**
+
+### THREE new required third-party deps
+
+`renderers==0.1.11` and `torch_remat` (a git pin, not PyPI) moved from optional
+to REQUIRED, and are hard-imported on paths ezpz reaches
+(`models/common/attention.py:22`, `feed_forward.py:10`,
+`hf_datasets/text_datasets.py:14`). `renderers` additionally pulls `openai` and
+`prime-pydantic-config` transitively.
+
+They **mask** every break above -- you get `ModuleNotFoundError` first, so
+installing them REVEALS the real breaks rather than fixing anything. On the
+clusters these must be installed before any ezpz import succeeds, and
+`torch_remat` being a git pin means no offline wheel.
+
+### Verification -- run, not read
+
+```
+14/14 ezpz modules import against the merged tree
+       (agpt, moe, trainer, validator, train, zloss, mup, sharding,
+        local_rmsnorm, both config registries)
+       pre-merge control: same 14 pass -> a real comparison, not a one-sided check
+12/12 agpt flavors build on meta device
+ 5/5  flavors have IDENTICAL param counts AND state-dict key names,
+       pre- vs post-merge -- including 2B_relu2 (feed-forward rewritten) and
+       2b-rl (the ex-fuse_qkv=True flavor)
+```
+
+Checkpoint compatibility is therefore **proven, not assumed**: upstream keeps
+the logical `wq/wk/wv` and gate/up keys through save/load hooks
+(`attention.py:742-743`, `feed_forward.py:74,84`).
+
+### NOT verified, and required before landing
+
+**Numerics.** Fused vs unfused QKV is a different compute path -- one GEMM
+instead of three -- and ezpz defaulted to unfused. Same for gate-up. A seeded
+loss/grad_norm comparison is still owed. Do NOT land this on a production clone
+on the strength of the import check alone.
+
+Also outstanding: a 2N smoke, and a checkpoint resume against a real ckpt (the
+#4187/#4188/#4191/#4197/#4270 cluster rewrote discovery, retention, saves, and
+loads -- and this project has a standing scar from `keep-latest-k`).
+
+### What each method actually caught
+
+Worth recording, because the methods were not interchangeable:
+
+| method | found | missed |
+|--------|-------|--------|
+| AST import sweep | the 5 renames/moves | everything below |
+| real import (14 modules) | the 3 new required deps | all config-construction breaks |
+| `cfg.build()` on agpt | #4526, #4535 | **the entire moe surface** |
+| `cfg.build()` on moe | #4631 (0/14 building) | -- |
+| pytest suite | #4328, the 2 new trainer attrs | -- |
+| parallel surface audit | #4572/#4398 batch protocol | -- |
+
+**The moe row is the lesson.** moe imported 14/14 clean, so it was called
+healthy on that basis and only agpt got build-tested. Every one of its 14
+flavors was dead at config construction. An import proves a module can be
+loaded, nothing more.
+
+The batch-protocol break (#4572) is the other one to note: imports pass, meta
+builds pass, the whole pytest suite passes, and the run still dies at step 1
+because `batch_generator` yields one dict where ezpz unpacked two values.
+Nothing short of feeding the trainer real batches finds it.
+
+### One finding was refuted, and the refutation mattered
+
+An audit reported the router `gate` change as a SOFT break -- "degraded
+routing precision and a worse loss curve, not a traceback". An adversarial
+check reproduced it and found the opposite: construction raises `TypeError`
+before the gate is ever inspected, so the loss regression it predicted CANNOT
+occur. It also established that pre-merge already got FP32 gating from an
+explicit `torch.autocast` wrapper that the merge deleted in favour of
+`RouterGateLinear` -- so ezpz was never silently losing precision by passing a
+plain `Linear`.
+
+The port is the same either way (all three fields had to change), but the
+wrong diagnosis would have sent someone hunting a loss-curve regression that
+does not exist.
+
+### The checkpoint-retention cluster cannot touch ezpz runs
+
+#4187/#4188/#4190/#4191/#4197/#4270/#4278/#4279/#4292/#4420/#4474/#4528/#4574
+rewrote checkpoint discovery, retention, saves and loads. Given this project
+lost ~334 checkpoints to `keep-latest-k` once, that cluster got checked
+directly rather than reasoned about:
+
+```
+base.py:419-425   _should_purge() returns keep_latest_k > 0 and rank==0 and isdir(folder)
+                  -> keep_latest_k == 0 gates the ENTIRE purge path off
+every ezpz submit script:  CKPT_KEEP_LATEST_K="${CKPT_KEEP_LATEST_K:-0}"
+```
+
+All 10+ submit scripts under `submit/aurora/` and `submit/sunspot/` default it
+to **0**, so `_purge_stale_checkpoints` is unreachable on every ezpz run. Note
+core's own default is **10** (`base.py:566`) -- the ezpz scripts are what
+stands between a run and deletion, and they still do.
+
+A finding claimed the rewrite drops effective retention from 10 to 9. Verified
+otherwise: the purge moved from after the save to before it and now excludes
+the in-flight step (`base.py:482`, "reserve one retained slot for this save"),
+so the two changes compensate exactly. Moot for ezpz either way at k=0.
+
+### Core's own CPU tests on the merged tree: 753 passed, 33 failed -- ALL environmental
+
+Run for completeness, since the merge changed 542 core files. The 33 failures
+are NOT merge damage, and the reason matters more than the number:
+
+```
+28  RuntimeError: Expected out tensor to have device cpu, but got mps:0
+ 9  ModuleNotFoundError: cutlass       (attn-gym[linear], CUDA-only)
+ 8  ModuleNotFoundError: expecttest
+ 5  ModuleNotFoundError: torchvision
+```
+
+Every one is a macOS artifact. torchtitan resolves the default device to MPS
+on this machine (`torch.backends.mps.is_available()` is True) while these
+tests assume CPU -- a condition that cannot arise on the XPU clusters. The
+missing modules are optional deps, one of them CUDA-only.
+
+The pre-merge control had 1 failure (`test_flux_config_via_cli`), and it
+**still fails post-merge, identically** -- so nothing regressed, and the count
+jumped from 1 to 33 only because the merge ADDED test files (453 -> 753
+collected) that happen to trip the MPS path.
+
+**This is not evidence the merge is clean on core.** It is evidence that this
+Mac cannot test core, and that the ezpz results above -- which were compared
+against a pre-merge control on the same machine -- are the load-bearing ones.
+Core coverage has to come from CI or a cluster.
+
+### Pre-existing, NOT caused by this merge
+
+`distributed.full_dtensor` (already guarded by `except ImportError`),
+`hf_datasets` `HFDataSource` / `InterleavedHuggingFaceTextDataLoader`,
+`rl.components.batcher.BatchConfig`, and three `distributed.deepep` deferred
+imports. All absent from core on BOTH sides of the merge -- verified against
+`HEAD^1`, not assumed.
+
 ## Sync 82 (2026-08-28): LANDED 2026-08-29 -- moe break ported, sync 83 on top
 
 > [!NOTE]
@@ -3672,3 +3857,44 @@ deprecated under experimental (`#4456`).
 Smoke at 2N first per the standing rule, then check in this order: a resume
 from a real checkpoint (2), a seeded loss/grad_norm comparison (1 and 3), and
 `config_registry.py:291` by inspection (4).
+
+---
+
+## Sync 84 addendum: installing the three new deps on ALCF
+
+`renderers==0.1.11` and `torch_remat` became REQUIRED and are hard-imported on
+paths ezpz reaches, so nothing imports until they are present. Two hazards:
+
+**1. `torch_remat` declares `torch>=2.10.0`.** A plain
+`pip install torch_remat` will happily resolve that by pulling **CUDA torch**
+over the XPU build. Always:
+
+```bash
+uv pip install --no-deps --no-cache --link-mode=copy \
+  'torch_remat @ git+https://github.com/meta-pytorch/remat.git@d302699b1c58f83fa2c7b03bc2593967e9530335'
+python -c "import torch; print(torch.__version__)"   # verify AFTER, every time
+```
+
+It is **pure Python, zero compiled extensions** (verified: no `.so` in the
+installed package), and `torch>=2.10.0` is satisfied by both the Polaris 2.10
+floor and the Aurora 2.13 stack. So it can be vendored or copied into a venv
+offline -- which matters because it is a **git pin, not a PyPI package**, and
+the compute nodes have no outbound git.
+
+**2. `renderers` drags in a transitive chain.** With `--no-deps` you get
+`ModuleNotFoundError` one layer at a time. The full set:
+
+```
+renderers==0.1.11
+  -> openai, prime-pydantic-config, openai-harmony, tiktoken, jinja2, numpy
+```
+
+None of these touch torch, so they are safe with ordinary resolution. The
+import chain that reaches them is
+`ezpz/trainer.py -> torchtitan/trainer.py -> components/validate.py ->
+hf_datasets/text_datasets.py:14 -> renderers`.
+
+**These deps MASK the sync-84 breaks.** Before they are installed every import
+dies with `ModuleNotFoundError`, so installing them REVEALS the real breaks
+rather than fixing anything. Do not read "it imports now" as "the sync is
+done" -- that is what the 0/14 moe build result already punished once.

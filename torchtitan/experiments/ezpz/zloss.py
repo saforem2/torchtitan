@@ -46,7 +46,6 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torchtitan.components.loss import BaseLoss, CrossEntropyLoss
 from torchtitan.config import CompileConfig
 from torchtitan.distributed.spmd_types import spmd_mesh_size
-from torchtitan.distributed.utils import get_spmd_backend
 
 
 def _gather_vocab(logits: torch.Tensor) -> torch.Tensor:
@@ -64,7 +63,10 @@ def _gather_vocab(logits: torch.Tensor) -> torch.Tensor:
             for p in logits.placements
         )
         return logits.redistribute(placements=placements).to_local()
-    if get_spmd_backend() == "spmd_types" and spmd_mesh_size("tp") > 1:
+    # #4419 removed the DTensor FWD/BWD backend, so spmd_types is the only
+    # backend and the former get_spmd_backend() == "spmd_types" guard is
+    # now always true. Only the TP degree still gates this path.
+    if spmd_mesh_size("tp") > 1:
         # dst=I matches compute_logprobs: the all-gather's backward is the
         # replicated upstream grad sliced back to this rank's vocab shard,
         # not an all-reduce (which would over-count by tp_degree).

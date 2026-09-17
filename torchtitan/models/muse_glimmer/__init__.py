@@ -11,14 +11,21 @@ from functools import partial
 
 import torch.nn as nn
 
+from torchtitan.config.transform import ModelConfigConverter, validate_converter_order
+
+from torchtitan.distributed.pipeline_parallel import pipeline_with_first_stage_modules
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
     Linear,
-    ScaledBiasRowwiseLinear,
+    PartialBiasRowwiseLinear,
 )
-from torchtitan.models.common.attention import QKVLinear, VarlenAttention
-from torchtitan.models.common.config_utils import get_attention_config, make_ffn_config
+from torchtitan.models.common.attention import QKVLinear, VarlenInnerAttention
+from torchtitan.models.common.config_utils import (
+    fused_qkv_param_init,
+    get_attention_config,
+    make_ffn_config,
+)
 from torchtitan.models.common.nn_modules import GELU, LayerNorm, RMSNorm
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.common.vision_encoder import (
@@ -26,8 +33,6 @@ from torchtitan.models.common.vision_encoder import (
     VisionMLP,
     VisionTransformerBlock,
 )
-from torchtitan.models.utils import validate_converter_order
-from torchtitan.protocols.model import ModelConfigConverter
 from torchtitan.protocols.model_spec import ModelSpec
 
 from .model import (
@@ -38,7 +43,7 @@ from .model import (
     RMSGainCenterNorm,
     SoftCappedLinear,
 )
-from .parallelize import parallelize_muse_glimmer, pipeline_muse_glimmer
+from .parallelize import parallelize_muse_glimmer
 from .sharding import set_muse_glimmer_vision_sharding_config
 from .state_dict_adapter import MuseGlimmerStateDictAdapter
 from .vision_encoder import (
@@ -49,7 +54,6 @@ from .vision_encoder import (
 
 __all__ = [
     "parallelize_muse_glimmer",
-    "pipeline_muse_glimmer",
     "set_muse_glimmer_vision_sharding_config",
     "MuseGlimmerModel",
     "muse_glimmer_configs",
@@ -150,7 +154,7 @@ def _build_muse_glimmer_attention(
     # Varlen carries the per-layer sliding window as an FA3 kernel arg (mirrors
     # gpt_oss). The flex path instead selects a window-keyed BlockMask in
     # Attention.forward, so it leaves inner_attention's window at the default.
-    if window is not None and isinstance(inner_attention, VarlenAttention.Config):
+    if window is not None and isinstance(inner_attention, VarlenInnerAttention.Config):
         inner_attention = dataclasses.replace(
             inner_attention, window_size=(window - 1, 0)
         )
@@ -161,15 +165,17 @@ def _build_muse_glimmer_attention(
         dim=dim,
         qkv_linear=QKVLinear.Config(
             head_dim=head_dim,
-            wq=Linear.Config(
+            n_heads=n_heads,
+            n_kv_heads=n_kv_heads,
+            wqkv=Linear.Config(
                 in_features=dim,
-                out_features=n_heads * head_dim,
-                param_init=_LINEAR_INIT,
-            ),
-            wkv=Linear.Config(
-                in_features=dim,
-                out_features=n_kv_heads * head_dim,
-                param_init=_LINEAR_INIT,
+                out_features=(n_heads + 2 * n_kv_heads) * head_dim,
+                param_init=fused_qkv_param_init(
+                    _LINEAR_INIT,
+                    n_heads=n_heads,
+                    n_kv_heads=n_kv_heads,
+                    head_dim=head_dim,
+                ),
             ),
         ),
         wo=Linear.Config(
@@ -178,16 +184,14 @@ def _build_muse_glimmer_attention(
             param_init=_depth_init(layer_id),
         ),
         qk_norm=_scaleless_norm(head_dim, _NORM_EPS),
-        use_rope=_layer_use_rope(layer_id, n_layers),
         inner_attention=inner_attention,
-        # Every layer (incl. NoPE) carries a rope config so the base Decoder's
-        # max_context_length discovery/resize works uniformly; NoPE layers
-        # simply never apply it (guarded by use_rope in Attention.forward).
         rope=ComplexRoPE.Config(
             dim=head_dim,
             max_context_length=max_context_length,
             theta=_ROPE_THETA,
-        ),
+        )
+        if _layer_use_rope(layer_id, n_layers)
+        else None,
         scale_query_by=_SCALE_QUERY_NUMERATOR / math.sqrt(head_dim),
         o_gate=Linear.Config(
             in_features=dim,
@@ -253,10 +257,10 @@ def _vision_linear(in_features: int, out_features: int, *, bias: bool) -> Linear
     )
 
 
-def _vision_scaled_bias_rowwise_linear(
+def _vision_partial_bias_rowwise_linear(
     in_features: int, out_features: int
-) -> ScaledBiasRowwiseLinear.Config:
-    return ScaledBiasRowwiseLinear.Config(
+) -> PartialBiasRowwiseLinear.Config:
+    return PartialBiasRowwiseLinear.Config(
         in_features=in_features,
         out_features=out_features,
         bias=True,
@@ -309,14 +313,14 @@ def muse_glimmer_vision_encoder_config(
                 wq=_vision_linear(latent_dim, num_heads * head_dim, bias=True),
                 wk=_vision_linear(latent_dim, num_heads * head_dim, bias=True),
                 wv=_vision_linear(latent_dim, num_heads * head_dim, bias=True),
-                proj=_vision_scaled_bias_rowwise_linear(
+                proj=_vision_partial_bias_rowwise_linear(
                     num_heads * head_dim, latent_dim
                 ),
             ),
             norm2=_vision_layer_norm(latent_dim),
             mlp=VisionMLP.Config(
                 fc1=_vision_linear(latent_dim, mlp_hidden, bias=True),
-                fc2=_vision_scaled_bias_rowwise_linear(mlp_hidden, latent_dim),
+                fc2=_vision_partial_bias_rowwise_linear(mlp_hidden, latent_dim),
                 act_fn=GELU.Config(approximate="none"),
             ),
         ),
@@ -407,8 +411,11 @@ def _muse_glimmer_config(
             output_multiplier=output_multiplier,
             output_soft_cap_temp=20.0,
         ),
-        # Final output norm is gain-centered on 0.0.
-        norm=_gain_norm(dim, _NORM_EPS, gain_center=0.0),
+        # Keep the checkpoint's zero gain center, but initialize to unit scale.
+        norm=dataclasses.replace(
+            _gain_norm(dim, _NORM_EPS, gain_center=0.0),
+            param_init={"weight": nn.init.ones_},
+        ),
         layers=_build_muse_glimmer_layers(
             n_layers=n_layers,
             dim=dim,
@@ -426,7 +433,7 @@ def _muse_glimmer_config(
     )
 
 
-def _debugmodel(attn_backend: str) -> MuseGlimmerModel.Config:
+def _debugmodel(attn_backend: str, *, seq_len: int) -> MuseGlimmerModel.Config:
     return _muse_glimmer_config(
         dim=256,
         n_layers=8,
@@ -434,7 +441,7 @@ def _debugmodel(attn_backend: str) -> MuseGlimmerModel.Config:
         n_kv_heads=2,
         head_dim=64,
         vocab_size=2048,
-        max_context_length=4096,
+        max_context_length=seq_len,
         window_pattern=[128, 128, 128, 0],
         output_multiplier=1.0,
         attn_backend=attn_backend,
@@ -442,7 +449,10 @@ def _debugmodel(attn_backend: str) -> MuseGlimmerModel.Config:
 
 
 def _muse_glimmer_30b(
-    attn_backend: str, *, with_vision: bool = False
+    attn_backend: str,
+    *,
+    with_vision: bool = False,
+    seq_len: int,
 ) -> MuseGlimmerModel.Config:
     vision_adapter_dim = None
     vision_encoder = None
@@ -459,7 +469,7 @@ def _muse_glimmer_30b(
         n_kv_heads=2,
         head_dim=128,
         vocab_size=202048,
-        max_context_length=16384,
+        max_context_length=seq_len,
         window_pattern=[2048, 2048, 2048, 0],
         output_multiplier=0.19611613513,
         attn_backend=attn_backend,
@@ -469,7 +479,9 @@ def _muse_glimmer_30b(
     )
 
 
-def _muse_glimmer_debugmodel_mm(attn_backend: str) -> MuseGlimmerModel.Config:
+def _muse_glimmer_debugmodel_mm(
+    attn_backend: str, *, seq_len: int
+) -> MuseGlimmerModel.Config:
     """Multimodal debug flavor: the debug text decoder that *owns* a scaled-down
     vision encoder + adapter and runs them inside ``forward``.
 
@@ -499,7 +511,7 @@ def _muse_glimmer_debugmodel_mm(attn_backend: str) -> MuseGlimmerModel.Config:
         n_kv_heads=2,
         head_dim=64,
         vocab_size=2048,
-        max_context_length=4096,
+        max_context_length=seq_len,
         window_pattern=[128, 128, 128, 0],
         output_multiplier=1.0,
         attn_backend=attn_backend,
@@ -510,19 +522,28 @@ def _muse_glimmer_debugmodel_mm(attn_backend: str) -> MuseGlimmerModel.Config:
 
 
 muse_glimmer_configs = {
-    "debugmodel": _debugmodel,
-    "30B": _muse_glimmer_30b,
-    "debugmodel_mm": _muse_glimmer_debugmodel_mm,
-    "30B_mm": partial(_muse_glimmer_30b, with_vision=True),
+    "debugmodel": (_debugmodel, 4096),
+    "30B": (_muse_glimmer_30b, 16384),
+    "debugmodel_mm": (_muse_glimmer_debugmodel_mm, 4096),
+    "30B_mm": (partial(_muse_glimmer_30b, with_vision=True), 16384),
 }
 
 
 def model_registry(
     flavor: str,
+    *,
+    seq_len: int | None = None,
     attn_backend: str = "flex",
     converters: list[ModelConfigConverter.Config] | None = None,
 ) -> ModelSpec:
-    config = muse_glimmer_configs[flavor](attn_backend=attn_backend)
+    get_config, max_context_len = muse_glimmer_configs[flavor]
+    context_len = seq_len or max_context_len
+    if context_len > max_context_len:
+        raise ValueError(
+            f"Requested seq_len {context_len} exceeds max context length "
+            f"{max_context_len} for flavor {flavor}"
+        )
+    config = get_config(attn_backend=attn_backend, seq_len=context_len)
     if converters is not None:
         validate_converter_order(converters)
         for c in converters:
@@ -531,8 +552,17 @@ def model_registry(
         name="muse_glimmer",
         flavor=flavor,
         model=config,
+        max_context_length=context_len,
         parallelize_fn=parallelize_muse_glimmer,
-        pipelining_fn=pipeline_muse_glimmer,
+        pipelining_fn=partial(
+            pipeline_with_first_stage_modules,
+            first_stage_module_fqns=(
+                "vision_encoder",
+                "vision_adapter",
+                "vision_projection",
+                "perception_emb_norm",
+            ),
+        ),
         post_optimizer_build_fn=None,
         state_dict_adapter=MuseGlimmerStateDictAdapter,
     )

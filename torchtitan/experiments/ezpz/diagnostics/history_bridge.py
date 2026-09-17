@@ -42,7 +42,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 # 384 is History's documented cutoff for automatic cross-rank aggregation.
 _AGG_MAX_WORLD = 384

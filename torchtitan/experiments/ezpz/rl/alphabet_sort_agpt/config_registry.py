@@ -29,7 +29,7 @@ grpo-lora-agpt2b-repro.md) are baked in:
   - `rl_grpo_lora_agpt_2b_easy()` uses the easy task (1 turn, <=3 names) + lr 2e-5 --
     the config that produced the rising reward curve (0.167 -> 0.26).
 
-agpt "2b-rl" uses FlexAttention (agpt/__init__.py:449); the flex-disable monkeypatch
+agpt "2b-rl" uses FlexInnerAttention (agpt/__init__.py:449); the flex-disable monkeypatch
 below caps its autotune. The generator uses vLLM own attention regardless.
 """
 
@@ -38,7 +38,7 @@ from __future__ import annotations
 import torch
 
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.components.lora import LoRAConverter
+from torchtitan.config.transform.lora import LoRAConverter
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
@@ -71,10 +71,10 @@ from torchtitan.experiments.rl.examples.alphabet_sort.rollouter import (
 )
 from torchtitan.experiments.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
 from torchtitan.experiments.rl.losses import GRPOLoss
-from torchtitan.experiments.rl.models.cast_linear import LMHeadCastConverter
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.rl.models.vllm_registry import InferenceParallelismConfig
 from torchtitan.experiments.rl.observability.metrics import MetricsProcessor
-from torchtitan.experiments.rl.renderer import RendererConfig
+from torchtitan.components.renderer import RendererConfig
 from torchtitan.experiments.rl.rubrics import Rubric
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
@@ -130,19 +130,19 @@ def _agpt_grpo_config(
     clip_eps: float = 0.2,
     shaped_reward: bool = False,
 ) -> Controller.Config:
-    # Disable FlexAttention max_autotune on XPU (backward autotuning exceeds XPU
+    # Disable FlexInnerAttention max_autotune on XPU (backward autotuning exceeds XPU
     # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
     # before the model is compiled; recompile the cached flex kernel.
     from torch.nn.attention.flex_attention import flex_attention
-    from torchtitan.models.common.attention import FlexAttention
+    from torchtitan.models.common.attention import FlexInnerAttention
 
-    FlexAttention.inductor_configs = {
-        **FlexAttention.inductor_configs,
+    FlexInnerAttention.inductor_configs = {
+        **FlexInnerAttention.inductor_configs,
         "max_autotune": False,
         "coordinate_descent_tuning": False,
     }
-    FlexAttention._compiled_flex_attn = torch.compile(
-        flex_attention, options=FlexAttention.inductor_configs
+    FlexInnerAttention._compiled_flex_attn = torch.compile(
+        flex_attention, options=FlexInnerAttention.inductor_configs
     )
     return Controller.Config(
         model_spec=_agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank),

@@ -1,5 +1,219 @@
 # Claude Session Log
 
+## 2026-09-15/16 (local -> aurora) -- sync 84 verified, blocked on a torch floor, and a two-session collision
+
+### Summary
+
+Merged 148 upstream commits, ported 11 indirect breaks, verified everything
+that can be verified off-cluster, and established that the one remaining
+blocker is not ours to fix. Nothing landed on `ezpz` or any production clone.
+
+### Cleared
+
+```
+12/12 ezpz modules import           (pre-merge control: same 12)
+12/12 agpt + 14/14 moe flavors build
+82 passed, 2 skipped, 0 failed
+param counts AND state-dict keys byte-identical pre/post merge
+numerics on A100: max rel err 1.3e-06, argmax + top-5 100% agreement
+```
+
+### RESOLVED: sync 84 TRAINS on XPU with torch 2.14.0+xpu
+
+```
+job 12477656   torch 2.14.0+xpu (STABLE), sunspot 2N/24 ranks
+  agpt TP=1  rc=0   10.87743 -> 10.75458 -> 10.48057
+  agpt TP=2  rc=0   10.88015          <- the #4533 contract arm
+  moe        rc=143 RuntimeError: Cannot unflatten unevenly sharded tensor
+```
+
+Losses track the pre-merge baseline to ~3 decimals (10.88382 / 10.48337).
+
+**Controlled A/B, only torch differs:**
+
+| | frameworks 2.13 (`12477660`) | torch 2.14.0+xpu (`12477656`) |
+|---|---|---|
+| FSDP | `ValueError`, 69 ranks | `Applied FSDP to the model` |
+| training | none | both dense arms rc=0 |
+
+Two REAL sync-84 bugs were found and fixed getting here:
+
+1. `global_valid_tokens` was a Python float where core keeps a tensor;
+   `spmd.assert_type()` does `.ndim` on it. Ours, not a `spmd_types` bug --
+   downgrading `spmd_types` would not have helped.
+2. The xccl shim declared 4 positional args; torch 2.15 added a 5th. Now
+   `*args/**kwargs` so it survives the next arity change too.
+
+Everything else between "merged" and "trains" was environment: prod-BKC venv,
+missing assets and blendcorpus cache, `impi-rt` shipping its own `mpiexec`,
+`mpi4py` built against the wheel's MPI, and a dozen absent deps.
+
+### Superseded: #181519 absent on all FOUR reachable torch builds
+
+The merged tree dies in FSDP setup before step 1. The pre-merge tree, same
+machine/venv/script/seed, trains clean (`VERDICT: ok`, agpt TP=1 and TP=2 and
+moe all rc=0). The trees differ on ONE line: `config_registry.py:252` pinned
+`partial_dtensor`, and #4419 deleted the pin AND the backend -- zero references
+left in core, so there is no configuration workaround.
+
+| build | lines | #181519 |
+|---|---|---|
+| `2.13.0.dev20260520+xpu` aurora projects | 1093 | absent |
+| `2.13.0.dev20260428+xpu` aurora runs (prod yeets this) | 1017 | absent |
+| `2.13.0a0+gitcf30153` frameworks/2026.1.0 (test BKC) | 1095 | absent |
+| `2.13.0+cu130` perlmutter | 1095 | absent |
+
+Confirmed on BOTH compute images, not just one. An earlier revision of this
+entry said "the merged tree dies in FSDP setup" from `debug-scaling` alone --
+the PROD bkc. Both earlier `next-eval` jobs had died on the venv trap before any
+sync-84 code ran, so the test bkc was untested while being reported as covered.
+Rerun properly:
+
+| job | bkc | torch | outcome |
+|---|---|---|---|
+| `8829185` | prod `20260828` | `dev20260520+xpu` | dies in FSDP setup |
+| `8831522` | **test `20260831`** | `dev20260428+xpu` | identical, 72 dtensor_err / 3 arms |
+| `8829243` | prod, PRE-MERGE | `dev20260520+xpu` | **trains**, `VERDICT: ok` |
+
+Both failures come AFTER `IMPORT_OK` and model construction, so it is the FSDP
+path rather than packaging. Four builds by inspection plus two images by
+execution.
+
+ALCF request drafted at
+`docs/guides/known-bugs/alcf-request-torch-181519-draft.md`. UNSENT.
+
+### DO NOT merge into `ezpz` yet
+
+`runs/agpt-80b-v2` tracks `origin/ezpz` at **0 commits behind**, so a merge puts
+an unrunnable tree on a production clone. Six production jobs are held/queued.
+The merge buys nothing until the torch floor lifts. `sync84-trial` is complete
+and ready to land the day it does.
+
+### The recurring failure mode, six times in two days
+
+Every one of these produced a confident-looking answer that was WRONG:
+
+| check | said | actually |
+|---|---|---|
+| 14/14 moe flavors imported | healthy | 0/14 built |
+| grep "full SPMD"/"plain tensor" | #181519 PRESENT | those strings ARE the raise text |
+| `qstat -Q \| head -22` | no next-eval queue | it was below the cutoff |
+| login-node `ls` | RC module retired | compute-only, it exists |
+| `[ -x $venv/bin/python ]` | venv fine | base interpreter absent on that BKC |
+| `${CONDA_PREFIX}/lib` | path set | unset -> silent bare `/lib:` |
+| "tested on next-eval" | both images covered | both next-eval jobs died before any sync-84 code ran |
+
+**The rule: ask what your check prints on the BROKEN state. If it prints the
+same thing, it is not a check.** Grep for symbols a patch INTRODUCES, never
+prose -- prose in a `raise` is evidence the bug is present.
+
+### Two sessions, one surface
+
+`aurora-tt-ezpz` was live on `feat/aurora-moe-port` the whole time and I did not
+notice until asked. Cost: four jobs rediscovering a compute-node venv trap it
+had already written to the SHARED memory store, plus shared-venv installs and
+queue contention under one allocation.
+
+Once coordinating, it was worth it in both directions: it caught that every
+torch build I had checked was login-reachable; I caught that its soname fix
+covered 1 of 3 files and that its #181519 PRESENT was a false positive. Neither
+of us would have reached the four-build answer alone.
+
+**Run `ListAgents` before touching a shared cluster.** One call.
+
+## 2026-09-15 (local, mbph)
+
+### Summary
+
+Answered "are there any upstream commits to pull in from main" -- 148, not the
+64 surveyed a week earlier. Merged them in a throwaway worktree, found ten
+indirect breaks, ported and verified all ten. Nothing landed on `ezpz` or any
+production clone.
+
+### The shape of it
+
+Zero of the 148 commits touch `experiments/ezpz`. Every break is indirect:
+upstream moved, renamed, or re-defaulted something ezpz imports, subclasses,
+or calls.
+
+```
+#4628  deleted the shared logger; logging/metrics/profiler -> observability
+#4630  split quantization/lora across two new homes
+#4533  renamed the attention classes AND rekeyed the TP sharding contract
+#4419  deleted spmd_backend -- the backend ezpz was pinned to
+#4526  fused QKV became mandatory
+#4535  fused gate-up became the default
+#4631  reshaped the MoE router config three ways at once
+#4572  merged labels into the batch dict
+#4398  added num_valid_tokens to collation
+#4328  made ModelSpec.max_context_length required
+```
+
+### The lesson, earned the hard way
+
+I build-tested agpt, saw moe import 14/14 clean, and called the surface
+healthy. **Every one of moe's 14 flavors was dead at config construction.** A
+parallel audit found it, not me.
+
+Five methods, each catching what the previous could not:
+
+| method | caught | blind to |
+|--------|--------|----------|
+| AST import sweep | the renames | everything below |
+| real import | the 3 new deps | all construction breaks |
+| `cfg.build()` agpt | #4526, #4535 | **the whole moe surface** |
+| `cfg.build()` moe | #4631 (0/14) | -- |
+| pytest | #4328, 2 trainer attrs | -- |
+| surface audit | #4572 batch protocol | -- |
+
+An import proves a module loads. Nothing more. And #4572 clears imports, meta
+builds, AND all 82 tests while still killing the run at step 1 -- only real
+batches reach it.
+
+### Verification
+
+```
+14/14 ezpz modules import        (pre-merge control: same 14 -- a real comparison)
+12/12 agpt + 14/14 moe build     (moe was 0/14)
+82 passed, 2 skipped, 0 failed
+8 pass / 3 nonzero standalone    EXACTLY the pre-merge baseline
+param counts AND state-dict keys byte-identical pre- vs post-merge
+```
+
+Checkpoints load. Proven, not assumed.
+
+### Adversarial verification: 3 refuted of 24, none fake
+
+Every refuted finding had an accurate core-side claim and a wrong ezpz half:
+an inverted consequence (a "soft precision regression" that actually raises
+TypeError before the gate is read), a stale callsite (fixed three commits
+earlier, with a false causal story), and an unreachable path (`padding_mask`
+cannot arrive -- the block takes no `**kwargs`). Verified each independently
+rather than trusting the verdicts. Zero lines changed; two corrected the
+record in ways that would have misdirected later debugging.
+
+### NOT settled -- both need cluster hardware
+
+**`spmd_types` may be a live blocker.** ezpz pinned `partial_dtensor` because
+`spmd_types` failed every ezpz config with the plain-tensor ValueError. #4419
+deleted the pin and `resolve_fsdp_mesh` still guards only
+`storage_mesh.size() == 1`, which the bug doc calls insufficient at TP=1 with
+FSDP>1. Flagged inline in both config registries.
+
+**Numerics.** Fused vs unfused QKV is one GEMM instead of three. A seeded loss
+comparison and a 2N smoke are owed before this lands anywhere real.
+
+### Also
+
+Three new REQUIRED deps, one a git pin. They mask every break above, so
+installing them reveals rather than fixes. `torch_remat` declares
+`torch>=2.10.0` and will pull CUDA torch if installed carelessly -- it is pure
+Python with zero compiled extensions, so it can be vendored offline. Install
+procedure is in `upstream-sync.md`.
+
+Side fix: `MEMORY.md` had grown to 25.3KB against a 24.4KB limit, so part of
+it was silently not loading. Trimmed to 21.5KB, all 152 entries intact.
+
 ## 2026-09-08 (sunspot)
 
 ### Summary

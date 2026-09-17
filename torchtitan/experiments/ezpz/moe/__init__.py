@@ -23,11 +23,13 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torchtitan.models.common.attention import ScaledDotProductAttention
+from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import (
     get_attention_config,
     make_ffn_config,
 )
+
+
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.protocols.module import Module
 from torchtitan.protocols.model_spec import ModelSpec
@@ -37,10 +39,76 @@ from torchtitan.protocols.model_spec import ModelSpec
 # `.moe` copy that was a byte-for-byte fork of `torchtitan/models/common/moe.py`;
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
+from torchtitan.models.common.activation import Sigmoid, Softmax
+from torchtitan.models.common.linear import RouterGateLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
+from torchtitan.models.deepseek_v3 import DeepSeekV3Router
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
+
+
+def _dtensor_safe_fused_ffn_config(**kwargs):
+    """``make_ffn_config`` whose w13 init survives an unevenly sharded DTensor.
+
+    #4535 made the fused gate/up projection the default. Core's
+    ``_make_fused_linear_init`` (models/common/config_utils.py:58) does
+
+        gate_up = t.unflatten(0, (-1, 2))
+        gate_init(gate_up[:, 0]); up_init(gate_up[:, 1])
+
+    i.e. w13 rows INTERLEAVE gate and up: even rows gate, odd rows up.
+
+    ``parallelize_moe`` calls ``fully_shard`` with ``Shard(0)`` over the whole
+    transformer block, so ``shared_experts.w13`` (1024 rows) arrives as a
+    DTensor sharded on dim 0 across ``dp_shard``. Two failures follow:
+
+    1. ``unflatten`` on the GLOBAL DTensor demands even divisibility --
+       1024 % 24 != 0 -- raising "Cannot unflatten unevenly sharded tensor"
+       (job 12477656, 52 ranks).
+    2. Unflattening the LOCAL shard is not enough either: FSDP splits 1024
+       into 16 shards of 43 and 8 of 42, both ODD, so a shard can begin on an
+       *up* row (rank1 starts at global row 43). That raises "[-1, 2] don't
+       multiply up to dim 0 (35)" -- and had the sizes been even it would have
+       silently applied the WRONG initializer to half the ranks (job 12477667).
+
+    So the init must know each shard's GLOBAL row offset and stripe from
+    there: with offset ``o`` the local even/odd split inverts when ``o`` is
+    odd.
+
+    Wraps core rather than editing it, per the experiments-folder rule.
+    """
+    cfg = make_ffn_config(**kwargs)
+    if not cfg.w13.param_init or "weight" not in cfg.w13.param_init:
+        return cfg
+    core_init = cfg.w13.param_init["weight"]
+    gate_init = kwargs["w1_param_init"].get("weight")
+    up_init = kwargs["w2w3_param_init"].get("weight")
+
+    def _init_striped(t):
+        if not hasattr(t, "to_local"):
+            core_init(t)  # plain tensor: core's path is already correct
+            return
+        local = t.to_local()
+        if local.numel() == 0:
+            return
+        offset = 0
+        mesh = getattr(t, "device_mesh", None)
+        for axis, pl in enumerate(getattr(t, "placements", ())):
+            if getattr(pl, "dim", None) == 0 and mesh is not None:
+                rank = mesh.get_local_rank(axis)
+                chunk, rem = divmod(t.shape[0], mesh.size(axis))
+                offset += rank * chunk + min(rank, rem)
+        g_start = 0 if offset % 2 == 0 else 1
+        gate_rows, up_rows = local[g_start::2], local[1 - g_start::2]
+        if gate_init is not None and gate_rows.numel():
+            gate_init(gate_rows)
+        if up_init is not None and up_rows.numel():
+            up_init(up_rows)
+
+    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_striped}
+    return cfg
+
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
@@ -51,31 +119,34 @@ from .parallelize import parallelize_moe
 from .state_dict_adapter import moeStateDictAdapter
 
 
-class EzpzScaledDotProductAttention(ScaledDotProductAttention):
+class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
     """SDPA variant that avoids set_priority=True in sdpa_kernel."""
 
     @dataclasses.dataclass(kw_only=True, slots=True)
-    class Config(ScaledDotProductAttention.Config):
+    class Config(ScaledDotProductInnerAttention.Config):
         pass
 
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_TNH: torch.Tensor,
-        k_TNH: torch.Tensor,
-        v_TNH: torch.Tensor,
+        q_THK: torch.Tensor,
+        k_THK: torch.Tensor,
+        v_THV: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        # Positional arg names MUST be the shape-suffixed q_TNH/k_TNH/v_TNH to
-        # match set_gqa_inner_attention_local_map's in_dst_shardings keys --
+        # Positional arg names MUST be the shape-suffixed q_THK/k_THK/v_THV to
+        # match set_gqa_inner_attention_local_spmd's in_dst_shardings keys --
         # the local_map contract check matches by positional-arg NAME and
         # asserts under TP>1 otherwise. Renamed from _BLNH 2026-08-25: #4121
         # (73aed7f6c) renamed the upstream keys and our port left the
         # parameters behind (MEASURED on the agpt twin, smoke 8781623 arm 2).
+        # Renamed AGAIN in sync 84: #4533 rekeyed in_dst_shardings a second
+        # time, _TNH -> q_THK/k_THK/v_THV, and renamed the contract fn to
+        # ..._local_spmd. See the agpt twin for the full history.
         #
         # This wrapper is a straight port of the agpt one -- moe reaches it
         # through the SAME BlendCorpusDataLoader (moe/config_registry.py:115),
@@ -92,7 +163,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # whole number of max_context_length sequences. The divisibility check
         # keeps that verified rather than assumed; a ragged batch must not
         # silently reshape into the wrong grid.
-        folded = q_TNH.ndim == 3
+        folded = q_THK.ndim == 3
         if folded:
             # Read agpt's module global rather than defining a second one.
             # trainer.py:443 only ever calls agpt.set_ezpz_max_context_length,
@@ -110,7 +181,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "unknown; the trainer must call "
                     "set_ezpz_max_context_length() before the first forward"
                 )
-            num_tokens, num_heads, head_dim = q_TNH.shape
+            num_tokens, num_heads, head_dim = q_THK.shape
             if num_tokens % seq_len != 0:
                 raise ValueError(
                     f"token count {num_tokens} is not a multiple of "
@@ -119,14 +190,14 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "ragged batch"
                 )
             batch = num_tokens // seq_len
-            q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
-            k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
-            v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
-        assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
+            q_THK = q_THK.view(batch, seq_len, num_heads, head_dim)
+            k_THK = k_THK.view(batch, seq_len, -1, head_dim)
+            v_THV = v_THV.view(batch, seq_len, -1, head_dim)
+        assert q_THK.ndim == 4, f"expected 4D, got {tuple(q_THK.shape)}"
         q, k, v = (
-            q_TNH.transpose(1, 2),
-            k_TNH.transpose(1, 2),
-            v_TNH.transpose(1, 2),
+            q_THK.transpose(1, 2),
+            k_THK.transpose(1, 2),
+            v_THV.transpose(1, 2),
         )
         with sdpa_kernel(self.sdpa_backends):
             out = F.scaled_dot_product_attention(
@@ -160,7 +231,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
     ]
 
 
-def _default_inner_attention() -> ScaledDotProductAttention.Config:
+def _default_inner_attention() -> ScaledDotProductInnerAttention.Config:
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         return XPUScaledDotProductAttention.Config()
     return EzpzScaledDotProductAttention.Config()
@@ -175,7 +246,7 @@ def _ezpz_get_attention_config(backend: str) -> Module.Config:
     mask_type separately (see `_build_moe_layers` which sets
     `_mask = "causal"` next to the call site). Returning a tuple
     here would break the downstream `inner_attention.sharding_config`
-    setattr in `moe/sharding.py:set_gqa_inner_attention_local_map`.
+    setattr in `moe/sharding.py:set_gqa_inner_attention_local_spmd`.
     """
     if backend == "sdpa":
         return _default_inner_attention()
@@ -194,21 +265,42 @@ def make_ezpz_router_config(
     num_expert_groups: int | None = None,
     num_limited_groups: int | None = None,
     bias: bool = False,
-) -> TokenChoiceTopKRouter.Config:
+) -> TokenChoiceTopKRouter.Config | DeepSeekV3Router.Config:
+    # Sync 84 reshaped this config three ways at once:
+    #   #4631 moved num_expert_groups/num_limited_groups OFF the stock router
+    #         and onto DeepSeekV3Router, which is now the only one that does
+    #         node-limited routing.
+    #   score_func became a UnaryActivationFn.Config instead of a string.
+    #   gate became a RouterGateLinear.Config instead of a plain Linear.Config.
+    # Route to whichever router actually supports what the flavor asks for,
+    # rather than passing group kwargs the stock router no longer accepts.
+    score_cfg = Sigmoid.Config() if score_func == "sigmoid" else Softmax.Config()
+    gate_cfg = RouterGateLinear.Config(
+        in_features=dim,
+        out_features=num_experts,
+        bias=bias,
+        param_init=gate_param_init,
+    )
+
+    if num_expert_groups is not None or num_limited_groups is not None:
+        return DeepSeekV3Router.Config(
+            num_experts=num_experts,
+            gate=gate_cfg,
+            top_k=top_k,
+            score_func=score_cfg,
+            route_norm=route_norm,
+            route_scale=route_scale,
+            num_expert_groups=num_expert_groups,
+            num_limited_groups=num_limited_groups,
+        )
+
     return TokenChoiceTopKRouter.Config(
         num_experts=num_experts,
-        gate=Linear.Config(
-            in_features=dim,
-            out_features=num_experts,
-            bias=bias,
-            param_init=gate_param_init,
-        ),
+        gate=gate_cfg,
         top_k=top_k,
-        score_func=score_func,
+        score_func=score_cfg,
         route_norm=route_norm,
         route_scale=route_scale,
-        num_expert_groups=num_expert_groups,
-        num_limited_groups=num_limited_groups,
     )
 
 
@@ -478,7 +570,7 @@ def _build_moe_layers(
         )
 
         if layer_id < n_dense_layers:
-            ffn_cfg = make_ffn_config(
+            ffn_cfg = _dtensor_safe_fused_ffn_config(
                 dim=dim,
                 hidden_dim=dense_hidden_dim,
                 w1_param_init=_LINEAR_INIT,
@@ -510,7 +602,7 @@ def _build_moe_layers(
                     param_init=_depth_experts_init(layer_id),
                     compute_backend=compute_backend,
                 ),
-                shared_experts=make_ffn_config(
+                shared_experts=_dtensor_safe_fused_ffn_config(
                     dim=dim,
                     hidden_dim=moe_hidden_dim * num_shared_experts,
                     w1_param_init=_LINEAR_INIT,
@@ -1225,7 +1317,7 @@ def model_registry(
     moe_comm_backend: str = "standard",
     quantization: list | None = None,
 ) -> ModelSpec:
-    from torchtitan.components.quantization import QuantizationConverter
+    from torchtitan.config.transform.quantization import QuantizationConverter
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
 
     config = moe_configs[flavor]()
@@ -1250,10 +1342,21 @@ def model_registry(
             assert isinstance(q, QuantizationConverter.Config)
             q.build().convert(config)
 
+    # #4328 made max_context_length a required ModelSpec field. Read it off the
+    # flavor's own RoPE config (same approach as the agpt twin) so the spec
+    # cannot drift from the model it describes.
+    rope_cfg = config.layers[0].attention.rope
+    if rope_cfg is None:
+        raise ValueError(
+            f"moe flavor {flavor!r} has no RoPE config, so max_context_length "
+            "cannot be derived for its ModelSpec"
+        )
+
     return ModelSpec(
         name="moe",
         flavor=flavor,
         model=config,
+        max_context_length=rope_cfg.max_context_length,
         parallelize_fn=parallelize_moe,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=register_moe_load_balancing_hook,

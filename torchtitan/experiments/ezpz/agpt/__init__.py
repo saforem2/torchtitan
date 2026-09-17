@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from functools import partial
-from typing import Literal
+from typing import Any, Literal
 
 _EZPZ_MAX_CONTEXT_LENGTH: int | None = None
 
@@ -16,7 +16,7 @@ def set_ezpz_max_context_length(seq_len: int) -> None:
     """Tell the SDPA wrapper how to unflatten #4121 flat [T, N, H] batches.
 
     Module-level rather than a Config field: the forward's positional-arg names
-    are contract-checked under TP>1 (set_gqa_inner_attention_local_map matches
+    are contract-checked under TP>1 (set_gqa_inner_attention_local_spmd matches
     in_dst_shardings by name), so the signature must not change.
     """
     global _EZPZ_MAX_CONTEXT_LENGTH
@@ -43,12 +43,12 @@ from torchtitan.models.common import (
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from torchtitan.models.common.attention import ScaledDotProductAttention
+from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import get_attention_config
 from torchtitan.protocols.module import Module
 
 
-class EzpzScaledDotProductAttention(ScaledDotProductAttention):
+class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
     """SDPA that avoids ``set_priority=True`` in the ``sdpa_kernel`` context.
 
     Works around a torch._dynamo bug in PyTorch 2.11 where
@@ -58,23 +58,23 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(ScaledDotProductAttention.Config):
+    class Config(ScaledDotProductInnerAttention.Config):
         pass
 
     # pyrefly: ignore [bad-override]
     def forward(
         self,
-        q_TNH: torch.Tensor,
-        k_TNH: torch.Tensor,
-        v_TNH: torch.Tensor,
+        q_THK: torch.Tensor,
+        k_THK: torch.Tensor,
+        v_THV: torch.Tensor,
         *,
         scale: float | None = None,
         enable_gqa: bool = False,
         is_causal: bool = True,
         **kwargs,
     ) -> torch.Tensor:
-        # Positional arg names MUST be the shape-suffixed q_TNH/k_TNH/v_TNH to
-        # match the keys in set_gqa_inner_attention_local_map's
+        # Positional arg names MUST be the shape-suffixed q_THK/k_THK/v_THV to
+        # match the keys in set_gqa_inner_attention_local_spmd's
         # in_dst_shardings (models/common/decoder_sharding.py:288) -- the
         # local_map contract check matches by positional-arg NAME and asserts
         # under TP>1 if a mapped input is missing.
@@ -89,6 +89,16 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         #   in_dst_shardings is missing entries for: ['q_BLNH','k_BLNH','v_BLNH']
         # Exactly the failure mode the 57th sync's q_BLNH rename was written
         # to prevent, reintroduced from the other direction.
+        #
+        # It happened AGAIN in sync 84. #4533 renamed the upstream class
+        # (ScaledDotProductAttention -> ScaledDotProductInnerAttention) and
+        # the contract fn (set_gqa_inner_attention_local_map ->
+        # ..._local_spmd), and rekeyed in_dst_shardings a second time:
+        # q_TNH/k_TNH/v_TNH -> q_THK/k_THK/v_THV (N heads -> H, H head_dim ->
+        # K, and v's last axis is V not K). These parameters were renamed to
+        # match at merge time. THIRD occurrence of the same trap: whenever an
+        # upstream sync touches decoder_sharding.py, diff its in_dst_shardings
+        # keys against this signature BEFORE running anything at TP>1.
         # #4121 (fold-batch-dim) reshaped the LM stack to a flat [T, N, H]
         # token layout, so these arrive 3D on the current tree. SDPA needs
         # [B, N, L, H], and a bare transpose(1, 2) on a 3D tensor swaps N with
@@ -104,7 +114,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
         # Upstream's own SDPA does the same bare transpose, and its flat-layout
         # path (VarlenAttention) needs CUDA flash attention, which XPU lacks --
         # so neither upstream branch covers this and the adaptation lives here.
-        folded = q_TNH.ndim == 3
+        folded = q_THK.ndim == 3
         if folded:
             seq_len = _EZPZ_MAX_CONTEXT_LENGTH
             if seq_len is None:
@@ -113,7 +123,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "unknown; the trainer must call "
                     "set_ezpz_max_context_length() before the first forward"
                 )
-            num_tokens, num_heads, head_dim = q_TNH.shape
+            num_tokens, num_heads, head_dim = q_THK.shape
             if num_tokens % seq_len != 0:
                 raise ValueError(
                     f"token count {num_tokens} is not a multiple of "
@@ -122,14 +132,14 @@ class EzpzScaledDotProductAttention(ScaledDotProductAttention):
                     "reshape a ragged batch"
                 )
             batch = num_tokens // seq_len
-            q_TNH = q_TNH.view(batch, seq_len, num_heads, head_dim)
-            k_TNH = k_TNH.view(batch, seq_len, -1, head_dim)
-            v_TNH = v_TNH.view(batch, seq_len, -1, head_dim)
-        assert q_TNH.ndim == 4, f"expected 4D, got {tuple(q_TNH.shape)}"
+            q_THK = q_THK.view(batch, seq_len, num_heads, head_dim)
+            k_THK = k_THK.view(batch, seq_len, -1, head_dim)
+            v_THV = v_THV.view(batch, seq_len, -1, head_dim)
+        assert q_THK.ndim == 4, f"expected 4D, got {tuple(q_THK.shape)}"
         q, k, v = (
-            q_TNH.transpose(1, 2),
-            k_TNH.transpose(1, 2),
-            v_TNH.transpose(1, 2),
+            q_THK.transpose(1, 2),
+            k_THK.transpose(1, 2),
+            v_THV.transpose(1, 2),
         )
         # Avoid set_priority=True — triggers a torch._dynamo bug in
         # PyTorch 2.11 where FX proxy nodes are incorrectly passed to
@@ -179,7 +189,7 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
     ]
 
 
-from torchtitan.models.common.feed_forward import FeedForward
+from torchtitan.models.common.activation import BinaryActivationFn
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_config
 
@@ -195,7 +205,7 @@ class SoftcappedFlexAttention(Module):
     Uses FlexAttention's score_mod to apply tanh softcapping inside the
     fused kernel — no O(seq_len²) materialization. Requires torch.compile.
 
-    TP: relies on `set_gqa_inner_attention_local_map` setting a static
+    TP: relies on `set_gqa_inner_attention_local_spmd` setting a static
     `LocalMapConfig` on the inner-attention sharding_config (upstream
     #2986 replaced runtime DTensor detection in `LocalMapInnerAttention`
     with config-driven local_map).
@@ -224,7 +234,7 @@ class SoftcappedFlexAttention(Module):
         **kwargs,
     ) -> torch.Tensor:
         # 57th sync: shape-suffixed positional names required to match
-        # set_gqa_inner_attention_local_map's in_dst_shardings under TP>1.
+        # set_gqa_inner_attention_local_spmd's in_dst_shardings under TP>1.
         # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
         # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
         # layout, and if that ever reaches here the tensors arrive 3D --
@@ -255,16 +265,36 @@ class SoftcappedFlexAttention(Module):
         return out.transpose(1, 2)
 
 
-class ReLUSquaredFeedForward(FeedForward):
-    """FFN with ReLU-squared activation instead of SiLU.
+class ReLUSquaredGLU(BinaryActivationFn):
+    """ReLU-squared gated activation: ``relu(gate)**2 * up``.
 
-    ReLU²(x) = max(0, x)². Used in NanoGPT speedrun entries for faster
-    convergence. The squared activation creates sharper sparsity patterns.
+    ReLU^2(x) = max(0, x)^2. Used in NanoGPT speedrun entries for faster
+    convergence; the squared activation creates sharper sparsity patterns.
+
+    This used to be a ReLUSquaredFeedForward subclass overriding forward() as
+    ``w2(relu(w1(x))**2 * w3(x))``. #4535 made the fused gate-up projection the
+    default: FeedForward.Config lost its w1/w3 fields for a single w13, and the
+    base forward() now unflattens the interleaved gate/up pair and delegates to
+    a configurable activation_fn. Expressing ReLU^2 as that activation keeps the
+    exact same math while inheriting the base's remat regions and fused layout.
     """
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = F.relu(self.w1(x))
-        return self.w2(h * h * self.w3(x))
+    @dataclass(kw_only=True, slots=True)
+    class Config(BinaryActivationFn.Config):
+        pass
+
+    def __init__(self, config: Config) -> None:
+        pass
+
+    def __call__(
+        self,
+        gate: torch.Tensor,
+        up: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del kwargs
+        h = F.relu(gate)
+        return h * h * up
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
@@ -316,7 +346,7 @@ def _depth_init(dim: int, layer_id: int) -> dict[str, Callable]:
     }
 
 
-def _default_inner_attention() -> ScaledDotProductAttention.Config:
+def _default_inner_attention() -> ScaledDotProductInnerAttention.Config:
     """Return the right SDPA config for the current device."""
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         return XPUScaledDotProductAttention.Config()
@@ -329,7 +359,7 @@ def _ezpz_get_attention_config(
     """XPU-aware attention config selection.
 
     For the "sdpa" backend, uses the XPU-optimized SDPA classes instead
-    of upstream's ScaledDotProductAttention. Other backends delegate
+    of upstream's ScaledDotProductInnerAttention. Other backends delegate
     to upstream get_attention_config().
 
     Upstream PR #3571 (2026-06-09) removed SDPA + mask_type from the
@@ -351,7 +381,6 @@ def _build_agpt_layers(
     hidden_dim: int,
     rope: RoPE.Config,
     n_kv_heads: int | None = None,
-    fuse_qkv: bool = False,
     attn_backend: str = "sdpa",
     qk_norm: bool = False,
     logit_softcap: float | None = None,
@@ -379,27 +408,19 @@ def _build_agpt_layers(
     )
     layers = []
     for layer_id in range(n_layers):
+        # Both branches go through make_ffn_config now: #4535 fused w1/w3 into
+        # a single interleaved w13, so hand-building the Config would have to
+        # duplicate fused_gate_up_param_init's interleaving. ReLU^2 differs from
+        # the SwiGLU default only in the activation.
+        ffn_config = make_ffn_config(
+            dim=dim,
+            hidden_dim=hidden_dim,
+            w1_param_init=linear_init,
+            w2w3_param_init=_depth_init(dim, layer_id),
+        )
         if relu_squared:
-            ffn_config = ReLUSquaredFeedForward.Config(
-                w1=Linear.Config(
-                    in_features=dim, out_features=hidden_dim,
-                    param_init=linear_init,
-                ),
-                w2=Linear.Config(
-                    in_features=hidden_dim, out_features=dim,
-                    param_init=_depth_init(dim, layer_id),
-                ),
-                w3=Linear.Config(
-                    in_features=dim, out_features=hidden_dim,
-                    param_init=_depth_init(dim, layer_id),
-                ),
-            )
-        else:
-            ffn_config = make_ffn_config(
-                dim=dim,
-                hidden_dim=hidden_dim,
-                w1_param_init=linear_init,
-                w2w3_param_init=_depth_init(dim, layer_id),
+            ffn_config = dataclass_replace(
+                ffn_config, activation_fn=ReLUSquaredGLU.Config()
             )
         layers.append(
             Llama3TransformerBlock.Config(
@@ -414,7 +435,6 @@ def _build_agpt_layers(
                     wqkv_param_init=linear_init,
                     wo_param_init=_depth_init(dim, layer_id),
                     inner_attention=inner_attention,
-                    fuse_qkv=fuse_qkv,
                     rope=rope,
                     qk_norm=qk_norm_config,
                 ),
@@ -433,7 +453,6 @@ def _build_agpt_config(
     rope_theta: int,
     vocab_size: int,
     hidden_dim: int,
-    fuse_qkv: bool = False,
     attn_backend: str = "sdpa",
     rope_backend: Literal["complex", "cos_sin"] = "complex",
     scaling: Literal["none", "llama", "yarn"] = "none",
@@ -475,7 +494,6 @@ def _build_agpt_config(
             n_heads=n_heads,
             n_kv_heads=n_kv_heads,
             hidden_dim=hidden_dim,
-            fuse_qkv=fuse_qkv,
             attn_backend=attn_backend,
             rope=rope_cfg,
             qk_norm=qk_norm,
@@ -549,7 +567,10 @@ agpt_configs = {
         rope_theta=50000,
         vocab_size=256000,
         hidden_dim=11008,
-        fuse_qkv=True,
+        # fuse_qkv=True was here until sync 84: #4526 removed the kwarg and
+        # QKVLinear is now always fused, so this flavor's behavior is the
+        # default. Checkpoints are unaffected -- attention.py:742-743 hooks
+        # split/merge the logical wq/wk/wv keys on save/load.
         # flex: matches the proven-working fork run (v4/v5/v6). The RL vLLM
         # generator asserts varlen|flex (generator.py:799) then REPLACES
         # inner_attention with its own VLLMAttentionWrapper, so the generator
@@ -964,7 +985,7 @@ def model_registry(
 
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
     from torchtitan.experiments.torchft.diloco import fragment_llm
-    from torchtitan.models.utils import validate_converter_order
+    from torchtitan.config.transform.converter import validate_converter_order
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,
@@ -975,10 +996,22 @@ def model_registry(
         for c in converters:
             config = c.build().convert(config)
 
+    # #4328 made max_context_length a required ModelSpec field. Read it off the
+    # flavor's own RoPE config rather than restating a constant here: that is
+    # where _build_agpt_config already threaded it, so the spec cannot drift
+    # from the model it describes.
+    rope_cfg = config.layers[0].attention.rope
+    if rope_cfg is None:
+        raise ValueError(
+            f"agpt flavor {flavor!r} has no RoPE config, so max_context_length "
+            "cannot be derived for its ModelSpec"
+        )
+
     return FaultTolerantModelSpec(
         name="ezpz.agpt",
         flavor=flavor,
         model=config,
+        max_context_length=rope_cfg.max_context_length,
         parallelize_fn=parallelize_llama,
         pipelining_fn=pipeline_llm,
         post_optimizer_build_fn=None,

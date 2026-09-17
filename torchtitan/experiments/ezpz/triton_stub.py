@@ -41,7 +41,7 @@ import importlib.util
 import sys
 import types
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 _KERNELS_MODULE = "torchtitan.distributed.minimal_async_ep.kernels"
 

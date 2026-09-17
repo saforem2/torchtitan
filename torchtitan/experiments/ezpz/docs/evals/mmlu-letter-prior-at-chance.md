@@ -332,7 +332,7 @@ content helped everything *except* MMLU.
 
 ## Related
 
-* [[dead-cli-flags-in-repo-root-pbs]] -- same family of failure: a launcher
+* [dead-cli-flags-in-repo-root-pbs](dead-cli-flags-in-repo-root-pbs.md) -- same family of failure: a launcher
   that runs and reports success while measuring the wrong thing.
 * `docs/evals/eval-landscape-2026-07.md` -- task selection, the `SHOTS_SPEC`
   few-shot gotcha, confirmed peer numbers.

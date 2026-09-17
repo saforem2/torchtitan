@@ -15,13 +15,13 @@ from torch.distributed.pipelining.schedules import _PipelineSchedule
 from torchtitan.components.data import ConcatThenSplitPackingConfig, GrainDataLoader
 from torchtitan.components.data.collators import TrainerBatch
 from torchtitan.components.data.loader import BaseDataLoader
-from torchtitan.components.loss import IGNORE_INDEX, LossFunction
-from torchtitan.components.metrics import MetricsProcessor
+from torchtitan.components.loss import LossFunction
 from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.config import Configurable, ParallelismConfig
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.hf_datasets.text_datasets import DATASETS
 from torchtitan.observability import structured_logger as sl
+from torchtitan.observability.metrics import MetricsProcessor
 from torchtitan.protocols.model import BaseModel
 from torchtitan.tools import utils
 
@@ -177,28 +177,31 @@ class Validator(BaseValidator):
 
             try:
                 microbatches = []
-                local_valid_tokens = torch.tensor(
-                    0, dtype=torch.int64, device=device_type
-                )
+                local_valid_tokens = 0
                 for _ in range(num_pp_microbatches):
-                    input_dict, labels = next(validation_iterator)
-                    self.metrics_processor.ntokens_since_last_log += labels.numel()
+                    input_dict = next(validation_iterator)
+                    # Popped so the batch reaching the model holds only its kwargs.
+                    local_valid_tokens += input_dict.pop("num_valid_tokens")
+                    self.metrics_processor.ntokens_since_last_log += input_dict[
+                        "labels"
+                    ].numel()
                     for k, v in input_dict.items():
                         input_dict[k] = v.to(device_type)
-                    labels = labels.to(device_type)
-                    local_valid_tokens += (labels != IGNORE_INDEX).sum()
-                    microbatches.append((input_dict, labels))
+                    microbatches.append(input_dict)
             except StopIteration:
                 break
 
             # All-reduce token count across DP ranks while keeping it on device.
+            local_valid_tokens_tensor = torch.tensor(
+                local_valid_tokens, dtype=torch.int64, device=device_type
+            )
             if parallel_dims.dp_enabled:
                 batch_mesh = parallel_dims.get_mesh("batch")
                 global_valid_tokens = dist_utils.dist_sum_tensor(
-                    local_valid_tokens, batch_mesh, None
+                    local_valid_tokens_tensor, batch_mesh, None
                 )
             else:
-                global_valid_tokens = local_valid_tokens
+                global_valid_tokens = local_valid_tokens_tensor
 
             if parallel_dims.pp_enabled:
                 assert self.pp_schedule is not None
@@ -211,19 +214,19 @@ class Validator(BaseValidator):
                     [] if self.pp_has_last_stage else None
                 )
 
-                for input_dict, labels in microbatches:
+                for input_dict in microbatches:
                     inputs, labels, extra_kwargs = cast(
                         BaseModel, model_parts[0]
                     ).preprocess_inputs(
-                        {**input_dict, "labels": labels},
+                        input_dict,
                         parallel_dims=self.parallel_dims,
                         parallelism=self.parallelism,
                     )
                     if self.pp_has_first_stage:
-                        arg_mbs.append((inputs,))
+                        arg_mbs.append((inputs,))  # pyrefly: ignore[bad-argument-type]
                     kwarg_mbs.append(extra_kwargs)
                     if target_mbs is not None:
-                        target_mbs.append(labels)
+                        target_mbs.append(labels)  # pyrefly: ignore[bad-argument-type]
 
                 with self.validation_context():
                     losses = [] if self.pp_has_last_stage else None
@@ -244,11 +247,11 @@ class Validator(BaseValidator):
                     loss_sum = torch.tensor([-1.0], device=device_type)
             else:
                 assert len(microbatches) == 1
-                input_dict, labels = microbatches[0]
+                input_dict = microbatches[0]
                 inputs, labels, extra_kwargs = cast(
                     BaseModel, model_parts[0]
                 ).preprocess_inputs(
-                    {**input_dict, "labels": labels},
+                    input_dict,
                     parallel_dims=self.parallel_dims,
                     parallelism=self.parallelism,
                 )

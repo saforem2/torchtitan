@@ -17,7 +17,7 @@ from torch import nn
 from torchtitan.models.common.attention import (
     AttentionMasksType,
     BaseAttention,
-    ScaledDotProductAttention,
+    ScaledDotProductInnerAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
 from torchtitan.models.common.linear import Linear
@@ -33,7 +33,7 @@ from torchtitan.models.utils import (
 )
 from torchtitan.protocols.module import Module
 from torchtitan.experiments.ezpz.logging import warn_once
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.tools.utils import has_cuda_capability
 
 
@@ -223,7 +223,20 @@ class moeTransformerBlock(TransformerBlock):  # noqa: N801
         x: torch.Tensor,
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
     ):
+        # #4594 added padding_mask to the block contract: Decoder.forward
+        # passes it by keyword to EVERY layer (models/common/decoder.py:249),
+        # so a block that does not accept it dies in the first forward with
+        #   TypeError: moeTransformerBlock.forward() got an unexpected
+        #   keyword argument 'padding_mask'
+        # (jobs 12477668, 12477669). The dense arms survived because
+        # Llama3TransformerBlock already accepts it.
+        #
+        # Consume and discard, exactly as llama3 does (llama3/model.py:53).
+        # It feeds varlen attention metadata, which this block does not build:
+        # blendcorpus emits fixed-length rows, so there is no padding to mask.
+        del padding_mask
         x = x + self.attention(self.attention_norm(x), attention_masks, positions)
         _maybe_release_device_cache_between_attention_and_moe(x)
         if self.moe_enabled:
@@ -319,11 +332,11 @@ class moeModel(Decoder):  # noqa: N801
 
             if parallelism.context_parallel_degree > 1 and not isinstance(
                 self.layers[0].attention.inner_attention,
-                ScaledDotProductAttention.Config,
+                ScaledDotProductInnerAttention.Config,
             ):
                 raise NotImplementedError(
                     "Context Parallel for MoE only supports "
-                    "ScaledDotProductAttention. Got "
+                    "ScaledDotProductInnerAttention. Got "
                     f"{type(self.layers[0].attention.inner_attention).__name__}."
                 )
 

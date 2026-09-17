@@ -16,7 +16,6 @@ from torchtitan.components.data import (
     SingleDatasetConfig,
 )
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import (
     LRSchedulersContainer,
     OptimizersContainer,
@@ -39,8 +38,12 @@ from torchtitan.hf_datasets.multimodal.mm_datasets import (
 )
 from torchtitan.hf_datasets.multimodal.utils.image import resize_to_navit_patch_grid
 from torchtitan.hf_datasets.text_datasets import DATASETS
-from torchtitan.models.common.config_utils import decoder_vocab_size
+from torchtitan.models.common.config_utils import (
+    decoder_vocab_size,
+    DEFAULT_DEBUG_MODEL_SEQ_LEN,
+)
 from torchtitan.models.deepseek_v3.model import Attention as DeepSeekV3Attention
+from torchtitan.observability.metrics import MetricsProcessor
 from torchtitan.protocols.model_spec import ModelSpec
 from torchtitan.trainer import Trainer
 
@@ -85,9 +88,11 @@ def _kimi_multimodal_dataloader(
     )
 
 
-def kimi_k2_5_debugmodel() -> Trainer.Config:
-    model_spec = model_registry("debugmodel")
-    parallelism = ParallelismConfig(spmd_backend="spmd_types")
+def kimi_k2_5_debugmodel(
+    seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
+) -> Trainer.Config:
+    model_spec = model_registry("debugmodel", seq_len=seq_len)
+    parallelism = ParallelismConfig()
     return _KimiTrainerConfig(
         loss=ChunkedLossWrapper.Config(
             loss_fn=CrossEntropyLoss.Config(
@@ -111,8 +116,8 @@ def kimi_k2_5_debugmodel() -> Trainer.Config:
             min_lr_factor=0.0,
         ),
         training=TrainingConfig(
-            num_tokens_per_microbatch_per_dp_rank=1 * 512,
-            max_context_length=512,
+            num_tokens_per_microbatch_per_dp_rank=1 * model_spec.max_context_length,
+            max_context_length=model_spec.max_context_length,
             steps=10,
             disable_cuda_graphs=True,
         ),
@@ -125,12 +130,13 @@ def kimi_k2_5_debugmodel() -> Trainer.Config:
     )
 
 
-def moonlight_16b_a3b() -> Trainer.Config:
+def moonlight_16b_a3b(seq_len: int | None = None) -> Trainer.Config:
     """Moonlight 16B-A3B: the text-only DeepSeekV3 sibling (no vision tower)."""
-    model_spec = model_registry("moonlight-16B-A3B", attn_backend="flex")
+    model_spec = model_registry(
+        "moonlight-16B-A3B", seq_len=seq_len, attn_backend="flex"
+    )
     parallelism = ParallelismConfig(
         expert_parallel_degree=8,
-        spmd_backend="spmd_types",
     )
     return _KimiTrainerConfig(
         loss=ChunkedLossWrapper.Config(
@@ -155,8 +161,8 @@ def moonlight_16b_a3b() -> Trainer.Config:
             min_lr_factor=0.1,
         ),
         training=TrainingConfig(
-            num_tokens_per_microbatch_per_dp_rank=4 * 4096,
-            max_context_length=4096,
+            num_tokens_per_microbatch_per_dp_rank=4 * model_spec.max_context_length,
+            max_context_length=model_spec.max_context_length,
             steps=10000,
             disable_cuda_graphs=True,
         ),
@@ -166,12 +172,11 @@ def moonlight_16b_a3b() -> Trainer.Config:
     )
 
 
-def kimi_vl_a3b() -> Trainer.Config:
+def kimi_vl_a3b(seq_len: int | None = None) -> Trainer.Config:
     """Kimi-VL A3B: Moonlight text tower + 2D MoonViT vision (image-text)."""
-    model_spec = model_registry("Kimi-VL-A3B", attn_backend="flex")
+    model_spec = model_registry("Kimi-VL-A3B", seq_len=seq_len, attn_backend="flex")
     parallelism = ParallelismConfig(
         expert_parallel_degree=8,
-        spmd_backend="spmd_types",
     )
     return _KimiTrainerConfig(
         loss=ChunkedLossWrapper.Config(
@@ -201,8 +206,8 @@ def kimi_vl_a3b() -> Trainer.Config:
             min_lr_factor=0.1,
         ),
         training=TrainingConfig(
-            num_tokens_per_microbatch_per_dp_rank=1 * 4096,
-            max_context_length=4096,
+            num_tokens_per_microbatch_per_dp_rank=1 * model_spec.max_context_length,
+            max_context_length=model_spec.max_context_length,
             steps=10000,
             disable_cuda_graphs=True,
         ),
@@ -212,15 +217,14 @@ def kimi_vl_a3b() -> Trainer.Config:
     )
 
 
-def kimi_k2_5() -> Trainer.Config:
+def kimi_k2_5(seq_len: int | None = None) -> Trainer.Config:
     """Full Kimi K2.5 (~1T-total / ~32B-active)."""
     compile_config = CompileConfig(enable=True, components=["loss"])
     # The report uses BF16 compute; its FP8 path only compresses saved activations.
-    model_spec = model_registry("Kimi-K2.5", attn_backend="flex")
+    model_spec = model_registry("Kimi-K2.5", seq_len=seq_len, attn_backend="flex")
     parallelism = ParallelismConfig(
         pipeline_parallel_schedule="Interleaved1F1B",
         expert_parallel_degree=8,
-        spmd_backend="spmd_types",
     )
     return _KimiTrainerConfig(
         loss=ChunkedLossWrapper.Config(
@@ -245,8 +249,8 @@ def kimi_k2_5() -> Trainer.Config:
             min_lr_factor=0.1,
         ),
         training=TrainingConfig(
-            num_tokens_per_microbatch_per_dp_rank=4 * 4096,
-            max_context_length=4096,
+            num_tokens_per_microbatch_per_dp_rank=4 * model_spec.max_context_length,
+            max_context_length=model_spec.max_context_length,
             steps=10000,
             disable_cuda_graphs=True,
         ),
@@ -358,7 +362,7 @@ def _dist_muon_optimizer(
             shardings.update(
                 {
                     f"{prefix}.feed_forward.{projection}.weight": owned
-                    for projection in ("w1", "w2", "w3")
+                    for projection in ("w13", "w2")
                 }
             )
         else:
@@ -372,7 +376,7 @@ def _dist_muon_optimizer(
             shardings.update(
                 {
                     f"{prefix}.moe.shared_experts.{projection}.weight": owned
-                    for projection in ("w1", "w2", "w3")
+                    for projection in ("w13", "w2")
                 }
             )
         return shardings

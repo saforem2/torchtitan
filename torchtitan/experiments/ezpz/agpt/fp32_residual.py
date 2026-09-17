@@ -84,7 +84,15 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
         x: torch.Tensor,
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
     ):
+        # #4594 put padding_mask in the block contract: Decoder.forward passes
+        # it by keyword to EVERY layer (models/common/decoder.py:249). The base
+        # Llama3TransformerBlock accepts it, but this override replaces that
+        # signature, so without it the first forward dies with
+        #   TypeError: forward() got an unexpected keyword argument
+        # Consume and discard, exactly as llama3 does (llama3/model.py:53).
+        del padding_mask
         # Do the two residual ADDS in fp32, but take bf16 in and emit bf16 out.
         #
         # Why cast back to bf16 at the block boundary (rather than carry fp32
@@ -143,7 +151,15 @@ class AgptFp32ResidualDepthBlock(Llama3TransformerBlock):
         x: torch.Tensor,
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
     ):
+        # #4594 put padding_mask in the block contract: Decoder.forward passes
+        # it by keyword to EVERY layer (models/common/decoder.py:249). The base
+        # Llama3TransformerBlock accepts it, but this override replaces that
+        # signature, so without it the first forward dies with
+        #   TypeError: forward() got an unexpected keyword argument
+        # Consume and discard, exactly as llama3 does (llama3/model.py:53).
+        del padding_mask
         dt = self._sublayer_dtype()
         # Residual accumulator is fp32 across the whole stack. Cast each
         # sublayer's input to the bf16 param dtype so the norm + attention/FFN

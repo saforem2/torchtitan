@@ -41,7 +41,7 @@ from torchtitan.experiments.ezpz.optimizer import (
     default_spam,
     default_torch_muon,
 )
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 

@@ -2,6 +2,73 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
+
+Asked whether there was anything upstream to pull in. 148 commits, not the 64
+I surveyed on 09-08. Merged in a throwaway worktree (`../tt-sync84`, branch
+`sync84-trial`); nothing landed on `ezpz` or a production clone.
+
+- **Zero of the 148 touch `experiments/ezpz`, and ten of them broke it
+  anyway.** All indirect -- upstream moved, renamed, or re-defaulted things
+  ezpz imports, subclasses, or calls. Module moves (#4628, #4630, #4444,
+  #4648), the attention rename (#4533), the spmd_backend deletion (#4419),
+  mandatory fused QKV and gate-up (#4526, #4535), the MoE router reshape
+  (#4631), the merged-batch protocol (#4572, #4398), and a newly-required
+  `ModelSpec.max_context_length` (#4328).
+
+- **The mistake worth writing down: moe imported 14/14 clean and built 0/14.**
+  I build-tested agpt, saw moe's imports pass, and inferred the surface was
+  healthy. Every flavor was dead at config construction
+  (`TokenChoiceTopKRouter.Config() got an unexpected keyword argument
+  num_expert_groups`). A parallel audit caught it, not me. `slots=True`
+  dataclasses reject an unknown keyword even when its value is None, which is
+  why it was 14/14 rather than the 2/14 that actually set the field.
+
+- **#4572 is the one no local check finds.** Core's `batch_generator` now
+  yields one dict where ezpz unpacked `(input_dict, labels)`. Imports pass,
+  meta builds pass, all 82 tests pass -- and the run dies at step 1. Ported
+  producer through consumer: blendcorpus yield, `train_step`, validator.
+
+- **#4533 rekeyed the TP sharding contract for the THIRD time**
+  (`BLNH -> TNH -> THK/THV`). It matches by positional-arg NAME and asserts
+  only under TP>1, so every miss sails through a TP=1 smoke. The warning
+  comments in both forks now record all three occurrences, and the rule:
+  whenever a sync touches `decoder_sharding.py`, diff its `in_dst_shardings`
+  keys against the ezpz `forward()` signatures BEFORE running at TP>1. Even
+  the test written to survive renames broke -- it assumed q/k/v share one
+  suffix, and #4533 gave v a different one.
+
+- **Verified by running it.** 14/14 imports (with a pre-merge control, so it
+  is a real comparison), 12/12 agpt and 14/14 moe meta builds, 82 passed /
+  0 failed, standalone scripts at exactly the pre-merge baseline. Param counts
+  AND state-dict key names are byte-identical pre- vs post-merge across every
+  flavor tested -- **existing checkpoints load**, proven rather than assumed.
+
+- **Adversarial verification: 3 of 24 findings refuted, none of them fake.**
+  Each had a correct core-side claim and a wrong ezpz half -- an inverted
+  consequence, a stale callsite, an unreachable code path. Changed zero lines;
+  two corrected reasoning that would have misdirected later debugging.
+
+- **The XPU blocker is now confirmed on BOTH compute images.** The first
+  writeup of this rested on `debug-scaling` (prod bkc) alone -- both earlier
+  `next-eval` jobs had died on the venv trap before any sync-84 code ran, so
+  the test bkc was reported as covered while being untested. Rerun on the test
+  bkc (`8831522`, a copy of the /home-based prod venv upgraded to
+  `spmd_types 0.2.5`): all three arms `rc=143`, 72 dtensor errors, byte-for-byte
+  the same `ValueError`. Prod `8829185` identical; pre-merge `8829243` TRAINS on
+  the same hardware. Two images by execution, four torch builds by inspection.
+
+- **Two things are NOT settled, and both need hardware.** `spmd_types` may be
+  a live blocker: ezpz pinned `partial_dtensor` precisely because
+  `spmd_types` failed every ezpz config, #4419 deleted that pin, and the
+  upstream guard is still as narrow as the bug doc says is insufficient.
+  And the numerics are unverified -- fused vs unfused QKV is one GEMM instead
+  of three. A seeded loss comparison and a 2N smoke are owed.
+
+- Three new REQUIRED deps, one a git pin (`torch_remat`, plus `renderers` and
+  its chain). They **mask** every break above, so installing them on the
+  clusters reveals rather than fixes. Install procedure in `upstream-sync.md`.
+
 ## 2026-09-08 (sunspot) -- `lm_head` is dp-invariant: the gradient concentration has a mechanism, and four curve fits were wrong
 
 The machine came back (113 of 129 free, all 29 mount-check offlines cleared, a
@@ -122,7 +189,7 @@ Continues the 2026-09-06 entry below, after the machine was made usable again.
   that logged aggregates as if they named tensors, and an inner `timeout`
   shorter than the walltime exiting 0. Plus two tools I wrote and had to fix.
   Every one was found by driving code or comparing outputs; none by reading.
-  Recorded in [[project_runs_that_fail_successfully]].
+  Recorded in `project_runs_that_fail_successfully`.
 
 ## 2026-09-06 (sunspot) -- every job silently requeued for hours; the cause was nodes PBS calls healthy, and the fix exposed that the 80B dies at an LR four orders below its documented ceiling
 
@@ -1952,7 +2019,7 @@ root-causing and fixing a cascade (each documented in the
 6. **384-rank GPU page fault** (`Segmentation fault from GPU ... NotPresent
    Write`, rank 221) -- NOT bad node (reproduces across nodes), NOT OOV (full 53M
    scan max 255998 < vocab 256000); a real 384-rank scale fault
-   ([[project_sft_v2_base_oom_badnode]] class, base-independent). Bisect
+   (`project_sft_v2_base_oom_badnode` class, base-independent). Bisect
    (12470343/346/347/348/349): 2/4/8N clean, 12/16/32N segfault -> run at **8N**.
 
 Also: nudged huggingface/datasets PR #8318 (vectorized interleave) -- tagged
@@ -2724,7 +2791,7 @@ path that doesn't exist on Sunspot (SUSE -> /usr/lib64); patched to the
 bare soname. Only bites interactive live-`.venv` use, not yeet-env
 training (tarball torch doesn't bundle pyzes). NOT an LD_LIBRARY_PATH
 issue (chased that wrongly first). See
-[[project_venv_ld_library_path_ze_loader]].
+`project_venv_ld_library_path_ze_loader`.
 
 Filesystem was 100% full earlier today (amplified transient failures);
 cleaned ~6.3 TB of core dumps + test ckpts -> 57% used.
