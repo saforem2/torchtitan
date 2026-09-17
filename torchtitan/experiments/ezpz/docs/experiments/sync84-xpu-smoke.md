@@ -60,6 +60,35 @@ Different torch versions, so not bitwise -- but ~3 decimals of agreement says
 the merge did not move the math. Consistent with the Perlmutter numerics A/B
 (argmax 100%, see `sync84-numerics-perlmutter.md`).
 
+## moe converges
+
+`12477675`, same node shape and venv, moe only, 200 steps:
+
+```
+step   1  loss 12.93973  grad_norm 0.8421
+step  40  loss 10.41446  grad_norm 1.2182
+step  80  loss  7.53617  grad_norm 0.6193
+step 120  loss  6.72880  grad_norm 0.4264
+step 160  loss  6.42788  grad_norm 0.3793
+step 200  loss  6.09904  grad_norm 0.4218
+```
+
+Zero non-finite loss or grad_norm. 66 of 199 steps tick the loss up, which
+is ordinary minibatch noise on a debug model, and the trend is a clean
+descent well below the ~10.4 uniform-prediction floor for this vocab -- so
+the model is learning, not just settling onto the token prior.
+
+Four steps exceed grad_norm 2 (15, 16, 58, 100), the largest 13.07 at step
+58. All are single-step transients: loss descends straight through the big
+one (9.23408 -> 9.15392 -> 9.00414) and grad_norm is back to 1.04 the next
+step. No persistent high-gradient regime, unlike the SophiaG 30B failure
+mode.
+
+This is what closes the fused gate-up init question. Three steps proved
+construction and one forward/backward; 200 steps exercise the striped `w13`
+initializer against real optimizer updates, where a wrong gate/up parity
+would show up as a model that fails to descend rather than as a raise.
+
 ## The controlled A/B: only torch differs
 
 Same tree, same script, same node shape, same deps.
@@ -151,9 +180,8 @@ into `venv/bin`. Activating the venv shadows the system MPI. Check with
 
 ## Open
 
-- **moe convergence beyond step 3.** The arm now passes the smoke (job
-  `12477670`), but three steps only proves it runs. It has not been run long
-  enough to say anything about where its loss goes.
+- **moe convergence at production scale.** Cleared at debug scale: see
+  "moe converges" below. Untested at real model size.
 - **`spmd_types 0.2.5` vs post-2.13 torch.** Surfaced once as the float bug
   above; whether more remains is untested.
 - **Landing.** Do NOT merge into `ezpz` yet: `runs/agpt-80b-v2` tracks it at 0
