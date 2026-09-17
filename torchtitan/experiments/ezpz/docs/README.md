@@ -23,9 +23,21 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-09-17 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-09-17 | [Development Journal](./journal.md) |
+| 2026-09-17 | [Data-mix configs are broken: HFDataSource no longer exists in core](./guides/known-bugs/datamix-hfdatasource-gone.md) |
+| 2026-09-17 | [Sync 84 on XPU: it trains, on torch 2.14](./experiments/sync84-xpu-smoke.md) |
+| 2026-09-17 | [Claude Session Log](./claude-sessions.md) |
+| 2026-09-17 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-09-16 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-26.md) |
+| 2026-09-16 | [One-week summary — 2026-05-22 → 2026-05-29](./summaries/2026-05-29.md) |
 | 2026-09-16 | [Session state before Claude restart -- 2026-09-15](./session-state/2026-09-15-handoff.md) |
-| 2026-09-16 | [Development Journal](./journal.md) |
-| 2026-09-16 | [Claude Session Log](./claude-sessions.md) |
+| 2026-09-16 | [Pre-#3623 checkpoints can't resume on current code: optimizer state-dict format migration](./guides/known-bugs/pre3623-optim-statedict-resume.md) |
+| 2026-09-16 | [ALCF request draft: a torch carrying pytorch #181519 on Aurora](./guides/known-bugs/alcf-request-torch-181519-draft.md) |
+| 2026-09-16 | [Breaking 512N queue starvation: sneak jobs, the multi-chain umbrella, and walltime-aware checkpointing](./experiments/agpt/aurora/20260626-512n-sneak-umbrella-walltime.md) |
+| 2026-09-16 | [80B NaN diagnosis — bf16 forward overflow at GBS≥384, only fp32-activations confirmed-clean](./experiments/agpt/aurora/20260611-80b-n32-nan-diagnosis.md) |
+| 2026-09-16 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
+| 2026-09-15 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-09-15 | [Sync 84 numerics: fused QKV / gate-up vs the pre-merge tree](./experiments/sync84-numerics-perlmutter.md) |
 | 2026-09-15 | [Monitor snapshot -- 2026-09-15 19:10 UTC (ahead of a Claude Code update)](./MONITORS-restart-20260915.md) |
 | 2026-09-09 | [12474810: a gradient instability developing at a defensible LR](./experiments/80b-gradient-growth-12474810.md) |
 | 2026-09-08 | [Umbrella std::bad_alloc at init -- intermittent, not yet root-caused](./guides/known-bugs/umbrella-bad-alloc-init.md) |
@@ -35,7 +47,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-08 | [dp=192 vs dp=96: the cleanest single-variable test in this investigation](./experiments/80b-dp-bracket-12474802.md) |
 | 2026-09-07 | [12474761: the first valid reproduction of 8574385](./experiments/80b-rescaled-reproduction-12474761.md) |
 | 2026-09-07 | [Separating batch size from parallelism: GBS is not the variable](./experiments/80b-gbs-vs-dp-separation.md) |
-| 2026-09-06 | [Upstream Sync Log](./upstream-sync.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-09-06 | [Summaries](./summaries/README.md) |
 | 2026-09-06 | [Week ending 2026-09-06](./summaries/2026-09-06.md) |
 | 2026-09-06 | [A short run silently rewrites your LR schedule](./guides/known-bugs/warmup-clamp-silently-voids-short-reproductions.md) |
@@ -47,21 +64,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-02 | [Two days ending 2026-08-31](./summaries/2026-08-31.md) |
 | 2026-09-02 | [SophiaG: a RECURRENT grad-norm blow-up at 30B](./guides/known-bugs/sophiag-stochastic-divergence-30b.md) |
 | 2026-09-02 | [Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG](./experiments/optimizer-comparison/README.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-09-01 | [AuroraGPT Sync — Meeting Notes](./meeting-notes/agpt-sync.md) |
 | 2026-09-01 | [MOVED -- and the title was wrong](./guides/known-bugs/80b-nan-rate-not-overflow.md) |
-| 2026-09-01 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
 | 2026-08-31 | [80th upstream sync: what works, what is deferred, what it costs](./upstream-sync-80th-status.md) |
 | 2026-08-31 | [79th upstream sync -- 26 commits, four stacked defects, all from one PR](./upstream-sync-79.md) |
 | 2026-08-31 | [INCITE Quarterly Report — Q2 2026 (Apr 1 – Jun 30)](./summaries/2026-Q2-incite.md) |
 | 2026-08-31 | [Week ending 2026-08-29](./summaries/2026-08-29.md) |
 | 2026-08-31 | [2026-06-26 to 2026-07-06 -- ~10-Day Summary](./summaries/2026-07-06.md) |
-| 2026-08-31 | [2026-06-12 to 2026-06-26 -- Two-Week Summary](./summaries/2026-06-26.md) |
 | 2026-08-31 | [2026-06-05 → 2026-06-12 — One-Week Summary](./summaries/2026-06-12.md) |
 | 2026-08-31 | [Two-week summary — 2026-05-08 → 2026-05-22](./summaries/2026-05-22.md) |
 | 2026-08-31 | [Two-Week Summary: 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) |
@@ -69,15 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-08-31 | [AuroraGPT-20B Scaling](./scaling/agpt-20b.md) |
 | 2026-08-31 | [GRPO+LoRA on Intel XPU: Sunspot reproduction (Monarch + TorchStore + vLLM)](./production/rl/history/grpo-lora-xpu-repro.md) |
 | 2026-08-31 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
-| 2026-08-31 | [Production Training Metrics -- Ground-Truth Store](./production/metrics/README.md) |
-| 2026-08-31 | [Production dispatch log](./production/dispatch-log.md) |
-| 2026-08-31 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-| 2026-08-31 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
-| 2026-08-31 | [TPC26 MAPE Talk — Working Outline (2026-05-21)](./notes/slides-2026-05-21.md) |
-| 2026-08-31 | [Data Strategy After 4.67T olmo-mix-1124 Tokens](./notes/data-strategy-after-olmo-mix-2026-07.md) |
-| 2026-08-31 | [XPU Attention Issues](./guides/xpu-attention-issues.md) |
-| 2026-08-31 | [Training agpt_80b on Aurora](./guides/training/agpt_80b.md) |
-| 2026-08-31 | [SPMD backends on XPU: what works, what does not, and why](./guides/spmd-backend-status.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -133,7 +133,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-09-16 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-09-17 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-09-01 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-31 |
@@ -172,7 +172,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-09-06 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-09-15 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
