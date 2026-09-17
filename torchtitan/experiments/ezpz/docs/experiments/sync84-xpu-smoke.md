@@ -1,7 +1,8 @@
 # Sync 84 on XPU: it trains, on torch 2.14
 
-**Bottom line:** the sync-84 merge trains on Aurora/Sunspot XPU hardware, but
-only on a torch carrying pytorch [#181519]. The `frameworks/2026.1.0` module
+**Bottom line:** the sync-84 merge trains on Aurora/Sunspot XPU hardware --
+all three smoke arms, moe included -- but only on a torch carrying pytorch
+[#181519]. The `frameworks/2026.1.0` module
 ships torch `2.13.0a0+gitcf30153`, which predates that patch, and on it every
 run dies at FSDP wrapping. `torch 2.14.0+xpu` -- a stable release -- works.
 
@@ -9,18 +10,43 @@ run dies at FSDP wrapping. `torch 2.14.0+xpu` -- a stable release -- works.
 
 ## The result
 
-`12477656`, sunspot `workq`, 2 nodes / 24 ranks, `torch 2.14.0+xpu`:
+`12477670`, sunspot `workq`, 2 nodes / 24 ranks, `torch 2.14.0+xpu`.
+All three arms pass, zero non-finite loss or grad_norm:
 
 ```
-agpt_debugmodel  TP=1   rc=0    step 1 loss 10.87743
-                                step 2       10.75458
-                                step 3       10.48057
-agpt_debugmodel  TP=2   rc=0    step 1 loss 10.88015
-moe_debugmodel          rc=143  RuntimeError: Cannot unflatten unevenly sharded tensor
+VERDICT: ok
+agpt_debugmodel  TP=1   rc=0    step 1 loss 10.87743  step 2 10.75458  step 3 10.48057
+agpt_debugmodel  TP=2   rc=0    step 1 loss 10.88015  step 2 10.70795  step 3 10.55879
+moe_debugmodel          rc=0    step 1 loss 12.95236  step 2 12.59633  step 3 11.47142
 ```
 
 TP=2 passing is the load-bearing part: that is the arm exercising the #4533
 `local_map` contract rekey, which asserts only at TP>1.
+
+The moe arm took three fixes past the torch floor, all in
+`experiments/ezpz/moe/`, each hiding the next:
+
+1. **Fused gate-up init under FSDP** (#4535/#4526 interleaved `w13`).
+   `Cannot unflatten unevenly sharded tensor`. The per-expert rows are
+   gate-on-even / up-on-odd, and shards are 43/42 rows -- odd -- so a shard
+   can begin on either parity. Fixed by computing the shard's global row
+   offset from its mesh placement and striping the two initializers from
+   that parity, rather than assuming every shard starts on a gate row.
+   A first attempt that assumed even-aligned shards would have silently
+   applied the wrong initializer instead of raising.
+2. **`padding_mask` in the block contract** (#4594). `Decoder.forward` now
+   passes it by keyword to every layer; `moeTransformerBlock.forward` did
+   not accept it. Consume and discard, as llama3 does.
+3. That fix, first time, landed on `Attention.forward` instead of the block
+   -- same file, wrong class -- so job `12477669` failed identically.
+   Verifying by line number rather than by enclosing class is what missed it.
+
+An audit for instance 2 across the tree then found the same defect in
+`AgptFp32ResidualBlock` and `AgptFp32ResidualDepthBlock`, which override
+`forward` with the pre-#4594 signature. Neither is in this smoke, so it
+would have surfaced later as a fresh mystery in an 80B fp32-residual run.
+Fixed in `a498c608`; all three block classes in `experiments/ezpz` now
+accept it.
 
 ### Losses match the pre-merge baseline
 
