@@ -248,7 +248,12 @@ TRAJECTORIES: list[dict] = [
         "model": "20b",
         "version": "v2",
         "num_nodes": 512,
-        "ckpt_dir": str(_20B_V2 / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"),
+        "ckpt_dir": str(
+            _20B_V2
+            / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
+        ),  # forked 2026-08-21; the pre-fork dir stopped advancing that day
+        # and pointing here is why the 20B-512 curve looked flat: the registry
+        # tracked a chain the seat had already left.
         "readme": f"{_DOCS}/20b/n512/README.md",
         "gbs": 12288,
         "seq_len": SEQ_LEN,
@@ -301,6 +306,11 @@ TRAJECTORIES: list[dict] = [
             # the seat was writing steps every second, its CURRENT run just
             # was not in this list.
             "ctbs1be4",  # Aug 16 20:20
+        # av8h56xt=8808931 t1, wnws2jtn=8812215 t1, fpw58jgz=8828611 t1
+        # (added 2026-09-17)
+            "av8h56xt",
+            "wnws2jtn",
+            "fpw58jgz",
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
@@ -452,6 +462,11 @@ TRAJECTORIES: list[dict] = [
             # nothing.
             "t9vly2u8",  # +1515 [8334, 9848]  (Aug 13)
             "lc9oukel",  # +580  [9801, 10380] (Aug 16)
+        # s2iqoonn=8808931 t2, 23magxfo=8812215 t2, xmdg7z2g=8828611 t2
+        # (added 2026-09-17)
+            "s2iqoonn",
+            "23magxfo",
+            "xmdg7z2g",
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --
@@ -575,7 +590,15 @@ TRAJECTORIES: list[dict] = [
         "gbs": 12288,
         "seq_len": SEQ_LEN,
         "token_target": 2_390_375_382_006,
-        "wandb_run_ids": ["hllpaq4g", "6321d2hh"],
+        "wandb_run_ids": ["hllpaq4g", "6321d2hh"
+        # no8zak98=8808931 t0, qzhfr1zi=8808932 t0, f1pzca4k=8812215 t0,
+        # pltbp016=8828611 t0 (added 2026-09-17: four umbrellas had run with
+        # no registry entry, so every chart stopped at 08-26)
+            "no8zak98",
+            "qzhfr1zi",
+            "f1pzca4k",
+            "pltbp016",
+        ],
         "olog_fallbacks": None,
         "eval_subdir": None,
         "cls": "live",
@@ -621,7 +644,12 @@ TRAJECTORIES: list[dict] = [
         # 1-50, and this fork BEGINS at 9,200, so they cannot be its steps.
         # That is the exact trap the detector warns about: writing the same
         # ckpt dir does not make a run part of the trajectory.
-        "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"],
+        "wandb_run_ids": ["ww88slec", "ijfo395o", "xii94czx"
+        # ozcm9s2t=8808931 t3, q5pa4ssw=8812215 t3 (added 2026-09-17;
+        # 8828611 t3 wrote no W&B id to its log)
+            "ozcm9s2t",
+            "q5pa4ssw",
+        ],
         "olog_fallbacks": None,
         "eval_subdir": None,
         # wandb_only: it is a deliberate LR ablation, not a production chain,
