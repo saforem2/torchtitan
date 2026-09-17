@@ -191,7 +191,30 @@ into `venv/bin`. Activating the venv shadows the system MPI. Check with
 | **sunspot** (XPU) | `12477670` 3/3 arms; `12477675` moe 200 steps | dense TP=1/TP=2 + moe train on XPU |
 | **polaris** (CUDA) | `7629879` 3/3 arms, `VERDICT: ok` | the merge is not XPU-specific: same three arms train on A100/CUDA |
 | **perlmutter** (CUDA) | numerics A/B, A100 login node | fused QKV/gate-up do not move the math (argmax 100%) |
-| **aurora** (XPU) | in flight | -- |
+| **aurora** (XPU) | `8834294` 3/3 arms, `VERDICT: ok` | production XPU machine; losses BIT-IDENTICAL to sunspot |
+
+### Aurora 3/3 (the production XPU machine)
+
+`8834294`, `next-eval`, 2 nodes / 24 ranks, `torch 2.15.0.dev20260915+xpu`
+(carries #181519 at 1379 lines). Zero non-finite:
+
+```
+agpt_debugmodel TP=1  rc=0  10.87743 -> 10.75458 -> 10.48057
+agpt_debugmodel TP=2  rc=0  10.88015 -> 10.70795 -> 10.55879
+moe_debugmodel        rc=0  12.95236 -> 12.59633 -> 11.47142
+```
+
+All nine values are **bit-identical to the Sunspot run** (`12477670`). Same
+backend, same deterministic seed, same torch floor -- so identical is the
+correct outcome here, and any drift would have been the finding. Note this is
+torch 2.15 nightly against Sunspot's 2.14 stable: both carry #181519, and the
+patch is what matters, not the version.
+
+Getting here needed `mpi4py` compiled on a compute node against the test-BKC
+MPICH (`/opt/aurora/26.181.0/.../mpich-5.0.0.aurora_test`) -- a PyPI wheel
+binds the wrong MPI and dies `PMIX_Init returned -25` -- plus `CXX=/usr/bin/g++`
+for blendcorpus, which builds through scikit-build-core and otherwise fails
+with `CMAKE_CXX_COMPILER not set`.
 
 ### Polaris 3/3 (CUDA control)
 
