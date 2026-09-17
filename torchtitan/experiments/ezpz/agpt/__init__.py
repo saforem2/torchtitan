@@ -985,14 +985,19 @@ def model_registry(
 
     from torchtitan.distributed.pipeline_parallel import pipeline_llm
     from torchtitan.experiments.torchft.diloco import fragment_llm
-    from torchtitan.config.transform.converter import validate_converter_order
+    # Upstream #4684 (post-sync-84) renamed validate_converter_order ->
+    # validate_converter_compatibility. Same one-arg contract: it takes the
+    # converter Config list and raises on an incompatible combination.
+    from torchtitan.config.transform.converter import (
+        validate_converter_compatibility,
+    )
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,
     # so copy first to avoid corrupting the cached registry entry.
     config = deepcopy(agpt_configs[flavor])
     if converters is not None:
-        validate_converter_order(converters)
+        validate_converter_compatibility(converters)
         for c in converters:
             config = c.build().convert(config)
 
