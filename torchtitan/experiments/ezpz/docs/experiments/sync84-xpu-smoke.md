@@ -1,11 +1,10 @@
 # Sync 84 on XPU: it trains, on torch 2.14
 
-**Bottom line:** the sync-84 merge trains on Sunspot XPU hardware -- all
-three smoke arms, moe included -- but only on a torch carrying pytorch
-[#181519]. **Sunspot is the only machine it has been RUN on.** Aurora and
-Polaris appear below only as torch-build inventory, not as runs; Perlmutter
-contributed a numerics A/B, not a training run. See "Where this has actually
-run". The `frameworks/2026.1.0` module
+**Bottom line:** the sync-84 merge trains on Sunspot (XPU) and Polaris (CUDA)
+-- all three smoke arms, moe included -- but only on a torch carrying pytorch
+[#181519]. Aurora is in flight; Perlmutter has a complete venv but no tokenized
+corpus on the machine, so it contributed the numerics A/B rather than a
+training run. See "Where this has actually run". The `frameworks/2026.1.0` module
 ships torch `2.13.0a0+gitcf30153`, which predates that patch, and on it every
 run dies at FSDP wrapping. `torch 2.14.0+xpu` -- a stable release -- works.
 
@@ -189,10 +188,40 @@ into `venv/bin`. Activating the venv shadows the system MPI. Check with
 
 | machine | what ran | what it proves |
 |---|---|---|
-| **sunspot** | `12477670` 3/3 arms; `12477675` moe 200 steps | dense TP=1/TP=2 + moe train on XPU |
-| **perlmutter** | numerics A/B, A100 login node | fused QKV/gate-up do not move the math (argmax 100%) |
-| **aurora** | nothing | -- |
-| **polaris** | nothing | -- |
+| **sunspot** (XPU) | `12477670` 3/3 arms; `12477675` moe 200 steps | dense TP=1/TP=2 + moe train on XPU |
+| **polaris** (CUDA) | `7629879` 3/3 arms, `VERDICT: ok` | the merge is not XPU-specific: same three arms train on A100/CUDA |
+| **perlmutter** (CUDA) | numerics A/B, A100 login node | fused QKV/gate-up do not move the math (argmax 100%) |
+| **aurora** (XPU) | in flight | -- |
+
+### Polaris 3/3 (CUDA control)
+
+`7629879`, 2 nodes / 8 ranks, hand-built `torch 2.14.0+cu130` (every preexisting
+Polaris venv is 2.10/2.13 and predates #181519). Zero non-finite:
+
+```
+agpt_debugmodel TP=1  rc=0  10.85358 -> 10.76995 -> 10.55864
+agpt_debugmodel TP=2  rc=0  10.85318 -> 10.73931 -> 10.60787
+moe_debugmodel        rc=0  12.98146 -> 12.62001 -> 11.63856
+```
+
+Losses land within ~0.01-0.16 of the Sunspot XPU run at the same steps
+(10.87743/10.88015/12.95236 at step 1), which is the agreement you would expect
+across different hardware, math libraries and RNG -- not bitwise, but nowhere
+near a divergence. **This is the load-bearing cross-backend result: the sync-84
+merge is not XPU-specific.**
+
+Four environment bugs stood between the venv and that result, none of them in
+the merge:
+
+1. `mpiexec` is absent from a PBS job's PATH (cray-pals module) -- every arm
+   `rc=127`.
+2. PALS stages the interpreter into `/var/run/palsd/.../files/0/python` without
+   its `libpython3.12.so.1.0`; `--no-transfer` fixes it.
+3. **Exporting the `mpi-compat` dir into the job shell aborts every coreutil**
+   with `*** stack smashing detected ***` -- `mkdir`, `whoami`, `head`, `sleep`.
+   That is what a "failed to create LOGDIR" actually was. Pass it to the ranks
+   via `mpiexec --env`, never into the shell.
+4. `libfabric` is its own module; a login shell has it, a PBS job does not.
 
 Aurora is the significant gap: it is the production machine, and while it
 shares Sunspot's Intel XPU lineage, "same vendor, same BKC family" is an
