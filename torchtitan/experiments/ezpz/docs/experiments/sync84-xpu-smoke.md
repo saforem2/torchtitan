@@ -1,8 +1,9 @@
 # Sync 84 on XPU: it trains, on torch 2.14
 
-**Bottom line:** the sync-84 merge trains on Sunspot (XPU) and Polaris (CUDA)
--- all three smoke arms, moe included -- but only on a torch carrying pytorch
-[#181519]. Aurora is in flight; Perlmutter has a complete venv but no tokenized
+**Bottom line:** the sync-84 merge trains on **Aurora and Sunspot (XPU) and
+Polaris (CUDA)** -- all three smoke arms, moe included, on every one -- but
+only on a torch carrying pytorch [#181519]. Aurora's nine loss values are
+bit-identical to Sunspot's. Perlmutter has a complete venv but no tokenized
 corpus on the machine, so it contributed the numerics A/B rather than a
 training run. See "Where this has actually run". The `frameworks/2026.1.0` module
 ships torch `2.13.0a0+gitcf30153`, which predates that patch, and on it every
