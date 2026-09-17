@@ -194,6 +194,33 @@ into `venv/bin`. Activating the venv shadows the system MPI. Check with
 | **perlmutter** (CUDA) | numerics A/B, A100 login node | fused QKV/gate-up do not move the math (argmax 100%) |
 | **aurora** (XPU) | `8834294` 3/3 arms, `VERDICT: ok` | production XPU machine; losses BIT-IDENTICAL to sunspot |
 
+### Landed, plus 22 more upstream commits
+
+`origin/ezpz` carries sync 84 (merge `a25127f56`) and a second, separate sync of
+the 22 commits that had accumulated past it (merge `0da30ae12`). Sequencing was
+deliberate: sync 84 was merged and verified on three machines FIRST, so a break
+in the 22 would be isolated against a known-good baseline instead of tangled
+with 148 commits.
+
+That paid for itself immediately. The 22 were audited as inert and were not:
+upstream #4684 renamed `validate_converter_order` ->
+`validate_converter_compatibility`, and `agpt_debugmodel` stopped BUILDING.
+Two things about how it hid:
+
+- the import is **lazy**, inside `model_registry`'s body
+  (`agpt/__init__.py:988`), so it survives every top-level grep;
+- **both registries still imported clean.** Only constructing the config
+  exposed it -- the same discriminator that found 0-of-14 moe flavors building
+  in sync 84 while 14 of 14 imported.
+
+The audit that missed it checked the four `models/common/` files ezpz depends
+on; `config/transform/` was in the changed-file list and went unchecked. Fixed
+in `715d8a16e`.
+
+Re-smoked after the second merge (`12478000`, sunspot `workq`): `VERDICT: ok`,
+all nine loss values bit-identical to the pre-22 run, which is what "inert for
+our code paths" is supposed to look like once the one real break is ported.
+
 ### Aurora 3/3 (the production XPU machine)
 
 `8834294`, `next-eval`, 2 nodes / 24 ranks, `torch 2.15.0.dev20260915+xpu`
