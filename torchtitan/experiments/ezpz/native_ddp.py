@@ -648,7 +648,13 @@ def wrap_native_ddp_pipeline_stage(
             f"{len(model_parts)}"
         )
     stage = pp_schedule._stage
-    from torchtitan.distributed.pipeline_parallel import _NativeDDPPipelineStage
+    # Defined at the bottom of THIS file -- ab24c5ce9 moved it out of core
+    # pipeline_parallel.py as part of the dependency inversion, and this
+    # import was never updated. It raised ImportError for any PP +
+    # native-DDP run, and the isinstance check below could never have
+    # matched. Only unreached because this function has no callers yet.
+    # Deferred (not top-of-file) because the class is defined later in the
+    # module.
 
     if type(stage) is not _NativeDDPPipelineStage:
         raise TypeError(

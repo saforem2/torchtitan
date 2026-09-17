@@ -32,6 +32,7 @@ from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.native_ddp import (
     install_agpt_dtype_probe,
     record_native_ddp_grad_streams,
+    scale_native_ddp_loss,
     validate_native_ddp,
     wrap_native_ddp,
 )
@@ -553,6 +554,42 @@ class FaultTolerantTrainer(Trainer):
         # for gradient sync.
         self.loss_fn = config.loss.build(compile_config=config.compile)
 
+        # Compensate DDP's gradient averaging on the native-DDP path.
+        #
+        # Core's forward_backward_step says it plainly: "The returned loss
+        # here is local SUM loss / global_valid_tokens" -- global_valid_tokens
+        # is a cross-DP sum (dist_sum over batch_mesh), so gradients are
+        # ALREADY globally normalized before backward. DDP's reducer then
+        # divides by process_group.size() again, leaving them dp_degree x
+        # too small.
+        #
+        # FSDP has the same problem and solves it with
+        # disable_fsdp_gradient_division (agpt/parallelize.py). DDP exposes
+        # no equivalent switch, so scale the loss gradient up by dp_degree
+        # instead -- which is exactly what scale_native_ddp_loss was written
+        # for. It was defined in native_ddp.py and never wired in, so the
+        # native-DDP path was not gradient-equivalent to the FSDP path it
+        # replaces. Silent: it would have trained, just wrongly.
+        #
+        # _ScaleGradient touches the gradient only; the returned loss VALUE
+        # is unchanged, so reported loss stays comparable across paths.
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            _dp_degree = parallel_dims.dp_replicate
+            if _dp_degree > 1:
+                _inner_loss_fn = self.loss_fn
+
+                def _native_ddp_loss_fn(*args: Any, **kwargs: Any) -> Any:
+                    result = _inner_loss_fn(*args, **kwargs)
+                    # core's loss_fn returns (loss, aux); scale only the loss
+                    if isinstance(result, tuple):
+                        return (
+                            scale_native_ddp_loss(result[0], _dp_degree),
+                            *result[1:],
+                        )
+                    return scale_native_ddp_loss(result, _dp_degree)
+
+                self.loss_fn = _native_ddp_loss_fn
+
         # 80th sync (#4121): batch sizes are counted in TOKENS, not sequences.
         #   num_tokens_per_microbatch_per_dp_rank == old local_batch_size * seq_len
         #   num_tokens_per_train_step            == old global_batch_size * seq_len
@@ -716,8 +753,23 @@ class FaultTolerantTrainer(Trainer):
                 dump_folder=config.dump_folder,
             )
 
-            # Native DDP wraps AFTER parallelize, so it sees the already-
-            # sharded module. Guarded: inert unless the config opts in.
+            model.to_empty(device=init_device)
+            with torch.no_grad():
+                cast(BaseModel, model).init_states(buffer_device=buffer_device)
+
+            # Native DDP wraps AFTER parallelize (so it sees the already-
+            # sharded module) AND after to_empty/init_states (so it sees real
+            # storage). Guarded: inert unless the config opts in.
+            #
+            # Ordering is load-bearing. The model is built under
+            # torch.device("meta"), so wrapping before to_empty gave DDP
+            # meta parameters: it read next(model.parameters()).device to
+            # compute device_ids and got device(type='meta') with .index
+            # None, then built reduction buckets over meta storage. The
+            # subsequent to_empty reallocated every parameter, invalidating
+            # the bucket views it had just built with
+            # gradient_as_bucket_view=True. Silent, and only on the opt-in
+            # path.
             if getattr(
                 config.parallelism, "enable_data_parallel_native_ddp", False
             ):
@@ -729,9 +781,6 @@ class FaultTolerantTrainer(Trainer):
                     config.parallelism.native_ddp_bucketize_first_iteration,
                 )
 
-            model.to_empty(device=init_device)
-            with torch.no_grad():
-                cast(BaseModel, model).init_states(buffer_device=buffer_device)
             model.train()
 
             self.model_parts = [model]
