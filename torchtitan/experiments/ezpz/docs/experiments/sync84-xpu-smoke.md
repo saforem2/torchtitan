@@ -151,10 +151,9 @@ into `venv/bin`. Activating the venv shadows the system MPI. Check with
 
 ## Open
 
-- **The moe arm.** `RuntimeError: Cannot unflatten unevenly sharded tensor`.
-  Reached only after FSDP and the dense arms pass. NOT yet attributable to the
-  merge: the pre-merge baseline ran moe on torch 2.13, so that comparison is
-  not controlled. The clean test is pre-merge moe on 2.14.
+- **moe convergence beyond step 3.** The arm now passes the smoke (job
+  `12477670`), but three steps only proves it runs. It has not been run long
+  enough to say anything about where its loss goes.
 - **`spmd_types 0.2.5` vs post-2.13 torch.** Surfaced once as the float bug
   above; whether more remains is untested.
 - **Landing.** Do NOT merge into `ezpz` yet: `runs/agpt-80b-v2` tracks it at 0
