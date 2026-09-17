@@ -14,6 +14,8 @@ import time
 import unittest
 import uuid
 from concurrent.futures import Future
+from contextlib import contextmanager
+from dataclasses import fields
 from types import SimpleNamespace
 from unittest import mock
 
@@ -23,6 +25,7 @@ import torch.distributed.checkpoint as dist_checkpoint
 import torch.nn as nn
 from torch.distributed.checkpoint.state_dict_saver import AsyncSaveResponse
 from torch.utils.data import DataLoader
+
 from torchtitan.components.checkpointer.base import (
     BaseCheckpointManager,
     CheckpointStorage,
@@ -35,6 +38,23 @@ from torchtitan.components.checkpointer.dcp import (
     AsyncMode,
     CheckpointManager,
 )
+from torchtitan.config import Function
+from torchtitan.observability import structured_logger as sl
+from torchtitan.quantization._fsdp_tensor import _ShardedFSDPTensor
+
+
+# These tests name the checkpoint folder after the running test, so a bare
+# "initial_load" also matches log lines that only echo that path back. Match on
+# a phrase from the message instead; spaces keep it from matching a path.
+INITIAL_LOAD_SKIP_MARKER = "ignoring initial_load_path"
+
+
+def initial_load_skip_logs(mock_log_method) -> list[str]:
+    """Render the %-style calls to a mocked logger and keep the skip messages."""
+    rendered = (
+        fmt % tuple(args) for fmt, *args in (c.args for c in mock_log_method.mock_calls)
+    )
+    return [msg for msg in rendered if INITIAL_LOAD_SKIP_MARKER in msg]
 
 
 class FakeOptimizersContainer:
@@ -135,6 +155,23 @@ class DummyTrainerConfig:
 
 
 class TestCheckpointManager(unittest.TestCase):
+    def test_close_waits_for_async_work_before_releasing_resources(self):
+        manager = CheckpointManager.__new__(CheckpointManager)
+        manager.enable = True
+        manager.staging_future = mock.sentinel.staging_future
+        manager.save_future = mock.sentinel.save_future
+
+        calls = []
+        manager._maybe_wait_for_staging = mock.Mock(
+            side_effect=lambda: calls.append("staging")
+        )
+        manager._wait_for_saving = mock.Mock(side_effect=lambda: calls.append("saving"))
+        manager._close = mock.Mock(side_effect=lambda: calls.append("close"))
+
+        manager.close()
+
+        self.assertEqual(calls, ["staging", "saving", "close"])
+
     def test_checkpointer_package_import_path(self):
         from torchtitan.components.checkpointer import (
             AsyncMode as PackageAsyncMode,
@@ -165,9 +202,31 @@ class TestCheckpointManager(unittest.TestCase):
             Trainer.Config.__annotations__["checkpoint"],
             BaseCheckpointManager.Config,
         )
-        checkpoint = Trainer.Config().checkpoint
+        checkpoint_field = next(
+            field for field in fields(Trainer.Config) if field.name == "checkpoint"
+        )
+        checkpoint = checkpoint_field.default_factory()
         self.assertIsInstance(checkpoint, CheckpointManager.Config)
         self.assertFalse(checkpoint.enable)
+
+    def test_purge_exempt_is_built_from_config(self):
+        self.trainer_config.checkpoint.purge_exempt = Function.Config(
+            fn=lambda step: step % 2 == 0
+        )
+        manager = CheckpointManager(
+            dataloader=self.data_loader,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            lr_schedulers=self.lr_schedulers,
+            states=self.states,
+            config=self.trainer_config.checkpoint,
+            sd_adapter=None,
+            base_folder=self.trainer_config.dump_folder,
+        )
+
+        self.assertTrue(manager._is_purge_exempt(2))
+        self.assertFalse(manager._is_purge_exempt(3))
+        manager.close()
 
     def test_legacy_import_path(self):
         from torchtitan.components.checkpointer import (
@@ -229,6 +288,8 @@ class TestCheckpointManager(unittest.TestCase):
             elif isinstance(val, torch.Tensor):
                 sd_to_save[key] = val
         torch.save(sd_to_save, os.path.join(checkpoint_id, "state_dict.pt"))
+        with open(os.path.join(checkpoint_id, ".metadata"), "wb"):
+            pass
 
     def fake_load(self, states: dict, checkpoint_id=None):
         path = os.path.join(checkpoint_id, "state_dict.pt")
@@ -339,7 +400,7 @@ class TestCheckpointManager(unittest.TestCase):
         self.assertEqual(len(mock_save.call_args_list), 3)
         manager.close()
 
-    @mock.patch("torchtitan.components.checkpointer.dcp.logger")
+    @mock.patch("torchtitan.components.checkpointer.base.logger")
     def test_load_returns_false_when_no_checkpoint_folder(self, mock_logger):
         cfg = self.trainer_config.checkpoint
         cfg.folder = "nonexistent"
@@ -405,10 +466,11 @@ class TestCheckpointManager(unittest.TestCase):
         self.assertTrue(res)
         manager.close()
 
+    @mock.patch("torchtitan.components.checkpointer.base.logger")
     @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch.object(dist_checkpoint, "load")
     def test_initial_load_path_used_when_folder_has_no_valid_checkpoints(
-        self, mock_load, mock_rank
+        self, mock_load, mock_rank, mock_logger
     ):
         initial_load_path = os.path.join(self.base_temp_dir, "initial", "step-100")
         os.makedirs(initial_load_path, exist_ok=True)
@@ -433,17 +495,20 @@ class TestCheckpointManager(unittest.TestCase):
         _, kwargs = mock_load.call_args
         self.assertEqual(kwargs.get("checkpoint_id"), initial_load_path)
         self.assertTrue(res)
+        # The initial load actually happened, so there is no skip to report.
+        for level in (mock_logger.info, mock_logger.warning):
+            self.assertFalse(initial_load_skip_logs(level))
         manager.close()
 
-    @mock.patch("torchtitan.components.checkpointer.dcp.logger")
+    @mock.patch("torchtitan.components.checkpointer.base.logger")
     @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch.object(dist_checkpoint, "load")
     def test_initial_load_path_ignored_when_folder_has_valid_checkpoints(
         self, mock_load, mock_rank, mock_logger
     ):
         # Resuming from checkpoint.folder is the fault-tolerance path: all
-        # initial_* options are silently ignored so a job can keep the same
-        # arguments across automatic restarts.
+        # initial_* options are ignored so a job can keep the same arguments
+        # across automatic restarts. Log it so users can see the skip.
         initial_load_path = os.path.join(self.base_temp_dir, "initial", "step-100")
         os.makedirs(initial_load_path, exist_ok=True)
         ckpt_folder = os.path.join(self.test_folder, "checkpoints")
@@ -472,7 +537,50 @@ class TestCheckpointManager(unittest.TestCase):
         mock_load.assert_called_once()
         _, kwargs = mock_load.call_args
         self.assertEqual(kwargs.get("checkpoint_id"), step_dir)
-        mock_logger.warning.assert_not_called()
+        skip_messages = initial_load_skip_logs(mock_logger.info)
+        self.assertEqual(len(skip_messages), 1)
+        self.assertIn("step 5", skip_messages[0])
+        # The skip is the normal fault-tolerance restart, so it must not warn.
+        self.assertFalse(initial_load_skip_logs(mock_logger.warning))
+        manager.close()
+
+    @mock.patch("torchtitan.components.checkpointer.base.logger")
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    @mock.patch.object(dist_checkpoint, "load")
+    def test_initial_load_in_hf_ignored_when_folder_has_valid_checkpoints(
+        self, mock_load, mock_rank, mock_logger
+    ):
+        ckpt_folder = os.path.join(self.test_folder, "checkpoints")
+        step_dir = os.path.join(ckpt_folder, "step-5")
+        os.makedirs(step_dir, exist_ok=True)
+        open(os.path.join(step_dir, ".metadata"), "w").close()
+
+        cfg = self.trainer_config.checkpoint
+        cfg.folder = "checkpoints"
+        cfg.initial_load_in_hf = True
+        cfg.initial_load_model_only = True
+        manager = CheckpointManager(
+            dataloader=self.data_loader,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            lr_schedulers=self.lr_schedulers,
+            states=self.states,
+            config=self.trainer_config.checkpoint,
+            sd_adapter=None,
+            base_folder=self.trainer_config.dump_folder,
+        )
+
+        res = manager.load(step=-1)
+
+        self.assertTrue(res)
+        mock_load.assert_called_once()
+        _, kwargs = mock_load.call_args
+        self.assertEqual(kwargs.get("checkpoint_id"), step_dir)
+        skip_messages = initial_load_skip_logs(mock_logger.info)
+        self.assertEqual(len(skip_messages), 1)
+        self.assertIn("step 5", skip_messages[0])
+        # The skip is the normal fault-tolerance restart, so it must not warn.
+        self.assertFalse(initial_load_skip_logs(mock_logger.warning))
         manager.close()
 
     @mock.patch("torch.distributed.get_rank", return_value=0)
@@ -651,6 +759,7 @@ class TestCheckpointManager(unittest.TestCase):
 
         # Verify that `maybe_wait_for_staging` actually waits for staging future to complete
         staging_future = manager.staging_future
+        manager.save_future.add_done_callback.assert_called_once()
         manager.maybe_wait_for_staging()
         staging_future.result.assert_called_once()
 
@@ -699,6 +808,84 @@ class TestCheckpointManager(unittest.TestCase):
         # New future created
         new_future = manager.save_future
         new_future.result.assert_not_called()
+
+    @mock.patch("torchtitan.components.checkpointer.dcp.dist.new_group")
+    def test_purge_runs_before_this_step_save_is_issued(self, _mock_new_group):
+        trainer_config = DummyTrainerConfig(dump_folder=self.trainer_config.dump_folder)
+        checkpoint_config = trainer_config.checkpoint
+        checkpoint_config.async_mode = "async"
+        manager = CheckpointManager(
+            dataloader=self.data_loader,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            lr_schedulers=self.lr_schedulers,
+            states=self.states,
+            config=checkpoint_config,
+            sd_adapter=None,
+            base_folder=self.trainer_config.dump_folder,
+        )
+        save_future: Future[None] = Future()
+        calls = []
+
+        with (
+            mock.patch.object(
+                manager,
+                "_purge_stale_checkpoints",
+                side_effect=lambda *, saving_step: calls.append(("purge", saving_step)),
+            ),
+            mock.patch.object(
+                manager,
+                "dcp_save",
+                side_effect=lambda *args, **kwargs: (
+                    calls.append("save"),
+                    save_future,
+                )[1],
+            ),
+            mock.patch(
+                "torchtitan.components.checkpointer.dcp.GarbageCollection.collect"
+            ),
+        ):
+            self.assertTrue(manager.save(curr_step=10))
+
+        self.assertEqual([("purge", 10), "save"], calls)
+        save_future.set_result(None)
+        manager.close()
+
+    def test_async_save_logs_duration_when_future_completes(self):
+        trainer_config = DummyTrainerConfig(dump_folder=self.trainer_config.dump_folder)
+        checkpoint_config = trainer_config.checkpoint
+        checkpoint_config.async_mode = "async"
+        manager = CheckpointManager(
+            dataloader=self.data_loader,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            lr_schedulers=self.lr_schedulers,
+            states=self.states,
+            config=checkpoint_config,
+            sd_adapter=None,
+            base_folder=self.trainer_config.dump_folder,
+        )
+        save_future: Future[None] = Future()
+
+        with (
+            mock.patch.object(manager, "dcp_save", return_value=save_future),
+            mock.patch(
+                "torchtitan.components.checkpointer.dcp.GarbageCollection.collect"
+            ),
+            mock.patch.object(sl, "log_trace_scalar") as log_trace_scalar,
+            mock.patch(
+                "torchtitan.components.checkpointer.dcp.time.monotonic",
+                side_effect=[0.0, 10.0, 10.5, 12.0],
+            ),
+        ):
+            manager.save(curr_step=10, last_step=False)
+            save_future.set_exception(RuntimeError("save failed"))
+
+        log_trace_scalar.assert_called_once_with(
+            {"train.checkpoint_write.native_dcp.execute.async_total.latency_ms": 2000.0}
+        )
+        with self.assertRaisesRegex(RuntimeError, "save failed"):
+            manager.close()
 
     @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch.object(dist_checkpoint, "save")
@@ -1083,15 +1270,31 @@ class TestFindLoadStepRemote(unittest.TestCase):
         manager._storage = _FilesystemCheckpointStorage()
         return manager
 
-    def test_returns_max_valid_step(self):
+    def test_returns_latest_resumable_step(self):
         self._write(f"{self.root}/step-10/.metadata")
         self._write(f"{self.root}/step-20/.metadata")
-        # step-30 has no core metadata -> not a valid checkpoint.
+        # step-30 has no core metadata, so it cannot be resumed.
         self._write(f"{self.root}/step-30/some_shard")
-        # A non-checkpoint directory must be ignored.
+        # Complete directories outside the canonical naming scheme must be ignored.
+        self._write(f"{self.root}/step-40.backup/.metadata")
+        self._write(f"{self.root}/foo-step-50/.metadata")
+        self._write(f"{self.root}/step-060/.metadata")
         self._write(f"{self.root}/logs/events")
 
         self.assertEqual(self._manager()._find_load_step(folder=self.root), 20)
+
+    def test_step_zero_is_resumable(self):
+        self._write(f"{self.root}/step-0/.metadata")
+
+        self.assertEqual(self._manager()._find_load_step(folder=self.root), 0)
+
+    def test_skips_hf_only_export_when_selecting_resume_step(self):
+        self._write(f"{self.root}/step-10/.metadata")
+        self._write(f"{self.root}/step-20/model.safetensors.index.json")
+        manager = self._manager()
+
+        self.assertTrue(manager._is_valid_checkpoint(f"{self.root}/step-20"))
+        self.assertEqual(manager._find_load_step(folder=self.root), 10)
 
     def test_missing_folder_returns_negative_one(self):
         self.assertEqual(self._manager()._find_load_step(folder=self.root), -1)
@@ -1155,6 +1358,87 @@ class TestFilesystemCheckpointStorage(unittest.TestCase):
         self.assertEqual(["step-1"], self.storage.listdir(root))
 
 
+class TestBaseCheckpointManagerTracing(unittest.TestCase):
+    def _manager(self, *, enable: bool = True):
+        manager = mock.Mock(spec=BaseCheckpointManager)
+        manager.enable = enable
+        manager._save.return_value = True
+        manager.folder = "/checkpoint"
+        # Set by __init__, so spec= does not cover them, but load() reads them.
+        manager.initial_load_path = None
+        manager.initial_load_in_hf = False
+        manager.initial_load_in_hf_quantized = False
+        manager._storage = mock.Mock()
+        manager._storage.isdir.return_value = True
+        manager._create_checkpoint_id.return_value = "/checkpoint/step-10"
+        manager._states_to_load.return_value = mock.sentinel.states
+        return manager
+
+    def test_enabled_save_and_load_trace_backend_hooks(self):
+        events = []
+
+        @contextmanager
+        def trace_span(name):
+            events.append(f"{name}_start")
+            yield
+            events.append(f"{name}_end")
+
+        manager = self._manager()
+        manager._save.side_effect = lambda *_args: events.append("save") or True
+        manager._load_checkpoint.side_effect = lambda *_args, **_kwargs: events.append(
+            "load"
+        )
+
+        with mock.patch.object(sl, "log_trace_span", side_effect=trace_span):
+            self.assertTrue(BaseCheckpointManager.save(manager, curr_step=10))
+            self.assertTrue(BaseCheckpointManager.load(manager, step=10))
+
+        self.assertEqual(
+            events,
+            [
+                "checkpoint_save_start",
+                "save",
+                "checkpoint_save_end",
+                "checkpoint_load_start",
+                "load",
+                "checkpoint_load_end",
+            ],
+        )
+        manager._save.assert_called_once_with(10, False)
+        manager._load_checkpoint.assert_called_once_with(
+            mock.sentinel.states,
+            "/checkpoint/step-10",
+            from_hf=False,
+            from_quantized=False,
+        )
+
+    def test_disabled_save_and_load_do_not_trace_or_call_backend_hooks(self):
+        manager = self._manager(enable=False)
+
+        with mock.patch.object(sl, "log_trace_span") as log_trace_span:
+            self.assertFalse(BaseCheckpointManager.save(manager, curr_step=10))
+            self.assertFalse(BaseCheckpointManager.load(manager, step=10))
+
+        log_trace_span.assert_not_called()
+        manager._save.assert_not_called()
+        manager._load_checkpoint.assert_not_called()
+
+    def test_public_save_and_load_disable_grad_before_backend_calls(self):
+        manager = self._manager()
+        grad_enabled = []
+        manager._save.side_effect = (
+            lambda *_args: grad_enabled.append(torch.is_grad_enabled()) or True
+        )
+        manager._load_checkpoint.side_effect = (
+            lambda *_args, **_kwargs: grad_enabled.append(torch.is_grad_enabled())
+        )
+
+        BaseCheckpointManager.save(manager, curr_step=10)
+        BaseCheckpointManager.load(manager, step=10)
+
+        self.assertEqual([False, False], grad_enabled)
+
+
 class TestShouldPurge(unittest.TestCase):
     """_should_purge lives on the base so every manager, and TorchFT's
     narrowing override, share one definition of who deletes checkpoints."""
@@ -1192,6 +1476,166 @@ class TestShouldPurge(unittest.TestCase):
         # Probed through the seam rather than the filesystem module, so a
         # manager on non-local storage asks its own backend.
         manager._storage.isdir.assert_called_once_with("/checkpoint")
+
+
+class TestPurgeStaleCheckpoints(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+        self.manager = CheckpointManager.__new__(CheckpointManager)
+        self.manager.keep_latest_k = 2
+        self.manager.folder = self.root
+        self.manager._storage = _FilesystemCheckpointStorage()
+        self.manager.purge_thread = mock.sentinel.purge_thread
+        self.manager.purge_queue = mock.Mock()
+
+    def _write_checkpoint(self, name, *, complete=True):
+        path = os.path.join(self.root, name)
+        os.makedirs(path)
+        if complete:
+            with open(os.path.join(path, ".metadata"), "wb"):
+                pass
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_only_queues_stale_canonical_directories(self, _rank):
+        self._write_checkpoint("step-1")
+        self._write_checkpoint("step-2")
+        self._write_checkpoint("step-100.backup")
+        self._write_checkpoint("foo-step-101")
+        self._write_checkpoint("step-0200")
+        self._write_checkpoint("step-300", complete=False)
+
+        self.manager._purge_stale_checkpoints(saving_step=400)
+
+        self.assertEqual(
+            [
+                mock.call(os.path.join(self.root, "step-1")),
+                mock.call(os.path.join(self.root, "step-300")),
+            ],
+            self.manager.purge_queue.put.call_args_list,
+        )
+        self.assertTrue(os.path.exists(os.path.join(self.root, "step-300")))
+
+
+class TestSharedDiscoveryAndRetention(unittest.TestCase):
+    """_find_load_step and _purge_stale_checkpoints live on the base; each
+    manager supplies its resumable and completed-checkpoint predicates."""
+
+    def _manager(self, *, keep_latest_k: int, entries: list[str]):
+        manager = CheckpointManager.__new__(CheckpointManager)
+        manager.keep_latest_k = keep_latest_k
+        manager.folder = "/checkpoint"
+        manager.purge_queue = queue_lib.Queue()
+        manager.purge_thread = object()
+        manager._storage = mock.Mock(spec=CheckpointStorage)
+        manager._storage.isdir.return_value = True
+        manager._storage.listdir.return_value = entries
+        manager._storage.isfile.return_value = True
+        return manager
+
+    def _purged(self, manager) -> set[str]:
+        purged = set()
+        while not manager.purge_queue.empty():
+            purged.add(manager.purge_queue.get_nowait())
+        return purged
+
+    def test_bodies_are_defined_on_the_base(self):
+        for name in ("_find_load_step", "_parse_step", "_purge_stale_checkpoints"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, vars(CheckpointManager))
+                self.assertIn(name, vars(BaseCheckpointManager))
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_purge_reserves_a_slot_for_the_upcoming_save(self, _rank):
+        manager = self._manager(keep_latest_k=2, entries=["step-1", "step-2", "step-3"])
+
+        manager._purge_stale_checkpoints(saving_step=4)
+
+        self.assertEqual(
+            {"/checkpoint/step-1", "/checkpoint/step-2"},
+            self._purged(manager),
+        )
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_incomplete_directory_cannot_evict_a_valid_checkpoint(self, _rank):
+        # An interrupted save leaves a step-N directory with no metadata. If it
+        # occupied a slot it would push a checkpoint we can actually resume from
+        # out of the retained set.
+        manager = self._manager(keep_latest_k=2, entries=["step-1", "step-2", "step-3"])
+        manager._storage.isfile.side_effect = lambda path: "step-3" not in path
+
+        manager._purge_stale_checkpoints(saving_step=4)
+
+        # k-1 valid ones stay (step-2), the incomplete step-3 is purged rather
+        # than counted, and step-1 falls out normally.
+        self.assertEqual(
+            {"/checkpoint/step-1", "/checkpoint/step-3"},
+            self._purged(manager),
+        )
+        manager._storage.remove.assert_not_called()
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_abandoned_directories_are_queued_for_purge(self, _rank):
+        manager = self._manager(keep_latest_k=2, entries=["step-1", "step-2"])
+        manager._storage.isfile.return_value = False
+
+        manager._purge_stale_checkpoints(saving_step=3)
+
+        self.assertEqual(
+            {"/checkpoint/step-1", "/checkpoint/step-2"},
+            self._purged(manager),
+        )
+        manager._storage.remove.assert_not_called()
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_purge_keeps_exempt_checkpoints_outside_latest_k(self, _rank):
+        manager = self._manager(
+            keep_latest_k=2,
+            entries=["step-1", "step-2", "step-3", "step-4", "step-5"],
+        )
+        manager.purge_exempt = Function.Config(fn=lambda step: step % 2 == 0).build()
+
+        manager._purge_stale_checkpoints(saving_step=6)
+
+        self.assertEqual(
+            {"/checkpoint/step-1", "/checkpoint/step-3"},
+            self._purged(manager),
+        )
+
+    def test_parse_step_accepts_only_canonical_published_names(self):
+        manager = CheckpointManager.__new__(CheckpointManager)
+
+        self.assertEqual(0, manager._parse_step("step-0"))
+        self.assertEqual(7, manager._parse_step("step-7"))
+        for name in ("logs", "foo-step-9", "step-9.partial", "step-09"):
+            with self.subTest(name=name):
+                self.assertIsNone(manager._parse_step(name))
+
+    @mock.patch("torch.distributed.get_rank", return_value=0)
+    def test_purge_preserves_the_checkpoint_currently_being_saved(self, _rank):
+        manager = self._manager(keep_latest_k=2, entries=["step-1", "step-2"])
+        manager._storage.isfile.return_value = False
+
+        manager._purge_stale_checkpoints(saving_step=2)
+
+        self.assertEqual({"/checkpoint/step-1"}, self._purged(manager))
+        manager._storage.remove.assert_not_called()
+
+    def test_valid_checkpoint_accepts_dcp_or_hf_markers(self):
+        manager = CheckpointManager.__new__(CheckpointManager)
+        manager._storage = mock.Mock(spec=CheckpointStorage)
+
+        for marker in (".metadata", "model.safetensors.index.json"):
+            with self.subTest(marker=marker):
+                manager._storage.isfile.side_effect = (
+                    lambda path, marker=marker: path.endswith(marker)
+                )
+                self.assertTrue(manager._is_valid_checkpoint("/checkpoint/step-1"))
+
+        manager._storage.isfile.side_effect = None
+        manager._storage.isfile.return_value = False
+        self.assertFalse(manager._is_valid_checkpoint("/checkpoint/step-1"))
 
 
 class TestPurgeThread(unittest.TestCase):
@@ -1250,7 +1694,7 @@ class TestModelWrapper(unittest.TestCase):
     def test_hook_tensor_storage_stable_and_refreshed(self):
         class HookedModule(nn.Module):
             # Slice a non-leading dim so .contiguous() allocates new storage
-            # disconnected from the parameter, mirroring FusedSwiGLU's split.
+            # disconnected from the parameter, mirroring FeedForward's split.
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.zeros(4, 2, 3))
@@ -1279,6 +1723,31 @@ class TestModelWrapper(unittest.TestCase):
         self.assertEqual(sd2["a"].untyped_storage().data_ptr(), ptr_a)
         # ... and the in-place refresh picked up the updated parameter.
         self.assertTrue(torch.all(sd2["a"] == 1.0))
+
+    def test_fsdp_unsharded_tensor_checkpoint(self):
+        class FSDPWeight(_ShardedFSDPTensor):
+            pass
+
+        class WrappedBuffer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", FSDPWeight(torch.zeros(4)))
+
+        model = WrappedBuffer()
+        wrapper = ModelWrapper(model)
+        state_dict = wrapper.state_dict()
+        cached_weight = state_dict["w"]
+
+        with torch.no_grad():
+            model.w._tensor.fill_(2.0)
+
+        refreshed = wrapper.state_dict()
+        self.assertIs(refreshed, state_dict)
+        self.assertIs(refreshed["w"], cached_weight)
+        self.assertTrue(torch.all(refreshed["w"]._tensor == 2.0))
+
+        wrapper.load_state_dict({"w": torch.full((4,), 3.0)})
+        self.assertTrue(torch.all(model.w._tensor == 3.0))
 
 
 if __name__ == "__main__":

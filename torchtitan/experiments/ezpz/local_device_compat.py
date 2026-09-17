@@ -47,7 +47,7 @@ from typing import Any
 
 import torch
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 _A100_PEAK_BF16_FLOPS = 312e12
 

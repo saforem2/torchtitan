@@ -8,14 +8,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import spmd_types as spmd
 import torch
 import torch.nn as nn
+from spmd_types.checker import typecheck
 from torch.nn.attention.flex_attention import create_mask
 
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.hf_datasets.multimodal.mm_collator import MultiModalCollator
 from torchtitan.models.common.linear import Linear
-from torchtitan.models.common.multimodal import scatter_vision_embeds
+from torchtitan.models.common.multimodal import (
+    gather_vision_embeds,
+    scatter_vision_embeds,
+)
 from torchtitan.models.common.nn_modules import LayerNorm
 from torchtitan.models.common.vision_encoder import create_block_diagonal_mask
 from torchtitan.models.kimi_k2_7.vision_encoder import (
@@ -56,11 +61,12 @@ class TestPackedVision(unittest.TestCase):
             },
         ]
 
-        inputs_T, labels_T, positions_T = collator.collate_text(batch)
+        inputs_T, labels_T, positions_T, padding_mask_T = collator.collate_text(batch)
 
         torch.testing.assert_close(inputs_T, torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]))
         torch.testing.assert_close(labels_T, torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]))
         torch.testing.assert_close(positions_T, torch.tensor([0, 1, 2, 3, 4, 0, 1, 2]))
+        self.assertFalse(padding_mask_T.any())
 
     def test_collator_resets_long_padding_positions(self) -> None:
         tokenizer = type("Tokenizer", (), {"pad_id": 99})()
@@ -82,12 +88,14 @@ class TestPackedVision(unittest.TestCase):
             }
         ]
 
-        _, labels, positions = collator.collate_text(batch)
+        _, labels, positions, padding_mask = collator.collate_text(batch)
 
         torch.testing.assert_close(labels[3:], torch.full((7,), IGNORE_INDEX))
         torch.testing.assert_close(
             positions, torch.tensor([0, 1, 2, 0, 1, 2, 3, 0, 1, 2])
         )
+        # The tail is padding regardless of how its positions were filled in.
+        torch.testing.assert_close(padding_mask, torch.tensor([False] * 3 + [True] * 7))
 
     def test_collator_concatenates_patches(self) -> None:
         patches_0 = torch.arange(12).view(3, 4)
@@ -229,6 +237,85 @@ class TestPackedVision(unittest.TestCase):
         torch.testing.assert_close(result_TD[:2], vision_TD[:2])
         torch.testing.assert_close(result_TD[3:], vision_TD[2:])
         torch.testing.assert_close(result_TD[2], torch.zeros(2))
+
+    def test_gather_vision_embeds_uses_packed_bank_indices(self) -> None:
+        inputs_TD = torch.tensor(
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+            requires_grad=True,
+        )
+        vision_bank_VD = torch.tensor(
+            [[10.0, 11.0], [20.0, 21.0], [30.0, 31.0]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        vision_bank_indices_T = torch.tensor([-1, 2, 0, 2])
+
+        result_TD = gather_vision_embeds(
+            inputs_TD,
+            vision_bank_VD=vision_bank_VD,
+            vision_bank_indices_T=vision_bank_indices_T,
+        )
+
+        expected_TD = torch.tensor(
+            [[1.0, 2.0], [30.0, 31.0], [10.0, 11.0], [30.0, 31.0]]
+        )
+        self.assertEqual(result_TD.dtype, inputs_TD.dtype)
+        torch.testing.assert_close(result_TD, expected_TD)
+        result_TD.sum().backward()
+        torch.testing.assert_close(
+            inputs_TD.grad,
+            torch.tensor([[1.0, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]),
+        )
+        torch.testing.assert_close(
+            vision_bank_VD.grad,
+            torch.tensor([[1.0, 1.0], [0.0, 0.0], [2.0, 2.0]], dtype=torch.float64),
+        )
+
+    def test_gather_vision_embeds_accepts_empty_bank(self) -> None:
+        inputs_TD = torch.randn(4, 3)
+
+        result_TD = gather_vision_embeds(
+            inputs_TD,
+            vision_bank_VD=torch.empty(0, 3),
+            vision_bank_indices_T=torch.full((4,), -1),
+        )
+
+        torch.testing.assert_close(result_TD, inputs_TD)
+
+    def test_gather_vision_embeds_preserves_token_sharding(self) -> None:
+        dp_axis = spmd.MeshAxis.of(2, 4)
+        cp_axis = spmd.MeshAxis.of(2, 2)
+        tp_axis = spmd.MeshAxis.of(2, 1)
+        inputs_TD = torch.zeros(2, 2)
+        vision_bank_VD = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        vision_bank_indices_T = torch.tensor([0, 1])
+        token_type = {dp_axis: spmd.V, cp_axis: spmd.V, tp_axis: spmd.V}
+        token_spec = spmd.PartitionSpec((dp_axis, cp_axis, tp_axis), None)
+        index_spec = spmd.PartitionSpec((dp_axis, cp_axis, tp_axis))
+
+        with spmd.set_current_mesh(
+            {"dp": dp_axis, "cp": cp_axis, "tp": tp_axis},
+            local_axes=(dp_axis,),
+        ):
+            spmd.assert_type(inputs_TD, token_type, token_spec)
+            spmd.assert_type(
+                vision_bank_VD,
+                {dp_axis: spmd.V, cp_axis: spmd.R, tp_axis: spmd.R},
+            )
+            spmd.assert_type(
+                vision_bank_indices_T,
+                token_type,
+                index_spec,
+            )
+            with typecheck(strict_mode="strict", local=False):
+                result_TD = gather_vision_embeds(
+                    inputs_TD,
+                    vision_bank_VD=vision_bank_VD,
+                    vision_bank_indices_T=vision_bank_indices_T,
+                )
+
+        self.assertEqual(spmd.get_local_type(result_TD), token_type)
+        self.assertEqual(spmd.get_partition_spec(result_TD), token_spec)
 
 
 if __name__ == "__main__":

@@ -7,11 +7,20 @@
 import dataclasses
 import io
 import sys
+import typing
 import unittest
 from unittest import mock
 
 import pytest
+import tyro
 from torchtitan.config import ConfigManager, ParallelismConfig, TrainingConfig
+from torchtitan.models.deepseek_v3.config_registry import (
+    deepseek_v3_debugmodel_hybridep,
+)
+from torchtitan.models.llama3.config_registry import llama3_debugmodel_dist_gemm
+from torchtitan.models.qwen3.config_registry import qwen3_moe_deepep
+from torchtitan.observability.sdc_replayer import SDCReplayer
+from torchtitan.trainer import Trainer
 
 
 class TestConfigManager(unittest.TestCase):
@@ -98,6 +107,7 @@ class TestConfigManager(unittest.TestCase):
 
         assert "alphabet_sort" in _supported_experiments
         assert "search_r1" in _supported_experiments
+        assert "verifiers.dapo_math" in _supported_experiments
 
     def test_cli_overrides(self):
         """CLI args override config defaults."""
@@ -161,7 +171,24 @@ class TestConfigManager(unittest.TestCase):
         assert config.parallelism.pipeline_parallel_degree == 1
         assert config.parallelism.num_pp_microbatches == 3
 
-    def test_cuda_graphs_reject_pipeline_parallelism(self):
+    def test_cuda_graphs_allow_single_stage_pipeline_schedule(self):
+        config_manager = ConfigManager()
+        config = config_manager.parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--parallelism.pipeline_parallel_degree",
+                "2",
+                "--parallelism.pipeline_parallel_schedule",
+                "1F1B",
+            ]
+        )
+
+        assert config.parallelism.pipeline_parallel_schedule == "1F1B"
+
+    def test_cuda_graphs_reject_looped_pipeline_schedule(self):
         config_manager = ConfigManager()
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
             with pytest.raises((ValueError, SystemExit)) as exc_info:
@@ -173,6 +200,8 @@ class TestConfigManager(unittest.TestCase):
                         "llama3_debugmodel",
                         "--parallelism.pipeline_parallel_degree",
                         "2",
+                        "--parallelism.pipeline_parallel_schedule",
+                        "Interleaved1F1B",
                     ]
                 )
 
@@ -181,7 +210,25 @@ class TestConfigManager(unittest.TestCase):
             error = stderr.getvalue()
         else:
             error = str(exc_info.value)
-        assert "do not support pipeline parallelism" in error
+        assert "do not support looped pipeline schedules" in error
+
+    def test_cuda_graphs_reject_pipeline_validation(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--training.disable_cuda_graphs",
+                "--parallelism.pipeline_parallel_degree",
+                "2",
+            ]
+        )
+        config.training.disable_cuda_graphs = False
+        config.validator.enable = True
+
+        with pytest.raises(ValueError, match="do not support validation"):
+            config._validate_cuda_graphs()
 
     def test_cuda_graphs_enabled_by_default(self):
         config = ConfigManager().parse_args(
@@ -240,13 +287,106 @@ class TestConfigManager(unittest.TestCase):
         )
         assert config.training.disable_cuda_graphs
 
+    def test_sdc_replay_requires_determinism(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--training.disable_cuda_graphs",
+            ]
+        )
+        config.sdc_replayer = SDCReplayer.Config()
+
+        with pytest.raises(ValueError, match="debug.deterministic=True"):
+            config._validate_sdc_replay()
+
+        config.debug.deterministic = True
+        config.debug.deterministic_warn_only = True
+        with pytest.raises(ValueError, match="deterministic_warn_only=False"):
+            config._validate_sdc_replay()
+
+    def test_sdc_replay_is_off_the_cli(self):
+        hints = typing.get_type_hints(Trainer.Config, include_extras=True)
+        assert tyro.conf.Suppress in hints["sdc_replayer"].__metadata__
+
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--debug.deterministic",
+                "--training.disable_cuda_graphs",
+            ]
+        )
+        config.sdc_replayer = SDCReplayer.Config(num_steps=3, num_replays=2)
+        config._validate_sdc_replay()
+
+    def test_sdc_replay_rejects_multiple_replays_with_cuda_graphs(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--debug.deterministic",
+            ]
+        )
+        config.sdc_replayer = SDCReplayer.Config(num_replays=2)
+
+        with pytest.raises(ValueError, match="at most one replay"):
+            config._validate_sdc_replay()
+
+    def test_sdc_replay_allows_multiple_replays_without_cuda_graphs(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--debug.deterministic",
+                "--training.disable_cuda_graphs",
+            ]
+        )
+        config.sdc_replayer = SDCReplayer.Config(num_replays=2)
+
+        config._validate_sdc_replay()
+
+    def test_sdc_replay_accepts_execution_modes(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "llama3",
+                "--config",
+                "llama3_debugmodel",
+                "--debug.deterministic",
+            ]
+        )
+        config.sdc_replayer = SDCReplayer.Config()
+        config.parallelism.fsdp_symm_mem_scope = "all"
+        config.compile.enable_async_tensor_parallel = True
+        configs = {
+            "symm_mem_async_tp": config,
+            "distributed_gemm": llama3_debugmodel_dist_gemm(seq_len=2048),
+            "hybrid_ep": deepseek_v3_debugmodel_hybridep(seq_len=2048),
+            "deep_ep": qwen3_moe_deepep(seq_len=512),
+        }
+
+        for name, config in configs.items():
+            with self.subTest(config=name):
+                config.debug.deterministic = True
+                config.sdc_replayer = SDCReplayer.Config()
+                config._validate_sdc_replay()
+
     def test_cuda_graphs_reject_blocking_hybridep(self):
         from torchtitan.models.common.token_dispatcher import HybridEPTokenDispatcher
         from torchtitan.models.deepseek_v3.config_registry import (
             deepseek_v3_debugmodel_hybridep,
         )
 
-        config = deepseek_v3_debugmodel_hybridep()
+        config = deepseek_v3_debugmodel_hybridep(seq_len=2048)
         dispatcher_configs = list(
             config.model_spec.model.traverse(HybridEPTokenDispatcher.Config)
         )
@@ -323,7 +463,7 @@ class TestConfigManager(unittest.TestCase):
         assert config.checkpoint.async_mode == "async"
 
     def test_trainer_config_quantization_default(self):
-        from torchtitan.components.quantization.utils import has_quantization
+        from torchtitan.quantization.utils import has_quantization
 
         config_manager = ConfigManager()
         config = config_manager.parse_args(
@@ -352,7 +492,12 @@ class TestConfigManager(unittest.TestCase):
         )
 
         # Verify the merged type has both base and custom fields
-        merged = MergedTrainerConfig()
+        model_spec = (
+            ConfigManager()
+            .parse_args(["--module", "llama3", "--config", "llama3_debugmodel"])
+            .model_spec
+        )
+        merged = MergedTrainerConfig(model_spec=model_spec)
         assert hasattr(merged, "checkpoint")
         assert hasattr(merged.checkpoint, "convert_path")
         assert merged.checkpoint.convert_path == "/custom/path"
@@ -380,6 +525,18 @@ class TestConfigManager(unittest.TestCase):
         )
         assert config.model_spec.name == "deepseek_v3"
         assert config.model_spec.flavor == "debugmodel"
+
+    def test_suppressed_model_spec_is_opaque_to_tyro(self):
+        config = ConfigManager().parse_args(
+            [
+                "--module",
+                "torchtitan_recipes.tests.transformers_modeling_backend",
+                "--config",
+                "transformers_backend_dense_cp_pp",
+            ]
+        )
+
+        assert config.model_spec.name == "transformers_modeling_backend"
 
     def test_fqn_module_with_config_registry(self):
         """--module torchtitan.models.llama3.config_registry works."""

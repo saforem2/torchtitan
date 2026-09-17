@@ -48,7 +48,7 @@ nested `get_optimizer_state_dict` format and lack those keys.
 
 Production clones (`agpt-{2b-v2,20b-v2,20b-n256}`) are **pinned pre-#3623 at
 `1263e5a1`** + this session's ckpt-safe infra (see
-[[feedback_clone_pull_can_break_ckpt_resume]]). They resume the existing
+`feedback_clone_pull_can_break_ckpt_resume`). They resume the existing
 checkpoints cleanly -- proven 2026-06-28: the 2B-256N chain advanced
 86,200 -> 86,674 (sneak 8572612) and the load-test 8570407 loaded
 step-86,200 in 32s. **No production chain is blocked.** The only cost of

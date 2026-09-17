@@ -36,10 +36,10 @@ checkpoint=CheckpointManager.Config(
 In some cases, you may want to partially load from a previous-trained checkpoint and modify certain settings, such as the number of GPUs or the current step. To achieve this, you can use the `exclude_from_loading` parameter to specify which keys should be excluded from loading.
 ```python
 checkpoint=CheckpointManager.Config(
-    exclude_from_loading=["data_loader", "lr_scheduler"],
+    exclude_from_loading=["dataloader", "lr_scheduler"],
 ),
 ```
-When used in command line: `--checkpoint.exclude_from_loading data_loader,lr_scheduler`.
+When used in command line: `--checkpoint.exclude_from_loading dataloader,lr_scheduler`.
 
 5. EXAMPLE CHECKPOINT CONFIGURATION
 ```python
@@ -69,7 +69,7 @@ NGPU=1 ./run_train.sh --module <module_name> --config <config_name> --checkpoint
 ### HuggingFace
 `torchtitan` offers two ways to work with Hugging Face models: either by directly saving and loading a Hugging Face checkpoint during training, or by using an example conversion script to directly reformat the model weights on cpu.
 
-1. You can directly save huggingface model weights during training by using the `--checkpoint.last_save_in_hf` and `--checkpoint.last_save_model_only` options together. To directly load a `torchtitan` training session from a huggingface safetensors file, enable `--checkpoint.initial_load_in_hf`, and set either `--hf_assets_path` or `--checkpoint.initial_load_path` to the directory containing the huggingface checkpoint. `--checkpoint.initial_load_path` overrides `--hf_assets_path` if both are set.
+1. You can directly save huggingface model weights during training by using the `--checkpoint.last_save_in_hf` and `--checkpoint.last_save_model_only` options together. To directly load a `torchtitan` training session from a huggingface safetensors file, enable `--checkpoint.initial_load_in_hf`, and set either `--hf_assets_path` or `--checkpoint.initial_load_path` to the directory containing the huggingface checkpoint. `--checkpoint.initial_load_path` overrides `--hf_assets_path` if both are set. If `checkpoint.folder` already contains a valid checkpoint, training resumes from that folder and ignores `initial_load_in_hf` / `initial_load_path` (fault-tolerance restart). The first run (empty folder) uses the initial load.
 
 2. To directly reformat the weights without the need to run a training loop, run the corresponding conversion script. The naming scheme is `torchtitan`-centric, e.g. convert_from_hf means convert hf->tt.
 
@@ -77,7 +77,7 @@ NGPU=1 ./run_train.sh --module <module_name> --config <config_name> --checkpoint
 python ./scripts/checkpoint_conversion/convert_from_hf.py <input_dir> <output_dir> --model_name <model_name> --model_flavor <model_flavor>
 python ./scripts/checkpoint_conversion/convert_to_hf.py <input_dir> <output_dir> --hf_assets_path ./assets/hf/Llama3.1-8B --model_name <model_name> --model_flavor <model_flavor>
 # e.g.
-python ./scripts/convert_from_hf.py ~/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3-8B/snapshots/8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920/ ./initial_load_path/ --model_name llama3 --model_flavor 8B
+python ./scripts/checkpoint_conversion/convert_from_hf.py ~/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3-8B/snapshots/8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920/ ./initial_load_path/ --model_name llama3 --model_flavor 8B
 ```
 
 ### Torch

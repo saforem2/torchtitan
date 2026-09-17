@@ -1,7 +1,8 @@
 # TorchTitan + 🍋 `ezpz`
 
 Pre-training AuroraGPT (dense + MoE) on ALCF systems
-(Aurora / Sunspot / Polaris) with **PyTorch >= 2.13**. This folder is
+(Aurora / Sunspot / Polaris) with **PyTorch >= 2.14 on XPU** (see the
+floor note below; >= 2.13 elsewhere). This folder is
 an opinionated experiment harness on top of upstream `torchtitan`
 that adds:
 
@@ -44,6 +45,29 @@ specific pages linked below.
 > ```bash
 > python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry"
 > ```
+
+> [!IMPORTANT]
+> **On XPU, sync 84 needs torch 2.14 -- the `frameworks/2026.1.0` module is
+> NOT enough.** That module ships `2.13.0a0+gitcf30153`, which predates
+> pytorch [#181519](https://github.com/pytorch/pytorch/pull/181519). Without
+> that patch every run dies at FSDP wrapping, before step 1:
+>
+> ```
+> RuntimeError: ... full SPMD ... expected DTensor, got plain tensor
+> ```
+>
+> `torch 2.14.0+xpu` (a stable release, `--index-url
+> https://download.pytorch.org/whl/xpu`) carries it and trains. Established by
+> controlled A/B on sunspot `workq`, same tree and script and node shape, only
+> torch differing: 2.13 fails at wrapping, 2.14 goes 3/3 (job `12477670`).
+>
+> Do not detect the patch by grepping for `"full SPMD"` or `"plain tensor"` --
+> that is the text of the raise it removes, so it matches the BROKEN build.
+> Grep the symbols the patch adds (`_resolve_spmd_types_for_storage`,
+> `is_spmd_types`, `get_local_type`).
+>
+> Build details and the six-build table:
+> [`docs/experiments/sync84-xpu-smoke.md`](docs/experiments/sync84-xpu-smoke.md).
 
 ## Quickstart (2B dense training, 2 nodes)
 

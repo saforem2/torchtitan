@@ -86,6 +86,19 @@ class GraphTrainerCompileConfig(CompileConfig):
     partitioning contracts depend on canonical graph structure.
     """
 
+    enable_inplace_graph_gradient_accumulation: bool = False
+    """Accumulate SPMD AOT gradients in-place into trainer-owned buffers.
+
+    This makes gradient accumulation CUDA-graph safe by avoiding clones of
+    replay-owned gradient outputs.
+
+    TODO: Add support for:
+        GraphPP
+        precompile
+        parameter aliases
+        custom pass pipelines.
+    """
+
     disable_passes: list[str] = field(default_factory=list)
     """Pass names to selectively disable for debugging and ablation
     studies. A pass is skipped if its name exactly matches any entry.
@@ -94,7 +107,9 @@ class GraphTrainerCompileConfig(CompileConfig):
     debug_graph_passes: bool = False
     """Log timing, op-count diffs, and before/after graphs for each pass to tlparse."""
 
-    memory_policy: Literal["default", "full", "eager", "sac_and_offload"] = "default"
+    memory_policy: Literal[
+        "default", "full", "eager", "min_cut", "sac_and_offload"
+    ] = "default"
     """
     Memory optimization policy for activation management (SAC, offload).
         default: SAC — save all compute-intensive ops and FSDP all_gathers.
@@ -103,6 +118,7 @@ class GraphTrainerCompileConfig(CompileConfig):
             full AC (checkpoint_wrapper with no context_fn).
         eager: SAC alternating mm ops between save/recompute, matching the
             eager AC policy in torchtitan.distributed.activation_checkpoint.
+        min_cut: choose saved activations with the min-cut partitioner.
         sac_and_offload: SAC + CPU offload — apply default SAC first,
             then offload surviving MUST_SAVE activations to CPU within
             the cpu_offload_budget_gb budget.
@@ -113,7 +129,7 @@ class GraphTrainerCompileConfig(CompileConfig):
 
     Each selector has the form ``MODULE_FQN_PATTERN::OP``. Separate multiple
     selectors with ``|`` and quote the full argument in the shell. For example:
-    ``layers.*.moe.router.gate::aten.mm.default | layers.*.attention.wkv_a::aten.mm.default``.
+    ``layers.*.moe.router.gate::aten.mm.dtype | layers.*.attention.wkv_a::aten.mm.default``.
     """
 
     pass_pipeline: str = "default"
@@ -123,7 +139,7 @@ class GraphTrainerCompileConfig(CompileConfig):
     inductor_compilation: Literal["regional", "full"] = "regional"
     """
     Inductor compilation strategy. Mutually exclusive options:
-        regional: compile tagged regions (e.g. FlexAttention HOPs) with
+        regional: compile tagged regions (e.g. FlexInnerAttention HOPs) with
             regional_inductor while leaving the rest interpreted.
         full: compile the entire graph with inductor into optimized
             Triton kernels. Provides better performance but may change
@@ -246,16 +262,9 @@ def to_graph_trainer_config(
     from the graph_trainer model_registry. The compile field is removed and
     left as the GraphTrainer.Config default; callers should explicitly set it.
     """
-    from .cudagraph import cudagraph_annotate_trace_post_processor
     from .trainer import GraphTrainer
 
     d = {f.name: getattr(base_config, f.name) for f in fields(base_config)}
-    # TODO: Adopt spmd_types to re-enable CP; partial_dtensor does not apply
-    # the CP placements declared in ShardingConfig.
-    d["parallelism"] = replace(
-        base_config.parallelism,
-        spmd_backend="partial_dtensor",
-    )
     graph_spec = model_registry(base_config.model_spec.flavor)
     # Wrap the base model config in the graph_trainer's model config class
     # (e.g. GraphTrainerQwen3Model.Config) while preserving all field values
@@ -289,12 +298,5 @@ def to_graph_trainer_config(
         d["loss"] = ChunkedLossWrapperWithParamGrads.Config(
             **{f.name: getattr(loss_cfg, f.name) for f in fields(loss_cfg)}
         )
-
-    # Merge CUDA graph kernel annotations into profiler traces when profiling
-    # is active.  No-op otherwise (and no-op when requirements aren't met).
-    # It's also a no-op if there is CUDA graph is not enabled.
-    profiler = d.get("profiler")
-    if profiler is not None:
-        profiler.trace_post_processor = cudagraph_annotate_trace_post_processor()
 
     return GraphTrainer.Config(**d)

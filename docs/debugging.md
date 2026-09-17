@@ -5,10 +5,10 @@ Launch training job with the following command (or alternatively set configs in 
 MODULE=llama3 CONFIG=llama3_debugmodel ./run_train.sh --profiler.enable_memory_snapshot --profiler.save_memory_snapshot_folder memory_snapshot
 ```
 * `--profiler.enable_memory_snapshot`: to enable memory profiling
-* `--profiler.save_memory_snapshot_folder`: configures the folder which memory snapshots are dumped into (`./outputs/memory_snapshot/` by default)
+* `--profiler.save_memory_snapshot_folder`: configures the folder which memory snapshots are dumped into (`profiling/memory_snapshot` under the dump folder by default)
 * `--profiler.memory_snapshot_freq`: controls how often regular memory snapshots are taken. When unset, it defaults to `--profiler.profile_freq` for backward compatibility.
-	+ In case of OOMs, the snapshots will be in `./outputs/memory_snapshot/iteration_x_exit`.
-	+ Regular snapshots will be in `memory_snapshot/iteration_x`.
+	+ In case of OOMs, the snapshots will be in `step_{step:012d}_exit` under that folder.
+	+ Regular snapshots will be in `step_{step:012d}`.
 	+ For example, set `--profiler.memory_snapshot_freq 3` to take a snapshot every three iterations independently of trace profiling.
 
 You can find the saved pickle files in your output folder.
@@ -60,7 +60,7 @@ This will print a structured configuration to `stdout`, allowing you to verify t
 
 ## Fake Backend Debugging
 
-Set `COMM_MODE="fake_backend"` to validate your configuration, model setup, and rank-0 program logic without requiring full multi-GPU distributed execution:
+Set `COMM_MODE="fake_backend"` to validate your configuration, model setup, and rank-0 program logic without requiring full multi-GPU distributed execution. To inspect a nonzero rank under `torchrun`, see [Distributed Breakpoints and LOG_RANK](#distributed-breakpoints-and-log_rank).
 
 ```bash
 NGPU=32 COMM_MODE="fake_backend" ./run_train.sh
@@ -85,6 +85,18 @@ NGPU=128 COMM_MODE="fake_backend" MODULE=llama3 CONFIG=llama3_70b ./run_train.sh
 ### Limitations
 
 - **Performance testing**: Fake backend mode does not provide accurate performance metrics; use actual distributed runs for benchmarking
+
+## Distributed Breakpoints and LOG_RANK
+
+`run_train.sh` defaults `LOG_RANK` to `0` and passes it to `torchrun` as `--local-ranks-filter`, so only rank 0's stdin/stdout are teed to the console. `torch.distributed.breakpoint(rank=N)` on a filtered rank therefore hangs and never prints a prompt.
+
+To debug rank N, set `LOG_RANK` to N (or a comma-separated list that includes N) before launching. Do not change the default `LOG_RANK` in `run_train.sh`.
+
+```bash
+LOG_RANK=1 ./run_train.sh
+# or, to keep rank 0 visible as well:
+LOG_RANK=0,1 ./run_train.sh
+```
 
 ## Troubleshooting jobs that timeout
 

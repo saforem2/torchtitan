@@ -24,7 +24,7 @@ from torchtitan.models.common.decoder_sharding import (
     set_decoder_sharding_config,
     set_dense_ffn_sharding,
     set_gqa_attention_sharding,
-    set_gqa_inner_attention_local_map,
+    set_gqa_inner_attention_local_spmd,
 )
 from torchtitan.protocols.sharding import ShardingConfig
 
@@ -67,7 +67,7 @@ def _set_agpt_layer_sharding(
     # replaced runtime DTensor detection in `LocalMapInnerAttention` with
     # this config-driven approach). All inner attention types — including
     # SoftcappedFlexAttention — go through this same path.
-    set_gqa_inner_attention_local_map(layer_cfg.attention.inner_attention)
+    set_gqa_inner_attention_local_spmd(layer_cfg.attention.inner_attention)
 
     qk_norm = getattr(layer_cfg.attention, "qk_norm", None)
     if qk_norm is not None:

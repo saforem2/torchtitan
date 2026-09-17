@@ -6,7 +6,6 @@
 
 from torchtitan.components.data import ConcatThenSplitPackingConfig, GrainDataLoader
 from torchtitan.components.loss import CrossEntropyLoss
-from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.components.validate import Validator
 from torchtitan.config import CommConfig, TrainingConfig
@@ -16,14 +15,20 @@ from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.optimizer import TorchFTOptimizersContainer
 from torchtitan.experiments.torchft.trainer import FaultTolerantTrainer
 from torchtitan.hf_datasets.text_datasets import DATASETS
-from torchtitan.models.common.config_utils import decoder_vocab_size
-from torchtitan.tools.profiler import Profiler
+from torchtitan.models.common.config_utils import (
+    decoder_vocab_size,
+    DEFAULT_DEBUG_MODEL_SEQ_LEN,
+)
+from torchtitan.observability.metrics import MetricsProcessor
+from torchtitan.observability.profiler import Profiler
 
 from . import model_registry
 
 
-def llama3_torchft_debugmodel() -> FaultTolerantTrainer.Config:
-    model_spec = model_registry("debugmodel")
+def llama3_torchft_debugmodel(
+    seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
+) -> FaultTolerantTrainer.Config:
+    model_spec = model_registry("debugmodel", seq_len=seq_len)
     return FaultTolerantTrainer.Config(
         loss=CrossEntropyLoss.Config(
             global_vocab_size=decoder_vocab_size(model_spec),
@@ -47,8 +52,8 @@ def llama3_torchft_debugmodel() -> FaultTolerantTrainer.Config:
             min_lr_factor=0.0,
         ),
         training=TrainingConfig(
-            num_tokens_per_microbatch_per_dp_rank=8 * 2048,
-            max_context_length=2048,
+            num_tokens_per_microbatch_per_dp_rank=8 * model_spec.max_context_length,
+            max_context_length=model_spec.max_context_length,
             steps=100,
         ),
         dataloader=GrainDataLoader.Config(

@@ -6,6 +6,7 @@
 
 import contextlib
 import gc
+import logging
 import os
 import subprocess
 import time
@@ -17,7 +18,9 @@ import torch
 from torch._utils import _get_available_device_type, _get_device_module
 
 from torchtitan.observability import structured_logger as sl
-from torchtitan.tools.logging import logger
+
+
+logger = logging.getLogger(__name__)
 
 
 def round_up(value: int, multiple: int) -> int:
@@ -35,7 +38,10 @@ def has_cuda_capability(major: int, minor: int) -> bool:
 
 def get_cuda_flash_attention_impl() -> str | None:
     """Return the FlashAttention implementation for the current CUDA architecture."""
-    # Blackwell (SM 10.0) and newer use FA4; Hopper (SM 9.0) uses FA3.
+
+    # FA4 advertises Hopper support, but as of writing it hangs under
+    # torch.compile there, so Hopper (sm90) stays on FA3.
+    # https://github.com/pytorch/torchtitan/pull/4413
     if has_cuda_capability(10, 0):
         return "FA4"
     if has_cuda_capability(9, 0):

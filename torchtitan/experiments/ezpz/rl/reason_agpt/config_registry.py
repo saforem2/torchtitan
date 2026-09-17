@@ -28,7 +28,7 @@ Validated knobs baked in (from the alphabet_sort_agpt 3-way study + the CoT plan
   - LoRA (``target_modules=["wqkv","wo"]``, ``alpha=2*rank``) + ``LMHeadCastConverter``
     fp32 head (RL logprob/KL math needs fp32 logits).
   - the ``2b-rl`` fused-QKV flavor (vocab 256000).
-  - FlexAttention ``max_autotune=False`` (XPU OUT_OF_RESOURCES on the backward).
+  - FlexInnerAttention ``max_autotune=False`` (XPU OUT_OF_RESOURCES on the backward).
   - dense componentized reward (0.05 format + 0.05 extractable + 0.20 dense
     closeness + 0.70 exact-match) -- the ceiling-attack lesson applied to GSM8K.
   - difficulty curriculum via the dataset's ``max_steps`` (easy subset -> more
@@ -54,7 +54,7 @@ from __future__ import annotations
 import torch
 
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.components.lora import LoRAConverter
+from torchtitan.config.transform.lora import LoRAConverter
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
@@ -89,10 +89,10 @@ from torchtitan.experiments.rl.controller import (
 )
 from torchtitan.experiments.rl.environment import TokenEnv
 from torchtitan.experiments.rl.losses import GRPOLoss
-from torchtitan.experiments.rl.models.cast_linear import LMHeadCastConverter
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.rl.models.vllm_registry import InferenceParallelismConfig
 from torchtitan.experiments.rl.observability.metrics import MetricsProcessor
-from torchtitan.experiments.rl.renderer import RendererConfig
+from torchtitan.components.renderer import RendererConfig
 from torchtitan.experiments.rl.rollout.advantage import AdvantageEstimator
 from torchtitan.experiments.rl.rubrics import Rubric
 
@@ -156,19 +156,19 @@ def _agpt_grpo_config(
     max_tokens: int = 700,
     num_samples: int = 0,
 ) -> Controller.Config:
-    # Disable FlexAttention max_autotune on XPU (backward autotuning exceeds XPU
+    # Disable FlexInnerAttention max_autotune on XPU (backward autotuning exceeds XPU
     # register limits -> OUT_OF_RESOURCES). Matches the working alphabet_sort_agpt
     # run. Must run before the model is compiled; recompile the cached flex kernel.
     from torch.nn.attention.flex_attention import flex_attention
-    from torchtitan.models.common.attention import FlexAttention
+    from torchtitan.models.common.attention import FlexInnerAttention
 
-    FlexAttention.inductor_configs = {
-        **FlexAttention.inductor_configs,
+    FlexInnerAttention.inductor_configs = {
+        **FlexInnerAttention.inductor_configs,
         "max_autotune": False,
         "coordinate_descent_tuning": False,
     }
-    FlexAttention._compiled_flex_attn = torch.compile(
-        flex_attention, options=FlexAttention.inductor_configs
+    FlexInnerAttention._compiled_flex_attn = torch.compile(
+        flex_attention, options=FlexInnerAttention.inductor_configs
     )
     return Controller.Config(
         model_spec=_agpt_rl_model_spec(

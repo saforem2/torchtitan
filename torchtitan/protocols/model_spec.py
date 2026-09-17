@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, TypeVar
 
 import torch.nn as nn
 from torch.distributed.pipelining.schedules import _PipelineSchedule
@@ -18,6 +18,8 @@ from torchtitan.protocols.state_dict_adapter import BaseStateDictAdapter
 
 if TYPE_CHECKING:
     from torchtitan.config import Configurable
+
+_ConfigT = TypeVar("_ConfigT", bound="Configurable.Config")
 
 # Type aliases for ModelSpec callables
 ParallelizeFunction: TypeAlias = Callable[..., nn.Module]
@@ -36,6 +38,7 @@ class ModelSpec:
     name: str
     flavor: str
     model: BaseModel.Config
+    max_context_length: int
     # NOTE: Callable fields use bare ``Callable`` instead of the parameterised
     # TypeAliases (e.g. ``ParallelizeFunction``) because tyro's type-parameter
     # resolver does not handle ``Callable[..., X]`` (Ellipsis as param spec).
@@ -47,8 +50,12 @@ class ModelSpec:
     state_dict_adapter: type[BaseStateDictAdapter] | None
 
     def traverse(
-        self, config_cls: type, *, recurse: bool = False, _prefix: str = ""
-    ) -> Iterator[tuple[str, "Configurable.Config", object | None, str | int | None]]:
+        self,
+        config_cls: type[_ConfigT],
+        *,
+        recurse: bool = False,
+        _prefix: str = "",
+    ) -> Iterator[tuple[str, _ConfigT, object | None, str | int | None]]:
         """Expose the nested model config to ``Configurable.Config.traverse``.
 
         ``ModelSpec`` is a plain dataclass, not a ``Configurable.Config``, so a

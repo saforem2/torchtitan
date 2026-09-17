@@ -87,7 +87,7 @@ GBS=96 success was about the dtype or about the batch size.
 ### What the n=128/n=256 deterministic scripts would have shown
 
 Nothing useful — both would NaN earlier than n=64 (GBS scales with N).
-Not submitting them. (Per [[feedback_never_kill_running_jobs]], they
+Not submitting them. (Per `feedback_never_kill_running_jobs`, they
 weren't actually queued — only n=64-det was.)
 
 ---

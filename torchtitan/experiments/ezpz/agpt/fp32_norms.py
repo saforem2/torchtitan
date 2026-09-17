@@ -52,7 +52,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from torchtitan.tools.logging import logger
+from torchtitan.experiments.ezpz.logging import logger
 
 __all__ = ["collect_norm_modules", "promote_norms_to_fp32", "is_norm_module"]
 

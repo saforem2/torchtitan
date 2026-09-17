@@ -56,6 +56,35 @@ def test_integration_run_exports_test_output_dir(monkeypatch, tmp_path: Path) ->
     )
 
 
+def test_numerics_run_uses_seed_config(monkeypatch, tmp_path: Path) -> None:
+    captured_command = None
+
+    def seed_config():
+        return llama3_debugmodel()
+
+    def fake_run(command, **kwargs):
+        nonlocal captured_command
+        captured_command = command
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    golden_path = tmp_path / "golden.txt"
+    golden_path.write_text("# step loss\n1 1.0\n")
+    monkeypatch.setattr("tests.integration_tests.run_tests.subprocess.run", fake_run)
+    test = OverrideDefinitions(
+        configs=[llama3_debugmodel],
+        test_name="seed_config_test",
+        ngpu=1,
+        golden_numerics_path=str(golden_path),
+        loss_compare_seed_config=seed_config,
+    )
+
+    run_single_test(test, str(tmp_path))
+
+    assert captured_command is not None
+    assert f"--seed-module={seed_config.__module__}" in captured_command
+    assert f"--seed-config={seed_config.__name__}" in captured_command
+
+
 def test_llama3_pp_numerics_has_one_microbatch_per_stage() -> None:
     config = llama3_debugmodel_fsdp2_tp2_pp2()
 
@@ -63,6 +92,14 @@ def test_llama3_pp_numerics_has_one_microbatch_per_stage() -> None:
         config.parallelism.num_pp_microbatches
         >= config.parallelism.pipeline_parallel_degree
     )
+
+
+def test_llama3_debug_config_defaults_to_short_context() -> None:
+    config = llama3_debugmodel()
+
+    assert config.model_spec is not None
+    assert config.model_spec.max_context_length == 2048
+    assert config.training.max_context_length == 2048
 
 
 def test_parse_multiple_integration_test_suites() -> None:
@@ -77,11 +114,10 @@ def test_parse_multiple_integration_test_suites() -> None:
 def test_h100_tests_are_registered_in_separate_suite() -> None:
     assert {test.test_name for test in build_h100_tests_list()} == {
         "2d_asynctp_compile",
-        "deepseek_v3_fsdp+cp+tp+minimal_async_ep",
         "deepseek_v3_fsdp+hybridep+compile",
         "dist_gemm",
         "float8",
-        "fsdp+tp+cp+compile+float8",
+        "fsdp+tp+pp+compile+float8",
         "fsdp_symm_mem",
         "hsdp+cp+compile+float8",
         "qwen3_fsdp+deepep",
@@ -91,15 +127,15 @@ def test_h100_tests_are_registered_in_separate_suite() -> None:
 
 
 def test_b200_tests_are_registered_in_separate_suite() -> None:
-    assert {test.test_name for test in build_b200_tests_list()} == {"kimi_k3_mm_fsdp"}
-    assert "kimi_k3_mm_fsdp" not in {
-        test.test_name for test in build_model_tests_list()
+    assert {test.test_name for test in build_b200_tests_list()} == {
+        "kimi_k3_mm",
+        "mxfp8_linear_fsdp",
     }
+    assert "kimi_k3_mm" not in {test.test_name for test in build_model_tests_list()}
 
 
 def test_specialized_moe_backends_have_ep_coverage() -> None:
     specialized_names = {
-        "deepseek_v3_fsdp+cp+tp+minimal_async_ep",
         "deepseek_v3_fsdp+hybridep+compile",
         "qwen3_fsdp+deepep",
     }
@@ -126,7 +162,10 @@ def test_models_select_fake_and_real_pg_cases() -> None:
         "muse_glimmer_text_fsdp",
         "muse_glimmer_mm_fsdp+tp+sp",
     } <= fake_pg_model_tests
-    assert {"deepseek_v3_fsdp+cp+pp+ep"} <= real_pg_model_tests
+    assert {
+        "deepseek_v3_fsdp+cp+pp+ep",
+        "deepseek_v4_fsdp+tp+ep",
+    } <= real_pg_model_tests
 
 
 def test_flux_fake_pg_filters_real_collective_cases() -> None:
@@ -147,7 +186,7 @@ def test_flux_fake_pg_filters_real_collective_cases() -> None:
 def test_fake_pg_incompatible_test_requires_explicit_marker(
     test_name: str, incompatibility: str
 ) -> None:
-    config = llama3_debugmodel()
+    config = llama3_debugmodel(seq_len=2048)
     if test_name == "checkpoint":
         config.checkpoint.enable = True
     elif test_name == "pipeline_parallel":
