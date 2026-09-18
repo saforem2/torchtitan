@@ -67,9 +67,15 @@ tokenizes raw text inline with OLMo-2.
 spends most probes above 1e-5 where everything has already diverged, and puts a
 plausible optimum AT the first sample where a minimum is unresolvable.
 
-**AdamW only.** The optimizer comparison is a separate campaign; SophiaG in
-particular flips into a persistent high-gradient regime at 30B 3/3 at random
-steps, which a sweep cannot distinguish from an LR cliff.
+**All four optimizers swept.** An earlier version of this file said AdamW
+only, on the grounds that SophiaG's curve is "smooth". That was wrong: SophiaG
+produced a real measured blow-up at 3.55e-04 in the 30B/GBS=960 sweep, the same
+as the other two arms. "Smooth through the low band" describes the region below
+the cliff and is true of every optimizer. A sweep finds a cliff if the window
+reaches it -- which is exactly why the window is now per-optimizer.
+
+SophiaG's 4/4 training divergences remain a reason not to LAUNCH it without
+--grad-norm-abort=20.0, but they were never a reason not to MEASURE it.
 
 **One size per job**, so a failure in one geometry does not cost the other two
 their walltime.
@@ -86,6 +92,25 @@ their walltime.
   three companions; olmo-mix wiki precached at 6.1 GB / 2 shards. (`du -sh` on
   an HF snapshot reports ~20K because snapshots are symlinks into `blobs/`;
   use `--dereference`.)
+
+## Job map
+
+3 sizes x 4 optimizers = 12 sweeps.
+
+| size | adamw | mano | muon | sophiag |
+|---|---|---|---|---|
+| 5b  | 8837334 | 8837373 | 8837397 | 8837391 |
+| 10b | 8837335 | 8837375 | 8837398 | 8837392 |
+| 30b | 8837336 | 8837377 | 8837399 | 8837393 |
+
+**Ignore any output from 8837374 / 8837376 / 8837378.** Those were the first
+muon submissions and carry a 1e-3 window, 5.7x BELOW muon's measured 5.68e-03
+cliff (30B/GBS=960). They will sweep, never diverge, and exit 0 with NO
+suggestion -- an empty result that looks like a failed optimizer rather than a
+mis-set window. PBS snapshots the script at qsub so they could not be fixed in
+place, and `qalter -v` cannot help either: the old script sets LRF_MAX_LR with
+an unconditional `export`, which overwrites anything injected. 8837397/8/9 are
+the corrected replacements.
 
 ## Results
 
