@@ -94,9 +94,25 @@ def main() -> int:
                              f"NO BLOW-UP in {min(lrs):.1e}-{max(lrs):.1e}"
                              " -- widen LRF_MAX_LR"))
                 continue
-            blow = cands[0]
-            rows.append((size, opt, blow / 10.0, blow, min_loss,
-                         f"{len(lrs)} rows"))
+
+            # find_optimal_lr returns EVERY negative-to-positive crossing, not
+            # just the cliff -- any noise wiggle early in the sweep is a local
+            # minimum too. On a real 20B adamw sweep it returned
+            # [2.31e-06, 3.95e-03]: the first is noise near the sweep's 1e-6
+            # start, the second is the true cliff at the loss minimum
+            # (3.98e-03). Taking cands[0] understated the LR by ~1700x.
+            #
+            # The blow-up is the crossing at or after the loss minimum: the
+            # curve must descend to its best value before the divergence that
+            # ends the usable band. Candidates below the minimum are on the
+            # descending branch and are not cliffs.
+            lr_at_min = lrs[min(range(len(losses)), key=lambda i: losses[i])]
+            after = [c for c in cands if c >= lr_at_min * 0.5]
+            blow = after[0] if after else cands[-1]
+            note = f"{len(lrs)} rows"
+            if len(cands) > 1:
+                note += f"; {len(cands)} candidates, took {blow:.2e}"
+            rows.append((size, opt, blow / 10.0, blow, min_loss, note))
 
     if args.markdown:
         print("| size | optimizer | suggested LR | blow-up | min loss | note |")
