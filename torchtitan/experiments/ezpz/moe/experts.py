@@ -410,6 +410,21 @@ def _run_experts_aurora_full_sonic(
             "(aurora_moe/_core.py:3727 raises otherwise)"
         )
 
+    # sycl_sonic hard-requires BF16 for x AND topk_scores (_core.py:3722-3725).
+    # In the real model the scores arrive as float32 even though an isolated
+    # router returns bf16 -- torchtitan promotes somewhere between the router
+    # and here (job 8836304 died on exactly this). Rather than chase which
+    # step does it, normalize at the boundary: this is the kernel's documented
+    # input contract, and the cast is a no-op when they already match.
+    if topk_scores.dtype != torch.bfloat16:
+        topk_scores = topk_scores.to(torch.bfloat16)
+    if x.dtype != torch.bfloat16:
+        raise ValueError(
+            "the aurora_full_sonic backend requires BF16 activations, got "
+            f"{x.dtype}. Casting x here would hide a real dtype problem in the "
+            "model, unlike the router scores, which are a routing decision."
+        )
+
     group = ep_mesh.get_group() if ep_mesh is not None else None
     mesh = ParallelMesh(MoEProcessGroups(ep_dispatch=group), x.device)
 
