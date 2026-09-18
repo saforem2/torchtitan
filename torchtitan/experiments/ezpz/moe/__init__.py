@@ -42,6 +42,8 @@ from torchtitan.protocols.model_spec import ModelSpec
 from torchtitan.models.common.activation import Sigmoid, Softmax
 from torchtitan.models.common.linear import RouterGateLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
+
+from .routed_experts import EzpzRoutedExperts
 from torchtitan.models.deepseek_v3 import DeepSeekV3Router
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
@@ -369,7 +371,13 @@ def make_ezpz_experts_config(
         comm_backend=comm_backend,
         non_blocking_capacity_factor=non_blocking_capacity_factor,
     )
-    return RoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
+    # EzpzRoutedExperts, not RoutedExperts: identical behaviour for the five
+    # backends that take (x, num_tokens_per_expert), but it forwards the
+    # router's decision to inner_experts for aurora_full_sonic, which core
+    # drops at models/common/moe.py:163.
+    return EzpzRoutedExperts.Config(
+        inner_experts=inner, token_dispatcher=dispatcher
+    )
 
 
 def make_ezpz_moe_config(
