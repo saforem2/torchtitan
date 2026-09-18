@@ -751,6 +751,48 @@ agpt_configs = {
         vocab_size=100352,
         hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
     ),
+    # ---- Aurora-native mid-ladder, OLMo-2 vocab ----
+    #
+    # The size ladder jumped 2B (dim 2048) straight to 20B (dim 5120); the 7B
+    # and 8B in this dict are Llama-geometry ports on foreign vocabs (32000 /
+    # 128256), not members of this family. These two fill that gap with the
+    # same conventions as 20B/30B: head_dim 128, GQA with 8 kv heads,
+    # compute_ffn_hidden_dim at multiple_of=1024.
+    #
+    # Both take OLMo-2's 100,352 vocab for the reason exp07 measured at 30B --
+    # it tied Llama-3.1 on fertility (225,749 vs 225,539 tok/MB) with a 22%
+    # smaller vocab -- and the argument is STRONGER here, because embedding is
+    # a larger share of a smaller model. At dim 3072 gemma's 256,128 vocab
+    # would be ~34% of the parameters; OLMo-2 makes it ~14%.
+    #
+    # Caveat on the mechanism, not the choice: exp07's framing was "freed HBM
+    # converts into batch size". That held because the 30B was pinned at 76.8%
+    # of a 64 GiB tile. These sizes are nowhere near that ceiling, so the vocab
+    # buys parameters and fertility here, not throughput. Do not cite the
+    # throughput half of exp07 for these.
+    "5B_olmo2tok": _build_agpt_config(
+        dim=3072,
+        n_layers=40,
+        n_heads=24,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(3072, multiple_of=1024),
+    ),
+    # dim 4096 puts n_heads at 32, which is NOT divisible by 12, so TP=12 is
+    # unavailable -- the 80B family deliberately picked 72 heads / 12 kv to
+    # keep it. Accepted here: exp05 measured TP=4 costing 55% of throughput on
+    # this stack (340 -> 151 tps), so TP>2 is not a capability these sizes
+    # would use. TP in {2, 4, 8} all divide cleanly.
+    "10B_olmo2tok": _build_agpt_config(
+        dim=4096,
+        n_layers=48,
+        n_heads=32,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(4096, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -899,6 +941,8 @@ agpt_configs["20b"] = agpt_configs["20B"]
 agpt_configs["30b"] = agpt_configs["30B"]
 agpt_configs["30b_llama3tok"] = agpt_configs["30B_llama3tok"]
 agpt_configs["30b_olmo2tok"] = agpt_configs["30B_olmo2tok"]
+agpt_configs["5b_olmo2tok"] = agpt_configs["5B_olmo2tok"]
+agpt_configs["10b_olmo2tok"] = agpt_configs["10B_olmo2tok"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]

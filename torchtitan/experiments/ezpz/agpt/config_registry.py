@@ -1025,6 +1025,66 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_llama3tok", hf_assets_path="./assets/hf/Llama-3.1-8B")
 
 
+def agpt_5b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """4.64B on OLMo-2's 100,352 vocab -- the low rung of the Aurora mid-ladder.
+
+    The family jumped 2B (dim 2048) to 20B (dim 5120) with nothing native in
+    between; dim 3072 is the only 2x gap in the ladder and this fills it.
+    Geometry follows 20B/30B exactly: head_dim 128, GQA 8, ffn via
+    compute_ffn_hidden_dim(multiple_of=1024).
+
+    The tokenizer argument from exp07 is stronger at this size than at 30B.
+    Embedding share against gemma's 256,128 vocab would be ~34% of the model
+    here versus 11% at dim 6144; OLMo-2 brings it to ~14%. What it does NOT
+    buy at this size is throughput -- exp07's "freed HBM converts into batch
+    size" held because the 30B was pinned at 76.8% of a 64 GiB tile, and these
+    sizes are far below that.
+
+    NOT RUNNABLE ON AURORA AS WRITTEN. ./assets/hf/OLMo-2-1124-7B does not
+    exist there -- verified 2026-09-17, every checkout has only gemma-7b,
+    llama-2-7b-hf and DeepSeek variants, and a find across
+    /flare/AuroraGPT/foremans returns nothing for OLMo-2. The 30B hit the same
+    wall (see submit_lr_finder_30b_aurora.sh, which falls back to agpt_30b for
+    exactly this). Staging the tokenizer is cheap -- it is a tokenizer, not a
+    model -- but the Aurora corpus is ALSO gemma-tokenized
+    (data_fused_gemma_eod), so running this there means either a retokenized
+    corpus or an id mismatch that trains to a plausible loss and evaluates as
+    gibberish. That is the Polaris 20B failure mode.
+
+    LR is NOT calibrated. agpt() hands every size lr=8e-4 and the only guard
+    in this file keys on the 80B flavor prefix, so nothing stops this config
+    running at a value ~35x the 20B's production 2.28e-5. Run a finder first.
+    """
+    return agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
+def agpt_10b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """9.48B on OLMo-2's 100,352 vocab -- the high rung of the mid-ladder.
+
+    dim 4096, 48 layers, 32 heads, 8 kv. Sits at roughly half the 20B's
+    non-embedding capacity, which makes the 5B/10B/20B/30B set a real scaling
+    series on one tokenizer rather than four point designs.
+
+    n_heads=32 is not divisible by 12, so unlike the 80B family this cannot do
+    TP=12. Accepted deliberately: exp05 measured TP=4 costing 55% of
+    throughput on this stack (340 -> 151 tps at 30B), so TP>2 is not a
+    capability these sizes would spend. TP in {2, 4, 8} divides cleanly.
+
+    Same two caveats as agpt_5b_olmo2tok: the OLMo-2 assets are absent from
+    Aurora and the corpus there is gemma-tokenized, and the LR is
+    uncalibrated and unguarded.
+
+    One risk specific to this rung: the 30B campaign's thesis (README section
+    1.3, exp06) is that a bigger model hides communication better -- more
+    per-rank work per collective. A 10B has ~2.5x less compute per token than
+    the 30B, moving back toward the regime where the 2B collapsed to 8.79% MFU
+    at 512N. Its efficient range is probably 64-128N, which lands in Aurora's
+    queue dead zone: nothing between 8 and 255 nodes runs longer than an hour.
+    Unmeasured either way.
+    """
+    return agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
 def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
 
