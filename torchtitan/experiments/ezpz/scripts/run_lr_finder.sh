@@ -81,16 +81,40 @@ set +u
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 set -u
 
-source .venv/bin/activate
-if [[ -f .venv.tar.gz ]]; then
+# LRF_VENV_SRC names a venv tarball OUTSIDE this repo to broadcast instead of
+# the local .venv. Needed on the next-eval queue: that queue runs a TEST bkc
+# image (26.181.0), while this repo's .venv is based on a
+# /opt/aurora/26.26.0/spack/... python that exists only on the PROD image, so
+# activating it there fails with a misleading "no importlib.metadata". A venv
+# based on $HOME/.local/share/uv is image-independent. The repo still supplies
+# the CODE; only the runtime comes from elsewhere.
+LRF_VENV_SRC="${LRF_VENV_SRC:-}"
+
+if [[ -n "${LRF_VENV_SRC}" ]]; then
+    if [[ ! -f "${LRF_VENV_SRC}" ]]; then
+        echo "lr-finder FATAL: LRF_VENV_SRC not found: ${LRF_VENV_SRC}" >&2
+        exit 2
+    fi
+    # No local .venv activation first -- that is the step that would die on a
+    # mismatched image, and it is not needed: `ezpz` comes from ezpz-utils,
+    # already sourced above.
+    log_message INFO "lr-finder: yeet-env via external tarball (${LRF_VENV_SRC})"
+    ezpz yeet-env --src "${LRF_VENV_SRC}"
+elif [[ -f .venv.tar.gz ]]; then
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via tarball (.venv.tar.gz)"
     ezpz yeet-env --src .venv.tar.gz
+    deactivate
 else
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via per-file rsync (.venv.tar.gz not present)"
     ezpz yeet-env
+    deactivate
 fi
-deactivate
 source /tmp/.venv/bin/activate
+
+# The repo supplies the code even when the runtime came from elsewhere.
+export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---------------------------------------------------------------------------
 # Configuration

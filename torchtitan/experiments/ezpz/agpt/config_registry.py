@@ -1333,6 +1333,30 @@ def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     )
 
 
+def agpt_30b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """26.2B twin of agpt_5b_olmo2tok_smoke -- same data path, same caveats.
+
+    Completes the {5, 10, 30}B ladder on one data path so the three LR finders
+    differ only in geometry. submit_lr_finder_30b_aurora.sh calibrates the
+    GEMMA 30B (agpt_30b, 256k vocab, 28.1B) instead, because the OLMo-2 assets
+    were absent from Aurora when it was written; they are staged now, and that
+    script's own CONFIG note says to re-run against this geometry once they
+    are. The vocab difference is not cosmetic -- it moves 1.9B parameters
+    between the embedding/head and the body, which is exactly the part of the
+    model an LR has to suit.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
 def agpt_30b_olmo2tok_optcmp_adamw() -> FaultTolerantTrainer.Config:
     """AdamW arm of the fixed-batch optimizer comparison, on fineweb-edu.
 
