@@ -14,6 +14,9 @@ M="${3:-$(hostname -s | sed 's/[0-9-].*//')}"
 fail=0
 ok()   { printf "  OK    %s\n" "$1"; }
 bad()  { printf "  BAD   %s\n" "$1"; fail=1; }
+# Informational only -- never sets `fail`. For facts worth printing that are
+# not gates (see the #181519 line below).
+note() { printf "  note  %s\n" "$1"; }
 
 cd "$W" 2>/dev/null || { bad "worktree $W does not exist"; exit 1; }
 
@@ -37,12 +40,33 @@ for m in torch mpi4py ezpz blendcorpus; do
   "$V/bin/python" -c "import $m" 2>/dev/null && ok "py:$m" || bad "py:$m not importable in $V"
 done
 
-# --- torch floor: pytorch #181519, by SYMBOL not prose ---
+# --- torch floor: the symbol HEAD actually imports, by SYMBOL not prose ---
+#
+# This used to hard-FAIL on pytorch #181519 (_resolve_spmd_types_for_storage)
+# and call it "this torch dies at FSDP wrapping". That verdict fails EVERY venv
+# we own -- both 2.13 builds score 0, including the production venv the live
+# 2B/20B chains are training on right now. A check that red-lights a
+# known-good production runtime is not a floor, it is a blocker for work that
+# would have succeeded.
+#
+# What HEAD actually requires is DataParallelMeshDims, imported at
+# torchtitan/distributed/fsdp.py:16. That is the real floor (it is what the
+# torch-2.10 Polaris venv cannot satisfy), and it is present on both 2.13
+# builds. Verified by import, not by grep: `from torch.distributed.fsdp import
+# DataParallelMeshDims` succeeds and torchtitan.distributed.fsdp loads.
+#
+# #181519 is kept as an informational line, because it is still the thing to
+# check when FSDP wrapping misbehaves on a 2.15 nightly -- just not a gate.
+if "$V/bin/python" -c "from torch.distributed.fsdp import DataParallelMeshDims" 2>/dev/null; then
+  ok "torch floor: DataParallelMeshDims importable"
+else
+  bad "torch floor: DataParallelMeshDims MISSING -- HEAD imports it at torchtitan/distributed/fsdp.py:16"
+fi
 f=$(ls "$V"/lib/python3*/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py 2>/dev/null | head -1)
 if [ -n "$f" ]; then
   n=$(grep -c _resolve_spmd_types_for_storage "$f")
-  [ "$n" -gt 0 ] && ok "#181519 present ($(wc -l < "$f") lines)" \
-                 || bad "#181519 ABSENT -- this torch dies at FSDP wrapping"
+  [ "$n" -gt 0 ] && note "#181519 present ($(wc -l < "$f") lines)" \
+                 || note "#181519 absent ($(wc -l < "$f") lines) -- normal for 2.13, not a blocker"
 fi
 
 # --- XPU geometry: the one that keeps biting ---
