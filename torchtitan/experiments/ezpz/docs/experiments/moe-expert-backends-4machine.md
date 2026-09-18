@@ -1,8 +1,12 @@
 # MoE expert backends across four machines
 
-**Bottom line:** all five backends behave correctly. `bmm_nodrop` is BIT-EXACT
-against `for_loop`, and `aurora_sycl` WORKS on Aurora -- settling a question the
-branch history left contradictory.
+**Bottom line:** all SIX backends behave correctly. `bmm_nodrop` is BIT-EXACT
+against `for_loop`, `aurora_sycl` works on both XPU machines, and
+`aurora_full_sonic` -- which this branch recorded as "deliberately not ported"
+-- is now ported and training at ~5e-05 from the reference.
+
+Correctness is settled. **Performance is not**, and performance is the entire
+reason sonic exists: see "Performance" at the end.
 
 Tested on `feat/aurora-moe-port` sitting on top of the merged sync 84.
 
@@ -33,6 +37,7 @@ the controlled A/B establishing that was run on Sunspot, not here.
 | `bmm_nodrop`  | **0.000e+00** | **0.000e+00** | **0.000e+00** | **0.000e+00** |
 | `grouped_mm`  | 0.000e+00 | 0.000e+00 | 0.000e+00 | 0.000e+00 |
 | `aurora_sycl` | **6.104e-05** | **6.104e-05** | `ValueError: x must be an XPU tensor` | same |
+| `aurora_full_sonic` | **~5e-05** (EP=2, job `8837281`) | not run | XPU-only | XPU-only |
 
 Numbers are max abs difference vs the `for_loop` reference, bf16, E=4 experts,
 D=64, H=128, counts `[8, 0, 5, 3]` (note the deliberate empty expert). Every
@@ -209,3 +214,26 @@ Two traps worth repeating, both of which produced false results here first:
   and is writable, but it is `tmpfs` -- node-local, so a file staged to the
   login node's `/tmp` is invisible there. PBS ships the job script itself, so
   the job starts and only fails when it opens a second file by path.
+
+## Performance
+
+Unmeasured as of this writing. Job `8837353` runs the comparison that matters:
+
+| arm | config | EP | why |
+|---|---|---|---|
+| baseline | `moe_10b_2b_sdpa_bmm_ep` | 12 | the best correct backend today |
+| candidate | `moe_10b_2b_sdpa_sonic_ep` | 12 | identical model/mesh, sonic swapped in |
+
+Same 2 nodes / 24 ranks, same seed, 10 steps each (the repo asks for >=10 so
+startup does not dominate), `activation-checkpoint:none` per the EP flavor
+note, sequence 2048.
+
+Two things to read carefully when it lands:
+
+- **Wall time includes compile.** `torch.compile` graph-breaks on every SYCL
+  custom op, so sonic pays a large fixed startup the bmm path does not. The
+  3-step EP=2 smoke took ~20 minutes wall. Compare steady-state step time,
+  not total wall, or the answer is meaningless.
+- **A speed win with divergent loss is not a win.** The EP=2 run agrees to
+  ~5e-05; if the EP=12 arm drifts materially further, that is a finding about
+  the backend at scale, not a benchmark to celebrate.
