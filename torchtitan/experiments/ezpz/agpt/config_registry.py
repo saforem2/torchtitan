@@ -1333,6 +1333,80 @@ def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     )
 
 
+# Optimizer-comparison arms for the OLMo-2 ladder.
+#
+# One factory instead of 12 near-identical functions. The LRs are deliberately
+# NOT defaults here: each must come from that (size, optimizer) pair's own
+# sweep at GBS=6144. For Mano alone the suggestion spans 4.79e-03 (2B) to
+# ~3e-06 (80B at GBS=6144), so a borrowed number is not an approximation, it
+# is a different experiment. Passing lr explicitly at the call site keeps the
+# provenance visible in the config that ran.
+_LADDER_OPTIMIZER_FACTORIES = {
+    "adamw": default_adamw,
+    "mano": default_mano,
+    "muon": default_muon,
+    "sophiag": default_sophiag,
+}
+
+
+def agpt_olmo2tok_arm(
+    size: str,
+    optimizer: str,
+    *,
+    lr: float,
+    decay: bool = False,
+) -> FaultTolerantTrainer.Config:
+    """One optimizer-comparison arm on the OLMo-2 ladder.
+
+    `size` is "5b" / "10b" / "30b"; `optimizer` keys
+    _LADDER_OPTIMIZER_FACTORIES; `lr` is that pair's measured suggestion at
+    GBS=6144 and has no default on purpose.
+
+    `decay=False` reproduces the 30B campaign's constant-LR protocol, which is
+    what makes the two comparable. `decay=True` is the open question that
+    campaign named and did not answer: the documented prior is "Mano/Muon win
+    short runs, AdamW wins in the cosine decay phase", so a constant-LR result
+    showing Mano ahead is CONSISTENT with that prior rather than a refutation
+    of it. Only the decay arms can distinguish the two.
+
+    Reads the same precached olmo-mix wiki subset as the smoke configs: the
+    on-disk blendcorpus on Aurora is gemma-tokenized, and pointing an
+    OLMo-2-vocab model at gemma ids trains to a plausible loss and evaluates
+    as gibberish.
+    """
+    if optimizer not in _LADDER_OPTIMIZER_FACTORIES:
+        raise ValueError(
+            f"unknown optimizer {optimizer!r}; "
+            f"expected one of {sorted(_LADDER_OPTIMIZER_FACTORIES)}"
+        )
+    if not lr > 0:
+        raise ValueError(f"lr must be positive, got {lr!r}")
+
+    cfg = agpt(f"{size}_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = _LADDER_OPTIMIZER_FACTORIES[optimizer](lr=lr)
+    if not decay:
+        # Constant after warmup, via the DECAY_RATIO=0 precedent the anneal
+        # arms use: decay_ratio=0.0 makes the decay phase zero steps, and
+        # min_lr_factor=1.0 pins the floor at full LR so any multiplier that
+        # did get computed is a no-op. ("constant" is not a decay_type; the
+        # valid values here are the linear/cosine family.)
+        #
+        # warmup_steps=20 matches the 30B campaign's protocol exactly, which
+        # is what makes these arms comparable to it. Note torchtitan clamps
+        # warmup_steps to total_steps and only WARNS, so a very short arm
+        # silently becomes all-warmup -- the submit script keeps steps far
+        # above 20.
+        cfg.lr_scheduler.warmup_steps = 20
+        cfg.lr_scheduler.decay_ratio = 0.0
+        cfg.lr_scheduler.decay_type = "linear"
+        cfg.lr_scheduler.min_lr_factor = 1.0
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
 def agpt_30b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     """26.2B twin of agpt_5b_olmo2tok_smoke -- same data path, same caveats.
 
