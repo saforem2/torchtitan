@@ -5,8 +5,11 @@ against `for_loop`, `aurora_sycl` works on both XPU machines, and
 `aurora_full_sonic` -- which this branch recorded as "deliberately not ported"
 -- is now ported and training at ~5e-05 from the reference.
 
-Correctness is settled. **Performance is not**, and performance is the entire
-reason sonic exists: see "Performance" at the end.
+Correctness is settled. A matched compiled Sunspot run now gives the first
+performance comparison: Sonic is roughly even with BMM in the initially stable
+steps, but 21% slower end-to-end because both arms show large mid-run compile
+stalls. See "Performance" at the end; this is directional, not a production-
+shape EP=12 result.
 
 Tested on `feat/aurora-moe-port` sitting on top of the merged sync 84.
 
@@ -37,7 +40,7 @@ the controlled A/B establishing that was run on Sunspot, not here.
 | `bmm_nodrop`  | **0.000e+00** | **0.000e+00** | **0.000e+00** | **0.000e+00** |
 | `grouped_mm`  | 0.000e+00 | 0.000e+00 | 0.000e+00 | 0.000e+00 |
 | `aurora_sycl` | **6.104e-05** | **6.104e-05** | `ValueError: x must be an XPU tensor` | same |
-| `aurora_full_sonic` | **~5e-05** (EP=2, job `8837281`) | not run | XPU-only | XPU-only |
+| `aurora_full_sonic` | **~5e-05** (EP=2, job `8837281`) | **training + perf measured** (EP=2, job `12478121`) | XPU-only | XPU-only |
 
 Numbers are max abs difference vs the `for_loop` reference, bf16, E=4 experts,
 D=64, H=128, counts `[8, 0, 5, 3]` (note the deliberate empty expert). Every
@@ -161,11 +164,9 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
 Expect a long startup: `torch.compile` graph-breaks on every SYCL custom op,
 so the first steps take minutes. Job `8837281` ran ~20 min wall for 3 steps.
-
-**Not yet measured: performance.** The whole point of this backend is speed,
-and a 3-step debugmodel run says nothing about it. The next step is
-`moe_10b_2b_sdpa_sonic_ep` against `moe_10b_2b_sdpa_bmm_ep` at EP=12, same
-node count, comparing step time and MFU.
+The smaller Sunspot comparison below also shows compile/recompile cliffs within
+the measured window, so individual step TPS must not be presented as a single
+steady-state throughput number.
 
 `aurora_full_loop` remains unported and is a separate question.
 
@@ -217,23 +218,77 @@ Two traps worth repeating, both of which produced false results here first:
 
 ## Performance
 
-Unmeasured as of this writing. Job `8837353` runs the comparison that matters:
+### First matched result: Sunspot debugmodel, EP=2
 
-| arm | config | EP | why |
-|---|---|---|---|
-| baseline | `moe_10b_2b_sdpa_bmm_ep` | 12 | the best correct backend today |
-| candidate | `moe_10b_2b_sdpa_sonic_ep` | 12 | identical model/mesh, sonic swapped in |
+Jobs `12478114` (BMM) and `12478121` (Sonic) form a controlled comparison:
 
-Same 2 nodes / 24 ranks, same seed, 10 steps each (the repo asks for >=10 so
-startup does not dominate), `activation-checkpoint:none` per the EP flavor
-note, sequence 2048.
+- Sunspot `workq`, `venvs/xpu-torch214`, torch `2.14.0+xpu`
+- commit `fb062f51aa443086b254096fbec11f14c14ecd8f`
+- 1 node / 12 ranks, EP=2, seed 42
+- max context and tokens per microbatch per DP rank both 512
+- 20 steps, compile ON, activation checkpointing off
+- `CCL_SYCL_KERNEL_SYNC=0` in both arms
 
-Two things to read carefully when it lands:
+| metric | `bmm` (`12478114`) | `aurora_full_sonic` (`12478121`) | Sonic vs BMM |
+|---|---:|---:|---:|
+| return code | 0 | 0 | -- |
+| wall time | 103 s | 125 s | **21.4% slower** |
+| mean TPS, steps 2-6 | 3,332 | 3,307 | **0.8% slower** |
+| median TPS, steps 2-6 | 3,382 | 3,235 | **4.3% slower** |
+| mean TPS, steps 17-20 | 1,148 | 3,718 | not comparable; BMM recompiled/stalled |
+| final loss | 9.29467 | 9.28677 | -0.00790 |
+| maximum absolute loss delta | -- | 0.01107 | at step 19 |
+| peak memory | 1.45 GiB | 1.46 GiB | +0.01 GiB |
+| oneCCL occupancy errors | 0 | 0 | -- |
+| segfaults | 0 | 0 | -- |
 
-- **Wall time includes compile.** `torch.compile` graph-breaks on every SYCL
-  custom op, so sonic pays a large fixed startup the bmm path does not. The
-  3-step EP=2 smoke took ~20 minutes wall. Compare steady-state step time,
-  not total wall, or the answer is meaningless.
-- **A speed win with divergent loss is not a win.** The EP=2 run agrees to
-  ~5e-05; if the EP=12 arm drifts materially further, that is a finding about
-  the backend at scale, not a benchmark to celebrate.
+The **steps 2-6 window is the cleanest directional comparison** before either
+trace hits a severe compile/recompile cliff. It shows no Sonic speedup at this
+small shape: mean throughput is effectively tied (-0.8%), while total wall
+clock is 21.4% worse for Sonic. The complete traces are highly non-stationary:
+BMM falls to 326-332 TPS at steps 18-20, while Sonic falls to 90-473 TPS at
+steps 7-16 before recovering to 3,428-3,832 TPS. Consequently neither the
+whole-run arithmetic mean nor the final four steps are defensible as a stable
+kernel benchmark.
+
+The losses remain close but are not bit-identical. Across 20 steps the mean
+absolute delta is 0.00192 and the maximum is 0.01107 at step 19. Final losses
+are 9.29467 (BMM) and 9.28677 (Sonic). This is consistent with the previously
+established bf16/reduction-order drift; there are no non-finite values or
+qualitative divergence.
+
+### oneCCL issue exposed by the first attempt
+
+The original two-node comparison, job `12478094`, was not a valid performance
+result. Its BMM arm reached step 10 and then rank 4 segfaulted in compiled
+backward; Sonic never started. The log contained 360 instances of:
+
+```text
+oneCCL: allgatherv_small_sycl_impl.hpp:195 operator(): EXCEPTION:
+sycl threads : 4096 > hw threads : 3584 is not allowed in allgatherv small
+```
+
+A 1-node control (`12478113`) reproduced 252 of these messages but completed 20
+steps without a segfault, proving that reducing the topology alone does not
+remove the invalid oneCCL small-allgather path and that the error does not
+predict a deterministic crash. The matched BMM control (`12478114`) set:
+
+```bash
+export CCL_SYCL_KERNEL_SYNC=0
+```
+
+and completed with zero occupancy errors and zero segfaults. The Sonic arm used
+the same setting. This tells oneCCL to split synchronization across multiple
+kernels instead of requiring all 4,096 SYCL threads to be resident
+simultaneously on a 3,584-thread PVC tile.
+
+### What remains
+
+This is a valid first performance comparison, but not the production-shape
+answer. The remaining benchmark is
+`moe_10b_2b_sdpa_bmm_ep` versus `moe_10b_2b_sdpa_sonic_ep` at EP=12, with the
+same node count, compile enabled, `CCL_SYCL_KERNEL_SYNC=0`, and enough post-
+compile steps to identify a genuinely stable window. The failed Aurora jobs
+`8837353` and `8837465` do not answer that question: the former spent its
+90-minute allocation compiling and logged no steps; the latter disabled
+compile, logged no steps in 48 minutes, and was deliberately deleted.
