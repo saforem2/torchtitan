@@ -47,11 +47,12 @@
 # gibberish failure, and it fails SILENTLY -- ids below the embedding size
 # index fine and the loss curve looks plausible.
 #
-# LR WINDOW: 1e-8 -> 1e-3, 5 decades. Inherited from the 30B script for the
-# same reasons: the script default 1e-6 -> 1.0 spends most of its probes above
-# 1e-5 where everything has already diverged, and places a plausible optimum AT
-# the first sample where a minimum is unresolvable. At LRF_FRACTION=0.15 of
-# 1000 steps that is 150 probes = 30 points/decade.
+# LR WINDOW: 1e-8 -> 1e-3 (1e-1 for muon), 5-7 decades. Inherited from the 30B
+# script for the same reasons: the script default 1e-6 -> 1.0 spends most of
+# its probes above 1e-5 where everything has already diverged, and places a
+# plausible optimum AT the first sample where a minimum is unresolvable. At
+# LRF_FRACTION=0.15 of 1000 steps that is 150 probes = 30 points/decade (21 for
+# muon's wider window -- coarser, but a resolved cliff beats a missing one).
 #
 # OPTIMIZERS: set LRF_OPTIMIZERS, default adamw. The fixed-batch comparison at
 # 30B/GBS=960 is COMPLETE and found Mano ahead of AdamW by 0.075 nats at 23.6B
@@ -97,8 +98,19 @@ export LRF_SEQ_LEN=4096
 
 export LRF_STEPS=1000
 export LRF_FRACTION=0.15
+# Window is PER OPTIMIZER, because a sweep that never reaches the cliff yields
+# no suggestion at all -- and exits 0 having burned the whole walltime.
+# Measured blow-ups at 30B/GBS=960: adamw 3.05e-04, sophiag 3.55e-04,
+# mano 5.61e-04, muon 5.68e-03. Muon's is 5.7x ABOVE a 1e-3 top, so the shared
+# window would have silently produced nothing for it.
+# Each window keeps ~a decade of margin above the known cliff; the batch here
+# is 6.4x the batch those were measured at, and optimal LR moves with batch, so
+# the margin is doing real work rather than padding.
 export LRF_INIT_LR=1e-8
-export LRF_MAX_LR=1e-3
+case "${LRF_OPTIMIZERS}" in
+    *muon*) export LRF_MAX_LR=1e-1 ;;
+    *)      export LRF_MAX_LR=1e-3 ;;
+esac
 
 # TP=1: these sizes fit without it, and exp05 measured TP=4 costing 55% of
 # throughput on this stack (340 -> 151 tps). The runner's TP block is 80B-only,
