@@ -27,6 +27,24 @@ reproduced the same five omissions repeatedly.
 | Polaris: `module load cray-pals`, `mpiexec --no-transfer`, `libfabric` | `mpiexec: command not found` (rc=127); then PALS stages the interpreter without `libpython3.12.so.1.0`; then `libfabric.so.1: cannot open shared object file`. |
 | Polaris: scope the `mpi-compat` dir to ranks via `mpiexec --env`, never `export` it | `*** stack smashing detected ***` in EVERY coreutil (`mkdir`, `whoami`, `head`). Presents as an unrelated filesystem failure. |
 
+## Submit through the wrapper, not qsub directly
+
+```bash
+.claude/skills/alcf-job-preflight/submit.sh <worktree> <venv> <machine> <job.sh>
+```
+
+`preflight.sh` exits non-zero, but that only helps if something acts on it.
+Running `bash preflight.sh ...; qsub job.sh` in one chain ignores the exit
+code and submits anyway -- which happened: preflight printed "PREFLIGHT FAIL,
+do not submit" against a 4-commit-stale worktree and the job was queued in the
+same command. `submit.sh` runs the check and refuses to submit when it fails.
+
+A check whose result you can ignore by accident is not a gate.
+
+(If a job is already queued with a stale worktree, you may not need to qdel it:
+PBS snapshots the SCRIPT at submit time but the worktree is read at RUNTIME, so
+updating the checkout while the job sits in the queue can rescue it.)
+
 ## Before every submission
 
 **1. Dry-run the APIs on the login node.** Presence checks are not enough --
