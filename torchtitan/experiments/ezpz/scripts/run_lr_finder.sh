@@ -81,16 +81,40 @@ set +u
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 set -u
 
-source .venv/bin/activate
-if [[ -f .venv.tar.gz ]]; then
+# LRF_VENV_SRC names a venv tarball OUTSIDE this repo to broadcast instead of
+# the local .venv. Needed on the next-eval queue: that queue runs a TEST bkc
+# image (26.181.0), while this repo's .venv is based on a
+# /opt/aurora/26.26.0/spack/... python that exists only on the PROD image, so
+# activating it there fails with a misleading "no importlib.metadata". A venv
+# based on $HOME/.local/share/uv is image-independent. The repo still supplies
+# the CODE; only the runtime comes from elsewhere.
+LRF_VENV_SRC="${LRF_VENV_SRC:-}"
+
+if [[ -n "${LRF_VENV_SRC}" ]]; then
+    if [[ ! -f "${LRF_VENV_SRC}" ]]; then
+        echo "lr-finder FATAL: LRF_VENV_SRC not found: ${LRF_VENV_SRC}" >&2
+        exit 2
+    fi
+    # No local .venv activation first -- that is the step that would die on a
+    # mismatched image, and it is not needed: `ezpz` comes from ezpz-utils,
+    # already sourced above.
+    log_message INFO "lr-finder: yeet-env via external tarball (${LRF_VENV_SRC})"
+    ezpz yeet-env --src "${LRF_VENV_SRC}"
+elif [[ -f .venv.tar.gz ]]; then
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via tarball (.venv.tar.gz)"
     ezpz yeet-env --src .venv.tar.gz
+    deactivate
 else
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via per-file rsync (.venv.tar.gz not present)"
     ezpz yeet-env
+    deactivate
 fi
-deactivate
 source /tmp/.venv/bin/activate
+
+# The repo supplies the code even when the runtime came from elsewhere.
+export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -163,9 +187,22 @@ LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 # Set LRF_DFL_NAME to match the config's tokenizer:
 #   gemma configs (agpt_2b/20b/30b/80b)  -> olmo-mix-1124 (data_fused_gemma_eod)
 #   *_llama3tok / *_olmo2tok             -> a list tokenized to match
+#
+# LRF_USE_CONFIG_DATALOADER=1 leaves the config's own dataloader alone, for
+# configs that carry a complete one. That is the only workable route for an
+# OLMo-2-vocab model on Aurora right now: EVERY blendcorpus list here is
+# gemma- or Llama-2-tokenized, so the "list tokenized to match" named above
+# does not exist for *_olmo2tok. The *_smoke configs read precached olmo-mix
+# parquet through Grain and tokenize inline with OLMo-2 instead, which is what
+# makes the geometry calibratable at all. Without this switch the hardcoded
+# --dataloader.dataset below would override that and feed gemma ids to a
+# 100,352 embedding -- silently, with a plausible curve, which is the whole
+# failure this block warns about.
+LRF_USE_CONFIG_DATALOADER="${LRF_USE_CONFIG_DATALOADER:-0}"
+
 LRF_DFL_NAME="${LRF_DFL_NAME:-books}"
 DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/${LRF_DFL_NAME}.txt"
-if [[ ! -f "$DATASET_PATH" ]]; then
+if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]] && [[ ! -f "$DATASET_PATH" ]]; then
     echo "lr-finder FATAL: data list not found: $DATASET_PATH" >&2
     exit 2
 fi
@@ -255,6 +292,16 @@ for model in "${MODELS[@]}"; do
         cache_args=(--dataloader.data-cache-path "${LRF_DATA_CACHE_PATH}")
     fi
 
+    # Empty when the config owns its dataloader (see LRF_USE_CONFIG_DATALOADER
+    # above); otherwise the historical blendcorpus override.
+    dataloader_args=()
+    if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]]; then
+        dataloader_args=(
+            --dataloader.dataset blendcorpus
+            --dataloader.dataset_path "${DATASET_PATH}"
+        )
+    fi
+
     for opt in "${OPTIMIZERS[@]}"; do
         label="${model}_${opt}"
         logfile="${OUTDIR}/${label}.log"
@@ -309,8 +356,7 @@ for model in "${MODELS[@]}"; do
             --training.seq_len "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
-            --dataloader.dataset blendcorpus \
-            --dataloader.dataset_path "${DATASET_PATH}" \
+            "${dataloader_args[@]}" \
             "${cache_args[@]}" \
             --lr_finder.enable \
             --lr_finder.init_lr "${LRF_INIT_LR}" \

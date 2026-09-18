@@ -602,7 +602,8 @@ TRAJECTORIES: list[dict] = [
             "pltbp016",
         ],
         "olog_fallbacks": None,
-        "eval_subdir": None,
+        # 6 results, head step-22300 (all 2026-09-17)
+        "eval_subdir": "agpt-2b-v2-512n-stage2",
         "cls": "live",
     },
     {
@@ -647,7 +648,8 @@ TRAJECTORIES: list[dict] = [
             "3ki7erdc",
         ],
         "olog_fallbacks": None,
-        "eval_subdir": None,
+        # 14 results, head step-28000 (all 2026-09-17)
+        "eval_subdir": "agpt-2b-v2-256n-stage2",
         "cls": "live",
     },
     {
@@ -701,7 +703,8 @@ TRAJECTORIES: list[dict] = [
             "q5pa4ssw",
         ],
         "olog_fallbacks": None,
-        "eval_subdir": None,
+        # 5 results, head step-39200 (all 2026-09-17)
+        "eval_subdir": "agpt-2b-v2-512n-constlr",
         # wandb_only: it is a deliberate LR ablation, not a production chain,
         # so it belongs on the board and in prod_dash but is not required on
         # the canonical overlay charts (which the live-chain guard enforces).
