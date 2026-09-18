@@ -1310,7 +1310,11 @@ def agpt_5b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     cfg = agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     return _use_hf_streaming(
         cfg,
-        path="parquet",
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
@@ -1320,7 +1324,11 @@ def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     cfg = agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     return _use_hf_streaming(
         cfg,
-        path="parquet",
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
