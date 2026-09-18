@@ -1,0 +1,108 @@
+# OLMo-2-vocab ladder LR finder: 4.64B / 9.48B / 26.2B at GBS=6144
+
+**Date:** 2026-09-18 | **Jobs:** 8837334 (5b), 8837335 (10b), 8837336 (30b)
+**Models:** agpt `{5,10,30}b_olmo2tok`, OLMo-2 tokenizer (vocab 100,352), seq 4096
+**Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-2 tokenization
+**Machine:** Aurora, `next-eval`, 64N x 3 jobs, 6h walltime | **Optimizer:** AdamW
+
+Status: SUBMITTED, results pending. This file records the setup and the
+reasoning; numbers land in the Results table when the jobs finish.
+
+## Why
+
+`agpt()` hands every size `lr=8e-4`, and the only guard (`_is_80b_config`)
+gates on `flavor.startswith("80b")`, so none of these three is covered. For
+scale: the 20B runs production at 2.28e-5, and the prior 30B olmo2tok sweep
+(2026-08-23, GBS=960, Sunspot) put AdamW at **3.05e-05**. The inherited default
+is therefore ~26x above the only measured number we have for this geometry.
+The 80B shipped its inherited default against a documented ~7.4e-7 ceiling and
+blew up at step 2.
+
+## Geometry
+
+| flavor | dim | layers | heads | kv | params | emb+head share |
+|---|---:|---:|---:|---:|---:|---:|
+| `5b_olmo2tok` | 3072 | 40 | 24 | 8 | 4.64B | ~14% |
+| `10b_olmo2tok` | 4096 | 48 | 32 | 8 | 9.48B | |
+| `30b_olmo2tok` | 6144 | 64 | 48 | 8 | 26.20B | |
+
+Parameter counts are measured (meta-device build), not estimated.
+
+## Setup notes that mattered
+
+**Queue: next-eval, and it changes the node count.** `qstat -Qf next-eval`
+shows NO nodect limits -- only walltime 00:05:00-06:00:00 and max_queued 20.
+That dissolves the constraint `submit_lr_finder_30b_aurora.sh` was built
+around, where 8-255 nodes above one hour was a queue dead zone forcing 256N
+purely to reach a multi-hour queue. 64N is the measured throughput sweet spot
+(exp06: 456 tps, 26.57% MFU) and is legal here. 64N x 12 = dp 768;
+6144 = 768 * 2 * 4, so LBS=2/GAS=4.
+
+**Runtime comes from the agpt-2b-v2 clone, not this repo.** next-eval runs a
+TEST bkc image (26.181.0 / oneAPI 2026.1); this repo's `.venv` is based on a
+`/opt/aurora/26.26.0/spack/...` python that does not exist there. Probe
+(job 8837294) on a next-eval compute node:
+
+- PROD spack python: **ABSENT**; the repo venv's interpreter is flatly
+  "No such file or directory"
+- clone venv: **OK** -- Python 3.14.2, torch 2.13.0.dev20260428+xpu, `xpu True`
+
+So: code from this repo, runtime from that tarball, joined by `LRF_VENV_SRC`
+plus an explicit `PYTHONPATH`. The tarball already carries torch 2.13 (not
+2.10) and postdates the venv's `pyvenv.cfg`, so yeet will not skip it as stale.
+Verified separately that HEAD's actual floor is satisfied on that runtime:
+`from torch.distributed.fsdp import DataParallelMeshDims` -> IMPORT_OK, and
+`torchtitan.distributed.fsdp` -> TT_FSDP_OK.
+
+**Data: the config's own dataloader, NOT blendcorpus.** `run_lr_finder.sh`
+hardcoded `--dataloader.dataset blendcorpus` on every invocation. Every
+blendcorpus list on Aurora is gemma- or Llama-2-tokenized; feeding those ids to
+a 100,352 embedding is the Polaris gibberish failure, and it fails SILENTLY --
+ids below the embedding size index fine and the loss curve looks plausible.
+`LRF_USE_CONFIG_DATALOADER=1` leaves the config's Grain path in place, which
+tokenizes raw text inline with OLMo-2.
+
+**LR window 1e-8 -> 1e-3**, 150 probes (fraction 0.15 of 1000 steps) =
+30 points/decade. Inherited from the 30B script: the script default 1e-6 -> 1.0
+spends most probes above 1e-5 where everything has already diverged, and puts a
+plausible optimum AT the first sample where a minimum is unresolvable.
+
+**AdamW only.** The optimizer comparison is a separate campaign; SophiaG in
+particular flips into a persistent high-gradient regime at 30B 3/3 at random
+steps, which a sweep cannot distinguish from an LR cliff.
+
+**One size per job**, so a failure in one geometry does not cost the other two
+their walltime.
+
+## Preconditions verified before submitting
+
+- LR-finder scheduler suspension still holds (`tests/test_lr_finder_scheduler.py`):
+  suspended sees the full 4-decade spread, unsuspended collapses 5 decades to
+  5x. Worth knowing: that file is a script, not a pytest module -- `pytest` on
+  it collects nothing and exits 0, so this guard is NOT running in CI.
+- ALCF preflight: PASS (worktree current, tokenizer, data-list, torch floor,
+  ZE_FLAT_DEVICE_HIERARCHY=FLAT).
+- OLMo-2 assets staged: `assets/hf/OLMo-2-1124-7B/` has tokenizer.json plus
+  three companions; olmo-mix wiki precached at 6.1 GB / 2 shards. (`du -sh` on
+  an HF snapshot reports ~20K because snapshots are symlinks into `blobs/`;
+  use `--dereference`.)
+
+## Results
+
+Pending.
+
+| size | suggested LR | blow-up | min loss | LR at min |
+|---|---:|---:|---:|---:|
+| 5b | | | | |
+| 10b | | | | |
+| 30b | | | | |
+
+Prior for comparison: 30B olmo2tok at GBS=960 on Sunspot gave AdamW 3.05e-05
+(2026-08-23-30b-gbs960-three-optimizers.md). Optimal LR is batch-size
+dependent, so the GBS=6144 answer is expected to differ -- the 80B's
+small-batch finder said 1.1e-5 while its real production-batch ceiling was
+~14x lower.
+
+## Artifacts
+
+`outputs/lr_finder_{5b,10b,30b}_olmo2tok_gbs6144/`
