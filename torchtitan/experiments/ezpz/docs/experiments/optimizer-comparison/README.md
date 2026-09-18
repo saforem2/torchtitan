@@ -1,5 +1,11 @@
 # Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG
 
+> **Follow-up in flight (2026-09-18):** the OLMo-2 ladder
+> ([plan](2026-09-18-olmo2tok-ladder-plan.md)) carries this to 4.64B / 9.48B /
+> 26.2B at GBS=6144, adds **Muon** as a training arm for the first time, and
+> targets the decay-phase question this page names as unanswered. Nine LR
+> sweeps submitted; training arms gated on them.
+
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
 **Status:** COMPLETE. Both healthy arms ran to the `training.steps=6000`
 ceiling on 2026-08-29 -- 23.59B tokens each, `rc=0`, 0 NaN/inf, 0 grad skips.
