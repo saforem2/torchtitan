@@ -22,6 +22,7 @@ from torchtitan.experiments.ezpz.moe.experts import (
     EzpzGroupedExperts,
     _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
+    _sonic_weight_layouts,
 )
 from torchtitan.models.common.token_dispatcher import LocalTokenDispatcher
 from torchtitan.experiments.ezpz.moe import moe_configs
@@ -46,6 +47,27 @@ def _init_grouped_experts_weights(module: GroupedExperts) -> None:
 
 
 class TestMoEExpertBackends(unittest.TestCase):
+    def test_sonic_weight_layouts_with_non_square_dimensions(self):
+        """Production D != F must not be hidden by the square debug model."""
+        experts, dim, hidden = 3, 7, 11
+        w1 = torch.arange(experts * hidden * dim).reshape(experts, hidden, dim)
+        w2 = torch.arange(experts * dim * hidden).reshape(experts, dim, hidden)
+        w3 = (1000 + torch.arange(experts * hidden * dim)).reshape(
+            experts, hidden, dim
+        )
+
+        up, gate, down = _sonic_weight_layouts(w1, w2, w3)
+
+        self.assertEqual(tuple(up.shape), (experts, dim, hidden))
+        self.assertEqual(tuple(gate.shape), (experts, dim, hidden))
+        self.assertEqual(tuple(down.shape), (experts, hidden, dim))
+        self.assertTrue(up.is_contiguous())
+        self.assertTrue(gate.is_contiguous())
+        self.assertTrue(down.is_contiguous())
+        assert_close(up, w3.transpose(1, 2))
+        assert_close(gate, w1.transpose(1, 2))
+        assert_close(down, w2.transpose(1, 2))
+
     @unittest.skip(
         "Needs four config flavors that do not exist in our registry: "
         "10B_2B_50K_sdpa_{for_loop,aurora_sycl,aurora_full_loop,"

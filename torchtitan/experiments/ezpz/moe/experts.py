@@ -352,6 +352,17 @@ WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
     return torchtitan_exact_experts(w1, w2, w3, x, num_tokens_per_expert)
 
 
+def _sonic_weight_layouts(
+    w1: torch.Tensor, w2: torch.Tensor, w3: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert TorchTitan [E,F,D]/[E,D,F] weights to Sonic layouts."""
+    return (
+        w3.transpose(1, 2).contiguous(),  # up: [E, D, F]
+        w1.transpose(1, 2).contiguous(),  # gate: [E, D, F]
+        w2.transpose(1, 2).contiguous(),  # down: [E, F, D]
+    )
+
+
 def _run_experts_aurora_full_sonic(
     w1: torch.Tensor,
     w2: torch.Tensor,
@@ -445,15 +456,21 @@ def _run_experts_aurora_full_sonic(
         )
     local_count = total_experts // ep_size
     local_expert_ids = list(range(local_count))
+    # TorchTitan stores the projections as w1/w3=[E, F, D] and
+    # w2=[E, D, F], while Sonic's ragged kernel expects
+    # up/gate=[E, D, F] and down=[E, F, D]. The debug model has D == F,
+    # which masked this contract mismatch; production 10B/2B does not.
+    # Transpose as views and materialize contiguous layouts required by Sonic.
+    up, gate, down = _sonic_weight_layouts(w1, w2, w3)
     return _routed_moe(
         x,
         topk_scores,
         topk_indices,
         local_expert_ids,
         mesh,
-        w3,  # up
-        w1,  # gate
-        w2,  # down
+        up,
+        gate,
+        down,
         expert_backend="sycl_sonic",
     )
 
