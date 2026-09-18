@@ -335,12 +335,22 @@ def load_dcp(
     original = _series(subdir)
     # ``extra_subdirs`` names sibling dirs holding LATER segments of the SAME
     # chain under the same step numbering (a schedule fork that kept training,
-    # e.g. 20B-512 continuing into -constlr at step 10,800). They merge in as
-    # additional steps; on the rare contested step the later dir wins, which
-    # matches the registry rule that the last-listed run owns a contested step.
+    # e.g. 20B-512 continuing into -constlr at step 10,800).
+    #
+    # These are held OUT of `original` and re-applied after the RoPE splice
+    # below, because they are not subject to it. Whether an export is
+    # wrongly-permuted is decided by the --model_flavor passed to
+    # convert_to_hf.py, not by which directory it landed in; every extra dir
+    # here was exported after the flavor fix. Merging them into `original`
+    # instead puts them above `switch_step`, where the splice keeps only what
+    # the corrected dir has -- and the corrected sweep stopped at 7,600. The
+    # 10,800 point vanished with no warning, which is the precise failure this
+    # function already carries two comments about.
+    extra: dict[int, float] = {}
     for d in extra_subdirs or []:
-        original.update(_series(d))
+        extra.update(_series(d))
     if corrected_subdir is None or switch_step is None:
+        original.update(extra)
         return sorted(original.items())
 
     corrected = _series(corrected_subdir)
@@ -368,6 +378,8 @@ def load_dcp(
     # entire exercise, and a gap is at least visible.
     merged = {s: v for s, v in original.items() if s < switch_step}
     merged.update({s: v for s, v in corrected.items() if s >= switch_step})
+    # Applied last so a continuation segment wins its own steps outright.
+    merged.update(extra)
     return sorted(merged.items())
 
 
