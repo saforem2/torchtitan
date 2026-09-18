@@ -1,0 +1,76 @@
+---
+name: alcf-job-preflight
+description: Use BEFORE submitting any PBS/Slurm job on Sunspot, Aurora, Polaris or Perlmutter, and before writing a job script from scratch. Covers the environment settings a hand-written script omits (ZE_FLAT_DEVICE_HIERARCHY, --login, activation-checkpoint syntax, shared-filesystem paths, XCCL split-group), plus the login-node dry-run that catches API errors without a queue round-trip.
+---
+
+# ALCF job preflight
+
+Nine jobs were burned in one session answering two questions. Eight failures
+were the script, not the system. Every one is checkable before `qsub`.
+
+## Rule 0: copy the house script, do not write one
+
+`torchtitan/experiments/ezpz/scripts/sync_smoke_{aurora,sunspot}.sh` already
+encodes everything below. Start from it. A scratch-written script has
+reproduced the same five omissions repeatedly.
+
+## The settings a hand-written script forgets
+
+| setting | symptom when missing |
+|---|---|
+| `#!/bin/bash --login` | `module: command not found` -- a PBS job has no `module` function otherwise |
+| `export ZE_FLAT_DEVICE_HIERARCHY=FLAT` | `device index out of range [0, 6)`. Aurora/Sunspot = 6 GPUs x 2 tiles: torch sees **6** under COMPOSITE (the job default) and **12** under FLAT. `--ppn 12` needs FLAT. |
+| `activation-checkpoint:none` | `Unrecognized options: --activation-checkpoint.mode`. It is a tyro SUBCOMMAND, not `--flag=value`. Same for `:full`, `:selective`. |
+| `--training.max-context-length=512` and `--training.num-tokens-per-microbatch-per-dp-rank=512` | OOM at the vocab projection. Full-size defaults are 16384; `16384 x 256128 x 2B ~= 8.4 GiB` of bf16 logits on one tile. |
+| scripts/data on a SHARED filesystem | `can't open file '/tmp/x.py'`. `/tmp` EXISTS on compute nodes and is writable, but it is `tmpfs` -- node-local. PBS ships the job script itself, so the job STARTS and only dies when it opens a second file by path. Stage to `/lus/tegu`, `/lus/flare`, `/eagle`, `/pscratch`. |
+| `maybe_install_xccl_split_group_workaround()` | `No backend for the parent process group or its backend does not support splitting`. XCCL cannot split a PG. `train.py` installs this before building any mesh; a standalone script that builds a mesh must call it too. |
+| Polaris: `module load cray-pals`, `mpiexec --no-transfer`, `libfabric` | `mpiexec: command not found` (rc=127); then PALS stages the interpreter without `libpython3.12.so.1.0`; then `libfabric.so.1: cannot open shared object file`. |
+| Polaris: scope the `mpi-compat` dir to ranks via `mpiexec --env`, never `export` it | `*** stack smashing detected ***` in EVERY coreutil (`mkdir`, `whoami`, `head`). Presents as an unrelated filesystem failure. |
+
+## Before every submission
+
+**1. Dry-run the APIs on the login node.** Presence checks are not enough --
+a job died on `setup_torch(backend="ccl")` while every import passed. Bind the
+arguments:
+
+```python
+import inspect
+inspect.signature(ezpz.setup_torch).bind()          # raises if the kwarg is wrong
+inspect.signature(ParallelDims.from_config).bind(cfg.parallelism, world_size=24)
+```
+
+**2. Preflight the assets**, in the worktree the job will actually use:
+tokenizer (`assets/hf/gemma-7b`), machine data-list
+(`data-lists/<machine>/books.txt`), `vendor/` if needed, and `python -c "import
+blendcorpus, mpi4py, ezpz, torch"`.
+
+**3. Check the worktree is current.** A worktree pinned to an older tip will
+be missing files a recent commit moved or added.
+
+## Reading results
+
+- **When `rc != 0`, print the tail UNCONDITIONALLY.** A grep for known failure
+  patterns that matches nothing reads exactly like success. A tyro argparse
+  error inside a Unicode box matched none of `ur_die|abort|Error:` and the
+  report said "no failure modes found" on a dead job.
+- Treat the pattern list as *classification*, never *detection*.
+- A check that cannot distinguish "broken" from "informative" is not a check.
+  A comparison that returns MISMATCH when one side threw `KeyError` reports 24
+  ranks disagreeing when the real answer is "I read the wrong object".
+- Never `tail -3` a build log; capture it to a file and grep after.
+
+## Machine facts
+
+- **Aurora/Sunspot**: XPU. 6 devices COMPOSITE / 12 FLAT. `mpi4py` must be
+  compiled on a compute node against the local MPICH (`MPICC=$(command -v
+  mpicc)`); a PyPI wheel gives `PMIX_Init returned -25`.
+- **Polaris**: CUDA. Default PrgEnv is **nvhpc**, so `cc` is `nvc` and rejects
+  CPython's GCC flags -- mpi4py then reports the misleading "Cannot compile MPI
+  programs". Use `module swap PrgEnv-nvhpc PrgEnv-gnu`.
+- **Perlmutter**: CUDA, Slurm. `cc` already wraps gcc. Use
+  `--gpus-per-node=4 --gpu-bind=none`; `--gpus-per-task=1` gives each rank one
+  device numbered 0 and rank 1 dies selecting `cuda:1`. Account `m3957_g` has
+  no node-hour balance; use `amsc013_g`. No tokenized corpus on the machine.
+- `uv` and `qsub` are not on a non-interactive `PATH`: use
+  `$HOME/.local/bin/uv` and `/opt/pbs/bin/qsub`.
+- Point `UV_CACHE_DIR` off `$HOME` on Polaris (`os error 122` = HOME quota).

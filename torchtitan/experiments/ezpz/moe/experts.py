@@ -347,7 +347,7 @@ WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
     except ImportError as error:
         raise ImportError(
             "the aurora_sycl expert backend requires the aurora_moe package "
-            "(vendor/aurora_moe_dropin/src) on PYTHONPATH"
+            "(torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src) on PYTHONPATH"
         ) from error
     return torchtitan_exact_experts(w1, w2, w3, x, num_tokens_per_expert)
 

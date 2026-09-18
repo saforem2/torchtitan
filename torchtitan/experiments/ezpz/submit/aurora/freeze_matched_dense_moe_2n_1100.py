@@ -93,7 +93,7 @@ def main():
     package_entries = []
     for path in package_files():
         relative = path.relative_to(PACKAGE).as_posix()
-        archive_name = "vendor/aurora_moe_dropin/{}".format(relative)
+        archive_name = "torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/{}".format(relative)
         data = path.read_bytes()
         records.append(
             {"path": archive_name, "sha256": sha256_bytes(data), "size": len(data)}

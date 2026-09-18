@@ -1,5 +1,27 @@
 import torch
 
+import pytest
+
+pytest.skip(
+    # Same decision as test_moe_expert_backends.py records for the backends
+    # themselves: aurora_full_loop / aurora_full_sonic are deliberately NOT
+    # ported. They need top_scores and selected_experts_indices, which our
+    # GroupedExperts.forward(x_RD, num_tokens_per_expert_E) never receives
+    # (upstream moved dispatch into the token dispatcher; the sww branch
+    # predates that), and they additionally require an EP mesh. Porting them
+    # is a dispatcher restructuring, not a backend addition.
+    #
+    # Every test in this file keys off AGPT_2B_50K_MOE_sdpa_aurora_full_sonic,
+    # so with the flavor unported the module cannot even be imported -- it was
+    # failing at COLLECTION, which takes the whole file down rather than
+    # reporting a skip. Kept rather than deleted so the architecture the 2B/50K
+    # config is meant to have stays on record if the flavor is revisited.
+    "agpt_2b_50k_moe_sdpa_aurora_full_sonic is deliberately not ported: it "
+    "needs routing data our GroupedExperts.forward never receives, plus an "
+    "EP mesh. See test_moe_expert_backends.py for the full rationale.",
+    allow_module_level=True,
+)
+
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
 from torchtitan.experiments.ezpz.moe import model_registry, moe_configs
 from torchtitan.experiments.ezpz.moe.config_registry import (

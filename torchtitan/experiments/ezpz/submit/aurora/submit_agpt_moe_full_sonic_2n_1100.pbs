@@ -85,7 +85,7 @@ mpiexec --envall --np 2 --ppn 1 --hostfile "${PBS_NODEFILE}" \
     '
 export VIRTUAL_ENV=${NODE_VENV}
 export PATH=${VIRTUAL_ENV}/bin:${PATH}
-export PYTHONPATH=${SOURCE}:${SOURCE}/vendor/aurora_moe_dropin/src${PYTHONPATH:+:${PYTHONPATH}}
+export PYTHONPATH=${SOURCE}:${SOURCE}/torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src${PYTHONPATH:+:${PYTHONPATH}}
 export TT_CONFIG_JSON=${SOURCE}/${CONFIG_REL}
 
 CACHE=${ROOT}/outputs/moe_full_runtime_tt_1layer/kernel_cache_py213
