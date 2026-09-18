@@ -54,7 +54,13 @@ version = {file = "assets/version.txt"}
 
 [tool.codespell]
 skip = ["*.json"]
-ignore-words-list = ["assertin", "datas" ,"indx", "inpt", "nd", "socio-economic"]
+ignore-words-list = ["assertin", "datas" ,"indx", "inpt", "nd", "socio-economic",
+    # Real names, not misspellings:
+    "preemptable",   # the literal ALCF PBS queue name; "correcting" it
+                     # to preemptible would make the docs wrong
+    "MAPE",          # the TPC26 conference track, not "MAP"
+    "coreutil",      # as in "every coreutil died", singular is fine
+]
 
 # ---- Explicit project build information ---- #
 [build-system]

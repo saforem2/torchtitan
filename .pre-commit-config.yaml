@@ -8,6 +8,7 @@ repos:
     rev: 6306a48f7dae5861702d573c9c247e4e9498e867
     hooks:
     -   id: trailing-whitespace
+        exclude: '^(.*\.svg)$'
     -   id: check-ast
     -   id: check-merge-conflict
     -   id: no-commit-to-branch
@@ -60,6 +61,7 @@ repos:
       description: Checks for common misspellings in text files.
       entry: codespell --toml pyproject.toml
       language: python
+      exclude: '^(.*\.svg)$'
       types: [text]
       additional_dependencies:
         - tomli
