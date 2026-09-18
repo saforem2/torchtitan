@@ -232,6 +232,7 @@ class TestMoEExpertBackends(unittest.TestCase):
         # use_grouped_mm, token_dispatcher, and score_before_experts --
         # all three are fields of ITS core config, not ours, and each
         # raises TypeError here.
+
         def _build(backend):
             return EzpzGroupedExperts(
                 EzpzGroupedExperts.Config(

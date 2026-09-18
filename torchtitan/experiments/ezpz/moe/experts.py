@@ -429,8 +429,22 @@ def _run_experts_aurora_full_sonic(
     mesh = ParallelMesh(MoEProcessGroups(ep_dispatch=group), x.device)
 
     # local_expert_ids only needs the right LENGTH: _routed_moe takes
-    # len(local_expert_ids) as the local expert count.
-    local_expert_ids = list(range(int(num_tokens_per_expert.numel())))
+    # len(local_expert_ids) as local_count, and the kernel then does
+    #     dest      = topk_indices // local_count
+    #     local_ids = topk_indices - dest * local_count
+    # (_core.py:1682). So local_count must be experts PER RANK, and the kernel
+    # shards the GLOBAL topk_indices itself. Passing the full expert count made
+    # local_ids exceed the per-rank range and the kernel raised
+    # "local_ids must be in [0, num_experts)" (job 8836331).
+    ep_size = ep_mesh.size() if ep_mesh is not None else 1
+    total_experts = int(num_tokens_per_expert.numel())
+    if total_experts % ep_size:
+        raise ValueError(
+            f"expert count {total_experts} is not divisible by EP size "
+            f"{ep_size}; the sonic kernel assumes an even per-rank split"
+        )
+    local_count = total_experts // ep_size
+    local_expert_ids = list(range(local_count))
     return _routed_moe(
         x,
         topk_scores,

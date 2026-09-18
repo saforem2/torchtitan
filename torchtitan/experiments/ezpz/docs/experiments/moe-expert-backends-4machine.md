@@ -78,15 +78,56 @@ Two requirements beyond that, both of which produce misleading errors:
    (`/opt/aurora/26.181.0/frameworks/.../bin/ninja`), so `module load
    frameworks` also satisfies it.
 
-## The unported backends, and the tests that chased them
+## aurora_full_sonic: ported, forward works, backward segfaults
 
-`aurora_full_loop` and `aurora_full_sonic` are **deliberately not ported**. They
-need `top_scores` and `selected_experts_indices`, which
-`GroupedExperts.forward(x_RD, num_tokens_per_expert_E)` never receives -- sync
-84 moved dispatch into the token dispatcher and the `sww` branch these came
-from predates that -- and they additionally require an EP mesh. Porting them is
-a dispatcher restructuring, not a backend addition. `aurora_sycl` is the one
-that fits the post-refactor contract, which is why it is the one that exists.
+**Superseded:** this section previously said `aurora_full_sonic` was
+"deliberately not ported" because the routing tensors "never reach" our
+forward. That reasoning was wrong, and the backend is now ported
+(`d0e5573ae`). What actually stops it is further down the stack.
+
+The routing tensors DO reach us, one layer above the expert backend: core's
+`RoutedExperts.forward` receives `topk_scores_TK` and `topk_expert_ids_TK`
+(`models/common/moe.py:143-144`) and discards them at line 163 before calling
+`inner_experts`. `EzpzRoutedExperts` forwards them instead. No dispatcher
+restructuring was needed.
+
+Two feasibility questions were settled first, both on hardware:
+
+| question | job | answer |
+|---|---|---|
+| EP>1 on torch 2.15? | `8836014` | yes -- losses match EP=1 to ~4 decimals, no `ur_die` |
+| rank orders agree? | `8836277` | yes at EP=2, 8 AND 12 |
+
+The second mattered because `create_dp_ep_groups` assumes
+`rank = dp_rank * EP + ep_rank`; a mismatch would have crossed ranks in the
+all-to-all with no error, only wrong gradients.
+
+Three integration bugs then surfaced in sequence, each only after the previous
+was fixed -- the port chain runs further every time:
+
+1. BF16 router scores (`c59d20182`). The kernel hard-requires bf16 for both `x`
+   and `topk_scores`. Cast the scores at the boundary; `x` deliberately raises
+   instead, since wrong-dtype activations mean a real model problem.
+2. `local_count` is experts PER RANK, not the total (`fdbd5eee3`). The kernel
+   derives `dest = topk_indices // local_count`, so the full count made every
+   local id exceed its range.
+3. **Backward segfaults.** Job `8837164`: `rc=139`, no steps logged, crash in
+   `torch/autograd/graph.py:1104 _engine_run_backward`. The FORWARD completes --
+   `_RoutedMOESyclSonic.apply` returns -- and the fault is inside
+   `_RoutedMOESyclEP._backward_alltoallv`, vendored SYCL below the Python
+   boundary.
+
+**Status: blocked, not abandoned.** The remaining fault is not in the glue.
+Plausible causes are a bug in the vendored backward, a mismatch between the
+saved forward context and what the backward expects under torchtitan's
+autograd, or an EP transport problem -- and distinguishing them needs
+kernel-level debugging or the author of `aurora_moe`. Worth asking whether
+`_backward_alltoallv` has ever been exercised outside `AuroraMoE`'s own
+whole-layer path, since this integration calls `_routed_moe` functionally.
+
+`aurora_full_loop` remains unported and is a separate question.
+
+## The tests that chased the unported flavors
 
 The three test files under `tests/moe/` were stale against sync 84 and are now
 fixed:
