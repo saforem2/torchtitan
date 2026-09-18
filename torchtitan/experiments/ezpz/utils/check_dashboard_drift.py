@@ -21,7 +21,6 @@ not equal the disk-valid step -> [DRIFT]. Read-only; always exits 0.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from torchtitan.experiments.ezpz.utils.trajectories import (
     REPO_ROOT,

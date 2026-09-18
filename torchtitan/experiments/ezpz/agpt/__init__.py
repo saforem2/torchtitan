@@ -190,7 +190,6 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
 
 
 from torchtitan.models.common.activation import BinaryActivationFn
-from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_config
 
 

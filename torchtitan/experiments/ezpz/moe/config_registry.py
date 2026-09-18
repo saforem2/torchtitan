@@ -19,7 +19,7 @@ from torchtitan.components.loss import CrossEntropyLoss
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import LRSchedulersContainer
 from torchtitan.observability.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.components.optimizer import default_adamw
 from torchtitan.config.transform.quantization import (
     Float8GroupedExpertsConverter,
     Float8LinearConverter,
@@ -27,8 +27,6 @@ from torchtitan.config.transform.quantization import (
 from torchtitan.config import (
     CommConfig,
     CompileConfig,
-    DebugConfig,
-    ParallelismConfig,
     TrainingConfig,
 )
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (

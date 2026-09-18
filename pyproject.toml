@@ -60,6 +60,9 @@ ignore-words-list = ["assertin", "datas" ,"indx", "inpt", "nd", "socio-economic"
                      # to preemptible would make the docs wrong
     "MAPE",          # the TPC26 conference track, not "MAP"
     "coreutil",      # as in "every coreutil died", singular is fine
+    "OVERRIDEABLE",  # torch.nn.attention.SDPBackend.OVERRIDEABLE -- the
+                     # real enum member; OVERRIDABLE does not exist and
+                     # "correcting" it is an AttributeError
 ]
 
 # ---- Explicit project build information ---- #

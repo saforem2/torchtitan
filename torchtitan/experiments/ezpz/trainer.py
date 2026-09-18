@@ -48,7 +48,6 @@ from torchtitan.experiments.torchft.optimizer import (
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
 from torchtitan.experiments.ezpz.logging import logger
-from torchtitan.observability.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
