@@ -163,9 +163,22 @@ LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 # Set LRF_DFL_NAME to match the config's tokenizer:
 #   gemma configs (agpt_2b/20b/30b/80b)  -> olmo-mix-1124 (data_fused_gemma_eod)
 #   *_llama3tok / *_olmo2tok             -> a list tokenized to match
+#
+# LRF_USE_CONFIG_DATALOADER=1 leaves the config's own dataloader alone, for
+# configs that carry a complete one. That is the only workable route for an
+# OLMo-2-vocab model on Aurora right now: EVERY blendcorpus list here is
+# gemma- or Llama-2-tokenized, so the "list tokenized to match" named above
+# does not exist for *_olmo2tok. The *_smoke configs read precached olmo-mix
+# parquet through Grain and tokenize inline with OLMo-2 instead, which is what
+# makes the geometry calibratable at all. Without this switch the hardcoded
+# --dataloader.dataset below would override that and feed gemma ids to a
+# 100,352 embedding -- silently, with a plausible curve, which is the whole
+# failure this block warns about.
+LRF_USE_CONFIG_DATALOADER="${LRF_USE_CONFIG_DATALOADER:-0}"
+
 LRF_DFL_NAME="${LRF_DFL_NAME:-books}"
 DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/${LRF_DFL_NAME}.txt"
-if [[ ! -f "$DATASET_PATH" ]]; then
+if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]] && [[ ! -f "$DATASET_PATH" ]]; then
     echo "lr-finder FATAL: data list not found: $DATASET_PATH" >&2
     exit 2
 fi
@@ -255,6 +268,16 @@ for model in "${MODELS[@]}"; do
         cache_args=(--dataloader.data-cache-path "${LRF_DATA_CACHE_PATH}")
     fi
 
+    # Empty when the config owns its dataloader (see LRF_USE_CONFIG_DATALOADER
+    # above); otherwise the historical blendcorpus override.
+    dataloader_args=()
+    if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]]; then
+        dataloader_args=(
+            --dataloader.dataset blendcorpus
+            --dataloader.dataset_path "${DATASET_PATH}"
+        )
+    fi
+
     for opt in "${OPTIMIZERS[@]}"; do
         label="${model}_${opt}"
         logfile="${OUTDIR}/${label}.log"
@@ -309,8 +332,7 @@ for model in "${MODELS[@]}"; do
             --training.seq_len "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
-            --dataloader.dataset blendcorpus \
-            --dataloader.dataset_path "${DATASET_PATH}" \
+            "${dataloader_args[@]}" \
             "${cache_args[@]}" \
             --lr_finder.enable \
             --lr_finder.init_lr "${LRF_INIT_LR}" \
