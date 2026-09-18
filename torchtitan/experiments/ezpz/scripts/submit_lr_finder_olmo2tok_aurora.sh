@@ -53,10 +53,23 @@
 # the first sample where a minimum is unresolvable. At LRF_FRACTION=0.15 of
 # 1000 steps that is 150 probes = 30 points/decade.
 #
-# ADAMW ONLY. The optimizer comparison is a separate question with its own
-# campaign; SophiaG in particular flips into a persistent high-gradient regime
-# at 30B 3/3 at random steps, which would corrupt a sweep that cannot tell that
-# apart from an LR cliff.
+# OPTIMIZERS: set LRF_OPTIMIZERS, default adamw. The fixed-batch comparison at
+# 30B/GBS=960 is COMPLETE and found Mano ahead of AdamW by 0.075 nats at 23.6B
+# tokens, so a comparison at these sizes needs Mano measured too; Muon has a
+# measured LR (5.68e-04 at GBS=960) but has never been run as a training arm.
+#
+# A measured LR per optimizer AT THE PRODUCTION BATCH is the precondition for
+# any of it: for Mano alone the suggestion spans 4.79e-03 (2B) to ~3e-06 (80B
+# at GBS=6144) -- three orders of magnitude for one optimizer. Borrowing a
+# number across batch sizes is how the 30B nearly ran SophiaG at 8.5x its
+# suggestion and 1.18x below its measured blow-up.
+#
+# SophiaG sweeps fine (the curve is smooth through the low band) but its
+# divergence is state-dependent, not LR-driven: 4/4 replicates at 30B, one with
+# the seed pinned and ZERO precursor excursions. A sweep cannot see that, so a
+# SophiaG LR from here is a number without a usable arm behind it. Include it
+# only to complete the table, never as a launch recommendation, and if an arm
+# is ever run then --grad-norm-abort=20.0 is mandatory (it is 0.0 by default).
 
 # PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
 set -o pipefail
@@ -70,7 +83,7 @@ MODEL_SIZE="${MODEL_SIZE:-5b}"
 
 export LRF_MODELS="${MODEL_SIZE}"
 export LRF_CONFIG="agpt_${MODEL_SIZE}_olmo2tok_smoke"
-export LRF_OPTIMIZERS="adamw"
+export LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw}"
 
 # The config owns its dataloader (Grain + OLMo-2 inline tokenization).
 export LRF_USE_CONFIG_DATALOADER=1
@@ -95,7 +108,11 @@ export LRF_AC=full
 export LRF_TIMEOUT=6000
 export LRF_IDLE_TIMEOUT=1800
 
-export LRF_DUMP_FOLDER="outputs/lr_finder_${MODEL_SIZE}_olmo2tok_gbs6144"
+# Keyed by optimizer set as well as size: run_lr_finder.sh writes under
+# ezpz.agpt/<flavor>/<optimizer>/, a path keyed by model+optimizer and NOT by
+# GBS or by job, so two concurrent submissions for the same size would
+# overwrite each other's CSV/plot/npz.
+export LRF_DUMP_FOLDER="outputs/lr_finder_${MODEL_SIZE}_olmo2tok_gbs6144_${LRF_OPTIMIZERS// /-}"
 
 echo "=========================================================="
 echo " OLMo-2-vocab LR finder"
