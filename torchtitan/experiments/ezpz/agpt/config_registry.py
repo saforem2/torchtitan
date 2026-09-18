@@ -1183,6 +1183,7 @@ def _use_hf_streaming(
     path: str,
     name: str | None = None,
     split: str = "train",
+    load_dataset_kwargs: dict | None = None,
 ) -> FaultTolerantTrainer.Config:
     """Read an arbitrary Hugging Face dataset by STREAMING it.
 
@@ -1198,9 +1199,30 @@ def _use_hf_streaming(
     "blendcorpus" after the 80th sync deleted the HF delegate -- the
     replacement is exactly this Grain object graph.
 
-    Not for production runs: streaming throughput is network-bound and the
-    shard order is not the deterministic, sorted selection the comparison
-    arms rely on.
+    Not for production runs BY REPO ID: streaming throughput is network-bound
+    and the shard order is not the deterministic, sorted selection the
+    comparison arms rely on.
+
+    ``load_dataset_kwargs`` is the escape hatch that makes this usable at
+    scale. Loading by repo id calls the hub once PER RANK to resolve dataset
+    metadata, and at 384 ranks that is a 429 storm: workers crash, rank 0 then
+    dies at the barrier (jobs 12471848/51/53, zero steps). Offline env vars do
+    not help -- huggingface_hub reads them into module constants at import
+    time, so a runtime HF_HUB_OFFLINE is ignored and a PBS-top one turns the
+    repo-id resolve into OfflineModeIsEnabled instead.
+
+    The fix is to precache once from a login node and then load LOCAL parquet,
+    which makes zero hub calls and works at any rank count::
+
+        _use_hf_streaming(
+            cfg,
+            path="parquet",
+            load_dataset_kwargs={"data_dir": "<snapshot>/data/<subset>"},
+        )
+
+    Verified end-to-end at 32N for open-web-math. The rule that fell out of
+    that debugging: at 100+ ranks never load an HF dataset by repo id, whether
+    streaming or offline.
     """
     cfg.dataloader = GrainDataLoader.Config(
         dataset=ConcatThenSplitPackingConfig(
@@ -1209,6 +1231,7 @@ def _use_hf_streaming(
                     path=path,
                     name=name,
                     split=split,
+                    load_dataset_kwargs=load_dataset_kwargs or {},
                 ),
                 processor=TextProcessor.Config(),
                 post_filters=(lambda sample: sample is not None,),
@@ -1232,6 +1255,73 @@ def agpt_2b_real_stream_c4() -> FaultTolerantTrainer.Config:
     # live hub call there dies with errno 524 / "not cached in None".
     return _use_hf_streaming(
         cfg, path="Salesforce/wikitext", name="wikitext-103-raw-v1"
+    )
+
+
+# Where precache_hf_dataset.py lands an olmo-mix snapshot on Aurora. $HOME
+# rather than /flare: flare was 92% full on 2026-09-17 while $HOME had 12P at
+# 5%, and an existing 2.0T HF cache already lives there.
+_OLMO_MIX_CACHE = (
+    "/home/foremans/.cache/huggingface/hub/"
+    "datasets--allenai--olmo-mix-1124/snapshots"
+)
+
+
+def _olmo_mix_subset_dir(subset: str) -> str:
+    """Local parquet dir for one olmo-mix subset, resolved at call time.
+
+    The snapshot hash is not hardcoded -- precaching again changes it. Resolve
+    the single snapshot dir under the cache instead, and fail loudly if the
+    subset is not there, because the alternative is a config that silently
+    falls back to a hub call and 429s at rank count.
+    """
+    import glob
+    import os
+
+    hits = sorted(glob.glob(os.path.join(_OLMO_MIX_CACHE, "*", "data", subset)))
+    if not hits:
+        raise FileNotFoundError(
+            f"olmo-mix subset {subset!r} is not precached under "
+            f"{_OLMO_MIX_CACHE}. Run scripts/precache_hf_dataset.py first; "
+            "loading by repo id instead will 429 at production rank counts."
+        )
+    return hits[-1]
+
+
+def agpt_5b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """4.64B on precached olmo-mix, for the 2N smoke and the LR finder.
+
+    Reads LOCAL parquet through the Grain path, so TextProcessor tokenizes
+    each sample with OLMo-2 as it streams. That is what makes this runnable on
+    Aurora at all: the on-disk blendcorpus there is gemma-tokenized
+    (data_fused_gemma_eod), and pointing an OLMo-2-vocab model at gemma ids
+    trains to a plausible loss and evaluates as gibberish -- the Polaris 20B
+    failure. Tokenizing raw text inline sidesteps retokenizing a corpus.
+
+    Uses the "wiki" subset: 6.0 GB and 2 files, the cheapest thing to precache
+    that is still real prose. olmo-mix as a whole is 6.97 TB, but 6.72 TB of
+    that is dclm -- everything else together is 243 GB, and a finder run of a
+    few hundred steps does not need the long tail.
+
+    NOT a production data config. The subset is narrow and the mixture is not
+    the production blend; this exists to get a loss curve and an LR, not a
+    model.
+    """
+    cfg = agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        path="parquet",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """9.48B twin of agpt_5b_olmo2tok_smoke -- same data path, same caveats."""
+    cfg = agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        path="parquet",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
 
