@@ -78,12 +78,12 @@ Two requirements beyond that, both of which produce misleading errors:
    (`/opt/aurora/26.181.0/frameworks/.../bin/ninja`), so `module load
    frameworks` also satisfies it.
 
-## aurora_full_sonic: ported, forward works, backward segfaults
+## aurora_full_sonic: PORTED AND TRAINING
 
 **Superseded:** this section previously said `aurora_full_sonic` was
 "deliberately not ported" because the routing tensors "never reach" our
-forward. That reasoning was wrong, and the backend is now ported
-(`d0e5573ae`). What actually stops it is further down the stack.
+forward. That reasoning was wrong on both counts -- the tensors are available,
+and the backend now trains.
 
 The routing tensors DO reach us, one layer above the expert backend: core's
 `RoutedExperts.forward` receives `topk_scores_TK` and `topk_expert_ids_TK`
@@ -111,19 +111,56 @@ was fixed -- the port chain runs further every time:
 2. `local_count` is experts PER RANK, not the total (`fdbd5eee3`). The kernel
    derives `dest = topk_indices // local_count`, so the full count made every
    local id exceed its range.
-3. **Backward segfaults.** Job `8837164`: `rc=139`, no steps logged, crash in
-   `torch/autograd/graph.py:1104 _engine_run_backward`. The FORWARD completes --
-   `_RoutedMOESyclSonic.apply` returns -- and the fault is inside
-   `_RoutedMOESyclEP._backward_alltoallv`, vendored SYCL below the Python
-   boundary.
+3. **The backward segfault was a JIT race** (job `8837164`, `rc=139`, crash in
+   `_engine_run_backward`). `aurora_moe` JIT-compiles four SYCL extensions on
+   first use, and 24 ranks doing that concurrently corrupted the backward --
+   which is why it presented as SIGSEGV rather than a clean error. Prebuilding
+   them fixes it: `aurora_moe.build.prebuild_torchtitan_full_sonic()` inside an
+   XPU allocation (~6 min, job `8837246`), then point
+   `AURORA_MOE_SYCL_BUILD_DIR` at the result. The dir must be on a shared
+   filesystem so every rank reads the same `.so`.
 
-**Status: blocked, not abandoned.** The remaining fault is not in the glue.
-Plausible causes are a bug in the vendored backward, a mismatch between the
-saved forward context and what the backward expects under torchtitan's
-autograd, or an EP transport problem -- and distinguishing them needs
-kernel-level debugging or the author of `aurora_moe`. Worth asking whether
-`_backward_alltoallv` has ever been exercised outside `AuroraMoE`'s own
-whole-layer path, since this integration calls `_routed_moe` functionally.
+## It trains
+
+`8837281`, `next-eval`, 2 nodes / 24 ranks, EP=2, `rc=0`, zero non-finite:
+
+```
+step: 1  loss: 12.95230
+step: 2  loss: 12.59623
+step: 3  loss: 11.47120
+```
+
+| step | EP=2 reference (`8836014`) | sonic | delta |
+|---|---|---|---|
+| 1 | 12.95224 | 12.95230 | 6e-05 |
+| 2 | 12.59619 | 12.59623 | 4e-05 |
+| 3 | 11.47116 | 11.47120 | 4e-05 |
+
+**This agreement is the result, not `rc=0`.** ~5e-05 is bf16 kernel variation,
+the same magnitude `aurora_sycl` shows (6.104e-05). It says the expert-id
+mapping, the `ParallelMesh` built from torchtitan's EP group, and the
+all-to-all are all routing tokens to the correct experts. A wrong mapping
+would have produced plausible-but-different losses -- running while silently
+wrong -- and it did not.
+
+### Required to run it
+
+```bash
+export AURORA_MOE_ALLTOALLV=1                 # the kernel refuses without it
+export AURORA_MOE_SYCL_BUILD_DIR=<shared dir> # prebuilt kernels, see above
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# EP>1 is mandatory: sonic owns its own expert-parallel all-to-all
+--config=moe_debugmodel_sonic        # EP=2
+--config=moe_10b_2b_sdpa_sonic_ep    # EP=12, mirrors bmm_ep for timing
+```
+
+Expect a long startup: `torch.compile` graph-breaks on every SYCL custom op,
+so the first steps take minutes. Job `8837281` ran ~20 min wall for 3 steps.
+
+**Not yet measured: performance.** The whole point of this backend is speed,
+and a 3-step debugmodel run says nothing about it. The next step is
+`moe_10b_2b_sdpa_sonic_ep` against `moe_10b_2b_sdpa_bmm_ep` at EP=12, same
+node count, comparing step time and MFU.
 
 `aurora_full_loop` remains unported and is a separate question.
 
