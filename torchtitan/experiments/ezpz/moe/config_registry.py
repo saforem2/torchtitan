@@ -466,6 +466,33 @@ def moe_10b_2b_sdpa_bmm_ep_cf050() -> FaultTolerantTrainer.Config:
     return _bmm_ep_cf(0.5)
 
 
+def moe_debugmodel_sonic() -> FaultTolerantTrainer.Config:
+    """EP=2 debugmodel on the aurora_full_sonic expert backend.
+
+    Smallest config that can exercise sonic: the backend performs its own
+    expert-parallel all-to-all, so EP>1 is mandatory. Pair with
+    ``activation-checkpoint:none`` and AURORA_MOE_ALLTOALLV=1.
+
+    Feasibility (docs/experiments/sonic-port-feasibility.md): EP>1 runs on
+    torch 2.15 (job 8836014) and torchtitan's EP rank order matches
+    aurora_moe's rank = dp_rank * EP + ep_rank at EP=2/8/12 (job 8836277).
+    """
+    cfg = moe_debugmodel_ep()
+    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    return cfg
+
+
+def moe_10b_2b_sdpa_sonic_ep() -> FaultTolerantTrainer.Config:
+    """EP=12 10B/2B on aurora_full_sonic -- the performance configuration.
+
+    Mirrors moe_10b_2b_sdpa_bmm_ep (EP=12, standard comm backend) with the
+    sonic backend swapped in, so the two are directly comparable for timing.
+    """
+    cfg = moe_10b_2b_sdpa_bmm_ep()
+    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    return cfg
+
+
 def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
     # EP=12 bmm variant (expert-parallel + batched-bmm compute). Pair with
     # `activation-checkpoint:none` on the CLI, since EP>1 selective-AC

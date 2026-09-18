@@ -37,7 +37,7 @@ from torchtitan.models.common.moe import GroupedExperts
 
 
 ExpertComputeBackend = Literal[
-    "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl"
+    "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl", "aurora_full_sonic"
 ]
 
 
@@ -352,6 +352,98 @@ WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
     return torchtitan_exact_experts(w1, w2, w3, x, num_tokens_per_expert)
 
 
+def _run_experts_aurora_full_sonic(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+    *,
+    topk_scores: torch.Tensor | None,
+    topk_indices: torch.Tensor | None,
+    ep_mesh: object | None,
+) -> torch.Tensor:
+    """aurora_moe's expert-parallel Sonic backend.
+
+    Unlike ``aurora_sycl`` -- a pure function over already-routed rows -- this
+    one owns the dispatch: it takes the router's decision and performs its own
+    expert-parallel all-to-all. That is why it needs ``topk_scores``,
+    ``topk_indices`` and a mesh, none of which the
+    ``forward(x, num_tokens_per_expert)`` contract carries.
+
+    Feasibility was established before this was written (see
+    ``docs/experiments/sonic-port-feasibility.md``):
+
+    - EP>1 runs on torch 2.15 (job 8836014); the ``ur_die`` abort recorded on
+      earlier stacks does not reproduce.
+    - torchtitan's EP rank ordering matches aurora_moe's documented
+      ``rank = dp_rank * EP + ep_rank`` at EP=2, 8 AND 12 (job 8836277), so no
+      remap is needed. Had they disagreed the all-to-all would have crossed
+      ranks silently -- wrong gradients, no error.
+
+    ``mesh`` is aurora_moe's ``ParallelMesh``, NOT a torch ``DeviceMesh``: the
+    kernel indexes ``mesh.group_size["ep_dispatch"]``. We build one from the
+    EP process group torchtitan already made.
+    """
+    if topk_scores is None or topk_indices is None:
+        raise ValueError(
+            "the aurora_full_sonic expert backend needs the router's "
+            "topk_scores/topk_indices. They are available in "
+            "RoutedExperts.forward but core drops them before calling "
+            "inner_experts (models/common/moe.py:163); use EzpzRoutedExperts, "
+            "which forwards them."
+        )
+    try:
+        from aurora_moe._core import _routed_moe
+        from aurora_moe.distributed import MoEProcessGroups, ParallelMesh
+    except ImportError as error:
+        raise ImportError(
+            "the aurora_full_sonic expert backend requires the aurora_moe "
+            "package (torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src) "
+            "on PYTHONPATH"
+        ) from error
+
+    # sycl_sonic refuses to run without the compact alltoallv transport.
+    if os.environ.get("AURORA_MOE_ALLTOALLV") != "1":
+        raise RuntimeError(
+            "the aurora_full_sonic backend requires AURORA_MOE_ALLTOALLV=1 "
+            "(aurora_moe/_core.py:3727 raises otherwise)"
+        )
+
+    # sycl_sonic hard-requires BF16 for x AND topk_scores (_core.py:3722-3725).
+    # In the real model the scores arrive as float32 even though an isolated
+    # router returns bf16 -- torchtitan promotes somewhere between the router
+    # and here (job 8836304 died on exactly this). Rather than chase which
+    # step does it, normalize at the boundary: this is the kernel's documented
+    # input contract, and the cast is a no-op when they already match.
+    if topk_scores.dtype != torch.bfloat16:
+        topk_scores = topk_scores.to(torch.bfloat16)
+    if x.dtype != torch.bfloat16:
+        raise ValueError(
+            "the aurora_full_sonic backend requires BF16 activations, got "
+            f"{x.dtype}. Casting x here would hide a real dtype problem in the "
+            "model, unlike the router scores, which are a routing decision."
+        )
+
+    group = ep_mesh.get_group() if ep_mesh is not None else None
+    mesh = ParallelMesh(MoEProcessGroups(ep_dispatch=group), x.device)
+
+    # local_expert_ids only needs the right LENGTH: _routed_moe takes
+    # len(local_expert_ids) as the local expert count.
+    local_expert_ids = list(range(int(num_tokens_per_expert.numel())))
+    return _routed_moe(
+        x,
+        topk_scores,
+        topk_indices,
+        local_expert_ids,
+        mesh,
+        w3,  # up
+        w1,  # gate
+        w2,  # down
+        expert_backend="sycl_sonic",
+    )
+
+
 class EzpzGroupedExperts(GroupedExperts):
     """GroupedExperts variant that selects between expert compute backends.
 
@@ -379,7 +471,19 @@ class EzpzGroupedExperts(GroupedExperts):
         self,
         x: torch.Tensor,
         num_tokens_per_expert: torch.Tensor,
+        *,
+        topk_scores: torch.Tensor | None = None,
+        topk_indices: torch.Tensor | None = None,
+        ep_mesh: object | None = None,
     ) -> torch.Tensor:
+        # topk_scores / topk_indices / ep_mesh are ONLY consumed by the
+        # "aurora_full_sonic" backend, which needs the routing decision and an
+        # EP mesh that the (x, num_tokens_per_expert) contract does not carry.
+        # They are keyword-only and default to None so every existing caller --
+        # and the other five backends -- are untouched. RoutedExperts passes
+        # them via EzpzRoutedExperts (moe/routed_experts.py); core's
+        # RoutedExperts drops them at models/common/moe.py:163, which is the
+        # entire reason this plumbing exists.
         # NOTE: this method is intentionally NOT marked with
         # @torch.compiler.disable. The grouped_mm and bmm paths delegate to
         # compile-friendly implementations (upstream's `super().forward()`
@@ -424,4 +528,15 @@ class EzpzGroupedExperts(GroupedExperts):
             return _run_experts_bmm_nodrop(w1, w2, w3, x, num_tokens_per_expert)
         if self.compute_backend == "aurora_sycl":
             return _run_experts_aurora_sycl(w1, w2, w3, x, num_tokens_per_expert)
+        if self.compute_backend == "aurora_full_sonic":
+            return _run_experts_aurora_full_sonic(
+                w1,
+                w2,
+                w3,
+                x,
+                num_tokens_per_expert,
+                topk_scores=topk_scores,
+                topk_indices=topk_indices,
+                ep_mesh=ep_mesh,
+            )
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")
