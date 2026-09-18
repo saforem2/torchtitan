@@ -95,11 +95,20 @@ if [[ -n "${LRF_VENV_SRC}" ]]; then
         echo "lr-finder FATAL: LRF_VENV_SRC not found: ${LRF_VENV_SRC}" >&2
         exit 2
     fi
-    # No local .venv activation first -- that is the step that would die on a
-    # mismatched image, and it is not needed: `ezpz` comes from ezpz-utils,
-    # already sourced above.
+    # Activate the venv that SHIPS the tarball, not the local one -- the local
+    # one is exactly what would die on a mismatched image. `ezpz` is a venv
+    # entrypoint (.venv/bin/ezpz), NOT something ezpz-utils defines, so some
+    # venv must be active here or this is `ezpz: command not found`.
+    LRF_VENV_HOME="$(dirname "${LRF_VENV_SRC}")/.venv"
+    if [[ ! -x "${LRF_VENV_HOME}/bin/ezpz" ]]; then
+        echo "lr-finder FATAL: no ezpz entrypoint beside LRF_VENV_SRC " \
+             "(looked for ${LRF_VENV_HOME}/bin/ezpz)" >&2
+        exit 2
+    fi
+    source "${LRF_VENV_HOME}/bin/activate"
     log_message INFO "lr-finder: yeet-env via external tarball (${LRF_VENV_SRC})"
     ezpz yeet-env --src "${LRF_VENV_SRC}"
+    deactivate
 elif [[ -f .venv.tar.gz ]]; then
     source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via tarball (.venv.tar.gz)"
