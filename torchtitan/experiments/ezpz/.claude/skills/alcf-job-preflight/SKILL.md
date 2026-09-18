@@ -47,6 +47,18 @@ blendcorpus, mpi4py, ezpz, torch"`.
 **3. Check the worktree is current.** A worktree pinned to an older tip will
 be missing files a recent commit moved or added.
 
+## Eval-job traps specifically
+
+Four that cost jobs on 2026-09-17, none caught by the checks above. All
+produced a clean exit.
+
+| trap | symptom | check before `qsub` |
+|---|---|---|
+| **`PBS_O_WORKDIR` is wherever you ran `qsub`** | every relative path resolves under `$HOME`; `cp` fails for config and tokenizer, lm-eval then raises `Unrecognized model`, and the script prints `Eval done` and exits **0** having written nothing | `cd` into the repo before `qsub`, or pass an absolute `PBS_O_WORKDIR`. Confirm with `qstat -xf <job> \| grep Output_Path` -- if it points at `$HOME`, the job ran from there |
+| **Conversion clone lacks `agpt/state_dict_adapter.py`** | with `MODEL_FLAVOR=*_real` the guard refuses (good, exit 2); the pinned run-clones predate `ComplexRoPE`/`CosSinRoPE` so the adapter cannot simply be copied in | convert from the main clone and symlink the chain's ckpt dir into its `outputs/checkpoints`. The guard is **cos_sin-only** -- a `complex` flavor runs fine from a pinned clone |
+| **A smoke run wrote the same ckpt dir name** | eval finds only `step-50` under a production chain's name and evaluates nothing | `ls -1d <ckpt_dir>/step-*` and eyeball the range BEFORE submitting. Link the real chain under a distinct suffix if the name is taken |
+| **Seats in one umbrella can differ in RoPE flavor** | the wrong flavor "loads fine and only fails as gibberish" | resolve per chain with `scripts/eval/rope_flavor_for_step.py`, then confirm against the `TRAINERS` table in the submit script. On 2026-09-17 the two 2B stage-2 seats were `_real` (n512) and `complex` (n256) deliberately |
+
 ## Reading results
 
 - **When `rc != 0`, print the tail UNCONDITIONALLY.** A grep for known failure
