@@ -100,6 +100,9 @@ export LRF_ONEAPI_MODULE="oneapi/release/2026.1.0"
 export LRF_GBS=6144
 export LRF_LBS=2
 export LRF_SEQ_LEN=4096
+# Keep the SPMD/FSDP storage mesh divisible by fused parameter dimensions.
+# At 64N this is HSDP replicate=96 x shard=8; at a 2N smoke it is 3 x 8.
+export LRF_DP_SHARD=8
 
 export LRF_STEPS=1000
 export LRF_FRACTION=0.15

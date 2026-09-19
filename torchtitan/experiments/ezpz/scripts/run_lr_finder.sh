@@ -195,6 +195,19 @@ LRF_TOKENS_PER_TRAIN_STEP=""
 if [[ -n "${LRF_GBS}" ]]; then
     LRF_TOKENS_PER_TRAIN_STEP=$(( LRF_GBS * LRF_SEQ_LEN ))
 fi
+# Optional HSDP shape. Full SPMD initialization shards parameters on the DP
+# storage mesh before FSDP. Large arbitrary world sizes (24 in smoke, 768 in
+# the sweep) do not divide every fused parameter dimension; use a small shard
+# degree that divides the model geometry and replicate across the remainder.
+LRF_DP_SHARD="${LRF_DP_SHARD:-}"
+LRF_DP_REPLICATE="${LRF_DP_REPLICATE:-}"
+if [[ -n "${LRF_DP_SHARD}" && -z "${LRF_DP_REPLICATE}" ]]; then
+    if (( NGPUS % LRF_DP_SHARD != 0 )); then
+        echo "lr-finder FATAL: NGPUS=${NGPUS} is not divisible by LRF_DP_SHARD=${LRF_DP_SHARD}" >&2
+        exit 2
+    fi
+    LRF_DP_REPLICATE=$(( NGPUS / LRF_DP_SHARD ))
+fi
 # Config flavor override. The default composes "agpt_${model}", which is right
 # for 2b/20b/80b but picks the WRONG 30B: agpt_30b is the gemma-256k-vocab
 # 28.1B variant, while every 30B measurement and the converged chain use
@@ -332,6 +345,11 @@ for model in "${MODELS[@]}"; do
         # activation-checkpoint is a positional tyro subcommand and must
         # be the LAST argv token (after every --flag and "$@").
         ac_subcommand=("activation-checkpoint:full")
+    elif [[ -n "${LRF_DP_SHARD}" ]]; then
+        tp_args+=(
+            --parallelism.data_parallel_replicate_degree "${LRF_DP_REPLICATE}"
+            --parallelism.data_parallel_shard_degree "${LRF_DP_SHARD}"
+        )
     fi
 
     # Optional target global batch. Current TorchTitan counts token slots:
