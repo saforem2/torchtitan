@@ -420,42 +420,50 @@ def _set_moe_compute_backend(spec, backend: str) -> None:
             layer_cfg.moe.routed_experts.inner_experts.compute_backend = backend
 
 
-def _intermediate_ep12(flavor: str, backend: str) -> FaultTolerantTrainer.Config:
-    """Build an EP=12 scale-ladder flavor for BMM/Sonic diagnosis.
+def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer.Config:
+    """Build a scale-ladder flavor for BMM/Sonic diagnosis.
 
-    The 2B/4B/7B models have 24/24/36 experts, respectively, so each divides
-    evenly across EP=12. Keep LBS=1 and AC off: these probes isolate model/graph
-    scale without adding recomputation or vocab-projection memory pressure.
+    The 2B/4B/7B models have 24/24/36 experts, respectively. Keep LBS=1 and AC
+    off: these probes isolate model/graph and EP scale without recomputation or
+    vocab-projection memory pressure.
     """
     cfg = moe(flavor, local_batch_size=1, activation_checkpoint_mode="none")
     cfg.model_spec = model_registry(flavor, moe_comm_backend="standard")
     _set_moe_compute_backend(cfg.model_spec, backend)
-    cfg.parallelism.expert_parallel_degree = 12
+    cfg.parallelism.expert_parallel_degree = ep
     return cfg
 
 
+def moe_2b_bmm_ep2() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "bmm", 2)
+
+
+def moe_2b_sonic_ep2() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "aurora_full_sonic", 2)
+
+
 def moe_2b_bmm_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("2B", "bmm")
+    return _intermediate_ep("2B", "bmm", 12)
 
 
 def moe_2b_sonic_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("2B", "aurora_full_sonic")
+    return _intermediate_ep("2B", "aurora_full_sonic", 12)
 
 
 def moe_4b_bmm_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("4B", "bmm")
+    return _intermediate_ep("4B", "bmm", 12)
 
 
 def moe_4b_sonic_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("4B", "aurora_full_sonic")
+    return _intermediate_ep("4B", "aurora_full_sonic", 12)
 
 
 def moe_7b_bmm_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("7B", "bmm")
+    return _intermediate_ep("7B", "bmm", 12)
 
 
 def moe_7b_sonic_ep12() -> FaultTolerantTrainer.Config:
-    return _intermediate_ep12("7B", "aurora_full_sonic")
+    return _intermediate_ep("7B", "aurora_full_sonic", 12)
 
 
 def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
