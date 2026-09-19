@@ -461,7 +461,7 @@ for model in "${MODELS[@]}"; do
             R_STATUS[$RUN_IDX]="OOM"
         elif grep -q 'LR Finder complete' "${logfile}"; then
             R_STATUS[$RUN_IDX]="OK"
-        elif grep -q 'Traceback\|Error\|Exception' "${logfile}"; then
+        elif grep -q 'Traceback\|Error\|Exception\|Fatal Python error\|terminate called\|died from signal\|ur_die:' "${logfile}"; then
             R_STATUS[$RUN_IDX]="CRASH"
         else
             R_STATUS[$RUN_IDX]="UNKNOWN"
