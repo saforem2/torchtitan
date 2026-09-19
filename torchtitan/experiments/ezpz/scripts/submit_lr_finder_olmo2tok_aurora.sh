@@ -97,15 +97,15 @@ export LRF_USE_CONFIG_DATALOADER=1
 export LRF_VENV_SRC="/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.tar.gz"
 export LRF_ONEAPI_MODULE="oneapi/release/2026.1.0"
 
-export LRF_GBS=6144
-export LRF_LBS=2
-export LRF_SEQ_LEN=4096
+export LRF_GBS="${LRF_GBS:-6144}"
+export LRF_LBS="${LRF_LBS:-2}"
+export LRF_SEQ_LEN="${LRF_SEQ_LEN:-4096}"
 # Keep the SPMD/FSDP storage mesh divisible by fused parameter dimensions.
 # At 64N this is HSDP replicate=96 x shard=8; at a 2N smoke it is 3 x 8.
-export LRF_DP_SHARD=8
+export LRF_DP_SHARD="${LRF_DP_SHARD:-8}"
 
-export LRF_STEPS=1000
-export LRF_FRACTION=0.15
+export LRF_STEPS="${LRF_STEPS:-1000}"
+export LRF_FRACTION="${LRF_FRACTION:-0.15}"
 # Window is PER OPTIMIZER, because a sweep that never reaches the cliff yields
 # no suggestion at all -- and exits 0 having burned the whole walltime.
 # Measured blow-ups at 30B/GBS=960: adamw 3.05e-04, sophiag 3.55e-04,
