@@ -10,6 +10,12 @@
 > ```
 
 > [!IMPORTANT]
+> For Aurora's `next-eval` TEST image, use the separate
+> [next-eval newer-PyTorch guide](running-with-newer-pytorch-next-eval.md).
+> A production-image venv may not even start there because its base interpreter
+> path does not exist on the compute image.
+
+> [!IMPORTANT]
 > To access the internet, you need to set the following environment variables:
 >
 > ```bash
@@ -59,7 +65,7 @@
    ```
 
    - **NOTE** (2026-06-09): The _nightly_ PyTorch 2.13 has missing symbols and
-     is **currently** broken.  
+     is **currently** broken.
      The latest (confirmed) functional PyTorch 2.13 wheel is `torch==2.13.0.dev20260519+xpu`
 
 1. Install dependencies:

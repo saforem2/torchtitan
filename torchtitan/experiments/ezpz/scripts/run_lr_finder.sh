@@ -51,7 +51,7 @@ if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
         source /usr/share/lmod/lmod/init/bash
     fi
 fi
-module load oneapi/release/2025.3.1 hdf5 pti-gpu
+module load "${LRF_ONEAPI_MODULE:-oneapi/release/2025.3.1}" hdf5 pti-gpu
 # /opt/pbs/bin must be on PATH so `sh.qstat` works inside `ezpz launch`
 # (ezpz.pbs.get_pbs_jobid_of_active_job calls `from sh import qstat`).
 # bash --login on login node has it via /etc/profile; this re-export
@@ -81,16 +81,94 @@ set +u
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 set -u
 
-source .venv/bin/activate
-if [[ -f .venv.tar.gz ]]; then
+# LRF_VENV_SRC names a venv tarball OUTSIDE this repo to broadcast instead of
+# the local .venv. Needed on the next-eval queue: that queue runs a TEST bkc
+# image (26.181.0), while this repo's .venv is based on a
+# /opt/aurora/26.26.0/spack/... python that exists only on the PROD image, so
+# activating it there fails with a misleading "no importlib.metadata". A venv
+# based on $HOME/.local/share/uv is image-independent. The repo still supplies
+# the CODE; only the runtime comes from elsewhere.
+LRF_VENV_SRC="${LRF_VENV_SRC:-}"
+
+if [[ -n "${LRF_VENV_SRC}" ]]; then
+    if [[ ! -f "${LRF_VENV_SRC}" ]]; then
+        echo "lr-finder FATAL: LRF_VENV_SRC not found: ${LRF_VENV_SRC}" >&2
+        exit 2
+    fi
+    # Activate the venv that SHIPS the tarball, not the local one -- the local
+    # one is exactly what would die on a mismatched image. `ezpz` is a venv
+    # entrypoint (.venv/bin/ezpz), NOT something ezpz-utils defines, so some
+    # venv must be active here or this is `ezpz: command not found`.
+    LRF_VENV_HOME="$(dirname "${LRF_VENV_SRC}")/.venv"
+    if [[ ! -x "${LRF_VENV_HOME}/bin/ezpz" ]]; then
+        echo "lr-finder FATAL: no ezpz entrypoint beside LRF_VENV_SRC " \
+             "(looked for ${LRF_VENV_HOME}/bin/ezpz)" >&2
+        exit 2
+    fi
+    source "${LRF_VENV_HOME}/bin/activate"
+    log_message INFO "lr-finder: yeet-env via external tarball (${LRF_VENV_SRC})"
+    ezpz yeet-env --src "${LRF_VENV_SRC}"
+    deactivate
+elif [[ -f .venv.tar.gz ]]; then
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via tarball (.venv.tar.gz)"
     ezpz yeet-env --src .venv.tar.gz
+    deactivate
 else
+    source .venv/bin/activate
     log_message INFO "lr-finder: yeet-env via per-file rsync (.venv.tar.gz not present)"
     ezpz yeet-env
+    deactivate
 fi
-deactivate
 source /tmp/.venv/bin/activate
+# The nightly wheel bundles a newer Unified Runtime loader than Aurora's
+# module tree. It must win library resolution (urGraphGetIdExp/urDeviceWaitExp).
+export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+# The external venv may be old even when its Python and torch are usable. HEAD
+# imports SpmdType, introduced after spmd-types 0.2.1; check the exact runtime
+# that was broadcast before spending an allocation. Importing an unrelated
+# torch symbol is not a sufficient compatibility preflight.
+python3 - <<'PY' || {
+import importlib.metadata as metadata
+
+import grain
+import torch
+from spmd_types import SpmdType
+from torchtitan.distributed.fsdp import DataParallelMeshDims
+
+expected = {"spmd-types": "0.2.5", "grain": "0.2.18"}
+for package, wanted in expected.items():
+    actual = metadata.version(package)
+    if actual != wanted:
+        raise RuntimeError(f"expected {package} {wanted}, found {actual}")
+if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
+    raise RuntimeError(f"expected a 2.15 XPU nightly, found torch {torch.__version__}")
+try:
+    metadata.version("impi-rt")
+except metadata.PackageNotFoundError:
+    pass
+else:
+    raise RuntimeError("impi-rt must be absent; Aurora uses the site MPICH/PMIx stack")
+
+import inspect
+import torch.distributed.fsdp._fully_shard._fsdp_param as fsdp_param
+
+if "_resolve_spmd_types_for_storage" not in inspect.getsource(fsdp_param):
+    raise RuntimeError("torch lacks the #181519 FSDP spmd-types consumer")
+print(
+    "lr-finder runtime preflight: "
+    f"spmd-types={expected['spmd-types']}, grain={grain.__version__}, "
+    f"torch={torch.__version__}, SpmdType={SpmdType.__name__}, "
+    f"DataParallelMeshDims={DataParallelMeshDims.__name__}"
+)
+PY
+    echo "lr-finder FATAL: broadcast venv is incompatible with repository HEAD" >&2
+    exit 2
+}
+
+# The repo supplies the code even when the runtime came from elsewhere.
+export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -109,6 +187,27 @@ LRF_LBS="${LRF_LBS:-1}"
 # is at seq=4096, and GBS counts SEQUENCES -- so 8192 would double tokens/step
 # and the wall clock for no calibration benefit.
 LRF_SEQ_LEN="${LRF_SEQ_LEN:-8192}"
+# TorchTitan sync #80 replaced sequence-count batch flags with token-count
+# flags. Preserve the historical LRF_LBS/LRF_GBS interface for submit scripts,
+# but derive the only CLI spellings accepted by current HEAD.
+LRF_TOKENS_PER_MICROBATCH=$(( LRF_LBS * LRF_SEQ_LEN ))
+LRF_TOKENS_PER_TRAIN_STEP=""
+if [[ -n "${LRF_GBS}" ]]; then
+    LRF_TOKENS_PER_TRAIN_STEP=$(( LRF_GBS * LRF_SEQ_LEN ))
+fi
+# Optional HSDP shape. Full SPMD initialization shards parameters on the DP
+# storage mesh before FSDP. Large arbitrary world sizes (24 in smoke, 768 in
+# the sweep) do not divide every fused parameter dimension; use a small shard
+# degree that divides the model geometry and replicate across the remainder.
+LRF_DP_SHARD="${LRF_DP_SHARD:-}"
+LRF_DP_REPLICATE="${LRF_DP_REPLICATE:-}"
+if [[ -n "${LRF_DP_SHARD}" && -z "${LRF_DP_REPLICATE}" ]]; then
+    if (( NGPUS % LRF_DP_SHARD != 0 )); then
+        echo "lr-finder FATAL: NGPUS=${NGPUS} is not divisible by LRF_DP_SHARD=${LRF_DP_SHARD}" >&2
+        exit 2
+    fi
+    LRF_DP_REPLICATE=$(( NGPUS / LRF_DP_SHARD ))
+fi
 # Config flavor override. The default composes "agpt_${model}", which is right
 # for 2b/20b/80b but picks the WRONG 30B: agpt_30b is the gemma-256k-vocab
 # 28.1B variant, while every 30B measurement and the converged chain use
@@ -163,9 +262,22 @@ LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
 # Set LRF_DFL_NAME to match the config's tokenizer:
 #   gemma configs (agpt_2b/20b/30b/80b)  -> olmo-mix-1124 (data_fused_gemma_eod)
 #   *_llama3tok / *_olmo2tok             -> a list tokenized to match
+#
+# LRF_USE_CONFIG_DATALOADER=1 leaves the config's own dataloader alone, for
+# configs that carry a complete one. That is the only workable route for an
+# OLMo-2-vocab model on Aurora right now: EVERY blendcorpus list here is
+# gemma- or Llama-2-tokenized, so the "list tokenized to match" named above
+# does not exist for *_olmo2tok. The *_smoke configs read precached olmo-mix
+# parquet through Grain and tokenize inline with OLMo-2 instead, which is what
+# makes the geometry calibratable at all. Without this switch the hardcoded
+# --dataloader.dataset below would override that and feed gemma ids to a
+# 100,352 embedding -- silently, with a plausible curve, which is the whole
+# failure this block warns about.
+LRF_USE_CONFIG_DATALOADER="${LRF_USE_CONFIG_DATALOADER:-0}"
+
 LRF_DFL_NAME="${LRF_DFL_NAME:-books}"
 DATASET_PATH="torchtitan/experiments/ezpz/data-lists/$(ezpz_get_machine_name)/${LRF_DFL_NAME}.txt"
-if [[ ! -f "$DATASET_PATH" ]]; then
+if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]] && [[ ! -f "$DATASET_PATH" ]]; then
     echo "lr-finder FATAL: data list not found: $DATASET_PATH" >&2
     exit 2
 fi
@@ -233,15 +345,19 @@ for model in "${MODELS[@]}"; do
         # activation-checkpoint is a positional tyro subcommand and must
         # be the LAST argv token (after every --flag and "$@").
         ac_subcommand=("activation-checkpoint:full")
+    elif [[ -n "${LRF_DP_SHARD}" ]]; then
+        tp_args+=(
+            --parallelism.data_parallel_replicate_degree "${LRF_DP_REPLICATE}"
+            --parallelism.data_parallel_shard_degree "${LRF_DP_SHARD}"
+        )
     fi
 
-    # Optional target global batch. The optimal LR is batch-size
-    # dependent, so calibrating a production run requires sweeping at that
-    # run's GBS (the trainer derives the needed GAS from
-    # GBS = dp_degree * LBS * GAS). Empty = use world_size*LBS/TP.
+    # Optional target global batch. Current TorchTitan counts token slots:
+    # num_tokens_per_train_step = GBS(sequences) * sequence length. Empty means
+    # the config derives the train-step total from world size and microbatch.
     gbs_args=()
-    if [[ -n "${LRF_GBS}" ]]; then
-        gbs_args=(--training.global_batch_size "${LRF_GBS}")
+    if [[ -n "${LRF_TOKENS_PER_TRAIN_STEP}" ]]; then
+        gbs_args=(--training.num-tokens-per-train-step "${LRF_TOKENS_PER_TRAIN_STEP}")
     fi
 
     # Optional shared index-cache dir. The blendcorpus index cold-builds
@@ -253,6 +369,16 @@ for model in "${MODELS[@]}"; do
     cache_args=()
     if [[ -n "${LRF_DATA_CACHE_PATH}" ]]; then
         cache_args=(--dataloader.data-cache-path "${LRF_DATA_CACHE_PATH}")
+    fi
+
+    # Empty when the config owns its dataloader (see LRF_USE_CONFIG_DATALOADER
+    # above); otherwise the historical blendcorpus override.
+    dataloader_args=()
+    if [[ "${LRF_USE_CONFIG_DATALOADER}" != "1" ]]; then
+        dataloader_args=(
+            --dataloader.dataset blendcorpus
+            --dataloader.dataset_path "${DATASET_PATH}"
+        )
     fi
 
     for opt in "${OPTIMIZERS[@]}"; do
@@ -304,13 +430,12 @@ for model in "${MODELS[@]}"; do
             --job.dump-folder "${LRF_DUMP_FOLDER}" \
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \
-            --training.local_batch_size "${LRF_LBS}" \
+            --training.num-tokens-per-microbatch-per-dp-rank "${LRF_TOKENS_PER_MICROBATCH}" \
             "${gbs_args[@]}" \
-            --training.seq_len "${LRF_SEQ_LEN}" \
+            --training.max-context-length "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
-            --dataloader.dataset blendcorpus \
-            --dataloader.dataset_path "${DATASET_PATH}" \
+            "${dataloader_args[@]}" \
             "${cache_args[@]}" \
             --lr_finder.enable \
             --lr_finder.init_lr "${LRF_INIT_LR}" \
@@ -319,7 +444,7 @@ for model in "${MODELS[@]}"; do
             "${tp_args[@]}" \
             "$@" \
             "${ac_subcommand[@]}" \
-            >"${logfile}" 2>&1 || true
+            >"${logfile}" 2>&1
         exit_code=$?
 
         # Kill any leftover processes
@@ -336,7 +461,7 @@ for model in "${MODELS[@]}"; do
             R_STATUS[$RUN_IDX]="OOM"
         elif grep -q 'LR Finder complete' "${logfile}"; then
             R_STATUS[$RUN_IDX]="OK"
-        elif grep -q 'Traceback\|Error\|Exception' "${logfile}"; then
+        elif grep -q 'Traceback\|Error\|Exception\|Fatal Python error\|terminate called\|died from signal\|ur_die:' "${logfile}"; then
             R_STATUS[$RUN_IDX]="CRASH"
         else
             R_STATUS[$RUN_IDX]="UNKNOWN"
@@ -426,3 +551,14 @@ echo "============================================================"
 echo ""
 echo "Report saved to: ${REPORT}"
 echo "Logs saved to:   ${OUTDIR}/"
+
+# A report is not success. Propagate any failed arm to PBS so a 12-second
+# import crash cannot appear as Exit_status=0. Keep all arms in the report,
+# then fail once at the end.
+overall_exit=0
+for ((i = 0; i < NUM_RUNS; i++)); do
+    if [[ "${R_STATUS[$i]}" != "OK" ]]; then
+        overall_exit=1
+    fi
+done
+exit "${overall_exit}"

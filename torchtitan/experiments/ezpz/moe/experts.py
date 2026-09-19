@@ -36,7 +36,9 @@ from torch.utils.checkpoint import checkpoint
 from torchtitan.models.common.moe import GroupedExperts
 
 
-ExpertComputeBackend = Literal["for_loop", "grouped_mm", "bmm"]
+ExpertComputeBackend = Literal[
+    "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl", "aurora_full_sonic"
+]
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -208,6 +210,271 @@ def _run_experts_bmm(
     return out_RD.to(x.dtype)
 
 
+def _run_experts_bmm_nodrop(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    """Batched torch.bmm expert compute that drops NO tokens.
+
+    Same batched-GEMM idea as `_run_experts_bmm`, but the padded buffer is
+    sized to the largest actual per-expert count rather than to a capacity
+    derived from `capacity_factor`. Nothing is dropped, so this is the
+    numerically exact choice; the cost is a dynamic leading dimension
+    (`max_tokens` moves with the routing each step), which makes it less
+    friendly to torch.compile than the fixed-capacity `bmm` path.
+
+    Ported from samuelwheeler/torchtitan feature/aurora-moe-training, where
+    it is `_run_experts_batched_mm_padded`. Renamed here so the difference
+    that matters -- drop vs no-drop -- is visible at the call site instead
+    of buried in the implementation. Adapted to our post-#3425 parameter
+    names (w1_EFD/w2_EDF/w3_EFD are unpacked by the caller).
+
+    `x` is assumed sorted by expert, matching the
+    `EzpzGroupedExperts.forward` contract.
+    """
+    counts = num_tokens_per_expert.to(device=x.device, dtype=torch.int64)
+    if counts.numel() == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    max_tokens = int(counts.max().item())
+    if max_tokens == 0:
+        return _empty_expert_output(w1, w2, w3, x)
+
+    num_experts = counts.numel()
+    total_tokens = x.shape[0]
+    device = x.device
+
+    offsets = counts.cumsum(0) - counts
+    expert_indices = torch.repeat_interleave(
+        torch.arange(num_experts, device=device, dtype=torch.int64),
+        counts,
+    )
+    token_indices_within_expert = torch.arange(
+        total_tokens, device=device, dtype=torch.int64
+    ) - torch.repeat_interleave(offsets, counts)
+
+    padded_x = x.new_zeros((num_experts, max_tokens, x.shape[-1]))
+    padded_x[expert_indices, token_indices_within_expert] = x
+
+    # Compute in bf16 and return in the caller's dtype, matching
+    # _run_experts_for_loop and _run_experts_bmm. Without this the GEMMs
+    # raise "expected scalar type Float but found BFloat16" whenever the
+    # parameters and the activations disagree -- which they do under
+    # mixed precision, where params stay fp32 and x arrives bf16. The sww
+    # original omitted the casts because on that branch the caller had
+    # already aligned the dtypes.
+    padded_x_bf16 = padded_x.bfloat16()
+    w1_bf16 = w1.bfloat16()
+    w2_bf16 = w2.bfloat16()
+    w3_bf16 = w3.bfloat16()
+
+    h = F.silu(torch.bmm(padded_x_bf16, w1_bf16.transpose(-2, -1)))
+    h = h * torch.bmm(padded_x_bf16, w3_bf16.transpose(-2, -1))
+    out_padded = torch.bmm(h, w2_bf16.transpose(-2, -1))
+
+    return out_padded[expert_indices, token_indices_within_expert].type_as(x)
+
+
+def _run_experts_aurora_sycl(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    """Exact compact expert GEMMs via the optional aurora-moe SYCL kernels.
+
+    Routing and score application stay in the token dispatcher; this only
+    replaces the expert GEMMs. Ported from samuelwheeler/torchtitan
+    feature/aurora-moe-training, where it is the `aurora_sycl` backend.
+
+    Uses the standard w1/w2/w3 parameters, so it is checkpoint-transparent:
+    unlike that branch's scattermoe and aurora_full_* backends, selecting
+    this one does not change any registered parameter name.
+
+    The kernels are JIT-compiled by torch.utils.cpp_extension.load on first
+    call, which needs oneMKL headers and libmkl_sycl_blas.so.5 (found under
+    $MKLROOT, default /opt/aurora/<ver>/oneapi/mkl/<ver>). Set
+    AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
+    call is slow. Imported lazily so every other backend stays usable
+    without aurora-moe installed.
+
+WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
+    oneMKL must all come from the SAME Aurora release. Four measurements on
+    real compute nodes, 2026-09-15/16:
+
+      8829416  next-eval (TEST bkc). frameworks/2026.1.0 module python 3.12
+               + MKLROOT 26.181.0. Coherent -> WORKS.
+      8829454  next-eval (TEST bkc). Our yeeted /tmp/.venv (py3.14,
+               2.13.0.dev20260428+xpu) + MKLROOT 26.26.0. Mismatched ->
+               UR_RESULT_ERROR_UNINITIALIZED (37).
+      8829790  next-eval (TEST bkc). Same venv + MKLROOT 26.181.0. Still
+               mismatched, because that venv's torch is prod-era while the
+               image and compiler are test-era ->
+               oneapi::mkl::blas::gemm_bf16bf16bf16: unsupported device.
+      8831582  debug (PROD bkc). Same venv + MKLROOT 26.26.0/2025.3 + icpx
+               2025.3.2. All three from one release -> WORKS.
+
+    So the discriminator is coherence, not the venv and not the oneMKL
+    version on its own. An earlier revision of this docstring said the
+    backend "does not work under the production training venv"; that was
+    measured only against test-bkc images and was wrong.
+
+    Numerics on the coherent stack (8831582, vs the for_loop reference,
+    bf16, 4 experts with one empty):
+
+      rel_err 4.4e-03, 14 of 1280 elements (1.09%) outside atol/rtol 0.05,
+      rowwise cosine min 0.999993
+
+    That is bf16 rounding, not a kernel defect. A single bf16 matmul on this
+    shape carries ~2e-03 and this is a three-matmul SwiGLU chain; the
+    mismatched elements are large-magnitude ones where the absolute
+    difference (max 8.0 against a reference max near 2000) is relatively
+    small. A structurally wrong kernel would break the cosine, not a
+    handful of elements. For contrast bmm_nodrop scored exactly 0.0 with 0
+    mismatches in the same job on the same device.
+
+    Requirement: aurora_moe hardcoded a libmkl_sycl_blas.so.5 check in three
+    files (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so
+    it refused the .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by
+    globbing the soname.
+    """
+    try:
+        from aurora_moe.torchtitan_experts import torchtitan_exact_experts
+    except ImportError as error:
+        raise ImportError(
+            "the aurora_sycl expert backend requires the aurora_moe package "
+            "(torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src) on PYTHONPATH"
+        ) from error
+    return torchtitan_exact_experts(w1, w2, w3, x, num_tokens_per_expert)
+
+
+def _sonic_weight_layouts(
+    w1: torch.Tensor, w2: torch.Tensor, w3: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert TorchTitan [E,F,D]/[E,D,F] weights to Sonic layouts."""
+    return (
+        w3.transpose(1, 2).contiguous(),  # up: [E, D, F]
+        w1.transpose(1, 2).contiguous(),  # gate: [E, D, F]
+        w2.transpose(1, 2).contiguous(),  # down: [E, F, D]
+    )
+
+
+def _run_experts_aurora_full_sonic(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+    *,
+    topk_scores: torch.Tensor | None,
+    topk_indices: torch.Tensor | None,
+    ep_mesh: object | None,
+) -> torch.Tensor:
+    """aurora_moe's expert-parallel Sonic backend.
+
+    Unlike ``aurora_sycl`` -- a pure function over already-routed rows -- this
+    one owns the dispatch: it takes the router's decision and performs its own
+    expert-parallel all-to-all. That is why it needs ``topk_scores``,
+    ``topk_indices`` and a mesh, none of which the
+    ``forward(x, num_tokens_per_expert)`` contract carries.
+
+    Feasibility was established before this was written (see
+    ``docs/experiments/sonic-port-feasibility.md``):
+
+    - EP>1 runs on torch 2.15 (job 8836014); the ``ur_die`` abort recorded on
+      earlier stacks does not reproduce.
+    - torchtitan's EP rank ordering matches aurora_moe's documented
+      ``rank = dp_rank * EP + ep_rank`` at EP=2, 8 AND 12 (job 8836277), so no
+      remap is needed. Had they disagreed the all-to-all would have crossed
+      ranks silently -- wrong gradients, no error.
+
+    ``mesh`` is aurora_moe's ``ParallelMesh``, NOT a torch ``DeviceMesh``: the
+    kernel indexes ``mesh.group_size["ep_dispatch"]``. We build one from the
+    EP process group torchtitan already made.
+    """
+    if topk_scores is None or topk_indices is None:
+        raise ValueError(
+            "the aurora_full_sonic expert backend needs the router's "
+            "topk_scores/topk_indices. They are available in "
+            "RoutedExperts.forward but core drops them before calling "
+            "inner_experts (models/common/moe.py:163); use EzpzRoutedExperts, "
+            "which forwards them."
+        )
+    try:
+        from aurora_moe._core import _routed_moe
+        from aurora_moe.distributed import MoEProcessGroups, ParallelMesh
+    except ImportError as error:
+        raise ImportError(
+            "the aurora_full_sonic expert backend requires the aurora_moe "
+            "package (torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src) "
+            "on PYTHONPATH"
+        ) from error
+
+    # sycl_sonic refuses to run without the compact alltoallv transport.
+    if os.environ.get("AURORA_MOE_ALLTOALLV") != "1":
+        raise RuntimeError(
+            "the aurora_full_sonic backend requires AURORA_MOE_ALLTOALLV=1 "
+            "(aurora_moe/_core.py:3727 raises otherwise)"
+        )
+
+    # sycl_sonic hard-requires BF16 for x AND topk_scores (_core.py:3722-3725).
+    # In the real model the scores arrive as float32 even though an isolated
+    # router returns bf16 -- torchtitan promotes somewhere between the router
+    # and here (job 8836304 died on exactly this). Rather than chase which
+    # step does it, normalize at the boundary: this is the kernel's documented
+    # input contract, and the cast is a no-op when they already match.
+    if topk_scores.dtype != torch.bfloat16:
+        topk_scores = topk_scores.to(torch.bfloat16)
+    if x.dtype != torch.bfloat16:
+        raise ValueError(
+            "the aurora_full_sonic backend requires BF16 activations, got "
+            f"{x.dtype}. Casting x here would hide a real dtype problem in the "
+            "model, unlike the router scores, which are a routing decision."
+        )
+
+    group = ep_mesh.get_group() if ep_mesh is not None else None
+    mesh = ParallelMesh(MoEProcessGroups(ep_dispatch=group), x.device)
+
+    # local_expert_ids only needs the right LENGTH: _routed_moe takes
+    # len(local_expert_ids) as local_count, and the kernel then does
+    #     dest      = topk_indices // local_count
+    #     local_ids = topk_indices - dest * local_count
+    # (_core.py:1682). So local_count must be experts PER RANK, and the kernel
+    # shards the GLOBAL topk_indices itself. Passing the full expert count made
+    # local_ids exceed the per-rank range and the kernel raised
+    # "local_ids must be in [0, num_experts)" (job 8836331).
+    ep_size = ep_mesh.size() if ep_mesh is not None else 1
+    total_experts = int(num_tokens_per_expert.numel())
+    if total_experts % ep_size:
+        raise ValueError(
+            f"expert count {total_experts} is not divisible by EP size "
+            f"{ep_size}; the sonic kernel assumes an even per-rank split"
+        )
+    local_count = total_experts // ep_size
+    local_expert_ids = list(range(local_count))
+    # TorchTitan stores the projections as w1/w3=[E, F, D] and
+    # w2=[E, D, F], while Sonic's ragged kernel expects
+    # up/gate=[E, D, F] and down=[E, F, D]. The debug model has D == F,
+    # which masked this contract mismatch; production 10B/2B does not.
+    # Transpose as views and materialize contiguous layouts required by Sonic.
+    up, gate, down = _sonic_weight_layouts(w1, w2, w3)
+    return _routed_moe(
+        x,
+        topk_scores,
+        topk_indices,
+        local_expert_ids,
+        mesh,
+        up,
+        gate,
+        down,
+        expert_backend="sycl_sonic",
+    )
+
+
 class EzpzGroupedExperts(GroupedExperts):
     """GroupedExperts variant that selects between expert compute backends.
 
@@ -235,7 +502,19 @@ class EzpzGroupedExperts(GroupedExperts):
         self,
         x: torch.Tensor,
         num_tokens_per_expert: torch.Tensor,
+        *,
+        topk_scores: torch.Tensor | None = None,
+        topk_indices: torch.Tensor | None = None,
+        ep_mesh: object | None = None,
     ) -> torch.Tensor:
+        # topk_scores / topk_indices / ep_mesh are ONLY consumed by the
+        # "aurora_full_sonic" backend, which needs the routing decision and an
+        # EP mesh that the (x, num_tokens_per_expert) contract does not carry.
+        # They are keyword-only and default to None so every existing caller --
+        # and the other five backends -- are untouched. RoutedExperts passes
+        # them via EzpzRoutedExperts (moe/routed_experts.py); core's
+        # RoutedExperts drops them at models/common/moe.py:163, which is the
+        # entire reason this plumbing exists.
         # NOTE: this method is intentionally NOT marked with
         # @torch.compiler.disable. The grouped_mm and bmm paths delegate to
         # compile-friendly implementations (upstream's `super().forward()`
@@ -275,5 +554,20 @@ class EzpzGroupedExperts(GroupedExperts):
         if self.compute_backend == "bmm":
             return _run_experts_bmm(
                 w1, w2, w3, x, num_tokens_per_expert, self.capacity_factor
+            )
+        if self.compute_backend == "bmm_nodrop":
+            return _run_experts_bmm_nodrop(w1, w2, w3, x, num_tokens_per_expert)
+        if self.compute_backend == "aurora_sycl":
+            return _run_experts_aurora_sycl(w1, w2, w3, x, num_tokens_per_expert)
+        if self.compute_backend == "aurora_full_sonic":
+            return _run_experts_aurora_full_sonic(
+                w1,
+                w2,
+                w3,
+                x,
+                num_tokens_per_expert,
+                topk_scores=topk_scores,
+                topk_indices=topk_indices,
+                ep_mesh=ep_mesh,
             )
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")

@@ -29,6 +29,14 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
+from torchtitan.experiments.ezpz.native_ddp import (
+    install_agpt_dtype_probe,
+    record_native_ddp_grad_streams,
+    scale_native_ddp_loss,
+    validate_native_ddp,
+    wrap_native_ddp,
+)
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
     TorchFTManager as FTManager,
@@ -40,7 +48,6 @@ from torchtitan.experiments.torchft.optimizer import (
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
 from torchtitan.experiments.ezpz.logging import logger
-from torchtitan.observability.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
@@ -152,6 +159,20 @@ class FaultTolerantTrainer(Trainer):
     class Config(Trainer.Config):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
         lr_finder: LRFinderConfig = field(default_factory=LRFinderConfig)
+
+        # Re-declare `parallelism` with the ezpz subclass so the native-DDP
+        # knobs exist without adding them to core ParallelismConfig. The
+        # upstream Aurora MoE branch puts these five fields in core; we do
+        # not need to, because the call sites were inverted into this file
+        # (see wrap_native_ddp below) and nothing in core ever reads them.
+        #
+        # tyro builds its CLI from the default_factory rather than the
+        # annotation, so this alone makes `--parallelism.native-ddp-*`
+        # parse. The subclass passes isinstance(ParallelismConfig), so every
+        # core annotation still accepts it.
+        parallelism: EzpzParallelismConfig = field(
+            default_factory=EzpzParallelismConfig
+        )
 
         # Batch-size ramp (analogous to LR warmup, but for global batch
         # size). Ramps the effective gradient-accumulation count -- and
@@ -533,6 +554,42 @@ class FaultTolerantTrainer(Trainer):
         # for gradient sync.
         self.loss_fn = config.loss.build(compile_config=config.compile)
 
+        # Compensate DDP's gradient averaging on the native-DDP path.
+        #
+        # Core's forward_backward_step says it plainly: "The returned loss
+        # here is local SUM loss / global_valid_tokens" -- global_valid_tokens
+        # is a cross-DP sum (dist_sum over batch_mesh), so gradients are
+        # ALREADY globally normalized before backward. DDP's reducer then
+        # divides by process_group.size() again, leaving them dp_degree x
+        # too small.
+        #
+        # FSDP has the same problem and solves it with
+        # disable_fsdp_gradient_division (agpt/parallelize.py). DDP exposes
+        # no equivalent switch, so scale the loss gradient up by dp_degree
+        # instead -- which is exactly what scale_native_ddp_loss was written
+        # for. It was defined in native_ddp.py and never wired in, so the
+        # native-DDP path was not gradient-equivalent to the FSDP path it
+        # replaces. Silent: it would have trained, just wrongly.
+        #
+        # _ScaleGradient touches the gradient only; the returned loss VALUE
+        # is unchanged, so reported loss stays comparable across paths.
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            _dp_degree = parallel_dims.dp_replicate
+            if _dp_degree > 1:
+                _inner_loss_fn = self.loss_fn
+
+                def _native_ddp_loss_fn(*args: Any, **kwargs: Any) -> Any:
+                    result = _inner_loss_fn(*args, **kwargs)
+                    # core's loss_fn returns (loss, aux); scale only the loss
+                    if isinstance(result, tuple):
+                        return (
+                            scale_native_ddp_loss(result[0], _dp_degree),
+                            *result[1:],
+                        )
+                    return scale_native_ddp_loss(result, _dp_degree)
+
+                self.loss_fn = _native_ddp_loss_fn
+
         # 80th sync (#4121): batch sizes are counted in TOKENS, not sequences.
         #   num_tokens_per_microbatch_per_dp_rank == old local_batch_size * seq_len
         #   num_tokens_per_train_step            == old global_batch_size * seq_len
@@ -558,6 +615,24 @@ class FaultTolerantTrainer(Trainer):
             num_tokens_per_dp_rank * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
+
+        # Native-DDP preflight. Inert unless the config opts in; it rejects
+        # combinations that would silently mis-train (wrong loss scaling,
+        # incompatible GAS) rather than letting them run.
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            validate_native_ddp(
+                model_name=model_spec.name,
+                parallel_dims=parallel_dims,
+                training=config.training,
+                parallelism=config.parallelism,
+                loss_fn=self.loss_fn,
+                gradient_accumulation_steps=self.gradient_accumulation_steps,
+                fault_tolerance_enabled=config.fault_tolerance.enable,
+                create_seed_checkpoint=config.checkpoint.create_seed_checkpoint,
+                optimizer_has_param_groups=bool(
+                    getattr(config.optimizer, "param_groups", None)
+                ),
+            )
 
         # How many pipeline microbatches make up one local batch. This is 1
         # whenever PP is off, so the extra loop it drives in train_step is a
@@ -703,9 +778,41 @@ class FaultTolerantTrainer(Trainer):
             model.to_empty(device=init_device)
             with torch.no_grad():
                 cast(BaseModel, model).init_states(buffer_device=buffer_device)
+
+            # Native DDP wraps AFTER parallelize (so it sees the already-
+            # sharded module) AND after to_empty/init_states (so it sees real
+            # storage). Guarded: inert unless the config opts in.
+            #
+            # Ordering is load-bearing. The model is built under
+            # torch.device("meta"), so wrapping before to_empty gave DDP
+            # meta parameters: it read next(model.parameters()).device to
+            # compute device_ids and got device(type='meta') with .index
+            # None, then built reduction buckets over meta storage. The
+            # subsequent to_empty reallocated every parameter, invalidating
+            # the bucket views it had just built with
+            # gradient_as_bucket_view=True. Silent, and only on the opt-in
+            # path.
+            if getattr(
+                config.parallelism, "enable_data_parallel_native_ddp", False
+            ):
+                model = wrap_native_ddp(
+                    model,
+                    parallel_dims.get_mesh("dp_replicate"),
+                    config.parallelism.native_ddp_bucket_cap_mb,
+                    config.parallelism.native_ddp_compute_policy,
+                    config.parallelism.native_ddp_bucketize_first_iteration,
+                )
+
             model.train()
 
             self.model_parts = [model]
+
+        # Opt-in dtype probe, env-gated rather than config-gated because it is
+        # a debugging aid rather than a run mode.
+        if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
+            if parallel_dims.pp_enabled or len(self.model_parts) != 1:
+                raise ValueError("AGPT dtype probe requires a non-pipeline model")
+            install_agpt_dtype_probe(self.model_parts[0])
 
         # Set lm_head reference for ChunkedLossWrapper after model construction.
         # Replayed from upstream torchtitan/trainer.py (lines 391-411). Required
@@ -1085,6 +1192,12 @@ class FaultTolerantTrainer(Trainer):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
             _attn.set_step(self.step)
 
+        if getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            # Experimental mixed-precision DDP restores FP32 gradients on an
+            # upcast stream; ordinary DDP/autocast makes this a no-op.
+            record_native_ddp_grad_streams(self.model_parts[0])
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,
