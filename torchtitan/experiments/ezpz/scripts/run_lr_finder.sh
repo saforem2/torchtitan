@@ -51,7 +51,7 @@ if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
         source /usr/share/lmod/lmod/init/bash
     fi
 fi
-module load oneapi/release/2025.3.1 hdf5 pti-gpu
+module load "${LRF_ONEAPI_MODULE:-oneapi/release/2025.3.1}" hdf5 pti-gpu
 # /opt/pbs/bin must be on PATH so `sh.qstat` works inside `ezpz launch`
 # (ezpz.pbs.get_pbs_jobid_of_active_job calls `from sh import qstat`).
 # bash --login on login node has it via /etc/profile; this re-export
@@ -139,6 +139,14 @@ for package, wanted in expected.items():
     actual = metadata.version(package)
     if actual != wanted:
         raise RuntimeError(f"expected {package} {wanted}, found {actual}")
+if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
+    raise RuntimeError(f"expected a 2.15 XPU nightly, found torch {torch.__version__}")
+
+import inspect
+import torch.distributed.fsdp._fully_shard._fsdp_param as fsdp_param
+
+if "_resolve_spmd_types_for_storage" not in inspect.getsource(fsdp_param):
+    raise RuntimeError("torch lacks the #181519 FSDP spmd-types consumer")
 print(
     "lr-finder runtime preflight: "
     f"spmd-types={expected['spmd-types']}, grain={grain.__version__}, "

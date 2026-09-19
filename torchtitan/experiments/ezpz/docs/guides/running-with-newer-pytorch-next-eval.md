@@ -31,7 +31,8 @@ The reusable environment used here lives at:
 | software tree | `/opt/aurora/26.181.0` |
 | oneAPI | 2026.1 |
 | Python | 3.14.2 from `$HOME/.local/share/uv` |
-| PyTorch | `2.13.0.dev20260428+xpu` |
+| PyTorch | `2.15.0.dev20260919+xpu` |
+| required PyTorch fix | `pytorch/pytorch#181519` (`_resolve_spmd_types_for_storage`) |
 | `spmd-types` | **0.2.5** |
 | Grain | **0.2.18** |
 | XPU layout | 12 tiles/node with `ZE_FLAT_DEVICE_HIERARCHY=FLAT` |
@@ -68,7 +69,7 @@ if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
   source /etc/bash.bashrc.local
 fi
 
-module load oneapi/release/2025.3.1 hdf5 pti-gpu
+module load oneapi/release/2026.1.0 hdf5 pti-gpu
 
 export PATH="/opt/pbs/bin:${PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -83,10 +84,11 @@ export ftp_proxy="http://proxy.alcf.anl.gov:3128"
 export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov"
 ```
 
-The TEST image begins with the 2026.1 software tree. The explicit module load
-above is the environment used by the current ezpz runner; it may print that
-oneAPI was reloaded from 2026.1.0 to 2025.3.1. Record that message rather than
-assuming the queue name alone identifies every library in the process.
+The TEST image begins with the 2026.1 software tree. Keep the matching oneAPI
+2026.1 runtime with the 2.15 XPU nightly; forcing the production 2025.3.1
+runtime produces loader mismatches such as an undefined `urDeviceWaitExp`
+symbol. Record module reload messages rather than assuming the queue name alone
+identifies every library in the process.
 
 ## 3. Use an image-independent venv
 
@@ -132,6 +134,12 @@ from torchtitan.distributed.fsdp import DataParallelMeshDims
 
 assert metadata.version("spmd-types") == "0.2.5"
 assert metadata.version("grain") == "0.2.18"
+if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
+    raise RuntimeError(f"wrong torch build: {torch.__version__}")
+
+import inspect
+import torch.distributed.fsdp._fully_shard._fsdp_param as fsdp_param
+assert "_resolve_spmd_types_for_storage" in inspect.getsource(fsdp_param)
 assert torch.xpu.is_available()
 assert torch.xpu.device_count() == 12
 
@@ -163,6 +171,14 @@ Use `uv` from the login environment because this venv intentionally has no
 
 ```bash
 VENV_ROOT=/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz
+uv pip install \
+  --python "${VENV_ROOT}/.venv/bin/python" \
+  --pre \
+  --upgrade-package torch \
+  --index-url https://download.pytorch.org/whl/nightly/xpu \
+  --link-mode=copy \
+  torch torchvision torchaudio
+
 uv pip install \
   --python "${VENV_ROOT}/.venv/bin/python" \
   --link-mode=copy \
@@ -248,6 +264,8 @@ matter. For the full ladder, see the
 | venv Python reports `No such file or directory` | venv was built against the production `/opt/aurora` Python | use the image-independent Python 3.14 venv |
 | `cannot import name 'SpmdType' from 'spmd_types'` | borrowed venv has 0.2.1; HEAD requires 0.2.5 | update source venv, rebuild tarball, test extracted archive |
 | `No module named 'grain'` | the image-independent venv lacks the config-owned dataloader dependency | install `grain==0.2.18`, rebuild, and re-run the exact preflight |
+| FSDP rejects a plain `weight` with `dp_mesh_dims` | torch predates `pytorch#181519`, even if `spmd-types` itself is current | install a 2.15 XPU nightly and assert `_resolve_spmd_types_for_storage` exists |
+| `undefined symbol: urDeviceWaitExp` while importing torch | 2.15 XPU wheel is running against the older oneAPI 2025.3 runtime | keep `oneapi/release/2026.1.0` on `next-eval` |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |
 | plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-3 config-owned Grain path |
