@@ -128,12 +128,23 @@ source /tmp/.venv/bin/activate
 # torch symbol is not a sufficient compatibility preflight.
 python3 - <<'PY' || {
 import importlib.metadata as metadata
-from spmd_types import SpmdType
 
-version = metadata.version("spmd-types")
-if version != "0.2.5":
-    raise RuntimeError(f"expected spmd-types 0.2.5, found {version}")
-print(f"lr-finder runtime preflight: spmd-types={version}, SpmdType={SpmdType.__name__}")
+import grain
+import torch
+from spmd_types import SpmdType
+from torchtitan.distributed.fsdp import DataParallelMeshDims
+
+expected = {"spmd-types": "0.2.5", "grain": "0.2.18"}
+for package, wanted in expected.items():
+    actual = metadata.version(package)
+    if actual != wanted:
+        raise RuntimeError(f"expected {package} {wanted}, found {actual}")
+print(
+    "lr-finder runtime preflight: "
+    f"spmd-types={expected['spmd-types']}, grain={grain.__version__}, "
+    f"torch={torch.__version__}, SpmdType={SpmdType.__name__}, "
+    f"DataParallelMeshDims={DataParallelMeshDims.__name__}"
+)
 PY
     echo "lr-finder FATAL: broadcast venv is incompatible with repository HEAD" >&2
     exit 2

@@ -33,6 +33,7 @@ The reusable environment used here lives at:
 | Python | 3.14.2 from `$HOME/.local/share/uv` |
 | PyTorch | `2.13.0.dev20260428+xpu` |
 | `spmd-types` | **0.2.5** |
+| Grain | **0.2.18** |
 | XPU layout | 12 tiles/node with `ZE_FLAT_DEVICE_HIERARCHY=FLAT` |
 
 The Python is intentionally independent of `/opt/aurora`: that makes the venv
@@ -124,17 +125,20 @@ python3 - <<'PY'
 import importlib.metadata as metadata
 import sys
 
+import grain
 import torch
 from spmd_types import SpmdType
 from torchtitan.distributed.fsdp import DataParallelMeshDims
 
 assert metadata.version("spmd-types") == "0.2.5"
+assert metadata.version("grain") == "0.2.18"
 assert torch.xpu.is_available()
 assert torch.xpu.device_count() == 12
 
 print("python:", sys.version)
 print("torch:", torch.__version__)
 print("spmd-types:", metadata.version("spmd-types"), SpmdType)
+print("grain:", metadata.version("grain"), grain.__file__)
 print("XPU devices:", torch.xpu.device_count())
 print("DataParallelMeshDims:", DataParallelMeshDims)
 PY
@@ -144,6 +148,7 @@ Expected essentials:
 
 ```text
 spmd-types: 0.2.5
+grain: 0.2.18
 XPU devices: 12
 ```
 
@@ -161,10 +166,11 @@ VENV_ROOT=/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz
 uv pip install \
   --python "${VENV_ROOT}/.venv/bin/python" \
   --link-mode=copy \
-  "spmd_types==0.2.5"
+  "spmd_types==0.2.5" \
+  "grain==0.2.18"
 
 "${VENV_ROOT}/.venv/bin/python" -c \
-  'import importlib.metadata as m; from spmd_types import SpmdType; print(m.version("spmd-types"), SpmdType)'
+  'import importlib.metadata as m; import grain; from spmd_types import SpmdType; print(m.version("spmd-types"), SpmdType, m.version("grain"), grain.__file__)'
 ```
 
 Back up and rebuild the tarball after changing the source venv. Never replace
@@ -241,6 +247,7 @@ matter. For the full ladder, see the
 |---|---|---|
 | venv Python reports `No such file or directory` | venv was built against the production `/opt/aurora` Python | use the image-independent Python 3.14 venv |
 | `cannot import name 'SpmdType' from 'spmd_types'` | borrowed venv has 0.2.1; HEAD requires 0.2.5 | update source venv, rebuild tarball, test extracted archive |
+| `No module named 'grain'` | the image-independent venv lacks the config-owned dataloader dependency | install `grain==0.2.18`, rebuild, and re-run the exact preflight |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |
 | plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-3 config-owned Grain path |
