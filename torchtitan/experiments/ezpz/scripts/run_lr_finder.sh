@@ -122,6 +122,23 @@ else
 fi
 source /tmp/.venv/bin/activate
 
+# The external venv may be old even when its Python and torch are usable. HEAD
+# imports SpmdType, introduced after spmd-types 0.2.1; check the exact runtime
+# that was broadcast before spending an allocation. Importing an unrelated
+# torch symbol is not a sufficient compatibility preflight.
+python3 - <<'PY' || {
+import importlib.metadata as metadata
+from spmd_types import SpmdType
+
+version = metadata.version("spmd-types")
+if version != "0.2.5":
+    raise RuntimeError(f"expected spmd-types 0.2.5, found {version}")
+print(f"lr-finder runtime preflight: spmd-types={version}, SpmdType={SpmdType.__name__}")
+PY
+    echo "lr-finder FATAL: broadcast venv is incompatible with repository HEAD" >&2
+    exit 2
+}
+
 # The repo supplies the code even when the runtime came from elsewhere.
 export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}${PYTHONPATH:+:${PYTHONPATH}}"
 
@@ -374,7 +391,7 @@ for model in "${MODELS[@]}"; do
             "${tp_args[@]}" \
             "$@" \
             "${ac_subcommand[@]}" \
-            >"${logfile}" 2>&1 || true
+            >"${logfile}" 2>&1
         exit_code=$?
 
         # Kill any leftover processes
@@ -481,3 +498,14 @@ echo "============================================================"
 echo ""
 echo "Report saved to: ${REPORT}"
 echo "Logs saved to:   ${OUTDIR}/"
+
+# A report is not success. Propagate any failed arm to PBS so a 12-second
+# import crash cannot appear as Exit_status=0. Keep all arms in the report,
+# then fail once at the end.
+overall_exit=0
+for ((i = 0; i < NUM_RUNS; i++)); do
+    if [[ "${R_STATUS[$i]}" != "OK" ]]; then
+        overall_exit=1
+    fi
+done
+exit "${overall_exit}"
