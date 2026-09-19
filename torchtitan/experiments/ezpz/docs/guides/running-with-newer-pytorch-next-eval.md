@@ -195,9 +195,10 @@ Keep the dated backup until a compute-node smoke has passed.
 
 ## 6. Smoke before scaling
 
-First prove the archived environment on one or two nodes. For the OLMo-2
-ladder, use the same config-owned Grain dataloader and tokenizer that the real
-run will use; do not override it with a pretokenized `blendcorpus` list.
+First prove the archived environment on one or two nodes. For the OLMo-3
+ladder (the existing config names remain `*_olmo2tok`), use the same
+config-owned Grain dataloader and tokenizer that the real run will use; do not
+override it with a pretokenized `blendcorpus` list.
 
 ```bash
 ezpz launch --nproc 24 --nproc_per_node 12 -- \
@@ -232,7 +233,7 @@ qsub \
 
 Submit one size and optimizer per job when independent failure and accounting
 matter. For the full ladder, see the
-[OLMo-2 LR-finder report and job map](../experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md).
+[OLMo-3 LR-finder report and job map](../experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md).
 
 ## Failure signatures
 
@@ -242,7 +243,7 @@ matter. For the full ladder, see the
 | `cannot import name 'SpmdType' from 'spmd_types'` | borrowed venv has 0.2.1; HEAD requires 0.2.5 | update source venv, rebuild tarball, test extracted archive |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |
-| plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-2 config-owned Grain path |
+| plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-3 config-owned Grain path |
 | import succeeds on login but fails in job | login and `next-eval` images differ | test inside the allocation after venv broadcast |
 
 ## Related documentation
@@ -251,4 +252,4 @@ matter. For the full ladder, see the
 - [Frameworks RC quickstart](aurora-quickstart-frameworks-rc.md)
 - [Production-image newer-PyTorch guide](running-with-newer-pytorch.md)
 - [Large-scale venv broadcast](running-with-newer-pytorch.md#running-at-large-scale--512-nodes)
-- [OLMo-2 ladder plan](../experiments/optimizer-comparison/2026-09-18-olmo2tok-ladder-plan.md)
+- [OLMo-3 ladder plan](../experiments/optimizer-comparison/2026-09-18-olmo2tok-ladder-plan.md)

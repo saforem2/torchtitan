@@ -1,7 +1,11 @@
-# Optimizer comparison on the OLMo-2 ladder: plan
+# Optimizer comparison on the OLMo-3 ladder: plan
 
-**Date:** 2026-09-18 | **Status:** LR finders SUBMITTED, training arms NOT submitted
+**Date:** 2026-09-18 | **Status:** first 12 LR-finder jobs crashed in runtime preflight; training arms NOT submitted
 **Sizes:** agpt `{5,10,30}b_olmo2tok` -- 4.64B / 9.48B / 26.2B, vocab 100,352, seq 4096
+
+> **Naming:** `olmo2tok` remains in config and file names for compatibility.
+> The core tokenizer is the OLMo-3 tokenizer: `tokenizer.json` is byte-identical
+> between `allenai/OLMo-2-1124-7B` and `allenai/Olmo-3-1025-7B`.
 **Machine:** Aurora `next-eval`, 64N, GBS=6144 (dp 768, LBS=2, GAS=4)
 
 ## What is already answered, and by what

@@ -1,12 +1,25 @@
-# OLMo-2-vocab ladder LR finder: 4.64B / 9.48B / 26.2B at GBS=6144
+# OLMo-3-vocab ladder LR finder: 4.64B / 9.48B / 26.2B at GBS=6144
 
-**Date:** 2026-09-18 | **Jobs:** 8837334 (5b), 8837335 (10b), 8837336 (30b)
-**Models:** agpt `{5,10,30}b_olmo2tok`, OLMo-2 tokenizer (vocab 100,352), seq 4096
-**Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-2 tokenization
+**Date:** 2026-09-18 | **Jobs:** 8837334–8837399 (12 valid submissions; see map)
+**Models:** agpt `{5,10,30}b_olmo2tok`, OLMo-3 tokenizer (vocab 100,352), seq 4096
+**Tokenizer compatibility:** the retained `olmo2tok` config names and staged
+`OLMo-2-1124-7B` asset path are historical; its core `tokenizer.json` is
+byte-identical to `allenai/Olmo-3-1025-7B`.
+**Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
 **Machine:** Aurora, `next-eval`, 64N x 3 jobs, 6h walltime | **Optimizer:** AdamW
 
-Status: SUBMITTED, results pending. This file records the setup and the
-reasoning; numbers land in the Results table when the jobs finish.
+Status: **FAILED BEFORE TRAINING.** All 12 jobs reached the runner but crashed
+in 12–19 seconds with `ImportError: cannot import name 'SpmdType' from
+'spmd_types'`. The borrowed image-independent venv carried `spmd-types 0.2.1`;
+repository HEAD pins 0.2.5 and imports `SpmdType`. PBS still reported
+`Exit_status=0` because the runner discarded the launcher status with
+`|| true`. Commit `fa23dc6d1` adds an exact post-broadcast import/version
+preflight and makes any non-OK arm fail the job. **No LR result was produced;
+all 12 jobs must be resubmitted after the rebuilt tarball passes a compute-node
+smoke.**
+
+This file records the setup and the reasoning; numbers land in the Results
+table when valid replacement jobs finish.
 
 ## Why
 
@@ -60,7 +73,7 @@ blendcorpus list on Aurora is gemma- or Llama-2-tokenized; feeding those ids to
 a 100,352 embedding is the Polaris gibberish failure, and it fails SILENTLY --
 ids below the embedding size index fine and the loss curve looks plausible.
 `LRF_USE_CONFIG_DATALOADER=1` leaves the config's Grain path in place, which
-tokenizes raw text inline with OLMo-2.
+tokenizes raw text inline with the OLMo-3 tokenizer.
 
 **LR window 1e-8 -> 1e-3**, 150 probes (fraction 0.15 of 1000 steps) =
 30 points/decade. Inherited from the 30B script: the script default 1e-6 -> 1.0
@@ -88,10 +101,12 @@ their walltime.
   it collects nothing and exits 0, so this guard is NOT running in CI.
 - ALCF preflight: PASS (worktree current, tokenizer, data-list, torch floor,
   ZE_FLAT_DEVICE_HIERARCHY=FLAT).
-- OLMo-2 assets staged: `assets/hf/OLMo-2-1124-7B/` has tokenizer.json plus
-  three companions; olmo-mix wiki precached at 6.1 GB / 2 shards. (`du -sh` on
-  an HF snapshot reports ~20K because snapshots are symlinks into `blobs/`;
-  use `--dereference`.)
+- OLMo-3 tokenizer assets staged at the historical
+  `assets/hf/OLMo-2-1124-7B/` path: `tokenizer.json` plus three companions; the
+  core tokenizer file is byte-identical to `allenai/Olmo-3-1025-7B`.
+- olmo-mix wiki precached at 6.1 GB / 2 shards. (`du -sh` on an HF snapshot
+  reports ~20K because snapshots are symlinks into `blobs/`; use
+  `--dereference`.)
 
 ## Job map
 

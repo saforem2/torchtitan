@@ -7,7 +7,9 @@
 #PBS -q next-eval
 #PBS -j oe
 #
-# LR finder for the OLMo-2-vocab ladder: 4.64B / 9.48B / 26.2B.
+# LR finder for the OLMo-3-vocab ladder: 4.64B / 9.48B / 26.2B.
+# The olmo2tok config/script names are retained for compatibility; the staged
+# OLMo-2 tokenizer.json is byte-identical to the OLMo-3 base tokenizer.
 #
 # WHY THIS EXISTS. agpt() hands every size lr=8e-4 and the only guard
 # (_is_80b_config) gates on flavor.startswith("80b"), so none of these three is
@@ -41,8 +43,8 @@
 # the NaN cliff.
 #
 # DATA: the config's OWN dataloader, via LRF_USE_CONFIG_DATALOADER=1. The
-# *_smoke configs read precached olmo-mix wiki parquet through Grain and
-# tokenize inline with OLMo-2. Every blendcorpus list on Aurora is gemma- or
+# *_smoke configs read precached olmo-mix wiki JSON through Grain and tokenize
+# inline with OLMo-3. Every blendcorpus list on Aurora is gemma- or
 # Llama-2-tokenized; feeding those ids to a 100,352 embedding is the Polaris
 # gibberish failure, and it fails SILENTLY -- ids below the embedding size
 # index fine and the loss curve looks plausible.
@@ -86,7 +88,7 @@ export LRF_MODELS="${MODEL_SIZE}"
 export LRF_CONFIG="agpt_${MODEL_SIZE}_olmo2tok_smoke"
 export LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw}"
 
-# The config owns its dataloader (Grain + OLMo-2 inline tokenization).
+# The config owns its dataloader (Grain + OLMo-3 inline tokenization).
 export LRF_USE_CONFIG_DATALOADER=1
 
 # Runtime from the image-independent clone venv; see the note above.
@@ -127,7 +129,7 @@ export LRF_IDLE_TIMEOUT=1800
 export LRF_DUMP_FOLDER="outputs/lr_finder_${MODEL_SIZE}_olmo2tok_gbs6144_${LRF_OPTIMIZERS// /-}"
 
 echo "=========================================================="
-echo " OLMo-2-vocab LR finder"
+echo " OLMo-3-vocab LR finder"
 echo "   size      = ${MODEL_SIZE}"
 echo "   config    = ${LRF_CONFIG}"
 echo "   queue     = next-eval (TEST bkc; venv from the 2b-v2 clone)"
