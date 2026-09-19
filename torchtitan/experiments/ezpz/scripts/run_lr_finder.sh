@@ -141,6 +141,12 @@ for package, wanted in expected.items():
         raise RuntimeError(f"expected {package} {wanted}, found {actual}")
 if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
     raise RuntimeError(f"expected a 2.15 XPU nightly, found torch {torch.__version__}")
+try:
+    metadata.version("impi-rt")
+except metadata.PackageNotFoundError:
+    pass
+else:
+    raise RuntimeError("impi-rt must be absent; Aurora uses the site MPICH/PMIx stack")
 
 import inspect
 import torch.distributed.fsdp._fully_shard._fsdp_param as fsdp_param

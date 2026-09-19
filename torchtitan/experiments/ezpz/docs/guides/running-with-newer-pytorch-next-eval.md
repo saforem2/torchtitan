@@ -179,6 +179,13 @@ uv pip install \
   --link-mode=copy \
   torch torchvision torchaudio
 
+# The XPU nightly resolver installs Intel's pip MPI runtime. Aurora launches
+# with the site MPICH/PMIx stack; leaving impi-rt in the venv can make even
+# `ezpz yeet` abort in MPI_Init_thread before the archive is distributed.
+uv pip uninstall \
+  --python "${VENV_ROOT}/.venv/bin/python" \
+  impi-rt
+
 uv pip install \
   --python "${VENV_ROOT}/.venv/bin/python" \
   --link-mode=copy \
@@ -266,6 +273,7 @@ matter. For the full ladder, see the
 | `No module named 'grain'` | the image-independent venv lacks the config-owned dataloader dependency | install `grain==0.2.18`, rebuild, and re-run the exact preflight |
 | FSDP rejects a plain `weight` with `dp_mesh_dims` | torch predates `pytorch#181519`, even if `spmd-types` itself is current | install a 2.15 XPU nightly and assert `_resolve_spmd_types_for_storage` exists |
 | `undefined symbol: urDeviceWaitExp` while importing torch | 2.15 XPU wheel is running against the older oneAPI 2025.3 runtime | keep `oneapi/release/2026.1.0` on `next-eval` |
+| `PMIX_Init returned -25` during `ezpz yeet` | the XPU wheel resolver installed `impi-rt`, shadowing Aurora's site MPICH/PMIx | uninstall `impi-rt`, rebuild the archive, and verify it is absent |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |
 | plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-3 config-owned Grain path |
