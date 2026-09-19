@@ -11,11 +11,12 @@
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
 **Status:** COMPLETE. Both healthy arms ran to the `training.steps=6000`
 ceiling on 2026-08-29 -- 23.59B tokens each, `rc=0`, 0 NaN/inf, 0 grad skips.
-**[W&B project `agpt-30b-optcmp`](https://wandb.ai/aurora_gpt/agpt-30b-optcmp)**
+**[Current W&B report (login required)](https://wandb.ai/aurora_gpt/agpt-30b-optcmp/reports/30B-optimizer-comparison-AdamW-vs-Mano-vs-SophiaG-GBS-960-constant-LR--VmlldzoxNzg0MDgwNg)** &middot;
+[project `agpt-30b-optcmp`](https://wandb.ai/aurora_gpt/agpt-30b-optcmp)
 
-> The former public report shortlink (`0em3ktti`) currently resolves to a W&B
-> “locked or empty page,” even with its embedded access token. Use the project
-> and this checked-in write-up until the report is republished.
+> The former public shortlink (`0em3ktti`) targets deleted report snapshot
+> `VmlldzoxNzgxNjE2Mg`. The report builder creates a new W&B View on every save
+> and deletes stale duplicates; the current View is `VmlldzoxNzg0MDgwNg`.
 
 ## RESULT: Mano wins at the 10B budget
 
