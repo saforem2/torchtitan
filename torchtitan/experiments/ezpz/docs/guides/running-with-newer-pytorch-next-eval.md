@@ -85,10 +85,12 @@ export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov"
 ```
 
 The TEST image begins with the 2026.1 software tree. Keep the matching oneAPI
-2026.1 runtime with the 2.15 XPU nightly; forcing the production 2025.3.1
-runtime produces loader mismatches such as an undefined `urDeviceWaitExp`
-symbol. Record module reload messages rather than assuming the queue name alone
-identifies every library in the process.
+2026.1 runtime with the 2.15 XPU nightly, then prepend `$VIRTUAL_ENV/lib` to
+`LD_LIBRARY_PATH`: the wheel's bundled Unified Runtime loader exports
+`urGraphGetIdExp`/`urDeviceWaitExp`, while the system loader may advertise the
+same symbol version without exporting those entry points. Record module reload
+messages rather than assuming the queue name alone identifies every library in
+the process.
 
 ## 3. Use an image-independent venv
 
@@ -105,6 +107,7 @@ source "${VENV_ROOT}/.venv/bin/activate"
 ezpz yeet --src "${VENV_ROOT}/.venv.tar.gz"
 deactivate
 source /tmp/.venv/bin/activate
+export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # Code comes from the current checkout; the tarball supplies the runtime.
 export PYTHONPATH="${PWD}${PYTHONPATH:+:${PYTHONPATH}}"
@@ -272,7 +275,7 @@ matter. For the full ladder, see the
 | `cannot import name 'SpmdType' from 'spmd_types'` | borrowed venv has 0.2.1; HEAD requires 0.2.5 | update source venv, rebuild tarball, test extracted archive |
 | `No module named 'grain'` | the image-independent venv lacks the config-owned dataloader dependency | install `grain==0.2.18`, rebuild, and re-run the exact preflight |
 | FSDP rejects a plain `weight` with `dp_mesh_dims` | torch predates `pytorch#181519`, even if `spmd-types` itself is current | install a 2.15 XPU nightly and assert `_resolve_spmd_types_for_storage` exists |
-| `undefined symbol: urDeviceWaitExp` while importing torch | 2.15 XPU wheel is running against the older oneAPI 2025.3 runtime | keep `oneapi/release/2026.1.0` on `next-eval` |
+| `undefined symbol: urGraphGetIdExp` or `urDeviceWaitExp` while importing torch | the system Unified Runtime loader won over the newer loader bundled with the XPU wheel | prepend `$VIRTUAL_ENV/lib` to `LD_LIBRARY_PATH` after activating the broadcast venv |
 | `PMIX_Init returned -25` during `ezpz yeet` | the XPU wheel resolver installed `impi-rt`, shadowing Aurora's site MPICH/PMIx | uninstall `impi-rt`, rebuild the archive, and verify it is absent |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |

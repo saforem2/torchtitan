@@ -121,6 +121,9 @@ else
     deactivate
 fi
 source /tmp/.venv/bin/activate
+# The nightly wheel bundles a newer Unified Runtime loader than Aurora's
+# module tree. It must win library resolution (urGraphGetIdExp/urDeviceWaitExp).
+export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # The external venv may be old even when its Python and torch are usable. HEAD
 # imports SpmdType, introduced after spmd-types 0.2.1; check the exact runtime
