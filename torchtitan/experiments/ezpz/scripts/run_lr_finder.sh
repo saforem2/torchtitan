@@ -170,6 +170,14 @@ LRF_LBS="${LRF_LBS:-1}"
 # is at seq=4096, and GBS counts SEQUENCES -- so 8192 would double tokens/step
 # and the wall clock for no calibration benefit.
 LRF_SEQ_LEN="${LRF_SEQ_LEN:-8192}"
+# TorchTitan sync #80 replaced sequence-count batch flags with token-count
+# flags. Preserve the historical LRF_LBS/LRF_GBS interface for submit scripts,
+# but derive the only CLI spellings accepted by current HEAD.
+LRF_TOKENS_PER_MICROBATCH=$(( LRF_LBS * LRF_SEQ_LEN ))
+LRF_TOKENS_PER_TRAIN_STEP=""
+if [[ -n "${LRF_GBS}" ]]; then
+    LRF_TOKENS_PER_TRAIN_STEP=$(( LRF_GBS * LRF_SEQ_LEN ))
+fi
 # Config flavor override. The default composes "agpt_${model}", which is right
 # for 2b/20b/80b but picks the WRONG 30B: agpt_30b is the gemma-256k-vocab
 # 28.1B variant, while every 30B measurement and the converged chain use
@@ -309,13 +317,12 @@ for model in "${MODELS[@]}"; do
         ac_subcommand=("activation-checkpoint:full")
     fi
 
-    # Optional target global batch. The optimal LR is batch-size
-    # dependent, so calibrating a production run requires sweeping at that
-    # run's GBS (the trainer derives the needed GAS from
-    # GBS = dp_degree * LBS * GAS). Empty = use world_size*LBS/TP.
+    # Optional target global batch. Current TorchTitan counts token slots:
+    # num_tokens_per_train_step = GBS(sequences) * sequence length. Empty means
+    # the config derives the train-step total from world size and microbatch.
     gbs_args=()
-    if [[ -n "${LRF_GBS}" ]]; then
-        gbs_args=(--training.global_batch_size "${LRF_GBS}")
+    if [[ -n "${LRF_TOKENS_PER_TRAIN_STEP}" ]]; then
+        gbs_args=(--training.num-tokens-per-train-step "${LRF_TOKENS_PER_TRAIN_STEP}")
     fi
 
     # Optional shared index-cache dir. The blendcorpus index cold-builds
@@ -388,9 +395,9 @@ for model in "${MODELS[@]}"; do
             --job.dump-folder "${LRF_DUMP_FOLDER}" \
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \
-            --training.local_batch_size "${LRF_LBS}" \
+            --training.num-tokens-per-microbatch-per-dp-rank "${LRF_TOKENS_PER_MICROBATCH}" \
             "${gbs_args[@]}" \
-            --training.seq_len "${LRF_SEQ_LEN}" \
+            --training.max-context-length "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
             --checkpoint.no-enable \
             "${dataloader_args[@]}" \
