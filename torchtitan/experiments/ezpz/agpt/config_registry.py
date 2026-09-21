@@ -46,7 +46,6 @@ from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.observability.metrics import MetricsProcessor
-
 from . import model_registry
 
 TT_CONFIG_JSON_ENV = "TT_CONFIG_JSON"
@@ -1147,9 +1146,7 @@ def agpt_30b_olmo2tok_dp12() -> FaultTolerantTrainer.Config:
     This is intentionally checkpoint-incompatible with canonical 30B_olmo2tok;
     it exists to test whether node-local HSDP outweighs the 1.56% FFN reduction.
     """
-    return agpt(
-        "30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B"
-    )
+    return agpt("30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
 # Local fineweb-edu shards for the optimizer comparison. The 80th upstream sync
@@ -1487,9 +1484,7 @@ def agpt_30b_olmo2tok_dp12_smoke() -> FaultTolerantTrainer.Config:
     Uses the same OLMo-2 streaming data path as the canonical 30B smoke, but is
     a fresh architecture and cannot resume canonical 30B checkpoints.
     """
-    cfg = agpt(
-        "30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B"
-    )
+    cfg = agpt("30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
     return _use_hf_streaming(
         cfg,
         path="json",
