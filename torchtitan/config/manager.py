@@ -40,6 +40,7 @@ class ConfigManager:
         if args is None:
             args = sys.argv[1:]
         loaded_config, args = self._load_config(args)
+        args = self._migrate_legacy_optional_component_args(loaded_config, args)
         config_cls = type(loaded_config)
 
         self.config = tyro.cli(
@@ -49,6 +50,50 @@ class ConfigManager:
         self._validate_config()
 
         return self.config
+
+    @staticmethod
+    def _migrate_legacy_optional_component_args(
+        config: Any, args: list[str]
+    ) -> list[str]:
+        """Map the frozen enable flags onto upstream's optional config fields."""
+        from torchtitan.components.checkpointer import CheckpointManager
+        from torchtitan.config.configs import CompileConfig
+
+        migrated: list[str] = []
+        for arg in args:
+            if arg in ("--checkpoint.enable", "--checkpoint-enable"):
+                if getattr(config, "checkpointer", None) is None:
+                    config.checkpointer = CheckpointManager.Config()
+                continue
+            if arg in (
+                "--checkpoint.no-enable",
+                "--no-checkpoint.enable",
+                "--no-checkpoint-enable",
+            ):
+                config.checkpointer = None
+                continue
+            if arg == "--checkpoint.create-seed-checkpoint":
+                config.create_seed_checkpoint = True
+                if getattr(config, "checkpointer", None) is None:
+                    config.checkpointer = CheckpointManager.Config()
+                continue
+            if arg in (
+                "--checkpoint.no-create-seed-checkpoint",
+                "--no-checkpoint.create-seed-checkpoint",
+            ):
+                config.create_seed_checkpoint = False
+                continue
+            if arg == "--compile.enable":
+                if getattr(config, "compile", None) is None:
+                    config.compile = CompileConfig()
+                continue
+            if arg in ("--compile.no-enable", "--no-compile.enable"):
+                config.compile = None
+                continue
+            if arg.startswith("--checkpoint."):
+                arg = "--checkpointer." + arg.removeprefix("--checkpoint.")
+            migrated.append(arg)
+        return migrated
 
     def _load_config(self, args: list[str]) -> tuple[object, list[str]]:
         """Parse --module and --config from args, load config from config_registry.

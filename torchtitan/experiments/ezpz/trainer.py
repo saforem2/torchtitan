@@ -539,7 +539,7 @@ class FaultTolerantTrainer(Trainer):
 
         # move sharded model to CPU/GPU and initialize weights via DTensor
         buffer_device: torch.device | None
-        if config.checkpoint.create_seed_checkpoint:
+        if config.create_seed_checkpoint:
             init_device = "cpu"
             buffer_device = None
         elif config.training.enable_cpu_offload:
@@ -592,7 +592,7 @@ class FaultTolerantTrainer(Trainer):
                 loss_fn=self.loss_fn,
                 gradient_accumulation_steps=self.gradient_accumulation_steps,
                 fault_tolerance_enabled=config.fault_tolerance.enable,
-                create_seed_checkpoint=config.checkpoint.create_seed_checkpoint,
+                create_seed_checkpoint=config.create_seed_checkpoint,
                 optimizer_has_param_groups=(
                     len(config.optimizer.param_groups) != 1
                     or config.optimizer.param_groups[0].pattern != r".*"
@@ -871,8 +871,8 @@ class FaultTolerantTrainer(Trainer):
                 world_size=int(os.environ.get("WORLD_SIZE", "1")),
             )
 
-        # Build checkpoint manager.
-        # When fault tolerance is enabled and config.checkpoint uses
+        # Build checkpoint manager when checkpointing is configured.
+        # When fault tolerance is enabled and config.checkpointer uses
         # FTCheckpointManager.Config, ft_manager is passed through.
         # Otherwise the base CheckpointManager is used without it.
         ckpt_kwargs: dict = dict(
@@ -893,9 +893,10 @@ class FaultTolerantTrainer(Trainer):
             TorchFTCheckpointManager as FTCheckpointManager,
         )
 
-        if isinstance(config.checkpoint, FTCheckpointManager.Config):
-            ckpt_kwargs["ft_manager"] = self.ft_manager
-        self.checkpointer = config.checkpoint.build(**ckpt_kwargs)
+        if config.checkpointer is not None:
+            if isinstance(config.checkpointer, FTCheckpointManager.Config):
+                ckpt_kwargs["ft_manager"] = self.ft_manager
+            self.checkpointer = config.checkpointer.build(**ckpt_kwargs)
 
         # 57th sync: PR #3694 deleted the --disable_loss_parallel flag.
         # TP-on now always implies LP-on; the context no longer takes
@@ -1196,7 +1197,8 @@ class FaultTolerantTrainer(Trainer):
         # Staging is a checkpoint concern, not an optimizer one -- it must run
         # whether or not we take the step, or a skipped step would leave an
         # async save un-awaited.
-        self.checkpointer.maybe_wait_for_staging()
+        if hasattr(self, "checkpointer"):
+            self.checkpointer.maybe_wait_for_staging()
         if not math.isfinite(float(grad_norm.item())):
             # CAPTURE BEFORE ZEROING. zero_grad() below destroys the gradients,
             # and the diagnostics that would characterize this step do not run
@@ -1424,6 +1426,7 @@ class FaultTolerantTrainer(Trainer):
     @record
     def train(self):
         config = self.config
+        checkpointer_config = config.checkpointer
 
         # Checkpoints written before the attention QKV wrapper refactor store
         # layers.N.attention.{wq,wk,wv} flat, while current code asks for
@@ -1437,13 +1440,14 @@ class FaultTolerantTrainer(Trainer):
         # resumable step the checkpointer loads the SEED instead, and a seed
         # can just as easily be pre-refactor. Probing only `folder` in that
         # case probes a directory that does not exist yet (job 8771774).
-        maybe_install_flat_attention_compat(
-            self.checkpointer,
-            config.checkpoint.folder,
-            config.checkpoint.load_step,
-            dump_folder=config.dump_folder,
-            initial_load_path=getattr(config.checkpoint, "initial_load_path", "") or "",
-        )
+        if checkpointer_config is not None:
+            maybe_install_flat_attention_compat(
+                self.checkpointer,
+                checkpointer_config.folder,
+                checkpointer_config.load_step,
+                dump_folder=config.dump_folder,
+                initial_load_path=checkpointer_config.initial_load_path or "",
+            )
 
         # Two concurrent jobs writing one checkpoint.folder is silent and it
         # physically mixes their shards -- it left two 453 GB dirs holding
@@ -1459,9 +1463,9 @@ class FaultTolerantTrainer(Trainer):
         # legitimately using that directory. Observed 2026-08-19, where a
         # throwaway sweep spooked a live 12h run into a shard-mixing warning
         # about a collision that could not happen.
-        if getattr(config.checkpoint, "enable", True):
+        if checkpointer_config is not None:
             check_and_claim(
-                config.checkpoint.folder,
+                checkpointer_config.folder,
                 dump_folder=config.dump_folder,
                 world_size=int(os.environ.get("WORLD_SIZE", -1)),
                 is_rank_zero=(
@@ -1470,7 +1474,8 @@ class FaultTolerantTrainer(Trainer):
                 ),
             )
 
-        self.checkpointer.load(step=config.checkpoint.load_step)
+        if checkpointer_config is not None:
+            self.checkpointer.load(step=checkpointer_config.load_step)
         logger.info(f"Training starts at step {self.step + 1}")
 
         # FT addition: per-replica profiling leaf folder
@@ -1670,8 +1675,12 @@ class FaultTolerantTrainer(Trainer):
                     else:
                         consecutive_nonfinite = 0
 
-                saved_this_step = self.checkpointer.save(
-                    self.step, last_step=(self.step == config.training.steps)
+                saved_this_step = (
+                    self.checkpointer.save(
+                        self.step, last_step=(self.step == config.training.steps)
+                    )
+                    if checkpointer_config is not None
+                    else False
                 )
 
                 # Walltime guard: once within margin of the (absolute) deadline,
@@ -1687,12 +1696,13 @@ class FaultTolerantTrainer(Trainer):
                             f"({remaining:.0f}s left <= margin {wall_margin}s); "
                             "forcing final checkpoint and stopping"
                         )
-                        if not saved_this_step:
+                        if checkpointer_config is not None and not saved_this_step:
                             self.checkpointer.save(self.step, last_step=True)
                         # Block until any async save is fully on disk before we
                         # break to teardown (close() does NOT wait for pending
                         # saves).
-                        self.checkpointer.maybe_wait_for_saving()
+                        if checkpointer_config is not None:
+                            self.checkpointer.maybe_wait_for_saving()
                         break
 
                 # Cooperative stop: a SIGTERM/SIGINT arrived (inner `timeout`,
@@ -1708,9 +1718,10 @@ class FaultTolerantTrainer(Trainer):
                         f"{signal_stop.stop_signal_name()} received at step "
                         f"{self.step}; forcing final checkpoint and stopping"
                     )
-                    if not saved_this_step:
+                    if checkpointer_config is not None and not saved_this_step:
                         self.checkpointer.save(self.step, last_step=True)
-                    self.checkpointer.maybe_wait_for_saving()
+                    if checkpointer_config is not None:
+                        self.checkpointer.maybe_wait_for_saving()
                     logger.info(
                         f"signal-ckpt: checkpoint for step {self.step} is on "
                         "disk; exiting cleanly"

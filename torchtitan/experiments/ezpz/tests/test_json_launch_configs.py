@@ -66,8 +66,10 @@ def test_agpt_launch_jsons_use_current_schema():
         assert not (
             isinstance(activation_checkpoint, dict) and "mode" in activation_checkpoint
         ), path
-        checkpoint = data.get("checkpoint", {})
-        assert checkpoint.get("keep_latest_k", 0) == 0, path
+        assert "checkpoint" not in data, path
+        assert "enable" not in data.get("compile", {}), path
+        checkpointer = data.get("checkpointer", {})
+        assert checkpointer.get("keep_latest_k", 0) == 0, path
 
 
 @pytest.mark.parametrize(
@@ -113,7 +115,8 @@ def test_retained_agpt_json_factories_load(
         assert cfg.activation_checkpoint is None
     else:
         assert isinstance(cfg.activation_checkpoint, ac_type)
-    assert cfg.checkpoint.keep_latest_k == 0
+    if cfg.checkpointer is not None:
+        assert cfg.checkpointer.keep_latest_k == 0
     assert cfg.optimizer.param_groups[0].optimizer_name == "AdamW"
     assert cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] == pytest.approx(2.2e-4)
     if backend is not None:

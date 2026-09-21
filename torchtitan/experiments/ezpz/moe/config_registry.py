@@ -62,6 +62,24 @@ def _apply_config_overrides(
     overrides: dict[str, Any],
     path: str = "",
 ) -> None:
+    if not path:
+        checkpoint = overrides.pop("checkpoint", None)
+        if checkpoint is not None:
+            enabled = checkpoint.pop("enable", True)
+            target.checkpointer = CheckpointManager.Config() if enabled else None
+            if enabled:
+                overrides["checkpointer"] = checkpoint
+
+        compile_config = overrides.get("compile")
+        if isinstance(compile_config, dict) and "enable" in compile_config:
+            enabled = compile_config.pop("enable")
+            if enabled:
+                if target.compile is None:
+                    target.compile = CompileConfig()
+            else:
+                target.compile = None
+                overrides.pop("compile")
+
     for key, value in overrides.items():
         if not hasattr(target, key):
             raise KeyError(f"Unknown config field {key!r} at path {path or '<root>'}.")
@@ -131,7 +149,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=MetricsProcessor.Config(log_freq=10),
-        checkpoint=CheckpointManager.Config(
+        checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -229,9 +247,9 @@ def moe(
     cfg.metrics.log_freq = 1
     cfg.metrics.enable_wandb = True
     if compile:
-        cfg.compile = CompileConfig(enable=True)
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = checkpoint_interval
+        cfg.compile = CompileConfig()
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = checkpoint_interval
     return cfg
 
 
@@ -354,7 +372,7 @@ def moe_16b() -> FaultTolerantTrainer.Config:
     # (known-bugs/moe-flex-attention-blockmask.md); moe_small and moe_10b_2b
     # got the opt-in then and this flavor was missed.
     cfg.dataloader.emit_positions = True
-    cfg.compile = CompileConfig(enable=True, components=["loss"])
+    cfg.compile = CompileConfig(components=["loss"])
     return cfg
 
 
@@ -370,8 +388,8 @@ def moe_671b() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 10000
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
-    cfg.checkpoint.interval = 500
-    cfg.compile = CompileConfig(enable=True, components=["loss"])
+    cfg.checkpointer.interval = 500
+    cfg.compile = CompileConfig(components=["loss"])
     # Quantization is now applied to the config at model_registry time
     # rather than to the runtime model (#3127). Re-register with Float8.
     cfg.model_spec = model_registry(
@@ -547,7 +565,7 @@ def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
-    cfg.checkpoint.keep_latest_k = 0
+    cfg.checkpointer.keep_latest_k = 0
     return cfg
 
 
@@ -592,7 +610,7 @@ def moe_10b_2b() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
-    cfg.checkpoint.interval = 100
+    cfg.checkpointer.interval = 100
     return cfg
 
 
@@ -616,7 +634,7 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
-    cfg.checkpoint.interval = 100
+    cfg.checkpointer.interval = 100
     return cfg
 
 
@@ -640,7 +658,7 @@ def smoke_moe_500m_50steps() -> FaultTolerantTrainer.Config:
     cfg.dataloader.dataset = "HuggingFaceFW/fineweb-edu"
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 8e-4
     cfg.lr_scheduler.warmup_steps = 5
     cfg.lr_scheduler.decay_ratio = 0.0

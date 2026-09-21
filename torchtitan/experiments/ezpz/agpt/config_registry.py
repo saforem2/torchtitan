@@ -69,7 +69,7 @@ def agpt_2b_50k() -> FaultTolerantTrainer.Config:
         hf_assets_path="./assets/hf/llama-2-32k-sp",
     )
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.checkpoint.keep_latest_k = 0
+    cfg.checkpointer.keep_latest_k = 0
     return cfg
 
 
@@ -342,11 +342,11 @@ def agpt(
     cfg.metrics.log_freq = 1
     cfg.metrics.enable_wandb = True
     if compile:
-        cfg.compile = CompileConfig(enable=True)
+        cfg.compile = CompileConfig()
     cfg.parallelism.fsdp_reshard_after_forward = fsdp_reshard_after_forward
     cfg.parallelism.tensor_parallel_degree = tensor_parallel_degree
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = checkpoint_interval
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = checkpoint_interval
     return cfg
 
 
@@ -371,7 +371,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=MetricsProcessor.Config(log_freq=10),
-        checkpoint=CheckpointManager.Config(
+        checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -446,7 +446,7 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     )
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.training.steps = 10
     cfg.training.max_context_length = 512
     # 2 seqs x 512 = 1024 tokens (#4121 unit change)
@@ -573,8 +573,8 @@ def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
             "first. A missing base would otherwise silently load nothing and "
             "train from random init."
         )
-    cfg.checkpoint.initial_load_path = _MDS_ANNEAL_BASE
-    cfg.checkpoint.initial_load_model_only = True
+    cfg.checkpointer.initial_load_path = _MDS_ANNEAL_BASE
+    cfg.checkpointer.initial_load_model_only = True
     # Stream a raw-text HF math dataset -> gemma tokenization at runtime. Drop
     # the blendcorpus data_file_list path so the HF hub path is used.
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
@@ -603,7 +603,7 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 0.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 1.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-flat"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-flat"
     return cfg
 
 
@@ -621,7 +621,7 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 1.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 0.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
     return cfg
 
 
@@ -657,7 +657,7 @@ def agpt_2b_mds_mix_owm() -> FaultTolerantTrainer.Config:
     cfg = _agpt_2b_mds_mix_base()
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET  # open-web-math/open-web-math
     cfg.dataloader.dataset_path = None
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-owm"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-mix-owm"
     return cfg
 
 
@@ -672,7 +672,7 @@ def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
     cfg = _agpt_2b_mds_mix_base()
     cfg.dataloader.dataset = "fineweb_edu_local"
     cfg.dataloader.dataset_path = None
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-edu"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-mix-edu"
     return cfg
 
 
@@ -708,7 +708,7 @@ def _agpt_2b_mds_mix_blend(
         seed=42,
         stopping_strategy="all_exhausted",
     )
-    cfg.checkpoint.folder = folder
+    cfg.checkpointer.folder = folder
     return cfg
 
 
@@ -763,7 +763,7 @@ def _agpt_2b_mds_mix_blend_src(
         seed=42,
         stopping_strategy="all_exhausted",
     )
-    cfg.checkpoint.folder = folder
+    cfg.checkpointer.folder = folder
     return cfg
 
 
@@ -833,8 +833,8 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
             "path of the step-92859 DCP. A missing base would silently load "
             "nothing and train from random init."
         )
-    cfg.checkpoint.initial_load_path = _OLMO_ANNEAL_BASE
-    cfg.checkpoint.initial_load_model_only = True
+    cfg.checkpointer.initial_load_path = _OLMO_ANNEAL_BASE
+    cfg.checkpointer.initial_load_model_only = True
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
     cfg.dataloader.dataset_path = None
     cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
@@ -850,7 +850,7 @@ def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 0.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 1.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
     return cfg
 
 
@@ -861,7 +861,7 @@ def agpt_2b_olmo_anneal_wsd() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 1.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 0.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
     return cfg
 
 

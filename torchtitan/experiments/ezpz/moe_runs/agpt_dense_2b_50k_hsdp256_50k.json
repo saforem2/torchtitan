@@ -21,9 +21,6 @@
     "context_parallel_degree": 1,
     "expert_parallel_degree": 1
   },
-  "compile": {
-    "enable": false
-  },
   "lr_scheduler": {
     "warmup_steps": 1000,
     "total_steps": 50000,
@@ -44,13 +41,6 @@
     "shuffle_sample_in_corpus": true,
     "append_eod": true
   },
-  "checkpoint": {
-    "enable": true,
-    "folder": "checkpoint",
-    "interval": 500,
-    "last_save_model_only": false,
-    "keep_latest_k": 0
-  },
   "metrics": {
     "enable_wandb": true,
     "log_freq": 10
@@ -62,5 +52,11 @@
   "debug": {
     "seed": 20260722,
     "print_config": true
+  },
+  "checkpointer": {
+    "folder": "checkpoint",
+    "interval": 500,
+    "last_save_model_only": false,
+    "keep_latest_k": 0
   }
 }

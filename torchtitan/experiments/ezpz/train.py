@@ -540,13 +540,13 @@ def main(args: list[str] | None = None) -> None:
                 if ezpz.distributed.get_rank() == 0:
                     logger.exception(e)
 
-        if config.checkpoint.create_seed_checkpoint:
+        if config.create_seed_checkpoint:
             assert (
                 int(os.environ["WORLD_SIZE"]) == 1
             ), "Must create seed checkpoint using a single device, to disable sharding."
             assert (
-                config.checkpoint.enable
-            ), "Must enable checkpointing when creating a seed checkpoint."
+                config.checkpointer is not None
+            ), "Must configure checkpointer when creating a seed checkpoint."
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         elif config.lr_finder.enable:

@@ -159,7 +159,7 @@ def _agpt_grpo_config(
                 batch=BatchConfig(local_batch_size=2, seq_len=2048),
             ),
         ),
-        compile=CompileConfig(enable=True, backend="aot_eager"),
+        compile=CompileConfig(backend="aot_eager"),
         rollouter=_agpt_rollouter(
             max_turns=max_turns,
             max_names_per_turn=max_names_per_turn,
@@ -179,8 +179,7 @@ def _agpt_grpo_config(
             parallelism=ParallelismConfig(
                 data_parallel_shard_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(
-                enable=True,
+            checkpointer=CheckpointManager.Config(
                 initial_load_in_hf=True,
                 interval=20,
                 last_save_model_only=False,
@@ -195,7 +194,7 @@ def _agpt_grpo_config(
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(enable=False),
+            checkpointer=None,
             sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=700),
         ),
     )

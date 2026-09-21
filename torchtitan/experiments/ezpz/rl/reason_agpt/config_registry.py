@@ -186,7 +186,7 @@ def _agpt_grpo_config(
                 batch=BatchConfig(local_batch_size=2, seq_len=2048),
             ),
         ),
-        compile=CompileConfig(enable=True, backend="aot_eager"),
+        compile=CompileConfig(backend="aot_eager"),
         rollouter=_gsm8k_rollouter(max_steps=max_steps, num_samples=num_samples),
         # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
         # ckpt dir must carry a chat_template. enable_thinking=False: the gemma/auto
@@ -202,8 +202,7 @@ def _agpt_grpo_config(
             parallelism=ParallelismConfig(
                 data_parallel_shard_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(
-                enable=True,
+            checkpointer=CheckpointManager.Config(
                 initial_load_in_hf=True,
                 interval=ckpt_interval,
                 last_save_model_only=False,
@@ -218,7 +217,7 @@ def _agpt_grpo_config(
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(enable=False),
+            checkpointer=None,
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
             sampling=SamplingConfig(

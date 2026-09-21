@@ -145,7 +145,7 @@ def parallelize_llama(
     model.parallelize(parallel_dims)
 
     model_compile_enabled = (
-        compile_config.enable and "model" in compile_config.components
+        compile_config is not None and "model" in compile_config.components
     )
 
     # 57th sync: PR #3674 refactored AC into a Configurable policy
