@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""XPU shims for upstream `torchtitan.experiments.rl/`.
+"""XPU shims for upstream `torchtitan.rl/`.
 
 Upstream `rl/` has two CUDA-specific touch points that need shimming
 on Intel XPU (Aurora / Sunspot):
@@ -85,6 +85,8 @@ class EzpzPerHostProvisioner:
     @staticmethod
     def make_bootstrap_command_for_gpu_ids(
         gpu_ids: list[int],
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> Callable:
         """Return a per-Point callable producing a ``BootstrapCommand``.
 
@@ -125,23 +127,16 @@ class EzpzPerHostProvisioner:
                     f"could not extract rank from Point: {point} "
                     f"(attrs={dir(point)})"
                 )
-            my_tile = gpu_ids[rank_in_mesh]
+            local_rank = rank_in_mesh % local_size
             env_overlay = {
-                # NARROW mask: each actor sees exactly ONE tile.
-                # Reasons:
-                #   (a) Isolates the SYCL primary context to one tile,
-                #       so oneDNN/onemkl allocators don't fight over
-                #       which tile to put a tensor on.
-                #   (b) Each actor's LOCAL_RANK=0 maps to its only
-                #       visible tile, so torch.xpu.set_device(0) works
-                #       transparently.
-                # Trade-off: forbids intra-actor multi-tile work, which
-                # we don't need at TP=1.
-                "ZE_AFFINITY_MASK": str(my_tile),
-                "LOCAL_RANK": "0",
+                # Every process in a mesh must see the full mesh allocation;
+                # oneCCL rejects narrow per-rank masks. LOCAL_RANK selects the
+                # process's tile from this common visible set.
+                "ZE_AFFINITY_MASK": ",".join(str(g) for g in gpu_ids),
+                "LOCAL_RANK": str(local_rank),
                 "RANK": str(rank_in_mesh),
                 "WORLD_SIZE": str(num_gpus),
-                "PALS_LOCAL_RANKID": str(rank_in_mesh),
+                "PALS_LOCAL_RANKID": str(local_rank),
                 "PALS_RANKID": str(rank_in_mesh),
                 "PALS_LOCAL_SIZE": str(local_size),
                 "PALS_NODEID": "0",
@@ -173,6 +168,8 @@ class EzpzPerHostProvisioner:
             ):
                 if k in os.environ:
                     env_overlay[k] = os.environ[k]
+            if extra_env:
+                env_overlay.update(extra_env)
             return base_cmd.with_env(env_overlay)
 
         return _per_rank
@@ -282,6 +279,22 @@ class EzpzPerHostProvisioner:
             os.environ["PALS_DEPTH"] = "1"
             os.environ["PALS_PMI"] = "pmix"
 
+            # vLLM -> tilelang -> tvm imports readline.  When Monarch starts
+            # actors in a background process group, readline can otherwise
+            # receive SIGTTOU while touching the controlling terminal.  Warm
+            # it with SIGTTOU blocked before importing torch/vLLM dependencies,
+            # matching torchtitan.rl.train._bootstrap_generator.
+            if os.isatty(0):
+                import signal
+
+                previous_mask = signal.pthread_sigmask(
+                    signal.SIG_BLOCK, {signal.SIGTTOU}
+                )
+                try:
+                    import readline  # noqa: F401
+                finally:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
 
@@ -375,7 +388,7 @@ def patch_has_cuda_capability_for_xpu() -> None:
 
     Replaces it with `has_xpu_kernels` (always False) so the FA3-vs-FA2
     branches throughout `rl/` take the FA2 path on XPU. Call BEFORE
-    importing anything from `torchtitan.experiments.rl`.
+    importing anything from `torchtitan.rl`.
 
     Idempotent.
     """
@@ -977,7 +990,7 @@ def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
     Call this at the top of any entrypoint that pulls in
-    `torchtitan.experiments.rl.*`. Currently:
+    `torchtitan.rl.*`. Currently:
       1. `has_cuda_capability` → always False on XPU.
       2. `OffsetBasedRNGTracker.__init__` → skip the broadcast at
          world_size=1.

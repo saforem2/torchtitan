@@ -44,8 +44,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from torchtitan.experiments.rl.rollout import Rollout
-from torchtitan.experiments.rl.rubrics import RewardFn
+from torchtitan.rl.rollout import Rollout
+from torchtitan.rl.rubric import RewardFn
 
 # --- <think>/<answer> parsing (ported verbatim from rl/tasks/gsm8k_reason.py) ---
 

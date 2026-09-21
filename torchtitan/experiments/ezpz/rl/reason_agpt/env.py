@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from renderers import Message
 
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import (
-    GSM8KReasonSample,
     PROMPT_SUFFIX,
+    GSM8KReasonSample,
 )
-from torchtitan.experiments.rl.environment import (
+from torchtitan.rl.rollout.environment import (
     MessageEnv,
     MessageEnvInitOutput,
     MessageEnvStepOutput,

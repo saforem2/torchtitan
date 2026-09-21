@@ -7,7 +7,7 @@
 #PBS -q workq
 #PBS -j oe
 #
-# First end-to-end attempt at upstream `torchtitan.experiments.rl.train`
+# First end-to-end attempt at upstream `torchtitan.rl.train`
 # on Sunspot XPU, via the ezpz mirror entrypoint
 # `torchtitan.experiments.ezpz.rl.train_upstream` which applies XPU
 # compatibility patches before importing upstream.
