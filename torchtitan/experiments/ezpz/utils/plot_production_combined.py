@@ -153,6 +153,19 @@ TRAJECTORIES: list[dict] = [
         "marker": None,
     },
     {
+        # Stage-2 continued pre-training on dolmino-mix-1124, seeded from the
+        # completed stage-1 n256 endpoint. Its W&B step numbering restarts.
+        "model": "2b",
+        "label": "2B-TT v2 stage-2 (n256, dolmino-mix)",
+        "source": "wandb",
+        "key": "2b_v2_256_stage2_dolmino",
+        "tokens_per_step": 6144 * 8192,
+        "token_offset_b": STAGE1_2B_TOKENS / 1e9,
+        "color": COLOR_2B_TT_256N,
+        "linestyle": ":",
+        "marker": None,
+    },
+    {
         "model": "20b",
         "label": "20B-TT v2 (n256)",
         "source": "wandb",
