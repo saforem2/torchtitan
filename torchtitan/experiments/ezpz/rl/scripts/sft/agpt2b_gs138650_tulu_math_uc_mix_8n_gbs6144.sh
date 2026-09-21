@@ -96,6 +96,7 @@ fi
 # -- ezpz auto-retry only recognizes its own step=N marker). Fault tolerance via
 # the afterany chain + --resume_from_checkpoint + save_steps=50; a fresh PBS
 # allocation per chain link also sidesteps any single bad node.
+set +e
 ezpz launch --np 96 -ppn 12 --timeout "${IDLE_TIMEOUT:-1800}" \
     python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --pretokenized_dataset "${PRETOK_DIR}" \
@@ -111,8 +112,11 @@ ezpz launch --np 96 -ppn 12 --timeout "${IDLE_TIMEOUT:-1800}" \
     --save_strategy steps --save_steps 50 \
     --report_to wandb \
     --resume_from_checkpoint "${CKPT_DIR}" \
-    2>&1 | tee -a "${LOG_DIR}/run.log" || true
+    2>&1 | tee -a "${LOG_DIR}/run.log"
+rc=${PIPESTATUS[0]}
+set -e
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "=== DONE: log in ${LOG_DIR}/, ckpts in ${CKPT_DIR}/ ===" \
     | tee -a "${LOG_DIR}/run.log"
+exit "${rc}"

@@ -26,6 +26,7 @@ from typing import Literal
 
 import torch
 import torch.nn.functional as F
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor
 from torch.utils.checkpoint import checkpoint
 
@@ -403,6 +404,87 @@ def _run_experts_aurora_full_sonic(
             "inner_experts (models/common/moe.py:163); use EzpzRoutedExperts, "
             "which forwards them."
         )
+    if not isinstance(ep_mesh, DeviceMesh):
+        raise ValueError("the aurora_full_sonic expert backend requires a real EP mesh")
+    ep_size = ep_mesh.size()
+    if ep_size <= 1:
+        raise ValueError(
+            "the aurora_full_sonic expert backend requires EP size greater than 1"
+        )
+
+    total_experts = int(num_tokens_per_expert.numel())
+    if total_experts % ep_size:
+        raise ValueError(
+            f"global expert count {total_experts} is not divisible by EP size "
+            f"{ep_size}; the Sonic kernel assumes an even per-rank split"
+        )
+    local_count = total_experts // ep_size
+    weight_counts = (w1.shape[0], w2.shape[0], w3.shape[0])
+    if weight_counts != (local_count,) * 3:
+        raise ValueError(
+            "local expert weight count must equal global expert count divided "
+            f"by EP size ({local_count}), got {weight_counts}"
+        )
+
+    if topk_scores.dtype != torch.float32:
+        raise ValueError(
+            "topk_scores must have dtype float32 from the core router, "
+            f"got {topk_scores.dtype}"
+        )
+    if topk_indices.dtype != torch.int64:
+        raise ValueError(
+            "topk_indices must have dtype int64 for aurora_full_sonic, "
+            f"got {topk_indices.dtype}"
+        )
+    if num_tokens_per_expert.dtype != torch.int64:
+        raise ValueError(
+            "num_tokens_per_expert must have dtype int64, "
+            f"got {num_tokens_per_expert.dtype}"
+        )
+    if topk_scores.device != x.device or topk_indices.device != x.device:
+        raise ValueError("routing tensors must be on the same device as x")
+    if num_tokens_per_expert.device != x.device:
+        raise ValueError("num_tokens_per_expert must be on the same device as x")
+    if (
+        topk_scores.ndim != 2
+        or topk_indices.shape != topk_scores.shape
+        or topk_scores.shape[0] != x.shape[0]
+    ):
+        raise ValueError(
+            "topk_scores and topk_indices must have matching [tokens, top_k] "
+            "shapes whose token dimension matches x"
+        )
+    if topk_scores.shape[1] == 0:
+        raise ValueError("routing tensors must have top_k greater than zero")
+    if num_tokens_per_expert.ndim != 1:
+        raise ValueError("num_tokens_per_expert must have shape [global_experts]")
+    if bool((num_tokens_per_expert < 0).any()):
+        raise ValueError("num_tokens_per_expert values must be non-negative")
+    if int(num_tokens_per_expert.sum()) != topk_indices.numel():
+        raise ValueError(
+            "num_tokens_per_expert must sum to the number of routing entries"
+        )
+    if topk_indices.numel() and (
+        bool((topk_indices < 0).any()) or bool((topk_indices >= total_experts).any())
+    ):
+        raise ValueError(f"topk_indices values must be in [0, {total_experts})")
+
+    # sycl_sonic refuses to run without the compact alltoallv transport.
+    if os.environ.get("AURORA_MOE_ALLTOALLV") != "1":
+        raise RuntimeError(
+            "the aurora_full_sonic backend requires AURORA_MOE_ALLTOALLV=1 "
+            "(aurora_moe/_core.py:3727 raises otherwise)"
+        )
+
+    if x.dtype != torch.bfloat16:
+        raise ValueError(
+            "the aurora_full_sonic backend requires BF16 activations, got "
+            f"{x.dtype}. Casting x here would hide a real dtype problem in the "
+            "model, unlike the router scores, which are a routing decision."
+        )
+
+    topk_scores = topk_scores.to(torch.bfloat16)
+
     try:
         from aurora_moe._core import _routed_moe
         from aurora_moe.distributed import MoEProcessGroups, ParallelMesh
@@ -413,29 +495,7 @@ def _run_experts_aurora_full_sonic(
             "on PYTHONPATH"
         ) from error
 
-    # sycl_sonic refuses to run without the compact alltoallv transport.
-    if os.environ.get("AURORA_MOE_ALLTOALLV") != "1":
-        raise RuntimeError(
-            "the aurora_full_sonic backend requires AURORA_MOE_ALLTOALLV=1 "
-            "(aurora_moe/_core.py:3727 raises otherwise)"
-        )
-
-    # sycl_sonic hard-requires BF16 for x AND topk_scores (_core.py:3722-3725).
-    # In the real model the scores arrive as float32 even though an isolated
-    # router returns bf16 -- torchtitan promotes somewhere between the router
-    # and here (job 8836304 died on exactly this). Rather than chase which
-    # step does it, normalize at the boundary: this is the kernel's documented
-    # input contract, and the cast is a no-op when they already match.
-    if topk_scores.dtype != torch.bfloat16:
-        topk_scores = topk_scores.to(torch.bfloat16)
-    if x.dtype != torch.bfloat16:
-        raise ValueError(
-            "the aurora_full_sonic backend requires BF16 activations, got "
-            f"{x.dtype}. Casting x here would hide a real dtype problem in the "
-            "model, unlike the router scores, which are a routing decision."
-        )
-
-    group = ep_mesh.get_group() if ep_mesh is not None else None
+    group = ep_mesh.get_group()
     mesh = ParallelMesh(MoEProcessGroups(ep_dispatch=group), x.device)
 
     # local_expert_ids only needs the right LENGTH: _routed_moe takes
@@ -446,14 +506,6 @@ def _run_experts_aurora_full_sonic(
     # shards the GLOBAL topk_indices itself. Passing the full expert count made
     # local_ids exceed the per-rank range and the kernel raised
     # "local_ids must be in [0, num_experts)" (job 8836331).
-    ep_size = ep_mesh.size() if ep_mesh is not None else 1
-    total_experts = int(num_tokens_per_expert.numel())
-    if total_experts % ep_size:
-        raise ValueError(
-            f"expert count {total_experts} is not divisible by EP size "
-            f"{ep_size}; the sonic kernel assumes an even per-rank split"
-        )
-    local_count = total_experts // ep_size
     local_expert_ids = list(range(local_count))
     # TorchTitan stores the projections as w1/w3=[E, F, D] and
     # w2=[E, D, F], while Sonic's ragged kernel expects

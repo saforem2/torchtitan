@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch.testing import assert_close
@@ -15,6 +16,7 @@ from torch.testing import assert_close
 # rename is deliberate -- it names the property that distinguishes it from
 # our capacity-limited `_run_experts_bmm`, which DOES drop overflow tokens.
 from torchtitan.experiments.ezpz.moe.experts import (
+    _run_experts_aurora_full_sonic,
     _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
     _sonic_weight_layouts,
@@ -42,6 +44,156 @@ def _init_grouped_experts_weights(module: GroupedExperts) -> None:
 
 
 class TestMoEExpertBackends(unittest.TestCase):
+    def test_full_sonic_rejects_missing_ep_mesh_before_import(self):
+        with self.assertRaisesRegex(ValueError, "EP mesh"):
+            _run_experts_aurora_full_sonic(
+                torch.empty(2, 3, dtype=torch.bfloat16),
+                torch.empty(2, 3, dtype=torch.bfloat16),
+                torch.empty(2, 3, dtype=torch.bfloat16),
+                torch.empty(4, 3, dtype=torch.bfloat16),
+                torch.tensor([1, 1]),
+                topk_scores=torch.ones(4, 1),
+                topk_indices=torch.zeros(4, 1, dtype=torch.int64),
+                ep_mesh=None,
+            )
+
+    def test_full_sonic_validates_routing_before_collective(self):
+        class FakeMesh:
+            def size(self):
+                return 2
+
+            def get_group(self):
+                raise AssertionError("validation must happen before collectives")
+
+        weights = torch.empty(2, 3, 4, dtype=torch.bfloat16)
+        x = torch.empty(4, 4, dtype=torch.bfloat16)
+        counts = torch.tensor([1, 1, 1, 1])
+        scores = torch.ones(4, 1, dtype=torch.float64)
+        indices = torch.zeros(4, 1, dtype=torch.int64)
+
+        with (
+            patch(
+                "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
+                FakeMesh,
+                create=True,
+            ),
+            self.assertRaisesRegex(ValueError, "topk_scores.*float32"),
+        ):
+            _run_experts_aurora_full_sonic(
+                weights,
+                torch.empty(2, 4, 3, dtype=torch.bfloat16),
+                weights,
+                x,
+                counts,
+                topk_scores=scores,
+                topk_indices=indices,
+                ep_mesh=FakeMesh(),
+            )
+
+    def test_full_sonic_validates_local_weight_expert_count(self):
+        class FakeMesh:
+            def size(self):
+                return 2
+
+            def get_group(self):
+                raise AssertionError("validation must happen before collectives")
+
+        with (
+            patch(
+                "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
+                FakeMesh,
+                create=True,
+            ),
+            self.assertRaisesRegex(ValueError, "local expert weight count"),
+        ):
+            _run_experts_aurora_full_sonic(
+                torch.empty(3, 3, 4, dtype=torch.bfloat16),
+                torch.empty(3, 4, 3, dtype=torch.bfloat16),
+                torch.empty(3, 3, 4, dtype=torch.bfloat16),
+                torch.empty(4, 4, dtype=torch.bfloat16),
+                torch.ones(4, dtype=torch.int64),
+                topk_scores=torch.ones(4, 1),
+                topk_indices=torch.zeros(4, 1, dtype=torch.int64),
+                ep_mesh=FakeMesh(),
+            )
+
+    def test_full_sonic_validates_ep_size_and_global_expert_divisibility(self):
+        class FakeMesh:
+            def __init__(self, size):
+                self._size = size
+
+            def size(self):
+                return self._size
+
+            def get_group(self):
+                raise AssertionError("validation must happen before collectives")
+
+        inputs = dict(
+            w1=torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            w2=torch.empty(2, 4, 3, dtype=torch.bfloat16),
+            w3=torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            x=torch.empty(4, 4, dtype=torch.bfloat16),
+            topk_scores=torch.ones(4, 1),
+            topk_indices=torch.zeros(4, 1, dtype=torch.int64),
+        )
+        with patch(
+            "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
+            FakeMesh,
+            create=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "greater than 1"):
+                _run_experts_aurora_full_sonic(
+                    **inputs,
+                    num_tokens_per_expert=torch.ones(2, dtype=torch.int64),
+                    ep_mesh=FakeMesh(1),
+                )
+            with self.assertRaisesRegex(ValueError, "not divisible"):
+                _run_experts_aurora_full_sonic(
+                    **inputs,
+                    num_tokens_per_expert=torch.ones(3, dtype=torch.int64),
+                    ep_mesh=FakeMesh(2),
+                )
+
+    def test_full_sonic_validates_routing_shape_range_and_device(self):
+        class FakeMesh:
+            def size(self):
+                return 2
+
+            def get_group(self):
+                raise AssertionError("validation must happen before collectives")
+
+        inputs = dict(
+            w1=torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            w2=torch.empty(2, 4, 3, dtype=torch.bfloat16),
+            w3=torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            x=torch.empty(4, 4, dtype=torch.bfloat16),
+            num_tokens_per_expert=torch.ones(4, dtype=torch.int64),
+            ep_mesh=FakeMesh(),
+        )
+        with patch(
+            "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
+            FakeMesh,
+            create=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "matching \\[tokens, top_k\\]"):
+                _run_experts_aurora_full_sonic(
+                    **inputs,
+                    topk_scores=torch.ones(3, 1),
+                    topk_indices=torch.zeros(3, 1, dtype=torch.int64),
+                )
+            with self.assertRaisesRegex(ValueError, "values must be in"):
+                _run_experts_aurora_full_sonic(
+                    **inputs,
+                    topk_scores=torch.ones(4, 1),
+                    topk_indices=torch.full((4, 1), 4, dtype=torch.int64),
+                )
+            with self.assertRaisesRegex(ValueError, "same device"):
+                _run_experts_aurora_full_sonic(
+                    **inputs,
+                    topk_scores=torch.ones(4, 1, device="meta"),
+                    topk_indices=torch.zeros(4, 1, dtype=torch.int64, device="meta"),
+                )
+
     def test_sonic_weight_layouts_with_non_square_dimensions(self):
         """Production D != F must not be hidden by the square debug model."""
         experts, dim, hidden = 3, 7, 11

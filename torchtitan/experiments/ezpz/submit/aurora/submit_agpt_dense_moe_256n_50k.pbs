@@ -254,7 +254,10 @@ if test "${CASE}" = moe -a "${MOE_WARMUP_STEPS}" -gt 0; then
           2>&1 | tee -a "${WARMUP_LOG}"
     warmup_rc=${PIPESTATUS[0]}
     set -e
-    test "${warmup_rc}" -eq 0
+    if test "${warmup_rc}" -ne 0; then
+        printf 'MOE_COLD_WARMUP_STATUS rc=%s completed=0\n' "${warmup_rc}" | tee -a "${WARMUP_LOG}"
+        exit "${warmup_rc}"
+    fi
     grep -q 'Training completed' "${WARMUP_LOG}"
     ! grep -q 'Traceback (most recent call last)' "${WARMUP_LOG}"
     python3 - "${WARMUP_LOG}" "${MOE_WARMUP_STEPS}" <<'PY'
@@ -351,6 +354,7 @@ elif test "${rc}" -eq 124; then
     test "${latest}" -ge 500
     printf 'CASE_STATUS case=%s rc=124 completed=0 resumable=1 checkpoint_step=%s output=%s\n' \
         "${CASE}" "${latest}" "${TRAIN_OUT}" | tee -a "${LOG}"
+    exit "${rc}"
 else
     printf 'CASE_STATUS case=%s rc=%s completed=0 resumable=0 output=%s\n' \
         "${CASE}" "${rc}" "${TRAIN_OUT}" | tee -a "${LOG}"

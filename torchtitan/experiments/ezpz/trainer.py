@@ -10,7 +10,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 import ezpz
 
@@ -31,10 +31,10 @@ from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
     install_agpt_dtype_probe,
-    record_native_ddp_grad_streams,
-    scale_native_ddp_loss,
+    native_ddp_autocast_context,
     validate_native_ddp,
     wrap_native_ddp,
+    wrap_native_ddp_loss,
 )
 from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
@@ -433,7 +433,7 @@ class FaultTolerantTrainer(Trainer):
             num_tokens_per_batch=(
                 config.training.num_tokens_per_microbatch_per_dp_rank
             ),
-            # train_step pulls gas * num_pipeline_parallel_microbatches batches
+            # train_step pulls gas * num_pp_microbatches batches
             # per optimizer step, so the dataloader must be sized for that many
             # -- not the raw step count. Without the PP factor the iterator runs
             # dry mid-run ("Ran out of data") and a later microbatch group comes
@@ -441,7 +441,7 @@ class FaultTolerantTrainer(Trainer):
             # "Expecting N arg_mbs but got M". The factor is 1 when PP is off,
             # so this is unchanged for every non-PP run. (Upstream applies the
             # same product to snapshot_every_n_steps, torchtitan/trainer.py.)
-            # (computed locally: self.num_pipeline_parallel_microbatches is not
+            # (computed locally: self.num_pp_microbatches is not
             # assigned until later in __init__, after the dataloader is built.)
             training_steps=config.training.steps * _num_pp_microbatches,
             # Sequences, not tokens -- see the conversion above.
@@ -555,42 +555,6 @@ class FaultTolerantTrainer(Trainer):
         # for gradient sync.
         self.loss_fn = config.loss.build(compile_config=config.compile)
 
-        # Compensate DDP's gradient averaging on the native-DDP path.
-        #
-        # Core's forward_backward_step says it plainly: "The returned loss
-        # here is local SUM loss / global_valid_tokens" -- global_valid_tokens
-        # is a cross-DP sum (dist_sum over batch_mesh), so gradients are
-        # ALREADY globally normalized before backward. DDP's reducer then
-        # divides by process_group.size() again, leaving them dp_degree x
-        # too small.
-        #
-        # FSDP has the same problem and solves it with
-        # disable_fsdp_gradient_division (agpt/parallelize.py). DDP exposes
-        # no equivalent switch, so scale the loss gradient up by dp_degree
-        # instead -- which is exactly what scale_native_ddp_loss was written
-        # for. It was defined in native_ddp.py and never wired in, so the
-        # native-DDP path was not gradient-equivalent to the FSDP path it
-        # replaces. Silent: it would have trained, just wrongly.
-        #
-        # _ScaleGradient touches the gradient only; the returned loss VALUE
-        # is unchanged, so reported loss stays comparable across paths.
-        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
-            _dp_degree = parallel_dims.dp_replicate
-            if _dp_degree > 1:
-                _inner_loss_fn = self.loss_fn
-
-                def _native_ddp_loss_fn(*args: Any, **kwargs: Any) -> Any:
-                    result = _inner_loss_fn(*args, **kwargs)
-                    # core's loss_fn returns (loss, aux); scale only the loss
-                    if isinstance(result, tuple):
-                        return (
-                            scale_native_ddp_loss(result[0], _dp_degree),
-                            *result[1:],
-                        )
-                    return scale_native_ddp_loss(result, _dp_degree)
-
-                self.loss_fn = _native_ddp_loss_fn
-
         # 80th sync (#4121): batch sizes are counted in TOKENS, not sequences.
         #   num_tokens_per_microbatch_per_dp_rank == old local_batch_size * seq_len
         #   num_tokens_per_train_step            == old global_batch_size * seq_len
@@ -629,9 +593,15 @@ class FaultTolerantTrainer(Trainer):
                 gradient_accumulation_steps=self.gradient_accumulation_steps,
                 fault_tolerance_enabled=config.fault_tolerance.enable,
                 create_seed_checkpoint=config.checkpoint.create_seed_checkpoint,
-                optimizer_has_param_groups=bool(
-                    getattr(config.optimizer, "param_groups", None)
+                optimizer_has_param_groups=(
+                    len(config.optimizer.param_groups) != 1
+                    or config.optimizer.param_groups[0].pattern != r".*"
                 ),
+            )
+            # Validate the concrete configured loss above before replacing it
+            # with a callable that compensates DDP's gradient averaging.
+            self.loss_fn = cast(
+                Any, wrap_native_ddp_loss(self.loss_fn, parallel_dims.dp_replicate)
             )
 
         # How many pipeline microbatches make up one local batch. This is 1
@@ -639,8 +609,9 @@ class FaultTolerantTrainer(Trainer):
         # no-op for every non-PP run. Mirrors the base Trainer
         # (torchtitan/trainer.py); FaultTolerantTrainer does not call
         # super().__init__(), so it must be set here explicitly or the PP
-        # branch would AttributeError.
-        self.num_pipeline_parallel_microbatches = _num_pp_microbatches
+        # branch would AttributeError. Keep the current core attribute spelling;
+        # the parity test guards this mirror across future syncs.
+        self.num_pp_microbatches = _num_pp_microbatches
 
         # The set_spmd_backend() mirror that used to live here is gone: #4419
         # removed the DTensor FWD/BWD backend entirely, deleting
@@ -941,6 +912,10 @@ class FaultTolerantTrainer(Trainer):
             # flag alone decides.
             spmd_typechecking=config.debug.spmd_typechecking,
         )
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            self.train_context = native_ddp_autocast_context(
+                self.train_context, device_type
+            )
 
         # Build validator if validation is configured
         if config.validator.enable:
@@ -1083,7 +1058,7 @@ class FaultTolerantTrainer(Trainer):
         # Two nested levels, mirroring the base Trainer: the OUTER level is
         # gradient accumulation (one optimizer step per `gas` groups), the
         # INNER level is pipeline microbatches (the PP schedule consumes a
-        # whole group at once). `num_pipeline_parallel_microbatches` is 1
+        # whole group at once). `num_pp_microbatches` is 1
         # whenever PP is off, so with PP disabled this is exactly the old
         # flat `gas` loop -- one batch dict per group.
         #
@@ -1098,7 +1073,7 @@ class FaultTolerantTrainer(Trainer):
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
             microbatches = []
-            for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
+            for _pp_microbatch in range(self.num_pp_microbatches):
                 input_dict = next(data_iterator)
                 if "num_valid_tokens" in input_dict:
                     local_valid_tokens += input_dict.pop("num_valid_tokens")
@@ -1192,10 +1167,6 @@ class FaultTolerantTrainer(Trainer):
 
             _attn.set_step(self.step)
 
-        if getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
-            # Experimental mixed-precision DDP restores FP32 gradients on an
-            # upcast stream; ordinary DDP/autocast makes this a no-op.
-            record_native_ddp_grad_streams(self.model_parts[0])
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.config.training.max_norm,

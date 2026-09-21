@@ -15,7 +15,7 @@ set -eo pipefail
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 set -u
 
-ROOT=/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan
+ROOT=${TT_ROOT:-/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan}
 INPUT_DIR=${TT_INPUT_DIR:?missing frozen input directory}
 ARCHIVE_SHA=${TT_SOURCE_ARCHIVE_SHA256:?missing source archive hash}
 SNAPSHOT_ID=${TT_SNAPSHOT_ID:?missing snapshot ID}
@@ -30,10 +30,11 @@ EXPERT_DW=${TT_MOE_EXPERT_DW:-onemkl}
 L0_MIN_CAPACITY_ELEMENTS=${TT_MOE_L0_MIN_CAPACITY_ELEMENTS:-0}
 EP_TRANSPORT=${TT_MOE_EP_TRANSPORT:-xccl}
 PHASE_SHARED=${TT_MOE_PHASE_SHARED:-0}
-case "${EXPECTED_STEPS}:${WARMUP_STEPS}:${WARMUP_TIMEOUT}:${ENABLE_WANDB}" in
+case "${EXPECTED_STEPS}:${CASE_TIMEOUT}:${WARMUP_STEPS}:${WARMUP_TIMEOUT}:${ENABLE_WANDB}" in
     *[!0-9:]*|:*|*::*|*:) echo "invalid numeric launch setting" >&2; exit 2 ;;
 esac
 test "${EXPECTED_STEPS}" -gt 0
+test "${CASE_TIMEOUT}" -gt 0
 test "${WARMUP_TIMEOUT}" -gt 0
 test "${ENABLE_WANDB}" -eq 0 -o "${ENABLE_WANDB}" -eq 1
 case "${EP_TRANSPORT}:${PHASE_SHARED}" in
@@ -74,13 +75,19 @@ cp "${INPUT_DIR}/source.manifest.sha256" "${OUT}/source.manifest.sha256"
 NNODES=$(sort -u "${PBS_NODEFILE}" | wc -l)
 test "${NNODES}" -eq 2
 export NODE_VENV=/tmp/CODEX_AGPT_MOE_${JOB_KEY}_venv
+VENV_TAR=${TT_VENV_TAR:-${ROOT}/.venv.tar.gz}
+test -s "${VENV_TAR}" || {
+    echo "missing TT_VENV_TAR archive: ${VENV_TAR}" >&2
+    exit 2
+}
+export VENV_TAR
 mpiexec --envall --np 2 --ppn 1 --hostfile "${PBS_NODEFILE}" \
     --no-vni --cpu-bind "list:2-9" bash -c '
         set -euo pipefail
         partial=${NODE_VENV}.partial
         test ! -e "${NODE_VENV}" && test ! -e "${partial}"
         mkdir "${partial}"
-        tar -xzf /lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/.venv.tar.gz --strip-components=1 -C "${partial}"
+        tar -xzf "${VENV_TAR}" --strip-components=1 -C "${partial}"
         mv "${partial}" "${NODE_VENV}"
     '
 export VIRTUAL_ENV=${NODE_VENV}
@@ -88,7 +95,7 @@ export PATH=${VIRTUAL_ENV}/bin:${PATH}
 export PYTHONPATH=${SOURCE}:${SOURCE}/torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/src${PYTHONPATH:+:${PYTHONPATH}}
 export TT_CONFIG_JSON=${SOURCE}/${CONFIG_REL}
 
-CACHE=${ROOT}/outputs/moe_full_runtime_tt_1layer/kernel_cache_py213
+CACHE=${TT_MOE_KERNEL_CACHE:-${ROOT}/outputs/moe_full_runtime_tt_1layer/kernel_cache_py213}
 export TORCH_EXTENSIONS_DIR=${CACHE}
 export AURORA_MOE_SYCL_BUILD_DIR=${CACHE}
 export AURORA_MOE_L0_IPC_BUILD_DIR=${CACHE}
@@ -132,10 +139,21 @@ else
     unset AURORA_MOE_PHASE_SHARED_A4_SUBMIT_WAIT
 fi
 
-DATA_LIST=/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/outputs/agpt_2b_50k_native_ddp_compile_wandb_ab/8703043/source/torchtitan/experiments/ezpz/data-lists/aurora/dolma_v1_7_llama2_live.txt
-TOKENIZER=/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/outputs/agpt_2b_50k_native_ddp_compile_wandb_ab/8703043/source/assets/hf/llama-2-32k-sp/tokenizer.model
-test "$(sha256sum "${DATA_LIST}" | awk '{print $1}')" = ded7678c8c94820d73ea654e98c47f4cc60d60d80bb3b70e1a5b1793c375be53
-test "$(sha256sum "${TOKENIZER}" | awk '{print $1}')" = 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347
+DATA_LIST=${TT_DATA_LIST:?missing TT_DATA_LIST path}
+TOKENIZER=${TT_TOKENIZER:?missing TT_TOKENIZER path}
+DATA_LIST_SHA=${TT_DATA_LIST_SHA256:?missing TT_DATA_LIST_SHA256}
+TOKENIZER_SHA=${TT_TOKENIZER_SHA256:?missing TT_TOKENIZER_SHA256}
+test -s "${DATA_LIST}" || { echo "missing TT_DATA_LIST file: ${DATA_LIST}" >&2; exit 2; }
+test -s "${TOKENIZER}" || { echo "missing TT_TOKENIZER file: ${TOKENIZER}" >&2; exit 2; }
+test "$(sha256sum "${DATA_LIST}" | awk '{print $1}')" = "${DATA_LIST_SHA}" || {
+    echo "TT_DATA_LIST_SHA256 mismatch for ${DATA_LIST}" >&2
+    exit 2
+}
+test "$(sha256sum "${TOKENIZER}" | awk '{print $1}')" = "${TOKENIZER_SHA}" || {
+    echo "TT_TOKENIZER_SHA256 mismatch for ${TOKENIZER}" >&2
+    exit 2
+}
+TOKENIZER_DIR=$(dirname "${TOKENIZER}")
 
 export MASTER_ADDR=$(head -n 1 "${PBS_NODEFILE}")
 export WORLD_SIZE=24
@@ -173,13 +191,18 @@ if test "${WARMUP_STEPS}" -gt 0; then
               --module=ezpz.moe \
               --config=agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json \
               --dump-folder="$1" --dataloader.data-cache-path="$2" \
-              --training.steps="$3" --metrics.no-enable_wandb \
+              --training.steps="$3" --dataloader.dataset-path="$4" \
+              --hf-assets-path="$5" --metrics.no-enable_wandb \
               --metrics.log-freq=1 --metrics.disable-color-printing \
               --checkpoint.no-enable
-          ' bash "${OUT}/warmup" "${DATA_CACHE}" "${WARMUP_STEPS}" 2>&1 | tee -a "${WARMUP_LOG}"
+          ' bash "${OUT}/warmup" "${DATA_CACHE}" "${WARMUP_STEPS}" \
+          "${DATA_LIST}" "${TOKENIZER_DIR}" 2>&1 | tee -a "${WARMUP_LOG}"
     warmup_rc=${PIPESTATUS[0]}
     set -e
-    test "${warmup_rc}" -eq 0
+    if test "${warmup_rc}" -ne 0; then
+        printf 'MOE_COLD_WARMUP_STATUS rc=%s completed=0\n' "${warmup_rc}" | tee -a "${WARMUP_LOG}"
+        exit "${warmup_rc}"
+    fi
     grep -q 'Training completed' "${WARMUP_LOG}"
     ! grep -q 'Traceback (most recent call last)' "${WARMUP_LOG}"
     python3 - "${WARMUP_LOG}" "${WARMUP_STEPS}" <<'PY'
@@ -228,13 +251,19 @@ timeout --foreground --kill-after=30s "${CASE_TIMEOUT}s" \
           --module=ezpz.moe \
           --config=agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json \
           --dump-folder="$1" --dataloader.data-cache-path="$2" \
-          --training.steps="$3" "$4" --metrics.disable-color-printing
-      ' bash "${OUT}/train" "${DATA_CACHE}" "${EXPECTED_STEPS}" "${TRAIN_WANDB_ARG}" 2>&1 | tee -a "${LOG}"
+          --training.steps="$3" --dataloader.dataset-path="$4" \
+          --hf-assets-path="$5" "$6" --metrics.disable-color-printing
+      ' bash "${OUT}/train" "${DATA_CACHE}" "${EXPECTED_STEPS}" \
+      "${DATA_LIST}" "${TOKENIZER_DIR}" "${TRAIN_WANDB_ARG}" 2>&1 | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
 set -e
+if test "${rc}" -ne 0; then
+    printf 'CASE_STATUS rc=%s completed=0 expected_steps=%s output=%s\n' \
+        "${rc}" "${EXPECTED_STEPS}" "${OUT}" | tee -a "${LOG}"
+    exit "${rc}"
+fi
 grep -q 'Training completed' "${LOG}"
 ! grep -q 'Traceback (most recent call last)' "${LOG}"
-test "${rc}" -eq 0
 python3 - "${LOG}" "${EXPECTED_STEPS}" <<'PY'
 import re
 import sys

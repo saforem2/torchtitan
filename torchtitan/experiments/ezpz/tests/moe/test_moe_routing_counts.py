@@ -9,6 +9,8 @@ import unittest
 import torch
 from torch import nn
 
+from torchtitan.experiments.ezpz.moe.model import moeTransformerBlock
+
 # ezpz's own dispatcher, NOT core's. Sync 84 removed score_before_experts
 # from core's LocalTokenDispatcher.Config (it is now just num_experts +
 # top_k), so importing core's made these tests fail with
@@ -17,6 +19,7 @@ from torch import nn
 # only its own dispatcher, so this is the class actually under test.
 from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher
 
+from torchtitan.models.common.config_utils import make_router_config
 from torchtitan.models.common.linear import Linear
 
 # Sync 84 made score_func a UnaryActivationFn.Config that the router
@@ -26,6 +29,50 @@ from torchtitan.models.common.moe import Sigmoid, TokenChoiceTopKRouter
 
 
 class TestMoERoutingCounts(unittest.TestCase):
+    def test_transformer_block_forwards_padding_mask_to_moe(self):
+        class CaptureMoE(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.padding_mask = None
+
+            def forward(self, x, *, padding_mask_T=None):
+                self.padding_mask = padding_mask_T
+                return torch.zeros_like(x)
+
+        block = moeTransformerBlock.__new__(moeTransformerBlock)
+        nn.Module.__init__(block)
+        block.attention_norm = nn.Identity()
+        block.ffn_norm = nn.Identity()
+        block.attention = lambda x, attention_masks, positions: torch.zeros_like(x)
+        block.moe_enabled = True
+        block.moe = CaptureMoE()
+        padding_mask = torch.tensor([False, True, False])
+
+        block(torch.randn(3, 4), None, padding_mask=padding_mask)
+
+        self.assertIs(block.moe.padding_mask, padding_mask)
+
+    def test_padding_values_do_not_change_router_counts(self):
+        router = make_router_config(
+            dim=3,
+            num_experts=4,
+            gate_param_init={"weight": nn.init.zeros_},
+            top_k=2,
+            score_func=Sigmoid.Config(),
+        ).build()
+        router.init_states()
+        router.train()
+        padding_mask = torch.tensor([False, False, True, True])
+        valid = torch.randn(2, 3)
+
+        router(torch.cat((valid, torch.zeros(2, 3))), padding_mask_T=padding_mask)
+        first_counts = router.tokens_per_expert_E.clone()
+        router.tokens_per_expert_E.zero_()
+        router(torch.cat((valid, torch.full((2, 3), 1e6))), padding_mask_T=padding_mask)
+
+        torch.testing.assert_close(router.tokens_per_expert_E, first_counts)
+        self.assertEqual(int(first_counts.sum()), 2 * router.top_k)
+
     def test_bf16_router_ties_have_stable_expert_order(self):
         class FixedGate(nn.Module):
             def forward(self, x):

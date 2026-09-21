@@ -24,12 +24,19 @@ Differences vs upstream `parallelize_llama`:
   `reshard_after_forward=reshard_after_forward_policy == "always"`).
 """
 
+import os
+
 import ezpz
 import ezpz.distributed
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    DataParallelMeshDims,
+    fully_shard,
+    MixedPrecisionPolicy,
+)
 
 from torchtitan.config import (
     CompileConfig,
@@ -37,23 +44,22 @@ from torchtitan.config import (
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
-import os
 
 from torchtitan.distributed import ParallelDims
-from torch.distributed.fsdp import DataParallelMeshDims
-from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
     apply_compile,
 )
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
+from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
+from torchtitan.experiments.ezpz.logging import logger
+
 # 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED from
 # distributed/tensor_parallel.py -- async TP now happens inside apply_compile,
 # which gained a keyword-only `parallel_dims`. Importing the old symbol is an
 # ImportError, so this replay is mandatory, not cosmetic.
 from torchtitan.models.llama3.model import Llama3Model
-from torchtitan.experiments.ezpz.logging import logger
 
 
 # [ezpz] max-autotune (and other torch.compile modes) on XPU.
@@ -72,9 +78,7 @@ def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
     if mode in (None, "default"):
         # 78th sync (#4045): apply_compile is keyword-only now and takes
         # parallel_dims, because async TP moved inside it.
-        apply_compile(
-            model, compile_config=compile_config, parallel_dims=parallel_dims
-        )
+        apply_compile(model, compile_config=compile_config, parallel_dims=parallel_dims)
         return
     # Mirror apply_compile's dynamo flags + backend resolution, adding mode=.
     torch._dynamo.config.capture_scalar_outputs = True
@@ -88,7 +92,6 @@ def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
         compile_config.backend,
         mode,
     )
-
 
 
 def parallelize_llama(
@@ -160,10 +163,10 @@ def parallelize_llama(
         # produce unbacked symbols in cross_entropy.
         torch._dynamo.config.capture_scalar_outputs = False
 
-    # [ezpz] Skip FSDP for the vLLM generator: FSDP forward hooks are
-    # incompatible with torch.inference_mode() used by vLLM. The generator's
-    # vllm_wrapper passes skip_dp=True. Mirrors qwen3/gpt_oss parallelize.
-    if skip_dp:
+    # Native DDP is installed by the ezpz trainer after parameters leave the
+    # meta device. Apply TP/AC/compile here, but do not also install FSDP.
+    # The vLLM generator similarly owns its data-parallel behavior.
+    if skip_dp or getattr(parallelism, "enable_data_parallel_native_ddp", False):
         return model
 
     # 79th sync: upstream #4085 made spmd_types the DEFAULT spmd_backend, and

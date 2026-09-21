@@ -55,25 +55,14 @@ class EzpzParallelismConfig(ParallelismConfig):
     Use native ``DistributedDataParallel`` for pure replicated AGPT data
     parallelism. This experimental path keeps FP32 master parameters and
     gradients. Its forward compute policy is selected separately below. It is
-    disabled by default and supports either no model parallelism or a guarded
-    one-stage-per-rank Schedule1F1B pipeline. TP, CP, EP, and outer gradient
-    accumulation remain unsupported.
+    disabled by default and supports no model parallelism. PP, TP, CP, EP, and
+    outer gradient accumulation remain unsupported.
     """
 
-    native_ddp_compute_policy: Literal[
-        "autocast",
-        "ddp_mixed_precision",
-        "ddp_mixed_precision_xpu_overlap",
-    ] = "autocast"
+    native_ddp_compute_policy: Literal["autocast"] = "autocast"
     """
-    Native DDP forward/backward compute policy. ``autocast`` retains FP32
-    parameter storage during forward and is not dtype-equivalent to FSDP for
-    embeddings and residuals. ``ddp_mixed_precision`` uses DDP's experimental
-    BF16 parameter-copy path with FP32 gradient reduction and optimizer state.
-    ``ddp_mixed_precision_xpu_overlap`` keeps those dtype semantics but replaces
-    a blocking private PyTorch communication hook with a pinned-version XPU
-    stream implementation. It is experimental and rejected off the validated
-    Aurora software/environment combination.
+    Native DDP forward/backward compute policy. Only BF16 autocast over FP32
+    parameter storage is supported.
     """
 
     native_ddp_bucket_cap_mb: float = 25.0

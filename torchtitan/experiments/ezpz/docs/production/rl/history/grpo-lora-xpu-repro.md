@@ -49,7 +49,7 @@ TorchStore weight sync, GRPO+LoRA training steps.
 ## How to run it (2-tile smoke)
 
 Build once with
-[`rl/scripts/build_rl_grpo_lora_venv.sh`](../../rl/scripts/build_rl_grpo_lora_venv.sh)
+[`rl/scripts/build_rl_grpo_lora_venv.sh`](../../../../rl/scripts/build_rl_grpo_lora_venv.sh)
 -> `venvs/rl-grpo-lora/` (py3.12); clones land in `~/rl-repro/` (outside the
 repo). Then, on a compute node, run from a **NEUTRAL cwd** (`~/rl-repro/run`) so
 the editable fork wins on `sys.path` over the main-repo `experiments/rl` copy:

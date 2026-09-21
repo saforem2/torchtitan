@@ -88,6 +88,12 @@ The command sets `PAIR_ID`, `TT_INPUT_DIR`, and
 `TT_SOURCE_ARCHIVE_SHA256`. The archive includes the vendored Aurora MoE
 Python and SYCL sources and records a SHA-256 manifest.
 
+The two-node full-Sonic launcher accepts the same relocatable artifact path
+overrides shown below: `TT_ROOT`, `TT_VENV_TAR`, `TT_MOE_KERNEL_CACHE`,
+`TT_DATA_CACHE_PATH`, `TT_DATA_LIST`, and `TT_TOKENIZER`. It also requires
+`TT_DATA_LIST_SHA256` and `TT_TOKENIZER_SHA256`; a missing file or mismatched
+hash terminates the job with a diagnostic before training starts.
+
 ## Submit the 256-node run
 
 The dataset list, tokenizer, validated BlendCorpus cache, and packed Python
@@ -112,9 +118,9 @@ TT_TOKENIZER_SHA256=sha256-of-tokenizer \
 torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs
 ```
 
-The job logs to W&B, checkpoints every 500 steps, retains the newest two
-checkpoints, and is resumable by submitting the same snapshot and run ID
-again. W&B credentials must be available to the batch job.
+The job logs to W&B, checkpoints every 500 steps, retains all checkpoints
+(`checkpoint.keep_latest_k=0`), and is resumable by submitting the same snapshot
+and run ID again. W&B credentials must be available to the batch job.
 
 ## Verification
 
@@ -122,7 +128,8 @@ Current registry, Sonic wiring, non-square weight-layout, and meta-build
 contracts are covered by
 `torchtitan/experiments/ezpz/tests/moe/test_agpt_moe_config.py`. Portable backend
 equivalence and routing behavior are covered by `test_moe_expert_backends.py`
-and `test_moe_routing_counts.py`. Actual Sonic/SYCL forward-backward and EP collectives require Intel XPU hardware
-and prebuilt kernels; local tests do not certify them. Job `12478353` provides
+and `test_moe_routing_counts.py`. Actual Sonic/SYCL forward-backward and EP
+collectives require Intel XPU hardware and prebuilt kernels; local tests do not
+certify them. Job `12478353` provides
 the current one-node EP=12 hardware smoke. The production launcher additionally
 validates source, tokenizer, dataset-list hashes, and the shared kernel cache.

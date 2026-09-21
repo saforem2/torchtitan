@@ -233,14 +233,10 @@ class moeTransformerBlock(TransformerBlock):  # noqa: N801
         # (jobs 12477668, 12477669). The dense arms survived because
         # Llama3TransformerBlock already accepts it.
         #
-        # Consume and discard, exactly as llama3 does (llama3/model.py:53).
-        # It feeds varlen attention metadata, which this block does not build:
-        # blendcorpus emits fixed-length rows, so there is no padding to mask.
-        del padding_mask
         x = x + self.attention(self.attention_norm(x), attention_masks, positions)
         _maybe_release_device_cache_between_attention_and_moe(x)
         if self.moe_enabled:
-            x = x + self.moe(self.ffn_norm(x))
+            x = x + self.moe(self.ffn_norm(x), padding_mask_T=padding_mask)
         else:
             x = x + self.feed_forward(self.ffn_norm(x))
         return x
