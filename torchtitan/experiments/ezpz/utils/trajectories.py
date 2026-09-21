@@ -467,6 +467,10 @@ TRAJECTORIES: list[dict] = [
             "s2iqoonn",
             "23magxfo",
             "xmdg7z2g",
+            # iv185ozq=8828612 t2 (15201..16035). Verified 2026-09-21
+            # against W&B config (20b, n256 ckpt folder, jobid 8828612) and
+            # the Aurora trainer-2 log; the allocation ended at walltime.
+            "iv185ozq",
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --
@@ -762,6 +766,11 @@ TRAJECTORIES: list[dict] = [
             "k944ah6j",  # leg16 4501-4902
             "rlxko4n7",  # leg17 4901-5299
             "5u38mvef",  # leg18 5201-5605
+            # shcl72f6=7567542 (5601-5978), thmd4sge=7575650
+            # (5901-6263). Verified 2026-09-21 from W&B config/history;
+            # both target this Polaris ckpt folder and are ordered by resume.
+            "shcl72f6",
+            "thmd4sge",
         ],
         # .o-log fallbacks are Polaris-only paths under /eagle; they are
         # unreachable off-cluster, and every leg above returned rows from
