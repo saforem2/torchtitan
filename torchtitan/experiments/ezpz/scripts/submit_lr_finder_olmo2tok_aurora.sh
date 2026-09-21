@@ -96,10 +96,10 @@ export LRF_USE_CONFIG_DATALOADER=1
 # runtime, which includes the FSDP spmd-types consumer required after sync 84.
 # Keep the TEST-image runtime isolated from the production clone's `.venv` and
 # `.venv.tar.gz`; the production umbrella reads those paths at job start.
-export LRF_VENV_SRC="/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval.tar.gz"
-export LRF_ONEAPI_MODULE="oneapi/release/2026.1.0"
-export LRF_PREPEND_VENV_LIB=1
-export LRF_REJECT_IMPI_RT=1
+export LRF_VENV_SRC="${LRF_VENV_SRC:-/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval.tar.gz}"
+export LRF_ONEAPI_MODULE="${LRF_ONEAPI_MODULE:-oneapi/release/2026.1.0}"
+export LRF_PREPEND_VENV_LIB="${LRF_PREPEND_VENV_LIB:-1}"
+export LRF_REJECT_IMPI_RT="${LRF_REJECT_IMPI_RT:-1}"
 
 export LRF_GBS="${LRF_GBS:-6144}"
 export LRF_LBS="${LRF_LBS:-2}"
