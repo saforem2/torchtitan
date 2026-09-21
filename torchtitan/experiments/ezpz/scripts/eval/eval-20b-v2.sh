@@ -44,7 +44,11 @@ cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/to
 # But the convert_to_hf step needs torchtitan + the v2 model registry —
 # so source the v2 venv for the conversion, then deactivate before
 # the lm-eval step.
-V2_REPO="${REPO:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz}"
+V2_REPO="${V2_REPO:-${REPO:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz}}"
+# The checkpoint may live in a pinned production clone that intentionally lacks
+# the current RoPE-safe adapter.  Keep conversion code rooted in V2_REPO while
+# allowing the DCP source to come from a separate, read-only checkout.
+CKPT_REPO="${CKPT_REPO:-${REPO:-${V2_REPO}}}"
 # Default to the canonical 512N chain (gbs12288); override CKPT_NAME +
 # LABEL to evaluate other trajectories (e.g. the 256N comparator).
 V2_CKPT_NAME="${CKPT_NAME:-agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288}"
@@ -108,7 +112,7 @@ fi
 echo "[eval-20b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default -- see rope-flavor-mismatch.md)"
 
 for step in $STEPS; do
-    DCP_DIR="${V2_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
+    DCP_DIR="${CKPT_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
     HF_DIR="outputs/evals/agpt-20b-v2-${LABEL}/step-${step}/hf"
     RESULTS_DIR="outputs/evals/agpt-20b-v2-${LABEL}/step-${step}/results"
 
@@ -337,7 +341,16 @@ for task, metrics in merged.items():
            or metrics.get("exact_match,flexible-extract", "?"))
     print(f"  {task}: {val:.4f}" if isinstance(val, float) else f"  {task}: {val}")
 PYEOF
+    eval_rc=$?
     deactivate
+    if (( eval_rc != 0 )); then
+        echo "[2/2] Eval FAILED for step ${step} (rc=${eval_rc})" >&2
+        exit "${eval_rc}"
+    fi
+    if [[ ! -s "${RESULTS_DIR_ABS}/results.json" ]]; then
+        echo "[2/2] Eval FAILED for step ${step}: missing or empty ${RESULTS_DIR_ABS}/results.json" >&2
+        exit 1
+    fi
     echo "[2/2] Eval done. results: ${RESULTS_DIR_ABS}/results.json"
 done
 
