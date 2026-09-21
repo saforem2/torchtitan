@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[7]
 # can't be conflated. Mirror docs/evals/agpt/2b/plot_eval_overview.py.
 V2_TRAJECTORIES = {
     # node_count -> (results dir, GBS)
-    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 3_072),   # LBS=1 × 256N × 12 GPUs ÷ TP=2 ⇒ 1536 dp-shards × 2 micro-batches
+    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 6_144),   # LBS=2 × 256N × 12 GPUs
     512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),  # LBS=2 × 512N × 12 GPUs (no TP)
 }
 
@@ -50,6 +50,14 @@ V2_TRAJECTORIES = {
 V2_CORRECTED = {
     256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n-ropefix", 3101),
     512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-ropefix", 4401),
+}
+
+# Later, correctly exported segments of the same trajectories. These must be
+# applied after the RoPE splice: they already used ``20b_real`` and therefore
+# must not be discarded merely because the dedicated ropefix sweep ended
+# earlier. Keep this aligned with plot_evals_combined.py::extra_subdirs.
+V2_EXTRA = {
+    512: [REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-constlr"],
 }
 
 # Pin every number to one shot count. The eval scripts write `<task>@<N>shot`
@@ -107,9 +115,12 @@ RANDOM_BASELINE = {
 }
 
 
-def _acc(metrics: dict) -> float | None:
-    """lm-eval reports `acc_norm,none` for HellaSwag/ARC; `acc,none` for Winogrande."""
-    for k in ("acc_norm,none", "acc,none"):
+def _acc(metrics: dict, task: str) -> float | None:
+    """Read the canonical metric used by the published 20B tables."""
+    keys = (("acc_norm,none", "acc,none")
+            if task in {"hellaswag", "arc_challenge"}
+            else ("acc,none", "acc_norm,none"))
+    for k in keys:
         if k in metrics:
             return float(metrics[k])
     return None
@@ -141,6 +152,7 @@ def load_v2_trajectory(
     results_base: Path,
     corrected_base: Path | None = None,
     switch_step: int | None = None,
+    extra_bases: list[Path] | None = None,
 ) -> dict[int, dict[str, float]]:
     """Load a chain's evals, splicing corrected results over the post-switch half.
 
@@ -152,7 +164,11 @@ def load_v2_trajectory(
     plausible wrong point.
     """
     out = _load_one(results_base)
+    extra: dict[int, dict[str, float]] = {}
+    for base in extra_bases or []:
+        extra.update(_load_one(base))
     if corrected_base is None or switch_step is None:
+        out.update(extra)
         return out
 
     corrected = _load_one(corrected_base)
@@ -172,6 +188,8 @@ def load_v2_trajectory(
     for step, scores in corrected.items():
         if step >= switch_step:
             merged.setdefault(step, scores)
+    # Correctly exported continuation segments win their own steps outright.
+    merged.update(extra)
     for t, n in sorted(dropped.items()):
         print(
             f"  NOTE [{results_base.name}/{t}]: {n} post-switch point(s) dropped"
@@ -202,7 +220,7 @@ def _load_one(results_base: Path) -> dict[int, dict[str, float]]:
         results = payload.get("results", payload)
         for task in TASKS:
             m = _task_metrics(results, task)
-            if m is not None and (acc := _acc(m)) is not None:
+            if m is not None and (acc := _acc(m, task)) is not None:
                 scores[task] = acc
         if scores:
             out[step] = scores
@@ -225,7 +243,7 @@ def load_mds() -> dict[int, dict[str, float]]:
             payload = json.load(f)
         results = payload.get("results", payload)
         for task in TASKS:
-            if task in results and (acc := _acc(results[task])) is not None:
+            if task in results and (acc := _acc(results[task], task)) is not None:
                 by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
         step: {task: sum(vs) / len(vs) for task, vs in d.items()}
@@ -370,7 +388,9 @@ def main() -> None:
     v2_gbs = {}
     for nodes, (path, gbs) in V2_TRAJECTORIES.items():
         corrected_path, switch = V2_CORRECTED.get(nodes, (None, None))
-        traj = load_v2_trajectory(path, corrected_path, switch)
+        traj = load_v2_trajectory(
+            path, corrected_path, switch, V2_EXTRA.get(nodes),
+        )
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs
         print(f"loaded v2 {nodes}N: {len(traj)} steps from {path}")

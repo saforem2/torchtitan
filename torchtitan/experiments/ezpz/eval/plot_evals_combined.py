@@ -161,12 +161,12 @@ TRAJECTORIES: list[dict] = [
     # 43 eval points on disk. The exclusion silently kept all of them off the
     # chart. Restored 2026-08-16.
     {
-        "label": "20B 256N (GBS=3072)",
+        "label": "20B 256N (GBS=6144)",
         "eval_subdir": "agpt-20b-v2-256n",
         "corrected_subdir": "agpt-20b-v2-256n-ropefix",
         "switch_step": 3101,
         "layout": "dcp",
-        "tokens_per_step": 3072 * 8192,
+        "tokens_per_step": 6144 * 8192,
         "color": COLOR_20B_TT_256N,
         "linestyle": "--",
         "marker": "^",

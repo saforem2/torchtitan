@@ -32,11 +32,11 @@
 > stale legacy conts (8521631/8534294) were superseded by the autoretry
 > chain, which was in turn superseded by the umbrellas.
 >
-> **Latest eval on record here (step-4,400, 2026-05-29)** -- the chain is far
-> past this; see the eval page for newer ladders:
-> HSn **0.6346** (+0.7pp from step-4,300), ARC-E 0.6641 (flat),
-> ARC-C **0.3797** (+1.5pp jump), Wino 0.5864. Steady monotonic
-> climb continues with ARC-C breakout this step.
+> **Latest eval:** the production-tail backfill at step 10,900 (`8846649`)
+> finished successfully on 2026-09-21: HellaSwag `acc_norm` 0.6804,
+> ARC-Easy `acc` 0.6965, ARC-Challenge 25-shot `acc_norm` 0.4334, and
+> Winogrande `acc` 0.5777. See the eval page for all seven tasks and the
+> shot-count distinction.
 >
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md).
 > **🏁 The 20B 512N sync chain is now beating 2B 256N async per token

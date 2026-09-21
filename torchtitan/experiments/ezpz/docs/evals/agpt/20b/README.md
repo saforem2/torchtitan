@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-08-31
+> Last updated: 2026-09-21
 >
 > **Training curves:** see [`docs/production/agpt/20b/`](../../../production/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
@@ -153,8 +153,8 @@ fp32-master + sync-mode stack is the right operational combination for
 
 Single canonical table covering **all** evaluated 20B checkpoints
 from disk. Tokens computed as `step × GBS × seq_len`:
-v1 256N (`GBS=3072`, `seq=8192`), v2 256N (`GBS=3072` — TP=2 halves
-the dp-shard count from the naive 6144), v2 512N (`GBS=12288`).
+v1 256N (`GBS=3072`, `seq=8192`), v2 256N (`GBS=6144`,
+`seq=8192`), and v2 512N (`GBS=12288`, `seq=8192`).
 
 Metric: `acc_norm,none` for HellaSwag / ARC-C / PIQA / OpenBookQA;
 `acc,none` for ARC-Easy / Winogrande / BoolQ (the ones without
@@ -229,9 +229,29 @@ resume), 8535041 (single step-2400), 8535121 (step-4200 + step-4300).
 | **v2 512N sync** | **5,300** | **533.5** | **0.6060** | **0.6751** | **0.3541** | **0.5848** | **0.7655** | **0.3760** | **0.5976** |
 | **v2 512N sync** | **5,400** | **543.6** | **0.6103** | **0.6671** | **0.3490** | **0.5706** | **0.7699** | **0.3640** | **0.6104** |
 | **v2 512N sync** | **6,000** | **604.0** | **0.6086** | **0.6481** | **0.3635** | **0.5825** | **0.7563** | **0.3640** | **0.5807** |
+| **v2 256N** | **16,000** | **805.3** | **0.6809** | **0.7054** | **—** | **0.6117** | **0.7693** | **0.3740** | **0.6248** |
+| **v2 512N const-LR** | **10,900** | **1,097.2** | **0.6804** | **0.6965** | **—** | **0.5777** | **0.7726** | **0.3440** | **0.6321** |
 
-**Note (resolved):** the step-4,500 note here is obsolete -- the 20B-512 chain
-has since advanced to step-6,050, evaluated through step-6,010.
+**Note (resolved):** the step-4,500 note here is obsolete. Production-tail
+backfills now cover the disk heads at **20B-512 step 10,900** and **20B-256
+step 16,000**; the 0-shot values are included in the canonical table above,
+and the separately measured 25-shot ARC-C values are recorded below.
+
+### Production-tail backfills (2026-09-21)
+
+Both jobs finished with `Exit_status=0`, wrote complete `results.json` files,
+and converted with the post-switch `20b_real` RoPE flavor. The six ordinary
+commonsense tasks are 0-shot; ARC-Challenge is 25-shot and is kept separate
+from the 0-shot trajectory curves rather than silently mixing shot counts.
+
+| Run | Job | Step | Tokens | HellaSwag acc_norm (0s) | ARC-Easy acc (0s) | ARC-C acc_norm (25s) | Winogrande acc (0s) | PIQA acc_norm (0s) | OpenBookQA acc_norm (0s) | BoolQ acc (0s) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20B 256N | `8846651` | 16,000 | 805.3B | 0.6809 | 0.7054 | 0.4420 | 0.6117 | 0.7693 | 0.3740 | 0.6248 |
+| 20B 512N const-LR | `8846649` | 10,900 | 1,097.2B | 0.6804 | 0.6965 | 0.4334 | 0.5777 | 0.7726 | 0.3440 | 0.6321 |
+
+The aggregate production-eval chart and the 20B overview include the new
+0-shot points. ARC-C remains absent from those curves at these two steps
+because no matching 0-shot measurement was run.
 
 ### Δ vs v1 ceiling
 
