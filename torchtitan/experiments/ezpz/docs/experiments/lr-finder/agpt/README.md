@@ -175,4 +175,4 @@ files in this directory and were missing from this index entirely until
 | 2026-08-23 | [30B GBS=960, three optimizers](2026-08-23-30b-gbs960-three-optimizers.md) | AdamW 3.05e-05, Mano 5.61e-05, SophiaG 3.55e-05 (Sunspot, 16N) |
 | 2026-08-23 | [30B Mano on Sunspot](2026-08-23-30b-mano-sunspot.md) | Mano arm detail |
 | 2026-08-30 | [30B GBS=960, Muon](2026-08-30-30b-gbs960-muon.md) | Muon arm |
-| 2026-09-18 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B on Aurora next-eval, 64N -- SUBMITTED |
+| 2026-09-18 / updated 2026-09-21 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; active replacement campaign with verified partial results |

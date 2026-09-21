@@ -6,20 +6,30 @@
 `OLMo-2-1124-7B` asset path are historical; its core `tokenizer.json` is
 byte-identical to `allenai/Olmo-3-1025-7B`.
 **Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
-**Machine:** Aurora, `next-eval`, 64N x 3 jobs, 6h walltime | **Optimizer:** AdamW
+**Machine:** Aurora `next-eval` and Sunspot `workq`, 64N production-batch sweeps
 
-Status: **FAILED BEFORE TRAINING.** All 12 jobs reached the runner but crashed
-in 12–19 seconds with `ImportError: cannot import name 'SpmdType' from
-'spmd_types'`. The borrowed image-independent venv carried `spmd-types 0.2.1`;
-repository HEAD pins 0.2.5 and imports `SpmdType`. PBS still reported
-`Exit_status=0` because the runner discarded the launcher status with
-`|| true`. Commit `fa23dc6d1` adds an exact post-broadcast import/version
-preflight and makes any non-OK arm fail the job. **No LR result was produced;
-all 12 jobs must be resubmitted after the rebuilt tarball passes a compute-node
-smoke.**
+Status as of 2026-09-21: **ACTIVE REPLACEMENT CAMPAIGN.** The original Aurora
+submissions failed before training for two successive runtime-contract defects:
+first stale `spmd-types`, then a pip `impi-rt` library shadowing Aurora's site
+MPICH/PMIx (`PMIX_Init returned -25`). The isolated `.venv.next-eval` runtime,
+an explicit `impi-rt` rejection gate, and archive-derived activation path were
+validated by Aurora job `8846942`: 5/5 finite Muon points plus CSV/NPZ/PNG.
+Clean full Aurora replacements `8847068`–`8847073` are queued.
 
-This file records the setup and the reasoning; numbers land in the Results
-table when valid replacement jobs finish.
+Sunspot is producing the first full results. Jobs `12478315` (5B AdamW) and
+`12478328` (10B Mano) completed 150/150 finite points with fresh artifacts;
+`12478327` (5B Mano) is running. The first canonical 30B Mano job `12478329`
+stalled at zero points with `dp_shard=8` and was cancelled. A `dp_shard=12`
+control on the canonical 16,384-wide FFN (`12478356`) failed correctly because
+16,384 is not divisible by 12. A separately named, checkpoint-incompatible
+16,128-wide FFN flavor then passed a 4-node smoke (`12478362`, 5/5 finite
+points); its full 64-node run is `12478375` (queued). Existing canonical 30B
+checkpoints and configs remain unchanged.
+
+This file records both setup and live outcomes. Per-job `report.md` files and
+CSV/NPZ/PNG artifacts are generated automatically under `outputs/`; this page
+is the durable campaign-level synthesis and is updated only from verified
+scheduler state plus artifacts.
 
 ## Why
 
@@ -129,16 +139,35 @@ the corrected replacements.
 
 ## Results
 
-Pending.
+Verified results as of 2026-09-21. A minimum at the final sampled LR means the
+curve was still descending and **does not constitute a defensible LR
+recommendation**; the sweep window must be extended or interpreted alongside
+the completed curve.
 
-| size | suggested LR | blow-up | min loss | LR at min |
-|---|---:|---:|---:|---:|
-| 5b | | | | |
-| 10b | | | | |
-| 30b | | | | |
+| job | machine | model / optimizer | points | finite | min loss | LR at min | status |
+|---|---|---|---:|---:|---:|---:|---|
+| 12478315 | Sunspot | 5B / AdamW | 150 | 150 | 8.3131 | 9.261e-4 | complete; minimum at final point |
+| 12478328 | Sunspot | 10B / Mano | 150 | 150 | 9.1098 | 9.261e-4 | complete; minimum at final point |
+| 12478327 | Sunspot | 5B / Mano | 87+ | 87+ | provisional | provisional | running |
+| 12478362 | Sunspot | 30B-dp12 / Mano | 5 | 5 | 11.8506 | 1.000e-4 | smoke passed; minimum at final point |
+| 12478375 | Sunspot | 30B-dp12 / Mano | — | — | — | — | full 150-point run queued |
+| 8846942 | Aurora | 5B / Muon | 5 | 5 | — | — | runtime/PMIx smoke passed |
+| 8847068–8847073 | Aurora | 5/10/30B Muon + SophiaG | — | — | — | — | clean-runtime replacements queued |
 
-Prior for comparison: 30B olmo2tok at GBS=960 on Sunspot gave AdamW 3.05e-05
-(2026-08-23-30b-gbs960-three-optimizers.md). Optimal LR is batch-size
+### Controlled failures and decisions
+
+- `12478325`, 10B AdamW: failed after 14 minutes; replacement `12478340` is queued.
+- `12478329`, canonical 30B Mano with `dp_shard=8`: entered the sweep but
+  completed zero points and stalled in oneCCL/MPI pending requests; cancelled.
+- `12478356`, canonical 30B Mano with `dp_shard=12`: failed during DTensor
+  parameter initialization because FFN dimension 16,384 is not divisible by 12.
+  The later rank-36 SIGTERM was launcher cleanup, not the initiating error.
+- `12478362`: validated the additive `30B_olmo2tok_dp12` flavor at FFN=16,128,
+  where `16128 / 12 = 1344`. This keeps each 12-rank shard group within one
+  node. It is a new architecture and cannot load canonical 30B checkpoints.
+
+Prior for comparison: canonical 30B olmo2tok at GBS=960 on Sunspot gave AdamW
+3.05e-05 (2026-08-23-30b-gbs960-three-optimizers.md). Optimal LR is batch-size
 dependent, so the GBS=6144 answer is expected to differ -- the 80B's
 small-batch finder said 1.1e-5 while its real production-batch ceiling was
 ~14x lower.
