@@ -94,7 +94,9 @@ export LRF_USE_CONFIG_DATALOADER=1
 # Runtime from the image-independent clone venv; see the note above. The venv
 # now carries a 2.15 XPU nightly built against the TEST image's oneAPI 2026.1
 # runtime, which includes the FSDP spmd-types consumer required after sync 84.
-export LRF_VENV_SRC="/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.tar.gz"
+# Keep the TEST-image runtime isolated from the production clone's `.venv` and
+# `.venv.tar.gz`; the production umbrella reads those paths at job start.
+export LRF_VENV_SRC="/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval.tar.gz"
 export LRF_ONEAPI_MODULE="oneapi/release/2026.1.0"
 
 export LRF_GBS="${LRF_GBS:-6144}"
