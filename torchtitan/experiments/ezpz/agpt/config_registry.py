@@ -1141,6 +1141,17 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
+def agpt_30b_olmo2tok_dp12() -> FaultTolerantTrainer.Config:
+    """Fresh 30B variant whose 16,128-wide FFN supports node-local dp_shard=12.
+
+    This is intentionally checkpoint-incompatible with canonical 30B_olmo2tok;
+    it exists to test whether node-local HSDP outweighs the 1.56% FFN reduction.
+    """
+    return agpt(
+        "30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B"
+    )
+
+
 # Local fineweb-edu shards for the optimizer comparison. The 80th upstream sync
 # (#4088) deleted HuggingFaceTextDataLoader, so `dataset="fineweb_edu_local"` on
 # a BlendCorpusDataLoader.Config now raises -- the replacement is a Grain
@@ -1465,6 +1476,22 @@ def agpt_30b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
         # packaged builder decompresses transparently. Verified on Aurora
         # against the precached wiki subset -- zero hub calls, first sample
         # carries a 2,786-char "text" field.
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_30b_olmo2tok_dp12_smoke() -> FaultTolerantTrainer.Config:
+    """Node-local dp_shard=12 experiment with a 16,128-wide FFN.
+
+    Uses the same OLMo-2 streaming data path as the canonical 30B smoke, but is
+    a fresh architecture and cannot resume canonical 30B checkpoints.
+    """
+    cfg = agpt(
+        "30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B"
+    )
+    return _use_hf_streaming(
+        cfg,
         path="json",
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )

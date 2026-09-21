@@ -764,6 +764,20 @@ agpt_configs = {
         vocab_size=100352,
         hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
     ),
+    # Experimental node-local HSDP variant for 12-XPU Aurora/Sunspot nodes.
+    # 16128 = 12 * 1344 and remains 256-aligned for efficient GEMMs. Keep this
+    # separate from 30B_olmo2tok: changing the canonical flavor would make its
+    # existing checkpoints shape-incompatible. Compared with 16384 this removes
+    # 256 FFN channels (1.56%) while allowing dp_shard=12 parameter init.
+    "30B_olmo2tok_dp12": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=16128,
+    ),
     # ---- Aurora-native mid-ladder, OLMo-2 vocab ----
     #
     # The size ladder jumped 2B (dim 2048) straight to 20B (dim 5120); the 7B
