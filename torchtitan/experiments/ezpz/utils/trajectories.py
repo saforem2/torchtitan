@@ -680,6 +680,10 @@ TRAJECTORIES: list[dict] = [
         "olog_fallbacks": None,
         # 6 results, head step-22300 (all 2026-09-17)
         "eval_subdir": "agpt-2b-v2-512n-stage2",
+        # Shares the stage-1 README; its restarted step counter must not replace
+        # the base chain's scalar fields or linked rollup row.
+        "auto_fill_leaf": False,
+        "auto_fill_rollups": False,
         "cls": "live",
     },
     {
@@ -726,6 +730,10 @@ TRAJECTORIES: list[dict] = [
         "olog_fallbacks": None,
         # 14 results, head step-28000 (all 2026-09-17)
         "eval_subdir": "agpt-2b-v2-256n-stage2",
+        # Shares the stage-1 README; its restarted step counter must not replace
+        # the base chain's scalar fields or linked rollup row.
+        "auto_fill_leaf": False,
+        "auto_fill_rollups": False,
         "cls": "live",
     },
     {
@@ -781,6 +789,9 @@ TRAJECTORIES: list[dict] = [
         "olog_fallbacks": None,
         # 5 results, head step-39200 (all 2026-09-17)
         "eval_subdir": "agpt-2b-v2-512n-constlr",
+        # Shares the stage-1 README and has no uniquely linked rollup row.
+        "auto_fill_leaf": False,
+        "auto_fill_rollups": False,
         # wandb_only: it is a deliberate LR ablation, not a production chain,
         # so it belongs on the board and in prod_dash but is not required on
         # the canonical overlay charts (which the live-chain guard enforces).
