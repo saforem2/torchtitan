@@ -155,3 +155,12 @@ def test_retained_launchers_reference_importable_factories():
             f"torchtitan.experiments.ezpz.{module_name}.config_registry"
         )
         assert callable(getattr(module, factory_name)), (module_name, factory_name)
+
+
+def test_full_sonic_launcher_exports_required_runtime_contract():
+    launcher = EZPZ_ROOT / "submit/aurora/submit_agpt_moe_full_sonic_2n_1100.pbs"
+    text = launcher.read_text()
+
+    assert "vendor/aurora_moe_dropin/src" in text
+    assert "export AURORA_MOE_ALLTOALLV=1" in text
+    assert "export AURORA_MOE_SEGMENTED_SONIC=1" in text

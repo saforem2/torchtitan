@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Regression tests for exact trajectory field/row selection."""
 from __future__ import annotations
 
@@ -17,9 +23,9 @@ TRAJECTORIES_MODULE = "torchtitan.experiments.ezpz.utils.trajectories"
 
 def _load_module(monkeypatch: pytest.MonkeyPatch, repo_root: Path):
     trajectories = types.ModuleType(TRAJECTORIES_MODULE)
-    setattr(trajectories, "REPO_ROOT", repo_root)
-    setattr(trajectories, "by_key", lambda key: None)
-    setattr(trajectories, "live_trajectories", lambda: [])
+    trajectories.REPO_ROOT = repo_root  # pyrefly: ignore [missing-attribute]
+    trajectories.by_key = lambda key: None  # pyrefly: ignore [missing-attribute]
+    trajectories.live_trajectories = lambda: []  # pyrefly: ignore [missing-attribute]
     monkeypatch.setitem(sys.modules, TRAJECTORIES_MODULE, trajectories)
 
     spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
@@ -83,8 +89,18 @@ def test_base_row_is_not_matched_by_continuation_values(monkeypatch, tmp_path):
     module = _load_module(monkeypatch, tmp_path)
     base = _trajectory("2b_v2_512", tmp_path / "base")
     continuation = _trajectory("2b_v2_512_stage2_dolmino", tmp_path / "continuation")
-    base_values = {"step": 46_429, "loss": "2.6869", "tokens": "4.674T", "pct": "100.0%"}
-    continuation_values = {"step": 22_300, "loss": "2.480", "tokens": "2.245T", "pct": "47.9%"}
+    base_values = {
+        "step": 46_429,
+        "loss": "2.6869",
+        "tokens": "4.674T",
+        "pct": "100.0%",
+    }
+    continuation_values = {
+        "step": 22_300,
+        "loss": "2.480",
+        "tokens": "2.245T",
+        "pct": "47.9%",
+    }
     base_row = (
         "| 2B | 512 | **46,000** (FINAL) | **2.700** | **4.60T** (98.0%) "
         "| -- chain complete | base status |"
@@ -94,15 +110,24 @@ def test_base_row_is_not_matched_by_continuation_values(monkeypatch, tmp_path):
         "| job | continuation status |"
     )
 
-    assert module._rewrite_rollup_row_for_trajectory(
-        base_row, continuation, continuation_values, force_shape_b=True
-    ) == base_row
-    assert module._rewrite_rollup_row_for_trajectory(
-        continuation_row, base, base_values, force_shape_b=True
-    ) == continuation_row
-    assert module._rewrite_rollup_row_for_trajectory(
-        base_row, base, base_values, force_shape_b=True
-    ) == base_row
+    assert (
+        module._rewrite_rollup_row_for_trajectory(
+            base_row, continuation, continuation_values, force_shape_b=True
+        )
+        == base_row
+    )
+    assert (
+        module._rewrite_rollup_row_for_trajectory(
+            continuation_row, base, base_values, force_shape_b=True
+        )
+        == continuation_row
+    )
+    assert (
+        module._rewrite_rollup_row_for_trajectory(
+            base_row, base, base_values, force_shape_b=True
+        )
+        == base_row
+    )
 
 
 def test_exact_linked_base_row_updates_only_numeric_cells(monkeypatch, tmp_path):
@@ -122,7 +147,9 @@ def test_exact_linked_base_row_updates_only_numeric_cells(monkeypatch, tmp_path)
     )
 
 
-def test_numeric_replacements_are_anchored_to_expected_cell_tokens(monkeypatch, tmp_path):
+def test_numeric_replacements_are_anchored_to_expected_cell_tokens(
+    monkeypatch, tmp_path
+):
     module = _load_module(monkeypatch, tmp_path)
     values = {"step": 86_200, "loss": "2.656", "tokens": "4.339T", "pct": "92.9%"}
     malformed = (

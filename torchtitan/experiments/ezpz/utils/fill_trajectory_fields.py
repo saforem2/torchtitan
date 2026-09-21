@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Auto-fill the DETERMINISTIC structured fields in production-tracking
 trajectory READMEs from on-disk checkpoint state (and optionally W&B).
 
@@ -46,9 +52,9 @@ import sys
 from pathlib import Path
 
 from torchtitan.experiments.ezpz.utils.trajectories import (
-    REPO_ROOT,
     by_key,
     live_trajectories,
+    REPO_ROOT,
 )
 
 # Reuse the leaf-field regexes already proven in refresh_docs_readme_table
@@ -63,7 +69,8 @@ LATEST_CKPT_RE = re.compile(
 CUMULATIVE_STEPS_RE = re.compile(
     # tolerate "Cumulative steps", "Cumulative *persisted* steps" (italic),
     # and "Cumulative persisted steps" (plain) -- different pages vary.
-    r"^(?P<label>\*\*Cumulative(?: \*?\w+\*?)? steps:\*\*\s*)(?P<body>.+)$", re.M
+    r"^(?P<label>\*\*Cumulative(?: \*?\w+\*?)? steps:\*\*\s*)(?P<body>.+)$",
+    re.M,
 )
 TOKENS_RE = re.compile(
     r"^(?P<label>\*\*Tokens consumed(?: \(persisted\))?:\*\*\s*)(?P<body>.+)$", re.M
@@ -176,10 +183,10 @@ def _replace_step_token(body: str, step: int) -> str:
         return body
     had_comma = "," in m.group(1)
     # Preserve bold-inside-token if the original had it.
-    bold = body[m.start():m.end()].count("**") >= 2
+    bold = body[m.start() : m.end()].count("**") >= 2
     new_num = _fmt_int(step, comma=had_comma)
     new_tok = f"step-**{new_num}**" if bold else f"step-{new_num}"
-    return body[: m.start()] + new_tok + body[m.end():]
+    return body[: m.start()] + new_tok + body[m.end() :]
 
 
 def _read_step_from_body(body: str) -> int | None:
@@ -266,19 +273,28 @@ def fill_one(
                 )
             new_body = _replace_step_token(m.group("body"), step)
             if new_body != m.group("body"):
-                changes.append(FieldChange("Latest checkpoint", m.group("body"), new_body))
-                new_text = new_text[: m.start("body")] + new_body + new_text[m.end("body"):]
+                changes.append(
+                    FieldChange("Latest checkpoint", m.group("body"), new_body)
+                )
+                new_text = (
+                    new_text[: m.start("body")] + new_body + new_text[m.end("body") :]
+                )
 
     # --- Cumulative steps: the bare number ---
     m = CUMULATIVE_STEPS_RE.search(new_text)
     if m:
         body = m.group("body")
-        stated = _read_step_from_body("step-" + body) if re.match(r"[\d,]+", body) else None
+        stated = (
+            _read_step_from_body("step-" + body) if re.match(r"[\d,]+", body) else None
+        )
         new_num = _fmt_int(step, comma=("," in body))
         # Replace only the leading number token, keep any trailing prose.
-        nb = re.sub(r"^\*{0,2}[\d,]+\*{0,2}", lambda mm: (
-            f"**{new_num}**" if mm.group(0).count("**") >= 2 else new_num
-        ), body, count=1)
+        nb = re.sub(
+            r"^\*{0,2}[\d,]+\*{0,2}",
+            lambda mm: (f"**{new_num}**" if mm.group(0).count("**") >= 2 else new_num),
+            body,
+            count=1,
+        )
         guard_skip = (
             stated is not None
             and stated > step
@@ -290,7 +306,7 @@ def fill_one(
             )
         elif nb != body:
             changes.append(FieldChange("Cumulative steps", body, nb))
-            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body") :]
 
     # --- Tokens consumed: rebuild "N x GBS x SEQ = TOK (PCT of TARGET)"
     # PRESERVING the file's existing decimal precision (no 3.07->3.070
@@ -303,11 +319,20 @@ def fill_one(
         tok_old = re.search(r"([\d.]+)\s*([TB])\s*tokens", body)
         pct_old = re.search(r"([\d.]+)\s*%", body)
         t_dec = _decimals_in(tok_old.group(1)) if tok_old else 3
-        b_dec = _decimals_in(tok_old.group(1)) if (tok_old and tok_old.group(2) == "B") else 1
+        b_dec = (
+            _decimals_in(tok_old.group(1))
+            if (tok_old and tok_old.group(2) == "B")
+            else 1
+        )
         pct_dec = _decimals_in(pct_old.group(1)) if pct_old else 1
         tok_str2, pct2 = format_tokens(
-            step, gbs, traj["seq_len"], traj["token_target"],
-            t_decimals=t_dec, b_decimals=b_dec, pct_decimals=pct_dec,
+            step,
+            gbs,
+            traj["seq_len"],
+            traj["token_target"],
+            t_decimals=t_dec,
+            b_decimals=b_dec,
+            pct_decimals=pct_dec,
         )
         step_comma = _fmt_int(step, comma=True)
         gbs_comma = _fmt_int(gbs, comma=True)
@@ -324,7 +349,7 @@ def fill_one(
         # Preserve anything AFTER the first ")" that closes the percent
         # parenthetical (a trailing prose clause). Find that close-paren.
         close_idx = body.find(")")
-        remainder = body[close_idx + 1:] if close_idx != -1 else ""
+        remainder = body[close_idx + 1 :] if close_idx != -1 else ""
         nb = (
             f"{step_comma} x {gbs_comma} x {seq_comma} = "
             f"{tok_render} ({pct_render}{of_text})" + remainder
@@ -333,7 +358,7 @@ def fill_one(
             nb = nb.replace(" x ", " × ")
         if nb != body:
             changes.append(FieldChange("Tokens consumed", body, nb))
-            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body") :]
 
     # --- Loss: only with --wandb ---
     if wandb_loss is not None:
@@ -343,18 +368,18 @@ def fill_one(
             lm = LEADING_NUM_RE.match(body)
             if lm:
                 new_loss = f"{wandb_loss:.5g}"
-                nb = new_loss + body[lm.end():]
+                nb = new_loss + body[lm.end() :]
                 if nb != body:
                     changes.append(FieldChange("Loss", body, nb))
-                    new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+                    new_text = (
+                        new_text[: m.start("body")] + nb + new_text[m.end("body") :]
+                    )
 
     # --- Last updated date ---
     m = LAST_UPDATED_RE.search(new_text)
     if m and m.group("date") != today:
         changes.append(FieldChange("Last updated", m.group("date"), today))
-        new_text = (
-            new_text[: m.start("date")] + today + new_text[m.end("date"):]
-        )
+        new_text = new_text[: m.start("date")] + today + new_text[m.end("date") :]
     elif not m:
         warns.append(
             f"{traj['key']}: no standalone '> Last updated:' line "
@@ -432,7 +457,7 @@ def _canon_readme(repo_rel: str) -> str:
     but differ in the model segment)."""
     marker = "docs/"
     i = repo_rel.find(marker)
-    return repo_rel[i + len(marker):] if i != -1 else repo_rel
+    return repo_rel[i + len(marker) :] if i != -1 else repo_rel
 
 
 def _resolve_rollup_link(page_rel: str, link: str) -> str:
@@ -441,7 +466,7 @@ def _resolve_rollup_link(page_rel: str, link: str) -> str:
     rollup's repo-relative path; ``link`` is the (possibly relative)
     link target from the table row (e.g. 'n256/README.md',
     'agpt/2b/n256/README.md', or '2b/n256/README.md')."""
-    page_docs = _canon_readme(page_rel)           # e.g. production/agpt/2b/README.md
+    page_docs = _canon_readme(page_rel)  # e.g. production/agpt/2b/README.md
     page_dir = "/".join(page_docs.split("/")[:-1])  # production/agpt/2b
     # Resolve link relative to the page's directory, collapsing any '../'.
     parts = (page_dir.split("/") if page_dir else []) + link.split("/")
@@ -484,8 +509,13 @@ def _compute_disk_values(traj: dict) -> dict | None:
         if pct_old:
             pct_dec = _decimals_in(pct_old.group(1))
     tok_str, pct = format_tokens(
-        step, gbs, traj["seq_len"], traj["token_target"],
-        t_decimals=t_dec, b_decimals=b_dec, pct_decimals=pct_dec,
+        step,
+        gbs,
+        traj["seq_len"],
+        traj["token_target"],
+        t_decimals=t_dec,
+        b_decimals=b_dec,
+        pct_decimals=pct_dec,
     )
     # Loss: read the leaf's **Loss:** field if present (leading number).
     loss_str = None
@@ -497,9 +527,7 @@ def _compute_disk_values(traj: dict) -> dict | None:
     return {"step": step, "tokens": tok_str, "pct": pct, "loss": loss_str}
 
 
-def propagate_to_rollups(
-    trajs: list[dict], *, dry_run: bool
-) -> tuple[int, list[str]]:
+def propagate_to_rollups(trajs: list[dict], *, dry_run: bool) -> tuple[int, list[str]]:
     """Update rollup Snapshot table rows from each live trajectory's
     disk-authoritative values. Rewrites ONLY the step/loss/tokens numeric
     cells of the row that links to a given leaf README; the Status/
@@ -592,7 +620,8 @@ def _rewrite_rollup_row(
         return re.sub(
             r"^(\s*\*{0,2})[\d,]+(\*{0,2})(?=\s*(?:\(|$))",
             lambda m: f"{m.group(1)}{step_comma}{m.group(2)}",
-            cell, count=1,
+            cell,
+            count=1,
         )
 
     def sub_loss(cell: str) -> str:
@@ -601,7 +630,8 @@ def _rewrite_rollup_row(
         return re.sub(
             r"^(\s*\*{0,2})[\d.]+(\*{0,2})(?=\s*(?:\(|$))",
             lambda m: f"{m.group(1)}{v['loss']}{m.group(2)}",
-            cell, count=1,
+            cell,
+            count=1,
         )
 
     def sub_tokens(cell: str) -> str:
@@ -715,7 +745,8 @@ def main() -> int:
         "otherwise used.",
     )
     ap.add_argument(
-        "--no-rollups", action="store_true",
+        "--no-rollups",
+        action="store_true",
         help="skip propagating leaf values into rollup Snapshot tables",
     )
     args = ap.parse_args()
