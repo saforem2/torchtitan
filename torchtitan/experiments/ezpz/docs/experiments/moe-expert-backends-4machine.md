@@ -153,6 +153,38 @@ all-to-all are all routing tokens to the correct experts. A wrong mapping
 would have produced plausible-but-different losses -- running while silently
 wrong -- and it did not.
 
+### Restored AGPT 2B/50K full-Sonic configuration
+
+The current routed-expert implementation also restores the production-shaped
+`AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` model and its JSON factory. Sunspot
+job `12478353` validated the current factory on commit `b8e070ba4` with torch
+`2.14.0+xpu` and oneAPI `2026.1.0`:
+
+- one node / 12 XPU ranks, EP=12 and DP-shard=12;
+- 12.29B total parameters, 1.91B active parameters;
+- GQA attention followed the shared TorchTitan GQA DTensor sharding path;
+- full-Sonic routing, all-to-all, expert forward/backward, and optimizer update;
+- two finite training steps, with process exit status 0.
+
+```text
+step: 1  loss: 11.36224  grad_norm: 3.0981  memory: 19.34 GiB
+step: 2  loss: 10.64051  grad_norm: 5.0499  memory: 20.81 GiB
+Training completed
+```
+
+This was a functional smoke, not a throughput benchmark: context length was
+128, compilation was disabled, and only two steps ran. W&B was deliberately
+disabled, so job `12478353` has no W&B run URL. Its batch result and full log
+are on Sunspot at
+`/lus/tegu/projects/datascience/foremans/agpt50k-sonic-12478353-result.txt`
+and `/lus/tegu/projects/datascience/foremans/agpt50k-sonic-12478353.log`.
+
+Full Sonic must currently run with activation checkpointing disabled. Its
+custom autograd backward calls `torch.autograd.grad`; wrapping that region in
+PyTorch SelectiveAC aborts with “Trying to backward an extra time.” This is an
+unsupported SelectiveAC/Sonic combination, not a failure of the Sonic
+forward/backward path. The restored factory therefore selects AC `none`.
+
 ### Required to run it
 
 ```bash
@@ -186,11 +218,12 @@ execution:
   checks that the ordering is STABLE across rows rather than hardcoding which
   expert pair wins, since the pair is a topk implementation detail and the
   determinism is the actual property under test.
-- `test_agpt_moe_config.py` no longer imports the removed
-  `AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` flavor. It covers every current
-  Sonic trainer config, EP requirements, `EzpzRoutedExperts` wiring, the six
-  registered backend names, registry ownership, checkpoint adapter contracts,
-  and meta-device weight shapes for non-square D/F models.
+- `test_agpt_moe_config.py` covers the restored
+  `AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` flavor and every current Sonic
+  trainer config: EP requirements, GQA/MLA sharding dispatch,
+  `EzpzRoutedExperts` wiring, the six registered backend names, registry
+  ownership, FLOP accounting, checkpoint adapter contracts, and meta-device
+  weight shapes for non-square D/F models.
 - `test_moe_expert_backends.py` covers portable numerical backends and the
   Sonic weight-layout conversion without invoking SYCL.
 

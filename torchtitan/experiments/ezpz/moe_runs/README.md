@@ -20,9 +20,15 @@ factory uses the current `EzpzRoutedExperts` full-Sonic path, which forwards the
 router outputs and EP mesh required by Sonic.
 
 Activation checkpointing is selected by the factories, not by JSON: dense uses
-`SelectiveAC`; MoE uses `MoeSelectiveAC`, whose policy does not save the EP
-all-to-all output. JSON cannot replace a config-policy object with the removed
-legacy `{ "mode": ... }` representation.
+`SelectiveAC`; full Sonic uses no activation checkpointing. Sonic's custom
+autograd backward calls `torch.autograd.grad`, which conflicts with
+SelectiveAC's single-backward region constraint. JSON cannot replace a
+config-policy object with the removed legacy `{ "mode": ... }` representation.
+
+The one-node JSON was validated by Sunspot job `12478353` on commit
+`b8e070ba4`: EP=12 completed two forward/backward/optimizer steps with finite
+loss and gradient norms and exit status 0. W&B was disabled for this functional
+smoke, so the job has no W&B run URL.
 
 Canonical training JSONs set `checkpoint.keep_latest_k` to `0` (retain all).
 Both AGPT and MoE JSON override paths reject nonzero values instead of silently

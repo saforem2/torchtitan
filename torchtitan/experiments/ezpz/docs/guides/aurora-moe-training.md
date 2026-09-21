@@ -27,12 +27,35 @@ The exact training configuration is
 The PBS launcher is
 `torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs`.
 
-> **Historical configuration:** current HEAD no longer registers that 50K
-> AGPT-MoE flavor or its `_from_json` wrapper. The JSON and launchers are run
-> records, not currently runnable presets. Current registered Sonic smoke and
-> scale configs are `moe_debugmodel_sonic`, `moe_{2b,4b,7b}_sonic_ep*`, and
-> `moe_10b_2b_sdpa_sonic_ep`; they use the current routed-expert model API and
-> do not reproduce the archived 50,304-vocabulary architecture.
+Current HEAD again registers this 50K AGPT-MoE flavor and its
+`agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json` wrapper on the current
+`EzpzRoutedExperts` API. The smaller registered Sonic smoke and scale configs
+remain `moe_debugmodel_sonic`, `moe_{2b,4b,7b}_sonic_ep*`, and
+`moe_10b_2b_sdpa_sonic_ep`.
+
+### Current-stack validation
+
+Sunspot job `12478353` validated the restored 50K factory on commit
+`b8e070ba4`, torch `2.14.0+xpu`, and oneAPI `2026.1.0`. It used one node / 12
+XPU ranks with EP=12 and completed two full forward/backward/optimizer steps:
+
+```text
+step: 1  loss: 11.36224  grad_norm: 3.0981
+step: 2  loss: 10.64051  grad_norm: 5.0499
+Training completed
+Exit_status = 0
+```
+
+This was a short functional smoke at context length 128 with compilation and
+W&B disabled. Consequently, **there is no W&B URL for job `12478353`**. The
+result and full log are retained on Sunspot as
+`/lus/tegu/projects/datascience/foremans/agpt50k-sonic-12478353-result.txt` and
+`/lus/tegu/projects/datascience/foremans/agpt50k-sonic-12478353.log`.
+
+The factory intentionally disables activation checkpointing. Full Sonic uses
+a custom autograd backward containing `torch.autograd.grad`, which is not
+compatible with PyTorch SelectiveAC's single-backward region constraint. Keep
+AC disabled unless that interaction is redesigned and separately validated.
 
 ## Prepare the source and kernels
 
@@ -99,8 +122,7 @@ Current registry, Sonic wiring, non-square weight-layout, and meta-build
 contracts are covered by
 `torchtitan/experiments/ezpz/tests/moe/test_agpt_moe_config.py`. Portable backend
 equivalence and routing behavior are covered by `test_moe_expert_backends.py`
-and `test_moe_routing_counts.py`. Actual Sonic/SYCL forward-backward and EP
-collectives require Intel XPU hardware and prebuilt kernels; local tests do not
-certify them. The archived production launcher validates source, tokenizer, and
-dataset-list hashes, but its removed config entry point must be ported before
-reuse on current HEAD.
+and `test_moe_routing_counts.py`. Actual Sonic/SYCL forward-backward and EP collectives require Intel XPU hardware
+and prebuilt kernels; local tests do not certify them. Job `12478353` provides
+the current one-node EP=12 hardware smoke. The production launcher additionally
+validates source, tokenizer, dataset-list hashes, and the shared kernel cache.
