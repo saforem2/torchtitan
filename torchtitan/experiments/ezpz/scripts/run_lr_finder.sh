@@ -51,7 +51,9 @@ if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
         source /usr/share/lmod/lmod/init/bash
     fi
 fi
-module load "${LRF_ONEAPI_MODULE:-oneapi/release/2025.3.1}" hdf5 pti-gpu
+if [[ "${LRF_SKIP_MODULE_LOAD:-0}" != "1" ]]; then
+    module load "${LRF_ONEAPI_MODULE:-oneapi/release/2025.3.1}" hdf5 pti-gpu
+fi
 # /opt/pbs/bin must be on PATH so `sh.qstat` works inside `ezpz launch`
 # (ezpz.pbs.get_pbs_jobid_of_active_job calls `from sh import qstat`).
 # bash --login on login node has it via /etc/profile; this re-export
@@ -89,8 +91,18 @@ set -u
 # based on $HOME/.local/share/uv is image-independent. The repo still supplies
 # the CODE; only the runtime comes from elsewhere.
 LRF_VENV_SRC="${LRF_VENV_SRC:-}"
+LRF_VENV_DIR="${LRF_VENV_DIR:-}"
 
-if [[ -n "${LRF_VENV_SRC}" ]]; then
+if [[ -n "${LRF_VENV_DIR}" ]]; then
+    if [[ ! -x "${LRF_VENV_DIR}/bin/ezpz" ]]; then
+        echo "lr-finder FATAL: no ezpz entrypoint in LRF_VENV_DIR=${LRF_VENV_DIR}" >&2
+        exit 2
+    fi
+    # Sunspot's validated xpu-torch214 venv is on shared Tegu storage and does
+    # not need a node-local broadcast. This also keeps it isolated from the
+    # Aurora production and next-eval archives.
+    source "${LRF_VENV_DIR}/bin/activate"
+elif [[ -n "${LRF_VENV_SRC}" ]]; then
     if [[ ! -f "${LRF_VENV_SRC}" ]]; then
         echo "lr-finder FATAL: LRF_VENV_SRC not found: ${LRF_VENV_SRC}" >&2
         exit 2
@@ -120,10 +132,15 @@ else
     ezpz yeet-env
     deactivate
 fi
-source /tmp/.venv/bin/activate
-# The nightly wheel bundles a newer Unified Runtime loader than Aurora's
-# module tree. It must win library resolution (urGraphGetIdExp/urDeviceWaitExp).
-export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+if [[ -z "${LRF_VENV_DIR}" ]]; then
+    source /tmp/.venv/bin/activate
+fi
+# The Aurora nightly wheel bundles a newer Unified Runtime loader than the
+# system module tree. Let callers opt into that ordering; Sunspot's validated
+# xpu-torch214 environment does not require it.
+if [[ "${LRF_PREPEND_VENV_LIB:-0}" == "1" ]]; then
+    export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+fi
 
 # The external venv may be old even when its Python and torch are usable. HEAD
 # imports SpmdType, introduced after spmd-types 0.2.1; check the exact runtime
@@ -142,8 +159,8 @@ for package, wanted in expected.items():
     actual = metadata.version(package)
     if actual != wanted:
         raise RuntimeError(f"expected {package} {wanted}, found {actual}")
-if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
-    raise RuntimeError(f"expected a 2.15 XPU nightly, found torch {torch.__version__}")
+if "+xpu" not in torch.__version__:
+    raise RuntimeError(f"expected an XPU torch build, found torch {torch.__version__}")
 try:
     metadata.version("impi-rt")
 except metadata.PackageNotFoundError:
@@ -285,8 +302,9 @@ fi
 # ---------------------------------------------------------------------------
 # Kill stale processes
 # ---------------------------------------------------------------------------
-echo "--- Cleaning up stale processes and cache ---"
-pkill -u "${USER}" -f "torchtitan.experiments.ezpz.train" 2>/dev/null && sleep 2 || true
+echo "--- Cleaning up cache ---"
+# Never kill every torchtitan process owned by the user: other allocations may
+# be training concurrently. Scheduler teardown owns stale rank cleanup.
 rm -rf .cache/blendcorpus/*.npy 2>/dev/null || true
 echo ""
 
