@@ -5,10 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 """Current AGPT/MoE registry contracts and host-testable Sonic coverage.
 
-The historical ``AGPT_2B_50K_MOE_sdpa_aurora_full_sonic`` flavor was removed
-when the MoE model API moved to routed-expert configs. These tests deliberately
-exercise the Sonic flavors that current HEAD actually registers. They stop at
-config/meta-model boundaries; executing Sonic kernels remains XPU-only.
+The historical ``AGPT_2B_50K_MOE_sdpa_aurora_full_sonic`` architecture is now
+restored on the current routed-expert API. These tests cover its registry and
+meta-model contracts alongside the smaller Sonic flavors; executing Sonic
+kernels remains XPU-only.
 """
 
 from typing import get_args
