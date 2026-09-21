@@ -296,11 +296,11 @@ def _run_experts_aurora_sycl(
         this one does not change any registered parameter name.
 
         The kernels are JIT-compiled by torch.utils.cpp_extension.load on first
-        call, which needs oneMKL headers and libmkl_sycl_blas.so.5 (found under
-        $MKLROOT, default /opt/aurora/<ver>/oneapi/mkl/<ver>). Set
-        AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
-        call is slow. Imported lazily so every other backend stays usable
-        without aurora-moe installed.
+        call, which needs oneMKL headers and a versioned
+        libmkl_sycl_blas.so.* (found under $MKLROOT, default
+        /opt/aurora/<ver>/oneapi/mkl/<ver>). Set AURORA_MOE_SYCL_BUILD_DIR to
+        cache the build across jobs -- the first call is slow. Imported lazily
+        so every other backend stays usable without aurora-moe installed.
 
     WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
         oneMKL must all come from the SAME Aurora release. Four measurements on
@@ -337,10 +337,11 @@ def _run_experts_aurora_sycl(
         handful of elements. For contrast bmm_nodrop scored exactly 0.0 with 0
         mismatches in the same job on the same device.
 
-        Requirement: aurora_moe hardcoded a libmkl_sycl_blas.so.5 check in three
-        files (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so
-        it refused the .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by
-        globbing the soname.
+        Historical note: aurora_moe previously hardcoded a
+        libmkl_sycl_blas.so.5 check in three files (one_mkl_ops,
+        one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so it refused the
+        .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by accepting the
+        installed versioned libmkl_sycl_blas.so.* soname.
     """
     try:
         from aurora_moe.torchtitan_experts import torchtitan_exact_experts
