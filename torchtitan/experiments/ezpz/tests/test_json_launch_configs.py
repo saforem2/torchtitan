@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 from torchtitan.distributed.activation_checkpoint import SelectiveAC
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 
 
 EZPZ_ROOT = Path(__file__).parents[1]
@@ -85,21 +84,21 @@ def test_agpt_launch_jsons_use_current_schema():
             "torchtitan.experiments.ezpz.moe.config_registry",
             "agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json",
             "agpt_moe_2b_50k_ep12_dp256_50k.json",
-            MoeSelectiveAC.Config,
+            None,
             "aurora_full_sonic",
         ),
         (
             "torchtitan.experiments.ezpz.moe.config_registry",
             "agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json",
             "agpt_2b_50k_moe_ep12_dp2_full_sonic_1100.json",
-            MoeSelectiveAC.Config,
+            None,
             "aurora_full_sonic",
         ),
         (
             "torchtitan.experiments.ezpz.moe.config_registry",
             "agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json",
             "agpt_2b_50k_moe_ep12_1node_smoke.json",
-            MoeSelectiveAC.Config,
+            None,
             "aurora_full_sonic",
         ),
     ],
@@ -110,7 +109,10 @@ def test_retained_agpt_json_factories_load(
     cfg = _factory(module_name, factory_name, MOE_RUNS / json_name, monkeypatch)
 
     assert cfg.model_spec.model.vocab_size == 50_304
-    assert isinstance(cfg.activation_checkpoint, ac_type)
+    if ac_type is None:
+        assert cfg.activation_checkpoint is None
+    else:
+        assert isinstance(cfg.activation_checkpoint, ac_type)
     assert cfg.checkpoint.keep_latest_k == 0
     assert cfg.optimizer.param_groups[0].optimizer_name == "AdamW"
     assert cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] == pytest.approx(2.2e-4)

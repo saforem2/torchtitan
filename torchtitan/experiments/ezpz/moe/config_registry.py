@@ -538,7 +538,7 @@ def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
     cfg = moe(
         "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic",
         local_batch_size=1,
-        activation_checkpoint_mode="selective",
+        activation_checkpoint_mode="none",
         seq_len=2048,
         compile=False,
         hf_assets_path="./assets/hf/llama-2-32k-sp",
