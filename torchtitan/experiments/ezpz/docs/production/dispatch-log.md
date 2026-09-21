@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-08-31
+> Last updated: 2026-09-21
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -36,6 +36,12 @@ Reading rules:
 | `8760249` | 08-17 | **12h00m / 12h (100%)** | CCL KVS timeout -> **bad_alloc** at init | 20B-512 9,601->10,200 | 20B-256 10,301->11,100 | CCL KVS segfault at init | **ckpt-key, 4th time -- OPTIMIZER namespace** | 2/5 |
 | `8764675` | 08-20 | **12h00m31s / 12h (100%)** | CCL KVS timeout -> segfault at init | 20B-512 10,101->10,699 | 20B-256 11,001->11,800 | **bad_alloc** | SophiaG `update_hessian`: `'dict' object has no attribute 'mul_'` | 2/5 |
 | `8773440` | 08-26 | 5h13m / 12h (43%) | no-start | no-start | 20B-256 **+201** (2.31488 -> 2.24577) | 2B-512clr **+504** (2.74535 -> 2.73836) | 2B-256 **+782** (2.56449 -> 2.54807) | 3/5 |
+| `8828612` | 09-19 | **12h00m23s / 12h (100%)** | not re-audited here | not re-audited here | **20B-256 15,201->16,035** | not re-audited here | not re-audited here | at least 1/5 verified |
+
+`8828612` started 2026-09-19 22:48 UTC and finished at walltime with PBS
+`Exit_status=-29`. The t2 range is independently verified against W&B config
+and history plus the Aurora trainer-2 log. The other four seat outcomes are
+left explicitly unaudited rather than inferred from scheduler completion.
 
 **Walltime column.** `8744247` and `8756070` are `resources_used.walltime` from
 `qstat -xf` (authoritative). The rest predate PBS history retention and are
@@ -93,8 +99,8 @@ constant-LR fork's tip, while the 2B-256 seat's 2.56449 matches no canonical
 chain (the canonical 2B-256 finished at 4.674T / 2.652), so read the t3/t4
 labels as the umbrella's slot map, not as a disk-verified chain mapping.
 
-**`8773440` is the last job that trained anything.** As of 2026-08-31 nothing
-has run since 2026-08-26 -- see "Queued and unproductive since 08-26" below.
+**`8828612` is the latest completed production dispatch.** It trained at least
+the verified 20B-256 seat above; successor `8834528` is queued.
 
 **`8756957` is the first umbrella to use 100% of its allocation** (12h00m23s of
 12h, `Exit_status = -29` = walltime expiry, not a fault), beating `8744247`'s
@@ -204,12 +210,10 @@ resumable as-is. Fixed in `cc4e22cfa`.
 | `8756071` | 08-14 | 20B-256 | 266 | **Q.** Continuation from step-9,800 (umbrella 8744247 ended at walltime) |
 | `8756072` | 08-14 | 2B-512 constlr | 522 | **Q.** Continuation from step-16,900 (umbrella t3 lost a node at 16,984) |. |
 
-### Queued and unproductive since 08-26 (state as of 2026-08-31)
+### Queue and dispatch state since 08-26 (updated 2026-09-21)
 
-Nothing in this section trained a production step. They are here because the
-scope of this log is *every job that targets a production chain*, and a job
-that held nodes and produced nothing is exactly what the per-chain READMEs
-cannot show.
+This section includes queued, cancelled, unproductive, and subsequently
+completed dispatches so the transition to the current continuation is visible.
 
 | Job | Date | Chain | Nodes | Outcome |
 |-----|------|-------|------:|---------|
@@ -218,6 +222,8 @@ cannot show.
 | `8775285` | 08-26 | 30B LR-finder umbrella | -- | **Ran 1h32m, exited 0, produced nothing.** All four seats `rc=143`, no suggested LR in any log. Exit code 0 is not evidence a job did anything. Not a pre-training chain job; recorded here because it consumed a dispatch. |
 | `8784460` | 08-26 | umbrella (2098N) | 2098 | **`Q` since Wed 08-26 13:22 UTC**, `score_boost = 0`, ~120h eligible as of 2026-08-31 and still not started. Reservations, allocation, queue limits, holds and node pinning were all ruled out locally; the previous incarnation of this pair carried a ~10M boost and started within a day, and a fresh `qsub` starts at 0. ALCF ticket **drafted but NOT SENT**: [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../ops/alcf-ticket-8784460-not-scheduling-20260830.md). |
 | `8784462` | 08-26 | umbrella continuation | 2098 | **`H`** on `afterany:8784460`. Cannot move until its predecessor does. |
+| `8828612` | 09-15 | umbrella (5 seats) | 2098 | **Finished at walltime.** Started 09-19 22:48 UTC, used 12:00:23, PBS `Exit_status=-29`; t2 advanced 20B-256 from 15,201 through 16,035. |
+| `8834528` | 09-17 | umbrella continuation | 2098 | **`Q` as of 2026-09-21.** Released from its dependency after `8828612` finished; not started, with no trainer logs yet. |
 
 **Full-machine maintenance `M8787441` (10,624 nodes) runs 2026-08-31 14:00 UTC
 to Tue 04:00**, so nothing seats across that window either. The gap since

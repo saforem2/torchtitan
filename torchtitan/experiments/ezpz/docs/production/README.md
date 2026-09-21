@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-09-17
+> Last updated: 2026-09-21
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -12,20 +12,15 @@
 > Aurora/Sunspot (Intel XPU) only.
 
 > [!IMPORTANT]
-> **Aurora production is TRAINING.** `8828611` (2,098 nodes, `large`) started
-> Thu 2026-09-17 02:26 UTC and is running **5/5 seats** -- the third
-> consecutive full-conversion umbrella. `8828612` is held behind it on
-> `afterany`.
+> **Aurora production is queued.** Umbrella `8828612` used its full 12-hour
+> allocation on 2,098 nodes and finished at walltime (`Exit_status=-29`) on
+> 2026-09-20. Its verified 20B-256 seat advanced from step 15,201 through
+> 16,035. Continuation `8834528` is queued for the next allocation; it has not
+> started and has no trainer logs yet.
 >
-> Live as of 2026-09-17 12:11 UTC:
->
-> | seat | step | loss |
-> |---|---:|---:|
-> | 2B-512 stage2-dolmino | 21,553 | 2.48037 |
-> | 2B-256 stage2-dolmino | 26,938 | 2.47324 |
-> | 2B-512 constlr-from9200 | 39,152 | 2.65700 |
-> | 20B-512 | 10,800 | 2.25807 |
-> | 20B-256 | 15,077 | 2.25079 |
+> Latest verified dispatch evidence: `8828612` ran from 2026-09-19 22:48 UTC
+> for 12:00:23. The scheduler's finished state records termination, while the
+> trainer log independently establishes the 20B-256 progress above.
 >
 > **What happened to the 08-26 stall.** The `8784460` scheduling problem this
 > callout used to describe resolved itself: a later submission (`8828611`)
@@ -65,10 +60,10 @@
 ### Pre-training
 
 One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
-**No row is advancing** -- see the idle banner above; every state below is
-where its chain stopped. Post-training stages (CPT / SFT / RL-GRPO) are in the
-[next table](#post-training-stages-cpt-sft-rl). Detail + per-dispatch history
-in the linked pages.
+**No row is advancing now** -- the next umbrella is queued. The summary below
+predates the latest dispatch where noted. Post-training stages (CPT / SFT /
+RL-GRPO) are in the [next table](#post-training-stages-cpt-sft-rl). Detail +
+per-dispatch history is in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
@@ -186,15 +181,15 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 ## Active Runs
 
 > **Nothing in this section is running.** Heading kept for stable anchors;
-> "Active" here means "on the live roster", not "executing". Every chain has
-> been idle since 2026-08-26 -- see the banner at the top of this page.
+> "Active" here means "on the live roster", not "executing". Umbrella
+> `8828612` finished at walltime; continuation `8834528` is queued.
 
 ### Canonical chains (one per model)
 
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 512 | **46,429** (FINAL) | **2.687** | **4.67T** (100.0%) | — chain complete | ✅ **COMPLETE 2026-08-13 19:11 UTC.** Finished the full olmo-mix-1124 budget as trainer 0 of umbrella 8744247: step 46,429/46,429, exit 0 (`FAILOVER STOP: success`), final ckpt step-46429 with 6,144 shards + `.metadata`. Do NOT submit continuations against this ckpt dir -- there is no budget left. Post-training and stage-2 work seed from step-46429. |
-| 20B | 512 | **10,900** (live) | **2.400** | **1,067.0B** (22.8%) | [`8773440`](dispatch-log.md) t1 -- **never started** | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: Its seat in the last umbrella logged 0 steps; last real advance was `8764675` on 08-20. Waiting on `8784460`. [History](#20b-512n-history-mayjune-2026) |
+| 20B | 512 | **10,900** (last documented checkpoint) | **2.400** | **1,067.0B** (22.8%) | [`8828612`](dispatch-log.md) t1 | ⏸️ `8828612` finished at walltime; this seat's outcome has not been re-audited for this overview. Continuation `8834528` is queued. [History](#20b-512n-history-mayjune-2026) |
 | 80B | 512 | — (NaN'd) | nan | — | [`8574385`](agpt/80b/README.md) F (NaN) | **SophiaG production config NaN'd 2026-07-03.** The 512N head ran a full 12h but **diverged at step-14** (grad_norm->inf, loss flat mid-warmup, then NaN for ~12h / ~6,100 node-h wasted). Long warmup (4650) + grad-clip (max_norm=1.0) were both already on and did NOT help -- overflow is inside SophiaG's Hessian at dim=9216. **Next: mano @ 1e-6, probing at 32N/GBS=6144 first (8647404).** (2048N head 8574387 had earlier SIGSEGV'd in set_determinism at 24,864 ranks = init ceiling; 1024N untested.) Analysis: [20260703-80b-512n-sophiag-nan.md](../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md). |
 
 > **Failover wrapper production-validated 2026-05-23**: [`8505298`](agpt/2b/n256/README.md) (2B 8N smoke) caught a real silent hang at step 37, watchdog tripped, blind-swapped the bad node, attempt-2 recovered cleanly + persisted DCP checkpoints. **First end-to-end real-world validation of the swap-and-retry path on a true silent-hang failure.** See [incident report](../experiments/agpt/aurora/20260523-failover-silent-hang-recovery-8505298.md).
@@ -206,10 +201,10 @@ Reproduce: `python3 -m torchtitan.experiments.ezpz.utils.plot_production_combine
 | Model | Nodes | Cumulative steps | Loss | Tokens | Latest job | Status |
 |-------|------:|-----------------:|-----:|-------:|------------|--------|
 | 2B  | 256 | **92,859** (persisted) | **2.652** | **4.674T** (**100.0%**) | [`8558531`](agpt/2b/n256/README.md) Done ✅ (cont12) | **COMPLETE — target reached.** cont12 (`8558531`) finished clean exit-0 (~10.2h) on 2026-06-29 03:03 at **step-92,859 = 4.674T tokens (100.0%** of 4.67T). Full v2 2B base pre-training run done. cont13 (`8558532`) Q behind it but <1 ckpt-interval to target (no-op). The final step-92,859 checkpoint **has since been evaluated** (job 8638581): see [`evals/agpt/2b/`](../evals/agpt/2b/README.md). |
-| 20B | 256 | **15,200** (live) | **2.372** | **604.0B** (12.9%) | [`8773440`](dispatch-log.md) t2 -- last to advance | 🟢 **TRAINING in `8828611`** (see the live table at the top; these persisted numbers are behind it). Previously idle since 2026-08-26: The only chain the last umbrella moved: **+201 steps, 2.31488 -> 2.24577**. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
-| 2B  | 512 | **22,300** (live) | 2.480 | stage-2 | [`8828611`](dispatch-log.md) t0 | 🟢 **TRAINING.** Stage-2 dolmino continuation; its step counter restarted, so this is not comparable to the 46,429 stage-1 endpoint above. |
-| 2B  | 256 | **28,000** (live) | 2.471 | stage-2 | [`8828611`](dispatch-log.md) t4 | 🟢 **TRAINING.** Stage-2 dolmino continuation. **No trajectory record and no evals** -- see the note below. |
-| 2B  | 512 | **39,200** (live) | 2.657 | constlr | [`8828611`](dispatch-log.md) t3 | 🟢 **TRAINING.** Constant-LR fork off step-9200, directly comparable step-for-step to the canonical chain. |
+| 20B | 256 | **16,035** (latest logged) | **2.372** | **604.0B** (12.9%) | [`8828612`](dispatch-log.md) t2 | ⏸️ `8828612` advanced this seat from 15,201 through 16,035 before walltime. Continuation `8834528` is queued. Per-token comparator to the canonical 512N. [History](#20b-256n-history-june-2026) |
+| 2B  | 512 | **22,300** (last documented checkpoint) | 2.480 | stage-2 | [`8828612`](dispatch-log.md) t0 | ⏸️ `8828612` finished at walltime; this seat's outcome has not been re-audited for this overview. Stage-2 step numbering is separate from the 46,429 stage-1 endpoint. |
+| 2B  | 256 | **28,000** (last documented checkpoint) | 2.471 | stage-2 | [`8828612`](dispatch-log.md) t4 | ⏸️ `8828612` finished at walltime; this seat's outcome has not been re-audited for this overview. **No trajectory record and no evals** -- see the note below. |
+| 2B  | 512 | **39,200** (last documented checkpoint) | 2.657 | constlr | [`8828612`](dispatch-log.md) t3 | ⏸️ `8828612` finished at walltime; this seat's outcome has not been re-audited for this overview. Constant-LR fork off step-9200. |
 
 ### Every dispatch (individual + umbrella)
 

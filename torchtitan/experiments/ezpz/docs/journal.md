@@ -2,6 +2,16 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
+
+- Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
+  for 12:00:23 and finished at walltime (`Exit_status=-29`).
+- Its independently verified trainer-2 / 20B-256 history spans steps 15,201
+  through 16,035. The other four seat outcomes were not inferred from the PBS
+  terminal state and remain unaudited in the overview-level documentation.
+- Dependent continuation `8834528` was released after the predecessor finished
+  and is queued as of 2026-09-21. It has not started and has no trainer logs.
+
 ## 2026-09-16 (aurora) -- checks that pass in both the working and broken states: six instances in two days
 
 Two fixes landed and two conclusions were withdrawn. The through-line is one
