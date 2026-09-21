@@ -42,7 +42,7 @@ For the cross-model view (2B + 20B together), see
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
 | [**v2 256N (async)**](n256/README.md) (per-token comparator) | **COMPLETE** 2026-06-29 (step-92,859 = 100% of 4.67T target); finished by cont12 (8558531). Now the base for CPT ([../../cpt/](../../cpt/README.md)) + SFT. | **92,859** | **2.6524** | **~4.674T (100.0%)** |
-| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **COMPLETE (stage 1)** 2026-08-13 19:11 UTC (step-46,429 = 100% of the 4.67T budget), as umbrella 8744247 trainer 0, `FAILOVER STOP: success`, rc=0. No stage-1 budget left, so no further dispatches. Follow-on heads: stage-2 dolmino **22,300** and constant-LR **39,200**, both unchanged by umbrella `8828612`. | **46,429** | **2.6869** | **~4.674T (100.0%)** |
+| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **COMPLETE (stage 1)** 2026-08-13 19:11 UTC (step-46,429 = 100% of the 4.67T budget), as umbrella 8744247 trainer 0, `FAILOVER STOP: success`, rc=0. No stage-1 budget left, so no further dispatches. Follow-on heads: stage-2 dolmino **22,300** and constant-LR **39,200**, both unchanged by umbrella `8828612`. | **46,429** | **2.6869** | **~4.67T (100.0%)** |
 | [v2 1024N](n1024/README.md) | Crashed at startup (12,288-rank init OOM/SIGSEGV); not retried | — | — | — |
 | v2 512N sqrt(2)-LR fork | 8467141 → 8467142 (separate ckpt dir `gbs12288-lr3.22e-5`) | 200 | — | ~20B |
 

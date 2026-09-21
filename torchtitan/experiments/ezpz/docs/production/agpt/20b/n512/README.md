@@ -109,9 +109,9 @@ logged through step 10,905)
 
 **Cumulative steps:** 10,900 (disk-confirmed)
 
-**Tokens consumed:** 10,900 x 12,288 x 8,192 = **1,097.2B tokens** (23.5% of 4.67T target)
+**Tokens consumed:** 10,900 x 12,288 x 8,192 = 1.1T tokens (23.5% of 4.67T target)
 
-**Loss:** 2.31773 (last logged step 10,905, umbrella `8828611` t1). This is a
+**Loss:** 2.3151 (last logged step 10,905, umbrella `8828611` t1). This is a
 single-step value from the current constant-LR fork.
 
 ### Recovery

@@ -107,10 +107,10 @@
 
 **Cumulative persisted steps:** 16,000 (disk-confirmed)
 
-**Tokens consumed:** 16,000 x 6,144 x 8,192 = **805.3B tokens** (17.2% of 4.67T
+**Tokens consumed:** 16,000 x 6,144 x 8,192 = **805.3B tokens** (17.2%)
 target)
 
-**Loss:** 2.45566 at the last logged step, 16,036 (`8828612` t2). This is a
+**Loss:** 2.4596 at the last logged step, 16,036 (`8828612` t2). This is a
 single-step value; the lower 2.19908 at resumed step 15,201 is the usual
 post-checkpoint reload boundary and not a like-for-like trend endpoint.
 

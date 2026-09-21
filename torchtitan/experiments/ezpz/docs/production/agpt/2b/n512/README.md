@@ -145,7 +145,7 @@
 
 **Tokens consumed:** 46,429 × 12,288 × 8,192 = **4.67T tokens** (100.0% of 4.67T target)
 
-**Loss:** 2.68687 (final, step-46,429 -- umbrella 8744247 trainer 0)
+**Loss:** 2.6869 (final, step-46,429 -- umbrella 8744247 trainer 0)
 
 ### Recovery
 

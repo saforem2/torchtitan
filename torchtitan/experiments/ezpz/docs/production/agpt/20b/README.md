@@ -50,8 +50,8 @@ per-task table.
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 512N**](n512/README.md) (current constant-LR fork) | **Idle since 2026-09-17.** Umbrella `8828611` logged 10,501 -> 10,905 and persisted step 10,900; `8828612` made no progress after two startup `std::bad_alloc` failures. | **10,900** (remote disk verified 2026-09-21) | **2.31773** (last logged, step 10,905) | **~1,097.2B (23.5%)** |
-| [v2 256N](n256/README.md) | **Idle since 2026-09-20.** Umbrella `8828612` logged 15,201 -> 16,036 and persisted step 16,000. Per-token comparator to the 512N chain. | **16,000** (remote disk verified 2026-09-21) | **2.45566** (last logged, step 16,036) | **~805.3B (17.2%)** |
+| [**v2 512N**](n512/README.md) (current constant-LR fork) | **Idle since 2026-09-17.** Umbrella `8828611` logged 10,501 -> 10,905 and persisted step 10,900; `8828612` made no progress after two startup `std::bad_alloc` failures. | **10,900** (remote disk verified 2026-09-21) | **2.3151** (last logged, step 10,905) | **~1,097.2B (23.5%)** |
+| [v2 256N](n256/README.md) | **Idle since 2026-09-20.** Umbrella `8828612` logged 15,201 -> 16,036 and persisted step 16,000. Per-token comparator to the 512N chain. | **16,000** (remote disk verified 2026-09-21) | **2.4596** (last logged, step 16,036) | **~805.3B (17.2%)** |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode
