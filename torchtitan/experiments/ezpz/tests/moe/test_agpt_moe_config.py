@@ -29,7 +29,9 @@ from torchtitan.experiments.ezpz.moe.config_registry import (
 )
 from torchtitan.experiments.ezpz.moe.experts import ExpertComputeBackend
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
+from torchtitan.models.common.attention import GQAttention
 
 
 SONIC_CONFIGS = (
@@ -128,3 +130,33 @@ def test_agpt_and_moe_model_registries_are_current_and_distinct():
     assert "2b" in agpt_configs
     # Generic names intentionally overlap, but they must be family-specific.
     assert moe_configs["debugmodel"] is not agpt_configs["debugmodel"]
+
+
+@pytest.mark.parametrize("enable_sp", [False, True])
+def test_agpt_50k_gqa_moe_sharding_contract(enable_sp):
+    """The AGPT factory must use GQA sharding, not the MLA-only layout."""
+    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model_spec.model
+
+    set_moe_sharding_config(  # pyrefly: ignore [bad-argument-type]
+        model_config, enable_sp=enable_sp, enable_ep=True
+    )
+
+    layers = model_config.layers  # pyrefly: ignore [missing-attribute]
+    for layer in layers:
+        assert isinstance(layer.attention, GQAttention.Config)
+        assert layer.attention.sharding_config is not None
+        assert layer.attention.qkv_linear.wqkv.sharding_config is not None
+        assert layer.attention.wo.sharding_config is not None
+        if layer.moe is not None:
+            assert layer.moe.routed_experts.sharding_config is not None
+
+
+def test_agpt_50k_gqa_moe_flop_accounting():
+    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model_spec.model
+    with torch.device("meta"):
+        model = model_config.build()
+
+    nparams, flops = model_config.get_nparams_and_flops(model, seq_len=512)
+
+    assert nparams > 0
+    assert flops > 0
