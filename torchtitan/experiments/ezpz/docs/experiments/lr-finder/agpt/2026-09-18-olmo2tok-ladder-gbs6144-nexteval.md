@@ -146,11 +146,13 @@ the completed curve.
 
 | job | machine | model / optimizer | points | finite | min loss | LR at min | status |
 |---|---|---|---:|---:|---:|---:|---|
-| 12478315 | Sunspot | 5B / AdamW | 150 | 150 | 8.3131 | 9.261e-4 | complete; minimum at final point; extended-window replacement `12478378` queued |
-| 12478328 | Sunspot | 10B / Mano | 150 | 150 | 9.1098 | 9.261e-4 | complete; minimum at final point; extended-window replacement `12478379` queued |
+| 12478315 | Sunspot | 5B / AdamW | 150 | 150 | 8.3131 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478392` queued |
+| 12478328 | Sunspot | 10B / Mano | 150 | 150 | 9.1098 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478393` queued |
 | 12478327 | Sunspot | 5B / Mano | 87+ | 87+ | provisional | provisional | running |
-| 12478378 | Sunspot | 5B / AdamW | — | — | — | — | extended `1e-5`–`1e-1` window queued |
-| 12478379 | Sunspot | 10B / Mano | — | — | — | — | extended `1e-5`–`1e-1` window queued |
+| 12478385 | Sunspot | 5B / AdamW | 5 | 5 | 11.9914 | 1.585e-5 | shard-4 smoke passed; 8.45 GiB model memory |
+| 12478386 | Sunspot | 10B / Mano | 5 | 5 | 11.9901 | 1.585e-5 | shard-4 smoke passed; 13.88 GiB model memory |
+| 12478392 | Sunspot | 5B / AdamW | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
+| 12478393 | Sunspot | 10B / Mano | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
 | 12478362 | Sunspot | 30B-dp12 / Mano | 5 | 5 | 11.8506 | 1.000e-4 | smoke passed; minimum at final point |
 | 12478375 | Sunspot | 30B-dp12 / Mano | — | — | — | — | full 150-point run queued |
 | 8846942 | Aurora | 5B / Muon | 5 | 5 | — | — | runtime/PMIx smoke passed |
