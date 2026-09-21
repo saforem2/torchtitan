@@ -4,10 +4,9 @@
 > **PR:** [saforem2/torchtitan#17](https://github.com/saforem2/torchtitan/pull/17)
 > **Target:** `ezpz`
 > **Reviewed head:** `0f7f0c7f5` plus documentation follow-up
-> **Current verdict:** **implementation and validation gates pass**. The restored
-> full-Sonic training path, deterministic numerical/gradient comparison, native
-> DCP resume, and repository lint gates pass. Updating the PR description and
-> resolving review threads are the remaining administrative steps.
+> **Current verdict:** **ready to merge**. The restored full-Sonic training path,
+> deterministic numerical/gradient comparison, native DCP resume, repository
+> lint gates, PR description, and review-thread resolution are complete.
 
 ## Executive summary
 
@@ -155,16 +154,28 @@ step-2 gradient norm     5.0454       5.0484       0.0030
 ```
 
 The acceptance bounds were `0.005` for loss and `0.05` for gradient norm.
-All three training processes returned zero. The PBS wrapper returned one only
-because its post-run text scanner matched the harmless configuration key
-`nan_abort_consecutive` as though it were a non-finite metric. Confirmation job
-`12478383` reruns the same test with that validator corrected; the passing
-training evidence above does not depend on the false-positive wrapper status.
+All three training processes returned zero. Job `12478382`'s PBS wrapper returned
+one only because its post-run text scanner matched the harmless configuration
+key `nan_abort_consecutive` as though it were a non-finite metric.
+
+Confirmation job `12478383` repeated the complete test with that validator fixed
+and exited zero:
+
+```text
+control step 1  loss 11.36219  grad_norm 3.0980
+save step 1     loss 11.36214  grad_norm 3.0980
+control step 2  loss 10.64056  grad_norm 5.0449
+resume step 2   loss 10.64007  grad_norm 5.0467
+step-2 loss delta       0.00049
+step-2 grad-norm delta  0.0018
+Exit_status=0
+```
 
 Evidence on Sunspot:
 
 ```text
 /lus/tegu/projects/datascience/foremans/agpt50k-sonic-dcp-real-12478382/
+/lus/tegu/projects/datascience/foremans/agpt50k-sonic-dcp-real-12478383/
 ```
 
 ## Diagnostic failures and what they established
@@ -252,15 +263,15 @@ calling native DDP production-validated.
 - PyTorch-hosted CUDA workflows are skipped for pull requests in forks where
   those runners are unavailable. CPU/lint coverage remains enabled.
 
-## Remaining administrative steps
+## Merge status
 
-1. **Update the PR description.** Replace the original limited-port description
-   with the current backend scope and validation evidence.
-2. **Resolve review threads.** All 15 reported findings now have source fixes or
-   an explicit supported-scope decision; reply with their fixing commits and
-   mark them resolved.
-3. **Record confirmation job `12478383`.** This repeats the already-passing
-   production DCP comparison with the false-positive log scanner corrected.
+All planned PR #17 implementation and validation gates are complete:
+
+- current PR description reflects the supported full-Sonic backend;
+- all 15 review threads have replies linking their fixes and are resolved;
+- GitHub lint is green;
+- full-Sonic training, deterministic numerical/gradient comparison, and native
+  DCP interrupted/resumed training pass on Sunspot XPU.
 
 A real XPU native-DDP smoke remains useful follow-up evidence, but native DDP is
 not required by the full-Sonic production path and already has two-rank CPU/Gloo
