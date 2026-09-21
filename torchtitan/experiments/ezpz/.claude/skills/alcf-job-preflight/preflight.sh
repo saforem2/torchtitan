@@ -28,7 +28,8 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # --- assets ---
-[ -s assets/hf/gemma-7b/tokenizer.json ] && ok "tokenizer" || bad "tokenizer assets/hf/gemma-7b"
+tokenizer_path="${PREFLIGHT_TOKENIZER_PATH:-assets/hf/gemma-7b/tokenizer.json}"
+[ -s "$tokenizer_path" ] && ok "tokenizer $tokenizer_path" || bad "tokenizer $tokenizer_path"
 dl="torchtitan/experiments/ezpz/data-lists"
 if [ -d "$dl" ]; then
   found=$(ls -1 "$dl" 2>/dev/null | tr '\n' ' ')
