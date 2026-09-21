@@ -148,6 +148,7 @@ fi
 # torch symbol is not a sufficient compatibility preflight.
 python3 - <<'PY' || {
 import importlib.metadata as metadata
+import os
 
 import grain
 import torch
@@ -161,12 +162,13 @@ for package, wanted in expected.items():
         raise RuntimeError(f"expected {package} {wanted}, found {actual}")
 if "+xpu" not in torch.__version__:
     raise RuntimeError(f"expected an XPU torch build, found torch {torch.__version__}")
-try:
-    metadata.version("impi-rt")
-except metadata.PackageNotFoundError:
-    pass
-else:
-    raise RuntimeError("impi-rt must be absent; Aurora uses the site MPICH/PMIx stack")
+if os.environ.get("LRF_REJECT_IMPI_RT") == "1":
+    try:
+        metadata.version("impi-rt")
+    except metadata.PackageNotFoundError:
+        pass
+    else:
+        raise RuntimeError("impi-rt must be absent for Aurora's site MPICH/PMIx stack")
 
 import inspect
 import torch.distributed.fsdp._fully_shard._fsdp_param as fsdp_param

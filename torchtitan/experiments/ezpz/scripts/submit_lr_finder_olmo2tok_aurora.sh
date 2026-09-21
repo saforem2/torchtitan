@@ -99,6 +99,7 @@ export LRF_USE_CONFIG_DATALOADER=1
 export LRF_VENV_SRC="/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval.tar.gz"
 export LRF_ONEAPI_MODULE="oneapi/release/2026.1.0"
 export LRF_PREPEND_VENV_LIB=1
+export LRF_REJECT_IMPI_RT=1
 
 export LRF_GBS="${LRF_GBS:-6144}"
 export LRF_LBS="${LRF_LBS:-2}"
