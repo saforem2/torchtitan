@@ -28,6 +28,7 @@ from torchtitan.experiments.ezpz.moe.config_registry import (
     moe_debugmodel_sonic,
 )
 from torchtitan.experiments.ezpz.moe.experts import ExpertComputeBackend
+from torchtitan.experiments.ezpz.moe.model import Attention
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
 from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
@@ -133,8 +134,36 @@ def test_agpt_and_moe_model_registries_are_current_and_distinct():
 
 
 @pytest.mark.parametrize("enable_sp", [False, True])
+def test_moe_mla_sharding_contract(enable_sp):
+    """DeepSeek-derived MoE flavors retain the MLA-specific sharding path."""
+    model_config = moe_debugmodel_sonic().model_spec.model
+
+    set_moe_sharding_config(  # pyrefly: ignore [bad-argument-type]
+        model_config, enable_sp=enable_sp, enable_ep=True
+    )
+
+    layers = model_config.layers  # pyrefly: ignore [missing-attribute]
+    for layer in layers:
+        attention = layer.attention
+        assert isinstance(attention, Attention.Config)
+        assert attention.sharding_config is not None
+        assert attention.wkv_a.sharding_config is not None
+        assert attention.wkv_b.sharding_config is not None
+        if attention.q_lora_rank == 0:
+            assert attention.wq is not None
+            assert attention.wq.sharding_config is not None
+        else:
+            assert attention.wq_a is not None
+            assert attention.wq_b is not None
+            assert attention.wq_a.sharding_config is not None
+            assert attention.wq_b.sharding_config is not None
+        if layer.moe is not None:
+            assert layer.moe.routed_experts.sharding_config is not None
+
+
+@pytest.mark.parametrize("enable_sp", [False, True])
 def test_agpt_50k_gqa_moe_sharding_contract(enable_sp):
-    """The AGPT factory must use GQA sharding, not the MLA-only layout."""
+    """AGPT uses GQA sharding while DeepSeek-style MoE retains MLA sharding."""
     model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model_spec.model
 
     set_moe_sharding_config(  # pyrefly: ignore [bad-argument-type]

@@ -11,8 +11,11 @@
 ## Executive summary
 
 `aurora_full_sonic` is ported and validated on the current TorchTitan stack.
-The restored AGPT 2B/50K factory builds, uses GQA-aware sharding, performs EP=12
-training on Sunspot, and matches a deterministic loop reference at DP=2 x EP=2
+The MoE stack continues to support its DeepSeek-style MLA attention path; the
+restored AGPT 2B/50K flavor uses GQA, so sharding now dispatches explicitly
+between MLA `Attention.Config` and `GQAttention.Config` rather than assuming
+that every MoE model uses MLA. The AGPT full-Sonic factory performs EP=12
+training on Sunspot and matches a deterministic loop reference at DP=2 x EP=2
 for outputs and first-order gradients.
 
 The review also found and repaired several independent integration problems:
