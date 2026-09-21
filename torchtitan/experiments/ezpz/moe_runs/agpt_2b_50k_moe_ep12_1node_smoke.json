@@ -19,23 +19,10 @@
     "tensor_parallel_degree": 1,
     "pipeline_parallel_degree": 1,
     "context_parallel_degree": 1,
-    "expert_parallel_degree": 12,
-    "enable_data_parallel_replicate_module": true
-  },
-  "activation_checkpoint": {
-    "mode": "selective"
+    "expert_parallel_degree": 12
   },
   "compile": {
     "enable": false
-  },
-  "optimizer": {
-    "name": "AdamW",
-    "implementation": "fused",
-    "lr": 0.00022,
-    "beta1": 0.9,
-    "beta2": 0.95,
-    "eps": 1e-08,
-    "weight_decay": 0.1
   },
   "lr_scheduler": {
     "warmup_steps": 2,
@@ -47,11 +34,11 @@
   "dataloader": {
     "dataset": "c4_test",
     "dataset_path": null,
-    "seed": 42,
     "train_iters": 5
   },
   "checkpoint": {
-    "enable": false
+    "enable": false,
+    "keep_latest_k": 0
   },
   "metrics": {
     "enable_wandb": false,

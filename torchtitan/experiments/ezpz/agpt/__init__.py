@@ -558,6 +558,17 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=11008,
     ),
+    # Historical 50,304-token AGPT whose smaller embedding/head budget is
+    # reinvested in depth and FFN width.
+    "2B_50K": _build_agpt_config(
+        dim=2048,
+        n_layers=24,
+        n_heads=16,
+        n_kv_heads=4,
+        rope_theta=50000,
+        vocab_size=50304,
+        hidden_dim=10496,
+    ),
     # [ezpz] agpt-2b variant matching the SFT checkpoint-900 HF config exactly
     # (vocab 256000, not the 256128 padding) + fused QKV so GRPO LoRA can target
     # ["wqkv","wo"]. Used by the RL overlay (experiments/ezpz/rl/alphabet_sort_agpt).
@@ -936,6 +947,7 @@ agpt_configs = {
 
 # Case-insensitive aliases
 agpt_configs["2b"] = agpt_configs["2B"]
+agpt_configs["2b_50k"] = agpt_configs["2B_50K"]
 agpt_configs["2b_flex_attn"] = agpt_configs["2B_flex_attn"]
 agpt_configs["7b"] = agpt_configs["7B"]
 agpt_configs["8b"] = agpt_configs["8B"]

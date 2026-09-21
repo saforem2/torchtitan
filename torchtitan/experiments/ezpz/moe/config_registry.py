@@ -533,6 +533,24 @@ def moe_10b_2b_sdpa_sonic_ep() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
+    """Full-Sonic counterpart to the retained dense AGPT 2B/50K run."""
+    cfg = moe(
+        "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic",
+        local_batch_size=1,
+        activation_checkpoint_mode="selective",
+        seq_len=2048,
+        compile=False,
+        hf_assets_path="./assets/hf/llama-2-32k-sp",
+    )
+    cfg.parallelism.expert_parallel_degree = 12
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.checkpoint.keep_latest_k = 0
+    return cfg
+
+
 def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
     # EP=12 bmm variant (expert-parallel + batched-bmm compute). Pair with
     # `activation-checkpoint:none` on the CLI, since EP>1 selective-AC
@@ -644,6 +662,10 @@ def moe_16b_from_json() -> FaultTolerantTrainer.Config:
 
 def moe_10b_2b_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json(moe_10b_2b)
+
+
+def agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json() -> FaultTolerantTrainer.Config:
+    return _config_from_json(agpt_2b_50k_moe_sdpa_aurora_full_sonic)
 
 
 def moe_671b_from_json() -> FaultTolerantTrainer.Config:

@@ -60,6 +60,20 @@ def agpt_2b() -> FaultTolerantTrainer.Config:
     return ezpz_agpt_2b()
 
 
+def agpt_2b_50k() -> FaultTolerantTrainer.Config:
+    """Dense 2B/50K base used by the retained Aurora JSON launcher."""
+    cfg = agpt(
+        "2b_50k",
+        activation_checkpoint_mode="selective",
+        seq_len=2048,
+        compile=False,
+        hf_assets_path="./assets/hf/llama-2-32k-sp",
+    )
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.checkpoint.keep_latest_k = 0
+    return cfg
+
+
 def agpt_2b_hf() -> FaultTolerantTrainer.Config:
     cfg = ezpz_agpt_2b()
     cfg.dataloader.dataset_path = None
@@ -903,6 +917,12 @@ def _apply_config_overrides(
         current_value = getattr(target, key)
         field_path = f"{path}.{key}" if path else key
 
+        if key == "keep_latest_k" and value not in (0, None):
+            raise ValueError(
+                f"keep_latest_k={value!r} at path {field_path!r} would delete "
+                "canonical chain checkpoints; use 0 (keep all)"
+            )
+
         if isinstance(value, dict):
             if not is_dataclass(current_value):
                 raise TypeError(
@@ -927,6 +947,12 @@ def ezpz_agpt_debugmodel_from_json() -> FaultTolerantTrainer.Config:
 
 def ezpz_agpt_2b_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json("2b")
+
+
+def agpt_2b_50k_from_json() -> FaultTolerantTrainer.Config:
+    cfg = agpt_2b_50k()
+    _apply_config_overrides(cfg, _load_json_overrides())
+    return cfg
 
 
 def ezpz_agpt_7b_from_json() -> FaultTolerantTrainer.Config:

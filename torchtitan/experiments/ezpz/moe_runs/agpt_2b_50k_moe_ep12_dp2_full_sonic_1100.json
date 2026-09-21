@@ -19,23 +19,10 @@
     "tensor_parallel_degree": 1,
     "pipeline_parallel_degree": 1,
     "context_parallel_degree": 1,
-    "expert_parallel_degree": 12,
-    "enable_data_parallel_replicate_module": true
-  },
-  "activation_checkpoint": {
-    "mode": "selective"
+    "expert_parallel_degree": 12
   },
   "compile": {
     "enable": false
-  },
-  "optimizer": {
-    "name": "AdamW",
-    "implementation": "fused",
-    "lr": 0.00022,
-    "beta1": 0.9,
-    "beta2": 0.95,
-    "eps": 1e-08,
-    "weight_decay": 0.1
   },
   "lr_scheduler": {
     "warmup_steps": 100,
@@ -47,7 +34,6 @@
   "dataloader": {
     "dataset": "blendcorpus",
     "dataset_path": "/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/outputs/agpt_2b_50k_native_ddp_compile_wandb_ab/8703043/source/torchtitan/experiments/ezpz/data-lists/aurora/dolma_v1_7_llama2_live.txt",
-    "seed": 42,
     "train_iters": 1100,
     "num_workers": 2,
     "persistent_workers": true,
@@ -59,7 +45,8 @@
     "append_eod": true
   },
   "checkpoint": {
-    "enable": false
+    "enable": false,
+    "keep_latest_k": 0
   },
   "metrics": {
     "enable_wandb": true,
