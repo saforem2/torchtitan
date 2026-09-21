@@ -95,6 +95,7 @@ docs/
 │   ├── perlmutter-debug-host.md
 │   ├── polaris-fresh-venv.md
 │   ├── running-with-newer-pytorch.md
+│   ├── running-with-newer-pytorch-next-eval.md <- TEST-image / image-independent venv path
 │   ├── spmd-backend-status.md
 │   ├── training-dtype-bf16-norm-freeze.md  <- Root cause of the v1 -> v2 restart
 │   ├── xpu-attention-issues.md

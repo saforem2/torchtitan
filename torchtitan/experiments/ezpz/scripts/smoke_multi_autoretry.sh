@@ -59,8 +59,16 @@ mkdir -p "$LOGDIR"
 log() { echo "[smoke-multi $(date +%H:%M:%S)] $*"; }
 
 # ---- ezpz utils (for ezpz_load_modules / ezpz_setup_job / yeet) ----
+# Prefer the cache, but reject an old copy that predates ezpz_load_modules.
 EZPZ_UTILS="${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh"
-if [[ -f "$EZPZ_UTILS" ]]; then source "$EZPZ_UTILS"; else source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils); fi
+if [[ -f "$EZPZ_UTILS" ]]; then
+    source "$EZPZ_UTILS"
+fi
+if ! declare -F ezpz_load_modules >/dev/null || ! declare -F ezpz_setup_job >/dev/null; then
+    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+fi
+declare -F ezpz_load_modules >/dev/null || { echo "ezpz_load_modules unavailable"; exit 2; }
+declare -F ezpz_setup_job >/dev/null || { echo "ezpz_setup_job unavailable"; exit 2; }
 
 # ---- Validate allocation ----
 [[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] || { echo "no PBS_NODEFILE"; exit 2; }

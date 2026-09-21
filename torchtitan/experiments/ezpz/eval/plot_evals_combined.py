@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Combined-overlay eval chart across all 5 production trajectories.
 
 One figure, 4 subplot panels (HellaSwag acc_norm, ARC-Easy acc, ARC-C acc_norm,
@@ -38,6 +44,7 @@ import matplotlib.pyplot as plt  # noqa: F401,E402
 from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
 
 apply_style()
+
 
 def _repo_root() -> Path:
     # Walk up to the repo root instead of counting parents: a depth-counted
@@ -89,12 +96,20 @@ OUT_PATH = EVAL_DOCS_DIR / "figures" / "all_production_evals.svg"
 # color at all.
 from torchtitan.experiments.ezpz.utils import palette as _pal  # noqa: E402
 
-COLOR_2B_MDS      = _pal.COLOR_MDS
-COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
-COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
+COLOR_2B_MDS = _pal.COLOR_MDS
+COLOR_2B_TT_256N = _pal.COLOR_2B_256N
+COLOR_2B_TT_512N = _pal.COLOR_2B_512N
 COLOR_20B_TT_256N = _pal.COLOR_20B_256N
 COLOR_20B_TT_512N = _pal.COLOR_20B_512N
-COLOR_RANDOM      = _pal.COLOR_RANDOM
+COLOR_RANDOM = _pal.COLOR_RANDOM
+COLOR_STAGE2 = _pal.COLOR_STAGE2
+COLOR_FORK = _pal.COLOR_FORK
+
+# Stage-1 budget of the 512N chain, reused as the stage-2 chains' token
+# offset. Imported rather than re-typed: it is the registry's number.
+from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    OLMO_MIX_1124_TOKENS,
+)
 
 TRAJECTORIES: list[dict] = [
     {
@@ -159,6 +174,12 @@ TRAJECTORIES: list[dict] = [
     {
         "label": "20B 512N sync (GBS=12288)",
         "eval_subdir": "agpt-20b-v2-512n",
+        # The chain did not stop at 7,600. It forked to a constant LR at
+        # step 9,000 and kept running; those evals land in a sibling dir
+        # (steps 10,800+) under the same step numbering. Reading only the
+        # first dir ends the 20B-512 curve at 7,600 with nothing to say it
+        # was truncated -- the same failure that cut the MDS chain short.
+        "extra_subdirs": ["agpt-20b-v2-512n-constlr"],
         "corrected_subdir": "agpt-20b-v2-512n-ropefix",
         "switch_step": 4401,
         "layout": "dcp",
@@ -166,6 +187,43 @@ TRAJECTORIES: list[dict] = [
         "color": COLOR_20B_TT_512N,
         "linestyle": "-",
         "marker": "D",
+    },
+    # Stage-2 (dolmino anneal) and the constant-LR fork. All three are
+    # registered in trajectories.py with results on disk; without entries here
+    # _assert_no_missing_live_chains() fails, which is the check doing its job.
+    # Stage-2 chains restart their step counter at 1 but carry the parent's
+    # tokens, so the token axis needs prior_tokens -- see load_dcp below.
+    {
+        "label": "2B 512N stage-2 (dolmino)",
+        "eval_subdir": "agpt-2b-v2-512n-stage2",
+        "layout": "dcp",
+        "tokens_per_step": 12288 * 8192,
+        "prior_tokens": OLMO_MIX_1124_TOKENS,
+        "color": COLOR_STAGE2,
+        "linestyle": "-",
+        "marker": "P",
+    },
+    {
+        "label": "2B 256N stage-2 (dolmino)",
+        "eval_subdir": "agpt-2b-v2-256n-stage2",
+        "layout": "dcp",
+        "tokens_per_step": 6144 * 8192,
+        # 256N stage-2 seeds from the 256N stage-1 head (step 92,859), not
+        # from the 512N chain, so its prior budget is that chain's, not
+        # OLMO_MIX_1124_TOKENS.
+        "prior_tokens": 92_859 * 6144 * 8192,
+        "color": COLOR_STAGE2,
+        "linestyle": "--",
+        "marker": "X",
+    },
+    {
+        "label": "2B 512N const-LR (from 9200)",
+        "eval_subdir": "agpt-2b-v2-512n-constlr",
+        "layout": "dcp",
+        "tokens_per_step": 12288 * 8192,
+        "color": COLOR_FORK,
+        "linestyle": "-",
+        "marker": "v",
     },
 ]
 
@@ -184,9 +242,9 @@ RANDOM_BASELINE = {
     "arc_easy": 0.25,
     "arc_challenge": 0.25,
     "winogrande": 0.5,
-    "piqa": 0.5,         # binary choice
+    "piqa": 0.5,  # binary choice
     "openbookqa": 0.25,  # 4-way MCQ
-    "boolq": 0.5,        # yes/no
+    "boolq": 0.5,  # yes/no
 }
 
 
@@ -254,6 +312,7 @@ def load_dcp(
     metric: str,
     corrected_subdir: str | None = None,
     switch_step: int | None = None,
+    extra_subdirs: list[str] | None = None,
 ) -> list[tuple[int, float]]:
     """Load a chain's eval series, splicing in corrected results if it has any.
 
@@ -270,6 +329,7 @@ def load_dcp(
     complex convention end to end, so its results were never corrupted and
     there is nothing to correct.
     """
+
     def _series(d: str) -> dict[int, float]:
         base = EVALS_DIR / d
         out: dict[int, float] = {}
@@ -281,7 +341,24 @@ def load_dcp(
         return out
 
     original = _series(subdir)
+    # ``extra_subdirs`` names sibling dirs holding LATER segments of the SAME
+    # chain under the same step numbering (a schedule fork that kept training,
+    # e.g. 20B-512 continuing into -constlr at step 10,800).
+    #
+    # These are held OUT of `original` and re-applied after the RoPE splice
+    # below, because they are not subject to it. Whether an export is
+    # wrongly-permuted is decided by the --model_flavor passed to
+    # convert_to_hf.py, not by which directory it landed in; every extra dir
+    # here was exported after the flavor fix. Merging them into `original`
+    # instead puts them above `switch_step`, where the splice keeps only what
+    # the corrected dir has -- and the corrected sweep stopped at 7,600. The
+    # 10,800 point vanished with no warning, which is the precise failure this
+    # function already carries two comments about.
+    extra: dict[int, float] = {}
+    for d in extra_subdirs or []:
+        extra.update(_series(d))
     if corrected_subdir is None or switch_step is None:
+        original.update(extra)
         return sorted(original.items())
 
     corrected = _series(corrected_subdir)
@@ -309,6 +386,8 @@ def load_dcp(
     # entire exercise, and a gap is at least visible.
     merged = {s: v for s, v in original.items() if s < switch_step}
     merged.update({s: v for s, v in corrected.items() if s >= switch_step})
+    # Applied last so a continuation segment wins its own steps outright.
+    merged.update(extra)
     return sorted(merged.items())
 
 
@@ -393,7 +472,7 @@ def _assert_no_missing_live_chains() -> None:
             if not d.is_dir() or d.name in have:
                 continue
             if not d.name.startswith("agpt-"):
-                continue      # sft / ifeval / harness one-offs, not chains
+                continue  # sft / ifeval / harness one-offs, not chains
             n = sum(1 for _ in d.glob("**/step-*/results/results.json"))
             if n:
                 unreferenced.append((d.name, n))
@@ -401,8 +480,10 @@ def _assert_no_missing_live_chains() -> None:
             print("  NOTE: eval dirs with results that no trajectory reads:")
             for name, n in unreferenced:
                 print(f"    - {name} ({n} result file(s))")
-            print("    Add them to a trajectory (eval_subdir / extra_subdirs) "
-                  "or ignore deliberately.")
+            print(
+                "    Add them to a trajectory (eval_subdir / extra_subdirs) "
+                "or ignore deliberately."
+            )
 
 
 def main() -> None:
@@ -426,7 +507,9 @@ def main() -> None:
         for traj in TRAJECTORIES:
             if traj["layout"] == "mds":
                 pts = load_mds(
-                    traj["eval_subdir"], task, metric,
+                    traj["eval_subdir"],
+                    task,
+                    metric,
                     traj.get("extra_subdirs"),
                 )
             else:
@@ -436,13 +519,19 @@ def main() -> None:
                     metric,
                     traj.get("corrected_subdir"),
                     traj.get("switch_step"),
+                    traj.get("extra_subdirs"),
                 )
             if not pts:
                 print(f"  [{title}] no data for {traj['label']}")
                 continue
             n_series += 1
             steps, accs = zip(*pts)
-            tokens_b = [s * traj["tokens_per_step"] / 1e9 for s in steps]
+            # Stage-2 chains restart the step counter at 1 while carrying
+            # their parent's tokens. Without the offset they plot on top of
+            # the base chains' first few hundred billion tokens, reading as a
+            # wild accuracy jump at ~0T rather than as an anneal at ~4.7T.
+            prior_b = traj.get("prior_tokens", 0) / 1e9
+            tokens_b = [prior_b + s * traj["tokens_per_step"] / 1e9 for s in steps]
             ax.plot(
                 tokens_b,
                 accs,
@@ -474,7 +563,7 @@ def main() -> None:
         ax.grid(True, alpha=0.3)
 
     # Hide any unused cells when len(PANELS) doesn't fill the grid evenly.
-    for ax in axes[len(PANELS):]:
+    for ax in axes[len(PANELS) :]:
         ax.set_visible(False)
 
     handles, labels = axes[0].get_legend_handles_labels()

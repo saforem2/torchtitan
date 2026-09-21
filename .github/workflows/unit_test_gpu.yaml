@@ -20,6 +20,9 @@ permissions:
 
 jobs:
   set-matrix-1gpu:
+    # PyTorch's hosted GPU runners are unavailable to fork repositories. Keep
+    # upstream PR/main coverage unchanged, but do not leave fork PRs queued.
+    if: github.repository_owner == 'pytorch' || github.event_name != 'pull_request'
     uses: ./.github/workflows/set-matrix.yaml
     with:
       runner-cuda: mt-l-x86aavx2-29-113-a10g
@@ -58,6 +61,7 @@ jobs:
         pytest tests/unit_tests/gpu -m "not multi_gpu" --strict-markers --durations=20 -vv
 
   set-matrix-multi-gpu:
+    if: github.repository_owner == 'pytorch' || github.event_name != 'pull_request'
     uses: ./.github/workflows/set-matrix.yaml
     with:
       gpu-arch: cuda

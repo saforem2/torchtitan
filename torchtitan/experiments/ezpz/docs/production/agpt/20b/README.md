@@ -1,15 +1,15 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-08-30
+> Last updated: 2026-09-21
 >
-> **Nothing is training right now.** The last leg on either 20B chain was
-> umbrella `8773440` on **2026-08-26**, which used 5h13m of a 12h slot
-> (`Exit_status=-14`): its 20B-256 seat trained 201 steps (loss 2.31488 ->
-> 2.24577) and its 20B-512 seat never started. The successor umbrella
-> `8784460` (2,098 nodes, `large`) has been `Q` since 2026-08-26 13:22 UTC
-> with 101h+ eligible and `score_boost=0`, `8784462` held behind it; ticket
-> drafted, NOT sent
-> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+> **Nothing is training right now.** Aurora was checked directly on
+> 2026-09-21. The latest umbrella, `8828612` (started 2026-09-19), advanced
+> 20B-256 from step 15,200 to a verified checkpoint head of **16,000**
+> (logged through step 16,036; loss 2.45566). Its 20B-512 seat made no
+> progress: both attempts died during startup with `std::bad_alloc`. The
+> preceding umbrella `8828611` advanced the 20B-512 constant-LR fork from
+> step 10,500 to a verified head of **10,900** (logged through 10,905) and
+> 20B-256 from 14,500 to **15,200** (logged through 15,242).
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -50,8 +50,8 @@ per-task table.
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 512N**](n512/README.md) (canonical chain) | **Idle since 2026-08-20.** Last advanced by umbrella `8764675` (10,101 -> 10,699, ckpt head 10,600); its seat in `8773440` on 08-26 never started. Waiting on `8784460`. | **10,600** (persisted, disk-audited 2026-08-21) | **2.41076** (last logged, step 10,699) | **~1,067.0B (22.8%)** |
-| [v2 256N](n256/README.md) | **Idle since 2026-08-26.** Last leg was umbrella `8773440` seat t2: 201 steps, loss 2.31488 -> 2.24577, on top of the step-12,000 head. Per-token comparator to the canonical 512N. | **12,000** (persisted, disk-audited 2026-08-21) | **2.24577** (last logged, 08-26) | **~604.0B (12.9%)** |
+| [**v2 512N**](n512/README.md) (current constant-LR fork) | **Idle since 2026-09-17.** Umbrella `8828611` logged 10,501 -> 10,905 and persisted step 10,900; `8828612` made no progress after two startup `std::bad_alloc` failures. | **10,900** (remote disk verified 2026-09-21) | **2.3151** (last logged, step 10,905) | **~1,097.2B (23.5%)** |
+| [v2 256N](n256/README.md) | **Idle since 2026-09-20.** Umbrella `8828612` logged 15,201 -> 16,036 and persisted step 16,000. Per-token comparator to the 512N chain. | **16,000** (remote disk verified 2026-09-21) | **2.4596** (last logged, step 16,036) | **~805.3B (17.2%)** |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode
@@ -69,10 +69,10 @@ native auto-retry and then to the ~2,098N umbrellas; see
 
 ## Per-trajectory detail
 
-- [n512/](n512/README.md) -- **canonical v2 512N chain** (idle since
-  2026-08-20; persisted step 10,600)
+- [n512/](n512/README.md) -- **current v2 512N constant-LR fork** (idle since
+  2026-09-17; persisted step 10,900)
 - [n256/](n256/README.md) -- v2 256N in the `agpt-20b-n256` clone (idle since
-  2026-08-26; persisted step 12,000, last logged loss 2.24577)
+  2026-09-20; persisted step 16,000, last logged loss 2.45566)
 - [n1024/](n1024/README.md) — v2 1024N (8463183 crashed at startup,
   std::bad_alloc / SIGSEGV — needs 768N/896N bracket before retry)
 

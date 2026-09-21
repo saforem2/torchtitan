@@ -1,10 +1,22 @@
 # Fixed-batch optimizer comparison: AdamW vs Mano vs SophiaG
 
+> **Follow-up in flight (2026-09-18):** the OLMo-3 ladder
+> ([plan](2026-09-18-olmo2tok-ladder-plan.md)) retains the historical
+> `olmo2tok` config name because the core OLMo-2 and OLMo-3 `tokenizer.json`
+> files are byte-identical, and carries this to 4.64B / 9.48B /
+> 26.2B at GBS=6144, adds **Muon** as a training arm for the first time, and
+> targets the decay-phase question this page names as unanswered. Nine LR
+> sweeps submitted; training arms gated on them.
+
 **Model:** agpt 30B (26.2B params), OLMo-2 tokenizer (100,352 vocab), seq 4096.
 **Status:** COMPLETE. Both healthy arms ran to the `training.steps=6000`
 ceiling on 2026-08-29 -- 23.59B tokens each, `rc=0`, 0 NaN/inf, 0 grad skips.
-**[W&B report](https://api.wandb.ai/links/aurora_gpt/0em3ktti)** &middot;
+**[Current W&B report (login required)](https://wandb.ai/aurora_gpt/agpt-30b-optcmp/reports/30B-optimizer-comparison-AdamW-vs-Mano-vs-SophiaG-GBS-960-constant-LR--VmlldzoxNzg0MDgwNg)** &middot;
 [project `agpt-30b-optcmp`](https://wandb.ai/aurora_gpt/agpt-30b-optcmp)
+
+> The former public shortlink (`0em3ktti`) targets deleted report snapshot
+> `VmlldzoxNzgxNjE2Mg`. The report builder creates a new W&B View on every save
+> and deletes stale duplicates; the current View is `VmlldzoxNzg0MDgwNg`.
 
 ## RESULT: Mano wins at the 10B budget
 

@@ -5,7 +5,7 @@
 
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-30
+> Last updated: 2026-09-21
 >
 > Status: **COMPLETE — target reached** (2026-06-29). Nothing has been
 > dispatched against this chain since, and nothing needs to be: it has
@@ -19,7 +19,7 @@
 > 256N pre-training run is done; subsequent tokens would be continued
 > pre-training (CPT), not the base run.
 >
-> **Do not read the 2026-08-26 2B-256 activity as this chain.** Umbrella
+> **Do not read later 2B-256 activity as this chain.** Umbrella
 > `8773440` (the last job to train anything on Aurora, 5h13m of a 12h slot,
 > `Exit_status=-14`) had a 2B-256 seat, `t4`, that ran **782 steps, 2.56449
 > -> 2.54807**. That is **not** this chain: this one finished at step-92,859
@@ -29,10 +29,12 @@
 > this chain's `step-92859` into a separate checkpoint dir, which is the
 > likely identity -- though the seat-to-chain mapping for `8773440` itself
 > has not been reconfirmed from that job's own logs here. Either way it adds
-> no tokens to this chain. Aurora has trained nothing since 2026-08-26; the
-> successor umbrella `8784460` has been `Q` since 2026-08-26 13:22 UTC with
-> 101h+ eligible time and `score_boost = 0` (ticket drafted, **NOT sent**:
-> [`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+> no tokens to this chain. The separate stage-2 arm later reached persisted
+> **step-28,000**, verified on Aurora on 2026-09-21 with 3,072 shards plus
+> `.metadata`. It did not advance in the latest completed umbrella,
+> `8828612`: seat `t4` failed during startup with `torch`'s repeated-import
+> guard. The only seat that trained in that 12h umbrella was 20B-256 (`t2`),
+> so `8828612` was **1/5**, not a successful continuation of this 2B work.
 >
 > Earlier 2026-06-28: a 2h "sneak" run `8572612` advanced step-86,200 ->
 > 86,674 (256N, +474 steps / 19 ckpts, loss **2.65**) -- the first run

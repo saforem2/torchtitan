@@ -5,19 +5,15 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-08-30
+> Last updated: 2026-09-21
 >
-> Status: **NOT RUNNING.** The last leg to train this chain was umbrella
-> `8773440` seat t2 on **2026-08-26** (**201 steps, loss 2.31488 ->
-> 2.24577**); nothing on Aurora has trained since. Chain head **step-12,000**
-> persisted (**604.0B tokens, 12.9%** of 4.67T, 137 step dirs verified on disk
-> 2026-08-21) -- the 08-26 leg resumed from that head, and its resulting
-> checkpoint head has not been re-verified on disk here. `8773440` used 5h13m
-> of a 12h slot and exited `-14`. The successor umbrella `8784460` (2,098
-> nodes, `large`) has been `Q` since 2026-08-26 13:22 UTC with 101h+ eligible
-> and `score_boost=0`, with `8784462` held behind it; a ticket is drafted but
-> NOT sent
-> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+> Status: **NOT RUNNING.** The latest umbrella, `8828612`, advanced this chain
+> on 2026-09-19/20 from step 15,201 through step 16,036 and persisted
+> **step-16,000** (**805.3B tokens, 17.2%** of 4.67T). The last logged loss was
+> **2.45566**. The checkpoint head and 173 step directories were verified
+> directly on Aurora on 2026-09-21. This was the latest productive 20B seat;
+> the same umbrella's 20B-512 seat failed twice at startup with
+> `std::bad_alloc` and made no progress.
 >
 > Trajectory since the step-300 stall: `8505255`
 > (sync mode) reached step-1,125; `8558548`/`8558549` carried it
@@ -103,21 +99,20 @@
 | `8647385`+ | 2026-07-06..23 | 12h | 3,100 -> 4,375 | ~3.2 -> ~2.5 | ~440 | ~22% | Continuations 8647385 (3101-3603), 8661054 (4201-4375) advanced the chain; interspersed with CCL/gloo crashes + resubmits (transient infra). |
 | `8681340` | 2026-07-23 | 12h | 5,101 -> **6,000** | 2.485 -> 2.533 | 40-443 (variable) | ~22% | **Done.** Full 260N throughput, resumed the real chain from `step-5100` and wrote `step-5200`..`step-6000` (3,072 shards each). Was marked RUNNING here through 2026-08-30; it is long finished and has aged out of PBS history. |
 | umbrellas `8698125`..`8764675` | 2026-07-28..08-20 | 12h-24h | 6,151 -> **12,000** | 2.41007 -> **2.43380** | ~370 (mean) | ~18.5% (mean) | Carried by the ~2,098N 5-chain umbrella seat t2 across eight dispatches, with the 16N `8703284` bridge and the 260N `8698753` backfill in between. TPS/MFU are means over the committed metric store, which covers 6,151-10,380 of this range. Per-dispatch step ranges: [dispatch log](../../../dispatch-log.md). |
-| `8773440` t2 | 2026-08-26 | 12h | **201 steps** on top of the step-12,000 head | **2.31488 -> 2.24577** | -- | -- | **Last leg to train this chain.** Umbrella used 5h13m of a 12h slot, `Exit_status=-14`; three of five seats trained, both 512N seats never started. The seat was abandoned early as `stuck_pre_training` because ezpz 0.21's progress regex matched `step=` while torchtitan prints `step: ` -- fixed in ezpz 0.27.3, pinned by [`tests/failover/test_progress_marker_contract.py`](../../../../../tests/failover/test_progress_marker_contract.py). **Nothing has trained since.** |
+| `8773440` t2 | 2026-08-26 | 12h | **201 steps** on top of the step-12,000 head | **2.31488 -> 2.24577** | -- | -- | Umbrella used 5h13m of a 12h slot, `Exit_status=-14`; three of five seats trained, both 512N seats never started. The seat was abandoned early as `stuck_pre_training` because ezpz 0.21's progress regex matched `step=` while torchtitan prints `step: ` -- fixed in ezpz 0.27.3, pinned by [`tests/failover/test_progress_marker_contract.py`](../../../../../tests/failover/test_progress_marker_contract.py). |
+| umbrellas `8784462`..`8828611` t2 | 2026-09-05..17 | -- | 12,401 -> **15,242** | 2.22184 -> **2.42473** | -- | -- | Four productive legs (`8784462`, `8808931`, `8812215`, `8828611`) advanced the persisted head through step 15,200; `8808932` made no progress after a startup `std::bad_alloc`. |
+| `8828612` t2 | 2026-09-19/20 | -- | 15,201 -> **16,036** | 2.19908 -> **2.45566** | -- | -- | **Latest umbrella outcome.** Persisted step 16,000. The sibling 20B-512 seat made no progress after two startup `std::bad_alloc` failures. Remote logs and checkpoint tree verified 2026-09-21. |
 
-**Latest checkpoint:** step-12,000 (137 step dirs, audited on disk 2026-08-21).
-The 08-26 leg (`8773440` t2) trained 201 further steps on top of this head; its
-resulting checkpoint head has not been re-verified on disk, so the last
-disk-confirmed figure is the one quoted.
+**Latest checkpoint:** step-16,000 (173 step dirs, audited on Aurora 2026-09-21).
 
-**Cumulative persisted steps:** 12,000 (disk-confirmed)
+**Cumulative persisted steps:** 16,000 (disk-confirmed)
 
-**Tokens consumed:** 12,000 x 6,144 x 8,192 = **604.0B tokens** (12.9% of 4.67T
+**Tokens consumed:** 16,000 x 6,144 x 8,192 = **805.3B tokens** (17.2%)
 target)
 
-**Loss:** 2.24577 at the end of the 08-26 leg (`8773440` t2, last logged step).
-The committed metric store here stops at step-10,380 / ~2.372 (`lc9oukel`); it
-was exported 2026-08-17 and predates the 08-20 and 08-26 legs.
+**Loss:** 2.4596 at the last logged step, 16,036 (`8828612` t2). This is a
+single-step value; the lower 2.19908 at resumed step 15,201 is the usual
+post-checkpoint reload boundary and not a like-for-like trend endpoint.
 
 > **Corrected 2026-08-17** (and again 2026-08-30, see the status header).
 > This page previously carried three different step

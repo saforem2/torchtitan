@@ -1,19 +1,16 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-08-30
+> **Last updated:** 2026-09-21
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status: NOT RUNNING.** Persisted at step **10,600** (~1,067.0B tokens,
-> 22.8% of 4.67T target), last logged loss **2.41076** at step 10,699
-> (disk audit 2026-08-21). The last leg to advance it was umbrella `8764675`
-> on **2026-08-20** (seat t1, 10,101 -> 10,699). Its seat in the 2026-08-26
-> umbrella `8773440` **never started**, and nothing on Aurora has trained
-> since that job. The successor umbrella `8784460` (2,098 nodes, `large`) has
-> been `Q` since 2026-08-26 13:22 UTC with 101h+ eligible and
-> `score_boost=0`, with `8784462` held behind it; a ticket is drafted but NOT
-> sent
-> ([`ops/alcf-ticket-8784460-not-scheduling-20260830.md`](../../../../ops/alcf-ticket-8784460-not-scheduling-20260830.md)).
+> **Status: NOT RUNNING.** Production moved to the constant-LR fork seeded at
+> step 9,000 on 2026-08-21. That fork is persisted at **step 10,900**
+> (~1,097.2B tokens, 23.5% of 4.67T target), with last logged loss
+> **2.31773** at step 10,905. The checkpoint head (20 step directories) was
+> verified directly on Aurora on 2026-09-21. Umbrella `8828611` last advanced
+> it on 2026-09-16/17; the latest umbrella, `8828612`, made no 20B-512
+> progress because both attempts died during startup with `std::bad_alloc`.
 >
 > The progress table below is detailed only through step-5,400 (2026-07-07);
 > everything from step-5,400 to the current head was carried by the ~2,098N
@@ -60,7 +57,7 @@
 | GBS | 12,288 (LBS=2) |
 | Total steps | 46,429 |
 | Total tokens | 4.67T |
-| Checkpoint dir | `outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288` |
+| Checkpoint dir | `outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000` (current fork; pre-fork chain remains in the path without the suffix) |
 | W&B | [9tsyx5us](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/9tsyx5us) |
 
 ### Loss / Throughput / MFU
@@ -101,18 +98,21 @@
 | [`8638795`](#log-8638795) | 2026-07-07 | 12h | 5,100 -> **5,400** | 2.52 -> **2.47** | ~376 | ~18.7% | **`afterany` continuation** of 8638793 (native auto-retry). step-5,200..5,400 persisted. Advanced during the multi-umbrella queue wait (umbrella 8648363 never won a slot; this standalone carried the chain). |
 | `8731758` | 2026-08-04 | -- | -> **7,251** | -- | -- | -- | Individual 516N dispatch; ran before umbrella 8744245 and carried the chain to step-7,251. |
 | umbrellas `8714502`..`8764675` seat t1 | 2026-08-05..08-20 | 12h-24h | 6,801 -> **10,699** | 2.33289 -> **2.41076** | ~332 (mean) | ~16.6% (mean) | Carried by the ~2,098N 5-chain umbrella in seat t1 across eight dispatches. TPS/MFU are means over the committed metric store, which covers 6,801-9,694 of this range. Per-dispatch ranges: 8714502 6,801->7,149; 8714503 7,251->7,654; 8744245 7,601->8,000+; 8744247 idle-watchdog kill during a silent DCP load; 8756070 8,701->9,109; 8756957 9,101->9,695; 8760249 9,601->10,200; 8764675 10,101->10,699. Ckpt head **10,600**. See the [dispatch log](../../../dispatch-log.md). |
-| `8773440` t1 | 2026-08-26 | 12h | **0 steps** | -- | -- | -- | **Never started.** Both 512N seats in this umbrella failed to launch; the reason is not yet established. The 20B-256 seat in the same job did train. **This chain has not advanced since 2026-08-20.** |
+| `8773440` t1 | 2026-08-26 | 12h | **0 steps** | -- | -- | -- | **Never started.** Both 512N seats in this umbrella failed to launch; the reason was not established at the time. The 20B-256 seat in the same job did train. |
+| umbrellas `8784462`..`8812215` t1 | 2026-09-05..12 | -- | 9,001 -> **10,593** | 2.26709 -> **2.41296** | -- | -- | Constant-LR fork legs. `8784462`, `8808931`, and `8812215` advanced the persisted head through step 10,500; `8784460` and `8808932` made no progress after startup failures. |
+| `8828611` t1 | 2026-09-16/17 | -- | 10,501 -> **10,905** | 2.26607 -> **2.31773** | -- | -- | Three attempts; the first two logged 10 and 41 steps without a save, and attempt 3 persisted step 10,900. |
+| `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | **Latest umbrella outcome.** Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
 
-**Latest checkpoint:** step-10,600 (audited on disk 2026-08-21; written by
-umbrella `8764675` seat t1 on 2026-08-20, which logged through step 10,699)
+**Latest checkpoint:** step-10,900 in the constant-LR fork (20 step dirs,
+audited on Aurora 2026-09-21; written by umbrella `8828611` seat t1, which
+logged through step 10,905)
 
-**Cumulative steps:** 10,600 (disk-confirmed)
+**Cumulative steps:** 10,900 (disk-confirmed)
 
-**Tokens consumed:** 10,600 x 12,288 x 8,192 = **1,067.0B tokens** (22.8% of 4.67T target)
+**Tokens consumed:** 10,900 x 12,288 x 8,192 = 1.1T tokens (23.5% of 4.67T target)
 
-**Loss:** 2.41076 (last logged step 10,699, umbrella `8764675` t1). The
-committed metric store here stops at step-9,694 / 2.3997; it was exported
-2026-08-17 and predates the 08-20 leg.
+**Loss:** 2.3151 (last logged step 10,905, umbrella `8828611` t1). This is a
+single-step value from the current constant-LR fork.
 
 ### Recovery
 

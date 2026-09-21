@@ -2,6 +2,143 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
+
+- Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
+  for 12:00:23 and finished at walltime (`Exit_status=-29`).
+- Its independently verified trainer-2 / 20B-256 history spans steps 15,201
+  through 16,035. The other four seat outcomes were not inferred from the PBS
+  terminal state and remain unaudited in the overview-level documentation.
+- Dependent continuation `8834528` was released after the predecessor finished
+  and is queued as of 2026-09-21. It has not started and has no trainer logs.
+
+## 2026-09-16 (aurora) -- checks that pass in both the working and broken states: six instances in two days
+
+Two fixes landed and two conclusions were withdrawn. The through-line is one
+error shape, and it showed up six times between this session and
+`sunspot-tt-ezpz` working the same surface.
+
+### The shape
+
+A check that returns the same answer whether or not the thing works.
+
+| check | passes when broken because |
+|---|---|
+| `import` the moe flavors | 14/14 imported, 0/14 built (sync 84 `#4631` reshaped the router) |
+| grep `"full SPMD"` / `"plain tensor"` for pytorch `#181519` | both strings live INSIDE the `raise` the patch removes |
+| chain depth monitor | depth read `2` for 79h while zero checkpoints advanced |
+| `[ -x .venv/bin/python ]` from a login node | the spack base interpreter is not mounted on compute |
+| patch one of three `.so.5` call sites | `exact_expert_gemm` passes, `ops` and `grouped_gemm` still refuse |
+| `Exit_status = 0` on a PBS probe | the job died before running a line of Python |
+
+The `#181519` one is the sharpest. My probe grepped prose and reported
+`VERDICT_181519 PRESENT` on `torch 2.13.0a0+gitcf30153`. A local CPU `torch
+2.13.0` that certainly lacks the fix scores identically -- 1095 lines, `full
+SPMD` x2, `plain tensor` x1 -- because both strings are the text of
+
+```python
+raise ValueError(
+    "When dp_mesh_dims is provided, all parameters must be "
+    "DTensors on the full SPMD mesh (e.g. via distribute_module). "
+    f"Got plain tensor for parameter '...'."
+)
+```
+
+A build matches BECAUSE it still raises. Grep for symbols a patch introduces,
+never prose. Prose in a `raise` is evidence the bug is present.
+
+`#181519` is ABSENT on all four reachable torch builds. The stronger evidence
+is execution, not inspection -- `sunspot-tt-ezpz` ran the merged tree on both
+images:
+
+| job | image | torch | result |
+|---|---|---|---|
+| `8829185` | prod `20260828` | `dev20260520+xpu` | dies in FSDP setup |
+| `8831522` | test `20260831` | `dev20260428+xpu` | identical, 72 `dtensor_err` / 3 arms |
+| `8829243` | prod, PRE-merge | | trains, ok |
+
+`8831522` reached `IMPORT_OK` and built the model before failing, so it is the
+FSDP path and not packaging. The test bkc was the last place the blocker could
+plausibly have been absent. A hard floor for sync 84, closed from both
+directions.
+
+### Shipped
+
+- [`67d4f262f`](https://github.com/saforem2/torchtitan/commit/67d4f262f) vendored `aurora_moe` matched only `libmkl_sycl_blas.so.5`,
+  so on the `26.181.0` image behind `next-eval` (ships `.so.6`) it REFUSED a
+  working oneMKL. Globbed, in all three files. The check is a presence probe per
+  its own error text; ABI is the linker's job at load time.
+- [`0dfa5fbe5`](https://github.com/saforem2/torchtitan/commit/0dfa5fbe5) `bmm_nodrop` did its GEMMs in whatever dtype it got, so
+  it raised `expected scalar type Float but found BFloat16` under mixed
+  precision. Both existing backends already cast to bf16 and return
+  `type_as(x)`; the port inherited an omission from a branch whose caller
+  pre-aligned dtypes.
+- [`e29bcbcb0`](https://github.com/saforem2/torchtitan/commit/e29bcbcb0) the 80B LR guard I added in `607f1f623` ran pre-CLI, so
+  it could only ever see the registry default. 8 configs hard-blocked with no
+  reachable way to run them (`agpt_80b_zloss` could not be launched at all), 14
+  silently returning `8e-4`. Moved after the CLI parse and the
+  `_build_optimizer_config` rebuild.
+- ezpz [#244](https://github.com/saforem2/ezpz/pull/244) PALS tagged the parent
+  reporting an RPC-forward failure instead of the child that died, so failover
+  evicted a healthy node and relaunched onto the sick one.
+- ezpz [#245](https://github.com/saforem2/ezpz/pull/245) `rc=143` +
+  `std::bad_alloc` filed as `walltime`. The accompanying `died from signal`
+  lines are stripped as innocent cascade, so the log looks clean.
+
+### Withdrawn
+
+`aurora_sycl` was reported working, then failing, then working, then failing.
+Final state, three measurements:
+
+| job | stack | MKLROOT | result |
+|---|---|---|---|
+| `8829416` | frameworks `2026.1.0` py3.12 | `26.181.0` | works |
+| `8829454` | yeeted `/tmp/.venv` py3.14 | `26.26.0` (wrong image) | `UR_RESULT_ERROR_UNINITIALIZED` |
+| `8829790` | yeeted `/tmp/.venv` py3.14 | `26.181.0` (correct) | `gemm_bf16bf16bf16: unsupported device` |
+
+`8829790` decides it: image-matched oneMKL and it still fails, so the oneMKL
+image is not the whole story. It works under the module python and not under
+the venv production trains with. `bmm_nodrop` ran in the same job on the same
+device at `rel_err 0.000e+00`, which isolates the failure to the aurora-moe
+SYCL path.
+
+The XPU `topk` tie-instability that motivated a core router change does not
+reproduce: 0 differing results over 20 identical calls with ties in 2913/4096
+rows. That change was not made.
+
+### The rule worth keeping
+
+~10 failed probe jobs here, ~4 on the sunspot side, none of which measured the
+thing under test. Causes: `module: command not found` in a PBS shell,
+`libglog.so.0`, a venv base interpreter absent on compute, a script edited after
+`qsub`, and `/opt/aurora/default` resolving to `26.26.0` from login and
+`26.181.0` from compute.
+
+Every one is handled by an existing submit script. Measured twice on two trees
+with two globs: **114/122 PBS scripts here use `#!/bin/bash --login` (93.4%)**,
+179/192 on `sync84-trial` (93.2%). Start from one of those, do not hand-roll.
+
+`--login` is also what sets `CONDA_PREFIX`. Proven on `x4000c5s1b0n0` -- the
+node that produced UNSET for the other session -- both answers from one machine:
+
+```
+BEFORE module (--login):     CONDA_PREFIX=UNSET
+AFTER  module (--login):     CONDA_PREFIX=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
+AFTER  module (non-login):   CONDA_PREFIX=UNSET
+```
+
+Node variance excluded. Guard it anyway -- unset, `"${CONDA_PREFIX}/lib:"`
+expands to a bare `/lib:` and fails later as a missing library.
+
+### Production
+
+The 2098-node chain has not advanced a checkpoint since 2026-09-13. `8828611`
+queued since 09-15 15:39, `8828612` held behind it, 9976 nodes job-exclusive
+and 538 free. Nothing wrong with the chain; the machine is full.
+
+The depth monitor read `2` throughout. Added a progress monitor keyed on
+checkpoint mtime, which fired at 79h on its first tick.
+||||||| e29bcbcb0
 ## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
 
 Asked whether there was anything upstream to pull in. 148 commits, not the 64

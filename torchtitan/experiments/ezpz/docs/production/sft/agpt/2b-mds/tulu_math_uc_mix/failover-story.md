@@ -29,7 +29,7 @@ upstream blockers had to be cleared inline during the run:
    `AssertionError: Torch not compiled with CUDA enabled`. Worked
    around locally in `train_sft.py:_patch_sharded_tensor_device_for_xpu`
    and filed + PR'd upstream.
-2. ezpz [commit `6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b) —
+2. ezpz commit `6b4a00b` (historical commit no longer published) —
    `launch_autoretry`'s `STUCK_PRE_TRAINING` guard was matching
    only torchtitan's `step=N` progress marker, false-positiving
    on TRL's `{'loss': '...'}` log format and aborting healthy
@@ -277,8 +277,7 @@ stringified Python dict like
 attempts trained 100+ steps, both produced ample progress markers
 *in their own format*, but the autoretry's grep returned zero.
 
-**Fix:** ezpz commit
-[`6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b)
+**Fix:** ezpz commit `6b4a00b` (historical commit no longer published)
 broadens the regex to also match `'loss': '<digit>` and
 `'loss': <digit>`:
 
@@ -365,7 +364,7 @@ instruction-following adaptation has converged on this mix.
 
 - Prior SFT smoke: [`20260608-sft-2b-sophiag-metamathqa-n32.md`](../../../../../experiments/agpt/sunspot/20260608-sft-2b-sophiag-metamathqa-n32.md)
 - Upstream issue + fix: [pytorch/pytorch#186938](https://github.com/pytorch/pytorch/issues/186938) + [pytorch/pytorch#186940](https://github.com/pytorch/pytorch/pull/186940)
-- ezpz autoretry fix: [saforem2/ezpz commit `6b4a00b`](https://github.com/saforem2/ezpz/commit/6b4a00b)
+- ezpz autoretry fix: saforem2/ezpz commit `6b4a00b` (historical commit no longer published)
 - ezpz autoretry _drain UTF-8 bug fix (pre-req for this work): [saforem2/ezpz PR #162](https://github.com/saforem2/ezpz/pull/162) (#163)
 - Local upstream-issues writeup: [`docs/upstream-issues/sharded_tensor_device_cuda_hardcode.md`](../../../../../upstream-issues/sharded_tensor_device_cuda_hardcode.md)
 - Journal entry: [`docs/journal.md`](../../../../../journal.md) 2026-06-10

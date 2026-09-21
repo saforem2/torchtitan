@@ -8,6 +8,7 @@ repos:
     rev: 6306a48f7dae5861702d573c9c247e4e9498e867
     hooks:
     -   id: trailing-whitespace
+        exclude: '^(.*\.svg)$'
     -   id: check-ast
     -   id: check-merge-conflict
     -   id: no-commit-to-branch
@@ -60,6 +61,7 @@ repos:
       description: Checks for common misspellings in text files.
       entry: codespell --toml pyproject.toml
       language: python
+      exclude: '^(.*\.svg)$'
       types: [text]
       additional_dependencies:
         - tomli
@@ -111,6 +113,11 @@ repos:
         - "--exclude=http://localhost:.*"
         - "--exclude=http://127.0.0.1:.*"
         - "--exclude=tcp://localhost:.*"
+        # Literal internal proxy endpoints are configuration values, not links.
+        - "--exclude=^http://proxy\\.alcf\\.anl\\.gov:3128/?$"
+        # These point-in-time records intentionally retain links to paths later
+        # removed or renamed; current documentation remains checked.
+        - "--exclude-path=^torchtitan/experiments/ezpz/docs/(journal\\.md|upstream-sync\\.md|meeting-notes/agpt-sync\\.md|summaries/(2026-04-27|2026-05-29|2026-06-12|2026-06-26|2026-07-06|2026-Q2-incite)\\.md)$"
         - "--max-retries=5"
         - "--retry-wait-time=10"
         - "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

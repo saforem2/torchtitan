@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import spmd_types as spmd
 
 from torchtitan.experiments.ezpz.moe.model import Attention
+from torchtitan.models.common.attention import GQAttention
 from torchtitan.models.common.decoder_sharding import (
     colwise_config,
     dense_activation_placement,
@@ -31,6 +32,7 @@ from torchtitan.models.common.decoder_sharding import (
     rowwise_config,
     set_decoder_sharding_config,
     set_dense_ffn_sharding,
+    set_gqa_attention_sharding,
     set_gqa_inner_attention_local_spmd,
 )
 from torchtitan.models.common.moe_sharding import (
@@ -39,10 +41,7 @@ from torchtitan.models.common.moe_sharding import (
 from torchtitan.protocols.sharding import ShardingConfig
 
 if TYPE_CHECKING:
-    from torchtitan.experiments.ezpz.moe.model import (
-        moeModel,
-        moeTransformerBlock,
-    )
+    from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
 
 
 # Routed-expert layout for the shared ``GroupedExperts`` / ``EzpzGroupedExperts``.
@@ -83,9 +82,7 @@ def set_moe_sharding_config(
     # all-reduce via _LossParallelCrossEntropy autograd.
     set_decoder_sharding_config(config, enable_sp=enable_sp)
     for layer_cfg in config.layers:
-        _set_moe_layer_sharding(
-            layer_cfg, enable_sp=enable_sp, enable_ep=enable_ep
-        )
+        _set_moe_layer_sharding(layer_cfg, enable_sp=enable_sp, enable_ep=enable_ep)
 
 
 def _set_moe_layer_sharding(
@@ -101,7 +98,11 @@ def _set_moe_layer_sharding(
     MoE FFN is routed through upstream's ``set_moe_sharding_config``.
     """
     attention = layer_cfg.attention
-    assert isinstance(attention, Attention.Config)
+    if not isinstance(attention, (Attention.Config, GQAttention.Config)):
+        raise TypeError(
+            "MoE layers require MLA Attention.Config or GQAttention.Config; "
+            f"got {type(attention).__name__}"
+        )
 
     norm = norm_config(enable_sp=enable_sp)
     layer_cfg.attention_norm.sharding_config = norm
@@ -123,6 +124,19 @@ def _set_moe_layer_sharding(
         if enable_sp
         else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
+
+    if isinstance(attention, GQAttention.Config):
+        # AGPT-MoE uses the same fused GQA block as dense AGPT. Delegate to the
+        # shared helper rather than applying the MLA-only wkv/q-lora layout.
+        set_gqa_attention_sharding(attention, enable_sp=enable_sp)
+        set_gqa_inner_attention_local_spmd(attention.inner_attention)
+        _set_moe_ffn_sharding(
+            layer_cfg,
+            attn_x_layout=attn_x_layout,
+            enable_sp=enable_sp,
+            enable_ep=enable_ep,
+        )
+        return
 
     # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
     # set_gqa_attention_sharding (decoder_sharding.py:201-203) as
@@ -180,6 +194,22 @@ def _set_moe_layer_sharding(
         attention.q_norm.sharding_config = replicate_weight
         attention.wq_b.sharding_config = colwise_config()
 
+    _set_moe_ffn_sharding(
+        layer_cfg,
+        attn_x_layout=attn_x_layout,
+        enable_sp=enable_sp,
+        enable_ep=enable_ep,
+    )
+
+
+def _set_moe_ffn_sharding(
+    layer_cfg: "moeTransformerBlock.Config",
+    *,
+    attn_x_layout,
+    enable_sp: bool,
+    enable_ep: bool,
+) -> None:
+    """Set dense or routed FFN sharding shared by MLA and GQA layers."""
     # Dense FFN (non-MoE layers only).
     if layer_cfg.feed_forward is not None:
         set_dense_ffn_sharding(

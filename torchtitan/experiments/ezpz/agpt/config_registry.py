@@ -1,24 +1,19 @@
-import ezpz
-import ezpz.distributed
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import json
 import os
 from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import ezpz
+import ezpz.distributed
+
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
-# a re-export shim when the optimizer components were grouped into a package
-# by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.observability.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
-from torchtitan.experiments.ezpz.optimizer.containers import (
-    default_mano,
-    default_muon,
-    default_sophiag,
-)
 from torchtitan.components.data import (
     ConcatThenSplitPackingConfig,
     GrainDataLoader,
@@ -28,18 +23,29 @@ from torchtitan.components.data.sources import (
     HuggingFaceRandomAccessSource,
     HuggingFaceStreamingSource,
 )
-from torchtitan.hf_datasets.text_datasets import TextProcessor
-from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
+
+# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
+# a re-export shim when the optimizer components were grouped into a package
+# by #4140). LRSchedulersContainer now lives in components.optimizer.
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.config.configs import CompileConfig
+from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
-from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_mano,
+    default_muon,
+    default_sophiag,
+)
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
-
+from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.hf_datasets.text_datasets import TextProcessor
+from torchtitan.observability.metrics import MetricsProcessor
 from . import model_registry
 
 TT_CONFIG_JSON_ENV = "TT_CONFIG_JSON"
@@ -51,6 +57,20 @@ def agpt_debugmodel() -> FaultTolerantTrainer.Config:
 
 def agpt_2b() -> FaultTolerantTrainer.Config:
     return ezpz_agpt_2b()
+
+
+def agpt_2b_50k() -> FaultTolerantTrainer.Config:
+    """Dense 2B/50K base used by the retained Aurora JSON launcher."""
+    cfg = agpt(
+        "2b_50k",
+        activation_checkpoint_mode="selective",
+        seq_len=2048,
+        compile=False,
+        hf_assets_path="./assets/hf/llama-2-32k-sp",
+    )
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.checkpoint.keep_latest_k = 0
+    return cfg
 
 
 def agpt_2b_hf() -> FaultTolerantTrainer.Config:
@@ -103,9 +123,7 @@ def _set_fp32_residual(
     import copy
     from dataclasses import fields
 
-    from torchtitan.experiments.ezpz.agpt.fp32_residual import (
-        AgptFp32ResidualBlock,
-    )
+    from torchtitan.experiments.ezpz.agpt.fp32_residual import AgptFp32ResidualBlock
 
     # Deep-copy first: ezpz_agpt_*() can hand back a config whose model spec is
     # shared with the agpt_configs template, so mutating .layers in place would
@@ -685,9 +703,7 @@ def _agpt_2b_mds_mix_blend(
             HFDataSource(
                 dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
             ),
-            HFDataSource(
-                dataset="fineweb_edu_local", weight=edu_weight, infinite=True
-            ),
+            HFDataSource(dataset="fineweb_edu_local", weight=edu_weight, infinite=True),
         ],
         seed=42,
         stopping_strategy="all_exhausted",
@@ -756,7 +772,9 @@ def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
     textbooks: auto_math_text+khanacademy+openstax+stanford+wikihow). Tests
     whether synthetic-science textbooks in the 25% slot beat generic edu."""
     return _agpt_2b_mds_mix_blend_src(
-        0.75, "cosmopedia_science_local", 0.25,
+        0.75,
+        "cosmopedia_science_local",
+        0.25,
         "checkpoints/agpt-2b-mds-mix-owm75-cosmo25",
     )
 
@@ -767,7 +785,9 @@ def agpt_2b_mds_mix_owm_nemotron_7525() -> FaultTolerantTrainer.Config:
     HF access granted for nvidia/Nemotron-CC-Math-v1 + precache of config 4plus
     registered as nemotron_cc_math_4plus_local."""
     return _agpt_2b_mds_mix_blend_src(
-        0.75, "nemotron_cc_math_4plus_local", 0.25,
+        0.75,
+        "nemotron_cc_math_4plus_local",
+        0.25,
         "checkpoints/agpt-2b-mds-mix-owm75-nemotron25",
     )
 
@@ -858,7 +878,12 @@ def agpt_20b_flex_attn() -> FaultTolerantTrainer.Config:
 
 
 def ezpz_agpt_7b() -> FaultTolerantTrainer.Config:
-    return agpt("7b", local_batch_size=2, seq_len=4096, hf_assets_path="./assets/hf/llama-2-7b-hf")
+    return agpt(
+        "7b",
+        local_batch_size=2,
+        seq_len=4096,
+        hf_assets_path="./assets/hf/llama-2-7b-hf",
+    )
 
 
 def _load_json_overrides() -> dict[str, Any]:
@@ -891,6 +916,12 @@ def _apply_config_overrides(
         current_value = getattr(target, key)
         field_path = f"{path}.{key}" if path else key
 
+        if key == "keep_latest_k" and value not in (0, None):
+            raise ValueError(
+                f"keep_latest_k={value!r} at path {field_path!r} would delete "
+                "canonical chain checkpoints; use 0 (keep all)"
+            )
+
         if isinstance(value, dict):
             if not is_dataclass(current_value):
                 raise TypeError(
@@ -915,6 +946,12 @@ def ezpz_agpt_debugmodel_from_json() -> FaultTolerantTrainer.Config:
 
 def ezpz_agpt_2b_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json("2b")
+
+
+def agpt_2b_50k_from_json() -> FaultTolerantTrainer.Config:
+    cfg = agpt_2b_50k()
+    _apply_config_overrides(cfg, _load_json_overrides())
+    return cfg
 
 
 def ezpz_agpt_7b_from_json() -> FaultTolerantTrainer.Config:
@@ -1025,6 +1062,66 @@ def agpt_30b_llama3tok() -> FaultTolerantTrainer.Config:
     return agpt("30b_llama3tok", hf_assets_path="./assets/hf/Llama-3.1-8B")
 
 
+def agpt_5b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """4.64B on OLMo-2's 100,352 vocab -- the low rung of the Aurora mid-ladder.
+
+    The family jumped 2B (dim 2048) to 20B (dim 5120) with nothing native in
+    between; dim 3072 is the only 2x gap in the ladder and this fills it.
+    Geometry follows 20B/30B exactly: head_dim 128, GQA 8, ffn via
+    compute_ffn_hidden_dim(multiple_of=1024).
+
+    The tokenizer argument from exp07 is stronger at this size than at 30B.
+    Embedding share against gemma's 256,128 vocab would be ~34% of the model
+    here versus 11% at dim 6144; OLMo-2 brings it to ~14%. What it does NOT
+    buy at this size is throughput -- exp07's "freed HBM converts into batch
+    size" held because the 30B was pinned at 76.8% of a 64 GiB tile, and these
+    sizes are far below that.
+
+    NOT RUNNABLE ON AURORA AS WRITTEN. ./assets/hf/OLMo-2-1124-7B does not
+    exist there -- verified 2026-09-17, every checkout has only gemma-7b,
+    llama-2-7b-hf and DeepSeek variants, and a find across
+    /flare/AuroraGPT/foremans returns nothing for OLMo-2. The 30B hit the same
+    wall (see submit_lr_finder_30b_aurora.sh, which falls back to agpt_30b for
+    exactly this). Staging the tokenizer is cheap -- it is a tokenizer, not a
+    model -- but the Aurora corpus is ALSO gemma-tokenized
+    (data_fused_gemma_eod), so running this there means either a retokenized
+    corpus or an id mismatch that trains to a plausible loss and evaluates as
+    gibberish. That is the Polaris 20B failure mode.
+
+    LR is NOT calibrated. agpt() hands every size lr=8e-4 and the only guard
+    in this file keys on the 80B flavor prefix, so nothing stops this config
+    running at a value ~35x the 20B's production 2.28e-5. Run a finder first.
+    """
+    return agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
+def agpt_10b_olmo2tok() -> FaultTolerantTrainer.Config:
+    """9.48B on OLMo-2's 100,352 vocab -- the high rung of the mid-ladder.
+
+    dim 4096, 48 layers, 32 heads, 8 kv. Sits at roughly half the 20B's
+    non-embedding capacity, which makes the 5B/10B/20B/30B set a real scaling
+    series on one tokenizer rather than four point designs.
+
+    n_heads=32 is not divisible by 12, so unlike the 80B family this cannot do
+    TP=12. Accepted deliberately: exp05 measured TP=4 costing 55% of
+    throughput on this stack (340 -> 151 tps at 30B), so TP>2 is not a
+    capability these sizes would spend. TP in {2, 4, 8} divides cleanly.
+
+    Same two caveats as agpt_5b_olmo2tok: the OLMo-2 assets are absent from
+    Aurora and the corpus there is gemma-tokenized, and the LR is
+    uncalibrated and unguarded.
+
+    One risk specific to this rung: the 30B campaign's thesis (README section
+    1.3, exp06) is that a bigger model hides communication better -- more
+    per-rank work per collective. A 10B has ~2.5x less compute per token than
+    the 30B, moving back toward the regime where the 2B collapsed to 8.79% MFU
+    at 512N. Its efficient range is probably 64-128N, which lands in Aurora's
+    queue dead zone: nothing between 8 and 255 nodes runs longer than an hour.
+    Unmeasured either way.
+    """
+    return agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
 def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     """30B with OLMo-2's 100,352 vocab -- see docs/production/agpt/30b-exp/.
 
@@ -1041,6 +1138,15 @@ def agpt_30b_olmo2tok() -> FaultTolerantTrainer.Config:
     does, so the tokenizer and the embedding cannot disagree.
     """
     return agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+
+
+def agpt_30b_olmo2tok_dp12() -> FaultTolerantTrainer.Config:
+    """Fresh 30B variant whose 16,128-wide FFN supports node-local dp_shard=12.
+
+    This is intentionally checkpoint-incompatible with canonical 30B_olmo2tok;
+    it exists to test whether node-local HSDP outweighs the 1.56% FFN reduction.
+    """
+    return agpt("30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
 
 
 # Local fineweb-edu shards for the optimizer comparison. The 80th upstream sync
@@ -1117,12 +1223,14 @@ def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.C
     )
     return cfg
 
+
 def _use_hf_streaming(
     cfg: FaultTolerantTrainer.Config,
     *,
     path: str,
     name: str | None = None,
     split: str = "train",
+    load_dataset_kwargs: dict | None = None,
 ) -> FaultTolerantTrainer.Config:
     """Read an arbitrary Hugging Face dataset by STREAMING it.
 
@@ -1138,9 +1246,30 @@ def _use_hf_streaming(
     "blendcorpus" after the 80th sync deleted the HF delegate -- the
     replacement is exactly this Grain object graph.
 
-    Not for production runs: streaming throughput is network-bound and the
-    shard order is not the deterministic, sorted selection the comparison
-    arms rely on.
+    Not for production runs BY REPO ID: streaming throughput is network-bound
+    and the shard order is not the deterministic, sorted selection the
+    comparison arms rely on.
+
+    ``load_dataset_kwargs`` is the escape hatch that makes this usable at
+    scale. Loading by repo id calls the hub once PER RANK to resolve dataset
+    metadata, and at 384 ranks that is a 429 storm: workers crash, rank 0 then
+    dies at the barrier (jobs 12471848/51/53, zero steps). Offline env vars do
+    not help -- huggingface_hub reads them into module constants at import
+    time, so a runtime HF_HUB_OFFLINE is ignored and a PBS-top one turns the
+    repo-id resolve into OfflineModeIsEnabled instead.
+
+    The fix is to precache once from a login node and then load LOCAL parquet,
+    which makes zero hub calls and works at any rank count::
+
+        _use_hf_streaming(
+            cfg,
+            path="parquet",
+            load_dataset_kwargs={"data_dir": "<snapshot>/data/<subset>"},
+        )
+
+    Verified end-to-end at 32N for open-web-math. The rule that fell out of
+    that debugging: at 100+ ranks never load an HF dataset by repo id, whether
+    streaming or offline.
     """
     cfg.dataloader = GrainDataLoader.Config(
         dataset=ConcatThenSplitPackingConfig(
@@ -1149,6 +1278,7 @@ def _use_hf_streaming(
                     path=path,
                     name=name,
                     split=split,
+                    load_dataset_kwargs=load_dataset_kwargs or {},
                 ),
                 processor=TextProcessor.Config(),
                 post_filters=(lambda sample: sample is not None,),
@@ -1172,6 +1302,193 @@ def agpt_2b_real_stream_c4() -> FaultTolerantTrainer.Config:
     # live hub call there dies with errno 524 / "not cached in None".
     return _use_hf_streaming(
         cfg, path="Salesforce/wikitext", name="wikitext-103-raw-v1"
+    )
+
+
+# Where precache_hf_dataset.py lands an olmo-mix snapshot on Aurora. $HOME
+# rather than /flare: flare was 92% full on 2026-09-17 while $HOME had 12P at
+# 5%, and an existing 2.0T HF cache already lives there.
+_OLMO_MIX_CACHE = (
+    "/home/foremans/.cache/huggingface/hub/"
+    "datasets--allenai--olmo-mix-1124/snapshots"
+)
+
+
+def _olmo_mix_subset_dir(subset: str) -> str:
+    """Local parquet dir for one olmo-mix subset, resolved at call time.
+
+    The snapshot hash is not hardcoded -- precaching again changes it. Resolve
+    the single snapshot dir under the cache instead, and fail loudly if the
+    subset is not there, because the alternative is a config that silently
+    falls back to a hub call and 429s at rank count.
+    """
+    import glob
+    import os
+
+    hits = sorted(glob.glob(os.path.join(_OLMO_MIX_CACHE, "*", "data", subset)))
+    if not hits:
+        raise FileNotFoundError(
+            f"olmo-mix subset {subset!r} is not precached under "
+            f"{_OLMO_MIX_CACHE}. Run scripts/precache_hf_dataset.py first; "
+            "loading by repo id instead will 429 at production rank counts."
+        )
+    return hits[-1]
+
+
+def agpt_5b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """4.64B on precached olmo-mix, for the 2N smoke and the LR finder.
+
+    Reads LOCAL parquet through the Grain path, so TextProcessor tokenizes
+    each sample with OLMo-2 as it streams. That is what makes this runnable on
+    Aurora at all: the on-disk blendcorpus there is gemma-tokenized
+    (data_fused_gemma_eod), and pointing an OLMo-2-vocab model at gemma ids
+    trains to a plausible loss and evaluates as gibberish -- the Polaris 20B
+    failure. Tokenizing raw text inline sidesteps retokenizing a corpus.
+
+    Uses the "wiki" subset: 6.0 GB and 2 files, the cheapest thing to precache
+    that is still real prose. olmo-mix as a whole is 6.97 TB, but 6.72 TB of
+    that is dclm -- everything else together is 243 GB, and a finder run of a
+    few hundred steps does not need the long tail.
+
+    NOT a production data config. The subset is narrow and the mixture is not
+    the production blend; this exists to get a loss curve and an LR, not a
+    model.
+    """
+    cfg = agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """9.48B twin of agpt_5b_olmo2tok_smoke -- same data path, same caveats."""
+    cfg = agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+# Optimizer-comparison arms for the OLMo-2 ladder.
+#
+# One factory instead of 12 near-identical functions. The LRs are deliberately
+# NOT defaults here: each must come from that (size, optimizer) pair's own
+# sweep at GBS=6144. For Mano alone the suggestion spans 4.79e-03 (2B) to
+# ~3e-06 (80B at GBS=6144), so a borrowed number is not an approximation, it
+# is a different experiment. Passing lr explicitly at the call site keeps the
+# provenance visible in the config that ran.
+_LADDER_OPTIMIZER_FACTORIES = {
+    "adamw": default_adamw,
+    "mano": default_mano,
+    "muon": default_muon,
+    "sophiag": default_sophiag,
+}
+
+
+def agpt_olmo2tok_arm(
+    size: str,
+    optimizer: str,
+    *,
+    lr: float,
+    decay: bool = False,
+) -> FaultTolerantTrainer.Config:
+    """One optimizer-comparison arm on the OLMo-2 ladder.
+
+    `size` is "5b" / "10b" / "30b"; `optimizer` keys
+    _LADDER_OPTIMIZER_FACTORIES; `lr` is that pair's measured suggestion at
+    GBS=6144 and has no default on purpose.
+
+    `decay=False` reproduces the 30B campaign's constant-LR protocol, which is
+    what makes the two comparable. `decay=True` is the open question that
+    campaign named and did not answer: the documented prior is "Mano/Muon win
+    short runs, AdamW wins in the cosine decay phase", so a constant-LR result
+    showing Mano ahead is CONSISTENT with that prior rather than a refutation
+    of it. Only the decay arms can distinguish the two.
+
+    Reads the same precached olmo-mix wiki subset as the smoke configs: the
+    on-disk blendcorpus on Aurora is gemma-tokenized, and pointing an
+    OLMo-2-vocab model at gemma ids trains to a plausible loss and evaluates
+    as gibberish.
+    """
+    if optimizer not in _LADDER_OPTIMIZER_FACTORIES:
+        raise ValueError(
+            f"unknown optimizer {optimizer!r}; "
+            f"expected one of {sorted(_LADDER_OPTIMIZER_FACTORIES)}"
+        )
+    if not lr > 0:
+        raise ValueError(f"lr must be positive, got {lr!r}")
+
+    cfg = agpt(f"{size}_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optimizer = _LADDER_OPTIMIZER_FACTORIES[optimizer](lr=lr)
+    if not decay:
+        # Constant after warmup, via the DECAY_RATIO=0 precedent the anneal
+        # arms use: decay_ratio=0.0 makes the decay phase zero steps, and
+        # min_lr_factor=1.0 pins the floor at full LR so any multiplier that
+        # did get computed is a no-op. ("constant" is not a decay_type; the
+        # valid values here are the linear/cosine family.)
+        #
+        # warmup_steps=20 matches the 30B campaign's protocol exactly, which
+        # is what makes these arms comparable to it. Note torchtitan clamps
+        # warmup_steps to total_steps and only WARNS, so a very short arm
+        # silently becomes all-warmup -- the submit script keeps steps far
+        # above 20.
+        cfg.lr_scheduler.warmup_steps = 20
+        cfg.lr_scheduler.decay_ratio = 0.0
+        cfg.lr_scheduler.decay_type = "linear"
+        cfg.lr_scheduler.min_lr_factor = 1.0
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_30b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
+    """26.2B twin of agpt_5b_olmo2tok_smoke -- same data path, same caveats.
+
+    Completes the {5, 10, 30}B ladder on one data path so the three LR finders
+    differ only in geometry. submit_lr_finder_30b_aurora.sh calibrates the
+    GEMMA 30B (agpt_30b, 256k vocab, 28.1B) instead, because the OLMo-2 assets
+    were absent from Aurora when it was written; they are staged now, and that
+    script's own CONFIG note says to re-run against this geometry once they
+    are. The vocab difference is not cosmetic -- it moves 1.9B parameters
+    between the embedding/head and the body, which is exactly the part of the
+    model an LR has to suit.
+    """
+    cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        # "json", not "parquet": olmo-mix ships .json.gz, and the json
+        # packaged builder decompresses transparently. Verified on Aurora
+        # against the precached wiki subset -- zero hub calls, first sample
+        # carries a 2,786-char "text" field.
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_30b_olmo2tok_dp12_smoke() -> FaultTolerantTrainer.Config:
+    """Node-local dp_shard=12 experiment with a 16,128-wide FFN.
+
+    Uses the same OLMo-2 streaming data path as the canonical 30B smoke, but is
+    a fresh architecture and cannot resume canonical 30B checkpoints.
+    """
+    cfg = agpt("30b_olmo2tok_dp12", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
 
@@ -1677,9 +1994,7 @@ def _set_z_loss(
             "Start from a non-chunked flavor."
         )
     vocab = getattr(cfg.loss, "global_vocab_size", None)
-    cfg.loss = CrossEntropyWithZLoss.Config(
-        z_loss_coef=coef, global_vocab_size=vocab
-    )
+    cfg.loss = CrossEntropyWithZLoss.Config(z_loss_coef=coef, global_vocab_size=vocab)
     return cfg
 
 
@@ -1819,30 +2134,7 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 
 
 # Competition speedrun configs — makes them discoverable via --config
-from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401
-    speedrun_2b_adamw,
-    speedrun_2b_adamw_cosine,
-    speedrun_2b_adamw_fast_warmup,
-    speedrun_2b_adamw_high_lr,
-    speedrun_2b_adamw_qknorm,
-    speedrun_2b_adamw_short_decay,
-    speedrun_2b_mano,
-    speedrun_2b_mano_1e3,
-    speedrun_2b_mano_cosine,
-    speedrun_2b_mano_high_lr,
-    speedrun_2b_mano_qknorm,
-    speedrun_2b_muon,
-    speedrun_2b_muon_aggressive,
-    speedrun_2b_muon_cosine,
-    speedrun_2b_muon_fast_warmup,
-    speedrun_2b_muon_qknorm,
-    speedrun_2b_muon_short_decay,
-    speedrun_2b_sophiag,
-    speedrun_2b_spam,
-    speedrun_2b_torchmuon,
-    speedrun_2b_torchmuon_cosine,
-)
-from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401
+from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401  # noqa: E402, F401
     full_2b_adamw,
     full_2b_adamw_qknorm,
     full_2b_mano,
@@ -1866,8 +2158,29 @@ from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F40
     smoke_2b_50steps,
     smoke_2b_async_ckpt,
     smoke_2b_async_ckpt_pinned,
+    speedrun_2b_adamw,
+    speedrun_2b_adamw_cosine,
+    speedrun_2b_adamw_fast_warmup,
+    speedrun_2b_adamw_high_lr,
+    speedrun_2b_adamw_qknorm,
+    speedrun_2b_adamw_short_decay,
     speedrun_2b_kitchen_sink,
+    speedrun_2b_mano,
+    speedrun_2b_mano_1e3,
+    speedrun_2b_mano_cosine,
+    speedrun_2b_mano_high_lr,
     speedrun_2b_mano_kitchen_sink,
+    speedrun_2b_mano_qknorm,
+    speedrun_2b_muon,
+    speedrun_2b_muon_aggressive,
+    speedrun_2b_muon_cosine,
+    speedrun_2b_muon_fast_warmup,
+    speedrun_2b_muon_qknorm,
+    speedrun_2b_muon_short_decay,
     speedrun_2b_relu2,
     speedrun_2b_softcap,
+    speedrun_2b_sophiag,
+    speedrun_2b_spam,
+    speedrun_2b_torchmuon,
+    speedrun_2b_torchmuon_cosine,
 )

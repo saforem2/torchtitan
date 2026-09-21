@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Per-model and combined production overlay charts.
 
 For each configured production trajectory we emit one or two artifacts:
@@ -42,15 +48,15 @@ from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 apply_style()
 
+import wandb  # noqa: E402
+
 # Reuse the W&B fetch + .o-log fallback already proven in
 # plot_production_wandb.py — same data path that feeds the per-trajectory
 # dashboards, so this chart can't diverge from those.
 from torchtitan.experiments.ezpz.utils.plot_production_wandb import (  # noqa: E402
-    PRODUCTION_RUNS,
     concat_runs,
+    PRODUCTION_RUNS,
 )
-
-import wandb  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FIGURES_DIR = REPO_ROOT / "torchtitan/experiments/ezpz/docs/production/figures"
@@ -98,9 +104,9 @@ from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
     OLMO_MIX_1124_TOKENS as STAGE1_2B_TOKENS,
 )
 
-COLOR_2B_MDS      = _pal.COLOR_MDS
-COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
-COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
+COLOR_2B_MDS = _pal.COLOR_MDS
+COLOR_2B_TT_256N = _pal.COLOR_2B_256N
+COLOR_2B_TT_512N = _pal.COLOR_2B_512N
 COLOR_20B_TT_256N = _pal.COLOR_20B_256N
 COLOR_20B_TT_512N = _pal.COLOR_20B_512N
 
@@ -150,6 +156,19 @@ TRAJECTORIES: list[dict] = [
         "token_offset_b": STAGE1_2B_TOKENS / 1e9,
         "color": _pal.COLOR_STAGE2,
         "linestyle": "-",
+        "marker": None,
+    },
+    {
+        # Stage-2 continued pre-training on dolmino-mix-1124, seeded from the
+        # completed stage-1 n256 endpoint. Its W&B step numbering restarts.
+        "model": "2b",
+        "label": "2B-TT v2 stage-2 (n256, dolmino-mix)",
+        "source": "wandb",
+        "key": "2b_v2_256_stage2_dolmino",
+        "tokens_per_step": 6144 * 8192,
+        "token_offset_b": STAGE1_2B_TOKENS / 1e9,
+        "color": COLOR_2B_TT_256N,
+        "linestyle": ":",
         "marker": None,
     },
     {
@@ -297,11 +316,20 @@ def _draw_stage_boundaries(ax, series: list[dict]) -> None:
     for tok_b, label in MDS_STAGE_BOUNDARIES_B:
         if tok_b > x_hi:
             continue  # boundary beyond plotted data -- don't extend the axis
-        ax.axvline(tok_b, color="0.45", linestyle=":", linewidth=1.0,
-                   alpha=0.8, zorder=1)
-        ax.text(tok_b, y_hi - 0.02 * (y_hi - y_lo), f" {label}",
-                rotation=90, va="top", ha="left", fontsize=6.5,
-                color="0.35", alpha=0.9)
+        ax.axvline(
+            tok_b, color="0.45", linestyle=":", linewidth=1.0, alpha=0.8, zorder=1
+        )
+        ax.text(
+            tok_b,
+            y_hi - 0.02 * (y_hi - y_lo),
+            f" {label}",
+            rotation=90,
+            va="top",
+            ha="left",
+            fontsize=6.5,
+            color="0.35",
+            alpha=0.9,
+        )
 
 
 def render_figure(
@@ -323,12 +351,19 @@ def render_figure(
     ax = axes[0]
     for s in series:
         ax.plot(
-            s["tokens_b"], s["loss"],
-            color=s["color"], alpha=0.18, linewidth=0.5, rasterized=True,
+            s["tokens_b"],
+            s["loss"],
+            color=s["color"],
+            alpha=0.18,
+            linewidth=0.5,
+            rasterized=True,
         )
         ax.plot(
-            s["tokens_b"], smooth(s["loss"], window=min(100, max(2, len(s["loss"]) // 20))),
-            color=s["color"], linestyle=s["linestyle"], linewidth=1.8,
+            s["tokens_b"],
+            smooth(s["loss"], window=min(100, max(2, len(s["loss"]) // 20))),
+            color=s["color"],
+            linestyle=s["linestyle"],
+            linewidth=1.8,
             label=_series_label(s),
         )
     ax.set_ylabel("Loss")
@@ -352,12 +387,19 @@ def render_figure(
     ax = axes[1]
     for s in series:
         ax.plot(
-            s["tokens_b"], s["tps"],
-            color=s["color"], alpha=0.18, linewidth=0.5, rasterized=True,
+            s["tokens_b"],
+            s["tps"],
+            color=s["color"],
+            alpha=0.18,
+            linewidth=0.5,
+            rasterized=True,
         )
         ax.plot(
-            s["tokens_b"], smooth(s["tps"], window=min(100, max(2, len(s["tps"]) // 20))),
-            color=s["color"], linestyle=s["linestyle"], linewidth=1.8,
+            s["tokens_b"],
+            smooth(s["tps"], window=min(100, max(2, len(s["tps"]) // 20))),
+            color=s["color"],
+            linestyle=s["linestyle"],
+            linewidth=1.8,
             label=f"{s['label']}",
         )
     ax.set_ylabel("Tokens / sec / GPU")
@@ -372,12 +414,19 @@ def render_figure(
             continue
         have_mfu = True
         ax.plot(
-            s["tokens_b"], s["mfu"],
-            color=s["color"], alpha=0.18, linewidth=0.5, rasterized=True,
+            s["tokens_b"],
+            s["mfu"],
+            color=s["color"],
+            alpha=0.18,
+            linewidth=0.5,
+            rasterized=True,
         )
         ax.plot(
-            s["tokens_b"], smooth(s["mfu"], window=min(100, max(2, len(s["mfu"]) // 20))),
-            color=s["color"], linestyle=s["linestyle"], linewidth=1.8,
+            s["tokens_b"],
+            smooth(s["mfu"], window=min(100, max(2, len(s["mfu"]) // 20))),
+            color=s["color"],
+            linestyle=s["linestyle"],
+            linewidth=1.8,
             label=f"{s['label']}",
         )
     ax.set_ylabel("MFU (%)")
@@ -424,7 +473,8 @@ def _assert_no_missing_live_chains() -> None:
     # guard -- any OTHER live chain that goes missing must still hard-fail.
     _OTHER_MACHINE = {"20b_polaris_128"}
     live = {
-        t["key"] for t in _ALL
+        t["key"]
+        for t in _ALL
         if t.get("cls") == "live" and t["key"] not in _OTHER_MACHINE
     }
     shown = {t.get("key") for t in TRAJECTORIES if t.get("source") == "wandb"}
@@ -458,12 +508,22 @@ def main() -> None:
                 continue
             # Stage-2 chains restart step numbering, so shift them past the
             # tokens their base already consumed (0 for from-scratch chains).
-            tokens_b = (
-                steps * traj["tokens_per_step"] / 1e9 + traj.get("token_offset_b", 0.0)
+            tokens_b = steps * traj["tokens_per_step"] / 1e9 + traj.get(
+                "token_offset_b", 0.0
             )
-            print(f"  {len(steps)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
-            series.append({**traj, "steps": steps, "tokens_b": tokens_b,
-                           "loss": loss, "tps": tps, "mfu": mfu})
+            print(
+                f"  {len(steps)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]"
+            )
+            series.append(
+                {
+                    **traj,
+                    "steps": steps,
+                    "tokens_b": tokens_b,
+                    "loss": loss,
+                    "tps": tps,
+                    "mfu": mfu,
+                }
+            )
         else:  # mds
             # The MDS CSV is gitignored -- that data is pulled from its own
             # W&B project and has never been tracked -- so off-cluster it is
@@ -490,9 +550,19 @@ def main() -> None:
                 )
             iters, loss, tps = load_mds_trajectory(traj["csv_path"])
             tokens_b = iters * traj["tokens_per_step"] / 1e9
-            print(f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]")
-            series.append({**traj, "steps": iters, "tokens_b": tokens_b,
-                           "loss": loss, "tps": tps, "mfu": None})
+            print(
+                f"  {len(iters)} rows, tokens [{tokens_b[0]:.1f}B, {tokens_b[-1]:.1f}B]"
+            )
+            series.append(
+                {
+                    **traj,
+                    "steps": iters,
+                    "tokens_b": tokens_b,
+                    "loss": loss,
+                    "tps": tps,
+                    "mfu": None,
+                }
+            )
 
     # 1) Combined chart (all models)
     print("\n=== rendering all_production_training ===")

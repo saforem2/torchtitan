@@ -26,11 +26,12 @@ def set_ezpz_max_context_length(seq_len: int) -> None:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
+
+from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
 from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
@@ -41,7 +42,6 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import get_attention_config
@@ -190,7 +190,6 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
 
 
 from torchtitan.models.common.activation import BinaryActivationFn
-from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_config
 
 
@@ -219,6 +218,7 @@ class SoftcappedFlexAttention(Module):
         super().__init__()
         self.logit_cap = config.logit_cap
         from torch.nn.attention.flex_attention import flex_attention
+
         self._flex_attention = torch.compile(flex_attention)
 
     # pyrefly: ignore [bad-override]
@@ -257,7 +257,9 @@ class SoftcappedFlexAttention(Module):
             return cap * torch.tanh(score / cap)
 
         out = self._flex_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             score_mod=softcap_mod,
             scale=scale,
             enable_gqa=enable_gqa,
@@ -295,13 +297,13 @@ class ReLUSquaredGLU(BinaryActivationFn):
         del kwargs
         h = F.relu(gate)
         return h * h * up
+
+
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
+from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
+from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
-from torchtitan.experiments.ezpz.agpt.state_dict_adapter import (
-    AgptStateDictAdapter,
-)
-from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
 
 __all__ = [
     "EzpzScaledDotProductAttention",
@@ -556,6 +558,17 @@ agpt_configs = {
         vocab_size=256128,
         hidden_dim=11008,
     ),
+    # Historical 50,304-token AGPT whose smaller embedding/head budget is
+    # reinvested in depth and FFN width.
+    "2B_50K": _build_agpt_config(
+        dim=2048,
+        n_layers=24,
+        n_heads=16,
+        n_kv_heads=4,
+        rope_theta=50000,
+        vocab_size=50304,
+        hidden_dim=10496,
+    ),
     # [ezpz] agpt-2b variant matching the SFT checkpoint-900 HF config exactly
     # (vocab 256000, not the 256128 padding) + fused QKV so GRPO LoRA can target
     # ["wqkv","wo"]. Used by the RL overlay (experiments/ezpz/rl/alphabet_sort_agpt).
@@ -751,6 +764,62 @@ agpt_configs = {
         vocab_size=100352,
         hidden_dim=compute_ffn_hidden_dim(6144, multiple_of=1024),
     ),
+    # Experimental node-local HSDP variant for 12-XPU Aurora/Sunspot nodes.
+    # 16128 = 12 * 1344 and remains 256-aligned for efficient GEMMs. Keep this
+    # separate from 30B_olmo2tok: changing the canonical flavor would make its
+    # existing checkpoints shape-incompatible. Compared with 16384 this removes
+    # 256 FFN channels (1.56%) while allowing dp_shard=12 parameter init.
+    "30B_olmo2tok_dp12": _build_agpt_config(
+        dim=6144,
+        n_layers=64,
+        n_heads=48,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=16128,
+    ),
+    # ---- Aurora-native mid-ladder, OLMo-2 vocab ----
+    #
+    # The size ladder jumped 2B (dim 2048) straight to 20B (dim 5120); the 7B
+    # and 8B in this dict are Llama-geometry ports on foreign vocabs (32000 /
+    # 128256), not members of this family. These two fill that gap with the
+    # same conventions as 20B/30B: head_dim 128, GQA with 8 kv heads,
+    # compute_ffn_hidden_dim at multiple_of=1024.
+    #
+    # Both take OLMo-2's 100,352 vocab for the reason exp07 measured at 30B --
+    # it tied Llama-3.1 on fertility (225,749 vs 225,539 tok/MB) with a 22%
+    # smaller vocab -- and the argument is STRONGER here, because embedding is
+    # a larger share of a smaller model. At dim 3072 gemma's 256,128 vocab
+    # would be ~34% of the parameters; OLMo-2 makes it ~14%.
+    #
+    # Caveat on the mechanism, not the choice: exp07's framing was "freed HBM
+    # converts into batch size". That held because the 30B was pinned at 76.8%
+    # of a 64 GiB tile. These sizes are nowhere near that ceiling, so the vocab
+    # buys parameters and fertility here, not throughput. Do not cite the
+    # throughput half of exp07 for these.
+    "5B_olmo2tok": _build_agpt_config(
+        dim=3072,
+        n_layers=40,
+        n_heads=24,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(3072, multiple_of=1024),
+    ),
+    # dim 4096 puts n_heads at 32, which is NOT divisible by 12, so TP=12 is
+    # unavailable -- the 80B family deliberately picked 72 heads / 12 kv to
+    # keep it. Accepted here: exp05 measured TP=4 costing 55% of throughput on
+    # this stack (340 -> 151 tps), so TP>2 is not a capability these sizes
+    # would use. TP in {2, 4, 8} all divide cleanly.
+    "10B_olmo2tok": _build_agpt_config(
+        dim=4096,
+        n_layers=48,
+        n_heads=32,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=compute_ffn_hidden_dim(4096, multiple_of=1024),
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -892,6 +961,7 @@ agpt_configs = {
 
 # Case-insensitive aliases
 agpt_configs["2b"] = agpt_configs["2B"]
+agpt_configs["2b_50k"] = agpt_configs["2B_50K"]
 agpt_configs["2b_flex_attn"] = agpt_configs["2B_flex_attn"]
 agpt_configs["7b"] = agpt_configs["7B"]
 agpt_configs["8b"] = agpt_configs["8B"]
@@ -899,6 +969,9 @@ agpt_configs["20b"] = agpt_configs["20B"]
 agpt_configs["30b"] = agpt_configs["30B"]
 agpt_configs["30b_llama3tok"] = agpt_configs["30B_llama3tok"]
 agpt_configs["30b_olmo2tok"] = agpt_configs["30B_olmo2tok"]
+agpt_configs["30b_olmo2tok_dp12"] = agpt_configs["30B_olmo2tok_dp12"]
+agpt_configs["5b_olmo2tok"] = agpt_configs["5B_olmo2tok"]
+agpt_configs["10b_olmo2tok"] = agpt_configs["10B_olmo2tok"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]
@@ -983,14 +1056,13 @@ def model_registry(
 ) -> FaultTolerantModelSpec:
     from copy import deepcopy
 
-    from torchtitan.distributed.pipeline_parallel import pipeline_llm
-    from torchtitan.experiments.torchft.diloco import fragment_llm
     # Upstream #4684 (post-sync-84) renamed validate_converter_order ->
     # validate_converter_compatibility. Same one-arg contract: it takes the
     # converter Config list and raises on an incompatible combination.
-    from torchtitan.config.transform.converter import (
-        validate_converter_compatibility,
-    )
+    from torchtitan.config.transform.converter import validate_converter_compatibility
+
+    from torchtitan.distributed.pipeline_parallel import pipeline_llm
+    from torchtitan.experiments.torchft.diloco import fragment_llm
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,

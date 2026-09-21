@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Auto-fill the DETERMINISTIC structured fields in production-tracking
 trajectory READMEs from on-disk checkpoint state (and optionally W&B).
 
@@ -46,9 +52,9 @@ import sys
 from pathlib import Path
 
 from torchtitan.experiments.ezpz.utils.trajectories import (
-    REPO_ROOT,
     by_key,
     live_trajectories,
+    REPO_ROOT,
 )
 
 # Reuse the leaf-field regexes already proven in refresh_docs_readme_table
@@ -63,7 +69,8 @@ LATEST_CKPT_RE = re.compile(
 CUMULATIVE_STEPS_RE = re.compile(
     # tolerate "Cumulative steps", "Cumulative *persisted* steps" (italic),
     # and "Cumulative persisted steps" (plain) -- different pages vary.
-    r"^(?P<label>\*\*Cumulative(?: \*?\w+\*?)? steps:\*\*\s*)(?P<body>.+)$", re.M
+    r"^(?P<label>\*\*Cumulative(?: \*?\w+\*?)? steps:\*\*\s*)(?P<body>.+)$",
+    re.M,
 )
 TOKENS_RE = re.compile(
     r"^(?P<label>\*\*Tokens consumed(?: \(persisted\))?:\*\*\s*)(?P<body>.+)$", re.M
@@ -176,10 +183,10 @@ def _replace_step_token(body: str, step: int) -> str:
         return body
     had_comma = "," in m.group(1)
     # Preserve bold-inside-token if the original had it.
-    bold = body[m.start():m.end()].count("**") >= 2
+    bold = body[m.start() : m.end()].count("**") >= 2
     new_num = _fmt_int(step, comma=had_comma)
     new_tok = f"step-**{new_num}**" if bold else f"step-{new_num}"
-    return body[: m.start()] + new_tok + body[m.end():]
+    return body[: m.start()] + new_tok + body[m.end() :]
 
 
 def _read_step_from_body(body: str) -> int | None:
@@ -206,6 +213,12 @@ def fill_one(
     """
     changes: list[FieldChange] = []
     warns: list[str] = []
+    if not traj.get("auto_fill_leaf", True):
+        warns.append(
+            f"{traj['key']}: shares README with another trajectory; "
+            "leaf fields are not owned by this record"
+        )
+        return changes, warns
     readme = REPO_ROOT / traj["readme"]
     if not readme.is_file():
         warns.append(f"{traj['key']}: README not found at {traj['readme']}")
@@ -260,19 +273,28 @@ def fill_one(
                 )
             new_body = _replace_step_token(m.group("body"), step)
             if new_body != m.group("body"):
-                changes.append(FieldChange("Latest checkpoint", m.group("body"), new_body))
-                new_text = new_text[: m.start("body")] + new_body + new_text[m.end("body"):]
+                changes.append(
+                    FieldChange("Latest checkpoint", m.group("body"), new_body)
+                )
+                new_text = (
+                    new_text[: m.start("body")] + new_body + new_text[m.end("body") :]
+                )
 
     # --- Cumulative steps: the bare number ---
     m = CUMULATIVE_STEPS_RE.search(new_text)
     if m:
         body = m.group("body")
-        stated = _read_step_from_body("step-" + body) if re.match(r"[\d,]+", body) else None
+        stated = (
+            _read_step_from_body("step-" + body) if re.match(r"[\d,]+", body) else None
+        )
         new_num = _fmt_int(step, comma=("," in body))
         # Replace only the leading number token, keep any trailing prose.
-        nb = re.sub(r"^\*{0,2}[\d,]+\*{0,2}", lambda mm: (
-            f"**{new_num}**" if mm.group(0).count("**") >= 2 else new_num
-        ), body, count=1)
+        nb = re.sub(
+            r"^\*{0,2}[\d,]+\*{0,2}",
+            lambda mm: (f"**{new_num}**" if mm.group(0).count("**") >= 2 else new_num),
+            body,
+            count=1,
+        )
         guard_skip = (
             stated is not None
             and stated > step
@@ -284,7 +306,7 @@ def fill_one(
             )
         elif nb != body:
             changes.append(FieldChange("Cumulative steps", body, nb))
-            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body") :]
 
     # --- Tokens consumed: rebuild "N x GBS x SEQ = TOK (PCT of TARGET)"
     # PRESERVING the file's existing decimal precision (no 3.07->3.070
@@ -297,11 +319,20 @@ def fill_one(
         tok_old = re.search(r"([\d.]+)\s*([TB])\s*tokens", body)
         pct_old = re.search(r"([\d.]+)\s*%", body)
         t_dec = _decimals_in(tok_old.group(1)) if tok_old else 3
-        b_dec = _decimals_in(tok_old.group(1)) if (tok_old and tok_old.group(2) == "B") else 1
+        b_dec = (
+            _decimals_in(tok_old.group(1))
+            if (tok_old and tok_old.group(2) == "B")
+            else 1
+        )
         pct_dec = _decimals_in(pct_old.group(1)) if pct_old else 1
         tok_str2, pct2 = format_tokens(
-            step, gbs, traj["seq_len"], traj["token_target"],
-            t_decimals=t_dec, b_decimals=b_dec, pct_decimals=pct_dec,
+            step,
+            gbs,
+            traj["seq_len"],
+            traj["token_target"],
+            t_decimals=t_dec,
+            b_decimals=b_dec,
+            pct_decimals=pct_dec,
         )
         step_comma = _fmt_int(step, comma=True)
         gbs_comma = _fmt_int(gbs, comma=True)
@@ -318,7 +349,7 @@ def fill_one(
         # Preserve anything AFTER the first ")" that closes the percent
         # parenthetical (a trailing prose clause). Find that close-paren.
         close_idx = body.find(")")
-        remainder = body[close_idx + 1:] if close_idx != -1 else ""
+        remainder = body[close_idx + 1 :] if close_idx != -1 else ""
         nb = (
             f"{step_comma} x {gbs_comma} x {seq_comma} = "
             f"{tok_render} ({pct_render}{of_text})" + remainder
@@ -327,7 +358,7 @@ def fill_one(
             nb = nb.replace(" x ", " × ")
         if nb != body:
             changes.append(FieldChange("Tokens consumed", body, nb))
-            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+            new_text = new_text[: m.start("body")] + nb + new_text[m.end("body") :]
 
     # --- Loss: only with --wandb ---
     if wandb_loss is not None:
@@ -337,18 +368,18 @@ def fill_one(
             lm = LEADING_NUM_RE.match(body)
             if lm:
                 new_loss = f"{wandb_loss:.5g}"
-                nb = new_loss + body[lm.end():]
+                nb = new_loss + body[lm.end() :]
                 if nb != body:
                     changes.append(FieldChange("Loss", body, nb))
-                    new_text = new_text[: m.start("body")] + nb + new_text[m.end("body"):]
+                    new_text = (
+                        new_text[: m.start("body")] + nb + new_text[m.end("body") :]
+                    )
 
     # --- Last updated date ---
     m = LAST_UPDATED_RE.search(new_text)
     if m and m.group("date") != today:
         changes.append(FieldChange("Last updated", m.group("date"), today))
-        new_text = (
-            new_text[: m.start("date")] + today + new_text[m.end("date"):]
-        )
+        new_text = new_text[: m.start("date")] + today + new_text[m.end("date") :]
     elif not m:
         warns.append(
             f"{traj['key']}: no standalone '> Last updated:' line "
@@ -411,9 +442,8 @@ def _wandb_latest_loss(traj: dict) -> float | None:
 ROLLUP_PAGES = [
     "torchtitan/experiments/ezpz/docs/production/agpt/2b/README.md",
     "torchtitan/experiments/ezpz/docs/production/agpt/20b/README.md",
-    # The top-level dashboard: its per-model rollup tables are Shape B and its
-    # status-at-a-glance table is Shape C (see _rewrite_rollup_row). Both are
-    # handled cell-by-index so the differing schema is not mangled.
+    # Only dashboard rows with an exact leaf README link are eligible. Its
+    # linkless model/node rows are intentionally left to manual maintenance.
     "torchtitan/experiments/ezpz/docs/production/README.md",
 ]
 
@@ -427,7 +457,7 @@ def _canon_readme(repo_rel: str) -> str:
     but differ in the model segment)."""
     marker = "docs/"
     i = repo_rel.find(marker)
-    return repo_rel[i + len(marker):] if i != -1 else repo_rel
+    return repo_rel[i + len(marker) :] if i != -1 else repo_rel
 
 
 def _resolve_rollup_link(page_rel: str, link: str) -> str:
@@ -436,7 +466,7 @@ def _resolve_rollup_link(page_rel: str, link: str) -> str:
     rollup's repo-relative path; ``link`` is the (possibly relative)
     link target from the table row (e.g. 'n256/README.md',
     'agpt/2b/n256/README.md', or '2b/n256/README.md')."""
-    page_docs = _canon_readme(page_rel)           # e.g. production/agpt/2b/README.md
+    page_docs = _canon_readme(page_rel)  # e.g. production/agpt/2b/README.md
     page_dir = "/".join(page_docs.split("/")[:-1])  # production/agpt/2b
     # Resolve link relative to the page's directory, collapsing any '../'.
     parts = (page_dir.split("/") if page_dir else []) + link.split("/")
@@ -479,8 +509,13 @@ def _compute_disk_values(traj: dict) -> dict | None:
         if pct_old:
             pct_dec = _decimals_in(pct_old.group(1))
     tok_str, pct = format_tokens(
-        step, gbs, traj["seq_len"], traj["token_target"],
-        t_decimals=t_dec, b_decimals=b_dec, pct_decimals=pct_dec,
+        step,
+        gbs,
+        traj["seq_len"],
+        traj["token_target"],
+        t_decimals=t_dec,
+        b_decimals=b_dec,
+        pct_decimals=pct_dec,
     )
     # Loss: read the leaf's **Loss:** field if present (leading number).
     loss_str = None
@@ -492,9 +527,7 @@ def _compute_disk_values(traj: dict) -> dict | None:
     return {"step": step, "tokens": tok_str, "pct": pct, "loss": loss_str}
 
 
-def propagate_to_rollups(
-    trajs: list[dict], *, dry_run: bool
-) -> tuple[int, list[str]]:
+def propagate_to_rollups(trajs: list[dict], *, dry_run: bool) -> tuple[int, list[str]]:
     """Update rollup Snapshot table rows from each live trajectory's
     disk-authoritative values. Rewrites ONLY the step/loss/tokens numeric
     cells of the row that links to a given leaf README; the Status/
@@ -503,15 +536,24 @@ def propagate_to_rollups(
     """
     # Build {canonical-docs-rel README: values} -- keyed so 2B-256N and
     # 20B-256N never collide.
-    vals: dict[str, dict] = {}
-    vals_by_mn: dict[tuple[str, int], dict] = {}
+    vals: dict[str, tuple[dict, dict]] = {}
+    ambiguous: set[str] = set()
+    warns: list[str] = []
     for t in trajs:
+        if not t.get("auto_fill_rollups", True):
+            continue
         v = _compute_disk_values(t)
         if v:
-            vals[_canon_readme(t["readme"])] = v
-            vals_by_mn[(t["model"].lower(), t["num_nodes"])] = v
+            key = _canon_readme(t["readme"])
+            if key in vals or key in ambiguous:
+                warns.append(
+                    f"duplicate rollup owner for {key}; skipping ambiguous trajectories"
+                )
+                vals.pop(key, None)
+                ambiguous.add(key)
+            else:
+                vals[key] = (t, v)
     n_changed = 0
-    warns: list[str] = []
 
     for page_rel in ROLLUP_PAGES:
         page = REPO_ROOT / page_rel
@@ -527,40 +569,22 @@ def propagate_to_rollups(
         out: list[str] = []
         changed_here = False
         for line in lines:
-            # Process table rows that either link a leaf README (Shape A/B/C)
-            # OR lead with `| Model | Nodes |` (Shape D dashboard rollups whose
-            # only link is an experiments report, not a leaf README).
-            _looks_rollup = re.match(
-                r"\|\s*(?:2B|20B|80B)\s*\|\s*\d+\s*\|", line, re.I
-            )
-            if not line.lstrip().startswith("|") or (
-                "README.md)" not in line and not _looks_rollup
-            ):
+            # Require the exact leaf README link. Model/node pairs are not
+            # unique: base, stage-2, and fork trajectories can share them.
+            if not line.lstrip().startswith("|") or "README.md)" not in line:
                 out.append(line)
                 continue
             # Resolve THIS row's leaf link to the same canonical key.
             link_m = re.search(r"\]\(([^)]*?n\d+/README\.md)\)", line)
-            v = None
+            owner = None
             if link_m:
-                v = vals.get(_resolve_rollup_link(page_rel, link_m.group(1)))
-            if v is None:
-                # Dashboard rollup rows (Shape D) carry no leaf link -- their
-                # job link points at an experiments report. Match them by the
-                # leading `| Model | Nodes |` cells instead.
-                mn = re.match(
-                    r"\|\s*(2B|20B|80B)\s*\|\s*(\d+)\s*\|", line, re.I
-                )
-                _is_shape_d = False
-                if mn:
-                    v = vals_by_mn.get((mn.group(1).lower(), int(mn.group(2))))
-                    _is_shape_d = v is not None
-            else:
-                _is_shape_d = False
-            if v is None:
+                owner = vals.get(_resolve_rollup_link(page_rel, link_m.group(1)))
+            if owner is None:
                 out.append(line)
                 continue
-            new_line = _rewrite_rollup_row(
-                line, v, skip_loss=_page_skip_loss, force_shape_b=_is_shape_d
+            traj, v = owner
+            new_line = _rewrite_rollup_row_for_trajectory(
+                line, traj, v, skip_loss=_page_skip_loss
             )
             if new_line != line:
                 out.append(new_line)
@@ -582,11 +606,11 @@ def _rewrite_rollup_row(
     table row, preserving every other cell (esp. the Status narrative)
     and the row's existing bold / comma / '~' / '(persisted)' styling.
 
-    Two row shapes are handled:
+    Three linked row shapes are handled:
       A. model-rollup:  | [name](nN/README.md) ... | <status> | **STEP** | **LOSS** | **TOK (PCT)** |
       B. top-level:     | Model | N | **STEP** (persisted) | **LOSS** | **TOK** (PCT) | [job](..nN/README.md) | <status> |
-    We edit cells by matching the numeric *content* with anchored regexes
-    rather than by column index, so both shapes work.
+      C. dashboard:     | [trajectory](nN/README.md) | state | step | loss | pct | trend |
+    We edit only the expected cells and anchor each scalar replacement.
     """
     step_comma = f"{v['step']:,}"
 
@@ -594,25 +618,37 @@ def _rewrite_rollup_row(
         # Replace a leading bold-or-plain integer (the cumulative step),
         # keep any '(persisted)' / suffix text.
         return re.sub(
-            r"(\*{0,2})[\d,]+(\*{0,2})",
+            r"^(\s*\*{0,2})[\d,]+(\*{0,2})(?=\s*(?:\(|$))",
             lambda m: f"{m.group(1)}{step_comma}{m.group(2)}",
-            cell, count=1,
+            cell,
+            count=1,
         )
 
     def sub_loss(cell: str) -> str:
         if v["loss"] is None:
             return cell
         return re.sub(
-            r"(\*{0,2})[\d.]+(\*{0,2})",
+            r"^(\s*\*{0,2})[\d.]+(\*{0,2})(?=\s*(?:\(|$))",
             lambda m: f"{m.group(1)}{v['loss']}{m.group(2)}",
-            cell, count=1,
+            cell,
+            count=1,
         )
 
     def sub_tokens(cell: str) -> str:
         # Replace "X.XXT" / "X.XB" and the "(YY.Y%)" while keeping ~, bold,
         # 'of ...' text, and any surrounding words.
-        c = re.sub(r"[\d.]+\s*[TB]", v["tokens"], cell, count=1)
-        c = re.sub(r"[\d.]+\s*%", v["pct"], c, count=1)
+        c = re.sub(
+            r"^(\s*(?:\*\*~|~|\*\*)?)[\d.]+\s*[TB]",
+            lambda m: f"{m.group(1)}{v['tokens']}",
+            cell,
+            count=1,
+        )
+        c = re.sub(
+            r"(\(\s*\*{0,2})[\d.]+\s*%",
+            lambda m: f"{m.group(1)}{v['pct']}",
+            c,
+            count=1,
+        )
         return c
 
     cells = line.split("|")
@@ -622,8 +658,8 @@ def _rewrite_rollup_row(
         None,
     )
     if force_shape_b:
-        # Dashboard rollup row matched by (Model, Nodes) -- no leaf link, but
-        # the numeric cells are the Shape B positions (step=3, loss=4, tok=5).
+        # Legacy direct callers may identify Shape B themselves. Propagation
+        # never uses this for linkless rows because model/node is ambiguous.
         if len(cells) >= 6:
             cells[3] = sub_step(cells[3])
             if not skip_loss:
@@ -643,13 +679,19 @@ def _rewrite_rollup_row(
         and len(cells) >= 7
         and _bare_step.match(cells[3])
         and "%" in cells[5]
+        and not re.search(r"[\d.]\s*[TB]", cells[5])
     )
     if is_shape_c:
         cells[3] = sub_step(cells[3])
         if not skip_loss:
             cells[4] = sub_loss(cells[4])
         # % target only (no tokens column here); reuse the pct sub.
-        cells[5] = re.sub(r"[\d.]+\s*%", v["pct"], cells[5], count=1)
+        cells[5] = re.sub(
+            r"^(\s*\*{0,2})[\d.]+\s*%",
+            lambda m: f"{m.group(1)}{v['pct']}",
+            cells[5],
+            count=1,
+        )
         return "|".join(cells)
 
     if link_idx <= 2:
@@ -672,6 +714,26 @@ def _rewrite_rollup_row(
     return "|".join(cells)
 
 
+def _rewrite_rollup_row_for_trajectory(
+    line: str,
+    traj: dict,
+    values: dict,
+    *,
+    skip_loss: bool = False,
+    force_shape_b: bool = False,
+) -> str:
+    """Rewrite a row only when its trajectory identity is unambiguous."""
+    if not traj.get("auto_fill_rollups", True):
+        return line
+    if force_shape_b:
+        # Rows without a trajectory link cannot be identified exactly: a base,
+        # continuation, and fork may all have the same model/node cells.
+        return line
+    return _rewrite_rollup_row(
+        line, values, skip_loss=skip_loss, force_shape_b=force_shape_b
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--dry-run", action="store_true", help="print diffs, don't write")
@@ -683,7 +745,8 @@ def main() -> int:
         "otherwise used.",
     )
     ap.add_argument(
-        "--no-rollups", action="store_true",
+        "--no-rollups",
+        action="store_true",
         help="skip propagating leaf values into rollup Snapshot tables",
     )
     args = ap.parse_args()

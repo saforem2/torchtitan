@@ -14,31 +14,25 @@ import ezpz.distributed
 
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
+
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.observability.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
 from torchtitan.config.transform.quantization import (
     Float8GroupedExpertsConverter,
     Float8LinearConverter,
 )
-from torchtitan.config import (
-    CommConfig,
-    CompileConfig,
-    DebugConfig,
-    ParallelismConfig,
-    TrainingConfig,
-)
+from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
-from torchtitan.distributed.activation_checkpoint import FullAC
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
 
@@ -71,6 +65,29 @@ def _apply_config_overrides(
     for key, value in overrides.items():
         if not hasattr(target, key):
             raise KeyError(f"Unknown config field {key!r} at path {path or '<root>'}.")
+
+        # keep_latest_k > 0 makes torchtitan's _purge_stale_checkpoints()
+        # delete every prior step-* dir on every save, irreversibly. One
+        # accidental override cost ~334 chain checkpoints on 2026-05-25
+        # (job 8505252).
+        #
+        # The submit scripts already guard the CKPT_KEEP_LATEST_K env var,
+        # but a JSON config sets the field directly and never passes through
+        # that check -- which is how two 50k-step 256-node configs arrived
+        # in moe_runs/ with keep_latest_k=2 (98 of 100 checkpoints deleted
+        # per run). Guard the JSON path too.
+        #
+        # Deliberately a hard error, not a clamp: silently rewriting a
+        # value the operator asked for is how the original loss looked
+        # like it had been configured on purpose.
+        if key == "keep_latest_k" and value not in (0, None):
+            raise ValueError(
+                f"keep_latest_k={value!r} at path {path or '<root>'} would "
+                "delete all but the newest checkpoints on every save. Use 0 "
+                "(keep all). If you genuinely want rotation, do it on a "
+                "separate experiment with its own checkpoint folder, never "
+                "on a canonical chain."
+            )
 
         current_value = getattr(target, key)
         field_path = f"{path}.{key}" if path else key
@@ -364,9 +381,7 @@ def moe_671b() -> FaultTolerantTrainer.Config:
             # The head module is named `lm_head`; the old `output` name matches
             # nothing, so the precision-sensitive LM head was silently quantized
             # to fp8. Replayed from upstream deepseek_v3 fix #4008 (2026-07-29).
-            Float8LinearConverter.Config(
-                filter_fqns=["lm_head", "router.gate"]
-            ),
+            Float8LinearConverter.Config(filter_fqns=["lm_head", "router.gate"]),
             Float8GroupedExpertsConverter.Config(),
         ],
     )
@@ -399,6 +414,52 @@ def _set_moe_compute_backend(spec, backend: str) -> None:
             layer_cfg.moe.routed_experts.inner_experts.compute_backend = backend
 
 
+def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer.Config:
+    """Build a scale-ladder flavor for BMM/Sonic diagnosis.
+
+    The 2B/4B/7B models have 24/24/36 experts, respectively. Keep LBS=1 and AC
+    off: these probes isolate model/graph and EP scale without recomputation or
+    vocab-projection memory pressure.
+    """
+    cfg = moe(flavor, local_batch_size=1, activation_checkpoint_mode="none")
+    cfg.model_spec = model_registry(flavor, moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model_spec, backend)
+    cfg.parallelism.expert_parallel_degree = ep
+    return cfg
+
+
+def moe_2b_bmm_ep2() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "bmm", 2)
+
+
+def moe_2b_sonic_ep2() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "aurora_full_sonic", 2)
+
+
+def moe_2b_bmm_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "bmm", 12)
+
+
+def moe_2b_sonic_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("2B", "aurora_full_sonic", 12)
+
+
+def moe_4b_bmm_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("4B", "bmm", 12)
+
+
+def moe_4b_sonic_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("4B", "aurora_full_sonic", 12)
+
+
+def moe_7b_bmm_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("7B", "bmm", 12)
+
+
+def moe_7b_sonic_ep12() -> FaultTolerantTrainer.Config:
+    return _intermediate_ep("7B", "aurora_full_sonic", 12)
+
+
 def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
     # EP=1 bmm-expert-backend variant of moe_10b_2b_sdpa. Selects the
     # batched-bmm expert compute (padded (E, cap, D) -> 3 torch.bmm) instead
@@ -410,6 +471,8 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
 
 
 ""
+
+
 def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
     # for_loop experts + hybridep comm backend (dispatch/compute overlap) at EP=12.
     cfg = moe_10b_2b_sdpa()
@@ -441,6 +504,51 @@ def moe_10b_2b_sdpa_bmm_ep_cf075() -> FaultTolerantTrainer.Config:
 
 def moe_10b_2b_sdpa_bmm_ep_cf050() -> FaultTolerantTrainer.Config:
     return _bmm_ep_cf(0.5)
+
+
+def moe_debugmodel_sonic() -> FaultTolerantTrainer.Config:
+    """EP=2 debugmodel on the aurora_full_sonic expert backend.
+
+    Smallest config that can exercise sonic: the backend performs its own
+    expert-parallel all-to-all, so EP>1 is mandatory. Pair with
+    ``activation-checkpoint:none`` and AURORA_MOE_ALLTOALLV=1.
+
+    Feasibility (docs/experiments/sonic-port-feasibility.md): EP>1 runs on
+    torch 2.15 (job 8836014) and torchtitan's EP rank order matches
+    aurora_moe's rank = dp_rank * EP + ep_rank at EP=2/8/12 (job 8836277).
+    """
+    cfg = moe_debugmodel_ep()
+    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    return cfg
+
+
+def moe_10b_2b_sdpa_sonic_ep() -> FaultTolerantTrainer.Config:
+    """EP=12 10B/2B on aurora_full_sonic -- the performance configuration.
+
+    Mirrors moe_10b_2b_sdpa_bmm_ep (EP=12, standard comm backend) with the
+    sonic backend swapped in, so the two are directly comparable for timing.
+    """
+    cfg = moe_10b_2b_sdpa_bmm_ep()
+    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    return cfg
+
+
+def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
+    """Full-Sonic counterpart to the retained dense AGPT 2B/50K run."""
+    cfg = moe(
+        "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic",
+        local_batch_size=1,
+        activation_checkpoint_mode="none",
+        seq_len=2048,
+        compile=False,
+        hf_assets_path="./assets/hf/llama-2-32k-sp",
+    )
+    cfg.parallelism.expert_parallel_degree = 12
+    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.checkpoint.keep_latest_k = 0
+    return cfg
 
 
 def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
@@ -503,8 +611,7 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     # AC=full still recomputes a different routing each pass; the
     # shape divergence is fundamental until AC saves the routing
     # result instead of recomputing it.
-    cfg = moe("10B_2B_sdpa", local_batch_size=1,
-              activation_checkpoint_mode="selective")
+    cfg = moe("10B_2B_sdpa", local_batch_size=1, activation_checkpoint_mode="selective")
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
@@ -555,6 +662,10 @@ def moe_16b_from_json() -> FaultTolerantTrainer.Config:
 
 def moe_10b_2b_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json(moe_10b_2b)
+
+
+def agpt_2b_50k_moe_sdpa_aurora_full_sonic_from_json() -> FaultTolerantTrainer.Config:
+    return _config_from_json(agpt_2b_50k_moe_sdpa_aurora_full_sonic)
 
 
 def moe_671b_from_json() -> FaultTolerantTrainer.Config:

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """BlendCorpus must yield the flat [T] token layout that #4121 requires.
 
 Upstream PR #4121 ("fold batch dim", 80th sync) moved the LM stack to a flat
@@ -19,6 +25,8 @@ were verified against the real code paths rather than assumed:
 These run on CPU with no GPU, no corpus, and no blendcorpus package: they
 exercise the arithmetic of the shipped reshape ops directly.
 """
+
+from types import SimpleNamespace
 
 import torch
 
@@ -127,3 +135,50 @@ class TestPositionsRequireFlatLayout:
             "unfolded positions yield negative document ids -- wrong masking "
             "with no exception, which is why the fold covers positions too"
         )
+
+
+class TestCheckpointConsumption:
+    """Checkpoint state must describe the batch already handed to the trainer."""
+
+    @staticmethod
+    def _loader_cls():
+        from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
+            BlendCorpusDataLoader,
+        )
+
+        return BlendCorpusDataLoader
+
+    def test_consumed_samples_advance_before_generator_suspends(self):
+        loader = object.__new__(self._loader_cls())
+        loader._delegate = None
+        loader._emit_positions = False
+        loader._eod_token_id = None
+        loader._consumed_samples = 0
+        loader._bc_cfg = SimpleNamespace(global_batch_size=12)
+        loader._loader = iter([{"text": torch.tensor([[10, 11, 12], [20, 21, 22]])}])
+
+        batch = next(iter(loader))
+
+        input_ids = batch["input"]
+        assert isinstance(input_ids, torch.Tensor)
+        assert input_ids.tolist() == [10, 11, 20, 21]
+        assert loader.state_dict() == {"consumed_samples": 12}
+
+    def test_load_rebuilds_sampler_at_saved_global_offset(self):
+        loader = object.__new__(self._loader_cls())
+        loader._delegate = None
+        loader._consumed_samples = 0
+        loader._served_ds = object()
+        loader._bc_cfg = SimpleNamespace(global_batch_size=12)
+        calls = []
+
+        def rebuild(dataset, consumed, config):
+            calls.append((dataset, consumed, config))
+            return f"loader-at-{consumed}"
+
+        loader._build_pretraining_data_loader = rebuild
+        loader.load_state_dict({"consumed_samples": 12})
+
+        assert loader._consumed_samples == 12
+        assert loader._loader == "loader-at-12"
+        assert calls == [(loader._served_ds, 12, loader._bc_cfg)]

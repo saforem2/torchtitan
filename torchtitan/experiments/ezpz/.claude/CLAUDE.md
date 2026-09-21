@@ -2,6 +2,14 @@
 
 ## Golden Rules
 
+0. **Before submitting ANY PBS/Slurm job, load the `alcf-job-preflight`
+   skill** (`.claude/skills/alcf-job-preflight/`). It carries the settings a
+   hand-written job script omits -- `ZE_FLAT_DEVICE_HIERARCHY=FLAT`,
+   `#!/bin/bash --login`, `activation-checkpoint:none` as a SUBCOMMAND, shared
+   filesystems vs node-local `/tmp` -- plus the login-node dry-run that catches
+   API errors without a queue round-trip. Nine jobs were lost in one session to
+   these; eight were the script, not the system.
+
 1. **Never modify code outside `experiments/ezpz/`.** All changes stay here.
    If upstream core doesn't support something, work around it in ezpz.
 

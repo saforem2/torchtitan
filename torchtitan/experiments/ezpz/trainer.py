@@ -10,7 +10,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 import ezpz
 
@@ -19,28 +19,35 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 from torchtitan.components.data.loader import DataloaderExhaustedError
 from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
-from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
-from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz import signal_stop
-from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
+from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
+from torchtitan.experiments.ezpz.native_ddp import (
+    install_agpt_dtype_probe,
+    native_ddp_autocast_context,
+    validate_native_ddp,
+    wrap_native_ddp,
+    wrap_native_ddp_loss,
+)
+from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
-    TorchFTManager as FTManager,
     maybe_semi_sync_training,
+    TorchFTManager as FTManager,
 )
 from torchtitan.experiments.torchft.optimizer import (
     TorchFTOptimizersContainer as FTOptimizersContainer,
 )
+from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
-from torchtitan.experiments.ezpz.logging import logger
-from torchtitan.observability.profiler import Profiler
 from torchtitan.trainer import Trainer
 
 
@@ -64,7 +71,6 @@ def _clip_foreach() -> bool:
         _CLIP_FOREACH_LOGGED = True
         logger.info("EZPZ_CLIP_NO_FOREACH active: clip_grad foreach=%s", foreach)
     return foreach
-
 
 
 def _set_pg_timeouts_xpu_aware(
@@ -119,9 +125,7 @@ def _set_pg_timeouts_xpu_aware(
         c10d._set_pg_timeout(timeout, group)
 
     xpu_device = torch.device("xpu")
-    if not (
-        torch.distributed.is_xccl_available() and torch.xpu.is_available()
-    ):
+    if not (torch.distributed.is_xccl_available() and torch.xpu.is_available()):
         return
 
     from torch._C._distributed_c10d import ProcessGroupXCCL
@@ -152,6 +156,20 @@ class FaultTolerantTrainer(Trainer):
     class Config(Trainer.Config):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
         lr_finder: LRFinderConfig = field(default_factory=LRFinderConfig)
+
+        # Redeclare `parallelism` with the ezpz subclass so the native-DDP
+        # knobs exist without adding them to core ParallelismConfig. The
+        # upstream Aurora MoE branch puts these five fields in core; we do
+        # not need to, because the call sites were inverted into this file
+        # (see wrap_native_ddp below) and nothing in core ever reads them.
+        #
+        # tyro builds its CLI from the default_factory rather than the
+        # annotation, so this alone makes `--parallelism.native-ddp-*`
+        # parse. The subclass passes isinstance(ParallelismConfig), so every
+        # core annotation still accepts it.
+        parallelism: EzpzParallelismConfig = field(
+            default_factory=EzpzParallelismConfig
+        )
 
         # Batch-size ramp (analogous to LR warmup, but for global batch
         # size). Ramps the effective gradient-accumulation count -- and
@@ -304,9 +322,9 @@ class FaultTolerantTrainer(Trainer):
         torch._C._log_api_usage_once("torchtitan.train")
 
         self.config = config
-        assert config.model_spec is not None, (
-            "model_spec must be set before creating Trainer"
-        )
+        assert (
+            config.model_spec is not None
+        ), "model_spec must be set before creating Trainer"
         model_spec = config.model_spec
 
         device_module, device_type = utils.device_module, utils.device_type
@@ -415,7 +433,7 @@ class FaultTolerantTrainer(Trainer):
             num_tokens_per_batch=(
                 config.training.num_tokens_per_microbatch_per_dp_rank
             ),
-            # train_step pulls gas * num_pipeline_parallel_microbatches batches
+            # train_step pulls gas * num_pp_microbatches batches
             # per optimizer step, so the dataloader must be sized for that many
             # -- not the raw step count. Without the PP factor the iterator runs
             # dry mid-run ("Ran out of data") and a later microbatch group comes
@@ -423,13 +441,11 @@ class FaultTolerantTrainer(Trainer):
             # "Expecting N arg_mbs but got M". The factor is 1 when PP is off,
             # so this is unchanged for every non-PP run. (Upstream applies the
             # same product to snapshot_every_n_steps, torchtitan/trainer.py.)
-            # (computed locally: self.num_pipeline_parallel_microbatches is not
+            # (computed locally: self.num_pp_microbatches is not
             # assigned until later in __init__, after the dataloader is built.)
             training_steps=config.training.steps * _num_pp_microbatches,
             # Sequences, not tokens -- see the conversion above.
-            global_batch_size=(
-                config.training.num_tokens_per_train_step // _seq_len
-            ),
+            global_batch_size=(config.training.num_tokens_per_train_step // _seq_len),
             parallel_dims=parallel_dims,
         )
 
@@ -466,6 +482,7 @@ class FaultTolerantTrainer(Trainer):
         # if ezpz.distributed.asni
         if ezpz.distributed.verify_wandb():
             import wandb
+
             if wandb.run is not None:
                 wandb.run.watch(model, log="all")
 
@@ -477,6 +494,7 @@ class FaultTolerantTrainer(Trainer):
 
         # Check if any quantization converter is on the model_config
         from torchtitan.quantization.utils import has_quantization as _has_quantization
+
         has_quantization = _has_quantization(model_config)
 
         # metrics logging (FT addition: ft_enable, ft_replica_id)
@@ -495,18 +513,22 @@ class FaultTolerantTrainer(Trainer):
         (
             model_param_count,
             self.metrics_processor.num_flops_per_token,
-        ) = model_config.get_nparams_and_flops(model, config.training.max_context_length)
+        ) = model_config.get_nparams_and_flops(
+            model, config.training.max_context_length
+        )
 
         heading = 80 * "="
         logger.info(
-            "\n".join([
-                "\n",
-                f"{heading}",
-                f"{color.blue}Model: {model_spec.name} {model_spec.flavor} ",
-                f"{color.red}config: {model_param_count:,} total parameters{color.reset}",
-                f"{heading}",
-                "\n",
-            ])
+            "\n".join(
+                [
+                    "\n",
+                    f"{heading}",
+                    f"{color.blue}Model: {model_spec.name} {model_spec.flavor} ",
+                    f"{color.red}config: {model_param_count:,} total parameters{color.reset}",
+                    f"{heading}",
+                    "\n",
+                ]
+            )
         )
         # logger.info(
         #     "\n" + 80 * "="
@@ -541,8 +563,7 @@ class FaultTolerantTrainer(Trainer):
         # subtly different GAS here would change the effective batch of every
         # run without failing anything.
         num_tokens_per_dp_rank = (
-            config.training.num_tokens_per_microbatch_per_dp_rank
-            * _num_pp_microbatches
+            config.training.num_tokens_per_microbatch_per_dp_rank * _num_pp_microbatches
         )
         num_tokens_per_train_step = config.training.num_tokens_per_train_step
         if num_tokens_per_train_step < 0:
@@ -559,13 +580,38 @@ class FaultTolerantTrainer(Trainer):
         )
         assert self.gradient_accumulation_steps > 0
 
+        # Native-DDP preflight. Inert unless the config opts in; it rejects
+        # combinations that would silently mis-train (wrong loss scaling,
+        # incompatible GAS) rather than letting them run.
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            validate_native_ddp(
+                model_name=model_spec.name,
+                parallel_dims=parallel_dims,
+                training=config.training,
+                parallelism=config.parallelism,
+                loss_fn=self.loss_fn,
+                gradient_accumulation_steps=self.gradient_accumulation_steps,
+                fault_tolerance_enabled=config.fault_tolerance.enable,
+                create_seed_checkpoint=config.checkpoint.create_seed_checkpoint,
+                optimizer_has_param_groups=(
+                    len(config.optimizer.param_groups) != 1
+                    or config.optimizer.param_groups[0].pattern != r".*"
+                ),
+            )
+            # Validate the concrete configured loss above before replacing it
+            # with a callable that compensates DDP's gradient averaging.
+            self.loss_fn = cast(
+                Any, wrap_native_ddp_loss(self.loss_fn, parallel_dims.dp_replicate)
+            )
+
         # How many pipeline microbatches make up one local batch. This is 1
         # whenever PP is off, so the extra loop it drives in train_step is a
         # no-op for every non-PP run. Mirrors the base Trainer
         # (torchtitan/trainer.py); FaultTolerantTrainer does not call
         # super().__init__(), so it must be set here explicitly or the PP
-        # branch would AttributeError.
-        self.num_pipeline_parallel_microbatches = _num_pp_microbatches
+        # branch would AttributeError. Keep the current core attribute spelling;
+        # the parity test guards this mirror across future syncs.
+        self.num_pp_microbatches = _num_pp_microbatches
 
         # The set_spmd_backend() mirror that used to live here is gone: #4419
         # removed the DTensor FWD/BWD backend entirely, deleting
@@ -703,9 +749,39 @@ class FaultTolerantTrainer(Trainer):
             model.to_empty(device=init_device)
             with torch.no_grad():
                 cast(BaseModel, model).init_states(buffer_device=buffer_device)
+
+            # Native DDP wraps AFTER parallelize (so it sees the already-
+            # sharded module) AND after to_empty/init_states (so it sees real
+            # storage). Guarded: inert unless the config opts in.
+            #
+            # Ordering is load-bearing. The model is built under
+            # torch.device("meta"), so wrapping before to_empty gave DDP
+            # meta parameters: it read next(model.parameters()).device to
+            # compute device_ids and got device(type='meta') with .index
+            # None, then built reduction buckets over meta storage. The
+            # subsequent to_empty reallocated every parameter, invalidating
+            # the bucket views it had just built with
+            # gradient_as_bucket_view=True. Silent, and only on the opt-in
+            # path.
+            if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+                model = wrap_native_ddp(
+                    model,
+                    parallel_dims.get_mesh("dp_replicate"),
+                    config.parallelism.native_ddp_bucket_cap_mb,
+                    config.parallelism.native_ddp_compute_policy,
+                    config.parallelism.native_ddp_bucketize_first_iteration,
+                )
+
             model.train()
 
             self.model_parts = [model]
+
+        # Opt-in dtype probe, env-gated rather than config-gated because it is
+        # a debugging aid rather than a run mode.
+        if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
+            if parallel_dims.pp_enabled or len(self.model_parts) != 1:
+                raise ValueError("AGPT dtype probe requires a non-pipeline model")
+            install_agpt_dtype_probe(self.model_parts[0])
 
         # Set lm_head reference for ChunkedLossWrapper after model construction.
         # Replayed from upstream torchtitan/trainer.py (lines 391-411). Required
@@ -726,7 +802,9 @@ class FaultTolerantTrainer(Trainer):
             else:
                 assert len(self.model_parts) == 1
                 lm_head = self.model_parts[0].lm_head
-                assert lm_head is not None, "Model must have lm_head for ChunkedLossWrapper"
+                assert (
+                    lm_head is not None
+                ), "Model must have lm_head for ChunkedLossWrapper"
                 self.loss_fn.set_lm_head(lm_head)
                 self.model_parts[0]._skip_lm_head = True
 
@@ -778,10 +856,10 @@ class FaultTolerantTrainer(Trainer):
         if getattr(config, "diagnostics", False) or getattr(
             config, "history_bridge", False
         ):
+            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
             from torchtitan.experiments.ezpz.diagnostics.history_bridge import (
                 HistoryBridge,
             )
-            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
             _attn.configure(
                 enabled=getattr(config, "diagnostics_attention", False),
@@ -834,6 +912,10 @@ class FaultTolerantTrainer(Trainer):
             # flag alone decides.
             spmd_typechecking=config.debug.spmd_typechecking,
         )
+        if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+            self.train_context = native_ddp_autocast_context(
+                self.train_context, device_type
+            )
 
         # Build validator if validation is configured
         if config.validator.enable:
@@ -927,6 +1009,7 @@ class FaultTolerantTrainer(Trainer):
         from torchtitan.experiments.ezpz.gloo_new_group_workaround import (
             maybe_install_gloo_new_group_workaround,
         )
+
         maybe_install_gloo_new_group_workaround()
 
         # FT addition: build FTManager
@@ -975,7 +1058,7 @@ class FaultTolerantTrainer(Trainer):
         # Two nested levels, mirroring the base Trainer: the OUTER level is
         # gradient accumulation (one optimizer step per `gas` groups), the
         # INNER level is pipeline microbatches (the PP schedule consumes a
-        # whole group at once). `num_pipeline_parallel_microbatches` is 1
+        # whole group at once). `num_pp_microbatches` is 1
         # whenever PP is off, so with PP disabled this is exactly the old
         # flat `gas` loop -- one batch dict per group.
         #
@@ -990,14 +1073,12 @@ class FaultTolerantTrainer(Trainer):
         local_valid_tokens = torch.tensor(0, dtype=torch.int64)
         for _microbatch in range(gas):
             microbatches = []
-            for _pp_microbatch in range(self.num_pipeline_parallel_microbatches):
+            for _pp_microbatch in range(self.num_pp_microbatches):
                 input_dict = next(data_iterator)
                 if "num_valid_tokens" in input_dict:
                     local_valid_tokens += input_dict.pop("num_valid_tokens")
                 else:
-                    local_valid_tokens += (
-                        input_dict["labels"] != IGNORE_INDEX
-                    ).sum()
+                    local_valid_tokens += (input_dict["labels"] != IGNORE_INDEX).sum()
                 microbatches.append(input_dict)
             microbatch_groups.append(microbatches)
 
@@ -1083,6 +1164,7 @@ class FaultTolerantTrainer(Trainer):
         # exactly the bug the first smoke exposed.
         if getattr(self.config, "diagnostics_attention", False):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
+
             _attn.set_step(self.step)
 
         grad_norm = dist_utils.clip_grad_norm_(
@@ -1138,7 +1220,8 @@ class FaultTolerantTrainer(Trainer):
                     self.model_parts, per_layer=True
                 )
                 _bad = [
-                    k for k, v in _nan_stats.items()
+                    k
+                    for k, v in _nan_stats.items()
                     if isinstance(v, float) and not math.isfinite(v)
                 ]
                 # The float scan above finds only AGGREGATES
@@ -1190,7 +1273,9 @@ class FaultTolerantTrainer(Trainer):
             except Exception as _e:  # instrumentation must not kill the run
                 logger.error(
                     "NON-FINITE GRADIENT CAPTURE step %s FAILED: %s: %s",
-                    self.step, type(_e).__name__, _e,
+                    self.step,
+                    type(_e).__name__,
+                    _e,
                 )
 
             self.optimizers.zero_grad()
@@ -1275,9 +1360,7 @@ class FaultTolerantTrainer(Trainer):
         ):
             try:
                 from torchtitan.experiments.ezpz import diagnostics as _diag
-                from torchtitan.experiments.ezpz.diagnostics import (
-                    attention as _attn,
-                )
+                from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
                 extra_metrics.update(
                     _diag.clipping_metrics(grad_norm, self.config.training.max_norm)
@@ -1285,9 +1368,7 @@ class FaultTolerantTrainer(Trainer):
                 extra_metrics.update(
                     _diag.collect_param_stats(
                         self.model_parts,
-                        per_layer=getattr(
-                            self.config, "diagnostics_per_layer", False
-                        ),
+                        per_layer=getattr(self.config, "diagnostics_per_layer", False),
                     )
                 )
                 ratios, self._diag_prev_weight_norms = _diag.collect_update_ratios(
@@ -1361,10 +1442,7 @@ class FaultTolerantTrainer(Trainer):
             config.checkpoint.folder,
             config.checkpoint.load_step,
             dump_folder=config.dump_folder,
-            initial_load_path=getattr(
-                config.checkpoint, "initial_load_path", ""
-            )
-            or "",
+            initial_load_path=getattr(config.checkpoint, "initial_load_path", "") or "",
         )
 
         # Two concurrent jobs writing one checkpoint.folder is silent and it
@@ -1564,8 +1642,12 @@ class FaultTolerantTrainer(Trainer):
                                     "%.1fx the trailing median (%.4g) over "
                                     "%d steps; aborting before it burns the "
                                     "window (threshold %.1fx)",
-                                    self.step, gn, gn / med, med,
-                                    gn_hist.maxlen, config.grad_norm_abort,
+                                    self.step,
+                                    gn,
+                                    gn / med,
+                                    med,
+                                    gn_hist.maxlen,
+                                    config.grad_norm_abort,
                                 )
                                 break
                         gn_hist.append(gn)
