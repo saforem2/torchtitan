@@ -70,7 +70,7 @@ CUDA runtime, oneMKL, and compiled extensions must agree.
 |---|---|---|---|---|
 | Sunspot full-Sonic jobs `12478121`, `12478353`, `12478371`, `12478381`-`12478383` | `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214` | same shared path; Python is `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214/bin/python` | `2.14.0+xpu` | present and re-verified on 2026-09-21 |
 | Sunspot separate Monarch/TorchStore work | `/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214` | same shared path | `2.14.0+xpu` | present; not part of PR #17 validation |
-| Aurora `next-eval` backend matrix, including `8837281` | `/lus/flare/projects/AuroraGPT/foremans/venvs/xpu-torch215` | the submitted job used this shared path | `2.15.0.dev20260915+xpu` | historical job path; no longer present when rechecked on 2026-09-21 |
+| Aurora `next-eval` backend matrix, including `8837281` | `/lus/flare/projects/AuroraGPT/foremans/venvs/xpu-torch215` (also visible as `/flare/AuroraGPT/foremans/venvs/xpu-torch215`) | the submitted PBS job used this shared path | `2.15.0.dev20260915+xpu` | present; canonical path re-verified on 2026-09-21 |
 | Aurora production Torch 2.13 environment | `/lus/flare/projects/AuroraGPT/sww/tt_aurora/torchtitan/venvs/aurora/torchtitan-python-3.12.12-nvje3vk-torch213` | shared path for direct use | `2.13.0.dev20260424+xpu` | present and re-verified on 2026-09-21 |
 | Aurora current production launch artifact | `/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/.venv.tar.gz` | extracted per job as `/tmp/CODEX_AGPT_MOE_${PBS_JOBID%%.*}_venv` by the full-Sonic launcher | archive-based | tarball present; checkout `.venv/` itself is not present |
 | Polaris four-machine backend comparison | `/lus/eagle/projects/datascience/foremans/venvs/sync84-torch214-cu` | same shared path | `2.14.0+cu130` | present and re-verified on 2026-09-21 |
@@ -93,6 +93,27 @@ NODE_VENV=/tmp/CODEX_AGPT_MOE_${PBS_JOBID%%.*}_venv
 `.venv/` directory, is the durable production input. The launcher also permits
 an explicit alternative through `TT_VENV_TAR` and validates that the archive is
 present before starting.
+
+## Aurora XPU evidence
+
+Aurora was tested through PBS `next-eval`, using `ezpz launch` and the shared
+Torch 2.15 XPU environment listed above. Job `8837281` ran
+`aurora_full_sonic` with EP=2 on 24 ranks after prebuilding the four vendored
+SYCL extensions into a shared cache. It completed three training steps with
+`rc=0` and no non-finite values:
+
+```text
+step 1  loss 12.95230
+step 2  loss 12.59623
+step 3  loss 11.47120
+```
+
+The matched EP=2 `for_loop` reference, job `8836014`, produced `12.95224`,
+`12.59619`, and `11.47116`: absolute differences of `6e-05`, `4e-05`, and
+`4e-05`. This exercised Aurora's XPU runtime, expert-id mapping, EP mesh, and
+all-to-all routing. The later Sunspot jobs below are the production-shaped
+EP=12, deterministic gradient, and checkpoint-resume acceptance gates; they do
+not replace or retroactively stand in for the Aurora run.
 
 ## Sunspot XPU evidence
 
