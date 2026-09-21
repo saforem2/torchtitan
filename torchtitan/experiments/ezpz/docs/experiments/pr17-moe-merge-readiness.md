@@ -60,6 +60,40 @@ This includes:
 - trainer initialization parity;
 - launcher factory, override, and return-code contracts.
 
+## Runtime environment provenance
+
+The validation jobs did not use one portable environment across all machines.
+The exact interpreter or environment artifact matters because Torch, the XPU or
+CUDA runtime, oneMKL, and compiled extensions must agree.
+
+| machine / evidence | persistent environment or artifact | compute-node environment | verified Torch | status |
+|---|---|---|---|---|
+| Sunspot full-Sonic jobs `12478121`, `12478353`, `12478371`, `12478381`-`12478383` | `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214` | same shared path; Python is `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214/bin/python` | `2.14.0+xpu` | present and re-verified on 2026-09-21 |
+| Sunspot separate Monarch/TorchStore work | `/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214` | same shared path | `2.14.0+xpu` | present; not part of PR #17 validation |
+| Aurora `next-eval` backend matrix, including `8837281` | `/lus/flare/projects/AuroraGPT/foremans/venvs/xpu-torch215` | the submitted job used this shared path | `2.15.0.dev20260915+xpu` | historical job path; no longer present when rechecked on 2026-09-21 |
+| Aurora production Torch 2.13 environment | `/lus/flare/projects/AuroraGPT/sww/tt_aurora/torchtitan/venvs/aurora/torchtitan-python-3.12.12-nvje3vk-torch213` | shared path for direct use | `2.13.0.dev20260424+xpu` | present and re-verified on 2026-09-21 |
+| Aurora current production launch artifact | `/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/.venv.tar.gz` | extracted per job as `/tmp/CODEX_AGPT_MOE_${PBS_JOBID%%.*}_venv` by the full-Sonic launcher | archive-based | tarball present; checkout `.venv/` itself is not present |
+| Polaris four-machine backend comparison | `/lus/eagle/projects/datascience/foremans/venvs/sync84-torch214-cu` | same shared path | `2.14.0+cu130` | present and re-verified on 2026-09-21 |
+| Perlmutter four-machine backend comparison | `/pscratch/sd/f/foremans/venvs/sync84-torch214-cu` | same shared path | `2.14.0+cu130` | present and re-verified on 2026-09-21 |
+
+The Sunspot full-Sonic runs also used the shared extension cache:
+
+```text
+/lus/tegu/projects/datascience/foremans/.aurora_moe_build
+```
+
+The checked-in Aurora production launcher defaults to this environment contract:
+
+```text
+TT_VENV_TAR=/lus/flare/projects/AuroraGPT/sww/new_tt_aurora/torchtitan/.venv.tar.gz
+NODE_VENV=/tmp/CODEX_AGPT_MOE_${PBS_JOBID%%.*}_venv
+```
+
+`NODE_VENV` is job-specific and ephemeral. The tarball, not a login-node
+`.venv/` directory, is the durable production input. The launcher also permits
+an explicit alternative through `TT_VENV_TAR` and validates that the archive is
+present before starting.
+
 ## Sunspot XPU evidence
 
 ### Production-shaped AGPT 2B/50K full-Sonic smoke: PASS
