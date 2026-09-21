@@ -17,7 +17,7 @@ import tyro
 import torch
 
 from torchtitan.config import Configurable
-from torchtitan.distributed.cudagraph import get_cudagraph_annotations
+from torchtitan.distributed.cuda_graph import get_cuda_graph_annotations
 from torchtitan.observability import structured_logger as sl
 from torchtitan.tools.utils import device_module
 
@@ -326,7 +326,7 @@ class Profiler(Configurable):
             # CUDA graph annotations are baked in during the export rather than
             # joined onto the written file afterwards: re-reading and rewriting a
             # gzipped trace paid the compression cost twice.
-            annotations = get_cudagraph_annotations()
+            annotations = get_cuda_graph_annotations()
             if annotations and not _EXPORT_SUPPORTS_ANNOTATIONS:
                 logger.warning(
                     "This torch does not support cuda_graph_annotations on "
