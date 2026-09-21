@@ -3,10 +3,11 @@
 > **Last updated:** 2026-09-21
 > **PR:** [saforem2/torchtitan#17](https://github.com/saforem2/torchtitan/pull/17)
 > **Target:** `ezpz`
-> **Reviewed head:** `44d6d5ab1` plus documentation follow-up
-> **Current verdict:** **not ready to merge**. The restored full-Sonic training path
-> and deterministic numerical/gradient comparison pass, but native DCP resume and
-> final CI/review closure remain open.
+> **Reviewed head:** `0f7f0c7f5` plus documentation follow-up
+> **Current verdict:** **implementation and validation gates pass**. The restored
+> full-Sonic training path, deterministic numerical/gradient comparison, native
+> DCP resume, and repository lint gates pass. Updating the PR description and
+> resolving review threads are the remaining administrative steps.
 
 ## Executive summary
 
@@ -125,6 +126,47 @@ Evidence on Sunspot:
 /lus/tegu/projects/datascience/foremans/sonic-validation-12478371/run.log
 ```
 
+### Native DCP interrupted/resumed training: PASS
+
+Jobs `12478381` and `12478382` exercised the real TorchTitan trainer,
+`CheckpointManager`, optimizer, scheduler, dataloader, and full-Sonic model on
+one Sunspot node with 12 XPU ranks and EP=12. Each test used three independent
+`ezpz launch` processes:
+
+1. uninterrupted steps 1-2;
+2. a fresh step-1 process that wrote a full DCP checkpoint;
+3. a fresh process that loaded `step-1` and continued at step 2.
+
+The first production-path comparison (`12478381`) exposed a real bug:
+`BlendCorpusDataLoader.state_dict()` always reported `consumed_samples=0`
+because iteration did not advance the counter. Model, optimizer, scheduler, and
+trainer state loaded, but the resumed process replayed batch 1. Commit
+`0f7f0c7f5` advances the global consumed-sample count before yielding each
+batch and adds focused state/save-load tests.
+
+After that fix, job `12478382` saved the full checkpoint, loaded it in a new
+process, resumed at step 2, and completed forward, backward, and optimizer
+update. Its resumed metrics matched the uninterrupted control:
+
+```text
+                         control      resumed      absolute difference
+step-2 loss             10.64065     10.64038     0.00027
+step-2 gradient norm     5.0454       5.0484       0.0030
+```
+
+The acceptance bounds were `0.005` for loss and `0.05` for gradient norm.
+All three training processes returned zero. The PBS wrapper returned one only
+because its post-run text scanner matched the harmless configuration key
+`nan_abort_consecutive` as though it were a non-finite metric. Confirmation job
+`12478383` reruns the same test with that validator corrected; the passing
+training evidence above does not depend on the false-positive wrapper status.
+
+Evidence on Sunspot:
+
+```text
+/lus/tegu/projects/datascience/foremans/agpt50k-sonic-dcp-real-12478382/
+```
+
 ## Diagnostic failures and what they established
 
 These jobs are not counted as successful validation, but each exposed a distinct
@@ -141,7 +183,9 @@ integration or harness defect:
 | `12478366`/`12478367` | harness failure | The first PALS adapter used nonexistent `PALS_SIZE`, producing an empty `WORLD_SIZE`. |
 | `12478372` | DCP test failure | Raw `dcp.load` into fresh AdamW did not materialize initially empty optimizer state; this was a harness/API misuse. |
 | `12478376` | DCP test failure | The synthetic test represented different EP-local tensors under identical ordinary-tensor keys, which DCP correctly interpreted as replicas. |
-| `12478377` | DCP test still failed | DTensor representation improved the test, but interrupted and uninterrupted state still diverged. Native-DCP resume equivalence is **not yet established**. |
+| `12478377` | synthetic DCP test failure | The reduced DTensor harness was not a faithful substitute for TorchTitan's complete trainer and `CheckpointManager` object graph; it was superseded by the production-path tests. |
+| `12478381` | production DCP comparison failed | Full save/load and resumed update worked, exposing that BlendCorpus saved `consumed_samples=0` and replayed the first batch. Fixed in `0f7f0c7f5`. |
+| `12478382` | training passed; wrapper false failure | After the BlendCorpus fix, resumed step-2 loss and gradient norm matched the uninterrupted control. The wrapper alone returned one after matching `nan_abort_consecutive` as a NaN token. |
 
 ## Important implementation constraints
 
@@ -208,20 +252,19 @@ calling native DDP production-validated.
 - PyTorch-hosted CUDA workflows are skipped for pull requests in forks where
   those runners are unavailable. CPU/lint coverage remains enabled.
 
-## Remaining merge gates
+## Remaining administrative steps
 
-1. **Resolve native-DCP resume equivalence.** Job `12478377` remains a failing
-   validation. Determine whether the remaining divergence is another synthetic
-   harness mismatch or a real state-dict/optimizer restore problem, then obtain
-   a passing interrupted-versus-uninterrupted test.
-2. **Obtain green GitHub lint on the latest head.** Local full Lychee and
-   modified-file pre-commit pass, but the latest pushed CI result must be green.
-3. **Run a real XPU native-DDP smoke.** The CPU/Gloo equivalence test validates
-   reducer/loss scaling, but not XPU autocast and XCCL behavior.
-4. **Update the PR description.** It still says full Sonic is unported and lists
-   obsolete test results.
-5. **Resolve all review threads** with fixing commits or explicit scope
-   decisions, and request a fresh review.
+1. **Update the PR description.** Replace the original limited-port description
+   with the current backend scope and validation evidence.
+2. **Resolve review threads.** All 15 reported findings now have source fixes or
+   an explicit supported-scope decision; reply with their fixing commits and
+   mark them resolved.
+3. **Record confirmation job `12478383`.** This repeats the already-passing
+   production DCP comparison with the false-positive log scanner corrected.
+
+A real XPU native-DDP smoke remains useful follow-up evidence, but native DDP is
+not required by the full-Sonic production path and already has two-rank CPU/Gloo
+update-equivalence coverage.
 
 ## Follow-ups that need not block the narrowly validated Sonic merge
 
