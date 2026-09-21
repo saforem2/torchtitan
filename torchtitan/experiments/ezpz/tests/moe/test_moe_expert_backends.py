@@ -7,11 +7,7 @@
 import unittest
 
 import torch
-import torch.nn.functional as F
 from torch.testing import assert_close
-
-from torchtitan.models.common.config_utils import make_ffn_config
-from torchtitan.models.common.moe import GroupedExperts
 
 # The padded batched-mm backend lives in the ezpz experiment, not in core.
 # Upstream's Aurora MoE branch puts it in torchtitan/models/common/moe.py;
@@ -19,14 +15,13 @@ from torchtitan.models.common.moe import GroupedExperts
 # rename is deliberate -- it names the property that distinguishes it from
 # our capacity-limited `_run_experts_bmm`, which DOES drop overflow tokens.
 from torchtitan.experiments.ezpz.moe.experts import (
-    EzpzGroupedExperts,
     _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
     _sonic_weight_layouts,
+    EzpzGroupedExperts,
 )
-from torchtitan.models.common.token_dispatcher import LocalTokenDispatcher
-from torchtitan.experiments.ezpz.moe import moe_configs
-from torchtitan.experiments.ezpz.utils.count_moe_params import count_params
+
+from torchtitan.models.common.moe import GroupedExperts
 
 
 def _clone_for_grad(tensor: torch.Tensor) -> torch.Tensor:
@@ -52,9 +47,7 @@ class TestMoEExpertBackends(unittest.TestCase):
         experts, dim, hidden = 3, 7, 11
         w1 = torch.arange(experts * hidden * dim).reshape(experts, hidden, dim)
         w2 = torch.arange(experts * dim * hidden).reshape(experts, dim, hidden)
-        w3 = (1000 + torch.arange(experts * hidden * dim)).reshape(
-            experts, hidden, dim
-        )
+        w3 = (1000 + torch.arange(experts * hidden * dim)).reshape(experts, hidden, dim)
 
         up, gate, down = _sonic_weight_layouts(w1, w2, w3)
 
@@ -67,125 +60,6 @@ class TestMoEExpertBackends(unittest.TestCase):
         assert_close(up, w3.transpose(1, 2))
         assert_close(gate, w1.transpose(1, 2))
         assert_close(down, w2.transpose(1, 2))
-
-    @unittest.skip(
-        "Needs four config flavors that do not exist in our registry: "
-        "10B_2B_50K_sdpa_{for_loop,aurora_sycl,aurora_full_loop,"
-        "aurora_full_sonic}. We have 10B_2B and 10B_2B_sdpa. The sww branch "
-        "selects a backend by defining a dedicated FLAVOR per backend; we "
-        "select it with the compute_backend config field instead, so those "
-        "flavors would be redundant here. Separately, count_params() assumes "
-        "cfg.experts, which our Config does not expose -- it raises "
-        "AttributeError on 10B_2B and 10B_2B_sdpa alike, so the parameter "
-        "contract this asserts is not currently checkable against our tree. "
-        "Kept as a marker: a param-count contract IS worth having, and this "
-        "is the shape it should take once count_params is adapted."
-    )
-    def test_50k_model_parameter_contract_and_backend_variants(self):
-        expected = (10_564_138_496, 1_999_894_016)
-        variants = {
-            "10B_2B_50K_sdpa_for_loop": "for_loop",
-            "10B_2B_50K_sdpa_aurora_sycl": "aurora_sycl",
-            "10B_2B_50K_sdpa_aurora_full_loop": "aurora_full_loop",
-            "10B_2B_50K_sdpa_aurora_full_sonic": "aurora_full_sonic",
-        }
-        for flavor, backend in variants.items():
-            with self.subTest(flavor=flavor):
-                self.assertEqual(count_params(flavor), expected)
-                cfg = moe_configs[flavor]()
-                self.assertEqual(cfg.vocab_size, 50_304)
-                self.assertEqual(len(cfg.layers), 31)
-                moe_layers = [layer.moe for layer in cfg.layers if layer.moe is not None]
-                self.assertEqual(len(moe_layers), 30)
-                self.assertEqual(
-                    {layer.experts.compute_backend for layer in moe_layers},
-                    {backend},
-                )
-
-    @unittest.skip(
-        "aurora_full_loop / aurora_full_sonic are deliberately NOT ported. "
-        "They need top_scores and selected_experts_indices, which our "
-        "GroupedExperts.forward(x_RD, num_tokens_per_expert_E) never receives "
-        "(upstream moved dispatch into the token dispatcher; the sww branch "
-        "predates that), and they additionally require an EP mesh. Porting "
-        "them is a dispatcher restructuring, not a backend addition. Kept "
-        "rather than deleted so the decision stays visible if we revisit it."
-    )
-    def test_aurora_full_layout_initializes_like_torchtitan(self):
-        initial = {
-            "w1": lambda tensor: torch.nn.init.constant_(tensor, 1.0),
-            "w2": lambda tensor: torch.nn.init.constant_(tensor, 2.0),
-            "w3": lambda tensor: torch.nn.init.constant_(tensor, 3.0),
-        }
-        config = GroupedExperts.Config(
-            dim=7,
-            hidden_dim=11,
-            num_experts=5,
-            use_grouped_mm=False,
-            compute_backend="aurora_full_sonic",
-            param_init=initial,
-            token_dispatcher=LocalTokenDispatcher.Config(
-                num_experts=5,
-                top_k=2,
-                score_before_experts=False,
-            ),
-        )
-        experts = config.build()
-        experts.init_states(buffer_device=torch.device("cpu"))
-
-        self.assertEqual(tuple(experts.aurora_up.shape), (5, 7, 11))
-        self.assertEqual(tuple(experts.aurora_gate.shape), (5, 7, 11))
-        self.assertEqual(tuple(experts.aurora_down.shape), (5, 11, 7))
-        self.assertTrue(experts.aurora_up.is_contiguous())
-        self.assertTrue(experts.aurora_gate.is_contiguous())
-        self.assertTrue(experts.aurora_down.is_contiguous())
-        torch.testing.assert_close(experts.aurora_gate, torch.ones_like(experts.aurora_gate))
-        torch.testing.assert_close(experts.aurora_down, torch.full_like(experts.aurora_down, 2.0))
-        torch.testing.assert_close(experts.aurora_up, torch.full_like(experts.aurora_up, 3.0))
-
-    @unittest.skip(
-        "aurora_full_loop / aurora_full_sonic are deliberately NOT ported. "
-        "They need top_scores and selected_experts_indices, which our "
-        "GroupedExperts.forward(x_RD, num_tokens_per_expert_E) never receives "
-        "(upstream moved dispatch into the token dispatcher; the sww branch "
-        "predates that), and they additionally require an EP mesh. Porting "
-        "them is a dispatcher restructuring, not a backend addition. Kept "
-        "rather than deleted so the decision stays visible if we revisit it."
-    )
-    def test_aurora_shared_views_preserve_feed_forward(self):
-        torch.manual_seed(7)
-        initial = {"weight": lambda tensor: torch.nn.init.normal_(tensor)}
-        experts = GroupedExperts.Config(
-            dim=7,
-            hidden_dim=11,
-            num_experts=5,
-            use_grouped_mm=False,
-            compute_backend="aurora_full_sonic",
-            token_dispatcher=LocalTokenDispatcher.Config(
-                num_experts=5,
-                top_k=2,
-                score_before_experts=False,
-            ),
-        ).build()
-        shared = make_ffn_config(
-            dim=7,
-            hidden_dim=22,
-            w1_param_init=initial,
-            w2w3_param_init=initial,
-        ).build()
-        shared.init_states(buffer_device=torch.device("cpu"))
-
-        up, gate, down = experts._aurora_shared_weights(shared)
-        self.assertEqual(tuple(up.shape), (2, 7, 11))
-        self.assertEqual(tuple(gate.shape), (2, 7, 11))
-        self.assertEqual(tuple(down.shape), (2, 11, 7))
-
-        x = torch.randn(13, 7)
-        expected = shared(x)
-        actual = torch.zeros_like(x)
-        for index in range(2):
-            actual = actual + (F.silu(x @ gate[index]) * (x @ up[index])) @ down[index]
-        assert_close(actual, expected, rtol=1e-5, atol=1e-5)
 
     def test_batched_mm_padded_matches_for_loop_kernel(self):
         torch.manual_seed(0)
@@ -291,4 +165,3 @@ class TestMoEExpertBackends(unittest.TestCase):
             if backend == "bmm":
                 continue
             assert_close(out.float(), ref_out.float(), rtol=0.05, atol=0.05)
-

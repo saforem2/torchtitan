@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import math
 import os
 import threading
@@ -57,9 +63,25 @@ def _init_experts(up, gate, down, expert_ids, config, layer_id):
     with torch.no_grad():
         for i, expert_id in enumerate(expert_ids):
             base = config.seed + 10000 * (layer_id + 1) + expert_id
-            up[i].copy_(_randn(up[i].shape, base, 1.0 / math.sqrt(up.shape[1]), up.device))
-            gate[i].copy_(_randn(gate[i].shape, base + 5000, 1.0 / math.sqrt(gate.shape[1]), gate.device))
-            down[i].copy_(_randn(down[i].shape, base + 10000, 1.0 / math.sqrt(down.shape[1]), down.device))
+            up[i].copy_(
+                _randn(up[i].shape, base, 1.0 / math.sqrt(up.shape[1]), up.device)
+            )
+            gate[i].copy_(
+                _randn(
+                    gate[i].shape,
+                    base + 5000,
+                    1.0 / math.sqrt(gate.shape[1]),
+                    gate.device,
+                )
+            )
+            down[i].copy_(
+                _randn(
+                    down[i].shape,
+                    base + 10000,
+                    1.0 / math.sqrt(down.shape[1]),
+                    down.device,
+                )
+            )
 
 
 def _swiglu(x, up, gate, down):
@@ -79,9 +101,10 @@ def _native_ccl_ep_requested():
     compute, routing, or DDP-reduction semantics.
     """
 
-    return _native_ccl_requested() and os.environ.get(
-        "AURORA_MOE_NATIVE_CCL_EP_XCCL"
-    ) != "1"
+    return (
+        _native_ccl_requested()
+        and os.environ.get("AURORA_MOE_NATIVE_CCL_EP_XCCL") != "1"
+    )
 
 
 def _native_ccl_alltoallv_requested(mesh):
@@ -139,7 +162,8 @@ def _l0_ipc_ep_requested(mesh):
         raise RuntimeError("AURORA_MOE_L0_IPC_EP requires Aurora XPU tensors")
     local_size = int(
         os.environ.get(
-            "LOCAL_WORLD_SIZE", os.environ.get("PALS_LOCAL_SIZE", torch.xpu.device_count())
+            "LOCAL_WORLD_SIZE",
+            os.environ.get("PALS_LOCAL_SIZE", torch.xpu.device_count()),
         )
     )
     if ep_size > local_size:
@@ -171,7 +195,8 @@ def _l0_ipc_alltoallv_requested(mesh):
         raise RuntimeError("AURORA_MOE_L0_IPC_ALLTOALLV requires Aurora XPU tensors")
     local_size = int(
         os.environ.get(
-            "LOCAL_WORLD_SIZE", os.environ.get("PALS_LOCAL_SIZE", torch.xpu.device_count())
+            "LOCAL_WORLD_SIZE",
+            os.environ.get("PALS_LOCAL_SIZE", torch.xpu.device_count()),
         )
     )
     if ep_size > local_size:
@@ -191,8 +216,7 @@ def _l0_ipc_expert_major_requested(mesh):
         return False
     if not _l0_ipc_alltoallv_requested(mesh):
         raise RuntimeError(
-            "AURORA_MOE_L0_IPC_EXPERT_MAJOR=1 requires "
-            "AURORA_MOE_L0_IPC_ALLTOALLV=1"
+            "AURORA_MOE_L0_IPC_EXPERT_MAJOR=1 requires " "AURORA_MOE_L0_IPC_ALLTOALLV=1"
         )
     if os.environ.get("AURORA_MOE_L0_IPC_ALLTOALLV_CCL_TYPED_STORE") != "1":
         raise RuntimeError(
@@ -274,9 +298,10 @@ def _expert_major_two_phase_requested():
             "AURORA_MOE_EXPERT_MAJOR_TWO_PHASE=1 requires "
             "AURORA_MOE_IGNORE_ROUTER_GRAD=1"
         )
-    if os.environ.get("AURORA_MOE_EXPERT_MAJOR_GEMM") != "onemkl" or os.environ.get(
-        "AURORA_MOE_EXPERT_MAJOR_DW"
-    ) != "onemkl":
+    if (
+        os.environ.get("AURORA_MOE_EXPERT_MAJOR_GEMM") != "onemkl"
+        or os.environ.get("AURORA_MOE_EXPERT_MAJOR_DW") != "onemkl"
+    ):
         raise RuntimeError(
             "AURORA_MOE_EXPERT_MAJOR_TWO_PHASE=1 requires exact oneMKL "
             "forward and dW backends"
@@ -333,7 +358,9 @@ def _direct_layout_precompute_expert_counts_requested():
     gate is being established.
     """
 
-    requested = os.environ.get("AURORA_MOE_DIRECT_LAYOUT_PRECOMPUTE_EXPERT_COUNTS") == "1"
+    requested = (
+        os.environ.get("AURORA_MOE_DIRECT_LAYOUT_PRECOMPUTE_EXPERT_COUNTS") == "1"
+    )
     if requested and not _direct_expert_layout_requested():
         raise RuntimeError(
             "AURORA_MOE_DIRECT_LAYOUT_PRECOMPUTE_EXPERT_COUNTS=1 requires "
@@ -355,9 +382,10 @@ def _direct_layout_precompute_native_count_alltoall_requested():
     Keep native control available as an explicit diagnostic opt-in.
     """
 
-    return os.environ.get(
-        "AURORA_MOE_DIRECT_LAYOUT_PRECOMPUTE_NATIVE_COUNT_ALLTOALL"
-    ) == "1"
+    return (
+        os.environ.get("AURORA_MOE_DIRECT_LAYOUT_PRECOMPUTE_NATIVE_COUNT_ALLTOALL")
+        == "1"
+    )
 
 
 def _direct_layout_two_phase_requested():
@@ -410,7 +438,9 @@ def _phase_shared_experts_requested(mesh):
             "AURORA_MOE_ALLTOALLV=1 or AURORA_MOE_DIRECT_LAYOUT_TWO_PHASE=1"
         )
     if mesh.group_size["ep_dispatch"] <= 1:
-        raise RuntimeError("AURORA_MOE_PHASE_SHARED_EXPERTS=1 requires EP size greater than one")
+        raise RuntimeError(
+            "AURORA_MOE_PHASE_SHARED_EXPERTS=1 requires EP size greater than one"
+        )
     compact_l0_ipc = compact_alltoallv and _l0_ipc_alltoallv_requested(mesh)
     if compact_l0_ipc:
         # The IPC implementation inserts its own current-stream bridges and
@@ -467,9 +497,7 @@ def _phase_shared_a4_submit_wait_requested():
 
     value = os.environ.get("AURORA_MOE_PHASE_SHARED_A4_SUBMIT_WAIT", "1")
     if value not in ("0", "1"):
-        raise ValueError(
-            "AURORA_MOE_PHASE_SHARED_A4_SUBMIT_WAIT must be '0' or '1'"
-        )
+        raise ValueError("AURORA_MOE_PHASE_SHARED_A4_SUBMIT_WAIT must be '0' or '1'")
     return value == "1"
 
 
@@ -550,7 +578,9 @@ def _native_ccl_defer_reap_limit():
     try:
         limit = int(value)
     except ValueError as error:
-        raise ValueError("AURORA_MOE_NATIVE_CCL_DEFER_REAP_MAX_WORKS must be positive") from error
+        raise ValueError(
+            "AURORA_MOE_NATIVE_CCL_DEFER_REAP_MAX_WORKS must be positive"
+        ) from error
     if limit <= 0:
         raise ValueError("AURORA_MOE_NATIVE_CCL_DEFER_REAP_MAX_WORKS must be positive")
     return limit
@@ -602,11 +632,15 @@ class _NativeCclGroupState:
             if self._reap_mode == "stream_fence":
                 with _record("moe.comm.native_reap_stream_fence"):
                     self.pending = [
-                        work for work in self.pending if not work.is_stream_fence_completed()
+                        work
+                        for work in self.pending
+                        if not work.is_stream_fence_completed()
                     ]
                 return
             with _record("moe.comm.native_reap_ccl_test"):
-                self.pending = [work for work in self.pending if not work.is_completed()]
+                self.pending = [
+                    work for work in self.pending if not work.is_completed()
+                ]
 
     def all_to_all(self, x):
         with self._launch_lock:
@@ -652,9 +686,7 @@ class _NativeCclGroupState:
             self.reap()
             return x.new_empty((sum(output_splits), *x.shape[1:]))
 
-    def submit_threaded_all_to_all_v(
-        self, x, output, input_splits, output_splits
-    ):
+    def submit_threaded_all_to_all_v(self, x, output, input_splits, output_splits):
         """Submit A4v without bridging it to the submitter's stream yet."""
 
         with self._launch_lock:
@@ -673,7 +705,6 @@ class _NativeCclGroupState:
                     bridge_current_stream=False,
                 )
 
-
     def all_reduce_sum(self, x):
         """Submit an out-of-place BF16 SUM reduction without a host wait."""
 
@@ -681,7 +712,9 @@ class _NativeCclGroupState:
             self.reap()
             y = torch.empty_like(x)
             with _record("moe.comm.native_allreduce_submit"):
-                output, work = self.communicator.all_reduce_sum(x, output=y, async_op=True)
+                output, work = self.communicator.all_reduce_sum(
+                    x, output=y, async_op=True
+                )
             self.pending.append(work)
             return output
 
@@ -705,9 +738,13 @@ class _NativeCclGroupState:
         with self._launch_lock:
             self.reap()
             with _record("moe.comm.native_allreduce_submit"):
-                output, work = self.communicator.all_reduce_sum(x, output=x, async_op=True)
+                output, work = self.communicator.all_reduce_sum(
+                    x, output=x, async_op=True
+                )
             if output is not x:
-                raise RuntimeError("native in-place all-reduce replaced its input buffer")
+                raise RuntimeError(
+                    "native in-place all-reduce replaced its input buffer"
+                )
             self.pending.append(work)
             return work
 
@@ -744,7 +781,9 @@ class _NativeCclGroupState:
                 # deferred bridge API is useful for controlled experiments,
                 # but Aurora's current runtime produced a GPU context abort
                 # in a full DP=2/EP=12 stress run without this fence.
-                return self.communicator.all_to_all_single(x, output=output, async_op=True)
+                return self.communicator.all_to_all_single(
+                    x, output=output, async_op=True
+                )
 
     def retain_threaded_work(self, work):
         """Keep a host-thread native work/event alive on the main thread."""
@@ -833,7 +872,9 @@ class _LevelZeroIpcAllToAllVGroupState:
             plan.inverse_input_offsets if inverse else plan.forward_input_offsets,
             plan.inverse_remote_offsets if inverse else plan.forward_remote_offsets,
             plan.inverse_counts if inverse else plan.forward_counts,
-            output_rows=plan.inverse_output_rows if inverse else plan.forward_output_rows,
+            output_rows=plan.inverse_output_rows
+            if inverse
+            else plan.forward_output_rows,
             global_capacity_rows=(
                 plan.inverse_capacity_rows if inverse else plan.forward_capacity_rows
             ),
@@ -987,7 +1028,9 @@ class _NativeCclThreadedA4V:
         self.submitted = threading.Event()
         self.work = None
         self.error = None
-        self.thread = threading.Thread(target=self._submit, name="moe-native-a4v-submit")
+        self.thread = threading.Thread(
+            target=self._submit, name="moe-native-a4v-submit"
+        )
 
     def _submit(self):
         try:
@@ -1074,9 +1117,7 @@ def _start_threaded_native_a4(mesh, source, producer_stream, state=None):
     stream = _direct_layout_two_phase_a4_stream(source.device)
     with torch.xpu.stream(stream):
         stream.wait_stream(producer_stream)
-    launch = _NativeCclThreadedA4(
-        state, source, output, stream, source.get_device()
-    )
+    launch = _NativeCclThreadedA4(state, source, output, stream, source.get_device())
     launch.start()
     return launch
 
@@ -1127,9 +1168,14 @@ def _all_to_all(x, mesh, name):
             # The direct equal-size path handles both data payloads and the
             # generic int64 expert-ID fallback.  alltoallv remains on the
             # explicit compact-transport path below.
-            if direct_ccl_requested and x.device.type == "xpu" and x.dtype in (
-                torch.bfloat16,
-                torch.int64,
+            if (
+                direct_ccl_requested
+                and x.device.type == "xpu"
+                and x.dtype
+                in (
+                    torch.bfloat16,
+                    torch.int64,
+                )
             ):
                 return _native_ccl_ep_state(mesh).all_to_all(x.contiguous())
             y = torch.empty_like(x)
@@ -1141,11 +1187,16 @@ def _all_to_all(x, mesh, name):
                 # behavior must be measured on the installed Aurora stack.
                 with _record("moe.comm.xccl_alltoall_async_submit_fence"):
                     work = dist.all_to_all_single(
-                        y, x.contiguous(), group=mesh.groups["ep_dispatch"], async_op=True
+                        y,
+                        x.contiguous(),
+                        group=mesh.groups["ep_dispatch"],
+                        async_op=True,
                     )
                     work.wait()
             else:
-                dist.all_to_all_single(y, x.contiguous(), group=mesh.groups["ep_dispatch"])
+                dist.all_to_all_single(
+                    y, x.contiguous(), group=mesh.groups["ep_dispatch"]
+                )
         else:
             y = torch.empty_like(x)
             y.copy_(x)
@@ -1214,7 +1265,9 @@ def _segmented_all_to_allv_split_sizes(
     local_count = gathered_destination_expert_counts.size(2)
     expected_shape = (ep_size, ep_size, local_count)
     if tuple(gathered_destination_expert_counts.shape) != expected_shape:
-        raise ValueError("segmented EP expert count tensor shape does not match dispatch group")
+        raise ValueError(
+            "segmented EP expert count tensor shape does not match dispatch group"
+        )
     with _record("moe.comm.segmented_alltoallv_count_splits_to_cpu"):
         counts_cpu = gathered_destination_expert_counts.detach().to(
             device="cpu", dtype=torch.int64, non_blocking=False
@@ -1228,7 +1281,9 @@ def _segmented_all_to_allv_split_sizes(
         int(value) for value in counts_cpu[:, rank, :].sum(dim=0).tolist()
     )
     if sum(local_expert_rows) != sum(recv_splits):
-        raise RuntimeError("segmented local expert row counts disagree with receive splits")
+        raise RuntimeError(
+            "segmented local expert row counts disagree with receive splits"
+        )
     result = (send_splits, recv_splits, uniform_nonzero, local_expert_rows)
     if return_count_matrix_cpu and return_counts_cpu:
         return (*result, count_matrix_cpu, counts_cpu)
@@ -1257,12 +1312,10 @@ def _l0_ipc_alltoallv_metadata_from_count_matrix_cpu(count_matrix_cpu, mesh):
     if bool((count_matrix_cpu < 0).any().item()):
         raise ValueError("EP alltoallv count matrix must be nonnegative")
     forward_remote_offsets = tuple(
-        int(value)
-        for value in count_matrix_cpu[:rank, :].sum(dim=0).tolist()
+        int(value) for value in count_matrix_cpu[:rank, :].sum(dim=0).tolist()
     )
     reverse_remote_offsets = tuple(
-        int(value)
-        for value in count_matrix_cpu[:, :rank].sum(dim=1).tolist()
+        int(value) for value in count_matrix_cpu[:, :rank].sum(dim=1).tolist()
     )
     forward_capacity_rows = int(count_matrix_cpu.sum(dim=0).max().item())
     reverse_capacity_rows = int(count_matrix_cpu.sum(dim=1).max().item())
@@ -1322,10 +1375,7 @@ def _all_to_allv(
                 and x.device.type == "xpu"
                 and x.dtype == torch.bfloat16
             ):
-                if (
-                    l0_remote_receive_offsets is None
-                    or l0_global_capacity_rows is None
-                ):
+                if l0_remote_receive_offsets is None or l0_global_capacity_rows is None:
                     raise RuntimeError(
                         "exact IPC alltoallv requires count-matrix remote offsets and capacity"
                     )
@@ -1403,7 +1453,9 @@ def _all_gather_counts(counts, mesh, *, use_native_count_alltoall=True):
             with _record("moe.comm.fwd_count_native_alltoall"):
                 replicated = counts.reshape(1, -1).expand(ep_size, -1).contiguous()
                 return _native_ccl_ep_state(mesh).all_to_all(replicated)
-        gathered = [torch.empty_like(counts) for _ in range(mesh.group_size["ep_dispatch"])]
+        gathered = [
+            torch.empty_like(counts) for _ in range(mesh.group_size["ep_dispatch"])
+        ]
         dist.all_gather(gathered, counts, group=mesh.groups["ep_dispatch"])
         return torch.stack(gathered)
 
@@ -1476,7 +1528,9 @@ class _NativeGradBucket:
             offset = next_offset
         self.numel = offset
         self.flat = (
-            torch.empty(self.numel, device=self.parameters[0].device, dtype=torch.bfloat16)
+            torch.empty(
+                self.numel, device=self.parameters[0].device, dtype=torch.bfloat16
+            )
             if self.numel
             else None
         )
@@ -1492,7 +1546,9 @@ class _NativeGradBucket:
                     "native CCL reducer requires a gradient for every nonempty parameter"
                 )
             if grad.device != self.flat.device or grad.dtype != self.flat.dtype:
-                raise ValueError("native CCL reducer gradient device/dtype changed after initialization")
+                raise ValueError(
+                    "native CCL reducer gradient device/dtype changed after initialization"
+                )
             gradients.append(grad)
         return tuple(gradients)
 
@@ -1545,7 +1601,12 @@ class _NativeMoEGradReducer:
     def __init__(self, layer):
         self.dense = _NativeGradBucket(
             "dense",
-            (layer.router_weight, layer.shared_up, layer.shared_gate, layer.shared_down),
+            (
+                layer.router_weight,
+                layer.shared_up,
+                layer.shared_gate,
+                layer.shared_down,
+            ),
             layer.mesh.groups["dense_dp"],
             layer.mesh.group_size["dense_dp"],
         )
@@ -1570,7 +1631,9 @@ class _NativeMoEGradReducer:
             self._dense_stream = torch.xpu.Stream(device=self.dense.flat.device)
         if self.sparse.active:
             self._sparse_stream = torch.xpu.Stream(device=self.sparse.flat.device)
-        self._two_streams = self._dense_stream is not None or self._sparse_stream is not None
+        self._two_streams = (
+            self._dense_stream is not None or self._sparse_stream is not None
+        )
 
     def enable_synchronized_pack(self):
         """Use a device sync instead of producer-to-reducer stream edges.
@@ -1612,7 +1675,11 @@ class _NativeMoEGradReducer:
         # dense/sparse order before entering the concurrent device phase.
         self.dense.warm_up()
         self.sparse.warm_up()
-        device = self.dense.flat.device if self.dense.flat is not None else self.sparse.flat.device
+        device = (
+            self.dense.flat.device
+            if self.dense.flat is not None
+            else self.sparse.flat.device
+        )
         producer = torch.xpu.current_stream(device)
         with _record("moe.comm.native_grad_pack"):
             with torch.xpu.stream(producer):
@@ -1688,9 +1755,15 @@ class _RoutedMOE(torch.autograd.Function):
         with _record("moe.local.fwd_pack_by_destination"):
             send_x = flat.new_zeros((ep_size, cap, flat.shape[-1]))
             send_s = topk_scores.new_zeros((ep_size, cap))
-            send_tok = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
-            send_choice = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
-            send_lid = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
+            send_tok = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
+            send_choice = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
+            send_lid = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
             for rank in range(ep_size):
                 token_ids, choice_ids = (dest == rank).nonzero(as_tuple=True)
                 n = token_ids.numel()
@@ -1710,14 +1783,20 @@ class _RoutedMOE(torch.autograd.Function):
             flat_scores = recv_scores.reshape(ep_size * cap)
             flat_lid = recv_lid.reshape(ep_size * cap)
             slot_ids = torch.arange(cap, device=x.device).unsqueeze(0)
-            valid_positions = (slot_ids < recv_counts.unsqueeze(1)).reshape(-1).nonzero(as_tuple=True)[0]
+            valid_positions = (
+                (slot_ids < recv_counts.unsqueeze(1))
+                .reshape(-1)
+                .nonzero(as_tuple=True)[0]
+            )
             valid_lid = flat_lid[valid_positions]
             local_counts = torch.bincount(valid_lid, minlength=local_count)
             expert_cap = int(local_counts.max().item())
 
             expert_tokens = flat.new_zeros((local_count, expert_cap, flat.shape[-1]))
             expert_scores = topk_scores.new_zeros((local_count, expert_cap))
-            expert_positions = torch.empty((local_count, expert_cap), dtype=torch.long, device=x.device)
+            expert_positions = torch.empty(
+                (local_count, expert_cap), dtype=torch.long, device=x.device
+            )
             for local_id in range(local_count):
                 idx = valid_positions[valid_lid == local_id]
                 n = idx.numel()
@@ -1747,7 +1826,9 @@ class _RoutedMOE(torch.autograd.Function):
                 gate_act[local_id, :n] = gate_i
                 hidden[local_id, :n] = hidden_i
                 raw[local_id, :n] = raw_i
-                local_flat[expert_positions[local_id, :n]] = raw_i * expert_scores[local_id, :n].unsqueeze(-1)
+                local_flat[expert_positions[local_id, :n]] = raw_i * expert_scores[
+                    local_id, :n
+                ].unsqueeze(-1)
 
         returned = _all_to_all(
             local_flat.reshape(ep_size, cap, flat.shape[-1]),
@@ -1785,6 +1866,7 @@ class _RoutedMOE(torch.autograd.Function):
         )
         return out.reshape_as(x)
 
+    @staticmethod
     def backward(ctx, grad_out):
         (
             send_tok,
@@ -1849,15 +1931,16 @@ class _RoutedMOE(torch.autograd.Function):
                 grad_up_act = grad_hidden * F.silu(gate_i)
                 grad_silu = grad_hidden * up_i
                 sigmoid_gate = torch.sigmoid(gate_i)
-                grad_gate_act = grad_silu * sigmoid_gate * (1.0 + gate_i * (1.0 - sigmoid_gate))
+                grad_gate_act = (
+                    grad_silu * sigmoid_gate * (1.0 + gate_i * (1.0 - sigmoid_gate))
+                )
 
                 tokens_i = expert_tokens[local_id, :n]
                 grad_up[local_id] = tokens_i.transpose(0, 1).matmul(grad_up_act)
                 grad_gate[local_id] = tokens_i.transpose(0, 1).matmul(grad_gate_act)
-                grad_recv_tokens_flat[pos] = (
-                    grad_up_act.matmul(up[local_id].transpose(0, 1))
-                    + grad_gate_act.matmul(gate[local_id].transpose(0, 1))
-                )
+                grad_recv_tokens_flat[pos] = grad_up_act.matmul(
+                    up[local_id].transpose(0, 1)
+                ) + grad_gate_act.matmul(gate[local_id].transpose(0, 1))
 
         grad_send_x = _all_to_all(
             grad_recv_tokens_flat.reshape(ep_size, cap, model_dim),
@@ -1881,9 +1964,20 @@ class _RoutedMOE(torch.autograd.Function):
                 tok = send_tok[rank, :n]
                 choice = send_choice[rank, :n]
                 grad_x.index_add_(0, tok, grad_send_x[rank, :n])
-                grad_scores_flat.index_add_(0, tok * top_k + choice, grad_send_scores[rank, :n])
+                grad_scores_flat.index_add_(
+                    0, tok * top_k + choice, grad_send_scores[rank, :n]
+                )
 
-        return grad_x.reshape(ctx.x_shape), grad_scores, None, grad_up, grad_gate, grad_down, None, None
+        return (
+            grad_x.reshape(ctx.x_shape),
+            grad_scores,
+            None,
+            grad_up,
+            grad_gate,
+            grad_down,
+            None,
+            None,
+        )
 
 
 class _RoutedMOESyclBMM(torch.autograd.Function):
@@ -1906,9 +2000,15 @@ class _RoutedMOESyclBMM(torch.autograd.Function):
         with _record("moe.local.fwd_pack_by_destination"):
             send_x = flat.new_zeros((ep_size, cap, flat.shape[-1]))
             send_s = topk_scores.new_zeros((ep_size, cap))
-            send_tok = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
-            send_choice = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
-            send_lid = torch.full((ep_size, cap), -1, dtype=torch.long, device=flat.device)
+            send_tok = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
+            send_choice = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
+            send_lid = torch.full(
+                (ep_size, cap), -1, dtype=torch.long, device=flat.device
+            )
             for rank in range(ep_size):
                 token_ids, choice_ids = (dest == rank).nonzero(as_tuple=True)
                 n = token_ids.numel()
@@ -1928,16 +2028,27 @@ class _RoutedMOESyclBMM(torch.autograd.Function):
             flat_scores = recv_scores.reshape(ep_size * cap)
             flat_lid = recv_lid.reshape(ep_size * cap)
             slot_ids = torch.arange(cap, device=x.device).unsqueeze(0)
-            valid_positions = (slot_ids < recv_counts.unsqueeze(1)).reshape(-1).nonzero(as_tuple=True)[0]
+            valid_positions = (
+                (slot_ids < recv_counts.unsqueeze(1))
+                .reshape(-1)
+                .nonzero(as_tuple=True)[0]
+            )
             valid_lid = flat_lid[valid_positions]
 
         has_valid_routes = valid_positions.numel() != 0
         if has_valid_routes:
-            from aurora_moe._kernels.padded_bmm_moe import exact_routed_expert_bmm, make_exact_route_plan
+            from aurora_moe._kernels.padded_bmm_moe import (
+                exact_routed_expert_bmm,
+                make_exact_route_plan,
+            )
 
             with _record("moe.sycl_bmm.fwd_exact_local_experts"):
                 with torch.enable_grad():
-                    expert_tokens = flat_tokens.index_select(0, valid_positions).detach().requires_grad_(True)
+                    expert_tokens = (
+                        flat_tokens.index_select(0, valid_positions)
+                        .detach()
+                        .requires_grad_(True)
+                    )
                     expert_scores = (
                         flat_scores.index_select(0, valid_positions)
                         .detach()
@@ -2058,14 +2169,22 @@ class _RoutedMOESyclBMM(torch.autograd.Function):
                         grad_expert_down,
                     ) = torch.autograd.grad(
                         ctx.weighted_valid,
-                        (expert_tokens, expert_scores, expert_up, expert_gate, expert_down),
+                        (
+                            expert_tokens,
+                            expert_scores,
+                            expert_up,
+                            expert_gate,
+                            expert_down,
+                        ),
                         grad_weighted_valid,
                         allow_unused=True,
                     )
                 if grad_tokens is not None:
                     grad_recv_tokens_flat.index_copy_(0, valid_positions, grad_tokens)
                 if grad_scores is not None:
-                    grad_recv_scores_flat.index_copy_(0, valid_positions, grad_scores.reshape(-1))
+                    grad_recv_scores_flat.index_copy_(
+                        0, valid_positions, grad_scores.reshape(-1)
+                    )
                 if grad_up is not None and grad_expert_up is not None:
                     grad_up = grad_expert_up
                 if grad_gate is not None and grad_expert_gate is not None:
@@ -2095,7 +2214,9 @@ class _RoutedMOESyclBMM(torch.autograd.Function):
                 tok = send_tok[rank, :n]
                 choice = send_choice[rank, :n]
                 grad_x.index_add_(0, tok, grad_send_x[rank, :n])
-                grad_scores_flat.index_add_(0, tok * top_k + choice, grad_send_scores[rank, :n])
+                grad_scores_flat.index_add_(
+                    0, tok * top_k + choice, grad_send_scores[rank, :n]
+                )
 
         return (
             grad_x.reshape(ctx.x_shape) if ctx.needs_input_grad[0] else None,
@@ -2181,7 +2302,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         with _record("moe.sycl_ep.fwd_route_metadata"):
             flat = x.reshape(-1, x.shape[-1]).contiguous()
             ep_size = mesh.group_size["ep_dispatch"]
-            dest = torch.div(topk_indices, local_count, rounding_mode="floor").contiguous()
+            dest = torch.div(
+                topk_indices, local_count, rounding_mode="floor"
+            ).contiguous()
             local_ids = (topk_indices - dest * local_count).contiguous()
             if direct_layout and precompute_expert_counts:
                 # The source owns both the destination rank and the
@@ -2205,25 +2328,35 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 recv_counts = destination_count_matrix[
                     :, mesh.group_rank["ep_dispatch"]
                 ].contiguous()
-                recv_expert_counts = gathered_destination_expert_counts[
-                    :, mesh.group_rank["ep_dispatch"], :
-                ].sum(dim=0).contiguous()
+                recv_expert_counts = (
+                    gathered_destination_expert_counts[
+                        :, mesh.group_rank["ep_dispatch"], :
+                    ]
+                    .sum(dim=0)
+                    .contiguous()
+                )
                 # One small control readback replaces the old cap readback
                 # plus the direct layout's second receive-side readback.  It
                 # occurs before dispatch, leaving the A1->pack->BMM path
                 # entirely device-scheduled.
-                shape_control = torch.stack(
-                    (
-                        destination_count_matrix.max(),
-                        recv_expert_counts.max(),
-                        recv_expert_counts.min(),
+                shape_control = (
+                    torch.stack(
+                        (
+                            destination_count_matrix.max(),
+                            recv_expert_counts.max(),
+                            recv_expert_counts.min(),
+                        )
                     )
-                ).detach().to(device="cpu", dtype=torch.int64, non_blocking=False)
+                    .detach()
+                    .to(device="cpu", dtype=torch.int64, non_blocking=False)
+                )
                 cap, known_max_rows, known_min_rows = (
                     int(value) for value in shape_control.tolist()
                 )
                 if known_max_rows > torch.iinfo(torch.int32).max:
-                    raise RuntimeError("direct expert row count exceeds int32 layout storage")
+                    raise RuntimeError(
+                        "direct expert row count exceeds int32 layout storage"
+                    )
                 known_max_tail = known_max_rows - known_min_rows
                 known_group_rows = recv_expert_counts.to(torch.int32).contiguous()
             else:
@@ -2233,7 +2366,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 # required scalar control-plane synchronization.  All route
                 # assignments and data movement below remain on the device.
                 cap = int(count_matrix.max().item())
-                recv_counts = count_matrix[:, mesh.group_rank["ep_dispatch"]].contiguous()
+                recv_counts = count_matrix[
+                    :, mesh.group_rank["ep_dispatch"]
+                ].contiguous()
             route_slots = make_route_slots(dest, ep_size, cap)
 
         rows = ep_size * cap
@@ -2292,7 +2427,10 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 mesh,
                 "moe.comm.sycl_ep_fwd_dispatch_expert_ids",
             )
-        if phase_controller is not None and not _phase_shared_forward_reorder_requested():
+        if (
+            phase_controller is not None
+            and not _phase_shared_forward_reorder_requested()
+        ):
             phase_controller.start_prefix_after_dispatch()
 
         if direct_layout:
@@ -2330,21 +2468,22 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     expert_up = up.detach().requires_grad_(True)
                     expert_gate = gate.detach().requires_grad_(True)
                     expert_down = down.detach().requires_grad_(True)
-                    weighted_valid, two_phase_state = (
-                        prepare_direct_padded_expert_bmm_two_phase(
-                            direct_payload,
-                            recv_counts,
-                            cap,
-                            local_count,
-                            expert_up,
-                            expert_gate,
-                            expert_down,
-                            local_ids=direct_local_ids,
-                            activation="swiglu",
-                            known_group_rows=known_group_rows,
-                            known_max_rows=known_max_rows,
-                            known_max_tail=known_max_tail,
-                        )
+                    (
+                        weighted_valid,
+                        two_phase_state,
+                    ) = prepare_direct_padded_expert_bmm_two_phase(
+                        direct_payload,
+                        recv_counts,
+                        cap,
+                        local_count,
+                        expert_up,
+                        expert_gate,
+                        expert_down,
+                        local_ids=direct_local_ids,
+                        activation="swiglu",
+                        known_group_rows=known_group_rows,
+                        known_max_rows=known_max_rows,
+                        known_max_tail=known_max_tail,
                     )
                 else:
                     with torch.enable_grad():
@@ -2373,9 +2512,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         else:
             with _record("moe.sycl_ep.fwd_prepare_local_routes"):
                 if small_id_payload:
-                    from aurora_moe._kernels.ep_local_ops import compact_payload_rows_with_ids_from_counts
+                    from aurora_moe._kernels.ep_local_ops import (
+                        compact_payload_rows_with_ids_from_counts,
+                    )
 
-                    flat_payload = recv_payload.reshape(rows, flat.shape[-1] + 2).contiguous()
+                    flat_payload = recv_payload.reshape(
+                        rows, flat.shape[-1] + 2
+                    ).contiguous()
                     compact = compact_payload_rows_with_ids_from_counts(
                         flat_payload, recv_counts, cap
                     )
@@ -2389,7 +2532,11 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     flat_payload = recv_payload.reshape(rows, flat.shape[-1] + 1)
                     flat_lid = recv_lid.reshape(rows)
                     slot_ids = torch.arange(cap, device=x.device).unsqueeze(0)
-                    valid_positions = (slot_ids < recv_counts.unsqueeze(1)).reshape(-1).nonzero(as_tuple=True)[0]
+                    valid_positions = (
+                        (slot_ids < recv_counts.unsqueeze(1))
+                        .reshape(-1)
+                        .nonzero(as_tuple=True)[0]
+                    )
                     valid_lid = flat_lid.index_select(0, valid_positions)
                     has_valid_routes = valid_positions.numel() != 0
 
@@ -2397,8 +2544,14 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 if small_id_payload:
                     from aurora_moe._kernels.ep_local_ops import expand_rows_to_counts
                 else:
-                    from aurora_moe._kernels.ep_local_ops import gather_payload_rows, scatter_rows
-                from aurora_moe._kernels.padded_bmm_moe import exact_routed_expert_bmm, make_exact_route_plan
+                    from aurora_moe._kernels.ep_local_ops import (
+                        gather_payload_rows,
+                        scatter_rows,
+                    )
+                from aurora_moe._kernels.padded_bmm_moe import (
+                    exact_routed_expert_bmm,
+                    make_exact_route_plan,
+                )
 
                 with _record("moe.sycl_ep.fwd_exact_local_experts"):
                     # Nested leaves make this custom autograd function explicit
@@ -2408,14 +2561,14 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                             compact = gather_payload_rows(flat_payload, valid_positions)
                         expert_tokens = compact.tokens.detach().requires_grad_(True)
                         expert_scores = (
-                            compact.scores.detach()
-                            .reshape(-1, 1)
-                            .requires_grad_(True)
+                            compact.scores.detach().reshape(-1, 1).requires_grad_(True)
                         )
                         expert_up = up.detach().requires_grad_(True)
                         expert_gate = gate.detach().requires_grad_(True)
                         expert_down = down.detach().requires_grad_(True)
-                        local_indices = valid_lid.to(torch.long).reshape(-1, 1).contiguous()
+                        local_indices = (
+                            valid_lid.to(torch.long).reshape(-1, 1).contiguous()
+                        )
                         plan = make_exact_route_plan(local_indices, local_count)
                         if phase_controller is not None:
                             phase_controller.wait_prefix_before_local_xmx(
@@ -2456,7 +2609,10 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             mesh,
             "moe.comm.sycl_ep_fwd_combine_outputs",
         )
-        if phase_controller is not None and not _phase_shared_forward_reorder_requested():
+        if (
+            phase_controller is not None
+            and not _phase_shared_forward_reorder_requested()
+        ):
             phase_controller.start_suffix_after_return()
         with _record("moe.sycl_ep.fwd_reduce_exact_routes"):
             out = reduce_route_rows(returned.reshape(rows, flat.shape[-1]), route_slots)
@@ -2471,7 +2627,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         ctx.direct_layout_two_phase = direct_layout_two_phase
         ctx.phase_controller = phase_controller
         ctx.dedicated_native_a4 = dedicated_native_a4
-        ctx.direct_layout_two_phase_state = two_phase_state if direct_layout_two_phase else None
+        ctx.direct_layout_two_phase_state = (
+            two_phase_state if direct_layout_two_phase else None
+        )
         ctx.weighted_valid = None if direct_layout_two_phase else weighted_valid
         if direct_layout:
             ctx.save_for_backward(
@@ -2524,10 +2682,10 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             make_compact_destination_expert_slots,
             make_compact_route_slots,
             make_destination_expert_offsets,
-            pack_compact_tokens_scores,
-            pack_compact_tokens_score_payload,
             pack_compact_routes_payload,
             pack_compact_routes_payload_ids,
+            pack_compact_tokens_score_payload,
+            pack_compact_tokens_scores,
             reduce_route_rows,
         )
 
@@ -2624,9 +2782,7 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 l0_forward_capacity_rows,
                 l0_reverse_remote_offsets,
                 l0_reverse_capacity_rows,
-            ) = _l0_ipc_alltoallv_metadata_from_count_matrix_cpu(
-                count_matrix_cpu, mesh
-            )
+            ) = _l0_ipc_alltoallv_metadata_from_count_matrix_cpu(count_matrix_cpu, mesh)
             # The matrix is globally replicated by the route-count exchange,
             # so this branch choice is collective-order safe.  It remains an
             # opt-in experimental transport selection, not a routing policy.
@@ -2646,9 +2802,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 route_slots = make_compact_destination_expert_slots(
                     destination, local_ids, destination_expert_offsets
                 )
-                source_expert_counts = gathered_destination_expert_counts[
-                    :, mesh.group_rank["ep_dispatch"], :
-                ].to(torch.int32).contiguous()
+                source_expert_counts = (
+                    gathered_destination_expert_counts[
+                        :, mesh.group_rank["ep_dispatch"], :
+                    ]
+                    .to(torch.int32)
+                    .contiguous()
+                )
                 if direct_expert_major_ipc:
                     from aurora_moe._kernels.level_zero_ipc_alltoallv import (
                         make_expert_major_ipc_block_plan,
@@ -2709,9 +2869,7 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             if expert_major_fused_payload:
                 if direct_expert_major_ipc:
                     assert l0_expert_major_plan is not None
-                    with _record(
-                        "moe.comm.l0_ipc_expert_major_fwd_dispatch_payload"
-                    ):
+                    with _record("moe.comm.l0_ipc_expert_major_fwd_dispatch_payload"):
                         recv_payload = _l0_ipc_alltoallv_group_state(
                             mesh
                         ).all_to_all_v_expert_major(
@@ -2766,7 +2924,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 l0_remote_receive_offsets=l0_forward_remote_offsets,
                 l0_global_capacity_rows=l0_forward_capacity_rows,
             )
-            from aurora_moe._kernels.ep_local_ops import split_compact_payload_rows_with_ids
+            from aurora_moe._kernels.ep_local_ops import (
+                split_compact_payload_rows_with_ids,
+            )
 
             with _record("moe.sycl_ep_alltoallv.fwd_prepare_local_routes"):
                 compact = split_compact_payload_rows_with_ids(recv_payload.contiguous())
@@ -2796,23 +2956,37 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 compact = split_compact_payload_rows(recv_payload.contiguous())
                 valid_lid = recv_lid.contiguous()
 
-        if phase_controller is not None and not _phase_shared_forward_reorder_requested():
+        if (
+            phase_controller is not None
+            and not _phase_shared_forward_reorder_requested()
+        ):
             # Submission has returned, so enqueue the independent shared
             # prefix on its private PyTorch stream while oneCCL advances A1.
             phase_controller.start_prefix_after_dispatch()
 
         if segmented_backend:
             if expert_major_fused_payload:
-                if recv_payload.size(0) != sum(recv_splits) or recv_payload.size(1) != flat.size(1) + 1:
-                    raise RuntimeError("fused segmented EP receive payload does not match received routes")
+                if (
+                    recv_payload.size(0) != sum(recv_splits)
+                    or recv_payload.size(1) != flat.size(1) + 1
+                ):
+                    raise RuntimeError(
+                        "fused segmented EP receive payload does not match received routes"
+                    )
                 has_valid_routes = recv_payload.size(0) != 0
             else:
-                if recv_tokens.size(0) != sum(recv_splits) or recv_scores.size(0) != sum(recv_splits):
-                    raise RuntimeError("segmented EP receive splits do not match received routes")
+                if recv_tokens.size(0) != sum(recv_splits) or recv_scores.size(
+                    0
+                ) != sum(recv_splits):
+                    raise RuntimeError(
+                        "segmented EP receive splits do not match received routes"
+                    )
                 has_valid_routes = recv_tokens.size(0) != 0
         else:
             if compact.tokens.size(0) != sum(recv_splits):
-                raise RuntimeError("compact EP receive splits do not match received routes")
+                raise RuntimeError(
+                    "compact EP receive splits do not match received routes"
+                )
             has_valid_routes = compact.tokens.size(0) != 0
         expert_major_two_phase_state = None
         if has_valid_routes:
@@ -2850,7 +3024,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     expert_gate = gate.detach().requires_grad_(True)
                     expert_down = down.detach().requires_grad_(True)
                     if segmented_backend:
-                        from aurora_moe._kernels.segmented_sonic import make_peer_expert_segments
+                        from aurora_moe._kernels.segmented_sonic import (
+                            make_peer_expert_segments,
+                        )
 
                         segments = make_peer_expert_segments(source_expert_counts)
                         if expert_major_segmented_backend:
@@ -2876,7 +3052,8 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                                         expert_down,
                                         expert_rows=local_expert_rows,
                                         reorder_backend=os.environ.get(
-                                            "AURORA_MOE_EXPERT_MAJOR_REORDER", "parallel"
+                                            "AURORA_MOE_EXPERT_MAJOR_REORDER",
+                                            "parallel",
                                         ),
                                         pointwise_backend=os.environ.get(
                                             "AURORA_MOE_SEGMENTED_POINTWISE", "torch"
@@ -2906,7 +3083,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                                     expert_rows=local_expert_rows,
                                 )
                         else:
-                            from aurora_moe._kernels.segmented_sonic import segmented_local_moe
+                            from aurora_moe._kernels.segmented_sonic import (
+                                segmented_local_moe,
+                            )
 
                             weighted_valid = segmented_local_moe(
                                 expert_tokens,
@@ -2928,12 +3107,19 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                             expert_gate,
                             expert_down,
                             activation="swiglu",
-                            backend=os.environ.get("AURORA_MOE_SONIC_RAGGED_GEMM", "reference"),
+                            backend=os.environ.get(
+                                "AURORA_MOE_SONIC_RAGGED_GEMM", "reference"
+                            ),
                         )
                     else:
-                        from aurora_moe._kernels.padded_bmm_moe import exact_routed_expert_bmm, make_exact_route_plan
+                        from aurora_moe._kernels.padded_bmm_moe import (
+                            exact_routed_expert_bmm,
+                            make_exact_route_plan,
+                        )
 
-                        local_indices = valid_lid.to(torch.long).reshape(-1, 1).contiguous()
+                        local_indices = (
+                            valid_lid.to(torch.long).reshape(-1, 1).contiguous()
+                        )
                         plan = make_exact_route_plan(local_indices, local_count)
                         weighted_valid = exact_routed_expert_bmm(
                             expert_tokens,
@@ -2993,7 +3179,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             # buffer before its oneCCL event is bridged.
             assert phase_controller is not None
             phase_controller.finish_forward(producer_stream)
-            with _record("moe.comm.sycl_ep_alltoallv_fwd_combine_outputs_thread_join_bridge"):
+            with _record(
+                "moe.comm.sycl_ep_alltoallv_fwd_combine_outputs_thread_join_bridge"
+            ):
                 returned = native_a3_launch.bridge(producer_stream)
         else:
             if direct_expert_major_ipc:
@@ -3017,7 +3205,10 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     l0_remote_receive_offsets=l0_reverse_remote_offsets,
                     l0_global_capacity_rows=l0_reverse_capacity_rows,
                 )
-            if phase_controller is not None and not _phase_shared_forward_reorder_requested():
+            if (
+                phase_controller is not None
+                and not _phase_shared_forward_reorder_requested()
+            ):
                 phase_controller.start_suffix_after_return()
         with _record("moe.sycl_ep_alltoallv.fwd_reduce_exact_routes"):
             out = reduce_route_rows(returned.contiguous(), route_slots)
@@ -3094,7 +3285,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         rows = ep_size * cap
         small_id_payload = ctx.small_id_payload
         phase_controller = getattr(ctx, "phase_controller", None)
-        if phase_controller is not None and not getattr(ctx, "direct_layout_two_phase", False):
+        if phase_controller is not None and not getattr(
+            ctx, "direct_layout_two_phase", False
+        ):
             raise RuntimeError(
                 "phase-separated shared experts require direct two-phase routed backward"
             )
@@ -3112,10 +3305,7 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         # exact backward chunk before A2, then make the local routed payload
         # phase wait for that chunk below.  This uses the A2 communication
         # window without ever overlapping the two XMX-heavy local backwards.
-        if (
-            phase_controller is not None
-            and phase_controller.early_backward_requested()
-        ):
+        if phase_controller is not None and phase_controller.early_backward_requested():
             phase_controller.start_backward_early()
         grad_local = _all_to_all(
             grad_returned.reshape(ep_size, cap, model_dim),
@@ -3123,10 +3313,7 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             "moe.comm.sycl_ep_bwd_dispatch_output_grads",
         )
         grad_local_flat = grad_local.reshape(rows, model_dim)
-        if (
-            phase_controller is not None
-            and phase_controller.backward_started_early
-        ):
+        if phase_controller is not None and phase_controller.backward_started_early:
             phase_controller.wait_backward_before_local_xmx(
                 torch.xpu.current_stream(grad_out.device)
             )
@@ -3138,7 +3325,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             if getattr(ctx, "direct_layout_two_phase", False):
                 weight_tail_state = ctx.direct_layout_two_phase_state
                 if weight_tail_state is None:
-                    raise RuntimeError("direct-layout two-phase backward state is missing")
+                    raise RuntimeError(
+                        "direct-layout two-phase backward state is missing"
+                    )
                 with _record("moe.sycl_ep.bwd_direct_expert_payload_phase"):
                     grad_direct_payload = weight_tail_state.payload_gradient(
                         grad_local_flat.contiguous(), payload_columns=model_dim + 1
@@ -3177,12 +3366,16 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     grad_gate = (
                         grad_expert_gate
                         if ctx.needs_input_grad[4] and grad_expert_gate is not None
-                        else (torch.zeros_like(gate) if ctx.needs_input_grad[4] else None)
+                        else (
+                            torch.zeros_like(gate) if ctx.needs_input_grad[4] else None
+                        )
                     )
                     grad_down = (
                         grad_expert_down
                         if ctx.needs_input_grad[5] and grad_expert_down is not None
-                        else (torch.zeros_like(down) if ctx.needs_input_grad[5] else None)
+                        else (
+                            torch.zeros_like(down) if ctx.needs_input_grad[5] else None
+                        )
                     )
                     if grad_direct_payload is None:
                         grad_direct_payload = torch.zeros_like(direct_payload)
@@ -3196,9 +3389,15 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 grad_tokens = None
                 grad_scores = None
                 if small_id_payload:
-                    from aurora_moe._kernels.ep_local_ops import compact_rows_from_counts
+                    from aurora_moe._kernels.ep_local_ops import (
+                        compact_rows_from_counts,
+                    )
                 else:
-                    from aurora_moe._kernels.ep_local_ops import gather_rows, scatter_rows
+                    from aurora_moe._kernels.ep_local_ops import (
+                        gather_rows,
+                        scatter_rows,
+                    )
+
                     grad_recv_tokens_flat = grad_flat.new_zeros((rows, model_dim))
                     grad_recv_scores_flat = expert_scores.new_zeros(rows)
                 grad_up = torch.zeros_like(up) if ctx.needs_input_grad[3] else None
@@ -3226,7 +3425,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                             grad_expert_down,
                         ) = torch.autograd.grad(
                             ctx.weighted_valid,
-                            (expert_tokens, expert_scores, expert_up, expert_gate, expert_down),
+                            (
+                                expert_tokens,
+                                expert_scores,
+                                expert_up,
+                                expert_gate,
+                                expert_down,
+                            ),
                             grad_weighted_valid,
                             allow_unused=True,
                         )
@@ -3235,7 +3440,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                             grad_tokens.contiguous(), valid_positions, rows
                         )
                     if not small_id_payload and grad_scores is not None:
-                        grad_recv_scores_flat.index_copy_(0, valid_positions, grad_scores.reshape(-1))
+                        grad_recv_scores_flat.index_copy_(
+                            0, valid_positions, grad_scores.reshape(-1)
+                        )
                     if grad_up is not None and grad_expert_up is not None:
                         grad_up = grad_expert_up
                     if grad_gate is not None and grad_expert_gate is not None:
@@ -3253,25 +3460,28 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                         grad_scores = torch.zeros_like(expert_scores)
                     grad_payload = expand_rows_to_counts(
                         fuse_route_rows(
-                            grad_tokens.contiguous(), grad_scores.reshape(-1).contiguous()
+                            grad_tokens.contiguous(),
+                            grad_scores.reshape(-1).contiguous(),
                         ),
                         recv_counts,
                         cap,
                     )
                 else:
-                    grad_payload = fuse_route_rows(grad_recv_tokens_flat, grad_recv_scores_flat)
+                    grad_payload = fuse_route_rows(
+                        grad_recv_tokens_flat, grad_recv_scores_flat
+                    )
         native_a4_launch = None
         if phase_controller is not None:
             if weight_tail_producer is None or weight_tail_stream is None:
-                raise RuntimeError("phase-separated shared experts require a routed weight tail")
+                raise RuntimeError(
+                    "phase-separated shared experts require a routed weight tail"
+                )
             phase_controller.mark_payload_ready(weight_tail_producer)
         if weight_tail_stream is not None and _threaded_native_a4_requested(mesh):
             assert weight_tail_producer is not None
             dedicated_native_a4 = getattr(ctx, "dedicated_native_a4", False)
             native_a4_state = (
-                _native_ccl_dedicated_a4_state(mesh)
-                if dedicated_native_a4
-                else None
+                _native_ccl_dedicated_a4_state(mesh) if dedicated_native_a4 else None
             )
             thread_start_name = (
                 "moe.comm.sycl_ep_bwd_combine_input_score_grads_dedicated_thread_start"
@@ -3293,7 +3503,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             )
         if phase_controller is not None:
             if native_a4_launch is None:
-                raise RuntimeError("phase-separated shared experts require threaded native reverse A4")
+                raise RuntimeError(
+                    "phase-separated shared experts require threaded native reverse A4"
+                )
             # Do not start competing shared XMX work until the oneCCL host
             # submission itself has returned.  This still overlaps it with
             # device-side A4 progress, but avoids the observed multi-step
@@ -3309,7 +3521,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             with _record("moe.sycl_ep.bwd_direct_expert_weight_tail"):
                 with torch.xpu.stream(weight_tail_stream):
                     if phase_controller is not None:
-                        phase_controller.wait_backward_for_weight_tail(weight_tail_stream)
+                        phase_controller.wait_backward_for_weight_tail(
+                            weight_tail_stream
+                        )
                     grad_up, grad_gate, grad_down = weight_tail_state.weight_gradients(
                         need_up=ctx.needs_input_grad[3],
                         need_gate=ctx.needs_input_grad[4],
@@ -3318,7 +3532,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
             weight_tail_state.record_weight_tail_stream(weight_tail_stream)
         if native_a4_launch is not None:
             assert weight_tail_producer is not None
-            with _record("moe.comm.sycl_ep_bwd_combine_input_score_grads_thread_join_bridge"):
+            with _record(
+                "moe.comm.sycl_ep_bwd_combine_input_score_grads_thread_join_bridge"
+            ):
                 grad_send_payload = native_a4_launch.bridge(weight_tail_producer)
         with _record("moe.sycl_ep.bwd_reduce_exact_routes"):
             grad_x, grad_scores_out = reduce_route_payload(
@@ -3373,28 +3589,28 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         direct_expert_major_ipc = getattr(ctx, "l0_expert_major_ipc", False)
         l0_expert_major_plan = getattr(ctx, "l0_expert_major_plan", None)
         if direct_expert_major_ipc and l0_expert_major_plan is None:
-            raise RuntimeError("direct expert-major IPC backward state is missing its plan")
+            raise RuntimeError(
+                "direct expert-major IPC backward state is missing its plan"
+            )
         model_dim = grad_out.shape[-1]
         phase_controller = getattr(ctx, "phase_controller", None)
 
-        from aurora_moe._kernels.ep_route_ops import pack_token_rows, reduce_route_payload
+        from aurora_moe._kernels.ep_route_ops import (
+            pack_token_rows,
+            reduce_route_payload,
+        )
 
         # Shared backward depends only on the outer gradient and its saved
         # shared-expert graph, both of which the joint wrapper has already
         # armed.  In the opt-in early schedule it occupies the exact A2
         # communication window; the reciprocal wait below keeps the routed
         # local payload GEMMs disjoint from its XMX work.
-        if (
-            phase_controller is not None
-            and phase_controller.early_backward_requested()
-        ):
+        if phase_controller is not None and phase_controller.early_backward_requested():
             phase_controller.start_backward_early()
 
         with _record("moe.sycl_ep_alltoallv.bwd_pack_output_grads"):
             grad_flat = grad_out.reshape(-1, model_dim).contiguous()
-            grad_returned = pack_token_rows(
-                grad_flat, route_slots, route_slots.numel()
-            )
+            grad_returned = pack_token_rows(grad_flat, route_slots, route_slots.numel())
         if direct_expert_major_ipc:
             with _record("moe.comm.l0_ipc_expert_major_bwd_dispatch_output_grads"):
                 grad_local = _l0_ipc_alltoallv_group_state(
@@ -3409,14 +3625,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 recv_splits,
                 mesh,
                 "moe.comm.sycl_ep_alltoallv_bwd_dispatch_output_grads",
-                exact_equal_fastpath=getattr(ctx, "alltoallv_exact_equal_fastpath", False),
+                exact_equal_fastpath=getattr(
+                    ctx, "alltoallv_exact_equal_fastpath", False
+                ),
                 l0_remote_receive_offsets=l0_forward_remote_offsets,
                 l0_global_capacity_rows=l0_forward_capacity_rows,
             )
-        if (
-            phase_controller is not None
-            and phase_controller.backward_started_early
-        ):
+        if phase_controller is not None and phase_controller.backward_started_early:
             phase_controller.wait_backward_before_local_xmx(
                 torch.xpu.current_stream(grad_out.device)
             )
@@ -3437,7 +3652,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                     grad_payload, l0_expert_major_plan, inverse=True
                 )
         elif _threaded_native_a4_requested(mesh):
-            with _record("moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads_thread_start"):
+            with _record(
+                "moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads_thread_start"
+            ):
                 native_a4_launch = _start_threaded_native_a4v(
                     mesh,
                     grad_payload,
@@ -3452,7 +3669,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 send_splits,
                 mesh,
                 "moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads",
-                exact_equal_fastpath=getattr(ctx, "alltoallv_exact_equal_fastpath", False),
+                exact_equal_fastpath=getattr(
+                    ctx, "alltoallv_exact_equal_fastpath", False
+                ),
                 l0_remote_receive_offsets=l0_reverse_remote_offsets,
                 l0_global_capacity_rows=l0_reverse_capacity_rows,
             )
@@ -3497,7 +3716,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         two_phase_state.record_weight_tail_stream(weight_tail_stream)
 
         if native_a4_launch is not None:
-            with _record("moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads_thread_join_bridge"):
+            with _record(
+                "moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads_thread_join_bridge"
+            ):
                 grad_send_payload = native_a4_launch.bridge(producer_stream)
         with _record("moe.sycl_ep_alltoallv.bwd_reduce_exact_routes"):
             grad_x, grad_scores_out = reduce_route_payload(
@@ -3553,7 +3774,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         direct_expert_major_ipc = getattr(ctx, "l0_expert_major_ipc", False)
         l0_expert_major_plan = getattr(ctx, "l0_expert_major_plan", None)
         if direct_expert_major_ipc and l0_expert_major_plan is None:
-            raise RuntimeError("direct expert-major IPC backward state is missing its plan")
+            raise RuntimeError(
+                "direct expert-major IPC backward state is missing its plan"
+            )
         model_dim = grad_out.shape[-1]
         phase_controller = getattr(ctx, "phase_controller", None)
 
@@ -3567,18 +3790,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         # introduced even though the shared route pack primitive is reused.
         with _record("moe.sycl_ep_alltoallv.bwd_pack_output_grads"):
             grad_flat = grad_out.reshape(-1, model_dim).contiguous()
-            grad_returned = pack_token_rows(
-                grad_flat, route_slots, route_slots.numel()
-            )
+            grad_returned = pack_token_rows(grad_flat, route_slots, route_slots.numel())
         # The exact generic compact path keeps router-score gradients, unlike
         # the expert-major two-phase experiment.  It nevertheless has the
         # same A2 communication interval: run the configured first shared
         # backward chunk there, then gate the routed nested autograd below so
         # the two local XMX computations remain disjoint.
-        if (
-            phase_controller is not None
-            and phase_controller.early_backward_requested()
-        ):
+        if phase_controller is not None and phase_controller.early_backward_requested():
             phase_controller.start_backward_early()
         if direct_expert_major_ipc:
             with _record("moe.comm.l0_ipc_expert_major_bwd_dispatch_output_grads"):
@@ -3594,14 +3812,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 recv_splits,
                 mesh,
                 "moe.comm.sycl_ep_alltoallv_bwd_dispatch_output_grads",
-                exact_equal_fastpath=getattr(ctx, "alltoallv_exact_equal_fastpath", False),
+                exact_equal_fastpath=getattr(
+                    ctx, "alltoallv_exact_equal_fastpath", False
+                ),
                 l0_remote_receive_offsets=l0_forward_remote_offsets,
                 l0_global_capacity_rows=l0_forward_capacity_rows,
             )
-        if (
-            phase_controller is not None
-            and phase_controller.backward_started_early
-        ):
+        if phase_controller is not None and phase_controller.backward_started_early:
             phase_controller.wait_backward_before_local_xmx(
                 torch.xpu.current_stream(grad_out.device)
             )
@@ -3623,7 +3840,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                         grad_expert_down,
                     ) = torch.autograd.grad(
                         ctx.weighted_valid,
-                        (expert_tokens, expert_scores, expert_up, expert_gate, expert_down),
+                        (
+                            expert_tokens,
+                            expert_scores,
+                            expert_up,
+                            expert_gate,
+                            expert_down,
+                        ),
                         grad_local.contiguous(),
                         allow_unused=True,
                     )
@@ -3661,7 +3884,9 @@ class _RoutedMOESyclEP(torch.autograd.Function):
         # shared backward can safely use A4's communication window without
         # sharing XMX with the local expert gradient calculation.
         if phase_controller is not None:
-            phase_controller.mark_payload_ready(torch.xpu.current_stream(grad_out.device))
+            phase_controller.mark_payload_ready(
+                torch.xpu.current_stream(grad_out.device)
+            )
         if direct_expert_major_ipc:
             with _record("moe.comm.l0_ipc_expert_major_bwd_combine_input_score_grads"):
                 grad_send_payload = _l0_ipc_alltoallv_group_state(
@@ -3676,14 +3901,13 @@ class _RoutedMOESyclEP(torch.autograd.Function):
                 send_splits,
                 mesh,
                 "moe.comm.sycl_ep_alltoallv_bwd_combine_input_score_grads",
-                exact_equal_fastpath=getattr(ctx, "alltoallv_exact_equal_fastpath", False),
+                exact_equal_fastpath=getattr(
+                    ctx, "alltoallv_exact_equal_fastpath", False
+                ),
                 l0_remote_receive_offsets=l0_reverse_remote_offsets,
                 l0_global_capacity_rows=l0_reverse_capacity_rows,
             )
-        if (
-            phase_controller is not None
-            and phase_controller.backward_after_a4_required
-        ):
+        if phase_controller is not None and phase_controller.backward_after_a4_required:
             phase_controller.start_backward_after_a4()
         with _record("moe.sycl_ep_alltoallv.bwd_reduce_exact_routes"):
             grad_x, grad_scores_out = reduce_route_payload(
@@ -3724,7 +3948,9 @@ class _RoutedMOESyclSonic(torch.autograd.Function):
         if topk_scores.dtype != torch.bfloat16:
             raise ValueError("sycl_sonic expert backend requires BF16 router scores")
         if os.environ.get("AURORA_MOE_ALLTOALLV") != "1":
-            raise RuntimeError("sycl_sonic requires AURORA_MOE_ALLTOALLV=1 for exact compact EP transport")
+            raise RuntimeError(
+                "sycl_sonic requires AURORA_MOE_ALLTOALLV=1 for exact compact EP transport"
+            )
         return _RoutedMOESyclEP._forward_alltoallv(
             ctx,
             x,
@@ -3762,9 +3988,13 @@ def _routed_moe(
             "phase-separated shared experts require expert_backend=sycl_ep or sycl_sonic"
         )
     if expert_backend == "loop":
-        return _RoutedMOE.apply(x, topk_scores, topk_indices, up, gate, down, mesh, local_count)
+        return _RoutedMOE.apply(
+            x, topk_scores, topk_indices, up, gate, down, mesh, local_count
+        )
     if expert_backend == "sycl_bmm":
-        return _RoutedMOESyclBMM.apply(x, topk_scores, topk_indices, up, gate, down, mesh, local_count)
+        return _RoutedMOESyclBMM.apply(
+            x, topk_scores, topk_indices, up, gate, down, mesh, local_count
+        )
     if expert_backend == "sycl_ep":
         return _RoutedMOESyclEP.apply(
             x,
@@ -3816,11 +4046,24 @@ class LocalExperts(nn.Module):
     def __init__(self, config, local_expert_ids, layer_id):
         super().__init__()
         count = len(local_expert_ids)
-        self.experts_up = nn.Parameter(torch.empty(count, config.model_dim, config.expert_hidden_dim))
-        self.experts_gate = nn.Parameter(torch.empty(count, config.model_dim, config.expert_hidden_dim))
-        self.experts_down = nn.Parameter(torch.empty(count, config.expert_hidden_dim, config.model_dim))
+        self.experts_up = nn.Parameter(
+            torch.empty(count, config.model_dim, config.expert_hidden_dim)
+        )
+        self.experts_gate = nn.Parameter(
+            torch.empty(count, config.model_dim, config.expert_hidden_dim)
+        )
+        self.experts_down = nn.Parameter(
+            torch.empty(count, config.expert_hidden_dim, config.model_dim)
+        )
         self.expert_backend = getattr(config, "expert_backend", "loop")
-        _init_experts(self.experts_up, self.experts_gate, self.experts_down, local_expert_ids, config, layer_id)
+        _init_experts(
+            self.experts_up,
+            self.experts_gate,
+            self.experts_down,
+            local_expert_ids,
+            config,
+            layer_id,
+        )
 
     def forward(
         self,
@@ -3833,9 +4076,13 @@ class LocalExperts(nn.Module):
         ddp_anchor_only=False,
     ):
         if ddp_anchor_only:
-            return ddp_parameter_anchor(self.experts_up, self.experts_gate, self.experts_down)
+            return ddp_parameter_anchor(
+                self.experts_up, self.experts_gate, self.experts_down
+            )
         if any(value is None for value in (x, scores, indices, local_expert_ids, mesh)):
-            raise ValueError("LocalExperts forward requires x, scores, indices, local_expert_ids, and mesh")
+            raise ValueError(
+                "LocalExperts forward requires x, scores, indices, local_expert_ids, and mesh"
+            )
         return _routed_moe(
             x,
             scores,
@@ -3853,15 +4100,25 @@ class SharedExperts(nn.Module):
     def __init__(self, config, layer_id):
         super().__init__()
         self.shared_count = config.shared_experts
-        self.experts_up = nn.Parameter(torch.empty(self.shared_count, config.model_dim, config.expert_hidden_dim))
-        self.experts_gate = nn.Parameter(torch.empty(self.shared_count, config.model_dim, config.expert_hidden_dim))
-        self.experts_down = nn.Parameter(torch.empty(self.shared_count, config.expert_hidden_dim, config.model_dim))
+        self.experts_up = nn.Parameter(
+            torch.empty(self.shared_count, config.model_dim, config.expert_hidden_dim)
+        )
+        self.experts_gate = nn.Parameter(
+            torch.empty(self.shared_count, config.model_dim, config.expert_hidden_dim)
+        )
+        self.experts_down = nn.Parameter(
+            torch.empty(self.shared_count, config.expert_hidden_dim, config.model_dim)
+        )
         ids = range(config.num_experts, config.num_experts + self.shared_count)
-        _init_experts(self.experts_up, self.experts_gate, self.experts_down, ids, config, layer_id)
+        _init_experts(
+            self.experts_up, self.experts_gate, self.experts_down, ids, config, layer_id
+        )
 
     def forward(self, x=None, *, ddp_anchor_only=False):
         if ddp_anchor_only:
-            return ddp_parameter_anchor(self.experts_up, self.experts_gate, self.experts_down)
+            return ddp_parameter_anchor(
+                self.experts_up, self.experts_gate, self.experts_down
+            )
         if x is None:
             raise ValueError("SharedExperts forward requires x")
         flat = x.reshape(-1, x.shape[-1])
@@ -3889,7 +4146,10 @@ class MOELayer(nn.Module):
         if config.shared_experts < 0:
             raise ValueError("shared_experts must be nonnegative")
         if config.num_experts % ep_size != 0:
-            raise ValueError("num_experts=%d must be divisible by ep_size=%d" % (config.num_experts, ep_size))
+            raise ValueError(
+                "num_experts=%d must be divisible by ep_size=%d"
+                % (config.num_experts, ep_size)
+            )
         if not 1 <= config.top_k <= config.num_experts:
             raise ValueError("top_k=%d must be in [1, num_experts]" % config.top_k)
 
@@ -3937,7 +4197,9 @@ class MOELayer(nn.Module):
             else None
         )
 
-        self.router = _wrap_ddp(self.router, mesh.groups["dense_dp"], mesh.group_size["dense_dp"], False)
+        self.router = _wrap_ddp(
+            self.router, mesh.groups["dense_dp"], mesh.group_size["dense_dp"], False
+        )
         # The exact SYCL-EP autograd function always returns a gradient tensor
         # (zero-filled when no route reaches a local expert), so its expert
         # parameters are not dynamically unused.  Leave the conservative DDP
@@ -3953,7 +4215,12 @@ class MOELayer(nn.Module):
             mesh.group_size["sparse_dp"],
             expert_find_unused,
         )
-        self.shared_experts = _wrap_ddp(self.shared_experts, mesh.groups["dense_dp"], mesh.group_size["dense_dp"], False)
+        self.shared_experts = _wrap_ddp(
+            self.shared_experts,
+            mesh.groups["dense_dp"],
+            mesh.group_size["dense_dp"],
+            False,
+        )
         # Construct once after the optional DDP wrapping.  In native-reducer
         # mode wrapping is intentionally disabled, while in normal mode this
         # stays ``None`` and preserves the stock DDP behavior.
@@ -4075,7 +4342,9 @@ class MOELayer(nn.Module):
                 else None
             )
             sparse_anchor = (
-                self.experts(ddp_anchor_only=True) if isinstance(self.experts, DDP) else None
+                self.experts(ddp_anchor_only=True)
+                if isinstance(self.experts, DDP)
+                else None
             )
             dense_anchor = (
                 self.shared_experts(ddp_anchor_only=True)
@@ -4128,11 +4397,15 @@ class MOELayer(nn.Module):
                 with _record("moe.shared_experts"):
                     shared = self.shared_experts(x)
             with _record("moe.routed_experts"):
-                routed = self.experts(x, scores, indices, self.local_expert_ids, self.mesh)
+                routed = self.experts(
+                    x, scores, indices, self.local_expert_ids, self.mesh
+                )
             current_stream.wait_stream(self._shared_expert_stream)
         else:
             with _record("moe.routed_experts"):
-                routed = self.experts(x, scores, indices, self.local_expert_ids, self.mesh)
+                routed = self.experts(
+                    x, scores, indices, self.local_expert_ids, self.mesh
+                )
             with _record("moe.shared_experts"):
                 shared = self.shared_experts(x)
         with _record("moe.combine_routed_shared"):

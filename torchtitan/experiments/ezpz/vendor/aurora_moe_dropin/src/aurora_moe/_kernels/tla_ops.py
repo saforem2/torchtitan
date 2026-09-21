@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Build and load the SYCL*TLA grouped-MoE GEMM extension for PVC."""
 
 from __future__ import annotations
@@ -60,7 +66,9 @@ def _load_without_forced_sycl2020(*args: object, **kwargs: object) -> ModuleType
 
     append_standard = getattr(cpp_extension, "_append_sycl_std_if_no_std_present", None)
     if append_standard is None:
-        raise RuntimeError("this PyTorch build does not expose its SYCL standard helper")
+        raise RuntimeError(
+            "this PyTorch build does not expose its SYCL standard helper"
+        )
 
     def leave_compiler_default(_: list[str]) -> None:
         return None

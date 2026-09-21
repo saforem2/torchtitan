@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Process-group helpers for a DP x EP MoE layout."""
 
 from __future__ import annotations
@@ -61,7 +67,9 @@ def create_dp_ep_groups(dp_size: int, ep_size: int) -> MoEProcessGroups:
         raise ValueError("dp_size and ep_size must be positive")
     if not dist.is_available() or not dist.is_initialized():
         if dp_size != 1 or ep_size != 1:
-            raise RuntimeError("initialize torch.distributed before creating DP x EP groups")
+            raise RuntimeError(
+                "initialize torch.distributed before creating DP x EP groups"
+            )
         return MoEProcessGroups()
 
     world_size = dist.get_world_size()

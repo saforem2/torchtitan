@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact source/expert-to-expert-major row packing for segmented MoE dW."""
 
 from __future__ import annotations
@@ -41,12 +47,16 @@ def load_segment_expert_reorder_ops(verbose: bool = False) -> ModuleType:
     if _MODULE is not None:
         return _MODULE
     if not torch.xpu.is_available():
-        raise RuntimeError("Aurora XPU is required to use source/expert reorder kernels")
+        raise RuntimeError(
+            "Aurora XPU is required to use source/expert reorder kernels"
+        )
     prebuilt = os.environ.get("AURORA_MOE_SEGMENT_EXPERT_REORDER_OPS_SO")
     if prebuilt:
         spec = spec_from_file_location("aurora_moe_segment_expert_reorder", prebuilt)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load prebuilt segment reorder ops: {prebuilt}")
+            raise RuntimeError(
+                f"could not load prebuilt segment reorder ops: {prebuilt}"
+            )
         module = module_from_spec(spec)
         spec.loader.exec_module(module)
         # A prebuilt may legitimately predate the optional row-tiled A/B
@@ -68,7 +78,10 @@ def load_segment_expert_reorder_ops(verbose: bool = False) -> ModuleType:
             "expert_major_to_payload_parallel_bf16",
             "expert_major_to_payload_zero_score_parallel_bf16",
         )
-        if os.environ.get("AURORA_MOE_EXPERT_MAJOR_REORDER", "parallel") == "row_parallel":
+        if (
+            os.environ.get("AURORA_MOE_EXPERT_MAJOR_REORDER", "parallel")
+            == "row_parallel"
+        ):
             required += (
                 "expert_major_to_segments_scaled_row_parallel_bf16",
                 "payload_to_expert_major_row_parallel_bf16",
@@ -133,9 +146,7 @@ def make_expert_major_layout(
     ).contiguous()
     # For physical [source, expert] fragment (s, e), this is the number of
     # earlier-source rows already assigned to logical expert e.
-    expert_source_offsets = (
-        counts64.cumsum(dim=0) - counts64
-    ).contiguous()
+    expert_source_offsets = (counts64.cumsum(dim=0) - counts64).contiguous()
     if include_row_schedule:
         fragment_blocks = torch.div(
             counts64.reshape(-1) + _ROW_PARALLEL_ROWS_PER_WORKGROUP - 1,
@@ -163,7 +174,9 @@ def _check_values(values: torch.Tensor, segments: PeerExpertSegments) -> None:
         or not values.is_contiguous()
         or values.device != segments.counts.device
     ):
-        raise ValueError("values must be a contiguous BF16 XPU matrix on the segment device")
+        raise ValueError(
+            "values must be a contiguous BF16 XPU matrix on the segment device"
+        )
 
 
 def segments_to_expert_major(
@@ -196,15 +209,17 @@ def pair_segments_to_expert_major(
     _check_values(second, segments)
     if first.size(0) != second.size(0):
         raise ValueError("paired matrices must have the same route count")
-    return tuple(load_segment_expert_reorder_ops().pair_segments_to_expert_major_bf16(
-        first,
-        second,
-        segments.counts,
-        segments.source_expert_offsets,
-        segments.source_offsets,
-        layout.expert_offsets_i64,
-        layout.expert_source_offsets,
-    ))  # type: ignore[return-value]
+    return tuple(
+        load_segment_expert_reorder_ops().pair_segments_to_expert_major_bf16(
+            first,
+            second,
+            segments.counts,
+            segments.source_expert_offsets,
+            segments.source_offsets,
+            layout.expert_offsets_i64,
+            layout.expert_source_offsets,
+        )
+    )  # type: ignore[return-value]
 
 
 def expert_major_to_segments(
@@ -290,16 +305,18 @@ def pair_segments_to_expert_major_parallel(
     schedule = make_parallel_reorder_block_offsets(
         segments, max(first.size(1), second.size(1))
     )
-    return tuple(load_segment_expert_reorder_ops().pair_segments_to_expert_major_parallel_bf16(
-        first,
-        second,
-        segments.counts,
-        segments.source_expert_offsets,
-        segments.source_offsets,
-        layout.expert_offsets_i64,
-        layout.expert_source_offsets,
-        schedule,
-    ))  # type: ignore[return-value]
+    return tuple(
+        load_segment_expert_reorder_ops().pair_segments_to_expert_major_parallel_bf16(
+            first,
+            second,
+            segments.counts,
+            segments.source_expert_offsets,
+            segments.source_offsets,
+            layout.expert_offsets_i64,
+            layout.expert_source_offsets,
+            schedule,
+        )
+    )  # type: ignore[return-value]
 
 
 def expert_major_to_segments_parallel(
@@ -343,17 +360,21 @@ def expert_major_to_segments_scaled_parallel(
         or scores.numel() != values.size(0)
         or not scores.is_contiguous()
     ):
-        raise ValueError("scores must be contiguous BF16 with one value per expert-major row")
+        raise ValueError(
+            "scores must be contiguous BF16 with one value per expert-major row"
+        )
     schedule = make_parallel_reorder_block_offsets(segments, values.size(1))
-    return load_segment_expert_reorder_ops().expert_major_to_segments_scaled_parallel_bf16(
-        values,
-        scores,
-        segments.counts,
-        segments.source_expert_offsets,
-        segments.source_offsets,
-        layout.expert_offsets_i64,
-        layout.expert_source_offsets,
-        schedule,
+    return (
+        load_segment_expert_reorder_ops().expert_major_to_segments_scaled_parallel_bf16(
+            values,
+            scores,
+            segments.counts,
+            segments.source_expert_offsets,
+            segments.source_offsets,
+            layout.expert_offsets_i64,
+            layout.expert_source_offsets,
+            schedule,
+        )
     )
 
 
@@ -379,7 +400,9 @@ def expert_major_to_segments_scaled_row_parallel(
         or scores.numel() != values.size(0)
         or not scores.is_contiguous()
     ):
-        raise ValueError("scores must be contiguous BF16 with one value per expert-major row")
+        raise ValueError(
+            "scores must be contiguous BF16 with one value per expert-major row"
+        )
     return load_segment_expert_reorder_ops().expert_major_to_segments_scaled_row_parallel_bf16(
         values,
         scores,
@@ -409,15 +432,17 @@ def payload_to_expert_major_parallel(
     if payload.size(1) < 2:
         raise ValueError("payload must contain a token column and a score column")
     schedule = make_parallel_reorder_block_offsets(segments, payload.size(1) - 1)
-    return tuple(load_segment_expert_reorder_ops().payload_to_expert_major_parallel_bf16(
-        payload,
-        segments.counts,
-        segments.source_expert_offsets,
-        segments.source_offsets,
-        layout.expert_offsets_i64,
-        layout.expert_source_offsets,
-        schedule,
-    ))  # type: ignore[return-value]
+    return tuple(
+        load_segment_expert_reorder_ops().payload_to_expert_major_parallel_bf16(
+            payload,
+            segments.counts,
+            segments.source_expert_offsets,
+            segments.source_offsets,
+            layout.expert_offsets_i64,
+            layout.expert_source_offsets,
+            schedule,
+        )
+    )  # type: ignore[return-value]
 
 
 def payload_to_expert_major_row_parallel(
@@ -430,15 +455,17 @@ def payload_to_expert_major_row_parallel(
     _check_values(payload, segments)
     if payload.size(1) < 2:
         raise ValueError("payload must contain a token column and a score column")
-    return tuple(load_segment_expert_reorder_ops().payload_to_expert_major_row_parallel_bf16(
-        payload,
-        segments.counts,
-        segments.source_expert_offsets,
-        segments.source_offsets,
-        layout.expert_offsets_i64,
-        layout.expert_source_offsets,
-        layout.fragment_row_block_offsets,
-    ))  # type: ignore[return-value]
+    return tuple(
+        load_segment_expert_reorder_ops().payload_to_expert_major_row_parallel_bf16(
+            payload,
+            segments.counts,
+            segments.source_expert_offsets,
+            segments.source_offsets,
+            layout.expert_offsets_i64,
+            layout.expert_source_offsets,
+            layout.fragment_row_block_offsets,
+        )
+    )  # type: ignore[return-value]
 
 
 def payload_and_grad_to_expert_major_scaled_parallel(
@@ -458,7 +485,9 @@ def payload_and_grad_to_expert_major_scaled_parallel(
     _check_values(payload, segments)
     _check_values(grad_output, segments)
     if payload.size(1) != grad_output.size(1) + 1:
-        raise ValueError("payload must have exactly one score column after grad_output columns")
+        raise ValueError(
+            "payload must have exactly one score column after grad_output columns"
+        )
     schedule = make_parallel_reorder_block_offsets(segments, grad_output.size(1))
     return tuple(
         load_segment_expert_reorder_ops().payload_and_grad_to_expert_major_scaled_parallel_bf16(
@@ -485,7 +514,9 @@ def payload_and_grad_to_expert_major_scaled_row_parallel(
     _check_values(payload, segments)
     _check_values(grad_output, segments)
     if payload.size(1) != grad_output.size(1) + 1:
-        raise ValueError("payload must have exactly one score column after grad_output columns")
+        raise ValueError(
+            "payload must have exactly one score column after grad_output columns"
+        )
     return tuple(
         load_segment_expert_reorder_ops().payload_and_grad_to_expert_major_scaled_row_parallel_bf16(
             payload,
@@ -516,7 +547,9 @@ def expert_major_to_payload_parallel(
         or scores.numel() != tokens.size(0)
         or not scores.is_contiguous()
     ):
-        raise ValueError("scores must be contiguous BF16 with one value per expert-major row")
+        raise ValueError(
+            "scores must be contiguous BF16 with one value per expert-major row"
+        )
     schedule = make_parallel_reorder_block_offsets(segments, tokens.size(1))
     return load_segment_expert_reorder_ops().expert_major_to_payload_parallel_bf16(
         tokens,

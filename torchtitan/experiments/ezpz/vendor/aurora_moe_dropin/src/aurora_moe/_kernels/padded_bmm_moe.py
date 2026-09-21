@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact routed-expert SwiGLU/Squared-ReLU path using native XPU BMMs.
 
 This is the first production-shaped control for the native Aurora effort.  It
@@ -45,7 +51,9 @@ class ExactRoutePlan:
     top_k: int
 
 
-def make_exact_route_plan(topk_indices: torch.Tensor, num_experts: int) -> ExactRoutePlan:
+def make_exact_route_plan(
+    topk_indices: torch.Tensor, num_experts: int
+) -> ExactRoutePlan:
     """Build an exact, ragged local route plan from arbitrary top-k choices.
 
     The scalar ``max_rows`` is intentionally obtained once here because a
@@ -186,7 +194,9 @@ class _ExactPaddedBmmMoE(torch.autograd.Function):
         ctx.save_for_backward(
             padded,
             up,
-            gate if gate is not None else torch.empty(0, dtype=x.dtype, device=x.device),
+            gate
+            if gate is not None
+            else torch.empty(0, dtype=x.dtype, device=x.device),
             down,
             up_values,
             gate_values,
@@ -214,7 +224,9 @@ class _ExactPaddedBmmMoE(torch.autograd.Function):
         plan: ExactRoutePlan = ctx.plan
         ops = load_route_ops()
         if grad_output.dtype != torch.bfloat16 or grad_output.ndim != 2:
-            raise RuntimeError("the exact BF16 MoE path requires BF16 rank-2 grad_output")
+            raise RuntimeError(
+                "the exact BF16 MoE path requires BF16 rank-2 grad_output"
+            )
         grad_output = grad_output.contiguous()
 
         # Recreate the per-route output gradient in expert-sorted order.  The
@@ -223,17 +235,17 @@ class _ExactPaddedBmmMoE(torch.autograd.Function):
         grad_sorted = ops.route_gather_bf16(grad_output, plan.route_ids, plan.top_k)
         grad_scores = None
         if ctx.needs_input_grad[1]:
-            grad_scores_sorted = (
-                grad_sorted.float() * sorted_values.float()
-            ).sum(dim=-1)
+            grad_scores_sorted = (grad_sorted.float() * sorted_values.float()).sum(
+                dim=-1
+            )
             grad_scores_flat = torch.empty_like(sorted_scores)
             grad_scores_flat.index_copy_(
                 0, plan.route_ids, grad_scores_sorted.to(sorted_scores.dtype)
             )
             grad_scores = grad_scores_flat.reshape(plan.tokens, plan.top_k)
-        grad_sorted_values = (
-            grad_sorted * sorted_scores.unsqueeze(-1)
-        ).to(torch.bfloat16)
+        grad_sorted_values = (grad_sorted * sorted_scores.unsqueeze(-1)).to(
+            torch.bfloat16
+        )
         if plan.is_uniform:
             grad_padded_values = grad_sorted_values.reshape(
                 up.size(0), plan.max_rows, grad_sorted.size(1)

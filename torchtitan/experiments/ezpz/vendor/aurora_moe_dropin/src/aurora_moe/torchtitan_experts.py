@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """TorchTitan-compatible exact expert MLPs backed by Aurora SYCL kernels.
 
 This module deliberately implements only the local, already-dispatched expert
@@ -108,9 +114,7 @@ class _TorchTitanExactExperts(torch.autograd.Function):
         gate = one_mkl.exact_expert_gemm_transposed_weight_bf16(x, w1, expert_rows)
         up = one_mkl.exact_expert_gemm_transposed_weight_bf16(x, w3, expert_rows)
         hidden = swiglu.swiglu_forward_bf16(up, gate)
-        out = one_mkl.exact_expert_gemm_transposed_weight_bf16(
-            hidden, w2, expert_rows
-        )
+        out = one_mkl.exact_expert_gemm_transposed_weight_bf16(hidden, w2, expert_rows)
 
         ctx.expert_rows = expert_rows
         # Recompute the cheap pointwise hidden value in backward instead of
@@ -131,33 +135,19 @@ class _TorchTitanExactExperts(torch.autograd.Function):
         hidden = swiglu.swiglu_forward_bf16(up, gate)
         # With W stored [out, in], dX = dY @ W.  The regular exact GEMM
         # consumes that same allocation as [forward_out, forward_in].
-        grad_hidden = one_mkl.exact_expert_gemm_bf16(
-            grad_out, w2, expert_rows
-        )
-        grad_up, grad_gate = swiglu.swiglu_backward_bf16(
-            grad_hidden, up, gate
-        )
+        grad_hidden = one_mkl.exact_expert_gemm_bf16(grad_out, w2, expert_rows)
+        grad_up, grad_gate = swiglu.swiglu_backward_bf16(grad_hidden, up, gate)
 
-        grad_x_gate = one_mkl.exact_expert_gemm_bf16(
-            grad_gate, w1, expert_rows
-        )
-        grad_x_up = one_mkl.exact_expert_gemm_bf16(
-            grad_up, w3, expert_rows
-        )
+        grad_x_gate = one_mkl.exact_expert_gemm_bf16(grad_gate, w1, expert_rows)
+        grad_x_up = one_mkl.exact_expert_gemm_bf16(grad_up, w3, expert_rows)
         grad_x = grad_x_gate + grad_x_up
 
         # exact_expert_weight_grad computes A.T @ B.  Reversing the usual
         # activation/gradient argument order returns [out, in], exactly the
         # TorchTitan parameter layout, with defined zeros for empty experts.
-        grad_w1 = one_mkl.exact_expert_weight_grad_bf16(
-            grad_gate, x, expert_rows
-        )
-        grad_w2 = one_mkl.exact_expert_weight_grad_bf16(
-            grad_out, hidden, expert_rows
-        )
-        grad_w3 = one_mkl.exact_expert_weight_grad_bf16(
-            grad_up, x, expert_rows
-        )
+        grad_w1 = one_mkl.exact_expert_weight_grad_bf16(grad_gate, x, expert_rows)
+        grad_w2 = one_mkl.exact_expert_weight_grad_bf16(grad_out, hidden, expert_rows)
+        grad_w3 = one_mkl.exact_expert_weight_grad_bf16(grad_up, x, expert_rows)
         return grad_x, grad_w1, grad_w2, grad_w3, None
 
 

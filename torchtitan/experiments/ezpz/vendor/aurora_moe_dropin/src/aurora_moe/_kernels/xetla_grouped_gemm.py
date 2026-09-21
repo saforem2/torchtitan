@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Runtime-shape BF16 grouped GEMM through SYCL*TLA's generic Xe API."""
 
 from __future__ import annotations
@@ -19,7 +25,9 @@ def _tla_root() -> Path:
     if not configured:
         raise RuntimeError("set AURORA_MOE_SYCL_TLA_ROOT to the SYCL*TLA checkout")
     root = Path(configured).expanduser().resolve()
-    if not (root / "include" / "cutlass" / "gemm" / "group_array_problem_shape.hpp").is_file():
+    if not (
+        root / "include" / "cutlass" / "gemm" / "group_array_problem_shape.hpp"
+    ).is_file():
         raise RuntimeError(f"SYCL*TLA grouped-GEMM headers were not found under {root}")
     return root
 
@@ -45,7 +53,9 @@ def _enable_pvc_link_flags() -> None:
 def _load_without_sycl2020(*args: object, **kwargs: object) -> ModuleType:
     append_standard = getattr(cpp_extension, "_append_sycl_std_if_no_std_present", None)
     if append_standard is None:
-        raise RuntimeError("this PyTorch build does not expose its SYCL standard helper")
+        raise RuntimeError(
+            "this PyTorch build does not expose its SYCL standard helper"
+        )
 
     def leave_compiler_default(_: list[str]) -> None:
         return None
@@ -76,7 +86,9 @@ def load_xetla_grouped_ops(verbose: bool = False) -> ModuleType:
     if prebuilt:
         spec = spec_from_file_location("aurora_moe_xetla_grouped_gemm", prebuilt)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load prebuilt XeTLA grouped GEMM: {prebuilt}")
+            raise RuntimeError(
+                f"could not load prebuilt XeTLA grouped GEMM: {prebuilt}"
+            )
         module = module_from_spec(spec)
         spec.loader.exec_module(module)
         required = ("grouped_gemm_bf16", "grouped_weight_grad_bf16")
@@ -106,8 +118,14 @@ def load_xetla_grouped_ops(verbose: bool = False) -> ModuleType:
             "-Wno-pass-failed",
             "-Wno-deprecated-declarations",
         ],
-        extra_sycl_cflags=["-fno-sycl-instrument-device-code", "-fsycl-targets=spir64_gen"],
-        extra_include_paths=[str(root / "include"), str(root / "tools" / "util" / "include")],
+        extra_sycl_cflags=[
+            "-fno-sycl-instrument-device-code",
+            "-fsycl-targets=spir64_gen",
+        ],
+        extra_include_paths=[
+            str(root / "include"),
+            str(root / "tools" / "util" / "include"),
+        ],
         with_cuda=False,
         with_sycl=True,
         verbose=verbose,

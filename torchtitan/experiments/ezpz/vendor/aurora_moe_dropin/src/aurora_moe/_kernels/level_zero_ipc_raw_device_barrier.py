@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Raw-SYCL control-allocation counterpart to the IPC device-barrier probe.
 
 This isolated A/B path deliberately allocates the three shared counter words
@@ -16,7 +22,7 @@ import torch
 import torch.distributed as dist
 from torch.utils.cpp_extension import load
 
-from .level_zero_ipc_equal_a2a import _Descriptor, _client_exchange, _root_exchange
+from .level_zero_ipc_equal_a2a import _client_exchange, _Descriptor, _root_exchange
 
 
 _MODULE: ModuleType | None = None
@@ -66,24 +72,32 @@ class RawIpcDeviceBarrierEpoch:
         socket_path: str | os.PathLike[str] | None = None,
     ) -> None:
         if not dist.is_available() or not dist.is_initialized():
-            raise RuntimeError("initialize torch.distributed before constructing an IPC barrier")
+            raise RuntimeError(
+                "initialize torch.distributed before constructing an IPC barrier"
+            )
         if not torch.xpu.is_available():
             raise RuntimeError("Aurora XPU is required for a raw IPC barrier")
         self._group = group
         self._world_size = dist.get_world_size(group)
         self._rank = dist.get_rank(group)
         if self._world_size < 2 or self._world_size > 12:
-            raise ValueError("raw IPC device barriers support same-node world sizes in [2, 12]")
+            raise ValueError(
+                "raw IPC device barriers support same-node world sizes in [2, 12]"
+            )
         self._device_index = torch.xpu.current_device()
         self._device = torch.device("xpu", self._device_index)
         base = socket_path or os.environ.get("AURORA_MOE_L0_IPC_RAW_BARRIER_SOCKET")
         if not base:
-            raise RuntimeError("set AURORA_MOE_L0_IPC_RAW_BARRIER_SOCKET for raw IPC exchange")
+            raise RuntimeError(
+                "set AURORA_MOE_L0_IPC_RAW_BARRIER_SOCKET for raw IPC exchange"
+            )
         self._socket_base = Path(base)
         self._ipc_bias, self._ipc_bias_flags = self._mapping_policy()
         self._import_backend = os.environ.get("AURORA_MOE_L0_IPC_IMPORT_BACKEND", "scm")
         if self._import_backend != "scm":
-            raise ValueError("raw IPC device barrier comparison currently supports SCM exchange only")
+            raise ValueError(
+                "raw IPC device barrier comparison currently supports SCM exchange only"
+            )
         self._ops = load_level_zero_ipc_raw_device_barrier_ops()
         if int(self._ops.slots) != _SLOTS:
             raise RuntimeError("raw IPC Python and SYCL slot counts disagree")
@@ -101,7 +115,9 @@ class RawIpcDeviceBarrierEpoch:
         policy = os.environ.get("AURORA_MOE_L0_IPC_BIAS", "default")
         flags = {"default": 0, "cached": 1, "uncached": 2}
         if policy not in flags:
-            raise ValueError("AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached")
+            raise ValueError(
+                "AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached"
+            )
         return policy, flags[policy]
 
     @staticmethod
@@ -163,8 +179,12 @@ class RawIpcDeviceBarrierEpoch:
             else:
                 imported = imports[source]
                 if imported is None:
-                    raise RuntimeError(f"missing raw IPC control mapping for rank {source}")
-                address = int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                    raise RuntimeError(
+                        f"missing raw IPC control mapping for rank {source}"
+                    )
+                address = (
+                    int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                )
             addresses.append(self._signed_pointer(address))
 
         self._local_control = local
@@ -238,7 +258,9 @@ class RawIpcDeviceBarrierEpoch:
         values = tuple(int(value) for value in self._require_local_control().counters())
         expected = self.expected_counters()
         if values != expected:
-            raise AssertionError(f"raw IPC barrier counters are {values}, expected {expected}")
+            raise AssertionError(
+                f"raw IPC barrier counters are {values}, expected {expected}"
+            )
         return values
 
     def close(self) -> None:

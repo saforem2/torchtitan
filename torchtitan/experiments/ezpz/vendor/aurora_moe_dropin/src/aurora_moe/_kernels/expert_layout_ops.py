@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact source-major EP to expert-major padded row layout kernels."""
 
 from __future__ import annotations
@@ -79,7 +85,9 @@ def _payload(payload: torch.Tensor, count_columns: int) -> None:
         or payload.size(1) < count_columns
         or not payload.is_contiguous()
     ):
-        raise ValueError("payload must be a contiguous BF16 XPU matrix with route metadata")
+        raise ValueError(
+            "payload must be a contiguous BF16 XPU matrix with route metadata"
+        )
 
 
 def _ids(local_ids: torch.Tensor) -> None:
@@ -92,7 +100,9 @@ def _ids(local_ids: torch.Tensor) -> None:
         raise ValueError("local_ids must be a contiguous int64 XPU rank-1 tensor")
 
 
-def _shape(payload: torch.Tensor, recv_counts: torch.Tensor, cap: int, num_experts: int) -> None:
+def _shape(
+    payload: torch.Tensor, recv_counts: torch.Tensor, cap: int, num_experts: int
+) -> None:
     if cap < 0 or num_experts <= 0:
         raise ValueError("cap must be nonnegative and num_experts must be positive")
     if payload.device != recv_counts.device:
@@ -121,7 +131,9 @@ def _zero_expert_row_tails(
         )
 
 
-def _layout_row_shape(group_rows: torch.Tensor, use_tail_zero: bool) -> tuple[int, int, bool]:
+def _layout_row_shape(
+    group_rows: torch.Tensor, use_tail_zero: bool
+) -> tuple[int, int, bool]:
     if use_tail_zero:
         return _row_shape(group_rows)
     return int(group_rows.max().item()), 0, False
@@ -228,7 +240,9 @@ def make_padded_expert_layout(
         _ids(local_ids)
         _shape(payload, recv_counts, cap, num_experts)
         if local_ids.device != payload.device or local_ids.numel() != payload.size(0):
-            raise ValueError("local_ids must share payload's device and padded row count")
+            raise ValueError(
+                "local_ids must share payload's device and padded row count"
+            )
         ops = load_expert_layout_ops()
         if use_known_rows:
             assert known_group_rows is not None
@@ -307,8 +321,13 @@ def expert_rows_to_padded(
         or not expert_values.is_contiguous()
     ):
         raise ValueError("expert_values must be a contiguous BF16 XPU rank-3 tensor")
-    if expert_values.device != recv_counts.device or expert_values.device != layout.tokens.device:
-        raise ValueError("expert_values, recv_counts, and layout must share an XPU device")
+    if (
+        expert_values.device != recv_counts.device
+        or expert_values.device != layout.tokens.device
+    ):
+        raise ValueError(
+            "expert_values, recv_counts, and layout must share an XPU device"
+        )
     if expert_values.shape[:2] != (layout.num_experts, layout.max_rows):
         raise ValueError("expert_values expert and row dimensions must match layout")
     if recv_counts.numel() * layout.cap != layout.padded_source_rows:
@@ -346,7 +365,9 @@ def expert_token_score_to_padded(
         or expert_tokens.ndim != 3
         or not expert_tokens.is_contiguous()
     ):
-        raise ValueError("expert_tokens must be contiguous BF16 [experts, rows, model_dim]")
+        raise ValueError(
+            "expert_tokens must be contiguous BF16 [experts, rows, model_dim]"
+        )
     if (
         expert_scores.device != expert_tokens.device
         or expert_scores.dtype != torch.bfloat16
@@ -355,12 +376,17 @@ def expert_token_score_to_padded(
         or expert_scores.shape != expert_tokens.shape[:2]
     ):
         raise ValueError("expert_scores must be contiguous BF16 [experts, rows]")
-    if expert_tokens.device != recv_counts.device or expert_tokens.device != layout.tokens.device:
+    if (
+        expert_tokens.device != recv_counts.device
+        or expert_tokens.device != layout.tokens.device
+    ):
         raise ValueError("expert token/score layout inputs must share an XPU device")
     if expert_tokens.shape[:2] != (layout.num_experts, layout.max_rows):
         raise ValueError("expert token rows must match the saved layout")
     if payload_columns not in (expert_tokens.size(2) + 1, expert_tokens.size(2) + 2):
-        raise ValueError("payload_columns must hold token, score, and optional ID columns")
+        raise ValueError(
+            "payload_columns must hold token, score, and optional ID columns"
+        )
     if recv_counts.numel() * layout.cap != layout.padded_source_rows:
         raise ValueError("recv_counts and cap do not describe layout")
     return load_expert_layout_ops().expert_token_score_to_padded_bf16(
@@ -384,8 +410,13 @@ def weighted_expert_rows_to_padded(
     if expert_values.dtype != torch.bfloat16 or not expert_values.is_contiguous():
         raise ValueError("expert_values must be contiguous BF16")
     _counts(recv_counts)
-    if expert_values.device != layout.tokens.device or expert_values.device != recv_counts.device:
-        raise ValueError("expert_values, recv_counts, and layout must share an XPU device")
+    if (
+        expert_values.device != layout.tokens.device
+        or expert_values.device != recv_counts.device
+    ):
+        raise ValueError(
+            "expert_values, recv_counts, and layout must share an XPU device"
+        )
     return load_expert_layout_ops().weighted_expert_rows_to_padded_bf16(
         expert_values,
         layout.scores,

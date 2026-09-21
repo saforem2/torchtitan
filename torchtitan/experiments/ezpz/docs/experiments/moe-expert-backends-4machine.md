@@ -1,9 +1,11 @@
 # MoE expert backends across four machines
 
-**Bottom line:** all SIX backends behave correctly. `bmm_nodrop` is BIT-EXACT
-against `for_loop`, `aurora_sycl` works on both XPU machines, and
-`aurora_full_sonic` -- which this branch recorded as "deliberately not ported"
--- is now ported and training at ~5e-05 from the reference.
+**Bottom line:** current HEAD registers six expert compute backends. The four
+portable paths were compared locally/on CUDA, while the two SYCL paths require
+Intel XPU hardware. In the recorded XPU runs, `bmm_nodrop` was bit-exact against
+`for_loop`, `aurora_sycl` ran on both XPU machines, and `aurora_full_sonic`
+trained at ~5e-05 from the reference. These are historical hardware results,
+not claims that every backend can execute on every platform.
 
 Correctness is settled. A matched compiled Sunspot run now gives the first
 performance comparison: Sonic is roughly even with BMM in the initially stable
@@ -170,10 +172,10 @@ steady-state throughput number.
 
 `aurora_full_loop` remains unported and is a separate question.
 
-## The tests that chased the unported flavors
+## Current test coverage
 
-The three test files under `tests/moe/` were stale against sync 84 and are now
-fixed:
+The tests under `tests/moe/` now separate host-testable contracts from XPU-only
+execution:
 
 - `test_moe_routing_counts.py` broke three separate ways, each hidden behind
   the previous: it imported **core's** `LocalTokenDispatcher` (ezpz has its own,
@@ -184,15 +186,17 @@ fixed:
   checks that the ordering is STABLE across rows rather than hardcoding which
   expert pair wins, since the pair is a topk implementation detail and the
   determinism is the actual property under test.
-- `test_agpt_moe_config.py` keys every one of its four tests off the unported
-  `aurora_full_sonic` flavor, so it failed at COLLECTION -- taking the whole
-  file down rather than reporting a skip. Now skipped at module level with the
-  rationale, kept rather than deleted so the intended 2B/50K architecture stays
-  on record.
-- `test_moe_expert_backends.py` was already correct.
+- `test_agpt_moe_config.py` no longer imports the removed
+  `AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` flavor. It covers every current
+  Sonic trainer config, EP requirements, `EzpzRoutedExperts` wiring, the six
+  registered backend names, registry ownership, checkpoint adapter contracts,
+  and meta-device weight shapes for non-square D/F models.
+- `test_moe_expert_backends.py` covers portable numerical backends and the
+  Sonic weight-layout conversion without invoking SYCL.
 
-`pytest torchtitan/experiments/ezpz/tests/moe/` is now **4 passed, 4 skipped**,
-no failures and no collection errors.
+Sonic forward/backward, all-to-all rank mapping, and `aurora_sycl` kernel
+execution remain explicitly XPU-only. Their historical jobs are recorded above;
+they are not implied by a local pytest pass.
 
 ## Reproducing
 

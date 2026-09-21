@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """DDP-safe, stream-ordered routed plus shared MoE autograd orchestration."""
 
 from __future__ import annotations
@@ -64,12 +70,22 @@ def _check(
     if x.device.type != "xpu" or any(tensor.device != x.device for tensor in tensors):
         raise ValueError("all joint-MoE inputs must be on one XPU device")
     if x.ndim < 2 or scores.ndim != 2 or indices.shape != scores.shape:
-        raise ValueError("x must end in model dim and scores/indices must be [tokens, top_k]")
+        raise ValueError(
+            "x must end in model dim and scores/indices must be [tokens, top_k]"
+        )
     if x.reshape(-1, x.shape[-1]).size(0) != scores.size(0):
         raise ValueError("router scores must have one row per flattened x token")
-    if routed_up.ndim != 3 or routed_gate.shape != routed_up.shape or routed_down.ndim != 3:
+    if (
+        routed_up.ndim != 3
+        or routed_gate.shape != routed_up.shape
+        or routed_down.ndim != 3
+    ):
         raise ValueError("routed weights must be up/gate=[E,D,H], down=[E,H,D]")
-    if shared_up.ndim != 3 or shared_gate.shape != shared_up.shape or shared_down.ndim != 3:
+    if (
+        shared_up.ndim != 3
+        or shared_gate.shape != shared_up.shape
+        or shared_down.ndim != 3
+    ):
         raise ValueError("shared weights must be up/gate=[S,D,H], down=[S,H,D]")
     if (
         routed_up.size(1) != x.shape[-1]
@@ -81,7 +97,10 @@ def _check(
         or shared_up.size(0) != shared_down.size(0)
     ):
         raise ValueError("incompatible routed/shared MoE dimensions")
-    if not isinstance(shared_stream, torch.xpu.Stream) or shared_stream.device != x.device:
+    if (
+        not isinstance(shared_stream, torch.xpu.Stream)
+        or shared_stream.device != x.device
+    ):
         raise ValueError("shared_stream must be an XPU stream on x.device")
 
 
@@ -121,7 +140,9 @@ class _JointRoutedSharedMoE(torch.autograd.Function):
         ctx.shared_empty = shared_up.size(0) == 0
         if phase_controller is not None:
             if not isinstance(phase_controller, PhaseSharedExpertController):
-                raise TypeError("phase_controller must be a PhaseSharedExpertController")
+                raise TypeError(
+                    "phase_controller must be a PhaseSharedExpertController"
+                )
             if (
                 phase_controller.x is not x
                 or phase_controller.up is not shared_up
@@ -133,7 +154,9 @@ class _JointRoutedSharedMoE(torch.autograd.Function):
                     "phase_controller must own this call's x, shared parameters, and shared stream"
                 )
             if phase_controller.needs != (ctx.needs[0], *ctx.needs[6:9]):
-                raise ValueError("phase_controller gradient requirements do not match joint MoE inputs")
+                raise ValueError(
+                    "phase_controller gradient requirements do not match joint MoE inputs"
+                )
         ctx.phase_controller = phase_controller
 
         with torch.enable_grad():
@@ -148,9 +171,17 @@ class _JointRoutedSharedMoE(torch.autograd.Function):
                         )
                     )
                     shared = shared_expert_loop(
-                        inner_shared[0].reshape(-1, inner_shared[0].shape[-1]), *inner_shared[1:]
+                        inner_shared[0].reshape(-1, inner_shared[0].shape[-1]),
+                        *inner_shared[1:],
                     ).reshape_as(inner_shared[0])
-                    for tensor in (x, shared_up, shared_gate, shared_down, *inner_shared, shared):
+                    for tensor in (
+                        x,
+                        shared_up,
+                        shared_gate,
+                        shared_down,
+                        *inner_shared,
+                        shared,
+                    ):
                         tensor.record_stream(shared_stream)
 
             with torch.xpu.stream(forward_stream):
@@ -162,7 +193,15 @@ class _JointRoutedSharedMoE(torch.autograd.Function):
                     )
                 )
                 routed = routed_forward(*inner_routed)
-                for tensor in (x, scores, routed_up, routed_gate, routed_down, *inner_routed, routed):
+                for tensor in (
+                    x,
+                    scores,
+                    routed_up,
+                    routed_gate,
+                    routed_down,
+                    *inner_routed,
+                    routed,
+                ):
                     tensor.record_stream(forward_stream)
 
             if phase_controller is None:

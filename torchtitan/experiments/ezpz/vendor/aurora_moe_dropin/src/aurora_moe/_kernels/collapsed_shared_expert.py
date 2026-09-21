@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Algebraically collapse independent shared SwiGLU experts into one dense MLP."""
 
 from __future__ import annotations
@@ -6,7 +12,9 @@ import torch
 import torch.nn.functional as F
 
 
-def _check(x: torch.Tensor, up: torch.Tensor, gate: torch.Tensor, down: torch.Tensor) -> None:
+def _check(
+    x: torch.Tensor, up: torch.Tensor, gate: torch.Tensor, down: torch.Tensor
+) -> None:
     if x.ndim < 2 or up.ndim != 3 or gate.shape != up.shape or down.ndim != 3:
         raise ValueError("expected x=[...,D], up/gate=[S,D,H], down=[S,H,D]")
     if (
@@ -86,7 +94,9 @@ def collapsed_packed_shared_expert_swiglu(
     return hidden.mm(down.reshape(width, model_dim)).reshape_as(x)
 
 
-def _swiglu(projection: torch.Tensor, width: int, fused_pointwise: bool) -> torch.Tensor:
+def _swiglu(
+    projection: torch.Tensor, width: int, fused_pointwise: bool
+) -> torch.Tensor:
     if not fused_pointwise:
         return F.silu(projection[:, width:]) * projection[:, :width]
     if projection.device.type != "xpu" or projection.dtype != torch.bfloat16:

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Opt-in direct imports for prebuilt isolated IPC extensions."""
 
 from __future__ import annotations
@@ -6,10 +12,10 @@ import ctypes
 import importlib.machinery
 import importlib.util
 import os
-from pathlib import Path
 import sys
+from collections.abc import Iterable
+from pathlib import Path
 from types import ModuleType
-from typing import Iterable
 
 
 _PREBUILT_ENV = "AURORA_MOE_L0_IPC_PREBUILT"
@@ -32,7 +38,9 @@ def _prebuilt_requested() -> bool:
 
 def _validate_module(module: ModuleType, path: Path, required: Iterable[str]) -> None:
     if module.__name__ != path.stem:
-        raise RuntimeError(f"prebuilt extension name mismatch: {module.__name__} != {path.stem}")
+        raise RuntimeError(
+            f"prebuilt extension name mismatch: {module.__name__} != {path.stem}"
+        )
     module_path = Path(str(getattr(module, "__file__", ""))).resolve()
     if module_path != path:
         raise RuntimeError(f"prebuilt extension path mismatch: {module_path} != {path}")
@@ -72,10 +80,14 @@ def load_prebuilt_ipc_extension(
         library = ctypes.CDLL(str(path), mode=mode)
         getattr(library, init_symbol)
     except (OSError, AttributeError) as exc:
-        raise RuntimeError(f"prebuilt IPC extension ABI validation failed for {path}: {init_symbol}") from exc
+        raise RuntimeError(
+            f"prebuilt IPC extension ABI validation failed for {path}: {init_symbol}"
+        ) from exc
 
     spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or not isinstance(spec.loader, importlib.machinery.ExtensionFileLoader):
+    if spec is None or not isinstance(
+        spec.loader, importlib.machinery.ExtensionFileLoader
+    ):
         raise RuntimeError(f"could not create CPython extension loader for {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module

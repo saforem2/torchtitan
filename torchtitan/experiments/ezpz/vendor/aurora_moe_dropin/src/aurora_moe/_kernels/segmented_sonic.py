@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact source-segmented local MoE with no expert-major route copy."""
 
 from __future__ import annotations
@@ -16,7 +22,11 @@ from aurora_moe._kernels.segmented_grouped_gemm import (
 
 
 def _record(name: str):
-    return torch.profiler.record_function(name) if os.environ.get("AURORA_MOE_PROFILE") == "1" else nullcontext()
+    return (
+        torch.profiler.record_function(name)
+        if os.environ.get("AURORA_MOE_PROFILE") == "1"
+        else nullcontext()
+    )
 
 
 @dataclass(frozen=True)
@@ -46,10 +56,14 @@ def make_peer_expert_segments(source_expert_counts: torch.Tensor) -> PeerExpertS
         or source_expert_counts.size(0) == 0
         or source_expert_counts.size(1) == 0
     ):
-        raise ValueError("source_expert_counts must be contiguous int32 [sources, experts]")
+        raise ValueError(
+            "source_expert_counts must be contiguous int32 [sources, experts]"
+        )
     counts64 = source_expert_counts.to(torch.int64)
     zero_column = counts64.new_zeros((counts64.size(0), 1))
-    source_expert_offsets = torch.cat((zero_column, counts64.cumsum(dim=1)), dim=1).contiguous()
+    source_expert_offsets = torch.cat(
+        (zero_column, counts64.cumsum(dim=1)), dim=1
+    ).contiguous()
     source_offsets = torch.cat(
         (counts64.new_zeros(1), counts64.sum(dim=1).cumsum(dim=0))
     ).contiguous()
@@ -70,7 +84,9 @@ def _pointwise_backend() -> str:
 def _down_backward_strategy() -> str:
     strategy = os.environ.get("AURORA_MOE_SEGMENTED_DOWN_BACKWARD", "reference")
     if strategy not in ("reference", "reordered"):
-        raise ValueError("AURORA_MOE_SEGMENTED_DOWN_BACKWARD must be 'reference' or 'reordered'")
+        raise ValueError(
+            "AURORA_MOE_SEGMENTED_DOWN_BACKWARD must be 'reference' or 'reordered'"
+        )
     return strategy
 
 
@@ -111,11 +127,11 @@ def _grouped_gemm(
         # source-major/expert-minor fragments.  It maps group % local_experts
         # to the reused weight, avoiding both a D-wide reorder and replicated
         # [source, expert, K, N] weights.
-        from aurora_moe._kernels.segmented_moe_tla import segmented_moe_grouped_gemm_bf16
-
-        return segmented_moe_grouped_gemm_bf16(
-            activations, weights, segments.counts
+        from aurora_moe._kernels.segmented_moe_tla import (
+            segmented_moe_grouped_gemm_bf16,
         )
+
+        return segmented_moe_grouped_gemm_bf16(activations, weights, segments.counts)
     raise AssertionError(f"unexpected segmented GEMM backend: {backend}")
 
 
@@ -135,7 +151,9 @@ def _swiglu_backward(
 
         return load_swiglu_ops().swiglu_backward_bf16(grad_hidden, up, gate)
     sigmoid = torch.sigmoid(gate)
-    return grad_hidden * gate * sigmoid, grad_hidden * up * sigmoid * (1.0 + gate * (1.0 - sigmoid))
+    return grad_hidden * gate * sigmoid, grad_hidden * up * sigmoid * (
+        1.0 + gate * (1.0 - sigmoid)
+    )
 
 
 def _check_inputs(
@@ -153,7 +171,9 @@ def _check_inputs(
         or tokens.ndim != 2
         or not tokens.is_contiguous()
     ):
-        raise ValueError("tokens must be a contiguous BF16 XPU [routes, model_dim] tensor")
+        raise ValueError(
+            "tokens must be a contiguous BF16 XPU [routes, model_dim] tensor"
+        )
     if (
         scores.device != tokens.device
         or scores.dtype != tokens.dtype
@@ -170,7 +190,9 @@ def _check_inputs(
         or segments.source_expert_offsets.dtype != torch.int64
         or segments.source_offsets.dtype != torch.int64
     ):
-        raise ValueError("segment metadata must be int32/int64 XPU tensors on tokens.device")
+        raise ValueError(
+            "segment metadata must be int32/int64 XPU tensors on tokens.device"
+        )
     if (
         up.device != tokens.device
         or down.device != tokens.device
@@ -188,7 +210,12 @@ def _check_inputs(
     if activation not in ("swiglu", "squared-relu"):
         raise ValueError("activation must be 'swiglu' or 'squared-relu'")
     if activation == "swiglu":
-        if gate is None or gate.shape != up.shape or gate.device != tokens.device or gate.dtype != tokens.dtype:
+        if (
+            gate is None
+            or gate.shape != up.shape
+            or gate.device != tokens.device
+            or gate.dtype != tokens.dtype
+        ):
             raise ValueError("SwiGLU gate weights must match up weights")
         if not gate.is_contiguous():
             raise ValueError("gate must be contiguous")
@@ -292,12 +319,18 @@ class _SegmentedLocalMoE(torch.autograd.Function):
                 )
             with _record("moe.segmented.down_grad_scale_score"):
                 grad_hidden = down_input_unscaled * score
-                grad_scores = (down_input_unscaled.float() * hidden.float()).sum(dim=-1).to(scores.dtype)
+                grad_scores = (
+                    (down_input_unscaled.float() * hidden.float())
+                    .sum(dim=-1)
+                    .to(scores.dtype)
+                )
         else:
             with _record(f"moe.segmented.{ctx.gemm_backend}.down_recompute"):
                 values = _grouped_gemm(hidden, down, segments, ctx.gemm_backend)
             with _record("moe.segmented.down_grad_score"):
-                grad_scores = (grad_output.float() * values.float()).sum(dim=-1).to(scores.dtype)
+                grad_scores = (
+                    (grad_output.float() * values.float()).sum(dim=-1).to(scores.dtype)
+                )
             with _record(f"moe.segmented.{ctx.gemm_backend}.down_dx"):
                 grad_hidden = _grouped_gemm(
                     grad_values,
@@ -306,11 +339,24 @@ class _SegmentedLocalMoE(torch.autograd.Function):
                     ctx.gemm_backend,
                 )
 
-        need_tokens, need_scores, _, _, _, need_up, need_gate, need_down = ctx.needs_input_grad[:8]
+        (
+            need_tokens,
+            need_scores,
+            _,
+            _,
+            _,
+            need_up,
+            need_gate,
+            need_down,
+        ) = ctx.needs_input_grad[:8]
         expert_major_layout = None
         expert_major_tokens = None
-        if ctx.weight_grad_backend == "expert_major" and (need_down or need_up or need_gate):
-            from aurora_moe._kernels.segment_expert_reorder import make_expert_major_layout
+        if ctx.weight_grad_backend == "expert_major" and (
+            need_down or need_up or need_gate
+        ):
+            from aurora_moe._kernels.segment_expert_reorder import (
+                make_expert_major_layout,
+            )
 
             expert_major_layout = make_expert_major_layout(segments)
 
@@ -326,8 +372,10 @@ class _SegmentedLocalMoE(torch.autograd.Function):
             )
 
         def expert_major_weight_grad(
-            activation_values: torch.Tensor, gradient_values: torch.Tensor,
-            *, pair: bool = True,
+            activation_values: torch.Tensor,
+            gradient_values: torch.Tensor,
+            *,
+            pair: bool = True,
         ) -> torch.Tensor:
             assert expert_major_layout is not None
             from aurora_moe._kernels.segment_expert_reorder import (
@@ -367,7 +415,9 @@ class _SegmentedLocalMoE(torch.autograd.Function):
         grad_gate = None
         if need_tokens or need_up or need_gate:
             if ctx.activation == "swiglu":
-                with _record(f"moe.segmented.pointwise.{ctx.pointwise_backend}.backward"):
+                with _record(
+                    f"moe.segmented.pointwise.{ctx.pointwise_backend}.backward"
+                ):
                     grad_up_values, grad_gate_values = _swiglu_backward(
                         grad_hidden, preact_up, preact_gate, ctx.pointwise_backend
                     )
@@ -377,13 +427,18 @@ class _SegmentedLocalMoE(torch.autograd.Function):
                         pair_segments_to_expert_major,
                         segments_to_expert_major,
                     )
-                    from aurora_moe._kernels.xetla_grouped_gemm import grouped_weight_grad_bf16
+                    from aurora_moe._kernels.xetla_grouped_gemm import (
+                        grouped_weight_grad_bf16,
+                    )
 
                     expert_major_tokens = segments_to_expert_major(
                         tokens, segments, expert_major_layout
                     )
                     if need_up and need_gate:
-                        gate_values_major, up_values_major = pair_segments_to_expert_major(
+                        (
+                            gate_values_major,
+                            up_values_major,
+                        ) = pair_segments_to_expert_major(
                             grad_gate_values,
                             grad_up_values,
                             segments,
@@ -448,7 +503,9 @@ class _SegmentedLocalMoE(torch.autograd.Function):
                         ctx.gemm_backend,
                     )
                 with _record("moe.segmented.combine_input_grads"):
-                    grad_tokens = up_tokens if grad_tokens is None else grad_tokens + up_tokens
+                    grad_tokens = (
+                        up_tokens if grad_tokens is None else grad_tokens + up_tokens
+                    )
 
         return (
             grad_tokens,
@@ -527,5 +584,7 @@ def segmented_reference_local_moe(
                 hidden = F.relu(preact).square()
             else:
                 raise ValueError("activation must be 'swiglu' or 'squared-relu'")
-            result[begin:end] = hidden.matmul(down[expert]) * scores[begin:end].unsqueeze(-1)
+            result[begin:end] = hidden.matmul(down[expert]) * scores[
+                begin:end
+            ].unsqueeze(-1)
     return result

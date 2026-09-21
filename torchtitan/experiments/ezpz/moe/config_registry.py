@@ -14,29 +14,25 @@ import ezpz.distributed
 
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
+
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.observability.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
 from torchtitan.config.transform.quantization import (
     Float8GroupedExpertsConverter,
     Float8LinearConverter,
 )
-from torchtitan.config import (
-    CommConfig,
-    CompileConfig,
-    TrainingConfig,
-)
+from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
-from torchtitan.distributed.activation_checkpoint import FullAC
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
 
@@ -385,9 +381,7 @@ def moe_671b() -> FaultTolerantTrainer.Config:
             # The head module is named `lm_head`; the old `output` name matches
             # nothing, so the precision-sensitive LM head was silently quantized
             # to fp8. Replayed from upstream deepseek_v3 fix #4008 (2026-07-29).
-            Float8LinearConverter.Config(
-                filter_fqns=["lm_head", "router.gate"]
-            ),
+            Float8LinearConverter.Config(filter_fqns=["lm_head", "router.gate"]),
             Float8GroupedExpertsConverter.Config(),
         ],
     )
@@ -477,6 +471,8 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
 
 
 ""
+
+
 def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
     # for_loop experts + hybridep comm backend (dispatch/compute overlap) at EP=12.
     cfg = moe_10b_2b_sdpa()
@@ -597,8 +593,7 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     # AC=full still recomputes a different routing each pass; the
     # shape divergence is fundamental until AC saves the routing
     # result instead of recomputing it.
-    cfg = moe("10B_2B_sdpa", local_batch_size=1,
-              activation_checkpoint_mode="selective")
+    cfg = moe("10B_2B_sdpa", local_batch_size=1, activation_checkpoint_mode="selective")
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1

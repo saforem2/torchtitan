@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Run one exact AuroraMoE distributed training step."""
 
 from __future__ import annotations
@@ -13,7 +19,9 @@ from aurora_moe import AuroraMoE, configure_native_runtime, create_dp_ep_groups
 def run_train_step() -> None:
     configure_native_runtime(router_grad=True)
     dist.init_process_group("xccl")
-    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("PALS_LOCAL_RANKID", "0")))
+    local_rank = int(
+        os.environ.get("LOCAL_RANK", os.environ.get("PALS_LOCAL_RANKID", "0"))
+    )
     torch.xpu.set_device(local_rank)
     groups = create_dp_ep_groups(
         dp_size=int(os.environ["AURORA_MOE_DP_SIZE"]),

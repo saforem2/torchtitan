@@ -1,108 +1,121 @@
-import torch
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+"""Current AGPT/MoE registry contracts and host-testable Sonic coverage.
+
+The historical ``AGPT_2B_50K_MOE_sdpa_aurora_full_sonic`` flavor was removed
+when the MoE model API moved to routed-expert configs. These tests deliberately
+exercise the Sonic flavors that current HEAD actually registers. They stop at
+config/meta-model boundaries; executing Sonic kernels remains XPU-only.
+"""
+
+from typing import get_args
 
 import pytest
-
-pytest.skip(
-    # Same decision as test_moe_expert_backends.py records for the backends
-    # themselves: aurora_full_loop / aurora_full_sonic are deliberately NOT
-    # ported. They need top_scores and selected_experts_indices, which our
-    # GroupedExperts.forward(x_RD, num_tokens_per_expert_E) never receives
-    # (upstream moved dispatch into the token dispatcher; the sww branch
-    # predates that), and they additionally require an EP mesh. Porting them
-    # is a dispatcher restructuring, not a backend addition.
-    #
-    # Every test in this file keys off AGPT_2B_50K_MOE_sdpa_aurora_full_sonic,
-    # so with the flavor unported the module cannot even be imported -- it was
-    # failing at COLLECTION, which takes the whole file down rather than
-    # reporting a skip. Kept rather than deleted so the architecture the 2B/50K
-    # config is meant to have stays on record if the flavor is revisited.
-    "agpt_2b_50k_moe_sdpa_aurora_full_sonic is deliberately not ported: it "
-    "needs routing data our GroupedExperts.forward never receives, plus an "
-    "EP mesh. See test_moe_expert_backends.py for the full rationale.",
-    allow_module_level=True,
-)
+import torch
 
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
+from torchtitan.experiments.ezpz.agpt import agpt_configs
 from torchtitan.experiments.ezpz.moe import model_registry, moe_configs
 from torchtitan.experiments.ezpz.moe.config_registry import (
-    agpt_2b_50k_moe_sdpa_aurora_full_sonic,
+    moe_10b_2b_sdpa_sonic_ep,
+    moe_2b_sonic_ep2,
+    moe_4b_sonic_ep12,
+    moe_7b_sonic_ep12,
+    moe_debugmodel_sonic,
 )
-from torchtitan.models.common.attention import GQAttention
+from torchtitan.experiments.ezpz.moe.experts import ExpertComputeBackend
+from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
 
 
-FLAVOR = "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic"
+SONIC_CONFIGS = (
+    (moe_debugmodel_sonic, 2, 256, 256),
+    (moe_2b_sonic_ep2, 2, 1024, 1024),
+    # Non-square D/F layouts catch transposition bugs hidden by debugmodel/2B.
+    (moe_4b_sonic_ep12, 12, 1536, 1024),
+    (moe_7b_sonic_ep12, 12, 2048, 1280),
+    (moe_10b_2b_sdpa_sonic_ep, 12, 2048, 1408),
+)
 
 
-def test_agpt_moe_architecture_matches_dense_backbone():
-    config = moe_configs[FLAVOR]()
-
-    assert config.dim == 2048
-    assert config.vocab_size == 50304
-    assert len(config.layers) == 24
-    assert config.rope.dim == 128
-    assert config.rope.theta == 50000
-    assert config.rope.scaling == "none"
-
-    for layer in config.layers:
-        assert isinstance(layer.attention, GQAttention.Config)
-        assert layer.attention.n_heads == 16
-        assert layer.attention.n_kv_heads == 4
-        assert layer.feed_forward is None
-        assert layer.moe.num_experts == 36
-        assert layer.moe.router.top_k == 3
-        assert layer.moe.router.score_func == "softmax"
-        assert not layer.moe.router.route_norm
-        assert layer.moe.load_balance_coeff == 1e-3
-        assert layer.moe.experts.hidden_dim == 2112
-        assert layer.moe.shared_experts.w1.out_features == 4224
-        assert layer.moe.experts.compute_backend == "aurora_full_sonic"
+def _moe_layers(model_config):
+    return [layer.moe for layer in model_config.layers if layer.moe is not None]
 
 
-def test_agpt_moe_active_and_total_parameter_counts():
-    config = moe_configs[FLAVOR]()
+def test_registered_expert_backends_match_the_implemented_selector():
+    assert set(get_args(ExpertComputeBackend)) == {
+        "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl",
+        "aurora_full_sonic",
+    }
+
+
+@pytest.mark.parametrize(
+    "config_factory,ep_degree,dim,hidden_dim",
+    SONIC_CONFIGS,
+    ids=lambda value: getattr(value, "__name__", str(value)),
+)
+def test_current_sonic_configs_wire_routing_and_layout(
+    config_factory, ep_degree, dim, hidden_dim
+):
+    trainer_config = config_factory()
+    model_config = trainer_config.model_spec.model
+    layers = _moe_layers(model_config)
+
+    assert trainer_config.parallelism.expert_parallel_degree == ep_degree
+    assert model_config.dim == dim
+    assert layers
+    assert {layer.routed_experts.inner_experts.compute_backend for layer in layers} == {
+        "aurora_full_sonic"
+    }
+    assert {layer.routed_experts.inner_experts.hidden_dim for layer in layers} == {
+        hidden_dim
+    }
+    assert all(
+        isinstance(layer.routed_experts, EzpzRoutedExperts.Config) for layer in layers
+    )
+
+
+@pytest.mark.parametrize(
+    "config_factory", [moe_4b_sonic_ep12, moe_7b_sonic_ep12, moe_10b_2b_sdpa_sonic_ep]
+)
+def test_non_square_sonic_meta_models_preserve_weight_shapes(config_factory):
+    config = config_factory().model_spec.model
     with torch.device("meta"):
         model = config.build()
 
-    counts = {"dense": 0, "router": 0, "shared": 0, "routed": 0}
-    for name, parameter in model.named_parameters():
-        if ".moe.router." in name:
-            counts["router"] += parameter.numel()
-        elif ".moe.shared_experts." in name:
-            counts["shared"] += parameter.numel()
-        elif ".moe.experts." in name:
-            counts["routed"] += parameter.numel()
-        else:
-            counts["dense"] += parameter.numel()
-
-    total = sum(counts.values())
-    active = (
-        counts["dense"]
-        + counts["router"]
-        + counts["shared"]
-        + counts["routed"] * 3 // 36
-    )
-    assert total == 12_293_801_984
-    assert active == 2_016_708_608
-    measured_total, flops_2048 = config.get_nparams_and_flops(model, 2048)
-    _, flops_4096 = config.get_nparams_and_flops(model, 4096)
-    assert measured_total == total
-    assert flops_2048 == 12_690_075_648
-    assert flops_4096 == 13_898_035_200
+    routed = [module for module in model.modules() if isinstance(module, EzpzRoutedExperts)]
+    assert routed
+    for module in routed:
+        experts = module.inner_experts
+        num_experts, hidden_dim, dim = experts.w1_EFD.shape
+        assert dim != hidden_dim
+        assert tuple(experts.w2_EDF.shape) == (num_experts, dim, hidden_dim)
+        assert tuple(experts.w3_EFD.shape) == (num_experts, hidden_dim, dim)
+        assert experts._wants_routing()
 
 
-def test_agpt_moe_training_config_wires_balancing_and_gqa_sharding():
-    trainer_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic()
-    spec = trainer_config.model_spec
+def test_moe_model_registry_contract_for_sonic_base_flavor():
+    spec = model_registry("10B_2B_sdpa")
 
+    assert spec.name == "moe"
+    assert spec.flavor == "10B_2B_sdpa"
     assert spec.post_optimizer_build_fn is register_moe_load_balancing_hook
-    assert spec.state_dict_adapter is None
-    assert trainer_config.activation_checkpoint.mode == "selective"
-    assert trainer_config.tokenizer.backend == "hf"
-    assert trainer_config.hf_assets_path.endswith("olmo-7b-0724-hf")
-    spec.model.update_from_config(trainer_config=trainer_config)
-    assert spec.model.layers[0].attention.sharding_config is not None
+    assert spec.state_dict_adapter is moeStateDictAdapter
+    model_config = spec.model
+    layers = getattr(model_config, "layers")
+    assert spec.max_context_length == layers[0].attention.rope.max_context_length
 
 
-def test_agpt_moe_model_registry_keeps_native_checkpoint_support():
-    spec = model_registry(FLAVOR)
-    assert spec.state_dict_adapter is None
+def test_agpt_and_moe_model_registries_are_current_and_distinct():
+    """Guard current registry ownership without reviving removed 50K flavors."""
+    removed_flavor = "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic"
+
+    assert removed_flavor not in moe_configs
+    assert removed_flavor not in agpt_configs
+    assert "10B_2B_sdpa" in moe_configs
+    assert "2b" in agpt_configs
+    # Generic names intentionally overlap, but they must be family-specific.
+    assert moe_configs["debugmodel"] is not agpt_configs["debugmodel"]

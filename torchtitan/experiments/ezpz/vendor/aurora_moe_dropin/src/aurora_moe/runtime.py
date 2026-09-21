@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Explicit runtime presets for Aurora's validated native-oneCCL path."""
 
 from __future__ import annotations
@@ -24,7 +30,9 @@ def configure_native_runtime(
     """
 
     if dist.is_available() and dist.is_initialized():
-        raise RuntimeError("configure_native_runtime must run before process-group initialization")
+        raise RuntimeError(
+            "configure_native_runtime must run before process-group initialization"
+        )
     if reorder not in {"parallel", "row_parallel"}:
         raise ValueError("reorder must be 'parallel' or 'row_parallel'")
     if router_free_two_phase and router_grad:

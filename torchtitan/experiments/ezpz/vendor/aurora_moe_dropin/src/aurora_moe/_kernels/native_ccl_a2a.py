@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Experimental direct-oneCCL collectives for an existing XCCL job.
 
 This deliberately does not reach into ProcessGroupXCCL's private communicator.
@@ -20,10 +26,10 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType
-from typing import Sequence
 
 import torch
 import torch.distributed as dist
@@ -40,7 +46,11 @@ def _env_enabled(name: str) -> bool:
 def _record(name: str):
     """Create a zero-overhead-when-disabled profiler range for bridge diagnosis."""
 
-    return torch.profiler.record_function(name) if _env_enabled("AURORA_MOE_PROFILE") else nullcontext()
+    return (
+        torch.profiler.record_function(name)
+        if _env_enabled("AURORA_MOE_PROFILE")
+        else nullcontext()
+    )
 
 
 def load_native_ccl_a2a_ops(verbose: bool = False) -> ModuleType:
@@ -179,15 +189,21 @@ class NativeCclA2A:
     correctness/control run under that inherited safety setting.
     """
 
-    def __init__(self, group: dist.ProcessGroup | None = None, *, require_async: bool = True):
+    def __init__(
+        self, group: dist.ProcessGroup | None = None, *, require_async: bool = True
+    ):
         if not dist.is_available() or not dist.is_initialized():
-            raise RuntimeError("initialize torch.distributed before constructing NativeCclA2A")
+            raise RuntimeError(
+                "initialize torch.distributed before constructing NativeCclA2A"
+            )
         self._group = group
         self._world_size = dist.get_world_size(group)
         self._rank = dist.get_rank(group)
         self._global_ranks = tuple(dist.get_process_group_ranks(group))
         if len(self._global_ranks) != self._world_size:
-            raise RuntimeError("could not resolve the supplied process group's ordered ranks")
+            raise RuntimeError(
+                "could not resolve the supplied process group's ordered ranks"
+            )
         self._require_async = require_async
         self._implementation: object | None = None
         self._device_index: int | None = None
@@ -221,7 +237,9 @@ class NativeCclA2A:
         implementation = ops.NativeCclCommunicator()
         # The main KVS has to stay alive on group rank zero.  The extension
         # retains it; object broadcast is only a one-time control-plane step.
-        root_address = implementation.create_root_kvs_address() if self._rank == 0 else b""
+        root_address = (
+            implementation.create_root_kvs_address() if self._rank == 0 else b""
+        )
         address_box = [root_address]
         dist.broadcast_object_list(
             address_box,
@@ -268,7 +286,9 @@ class NativeCclA2A:
             or output.dtype != input.dtype
             or output.numel() != input.numel()
         ):
-            raise ValueError("input and output must share a device, dtype, and number of elements")
+            raise ValueError(
+                "input and output must share a device, dtype, and number of elements"
+            )
         if input.numel() % self._world_size:
             raise ValueError("equal all-to-all input elements must divide world_size")
         implementation = self._ensure_communicator(input)
@@ -302,7 +322,9 @@ class NativeCclA2A:
             output = input
         _check_bf16_xpu(output, "output")
         if output.device != input.device or output.numel() != input.numel():
-            raise ValueError("input and output must share a device and number of elements")
+            raise ValueError(
+                "input and output must share a device and number of elements"
+            )
         implementation = self._ensure_communicator(input)
         with _record("moe.comm.native_ccl_launch"):
             native_work = implementation.allreduce_sum_bf16(input, output)
@@ -351,11 +373,19 @@ class NativeCclA2A:
         _check_bf16_xpu(input, "input")
         _check_bf16_xpu(output, "output")
         if input.device != output.device or input.ndim < 1 or output.ndim < 1:
-            raise ValueError("input/output must be same-device rank-1-or-higher tensors")
-        send_rows = _split_sizes(input_split_sizes, "input_split_sizes", self._world_size)
-        recv_rows = _split_sizes(output_split_sizes, "output_split_sizes", self._world_size)
+            raise ValueError(
+                "input/output must be same-device rank-1-or-higher tensors"
+            )
+        send_rows = _split_sizes(
+            input_split_sizes, "input_split_sizes", self._world_size
+        )
+        recv_rows = _split_sizes(
+            output_split_sizes, "output_split_sizes", self._world_size
+        )
         if sum(send_rows) != input.size(0) or sum(recv_rows) != output.size(0):
-            raise ValueError("all-to-all-v split sizes must sum to input/output dim-0 sizes")
+            raise ValueError(
+                "all-to-all-v split sizes must sum to input/output dim-0 sizes"
+            )
         send_counts = tuple(rows * _row_width(input) for rows in send_rows)
         recv_counts = tuple(rows * _row_width(output) for rows in recv_rows)
         implementation = self._ensure_communicator(input)

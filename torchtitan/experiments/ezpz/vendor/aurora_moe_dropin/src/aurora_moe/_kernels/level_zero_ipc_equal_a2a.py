@@ -1,14 +1,20 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Synchronous same-node equal all-to-all over Level Zero IPC mappings."""
 
 from __future__ import annotations
 
 import array
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import socket
 import struct
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -59,15 +65,20 @@ def _send_descriptor(
     send_fd: bool = True,
 ) -> None:
     if len(descriptor.handle) != _HANDLE_BYTES:
-        raise RuntimeError(f"unexpected Level Zero IPC handle length {len(descriptor.handle)}")
+        raise RuntimeError(
+            f"unexpected Level Zero IPC handle length {len(descriptor.handle)}"
+        )
     if descriptor.pid <= 0:
         raise RuntimeError(f"invalid IPC descriptor exporter PID {descriptor.pid}")
-    message = _DESCRIPTOR_HEADER.pack(
-        rank, descriptor.pid, descriptor.tensor_offset_bytes
-    ) + descriptor.handle
+    message = (
+        _DESCRIPTOR_HEADER.pack(rank, descriptor.pid, descriptor.tensor_offset_bytes)
+        + descriptor.handle
+    )
     if send_fd:
         if descriptor.fd < 0:
-            raise RuntimeError("SCM_RIGHTS IPC descriptor is missing its file descriptor")
+            raise RuntimeError(
+                "SCM_RIGHTS IPC descriptor is missing its file descriptor"
+            )
         rights = array.array("i", [descriptor.fd])
         sent = connection.sendmsg(
             [message], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights.tobytes())]
@@ -101,7 +112,9 @@ def _recv_descriptor(
         if received:
             for fd in received:
                 os.close(fd)
-            raise RuntimeError("pidfd IPC descriptor unexpectedly carried SCM_RIGHTS data")
+            raise RuntimeError(
+                "pidfd IPC descriptor unexpectedly carried SCM_RIGHTS data"
+            )
         fd = -1
     rank, pid, offset = _DESCRIPTOR_HEADER.unpack(message[: _DESCRIPTOR_HEADER.size])
     if pid <= 0:
@@ -156,15 +169,19 @@ def _client_exchange(
         try:
             connection.connect(str(path))
             break
-        except FileNotFoundError:
+        except FileNotFoundError as error:
             if time.monotonic() >= deadline:
                 connection.close()
-                raise RuntimeError("timed out waiting for the Unix IPC server")
+                raise RuntimeError(
+                    "timed out waiting for the Unix IPC server"
+                ) from error
             time.sleep(0.05)
-        except ConnectionRefusedError:
+        except ConnectionRefusedError as error:
             if time.monotonic() >= deadline:
                 connection.close()
-                raise RuntimeError("Unix IPC server refused connections for 60 seconds")
+                raise RuntimeError(
+                    "Unix IPC server refused connections for 60 seconds"
+                ) from error
             time.sleep(0.05)
     try:
         _send_descriptor(connection, rank, own, send_fd=send_fd)
@@ -222,7 +239,9 @@ class LevelZeroIpcEqualAllToAll:
         self._device_index = device_index
         base = socket_path or os.environ.get("AURORA_MOE_L0_IPC_SOCKET")
         if not base:
-            raise RuntimeError("set AURORA_MOE_L0_IPC_SOCKET for IPC descriptor exchange")
+            raise RuntimeError(
+                "set AURORA_MOE_L0_IPC_SOCKET for IPC descriptor exchange"
+            )
         self._socket_base = Path(base)
         self._ops = load_level_zero_ipc_ops()
         self._staging: torch.Tensor | None = None
@@ -346,12 +365,16 @@ class LevelZeroIpcEqualAllToAll:
         if dtype != torch.bfloat16:
             raise ValueError("IPC all-to-all currently supports BF16 payloads only")
         if self._dtype is not None and dtype != self._dtype:
-            raise ValueError("IPC all-to-all payload dtype cannot change after initialization")
+            raise ValueError(
+                "IPC all-to-all payload dtype cannot change after initialization"
+            )
         if elements_per_peer > self._capacity_elements:
             grown = max(elements_per_peer, max(1, self._capacity_elements * 2))
             self._create_epoch(grown, dtype)
 
-    def exchange(self, input: torch.Tensor, output: torch.Tensor | None = None) -> torch.Tensor:
+    def exchange(
+        self, input: torch.Tensor, output: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Synchronously exchange contiguous BF16 ``[world_size, ...]`` payloads."""
 
         if input.device != self._device or not input.is_contiguous():
@@ -371,7 +394,9 @@ class LevelZeroIpcEqualAllToAll:
             or output.shape != input.shape
             or not output.is_contiguous()
         ):
-            raise ValueError("output must be contiguous and match input device, dtype, and shape")
+            raise ValueError(
+                "output must be contiguous and match input device, dtype, and shape"
+            )
         self._ensure_capacity(elements_per_peer, input.dtype)
         if self._staging is None or self._capacity_elements < elements_per_peer:
             raise RuntimeError("IPC staging was not initialized")

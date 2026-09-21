@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Flag stale STEP counts in the hand-narrated production dashboard.
 
 check_stale_docs.sh's "Last updated" check only compares a doc's marker date
@@ -22,13 +28,9 @@ from __future__ import annotations
 
 import re
 
-from torchtitan.experiments.ezpz.utils.trajectories import (
-    REPO_ROOT,
-    live_trajectories,
-)
-from torchtitan.experiments.ezpz.utils.fill_trajectory_fields import (
-    largest_valid_step,
-)
+from torchtitan.experiments.ezpz.utils.fill_trajectory_fields import largest_valid_step
+
+from torchtitan.experiments.ezpz.utils.trajectories import live_trajectories, REPO_ROOT
 
 DASHBOARD = REPO_ROOT / "torchtitan/experiments/ezpz/docs/production/README.md"
 
@@ -47,7 +49,7 @@ _STEP_CELL = re.compile(
 def _link_suffix(traj: dict) -> str:
     r = traj["readme"]
     i = r.find("docs/production/")
-    rel = r[i + len("docs/production/"):] if i != -1 else r
+    rel = r[i + len("docs/production/") :] if i != -1 else r
     return rel  # e.g. agpt/20b/n512/README.md
 
 
@@ -65,7 +67,9 @@ def main() -> int:
     if not DASHBOARD.is_file():
         print("  (dashboard not found; skipping drift check)")
         return 0
-    rows = [ln for ln in DASHBOARD.read_text().splitlines() if ln.lstrip().startswith("|")]
+    rows = [
+        ln for ln in DASHBOARD.read_text().splitlines() if ln.lstrip().startswith("|")
+    ]
     drift = 0
     ok = 0
     unreadable: list[str] = []
@@ -108,8 +112,10 @@ def main() -> int:
                 stale_here.append(cited)
         if stale_here:
             print(f"  [DRIFT] {link}")
-            print(f"    disk-valid step: {step:,}   dashboard step-cell(s): "
-                  f"{', '.join(f'{c:,}' for c in stale_here)}")
+            print(
+                f"    disk-valid step: {step:,}   dashboard step-cell(s): "
+                f"{', '.join(f'{c:,}' for c in stale_here)}"
+            )
             drift += 1
         elif fresh_here:
             ok += 1

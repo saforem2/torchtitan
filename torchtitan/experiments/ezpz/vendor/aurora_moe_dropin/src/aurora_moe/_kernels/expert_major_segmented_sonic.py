@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact compact MoE local node with long expert-major PVC GEMMs.
 
 The exact EP transport naturally delivers source-major ``[source, expert]``
@@ -18,14 +24,14 @@ import torch.nn.functional as F
 
 from aurora_moe._kernels.ep_local_ops import split_compact_payload_rows
 from aurora_moe._kernels.segment_expert_reorder import (
-    ExpertMajorLayout,
+    expert_major_to_payload_parallel,
     expert_major_to_payload_zero_score_parallel,
     expert_major_to_payload_zero_score_row_parallel,
-    expert_major_to_payload_parallel,
     expert_major_to_segments,
     expert_major_to_segments_parallel,
     expert_major_to_segments_scaled_parallel,
     expert_major_to_segments_scaled_row_parallel,
+    ExpertMajorLayout,
     make_expert_major_layout,
     pair_segments_to_expert_major,
     pair_segments_to_expert_major_parallel,
@@ -41,8 +47,8 @@ from aurora_moe._kernels.segmented_grouped_gemm import (
     segmented_weight_grad_bf16,
 )
 from aurora_moe._kernels.segmented_sonic import (
-    PeerExpertSegments,
     make_peer_expert_segments,
+    PeerExpertSegments,
 )
 
 
@@ -139,7 +145,9 @@ def _onemkl_fuse_up_gate_dx_requested() -> bool:
     return value == "1"
 
 
-def make_expert_group_segments(physical_segments: PeerExpertSegments) -> PeerExpertSegments:
+def make_expert_group_segments(
+    physical_segments: PeerExpertSegments,
+) -> PeerExpertSegments:
     """Return one runtime-size group per logical local expert.
 
     The leading singleton is only metadata: it describes one packed physical
@@ -166,7 +174,9 @@ def _check_inputs(
         or tokens.ndim != 2
         or not tokens.is_contiguous()
     ):
-        raise ValueError("tokens must be a contiguous BF16 XPU [routes, model_dim] tensor")
+        raise ValueError(
+            "tokens must be a contiguous BF16 XPU [routes, model_dim] tensor"
+        )
     if (
         scores.device != tokens.device
         or scores.dtype != tokens.dtype
@@ -195,15 +205,15 @@ def _check_payload_inputs(
         or payload.size(1) < 2
         or not payload.is_contiguous()
     ):
-        raise ValueError(
-            "payload must be contiguous BF16 XPU [routes, model_dim + 1]"
-        )
+        raise ValueError("payload must be contiguous BF16 XPU [routes, model_dim + 1]")
     _check_expert_inputs(
         payload, payload.size(1) - 1, physical_segments, up, gate, down, activation
     )
 
 
-def _split_expert_major_payload(payload: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _split_expert_major_payload(
+    payload: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Return contiguous token and score columns from direct expert-major IPC."""
 
     rows = split_compact_payload_rows(payload)
@@ -330,7 +340,9 @@ def _torch_dense_expert_gemm(
     """
 
     if weights.size(0) != len(expert_rows) or sum(expert_rows) != activations.size(0):
-        raise ValueError("dense expert rows do not describe the compact activation extent")
+        raise ValueError(
+            "dense expert rows do not describe the compact activation extent"
+        )
     output = activations.new_empty((activations.size(0), weights.size(2)))
     begin = 0
     for expert, rows in enumerate(expert_rows):
@@ -390,7 +402,9 @@ def _grouped_gemm(
             expert_segments.source_offsets,
         )
     if backend == "specialized":
-        from aurora_moe._kernels.segmented_moe_tla import segmented_moe_grouped_gemm_bf16
+        from aurora_moe._kernels.segmented_moe_tla import (
+            segmented_moe_grouped_gemm_bf16,
+        )
 
         return segmented_moe_grouped_gemm_bf16(
             activations, weights, expert_segments.counts
@@ -496,7 +510,9 @@ def _weight_grad(
     if backend == "onemkl":
         if expert_rows is None:
             expert_rows = _expert_rows_host(expert_segments)
-        from aurora_moe._kernels.one_mkl_exact_expert_gemm import exact_expert_weight_grad_bf16
+        from aurora_moe._kernels.one_mkl_exact_expert_gemm import (
+            exact_expert_weight_grad_bf16,
+        )
 
         return exact_expert_weight_grad_bf16(activations, gradients, expert_rows)
     raise AssertionError(f"unexpected expert-major dW backend: {backend}")
@@ -528,7 +544,9 @@ def _packed_swiglu(projection: torch.Tensor, backend: str) -> torch.Tensor:
     """Apply SwiGLU directly to a contiguous ``[up | gate]`` projection."""
 
     if projection.size(-1) <= 0 or projection.size(-1) % 2:
-        raise ValueError("packed SwiGLU projection must have a positive even trailing dimension")
+        raise ValueError(
+            "packed SwiGLU projection must have a positive even trailing dimension"
+        )
     if backend == "sycl":
         from aurora_moe._kernels.packed_swiglu_ops import packed_swiglu_bf16
 
@@ -677,9 +695,13 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
         )
         gate_arg = gate if activation == "swiglu" else None
         if payload_input:
-            _check_payload_inputs(tokens, physical_segments, up, gate_arg, down, activation)
+            _check_payload_inputs(
+                tokens, physical_segments, up, gate_arg, down, activation
+            )
         else:
-            _check_inputs(tokens, scores, physical_segments, up, gate_arg, down, activation)
+            _check_inputs(
+                tokens, scores, physical_segments, up, gate_arg, down, activation
+            )
         expert_segments = make_peer_expert_segments(expert_counts)
         expert_rows = _resolve_expert_rows(
             expert_segments,
@@ -692,7 +714,9 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
             physical_segments, include_row_schedule=reorder_backend == "row_parallel"
         )
         if already_expert_major and not payload_input:
-            raise ValueError("only fused token/score payloads may already be expert-major")
+            raise ValueError(
+                "only fused token/score payloads may already be expert-major"
+            )
         with _record(f"moe.expert_major.reorder.{reorder_backend}.forward"):
             if payload_input and already_expert_major:
                 # Direct IPC has already performed the exact runtime
@@ -841,12 +865,11 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                 # two operands required by the router-free backward: compact
                 # tokens for dW-up/gate and dY*score for down dX/dW.
                 if ctx.already_expert_major:
-                    grouped_payload_tokens, grouped_scores = _split_expert_major_payload(
-                        tokens
-                    )
-                    pre_scaled_grad_values = (
-                        grad_output * grouped_scores.unsqueeze(-1)
-                    )
+                    (
+                        grouped_payload_tokens,
+                        grouped_scores,
+                    ) = _split_expert_major_payload(tokens)
+                    pre_scaled_grad_values = grad_output * grouped_scores.unsqueeze(-1)
                 else:
                     grouped_payload_tokens, pre_scaled_grad_values = (
                         payload_and_grad_to_expert_major_scaled_row_parallel(
@@ -865,9 +888,10 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                 )
             if ctx.payload_input and grouped_payload_tokens is None:
                 if ctx.already_expert_major:
-                    grouped_payload_tokens, grouped_scores = _split_expert_major_payload(
-                        tokens
-                    )
+                    (
+                        grouped_payload_tokens,
+                        grouped_scores,
+                    ) = _split_expert_major_payload(tokens)
                 else:
                     grouped_payload_tokens, grouped_scores = _pack_payload(
                         tokens, physical_segments, layout, ctx.reorder_backend
@@ -880,7 +904,9 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                     ctx.reorder_backend,
                 ).reshape(-1)
         if ctx.activation == "swiglu":
-            with _record(f"moe.expert_major.pointwise.{ctx.pointwise_backend}.recompute"):
+            with _record(
+                f"moe.expert_major.pointwise.{ctx.pointwise_backend}.recompute"
+            ):
                 hidden = (
                     _packed_swiglu(preact_up, ctx.pointwise_backend)
                     if ctx.packed_up_gate
@@ -938,8 +964,10 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                 with _record("moe.expert_major.down_backward_pointwise"):
                     grad_hidden = down_input_unscaled * grouped_scores.unsqueeze(-1)
                     grouped_grad_scores = (
-                        down_input_unscaled.float() * hidden.float()
-                    ).sum(dim=-1).to(scores.dtype)
+                        (down_input_unscaled.float() * hidden.float())
+                        .sum(dim=-1)
+                        .to(scores.dtype)
+                    )
             if need_down and not router_free_payload:
                 assert grouped_grad_output is not None
                 grad_values = grouped_grad_output * grouped_scores.unsqueeze(-1)
@@ -950,8 +978,10 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                 )
             if need_scores:
                 grouped_grad_scores = (
-                    grouped_grad_output.float() * values.float()
-                ).sum(dim=-1).to(scores.dtype)
+                    (grouped_grad_output.float() * values.float())
+                    .sum(dim=-1)
+                    .to(scores.dtype)
+                )
             if need_down or need_activation_backward:
                 grad_values = grouped_grad_output * grouped_scores.unsqueeze(-1)
             if need_activation_backward:
@@ -1013,7 +1043,9 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                     hidden_dim = up.size(-1)
                     if need_up or need_gate:
                         assert grouped_tokens is not None
-                        with _record(f"moe.expert_major.dw.{ctx.dw_backend}.packed_up_gate"):
+                        with _record(
+                            f"moe.expert_major.dw.{ctx.dw_backend}.packed_up_gate"
+                        ):
                             grad_up_gate = _weight_grad(
                                 grouped_tokens,
                                 grad_up_gate_values,
@@ -1030,15 +1062,19 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                         with _record(
                             f"moe.expert_major.{ctx.gemm_backend}.packed_up_gate_dx"
                         ):
-                            grouped_grad_tokens = _grouped_gemm_with_forward_weight_transpose(
-                                grad_up_gate_values,
-                                torch.cat((up, gate), dim=-1).contiguous(),
-                                expert_segments,
-                                ctx.gemm_backend,
-                                ctx.expert_rows,
+                            grouped_grad_tokens = (
+                                _grouped_gemm_with_forward_weight_transpose(
+                                    grad_up_gate_values,
+                                    torch.cat((up, gate), dim=-1).contiguous(),
+                                    expert_segments,
+                                    ctx.gemm_backend,
+                                    ctx.expert_rows,
+                                )
                             )
                 else:
-                    with _record(f"moe.expert_major.pointwise.{ctx.pointwise_backend}.backward"):
+                    with _record(
+                        f"moe.expert_major.pointwise.{ctx.pointwise_backend}.backward"
+                    ):
                         grad_up_values, grad_gate_values = _swiglu_backward(
                             grad_hidden, preact_up, preact_gate, ctx.pointwise_backend
                         )
@@ -1055,12 +1091,14 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                             )
                     if need_tokens and not fused_up_gate_dx:
                         with _record(f"moe.expert_major.{ctx.gemm_backend}.gate_dx"):
-                            grouped_grad_tokens = _grouped_gemm_with_forward_weight_transpose(
-                                grad_gate_values,
-                                gate,
-                                expert_segments,
-                                ctx.gemm_backend,
-                                ctx.expert_rows,
+                            grouped_grad_tokens = (
+                                _grouped_gemm_with_forward_weight_transpose(
+                                    grad_gate_values,
+                                    gate,
+                                    expert_segments,
+                                    ctx.gemm_backend,
+                                    ctx.expert_rows,
+                                )
                             )
             else:
                 with _record("moe.expert_major.pointwise.squared_relu.backward"):
@@ -1081,14 +1119,18 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                     )
             if need_tokens and not ctx.packed_up_gate:
                 if fused_up_gate_dx:
-                    with _record(f"moe.expert_major.{ctx.gemm_backend}.fused_up_gate_dx"):
-                        grouped_grad_tokens = _grouped_sum_with_forward_weight_transposes(
-                            grad_gate_values,
-                            gate,
-                            grad_up_values,
-                            up,
-                            expert_segments,
-                            ctx.expert_rows,
+                    with _record(
+                        f"moe.expert_major.{ctx.gemm_backend}.fused_up_gate_dx"
+                    ):
+                        grouped_grad_tokens = (
+                            _grouped_sum_with_forward_weight_transposes(
+                                grad_gate_values,
+                                gate,
+                                grad_up_values,
+                                up,
+                                expert_segments,
+                                ctx.expert_rows,
+                            )
                         )
                 else:
                     with _record(f"moe.expert_major.{ctx.gemm_backend}.up_dx"):
@@ -1106,7 +1148,9 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
         if need_tokens:
             assert grouped_grad_tokens is not None
             if not ctx.payload_input:
-                with _record(f"moe.expert_major.reorder.{ctx.reorder_backend}.input_grad"):
+                with _record(
+                    f"moe.expert_major.reorder.{ctx.reorder_backend}.input_grad"
+                ):
                     grad_tokens = _unpack(
                         grouped_grad_tokens,
                         physical_segments,
@@ -1151,7 +1195,9 @@ class _ExpertMajorSegmentedLocalMoE(torch.autograd.Function):
                         )
                     )
             else:
-                with _record(f"moe.expert_major.reorder.{ctx.reorder_backend}.score_grad"):
+                with _record(
+                    f"moe.expert_major.reorder.{ctx.reorder_backend}.score_grad"
+                ):
                     grad_scores = _unpack(
                         grouped_grad_scores.unsqueeze(-1),
                         physical_segments,
@@ -1356,7 +1402,7 @@ def expert_major_segmented_reference_local_moe(
             hidden = preact * F.silu(grouped_tokens[begin:end].matmul(gate[expert]))
         else:
             hidden = F.relu(preact).square()
-        grouped_values[begin:end] = hidden.matmul(down[expert]) * grouped_scores[
-            begin:end, None
-        ]
+        grouped_values[begin:end] = (
+            hidden.matmul(down[expert]) * grouped_scores[begin:end, None]
+        )
     return _reference_unpack(grouped_values, physical_segments, layout)

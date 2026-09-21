@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """FP32-output diagnostic for the generic SYCL*TLA grouped BF16 GEMM."""
 
 from __future__ import annotations
@@ -7,7 +13,6 @@ from pathlib import Path
 from types import ModuleType
 
 import torch
-from torch.utils import cpp_extension
 
 from aurora_moe._kernels.xetla_grouped_gemm import (
     _enable_pvc_link_flags,
@@ -47,8 +52,14 @@ def load_xetla_grouped_f32_ops(verbose: bool = False) -> ModuleType:
             "-Wno-pass-failed",
             "-Wno-deprecated-declarations",
         ],
-        extra_sycl_cflags=["-fno-sycl-instrument-device-code", "-fsycl-targets=spir64_gen"],
-        extra_include_paths=[str(root / "include"), str(root / "tools" / "util" / "include")],
+        extra_sycl_cflags=[
+            "-fno-sycl-instrument-device-code",
+            "-fsycl-targets=spir64_gen",
+        ],
+        extra_include_paths=[
+            str(root / "include"),
+            str(root / "tools" / "util" / "include"),
+        ],
         with_cuda=False,
         with_sycl=True,
         verbose=verbose,
@@ -99,8 +110,14 @@ def load_xetla_grouped_f32_host_metadata_ops(verbose: bool = False) -> ModuleTyp
             "-Wno-pass-failed",
             "-Wno-deprecated-declarations",
         ],
-        extra_sycl_cflags=["-fno-sycl-instrument-device-code", "-fsycl-targets=spir64_gen"],
-        extra_include_paths=[str(root / "include"), str(root / "tools" / "util" / "include")],
+        extra_sycl_cflags=[
+            "-fno-sycl-instrument-device-code",
+            "-fsycl-targets=spir64_gen",
+        ],
+        extra_include_paths=[
+            str(root / "include"),
+            str(root / "tools" / "util" / "include"),
+        ],
         with_cuda=False,
         with_sycl=True,
         verbose=verbose,

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """SYCL*TLA grouped GEMMs over exact source/expert route segments."""
 
 from __future__ import annotations
@@ -9,7 +15,11 @@ from types import ModuleType
 
 import torch
 
-from aurora_moe._kernels.xetla_grouped_gemm import _enable_pvc_link_flags, _load_without_sycl2020, _tla_root
+from aurora_moe._kernels.xetla_grouped_gemm import (
+    _enable_pvc_link_flags,
+    _load_without_sycl2020,
+    _tla_root,
+)
 
 
 _MODULE: ModuleType | None = None
@@ -27,13 +37,17 @@ def load_segmented_grouped_ops(verbose: bool = False) -> ModuleType:
     if prebuilt:
         spec = spec_from_file_location("aurora_moe_segmented_grouped_gemm", prebuilt)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load prebuilt segmented grouped GEMM: {prebuilt}")
+            raise RuntimeError(
+                f"could not load prebuilt segmented grouped GEMM: {prebuilt}"
+            )
         module = module_from_spec(spec)
         spec.loader.exec_module(module)
         required = ("segmented_grouped_gemm_bf16", "segmented_weight_grad_bf16")
         missing = [name for name in required if not hasattr(module, name)]
         if missing:
-            raise RuntimeError(f"prebuilt segmented grouped GEMM is missing symbols: {missing}")
+            raise RuntimeError(
+                f"prebuilt segmented grouped GEMM is missing symbols: {missing}"
+            )
         _MODULE = module
         return _MODULE
 
@@ -56,8 +70,14 @@ def load_segmented_grouped_ops(verbose: bool = False) -> ModuleType:
             "-Wno-pass-failed",
             "-Wno-deprecated-declarations",
         ],
-        extra_sycl_cflags=["-fno-sycl-instrument-device-code", "-fsycl-targets=spir64_gen"],
-        extra_include_paths=[str(root / "include"), str(root / "tools" / "util" / "include")],
+        extra_sycl_cflags=[
+            "-fno-sycl-instrument-device-code",
+            "-fsycl-targets=spir64_gen",
+        ],
+        extra_include_paths=[
+            str(root / "include"),
+            str(root / "tools" / "util" / "include"),
+        ],
         with_cuda=False,
         with_sycl=True,
         verbose=verbose,

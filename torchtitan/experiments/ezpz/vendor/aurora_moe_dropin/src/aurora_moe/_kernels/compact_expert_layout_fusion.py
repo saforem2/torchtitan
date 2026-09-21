@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact compact expert-row layout and route-transform fusion prototype."""
 
 from __future__ import annotations
@@ -42,7 +48,9 @@ def load_compact_expert_layout_fusion_ops(verbose: bool = False) -> ModuleType:
     if _MODULE is not None:
         return _MODULE
     if not torch.xpu.is_available():
-        raise RuntimeError("Aurora XPU is required to use compact layout fusion kernels")
+        raise RuntimeError(
+            "Aurora XPU is required to use compact layout fusion kernels"
+        )
     source = Path(__file__).with_name("csrc") / "compact_expert_layout_fusion.sycl"
     build_dir = os.environ.get("AURORA_MOE_SYCL_BUILD_DIR")
     if build_dir:
@@ -141,19 +149,25 @@ def make_compact_expert_layout(
     _bf16_matrix(payload, "payload")
     _check_counts(recv_counts, cap)
     if num_experts <= 0 or payload.device != recv_counts.device:
-        raise ValueError("num_experts must be positive and payload/counts must share a device")
+        raise ValueError(
+            "num_experts must be positive and payload/counts must share a device"
+        )
     padded_rows = recv_counts.numel() * cap
     if payload.size(0) != padded_rows:
         raise ValueError("payload rows must equal recv_counts.numel() * cap")
     embedded_ids = local_ids is None
     if embedded_ids:
         if num_experts > 256 or payload.size(1) < 3:
-            raise ValueError("embedded BF16 IDs require 1..256 experts and token, score, ID columns")
+            raise ValueError(
+                "embedded BF16 IDs require 1..256 experts and token, score, ID columns"
+            )
         ids = torch.empty(0, device=payload.device, dtype=torch.int64)
     else:
         _i64_vector(local_ids, "local_ids")
         if local_ids.device != payload.device or local_ids.numel() != padded_rows:
-            raise ValueError("local_ids must share payload's device and padded row count")
+            raise ValueError(
+                "local_ids must share payload's device and padded row count"
+            )
         if payload.size(1) < 2:
             raise ValueError("payload must contain token columns and one score column")
         ids = local_ids
@@ -193,11 +207,13 @@ def weighted_compact_rows_to_padded(
 
     _bf16_matrix(expert_values, "expert_values")
     _check_layout(layout, recv_counts)
-    if (
-        expert_values.device != layout.tokens.device
-        or expert_values.shape != (layout.total_rows, layout.tokens.size(1))
+    if expert_values.device != layout.tokens.device or expert_values.shape != (
+        layout.total_rows,
+        layout.tokens.size(1),
     ):
-        raise ValueError("expert_values must match compact token rows and model dimension")
+        raise ValueError(
+            "expert_values must match compact token rows and model dimension"
+        )
     return load_compact_expert_layout_fusion_ops().weighted_compact_rows_to_padded_bf16(
         expert_values,
         layout.scores,
@@ -223,7 +239,10 @@ def compact_route_grad_scale_score(
         or expert_values.shape != (layout.total_rows, layout.tokens.size(1))
     ):
         raise ValueError("route-gradient tensors do not match the compact layout")
-    values, scores = load_compact_expert_layout_fusion_ops().compact_route_grad_scale_score_bf16(
+    (
+        values,
+        scores,
+    ) = load_compact_expert_layout_fusion_ops().compact_route_grad_scale_score_bf16(
         grad_output,
         expert_values,
         layout.scores,
@@ -253,7 +272,9 @@ def compact_token_score_to_padded(
     ):
         raise ValueError("expert token/score gradients do not match compact layout")
     if payload_columns not in (expert_tokens.size(1) + 1, expert_tokens.size(1) + 2):
-        raise ValueError("payload_columns must hold tokens, score, and optional ID gradient")
+        raise ValueError(
+            "payload_columns must hold tokens, score, and optional ID gradient"
+        )
     return load_compact_expert_layout_fusion_ops().compact_token_score_to_padded_bf16(
         expert_tokens,
         expert_scores,
@@ -287,9 +308,13 @@ def fused_compact_token_add_score_to_padded(
         or expert_scores.device != layout.tokens.device
         or expert_scores.shape != (layout.total_rows,)
     ):
-        raise ValueError("fused compact token/score gradients do not match compact layout")
+        raise ValueError(
+            "fused compact token/score gradients do not match compact layout"
+        )
     if payload_columns not in (up_tokens.size(1) + 1, up_tokens.size(1) + 2):
-        raise ValueError("payload_columns must hold tokens, score, and optional ID gradient")
+        raise ValueError(
+            "payload_columns must hold tokens, score, and optional ID gradient"
+        )
     return load_compact_expert_layout_fusion_ops().fused_compact_token_add_score_to_padded_bf16(
         up_tokens,
         gate_tokens,

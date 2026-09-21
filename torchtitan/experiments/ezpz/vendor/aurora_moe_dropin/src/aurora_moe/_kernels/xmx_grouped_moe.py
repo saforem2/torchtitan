@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Experimental exact MoE pack/XMX-GEMM/scatter primitives for PVC."""
 
 from __future__ import annotations
@@ -106,7 +112,9 @@ def _check_payload_inputs(
         or payload.size(1) < 2
         or not payload.is_contiguous()
     ):
-        raise ValueError("payload must be contiguous BF16 [padded_rows, token..., score]")
+        raise ValueError(
+            "payload must be contiguous BF16 [padded_rows, token..., score]"
+        )
     if (
         local_ids.device != payload.device
         or local_ids.dtype != torch.int64
@@ -123,7 +131,9 @@ def _check_payload_inputs(
         raise ValueError("recv_counts must be contiguous int64 on payload.device")
     if cap < 0 or num_experts <= 0:
         raise ValueError("cap must be nonnegative and num_experts must be positive")
-    if payload.size(0) != recv_counts.numel() * cap or local_ids.numel() != payload.size(0):
+    if payload.size(
+        0
+    ) != recv_counts.numel() * cap or local_ids.numel() != payload.size(0):
         raise ValueError("payload/local_ids rows must equal recv_counts.numel() * cap")
 
 
@@ -205,7 +215,9 @@ def xmx_grouped_gemm_bf16(
         or padded_weights.shape[:2] != (layout.num_experts, layout.padded_model_dim)
         or padded_weights.size(2) % _macro_tiles()[1]
     ):
-        raise ValueError("padded_weights must match XMX layout [experts, padded_K, padded_N]")
+        raise ValueError(
+            "padded_weights must match XMX layout [experts, padded_K, padded_N]"
+        )
     return load_xmx_grouped_moe_ops().xmx_grouped_gemm_bf16(
         layout.tokens, padded_weights, layout.group_rows
     )

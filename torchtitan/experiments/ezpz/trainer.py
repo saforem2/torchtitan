@@ -19,17 +19,16 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 from torchtitan.components.data.loader import DataloaderExhaustedError
 from torchtitan.components.loss import ChunkedLossWrapper, IGNORE_INDEX
-from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
-from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz import signal_stop
-from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
+from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
     install_agpt_dtype_probe,
     record_native_ddp_grad_streams,
@@ -37,17 +36,18 @@ from torchtitan.experiments.ezpz.native_ddp import (
     validate_native_ddp,
     wrap_native_ddp,
 )
+from torchtitan.experiments.ezpz.xpu_graph import maybe_wrap_with_xpu_graph
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import (
-    TorchFTManager as FTManager,
     maybe_semi_sync_training,
+    TorchFTManager as FTManager,
 )
 from torchtitan.experiments.torchft.optimizer import (
     TorchFTOptimizersContainer as FTOptimizersContainer,
 )
+from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.protocols import BaseModel
 from torchtitan.tools import utils
-from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.trainer import Trainer
 
 
@@ -71,7 +71,6 @@ def _clip_foreach() -> bool:
         _CLIP_FOREACH_LOGGED = True
         logger.info("EZPZ_CLIP_NO_FOREACH active: clip_grad foreach=%s", foreach)
     return foreach
-
 
 
 def _set_pg_timeouts_xpu_aware(
@@ -126,9 +125,7 @@ def _set_pg_timeouts_xpu_aware(
         c10d._set_pg_timeout(timeout, group)
 
     xpu_device = torch.device("xpu")
-    if not (
-        torch.distributed.is_xccl_available() and torch.xpu.is_available()
-    ):
+    if not (torch.distributed.is_xccl_available() and torch.xpu.is_available()):
         return
 
     from torch._C._distributed_c10d import ProcessGroupXCCL
@@ -160,7 +157,7 @@ class FaultTolerantTrainer(Trainer):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
         lr_finder: LRFinderConfig = field(default_factory=LRFinderConfig)
 
-        # Re-declare `parallelism` with the ezpz subclass so the native-DDP
+        # Redeclare `parallelism` with the ezpz subclass so the native-DDP
         # knobs exist without adding them to core ParallelismConfig. The
         # upstream Aurora MoE branch puts these five fields in core; we do
         # not need to, because the call sites were inverted into this file
@@ -325,9 +322,9 @@ class FaultTolerantTrainer(Trainer):
         torch._C._log_api_usage_once("torchtitan.train")
 
         self.config = config
-        assert config.model_spec is not None, (
-            "model_spec must be set before creating Trainer"
-        )
+        assert (
+            config.model_spec is not None
+        ), "model_spec must be set before creating Trainer"
         model_spec = config.model_spec
 
         device_module, device_type = utils.device_module, utils.device_type
@@ -448,9 +445,7 @@ class FaultTolerantTrainer(Trainer):
             # assigned until later in __init__, after the dataloader is built.)
             training_steps=config.training.steps * _num_pp_microbatches,
             # Sequences, not tokens -- see the conversion above.
-            global_batch_size=(
-                config.training.num_tokens_per_train_step // _seq_len
-            ),
+            global_batch_size=(config.training.num_tokens_per_train_step // _seq_len),
             parallel_dims=parallel_dims,
         )
 
@@ -487,6 +482,7 @@ class FaultTolerantTrainer(Trainer):
         # if ezpz.distributed.asni
         if ezpz.distributed.verify_wandb():
             import wandb
+
             if wandb.run is not None:
                 wandb.run.watch(model, log="all")
 
@@ -498,6 +494,7 @@ class FaultTolerantTrainer(Trainer):
 
         # Check if any quantization converter is on the model_config
         from torchtitan.quantization.utils import has_quantization as _has_quantization
+
         has_quantization = _has_quantization(model_config)
 
         # metrics logging (FT addition: ft_enable, ft_replica_id)
@@ -516,18 +513,22 @@ class FaultTolerantTrainer(Trainer):
         (
             model_param_count,
             self.metrics_processor.num_flops_per_token,
-        ) = model_config.get_nparams_and_flops(model, config.training.max_context_length)
+        ) = model_config.get_nparams_and_flops(
+            model, config.training.max_context_length
+        )
 
         heading = 80 * "="
         logger.info(
-            "\n".join([
-                "\n",
-                f"{heading}",
-                f"{color.blue}Model: {model_spec.name} {model_spec.flavor} ",
-                f"{color.red}config: {model_param_count:,} total parameters{color.reset}",
-                f"{heading}",
-                "\n",
-            ])
+            "\n".join(
+                [
+                    "\n",
+                    f"{heading}",
+                    f"{color.blue}Model: {model_spec.name} {model_spec.flavor} ",
+                    f"{color.red}config: {model_param_count:,} total parameters{color.reset}",
+                    f"{heading}",
+                    "\n",
+                ]
+            )
         )
         # logger.info(
         #     "\n" + 80 * "="
@@ -598,8 +599,7 @@ class FaultTolerantTrainer(Trainer):
         # subtly different GAS here would change the effective batch of every
         # run without failing anything.
         num_tokens_per_dp_rank = (
-            config.training.num_tokens_per_microbatch_per_dp_rank
-            * _num_pp_microbatches
+            config.training.num_tokens_per_microbatch_per_dp_rank * _num_pp_microbatches
         )
         num_tokens_per_train_step = config.training.num_tokens_per_train_step
         if num_tokens_per_train_step < 0:
@@ -792,9 +792,7 @@ class FaultTolerantTrainer(Trainer):
             # the bucket views it had just built with
             # gradient_as_bucket_view=True. Silent, and only on the opt-in
             # path.
-            if getattr(
-                config.parallelism, "enable_data_parallel_native_ddp", False
-            ):
+            if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
                 model = wrap_native_ddp(
                     model,
                     parallel_dims.get_mesh("dp_replicate"),
@@ -833,7 +831,9 @@ class FaultTolerantTrainer(Trainer):
             else:
                 assert len(self.model_parts) == 1
                 lm_head = self.model_parts[0].lm_head
-                assert lm_head is not None, "Model must have lm_head for ChunkedLossWrapper"
+                assert (
+                    lm_head is not None
+                ), "Model must have lm_head for ChunkedLossWrapper"
                 self.loss_fn.set_lm_head(lm_head)
                 self.model_parts[0]._skip_lm_head = True
 
@@ -885,10 +885,10 @@ class FaultTolerantTrainer(Trainer):
         if getattr(config, "diagnostics", False) or getattr(
             config, "history_bridge", False
         ):
+            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
             from torchtitan.experiments.ezpz.diagnostics.history_bridge import (
                 HistoryBridge,
             )
-            from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
             _attn.configure(
                 enabled=getattr(config, "diagnostics_attention", False),
@@ -1034,6 +1034,7 @@ class FaultTolerantTrainer(Trainer):
         from torchtitan.experiments.ezpz.gloo_new_group_workaround import (
             maybe_install_gloo_new_group_workaround,
         )
+
         maybe_install_gloo_new_group_workaround()
 
         # FT addition: build FTManager
@@ -1102,9 +1103,7 @@ class FaultTolerantTrainer(Trainer):
                 if "num_valid_tokens" in input_dict:
                     local_valid_tokens += input_dict.pop("num_valid_tokens")
                 else:
-                    local_valid_tokens += (
-                        input_dict["labels"] != IGNORE_INDEX
-                    ).sum()
+                    local_valid_tokens += (input_dict["labels"] != IGNORE_INDEX).sum()
                 microbatches.append(input_dict)
             microbatch_groups.append(microbatches)
 
@@ -1190,11 +1189,10 @@ class FaultTolerantTrainer(Trainer):
         # exactly the bug the first smoke exposed.
         if getattr(self.config, "diagnostics_attention", False):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
+
             _attn.set_step(self.step)
 
-        if getattr(
-            self.config.parallelism, "enable_data_parallel_native_ddp", False
-        ):
+        if getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
             # Experimental mixed-precision DDP restores FP32 gradients on an
             # upcast stream; ordinary DDP/autocast makes this a no-op.
             record_native_ddp_grad_streams(self.model_parts[0])
@@ -1251,7 +1249,8 @@ class FaultTolerantTrainer(Trainer):
                     self.model_parts, per_layer=True
                 )
                 _bad = [
-                    k for k, v in _nan_stats.items()
+                    k
+                    for k, v in _nan_stats.items()
                     if isinstance(v, float) and not math.isfinite(v)
                 ]
                 # The float scan above finds only AGGREGATES
@@ -1303,7 +1302,9 @@ class FaultTolerantTrainer(Trainer):
             except Exception as _e:  # instrumentation must not kill the run
                 logger.error(
                     "NON-FINITE GRADIENT CAPTURE step %s FAILED: %s: %s",
-                    self.step, type(_e).__name__, _e,
+                    self.step,
+                    type(_e).__name__,
+                    _e,
                 )
 
             self.optimizers.zero_grad()
@@ -1388,9 +1389,7 @@ class FaultTolerantTrainer(Trainer):
         ):
             try:
                 from torchtitan.experiments.ezpz import diagnostics as _diag
-                from torchtitan.experiments.ezpz.diagnostics import (
-                    attention as _attn,
-                )
+                from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
                 extra_metrics.update(
                     _diag.clipping_metrics(grad_norm, self.config.training.max_norm)
@@ -1398,9 +1397,7 @@ class FaultTolerantTrainer(Trainer):
                 extra_metrics.update(
                     _diag.collect_param_stats(
                         self.model_parts,
-                        per_layer=getattr(
-                            self.config, "diagnostics_per_layer", False
-                        ),
+                        per_layer=getattr(self.config, "diagnostics_per_layer", False),
                     )
                 )
                 ratios, self._diag_prev_weight_norms = _diag.collect_update_ratios(
@@ -1474,10 +1471,7 @@ class FaultTolerantTrainer(Trainer):
             config.checkpoint.folder,
             config.checkpoint.load_step,
             dump_folder=config.dump_folder,
-            initial_load_path=getattr(
-                config.checkpoint, "initial_load_path", ""
-            )
-            or "",
+            initial_load_path=getattr(config.checkpoint, "initial_load_path", "") or "",
         )
 
         # Two concurrent jobs writing one checkpoint.folder is silent and it
@@ -1677,8 +1671,12 @@ class FaultTolerantTrainer(Trainer):
                                     "%.1fx the trailing median (%.4g) over "
                                     "%d steps; aborting before it burns the "
                                     "window (threshold %.1fx)",
-                                    self.step, gn, gn / med, med,
-                                    gn_hist.maxlen, config.grad_norm_abort,
+                                    self.step,
+                                    gn,
+                                    gn / med,
+                                    med,
+                                    gn_hist.maxlen,
+                                    config.grad_norm_abort,
                                 )
                                 break
                         gn_hist.append(gn)

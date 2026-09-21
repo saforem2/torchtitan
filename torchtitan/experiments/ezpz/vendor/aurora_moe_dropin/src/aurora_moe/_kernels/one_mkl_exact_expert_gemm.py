@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact compact expert-major oneMKL BF16 GEMMs for Aurora."""
 
 from __future__ import annotations
@@ -27,7 +33,9 @@ def load_one_mkl_exact_expert_ops(verbose: bool = False) -> ModuleType:
     if prebuilt:
         spec = spec_from_file_location("aurora_moe_one_mkl_exact_expert", prebuilt)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load prebuilt oneMKL exact-expert ops: {prebuilt}")
+            raise RuntimeError(
+                f"could not load prebuilt oneMKL exact-expert ops: {prebuilt}"
+            )
         module = module_from_spec(spec)
         spec.loader.exec_module(module)
         required = (
@@ -38,7 +46,9 @@ def load_one_mkl_exact_expert_ops(verbose: bool = False) -> ModuleType:
         )
         missing = [name for name in required if not hasattr(module, name)]
         if missing:
-            raise RuntimeError(f"prebuilt oneMKL exact-expert ops is missing symbols: {missing}")
+            raise RuntimeError(
+                f"prebuilt oneMKL exact-expert ops is missing symbols: {missing}"
+            )
         _MODULE = module
         return _MODULE
 
@@ -63,7 +73,9 @@ def load_one_mkl_exact_expert_ops(verbose: bool = False) -> ModuleType:
     os.environ.setdefault("TORCH_XPU_ARCH_LIST", "pvc")
     _MODULE = load(
         name="aurora_moe_one_mkl_exact_expert",
-        sources=[str(Path(__file__).with_name("csrc") / "one_mkl_exact_expert_gemm.sycl")],
+        sources=[
+            str(Path(__file__).with_name("csrc") / "one_mkl_exact_expert_gemm.sycl")
+        ],
         extra_cflags=["-O3", "-DNDEBUG"],
         extra_sycl_cflags=["-fno-sycl-instrument-device-code"],
         extra_include_paths=[str(include)],
@@ -79,13 +91,17 @@ def load_one_mkl_exact_expert_ops(verbose: bool = False) -> ModuleType:
 def _rows(expert_rows: torch.Tensor | Sequence[int]) -> list[int]:
     if isinstance(expert_rows, torch.Tensor):
         if expert_rows.ndim != 1 or expert_rows.dtype not in (torch.int32, torch.int64):
-            raise ValueError("expert_rows tensor must be a rank-1 int32 or int64 tensor")
+            raise ValueError(
+                "expert_rows tensor must be a rank-1 int32 or int64 tensor"
+            )
         return [int(value) for value in expert_rows.cpu().tolist()]
     return [int(value) for value in expert_rows]
 
 
 def exact_expert_gemm_bf16(
-    activations: torch.Tensor, weights: torch.Tensor, expert_rows: torch.Tensor | Sequence[int]
+    activations: torch.Tensor,
+    weights: torch.Tensor,
+    expert_rows: torch.Tensor | Sequence[int],
 ) -> torch.Tensor:
     """Apply one dense, true-length GEMM to every compact expert interval."""
 
@@ -95,7 +111,9 @@ def exact_expert_gemm_bf16(
 
 
 def exact_expert_gemm_transposed_weight_bf16(
-    activations: torch.Tensor, weights: torch.Tensor, expert_rows: torch.Tensor | Sequence[int]
+    activations: torch.Tensor,
+    weights: torch.Tensor,
+    expert_rows: torch.Tensor | Sequence[int],
 ) -> torch.Tensor:
     """Apply exact GEMMs using each forward weight through oneMKL's transpose flag.
 
@@ -130,7 +148,9 @@ def exact_expert_sum_transposed_weight_bf16(
 
 
 def exact_expert_weight_grad_bf16(
-    activations: torch.Tensor, gradients: torch.Tensor, expert_rows: torch.Tensor | Sequence[int]
+    activations: torch.Tensor,
+    gradients: torch.Tensor,
+    expert_rows: torch.Tensor | Sequence[int],
 ) -> torch.Tensor:
     """Return exact expert-wise ``activations.T @ gradients`` without padding."""
 

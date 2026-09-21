@@ -1,10 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact device-side source routing for padded expert-parallel transport."""
 
 from __future__ import annotations
 
 import os
-from importlib.util import module_from_spec, spec_from_file_location
 from dataclasses import dataclass
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
 
@@ -112,13 +118,17 @@ def _check_route_matrix(routes: torch.Tensor, name: str) -> None:
         raise ValueError(f"{name} must be contiguous")
 
 
-def destination_counts(destinations: torch.Tensor, num_destinations: int) -> torch.Tensor:
+def destination_counts(
+    destinations: torch.Tensor, num_destinations: int
+) -> torch.Tensor:
     """Return exact per-destination route counts for canonical route IDs."""
 
     _check_route_matrix(destinations, "destinations")
     if num_destinations <= 0:
         raise ValueError("num_destinations must be positive")
-    return torch.bincount(destinations.reshape(-1), minlength=num_destinations).to(torch.int64)
+    return torch.bincount(destinations.reshape(-1), minlength=num_destinations).to(
+        torch.int64
+    )
 
 
 def destination_expert_counts(
@@ -149,9 +159,11 @@ def destination_expert_counts(
     # entirely device-resident and works for arbitrary dynamic
     # destination/expert counts.
     combined = destinations.reshape(-1) * num_local_experts + local_ids.reshape(-1)
-    return torch.bincount(
-        combined, minlength=num_destinations * num_local_experts
-    ).reshape(num_destinations, num_local_experts).to(torch.int64)
+    return (
+        torch.bincount(combined, minlength=num_destinations * num_local_experts)
+        .reshape(num_destinations, num_local_experts)
+        .to(torch.int64)
+    )
 
 
 def make_route_slots(
@@ -167,9 +179,11 @@ def make_route_slots(
     _check_route_matrix(destinations, "destinations")
     if num_destinations <= 0 or cap < 0:
         raise ValueError("num_destinations must be positive and cap nonnegative")
-    return load_ep_route_ops().route_slots_atomic_i64(
-        destinations.reshape(-1), num_destinations, cap
-    ).reshape_as(destinations)
+    return (
+        load_ep_route_ops()
+        .route_slots_atomic_i64(destinations.reshape(-1), num_destinations, cap)
+        .reshape_as(destinations)
+    )
 
 
 def make_compact_route_slots(
@@ -199,10 +213,14 @@ def make_compact_route_slots(
         or destination_offsets.device != destinations.device
         or destination_offsets.numel() == 0
     ):
-        raise ValueError("destination_offsets must be a contiguous nonempty int64 XPU vector")
-    return load_ep_route_ops().compact_route_slots_atomic_i64(
-        destinations.reshape(-1), destination_offsets
-    ).reshape_as(destinations)
+        raise ValueError(
+            "destination_offsets must be a contiguous nonempty int64 XPU vector"
+        )
+    return (
+        load_ep_route_ops()
+        .compact_route_slots_atomic_i64(destinations.reshape(-1), destination_offsets)
+        .reshape_as(destinations)
+    )
 
 
 def make_destination_expert_offsets(
@@ -218,7 +236,9 @@ def make_destination_expert_offsets(
         or destination_expert_counts.size(0) == 0
         or destination_expert_counts.size(1) == 0
     ):
-        raise ValueError("destination_expert_counts must be contiguous int64 [destinations, experts]")
+        raise ValueError(
+            "destination_expert_counts must be contiguous int64 [destinations, experts]"
+        )
     if (
         destination_offsets.device != destination_expert_counts.device
         or destination_offsets.dtype != torch.int64
@@ -226,7 +246,9 @@ def make_destination_expert_offsets(
         or destination_offsets.numel() != destination_expert_counts.size(0)
         or not destination_offsets.is_contiguous()
     ):
-        raise ValueError("destination_offsets must be contiguous int64 with one entry per destination")
+        raise ValueError(
+            "destination_offsets must be contiguous int64 with one entry per destination"
+        )
     prefix = torch.cat(
         (
             destination_expert_counts.new_zeros((destination_expert_counts.size(0), 1)),
@@ -247,7 +269,9 @@ def make_compact_destination_expert_slots(
     _check_route_matrix(destinations, "destinations")
     _check_route_matrix(local_ids, "local_ids")
     if destinations.shape != local_ids.shape or destinations.device != local_ids.device:
-        raise ValueError("destinations and local_ids must have matching XPU route shapes")
+        raise ValueError(
+            "destinations and local_ids must have matching XPU route shapes"
+        )
     if (
         destination_expert_offsets.device != destinations.device
         or destination_expert_offsets.dtype != torch.int64
@@ -256,10 +280,16 @@ def make_compact_destination_expert_slots(
         or destination_expert_offsets.shape[0] == 0
         or destination_expert_offsets.shape[1] < 2
     ):
-        raise ValueError("destination_expert_offsets must be contiguous int64 [destinations, experts + 1]")
-    return load_ep_route_ops().compact_destination_expert_slots_atomic_i64(
-        destinations.reshape(-1), local_ids.reshape(-1), destination_expert_offsets
-    ).reshape_as(destinations)
+        raise ValueError(
+            "destination_expert_offsets must be contiguous int64 [destinations, experts + 1]"
+        )
+    return (
+        load_ep_route_ops()
+        .compact_destination_expert_slots_atomic_i64(
+            destinations.reshape(-1), local_ids.reshape(-1), destination_expert_offsets
+        )
+        .reshape_as(destinations)
+    )
 
 
 def pack_routes(
@@ -273,13 +303,20 @@ def pack_routes(
 
     _check_route_matrix(route_slots, "route_slots")
     _check_route_matrix(expert_ids, "expert_ids")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
     if not tokens.is_contiguous():
         raise ValueError("tokens must be contiguous")
     if scores.device != tokens.device or scores.shape != route_slots.shape:
         raise ValueError("scores must share route_slots shape and device")
-    if scores.dtype not in (torch.bfloat16, torch.float32) or not scores.is_contiguous():
+    if (
+        scores.dtype not in (torch.bfloat16, torch.float32)
+        or not scores.is_contiguous()
+    ):
         raise ValueError("scores must be contiguous BF16 or FP32")
     if expert_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
         raise ValueError("route shapes do not match tokens")
@@ -297,7 +334,11 @@ def pack_token_rows(
     """Copy each token row to every route's padded slot without host loops."""
 
     _check_route_matrix(route_slots, "route_slots")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
     if not tokens.is_contiguous() or tokens.size(0) != route_slots.size(0):
         raise ValueError("tokens must be contiguous and match route_slots")
@@ -322,10 +363,20 @@ def pack_routes_payload(
 
     _check_route_matrix(route_slots, "route_slots")
     _check_route_matrix(expert_ids, "expert_ids")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
-        raise ValueError("fused route payload requires BF16 scores matching route_slots")
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
+        raise ValueError(
+            "fused route payload requires BF16 scores matching route_slots"
+        )
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
     if expert_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
@@ -357,11 +408,23 @@ def pack_routes_chunked_payload(
     _check_route_matrix(route_slots, "route_slots")
     _check_route_matrix(expert_ids, "expert_ids")
     if num_destinations <= 0 or cap < 0 or chunk_rows <= 0:
-        raise ValueError("destination count and chunk rows must be positive and cap nonnegative")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+        raise ValueError(
+            "destination count and chunk rows must be positive and cap nonnegative"
+        )
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
-        raise ValueError("chunked route payload requires BF16 scores matching route_slots")
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
+        raise ValueError(
+            "chunked route payload requires BF16 scores matching route_slots"
+        )
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
     if expert_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
@@ -403,9 +466,17 @@ def pack_routes_payload_ids(
     _check_route_matrix(local_ids, "local_ids")
     if not 1 <= local_count <= 256:
         raise ValueError("BF16 ID payload requires local_count in [1, 256]")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
         raise ValueError("BF16 ID payload requires BF16 scores matching route_slots")
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
@@ -441,11 +512,23 @@ def pack_routes_chunked_payload_ids(
     if not 1 <= local_count <= 256:
         raise ValueError("chunked BF16 ID payload requires local_count in [1, 256]")
     if num_destinations <= 0 or cap < 0 or chunk_rows <= 0:
-        raise ValueError("destination count and chunk rows must be positive and cap nonnegative")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+        raise ValueError(
+            "destination count and chunk rows must be positive and cap nonnegative"
+        )
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
-        raise ValueError("chunked BF16 ID payload requires BF16 scores matching route_slots")
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
+        raise ValueError(
+            "chunked BF16 ID payload requires BF16 scores matching route_slots"
+        )
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
     if local_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
@@ -486,10 +569,20 @@ def pack_compact_routes_payload(
 
     _check_route_matrix(route_slots, "route_slots")
     _check_route_matrix(expert_ids, "expert_ids")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
-        raise ValueError("compact route payload requires BF16 scores matching route_slots")
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
+        raise ValueError(
+            "compact route payload requires BF16 scores matching route_slots"
+        )
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
     if expert_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
@@ -518,10 +611,20 @@ def pack_compact_routes_payload_ids(
     _check_route_matrix(local_ids, "local_ids")
     if not 1 <= local_count <= 256:
         raise ValueError("compact BF16 ID payload requires local_count in [1, 256]")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
-    if scores.device != tokens.device or scores.dtype != torch.bfloat16 or scores.shape != route_slots.shape:
-        raise ValueError("compact BF16 ID payload requires BF16 scores matching route_slots")
+    if (
+        scores.device != tokens.device
+        or scores.dtype != torch.bfloat16
+        or scores.shape != route_slots.shape
+    ):
+        raise ValueError(
+            "compact BF16 ID payload requires BF16 scores matching route_slots"
+        )
     if not tokens.is_contiguous() or not scores.is_contiguous():
         raise ValueError("tokens and scores must be contiguous")
     if local_ids.shape != route_slots.shape or tokens.size(0) != route_slots.size(0):
@@ -538,7 +641,11 @@ def pack_compact_tokens_scores(
     """Pack contiguous exact token and score buffers for segmented all-to-all-v."""
 
     _check_route_matrix(route_slots, "route_slots")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
     if (
         scores.device != tokens.device
@@ -567,7 +674,11 @@ def pack_compact_tokens_score_payload(
     """
 
     _check_route_matrix(route_slots, "route_slots")
-    if tokens.device.type != "xpu" or tokens.dtype != torch.bfloat16 or tokens.ndim != 2:
+    if (
+        tokens.device.type != "xpu"
+        or tokens.dtype != torch.bfloat16
+        or tokens.ndim != 2
+    ):
         raise ValueError("tokens must be a BF16 XPU [tokens, model_dim] tensor")
     if (
         scores.device != tokens.device
@@ -583,7 +694,9 @@ def pack_compact_tokens_score_payload(
     )
 
 
-def reduce_route_rows(route_values: torch.Tensor, route_slots: torch.Tensor) -> torch.Tensor:
+def reduce_route_rows(
+    route_values: torch.Tensor, route_slots: torch.Tensor
+) -> torch.Tensor:
     """Sum padded return rows into canonical tokens without atomic ``index_add_``."""
 
     _check_route_matrix(route_slots, "route_slots")
@@ -593,11 +706,15 @@ def reduce_route_rows(route_values: torch.Tensor, route_slots: torch.Tensor) -> 
         or route_values.ndim != 2
         or not route_values.is_contiguous()
     ):
-        raise ValueError("route_values must be a contiguous BF16 XPU [rows, model_dim] tensor")
+        raise ValueError(
+            "route_values must be a contiguous BF16 XPU [rows, model_dim] tensor"
+        )
     return load_ep_route_ops().reduce_route_rows_bf16(route_values, route_slots)
 
 
-def unpack_route_scalars(padded_values: torch.Tensor, route_slots: torch.Tensor) -> torch.Tensor:
+def unpack_route_scalars(
+    padded_values: torch.Tensor, route_slots: torch.Tensor
+) -> torch.Tensor:
     """Gather one returned scalar per route into canonical ``[token, choice]`` order."""
 
     _check_route_matrix(route_slots, "route_slots")
@@ -611,7 +728,9 @@ def unpack_route_scalars(padded_values: torch.Tensor, route_slots: torch.Tensor)
     return load_ep_route_ops().unpack_route_scalars(padded_values, route_slots)
 
 
-def fuse_route_rows(route_values: torch.Tensor, route_scalars: torch.Tensor) -> torch.Tensor:
+def fuse_route_rows(
+    route_values: torch.Tensor, route_scalars: torch.Tensor
+) -> torch.Tensor:
     """Fuse BF16 return vectors and one scalar into a transport payload."""
 
     if (
@@ -628,7 +747,9 @@ def fuse_route_rows(route_values: torch.Tensor, route_scalars: torch.Tensor) -> 
         or route_scalars.numel() != route_values.size(0)
         or not route_scalars.is_contiguous()
     ):
-        raise ValueError("route_scalars must be contiguous BF16 with one scalar per row")
+        raise ValueError(
+            "route_scalars must be contiguous BF16 with one scalar per row"
+        )
     return load_ep_route_ops().fuse_route_rows_bf16(route_values, route_scalars)
 
 
@@ -646,5 +767,7 @@ def reduce_route_payload(
     ):
         raise ValueError("payload must be contiguous BF16 XPU rank-2")
     if payload.size(1) < 2:
-        raise ValueError("payload must contain at least one vector column and one scalar")
+        raise ValueError(
+            "payload must contain at least one vector column and one scalar"
+        )
     return tuple(load_ep_route_ops().reduce_route_payload_bf16(payload, route_slots))

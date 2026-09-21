@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact ragged local MoE primitives with SonicMoE-style saved state."""
 
 from __future__ import annotations
@@ -20,10 +26,16 @@ class RaggedRouteLayout:
     expert_offsets: torch.Tensor
 
 
-def make_ragged_route_layout(local_ids: torch.Tensor, num_experts: int) -> RaggedRouteLayout:
+def make_ragged_route_layout(
+    local_ids: torch.Tensor, num_experts: int
+) -> RaggedRouteLayout:
     """Sort exact local routes by expert and return device-resident offsets."""
 
-    if local_ids.ndim != 1 or local_ids.dtype != torch.int64 or not local_ids.is_contiguous():
+    if (
+        local_ids.ndim != 1
+        or local_ids.dtype != torch.int64
+        or not local_ids.is_contiguous()
+    ):
         raise ValueError("local_ids must be a contiguous int64 rank-1 tensor")
     if num_experts <= 0:
         raise ValueError("num_experts must be positive")
@@ -33,10 +45,15 @@ def make_ragged_route_layout(local_ids: torch.Tensor, num_experts: int) -> Ragge
         raise ValueError("local_ids must be in [0, num_experts)")
     group_rows = group_rows.to(torch.int32)
     expert_offsets = torch.cat(
-        (group_rows.new_zeros(1, dtype=torch.int64), group_rows.to(torch.int64).cumsum(0))
+        (
+            group_rows.new_zeros(1, dtype=torch.int64),
+            group_rows.to(torch.int64).cumsum(0),
+        )
     )
     source_to_grouped = torch.empty_like(grouped_to_source)
-    source_to_grouped.scatter_(0, grouped_to_source, torch.arange(local_ids.numel(), device=local_ids.device))
+    source_to_grouped.scatter_(
+        0, grouped_to_source, torch.arange(local_ids.numel(), device=local_ids.device)
+    )
     return RaggedRouteLayout(
         grouped_experts=grouped_experts,
         grouped_to_source=grouped_to_source,
@@ -148,13 +165,18 @@ def _reference_grouped_gemm(
     offset = 0
     for expert, rows in enumerate(_row_counts(group_rows)):
         if rows:
-            output[offset : offset + rows] = activations[offset : offset + rows].matmul(weights[expert])
+            output[offset : offset + rows] = activations[offset : offset + rows].matmul(
+                weights[expert]
+            )
         offset += rows
     return output
 
 
 def _grouped_gemm(
-    activations: torch.Tensor, weights: torch.Tensor, group_rows: torch.Tensor, backend: str
+    activations: torch.Tensor,
+    weights: torch.Tensor,
+    group_rows: torch.Tensor,
+    backend: str,
 ) -> torch.Tensor:
     if activations.size(0) == 0:
         return activations.new_empty((0, weights.size(2)))
@@ -201,9 +223,12 @@ def _weight_grad(
     offset = 0
     for expert, rows in enumerate(_row_counts(group_rows)):
         if rows:
-            output[expert] = activations[offset : offset + rows].transpose(0, 1).matmul(
-                grad_output[offset : offset + rows]
-            ).to(dtype=weights.dtype)
+            output[expert] = (
+                activations[offset : offset + rows]
+                .transpose(0, 1)
+                .matmul(grad_output[offset : offset + rows])
+                .to(dtype=weights.dtype)
+            )
         offset += rows
     return output
 
@@ -224,7 +249,9 @@ def _swiglu_backward(
 
         return load_swiglu_ops().swiglu_backward_bf16(grad_hidden, up, gate)
     sigmoid = torch.sigmoid(gate)
-    return grad_hidden * (gate * sigmoid), grad_hidden * up * sigmoid * (1.0 + gate * (1.0 - sigmoid))
+    return grad_hidden * (gate * sigmoid), grad_hidden * up * sigmoid * (
+        1.0 + gate * (1.0 - sigmoid)
+    )
 
 
 def _check_inputs(
@@ -237,7 +264,9 @@ def _check_inputs(
     activation: str,
 ) -> None:
     if tokens.ndim != 2 or not tokens.is_contiguous() or not tokens.is_floating_point():
-        raise ValueError("tokens must be a contiguous floating-point [routes, model_dim] tensor")
+        raise ValueError(
+            "tokens must be a contiguous floating-point [routes, model_dim] tensor"
+        )
     if scores.ndim != 1 or not scores.is_contiguous() or not scores.is_floating_point():
         raise ValueError("scores must be a contiguous floating-point [routes] tensor")
     if scores.device != tokens.device or scores.numel() != tokens.size(0):
@@ -245,17 +274,30 @@ def _check_inputs(
     if local_ids.device != tokens.device or local_ids.numel() != tokens.size(0):
         raise ValueError("local_ids must share tokens.device and route count")
     if up.ndim != 3 or not up.is_contiguous() or up.device != tokens.device:
-        raise ValueError("up must be contiguous [experts, model_dim, hidden_dim] on tokens.device")
+        raise ValueError(
+            "up must be contiguous [experts, model_dim, hidden_dim] on tokens.device"
+        )
     if down.ndim != 3 or not down.is_contiguous() or down.device != tokens.device:
-        raise ValueError("down must be contiguous [experts, hidden_dim, model_dim] on tokens.device")
+        raise ValueError(
+            "down must be contiguous [experts, hidden_dim, model_dim] on tokens.device"
+        )
     if up.dtype != tokens.dtype or down.dtype != tokens.dtype:
         raise ValueError("tokens and expert weights must have a common dtype")
-    if up.size(1) != tokens.size(1) or down.shape != (up.size(0), up.size(2), up.size(1)):
+    if up.size(1) != tokens.size(1) or down.shape != (
+        up.size(0),
+        up.size(2),
+        up.size(1),
+    ):
         raise ValueError("expert weight shapes do not match tokens")
     if activation not in ("swiglu", "squared-relu"):
         raise ValueError("activation must be 'swiglu' or 'squared-relu'")
     if activation == "swiglu":
-        if gate is None or gate.shape != up.shape or gate.dtype != tokens.dtype or not gate.is_contiguous():
+        if (
+            gate is None
+            or gate.shape != up.shape
+            or gate.dtype != tokens.dtype
+            or not gate.is_contiguous()
+        ):
             raise ValueError("SwiGLU requires contiguous gate weights shaped like up")
         if gate.device != tokens.device:
             raise ValueError("gate must share tokens.device")
@@ -302,7 +344,9 @@ class _RaggedLocalMoE(torch.autograd.Function):
         up_values = _grouped_gemm(grouped_tokens, up, layout.group_rows, backend)
         if activation == "swiglu":
             assert gate is not None
-            gate_values = _grouped_gemm(grouped_tokens, gate, layout.group_rows, backend)
+            gate_values = _grouped_gemm(
+                grouped_tokens, gate, layout.group_rows, backend
+            )
             # Keep the two logical halves as their native GEMM outputs.  The
             # old concatenation allocated and copied another [routes, 2H]
             # temporary even though backward consumes the halves separately.
@@ -315,7 +359,10 @@ class _RaggedLocalMoE(torch.autograd.Function):
             hidden = F.relu(preact_up).square()
         values = _grouped_gemm(hidden, down, layout.group_rows, backend)
         output = _weighted_scatter_grouped_rows(
-            values, grouped_scores.to(values.dtype), layout.grouped_to_source, layout_backend
+            values,
+            grouped_scores.to(values.dtype),
+            layout.grouped_to_source,
+            layout_backend,
         )
 
         ctx.activation = activation
@@ -364,7 +411,14 @@ class _RaggedLocalMoE(torch.autograd.Function):
         # kernel is the important bandwidth path; keep this tiny gather in
         # PyTorch until it can be folded into the following GEMM epilogue.
         grouped_scores = scores.index_select(0, grouped_to_source).contiguous()
-        need_tokens, need_scores, _, need_up, need_gate, need_down = ctx.needs_input_grad[:6]
+        (
+            need_tokens,
+            need_scores,
+            _,
+            need_up,
+            need_gate,
+            need_down,
+        ) = ctx.needs_input_grad[:6]
         if ctx.activation == "swiglu":
             hidden = _swiglu(preact_up, preact_gate, ctx.backend)
         else:
@@ -413,7 +467,9 @@ class _RaggedLocalMoE(torch.autograd.Function):
                     ctx.backend,
                 )
                 if ctx.layout_backend == "sycl":
-                    from aurora_moe._kernels.sonic_ragged_ops import ragged_down_backward
+                    from aurora_moe._kernels.sonic_ragged_ops import (
+                        ragged_down_backward,
+                    )
 
                     (
                         candidate_grad_values,
@@ -436,8 +492,10 @@ class _RaggedLocalMoE(torch.autograd.Function):
                             grouped_grad_output.dtype
                         ).unsqueeze(-1)
                     grouped_grad_scores = (
-                        down_input_grad_unscaled.float() * hidden.float()
-                    ).sum(dim=-1).to(grouped_scores.dtype)
+                        (down_input_grad_unscaled.float() * hidden.float())
+                        .sum(dim=-1)
+                        .to(grouped_scores.dtype)
+                    )
                 if need_scores:
                     grad_scores = _scatter_grouped_scalars(
                         grouped_grad_scores, grouped_to_source, ctx.layout_backend
@@ -456,15 +514,20 @@ class _RaggedLocalMoE(torch.autograd.Function):
                     from aurora_moe._kernels.sonic_ragged_ops import ragged_route_grad
 
                     grad_values, grouped_grad_scores = ragged_route_grad(
-                        grad_output.contiguous(), values, grouped_scores, grouped_to_source
+                        grad_output.contiguous(),
+                        values,
+                        grouped_scores,
+                        grouped_to_source,
                     )
                 else:
                     grad_values = get_grouped_grad_output() * grouped_scores.to(
                         grouped_grad_output.dtype
                     ).unsqueeze(-1)
                     grouped_grad_scores = (
-                        get_grouped_grad_output().float() * values.float()
-                    ).sum(dim=-1).to(grouped_scores.dtype)
+                        (get_grouped_grad_output().float() * values.float())
+                        .sum(dim=-1)
+                        .to(grouped_scores.dtype)
+                    )
                 grad_scores = _scatter_grouped_scalars(
                     grouped_grad_scores, grouped_to_source, ctx.layout_backend
                 )
@@ -524,13 +587,26 @@ class _RaggedLocalMoE(torch.autograd.Function):
                 )
             if need_tokens:
                 grouped_grad_tokens = grouped_grad_tokens + _grouped_gemm(
-                    grad_up_values, up.transpose(-1, -2).contiguous(), group_rows, ctx.backend
+                    grad_up_values,
+                    up.transpose(-1, -2).contiguous(),
+                    group_rows,
+                    ctx.backend,
                 )
                 grad_tokens = _scatter_grouped_rows(
                     grouped_grad_tokens, grouped_to_source, ctx.layout_backend
                 )
 
-        return grad_tokens, grad_scores, None, grad_up, grad_gate, grad_down, None, None, None
+        return (
+            grad_tokens,
+            grad_scores,
+            None,
+            grad_up,
+            grad_gate,
+            grad_down,
+            None,
+            None,
+            None,
+        )
 
 
 def ragged_local_moe(
@@ -572,7 +648,9 @@ def ragged_local_moe(
     )
 
 
-def sonic_saved_activation_bytes(routes: int, model_dim: int, hidden_dim: int, dtype: torch.dtype) -> int:
+def sonic_saved_activation_bytes(
+    routes: int, model_dim: int, hidden_dim: int, dtype: torch.dtype
+) -> int:
     """Return newly allocated BF16 activation state retained by the local node.
 
     The input is retained by reference, as in SonicMoE's indirect-input path;

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact padded-EP expert BMM using direct expert-major layout kernels.
 
 Integration point: replace the receive-side compact/sort/gather/pad block in
@@ -14,10 +20,10 @@ import torch
 import torch.nn.functional as F
 
 from aurora_moe._kernels.expert_layout_ops import (
-    PaddedExpertLayout,
     expert_token_score_to_padded,
     make_padded_expert_layout,
     padded_rows_to_expert,
+    PaddedExpertLayout,
     weighted_expert_rows_to_padded,
 )
 from aurora_moe._kernels.route_grad_ops import route_grad_scale_score_from_layout
@@ -79,7 +85,9 @@ def _check_inputs(
         or up.ndim != 3
         or not up.is_contiguous()
     ):
-        raise ValueError("up must be a contiguous BF16 XPU [experts, model_dim, hidden_dim]")
+        raise ValueError(
+            "up must be a contiguous BF16 XPU [experts, model_dim, hidden_dim]"
+        )
     if up.size(0) != num_experts:
         raise ValueError("up expert dimension must equal num_experts")
     if (
@@ -89,7 +97,9 @@ def _check_inputs(
         or not down.is_contiguous()
         or down.shape != (num_experts, up.size(2), up.size(1))
     ):
-        raise ValueError("down must be contiguous BF16 [experts, hidden_dim, model_dim]")
+        raise ValueError(
+            "down must be contiguous BF16 [experts, hidden_dim, model_dim]"
+        )
     if activation not in ("swiglu", "squared-relu"):
         raise ValueError("activation must be 'swiglu' or 'squared-relu'")
     if activation == "swiglu":
@@ -105,7 +115,9 @@ def _check_inputs(
         raise ValueError("squared-relu does not use a gate weight")
     expected_columns = up.size(1) + (1 if local_ids is not None else 2)
     if payload.size(1) != expected_columns:
-        raise ValueError("payload columns must be [token..., score] or [token..., score, id]")
+        raise ValueError(
+            "payload columns must be [token..., score] or [token..., score, id]"
+        )
     if local_ids is not None and (
         local_ids.device != payload.device
         or local_ids.dtype != torch.int64
@@ -113,7 +125,9 @@ def _check_inputs(
         or not local_ids.is_contiguous()
         or local_ids.numel() != payload.size(0)
     ):
-        raise ValueError("local_ids must be contiguous int64 with one entry per padded payload row")
+        raise ValueError(
+            "local_ids must be contiguous int64 with one entry per padded payload row"
+        )
 
 
 class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
@@ -136,7 +150,15 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
         known_max_tail: int | None,
     ) -> torch.Tensor:
         _check_inputs(
-            payload, recv_counts, cap, num_experts, local_ids, up, gate, down, activation
+            payload,
+            recv_counts,
+            cap,
+            num_experts,
+            local_ids,
+            up,
+            gate,
+            down,
+            activation,
         )
         layout = make_padded_expert_layout(
             payload,
@@ -159,7 +181,9 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
             ctx.save_for_backward(
                 recv_counts,
                 up,
-                gate if gate is not None else torch.empty(0, dtype=payload.dtype, device=payload.device),
+                gate
+                if gate is not None
+                else torch.empty(0, dtype=payload.dtype, device=payload.device),
                 down,
             )
             return payload.new_zeros((payload.size(0), up.size(1)))
@@ -181,7 +205,9 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
             recv_counts,
             tokens,
             up,
-            gate if gate is not None else torch.empty(0, dtype=payload.dtype, device=payload.device),
+            gate
+            if gate is not None
+            else torch.empty(0, dtype=payload.dtype, device=payload.device),
             down,
             up_values,
             gate_values,
@@ -195,7 +221,9 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor
     ) -> tuple[torch.Tensor | None, ...]:
         if grad_output.dtype != torch.bfloat16 or grad_output.ndim != 2:
-            raise RuntimeError("direct padded expert BMM requires BF16 rank-2 grad_output")
+            raise RuntimeError(
+                "direct padded expert BMM requires BF16 rank-2 grad_output"
+            )
         if ctx.zero_routes:
             _, up, gate, down = ctx.saved_tensors
             grad_payload = (
@@ -210,7 +238,9 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
                 None,
                 None,
                 torch.zeros_like(up) if ctx.needs_input_grad[5] else None,
-                torch.zeros_like(gate) if ctx.gate_present and ctx.needs_input_grad[6] else None,
+                torch.zeros_like(gate)
+                if ctx.gate_present and ctx.needs_input_grad[6]
+                else None,
                 torch.zeros_like(down) if ctx.needs_input_grad[7] else None,
                 None,
                 None,
@@ -232,7 +262,9 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
         layout: PaddedExpertLayout = ctx.layout
         grad_output = grad_output.contiguous()
         if grad_output.shape != (layout.padded_source_rows, ctx.model_dim):
-            raise RuntimeError("grad_output shape does not match the direct padded expert layout")
+            raise RuntimeError(
+                "grad_output shape does not match the direct padded expert layout"
+            )
         need_payload = ctx.needs_input_grad[0]
         need_up = ctx.needs_input_grad[5]
         need_gate = ctx.gate_present and ctx.needs_input_grad[6]
@@ -244,13 +276,13 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
                 grad_output, expert_values, recv_counts, layout
             )
         else:
-            grad_expert_values = padded_rows_to_expert(
-                grad_output, recv_counts, layout
-            )
+            grad_expert_values = padded_rows_to_expert(grad_output, recv_counts, layout)
             if need_payload:
                 grad_scores = (
-                    grad_expert_values.float() * expert_values.float()
-                ).sum(dim=-1).to(torch.bfloat16)
+                    (grad_expert_values.float() * expert_values.float())
+                    .sum(dim=-1)
+                    .to(torch.bfloat16)
+                )
             grad_weighted_values = (
                 grad_expert_values * layout.scores.unsqueeze(-1)
             ).to(torch.bfloat16)
@@ -266,7 +298,10 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
         if need_payload or need_up or need_gate:
             grad_hidden = torch.bmm(grad_weighted_values, down.transpose(-1, -2))
             if ctx.activation == "swiglu":
-                grad_up_values, grad_gate_values = load_swiglu_ops().swiglu_backward_bf16(
+                (
+                    grad_up_values,
+                    grad_gate_values,
+                ) = load_swiglu_ops().swiglu_backward_bf16(
                     grad_hidden, up_values, gate_values
                 )
                 if need_up:
@@ -292,9 +327,7 @@ class _DirectPaddedLayoutBmmMoE(torch.autograd.Function):
                             payload_columns=ctx.payload_columns,
                         )
                     elif _fused_dx_baddbmm_requested():
-                        grad_tokens.baddbmm_(
-                            grad_gate_values, gate.transpose(-1, -2)
-                        )
+                        grad_tokens.baddbmm_(grad_gate_values, gate.transpose(-1, -2))
                     else:
                         grad_tokens = grad_tokens + torch.bmm(
                             grad_gate_values, gate.transpose(-1, -2)
@@ -433,16 +466,24 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
         """
 
         if self._payload_phase_started:
-            raise RuntimeError("payload_gradient may be called only once per two-phase context")
+            raise RuntimeError(
+                "payload_gradient may be called only once per two-phase context"
+            )
         if (
             grad_output.device != self._up.device
             or grad_output.dtype != torch.bfloat16
             or grad_output.ndim != 2
         ):
-            raise ValueError("grad_output must be a BF16 rank-2 XPU tensor on the expert device")
+            raise ValueError(
+                "grad_output must be a BF16 rank-2 XPU tensor on the expert device"
+            )
         if grad_output.shape != (self._layout.padded_source_rows, self._model_dim):
-            raise ValueError("grad_output shape does not match the direct padded expert layout")
-        output_columns = self._payload_columns if payload_columns is None else payload_columns
+            raise ValueError(
+                "grad_output shape does not match the direct padded expert layout"
+            )
+        output_columns = (
+            self._payload_columns if payload_columns is None else payload_columns
+        )
         if output_columns not in (self._model_dim + 1, self._payload_columns):
             raise ValueError(
                 "payload_columns must be model_dim + 1 or the original payload column count"
@@ -461,8 +502,15 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
             up_values = self._up_values
             hidden = self._hidden
             expert_values = self._expert_values
-            if tokens is None or up_values is None or hidden is None or expert_values is None:
-                raise RuntimeError("two-phase context is missing nonempty forward state")
+            if (
+                tokens is None
+                or up_values is None
+                or hidden is None
+                or expert_values is None
+            ):
+                raise RuntimeError(
+                    "two-phase context is missing nonempty forward state"
+                )
 
             if _fused_route_grad_requested():
                 grad_weighted_values, grad_scores = route_grad_scale_score_from_layout(
@@ -476,8 +524,10 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
                     grad_output, self._recv_counts, self._layout
                 )
                 grad_scores = (
-                    grad_expert_values.float() * expert_values.float()
-                ).sum(dim=-1).to(torch.bfloat16)
+                    (grad_expert_values.float() * expert_values.float())
+                    .sum(dim=-1)
+                    .to(torch.bfloat16)
+                )
                 grad_weighted_values = (
                     grad_expert_values * self._layout.scores.unsqueeze(-1)
                 ).to(torch.bfloat16)
@@ -485,20 +535,19 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
             # These intermediates are the only dependency of the later dW
             # BMMs.  Computing them here leaves phase 2 as BMM-only work that
             # can overlap the reverse EP collective.
-            grad_hidden = torch.bmm(
-                grad_weighted_values, self._down.transpose(-1, -2)
-            )
+            grad_hidden = torch.bmm(grad_weighted_values, self._down.transpose(-1, -2))
             if self._activation == "swiglu":
                 gate = self._gate
                 gate_values = self._gate_values
                 if gate is None or gate_values is None:
                     raise RuntimeError("SwiGLU two-phase context is missing gate state")
-                grad_up_values, grad_gate_values = load_swiglu_ops().swiglu_backward_bf16(
+                (
+                    grad_up_values,
+                    grad_gate_values,
+                ) = load_swiglu_ops().swiglu_backward_bf16(
                     grad_hidden, up_values, gate_values
                 )
-                grad_tokens = torch.bmm(
-                    grad_up_values, self._up.transpose(-1, -2)
-                )
+                grad_tokens = torch.bmm(grad_up_values, self._up.transpose(-1, -2))
                 if _fused_dx_payload_requested():
                     from aurora_moe._kernels.direct_layout_payload_fusion import (
                         fused_expert_token_add_score_to_padded,
@@ -516,9 +565,7 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
                         payload_columns=output_columns,
                     )
                 elif _fused_dx_baddbmm_requested():
-                    grad_tokens.baddbmm_(
-                        grad_gate_values, gate.transpose(-1, -2)
-                    )
+                    grad_tokens.baddbmm_(grad_gate_values, gate.transpose(-1, -2))
                 else:
                     grad_tokens = grad_tokens + torch.bmm(
                         grad_gate_values, gate.transpose(-1, -2)
@@ -526,9 +573,7 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
             else:
                 grad_up_values = grad_hidden * (2.0 * F.relu(up_values))
                 grad_gate_values = None
-                grad_tokens = torch.bmm(
-                    grad_up_values, self._up.transpose(-1, -2)
-                )
+                grad_tokens = torch.bmm(grad_up_values, self._up.transpose(-1, -2))
 
             self._grad_weighted_values = grad_weighted_values
             self._grad_up_values = grad_up_values
@@ -564,15 +609,18 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
         if not self._payload_phase_started:
             raise RuntimeError("call payload_gradient before weight_gradients")
         if self._weight_phase_started:
-            raise RuntimeError("weight_gradients may be called only once per two-phase context")
+            raise RuntimeError(
+                "weight_gradients may be called only once per two-phase context"
+            )
         self._weight_phase_started = True
 
         requested_up = self._up.requires_grad if need_up is None else bool(need_up)
-        requested_gate = (
-            self._gate is not None
-            and (self._gate.requires_grad if need_gate is None else bool(need_gate))
+        requested_gate = self._gate is not None and (
+            self._gate.requires_grad if need_gate is None else bool(need_gate)
         )
-        requested_down = self._down.requires_grad if need_down is None else bool(need_down)
+        requested_down = (
+            self._down.requires_grad if need_down is None else bool(need_down)
+        )
 
         with torch.no_grad():
             if self._zero_routes:
@@ -593,7 +641,9 @@ class DirectPaddedLayoutBmmTwoPhaseBackward:
                 or grad_weighted_values is None
                 or grad_up_values is None
             ):
-                raise RuntimeError("payload_gradient did not retain the required dW state")
+                raise RuntimeError(
+                    "payload_gradient did not retain the required dW state"
+                )
 
             grad_up = (
                 torch.bmm(tokens.transpose(-1, -2), grad_up_values)

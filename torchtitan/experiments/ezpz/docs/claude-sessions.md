@@ -649,7 +649,7 @@ TORCH_DEVICE=cpu LOCAL_RANK=0 RANK=0 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 \
 - Added prefix-wildcard Bash allow rules in `.claude/settings.local.json`
   (`ssh -o BatchMode=yes -o ControlPath=/tmp/kssh-rdir-*`, `kitten @ *`,
   `grep:*`) to replace the brittle exact-match entries the auto-approver
-  had been accreting.
+  had been accumulating.
 
 ## 2026-06-29 (INCITE Q2 report)
 

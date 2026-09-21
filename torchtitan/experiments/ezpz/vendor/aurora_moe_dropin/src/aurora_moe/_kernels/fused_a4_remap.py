@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Dynamic direct-peer remap candidate for the reverse MoE A4 payload.
 
 The normal direct-layout backward first materializes a source-major
@@ -135,7 +141,9 @@ def fused_a4_remap_peer_push(
     payload_columns = expert_tokens.size(2) + 1
     elements_per_peer = cap * payload_columns
     if receive_staging.size(1) < elements_per_peer:
-        raise ValueError("receive_staging capacity is smaller than the reverse-A4 payload")
+        raise ValueError(
+            "receive_staging capacity is smaller than the reverse-A4 payload"
+        )
     if elements_per_peer == 0:
         return receive_staging
     ops = load_fused_a4_remap_ops()
@@ -179,7 +187,9 @@ def fused_a4_remap_reference(
         raise ValueError("reference source_slots must contain peers * cap entries")
     columns = expert_tokens.size(2)
     result = torch.zeros(
-        (peers, cap, columns + 1), dtype=expert_tokens.dtype, device=expert_tokens.device
+        (peers, cap, columns + 1),
+        dtype=expert_tokens.dtype,
+        device=expert_tokens.device,
     )
     for peer in range(peers):
         count = int(recv_counts[peer].item())
@@ -188,7 +198,9 @@ def fused_a4_remap_reference(
         for row in range(count):
             slot = int(source_slots[peer * cap + row].item())
             if slot < 0 or slot >= expert_tokens.size(0) * expert_tokens.size(1):
-                raise ValueError("reference source_slots contains an invalid live route slot")
+                raise ValueError(
+                    "reference source_slots contains an invalid live route slot"
+                )
             expert = slot // expert_tokens.size(1)
             expert_row = slot % expert_tokens.size(1)
             result[peer, row, :columns] = expert_tokens[expert, expert_row]

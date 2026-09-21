@@ -12,7 +12,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.components.optimizer import register_moe_load_balancing_hook
 from torchtitan.models.common import (
@@ -23,16 +23,6 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torchtitan.models.common.attention import ScaledDotProductInnerAttention
-from torchtitan.models.common.config_utils import (
-    get_attention_config,
-    make_ffn_config,
-)
-
-
-from torchtitan.models.common.param_init import depth_scaled_std
-from torchtitan.protocols.module import Module
-from torchtitan.protocols.model_spec import ModelSpec
 
 # MoE and TokenChoiceTopKRouter come straight from upstream — we have no
 # ezpz-specific override for them. Earlier this re-imported from a local
@@ -40,14 +30,20 @@ from torchtitan.protocols.model_spec import ModelSpec
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
 from torchtitan.models.common.activation import Sigmoid, Softmax
+from torchtitan.models.common.attention import ScaledDotProductInnerAttention
+from torchtitan.models.common.config_utils import get_attention_config, make_ffn_config
 from torchtitan.models.common.linear import RouterGateLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
 
-from .routed_experts import EzpzRoutedExperts
+from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.deepseek_v3 import DeepSeekV3Router
+from torchtitan.protocols.model_spec import ModelSpec
+from torchtitan.protocols.module import Module
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
 from .model import Attention, moeModel, moeTransformerBlock
+
+from .routed_experts import EzpzRoutedExperts
 
 
 def _dtensor_safe_fused_ffn_config(**kwargs):
@@ -102,7 +98,7 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
                 chunk, rem = divmod(t.shape[0], mesh.size(axis))
                 offset += rank * chunk + min(rank, rem)
         g_start = 0 if offset % 2 == 0 else 1
-        gate_rows, up_rows = local[g_start::2], local[1 - g_start::2]
+        gate_rows, up_rows = local[g_start::2], local[1 - g_start :: 2]
         if gate_init is not None and gate_rows.numel():
             gate_init(gate_rows)
         if up_init is not None and up_rows.numel():
@@ -111,14 +107,14 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
     cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_striped}
     return cfg
 
+
+from .parallelize import parallelize_moe
+from .state_dict_adapter import moeStateDictAdapter
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-
-from .parallelize import parallelize_moe
-from .state_dict_adapter import moeStateDictAdapter
 
 
 class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
@@ -173,9 +169,9 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
             # would raise the "must call set_ezpz_max_context_length" branch
             # below. Imported inside the function because agpt imports heavy
             # model deps at module scope.
-            from torchtitan.experiments.ezpz.agpt import (
-                _EZPZ_MAX_CONTEXT_LENGTH as seq_len,
-            )
+            from torchtitan.experiments.ezpz.agpt import _EZPZ_MAX_CONTEXT_LENGTH
+
+            seq_len = _EZPZ_MAX_CONTEXT_LENGTH
 
             if seq_len is None:
                 raise ValueError(
@@ -375,9 +371,7 @@ def make_ezpz_experts_config(
     # backends that take (x, num_tokens_per_expert), but it forwards the
     # router's decision to inner_experts for aurora_full_sonic, which core
     # drops at models/common/moe.py:163.
-    return EzpzRoutedExperts.Config(
-        inner_experts=inner, token_dispatcher=dispatcher
-    )
+    return EzpzRoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
 
 
 def make_ezpz_moe_config(

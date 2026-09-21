@@ -34,7 +34,9 @@ class EzpzRoutedExperts(RoutedExperts):
         pass
 
     def _wants_routing(self) -> bool:
-        return getattr(self.inner_experts, "compute_backend", None) == "aurora_full_sonic"
+        return (
+            getattr(self.inner_experts, "compute_backend", None) == "aurora_full_sonic"
+        )
 
     def forward(
         self,

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Collect the OLMo-2 ladder LR sweeps into one table.
 
 Twelve sweeps (3 sizes x 4 optimizers) are too many to read off plots and
@@ -53,15 +59,21 @@ def _find_csv(root: str, size: str, opt: str) -> str | None:
     # Glob rather than reconstruct: the flavor segment has varied across
     # campaigns (30b vs 30b_olmo2tok), and a wrong guess reads as "no data".
     pat = os.path.join(
-        root, f"lr_finder_{size}_olmo2tok_gbs6144_{opt}",
-        "**", opt, "lr_finder_data.csv",
+        root,
+        f"lr_finder_{size}_olmo2tok_gbs6144_{opt}",
+        "**",
+        opt,
+        "lr_finder_data.csv",
     )
     hits = sorted(glob.glob(pat, recursive=True), key=os.path.getmtime)
     if not hits:
         # adamw's first submissions predate the per-optimizer dump suffix.
         pat = os.path.join(
-            root, f"lr_finder_{size}_olmo2tok_gbs6144",
-            "**", opt, "lr_finder_data.csv",
+            root,
+            f"lr_finder_{size}_olmo2tok_gbs6144",
+            "**",
+            opt,
+            "lr_finder_data.csv",
         )
         hits = sorted(glob.glob(pat, recursive=True), key=os.path.getmtime)
     return hits[-1] if hits else None
@@ -83,16 +95,25 @@ def main() -> int:
                 continue
             lrs, losses = _read(path)
             if len(lrs) < 5:
-                rows.append((size, opt, None, None, None,
-                             f"{len(lrs)} rows -- too few"))
+                rows.append(
+                    (size, opt, None, None, None, f"{len(lrs)} rows -- too few")
+                )
                 continue
             cands = find_optimal_lr(lrs, losses, smooth_frac=args.smooth_frac)
             finite = [x for x in losses if x == x and abs(x) != float("inf")]
             min_loss = min(finite) if finite else None
             if not cands:
-                rows.append((size, opt, None, None, min_loss,
-                             f"NO BLOW-UP in {min(lrs):.1e}-{max(lrs):.1e}"
-                             " -- widen LRF_MAX_LR"))
+                rows.append(
+                    (
+                        size,
+                        opt,
+                        None,
+                        None,
+                        min_loss,
+                        f"NO BLOW-UP in {min(lrs):.1e}-{max(lrs):.1e}"
+                        " -- widen LRF_MAX_LR",
+                    )
+                )
                 continue
 
             # find_optimal_lr returns EVERY negative-to-positive crossing, not
@@ -119,15 +140,21 @@ def main() -> int:
         print("|---|---|---:|---:|---:|---|")
         for size, opt, sug, blow, ml, note in rows:
             f = lambda v, p=".3e": f"{v:{p}}" if v is not None else ""
-            print(f"| {size} | {opt} | {f(sug)} | {f(blow)} | "
-                  f"{f(ml, '.4f')} | {note} |")
+            print(
+                f"| {size} | {opt} | {f(sug)} | {f(blow)} | "
+                f"{f(ml, '.4f')} | {note} |"
+            )
     else:
-        print(f"{'size':>5} {'opt':>8} {'suggested':>11} {'blow-up':>11} "
-              f"{'min loss':>9}  note")
+        print(
+            f"{'size':>5} {'opt':>8} {'suggested':>11} {'blow-up':>11} "
+            f"{'min loss':>9}  note"
+        )
         for size, opt, sug, blow, ml, note in rows:
             f = lambda v, p=".3e": f"{v:{p}}" if v is not None else "-"
-            print(f"{size:>5} {opt:>8} {f(sug):>11} {f(blow):>11} "
-                  f"{f(ml, '.4f'):>9}  {note}")
+            print(
+                f"{size:>5} {opt:>8} {f(sug):>11} {f(blow):>11} "
+                f"{f(ml, '.4f'):>9}  {note}"
+            )
 
     missing = [r for r in rows if r[2] is None]
     if missing:

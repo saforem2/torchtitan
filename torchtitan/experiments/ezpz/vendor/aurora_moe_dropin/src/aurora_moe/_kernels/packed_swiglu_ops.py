@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Differentiable packed-[up|gate] BF16 SwiGLU kernels for Aurora."""
 
 from __future__ import annotations
@@ -21,7 +27,9 @@ def load_packed_swiglu_ops(verbose: bool = False) -> ModuleType:
     if _MODULE is not None:
         return _MODULE
     if not torch.xpu.is_available():
-        raise RuntimeError("Aurora XPU is required to build/use packed SwiGLU operations")
+        raise RuntimeError(
+            "Aurora XPU is required to build/use packed SwiGLU operations"
+        )
     # A packed up/gate projection is used by the distributed candidate, where
     # source JIT compilation from every DPxEP rank would otherwise dominate
     # the first step.  Match the other Sonic-pipeline extensions and allow a
@@ -36,7 +44,9 @@ def load_packed_swiglu_ops(verbose: bool = False) -> ModuleType:
         required = ("packed_swiglu_forward_bf16", "packed_swiglu_backward_bf16")
         missing = [name for name in required if not hasattr(module, name)]
         if missing:
-            raise RuntimeError(f"prebuilt packed SwiGLU ops is missing symbols: {missing}")
+            raise RuntimeError(
+                f"prebuilt packed SwiGLU ops is missing symbols: {missing}"
+            )
         _MODULE = module
         return _MODULE
     source = Path(__file__).with_name("csrc") / "packed_swiglu_ops.sycl"

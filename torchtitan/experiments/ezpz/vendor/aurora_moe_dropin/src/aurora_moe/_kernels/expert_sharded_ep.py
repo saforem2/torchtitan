@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact local-expert-sharded layouts for pipelined padded EP transport.
 
 Each local expert owns a separate ``[destination, cap]`` all-to-all slice.
@@ -44,13 +50,17 @@ def destination_expert_counts(
         or destinations.device.type != "xpu"
         or local_ids.device != destinations.device
     ):
-        raise ValueError("destinations and local_ids must be matching contiguous int64 XPU matrices")
+        raise ValueError(
+            "destinations and local_ids must be matching contiguous int64 XPU matrices"
+        )
     if ep_size <= 0 or local_count <= 0:
         raise ValueError("EP size and local expert count must be positive")
     combined = local_ids * ep_size + destinations
-    return torch.bincount(combined.reshape(-1), minlength=ep_size * local_count).reshape(
-        local_count, ep_size
-    ).to(torch.int64)
+    return (
+        torch.bincount(combined.reshape(-1), minlength=ep_size * local_count)
+        .reshape(local_count, ep_size)
+        .to(torch.int64)
+    )
 
 
 def make_expert_sharded_routes(
@@ -112,7 +122,9 @@ def run_expert_sharded_local_experts(
         or source_expert_counts.ndim != 2
         or not source_expert_counts.is_contiguous()
     ):
-        raise ValueError("expert-sharded payload and counts must be contiguous XPU tensors")
+        raise ValueError(
+            "expert-sharded payload and counts must be contiguous XPU tensors"
+        )
     local_count, sources, cap, columns = received_payload.shape
     if source_expert_counts.shape != (sources, local_count):
         raise ValueError("source counts must be [sources, local_experts]")
@@ -127,7 +139,9 @@ def run_expert_sharded_local_experts(
     if gate is not None and gate.shape != up.shape:
         raise ValueError("SwiGLU gate weights must match up weights")
 
-    zero_ids = torch.zeros(sources * cap, dtype=torch.long, device=received_payload.device)
+    zero_ids = torch.zeros(
+        sources * cap, dtype=torch.long, device=received_payload.device
+    )
     outputs = []
     for expert in range(local_count):
         output = direct_padded_expert_bmm(
@@ -152,4 +166,6 @@ def reduce_expert_sharded_rows(
 
     if returned_payload.ndim != 4 or not returned_payload.is_contiguous():
         raise ValueError("returned expert-sharded values must be contiguous rank-4")
-    return reduce_route_rows(returned_payload.reshape(-1, returned_payload.size(-1)), route_slots)
+    return reduce_route_rows(
+        returned_payload.reshape(-1, returned_payload.size(-1)), route_slots
+    )

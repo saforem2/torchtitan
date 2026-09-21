@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Experimental fused dX-add and reverse-A4 payload scatter."""
 
 from __future__ import annotations
@@ -94,7 +100,9 @@ def fused_expert_token_add_score_to_padded(
     if recv_counts.numel() * layout.cap != layout.padded_source_rows:
         raise ValueError("recv_counts and cap do not describe layout")
     if payload_columns not in (up_tokens.size(2) + 1, up_tokens.size(2) + 2):
-        raise ValueError("payload_columns must hold token, score, and optional ID columns")
+        raise ValueError(
+            "payload_columns must hold token, score, and optional ID columns"
+        )
     return load_direct_layout_payload_fusion_ops().fused_expert_token_add_score_to_padded_bf16(
         up_tokens,
         gate_tokens,

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """PyTorch module facade for the exact Aurora expert-parallel MoE runtime."""
 
 from __future__ import annotations
@@ -9,7 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from ._core import MOELayer
-from .distributed import MoEProcessGroups, ParallelMesh, default_device
+from .distributed import default_device, MoEProcessGroups, ParallelMesh
 
 
 def _dtype_name(dtype: torch.dtype) -> str:
@@ -45,13 +51,19 @@ class AuroraMoE(nn.Module):
     ) -> None:
         super().__init__()
         if model_dim <= 0 or expert_hidden_dim <= 0 or num_experts <= 0:
-            raise ValueError("model_dim, expert_hidden_dim, and num_experts must be positive")
+            raise ValueError(
+                "model_dim, expert_hidden_dim, and num_experts must be positive"
+            )
         if not 1 <= top_k <= num_experts:
             raise ValueError("top_k must be in [1, num_experts]")
         if shared_experts < 0:
             raise ValueError("shared_experts must be nonnegative")
         if groups is None:
-            if dist.is_available() and dist.is_initialized() and dist.get_world_size() != 1:
+            if (
+                dist.is_available()
+                and dist.is_initialized()
+                and dist.get_world_size() != 1
+            ):
                 raise RuntimeError(
                     "pass DP x EP groups for a multi-rank run; use create_dp_ep_groups"
                 )

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """TorchTitan adapter for Aurora's complete routed-MoE runtime."""
 
 from __future__ import annotations
@@ -8,10 +14,11 @@ import torch
 from torch.distributed.tensor import DeviceMesh
 
 from ._core import _phase_shared_experts_requested, _routed_moe
-from .distributed import MoEProcessGroups, ParallelMesh
 from ._kernels.joint_moe_autograd import joint_routed_shared_moe
 from ._kernels.phase_shared_expert import PhaseSharedExpertController
 from ._kernels.shared_expert_bmm import shared_expert_loop
+from .distributed import MoEProcessGroups, ParallelMesh
+
 _MESHES: dict[tuple[int, int], ParallelMesh] = {}
 _SHARED_STREAMS: dict[int, torch.xpu.Stream] = {}
 
@@ -58,7 +65,9 @@ def torchtitan_full_moe(
     if up.shape[0] * mesh.group_size["ep_dispatch"] <= 0:
         raise ValueError("Aurora routed MoE requires local experts")
     if shared_up.shape != shared_gate.shape or shared_down.shape != (
-        shared_up.shape[0], shared_up.shape[2], shared_up.shape[1]
+        shared_up.shape[0],
+        shared_up.shape[2],
+        shared_up.shape[1],
     ):
         raise ValueError("invalid Aurora shared-expert weight layouts")
 
@@ -67,8 +76,16 @@ def torchtitan_full_moe(
 
     def routed(inner_x, inner_scores, inner_up, inner_gate, inner_down, phase=None):
         return _routed_moe(
-            inner_x, inner_scores, indices, local_ids, mesh,
-            inner_up, inner_gate, inner_down, backend, phase,
+            inner_x,
+            inner_scores,
+            indices,
+            local_ids,
+            mesh,
+            inner_up,
+            inner_gate,
+            inner_down,
+            backend,
+            phase,
         )
 
     if backend == "loop":
@@ -83,9 +100,7 @@ def torchtitan_full_moe(
     # Running the two branches in the outer graph is also the conservative
     # fallback if a framework/runtime combination cannot safely execute
     # nested autograd across the private shared-expert stream.
-    joint_requested = (
-        os.environ.get("AURORA_MOE_JOINT_ROUTED_SHARED_AUTOGRAD") == "1"
-    )
+    joint_requested = os.environ.get("AURORA_MOE_JOINT_ROUTED_SHARED_AUTOGRAD") == "1"
     if not joint_requested:
         if os.environ.get("AURORA_MOE_PHASE_SHARED_EXPERTS") == "1":
             raise RuntimeError(
@@ -105,15 +120,28 @@ def torchtitan_full_moe(
     phase = None
     if _phase_shared_experts_requested(mesh):
         phase = PhaseSharedExpertController(
-            x, shared_up, shared_gate, shared_down,
+            x,
+            shared_up,
+            shared_gate,
+            shared_down,
             (
-                x.requires_grad, shared_up.requires_grad,
-                shared_gate.requires_grad, shared_down.requires_grad,
+                x.requires_grad,
+                shared_up.requires_grad,
+                shared_gate.requires_grad,
+                shared_down.requires_grad,
             ),
             stream,
         )
     return joint_routed_shared_moe(
-        x, scores, indices, up, gate, down, shared_up, shared_gate, shared_down,
+        x,
+        scores,
+        indices,
+        up,
+        gate,
+        down,
+        shared_up,
+        shared_gate,
+        shared_down,
         routed_forward=lambda *args: routed(*args, phase),
         shared_stream=stream,
         phase_controller=phase,

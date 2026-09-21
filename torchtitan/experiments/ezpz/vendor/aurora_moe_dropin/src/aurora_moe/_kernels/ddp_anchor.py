@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Cheap DDP-forward anchors for custom-autograd parameter producers.
 
 ``DistributedDataParallel`` prepares its reducer from the graph returned by
@@ -15,7 +21,9 @@ import torch
 
 class _DDPParameterAnchor(torch.autograd.Function):
     @staticmethod
-    def forward(ctx: torch.autograd.function.FunctionCtx, *parameters: torch.Tensor) -> torch.Tensor:
+    def forward(
+        ctx: torch.autograd.function.FunctionCtx, *parameters: torch.Tensor
+    ) -> torch.Tensor:
         if not parameters:
             raise ValueError("ddp_parameter_anchor requires at least one parameter")
         if any(parameter.device != parameters[0].device for parameter in parameters):

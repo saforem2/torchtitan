@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact compact expert-major MoE backward split for reverse-A4 overlap.
 
 This module is deliberately separate from the ordinary custom-autograd node.
@@ -35,9 +41,9 @@ from aurora_moe._kernels.expert_major_segmented_sonic import (
     make_expert_group_segments,
 )
 from aurora_moe._kernels.segment_expert_reorder import (
-    ExpertMajorLayout,
     expert_major_to_payload_zero_score_parallel,
     expert_major_to_payload_zero_score_row_parallel,
+    ExpertMajorLayout,
     make_expert_major_layout,
     payload_and_grad_to_expert_major_scaled_parallel,
     payload_and_grad_to_expert_major_scaled_row_parallel,
@@ -83,7 +89,9 @@ class ExactExpertMajorTwoPhaseBackward:
     _grad_up_values: torch.Tensor | None = None
     _grad_gate_values: torch.Tensor | None = None
     _grad_payload: torch.Tensor | None = None
-    _weight_outputs: tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None] | None = None
+    _weight_outputs: tuple[
+        torch.Tensor | None, torch.Tensor | None, torch.Tensor | None
+    ] | None = None
 
     @property
     def zero_routes(self) -> bool:
@@ -111,25 +119,25 @@ class ExactExpertMajorTwoPhaseBackward:
         self._payload_started = True
         with torch.no_grad():
             if self._zero_routes:
-                self._grad_payload = self.payload.new_empty(
-                    (0, self.payload.size(1))
-                )
+                self._grad_payload = self.payload.new_empty((0, self.payload.size(1)))
                 return self._grad_payload
 
             if self.already_expert_major:
                 grouped_tokens = self.payload[:, :-1].contiguous()
                 grad_values = grad_output * self.payload[:, -1:].contiguous()
             elif self.reorder_backend == "row_parallel":
-                grouped_tokens, grad_values = (
-                    payload_and_grad_to_expert_major_scaled_row_parallel(
-                        self.payload, grad_output, self.physical_segments, self.layout
-                    )
+                (
+                    grouped_tokens,
+                    grad_values,
+                ) = payload_and_grad_to_expert_major_scaled_row_parallel(
+                    self.payload, grad_output, self.physical_segments, self.layout
                 )
             else:
-                grouped_tokens, grad_values = (
-                    payload_and_grad_to_expert_major_scaled_parallel(
-                        self.payload, grad_output, self.physical_segments, self.layout
-                    )
+                (
+                    grouped_tokens,
+                    grad_values,
+                ) = payload_and_grad_to_expert_major_scaled_parallel(
+                    self.payload, grad_output, self.physical_segments, self.layout
                 )
             hidden = _swiglu(self.preact_up, self.preact_gate, self.pointwise_backend)
             grad_hidden = _grouped_gemm_with_forward_weight_transpose(
@@ -170,7 +178,8 @@ class ExactExpertMajorTwoPhaseBackward:
                 )
             if self.already_expert_major:
                 grad_payload = torch.cat(
-                    (grouped_grad_tokens, torch.zeros_like(self.payload[:, -1:])), dim=-1
+                    (grouped_grad_tokens, torch.zeros_like(self.payload[:, -1:])),
+                    dim=-1,
                 )
             elif self.reorder_backend == "row_parallel":
                 grad_payload = expert_major_to_payload_zero_score_row_parallel(
@@ -308,9 +317,13 @@ def prepare_exact_expert_major_two_phase(
     """
 
     if reorder_backend not in ("parallel", "row_parallel"):
-        raise ValueError("two-phase expert-major reorder must be 'parallel' or 'row_parallel'")
+        raise ValueError(
+            "two-phase expert-major reorder must be 'parallel' or 'row_parallel'"
+        )
     if pointwise_backend not in ("torch", "sycl"):
-        raise ValueError("two-phase expert-major pointwise backend must be 'torch' or 'sycl'")
+        raise ValueError(
+            "two-phase expert-major pointwise backend must be 'torch' or 'sycl'"
+        )
     _check_payload_inputs(payload, physical_segments, up, gate, down, "swiglu")
     expert_segments = make_expert_group_segments(physical_segments)
     resolved_rows = _resolve_expert_rows(

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Combined-overlay eval chart across all 5 production trajectories.
 
 One figure, 4 subplot panels (HellaSwag acc_norm, ARC-Easy acc, ARC-C acc_norm,
@@ -38,6 +44,7 @@ import matplotlib.pyplot as plt  # noqa: F401,E402
 from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
 
 apply_style()
+
 
 def _repo_root() -> Path:
     # Walk up to the repo root instead of counting parents: a depth-counted
@@ -89,14 +96,14 @@ OUT_PATH = EVAL_DOCS_DIR / "figures" / "all_production_evals.svg"
 # color at all.
 from torchtitan.experiments.ezpz.utils import palette as _pal  # noqa: E402
 
-COLOR_2B_MDS      = _pal.COLOR_MDS
-COLOR_2B_TT_256N  = _pal.COLOR_2B_256N
-COLOR_2B_TT_512N  = _pal.COLOR_2B_512N
+COLOR_2B_MDS = _pal.COLOR_MDS
+COLOR_2B_TT_256N = _pal.COLOR_2B_256N
+COLOR_2B_TT_512N = _pal.COLOR_2B_512N
 COLOR_20B_TT_256N = _pal.COLOR_20B_256N
 COLOR_20B_TT_512N = _pal.COLOR_20B_512N
-COLOR_RANDOM      = _pal.COLOR_RANDOM
-COLOR_STAGE2      = _pal.COLOR_STAGE2
-COLOR_FORK        = _pal.COLOR_FORK
+COLOR_RANDOM = _pal.COLOR_RANDOM
+COLOR_STAGE2 = _pal.COLOR_STAGE2
+COLOR_FORK = _pal.COLOR_FORK
 
 # Stage-1 budget of the 512N chain, reused as the stage-2 chains' token
 # offset. Imported rather than re-typed: it is the registry's number.
@@ -235,9 +242,9 @@ RANDOM_BASELINE = {
     "arc_easy": 0.25,
     "arc_challenge": 0.25,
     "winogrande": 0.5,
-    "piqa": 0.5,         # binary choice
+    "piqa": 0.5,  # binary choice
     "openbookqa": 0.25,  # 4-way MCQ
-    "boolq": 0.5,        # yes/no
+    "boolq": 0.5,  # yes/no
 }
 
 
@@ -322,6 +329,7 @@ def load_dcp(
     complex convention end to end, so its results were never corrupted and
     there is nothing to correct.
     """
+
     def _series(d: str) -> dict[int, float]:
         base = EVALS_DIR / d
         out: dict[int, float] = {}
@@ -464,7 +472,7 @@ def _assert_no_missing_live_chains() -> None:
             if not d.is_dir() or d.name in have:
                 continue
             if not d.name.startswith("agpt-"):
-                continue      # sft / ifeval / harness one-offs, not chains
+                continue  # sft / ifeval / harness one-offs, not chains
             n = sum(1 for _ in d.glob("**/step-*/results/results.json"))
             if n:
                 unreferenced.append((d.name, n))
@@ -472,8 +480,10 @@ def _assert_no_missing_live_chains() -> None:
             print("  NOTE: eval dirs with results that no trajectory reads:")
             for name, n in unreferenced:
                 print(f"    - {name} ({n} result file(s))")
-            print("    Add them to a trajectory (eval_subdir / extra_subdirs) "
-                  "or ignore deliberately.")
+            print(
+                "    Add them to a trajectory (eval_subdir / extra_subdirs) "
+                "or ignore deliberately."
+            )
 
 
 def main() -> None:
@@ -497,7 +507,9 @@ def main() -> None:
         for traj in TRAJECTORIES:
             if traj["layout"] == "mds":
                 pts = load_mds(
-                    traj["eval_subdir"], task, metric,
+                    traj["eval_subdir"],
+                    task,
+                    metric,
                     traj.get("extra_subdirs"),
                 )
             else:
@@ -519,9 +531,7 @@ def main() -> None:
             # the base chains' first few hundred billion tokens, reading as a
             # wild accuracy jump at ~0T rather than as an anneal at ~4.7T.
             prior_b = traj.get("prior_tokens", 0) / 1e9
-            tokens_b = [
-                prior_b + s * traj["tokens_per_step"] / 1e9 for s in steps
-            ]
+            tokens_b = [prior_b + s * traj["tokens_per_step"] / 1e9 for s in steps]
             ax.plot(
                 tokens_b,
                 accs,
@@ -553,7 +563,7 @@ def main() -> None:
         ax.grid(True, alpha=0.3)
 
     # Hide any unused cells when len(PANELS) doesn't fill the grid evenly.
-    for ax in axes[len(PANELS):]:
+    for ax in axes[len(PANELS) :]:
         ax.set_visible(False)
 
     handles, labels = axes[0].get_legend_handles_labels()

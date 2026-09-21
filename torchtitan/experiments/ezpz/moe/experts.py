@@ -7,22 +7,21 @@
 """ezpz expert compute backends for MoE.
 
 Subclasses upstream `GroupedExperts` to add a `compute_backend` selector
-without modifying core. Three backends are supported here:
+without modifying core. Current HEAD registers six backends:
 
 - ``"grouped_mm"`` (default): defer to upstream's ``torch._grouped_mm``
   path. Requires SM90+ on CUDA; on XPU there is no grouped-mm fallback.
-- ``"for_loop"``: per-expert ``matmul`` loop. Slower but works on every
-  device. Re-vendored from upstream's ``_run_experts_for_loop`` which
-  was deleted in pytorch/torchtitan#3308.
-- ``"bmm"``: batched ``torch.bmm`` over a padded ``(E, capacity, D)``
-  buffer. On XPU ``torch.bmm`` lowers to a oneDNN batched matmul (a real
-  grouped-GEMM equivalent), and unlike ``"for_loop"`` this path has
-  static shapes (given a capacity) and is compile-friendly.
+- ``"for_loop"``: portable per-expert reference implementation.
+- ``"bmm"`` and ``"bmm_nodrop"``: padded batched-matmul variants, with and
+  without capacity dropping respectively.
+- ``"aurora_sycl"`` and ``"aurora_full_sonic"``: Intel XPU/SYCL backends.
+  Sonic also owns expert-parallel dispatch/combine and therefore requires
+  routing tensors and an EP process group supplied by ``EzpzRoutedExperts``.
 """
 
-from dataclasses import dataclass
 import math
 import os
+from dataclasses import dataclass
 from typing import Literal
 
 import torch
@@ -287,60 +286,60 @@ def _run_experts_aurora_sycl(
 ) -> torch.Tensor:
     """Exact compact expert GEMMs via the optional aurora-moe SYCL kernels.
 
-    Routing and score application stay in the token dispatcher; this only
-    replaces the expert GEMMs. Ported from samuelwheeler/torchtitan
-    feature/aurora-moe-training, where it is the `aurora_sycl` backend.
+        Routing and score application stay in the token dispatcher; this only
+        replaces the expert GEMMs. Ported from samuelwheeler/torchtitan
+        feature/aurora-moe-training, where it is the `aurora_sycl` backend.
 
-    Uses the standard w1/w2/w3 parameters, so it is checkpoint-transparent:
-    unlike that branch's scattermoe and aurora_full_* backends, selecting
-    this one does not change any registered parameter name.
+        Uses the standard w1/w2/w3 parameters, so it is checkpoint-transparent:
+        unlike that branch's scattermoe and aurora_full_* backends, selecting
+        this one does not change any registered parameter name.
 
-    The kernels are JIT-compiled by torch.utils.cpp_extension.load on first
-    call, which needs oneMKL headers and libmkl_sycl_blas.so.5 (found under
-    $MKLROOT, default /opt/aurora/<ver>/oneapi/mkl/<ver>). Set
-    AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
-    call is slow. Imported lazily so every other backend stays usable
-    without aurora-moe installed.
+        The kernels are JIT-compiled by torch.utils.cpp_extension.load on first
+        call, which needs oneMKL headers and libmkl_sycl_blas.so.5 (found under
+        $MKLROOT, default /opt/aurora/<ver>/oneapi/mkl/<ver>). Set
+        AURORA_MOE_SYCL_BUILD_DIR to cache the build across jobs -- the first
+        call is slow. Imported lazily so every other backend stays usable
+        without aurora-moe installed.
 
-WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
-    oneMKL must all come from the SAME Aurora release. Four measurements on
-    real compute nodes, 2026-09-15/16:
+    WORKS, BUT ONLY ON A COHERENT STACK. The venv, the compiler and the
+        oneMKL must all come from the SAME Aurora release. Four measurements on
+        real compute nodes, 2026-09-15/16:
 
-      8829416  next-eval (TEST bkc). frameworks/2026.1.0 module python 3.12
-               + MKLROOT 26.181.0. Coherent -> WORKS.
-      8829454  next-eval (TEST bkc). Our yeeted /tmp/.venv (py3.14,
-               2.13.0.dev20260428+xpu) + MKLROOT 26.26.0. Mismatched ->
-               UR_RESULT_ERROR_UNINITIALIZED (37).
-      8829790  next-eval (TEST bkc). Same venv + MKLROOT 26.181.0. Still
-               mismatched, because that venv's torch is prod-era while the
-               image and compiler are test-era ->
-               oneapi::mkl::blas::gemm_bf16bf16bf16: unsupported device.
-      8831582  debug (PROD bkc). Same venv + MKLROOT 26.26.0/2025.3 + icpx
-               2025.3.2. All three from one release -> WORKS.
+          8829416  next-eval (TEST bkc). frameworks/2026.1.0 module python 3.12
+                   + MKLROOT 26.181.0. Coherent -> WORKS.
+          8829454  next-eval (TEST bkc). Our yeeted /tmp/.venv (py3.14,
+                   2.13.0.dev20260428+xpu) + MKLROOT 26.26.0. Mismatched ->
+                   UR_RESULT_ERROR_UNINITIALIZED (37).
+          8829790  next-eval (TEST bkc). Same venv + MKLROOT 26.181.0. Still
+                   mismatched, because that venv's torch is prod-era while the
+                   image and compiler are test-era ->
+                   oneapi::mkl::blas::gemm_bf16bf16bf16: unsupported device.
+          8831582  debug (PROD bkc). Same venv + MKLROOT 26.26.0/2025.3 + icpx
+                   2025.3.2. All three from one release -> WORKS.
 
-    So the discriminator is coherence, not the venv and not the oneMKL
-    version on its own. An earlier revision of this docstring said the
-    backend "does not work under the production training venv"; that was
-    measured only against test-bkc images and was wrong.
+        So the discriminator is coherence, not the venv and not the oneMKL
+        version on its own. An earlier revision of this docstring said the
+        backend "does not work under the production training venv"; that was
+        measured only against test-bkc images and was wrong.
 
-    Numerics on the coherent stack (8831582, vs the for_loop reference,
-    bf16, 4 experts with one empty):
+        Numerics on the coherent stack (8831582, vs the for_loop reference,
+        bf16, 4 experts with one empty):
 
-      rel_err 4.4e-03, 14 of 1280 elements (1.09%) outside atol/rtol 0.05,
-      rowwise cosine min 0.999993
+          rel_err 4.4e-03, 14 of 1280 elements (1.09%) outside atol/rtol 0.05,
+          rowwise cosine min 0.999993
 
-    That is bf16 rounding, not a kernel defect. A single bf16 matmul on this
-    shape carries ~2e-03 and this is a three-matmul SwiGLU chain; the
-    mismatched elements are large-magnitude ones where the absolute
-    difference (max 8.0 against a reference max near 2000) is relatively
-    small. A structurally wrong kernel would break the cosine, not a
-    handful of elements. For contrast bmm_nodrop scored exactly 0.0 with 0
-    mismatches in the same job on the same device.
+        That is bf16 rounding, not a kernel defect. A single bf16 matmul on this
+        shape carries ~2e-03 and this is a three-matmul SwiGLU chain; the
+        mismatched elements are large-magnitude ones where the absolute
+        difference (max 8.0 against a reference max near 2000) is relatively
+        small. A structurally wrong kernel would break the cosine, not a
+        handful of elements. For contrast bmm_nodrop scored exactly 0.0 with 0
+        mismatches in the same job on the same device.
 
-    Requirement: aurora_moe hardcoded a libmkl_sycl_blas.so.5 check in three
-    files (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so
-    it refused the .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by
-    globbing the soname.
+        Requirement: aurora_moe hardcoded a libmkl_sycl_blas.so.5 check in three
+        files (one_mkl_ops, one_mkl_grouped_gemm, one_mkl_exact_expert_gemm), so
+        it refused the .so.6 that the 26.181.0 image ships. Fixed in 67d4f262f by
+        globbing the soname.
     """
     try:
         from aurora_moe.torchtitan_experts import torchtitan_exact_experts

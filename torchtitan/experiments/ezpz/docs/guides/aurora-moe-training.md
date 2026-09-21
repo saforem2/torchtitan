@@ -8,7 +8,8 @@ at about 530 tokens/s/tile with finite loss and gradients.
 
 ## Model and run
 
-The `AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` flavor has:
+The archived run used the then-registered
+`AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` flavor, with:
 
 - 12,293,801,984 total parameters and 2,016,708,608 active parameters;
 - 24 layers, model dimension 2,048, 16 query heads, and 4 KV heads;
@@ -25,6 +26,13 @@ The exact training configuration is
 `torchtitan/experiments/ezpz/moe_runs/agpt_moe_2b_50k_ep12_dp256_50k.json`.
 The PBS launcher is
 `torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs`.
+
+> **Historical configuration:** current HEAD no longer registers that 50K
+> AGPT-MoE flavor or its `_from_json` wrapper. The JSON and launchers are run
+> records, not currently runnable presets. Current registered Sonic smoke and
+> scale configs are `moe_debugmodel_sonic`, `moe_{2b,4b,7b}_sonic_ep*`, and
+> `moe_10b_2b_sdpa_sonic_ep`; they use the current routed-expert model API and
+> do not reproduce the archived 50,304-vocabulary architecture.
 
 ## Prepare the source and kernels
 
@@ -87,8 +95,12 @@ again. W&B credentials must be available to the batch job.
 
 ## Verification
 
-The architecture and parameter-count contract is covered by
-`tests/unit_tests/test_agpt_moe_config.py`. Backend equivalence and routing
-count behavior are covered by `test_moe_expert_backends.py` and
-`test_moe_routing_counts.py`. The production launcher validates source,
-tokenizer, and dataset-list hashes before starting distributed training.
+Current registry, Sonic wiring, non-square weight-layout, and meta-build
+contracts are covered by
+`torchtitan/experiments/ezpz/tests/moe/test_agpt_moe_config.py`. Portable backend
+equivalence and routing behavior are covered by `test_moe_expert_backends.py`
+and `test_moe_routing_counts.py`. Actual Sonic/SYCL forward-backward and EP
+collectives require Intel XPU hardware and prebuilt kernels; local tests do not
+certify them. The archived production launcher validates source, tokenizer, and
+dataset-list hashes, but its removed config entry point must be ported before
+reuse on current HEAD.

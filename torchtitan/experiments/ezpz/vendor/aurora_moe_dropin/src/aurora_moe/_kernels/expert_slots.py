@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact device-side local-expert packing plans for routed BF16 MoE rows."""
 
 from __future__ import annotations
@@ -93,7 +99,9 @@ def make_exact_expert_slot_plan(
     )
 
 
-def pack_expert_rows(route_values: torch.Tensor, plan: ExactExpertSlotPlan) -> torch.Tensor:
+def pack_expert_rows(
+    route_values: torch.Tensor, plan: ExactExpertSlotPlan
+) -> torch.Tensor:
     """Pack route rows into exact ``[experts, max_rows, columns]`` BF16 rows."""
 
     if (
@@ -108,7 +116,9 @@ def pack_expert_rows(route_values: torch.Tensor, plan: ExactExpertSlotPlan) -> t
     return packed.reshape(plan.num_experts, plan.max_rows, route_values.size(1))
 
 
-def unpack_expert_rows(padded_values: torch.Tensor, plan: ExactExpertSlotPlan) -> torch.Tensor:
+def unpack_expert_rows(
+    padded_values: torch.Tensor, plan: ExactExpertSlotPlan
+) -> torch.Tensor:
     """Restore exact original route order from dynamic padded expert rows."""
 
     if (
@@ -120,7 +130,9 @@ def unpack_expert_rows(padded_values: torch.Tensor, plan: ExactExpertSlotPlan) -
         or padded_values.size(1) != plan.max_rows
     ):
         raise ValueError("padded_values must match the exact expert-slot plan")
-    return gather_rows(padded_values.reshape(plan.padded_rows, padded_values.size(2)), plan.route_slots)
+    return gather_rows(
+        padded_values.reshape(plan.padded_rows, padded_values.size(2)), plan.route_slots
+    )
 
 
 class _ExactExpertSlotBmm(torch.autograd.Function):
@@ -142,7 +154,9 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
         if route_tokens.ndim != 2 or not route_tokens.is_contiguous():
             raise ValueError("route_tokens must be contiguous rank-2")
         if route_tokens.size(0) != plan.routes or plan.routes == 0:
-            raise ValueError("expert-slot BMM requires a nonempty plan matching route_tokens")
+            raise ValueError(
+                "expert-slot BMM requires a nonempty plan matching route_tokens"
+            )
         if (
             route_scores.device != route_tokens.device
             or route_scores.dtype != torch.bfloat16
@@ -154,7 +168,11 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
             raise ValueError("up shape does not match route tokens and expert plan")
         if up.device != route_tokens.device or up.dtype != torch.bfloat16:
             raise ValueError("up must be BF16 on the route-token XPU")
-        if down.ndim != 3 or down.shape != (plan.num_experts, up.size(2), route_tokens.size(1)):
+        if down.ndim != 3 or down.shape != (
+            plan.num_experts,
+            up.size(2),
+            route_tokens.size(1),
+        ):
             raise ValueError("down shape does not match up and route tokens")
         if down.device != route_tokens.device or down.dtype != torch.bfloat16:
             raise ValueError("down must be BF16 on the route-token XPU")
@@ -166,7 +184,9 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
             or gate.device != route_tokens.device
             or gate.dtype != torch.bfloat16
         ):
-            raise ValueError("SwiGLU requires BF16 gate shaped like up on the route-token XPU")
+            raise ValueError(
+                "SwiGLU requires BF16 gate shaped like up on the route-token XPU"
+            )
         if activation == "squared-relu" and gate is not None:
             raise ValueError("squared-relu does not take a gate tensor")
 
@@ -177,7 +197,9 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
             gate_values = torch.bmm(padded, gate)
             hidden = load_swiglu_ops().swiglu_forward_bf16(up_values, gate_values)
         else:
-            gate_values = torch.empty(0, dtype=route_tokens.dtype, device=route_tokens.device)
+            gate_values = torch.empty(
+                0, dtype=route_tokens.dtype, device=route_tokens.device
+            )
             hidden = F.relu(up_values).square()
         padded_values = torch.bmm(hidden, down)
         route_values = unpack_expert_rows(padded_values, plan)
@@ -189,7 +211,9 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
         ctx.save_for_backward(
             padded,
             up,
-            gate if gate is not None else torch.empty(0, dtype=route_tokens.dtype, device=route_tokens.device),
+            gate
+            if gate is not None
+            else torch.empty(0, dtype=route_tokens.dtype, device=route_tokens.device),
             down,
             up_values,
             gate_values,
@@ -221,12 +245,18 @@ class _ExactExpertSlotBmm(torch.autograd.Function):
             or grad_output.shape != route_values.shape
             or not grad_output.is_contiguous()
         ):
-            raise RuntimeError("exact expert-slot BMM requires matching contiguous BF16 grad_output")
+            raise RuntimeError(
+                "exact expert-slot BMM requires matching contiguous BF16 grad_output"
+            )
         plan: ExactExpertSlotPlan = ctx.plan
 
         grad_scores = None
         if ctx.needs_input_grad[1]:
-            grad_scores = (grad_output.float() * route_values.float()).sum(-1, keepdim=True).to(torch.bfloat16)
+            grad_scores = (
+                (grad_output.float() * route_values.float())
+                .sum(-1, keepdim=True)
+                .to(torch.bfloat16)
+            )
         grad_route_values = (grad_output * route_scores).to(torch.bfloat16)
         grad_padded_values = pack_expert_rows(grad_route_values, plan)
         grad_down = torch.bmm(hidden.transpose(-1, -2), grad_padded_values)
@@ -263,4 +293,6 @@ def exact_expert_slot_bmm(
     independent of model dimension, hidden dimension, and expert count.
     """
 
-    return _ExactExpertSlotBmm.apply(route_tokens, route_scores, up, gate, down, plan, activation)
+    return _ExactExpertSlotBmm.apply(
+        route_tokens, route_scores, up, gate, down, plan, activation
+    )

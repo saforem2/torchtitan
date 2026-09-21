@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact first-order shared-SwiGLU autograd on a caller-owned XPU stream."""
 
 from __future__ import annotations
@@ -66,9 +72,20 @@ class _StreamedSharedSwiGLU(torch.autograd.Function):
                     inner_up = up.detach().requires_grad_(ctx.needs[1])
                     inner_gate = gate.detach().requires_grad_(ctx.needs[2])
                     inner_down = down.detach().requires_grad_(ctx.needs[3])
-                    output = shared_expert_loop(inner_x, inner_up, inner_gate, inner_down)
+                    output = shared_expert_loop(
+                        inner_x, inner_up, inner_gate, inner_down
+                    )
                 ctx.save_for_backward(inner_x, inner_up, inner_gate, inner_down, output)
-                for tensor in (x, up, gate, down, inner_x, inner_up, inner_gate, inner_down):
+                for tensor in (
+                    x,
+                    up,
+                    gate,
+                    down,
+                    inner_x,
+                    inner_up,
+                    inner_gate,
+                    inner_down,
+                ):
                     tensor.record_stream(stream)
             output.record_stream(stream)
         returned = output.detach()
@@ -104,11 +121,15 @@ class _StreamedSharedSwiGLU(torch.autograd.Function):
         grad_output.record_stream(ctx.stream)
         inputs = tuple(
             tensor
-            for tensor, needed in zip((inner_x, inner_up, inner_gate, inner_down), ctx.needs)
+            for tensor, needed in zip(
+                (inner_x, inner_up, inner_gate, inner_down), ctx.needs
+            )
             if needed
         )
         with torch.xpu.stream(ctx.stream), torch.enable_grad():
-            gradients = torch.autograd.grad(output, inputs, grad_output, allow_unused=True)
+            gradients = torch.autograd.grad(
+                output, inputs, grad_output, allow_unused=True
+            )
         gradient_iter = iter(gradients)
         result: list[torch.Tensor | None] = []
         for needed in ctx.needs:

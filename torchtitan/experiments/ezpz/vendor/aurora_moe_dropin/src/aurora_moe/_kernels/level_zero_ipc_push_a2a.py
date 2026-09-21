@@ -1,19 +1,25 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Persistent Level Zero IPC push all-to-all for isolated diagnostics."""
 
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-import time
 
 import torch
 import torch.distributed as dist
 
 from ._ipc_trace import emit_ipc_trace, ipc_trace_enabled
 from .level_zero_ipc import load_level_zero_ipc_ops
-from .level_zero_ipc_equal_a2a import _Descriptor, _client_exchange, _root_exchange
+from .level_zero_ipc_equal_a2a import _client_exchange, _Descriptor, _root_exchange
 from .level_zero_ipc_push import load_level_zero_ipc_push_ops
 
 
@@ -57,7 +63,9 @@ class LevelZeroIpcPushAllToAll:
         self._device = torch.device("xpu", self._device_index)
         base = socket_path or os.environ.get("AURORA_MOE_L0_IPC_PUSH_SOCKET")
         if not base:
-            raise RuntimeError("set AURORA_MOE_L0_IPC_PUSH_SOCKET for IPC descriptor exchange")
+            raise RuntimeError(
+                "set AURORA_MOE_L0_IPC_PUSH_SOCKET for IPC descriptor exchange"
+            )
         self._socket_base = Path(base)
         cache_policy = os.environ.get("AURORA_MOE_L0_IPC_BIAS", "cached")
         if cache_policy not in {"default", "cached", "uncached"}:
@@ -357,9 +365,13 @@ class LevelZeroIpcPushAllToAll:
             raise RuntimeError("IPC push all-to-all is closed")
         self._matching_value(elements_per_peer, "elements per peer")
         if dtype != torch.bfloat16:
-            raise ValueError("IPC push all-to-all currently supports BF16 payloads only")
+            raise ValueError(
+                "IPC push all-to-all currently supports BF16 payloads only"
+            )
         if self._dtype is not None and dtype != self._dtype:
-            raise ValueError("IPC push all-to-all payload dtype cannot change after initialization")
+            raise ValueError(
+                "IPC push all-to-all payload dtype cannot change after initialization"
+            )
         if elements_per_peer > self._capacity_elements:
             grown = max(elements_per_peer, max(1, self._capacity_elements * 2))
             grown += grown % 2
@@ -377,7 +389,9 @@ class LevelZeroIpcPushAllToAll:
                 },
             )
 
-    def _output_for(self, input: torch.Tensor, output: torch.Tensor | None) -> torch.Tensor:
+    def _output_for(
+        self, input: torch.Tensor, output: torch.Tensor | None
+    ) -> torch.Tensor:
         if input.device != self._device or not input.is_contiguous():
             raise ValueError("input must be a contiguous tensor on the local XPU tile")
         if input.ndim < 1 or input.size(0) != self._world_size:
@@ -392,10 +406,14 @@ class LevelZeroIpcPushAllToAll:
             or output.shape != input.shape
             or not output.is_contiguous()
         ):
-            raise ValueError("output must be contiguous and match input device, dtype, and shape")
+            raise ValueError(
+                "output must be contiguous and match input device, dtype, and shape"
+            )
         return output
 
-    def exchange(self, input: torch.Tensor, output: torch.Tensor | None = None) -> torch.Tensor:
+    def exchange(
+        self, input: torch.Tensor, output: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Exchange contiguous BF16 ``[world_size, ...]`` payloads exactly."""
 
         received, _ = self.exchange_profiled(input, output)
@@ -444,7 +462,9 @@ class LevelZeroIpcPushAllToAll:
         if self._closed:
             raise RuntimeError("IPC push all-to-all is closed")
         if self._dtype is not None and input.dtype != self._dtype:
-            raise ValueError("IPC push payload dtype cannot change after initialization")
+            raise ValueError(
+                "IPC push payload dtype cannot change after initialization"
+            )
         if elements_per_peer > self._capacity_elements:
             self._ensure_capacity(elements_per_peer, input.dtype)
         if self._trace_enabled:

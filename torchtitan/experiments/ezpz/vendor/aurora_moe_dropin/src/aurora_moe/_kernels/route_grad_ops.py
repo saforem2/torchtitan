@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Experimental fused route-gradient preparation for direct padded EP MoE."""
 
 from __future__ import annotations
@@ -91,7 +97,9 @@ def route_grad_scale_score(
         or expert_values.ndim != 3
         or not expert_values.is_contiguous()
     ):
-        raise ValueError("expert_values must be contiguous BF16 [experts, rows, model_dim]")
+        raise ValueError(
+            "expert_values must be contiguous BF16 [experts, rows, model_dim]"
+        )
     if (
         group_rows.device != grad_output.device
         or group_rows.dtype != torch.int32
@@ -109,7 +117,9 @@ def route_grad_scale_score(
     ):
         raise ValueError("all route-gradient inputs must share an XPU device")
     if grad_output.shape != (recv_counts.numel() * cap, expert_values.size(2)):
-        raise ValueError("grad_output shape must equal [recv_counts.numel() * cap, model_dim]")
+        raise ValueError(
+            "grad_output shape must equal [recv_counts.numel() * cap, model_dim]"
+        )
     if expert_scores.shape != expert_values.shape[:2]:
         raise ValueError("expert_scores must have shape [experts, rows]")
     if source_slots.numel() != grad_output.size(0):

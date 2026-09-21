@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """SYCL route-layout primitives for the exact Sonic-style MoE path.
 
 This module intentionally has no padded-capacity interface.  A route appears
@@ -136,7 +142,9 @@ def build_sonic_ragged_layout(
     return SonicRaggedLayout(*outputs)
 
 
-def gather_source_rows(values: torch.Tensor, grouped_to_source: torch.Tensor) -> torch.Tensor:
+def gather_source_rows(
+    values: torch.Tensor, grouped_to_source: torch.Tensor
+) -> torch.Tensor:
     """Gather exact source-order BF16 rows into current grouped-route order."""
 
     _bf16_matrix(values, "values")
@@ -153,8 +161,13 @@ def scatter_grouped_rows(
 
     _bf16_matrix(values, "values")
     _i64_vector(grouped_to_source, "grouped_to_source")
-    if values.device != grouped_to_source.device or values.size(0) != grouped_to_source.numel():
-        raise ValueError("values and grouped_to_source must describe the same XPU routes")
+    if (
+        values.device != grouped_to_source.device
+        or values.size(0) != grouped_to_source.numel()
+    ):
+        raise ValueError(
+            "values and grouped_to_source must describe the same XPU routes"
+        )
     if source_rows != grouped_to_source.numel():
         raise ValueError("exact ragged scatter requires one destination row per route")
     return load_sonic_ragged_ops().scatter_grouped_rows_bf16(
@@ -179,7 +192,9 @@ def weighted_scatter_grouped_rows(
         or values.size(0) != grouped_scores.numel()
         or values.size(0) != grouped_to_source.numel()
     ):
-        raise ValueError("ragged value, score, and map tensors must describe the same XPU routes")
+        raise ValueError(
+            "ragged value, score, and map tensors must describe the same XPU routes"
+        )
     if source_rows != grouped_to_source.numel():
         raise ValueError("exact ragged scatter requires one destination row per route")
     return load_sonic_ragged_ops().weighted_scatter_grouped_rows_bf16(
@@ -194,8 +209,13 @@ def scatter_grouped_scalars(
 
     _bf16_vector(values, "values")
     _i64_vector(grouped_to_source, "grouped_to_source")
-    if values.device != grouped_to_source.device or values.numel() != grouped_to_source.numel():
-        raise ValueError("values and grouped_to_source must describe the same XPU routes")
+    if (
+        values.device != grouped_to_source.device
+        or values.numel() != grouped_to_source.numel()
+    ):
+        raise ValueError(
+            "values and grouped_to_source must describe the same XPU routes"
+        )
     if source_rows != grouped_to_source.numel():
         raise ValueError("exact ragged scatter requires one destination row per route")
     return load_sonic_ragged_ops().scatter_grouped_scalars_bf16(
@@ -224,7 +244,9 @@ def ragged_route_grad(
         or expert_values.size(0) != grouped_to_source.numel()
         or grad_source.size(0) != grouped_to_source.numel()
     ):
-        raise ValueError("ragged gradient tensors must share exact source/grouped route shapes")
+        raise ValueError(
+            "ragged gradient tensors must share exact source/grouped route shapes"
+        )
     return load_sonic_ragged_ops().ragged_route_grad_bf16(
         grad_source, expert_values, grouped_scores, grouped_to_source
     )
@@ -258,7 +280,9 @@ def ragged_down_backward(
         or down_input_grad_unscaled.shape != hidden.shape
         or grouped_grad_output.size(0) != grouped_scores.numel()
     ):
-        raise ValueError("Sonic down-backward tensors must share exact grouped route shapes")
+        raise ValueError(
+            "Sonic down-backward tensors must share exact grouped route shapes"
+        )
     return load_sonic_ragged_ops().ragged_down_backward_bf16(
         grouped_grad_output,
         down_input_grad_unscaled,

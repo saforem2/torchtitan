@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Correctness and throughput gate for a contiguous Aurora BF16 GEMM backend."""
 
 from __future__ import annotations
@@ -12,7 +18,9 @@ import torch
 
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("torch", "tla-builder-probe"), default="tla-builder-probe")
+    parser.add_argument(
+        "--backend", choices=("torch", "tla-builder-probe"), default="tla-builder-probe"
+    )
     parser.add_argument("--m", type=int, default=16384)
     parser.add_argument("--k", type=int, default=1408)
     parser.add_argument("--n", type=int, default=2048)
@@ -27,8 +35,13 @@ def _assert_close(got: torch.Tensor, expected: torch.Tensor, backend: str) -> No
     torch.xpu.synchronize()
     maximum = (got.float() - expected.float()).abs().max().item()
     if not torch.allclose(got, expected, atol=0.25, rtol=0.05):
-        raise AssertionError(f"canonical BF16 GEMM {backend} mismatch: max_abs_diff={maximum:g}")
-    print(f"canonical_bf16_gemm_correctness backend={backend} max_abs_diff={maximum:g}", flush=True)
+        raise AssertionError(
+            f"canonical BF16 GEMM {backend} mismatch: max_abs_diff={maximum:g}"
+        )
+    print(
+        f"canonical_bf16_gemm_correctness backend={backend} max_abs_diff={maximum:g}",
+        flush=True,
+    )
 
 
 def _candidate(
@@ -42,7 +55,9 @@ def _candidate(
     return lambda: builder_gemm_probe_bf16(a, b, c, alpha=1.0, beta=0.0)
 
 
-def _time(step: Callable[[], torch.Tensor], warmup: int, steps: int) -> tuple[float, float]:
+def _time(
+    step: Callable[[], torch.Tensor], warmup: int, steps: int
+) -> tuple[float, float]:
     for _ in range(warmup):
         step()
     torch.xpu.synchronize()
@@ -63,7 +78,9 @@ def main() -> None:
         raise ValueError("M, K, N, warmup, and steps must be positive")
     if args.minimum_tflops <= 0:
         raise ValueError("minimum-tflops must be positive")
-    torch.xpu.set_device(int(os.environ.get("PALS_LOCAL_RANKID", os.environ.get("LOCAL_RANK", "0"))))
+    torch.xpu.set_device(
+        int(os.environ.get("PALS_LOCAL_RANKID", os.environ.get("LOCAL_RANK", "0")))
+    )
     torch.manual_seed(20260721)
     a = torch.randn(args.m, args.k, device="xpu", dtype=torch.bfloat16)
     b = torch.randn(args.k, args.n, device="xpu", dtype=torch.bfloat16)

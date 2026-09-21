@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact source-block expert segmentation for the isolated MoE kernel probe."""
 
 from __future__ import annotations
@@ -53,7 +59,9 @@ def load_segmented_expert_layout_ops(verbose: bool = False) -> ModuleType:
     if _MODULE is not None:
         return _MODULE
     if not torch.xpu.is_available():
-        raise RuntimeError("Aurora XPU is required to use segmented expert layout kernels")
+        raise RuntimeError(
+            "Aurora XPU is required to use segmented expert layout kernels"
+        )
     source = Path(__file__).with_name("csrc") / "segmented_expert_layout.sycl"
     build_dir = os.environ.get("AURORA_MOE_SYCL_BUILD_DIR")
     if build_dir:
@@ -119,7 +127,11 @@ def make_segmented_expert_layout(
     _counts(source_expert_counts)
     if cap < 0:
         raise ValueError("cap must be nonnegative")
-    offsets, source_rows, expert_rows = load_segmented_expert_layout_ops().build_source_expert_offsets_i32(
+    (
+        offsets,
+        source_rows,
+        expert_rows,
+    ) = load_segmented_expert_layout_ops().build_source_expert_offsets_i32(
         source_expert_counts, cap
     )
     return SegmentedExpertLayout(
@@ -188,8 +200,14 @@ def pack_padded_payload_to_source_expert_segments(
     if recv_counts.numel() != layout.sources:
         raise ValueError("recv_counts must have one entry per source")
     if payload.size(0) != layout.padded_rows or local_ids.numel() != layout.padded_rows:
-        raise ValueError("payload and local_ids must have one row per source padded slot")
-    segmented, source_to_segment, segment_to_source = load_segmented_expert_layout_ops().pack_padded_payload_to_source_expert_segments_bf16(
+        raise ValueError(
+            "payload and local_ids must have one row per source padded slot"
+        )
+    (
+        segmented,
+        source_to_segment,
+        segment_to_source,
+    ) = load_segmented_expert_layout_ops().pack_padded_payload_to_source_expert_segments_bf16(
         payload,
         local_ids,
         recv_counts,

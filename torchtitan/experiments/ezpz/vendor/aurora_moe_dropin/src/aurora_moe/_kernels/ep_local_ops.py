@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact local EP row gather/scatter kernels for received expert routes."""
 
 from __future__ import annotations
@@ -143,7 +149,9 @@ def gather_payload_rows(payload: torch.Tensor, positions: torch.Tensor) -> Paylo
         or payload.device != positions.device
     ):
         raise ValueError("payload must be contiguous BF16 XPU [rows, model_dim + 1]")
-    return PayloadRows(*load_ep_local_ops().gather_payload_rows_bf16(payload, positions))
+    return PayloadRows(
+        *load_ep_local_ops().gather_payload_rows_bf16(payload, positions)
+    )
 
 
 def gather_payload_rows_with_ids(
@@ -234,7 +242,9 @@ def compact_payload_rows_from_counts(
         or payload.device != recv_counts.device
         or payload.size(0) != recv_counts.numel() * cap
     ):
-        raise ValueError("payload must be contiguous BF16 [ep_size * cap, model_dim + 1]")
+        raise ValueError(
+            "payload must be contiguous BF16 [ep_size * cap, model_dim + 1]"
+        )
     rows = _valid_rows(recv_counts, cap)
     return PayloadRows(
         *load_ep_local_ops().compact_payload_rows_from_counts_bf16(
@@ -264,7 +274,9 @@ def compact_payload_rows_with_ids_from_counts(
         or payload.device != recv_counts.device
         or payload.size(0) != recv_counts.numel() * cap
     ):
-        raise ValueError("payload must be contiguous BF16 [ep_size * cap, model_dim + 2]")
+        raise ValueError(
+            "payload must be contiguous BF16 [ep_size * cap, model_dim + 2]"
+        )
     rows = _valid_rows(recv_counts, cap)
     return PayloadRowsWithIds(
         *load_ep_local_ops().compact_payload_rows_with_ids_from_counts_bf16(
@@ -325,7 +337,9 @@ def expand_rows_to_counts(
         or values.device != recv_counts.device
         or values.size(0) > recv_counts.numel() * cap
     ):
-        raise ValueError("values must be contiguous BF16 compact rows for [ep_size, cap]")
+        raise ValueError(
+            "values must be contiguous BF16 compact rows for [ep_size, cap]"
+        )
     if cap < 0:
         raise ValueError("cap must be nonnegative")
     return load_ep_local_ops().expand_rows_to_counts_bf16(values, recv_counts, cap)

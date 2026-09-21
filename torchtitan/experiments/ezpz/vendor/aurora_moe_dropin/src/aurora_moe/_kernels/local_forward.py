@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact local routed-expert path for the Aurora MoE prototype."""
 
 from __future__ import annotations
@@ -5,8 +11,8 @@ from __future__ import annotations
 import torch
 
 from aurora_moe._kernels.padded_bmm_moe import (
-    ExactRoutePlan,
     exact_routed_expert_bmm,
+    ExactRoutePlan,
     make_exact_route_plan,
 )
 

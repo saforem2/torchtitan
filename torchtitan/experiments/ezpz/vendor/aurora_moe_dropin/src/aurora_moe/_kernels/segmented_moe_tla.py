@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Specialized SYCL*TLA GEMM for compact source/expert MoE fragments."""
 
 from __future__ import annotations
@@ -31,11 +37,15 @@ def load_segmented_moe_tla_ops(verbose: bool = False) -> ModuleType:
     if prebuilt:
         spec = spec_from_file_location("aurora_moe_segmented_moe_tla", prebuilt)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load prebuilt segmented MoE TLA kernel: {prebuilt}")
+            raise RuntimeError(
+                f"could not load prebuilt segmented MoE TLA kernel: {prebuilt}"
+            )
         module = module_from_spec(spec)
         spec.loader.exec_module(module)
         if not hasattr(module, "segmented_moe_grouped_gemm_bf16"):
-            raise RuntimeError("prebuilt segmented MoE TLA kernel is missing its GEMM entry point")
+            raise RuntimeError(
+                "prebuilt segmented MoE TLA kernel is missing its GEMM entry point"
+            )
         _MODULE = module
         return _MODULE
 
@@ -62,7 +72,10 @@ def load_segmented_moe_tla_ops(verbose: bool = False) -> ModuleType:
             "-Wno-pass-failed",
             "-Wno-deprecated-declarations",
         ],
-        extra_sycl_cflags=["-fno-sycl-instrument-device-code", "-fsycl-targets=spir64_gen"],
+        extra_sycl_cflags=[
+            "-fno-sycl-instrument-device-code",
+            "-fsycl-targets=spir64_gen",
+        ],
         extra_include_paths=[
             str(Path(__file__).with_name("csrc")),
             str(root / "include"),
@@ -85,5 +98,7 @@ def segmented_moe_grouped_gemm_bf16(
     """Apply local expert weights to compact source/expert physical fragments."""
 
     return load_segmented_moe_tla_ops().segmented_moe_grouped_gemm_bf16(
-        activations.contiguous(), weights.contiguous(), source_expert_counts.contiguous()
+        activations.contiguous(),
+        weights.contiguous(),
+        source_expert_counts.contiguous(),
     )

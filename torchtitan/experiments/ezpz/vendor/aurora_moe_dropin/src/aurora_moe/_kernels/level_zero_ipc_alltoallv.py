@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact compact variable-split Level Zero IPC transport for Aurora EP.
 
 This module deliberately owns a flat exported receive staging allocation rather
@@ -10,9 +16,9 @@ the actual receive split sum.
 from __future__ import annotations
 
 import os
-from math import prod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from math import prod
 from pathlib import Path
 from types import ModuleType
 
@@ -23,7 +29,7 @@ from torch.utils.cpp_extension import load
 from ._prebuilt_extension import load_prebuilt_ipc_extension
 from .level_zero_ipc import load_level_zero_ipc_ops
 from .level_zero_ipc_device_barrier import IpcDeviceBarrierEpoch
-from .level_zero_ipc_equal_a2a import _Descriptor, _client_exchange, _root_exchange
+from .level_zero_ipc_equal_a2a import _client_exchange, _Descriptor, _root_exchange
 
 
 _MODULE: ModuleType | None = None
@@ -231,9 +237,7 @@ class LevelZeroIpcAllToAllV:
             )
         self._persistent_ooo_queue: object | None = None
         if persistent_ooo_queue == "1":
-            queue_type = getattr(
-                self._push_ops, "PersistentOooAllToAllVQueue", None
-            )
+            queue_type = getattr(self._push_ops, "PersistentOooAllToAllVQueue", None)
             if queue_type is None:
                 raise RuntimeError(
                     "AURORA_MOE_L0_IPC_ALLTOALLV_PERSISTENT_OOO_QUEUE=1 requires "
@@ -271,13 +275,9 @@ class LevelZeroIpcAllToAllV:
                 "AURORA_MOE_L0_IPC_ALLTOALLV_MIN_CAPACITY_ELEMENTS must be a "
                 "nonnegative integer"
             )
-        log_capacity = os.environ.get(
-            "AURORA_MOE_L0_IPC_ALLTOALLV_LOG_CAPACITY", "0"
-        )
+        log_capacity = os.environ.get("AURORA_MOE_L0_IPC_ALLTOALLV_LOG_CAPACITY", "0")
         if log_capacity not in {"0", "1"}:
-            raise ValueError(
-                "AURORA_MOE_L0_IPC_ALLTOALLV_LOG_CAPACITY must be 0 or 1"
-            )
+            raise ValueError("AURORA_MOE_L0_IPC_ALLTOALLV_LOG_CAPACITY must be 0 or 1")
         self._log_capacity = log_capacity == "1"
         self._epoch = 0
         self._closed = False
@@ -287,7 +287,9 @@ class LevelZeroIpcAllToAllV:
         policy = os.environ.get("AURORA_MOE_L0_IPC_BIAS", "default")
         flags = {"default": 0, "cached": 1, "uncached": 2}
         if policy not in flags:
-            raise ValueError("AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached")
+            raise ValueError(
+                "AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached"
+            )
         return policy, flags[policy]
 
     @staticmethod
@@ -404,7 +406,9 @@ class LevelZeroIpcAllToAllV:
                 imported = imports[source]
                 if imported is None:
                     raise RuntimeError(f"missing IPC receive mapping for rank {source}")
-                address = int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                address = (
+                    int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                )
             if address % 2:
                 raise RuntimeError("IPC receive mapping is not BF16 aligned")
             addresses.append(self._signed_pointer(address))
@@ -428,7 +432,9 @@ class LevelZeroIpcAllToAllV:
         if capacity_elements <= 0:
             raise ValueError("IPC alltoallv capacity must be positive")
         if self._dtype is not None and dtype != self._dtype:
-            raise ValueError("IPC alltoallv payload dtype cannot change after initialization")
+            raise ValueError(
+                "IPC alltoallv payload dtype cannot change after initialization"
+            )
         requested = capacity_elements
         capacity_elements = max(capacity_elements, self._minimum_capacity_elements)
         if capacity_elements > self._capacity_elements:
@@ -521,12 +527,16 @@ class LevelZeroIpcAllToAllV:
             raise ValueError("input rows do not match alltoallv input splits")
         if any(value < 0 for value in remote_receive_offsets):
             raise ValueError("remote alltoallv receive offsets must be nonnegative")
-        width = input.numel() // input.size(0) if input.size(0) else prod(input.shape[1:])
+        width = (
+            input.numel() // input.size(0) if input.size(0) else prod(input.shape[1:])
+        )
         if width <= 0:
             raise ValueError("alltoallv payload width must be positive")
         capacity_rows = int(global_capacity_rows)
         if capacity_rows < sum(output_splits):
-            raise ValueError("global alltoallv capacity is smaller than local receive rows")
+            raise ValueError(
+                "global alltoallv capacity is smaller than local receive rows"
+            )
         if any(
             offset + count > capacity_rows
             for offset, count in zip(remote_receive_offsets, input_splits)
@@ -534,7 +544,9 @@ class LevelZeroIpcAllToAllV:
             raise ValueError("remote alltoallv offsets exceed global staging capacity")
         if capacity_rows == 0:
             if any(input_splits) or any(output_splits):
-                raise ValueError("zero capacity is valid only for all-zero split vectors")
+                raise ValueError(
+                    "zero capacity is valid only for all-zero split vectors"
+                )
             return input.new_empty((0, *input.shape[1:]))
 
         capacity_elements = capacity_rows * width
@@ -564,7 +576,9 @@ class LevelZeroIpcAllToAllV:
             or tuple(output.shape) != output_shape
             or not output.is_contiguous()
         ):
-            raise ValueError("output must be contiguous and match exact alltoallv shape")
+            raise ValueError(
+                "output must be contiguous and match exact alltoallv shape"
+            )
 
         # The current stream owns both route packing and the output copy.  The
         # barriers are GPU-resident; neither waits on host collective progress.
@@ -625,7 +639,9 @@ class LevelZeroIpcAllToAllV:
             raise ValueError("input must be contiguous with a leading route dimension")
         if output_rows < 0 or global_capacity_rows < output_rows:
             raise ValueError("expert-major output rows exceed IPC staging capacity")
-        width = input.numel() // input.size(0) if input.size(0) else prod(input.shape[1:])
+        width = (
+            input.numel() // input.size(0) if input.size(0) else prod(input.shape[1:])
+        )
         if width <= 0:
             raise ValueError("expert-major IPC payload width must be positive")
         normalized = tuple(tuple(int(value) for value in block) for block in blocks)
@@ -642,10 +658,14 @@ class LevelZeroIpcAllToAllV:
                 or input_offset + rows > input_rows
                 or output_offset + rows > global_capacity_rows
             ):
-                raise ValueError("expert-major IPC block is outside its exact live extent")
+                raise ValueError(
+                    "expert-major IPC block is outside its exact live extent"
+                )
             covered_rows += rows
         if covered_rows != input_rows:
-            raise ValueError("expert-major IPC blocks must cover every input row exactly once")
+            raise ValueError(
+                "expert-major IPC blocks must cover every input row exactly once"
+            )
         if not hasattr(self._push_ops, "push_alltoallv_bf16_expert_major_blocks_async"):
             raise RuntimeError(
                 "expert-major IPC requires a rebuilt level_zero_ipc_alltoallv extension"
@@ -685,7 +705,9 @@ class LevelZeroIpcAllToAllV:
             or tuple(output.shape) != output_shape
             or not output.is_contiguous()
         ):
-            raise ValueError("output must be contiguous and match expert-major output shape")
+            raise ValueError(
+                "output must be contiguous and match expert-major output shape"
+            )
         metadata = torch.tensor(normalized, dtype=torch.int64, device=self._device)
         if metadata.numel() == 0:
             metadata = metadata.reshape(0, 4)
@@ -746,12 +768,12 @@ class LevelZeroIpcAllToAllV:
         remote_output_offsets = tuple(int(value) for value in remote_output_offsets)
         row_counts = tuple(int(value) for value in row_counts)
         if not (
-            len(input_offsets)
-            == len(remote_output_offsets)
-            == len(row_counts)
+            len(input_offsets) == len(remote_output_offsets) == len(row_counts)
             and len(row_counts) % self._world_size == 0
         ):
-            raise ValueError("expert-major typed metadata must contain whole peer groups")
+            raise ValueError(
+                "expert-major typed metadata must contain whole peer groups"
+            )
         if output_rows < 0 or global_capacity_rows < output_rows:
             raise ValueError("expert-major output rows exceed IPC staging capacity")
         input_rows = input.size(0)
@@ -768,9 +790,7 @@ class LevelZeroIpcAllToAllV:
             )
         ):
             raise ValueError("expert-major typed metadata is outside the live extent")
-        if not hasattr(
-            self._push_ops, "push_alltoallv_bf16_expert_major_typed_async"
-        ):
+        if not hasattr(self._push_ops, "push_alltoallv_bf16_expert_major_typed_async"):
             raise RuntimeError(
                 "expert-major typed IPC requires a rebuilt level_zero_ipc_alltoallv extension"
             )
@@ -806,7 +826,9 @@ class LevelZeroIpcAllToAllV:
             or tuple(output.shape) != output_shape
             or not output.is_contiguous()
         ):
-            raise ValueError("output must be contiguous and match expert-major output shape")
+            raise ValueError(
+                "output must be contiguous and match expert-major output shape"
+            )
 
         self._readiness.enqueue()
         input_rows_view = input.reshape(input_rows, width)

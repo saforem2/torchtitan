@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Single source of truth for every AuroraGPT production trajectory.
 
 Historically the trajectory metadata was duplicated across three
@@ -88,8 +94,15 @@ TRAJECTORIES: list[dict] = [
         "seq_len": SEQ_LEN,
         "token_target": OLMO_MIX_1124_TOKENS,
         "wandb_run_ids": [
-            "v5ytgu0o", "pjanidnw", "4u9w23p9", "tahlsmy9", "iy1xbv0t",
-            "11jzfnno", "hqwaw075", "6ictshbs", "wviyqysc",
+            "v5ytgu0o",
+            "pjanidnw",
+            "4u9w23p9",
+            "tahlsmy9",
+            "iy1xbv0t",
+            "11jzfnno",
+            "hqwaw075",
+            "6ictshbs",
+            "wviyqysc",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,
@@ -106,8 +119,14 @@ TRAJECTORIES: list[dict] = [
         "seq_len": SEQ_LEN,
         "token_target": OLMO_MIX_1124_TOKENS,
         "wandb_run_ids": [
-            "q9oq5huj", "pnkaurba", "lrlv3xsc", "pigwfqkg", "lvyzlocg",
-            "e2anhgt2", "he01jr7f", "t0ja3dl4",
+            "q9oq5huj",
+            "pnkaurba",
+            "lrlv3xsc",
+            "pigwfqkg",
+            "lvyzlocg",
+            "e2anhgt2",
+            "he01jr7f",
+            "t0ja3dl4",
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,
@@ -139,12 +158,28 @@ TRAJECTORIES: list[dict] = [
         # 9itxu3pt=8572612(sneak2h,86201-86674) ew4pqb51=8573619(sneak2h,86675-87145)
         # fm3gzdxt=8558531(cont12,87126->92859 DONE)
         "wandb_run_ids": [
-            "lytjeegk", "0t4h0kuw", "j7bz39tj", "0qpf3hnc", "iekiq5rq",
-            "ni0etxx7", "0fk1bvtt", "3n22a69q", "8vmrcxqr",
-            "56lkkkh1", "24wfvoje", "bs6tay8l",
-            "zrqx75x7", "ied4spbx", "yklnyjd5",
-            "8ujhblrp", "a52q40kx", "jkde9zdg", "zcmlqbd8",
-            "9itxu3pt", "ew4pqb51", "fm3gzdxt",
+            "lytjeegk",
+            "0t4h0kuw",
+            "j7bz39tj",
+            "0qpf3hnc",
+            "iekiq5rq",
+            "ni0etxx7",
+            "0fk1bvtt",
+            "3n22a69q",
+            "8vmrcxqr",
+            "56lkkkh1",
+            "24wfvoje",
+            "bs6tay8l",
+            "zrqx75x7",
+            "ied4spbx",
+            "yklnyjd5",
+            "8ujhblrp",
+            "a52q40kx",
+            "jkde9zdg",
+            "zcmlqbd8",
+            "9itxu3pt",
+            "ew4pqb51",
+            "fm3gzdxt",
         ],
         # NOTE (2026-07-24): these 3 completion jobs each run an
         # `ezpz.examples.test` preflight smoke FIRST, which opens a wandb run in
@@ -165,7 +200,8 @@ TRAJECTORIES: list[dict] = [
         # MEASURED: 92,456 steps / 1 gap -> 92,778 / 0 gaps.
         "olog_fallbacks": {
             "0fk1bvtt": str(
-                RUNS / "agpt-2b-v2/torchtitan-ezpz"
+                RUNS
+                / "agpt-2b-v2/torchtitan-ezpz"
                 / "agpt-2b-n256-v2-failover-cont4.o8505119"
             ),
         },
@@ -191,12 +227,20 @@ TRAJECTORIES: list[dict] = [
         # --- umbrella 8714502 trainer-0, added 2026-08-05: ---
         # vtumb5cb=8714502 (39601->41300; clean walltime FAILOVER STOP, so
         #   unlike the 20B trainers this one saved at its logged tip)
-                # --- 08-07 umbrella, added 2026-08-11: ---
+        # --- 08-07 umbrella, added 2026-08-11: ---
         # nowkdepb=8714503 t0 (41301->43820)
         "wandb_run_ids": [
-            "i252kps9", "d4hlr8qe", "1va7zfki", "6op7ozfh",
-            "y70rh76h", "logai2xn", "2qqhpcrm", "w78n1akt",
-            "i0ayskft", "21grc6o7", "nv4qwxc8",
+            "i252kps9",
+            "d4hlr8qe",
+            "1va7zfki",
+            "6op7ozfh",
+            "y70rh76h",
+            "logai2xn",
+            "2qqhpcrm",
+            "w78n1akt",
+            "i0ayskft",
+            "21grc6o7",
+            "nv4qwxc8",
             # ADDED 2026-08-16. These two were missing, and their absence was
             # the ENTIRE 30,483->39,601 "gap" (9,117 steps) in this chain --
             # not lost data, just an incomplete list. Both have full synced
@@ -217,7 +261,8 @@ TRAJECTORIES: list[dict] = [
             # (49-200 steps, 05-30 through 07-01) -- the chain spent a month
             # failing to get past its resume point, and the two runs that
             # finally carried it were never recorded.
-            "9d10mqwb", "n887c3lk",
+            "9d10mqwb",
+            "n887c3lk",
             # ADDED 2026-08-16 (third missing-run-id find of the day, and the
             # worst one): ud8t6d3t = 43801..46429, 2630 rows, state FINISHED.
             # This is the run that COMPLETED THE FLAGSHIP -- the chain's last
@@ -236,7 +281,6 @@ TRAJECTORIES: list[dict] = [
             # order semantic, and a mis-ordered list traps the next append.
             "vtumb5cb",
             "nowkdepb",
-        
             "ud8t6d3t",
         ],
         "olog_fallbacks": None,
@@ -249,8 +293,7 @@ TRAJECTORIES: list[dict] = [
         "version": "v2",
         "num_nodes": 512,
         "ckpt_dir": str(
-            _20B_V2
-            / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
+            _20B_V2 / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
         ),  # forked 2026-08-21; the pre-fork dir stopped advancing that day
         # and pointing here is why the 20B-512 curve looked flat: the registry
         # tracked a chain the seat had already left.
@@ -274,16 +317,25 @@ TRAJECTORIES: list[dict] = [
         # --- umbrella 8714502 trainer-1, added 2026-08-05: ---
         # 9d1g9zsw=8714502 (6801->7149; ckpt head 7,100 -- SIGTERM'd
         #   mid-interval when trainer-1 hit the Aurora pals RPC failure)
-                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
         # 2lxurmes+iozc8x9n=8714503 t1 (7251->7654, two ids = an auto-retry
         #   relaunch mid-job)  c8zwrlqw=8744245 t1 (7601->8800, still running)
         "wandb_run_ids": [
-            "9tsyx5us", "ej3zy5cq", "s6b159xk", "gkzl19dg", "10vf1mqr",
-            "wjy5pvxm", "cv3wii8x",
-            "tu77pzu7", "8vixdfg2", "0pmsn01c",
-            "tu1iseu1", "8o2xakm3", "g59v83go", "jyq4w87d",
+            "9tsyx5us",
+            "ej3zy5cq",
+            "s6b159xk",
+            "gkzl19dg",
+            "10vf1mqr",
+            "wjy5pvxm",
+            "cv3wii8x",
+            "tu77pzu7",
+            "8vixdfg2",
+            "0pmsn01c",
+            "tu1iseu1",
+            "8o2xakm3",
+            "g59v83go",
+            "jyq4w87d",
             "jb5ox6u9",  # Jul 30  +211 [6551, 6761]
-        
             # ORDER IS SEMANTIC -- see the note in concat_chain: on a step two
             # runs both logged, the LAST listed wins. Keep this chronological.
             # The five run-ids below were found 2026-08-17 by
@@ -306,8 +358,8 @@ TRAJECTORIES: list[dict] = [
             # the seat was writing steps every second, its CURRENT run just
             # was not in this list.
             "ctbs1be4",  # Aug 16 20:20
-        # av8h56xt=8808931 t1, wnws2jtn=8812215 t1, fpw58jgz=8828611 t1
-        # (added 2026-09-17)
+            # av8h56xt=8808931 t1, wnws2jtn=8812215 t1, fpw58jgz=8828611 t1
+            # (added 2026-09-17)
             "av8h56xt",
             "wnws2jtn",
             "fpw58jgz",
@@ -362,28 +414,32 @@ TRAJECTORIES: list[dict] = [
             # were invisible everywhere -- charts, store, and W&B alike. Found
             # 2026-08-19 by checking what the gap-backfill did NOT cover.
             "c8zwrlqw": str(
-                REPO_ROOT / "logs/multi-autoretry-8744245"
+                REPO_ROOT
+                / "logs/multi-autoretry-8744245"
                 / "trainer-1-20b-n512.console.log"
             ),
             "8vixdfg2": str(
-                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                RUNS
+                / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-v2-failover-sync-cont3.o8508214"
             ),
             "2lxurmes": str(
-                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                RUNS
+                / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-native-cont.o8731758"
             ),
             "g59v83go": str(
-                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                RUNS
+                / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512-autoretry-cont2.o8647383"
             ),
             "jyq4w87d": str(
-                RUNS / "agpt-20b-v2/torchtitan-ezpz"
+                RUNS
+                / "agpt-20b-v2/torchtitan-ezpz"
                 / "agpt-20b-n512chain-256Nprod.o8687862"
             ),
             "9d1g9zsw": str(
-                RUNS / "agpt-20b-v2/torchtitan-ezpz"
-                / "agpt-20b-n512-resume.o8696040"
+                RUNS / "agpt-20b-v2/torchtitan-ezpz" / "agpt-20b-n512-resume.o8696040"
             ),
             # 5399->6001 (600 steps), closed 2026-08-16. This one was called
             # PERMANENT twice before, because both earlier searches only looked
@@ -392,7 +448,8 @@ TRAJECTORIES: list[dict] = [
             # 5401..6071. Attached to 8o2xakm3 (W&B 5101..5399), the run whose
             # tail ends at the gap.
             "8o2xakm3": str(
-                REPO_ROOT / "logs/multi-autoretry-8648363"
+                REPO_ROOT
+                / "logs/multi-autoretry-8648363"
                 / "trainer-1-20b-n512.console.log"
             ),
         },
@@ -431,16 +488,27 @@ TRAJECTORIES: list[dict] = [
         # cxlt0tpe=8698125 trainer-2 (6151->6897)
         # 2ktrz29u=8714502 trainer-2 (7501->7897; ckpt head 7,800 -- SIGTERM'd
         #   mid-interval when a sibling trainer hit the pals RPC failure)
-                # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
+        # --- 08-07/08-09 umbrellas, added 2026-08-11: ---
         # 82e1jewm=8714503 t2 (7801->8334)  pne9uj4w=8744245 t2 (8301->8324,
         #   died on the init std::bad_alloc after 23 steps)
         "wandb_run_ids": [
-            "r1yyxbmt", "72airpph", "m9c5wx2e", "6eocrnxs",
-            "5481v99b", "yrq1s1ac", "xt03uvp6",
-            "f1p8nyxh", "g6ekeu4j",
-            "kk4h0i7m", "17sfemjj", "rugscgjs",
-            "6yr6ivh4", "uvgmafv9", "5rvusq43",
-            "v58n7vam", "cxlt0tpe",
+            "r1yyxbmt",
+            "72airpph",
+            "m9c5wx2e",
+            "6eocrnxs",
+            "5481v99b",
+            "yrq1s1ac",
+            "xt03uvp6",
+            "f1p8nyxh",
+            "g6ekeu4j",
+            "kk4h0i7m",
+            "17sfemjj",
+            "rugscgjs",
+            "6yr6ivh4",
+            "uvgmafv9",
+            "5rvusq43",
+            "v58n7vam",
+            "cxlt0tpe",
             # ORDER IS SIGNIFICANT. concat_chain does `by_step[step] = row`
             # walking this list in order, so on a step two runs both logged,
             # the LAST one listed wins. Keep these in chronological order: a
@@ -453,7 +521,8 @@ TRAJECTORIES: list[dict] = [
             # values, moving loss ~2.33 -> ~2.47 with no error anywhere.
             "djmhgmmq",  # +604  [6897, 7500]  (Aug 3)
             "2ktrz29u",  # (Aug 5) re-trains 7,501+ after djmhgmmq crashed
-            "82e1jewm", "pne9uj4w",
+            "82e1jewm",
+            "pne9uj4w",
             # Found 2026-08-17 by find_missing_runs.py + a coverage-gain check.
             # 2,699 steps no registered run covered, 2,095 of them PAST the
             # previous head of 8,333 -- this chain was under-reporting its own
@@ -462,8 +531,8 @@ TRAJECTORIES: list[dict] = [
             # nothing.
             "t9vly2u8",  # +1515 [8334, 9848]  (Aug 13)
             "lc9oukel",  # +580  [9801, 10380] (Aug 16)
-        # s2iqoonn=8808931 t2, 23magxfo=8812215 t2, xmdg7z2g=8828611 t2
-        # (added 2026-09-17)
+            # s2iqoonn=8808931 t2, 23magxfo=8812215 t2, xmdg7z2g=8828611 t2
+            # (added 2026-09-17)
             "s2iqoonn",
             "23magxfo",
             "xmdg7z2g",
@@ -524,15 +593,18 @@ TRAJECTORIES: list[dict] = [
         # console logs record the ckpt folder but not the --config flag.)
         "olog_fallbacks": {
             "6yr6ivh4": str(
-                REPO_ROOT / "logs/multi-autoretry-8648363"
+                REPO_ROOT
+                / "logs/multi-autoretry-8648363"
                 / "trainer-3-20b-n256.console.log"
             ),
             "uvgmafv9": str(
-                REPO_ROOT / "logs/multi-autoretry-8663177"
+                REPO_ROOT
+                / "logs/multi-autoretry-8663177"
                 / "trainer-3-20b-n256.console.log"
             ),
             "2ktrz29u": str(
-                RUNS / "agpt-20b-n256/torchtitan-ezpz"
+                RUNS
+                / "agpt-20b-n256/torchtitan-ezpz"
                 / "agpt-20b-n256-resume-cont.o8698754"
             ),
         },
@@ -597,9 +669,9 @@ TRAJECTORIES: list[dict] = [
         "wandb_run_ids": [
             "hllpaq4g",
             "6321d2hh",
-        # no8zak98=8808931 t0, qzhfr1zi=8808932 t0, f1pzca4k=8812215 t0,
-        # pltbp016=8828611 t0 (added 2026-09-17: four umbrellas had run with
-        # no registry entry, so every chart stopped at 08-26)
+            # no8zak98=8808931 t0, qzhfr1zi=8808932 t0, f1pzca4k=8812215 t0,
+            # pltbp016=8828611 t0 (added 2026-09-17: four umbrellas had run with
+            # no registry entry, so every chart stopped at 08-26)
             "no8zak98",
             "qzhfr1zi",
             "f1pzca4k",
@@ -701,8 +773,8 @@ TRAJECTORIES: list[dict] = [
             "ww88slec",
             "ijfo395o",
             "xii94czx",
-        # ozcm9s2t=8808931 t3, q5pa4ssw=8812215 t3 (added 2026-09-17;
-        # 8828611 t3 wrote no W&B id to its log)
+            # ozcm9s2t=8808931 t3, q5pa4ssw=8812215 t3 (added 2026-09-17;
+            # 8828611 t3 wrote no W&B id to its log)
             "ozcm9s2t",
             "q5pa4ssw",
         ],
@@ -723,9 +795,7 @@ TRAJECTORIES: list[dict] = [
         # Polaris lives in its OWN clone under /eagle (not /flare): a
         # separate checkout with separate outputs/checkpoints. See
         # docs/production/polaris/README.md.
-        "ckpt_dir": str(
-            _POLARIS_20B / "agpt-20b-sophiag-dolma-n128-gbs1024"
-        ),
+        "ckpt_dir": str(_POLARIS_20B / "agpt-20b-sophiag-dolma-n128-gbs1024"),
         "readme": "torchtitan/experiments/ezpz/docs/production/polaris/README.md",
         "gbs": 1024,
         "seq_len": SEQ_LEN,
@@ -878,7 +948,8 @@ def live_trajectories() -> list[dict]:
     """Records whose ckpt dir is on disk and should have disk fields
     auto-filled (class 'live')."""
     return [
-        t for t in TRAJECTORIES
+        t
+        for t in TRAJECTORIES
         if t["cls"] == "live" and t.get("ckpt_dir") and Path(t["ckpt_dir"]).is_dir()
     ]
 
@@ -918,8 +989,8 @@ def check_coverage(verbose: bool = True) -> int:
             continue
         steps = []
         for p in d.glob("step-*"):
-            tail = p.name[len("step-"):]
-            if tail.isdigit():          # skip quarantined step-N-<timestamp>
+            tail = p.name[len("step-") :]
+            if tail.isdigit():  # skip quarantined step-N-<timestamp>
                 steps.append(int(tail))
         if not steps:
             continue
@@ -931,8 +1002,10 @@ def check_coverage(verbose: bool = True) -> int:
             bad += 1
             continue
         if verbose:
-            print("  %-30s disk head step-%-7d  %d run-id(s)" % (
-                t["key"], disk_head, n_runs))
+            print(
+                "  %-30s disk head step-%-7d  %d run-id(s)"
+                % (t["key"], disk_head, n_runs)
+            )
     if verbose:
         print("\nDisk heads above are the FLOOR each chain's data must reach.")
         print("Compare against the plotted/exported last step -- if the data")
@@ -958,7 +1031,7 @@ def _main() -> int:
         "--check-coverage",
         action="store_true",
         help="report each chain's on-disk checkpoint head (the floor its data "
-             "must reach) to catch missing wandb_run_ids",
+        "must reach) to catch missing wandb_run_ids",
     )
     args = ap.parse_args()
 

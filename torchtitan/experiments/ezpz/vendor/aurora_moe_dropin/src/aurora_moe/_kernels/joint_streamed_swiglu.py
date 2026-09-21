@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Controlled first-order backward ordering for routed and shared SwiGLU branches."""
 
 from __future__ import annotations
@@ -31,7 +37,11 @@ def _check_inputs(
         raise ValueError("expected x=[M,D] and routed up/gate=[D,H]")
     if routed_down.ndim != 2 or routed_down.shape != (routed_up.size(1), x.size(1)):
         raise ValueError("routed_down must have shape [H,D]")
-    if shared_up.ndim != 3 or shared_gate.shape != shared_up.shape or shared_down.ndim != 3:
+    if (
+        shared_up.ndim != 3
+        or shared_gate.shape != shared_up.shape
+        or shared_down.ndim != 3
+    ):
         raise ValueError("expected shared up/gate=[S,D,H], down=[S,H,D]")
     if (
         shared_up.size(0) != shared_down.size(0)
@@ -40,7 +50,10 @@ def _check_inputs(
         or shared_down.size(2) != x.size(1)
     ):
         raise ValueError("incompatible shared-expert matrix dimensions")
-    if not isinstance(shared_stream, torch.xpu.Stream) or shared_stream.device != x.device:
+    if (
+        not isinstance(shared_stream, torch.xpu.Stream)
+        or shared_stream.device != x.device
+    ):
         raise ValueError("shared_stream must be an XPU stream on x.device")
 
 
@@ -134,7 +147,14 @@ class _JointStreamedSwiGLU(torch.autograd.Function):
                     )
                 )
                 routed = _routed_swiglu(*inner_routed)
-                for tensor in (x, routed_up, routed_gate, routed_down, *inner_routed, routed):
+                for tensor in (
+                    x,
+                    routed_up,
+                    routed_gate,
+                    routed_down,
+                    *inner_routed,
+                    routed,
+                ):
                     tensor.record_stream(forward_stream)
 
             # The custom Function owns the backward, so avoid retaining an

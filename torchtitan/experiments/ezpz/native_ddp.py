@@ -447,6 +447,7 @@ def wrap_native_ddp(
                 "native DDP initial/rebuild bucket semantics mismatch: "
                 f"{limits} != {([expected], [expected])}"
             )
+
     if compute_policy == "ddp_mixed_precision":
         _validate_builtin_mp_runtime(device)
     if compute_policy == "ddp_mixed_precision_xpu_overlap":
@@ -476,14 +477,11 @@ def wrap_native_ddp(
         validate_initial_buckets(wrapped)
         if (
             len(wrapped._comm_hooks) != 1
-            or wrapped._comm_hooks[0][0]
-            is not _xpu_overlap_allreduce_and_upcast_hook
+            or wrapped._comm_hooks[0][0] is not _xpu_overlap_allreduce_and_upcast_hook
         ):
             raise RuntimeError("DDP did not register the pinned XPU overlap hook")
         wrapped._xpu_overlap_hook_stats = (
-            []
-            if os.getenv("TORCHTITAN_DDP_XPU_OVERLAP_DIAGNOSTICS") == "1"
-            else None
+            [] if os.getenv("TORCHTITAN_DDP_XPU_OVERLAP_DIAGNOSTICS") == "1" else None
         )
         return wrapped
     wrapped = NativeDDP(
@@ -731,7 +729,9 @@ def install_agpt_dtype_probe(model: nn.Module) -> None:
     except (AttributeError, StopIteration) as exc:
         raise TypeError("AGPT dtype probe requires a non-pipeline decoder") from exc
     if any(module is None for module in modules.values()):
-        raise TypeError("AGPT dtype probe requires embedding, norm, and LM head modules")
+        raise TypeError(
+            "AGPT dtype probe requires embedding, norm, and LM head modules"
+        )
 
     state: dict[str, str] = {}
 
@@ -834,9 +834,9 @@ def get_native_ddp_logging_data(model: nn.Module) -> dict[str, object]:
     result = {key: data[key] for key in keys if key in data}
     if hasattr(model, "_native_ddp_pipeline_rebuild_calls"):
         result["has_rebuilt_buckets"] = int(model._has_rebuilt_buckets)
-        result["pipeline_bucket_rebuild_calls"] = (
-            model._native_ddp_pipeline_rebuild_calls
-        )
+        result[
+            "pipeline_bucket_rebuild_calls"
+        ] = model._native_ddp_pipeline_rebuild_calls
         result["pipeline_rebuilt_bucket_sizes"] = list(
             model._native_ddp_pipeline_rebuilt_bucket_sizes
         )
@@ -856,6 +856,7 @@ def get_native_ddp_logging_data(model: nn.Module) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 from torch.distributed.pipelining import PipelineStage  # noqa: E402
 
+
 class _NativeDDPPipelineStage(PipelineStage):
     """Keep dynamic pipeline metadata inference outside the DDP reducer."""
 
@@ -870,4 +871,3 @@ class _NativeDDPPipelineStage(PipelineStage):
             return super()._forward_metadata_inference(*args, **kwargs)
         finally:
             self.submod = ddp
-

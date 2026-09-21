@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Direct oneMKL strided-batched BF16 GEMM on PyTorch's current XPU stream."""
 
 from __future__ import annotations
@@ -122,12 +128,18 @@ class _OneMklBmm(torch.autograd.Function):
         grad_a = grad_b = None
         if ctx.needs_input_grad[0]:
             grad_a_op = _raw_strided_batched_gemm_bf16(
-                grad_output.contiguous(), b, trans_b=not ctx.trans_b, batched=ctx.batched
+                grad_output.contiguous(),
+                b,
+                trans_b=not ctx.trans_b,
+                batched=ctx.batched,
             )
             grad_a = grad_a_op.transpose(-1, -2) if ctx.trans_a else grad_a_op
         if ctx.needs_input_grad[1]:
             grad_b_op = _raw_strided_batched_gemm_bf16(
-                a, grad_output.contiguous(), trans_a=not ctx.trans_a, batched=ctx.batched
+                a,
+                grad_output.contiguous(),
+                trans_a=not ctx.trans_a,
+                batched=ctx.batched,
             )
             grad_b = grad_b_op.transpose(-1, -2) if ctx.trans_b else grad_b_op
         return grad_a, grad_b, None, None, None

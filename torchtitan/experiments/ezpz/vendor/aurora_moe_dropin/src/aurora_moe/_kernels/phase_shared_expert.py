@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Phase-separated shared-expert work for native EP communication windows."""
 
 from __future__ import annotations
@@ -28,7 +34,9 @@ class PhaseSharedExpertController:
         needs: tuple[bool, bool, bool, bool],
         stream: torch.xpu.Stream,
     ) -> None:
-        if x.device.type != "xpu" or any(tensor.device != x.device for tensor in (up, gate, down)):
+        if x.device.type != "xpu" or any(
+            tensor.device != x.device for tensor in (up, gate, down)
+        ):
             raise ValueError("shared phase controller requires same-device XPU tensors")
         if up.shape != gate.shape or up.ndim != 3 or down.ndim != 3:
             raise ValueError("shared parameters must be up/gate=[S,D,H], down=[S,H,D]")
@@ -104,9 +112,7 @@ class PhaseSharedExpertController:
     def early_backward_chunk_count_requested() -> int:
         """Return the runtime number of shared-backward chunks placed in A2."""
 
-        value = os.environ.get(
-            "AURORA_MOE_PHASE_SHARED_BACKWARD_EARLY_CHUNKS", "1"
-        )
+        value = os.environ.get("AURORA_MOE_PHASE_SHARED_BACKWARD_EARLY_CHUNKS", "1")
         try:
             chunks = int(value)
         except ValueError as error:
@@ -122,7 +128,9 @@ class PhaseSharedExpertController:
     @staticmethod
     def _chunk_ranges(total: int, chunks: int) -> tuple[tuple[int, int], ...]:
         if total < 0 or chunks < 1:
-            raise ValueError("shared-expert chunk ranges require total >= 0 and chunks >= 1")
+            raise ValueError(
+                "shared-expert chunk ranges require total >= 0 and chunks >= 1"
+            )
         if total == 0:
             return ()
         chunks = min(total, chunks)
@@ -172,11 +180,15 @@ class PhaseSharedExpertController:
         event.record(stream)
         return event
 
-    def _make_inner(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _make_inner(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if self._inner is None:
             self._inner = tuple(
                 tensor.detach().requires_grad_(needed)
-                for tensor, needed in zip((self.x, self.up, self.gate, self.down), self.needs)
+                for tensor, needed in zip(
+                    (self.x, self.up, self.gate, self.down), self.needs
+                )
             )
         return self._inner
 
@@ -207,18 +219,27 @@ class PhaseSharedExpertController:
         return output, up_chunk, gate_chunk, down_chunk, flat
 
     def _run_independent_chunks(
-        self, ranges: tuple[tuple[int, int], ...], *, initial: torch.Tensor | None = None
+        self,
+        ranges: tuple[tuple[int, int], ...],
+        *,
+        initial: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if not ranges:
             if initial is None:
-                raise RuntimeError("independent shared chunks must contain at least one range")
+                raise RuntimeError(
+                    "independent shared chunks must contain at least one range"
+                )
             return initial
         total = initial
         for start, stop in ranges:
             with _record(f"moe.phase_shared.forward.chunk_{start}_{stop}"):
-                output, up_chunk, gate_chunk, down_chunk, flat = self._independent_chunk(
-                    start, stop
-                )
+                (
+                    output,
+                    up_chunk,
+                    gate_chunk,
+                    down_chunk,
+                    flat,
+                ) = self._independent_chunk(start, stop)
             self._chunk_outputs.append((output, up_chunk, gate_chunk, down_chunk, flat))
             total = output if total is None else total + output
         assert total is not None
@@ -240,7 +261,9 @@ class PhaseSharedExpertController:
         """Enqueue the first shared chunk after native A1 is submitted."""
 
         if self._dispatch_ready is None or self._prefix_done is not None:
-            raise RuntimeError("mark dispatch readiness before starting the shared prefix")
+            raise RuntimeError(
+                "mark dispatch readiness before starting the shared prefix"
+            )
         with torch.enable_grad(), torch.xpu.stream(self.stream):
             self.stream.wait_event(self._dispatch_ready)
             if self._chunked_backward:
@@ -272,15 +295,24 @@ class PhaseSharedExpertController:
         """Enqueue remaining shared experts after native A3 is submitted."""
 
         if self._return_ready is None or self._forward_done is not None:
-            raise RuntimeError("mark return readiness before starting the shared suffix")
+            raise RuntimeError(
+                "mark return readiness before starting the shared suffix"
+            )
         with torch.enable_grad(), torch.xpu.stream(self.stream):
             self.stream.wait_event(self._return_ready)
             if self._chunked_backward:
                 if self._prefix is None:
-                    raise RuntimeError("chunked shared suffix is missing its forward prefix")
-                self._shared = self._run_independent_chunks(
-                    self._backward_ranges[self._forward_prefix_chunks :], initial=self._prefix
-                ).reshape_as(self._make_inner()[0]).detach()
+                    raise RuntimeError(
+                        "chunked shared suffix is missing its forward prefix"
+                    )
+                self._shared = (
+                    self._run_independent_chunks(
+                        self._backward_ranges[self._forward_prefix_chunks :],
+                        initial=self._prefix,
+                    )
+                    .reshape_as(self._make_inner()[0])
+                    .detach()
+                )
                 self._prefix = None
             else:
                 self._shared = self._chunk(
@@ -298,7 +330,9 @@ class PhaseSharedExpertController:
         self._shared.record_stream(stream)
         return self._shared
 
-    def saved_tensors(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def saved_tensors(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return nested shared leaves and output for the outer autograd context."""
 
         if self._inner is None or self._shared is None:
@@ -354,7 +388,9 @@ class PhaseSharedExpertController:
         """Capture outer-gradient readiness before routed reverse communication."""
 
         if self._shared is None or self._grad_output is not None:
-            raise RuntimeError("shared backward may be armed exactly once after forward")
+            raise RuntimeError(
+                "shared backward may be armed exactly once after forward"
+            )
         if stream.device != grad_output.device:
             raise ValueError("shared backward gradient stream must match grad_output")
         self._grad_output = grad_output
@@ -373,7 +409,11 @@ class PhaseSharedExpertController:
     def _start_backward_after(self, ready: torch.xpu.Event, *, early: bool) -> None:
         if self._backward_done is not None:
             raise RuntimeError("shared backward may be started only once")
-        assert self._inner is not None and self._shared is not None and self._grad_output is not None
+        assert (
+            self._inner is not None
+            and self._shared is not None
+            and self._grad_output is not None
+        )
         with torch.enable_grad(), torch.xpu.stream(self.stream):
             self.stream.wait_event(ready)
             self._record_shared_stream(*self._inner, self._shared, self._grad_output)
@@ -390,15 +430,21 @@ class PhaseSharedExpertController:
             else:
                 pairs = tuple(
                     (index, tensor)
-                    for index, (tensor, needed) in enumerate(zip(self._inner, self.needs))
+                    for index, (tensor, needed) in enumerate(
+                        zip(self._inner, self.needs)
+                    )
                     if needed
                 )
-                gradients = torch.autograd.grad(
-                    self._shared,
-                    tuple(tensor for _, tensor in pairs),
-                    self._grad_output,
-                    allow_unused=True,
-                ) if pairs else ()
+                gradients = (
+                    torch.autograd.grad(
+                        self._shared,
+                        tuple(tensor for _, tensor in pairs),
+                        self._grad_output,
+                        allow_unused=True,
+                    )
+                    if pairs
+                    else ()
+                )
                 result: list[torch.Tensor | None] = [None] * 4
                 for (index, _), gradient in zip(pairs, gradients):
                     result[index] = gradient
@@ -434,13 +480,19 @@ class PhaseSharedExpertController:
         self, ready: torch.xpu.Event, limit: int, *, early: bool
     ) -> None:
         if not self._chunked_backward:
-            raise RuntimeError("chunked shared backward requires multiple live expert ranges")
+            raise RuntimeError(
+                "chunked shared backward requires multiple live expert ranges"
+            )
         if self._backward_done is not None:
             raise RuntimeError("shared backward has already completed")
         if self._inner is None or self._shared is None or self._grad_output is None:
-            raise RuntimeError("shared forward and outer gradient must be available before backward")
+            raise RuntimeError(
+                "shared forward and outer gradient must be available before backward"
+            )
         if len(self._chunk_outputs) != len(self._backward_ranges):
-            raise RuntimeError("shared forward did not retain every requested backward chunk")
+            raise RuntimeError(
+                "shared forward did not retain every requested backward chunk"
+            )
         if not self._next_backward_chunk < limit <= len(self._chunk_outputs):
             raise RuntimeError("invalid shared-backward chunk interval")
 
@@ -448,12 +500,12 @@ class PhaseSharedExpertController:
             self.stream.wait_event(ready)
             self._record_shared_stream(*self._inner, self._shared, self._grad_output)
             for chunk_index in range(self._next_backward_chunk, limit):
-                output, up_chunk, gate_chunk, down_chunk, _flat = self._chunk_outputs[chunk_index]
+                output, up_chunk, gate_chunk, down_chunk, _flat = self._chunk_outputs[
+                    chunk_index
+                ]
                 start, stop = self._backward_ranges[chunk_index]
                 phase = "early" if early else "after_a4"
-                with _record(
-                    f"moe.phase_shared.backward.{phase}.chunk_{chunk_index}"
-                ):
+                with _record(f"moe.phase_shared.backward.{phase}.chunk_{chunk_index}"):
                     pairs: list[tuple[int, torch.Tensor]] = []
                     if self.needs[0]:
                         pairs.append((0, self._inner[0]))
@@ -503,7 +555,9 @@ class PhaseSharedExpertController:
             early_chunks = min(
                 self.early_backward_chunk_count_requested(), len(self._chunk_outputs)
             )
-            self._start_chunked_backward_after(self._grad_ready, early_chunks, early=True)
+            self._start_chunked_backward_after(
+                self._grad_ready, early_chunks, early=True
+            )
         else:
             self._start_backward_after(self._grad_ready, early=True)
 
@@ -530,7 +584,9 @@ class PhaseSharedExpertController:
             else self._backward_done
         )
         if ready is None:
-            raise RuntimeError("early shared backward did not record its completion event")
+            raise RuntimeError(
+                "early shared backward did not record its completion event"
+            )
         stream.wait_event(ready)
 
     def wait_backward_for_weight_tail(self, stream: torch.xpu.Stream) -> None:
@@ -544,7 +600,12 @@ class PhaseSharedExpertController:
 
     def finish_backward(
         self, stream: torch.xpu.Stream
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    ) -> tuple[
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
         """Join shared gradients after routed backward returns."""
 
         if self._backward_done is None or self._result is None:

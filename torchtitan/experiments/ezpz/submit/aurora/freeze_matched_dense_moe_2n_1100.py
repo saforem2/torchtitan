@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Freeze one self-contained source image for Aurora MoE training."""
 
 import argparse
-from datetime import datetime
 import hashlib
 import json
 import os
-from pathlib import Path
 import secrets
 import subprocess
 import tarfile
+from datetime import datetime
+from pathlib import Path
 
 
 HERE = Path(__file__).resolve()
@@ -55,9 +61,7 @@ def package_files():
     return sorted(
         path
         for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix != ".pyc"
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
     )
 
 
@@ -84,7 +88,11 @@ def main():
             raise FileNotFoundError(path)
         if path.is_dir():
             continue
-        data = path.read_bytes() if not path.is_symlink() else os.readlink(str(path)).encode()
+        data = (
+            path.read_bytes()
+            if not path.is_symlink()
+            else os.readlink(str(path)).encode()
+        )
         records.append(
             {"path": relative, "sha256": sha256_bytes(data), "size": len(data)}
         )
@@ -93,7 +101,9 @@ def main():
     package_entries = []
     for path in package_files():
         relative = path.relative_to(PACKAGE).as_posix()
-        archive_name = "torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/{}".format(relative)
+        archive_name = "torchtitan/experiments/ezpz/vendor/aurora_moe_dropin/{}".format(
+            relative
+        )
         data = path.read_bytes()
         records.append(
             {"path": archive_name, "sha256": sha256_bytes(data), "size": len(data)}
@@ -112,9 +122,11 @@ def main():
         "{}  source.manifest.jsonl\n".format(manifest_sha)
     )
 
-    repo_head = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=str(REPO)
-    ).decode().strip()
+    repo_head = (
+        subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO))
+        .decode()
+        .strip()
+    )
     status = subprocess.check_output(
         ["git", "status", "--short"], cwd=str(REPO)
     ).decode()
@@ -138,8 +150,16 @@ def main():
     with tarfile.open(str(archive), "w:gz", compresslevel=6) as tar:
         for path, archive_name in repo_entries + package_entries:
             tar.add(str(path), arcname=archive_name, recursive=False)
-        tar.add(str(manifest), arcname=".codex_snapshot/source.manifest.jsonl", recursive=False)
-        tar.add(str(provenance_path), arcname=".codex_snapshot/snapshot_provenance.json", recursive=False)
+        tar.add(
+            str(manifest),
+            arcname=".codex_snapshot/source.manifest.jsonl",
+            recursive=False,
+        )
+        tar.add(
+            str(provenance_path),
+            arcname=".codex_snapshot/snapshot_provenance.json",
+            recursive=False,
+        )
 
     archive_sha = sha256_file(archive)
     provenance["source_archive_sha256"] = archive_sha

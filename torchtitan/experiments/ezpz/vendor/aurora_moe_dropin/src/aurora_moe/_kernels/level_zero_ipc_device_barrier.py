@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Persistent Level Zero IPC control counters and current-stream barriers."""
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ from torch.utils.cpp_extension import load
 from ._ipc_trace import emit_ipc_trace, ipc_trace_enabled
 from ._prebuilt_extension import load_prebuilt_ipc_extension
 from .level_zero_ipc import load_level_zero_ipc_ops
-from .level_zero_ipc_equal_a2a import _Descriptor, _client_exchange, _root_exchange
+from .level_zero_ipc_equal_a2a import _client_exchange, _Descriptor, _root_exchange
 
 
 _MODULE: ModuleType | None = None
@@ -68,7 +74,9 @@ class IpcDeviceBarrierEpoch:
         socket_path: str | os.PathLike[str] | None = None,
     ) -> None:
         if not dist.is_available() or not dist.is_initialized():
-            raise RuntimeError("initialize torch.distributed before constructing an IPC barrier")
+            raise RuntimeError(
+                "initialize torch.distributed before constructing an IPC barrier"
+            )
         if not torch.xpu.is_available():
             raise RuntimeError("Aurora XPU is required for an IPC barrier")
         self._group = group
@@ -89,7 +97,9 @@ class IpcDeviceBarrierEpoch:
         self._device = torch.device("xpu", self._device_index)
         base = socket_path or os.environ.get("AURORA_MOE_L0_IPC_BARRIER_SOCKET")
         if not base:
-            raise RuntimeError("set AURORA_MOE_L0_IPC_BARRIER_SOCKET for IPC descriptor exchange")
+            raise RuntimeError(
+                "set AURORA_MOE_L0_IPC_BARRIER_SOCKET for IPC descriptor exchange"
+            )
         self._socket_base = Path(base)
         self._ipc_bias, self._ipc_bias_flags = self._mapping_policy()
         self._import_backend = self._import_policy()
@@ -98,9 +108,10 @@ class IpcDeviceBarrierEpoch:
         self._barrier_ops = load_level_zero_ipc_device_barrier_ops()
         if self._trace_enabled:
             emit_ipc_trace(self._rank, "readiness", "init", "post_ops_load")
-        if int(self._barrier_ops.slots) != _SLOTS or int(
-            self._barrier_ops.counter_stride_words
-        ) != _COUNTER_STRIDE_WORDS:
+        if (
+            int(self._barrier_ops.slots) != _SLOTS
+            or int(self._barrier_ops.counter_stride_words) != _COUNTER_STRIDE_WORDS
+        ):
             raise RuntimeError("IPC barrier Python and SYCL control layouts disagree")
         self._control_storage: torch.Tensor | None = None
         self._local_counters: torch.Tensor | None = None
@@ -128,7 +139,9 @@ class IpcDeviceBarrierEpoch:
         policy = os.environ.get("AURORA_MOE_L0_IPC_BIAS", "default")
         flags = {"default": 0, "cached": 1, "uncached": 2}
         if policy not in flags:
-            raise ValueError("AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached")
+            raise ValueError(
+                "AURORA_MOE_L0_IPC_BIAS must be default, cached, or uncached"
+            )
         return policy, flags[policy]
 
     @staticmethod
@@ -179,7 +192,9 @@ class IpcDeviceBarrierEpoch:
         )
         offset_bytes = (-storage.data_ptr()) % _CACHE_LINE_BYTES
         if offset_bytes % _COUNTER_WORD_BYTES:
-            raise RuntimeError("could not align IPC control storage to an int64 boundary")
+            raise RuntimeError(
+                "could not align IPC control storage to an int64 boundary"
+            )
         offset_words = offset_bytes // _COUNTER_WORD_BYTES
         local = storage.narrow(0, offset_words, _SLOTS * _COUNTER_STRIDE_WORDS).view(
             _SLOTS, _COUNTER_STRIDE_WORDS
@@ -254,7 +269,9 @@ class IpcDeviceBarrierEpoch:
                 imported = imports[source]
                 if imported is None:
                     raise RuntimeError(f"missing IPC control mapping for rank {source}")
-                address = int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                address = (
+                    int(imported.mapping_address()) + descriptor.tensor_offset_bytes
+                )
             if address % _CACHE_LINE_BYTES:
                 raise RuntimeError(
                     f"IPC control mapping for rank {source} is not cache-line aligned"
@@ -402,7 +419,9 @@ class IpcDeviceBarrierEpoch:
             )
         return ordinal
 
-    def _all_gather_control_values(self, values: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
+    def _all_gather_control_values(
+        self, values: tuple[int, ...]
+    ) -> tuple[tuple[int, ...], ...]:
         local = torch.tensor(values, dtype=torch.int64, device=self._device)
         gathered = [torch.empty_like(local) for _ in range(self._world_size)]
         dist.all_gather(gathered, local, group=self._group)
@@ -519,7 +538,9 @@ class IpcDeviceBarrierEpoch:
         values = tuple(int(value) for value in self.local_counters[:, 0].cpu().tolist())
         expected = self.expected_counters()
         if strict and values != expected:
-            raise AssertionError(f"IPC barrier counters are {values}, expected {expected}")
+            raise AssertionError(
+                f"IPC barrier counters are {values}, expected {expected}"
+            )
         return values
 
     def close(self) -> None:

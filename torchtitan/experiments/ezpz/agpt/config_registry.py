@@ -1,24 +1,19 @@
-import ezpz
-import ezpz.distributed
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import json
 import os
 from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import ezpz
+import ezpz.distributed
+
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
-# a re-export shim when the optimizer components were grouped into a package
-# by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.observability.metrics import MetricsProcessor
-from torchtitan.components.optimizer import default_adamw
-from torchtitan.experiments.ezpz.optimizer.containers import (
-    default_mano,
-    default_muon,
-    default_sophiag,
-)
 from torchtitan.components.data import (
     ConcatThenSplitPackingConfig,
     GrainDataLoader,
@@ -28,17 +23,29 @@ from torchtitan.components.data.sources import (
     HuggingFaceRandomAccessSource,
     HuggingFaceStreamingSource,
 )
-from torchtitan.hf_datasets.text_datasets import TextProcessor
-from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
+
+# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
+# a re-export shim when the optimizer components were grouped into a package
+# by #4140). LRSchedulersContainer now lives in components.optimizer.
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.config.configs import CompileConfig
+from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
-from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_mano,
+    default_muon,
+    default_sophiag,
+)
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.hf_datasets.text_datasets import TextProcessor
+from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
 
@@ -103,9 +110,7 @@ def _set_fp32_residual(
     import copy
     from dataclasses import fields
 
-    from torchtitan.experiments.ezpz.agpt.fp32_residual import (
-        AgptFp32ResidualBlock,
-    )
+    from torchtitan.experiments.ezpz.agpt.fp32_residual import AgptFp32ResidualBlock
 
     # Deep-copy first: ezpz_agpt_*() can hand back a config whose model spec is
     # shared with the agpt_configs template, so mutating .layers in place would
@@ -685,9 +690,7 @@ def _agpt_2b_mds_mix_blend(
             HFDataSource(
                 dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
             ),
-            HFDataSource(
-                dataset="fineweb_edu_local", weight=edu_weight, infinite=True
-            ),
+            HFDataSource(dataset="fineweb_edu_local", weight=edu_weight, infinite=True),
         ],
         seed=42,
         stopping_strategy="all_exhausted",
@@ -756,7 +759,9 @@ def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
     textbooks: auto_math_text+khanacademy+openstax+stanford+wikihow). Tests
     whether synthetic-science textbooks in the 25% slot beat generic edu."""
     return _agpt_2b_mds_mix_blend_src(
-        0.75, "cosmopedia_science_local", 0.25,
+        0.75,
+        "cosmopedia_science_local",
+        0.25,
         "checkpoints/agpt-2b-mds-mix-owm75-cosmo25",
     )
 
@@ -767,7 +772,9 @@ def agpt_2b_mds_mix_owm_nemotron_7525() -> FaultTolerantTrainer.Config:
     HF access granted for nvidia/Nemotron-CC-Math-v1 + precache of config 4plus
     registered as nemotron_cc_math_4plus_local."""
     return _agpt_2b_mds_mix_blend_src(
-        0.75, "nemotron_cc_math_4plus_local", 0.25,
+        0.75,
+        "nemotron_cc_math_4plus_local",
+        0.25,
         "checkpoints/agpt-2b-mds-mix-owm75-nemotron25",
     )
 
@@ -858,7 +865,12 @@ def agpt_20b_flex_attn() -> FaultTolerantTrainer.Config:
 
 
 def ezpz_agpt_7b() -> FaultTolerantTrainer.Config:
-    return agpt("7b", local_batch_size=2, seq_len=4096, hf_assets_path="./assets/hf/llama-2-7b-hf")
+    return agpt(
+        "7b",
+        local_batch_size=2,
+        seq_len=4096,
+        hf_assets_path="./assets/hf/llama-2-7b-hf",
+    )
 
 
 def _load_json_overrides() -> dict[str, Any]:
@@ -1176,6 +1188,7 @@ def _use_fineweb_edu(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.C
         )
     )
     return cfg
+
 
 def _use_hf_streaming(
     cfg: FaultTolerantTrainer.Config,
@@ -1933,9 +1946,7 @@ def _set_z_loss(
             "Start from a non-chunked flavor."
         )
     vocab = getattr(cfg.loss, "global_vocab_size", None)
-    cfg.loss = CrossEntropyWithZLoss.Config(
-        z_loss_coef=coef, global_vocab_size=vocab
-    )
+    cfg.loss = CrossEntropyWithZLoss.Config(z_loss_coef=coef, global_vocab_size=vocab)
     return cfg
 
 
@@ -2075,30 +2086,7 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 
 
 # Competition speedrun configs — makes them discoverable via --config
-from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401
-    speedrun_2b_adamw,
-    speedrun_2b_adamw_cosine,
-    speedrun_2b_adamw_fast_warmup,
-    speedrun_2b_adamw_high_lr,
-    speedrun_2b_adamw_qknorm,
-    speedrun_2b_adamw_short_decay,
-    speedrun_2b_mano,
-    speedrun_2b_mano_1e3,
-    speedrun_2b_mano_cosine,
-    speedrun_2b_mano_high_lr,
-    speedrun_2b_mano_qknorm,
-    speedrun_2b_muon,
-    speedrun_2b_muon_aggressive,
-    speedrun_2b_muon_cosine,
-    speedrun_2b_muon_fast_warmup,
-    speedrun_2b_muon_qknorm,
-    speedrun_2b_muon_short_decay,
-    speedrun_2b_sophiag,
-    speedrun_2b_spam,
-    speedrun_2b_torchmuon,
-    speedrun_2b_torchmuon_cosine,
-)
-from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401
+from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401  # noqa: E402, F401
     full_2b_adamw,
     full_2b_adamw_qknorm,
     full_2b_mano,
@@ -2122,8 +2110,29 @@ from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F40
     smoke_2b_50steps,
     smoke_2b_async_ckpt,
     smoke_2b_async_ckpt_pinned,
+    speedrun_2b_adamw,
+    speedrun_2b_adamw_cosine,
+    speedrun_2b_adamw_fast_warmup,
+    speedrun_2b_adamw_high_lr,
+    speedrun_2b_adamw_qknorm,
+    speedrun_2b_adamw_short_decay,
     speedrun_2b_kitchen_sink,
+    speedrun_2b_mano,
+    speedrun_2b_mano_1e3,
+    speedrun_2b_mano_cosine,
+    speedrun_2b_mano_high_lr,
     speedrun_2b_mano_kitchen_sink,
+    speedrun_2b_mano_qknorm,
+    speedrun_2b_muon,
+    speedrun_2b_muon_aggressive,
+    speedrun_2b_muon_cosine,
+    speedrun_2b_muon_fast_warmup,
+    speedrun_2b_muon_qknorm,
+    speedrun_2b_muon_short_decay,
     speedrun_2b_relu2,
     speedrun_2b_softcap,
+    speedrun_2b_sophiag,
+    speedrun_2b_spam,
+    speedrun_2b_torchmuon,
+    speedrun_2b_torchmuon_cosine,
 )

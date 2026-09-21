@@ -26,11 +26,12 @@ def set_ezpz_max_context_length(seq_len: int) -> None:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
+
+from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
 from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
@@ -41,7 +42,6 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import get_attention_config
@@ -218,6 +218,7 @@ class SoftcappedFlexAttention(Module):
         super().__init__()
         self.logit_cap = config.logit_cap
         from torch.nn.attention.flex_attention import flex_attention
+
         self._flex_attention = torch.compile(flex_attention)
 
     # pyrefly: ignore [bad-override]
@@ -256,7 +257,9 @@ class SoftcappedFlexAttention(Module):
             return cap * torch.tanh(score / cap)
 
         out = self._flex_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             score_mod=softcap_mod,
             scale=scale,
             enable_gqa=enable_gqa,
@@ -294,13 +297,13 @@ class ReLUSquaredGLU(BinaryActivationFn):
         del kwargs
         h = F.relu(gate)
         return h * h * up
+
+
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
+from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
+from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
-from torchtitan.experiments.ezpz.agpt.state_dict_adapter import (
-    AgptStateDictAdapter,
-)
-from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
 
 __all__ = [
     "EzpzScaledDotProductAttention",
@@ -1026,14 +1029,13 @@ def model_registry(
 ) -> FaultTolerantModelSpec:
     from copy import deepcopy
 
-    from torchtitan.distributed.pipeline_parallel import pipeline_llm
-    from torchtitan.experiments.torchft.diloco import fragment_llm
     # Upstream #4684 (post-sync-84) renamed validate_converter_order ->
     # validate_converter_compatibility. Same one-arg contract: it takes the
     # converter Config list and raises on an incompatible combination.
-    from torchtitan.config.transform.converter import (
-        validate_converter_compatibility,
-    )
+    from torchtitan.config.transform.converter import validate_converter_compatibility
+
+    from torchtitan.distributed.pipeline_parallel import pipeline_llm
+    from torchtitan.experiments.torchft.diloco import fragment_llm
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,

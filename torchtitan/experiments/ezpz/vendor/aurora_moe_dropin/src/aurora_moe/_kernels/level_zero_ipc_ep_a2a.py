@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Asynchronous same-node BF16 EP all-to-all over persistent Level Zero IPC.
 
 This is the production-facing composition of the persistent push payload

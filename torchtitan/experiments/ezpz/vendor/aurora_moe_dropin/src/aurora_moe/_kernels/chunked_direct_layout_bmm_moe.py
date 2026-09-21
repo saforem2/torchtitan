@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Exact chunked local-expert BMMs for source-padded EP transport.
 
 The transport layout is ``[chunk, source, rows_per_chunk, columns]``.  It
@@ -26,7 +32,9 @@ def source_major_to_chunked(payload: torch.Tensor, chunk_rows: int) -> torch.Ten
     """Copy ``[source, cap, columns]`` payload storage into chunk-major order."""
 
     if payload.ndim != 3 or not payload.is_contiguous() or chunk_rows <= 0:
-        raise ValueError("payload must be contiguous rank-3 and chunk_rows must be positive")
+        raise ValueError(
+            "payload must be contiguous rank-3 and chunk_rows must be positive"
+        )
     sources, cap, columns = payload.shape
     chunks = math.ceil(cap / chunk_rows)
     result = payload.new_zeros((chunks, sources, chunk_rows, columns))
