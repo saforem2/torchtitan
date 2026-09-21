@@ -94,6 +94,7 @@ set -u
 # the CODE; only the runtime comes from elsewhere.
 LRF_VENV_SRC="${LRF_VENV_SRC:-}"
 LRF_VENV_DIR="${LRF_VENV_DIR:-}"
+LRF_RUNTIME_VENV=""
 
 if [[ -n "${LRF_VENV_DIR}" ]]; then
     if [[ ! -x "${LRF_VENV_DIR}/bin/ezpz" ]]; then
@@ -122,6 +123,10 @@ elif [[ -n "${LRF_VENV_SRC}" ]]; then
     source "${LRF_VENV_HOME}/bin/activate"
     log_message INFO "lr-finder: yeet-env via external tarball (${LRF_VENV_SRC})"
     ezpz yeet-env --src "${LRF_VENV_SRC}"
+    # ezpz preserves the archive's environment basename: .venv.next-eval.tar.gz
+    # stages to /tmp/.venv.next-eval, not /tmp/.venv.
+    _venv_archive="$(basename "${LRF_VENV_SRC}")"
+    LRF_RUNTIME_VENV="/tmp/${_venv_archive%.tar.gz}"
     deactivate
 elif [[ -f .venv.tar.gz ]]; then
     source .venv/bin/activate
@@ -135,7 +140,7 @@ else
     deactivate
 fi
 if [[ -z "${LRF_VENV_DIR}" ]]; then
-    source /tmp/.venv/bin/activate
+    source "${LRF_RUNTIME_VENV:-/tmp/.venv}/bin/activate"
 fi
 # The Aurora nightly wheel bundles a newer Unified Runtime loader than the
 # system module tree. Let callers opt into that ordering; Sunspot's validated
