@@ -468,6 +468,11 @@ class BlendCorpusDataLoader(BaseDataLoader):
             }
             if positions is not None:
                 out["positions"] = positions.flatten()
+            # ``build_pretraining_data_loader`` resumes from a GLOBAL consumed
+            # sample count. Advance it before yielding: the generator is
+            # suspended at ``yield``, and checkpoints are taken after the
+            # caller consumes the batch but before this frame resumes.
+            self._consumed_samples += int(self._bc_cfg.global_batch_size)
             yield out
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
