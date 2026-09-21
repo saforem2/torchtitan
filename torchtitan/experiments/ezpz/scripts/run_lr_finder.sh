@@ -29,6 +29,8 @@
 #                     N + LBS to measure the optimal LR at the actual GBS the
 #                     production chain will run at (e.g. LBS=2 for 2b 256N
 #                     gives GBS=6144 matching submit_agpt_2b_aurora_venv.sh).
+#   LRF_ACTIVE_NODES — training nodes within a larger PBS allocation; remaining
+#                     nodes are available to ezpz --spare-nodes auto.
 
 set -o pipefail
 
@@ -192,6 +194,20 @@ export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}${PYTHONPATH:+:${PYTHONPATH}}"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+# ezpz_setup_job initially reports every allocated rank. Allow an allocation to
+# reserve whole nodes for --spare-nodes auto while keeping the training world
+# size fixed. Without this, requesting extra PBS nodes also enlarges --nproc,
+# leaving auto-retry with zero actual spares.
+LRF_ACTIVE_NODES="${LRF_ACTIVE_NODES:-}"
+if [[ -n "${LRF_ACTIVE_NODES}" ]]; then
+    _allocated_nodes="${NHOSTS:-${SLURM_NNODES:-1}}"
+    _ppn="${NGPU_PER_HOST:-12}"
+    if (( LRF_ACTIVE_NODES < 1 || LRF_ACTIVE_NODES > _allocated_nodes )); then
+        echo "lr-finder FATAL: LRF_ACTIVE_NODES=${LRF_ACTIVE_NODES} must be in [1, ${_allocated_nodes}]" >&2
+        exit 2
+    fi
+    NGPUS=$(( LRF_ACTIVE_NODES * _ppn ))
+fi
 LRF_MODELS="${LRF_MODELS:-2b 20b}"
 LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw muon sophiag}"
 LRF_STEPS="${LRF_STEPS:-1000}"
