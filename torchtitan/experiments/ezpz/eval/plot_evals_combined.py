@@ -16,7 +16,7 @@ be compared directly:
     - 2B 256N async (current production comparator)
     - 2B 512N sync (canonical 2B chain)
     - 20B 256N (per-token comparator)
-    - 20B 512N sync (canonical 20B chain)
+    - 20B 512N sync -> const-LR (canonical 20B chain plus continuation)
 
 Writes to <eval-docs>/figures/all_production_evals.svg (single artifact
 referenced from the eval README as the landing-page chart). The eval docs dir
@@ -172,7 +172,7 @@ TRAJECTORIES: list[dict] = [
         "marker": "^",
     },
     {
-        "label": "20B 512N sync (GBS=12288)",
+        "label": "20B 512N sync -> const-LR (GBS=12288)",
         "eval_subdir": "agpt-20b-v2-512n",
         # The chain did not stop at 7,600. It forked to a constant LR at
         # step 9,000 and kept running; those evals land in a sibling dir
@@ -324,10 +324,16 @@ def load_dcp(
     history. So take pre-switch from the original and post-switch from the
     corrected dir.
 
+    Shot-tagged task results are pinned to ``SHOTS`` by ``_read_metric``; a
+    bare alias is used only when the file has no tagged variant for that task.
+    This prevents a later 25-shot ARC-Challenge pass from entering the 0-shot
+    aggregate curve.
+
     Chains that never switched pass ``corrected_subdir=None`` and read one dir,
-    unchanged. ``agpt-2b-v2-256n`` is deliberately in that group: it used the
-    complex convention end to end, so its results were never corrupted and
-    there is nothing to correct.
+    unchanged. Optional ``extra_subdirs`` are merged last and override earlier
+    values at duplicate steps. ``agpt-2b-v2-256n`` is deliberately in that
+    group: it used the complex convention end to end, so its results were never
+    corrupted and there is nothing to correct.
     """
 
     def _series(d: str) -> dict[int, float]:

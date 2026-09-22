@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Overlay v1 (bf16-master, broken) vs v2 (fp32-master, current) 20B
 eval scores on a single figure per task.
 
@@ -36,8 +42,8 @@ REPO_ROOT = Path(__file__).resolve().parents[7]
 # can't be conflated. Mirror docs/evals/agpt/2b/plot_eval_overview.py.
 V2_TRAJECTORIES = {
     # node_count -> (results dir, GBS)
-    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 6_144),   # LBS=2 × 256N × 12 GPUs
-    512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),  # LBS=2 × 512N × 12 GPUs (no TP)
+    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 6_144),
+    512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),
 }
 
 # BOTH 20B chains changed RoPE convention mid-flight, and every eval exported
@@ -89,12 +95,42 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # v1 (bf16-tainted) scores from the eval README. Steps × GBS=3072 × seq=8192.
 V1_RESULTS = {
-    100:   {"hellaswag": 0.2650, "arc_easy": 0.2571, "arc_challenge": 0.2560, "winogrande": 0.4957},
-    500:   {"hellaswag": 0.2562, "arc_easy": 0.2712, "arc_challenge": 0.2355, "winogrande": 0.4886},
-    1000:  {"hellaswag": 0.2549, "arc_easy": 0.2647, "arc_challenge": 0.2440, "winogrande": 0.5178},
-    1500:  {"hellaswag": 0.2505, "arc_easy": 0.2681, "arc_challenge": 0.2398, "winogrande": 0.4807},
-    2000:  {"hellaswag": 0.2480, "arc_easy": 0.2740, "arc_challenge": 0.2543, "winogrande": 0.5020},
-    2500:  {"hellaswag": 0.2462, "arc_easy": 0.2736, "arc_challenge": 0.2483, "winogrande": 0.5193},
+    100: {
+        "hellaswag": 0.2650,
+        "arc_easy": 0.2571,
+        "arc_challenge": 0.2560,
+        "winogrande": 0.4957,
+    },
+    500: {
+        "hellaswag": 0.2562,
+        "arc_easy": 0.2712,
+        "arc_challenge": 0.2355,
+        "winogrande": 0.4886,
+    },
+    1000: {
+        "hellaswag": 0.2549,
+        "arc_easy": 0.2647,
+        "arc_challenge": 0.2440,
+        "winogrande": 0.5178,
+    },
+    1500: {
+        "hellaswag": 0.2505,
+        "arc_easy": 0.2681,
+        "arc_challenge": 0.2398,
+        "winogrande": 0.4807,
+    },
+    2000: {
+        "hellaswag": 0.2480,
+        "arc_easy": 0.2740,
+        "arc_challenge": 0.2543,
+        "winogrande": 0.5020,
+    },
+    2500: {
+        "hellaswag": 0.2462,
+        "arc_easy": 0.2736,
+        "arc_challenge": 0.2483,
+        "winogrande": 0.5193,
+    },
 }
 V1_GBS = 3072  # LBS=1
 V1_SEQ = 8192
@@ -108,18 +144,20 @@ TASK_TITLES = {
     "winogrande": "Winogrande",
 }
 RANDOM_BASELINE = {
-    "hellaswag": 0.25,       # 4-way
-    "arc_easy": 0.25,        # 4-way
-    "arc_challenge": 0.25,   # 4-way
-    "winogrande": 0.50,      # 2-way
+    "hellaswag": 0.25,  # 4-way
+    "arc_easy": 0.25,  # 4-way
+    "arc_challenge": 0.25,  # 4-way
+    "winogrande": 0.50,  # 2-way
 }
 
 
 def _acc(metrics: dict, task: str) -> float | None:
     """Read the canonical metric used by the published 20B tables."""
-    keys = (("acc_norm,none", "acc,none")
-            if task in {"hellaswag", "arc_challenge"}
-            else ("acc,none", "acc_norm,none"))
+    keys = (
+        ("acc_norm,none", "acc,none")
+        if task in {"hellaswag", "arc_challenge"}
+        else ("acc,none", "acc_norm,none")
+    )
     for k in keys:
         if k in metrics:
             return float(metrics[k])
@@ -162,6 +200,10 @@ def load_v2_trajectory(
     DROPPED, never backfilled from the original: the original value there is
     the wrongly-permuted one this exists to remove, and a visible gap beats a
     plausible wrong point.
+
+    Optional `extra_bases` contain correctly exported continuation segments
+    and are merged last. Duplicate steps are allowed: later extra bases win
+    over earlier ones, and all extras win over the base/corrected splice.
     """
     out = _load_one(results_base)
     extra: dict[int, dict[str, float]] = {}
@@ -261,7 +303,11 @@ V2_STYLE = {
     # 20B 256N was a one-off NODE_FAIL run; kept here as orange (the
     # user's shared palette doesn't reserve a color for it).
     256: {"color": "#fb8c00", "marker": "^", "label_prefix": "v2 256N"},
-    512: {"color": "#1b8a3a", "marker": "D", "label_prefix": "v2 512N sync"},
+    512: {
+        "color": "#1b8a3a",
+        "marker": "D",
+        "label_prefix": "v2 512N sync -> const-LR",
+    },
 }
 
 
@@ -284,11 +330,21 @@ def plot_per_task(
         v1_y = [v1[s][task] for s in v1_steps]
 
         ax.axhline(
-            RANDOM_BASELINE[task], color="#808080", lw=1, ls=":", label="random",
+            RANDOM_BASELINE[task],
+            color="#808080",
+            lw=1,
+            ls=":",
+            label="random",
         )
         ax.plot(
-            v1_tokens, v1_y, marker="o", ms=4, lw=1.4,
-            color="#94a3b8", alpha=0.85, label=f"v1 256N (n={len(v1_steps)})",
+            v1_tokens,
+            v1_y,
+            marker="o",
+            ms=4,
+            lw=1.4,
+            color="#94a3b8",
+            alpha=0.85,
+            label=f"v1 256N (n={len(v1_steps)})",
         )
 
         # 2B-MDS reference (different model size — included to show the
@@ -298,8 +354,14 @@ def plot_per_task(
             mds_tokens = [s * MDS_TOKENS_PER_STEP / 1e9 for s in mds_steps]
             mds_y = [mds[s][task] for s in mds_steps]
             ax.plot(
-                mds_tokens, mds_y, marker="x", ms=5, lw=1.4,
-                color="C0", alpha=0.85, linestyle="--",
+                mds_tokens,
+                mds_y,
+                marker="x",
+                ms=5,
+                lw=1.4,
+                color="C0",
+                alpha=0.85,
+                linestyle="--",
                 label=f"2B-MDS SophiaG ref (n={len(mds_steps)})",
             )
 
@@ -309,7 +371,9 @@ def plot_per_task(
         for nodes, v2_traj in v2_by_nodes.items():
             if not v2_traj:
                 continue
-            style = V2_STYLE.get(nodes, {"color": "#666", "marker": "x", "label_prefix": f"v2 {nodes}N"})
+            style = V2_STYLE.get(
+                nodes, {"color": "#666", "marker": "x", "label_prefix": f"v2 {nodes}N"}
+            )
             gbs = v2_gbs[nodes]
             v2_steps = sorted(v2_traj)
             v2_tokens = [_tokens_for(s, gbs, V2_SEQ) for s in v2_steps]
@@ -319,9 +383,13 @@ def plot_per_task(
                 continue
             xs, ys = zip(*v2_pts)
             ax.plot(
-                xs, ys,
-                marker=style["marker"], ms=6, lw=1.8,
-                color=style["color"], alpha=1.0,
+                xs,
+                ys,
+                marker=style["marker"],
+                ms=6,
+                lw=1.8,
+                color=style["color"],
+                alpha=1.0,
                 label=f"{style['label_prefix']} (n={len(xs)})",
             )
             all_y_max = max(all_y_max, max(ys))
@@ -336,7 +404,8 @@ def plot_per_task(
     # directly over the climbing trajectories.
     handles, labels = axes.flat[0].get_legend_handles_labels()
     fig.legend(
-        handles, labels,
+        handles,
+        labels,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.98),
         ncol=min(len(labels), 4),
@@ -369,7 +438,7 @@ def print_table(
     for nodes in sorted(v2_by_nodes):
         v2 = v2_by_nodes[nodes]
         gbs = v2_gbs[nodes]
-        label = "v2 512N sync" if nodes == 512 else f"v2 {nodes}N"
+        label = "v2 512N sync -> const-LR" if nodes == 512 else f"v2 {nodes}N"
         for step in sorted(v2):
             s = v2[step]
             tok = _tokens_for(step, gbs, V2_SEQ)
@@ -389,7 +458,10 @@ def main() -> None:
     for nodes, (path, gbs) in V2_TRAJECTORIES.items():
         corrected_path, switch = V2_CORRECTED.get(nodes, (None, None))
         traj = load_v2_trajectory(
-            path, corrected_path, switch, V2_EXTRA.get(nodes),
+            path,
+            corrected_path,
+            switch,
+            V2_EXTRA.get(nodes),
         )
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs
