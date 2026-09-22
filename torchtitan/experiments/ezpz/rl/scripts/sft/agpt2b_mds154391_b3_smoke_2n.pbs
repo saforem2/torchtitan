@@ -14,7 +14,7 @@ BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-st
 PRETOK=/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192
 OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-b3-sft-smoke
 EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
-EXPECTED_COMMIT=__EXPECTED_COMMIT__
+EXPECTED_COMMIT=15b2f53302414a6d7516d7a7724b0527abf5f1c3
 
 source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
 export PATH="$V/bin:/opt/pbs/bin:$PATH"
