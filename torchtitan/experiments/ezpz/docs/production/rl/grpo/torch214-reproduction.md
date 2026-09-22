@@ -143,6 +143,30 @@ model/checkpoint/adapter-specific rather than a general Gloo byte-transport
 failure. The next isolation step is pre-sync versus post-sync AGPT parameter
 and logit parity across HF, TorchTitan, and the registered vLLM wrapper.
 
+### Direct AGPT bypass result
+
+Native-vLLM job `12478432` loaded the exact regenerated checkpoint-900 HF
+artifact directly, bypassing TorchTitan, Monarch, TorchStore, and the custom
+state-dict adapter. It exited 0, but all eight samples hit the 128-token limit
+and reproduced the same bad behavior: copying demonstration names, repeating
+or nesting malformed tags, unrelated explanatory/code text, and loops. Thus
+the malformed generation exists in the HF artifact before weight sync.
+
+Native-vLLM job `12478434` then loaded the pre-SFT `global_step138650` weights
+with the same tokenizer and injected chat template. All four samples likewise
+hit the 128-token limit and produced irrelevant prose, malformed markup, or
+code-like text. Checkpoint-900 changes the behavior toward more demonstration
+copying but did not create a previously coherent instruction-following model.
+
+The HF metadata is also internally inconsistent: `config.json` declares
+`bos_token_id=1` and `eos_token_id=2`, while `tokenizer_config.json` maps
+`<eos>` to 1 and `<bos>` to 2. The tested renderer and direct sampling both
+explicitly used stop token 1, so this defect should be corrected but does not
+by itself explain content corruption. The historical checkpoint-900 evals
+show useful aggregate IFEval/base-LM scores, but the present direct samples
+demonstrate that this checkpoint is not a reliable few-shot alphabet-sort
+instruction model under the reconstructed Gemma chat-template contract.
+
 ## Acceptance criteria
 
 Any corrected reproduction is complete only after all of the following:
