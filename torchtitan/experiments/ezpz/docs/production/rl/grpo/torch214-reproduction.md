@@ -110,14 +110,14 @@ However, if the names already in alphabetical order ...
 
 Another generated unrelated code:
 
-````text
+~~~~text
 Here is the Python solution for the problem:
 
 ```python
 def sort_names(names):
     return sorted(names, key=lambda x: x.startswith('Quinn', 'Omar', 'Pia'))
 ```
-````
+~~~~
 
 This establishes that the bad output is already present in the reconstructed
 HF artifact. It is not introduced by the RL synchronization path.
