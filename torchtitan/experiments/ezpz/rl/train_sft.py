@@ -577,6 +577,50 @@ def main() -> None:
             f"samples (--max_train_samples)"
         )
 
+    if use_pretokenized:
+        # TRL 0.29 no longer treats input_ids alone as fully trainer-ready: it
+        # builds a labels column and truncates inside main_process_first(). On
+        # a multi-million-row packed dataset that leaves every worker blocked
+        # in a oneCCL barrier for hours. Materialize labels after the optional
+        # smoke-test slice, then explicitly skip all TRL dataset preparation.
+        if "labels" not in dataset.column_names:
+            mask_column = (
+                "assistant_masks"
+                if "assistant_masks" in dataset.column_names
+                else "completion_mask"
+            )
+
+            def _build_pretokenized_labels(example):
+                mask = example[mask_column]
+                return {
+                    "labels": [
+                        token_id if keep else -100
+                        for token_id, keep in zip(
+                            example["input_ids"], mask, strict=True
+                        )
+                    ]
+                }
+
+            mask_columns = [
+                column
+                for column in ("assistant_masks", "completion_mask")
+                if column in dataset.column_names
+            ]
+            dataset = dataset.map(
+                _build_pretokenized_labels,
+                remove_columns=mask_columns,
+                num_proc=1,
+                desc="Building trainer-ready labels",
+            )
+            log.info(
+                f"[rank {rank}] built labels from {mask_column} for "
+                f"{len(dataset)} pre-tokenized samples"
+            )
+        config.dataset_kwargs = {
+            **(config.dataset_kwargs or {}),
+            "skip_prepare_dataset": True,
+        }
+
     trainer = SFTTrainer(
         model=model_name,
         args=config,

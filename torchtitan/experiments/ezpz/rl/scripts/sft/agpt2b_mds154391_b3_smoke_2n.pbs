@@ -80,6 +80,7 @@ echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
   --per_device_train_batch_size 1 \
   --gradient_accumulation_steps 8 \
   --dataset_num_proc 1 \
+  --max_train_samples 4096 \
   --max_length 8192 \
   --bf16 --fsdp full_shard \
   --logging_steps 1 \
