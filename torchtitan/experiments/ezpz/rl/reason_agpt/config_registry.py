@@ -51,6 +51,8 @@ on the CLI so all-zero-reward cold-start groups still assemble a batch.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import torch
 from renderers import Gemma4RendererConfig
 
@@ -68,7 +70,11 @@ from torchtitan.config import (
     TrainingConfig,
 )
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
-from torchtitan.config.transform.lora import LoRAConverter
+from torchtitan.config.transform import (
+    LinearLoRAHandler,
+    LoRATransform,
+    transform_model_config_,
+)
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import GSM8KReasonDataset
 from torchtitan.experiments.ezpz.rl.reason_agpt.env import GSM8KReasonEnv
@@ -101,15 +107,25 @@ def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     Converter order: LoRA first (wraps the base linears in frozen+adapter form),
     then the lm_head fp32 cast (RL logprob/KL math needs fp32 logits).
     """
-    return agpt_model_registry(
+    model_spec = agpt_model_registry(
         "2b-rl",
-        converters=[
-            LoRAConverter.Config(
-                rank=lora_rank, alpha=lora_alpha, target_modules=["wqkv", "wo"]
-            ),
-            LMHeadCastConverter.Config(),
-        ],
+        converters=[LMHeadCastConverter.Config()],
     )
+    model_spec.model = cast(
+        Any,
+        transform_model_config_(
+            model_spec.model,
+            [
+                LoRATransform(
+                    handlers=(LinearLoRAHandler(),),
+                    rank=lora_rank,
+                    alpha=lora_alpha,
+                    target_modules=["wqkv", "wo"],
+                )
+            ],
+        ),
+    )
+    return model_spec
 
 
 def _gsm8k_rollouter(
