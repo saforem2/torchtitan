@@ -53,5 +53,8 @@ cp "${SRC_MODEL}/config.json" "${OUT_DIR}/"
 cp "${SRC_MODEL}"/tokenizer* "${OUT_DIR}/" 2>/dev/null || true
 cp "${SRC_MODEL}/special_tokens_map.json" "${OUT_DIR}/" 2>/dev/null || true
 
+echo "[consolidate] restoring the exact SFT chat/generation contract"
+python3 "$(dirname "$0")/repair_agpt_hf_artifact.py" "${OUT_DIR}"
+
 echo "[consolidate] done -> ${OUT_DIR}"
 ls -la "${OUT_DIR}/"
