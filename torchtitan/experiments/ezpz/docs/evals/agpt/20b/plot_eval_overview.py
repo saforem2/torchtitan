@@ -66,6 +66,11 @@ V2_EXTRA = {
     512: [REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-constlr"],
 }
 
+# Correctly exported production-tail results that landed in the legacy base
+# directory. Whitelist exact steps rather than re-admitting every post-switch
+# base result, because the others were exported with the wrong RoPE flavor.
+V2_TRUSTED_BASE_STEPS = {256: {16_000}}
+
 # Pin every number to one shot count. The eval scripts write `<task>@<N>shot`
 # keys plus a bare `<task>` alias for whichever group ran LAST, so on steps
 # where a 25-shot ARC-C pass followed the 0-shot pass the bare key IS the
@@ -191,6 +196,7 @@ def load_v2_trajectory(
     corrected_base: Path | None = None,
     switch_step: int | None = None,
     extra_bases: list[Path] | None = None,
+    trusted_base_steps: set[int] | None = None,
 ) -> dict[int, dict[str, float]]:
     """Load a chain's evals, splicing corrected results over the post-switch half.
 
@@ -204,6 +210,8 @@ def load_v2_trajectory(
     Optional `extra_bases` contain correctly exported continuation segments
     and are merged last. Duplicate steps are allowed: later extra bases win
     over earlier ones, and all extras win over the base/corrected splice.
+    `trusted_base_steps` explicitly restores known-good exports that were
+    written to the legacy base directory after the RoPE switch.
     """
     out = _load_one(results_base)
     extra: dict[int, dict[str, float]] = {}
@@ -230,6 +238,9 @@ def load_v2_trajectory(
     for step, scores in corrected.items():
         if step >= switch_step:
             merged.setdefault(step, scores)
+    for step in trusted_base_steps or set():
+        if step in out:
+            merged[step] = out[step]
     # Correctly exported continuation segments win their own steps outright.
     merged.update(extra)
     for t, n in sorted(dropped.items()):
@@ -462,6 +473,7 @@ def main() -> None:
             corrected_path,
             switch,
             V2_EXTRA.get(nodes),
+            V2_TRUSTED_BASE_STEPS.get(nodes),
         )
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs

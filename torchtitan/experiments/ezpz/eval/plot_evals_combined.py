@@ -165,6 +165,9 @@ TRAJECTORIES: list[dict] = [
         "eval_subdir": "agpt-20b-v2-256n",
         "corrected_subdir": "agpt-20b-v2-256n-ropefix",
         "switch_step": 3101,
+        # This production-tail export used the corrected 20b_real flavor but
+        # was written to the legacy base directory. Admit only this exact step.
+        "trusted_base_steps": [16000],
         "layout": "dcp",
         "tokens_per_step": 6144 * 8192,
         "color": COLOR_20B_TT_256N,
@@ -313,6 +316,7 @@ def load_dcp(
     corrected_subdir: str | None = None,
     switch_step: int | None = None,
     extra_subdirs: list[str] | None = None,
+    trusted_base_steps: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """Load a chain's eval series, splicing in corrected results if it has any.
 
@@ -331,9 +335,10 @@ def load_dcp(
 
     Chains that never switched pass ``corrected_subdir=None`` and read one dir,
     unchanged. Optional ``extra_subdirs`` are merged last and override earlier
-    values at duplicate steps. ``agpt-2b-v2-256n`` is deliberately in that
-    group: it used the complex convention end to end, so its results were never
-    corrupted and there is nothing to correct.
+    values at duplicate steps. ``trusted_base_steps`` explicitly restores
+    known-good exports that landed in the legacy base directory after the RoPE
+    switch. ``agpt-2b-v2-256n`` is deliberately in the no-switch group: it used
+    the complex convention end to end, so its results were never corrupted.
     """
 
     def _series(d: str) -> dict[int, float]:
@@ -392,6 +397,9 @@ def load_dcp(
     # entire exercise, and a gap is at least visible.
     merged = {s: v for s, v in original.items() if s < switch_step}
     merged.update({s: v for s, v in corrected.items() if s >= switch_step})
+    for step in trusted_base_steps or []:
+        if step in original:
+            merged[step] = original[step]
     # Applied last so a continuation segment wins its own steps outright.
     merged.update(extra)
     return sorted(merged.items())
@@ -526,6 +534,7 @@ def main() -> None:
                     traj.get("corrected_subdir"),
                     traj.get("switch_step"),
                     traj.get("extra_subdirs"),
+                    traj.get("trusted_base_steps"),
                 )
             if not pts:
                 print(f"  [{title}] no data for {traj['label']}")
