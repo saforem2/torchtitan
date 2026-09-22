@@ -69,10 +69,14 @@ fi
 export PATH="/opt/pbs/bin:${PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
-# Preserve the production default while allowing controlled runtime A/B tests.
-# In particular, Aurora's TEST image can stall after a few otherwise-finite
-# updates with synchronous oneCCL operations enabled.
-export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"
+# Do not force synchronous oneCCL operations. Current oneCCL supports async
+# collectives, and forcing CCL_OP_SYNC=1 stalls this workload after a few
+# otherwise-finite updates on Aurora. An explicit caller value is preserved.
+if [[ -n "${CCL_OP_SYNC+x}" ]]; then
+    export CCL_OP_SYNC
+else
+    unset CCL_OP_SYNC
+fi
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"

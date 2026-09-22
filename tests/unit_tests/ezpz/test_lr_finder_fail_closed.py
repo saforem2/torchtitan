@@ -131,10 +131,12 @@ def test_runner_uses_top_level_hf_assets_option():
     assert "--job.hf-assets-path" not in text
 
 
-def test_runner_preserves_caller_ccl_op_sync():
+def test_runner_does_not_force_ccl_op_sync_and_preserves_explicit_values():
     script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
     text = script.read_text()
-    assert 'export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"' in text
+    assert 'if [[ -n "${CCL_OP_SYNC+x}" ]]' in text
+    assert "export CCL_OP_SYNC" in text
+    assert "unset CCL_OP_SYNC" in text
     assert "export CCL_OP_SYNC=1" not in text
 
 
