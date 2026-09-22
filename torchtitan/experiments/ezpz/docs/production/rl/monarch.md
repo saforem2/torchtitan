@@ -4,6 +4,11 @@
 > from 2026-07-19, not a running job -- the most recent Monarch GRPO run on
 > record is 2026-07-20. Nothing on this page is training or queued.
 
+> **2026-09-22 reproduction:** the current Torch 2.14 stack is being rerun
+> against the regenerated, hash-pinned SFT checkpoint-900 export. See
+> [Torch 2.14 Monarch GRPO reproduction](grpo/torch214-reproduction.md) for
+> job IDs, provenance, interim metrics, and final acceptance criteria.
+
 **Current status doc** for the UPSTREAM `torchtitan.experiments.rl` RL path
 (Monarch actors + TorchStore weight store + vLLM generation), vendored into
 **our** repo under `experiments/ezpz/` and verified end-to-end on Sunspot XPU.
