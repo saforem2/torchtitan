@@ -201,7 +201,7 @@ The repair is implemented in
 and integrated into consolidation and legacy staging by
 [`0f98b248e`](https://github.com/saforem2/torchtitan/commit/0f98b248eb8b9686ac7ab831a121c520006259a3).
 Fast-tokenizer compatibility was added by
-[`002218169`](https://github.com/saforem2/torchtitan/commit/0022181696f4ef6490f2439017541f2a1cfca83e).
+[`002218169`](https://github.com/saforem2/torchtitan/commit/002218169680a3ce0ef0dbd9d234668335e7e2a1).
 
 The repair installs the literal training template and sets:
 
