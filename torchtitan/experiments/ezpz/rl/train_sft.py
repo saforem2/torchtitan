@@ -659,11 +659,9 @@ def main() -> None:
 
     if rank == 0 and not ezpz_args.no_save:
         save_path = os.path.join(config.output_dir, "final")
-        try:
-            trainer.save_model(save_path)
-            log.info(f"Model saved to {save_path}")
-        except Exception as e:
-            log.warning(f"Failed to save model to {save_path}: {e}")
+        trainer.save_model(save_path)
+        tokenizer.save_pretrained(save_path)
+        log.info(f"Model and tokenizer saved to {save_path}")
 
 
 if __name__ == "__main__":

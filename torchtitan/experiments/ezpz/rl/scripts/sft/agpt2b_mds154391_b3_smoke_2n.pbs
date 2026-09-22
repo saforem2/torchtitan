@@ -1,0 +1,62 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mds154391-sft-smoke
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+PRETOK=/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-b3-sft-smoke
+EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+EXPECTED_COMMIT=__EXPECTED_COMMIT__
+
+source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=8000
+export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=8000
+export TORCH_CPP_LOG_LEVEL=ERROR
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
+export PYTHONIOENCODING="ascii:replace"
+export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/mds154391-sft-${PBS_JOBID%%.*}
+mkdir -p "$TMPDIR" "$OUT"
+cd "$WT" || exit 11
+
+commit=$(git rev-parse HEAD)
+model_sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+[[ "$commit" == "$EXPECTED_COMMIT" ]] || { echo "bad commit $commit"; exit 12; }
+[[ "$model_sha" == "$EXPECTED_MODEL_SHA" ]] || { echo "bad model sha $model_sha"; exit 13; }
+[[ -f "$PRETOK/state.json" ]] || { echo "missing dataset $PRETOK"; exit 14; }
+
+echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
+"$V/bin/ezpz" launch --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --pretokenized_dataset "$PRETOK" \
+  --model_name_or_path "$BASE" \
+  --output_dir "$OUT" \
+  --max_steps 20 \
+  --num_train_epochs 1 \
+  --learning_rate 2e-5 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 8 \
+  --max_length 8192 \
+  --bf16 --fsdp full_shard \
+  --logging_steps 1 \
+  --save_strategy steps --save_steps 10 \
+  --report_to none
+rc=$?
+echo "MDS154391_SFT_DONE rc=$rc $(date -Is)"
+exit "$rc"
