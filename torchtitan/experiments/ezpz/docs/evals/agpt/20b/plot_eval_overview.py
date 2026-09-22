@@ -81,7 +81,9 @@ SHOTS = "0shot"
 # (pre-torchtitan SophiaG, 140K steps / 7.77T tokens). Same trajectory
 # overlay used on the 2B eval page.
 MDS_RESULTS_BASE = REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds"
-MDS_RESULTS_EXTRA = [REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds-7771T"]
+MDS_RESULTS_EXTRA = [
+    REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds-7771T" / "stage3-mix"
+]
 # MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
 # (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter.
 #
@@ -292,7 +294,9 @@ def load_mds() -> dict[int, dict[str, float]]:
     for base in bases:
         if not base.exists():
             continue
-        for p in sorted(base.glob("*/step-*/results/results.json")):
+        paths = sorted(base.glob("*/step-*/results/results.json"))
+        paths += sorted(base.glob("step-*/results/results.json"))
+        for p in paths:
             try:
                 step = int(p.parent.parent.name.split("-")[1])
             except ValueError:

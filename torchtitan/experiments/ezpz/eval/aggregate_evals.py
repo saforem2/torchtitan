@@ -61,7 +61,17 @@ TASK_ORDER = [
     "mmlu", "gsm8k",
 ]
 
-SHOTS = "0shot"
+TASK_SHOTS = {
+    "hellaswag": "0shot",
+    "arc_easy": "0shot",
+    "arc_challenge": "0shot",
+    "winogrande": "0shot",
+    "piqa": "0shot",
+    "openbookqa": "0shot",
+    "boolq": "0shot",
+    "mmlu": "5shot",
+    "gsm8k": "5shot",
+}
 
 DCP_MODEL_OVERRIDES = {
     "20b": [
@@ -80,6 +90,8 @@ DCP_MODEL_OVERRIDES = {
     ],
 }
 
+MDS_EXTRA_BASES = {"2b-mds": ["agpt-2b-mds-7771T/stage3-mix"]}
+
 
 def _ordered_tasks(found):
     """TASK_ORDER first (those present), then any extras alphabetically."""
@@ -89,7 +101,7 @@ def _ordered_tasks(found):
 
 
 def _task_metrics(results: dict, task: str) -> dict | None:
-    tagged = results.get(f"{task}@{SHOTS}")
+    tagged = results.get(f"{task}@{TASK_SHOTS.get(task, '0shot')}")
     if isinstance(tagged, dict):
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
@@ -118,7 +130,8 @@ def _read_one(path: Path) -> dict[str, float]:
         payload = json.load(f)
     results = payload.get("results", payload)
     scores: dict[str, float] = {}
-    for task in results:
+    tasks = {task.split("@", 1)[0] for task in results}
+    for task in sorted(tasks):
         # mmlu logs a 'mmlu' aggregate PLUS ~57 'mmlu_<subject>' subtasks;
         # keep only the aggregate so the table/plot are not swamped.
         if task.startswith("mmlu_"):
@@ -126,13 +139,16 @@ def _read_one(path: Path) -> dict[str, float]:
         m = _task_metrics(results, task)
         if m is None:
             continue
-        acc = (m.get("acc_norm,none")
-               or m.get("acc,none")
-               or m.get("exact_match,strict-match")
-               or m.get("exact_match,none")
-               or m.get("exact_match,flexible-extract"))
-        if acc is not None:
-            scores[task] = acc
+        for key in (
+            "acc_norm,none",
+            "acc,none",
+            "exact_match,strict-match",
+            "exact_match,none",
+            "exact_match,flexible-extract",
+        ):
+            if key in m:
+                scores[task] = m[key]
+                break
     return scores
 
 
@@ -225,13 +241,19 @@ def load_results_mds(
     Returns ``{step: {task: [acc1, acc2, ...]}}`` with one entry per
     replicate found at that (step, task).
     """
-    base = evals_dir / f"agpt-{model}"  # caller passes "2b-mds" -> agpt-2b-mds
     by_step: dict[int, dict[str, list[float]]] = {}
-    for step_path in sorted(base.glob("*/step-*/results/results.json")):
-        step = int(step_path.parent.parent.name.split("-")[1])
-        scores = _read_one(step_path)
-        for task, acc in scores.items():
-            by_step.setdefault(step, {}).setdefault(task, []).append(acc)
+    bases = [evals_dir / f"agpt-{model}"]
+    bases += [evals_dir / name for name in MDS_EXTRA_BASES.get(model, [])]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        step_paths = sorted(base.glob("*/step-*/results/results.json"))
+        step_paths += sorted(base.glob("step-*/results/results.json"))
+        for step_path in step_paths:
+            step = int(step_path.parent.parent.name.split("-")[1])
+            scores = _read_one(step_path)
+            for task, acc in scores.items():
+                by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return dict(sorted(by_step.items()))
 
 
@@ -293,13 +315,21 @@ def make_plot_mds(
     model: str,
     outpath: Path,
 ) -> None:
-    """4-panel figure (one per task), mean ± stderr across replicates."""
+    """Per-task figure, mean ± stderr across replicate evals."""
     if not by_step:
         print(f"[skip] no MDS data for {model}")
         return
 
     tasks = sorted({t for s in by_step.values() for t in s})
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
+    ncols = 2 if len(tasks) > 1 else 1
+    nrows = (len(tasks) + ncols - 1) // ncols
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(7 * ncols, 5 * nrows),
+        sharex=True,
+        squeeze=False,
+    )
     axes = axes.flatten()
 
     n_replicates = max(len(by_step[s].get(tasks[0], [])) for s in by_step)
@@ -339,8 +369,9 @@ def make_plot_mds(
 
     for ax in axes[len(tasks):]:
         ax.set_visible(False)
-    for ax in axes[-2:]:
-        ax.set_xlabel("global_step")
+    for index, ax in enumerate(axes[: len(tasks)]):
+        if index // ncols == nrows - 1:
+            ax.set_xlabel("global_step")
 
     fig.suptitle(
         f"agpt_{model} — MDS SophiaG sweep ({len(by_step)} unique checkpoints, "
