@@ -61,12 +61,43 @@ TASK_ORDER = [
     "mmlu", "gsm8k",
 ]
 
+SHOTS = "0shot"
+
+DCP_MODEL_OVERRIDES = {
+    "20b": [
+        {
+            "base": "agpt-20b-v2-256n",
+            "corrected": "agpt-20b-v2-256n-ropefix",
+            "switch_step": 3101,
+            "trusted_base_steps": {16_000},
+        },
+        {
+            "base": "agpt-20b-v2-512n",
+            "corrected": "agpt-20b-v2-512n-ropefix",
+            "switch_step": 4401,
+            "extra_bases": ["agpt-20b-v2-512n-constlr"],
+        },
+    ],
+}
+
 
 def _ordered_tasks(found):
     """TASK_ORDER first (those present), then any extras alphabetically."""
     present = [t for t in TASK_ORDER if t in found]
     extras = sorted(t for t in found if t not in TASK_ORDER)
     return present + extras
+
+
+def _task_metrics(results: dict, task: str) -> dict | None:
+    tagged = results.get(f"{task}@{SHOTS}")
+    if isinstance(tagged, dict):
+        return tagged
+    if any(k.startswith(f"{task}@") for k in results):
+        return None
+    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+        return None
+    metrics = results.get(task)
+    return metrics if isinstance(metrics, dict) else None
 
 
 RANDOM_BASELINES = {
@@ -84,14 +115,16 @@ RANDOM_BASELINES = {
 
 def _read_one(path: Path) -> dict[str, float]:
     with open(path) as f:
-        d = json.load(f)
+        payload = json.load(f)
+    results = payload.get("results", payload)
     scores: dict[str, float] = {}
-    for task, m in d.items():
-        if not isinstance(m, dict):
-            continue
+    for task in results:
         # mmlu logs a 'mmlu' aggregate PLUS ~57 'mmlu_<subject>' subtasks;
         # keep only the aggregate so the table/plot are not swamped.
         if task.startswith("mmlu_"):
+            continue
+        m = _task_metrics(results, task)
+        if m is None:
             continue
         acc = (m.get("acc_norm,none")
                or m.get("acc,none")
@@ -101,6 +134,53 @@ def _read_one(path: Path) -> dict[str, float]:
         if acc is not None:
             scores[task] = acc
     return scores
+
+
+def _load_base_dir(base: Path) -> dict[int, dict[str, float]]:
+    data: dict[int, dict[str, float]] = {}
+    if not base.is_dir():
+        return data
+    for results_path in sorted(base.glob("step-*/results/results.json")):
+        step = int(results_path.parent.parent.name.split("-")[1])
+        scores = _read_one(results_path)
+        if scores:
+            data[step] = scores
+    return data
+
+
+def _load_corrected_dcp(
+    evals_dir: Path,
+    *,
+    base: str,
+    corrected: str | None = None,
+    switch_step: int | None = None,
+    extra_bases: list[str] | None = None,
+    trusted_base_steps: set[int] | None = None,
+) -> dict[int, dict[str, float]]:
+    original = _load_base_dir(evals_dir / base)
+    extra: dict[int, dict[str, float]] = {}
+    for extra_base in extra_bases or []:
+        extra.update(_load_base_dir(evals_dir / extra_base))
+    if corrected is None or switch_step is None:
+        original.update(extra)
+        return original
+
+    corrected_steps = _load_base_dir(evals_dir / corrected)
+    merged = {step: scores for step, scores in original.items() if step < switch_step}
+    for step, scores in original.items():
+        if step < switch_step:
+            continue
+        fixed = corrected_steps.get(step, {})
+        if fixed:
+            merged[step] = dict(fixed)
+    for step, scores in corrected_steps.items():
+        if step >= switch_step:
+            merged.setdefault(step, scores)
+    for step in trusted_base_steps or set():
+        if step in original:
+            merged[step] = original[step]
+    merged.update(extra)
+    return merged
 
 
 def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
@@ -113,16 +193,19 @@ def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
     that live in the -v2-{LABEL} dirs show up alongside the legacy suite.
     """
     data: dict[int, dict[str, float]] = {}
-    bases = [evals_dir / f"agpt-{model}"]
-    bases += sorted(evals_dir.glob(f"agpt-{model}-v2-*"))
-    for base in bases:
-        if not base.is_dir():
-            continue
-        for step_dir in sorted(base.glob("step-*/results/results.json")):
-            step = int(step_dir.parent.parent.name.split("-")[1])
-            scores = _read_one(step_dir)
-            if scores:
+    for step, scores in _load_base_dir(evals_dir / f"agpt-{model}").items():
+        data.setdefault(step, {}).update(scores)
+
+    overrides = DCP_MODEL_OVERRIDES.get(model)
+    if overrides is not None:
+        for override in overrides:
+            for step, scores in _load_corrected_dcp(evals_dir, **override).items():
                 data.setdefault(step, {}).update(scores)
+        return data
+
+    for base in sorted(evals_dir.glob(f"agpt-{model}-v2-*")):
+        for step, scores in _load_base_dir(base).items():
+            data.setdefault(step, {}).update(scores)
     return data
 
 

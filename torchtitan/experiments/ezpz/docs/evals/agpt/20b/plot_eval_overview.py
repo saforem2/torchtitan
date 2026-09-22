@@ -81,6 +81,7 @@ SHOTS = "0shot"
 # (pre-torchtitan SophiaG, 140K steps / 7.77T tokens). Same trajectory
 # overlay used on the 2B eval page.
 MDS_RESULTS_BASE = REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds"
+MDS_RESULTS_EXTRA = [REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds-7771T"]
 # MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
 # (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter.
 #
@@ -284,21 +285,25 @@ def load_mds() -> dict[int, dict[str, float]]:
     """2B-MDS reference layout: <stage>/step-<N>/results/results.json with 3
     stages all symlinked to the same physical ckpt dir for SophiaG. Average
     across replicates (XPU lm-eval is not bitwise-deterministic)."""
-    if not MDS_RESULTS_BASE.exists():
+    bases = [MDS_RESULTS_BASE] + MDS_RESULTS_EXTRA
+    if not any(base.exists() for base in bases):
         return {}
     by_step: dict[int, dict[str, list[float]]] = {}
-    for p in sorted(MDS_RESULTS_BASE.glob("*/step-*/results/results.json")):
-        try:
-            step = int(p.parent.parent.name.split("-")[1])
-        except ValueError:
+    for base in bases:
+        if not base.exists():
             continue
-        with p.open() as f:
-            payload = json.load(f)
-        results = payload.get("results", payload)
-        for task in TASKS:
-            m = _task_metrics(results, task)
-            if m is not None and (acc := _acc(m, task)) is not None:
-                by_step.setdefault(step, {}).setdefault(task, []).append(acc)
+        for p in sorted(base.glob("*/step-*/results/results.json")):
+            try:
+                step = int(p.parent.parent.name.split("-")[1])
+            except ValueError:
+                continue
+            with p.open() as f:
+                payload = json.load(f)
+            results = payload.get("results", payload)
+            for task in TASKS:
+                m = _task_metrics(results, task)
+                if m is not None and (acc := _acc(m, task)) is not None:
+                    by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
         step: {task: sum(vs) / len(vs) for task, vs in d.items()}
         for step, d in sorted(by_step.items())
