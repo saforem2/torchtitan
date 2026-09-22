@@ -44,22 +44,6 @@ if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
 
 
-# Routed-expert layout for the shared ``GroupedExperts`` / ``EzpzGroupedExperts``.
-# After upstream PR #3425 (41st sync, MoE [8/n] shape-suffix rename), the
-# parameters are named w{1,2,3}_E{F,D}D using Shazeer shape-suffix style.
-# Matches upstream ``deepseek_v3.sharding._GROUPED_EXPERTS_PARAM_LAYOUT``.
-# spmd.S(n), NOT DTensor Shard(n): resolve_placements feeds these through
-# spmd_type_to_dtensor_placement, which only understands spmd_types. A DTensor
-# Shard reaches it as an unrecognized object and dies with the unhelpfully
-# identical-looking "Unknown spmd type: S(1)". Matches upstream
-# deepseek_v3/sharding.py, which migrated this table; our fork missed the replay.
-_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
-    "w1_EFD": spmd.S(1),
-    "w2_EDF": spmd.S(2),
-    "w3_EFD": spmd.S(1),
-}
-
-
 def set_moe_sharding_config(
     config: "moeModel.Config",
     *,
@@ -226,5 +210,4 @@ def _set_moe_ffn_sharding(
             layer_cfg.moe,
             enable_ep=enable_ep,
             enable_sp=enable_sp,
-            expert_param_layout=_GROUPED_EXPERTS_PARAM_LAYOUT,
         )

@@ -85,6 +85,29 @@ def test_ft_trainer_composes_specialized_training_engine() -> None:
     assert issubclass(ft.FaultTolerantTrainingEngine, TrainingEngine)
 
 
+def test_ft_trainer_uses_engine_cls_hook() -> None:
+    built = []
+
+    class CustomEngine(ft.FaultTolerantTrainingEngine):
+        def __init__(self, *args, **kwargs):
+            built.append(self)
+            raise RuntimeError("engine hook used")
+
+    class CustomTrainer(ft.FaultTolerantTrainer):
+        engine_cls = CustomEngine
+
+    config = ft.FaultTolerantTrainer.Config(
+        model_spec=model_registry("debugmodel"),
+        tokenizer=None,
+        loss=CrossEntropyLoss.Config(),
+    )
+
+    with pytest.raises(RuntimeError, match="engine hook used"):
+        CustomTrainer(config)
+
+    assert type(built[0]) is CustomEngine
+
+
 def test_ft_averages_logged_loss_by_active_replica_count(monkeypatch):
     engine = Mock(
         spec=ft.FaultTolerantTrainingEngine,

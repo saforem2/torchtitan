@@ -101,6 +101,7 @@ class moeStateDictAdapter(MoEStateDictAdapter):
         1. Convert between the HF shape and the torchtitan shape.
         2. Split the GroupedExperts' weight into separate expert's weight.
         """
+        state_dict = self._native_fused_linears_to_hf(state_dict)
         to_hf_map = {v: k for k, v in self.from_hf_map.items()}
 
         hf_state_dict = {}
@@ -216,4 +217,4 @@ class moeStateDictAdapter(MoEStateDictAdapter):
                 new_key = self.from_hf_map[key]
                 state_dict[new_key] = value
 
-        return state_dict
+        return self._native_fused_linears_from_hf(state_dict)

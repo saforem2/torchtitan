@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""FaultTolerantTrainer.__init__ must set everything core's __init__ sets.
+"""The ezpz trainer must delegate execution state to TrainingEngine.
 
-`FaultTolerantTrainer` deliberately does NOT call `super().__init__()` -- it
-reimplements the body so it can interpose fault-tolerance setup. The cost is
-that any attribute upstream adds to `Trainer.__init__` silently goes missing
-here, and the run dies at step 1 with a bare AttributeError.
+Historically ``FaultTolerantTrainer`` copied ``Trainer.__init__``. Upstream now
+owns execution state in ``TrainingEngine``; copying trainer initialization is
+no longer a supported integration point.
 
 This has now happened at least twice:
 
@@ -56,29 +55,22 @@ def init_self_attrs(path: str, cls: str) -> set[str]:
     raise AssertionError(f"{cls}.__init__ not found in {path}")
 
 
+def class_bases(path: str, cls: str) -> set[str]:
+    tree = ast.parse(open(path).read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == cls:
+            return {ast.unparse(base) for base in node.bases}
+    raise AssertionError(f"{cls} not found in {path}")
+
+
 def main() -> int:
-    core = init_self_attrs(CORE, "Trainer")
-    ezpz = init_self_attrs(EZPZ, "FaultTolerantTrainer")
-    missing = sorted(core - ezpz - set(INTENTIONAL_OMISSIONS))
-
-    print(f"core Trainer.__init__      sets {len(core)} self attributes")
-    print(f"ezpz FaultTolerantTrainer  sets {len(ezpz)}")
-    if INTENTIONAL_OMISSIONS:
-        print(f"intentional omissions:     {len(INTENTIONAL_OMISSIONS)}")
-
-    if missing:
-        print()
-        print(f"FAIL: {len(missing)} attribute(s) set by core but NOT by ezpz:")
-        for m in missing:
-            print(f"    self.{m}")
-        print()
-        print("Each will AttributeError at run time. Either mirror the")
-        print("assignment in FaultTolerantTrainer.__init__ (with a comment")
-        print("naming the upstream PR), or add it to INTENTIONAL_OMISSIONS")
-        print("with a reason.")
+    bases = class_bases(EZPZ, "FaultTolerantTrainer")
+    source = open(EZPZ).read()
+    if "TorchFTTrainer" not in bases or "engine_cls" not in source:
+        print("FAIL: ezpz must extend TorchFTTrainer and select an engine_cls")
         return 1
 
-    print("\nPASS: ezpz sets every attribute core does.")
+    print("PASS: ezpz delegates execution state to a TrainingEngine.")
     return 0
 
 

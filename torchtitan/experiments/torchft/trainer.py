@@ -160,6 +160,7 @@ class FaultTolerantTrainer(Configurable):
         fault_tolerance: FaultTolerance = field(default_factory=FaultTolerance)
 
     engine: FaultTolerantTrainingEngine
+    engine_cls: type[TrainingEngine] = FaultTolerantTrainingEngine
 
     @record
     def __init__(self, config: Config):
@@ -171,7 +172,7 @@ class FaultTolerantTrainer(Configurable):
             apply_overrides(config.override, config)
         config.__post_init__()
 
-        self.engine = FaultTolerantTrainingEngine(
+        self.engine = self.engine_cls(
             config,
             model_config=model_config,
             max_num_documents=config.dataloader.max_num_documents,

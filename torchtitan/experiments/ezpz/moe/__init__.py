@@ -51,65 +51,14 @@ from .routed_experts import EzpzRoutedExperts
 
 
 def _dtensor_safe_fused_ffn_config(**kwargs):
-    """``make_ffn_config`` whose w13 init survives an unevenly sharded DTensor.
+    """Build the native stacked ``[2, F, D]`` gate/up projection config.
 
-    #4535 made the fused gate/up projection the default. Core's
-    ``_make_fused_linear_init`` (models/common/config_utils.py:58) does
-
-        gate_up = t.unflatten(0, (-1, 2))
-        gate_init(gate_up[:, 0]); up_init(gate_up[:, 1])
-
-    i.e. w13 rows INTERLEAVE gate and up: even rows gate, odd rows up.
-
-    ``parallelize_moe`` calls ``fully_shard`` with ``Shard(0)`` over the whole
-    transformer block, so ``shared_experts.w13`` (1024 rows) arrives as a
-    DTensor sharded on dim 0 across ``dp_shard``. Two failures follow:
-
-    1. ``unflatten`` on the GLOBAL DTensor demands even divisibility --
-       1024 % 24 != 0 -- raising "Cannot unflatten unevenly sharded tensor"
-       (job 12477656, 52 ranks).
-    2. Unflattening the LOCAL shard is not enough either: FSDP splits 1024
-       into 16 shards of 43 and 8 of 42, both ODD, so a shard can begin on an
-       *up* row (rank1 starts at global row 43). That raises "[-1, 2] don't
-       multiply up to dim 0 (35)" -- and had the sizes been even it would have
-       silently applied the WRONG initializer to half the ranks (job 12477667).
-
-    So the init must know each shard's GLOBAL row offset and stripe from
-    there: with offset ``o`` the local even/odd split inverts when ``o`` is
-    odd.
-
-    Wraps core rather than editing it, per the experiments-folder rule.
+    Upstream now gives the projection axis its own dimension, so FSDP shards
+    the expert dimension without splitting interleaved gate/up rows.  The old
+    offset-aware striped initializer would initialize the new layout
+    incorrectly; the core initializer is now DTensor safe.
     """
-    cfg = make_ffn_config(**kwargs)
-    if not cfg.w13.param_init or "weight" not in cfg.w13.param_init:
-        return cfg
-    core_init = cfg.w13.param_init["weight"]
-    gate_init = kwargs["w1_param_init"].get("weight")
-    up_init = kwargs["w2w3_param_init"].get("weight")
-
-    def _init_striped(t):
-        if not hasattr(t, "to_local"):
-            core_init(t)  # plain tensor: core's path is already correct
-            return
-        local = t.to_local()
-        if local.numel() == 0:
-            return
-        offset = 0
-        mesh = getattr(t, "device_mesh", None)
-        for axis, pl in enumerate(getattr(t, "placements", ())):
-            if getattr(pl, "dim", None) == 0 and mesh is not None:
-                rank = mesh.get_local_rank(axis)
-                chunk, rem = divmod(t.shape[0], mesh.size(axis))
-                offset += rank * chunk + min(rank, rem)
-        g_start = 0 if offset % 2 == 0 else 1
-        gate_rows, up_rows = local[g_start::2], local[1 - g_start :: 2]
-        if gate_init is not None and gate_rows.numel():
-            gate_init(gate_rows)
-        if up_init is not None and up_rows.numel():
-            up_init(up_rows)
-
-    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_striped}
-    return cfg
+    return make_ffn_config(**kwargs)
 
 
 from .parallelize import parallelize_moe
