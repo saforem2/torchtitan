@@ -77,6 +77,7 @@ if [[ -n "${CCL_OP_SYNC+x}" ]]; then
 else
     unset CCL_OP_SYNC
 fi
+echo "lr-finder: CCL_OP_SYNC=${CCL_OP_SYNC-<unset>}"
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"

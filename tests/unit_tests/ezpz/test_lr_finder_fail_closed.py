@@ -137,6 +137,7 @@ def test_runner_does_not_force_ccl_op_sync_and_preserves_explicit_values():
     assert 'if [[ -n "${CCL_OP_SYNC+x}" ]]' in text
     assert "export CCL_OP_SYNC" in text
     assert "unset CCL_OP_SYNC" in text
+    assert "CCL_OP_SYNC=${CCL_OP_SYNC-<unset>}" in text
     assert "export CCL_OP_SYNC=1" not in text
 
 
