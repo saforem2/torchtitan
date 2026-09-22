@@ -20,18 +20,12 @@ import torch
 import torch.distributed
 from torch.distributed import get_rank, get_world_size, is_initialized
 
+import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
+
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.config import ConfigManager
-from torchtitan.experiments.ezpz.logging import init_logger
+from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
-    ADOPTOptimizersContainer,
-    ManoOptimizersContainer,
-    MuonClipOptimizersContainer,
-    MuonOptimizersContainer,
-    ScheduleFreeOptimizersContainer,
-    SPAMOptimizersContainer,
-    SophiaGOptimizersContainer,
-    TorchMuonOptimizersContainer,
     default_adopt,
     default_mano,
     default_muon,
@@ -40,10 +34,8 @@ from torchtitan.experiments.ezpz.optimizer import (
     default_sophiag,
     default_spam,
     default_torch_muon,
+    SophiaGOptimizersContainer,
 )
-from torchtitan.experiments.ezpz.logging import logger
-
-import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
 DEFAULT_MODULE = "ezpz.agpt"
 DEFAULT_CONFIG = "ezpz_agpt_2b"
@@ -547,7 +539,9 @@ def main(args: list[str] | None = None) -> None:
             assert (
                 config.checkpointer is not None
             ), "Must configure checkpointer when creating a seed checkpoint."
-            trainer.checkpointer.save(curr_step=0, last_step=True)
+            # FaultTolerantTrainer delegates checkpoint ownership to its
+            # TrainingEngine; it does not expose ``checkpointer`` directly.
+            trainer.engine.save_checkpoint(last_step=True)
             logger.info("Created seed checkpoint")
         elif config.lr_finder.enable:
             from torchtitan.experiments.ezpz.lr_finder import run_lr_finder
@@ -581,8 +575,9 @@ if __name__ == "__main__":
     # "leaked semaphore" warnings on shutdown (the semaphores are
     # kernel-cleaned anyway when the process group dies).
     try:
-        from multiprocessing.resource_tracker import _resource_tracker as _rt
         import signal
+        from multiprocessing.resource_tracker import _resource_tracker as _rt
+
         if getattr(_rt, "_pid", None) is not None:
             os.kill(_rt._pid, signal.SIGKILL)
     except Exception:

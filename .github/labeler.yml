@@ -10,6 +10,7 @@
 "ciflow/rl":
   - torchtitan/rl/**
   - tests/rl/**
+  - tests/unit_tests/rl/**
   - scripts/rl/**
   - torchtitan/trainer.py
   - torchtitan/components/checkpointer/**

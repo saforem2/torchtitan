@@ -15,13 +15,13 @@ to the upstream training loop with a minimal substitution:
 
 Use it the same way as upstream:
 
-    python -m torchtitan.experiments.ezpz.rl.train_upstream \\
-        --module rl --config rl_grpo_qwen3_0_6b_varlen \\
-        --hf_assets_path torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B
+    python -m torchtitan.experiments.ezpz.rl.train_upstream \
+        --module alphabet_sort --config rl_grpo_qwen3_0_6b_varlen \
+        --hf_assets_path torchtitan/rl/example_checkpoint/Qwen3-0.6B
 
-The `--module rl` arg points the ConfigManager at the **upstream**
-`config_registry.py`, which is exactly what we want — we're reusing
-upstream's configs unchanged.
+The `--module alphabet_sort` argument points ConfigManager at the relocated
+upstream example's `config_registry.py`; the wrapper reuses that config
+unchanged after applying the XPU compatibility patches.
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ for _var in (
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from torchtitan.experiments.ezpz.rl.xpu_overrides import (
-    EzpzPerHostProvisioner,
     apply_all_xpu_patches,
+    EzpzPerHostProvisioner,
 )
 
 apply_all_xpu_patches()
@@ -84,10 +84,10 @@ from torchtitan.rl.controller import Controller
 
 # Re-export upstream so future maintainers know what we depend on.
 from torchtitan.rl.train import (
-    HostMeshes,
     _compute_generator_world_size,
     _compute_trainer_world_size,
     breakable_cuda_graph_env,
+    HostMeshes,
 )
 
 logger = logging.getLogger(__name__)

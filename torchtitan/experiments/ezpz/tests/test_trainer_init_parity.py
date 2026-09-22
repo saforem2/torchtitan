@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """The ezpz trainer must delegate execution state to TrainingEngine.
 
 Historically ``FaultTolerantTrainer`` copied ``Trainer.__init__``. Upstream now
@@ -63,12 +69,21 @@ def class_bases(path: str, cls: str) -> set[str]:
     raise AssertionError(f"{cls} not found in {path}")
 
 
+def test_seed_checkpoint_delegates_to_training_engine() -> None:
+    """The ezpz trainer must save seed checkpoints through its engine."""
+    entrypoint = os.path.join(HERE, "..", "train.py")
+    source = open(entrypoint).read()
+    assert "trainer.engine.save_checkpoint(last_step=True)" in source
+    assert "trainer.checkpointer.save(" not in source
+
+
 def main() -> int:
     bases = class_bases(EZPZ, "FaultTolerantTrainer")
     source = open(EZPZ).read()
     if "TorchFTTrainer" not in bases or "engine_cls" not in source:
         print("FAIL: ezpz must extend TorchFTTrainer and select an engine_cls")
         return 1
+    test_seed_checkpoint_delegates_to_training_engine()
 
     print("PASS: ezpz delegates execution state to a TrainingEngine.")
     return 0
