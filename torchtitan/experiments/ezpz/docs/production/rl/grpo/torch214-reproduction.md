@@ -95,6 +95,27 @@ Monarch/GRPO rollout run or archived 20B rollout JSONL was found; existing
 AGPT-20B records cover training, scaling, and evaluation rather than this RL
 generation path.
 
+### Forced-Gloo TorchStore A/B
+
+Job `12478413` forced TorchStore's data transport to Gloo with
+`TORCHTITAN_TORCHSTORE_TRANSPORT=gloo` and disabled TorchStore XCCL, while
+leaving TorchTitan's XPU training collectives unchanged. The run used commit
+`4f16c6a9b1d9369550e428412e9a96eb6aed21f5` and the same model hash above.
+It completed with PBS `Exit_status=0`; TorchStore moved the approximately 8 GB
+state at 2.39 GB/s on put and 2.56 GB/s on get, and training produced nonzero
+loss and gradient.
+
+The four captured rollouts nevertheless remained malformed and all reached
+the 128-token limit. They copied the demonstration names, repeated malformed
+blocks and `<end_of_turn>`, or answered with irrelevant Python code. Forced
+Gloo therefore did **not** fix generation quality. This rules out the
+same-host SharedMemory-versus-Gloo transport choice as the cause, but does not
+yet rule out a bug above the byte transport layer (state-dict adaptation,
+parameter-name mapping, dtype/layout conversion, or model/tokenizer lineage).
+Because automatic TorchStore selection prefers SharedMemory on a colocated
+single-node topology, a true cross-node XCCL-versus-Gloo comparison remains a
+separate test.
+
 ## Acceptance criteria
 
 Any corrected reproduction is complete only after all of the following:
