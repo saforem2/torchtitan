@@ -116,6 +116,33 @@ Because automatic TorchStore selection prefers SharedMemory on a colocated
 single-node topology, a true cross-node XCCL-versus-Gloo comparison remains a
 separate test.
 
+### Known-good Qwen3-0.6B control
+
+To distinguish a platform-wide vLLM/TorchStore fault from an AGPT-specific
+problem, the official `Qwen/Qwen3-0.6B` checkpoint was tested with identical
+alphabet-sort prompts. The staged `model.safetensors` SHA-256 was
+`f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b`.
+
+Direct vLLM job `12478419` used the XPU Triton attention backend and exited 0.
+Seven of eight outputs were exact, correctly sorted tagged blocks; the eighth
+had the correct sorted names but omitted only the closing tag. There was no
+repetition or gibberish.
+
+TorchTitan/TorchStore job `12478425` loaded the same checkpoint through the
+TorchTitan Qwen adapter, forced `TransportType.Gloo`, synchronized weights into
+the generator, generated rollouts, ran backward and AdamW, saved a checkpoint,
+and exited 0. All four recorded rollouts terminated normally and were coherent
+tagged answers. Two preserved a concatenated name exactly; two split its first
+and last name over adjacent lines, but none copied the demonstration names,
+looped, or produced character soup. Step 1 reported reward 0.70, loss -0.0010,
+and gradient norm 0.36.
+
+This control demonstrates that vLLM XPU and TorchStore Gloo can preserve a
+known-good model through the complete RL path. The AGPT failure is therefore
+model/checkpoint/adapter-specific rather than a general Gloo byte-transport
+failure. The next isolation step is pre-sync versus post-sync AGPT parameter
+and logit parity across HF, TorchTitan, and the registered vLLM wrapper.
+
 ## Acceptance criteria
 
 Any corrected reproduction is complete only after all of the following:
