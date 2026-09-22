@@ -54,7 +54,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import torch
-from renderers import Gemma4RendererConfig
+from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
@@ -204,10 +204,10 @@ def _agpt_grpo_config(
         ),
         compile=CompileConfig(backend="aot_eager"),
         rollouter=_gsm8k_rollouter(max_steps=max_steps, num_samples=num_samples),
-        # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
-        # ckpt dir must carry a chat_template. enable_thinking=False: the gemma/auto
-        # renderer has no reasoning channel; reasoning is prompt-driven + regex-scored.
-        renderer=from_renderers(Gemma4RendererConfig()),
+        # AuroraGPT uses the original Gemma chat template with
+        # <start_of_turn>/<end_of_turn>. Use the checkpoint's own Jinja template;
+        # reasoning remains prompt-driven and regex-scored.
+        renderer=from_renderers(DefaultRendererConfig()),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),

@@ -38,7 +38,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import torch
-from renderers import Gemma4RendererConfig
+from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
@@ -183,10 +183,10 @@ def _agpt_grpo_config(
             max_names_per_turn=max_names_per_turn,
             shaped=shaped_reward,
         ),
-        # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
-        # ckpt dir must carry a chat_template (SFT gemma template injected at staging
-        # time -- scripts/stage_agpt2b.sh).
-        renderer=from_renderers(Gemma4RendererConfig()),
+        # AuroraGPT uses the original Gemma chat template with
+        # <start_of_turn>/<end_of_turn>. Gemma4RendererConfig expects the newer
+        # <|turn> vocabulary, so use the checkpoint's own Jinja template.
+        renderer=from_renderers(DefaultRendererConfig()),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),
