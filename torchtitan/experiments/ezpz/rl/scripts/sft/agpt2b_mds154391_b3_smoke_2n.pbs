@@ -17,7 +17,10 @@ OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-b3-sf
 EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
 EXPECTED_CODE_COMMIT=15b2f53302414a6d7516d7a7724b0527abf5f1c3
 
-source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
+# The login environment already provides Sunspot's oneAPI compiler module,
+# MPICH, Cray PALS, and Cray libfabric. Do not source Intel's standalone
+# setvars.sh here: it prepends Intel MPI/libfabric paths and contaminates the
+# PALS-launched workers even when the launcher executable itself is correct.
 export PATH="$V/bin:/opt/pbs/bin:$PATH"
 export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -56,7 +59,7 @@ echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
 "$MPIEXEC" --version
 "$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
   "$V/bin/python" -c \
-  'from mpi4py import MPI; print(f"MPI_PREFLIGHT rank={MPI.COMM_WORLD.rank} size={MPI.COMM_WORLD.size} host={MPI.Get_processor_name()}")' \
+  'from mpi4py import MPI; v=MPI.Get_library_version(); assert "MPICH" in v and "Intel(R) MPI" not in v, v; print(f"MPI_PREFLIGHT rank={MPI.COMM_WORLD.rank} size={MPI.COMM_WORLD.size} host={MPI.Get_processor_name()}")' \
   || exit 17
 
 "$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
