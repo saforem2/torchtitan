@@ -84,7 +84,7 @@ echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
   --max_length 8192 \
   --bf16 --fsdp full_shard \
   --logging_steps 1 \
-  --save_strategy steps --save_steps 10 \
+  --save_strategy no \
   --report_to none
 rc=$?
 echo "MDS154391_SFT_DONE rc=$rc $(date -Is)"

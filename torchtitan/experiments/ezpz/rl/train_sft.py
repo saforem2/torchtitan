@@ -181,9 +181,16 @@ class EzpzSFTArgs:
             )
 
 
+_EZPZ_SFT_CONFIG_CLS = None
+
+
 def _ezpz_sft_config_cls():
     """Build EzpzSFTConfig lazily so importing this module doesn't drag
     in TRL/transformers (which pull in torch)."""
+
+    global _EZPZ_SFT_CONFIG_CLS
+    if _EZPZ_SFT_CONFIG_CLS is not None:
+        return _EZPZ_SFT_CONFIG_CLS
 
     from trl import SFTConfig
 
@@ -276,6 +283,14 @@ def _ezpz_sft_config_cls():
                 self.model_init_kwargs = mik
             super().__post_init__()
 
+    # Trainer checkpoints pickle TrainingArguments. A function-local class is
+    # otherwise unpickleable (job 12478482 reached step 10, wrote model
+    # weights, then failed saving training_args.bin). Publish a stable module
+    # identity while retaining lazy TRL import behavior.
+    EzpzSFTConfig.__module__ = __name__
+    EzpzSFTConfig.__qualname__ = "EzpzSFTConfig"
+    globals()["EzpzSFTConfig"] = EzpzSFTConfig
+    _EZPZ_SFT_CONFIG_CLS = EzpzSFTConfig
     return EzpzSFTConfig
 
 
