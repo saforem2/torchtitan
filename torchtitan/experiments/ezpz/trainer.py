@@ -601,7 +601,12 @@ class FaultTolerantTrainer(TorchFTTrainer):
             f"({engine.model_device_mem_stats.max_reserved_pct:.2f}%)"
         )
 
-        if config.validator is not None:
+        validator_config = config.validator
+        validator_enabled = validator_config is not None and getattr(
+            validator_config, "enable", True
+        )
+        if validator_enabled:
+            assert validator_config is not None
             pp_schedule, pp_has_first_stage, pp_has_last_stage = (
                 (
                     engine.pp_schedule,
@@ -611,7 +616,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 if parallel_dims.pp_enabled
                 else (None, None, None)
             )
-            self.validator = config.validator.build(
+            self.validator = validator_config.build(
                 parallelism=config.parallelism,
                 dp_world_size=dp_degree,
                 dp_rank=dp_rank,
@@ -961,6 +966,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
                         if (
                             self.config.validator is not None
+                            and getattr(self.config.validator, "enable", True)
                             and self.validator.should_validate(engine.num_completed_steps)
                         ):
                             self.validator.validate(

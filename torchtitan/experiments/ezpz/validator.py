@@ -32,7 +32,12 @@ from torchtitan.tools import utils
 class EzpzValidator(Validator):
     @dataclass(kw_only=True, slots=True)
     class Config(Validator.Config):
-        pass
+        # Keep the established ezpz launcher contract while upstream models
+        # validation as an optional component. Production launchers still use
+        # --validator.enable/--validator.no-enable, so the trainer gates build
+        # and execution on this field until those launchers are migrated as a
+        # separate change.
+        enable: bool = False
 
     def __init__(self, *args, **kwargs):
         # Capture job_config before delegating so we can pass training_steps
