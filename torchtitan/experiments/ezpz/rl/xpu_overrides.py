@@ -206,12 +206,20 @@ class EzpzPerHostProvisioner:
             import sys as _sys
 
             _candidate_keys = [
-                "LOCAL_RANK", "RANK", "WORLD_SIZE",
-                "MONARCH_RANK", "MONARCH_LOCAL_RANK", "MONARCH_WORLD_SIZE",
-                "HYPERACTOR_RANK", "HYPERACTOR_LOCAL_RANK",
-                "PALS_LOCAL_RANKID", "PALS_RANKID",
-                "PMI_RANK", "PMI_LOCAL_RANK",
-                "PMIX_RANK", "PMIX_LOCAL_RANK",
+                "LOCAL_RANK",
+                "RANK",
+                "WORLD_SIZE",
+                "MONARCH_RANK",
+                "MONARCH_LOCAL_RANK",
+                "MONARCH_WORLD_SIZE",
+                "HYPERACTOR_RANK",
+                "HYPERACTOR_LOCAL_RANK",
+                "PALS_LOCAL_RANKID",
+                "PALS_RANKID",
+                "PMI_RANK",
+                "PMI_LOCAL_RANK",
+                "PMIX_RANK",
+                "PMIX_LOCAL_RANK",
             ]
             _hits = {k: os.environ[k] for k in _candidate_keys if k in os.environ}
             _monarch_kv = {
@@ -553,6 +561,7 @@ def patch_torch_xpu_set_device_for_single_tile() -> None:
     # use a sys.audit hook... actually simpler: just override the
     # __getitem__ via instance method swap.
     import os as _os
+
     _orig_getitem = _os.environ.__class__.__getitem__
 
     def _patched_getitem(self, key):
@@ -613,9 +622,7 @@ def patch_torch_cuda_aliases_for_xpu() -> None:
 
     _aliased._xpu_aliased = True  # type: ignore[attr-defined]
     torch.cuda.current_device = _aliased
-    logger.info(
-        "Aliased torch.cuda.current_device → torch.xpu.current_device (XPU)"
-    )
+    logger.info("Aliased torch.cuda.current_device → torch.xpu.current_device (XPU)")
 
 
 def patch_dtensor_make_replicate_for_xpu() -> None:
@@ -663,9 +670,7 @@ def patch_dtensor_make_replicate_for_xpu() -> None:
         # etc.) all hits are deterministic re-computation, not broadcast.
         my_coordinate = device_mesh.get_coordinate()
         if my_coordinate is None:
-            return local_tensor.new_empty(
-                0, requires_grad=local_tensor.requires_grad
-            )
+            return local_tensor.new_empty(0, requires_grad=local_tensor.requires_grad)
         return local_tensor.contiguous()
 
     _patched._xpu_patched = True
@@ -741,6 +746,7 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
         torch.cuda.set_stream = torch.xpu.set_stream
         try:
             from vllm.v1.worker.xpu_model_runner import supports_xpu_graph
+
             if supports_xpu_graph():
                 torch.cuda.graph = torch.xpu.graph
                 torch.cuda.CUDAGraph = torch.xpu.XPUGraph
@@ -834,11 +840,7 @@ def patch_vllm_xpu_skip_oneccl_warmup() -> None:
 
     def patched_all_reduce(tensor, *args, **kwargs):
         # Cheap inspection: only suppress the literal warmup tensor.
-        if (
-            tensor is not None
-            and tensor.numel() == 1
-            and tensor.device.type == "xpu"
-        ):
+        if tensor is not None and tensor.numel() == 1 and tensor.device.type == "xpu":
             # Check the call stack one frame up.
             import sys as _sys
 

@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, cast
 
-import ezpz
-
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
@@ -49,7 +47,6 @@ from torchtitan.experiments.torchft.trainer import (
     FaultTolerantTrainingEngine as TorchFTTrainingEngine,
 )
 from torchtitan.models.common.aux_loss import collect_aux_loss_metrics
-from torchtitan.observability import structured_logger as sl
 from torchtitan.training_engine import TrainingEngine
 
 
@@ -153,7 +150,6 @@ def _set_pg_timeouts_xpu_aware(
         )
 
 
-
 class _DictTrainingMicrobatch(TrainingMicrobatch):
     """Adapter for ezpz dataloaders that still yield batch dictionaries."""
 
@@ -184,11 +180,11 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     _last_grad_norm: float | None
 
     def _initialize_distributed_runtime(self) -> None:
-        from torchtitan.experiments.ezpz.xccl_split_group_workaround import (
-            maybe_install_xccl_split_group_workaround,
-        )
         from torchtitan.experiments.ezpz.gloo_new_group_workaround import (
             maybe_install_gloo_new_group_workaround,
+        )
+        from torchtitan.experiments.ezpz.xccl_split_group_workaround import (
+            maybe_install_xccl_split_group_workaround,
         )
 
         maybe_install_xccl_split_group_workaround()
@@ -273,7 +269,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         self._history_bridge = None
         self._last_grad_norm = None
         config = self.config
-        if getattr(config, "diagnostics", False) or getattr(config, "history_bridge", False):
+        if getattr(config, "diagnostics", False) or getattr(
+            config, "history_bridge", False
+        ):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
             from torchtitan.experiments.ezpz.diagnostics.history_bridge import (
                 HistoryBridge,
@@ -321,7 +319,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         if hasattr(self, "checkpointer"):
             self.checkpointer.maybe_wait_for_staging()
 
-        step_is_finite = self.loss_is_finite.logical_and(torch.isfinite(grad_norm).all())
+        step_is_finite = self.loss_is_finite.logical_and(
+            torch.isfinite(grad_norm).all()
+        )
         if bool(step_is_finite.item()):
             self.optimizers.step()
         else:
@@ -339,9 +339,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         self._last_grad_norm = float(grad_norm.item())
         return grad_norm
 
-    def _capture_nonfinite_gradients(
-        self, step: int, grad_norm: torch.Tensor
-    ) -> None:
+    def _capture_nonfinite_gradients(self, step: int, grad_norm: torch.Tensor) -> None:
         try:
             from torchtitan.experiments.ezpz import diagnostics as _diag_nan
 
@@ -431,7 +429,10 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         if self._history_bridge is not None and self._history_bridge.enabled:
             extra_metrics.update(
                 self._history_bridge.update(
-                    {"loss": float(loss.detach().item()), "grad_norm": float(grad_norm.item())},
+                    {
+                        "loss": float(loss.detach().item()),
+                        "grad_norm": float(grad_norm.item()),
+                    },
                     step=step,
                 )
             )
@@ -445,7 +446,6 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def close(self) -> None:
         super().close()
         xpu_graph_teardown()
-
 
 
 class FaultTolerantTrainer(TorchFTTrainer):
@@ -876,7 +876,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
         logger.info(f"Training starts at step {engine.num_completed_steps + 1}")
 
         leaf_folder = (
-            "" if not engine.ft_manager.enabled else f"replica_{engine.ft_manager.replica_id}"
+            ""
+            if not engine.ft_manager.enabled
+            else f"replica_{engine.ft_manager.replica_id}"
         )
         profiler = config.profiler.build(
             global_step=engine.num_completed_steps,
@@ -957,9 +959,13 @@ class FaultTolerantTrainer(TorchFTTrainer):
                                 consecutive_nonfinite = 0
 
                         saved_this_step = engine.save_checkpoint(
-                            last_step=(engine.num_completed_steps == config.training.steps)
+                            last_step=(
+                                engine.num_completed_steps == config.training.steps
+                            )
                         )
-                        if self._maybe_stop_for_walltime(wall_deadline, saved_this_step):
+                        if self._maybe_stop_for_walltime(
+                            wall_deadline, saved_this_step
+                        ):
                             break
                         if self._maybe_stop_for_signal(saved_this_step):
                             break
@@ -967,7 +973,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
                         if (
                             self.config.validator is not None
                             and getattr(self.config.validator, "enable", True)
-                            and self.validator.should_validate(engine.num_completed_steps)
+                            and self.validator.should_validate(
+                                engine.num_completed_steps
+                            )
                         ):
                             self.validator.validate(
                                 engine.model_parts, engine.num_completed_steps

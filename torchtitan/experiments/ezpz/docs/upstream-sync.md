@@ -1638,7 +1638,7 @@ from `get_attention_config()`, and our `_ezpz_get_attention_config`
 
 | Commit | Title | ezpz impact |
 |---|---|---|
-| `e6adf26b1` | Fix experiemental CI trigger condition + RL CI editable install (#3541) | None — experimental/rl CI, not ezpz |
+| `e6adf26b1` | Fix experimental CI trigger condition + RL CI editable install (#3541) | None — experimental/rl CI, not ezpz |
 | `0f929e734` | `[rl] PR2/N — AlphabetSort task; remove SumDigits (#3582)` | None — experimental/rl task registry, separate from ezpz/rl |
 | `873868905` | `[rl] PR 1/N - rollout logger (#3581)` | None — experimental/rl |
 | **`169545712`** | **`[BE] deprecate SDPA and causal mask_type for language models (#3571)`** | **Replay required** — see below |

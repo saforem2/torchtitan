@@ -18,7 +18,7 @@ from torchtitan.models.utils import MoEStateDictAdapter
 from .model import moeModel
 
 
-class moeStateDictAdapter(MoEStateDictAdapter):
+class moeStateDictAdapter(MoEStateDictAdapter):  # noqa: N801
     """
     StateDictAdapter for moe model.
     """

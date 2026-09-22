@@ -45,16 +45,16 @@ class GSM8KReasonWorker(RolloutWorker):
                 truncation_reward=0.0,
             )
         )
-        message_env: GSM8KReasonEnv.Config = field(default_factory=GSM8KReasonEnv.Config)
+        message_env: GSM8KReasonEnv.Config = field(
+            default_factory=GSM8KReasonEnv.Config
+        )
         token_env: TokenEnv.Config = field(
             default_factory=lambda: TokenEnv.Config(
                 max_rollout_tokens=2048, max_num_turns=1
             )
         )
         advantage: AdvantageEstimator.Config = field(
-            default_factory=lambda: AdvantageEstimator.Config(
-                should_std_normalize=True
-            )
+            default_factory=lambda: AdvantageEstimator.Config(should_std_normalize=True)
         )
 
 

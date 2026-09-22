@@ -46,19 +46,15 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer, default_adamw
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.components.renderer import from_renderers
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TrainingConfig,
-)
-from torchtitan.config.transform.cast_linear import LMHeadCastConverter
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,
     transform_model_config_,
 )
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
@@ -67,11 +63,7 @@ from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
 )
 from torchtitan.models.common.config_utils import decoder_vocab_size
-from torchtitan.rl.controller import (
-    AsyncLoopConfig,
-    Controller,
-    ValidationConfig,
-)
+from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
 from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
 from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
 from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
@@ -162,9 +154,7 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
-    model_spec = _agpt_rl_model_spec(
-        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
-    )
+    model_spec = _agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
     return Controller.Config(
         model_spec=model_spec,
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
@@ -258,6 +248,7 @@ def rl_grpo_lora_agpt_2b_easy() -> Controller.Config:
 
 # --- "beat v5" sweep (2026-07-19): all on the easy task (the winner), each
 # --- combining/extending the levers v5/v6 left on the table. ---
+
 
 def rl_grpo_lora_agpt_2b_w1() -> Controller.Config:
     """w1 = v5 easy task + v6's higher LR (5e-5). The untested v5xv6 combo:

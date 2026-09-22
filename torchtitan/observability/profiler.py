@@ -13,7 +13,6 @@ import pickle
 import time
 from dataclasses import dataclass
 
-import tyro
 import torch
 
 from torchtitan.config import Configurable

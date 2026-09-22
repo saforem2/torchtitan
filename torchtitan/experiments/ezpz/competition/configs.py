@@ -23,12 +23,6 @@ from torchtitan.experiments.ezpz.optimizer import (
     default_sophiag,
     default_spam,
     default_torch_muon,
-    ManoOptimizersContainer,
-    MuonOptimizersContainer,
-    ScheduleFreeOptimizersContainer,
-    SPAMOptimizersContainer,
-    SophiaGOptimizersContainer,
-    TorchMuonOptimizersContainer,
 )
 
 # Fixed competition parameters — same for all configs

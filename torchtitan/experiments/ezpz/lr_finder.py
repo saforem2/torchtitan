@@ -274,9 +274,14 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         # If file exists with outdated header, rename as backup.
         csv_path = os.path.join(out_dir, "lr_finder_data.csv")
         new_header = [
-            "learning_rate", "loss",
-            "timestamp", "job_id", "hostname", "world_size",
-            "global_batch_size", "seq_len",
+            "learning_rate",
+            "loss",
+            "timestamp",
+            "job_id",
+            "hostname",
+            "world_size",
+            "global_batch_size",
+            "seq_len",
         ]
         write_header = True
         if os.path.isfile(csv_path):
@@ -299,11 +304,18 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             if write_header:
                 writer.writerow(new_header)
             for lr, loss in zip(lrs, losses):
-                writer.writerow([
-                    lr, loss,
-                    run_timestamp, job_id, hostname, world_size,
-                    global_batch_size, seq_len,
-                ])
+                writer.writerow(
+                    [
+                        lr,
+                        loss,
+                        run_timestamp,
+                        job_id,
+                        hostname,
+                        world_size,
+                        global_batch_size,
+                        seq_len,
+                    ]
+                )
         logger.info(f"LR Finder: appended {len(lrs)} rows to {csv_path}")
 
         # NPZ
@@ -322,9 +334,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
 
         # Derivative-based optimal LR analysis
         try:
-            blow_up_lrs = find_optimal_lr(
-                lrs, losses, smooth_frac=config.smooth_frac
-            )
+            blow_up_lrs = find_optimal_lr(lrs, losses, smooth_frac=config.smooth_frac)
             if blow_up_lrs:
                 suggested = blow_up_lrs[0] / 10
                 logger.info(
@@ -390,9 +400,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             # eval / docs charts. apply_style is import-safe in the XPU
             # training .venv (loads the stylesheet from file rather than
             # importing ambivalent, which would pull IPython).
-            from torchtitan.experiments.ezpz.utils.plot_style import (
-                apply_style,
-            )
+            from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
             apply_style()
 
@@ -442,9 +450,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         except ImportError:
             logger.warning("matplotlib not available, skipping plot output")
 
-        logger.info(
-            f"LR Finder complete. {len(lrs)} data points saved to {out_dir}/"
-        )
+        logger.info(f"LR Finder complete. {len(lrs)} data points saved to {out_dir}/")
 
     # Synchronize all ranks before exit
     if dist.is_initialized():

@@ -14,7 +14,7 @@ import torch
 from torch.multiprocessing.spawn import spawn
 
 from torchtitan.components.loss import CrossEntropyLoss, MSELoss
-from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.config import TrainingConfig
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.ezpz.agpt import parallelize as agpt_parallelize
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig

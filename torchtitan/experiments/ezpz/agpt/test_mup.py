@@ -29,8 +29,7 @@ import torch
 from torchtitan.components.checkpointer.utils import canonical_fqn
 from torchtitan.components.optimizer.optimizer import OptimizersContainer
 from torchtitan.distributed.activation_checkpoint import FullAC
-from torchtitan.experiments.ezpz.agpt import agpt_configs
-from torchtitan.experiments.ezpz.agpt import mup as M
+from torchtitan.experiments.ezpz.agpt import agpt_configs, mup as M
 
 ETA = 8e-4
 
@@ -95,8 +94,7 @@ def test_ladder_varies_width_only():
             c.vocab_size,
             c.layers[0].attention.n_heads // c.layers[0].attention.n_kv_heads,
             # w13 packs gate and up, so out_features is 2*hidden_dim.
-            (c.layers[0].feed_forward.w13.out_features / 2)
-            / c.layers[0].attention.dim,
+            (c.layers[0].feed_forward.w13.out_features / 2) / c.layers[0].attention.dim,
         )
         for c in rungs
     ]
@@ -172,8 +170,11 @@ def test_attention_scale_reaches_the_kernel():
     ).build()
     q, k, v = (torch.randn(2, 5, 4, 8) for _ in range(3))
     ref = F.scaled_dot_product_attention(
-        q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-        scale=0.5, is_causal=True,
+        q.transpose(1, 2),
+        k.transpose(1, 2),
+        v.transpose(1, 2),
+        scale=0.5,
+        is_causal=True,
     ).transpose(1, 2)
     assert torch.allclose(a(q, k, v), ref, atol=1e-6)
 
@@ -247,8 +248,14 @@ def test_param_groups_cover_qk_norm_and_fused_qkv():
     """
     for kw in ({}, {"qk_norm": True}):
         cfg = M.build_mup_agpt_config(
-            dim=512, base_dim=256, n_layers=3, n_heads=8, n_kv_heads=2,
-            vocab_size=1000, hidden_dim=2048, **kw,
+            dim=512,
+            base_dim=256,
+            n_layers=3,
+            n_heads=8,
+            n_kv_heads=2,
+            vocab_size=1000,
+            hidden_dim=2048,
+            **kw,
         )
         with torch.device("meta"):
             model = cfg.build()
@@ -256,7 +263,9 @@ def test_param_groups_cover_qk_norm_and_fused_qkv():
         rep = M.summarize_mup_param_groups(
             model, M.default_mup_adamw(ETA, dim=512, base_dim=256).param_groups
         )
-        assert not rep["unclaimed"] and not rep["empty_groups"] and not rep["misrouted"], kw
+        assert (
+            not rep["unclaimed"] and not rep["empty_groups"] and not rep["misrouted"]
+        ), kw
 
 
 def test_real_optimizer_moves_hidden_group_by_one_over_m():
@@ -314,8 +323,14 @@ def test_weight_tying_is_rejected():
     # and the guard that keeps it from getting that far
     try:
         M.build_mup_agpt_config(
-            dim=256, base_dim=256, n_layers=2, n_heads=4, n_kv_heads=1,
-            vocab_size=1000, hidden_dim=512, enable_weight_tying=True,
+            dim=256,
+            base_dim=256,
+            n_layers=2,
+            n_heads=4,
+            n_kv_heads=1,
+            vocab_size=1000,
+            hidden_dim=512,
+            enable_weight_tying=True,
         )
     except ValueError as e:
         assert "weight tying" in str(e)
@@ -327,8 +342,14 @@ def test_unsupported_attention_paths_are_rejected():
     for kw in ({"logit_softcap": 30.0}, {"attn_backend": "flex"}):
         try:
             M.build_mup_agpt_config(
-                dim=256, base_dim=256, n_layers=2, n_heads=4, n_kv_heads=1,
-                vocab_size=1000, hidden_dim=512, **kw,
+                dim=256,
+                base_dim=256,
+                n_layers=2,
+                n_heads=4,
+                n_kv_heads=1,
+                vocab_size=1000,
+                hidden_dim=512,
+                **kw,
             )
         except ValueError:
             continue
@@ -346,8 +367,12 @@ def test_independent_weight_decay_makes_lr_times_wd_width_invariant():
 
 
 def test_trainer_configs_build():
-    for name in ("mup_1536_adamw", "mup_3072_adamw", "mup_6144_adamw",
-                 "mup_6144_adamw_independent_wd"):
+    for name in (
+        "mup_1536_adamw",
+        "mup_3072_adamw",
+        "mup_6144_adamw",
+        "mup_6144_adamw_independent_wd",
+    ):
         cfg = getattr(M, name)()
         assert len(cfg.optimizer.param_groups) == 4, name
 

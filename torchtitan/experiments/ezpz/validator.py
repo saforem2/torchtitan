@@ -24,7 +24,6 @@ import torch.nn as nn
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.components.validate import Validator
 from torchtitan.distributed import utils as dist_utils
-from torchtitan.distributed.context_parallel import prepare_context_parallel_input
 from torchtitan.protocols.model import BaseModel
 from torchtitan.tools import utils
 

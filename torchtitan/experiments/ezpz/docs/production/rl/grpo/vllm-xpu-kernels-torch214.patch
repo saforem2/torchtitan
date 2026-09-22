@@ -4,7 +4,7 @@ index 4d13ac6..ba57fbe 100644
 +++ b/CMakeLists.txt
 @@ -522,6 +522,8 @@ endif()
  # define vLLM XPU cmake variables
- 
+
  set(VLLM_XPU_INCLUDE_DIR "")
 +# Sources include headers as "csrc/...", so expose the repository root.
 +list(APPEND VLLM_XPU_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})

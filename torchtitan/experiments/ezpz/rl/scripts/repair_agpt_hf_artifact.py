@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Repair and validate the HF interface for Gemma-tokenized AGPT SFT models.
 
 AGPT's SFT jobs installed their chat template at runtime, so FSDP checkpoint
@@ -64,9 +70,7 @@ def repair_artifact(checkpoint_dir: Path) -> None:
     _write_json(config_path, config)
     _write_json(tokenizer_config_path, tokenizer_config)
     _write_json(checkpoint_dir / "generation_config.json", generation_config)
-    (checkpoint_dir / "chat_template.jinja").write_text(
-        AGPT_GEMMA_CHAT_TEMPLATE + "\n"
-    )
+    (checkpoint_dir / "chat_template.jinja").write_text(AGPT_GEMMA_CHAT_TEMPLATE + "\n")
 
 
 def validate_artifact(checkpoint_dir: Path) -> None:

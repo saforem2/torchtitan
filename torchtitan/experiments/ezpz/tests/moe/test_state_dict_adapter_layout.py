@@ -29,7 +29,9 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
     assert moe_layers
     for moe in moe_layers:
         assert moe.routed_experts.inner_experts.sharding_config is not None
-        assert set(moe.routed_experts.inner_experts.sharding_config.state_shardings) == {
+        assert set(
+            moe.routed_experts.inner_experts.sharding_config.state_shardings
+        ) == {
             "w1_EFD",
             "w2_EDF",
             "w3_EFD",
@@ -63,8 +65,7 @@ def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():
 
     assert set(restored) == set(native)
     torch.testing.assert_close(
-        restored["layers.1.moe.shared_experts.w13.weight"], native["layers.1.moe.shared_experts.w13.weight"]
+        restored["layers.1.moe.shared_experts.w13.weight"],
+        native["layers.1.moe.shared_experts.w13.weight"],
     )
-    torch.testing.assert_close(
-        restored["layers.1.moe.shared_experts.w2.weight"], w2
-    )
+    torch.testing.assert_close(restored["layers.1.moe.shared_experts.w2.weight"], w2)

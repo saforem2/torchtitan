@@ -11,12 +11,7 @@ import json
 from pathlib import Path
 
 
-SCRIPT = (
-    Path(__file__).parents[1]
-    / "rl"
-    / "scripts"
-    / "repair_agpt_hf_artifact.py"
-)
+SCRIPT = Path(__file__).parents[1] / "rl" / "scripts" / "repair_agpt_hf_artifact.py"
 _spec = importlib.util.spec_from_file_location("repair_agpt_hf_artifact", SCRIPT)
 assert _spec and _spec.loader
 repair = importlib.util.module_from_spec(_spec)

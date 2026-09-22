@@ -62,19 +62,15 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer, default_adamw
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.components.renderer import from_renderers
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TrainingConfig,
-)
-from torchtitan.config.transform.cast_linear import LMHeadCastConverter
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,
     transform_model_config_,
 )
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import GSM8KReasonDataset
 from torchtitan.experiments.ezpz.rl.reason_agpt.env import GSM8KReasonEnv
@@ -185,9 +181,7 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
-    model_spec = _agpt_rl_model_spec(
-        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
-    )
+    model_spec = _agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
     return Controller.Config(
         model_spec=model_spec,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.
@@ -247,9 +241,7 @@ def _agpt_grpo_config(
             checkpointer=None,
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
-            sampling=SamplingConfig(
-                temperature=0.8, top_p=0.95, max_tokens=max_tokens
-            ),
+            sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=max_tokens),
         ),
     )
 

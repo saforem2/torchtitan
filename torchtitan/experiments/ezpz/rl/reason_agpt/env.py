@@ -26,8 +26,8 @@ from dataclasses import dataclass
 from renderers import Message
 
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import (
-    PROMPT_SUFFIX,
     GSM8KReasonSample,
+    PROMPT_SUFFIX,
 )
 from torchtitan.rl.rollout.environment import (
     MessageEnv,

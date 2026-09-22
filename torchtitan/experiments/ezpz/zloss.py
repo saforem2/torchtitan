@@ -140,18 +140,14 @@ class CrossEntropyWithZLoss(BaseLoss):
         global_vocab_size: int | None = None
         """Full vocabulary size, needed for spmd_types loss-parallel CE."""
 
-    def __init__(
-        self, config: Config, *, compile_config: CompileConfig | None = None
-    ):
+    def __init__(self, config: Config, *, compile_config: CompileConfig | None = None):
         if config.z_loss_coef < 0.0:
             raise ValueError(
                 f"z_loss_coef must be >= 0, got {config.z_loss_coef}. "
                 "A negative coefficient rewards logit growth, which is the "
                 "opposite of the intended effect."
             )
-        ce_config = CrossEntropyLoss.Config(
-            global_vocab_size=config.global_vocab_size
-        )
+        ce_config = CrossEntropyLoss.Config(global_vocab_size=config.global_vocab_size)
         self._ce = CrossEntropyLoss(ce_config, compile_config=compile_config)
         self.fn = self._ce.fn
         self.z_loss_coef = float(config.z_loss_coef)
