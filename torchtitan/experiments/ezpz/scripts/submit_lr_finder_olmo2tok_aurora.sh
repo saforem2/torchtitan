@@ -109,7 +109,7 @@ export LRF_SEQ_LEN="${LRF_SEQ_LEN:-4096}"
 export LRF_DP_SHARD="${LRF_DP_SHARD:-8}"
 
 export LRF_STEPS="${LRF_STEPS:-1000}"
-export LRF_FRACTION="${LRF_FRACTION:-0.15}"
+export LRF_MODE="${LRF_MODE:-custom}"
 # Window is PER OPTIMIZER, because a sweep that never reaches the cliff yields
 # no suggestion at all -- and exits 0 having burned the whole walltime.
 # Measured blow-ups at 30B/GBS=960: adamw 3.05e-04, sophiag 3.55e-04,
@@ -118,25 +118,30 @@ export LRF_FRACTION="${LRF_FRACTION:-0.15}"
 # Each window keeps ~a decade of margin above the known cliff; the batch here
 # is 6.4x the batch those were measured at, and optimal LR moves with batch, so
 # the margin is doing real work rather than padding.
-export LRF_INIT_LR=1e-8
-case "${LRF_OPTIMIZERS}" in
-    *muon*) export LRF_MAX_LR=1e-1 ;;
-    *)      export LRF_MAX_LR=1e-3 ;;
-esac
+if [[ "${LRF_MODE}" == custom ]]; then
+    export LRF_FRACTION="${LRF_FRACTION:-0.15}"
+    export LRF_INIT_LR="${LRF_INIT_LR:-1e-8}"
+    case "${LRF_OPTIMIZERS}" in
+        *muon*) export LRF_MAX_LR="${LRF_MAX_LR:-1e-1}" ;;
+        *)      export LRF_MAX_LR="${LRF_MAX_LR:-1e-3}" ;;
+    esac
+fi
 
 # TP=1: these sizes fit without it, and exp05 measured TP=4 costing 55% of
 # throughput on this stack (340 -> 151 tps). The runner's TP block is 80B-only,
 # so nothing is set here and the default applies.
 export LRF_AC=full
 
-export LRF_TIMEOUT=6000
+export LRF_TIMEOUT="${LRF_TIMEOUT:-6000}"
 export LRF_IDLE_TIMEOUT=1800
 
 # Keyed by optimizer set as well as size: run_lr_finder.sh writes under
 # ezpz.agpt/<flavor>/<optimizer>/, a path keyed by model+optimizer and NOT by
 # GBS or by job, so two concurrent submissions for the same size would
 # overwrite each other's CSV/plot/npz.
-export LRF_DUMP_FOLDER="outputs/lr_finder_${MODEL_SIZE}_olmo2tok_gbs6144_${LRF_OPTIMIZERS// /-}"
+_job_tag="${PBS_JOBID%%.*}"
+_run_tag="${_job_tag:-$(date +%Y%m%d_%H%M%S)}"
+export LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${MODEL_SIZE}_olmo2tok_gbs${LRF_GBS}_${LRF_OPTIMIZERS// /-}_${_run_tag}}"
 
 echo "=========================================================="
 echo " OLMo-3-vocab LR finder"

@@ -78,6 +78,35 @@ Two heuristics (both implemented):
 | `smooth_frac` | Derivative smoothing window | Increase (0.1+) for noisy/short curves |
 | `training.steps` | Base for fraction | Set to 1000+ for 100+ finder steps |
 
+## Coarse-to-fine workflow
+
+Use two separate invocations of `scripts/run_lr_finder.sh`; do not continue a
+fine sweep in the process that ran the coarse sweep. A new invocation creates a
+new trainer, model, optimizer, and dataloader, so the fine measurements start
+from fresh initialization rather than the coarse sweep's damaged/high-LR end
+state. Stage-specific default output directories also keep their artifacts
+separate.
+
+```bash
+# Stage 1: broad discovery window (defaults: 1e-8..1e-1, fraction 0.10)
+LRF_MODE=coarse LRF_MODELS=5b LRF_OPTIMIZERS=adamw \
+  bash torchtitan/experiments/ezpz/scripts/run_lr_finder.sh
+
+# Stage 2: choose explicit bounds around the finite descending/cliff region
+# observed above. This is a NEW process and therefore a fresh initialization.
+LRF_MODE=fine LRF_INIT_LR=3e-6 LRF_MAX_LR=3e-4 LRF_FRACTION=0.20 \
+  LRF_MODELS=5b LRF_OPTIMIZERS=adamw \
+  bash torchtitan/experiments/ezpz/scripts/run_lr_finder.sh
+```
+
+`LRF_MODE=custom` preserves the legacy `1e-6..1.0`, fraction `0.1` defaults.
+Fine mode deliberately has no inferred bounds: both `LRF_INIT_LR` and
+`LRF_MAX_LR` are required so a missing/failed coarse result cannot silently
+turn into a plausible fine run. A sweep with fewer than five points, any
+non-finite LR/loss, no detected blow-up, or a nonzero launcher exit fails the
+job and is not reported as `OK`. Coarse and fine launchers force checkpoint
+loading off after any caller arguments, so neither stage can resume the other.
+
 ### Important Notes
 
 - The finder **bypasses the normal LR scheduler** — it directly sets
