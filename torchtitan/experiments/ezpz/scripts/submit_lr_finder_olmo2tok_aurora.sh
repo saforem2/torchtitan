@@ -133,7 +133,7 @@ fi
 export LRF_AC=full
 
 export LRF_TIMEOUT="${LRF_TIMEOUT:-6000}"
-export LRF_IDLE_TIMEOUT=1800
+export LRF_IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"
 
 # Keyed by optimizer set as well as size: run_lr_finder.sh writes under
 # ezpz.agpt/<flavor>/<optimizer>/, a path keyed by model+optimizer and NOT by

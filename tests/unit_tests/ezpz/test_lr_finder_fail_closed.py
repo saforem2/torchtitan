@@ -69,6 +69,11 @@ def test_validate_sweep_results_accepts_finite_curve():
     )
 
 
+def test_validate_sweep_results_rejects_partial_sweep():
+    with pytest.raises(RuntimeError, match="partial sweep"):
+        validate_sweep_results([1e-8] * 5, [1.0] * 5, expected_points=6)
+
+
 def test_exponential_schedule_includes_both_endpoints():
     schedule = exponential_lr_schedule(1e-8, 1e-1, 100)
     assert len(schedule) == 100
@@ -84,7 +89,9 @@ def test_olmo_submitter_preserves_caller_timeout():
     )
     text = script.read_text()
     assert 'export LRF_TIMEOUT="${LRF_TIMEOUT:-6000}"' in text
+    assert 'export LRF_IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"' in text
     assert "export LRF_TIMEOUT=6000" not in text
+    assert "export LRF_IDLE_TIMEOUT=1800" not in text
 
 
 def test_runner_exposes_coarse_and_fine_modes_with_fine_bounds_required():
@@ -122,3 +129,25 @@ def test_runner_uses_top_level_hf_assets_option():
     text = script.read_text()
     assert 'asset_args=(--hf-assets-path "${LRF_HF_ASSETS_PATH}")' in text
     assert "--job.hf-assets-path" not in text
+
+
+def test_all_submitter_output_defaults_are_stage_and_run_specific():
+    scripts = REPO_ROOT / "torchtitan/experiments/ezpz/scripts"
+    for name in (
+        "submit_lr_finder_olmo2tok_aurora.sh",
+        "submit_lr_finder_30b_aurora.sh",
+    ):
+        text = (scripts / name).read_text()
+        assert (
+            'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}'
+            in text
+        )
+        assert "_run_tag" in text
+
+
+def test_ladder_summarizer_accepts_stage_specific_output_prefixes():
+    script = (
+        REPO_ROOT
+        / "torchtitan/experiments/ezpz/scripts/summarize_lr_finder_ladder.py"
+    )
+    assert 'f"lr_finder_*{size}_olmo2tok_gbs6144*{opt}*"' in script.read_text()

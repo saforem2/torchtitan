@@ -60,7 +60,7 @@ def _find_csv(root: str, size: str, opt: str) -> str | None:
     # campaigns (30b vs 30b_olmo2tok), and a wrong guess reads as "no data".
     pat = os.path.join(
         root,
-        f"lr_finder_{size}_olmo2tok_gbs6144_{opt}",
+        f"lr_finder_*{size}_olmo2tok_gbs6144*{opt}*",
         "**",
         opt,
         "lr_finder_data.csv",

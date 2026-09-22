@@ -48,12 +48,19 @@ def validate_sweep_config(
     return sweep_steps
 
 
-def validate_sweep_results(lrs: list[float], losses: list[float]) -> None:
+def validate_sweep_results(
+    lrs: list[float], losses: list[float], expected_points: int | None = None
+) -> None:
     """Raise when a sweep cannot safely be treated as a successful result."""
     if len(lrs) != len(losses):
         raise RuntimeError(
             "LR Finder produced different learning-rate and loss counts; "
             f"got {len(lrs)} and {len(losses)}"
+        )
+    if expected_points is not None and len(lrs) != expected_points:
+        raise RuntimeError(
+            "LR Finder produced a partial sweep; "
+            f"expected {expected_points} points, got {len(lrs)}"
         )
     if len(lrs) < 5:
         raise RuntimeError(

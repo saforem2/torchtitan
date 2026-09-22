@@ -205,6 +205,10 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             # Run one training step; returns global_avg_loss
             loss_val = trainer.train_step(data_iterator)
             if loss_val is None:
+                if not in_warmup:
+                    raise RuntimeError(
+                        "LR Finder produced no loss during sweep; refusing partial sweep"
+                    )
                 continue
 
             if isinstance(loss_val, torch.Tensor):
@@ -249,7 +253,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     # Validate before creating or appending any artifact. A partial, empty, or
     # non-finite curve is not a successful finder run and must make the launcher
     # fail instead of leaving success-looking CSV/NPZ/PNG files behind.
-    validate_sweep_results(lrs, losses)
+    validate_sweep_results(lrs, losses, expected_points=sweep_steps)
     blow_up_lrs = find_optimal_lr(lrs, losses, smooth_frac=config.smooth_frac)
     if not blow_up_lrs:
         raise RuntimeError(
