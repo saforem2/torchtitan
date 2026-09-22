@@ -30,6 +30,13 @@ export CCL_OP_SYNC=1
 export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=8000
 export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=8000
 export TORCH_CPP_LOG_LEVEL=ERROR
+# Twelve ranks share each node. Prevent OpenMP/BLAS/tokenizer libraries and
+# per-rank dataset preprocessing from each spawning a full-node thread pool.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export TOKENIZERS_PARALLELISM=false
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
 export HF_HOME=/tegu/datasets/datasets/hf
 export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
@@ -72,6 +79,7 @@ echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
   --learning_rate 2e-5 \
   --per_device_train_batch_size 1 \
   --gradient_accumulation_steps 8 \
+  --dataset_num_proc 1 \
   --max_length 8192 \
   --bf16 --fsdp full_shard \
   --logging_steps 1 \
