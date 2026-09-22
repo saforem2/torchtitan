@@ -65,12 +65,6 @@ class RenderersConfigAdapter(RendererConfig):
                 "against renderers' MODEL_RENDERER_MAP, else falls back to DefaultRenderer (unsupported here). "
                 "Pick the model's renderer, e.g. Qwen3RendererConfig(...)."
             )
-        if self.renderers_config.name == "default":
-            raise ValueError(
-                "DefaultRenderer needs Hugging Face apply_chat_template; TorchTitan's template rendering lacks "
-                "its special-token variables (bos_token, ...) and would silently produce different tokens. "
-                "Pick the model's renderer, e.g. Qwen3RendererConfig(...)."
-            )
         return create_renderer(
             tokenizer=RendererTokenizerWrapper(tokenizer), config=self.renderers_config
         )
@@ -112,15 +106,45 @@ class RendererTokenizerWrapper:
     """
 
     def __init__(self, tokenizer: HuggingFaceTokenizer):
-        # The `tokenizers.Tokenizer` inside; it has the offsets and token -> id lookup.
+        # Keep the TorchTitan wrapper for its compiled chat template and the
+        # `tokenizers.Tokenizer` backend for offsets and token -> id lookup.
+        self._tokenizer = tokenizer
         self._tokenizer_backend = tokenizer.tokenizer
         self.name_or_path = tokenizer.tokenizer_path
         self.bos_token = tokenizer.bos_token
         self.eos_token = tokenizer.eos_token
         self.bos_token_id = tokenizer.bos_id
         self.eos_token_id = tokenizer.eos_id
+        self.all_special_tokens = list(
+            dict.fromkeys(self._special_token_variables().values())
+        )
         # `tokenizers` returns None for unknown tokens; it has no unk id.
         self.unk_token_id = None
+
+    def _special_token_variables(self) -> dict[str, str]:
+        return {
+            key: value
+            for key, value in (self._tokenizer._hf_config or {}).items()
+            if key.endswith("_token") and isinstance(value, str)
+        }
+
+    def apply_chat_template(self, messages, **kwargs) -> list[int] | str:
+        """Render the checkpoint's Jinja template with Hugging Face semantics.
+
+        ``DefaultRenderer`` needs the tokenizer's special-token variables and
+        asks for token ids. TorchTitan already loaded the same template and
+        tokenizer backend, so provide those variables here without loading a
+        second tokenizer or silently changing the rendered text.
+        """
+        tokenize = kwargs.pop("tokenize", True)
+        kwargs.pop("return_dict", None)
+        special_tokens = self._special_token_variables()
+        rendered = self._tokenizer.apply_chat_template(
+            messages, **special_tokens, **kwargs
+        )
+        if not tokenize:
+            return rendered
+        return self.encode(rendered, add_special_tokens=False)
 
     def encode(
         self, text: str, add_special_tokens: bool = False, **kwargs
