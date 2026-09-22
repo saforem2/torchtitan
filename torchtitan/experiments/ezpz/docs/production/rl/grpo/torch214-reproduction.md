@@ -167,6 +167,63 @@ show useful aggregate IFEval/base-LM scores, but the present direct samples
 demonstrate that this checkpoint is not a reliable few-shot alphabet-sort
 instruction model under the reconstructed Gemma chat-template contract.
 
+### Exact SFT interface repair
+
+The initial staged template was not actually training-equivalent. The original
+TRL SFT job used `_CHAT_TEMPLATE_GEMMA` from `rl/train_grpo.py`: it emitted no
+explicit BOS, mapped both `system` and `user` roles to `user`, removed only
+leading newline characters with `.lstrip("\\n")`, retained trailing whitespace,
+and wrapped assistant content plus `<end_of_turn>` in Jinja generation markers.
+The staged template instead added BOS, used generic `trim`, preserved a
+`system` role header, and omitted generation markers.
+
+Commit `0f98b248e` adds `repair_agpt_hf_artifact.py` and invokes it from both
+checkpoint consolidation and legacy staging. It installs the literal training
+template, writes `chat_template.jinja`, changes BOS to 2, configures generation
+stops `[1, 107]` (`<eos>` and `<end_of_turn>`), sets pad to 0, and validates the
+256,000-token vocabulary and rendered prompt contract. Commit `002218169`
+adds compatibility for the fast-tokenizer encoding wrapper. The focused tests
+pass on Sunspot (`2 passed`).
+
+Direct-vLLM job `12478440` tested a repaired copy without changing the original
+checkpoint. The repair had the intended mechanical effect: one sample emitted
+token 107 and stopped after 36 tokens instead of reaching the length limit.
+Semantic quality remained unacceptable, however: that sample still copied the
+three demonstration names, while the other seven reached 128 tokens with
+irrelevant Python, copied demonstrations, repeated blocks, or malformed XML.
+Therefore the interface defects are real and now fixed, but they are not a
+sufficient explanation for checkpoint-900's poor generation.
+
+### Genuine MDS stage-3 7.771T checkpoint
+
+The label “stage-3 / 7.77T” was previously used ambiguously. The commonly cited
+`ntok7770B/global_step140352` artifact is the stage-2 terminus at 7.064T; the
+directory name encodes a target, not consumed tokens. The genuine stage-3
+endpoints are `global_step154391`, exactly 7,770,753,466,368 tokens. There are
+two arms. The broad `stage3-mix` arm is preferred over the narrow
+`nvidia-math1-code2` arm because its recorded commonsense scores are much
+stronger (ARC-Easy 0.7138, ARC-Challenge@25 0.4164, HellaSwag 0.5874 versus
+0.6216, 0.3703, and 0.4215 respectively).
+
+The broad source checkpoint is present on Aurora and has:
+
+```text
+global_step154391/mp_rank_00_model_states.pt
+size: 3,972,173,129 bytes
+sha256: 619b5d2581ac798f8bfe7de0d152b19f3ca7805b8566ab5b1191239e150a9a5f
+```
+
+Its existing MDS-to-HF export uses the dedicated 256,000-vocabulary `2b-mds`
+configuration and has model SHA-256
+`df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1`.
+Aurora direct-generation job `8851384` exited 0. Greedy base-model continuations
+correctly answered `Paris`, `100 degrees Celsius`, and `4`, and produced a
+coherent Python sorting-function continuation. The factual answers repeated
+because this is a pretrained base rather than an instruction-tuned model, but
+the output was coherent rather than character soup. This is a cleaner base for
+a corrected SFT run; it does not by itself satisfy the alphabet-sort/chat
+acceptance criterion.
+
 ## Acceptance criteria
 
 Any corrected reproduction is complete only after all of the following:
