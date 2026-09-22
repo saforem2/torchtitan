@@ -112,9 +112,10 @@ def validate_artifact(checkpoint_dir: Path) -> None:
             "chat serialization mismatch:\n"
             f"expected={expected!r}\nactual={rendered!r}"
         )
-    ids = tokenizer.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=True
-    )
+    ids = tokenizer.encode(rendered, add_special_tokens=False)
+    # Some fast-tokenizer versions return a tokenizers.Encoding wrapper.
+    if len(ids) == 1 and hasattr(ids[0], "ids"):
+        ids = ids[0].ids
     if not ids or ids[0] != EXPECTED_TOKEN_IDS["<start_of_turn>"]:
         raise ValueError(f"rendered ids start with {ids[:4]}, expected 106")
 
