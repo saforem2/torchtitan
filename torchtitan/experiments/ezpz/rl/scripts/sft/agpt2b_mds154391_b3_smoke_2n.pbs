@@ -10,6 +10,7 @@ set -o pipefail
 
 WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
 V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+MPIEXEC=/opt/cray/pals/1.8/bin/mpiexec
 BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
 PRETOK=/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192
 OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-b3-sft-smoke
@@ -42,12 +43,23 @@ git merge-base --is-ancestor "$EXPECTED_CODE_COMMIT" "$commit" || {
 }
 [[ "$model_sha" == "$EXPECTED_MODEL_SHA" ]] || { echo "bad model sha $model_sha"; exit 13; }
 [[ -f "$PRETOK/state.json" ]] || { echo "missing dataset $PRETOK"; exit 14; }
+[[ -x "$MPIEXEC" ]] || { echo "missing PALS launcher $MPIEXEC"; exit 15; }
+[[ ! -e "$V/bin/mpiexec" ]] || {
+  echo "refusing venv-provided mpiexec: $V/bin/mpiexec"; exit 16;
+}
 
 echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
-# Invoke the scheduler launcher directly.  Importing ezpz in the PBS parent
-# process initializes mpi4py before mpiexec and is invalid under Sunspot PMIx.
-# The worker module still uses ezpz normally after PALS establishes each rank.
-mpiexec -n 24 -ppn 12 --cpu-bind none \
+# Pin the site PALS launcher. A pip-installed impi-rt injects Intel Hydra,
+# Intel libmpi, and Intel libfabric into the venv; that mixed stack fails in
+# MPI_Init_thread/open_fabric on Sunspot. Importing ezpz in the PBS parent is
+# also invalid because it initializes mpi4py before PALS establishes ranks.
+"$MPIEXEC" --version
+"$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
+  "$V/bin/python" -c \
+  'from mpi4py import MPI; print(f"MPI_PREFLIGHT rank={MPI.COMM_WORLD.rank} size={MPI.COMM_WORLD.size} host={MPI.Get_processor_name()}")' \
+  || exit 17
+
+"$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
   "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
   --pretokenized_dataset "$PRETOK" \
   --model_name_or_path "$BASE" \
