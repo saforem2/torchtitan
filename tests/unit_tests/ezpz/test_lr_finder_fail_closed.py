@@ -139,15 +139,11 @@ def test_all_submitter_output_defaults_are_stage_and_run_specific():
     ):
         text = (scripts / name).read_text()
         assert (
-            'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}'
-            in text
+            'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}' in text
         )
         assert "_run_tag" in text
 
 
 def test_ladder_summarizer_accepts_stage_specific_output_prefixes():
-    script = (
-        REPO_ROOT
-        / "torchtitan/experiments/ezpz/scripts/summarize_lr_finder_ladder.py"
-    )
+    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/summarize_lr_finder_ladder.py"
     assert 'f"lr_finder_*{size}_olmo2tok_gbs6144*{opt}*"' in script.read_text()
