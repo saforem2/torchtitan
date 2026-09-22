@@ -294,6 +294,175 @@ were correct. Unlike checkpoint-900, it did not immediately copy an unrelated
 few-shot demonstration or degrade into character soup. It is therefore the
 cleanest available base for corrected instruction SFT.
 
+A separate two-node rollout control then loaded the same hash-verified HF
+artifact independently on one PVC tile per node. Sunspot job `12478450` exited
+0 and wrote one JSONL corpus per host:
+
+```text
+rank 0: x1922c6s3b0n0
+rank 1: x1922c6s4b0n0
+model:  df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+```
+
+Both nodes returned the same correct initial factual continuations (`Paris`,
+`100 degrees Celsius`, and `4`) and coherent Python. The complete decoded
+rollouts are shown below; every row used the model SHA-256 above and ended with
+`finish_reason="length"` after 64 generated tokens.
+
+#### Prompt: `The capital of France is`
+
+Rank 0 on `x1922c6s3b0n0`:
+
+```text
+ Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is
+```
+
+Rank 1 on `x1922c6s4b0n0`:
+
+```text
+ Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is Paris.
+
+The capital of France is
+```
+
+#### Prompt: `Water boils at a temperature of`
+
+Rank 0 on `x1922c6s3b0n0`:
+
+```text
+ 100 degrees Celsius.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of
+```
+
+Rank 1 on `x1922c6s4b0n0`:
+
+```text
+ 100 degrees Celsius.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of water is affected by the atmospheric pressure.
+
+The boiling point of
+```
+
+#### Prompt: `2 + 2 =`
+
+Rank 0 on `x1922c6s3b0n0`:
+
+```text
+ 4
+
+The number 2 + 2 = 4 is a fundamental mathematical expression that represents
+ the sum of two and two. The expression is often used in various mathematical
+ contexts, including algebra and calculus.
+
+### Definition
+
+The expression 2 + 2 = 4 can be interpreted in several ways:
+```
+
+Rank 1 on `x1922c6s4b0n0`:
+
+```text
+ 4
+
+The number 2 + 2 = 4 is a fundamental mathematical expression that represents
+ the sum of two and two. The expression is often used in various mathematical
+ contexts, including algebra and calculus.
+
+### Definition
+
+The expression 2 + 2 = 4 can be interpreted in several ways:
+```
+
+#### Prompt: `def sort_list(xs):`
+
+Rank 0 on `x1922c6s3b0n0`:
+
+```python
+def sort_list(xs):
+    """
+    Sorts a list of integers in ascending order using the bubble sort algorithm.
+
+    Args:
+        xs (list): A list of integers to be sorted.
+
+    Returns:
+        list: A new list containing the sorted integers.
+
+    Raises:
+        TypeError: If the
+```
+
+Rank 1 on `x1922c6s4b0n0`:
+
+```python
+def sort_list(xs):
+    """
+    Sorts a list of integers in ascending order using the bubble sort algorithm.
+
+    Args:
+        xs (List[int]): The list of integers to be sorted.
+
+    Returns:
+        List[int]: A new list containing the sorted integers.
+
+    Raises:
+```
+
+The first three deterministic token sequences matched exactly across nodes. The
+Python docstring differed slightly (`list` versus `List[int]`) despite
+`temperature=0`, which is a useful warning that accelerator execution need not
+be bitwise deterministic across hosts. Both outputs remained semantically
+equivalent. All generations reached the 64-token cap because this is a
+pretrained completion model, not an instruction-tuned chat model. This
+establishes multi-node loading and coherent rollout execution; it does not claim
+multi-node tensor parallelism or instruction following.
+
 ## What is and is not wrong
 
 ### Proven
