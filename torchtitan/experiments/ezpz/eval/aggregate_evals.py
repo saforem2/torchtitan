@@ -100,13 +100,25 @@ def _ordered_tasks(found):
     return present + extras
 
 
-def _task_metrics(results: dict, task: str) -> dict | None:
-    tagged = results.get(f"{task}@{TASK_SHOTS.get(task, '0shot')}")
+def _task_metrics(results: dict, task: str, n_shot: dict | None = None) -> dict | None:
+    expected_shot = TASK_SHOTS.get(task)
+    tagged = results.get(f"{task}@{expected_shot}") if expected_shot is not None else None
     if isinstance(tagged, dict):
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
         return None
-    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+    if expected_shot is not None and isinstance(n_shot, dict) and task in n_shot:
+        desired_shot = int(expected_shot.removesuffix("shot"))
+        try:
+            if int(n_shot[task]) != desired_shot:
+                return None
+        except (TypeError, ValueError):
+            return None
+    if (
+        task == "arc_challenge"
+        and any(k.startswith("mmlu") for k in results)
+        and not (isinstance(n_shot, dict) and task in n_shot)
+    ):
         return None
     metrics = results.get(task)
     return metrics if isinstance(metrics, dict) else None
@@ -129,6 +141,7 @@ def _read_one(path: Path) -> dict[str, float]:
     with open(path) as f:
         payload = json.load(f)
     results = payload.get("results", payload)
+    n_shot = payload.get("n-shot")
     scores: dict[str, float] = {}
     tasks = {task.split("@", 1)[0] for task in results}
     for task in sorted(tasks):
@@ -136,7 +149,7 @@ def _read_one(path: Path) -> dict[str, float]:
         # keep only the aggregate so the table/plot are not swamped.
         if task.startswith("mmlu_"):
             continue
-        m = _task_metrics(results, task)
+        m = _task_metrics(results, task, n_shot)
         if m is None:
             continue
         for key in (

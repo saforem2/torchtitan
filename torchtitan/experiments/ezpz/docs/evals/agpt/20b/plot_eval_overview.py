@@ -172,7 +172,7 @@ def _acc(metrics: dict, task: str) -> float | None:
     return None
 
 
-def _task_metrics(results: dict, task: str) -> dict | None:
+def _task_metrics(results: dict, task: str, n_shot: dict | None = None) -> dict | None:
     """Metrics for `task`, pinned to SHOTS when the file records shot counts.
 
     Returns None when shot-tagged keys exist but not at SHOTS, rather than
@@ -184,11 +184,21 @@ def _task_metrics(results: dict, task: str) -> dict | None:
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
         return None
+    if isinstance(n_shot, dict) and task in n_shot:
+        try:
+            if int(n_shot[task]) != 0:
+                return None
+        except (TypeError, ValueError):
+            return None
     # Untagged few-shot: SHOTS_SPEC="5:mmlu;25:arc_challenge" batches wrote no
     # @Nshot keys, so they look 0-shot by key shape while holding 25-shot
     # numbers. mmlu's presence is the tell -- a plain 0-shot commonsense pass
     # never includes it. Measured ~4pp high on 2b_v2_256's ARC-C.
-    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+    if (
+        task == "arc_challenge"
+        and any(k.startswith("mmlu") for k in results)
+        and not (isinstance(n_shot, dict) and task in n_shot)
+    ):
         return None
     m = results.get(task)
     return m if isinstance(m, dict) else None
@@ -277,8 +287,9 @@ def _load_one(results_base: Path) -> dict[int, dict[str, float]]:
         # lm-eval JSON either has {task: {metric: value, ...}} or wraps in
         # {"results": {task: ...}}. Handle both.
         results = payload.get("results", payload)
+        n_shot = payload.get("n-shot")
         for task in TASKS:
-            m = _task_metrics(results, task)
+            m = _task_metrics(results, task, n_shot)
             if m is not None and (acc := _acc(m, task)) is not None:
                 scores[task] = acc
         if scores:
@@ -307,8 +318,9 @@ def load_mds() -> dict[int, dict[str, float]]:
             with p.open() as f:
                 payload = json.load(f)
             results = payload.get("results", payload)
+            n_shot = payload.get("n-shot")
             for task in TASKS:
-                m = _task_metrics(results, task)
+                m = _task_metrics(results, task, n_shot)
                 if m is not None and (acc := _acc(m, task)) is not None:
                     by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
