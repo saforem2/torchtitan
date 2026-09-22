@@ -12,6 +12,7 @@
 #   LRF_FRACTION    — fraction of steps to sweep (default: 0.1)
 #   LRF_INIT_LR     — starting LR (default: 1e-6)
 #   LRF_MAX_LR      — max LR (default: 1.0)
+#   LRF_HF_ASSETS_PATH — optional compute-visible tokenizer/assets directory
 #   LRF_MODE        — custom (legacy defaults), coarse, or fine. Coarse uses a
 #                     broad default window. Fine requires explicit INIT/MAX
 #                     bounds obtained from a successful coarse run. Invoke the
@@ -430,6 +431,11 @@ for model in "${MODELS[@]}"; do
         gbs_args=(--training.num-tokens-per-train-step "${LRF_TOKENS_PER_TRAIN_STEP}")
     fi
 
+    asset_args=()
+    if [[ -n "${LRF_HF_ASSETS_PATH:-}" ]]; then
+        asset_args=(--hf-assets-path "${LRF_HF_ASSETS_PATH}")
+    fi
+
     # Optional shared index-cache dir. The blendcorpus index cold-builds
     # on the FIRST optimizer of a sweep and (at TP>1) races the
     # build-then-load; the finder has no auto-retry, so a cold first
@@ -497,6 +503,7 @@ for model in "${MODELS[@]}"; do
             python3 -m torchtitan.experiments.ezpz.train \
             --module ezpz.agpt \
             --config "${config}" \
+            "${asset_args[@]}" \
             --job.dump-folder "${LRF_DUMP_FOLDER}" \
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \

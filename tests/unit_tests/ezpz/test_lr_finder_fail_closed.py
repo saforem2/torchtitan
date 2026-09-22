@@ -95,3 +95,10 @@ def test_runner_forces_no_checkpoint_after_caller_arguments():
     caller_args = text.index('            "$@" \\\n')
     checkpoint_off = text.index("            --checkpoint.no-enable \\\n", caller_args)
     assert checkpoint_off > caller_args
+
+
+def test_runner_uses_top_level_hf_assets_option():
+    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
+    text = script.read_text()
+    assert 'asset_args=(--hf-assets-path "${LRF_HF_ASSETS_PATH}")' in text
+    assert "--job.hf-assets-path" not in text
