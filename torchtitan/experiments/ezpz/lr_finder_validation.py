@@ -60,6 +60,8 @@ def validate_sweep_results(lrs: list[float], losses: list[float]) -> None:
             f"LR Finder requires at least 5 measured points; got {len(lrs)}"
         )
     if any(not math.isfinite(value) or value <= 0 for value in lrs):
-        raise RuntimeError("LR Finder produced a non-finite or non-positive learning rate")
+        raise RuntimeError(
+            "LR Finder produced a non-finite or non-positive learning rate"
+        )
     if any(not math.isfinite(value) for value in losses):
         raise RuntimeError("LR Finder produced a non-finite loss; refusing artifacts")

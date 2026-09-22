@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Focused contracts for LR-finder stage selection and fail-closed results."""
 
 import importlib.util
@@ -38,8 +44,16 @@ def test_validate_sweep_config_returns_post_warmup_point_count():
     ("lrs", "losses", "message"),
     [
         ([1e-6, 1e-5], [1.0], "different learning-rate and loss counts"),
-        ([1e-8, 1e-7, 1e-6, 1e-5, 1e-4], [5.0, 4.0, float("nan"), 3.0, 4.0], "non-finite"),
-        ([1e-8, 1e-7, float("inf"), 1e-5, 1e-4], [5.0, 4.0, 3.0, 3.5, 5.0], "non-finite"),
+        (
+            [1e-8, 1e-7, 1e-6, 1e-5, 1e-4],
+            [5.0, 4.0, float("nan"), 3.0, 4.0],
+            "non-finite",
+        ),
+        (
+            [1e-8, 1e-7, float("inf"), 1e-5, 1e-4],
+            [5.0, 4.0, 3.0, 3.5, 5.0],
+            "non-finite",
+        ),
         ([1e-6] * 4, [1.0] * 4, "at least 5"),
     ],
 )
@@ -64,7 +78,10 @@ def test_exponential_schedule_includes_both_endpoints():
 
 
 def test_olmo_submitter_preserves_caller_timeout():
-    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/submit_lr_finder_olmo2tok_aurora.sh"
+    script = (
+        REPO_ROOT
+        / "torchtitan/experiments/ezpz/scripts/submit_lr_finder_olmo2tok_aurora.sh"
+    )
     text = script.read_text()
     assert 'export LRF_TIMEOUT="${LRF_TIMEOUT:-6000}"' in text
     assert "export LRF_TIMEOUT=6000" not in text
@@ -80,7 +97,10 @@ def test_runner_exposes_coarse_and_fine_modes_with_fine_bounds_required():
 
 
 def test_olmo_submitter_preserves_caller_fine_bounds():
-    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/submit_lr_finder_olmo2tok_aurora.sh"
+    script = (
+        REPO_ROOT
+        / "torchtitan/experiments/ezpz/scripts/submit_lr_finder_olmo2tok_aurora.sh"
+    )
     text = script.read_text()
     custom_block = text.split('if [[ "${LRF_MODE}" == custom ]]', 1)[1]
     assert 'export LRF_INIT_LR="${LRF_INIT_LR:-1e-8}"' in custom_block
