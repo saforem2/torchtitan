@@ -219,9 +219,11 @@ def load_v2_trajectory(
     out = _load_one(results_base)
     extra: dict[int, dict[str, float]] = {}
     for base in extra_bases or []:
-        extra.update(_load_one(base))
+        for step, scores in _load_one(base).items():
+            extra.setdefault(step, {}).update(scores)
     if corrected_base is None or switch_step is None:
-        out.update(extra)
+        for step, scores in extra.items():
+            out.setdefault(step, {}).update(scores)
         return out
 
     corrected = _load_one(corrected_base)
@@ -245,7 +247,8 @@ def load_v2_trajectory(
         if step in out:
             merged[step] = out[step]
     # Correctly exported continuation segments win their own steps outright.
-    merged.update(extra)
+    for step, scores in extra.items():
+        merged.setdefault(step, {}).update(scores)
     for t, n in sorted(dropped.items()):
         print(
             f"  NOTE [{results_base.name}/{t}]: {n} post-switch point(s) dropped"

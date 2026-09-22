@@ -176,9 +176,11 @@ def _load_corrected_dcp(
     original = _load_base_dir(evals_dir / base)
     extra: dict[int, dict[str, float]] = {}
     for extra_base in extra_bases or []:
-        extra.update(_load_base_dir(evals_dir / extra_base))
+        for step, scores in _load_base_dir(evals_dir / extra_base).items():
+            extra.setdefault(step, {}).update(scores)
     if corrected is None or switch_step is None:
-        original.update(extra)
+        for step, scores in extra.items():
+            original.setdefault(step, {}).update(scores)
         return original
 
     corrected_steps = _load_base_dir(evals_dir / corrected)
@@ -195,7 +197,8 @@ def _load_corrected_dcp(
     for step in trusted_base_steps or set():
         if step in original:
             merged[step] = original[step]
-    merged.update(extra)
+    for step, scores in extra.items():
+        merged.setdefault(step, {}).update(scores)
     return merged
 
 
