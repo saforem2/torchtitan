@@ -167,6 +167,9 @@ python torchtitan/experiments/ezpz/scripts/plot_olmo3_lrf_interim.py \
   --output torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures/2026-09-21-olmo3-gbs6144-interim.png
 ```
 
+This reproduces the chart from the committed CSVs once the current environment
+has `matplotlib` installed; the repository requirements do not install it.
+
 [`plot_olmo3_lrf_interim.py`](../../../../scripts/plot_olmo3_lrf_interim.py)
 requires exactly 150 finite rows for each allowlisted PBS job and verifies each
 committed CSV's SHA-256 digest. The CSV schema does not record gradient/update
