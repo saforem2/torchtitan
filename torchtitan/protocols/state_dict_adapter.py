@@ -181,7 +181,15 @@ class StateDictAdapter(BaseStateDictAdapter):
         """Expose a native stacked parameter as logical projection views."""
         if fused_key not in state_dict:
             return
-        projections = state_dict.pop(fused_key).unbind(dim)
+        tensor = state_dict.pop(fused_key)
+        # DTensor forbids unbind along a sharded dimension, even when the mesh
+        # has size one. HF checkpoint conversion needs complete logical
+        # projections, so mirror QKV conversion and replicate before splitting.
+        if isinstance(tensor, DTensor):
+            tensor = tensor.redistribute(
+                tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
+            )
+        projections = tensor.unbind(dim)
         assert len(projections) == len(logical_keys)
         state_dict.update(zip(logical_keys, projections, strict=True))
 

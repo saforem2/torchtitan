@@ -12,11 +12,17 @@ from torchtitan.rl.model.gdn_backend import TorchTitanGDNAttentionBackend
 from vllm.config import CUDAGraphMode, get_layers_from_vllm_config
 from vllm.forward_context import BatchDescriptor
 from vllm.model_executor.layers.mamba.abstract import MambaBase
+from vllm.platforms import current_platform
 from vllm.utils.math_utils import round_up
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 from vllm.v1.worker import gpu_model_runner as vllm_gpu_model_runner
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm.v1.worker.gpu_worker import Worker as GPUWorker
+
+if current_platform.is_xpu():
+    from vllm.v1.worker.xpu_worker import XPUWorker as VLLMWorker
+else:
+    VLLMWorker = GPUWorker
 
 
 class TorchTitanCudagraphDispatcher(CudagraphDispatcher):
@@ -99,14 +105,20 @@ class TorchTitanGPUModelRunner(GPUModelRunner):
         return num_scheduled_tokens
 
 
-class TorchTitanGPUWorker(GPUWorker):
-    """V1 worker that constructs :class:`TorchTitanGPUModelRunner`."""
+class TorchTitanGPUWorker(VLLMWorker):
+    """V1 worker with native device setup and TorchTitan's CUDA runner tweaks."""
 
     def init_device(self):
         if self.use_v2_model_runner:
             raise ValueError(
                 "TorchTitan's vLLM integration requires the V1 model runner"
             )
+
+        # The XPU package has device setup, memory accounting, and an
+        # XPUModelRunner that differ from GPUWorker. The CUDA-only runner
+        # substitution below must not replace those native implementations.
+        if current_platform.is_xpu():
+            return super().init_device()
 
         # GPUWorker imports its runner class inside init_device and provides no
         # runner factory. Scope the class substitution to that construction.

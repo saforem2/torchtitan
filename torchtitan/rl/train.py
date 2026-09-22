@@ -296,8 +296,11 @@ async def main():
             generator_meshes=generator_meshes,
         )
         await rl_trainer.run()
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt:
         logger.info("Interrupted; attempting graceful shutdown...")
+    except asyncio.CancelledError:
+        logger.exception("RL controller cancelled; propagating failure after shutdown")
+        raise
     finally:
         await rl_trainer.close()
 
