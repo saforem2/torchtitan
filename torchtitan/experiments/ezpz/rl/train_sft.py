@@ -723,11 +723,15 @@ def main() -> None:
     trainer.train(resume_from_checkpoint=rfc or None)
     log.info(f"[rank {rank}] Training complete.")
 
-    if rank == 0 and not ezpz_args.no_save:
+    if not ezpz_args.no_save:
         save_path = os.path.join(config.output_dir, "final")
+        # FSDP2 state-dict gathering is collective: every rank must enter
+        # save_model(). Calling it only on rank 0 disconnects the remaining
+        # ranks while rank 0 is still inside all-gather (job 12478483).
         trainer.save_model(save_path)
-        tokenizer.save_pretrained(save_path)
-        log.info(f"Model and tokenizer saved to {save_path}")
+        if rank == 0:
+            tokenizer.save_pretrained(save_path)
+            log.info(f"Model and tokenizer saved to {save_path}")
 
 
 if __name__ == "__main__":
