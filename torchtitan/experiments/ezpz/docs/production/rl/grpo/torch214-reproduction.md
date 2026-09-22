@@ -40,6 +40,8 @@ completion inspection and three controlled comparisons:
 | Qwen3-0.6B model SHA-256 | `f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b` |
 | MDS stage3-mix source SHA-256 | `619b5d2581ac798f8bfe7de0d152b19f3ca7805b8566ab5b1191239e150a9a5f` |
 | MDS stage3-mix HF weights SHA-256 | `df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1` |
+| MDS source checkpoint | `/lus/flare/projects/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/optimizer-experiments/stage3-mix/Megatron-DeepSpeed/checkpoints/AuroraGPT-2B-ws3072-ds-stage0-nl12-hs2048-mb1-seq8192-gb6144-sp1-pp1-tp1-bf16-optsophiag-lr2.17e-5-lwf0.05_ntok7770B_tokHF_tmgoogle_gemma-7b_flash/global_step154391/mp_rank_00_model_states.pt` |
+| MDS converted HF directory | `/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/evals/agpt-2b-mds-7771T/stage3-mix/step-154391/hf` |
 | Python | 3.12.12 |
 | PyTorch | `2.14.0+xpu` |
 | Triton XPU | 3.8.0 |
@@ -255,6 +257,18 @@ The broad source checkpoint is 3,972,173,129 bytes with SHA-256
 Its existing 256,000-vocabulary HF conversion has SHA-256
 `df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1`.
 
+The exact source path is:
+
+```text
+/lus/flare/projects/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/optimizer-experiments/stage3-mix/Megatron-DeepSpeed/checkpoints/AuroraGPT-2B-ws3072-ds-stage0-nl12-hs2048-mb1-seq8192-gb6144-sp1-pp1-tp1-bf16-optsophiag-lr2.17e-5-lwf0.05_ntok7770B_tokHF_tmgoogle_gemma-7b_flash/global_step154391/mp_rank_00_model_states.pt
+```
+
+The converted HF directory used by direct generation is:
+
+```text
+/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/evals/agpt-2b-mds-7771T/stage3-mix/step-154391/hf
+```
+
 Aurora direct-generation job `8851384` loaded that exact converted endpoint and
 exited 0. Representative greedy continuations were:
 
@@ -323,3 +337,313 @@ without those TorchTitan live-sync conversions.
 
 The next acceptance gate is explicit: a stage-3-derived SFT candidate must pass
 direct alphabet-sort generation before any longer RL or multi-node run.
+
+## Reproducing the results
+
+The commands below reproduce the software environment, artifact repair, and
+control experiments used in this diagnosis. They were validated on Sunspot PVC
+nodes unless the subsection explicitly says Aurora. Site account names,
+filesystem roots, and queue names must be adapted outside ALCF.
+
+### 1. Check out the exact TorchTitan revision
+
+Use the published branch containing this reproduction bundle:
+
+```bash
+git clone https://github.com/saforem2/torchtitan.git
+cd torchtitan
+git fetch origin sync/upstream-0fd69d0b
+git checkout --track origin/sync/upstream-0fd69d0b
+```
+
+For archival runs, record `git rev-parse HEAD` and pin that SHA in the job log;
+the branch includes the post-`f3dd7074090e2a01d7691783bc72031b4260ff0b`
+reproduction additions described below.
+
+The repair implementation is in
+[`repair_agpt_hf_artifact.py`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/rl/scripts/repair_agpt_hf_artifact.py).
+The focused regression tests are in
+[`test_repair_agpt_hf_artifact.py`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/tests/test_repair_agpt_hf_artifact.py).
+
+### 2. Create the Python 3.12 environment
+
+The validated environment used CPython 3.12.12 and was fully stored on
+`/lus/tegu`; compute jobs did not depend on a `/home` Python executable.
+
+```bash
+export REPO=$PWD
+export VENV=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+export SRC=/lus/tegu/projects/datascience/foremans/src
+
+uv venv --clear --python 3.12.12 "$VENV"
+source "$VENV/bin/activate"
+python -m pip install --upgrade pip setuptools wheel cmake ninja pybind11 build \
+  setuptools_scm 'numpy<2.5'
+```
+
+Install the protected accelerator stack first. Resolve all later packages with
+constraints or `--no-deps`; otherwise dependency resolution may replace this
+Torch/Triton pair with CUDA or incompatible XPU builds.
+
+```bash
+uv pip install --python "$VENV/bin/python" \
+  --index-url https://download.pytorch.org/whl/xpu \
+  'torch==2.14.0+xpu' 'triton-xpu==3.8.0'
+uv pip install --python "$VENV/bin/python" --no-deps \
+  --index-url https://download.pytorch.org/whl/nightly/xpu \
+  'torchvision==0.30.0.dev20260921+xpu'
+
+uv pip install --python "$VENV/bin/python" --no-deps 'torchmonarch==0.6.0'
+uvi 'git+https://github.com/saforem2/ezpz@6b0c729ab61f0a8e6ab26d7d83d63d3039fd4feb'
+```
+
+`uvi` above is the required ezpz installation route. If `uvi` does not target
+`$VENV`, activate the venv before invoking it and verify the import path below.
+
+Install TorchStore from its validated revision:
+
+```bash
+git clone https://github.com/songhappy/torchstore.git "$SRC/torchstore"
+git -C "$SRC/torchstore" checkout 03f588e53ff3bb69a6b42c542c6e03662b333c0f
+uv pip install --python "$VENV/bin/python" --no-deps \
+  --no-build-isolation "$SRC/torchstore"
+```
+
+### 3. Build vLLM and the XPU kernels
+
+The validated vLLM source revision is
+`dc479a2d839d5c474b36ac521dc5a72294bcb186`. The validated kernel revision is
+`0bfb37287b335fccf94f005141774af99e3eef33`. Both were built against the
+already-installed Torch 2.14 XPU wheel. Install the full remaining dependency
+lock in the next subsection before importing vLLM; these two source installs
+use `--no-deps` deliberately to protect Torch and Triton.
+
+```bash
+source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
+export CC=/usr/bin/gcc-14
+export CXX=/usr/bin/g++-14
+
+git clone https://github.com/vllm-project/vllm.git "$SRC/vllm-torch214"
+git -C "$SRC/vllm-torch214" checkout dc479a2d839d5c474b36ac521dc5a72294bcb186
+VLLM_TARGET_DEVICE=xpu uv pip install --python "$VENV/bin/python" \
+  --no-deps --no-build-isolation "$SRC/vllm-torch214"
+
+git clone https://github.com/vllm-project/vllm-xpu-kernels.git \
+  "$SRC/vllm-xpu-kernels-torch214"
+git -C "$SRC/vllm-xpu-kernels-torch214" checkout \
+  0bfb37287b335fccf94f005141774af99e3eef33
+git -C "$SRC/vllm-xpu-kernels-torch214" apply \
+  "$REPO/torchtitan/experiments/ezpz/docs/production/rl/grpo/vllm-xpu-kernels-torch214.patch"
+VLLM_TARGET_DEVICE=xpu uv pip install --python "$VENV/bin/python" \
+  --no-deps --no-build-isolation "$SRC/vllm-xpu-kernels-torch214"
+```
+
+The kernel patch makes two build fixes used for the PVC build:
+
+1. exposes the repository root so sources that include `csrc/...` resolve;
+2. forwards `MHC_KERNELS_ENABLED` through `setup.py`.
+
+Install the remaining Python packages without allowing them to replace Torch,
+Triton, vLLM, or the native kernels. The complete captured environment is
+[`torch214-environment.freeze.txt`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/docs/production/rl/grpo/torch214-environment.freeze.txt),
+whose SHA-256 is
+`efc547a8bcde254f2e7a3db44fe729e3ea12eabf831c74a6b4742d0712607ddb`.
+The key resolved versions were:
+
+```text
+torch==2.14.0+xpu
+torchvision==0.30.0.dev20260921+xpu
+triton-xpu==3.8.0
+torchmonarch==0.6.0
+vllm==0.29.1rc1.dev481+gdc479a2d8.xpu
+vllm-xpu-kernels==0.1.15.dev30+g0bfb372.d20260922
+torchstore==0.0.0.dev0
+ezpz==0.27.3
+renderers==0.1.11
+transformers==5.17.0
+trl==1.13.0
+datasets==5.0.1
+accelerate==1.15.0
+safetensors==0.8.0
+pytest==9.1.1
+```
+
+Do not blindly install the freeze file on a different host: it records local
+editable source paths for vLLM, its kernels, and TorchStore. Build those three
+at the revisions above, then install the remaining captured packages with the
+filtered lock file while constraining the protected stack:
+
+```bash
+printf '%s\n' \
+  'torch==2.14.0+xpu' \
+  'torchvision==0.30.0.dev20260921+xpu' \
+  'triton-xpu==3.8.0' \
+  'torchmonarch==0.6.0' \
+  'vllm==0.29.1rc1.dev481+gdc479a2d8.xpu' \
+  'vllm-xpu-kernels==0.1.15.dev30+g0bfb372.d20260922' \
+  > /tmp/torch214-protected.txt
+
+uv pip install --python "$VENV/bin/python" \
+  --constraint /tmp/torch214-protected.txt \
+  -r torchtitan/experiments/ezpz/docs/production/rl/grpo/torch214-python-requirements.txt
+```
+
+The filtered requirements file is
+[`torch214-python-requirements.txt`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/docs/production/rl/grpo/torch214-python-requirements.txt).
+It excludes the eight protected/source-built packages and can therefore be
+used after those packages are installed. Re-run the environment verification
+after dependency installation and fail if any protected version changed.
+
+### 4. Verify the environment on a compute node
+
+The compute wrapper must load oneAPI and use the venv's Python directly:
+
+```bash
+source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
+export PATH="$VENV/bin:$PATH"
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR='level_zero:gpu'
+export ZE_AFFINITY_MASK=0
+
+"$VENV/bin/python" - <<'PY'
+import torch, triton, vllm, vllm_xpu_kernels, monarch, torchstore, ezpz
+print('torch', torch.__version__)
+print('xpu', torch.xpu.is_available(), torch.xpu.device_count())
+print('triton', triton.__version__)
+print('vllm', vllm.__version__)
+print('ezpz', ezpz.__version__)
+PY
+```
+
+Expected versions are those listed above, with `torch.xpu.is_available()` true.
+
+### 5. Prepare and validate the repaired AGPT SFT artifact
+
+Never mutate the historical model in place. Copy or stage its metadata and run
+the canonical repair against that directory:
+
+```bash
+export AGPT_REPAIRED=/path/to/immutable-copy-of-checkpoint-900-hf
+"$VENV/bin/python" \
+  torchtitan/experiments/ezpz/rl/scripts/repair_agpt_hf_artifact.py \
+  "$AGPT_REPAIRED"
+
+"$VENV/bin/python" -m pytest -q \
+  torchtitan/experiments/ezpz/tests/test_repair_agpt_hf_artifact.py
+```
+
+Expected results are the message `repaired and validated` and `2 passed`.
+Then reproduce the repaired checkpoint-900 semantic check:
+
+```bash
+export AGPT_OUT=/path/to/agpt-direct-control-fixed.jsonl
+"$VENV/bin/python" \
+  torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py \
+  "$AGPT_REPAIRED" "$AGPT_OUT"
+```
+
+The captured result was one EOT-terminated sample out of eight; the others
+remained malformed or reached 128 tokens. Inspect the JSONL rather than treating
+the successful process exit as model success.
+
+If starting from an FSDP SFT checkpoint, use
+[`consolidate_sft_ckpt.sh`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/rl/scripts/consolidate_sft_ckpt.sh);
+it merges the shards and invokes the same repair automatically.
+
+### 6. Reproduce the Qwen control
+
+Stage official `Qwen/Qwen3-0.6B` and verify
+`model.safetensors` SHA-256
+`f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b`.
+Run the checked-in direct harness on one PVC tile:
+
+```bash
+export QWEN=/path/to/Qwen3-0.6B-hf-control
+export OUT=/path/to/qwen-direct-control.jsonl
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+"$VENV/bin/python" \
+  torchtitan/experiments/ezpz/rl/scripts/qwen_direct_control.py \
+  "$QWEN" "$OUT"
+```
+
+This harness explicitly requests vLLM `TRITON_ATTN`; the Xe2 CUTLASS path is
+not available on PVC. The expected semantic result is coherent, bounded XML:
+seven of eight captured outputs were exact and the eighth omitted only its
+closing tag.
+
+The one-step TorchTitan/Monarch control is launched from a PBS compute node as:
+
+```bash
+export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
+export VLLM_ENABLE_V1_MULTIPROCESSING=1 WANDB_MODE=disabled
+export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+
+set +e
+ezpz launch --auto-retry --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
+  "$VENV/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_upstream \
+  --module torchtitan.rl.examples.alphabet_sort.config_registry \
+  --config rl_grpo_qwen3_0_6b_flex \
+  --hf_assets_path="$QWEN" \
+  --async-loop.num-training-steps=1 \
+  --async-loop.num-prompts-per-train-step=2 \
+  --async-loop.num-samples-per-prompt=4 \
+  --async-loop.target-offpolicy-steps=0 \
+  --async-loop.validation.num-samples=0 \
+  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --generator.sampling.max-tokens=128 \
+  --generator.parallelism.tensor-parallel-degree=1 \
+  --trainer.parallelism.tensor-parallel-degree=1 \
+  --trainer.checkpointer.interval=1 \
+  --metrics.no-enable-wandb \
+  --dump_folder=/path/to/qwen-control-output
+rc=$?
+set -e
+exit "$rc"
+```
+
+The expected signature is coherent rollout text, nonzero loss/gradient,
+successful backward and AdamW, a saved checkpoint, and process exit 0. Always
+propagate the inner return code from a PBS wrapper with `exit "$rc"`.
+
+### 7. Reproduce direct MDS stage-3 generation on Aurora
+
+Use the exact source checkpoint—not the mislabeled stage-2 endpoint:
+
+```bash
+export MDS_SOURCE=/lus/flare/projects/AuroraGPT/AuroraGPT-v1/Experiments/AuroraGPT-2B/optimizer-experiments/stage3-mix/Megatron-DeepSpeed/checkpoints/AuroraGPT-2B-ws3072-ds-stage0-nl12-hs2048-mb1-seq8192-gb6144-sp1-pp1-tp1-bf16-optsophiag-lr2.17e-5-lwf0.05_ntok7770B_tokHF_tmgoogle_gemma-7b_flash/global_step154391/mp_rank_00_model_states.pt
+export MDS_HF=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/evals/agpt-2b-mds-7771T/stage3-mix/step-154391/hf
+export MDS_OUT="$MDS_HF/direct-generation.jsonl"
+
+sha256sum "$MDS_SOURCE"
+sha256sum "$MDS_HF/model-00001-of-00001.safetensors"
+python -u torchtitan/experiments/ezpz/rl/scripts/mds_stage3_direct.py \
+  "$MDS_HF" "$MDS_OUT"
+```
+
+Expected hashes are the two MDS hashes in the artifact table. Expected initial
+continuations include `Paris`, `100 degrees Celsius`, and `4`. Repetition after
+the correct answer is expected from this pretrained, non-chat base; incoherent
+character soup is not.
+
+### 8. Inspect raw completions and decide pass/fail
+
+Do not use throughput or aggregate reward as the acceptance criterion. Read
+every JSONL record and report, at minimum:
+
+- prompt and decoded continuation;
+- token count and finish reason;
+- whether EOS/EOT terminated generation;
+- exact task correctness;
+- copied demonstration names;
+- repeated or unclosed tags;
+- unrelated prose/code and repetition.
+
+The reproduced diagnosis should satisfy all three checks:
+
+1. repaired checkpoint-900 can stop on EOT but remains semantically poor;
+2. Qwen produces coherent bounded alphabet-sort output on the same XPU stack;
+3. MDS `stage3-mix/global_step154391` produces coherent base completions but is
+   not yet instruction-tuned.
+
+Only a stage-3-derived SFT candidate that passes direct semantic inspection
+should proceed to TorchTitan synchronization and GRPO.
