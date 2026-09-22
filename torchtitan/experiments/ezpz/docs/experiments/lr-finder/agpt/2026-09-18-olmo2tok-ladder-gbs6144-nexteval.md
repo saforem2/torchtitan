@@ -144,11 +144,35 @@ curve was still descending and **does not constitute a defensible LR
 recommendation**; the sweep window must be extended or interpreted alongside
 the completed curve.
 
+### Interim completed-run snapshot
+
+![Interim OLMo-3-vocab LR-finder curves](figures/2026-09-21-olmo3-gbs6144-interim.png)
+
+This is intentionally an **interim** chart and will be regenerated in place as
+additional full sweeps finish. It includes only complete 150-point sweeps with
+finite optimizer updates—not five-point smokes or failed/invalid runs—and
+filters reused CSVs by PBS job ID. The current snapshot contains Sunspot
+`12478315` (5B AdamW), `12478327` (5B Mano), and `12478328` (10B Mano). The
+optimizer minima marked at the edge of a search window are observations, not
+yet recommended learning rates.
+
+The chart is reproducible with
+[`plot_olmo3_lrf_interim.py`](../../../../scripts/plot_olmo3_lrf_interim.py) after
+copying the named CSVs into one data directory.
+
+### Aurora W&B runs
+
+There is not currently a separate shared W&B Report. The six clean replacement
+runs are available individually:
+
+- Muon: [5B (`8847068`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2abqxxcc), [10B (`8847069`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/3m93gxnj), [30B (`8847070`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/346ucb4v)
+- SophiaG: [5B (`8847071`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/spix9udq), [10B (`8847072`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/sgmfddmr), [30B (`8847073`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2usu7dw9)
+
 | job | machine | model / optimizer | points | finite | min loss | LR at min | status |
 |---|---|---|---:|---:|---:|---:|---|
 | 12478315 | Sunspot | 5B / AdamW | 150 | 150 | 8.3131 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478392` queued |
 | 12478328 | Sunspot | 10B / Mano | 150 | 150 | 9.1098 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478393` queued |
-| 12478327 | Sunspot | 5B / Mano | 87+ | 87+ | provisional | provisional | running |
+| 12478327 | Sunspot | 5B / Mano | 150 | 150 | 9.2289 | 9.261e-4 | complete; minimum at final point |
 | 12478385 | Sunspot | 5B / AdamW | 5 | 5 | 11.9914 | 1.585e-5 | shard-4 smoke passed; 8.45 GiB model memory |
 | 12478386 | Sunspot | 10B / Mano | 5 | 5 | 11.9901 | 1.585e-5 | shard-4 smoke passed; 13.88 GiB model memory |
 | 12478392 | Sunspot | 5B / AdamW | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
@@ -156,10 +180,21 @@ the completed curve.
 | 12478362 | Sunspot | 30B-dp12 / Mano | 5 | 5 | 11.8506 | 1.000e-4 | smoke passed; minimum at final point |
 | 12478375 | Sunspot | 30B-dp12 / Mano | — | — | — | — | full 150-point run queued |
 | 8846942 | Aurora | 5B / Muon | 5 | 5 | — | — | runtime/PMIx smoke passed |
-| 8847068–8847073 | Aurora | 5/10/30B Muon + SophiaG | — | — | — | — | clean-runtime replacements queued |
+| 8847068 | Aurora | 5B / Muon | 150 | 150 losses | — | — | finished (`exit=0`), but gradients were non-finite from step 2; excluded from comparison chart |
+| 8847069 | Aurora | 10B / Muon | 61 / 150 | partial | — | — | failed (`exit=1`); loss and gradients non-finite by step 60 |
+| 8847070 | Aurora | 30B / Muon | 6 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
+| 8847071 | Aurora | 5B / SophiaG | 97 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
+| 8847072 | Aurora | 10B / SophiaG | 60 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
+| 8847073 | Aurora | 30B / SophiaG | 10 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
 
 ### Controlled failures and decisions
 
+- Aurora `8847068` wrote 150 finite loss values but had non-finite gradients
+  from step 2 onward. Its apparent loss curve is not valid optimizer evidence
+  and is deliberately excluded from the interim comparison figure.
+- Aurora `8847069`–`8847073` terminated with `Exit_status=1` after only
+  61/6/97/60/10 sweep points respectively. Their partial data remain linked in
+  W&B for diagnosis but are not presented as completed LR-finder results.
 - `12478325`, 10B AdamW: failed after 14 minutes; replacement `12478340` is queued.
 - `12478329`, canonical 30B Mano with `dp_shard=8`: entered the sweep but
   completed zero points and stalled in oneCCL/MPI pending requests; cancelled.
