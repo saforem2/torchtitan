@@ -296,7 +296,8 @@ def load_mds() -> dict[int, dict[str, float]]:
             payload = json.load(f)
         results = payload.get("results", payload)
         for task in TASKS:
-            if task in results and (acc := _acc(results[task], task)) is not None:
+            m = _task_metrics(results, task)
+            if m is not None and (acc := _acc(m, task)) is not None:
                 by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
         step: {task: sum(vs) / len(vs) for task, vs in d.items()}
