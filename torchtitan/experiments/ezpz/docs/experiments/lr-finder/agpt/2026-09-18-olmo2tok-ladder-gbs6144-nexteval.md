@@ -8,17 +8,21 @@ byte-identical to `allenai/Olmo-3-1025-7B`.
 **Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
 **Machine:** Aurora `next-eval` and Sunspot `workq`, 64N production-batch sweeps
 
-Status as of 2026-09-21: **ACTIVE REPLACEMENT CAMPAIGN.** The original Aurora
+Status as of 2026-09-22: **PARTIAL RESULTS; COARSE-TO-FINE REDESIGN IN
+PROGRESS.** The original Aurora
 submissions failed before training for two successive runtime-contract defects:
 first stale `spmd-types`, then a pip `impi-rt` library shadowing Aurora's site
 MPICH/PMIx (`PMIX_Init returned -25`). The isolated `.venv.next-eval` runtime,
 an explicit `impi-rt` rejection gate, and archive-derived activation path were
-validated by Aurora job `8846942`: 5/5 finite Muon points plus CSV/NPZ/PNG.
-Clean full Aurora replacements `8847068`–`8847073` are queued.
+validated the runtime contract with Aurora job `8846942`, but later forensic
+analysis showed that its Muon optimizer became non-finite after the first
+update. Clean Aurora replacements `8847068`–`8847073` all terminated: the Muon
+arms are invalid optimizer evidence, while the SophiaG arms remained finite
+until a launcher timeout stopped their partial sweeps.
 
 Sunspot is producing the first full results. Jobs `12478315` (5B AdamW) and
 `12478328` (10B Mano) completed 150/150 finite points with fresh artifacts;
-`12478327` (5B Mano) is running. The first canonical 30B Mano job `12478329`
+`12478327` (5B Mano) also completed 150/150. The first canonical 30B Mano job `12478329`
 stalled at zero points with `dp_shard=8` and was cancelled. A `dp_shard=12`
 control on the canonical 16,384-wide FFN (`12478356`) failed correctly because
 16,384 is not divisible by 12. A separately named, checkpoint-incompatible
@@ -149,16 +153,26 @@ the completed curve.
 ![Interim OLMo-3-vocab LR-finder curves](figures/2026-09-21-olmo3-gbs6144-interim.png)
 
 This is intentionally an **interim** chart and will be regenerated in place as
-additional full sweeps finish. It includes only complete 150-point sweeps with
-finite optimizer updates—not five-point smokes or failed/invalid runs—and
-filters reused CSVs by PBS job ID. The current snapshot contains Sunspot
+additional full sweeps finish. It includes only three explicitly approved,
+complete 150-point sweeps—not five-point smokes or failed/invalid runs. The
+current snapshot contains Sunspot
 `12478315` (5B AdamW), `12478327` (5B Mano), and `12478328` (10B Mano). The
 optimizer minima marked at the edge of a search window are observations, not
 yet recommended learning rates.
 
-The chart is reproducible with
-[`plot_olmo3_lrf_interim.py`](../../../../scripts/plot_olmo3_lrf_interim.py) after
-copying the named CSVs into one data directory.
+The chart is reproducible directly from the committed source CSVs with:
+
+```bash
+python torchtitan/experiments/ezpz/scripts/plot_olmo3_lrf_interim.py \
+  --output torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures/2026-09-21-olmo3-gbs6144-interim.png
+```
+
+[`plot_olmo3_lrf_interim.py`](../../../../scripts/plot_olmo3_lrf_interim.py)
+requires exactly 150 finite rows for each allowlisted PBS job and verifies each
+committed CSV's SHA-256 digest. The CSV schema does not record gradient/update
+health; that evidence was checked from each job's terminal logs before its
+digest was allowlisted. This prevents arbitrary or partial CSVs—including the
+finite-loss but optimizer-invalid Aurora Muon output—from entering the chart.
 
 ### Aurora W&B runs
 
@@ -179,13 +193,13 @@ runs are available individually:
 | 12478393 | Sunspot | 10B / Mano | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
 | 12478362 | Sunspot | 30B-dp12 / Mano | 5 | 5 | 11.8506 | 1.000e-4 | smoke passed; minimum at final point |
 | 12478375 | Sunspot | 30B-dp12 / Mano | — | — | — | — | full 150-point run queued |
-| 8846942 | Aurora | 5B / Muon | 5 | 5 | — | — | runtime/PMIx smoke passed |
+| 8846942 | Aurora | 5B / Muon | 5 | 5 losses | — | — | runtime passed, but optimizer became non-finite after its first update; invalid as a training canary |
 | 8847068 | Aurora | 5B / Muon | 150 | 150 losses | — | — | finished (`exit=0`), but gradients were non-finite from step 2; excluded from comparison chart |
 | 8847069 | Aurora | 10B / Muon | 61 / 150 | partial | — | — | failed (`exit=1`); loss and gradients non-finite by step 60 |
 | 8847070 | Aurora | 30B / Muon | 6 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
-| 8847071 | Aurora | 5B / SophiaG | 97 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
-| 8847072 | Aurora | 10B / SophiaG | 60 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
-| 8847073 | Aurora | 30B / SophiaG | 10 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
+| 8847071 | Aurora | 5B / SophiaG | 97 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
+| 8847072 | Aurora | 10B / SophiaG | 60 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
+| 8847073 | Aurora | 30B / SophiaG | 10 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
 
 ### Controlled failures and decisions
 
@@ -193,8 +207,10 @@ runs are available individually:
   from step 2 onward. Its apparent loss curve is not valid optimizer evidence
   and is deliberately excluded from the interim comparison figure.
 - Aurora `8847069`–`8847073` terminated with `Exit_status=1` after only
-  61/6/97/60/10 sweep points respectively. Their partial data remain linked in
-  W&B for diagnosis but are not presented as completed LR-finder results.
+  61/6/97/60/10 sweep points respectively. The Muon arms were non-finite or
+  otherwise unhealthy; the SophiaG arms were stopped by a submitter bug that
+  overwrote the requested timeout with 6,000 seconds. Their partial data remain
+  linked in W&B for diagnosis but are not completed LR-finder results.
 - `12478325`, 10B AdamW: failed after 14 minutes; replacement `12478340` is queued.
 - `12478329`, canonical 30B Mano with `dp_shard=8`: entered the sweep but
   completed zero points and stalled in oneCCL/MPI pending requests; cancelled.
