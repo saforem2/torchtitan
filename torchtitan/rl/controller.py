@@ -90,6 +90,7 @@ _trainer_loop
 import asyncio
 import logging
 import math
+import os
 import time
 import warnings
 from dataclasses import dataclass, field, replace
@@ -136,6 +137,37 @@ from torchtitan.rl.trainer import Trainer
 from torchtitan.rl.types import Completion, TrainerStepBatch
 
 logger = logging.getLogger(__name__)
+
+
+def _torchstore_strategy_from_env() -> ts.LocalRankStrategy:
+    """Build the TorchStore strategy, optionally forcing its data transport.
+
+    This affects only trainer/generator weight transfer; TorchTitan model
+    collectives continue to use their configured accelerator backend.
+    """
+    requested = os.environ.get("TORCHTITAN_TORCHSTORE_TRANSPORT", "auto").lower()
+    if requested in ("", "auto", "unset"):
+        return ts.LocalRankStrategy()
+
+    # torchstore does not re-export TransportType from its top-level package.
+    # Import lazily so default deployments do not require a particular
+    # torchstore transport module layout until an override is requested.
+    from importlib import import_module
+
+    TransportType = import_module("torchstore.transport").TransportType
+    transports = {
+        "gloo": TransportType.Gloo,
+        "xccl": TransportType.XCCL,
+        "shared_memory": TransportType.SharedMemory,
+        "monarch_rpc": TransportType.MonarchRPC,
+    }
+    if requested not in transports:
+        raise ValueError(
+            "TORCHTITAN_TORCHSTORE_TRANSPORT must be one of "
+            f"auto, gloo, xccl, shared_memory, monarch_rpc; got {requested!r}"
+        )
+    logger.warning("Forcing TorchStore weight transport to %s", requested)
+    return ts.LocalRankStrategy(default_transport_type=transports[requested])
 
 
 @dataclass(kw_only=True, slots=True)
@@ -648,7 +680,9 @@ class Controller(Configurable):
         #   LOCAL_RANK, so colocated processes share the same volume.
         # https://github.com/meta-pytorch/torchstore
         with sl.log_trace_span("torchstore_init"):
-            await ts.initialize(mesh=trainer_mesh, strategy=ts.LocalRankStrategy())
+            await ts.initialize(
+                mesh=trainer_mesh, strategy=_torchstore_strategy_from_env()
+            )
 
         # Resume: __init__ ran CheckpointManager.load(); read back the restored policy_version
         # (0 if fresh) so the loop resumes at the right step and generators pull at that version.
