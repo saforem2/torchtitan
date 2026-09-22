@@ -1,6 +1,6 @@
 # Torch 2.14 Monarch GRPO reproduction
 
-> Status: **running** (2026-09-22). This page records a clean-room rerun of the
+> Status: **stopped after semantic rollout audit failed** (2026-09-22). This page records a clean-room rerun of the
 > `monarch.md` easy-task result and the shaped-reward ceiling attack on the
 > current TorchTitan stack. Interim values are not final reproduction claims.
 
@@ -46,8 +46,8 @@ loading, and chat rendering were validated before submission.
 
 | Recipe | PBS job | Node | Output directory | Current state |
 |---|---:|---|---|---|
-| easy baseline | `12478404` | `x1922c1s3b0n0` | `/lus/tegu/projects/datascience/foremans/reproductions/grpo-easy-c5f8deac6-12478404` | running |
-| shaped ceiling attack | `12478405` | `x1922c1s5b0n0` | `/lus/tegu/projects/datascience/foremans/reproductions/grpo-shaped-c5f8deac6-12478405` | running |
+| easy baseline | `12478404` | `x1922c1s3b0n0` | `/lus/tegu/projects/datascience/foremans/reproductions/grpo-easy-c5f8deac6-12478404` | stopped by operator; PBS exit 143 |
+| shaped ceiling attack | `12478405` | `x1922c1s5b0n0` | `/lus/tegu/projects/datascience/foremans/reproductions/grpo-shaped-c5f8deac6-12478405` | stopped by operator; PBS exit 143 |
 
 Both use one Sunspot node, two XPU tiles (one trainer and one vLLM generator),
 `ezpz launch --auto-retry`, FP32 generation, offline cached data, and strict
@@ -62,22 +62,42 @@ synchronization, and clean shutdown. Its intentionally retained zero-variance
 cold-start batch had zero loss and gradient, so it validates the path rather
 than learning.
 
-## Interim observations
+## Semantic rollout audit and stop decision
 
-At step 4, both production reruns are healthy and have nonzero gradients:
+At step 4, both production reruns were mechanically healthy and had nonzero gradients:
 
 | Recipe | Step rewards observed | Steady-state trainer throughput | Gradient norm range |
 |---|---|---:|---:|
 | easy | `0.081, 0.16, 0.17, 0.12` | about `1,795-1,850 tok/s` | `0.010-0.026` |
 | shaped | `0.14, 0.12, 0.14, 0.15` | about `1,803-1,861 tok/s` | `0.030-0.050` |
 
-This already reproduces the historical Monarch infrastructure throughput of
-approximately 1,765 tok/s. It does **not** yet establish either final reward
-claim; both jobs must finish and the shaped completions must be cross-scored.
+This reproduces the historical Monarch infrastructure throughput of
+approximately 1,765 tok/s, but an explicit audit of `rollout_samples.jsonl`
+failed semantic-quality acceptance. Both jobs were stopped at 38m53s rather
+than spending the remaining allocation optimizing an exploitable reward.
+
+| Recipe | Rollouts inspected | Hit length limit | Copied demo names | Mean completion characters |
+|---|---:|---:|---:|---:|
+| easy | 836 | 100% | 94.4% | 2,373.6 |
+| shaped | 852 | 100% | 94.2% | 2,223.0 |
+
+The completions repeatedly copied `QuinnRivera/OmarSaito/PiaValdez`, emitted
+multiple or malformed `<alphabetical_sorted>` blocks, repeated
+`<end_of_turn>`, and often degraded into unrelated prose or character soup.
+The shaped reward assigned values as high as 0.8-0.9 to some malformed,
+repetitive outputs. Reward and throughput therefore cannot be treated as
+evidence of a successful learning-result reproduction.
+
+These were single-node, two-tile AGPT-2B runs. Historical records document a
+10-node AGPT-2B cross-node vLLM run (job `12470959`), but its raw completions
+have not yet been re-audited under this semantic criterion. No AGPT-20B
+Monarch/GRPO rollout run or archived 20B rollout JSONL was found; existing
+AGPT-20B records cover training, scaling, and evaluation rather than this RL
+generation path.
 
 ## Acceptance criteria
 
-The reproduction is complete only after all of the following:
+Any corrected reproduction is complete only after all of the following:
 
 - both PBS jobs finish with `Exit_status=0`;
 - all 100 optimizer steps are present with nonzero training activity;
@@ -86,3 +106,5 @@ The reproduction is complete only after all of the following:
 - shaped completions are rescored offline with character-ratio(power=1);
 - final checkpoints, logs, code commit, model hash, and any deviations are
   recorded here.
+- sampled raw completions pass an explicit non-gibberish and task-compliance
+  audit before scaling to multi-node or AGPT-20B.
