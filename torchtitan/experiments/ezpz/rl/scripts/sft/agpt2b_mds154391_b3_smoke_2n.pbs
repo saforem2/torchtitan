@@ -44,7 +44,10 @@ git merge-base --is-ancestor "$EXPECTED_CODE_COMMIT" "$commit" || {
 [[ -f "$PRETOK/state.json" ]] || { echo "missing dataset $PRETOK"; exit 14; }
 
 echo "MDS154391_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
-"$V/bin/ezpz" launch --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
+# Invoke the scheduler launcher directly.  Importing ezpz in the PBS parent
+# process initializes mpi4py before mpiexec and is invalid under Sunspot PMIx.
+# The worker module still uses ezpz normally after PALS establishes each rank.
+mpiexec -n 24 -ppn 12 --cpu-bind none \
   "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
   --pretokenized_dataset "$PRETOK" \
   --model_name_or_path "$BASE" \
