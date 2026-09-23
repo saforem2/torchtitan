@@ -132,7 +132,10 @@ def test_runner_supports_stable_run_identity_for_walltime_resume():
     script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
     text = script.read_text()
     assert 'LRF_RUN_ID="${LRF_RUN_ID:-${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}}"' in text
-    assert 'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${LRF_RUN_ID}}"' in text
+    assert (
+        'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${LRF_RUN_ID}}"'
+        in text
+    )
     for name in (
         "submit_lr_finder_olmo2tok_aurora.sh",
         "submit_lr_finder_30b_aurora.sh",

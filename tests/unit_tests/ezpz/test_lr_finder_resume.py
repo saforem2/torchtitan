@@ -13,9 +13,9 @@ import pytest
 import torch
 
 from torchtitan.experiments.ezpz.lr_finder import (
-    LRFinderState,
     _seed_finder_iteration,
     _stable_config_value,
+    LRFinderState,
     run_lr_finder,
 )
 from torchtitan.experiments.ezpz.lr_finder_validation import exponential_lr_schedule
@@ -63,9 +63,7 @@ def test_lr_finder_state_round_trip_preserves_resume_trajectory():
         ("curr_lr", float("nan"), "invalid LR Finder resume LR"),
     ],
 )
-def test_lr_finder_state_rejects_incompatible_or_corrupt_resume(
-    field, value, message
-):
+def test_lr_finder_state_rejects_incompatible_or_corrupt_resume(field, value, message):
     saved = _state().state_dict()
     saved[field] = value
     with pytest.raises(RuntimeError, match=message):

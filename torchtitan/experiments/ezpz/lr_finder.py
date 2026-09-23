@@ -27,7 +27,7 @@ import random
 import tempfile
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
