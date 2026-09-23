@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Aggregate lm-eval results across training steps and generate plots/tables.
 
 Two layouts supported:
@@ -32,11 +38,10 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-
 # ambivalent is required — silent fallback hides style regressions.
 # Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
 import ambivalent  # noqa: F401
+import matplotlib.pyplot as plt
 
 plt.style.use(ambivalent.STYLES["ambivalent"])
 
@@ -55,11 +60,48 @@ TASK_COLORS = {
 
 TASK_ORDER = [
     # legacy commonsense dashboard
-    "hellaswag", "arc_easy", "arc_challenge", "winogrande",
-    "piqa", "openbookqa", "boolq",
+    "hellaswag",
+    "arc_easy",
+    "arc_challenge",
+    "winogrande",
+    "piqa",
+    "openbookqa",
+    "boolq",
     # modern suite (2026-07 landscape review)
-    "mmlu", "gsm8k",
+    "mmlu",
+    "gsm8k",
 ]
+
+TASK_SHOTS = {
+    "hellaswag": "0shot",
+    "arc_easy": "0shot",
+    "arc_challenge": "0shot",
+    "winogrande": "0shot",
+    "piqa": "0shot",
+    "openbookqa": "0shot",
+    "boolq": "0shot",
+    "mmlu": "5shot",
+    "gsm8k": "5shot",
+}
+
+DCP_MODEL_OVERRIDES = {
+    "20b": [
+        {
+            "base": "agpt-20b-v2-256n",
+            "corrected": "agpt-20b-v2-256n-ropefix",
+            "switch_step": 3101,
+            "trusted_base_steps": {16_000},
+        },
+        {
+            "base": "agpt-20b-v2-512n",
+            "corrected": "agpt-20b-v2-512n-ropefix",
+            "switch_step": 4401,
+            "extra_bases": ["agpt-20b-v2-512n-constlr"],
+        },
+    ],
+}
+
+MDS_EXTRA_BASES = {"2b-mds": ["agpt-2b-mds-7771T/stage3-mix"]}
 
 
 def _ordered_tasks(found):
@@ -69,38 +111,121 @@ def _ordered_tasks(found):
     return present + extras
 
 
+def _task_metrics(results: dict, task: str, n_shot: dict | None = None) -> dict | None:
+    expected_shot = TASK_SHOTS.get(task)
+    tagged = (
+        results.get(f"{task}@{expected_shot}") if expected_shot is not None else None
+    )
+    if isinstance(tagged, dict):
+        return tagged
+    if any(k.startswith(f"{task}@") for k in results):
+        return None
+    if expected_shot is not None and isinstance(n_shot, dict) and task in n_shot:
+        desired_shot = int(expected_shot.removesuffix("shot"))
+        try:
+            if int(n_shot[task]) != desired_shot:
+                return None
+        except (TypeError, ValueError):
+            return None
+    if (
+        task == "arc_challenge"
+        and any(k.startswith("mmlu") for k in results)
+        and not (isinstance(n_shot, dict) and task in n_shot)
+    ):
+        return None
+    metrics = results.get(task)
+    return metrics if isinstance(metrics, dict) else None
+
+
 RANDOM_BASELINES = {
     "hellaswag": 0.25,
     "arc_easy": 0.25,
     "arc_challenge": 0.25,
     "winogrande": 0.5,
-    "piqa": 0.5,        # binary choice
-    "openbookqa": 0.25, # 4-way MCQ
-    "boolq": 0.5,       # yes/no
-    "mmlu": 0.25,      # 4-way MCQ
-    "gsm8k": 0.0,      # generative exact-match
+    "piqa": 0.5,  # binary choice
+    "openbookqa": 0.25,  # 4-way MCQ
+    "boolq": 0.5,  # yes/no
+    "mmlu": 0.25,  # 4-way MCQ
+    "gsm8k": 0.0,  # generative exact-match
 }
 
 
 def _read_one(path: Path) -> dict[str, float]:
     with open(path) as f:
-        d = json.load(f)
+        payload = json.load(f)
+    results = payload.get("results", payload)
+    n_shot = payload.get("n-shot")
     scores: dict[str, float] = {}
-    for task, m in d.items():
-        if not isinstance(m, dict):
-            continue
+    tasks = {task.split("@", 1)[0] for task in results}
+    for task in sorted(tasks):
         # mmlu logs a 'mmlu' aggregate PLUS ~57 'mmlu_<subject>' subtasks;
         # keep only the aggregate so the table/plot are not swamped.
         if task.startswith("mmlu_"):
             continue
-        acc = (m.get("acc_norm,none")
-               or m.get("acc,none")
-               or m.get("exact_match,strict-match")
-               or m.get("exact_match,none")
-               or m.get("exact_match,flexible-extract"))
-        if acc is not None:
-            scores[task] = acc
+        m = _task_metrics(results, task, n_shot)
+        if m is None:
+            continue
+        for key in (
+            "acc_norm,none",
+            "acc,none",
+            "exact_match,strict-match",
+            "exact_match,none",
+            "exact_match,flexible-extract",
+        ):
+            if key in m:
+                scores[task] = m[key]
+                break
     return scores
+
+
+def _load_base_dir(base: Path) -> dict[int, dict[str, float]]:
+    data: dict[int, dict[str, float]] = {}
+    if not base.is_dir():
+        return data
+    for results_path in sorted(base.glob("step-*/results/results.json")):
+        step = int(results_path.parent.parent.name.split("-")[1])
+        scores = _read_one(results_path)
+        if scores:
+            data[step] = scores
+    return data
+
+
+def _load_corrected_dcp(
+    evals_dir: Path,
+    *,
+    base: str,
+    corrected: str | None = None,
+    switch_step: int | None = None,
+    extra_bases: list[str] | None = None,
+    trusted_base_steps: set[int] | None = None,
+) -> dict[int, dict[str, float]]:
+    original = _load_base_dir(evals_dir / base)
+    extra: dict[int, dict[str, float]] = {}
+    for extra_base in extra_bases or []:
+        for step, scores in _load_base_dir(evals_dir / extra_base).items():
+            extra.setdefault(step, {}).update(scores)
+    if corrected is None or switch_step is None:
+        for step, scores in extra.items():
+            original.setdefault(step, {}).update(scores)
+        return original
+
+    corrected_steps = _load_base_dir(evals_dir / corrected)
+    merged = {step: scores for step, scores in original.items() if step < switch_step}
+    for step, scores in original.items():
+        if step < switch_step:
+            continue
+        fixed = corrected_steps.get(step, {})
+        if fixed:
+            merged[step] = dict(fixed)
+    for step, scores in corrected_steps.items():
+        if step >= switch_step:
+            merged.setdefault(step, scores)
+    for step in trusted_base_steps or set():
+        if step in original:
+            merged[step] = original[step]
+    for step, scores in extra.items():
+        merged.setdefault(step, {}).update(scores)
+    return merged
 
 
 def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
@@ -113,22 +238,23 @@ def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
     that live in the -v2-{LABEL} dirs show up alongside the legacy suite.
     """
     data: dict[int, dict[str, float]] = {}
-    bases = [evals_dir / f"agpt-{model}"]
-    bases += sorted(evals_dir.glob(f"agpt-{model}-v2-*"))
-    for base in bases:
-        if not base.is_dir():
-            continue
-        for step_dir in sorted(base.glob("step-*/results/results.json")):
-            step = int(step_dir.parent.parent.name.split("-")[1])
-            scores = _read_one(step_dir)
-            if scores:
+    for step, scores in _load_base_dir(evals_dir / f"agpt-{model}").items():
+        data.setdefault(step, {}).update(scores)
+
+    overrides = DCP_MODEL_OVERRIDES.get(model)
+    if overrides is not None:
+        for override in overrides:
+            for step, scores in _load_corrected_dcp(evals_dir, **override).items():
                 data.setdefault(step, {}).update(scores)
+        return data
+
+    for base in sorted(evals_dir.glob(f"agpt-{model}-v2-*")):
+        for step, scores in _load_base_dir(base).items():
+            data.setdefault(step, {}).update(scores)
     return data
 
 
-def load_results_mds(
-    model: str, evals_dir: Path
-) -> dict[int, dict[str, list[float]]]:
+def load_results_mds(model: str, evals_dir: Path) -> dict[int, dict[str, list[float]]]:
     """Load MDS-layout results aggregated across replicate eval runs.
 
     The on-disk layout has three sibling directories
@@ -142,13 +268,19 @@ def load_results_mds(
     Returns ``{step: {task: [acc1, acc2, ...]}}`` with one entry per
     replicate found at that (step, task).
     """
-    base = evals_dir / f"agpt-{model}"  # caller passes "2b-mds" -> agpt-2b-mds
     by_step: dict[int, dict[str, list[float]]] = {}
-    for step_path in sorted(base.glob("*/step-*/results/results.json")):
-        step = int(step_path.parent.parent.name.split("-")[1])
-        scores = _read_one(step_path)
-        for task, acc in scores.items():
-            by_step.setdefault(step, {}).setdefault(task, []).append(acc)
+    bases = [evals_dir / f"agpt-{model}"]
+    bases += [evals_dir / name for name in MDS_EXTRA_BASES.get(model, [])]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        step_paths = sorted(base.glob("*/step-*/results/results.json"))
+        step_paths += sorted(base.glob("step-*/results/results.json"))
+        for step_path in step_paths:
+            step = int(step_path.parent.parent.name.split("-")[1])
+            scores = _read_one(step_path)
+            for task, acc in scores.items():
+                by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return dict(sorted(by_step.items()))
 
 
@@ -210,13 +342,21 @@ def make_plot_mds(
     model: str,
     outpath: Path,
 ) -> None:
-    """4-panel figure (one per task), mean ± stderr across replicates."""
+    """Per-task figure, mean ± stderr across replicate evals."""
     if not by_step:
         print(f"[skip] no MDS data for {model}")
         return
 
     tasks = sorted({t for s in by_step.values() for t in s})
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
+    ncols = 2 if len(tasks) > 1 else 1
+    nrows = (len(tasks) + ncols - 1) // ncols
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(7 * ncols, 5 * nrows),
+        sharex=True,
+        squeeze=False,
+    )
     axes = axes.flatten()
 
     n_replicates = max(len(by_step[s].get(tasks[0], [])) for s in by_step)
@@ -254,10 +394,11 @@ def make_plot_mds(
         ax.set_ylabel("Accuracy")
         ax.legend(loc="best", fontsize=9)
 
-    for ax in axes[len(tasks):]:
+    for ax in axes[len(tasks) :]:
         ax.set_visible(False)
-    for ax in axes[-2:]:
-        ax.set_xlabel("global_step")
+    for index, ax in enumerate(axes[: len(tasks)]):
+        if index // ncols == nrows - 1:
+            ax.set_xlabel("global_step")
 
     fig.suptitle(
         f"agpt_{model} — MDS SophiaG sweep ({len(by_step)} unique checkpoints, "
@@ -272,9 +413,7 @@ def make_plot_mds(
     print(f"Saved plot: {outpath}")
 
 
-def print_table_mds(
-    by_step: dict[int, dict[str, list[float]]], model: str
-) -> None:
+def print_table_mds(by_step: dict[int, dict[str, list[float]]], model: str) -> None:
     """Print a markdown table of mean accuracies per (step, task)."""
     if not by_step:
         print(f"\n## agpt_{model}: no MDS results")

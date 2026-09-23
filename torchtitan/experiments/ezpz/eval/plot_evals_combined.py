@@ -16,7 +16,7 @@ be compared directly:
     - 2B 256N async (current production comparator)
     - 2B 512N sync (canonical 2B chain)
     - 20B 256N (per-token comparator)
-    - 20B 512N sync (canonical 20B chain)
+    - 20B 512N sync -> const-LR (canonical 20B chain plus continuation)
 
 Writes to <eval-docs>/figures/all_production_evals.svg (single artifact
 referenced from the eval README as the landing-page chart). The eval docs dir
@@ -161,18 +161,21 @@ TRAJECTORIES: list[dict] = [
     # 43 eval points on disk. The exclusion silently kept all of them off the
     # chart. Restored 2026-08-16.
     {
-        "label": "20B 256N (GBS=3072)",
+        "label": "20B 256N (GBS=6144)",
         "eval_subdir": "agpt-20b-v2-256n",
         "corrected_subdir": "agpt-20b-v2-256n-ropefix",
         "switch_step": 3101,
+        # This production-tail export used the corrected 20b_real flavor but
+        # was written to the legacy base directory. Admit only this exact step.
+        "trusted_base_steps": [16000],
         "layout": "dcp",
-        "tokens_per_step": 3072 * 8192,
+        "tokens_per_step": 6144 * 8192,
         "color": COLOR_20B_TT_256N,
         "linestyle": "--",
         "marker": "^",
     },
     {
-        "label": "20B 512N sync (GBS=12288)",
+        "label": "20B 512N sync -> const-LR (GBS=12288)",
         "eval_subdir": "agpt-20b-v2-512n",
         # The chain did not stop at 7,600. It forked to a constant LR at
         # step 9,000 and kept running; those evals land in a sibling dir
@@ -313,6 +316,7 @@ def load_dcp(
     corrected_subdir: str | None = None,
     switch_step: int | None = None,
     extra_subdirs: list[str] | None = None,
+    trusted_base_steps: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """Load a chain's eval series, splicing in corrected results if it has any.
 
@@ -324,10 +328,17 @@ def load_dcp(
     history. So take pre-switch from the original and post-switch from the
     corrected dir.
 
+    Shot-tagged task results are pinned to ``SHOTS`` by ``_read_metric``; a
+    bare alias is used only when the file has no tagged variant for that task.
+    This prevents a later 25-shot ARC-Challenge pass from entering the 0-shot
+    aggregate curve.
+
     Chains that never switched pass ``corrected_subdir=None`` and read one dir,
-    unchanged. ``agpt-2b-v2-256n`` is deliberately in that group: it used the
-    complex convention end to end, so its results were never corrupted and
-    there is nothing to correct.
+    unchanged. Optional ``extra_subdirs`` are merged last and override earlier
+    values at duplicate steps. ``trusted_base_steps`` explicitly restores
+    known-good exports that landed in the legacy base directory after the RoPE
+    switch. ``agpt-2b-v2-256n`` is deliberately in the no-switch group: it used
+    the complex convention end to end, so its results were never corrupted.
     """
 
     def _series(d: str) -> dict[int, float]:
@@ -386,6 +397,9 @@ def load_dcp(
     # entire exercise, and a gap is at least visible.
     merged = {s: v for s, v in original.items() if s < switch_step}
     merged.update({s: v for s, v in corrected.items() if s >= switch_step})
+    for step in trusted_base_steps or []:
+        if step in original:
+            merged[step] = original[step]
     # Applied last so a continuation segment wins its own steps outright.
     merged.update(extra)
     return sorted(merged.items())
@@ -520,6 +534,7 @@ def main() -> None:
                     traj.get("corrected_subdir"),
                     traj.get("switch_step"),
                     traj.get("extra_subdirs"),
+                    traj.get("trusted_base_steps"),
                 )
             if not pts:
                 print(f"  [{title}] no data for {traj['label']}")
