@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Aggregate lm-eval results across training steps and generate plots/tables.
 
 Two layouts supported:
@@ -32,11 +38,10 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-
 # ambivalent is required — silent fallback hides style regressions.
 # Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
 import ambivalent  # noqa: F401
+import matplotlib.pyplot as plt
 
 plt.style.use(ambivalent.STYLES["ambivalent"])
 
@@ -55,10 +60,16 @@ TASK_COLORS = {
 
 TASK_ORDER = [
     # legacy commonsense dashboard
-    "hellaswag", "arc_easy", "arc_challenge", "winogrande",
-    "piqa", "openbookqa", "boolq",
+    "hellaswag",
+    "arc_easy",
+    "arc_challenge",
+    "winogrande",
+    "piqa",
+    "openbookqa",
+    "boolq",
     # modern suite (2026-07 landscape review)
-    "mmlu", "gsm8k",
+    "mmlu",
+    "gsm8k",
 ]
 
 TASK_SHOTS = {
@@ -102,7 +113,9 @@ def _ordered_tasks(found):
 
 def _task_metrics(results: dict, task: str, n_shot: dict | None = None) -> dict | None:
     expected_shot = TASK_SHOTS.get(task)
-    tagged = results.get(f"{task}@{expected_shot}") if expected_shot is not None else None
+    tagged = (
+        results.get(f"{task}@{expected_shot}") if expected_shot is not None else None
+    )
     if isinstance(tagged, dict):
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
@@ -129,11 +142,11 @@ RANDOM_BASELINES = {
     "arc_easy": 0.25,
     "arc_challenge": 0.25,
     "winogrande": 0.5,
-    "piqa": 0.5,        # binary choice
-    "openbookqa": 0.25, # 4-way MCQ
-    "boolq": 0.5,       # yes/no
-    "mmlu": 0.25,      # 4-way MCQ
-    "gsm8k": 0.0,      # generative exact-match
+    "piqa": 0.5,  # binary choice
+    "openbookqa": 0.25,  # 4-way MCQ
+    "boolq": 0.5,  # yes/no
+    "mmlu": 0.25,  # 4-way MCQ
+    "gsm8k": 0.0,  # generative exact-match
 }
 
 
@@ -241,9 +254,7 @@ def load_results(model: str, evals_dir: Path) -> dict[int, dict[str, float]]:
     return data
 
 
-def load_results_mds(
-    model: str, evals_dir: Path
-) -> dict[int, dict[str, list[float]]]:
+def load_results_mds(model: str, evals_dir: Path) -> dict[int, dict[str, list[float]]]:
     """Load MDS-layout results aggregated across replicate eval runs.
 
     The on-disk layout has three sibling directories
@@ -383,7 +394,7 @@ def make_plot_mds(
         ax.set_ylabel("Accuracy")
         ax.legend(loc="best", fontsize=9)
 
-    for ax in axes[len(tasks):]:
+    for ax in axes[len(tasks) :]:
         ax.set_visible(False)
     for index, ax in enumerate(axes[: len(tasks)]):
         if index // ncols == nrows - 1:
@@ -402,9 +413,7 @@ def make_plot_mds(
     print(f"Saved plot: {outpath}")
 
 
-def print_table_mds(
-    by_step: dict[int, dict[str, list[float]]], model: str
-) -> None:
+def print_table_mds(by_step: dict[int, dict[str, list[float]]], model: str) -> None:
     """Print a markdown table of mean accuracies per (step, task)."""
     if not by_step:
         print(f"\n## agpt_{model}: no MDS results")
