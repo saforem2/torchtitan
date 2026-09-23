@@ -69,15 +69,12 @@ fi
 export PATH="/opt/pbs/bin:${PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
-# Do not force synchronous oneCCL operations. Current oneCCL supports async
-# collectives, and forcing CCL_OP_SYNC=1 stalls this workload after a few
-# otherwise-finite updates on Aurora. An explicit caller value is preserved.
-if [[ -n "${CCL_OP_SYNC+x}" ]]; then
-    export CCL_OP_SYNC
-else
-    unset CCL_OP_SYNC
-fi
-echo "lr-finder: CCL_OP_SYNC=${CCL_OP_SYNC-<unset>}"
+# This workload owns its collective policy. Matched 4-node / 48-rank controls
+# on both Aurora and Sunspot found asynchronous oneCCL about 6x slower while
+# both modes remained finite, so default this application to synchronous ops.
+# Callers can still opt into a controlled async experiment with CCL_OP_SYNC=0.
+export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"
+echo "lr-finder: CCL_OP_SYNC=${CCL_OP_SYNC}"
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
