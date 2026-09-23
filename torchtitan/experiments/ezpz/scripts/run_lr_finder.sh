@@ -252,6 +252,7 @@ case "${LRF_MODE}" in
         ;;
 esac
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
+LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"
 LRF_LBS="${LRF_LBS:-1}"
 # Sequence length. Was hardcoded to 8192 in the launch below, which is wrong
 # for any model whose measurements are at another length: every 30B datapoint
@@ -314,7 +315,8 @@ NUM_NODES="${NHOSTS:-${SLURM_NNODES:-1}}"
 # submitted in the same second) get DISTINCT per-run dirs. date alone is
 # second-resolution and collides on simultaneous submits.
 _JOBTAG="${PBS_JOBID%%.*}"
-OUTDIR="outputs/lr_finder/${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}"
+LRF_RUN_ID="${LRF_RUN_ID:-${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}}"
+OUTDIR="outputs/lr_finder/${LRF_RUN_ID}"
 mkdir -p "${OUTDIR}"
 # The trainer writes the CSV/plot/npz under <dump_folder>/lr_finder/
 # ezpz.agpt/<flavor>/<optimizer>/ -- a path keyed by model+optimizer, NOT
@@ -323,7 +325,7 @@ mkdir -p "${OUTDIR}"
 # so a trend sweep isolates each GBS's outputs.
 # Stage-specific defaults prevent a fine pass from appending to the coarse
 # CSV. Explicit submitter paths remain authoritative.
-LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}}"
+LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${LRF_RUN_ID}}"
 
 # Data list. The default is books.txt for historical reasons, but on Aurora
 # that points at dolma/data_v1.7_Llama2Tokenizer -- LLAMA-2 token ids. Sweeping
@@ -524,7 +526,11 @@ for model in "${MODELS[@]}"; do
             --lr_finder.fraction "${LRF_FRACTION}" \
             "${tp_args[@]}" \
             "$@" \
-            --checkpoint.no-enable \
+            --checkpoint.enable \
+            --checkpoint.folder "checkpoints/lr_finder_${label}" \
+            --checkpoint.interval "${LRF_CHECKPOINT_INTERVAL}" \
+            --checkpoint.no-last-save-model-only \
+            --checkpoint.async-mode disabled \
             "${ac_subcommand[@]}" \
             >"${logfile}" 2>&1
         exit_code=$?

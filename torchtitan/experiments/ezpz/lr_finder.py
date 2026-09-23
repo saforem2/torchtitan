@@ -19,9 +19,15 @@ Reference:
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
+import math
 import os
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import random
+import tempfile
+from dataclasses import dataclass, field, fields, is_dataclass
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.distributed as dist
@@ -63,6 +69,188 @@ class LRFinderConfig:
     smooth_frac: float = 0.05
     """Moving-average window fraction for derivative-based analysis.
     Increase for noisier curves or fewer steps (e.g. 0.1 for <50 steps)."""
+
+
+@dataclass
+class LRFinderState:
+    """Checkpointed cursor and statistics for one logical LR sweep."""
+
+    init_lr: float
+    max_lr: float
+    beta: float
+    total_iters: int
+    warmup_steps: int
+    sweep_steps: int
+    world_size: int
+    trajectory_fingerprint: str
+    next_iter: int = 0
+    curr_lr: float = 0.0
+    avg_loss: float = 0.0
+    best_loss: float = float("inf")
+    batch_num: int = 0
+    lrs: list[float] = field(default_factory=list)
+    losses: list[float] = field(default_factory=list)
+    base_seeds: list[int] = field(default_factory=list)
+    loaded: bool = field(default=False, init=False, repr=False)
+
+    VERSION = 1
+
+    def __post_init__(self) -> None:
+        if self.curr_lr == 0.0:
+            self.curr_lr = self.init_lr
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.VERSION,
+            "init_lr": self.init_lr,
+            "max_lr": self.max_lr,
+            "beta": self.beta,
+            "total_iters": self.total_iters,
+            "warmup_steps": self.warmup_steps,
+            "sweep_steps": self.sweep_steps,
+            "world_size": self.world_size,
+            "trajectory_fingerprint": self.trajectory_fingerprint,
+            "next_iter": self.next_iter,
+            "curr_lr": self.curr_lr,
+            "avg_loss": self.avg_loss,
+            "best_loss": self.best_loss,
+            "batch_num": self.batch_num,
+            "lrs": list(self.lrs),
+            "losses": list(self.losses),
+            "base_seeds": list(self.base_seeds),
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        expected = {
+            "init_lr": self.init_lr,
+            "max_lr": self.max_lr,
+            "beta": self.beta,
+            "total_iters": self.total_iters,
+            "warmup_steps": self.warmup_steps,
+            "sweep_steps": self.sweep_steps,
+            "world_size": self.world_size,
+            "trajectory_fingerprint": self.trajectory_fingerprint,
+        }
+        if state_dict.get("version") != self.VERSION:
+            raise RuntimeError(
+                "LR Finder checkpoint version mismatch: "
+                f"expected {self.VERSION}, got {state_dict.get('version')}"
+            )
+        for key, value in expected.items():
+            if state_dict.get(key) != value:
+                raise RuntimeError(
+                    f"LR Finder checkpoint configuration mismatch for {key}: "
+                    f"expected {value}, got {state_dict.get(key)}"
+                )
+
+        next_iter = int(state_dict["next_iter"])
+        batch_num = int(state_dict["batch_num"])
+        curr_lr = float(state_dict["curr_lr"])
+        lrs = [float(value) for value in state_dict["lrs"]]
+        losses = [float(value) for value in state_dict["losses"]]
+        if not 0 <= next_iter <= self.total_iters:
+            raise RuntimeError(f"invalid LR Finder resume cursor: {next_iter}")
+        if not 0 <= batch_num <= next_iter:
+            raise RuntimeError(f"invalid LR Finder EMA sample count: {batch_num}")
+        if len(lrs) != len(losses):
+            raise RuntimeError("LR Finder checkpoint has mismatched LR/loss counts")
+        expected_points = max(0, next_iter - self.warmup_steps)
+        if len(lrs) != expected_points:
+            raise RuntimeError(
+                "LR Finder checkpoint point count does not match its cursor: "
+                f"expected {expected_points}, got {len(lrs)}"
+            )
+        if not math.isfinite(curr_lr) or curr_lr <= 0:
+            raise RuntimeError(f"invalid LR Finder resume LR: {curr_lr}")
+        if any(not math.isfinite(value) for value in [*lrs, *losses]):
+            raise RuntimeError("LR Finder checkpoint contains non-finite curve data")
+
+        self.next_iter = next_iter
+        self.curr_lr = curr_lr
+        self.avg_loss = float(state_dict["avg_loss"])
+        self.best_loss = float(state_dict["best_loss"])
+        self.batch_num = batch_num
+        self.lrs = lrs
+        self.losses = losses
+        base_seeds = [int(value) for value in state_dict["base_seeds"]]
+        if len(base_seeds) != self.world_size:
+            raise RuntimeError(
+                "LR Finder checkpoint RNG seed count does not match world size: "
+                f"expected {self.world_size}, got {len(base_seeds)}"
+            )
+        self.base_seeds = base_seeds
+        self.loaded = True
+
+
+def _seed_finder_iteration(
+    base_seed: int, iteration: int, parallel_dims: Any | None = None
+) -> None:
+    """Make process-local model RNG reproducible across job restarts."""
+    seed = (base_seed + iteration * 1_000_003) % 2**64
+    random.seed(seed)
+    torch.manual_seed(seed)
+    try:
+        import numpy as np
+
+        np.random.seed(seed % 2**32)
+    except ImportError:
+        pass
+    if parallel_dims is not None and parallel_dims.world_size > parallel_dims.pp:
+        torch.distributed.tensor._random.manual_seed(  # pyrefly: ignore[missing-attribute]
+            seed, parallel_dims.world_mesh
+        )
+
+
+def _stable_config_value(value: Any) -> Any:
+    """Convert nested config objects to deterministic JSON-compatible data."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            item.name: _stable_config_value(getattr(value, item.name))
+            for item in fields(value)
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _stable_config_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_stable_config_value(item) for item in value]
+    if callable(value):
+        return {
+            "callable": f"{getattr(value, '__module__', '')}."
+            f"{getattr(value, '__qualname__', type(value).__qualname__)}"
+        }
+    if hasattr(value, "__dict__"):
+        return {
+            key: _stable_config_value(item)
+            for key, item in sorted(vars(value).items())
+            if not key.startswith("_")
+        }
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
+    """Fingerprint configuration that defines an exact LR-finder trajectory."""
+    config = trainer.config
+    model_spec = config.model_spec
+    payload = {
+        "model": None
+        if model_spec is None
+        else {"name": model_spec.name, "flavor": model_spec.flavor},
+        "optimizer_container": type(trainer.optimizers).__qualname__,
+        "optimizer_config": _stable_config_value(config.optimizer),
+        "dataloader_config": _stable_config_value(config.dataloader),
+        "microbatch_tokens": config.training.num_tokens_per_microbatch_per_dp_rank,
+        "train_step_tokens": config.training.num_tokens_per_train_step,
+        "context_length": config.training.max_context_length,
+        "parallelism": _stable_config_value(config.parallelism),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def find_optimal_lr(
@@ -137,6 +325,40 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     )
     lr_schedule = exponential_lr_schedule(config.init_lr, config.max_lr, sweep_steps)
     mult = lr_schedule[1] / lr_schedule[0]
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    initial_seed = torch.initial_seed()
+    if dist.is_initialized():
+        gathered_seeds: list[int | None] = [None] * world_size
+        dist.all_gather_object(gathered_seeds, initial_seed)
+        base_seeds = [int(seed) for seed in gathered_seeds if seed is not None]
+        if len(base_seeds) != world_size:
+            raise RuntimeError("failed to gather every rank's LR Finder RNG seed")
+    else:
+        base_seeds = [initial_seed]
+    finder_state = LRFinderState(
+        init_lr=config.init_lr,
+        max_lr=config.max_lr,
+        beta=config.beta,
+        total_iters=total_iters,
+        warmup_steps=warmup_steps,
+        sweep_steps=sweep_steps,
+        world_size=world_size,
+        trajectory_fingerprint=_trajectory_fingerprint(trainer),
+        base_seeds=base_seeds,
+    )
+    if not getattr(trainer.checkpointer, "enable", False):
+        raise RuntimeError(
+            "LR Finder requires checkpointing so interrupted sweeps can resume"
+        )
+    trainer.checkpointer.states["lr_finder"] = finder_state
+    checkpoint_loaded = trainer.checkpointer.load(
+        step=trainer.config.checkpoint.load_step
+    )
+    if checkpoint_loaded and not finder_state.loaded and trainer.step != 0:
+        raise RuntimeError(
+            "Loaded a non-seed checkpoint without LR Finder state; refusing to "
+            "continue from already-updated weights"
+        )
 
     logger.info(
         f"LR Finder: sweeping from {config.init_lr:.2e} to {config.max_lr:.2e} "
@@ -148,20 +370,13 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             f"before sweep"
         )
 
-    # Set initial LR on all optimizer param groups
-    curr_lr = lr_schedule[0]
+    # Reapply the authoritative LR-finder value after optimizer/scheduler load.
+    curr_lr = finder_state.curr_lr
     for optimizer in trainer.optimizers.optimizers:
         for param_group in optimizer.param_groups:
             param_group["lr"] = curr_lr
 
-    # EMA tracking
-    avg_loss = 0.0
-    best_loss = float("inf")
-    batch_num = 0
-
-    lrs: list[float] = []
-    losses: list[float] = []
-
+    # Build the iterator only after checkpoint load restores dataloader state.
     data_iterator = trainer.batch_generator(trainer.dataloader)
 
     # SUSPEND THE LR SCHEDULER FOR THE DURATION OF THE SWEEP.
@@ -198,35 +413,44 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         )
 
     try:
-        for i in range(total_iters):
+        for i in range(finder_state.next_iter, total_iters):
+            _seed_finder_iteration(
+                finder_state.base_seeds[
+                    dist.get_rank() if dist.is_initialized() else 0
+                ],
+                i,
+                getattr(trainer, "parallel_dims", None),
+            )
             trainer.step += 1
             in_warmup = i < warmup_steps
 
             # Run one training step; returns global_avg_loss
             loss_val = trainer.train_step(data_iterator)
             if loss_val is None:
-                if not in_warmup:
-                    raise RuntimeError(
-                        "LR Finder produced no loss during sweep; refusing partial sweep"
-                    )
-                continue
+                raise RuntimeError(
+                    "LR Finder produced no loss; refusing to advance a resumable sweep"
+                )
 
             if isinstance(loss_val, torch.Tensor):
                 loss_val = float(loss_val.item())
 
-            batch_num += 1
+            finder_state.batch_num += 1
 
             # EMA-smoothed loss with bias correction
-            avg_loss = config.beta * avg_loss + (1.0 - config.beta) * loss_val
-            smoothed_loss = avg_loss / (1.0 - config.beta**batch_num)
+            finder_state.avg_loss = (
+                config.beta * finder_state.avg_loss + (1.0 - config.beta) * loss_val
+            )
+            smoothed_loss = finder_state.avg_loss / (
+                1.0 - config.beta**finder_state.batch_num
+            )
 
-            if smoothed_loss < best_loss or batch_num == 1:
-                best_loss = smoothed_loss
+            if smoothed_loss < finder_state.best_loss or finder_state.batch_num == 1:
+                finder_state.best_loss = smoothed_loss
 
             # Only record data points during the sweep phase
             if not in_warmup:
-                lrs.append(curr_lr)
-                losses.append(smoothed_loss)
+                finder_state.lrs.append(curr_lr)
+                finder_state.losses.append(smoothed_loss)
 
             # Log progress
             log_freq = trainer.config.metrics.log_freq
@@ -239,11 +463,15 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
 
             # Advance LR exponentially only during sweep. Avoid assigning one
             # step beyond max_lr after the final recorded endpoint.
-            if not in_warmup and len(lrs) < sweep_steps:
-                curr_lr = lr_schedule[len(lrs)]
+            if not in_warmup and len(finder_state.lrs) < sweep_steps:
+                curr_lr = lr_schedule[len(finder_state.lrs)]
+                finder_state.curr_lr = curr_lr
                 for optimizer in trainer.optimizers.optimizers:
                     for param_group in optimizer.param_groups:
                         param_group["lr"] = curr_lr
+            finder_state.next_iter = i + 1
+            if finder_state.next_iter < total_iters:
+                trainer.checkpointer.save(trainer.step)
     finally:
         if _orig_step is not None:
             assert _sched is not None
@@ -253,6 +481,10 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     # Validate before creating or appending any artifact. A partial, empty, or
     # non-finite curve is not a successful finder run and must make the launcher
     # fail instead of leaving success-looking CSV/NPZ/PNG files behind.
+    trainer.checkpointer.maybe_wait_for_staging()
+    trainer.checkpointer.maybe_wait_for_saving()
+    lrs = finder_state.lrs
+    losses = finder_state.losses
     validate_sweep_results(lrs, losses, expected_points=sweep_steps)
     blow_up_lrs = find_optimal_lr(lrs, losses, smooth_frac=config.smooth_frac)
     if not blow_up_lrs:
@@ -261,6 +493,11 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             "the sweep successful. Run a wider coarse sweep or inspect the curve."
         )
     suggested = blow_up_lrs[0] / 10
+    # Only a semantically valid curve earns the terminal checkpoint. Otherwise
+    # the latest automatic resume point remains the preceding periodic save.
+    trainer.checkpointer.save(trainer.step, last_step=True)
+    trainer.checkpointer.maybe_wait_for_staging()
+    trainer.checkpointer.maybe_wait_for_saving()
 
     # Save results on rank 0
     rank = int(os.environ.get("RANK", "0"))
@@ -297,8 +534,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         global_batch_size = trainer.config.training.num_tokens_per_train_step
         seq_len = trainer.config.training.max_context_length
 
-        # CSV — append mode so runs accumulate across experiments.
-        # If file exists with outdated header, rename as backup.
+        # Publish a complete per-run CSV atomically. A retry after interruption
+        # replaces this logical run instead of appending duplicate rows.
         csv_path = os.path.join(out_dir, "lr_finder_data.csv")
         new_header = [
             "learning_rate",
@@ -310,26 +547,10 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             "global_batch_size",
             "seq_len",
         ]
-        write_header = True
-        if os.path.isfile(csv_path):
-            with open(csv_path) as f:
-                first_line = f.readline().strip()
-            if "global_batch_size" in first_line:
-                write_header = False  # already has current header
-            elif "timestamp" in first_line:
-                # Has old 6-column header but missing GBS — back up
-                backup = csv_path + ".bak2"
-                os.rename(csv_path, backup)
-                logger.info(f"LR Finder: backed up old CSV to {backup}")
-            else:
-                # Very old 2-column format
-                backup = csv_path + ".bak"
-                os.rename(csv_path, backup)
-                logger.info(f"LR Finder: backed up old CSV to {backup}")
-        with open(csv_path, "a", newline="") as f:
+        fd, csv_tmp = tempfile.mkstemp(prefix=".lr_finder_data.", dir=out_dir)
+        with os.fdopen(fd, "w", newline="") as f:
             writer = csv.writer(f)
-            if write_header:
-                writer.writerow(new_header)
+            writer.writerow(new_header)
             for lr, loss in zip(lrs, losses):
                 writer.writerow(
                     [
@@ -343,18 +564,26 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
                         seq_len,
                     ]
                 )
-        logger.info(f"LR Finder: appended {len(lrs)} rows to {csv_path}")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(csv_tmp, csv_path)
+        logger.info(f"LR Finder: atomically wrote {len(lrs)} rows to {csv_path}")
 
         # NPZ
         try:
             import numpy as np
 
             npz_path = os.path.join(out_dir, "lr_finder_data.npz")
-            np.savez(
-                npz_path,
-                learning_rates=np.array(lrs),
-                losses=np.array(losses),
-            )
+            fd, npz_tmp = tempfile.mkstemp(prefix=".lr_finder_data.", dir=out_dir)
+            with os.fdopen(fd, "wb") as f:
+                np.savez(
+                    f,
+                    learning_rates=np.array(lrs),
+                    losses=np.array(losses),
+                )
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(npz_tmp, npz_path)
             logger.info(f"LR Finder: saved NPZ to {npz_path}")
         except ImportError:
             logger.warning("numpy not available, skipping NPZ output")
@@ -425,8 +654,13 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             ax.legend()
 
             plot_path = os.path.join(out_dir, "lr_vs_loss.png")
-            fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+            fd, plot_tmp = tempfile.mkstemp(
+                prefix=".lr_vs_loss.", suffix=".png", dir=out_dir
+            )
+            os.close(fd)
+            fig.savefig(plot_tmp, dpi=150, bbox_inches="tight")
             plt.close(fig)
+            os.replace(plot_tmp, plot_path)
             logger.info(f"LR Finder: saved plot to {plot_path}")
         except ImportError:
             logger.warning("matplotlib not available, skipping plot output")

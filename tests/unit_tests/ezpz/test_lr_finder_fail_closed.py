@@ -116,12 +116,30 @@ def test_olmo_submitter_preserves_caller_fine_bounds():
     assert 'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}' in text
 
 
-def test_runner_forces_no_checkpoint_after_caller_arguments():
+def test_runner_forces_resumable_checkpoint_contract_after_caller_arguments():
     script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
     text = script.read_text()
     caller_args = text.index('            "$@" \\\n')
-    checkpoint_off = text.index("            --checkpoint.no-enable \\\n", caller_args)
-    assert checkpoint_off > caller_args
+    checkpoint_on = text.index("            --checkpoint.enable \\\n", caller_args)
+    assert checkpoint_on > caller_args
+    assert "--checkpoint.no-last-save-model-only" in text[checkpoint_on:]
+    assert 'LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"' in text
+    assert '--checkpoint.folder "checkpoints/lr_finder_${label}"' in text
+    assert "--checkpoint.no-enable" not in text[caller_args:]
+
+
+def test_runner_supports_stable_run_identity_for_walltime_resume():
+    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
+    text = script.read_text()
+    assert 'LRF_RUN_ID="${LRF_RUN_ID:-${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}}"' in text
+    assert 'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${LRF_RUN_ID}}"' in text
+    for name in (
+        "submit_lr_finder_olmo2tok_aurora.sh",
+        "submit_lr_finder_30b_aurora.sh",
+    ):
+        submitter_text = (script.parent / name).read_text()
+        assert '_run_tag="${LRF_RUN_ID:-' in submitter_text
+        assert 'export LRF_RUN_ID="${_run_tag}"' in submitter_text
 
 
 def test_runner_uses_top_level_hf_assets_option():
