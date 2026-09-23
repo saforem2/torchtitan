@@ -1,11 +1,10 @@
 # Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis
 
 > **Status (2026-09-23):** the Torch 2.14 Monarch/TorchStore/vLLM XPU path is
-> operational. A stage-3-derived AGPT SFT checkpoint passes clean direct
-> generation and automatic TorchStore synchronization with bounded pre/post
-> outputs. A distractor-resistant SFT follow-up improved the adversarial suite
-> from 0/8 to 5/8 without regressing its 8/8 clean score, but still fails the
-> semantic release gate; bounded GRPO remains blocked on policy robustness.
+> operational. Robust-SFT-v3, trained from the broad MDS stage-3 base, passes
+> both held-out gates: clean 8/8 and adversarial 8/8, with exact output framing
+> and EOT termination. It is the first AGPT candidate in this report eligible
+> for a small bounded GRPO canary.
 
 ## Executive conclusion
 
@@ -29,12 +28,13 @@ trained stage-3-derived policies:
    termination. It also passed bounded automatic TorchTitan/TorchStore
    synchronization. This supersedes any broad claim that the current AGPT
    candidate is semantically malformed.
-4. **Robustness—not basic task learning or synchronization—is the remaining
-   blocker.** The first targeted candidate scored 0/8 under conflicting
-   distractor examples. Robust-SFT-v2 preserved 8/8 clean behavior and improved
-   the adversarial suite to 5/8, but three single-name cases still leaked,
-   repeated, or failed to terminate cleanly. No current AGPT policy therefore
-   qualifies for bounded GRPO yet.
+4. **The controlled robustness curriculum closed the remaining direct-generation
+   gate.** The first targeted candidate scored 0/8 under conflicting distractor
+   examples. Robust-SFT-v2 preserved 8/8 clean behavior and improved the
+   adversarial suite to 5/8. Robust-SFT-v3 then reached 8/8 clean and 8/8
+   adversarial, with all samples bounded and EOT-terminated. It qualifies for a
+   small bounded GRPO canary; any resulting policy must still be re-evaluated on
+   both suites before being accepted.
 
 These conclusions do **not** rely on reward, loss, token accuracy, or throughput
 alone. They follow from raw completion inspection across direct AGPT loading, a
@@ -1223,6 +1223,43 @@ saving succeeded. The artifact is:
 model.safetensors SHA-256: 2e075c04a8560a0a4f197a24e3638148f491eb507dbb0506ef8ef14f5c4aaf17
 ```
 
-These training metrics establish technical completion only. The release gate
-remains conjunctive: clean 8/8 exact and EOT, adversarial 8/8 exact and EOT, with
-no distractor leakage, repetition, or truncation.
+These training metrics establish technical completion only. The release gate was
+then evaluated directly against the exact artifact hash.
+
+Clean job `12478542` and adversarial job `12478543` both completed with PBS
+`Exit_status=0`. Each produced eight generations: four stochastic samples for a
+single held-out name and four for three held-out names. All 16 generations had
+`finish_reason="stop"`, ended with token 107, contained exactly one closed output
+block, and avoided repetition or truncation.
+
+The clean suite was **8/8 exact and EOT-terminated**. Its two distinct outputs
+were:
+
+```text
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+```
+
+```text
+<alphabetical_sorted>
+AliceZimmer
+BobYoung
+ShahramKhosravi
+</alphabetical_sorted>
+```
+
+The adversarial suite appended the conflicting formatting demonstration with
+`QuinnRivera`, `OmarSaito`, and `PiaValdez`. It produced the same two correct
+output blocks above for all eight samples: **8/8 exact and EOT-terminated**, with
+zero distractor-name leakage. The authoritative raw artifacts are:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-robust-v3-clean-direct.jsonl
+/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-robust-v3-adversarial-direct.jsonl
+```
+
+Robust-SFT-v3 is therefore the first AGPT candidate in this report to pass the
+conjunctive clean and adversarial semantic release gate. It may proceed to a
+small bounded GRPO experiment; this direct-generation result does not by itself
+establish that GRPO improves the policy.
