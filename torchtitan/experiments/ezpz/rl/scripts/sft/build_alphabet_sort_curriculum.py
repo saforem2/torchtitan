@@ -69,22 +69,37 @@ def _make_names(rng: random.Random, count: int) -> list[str]:
     return names
 
 
-def build(model: Path, output: Path, size: int, seed: int, robust: bool) -> None:
+def build(
+    model: Path,
+    output: Path,
+    size: int,
+    seed: int,
+    robust: bool,
+    robust_v3: bool,
+) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model, local_files_only=True)
     rng = random.Random(seed)
     rows = {"input_ids": [], "assistant_masks": [], "seq_lengths": []}
     for index in range(size):
         group = index // 8
-        count = 1 + (group % 8) if robust else 1 + (index % 8)
+        if robust_v3:
+            row_class = index % 4
+            is_distractor = row_class >= 2
+            count = 1 if row_class == 2 else 1 + (group % 8)
+        else:
+            is_distractor = robust and index % 8 < 2
+            count = 1 + (group % 8) if robust else 1 + (index % 8)
         distractor_count = 2 + ((index // 64) % 4)
         sampled = _make_names(
-            rng, count + (distractor_count if robust and index % 8 < 2 else 0)
+            rng, count + (distractor_count if is_distractor else 0)
         )
         names = sampled[:count]
         prompt = INSTRUCTIONS[
-            group % len(INSTRUCTIONS) if robust else index % len(INSTRUCTIONS)
+            group % len(INSTRUCTIONS)
+            if robust or robust_v3
+            else index % len(INSTRUCTIONS)
         ].format(names=", ".join(names))
-        if robust and index % 8 < 2:
+        if is_distractor:
             distractors = sampled[count:]
             rng.shuffle(distractors)
             prompt += (
@@ -117,7 +132,7 @@ def build(model: Path, output: Path, size: int, seed: int, robust: bool) -> None
     dataset.save_to_disk(output)
     print(
         f"ALPHABET_CURRICULUM_DONE output={output} rows={len(dataset)} "
-        f"seed={seed} robust={robust} "
+        f"seed={seed} robust={robust} robust_v3={robust_v3} "
         f"max_length={max(map(len, rows['input_ids']))}"
     )
 
@@ -129,8 +144,18 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=8192)
     parser.add_argument("--seed", type=int, default=154391)
     parser.add_argument("--robust", action="store_true")
+    parser.add_argument("--robust-v3", action="store_true")
     args = parser.parse_args()
-    build(args.model, args.output, args.size, args.seed, args.robust)
+    if args.robust and args.robust_v3:
+        parser.error("--robust and --robust-v3 are mutually exclusive")
+    build(
+        args.model,
+        args.output,
+        args.size,
+        args.seed,
+        args.robust,
+        args.robust_v3,
+    )
 
 
 if __name__ == "__main__":
