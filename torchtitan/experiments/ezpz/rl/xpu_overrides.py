@@ -766,6 +766,15 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
     )
 
 
+def _select_vllm_xpu_attention_backend(selected_backend, backend_enum, fallback):
+    """Map TorchTitan-only attention choices to vLLM-XPU implementations."""
+    if selected_backend == backend_enum.CUSTOM:
+        return backend_enum.CUSTOM.get_path()
+    if selected_backend == backend_enum.FLEX_ATTENTION:
+        return backend_enum.TRITON_ATTN.get_path()
+    return fallback(selected_backend)
+
+
 def patch_vllm_xpu_attention_backend() -> None:
     """Allow ``AttentionBackendEnum.CUSTOM`` on vLLM-XPU.
 
@@ -794,15 +803,13 @@ def patch_vllm_xpu_attention_backend() -> None:
 
     @classmethod
     def patched(cls, selected_backend, attn_selector_config, num_heads=None):
-        if selected_backend == AttentionBackendEnum.CUSTOM:
-            return AttentionBackendEnum.CUSTOM.get_path()
-        if selected_backend == AttentionBackendEnum.FLEX_ATTENTION:
-            # vLLM-XPU does not expose FLEX_ATTENTION, but TorchTitan's flex
-            # model path only needs a supported paged-attention implementation
-            # inside the generator wrapper. Triton Attention is the native XPU
-            # backend and is also used by direct vLLM generation on this stack.
-            return AttentionBackendEnum.TRITON_ATTN.get_path()
-        return orig.__func__(cls, selected_backend, attn_selector_config, num_heads)
+        return _select_vllm_xpu_attention_backend(
+            selected_backend,
+            AttentionBackendEnum,
+            lambda backend: orig.__func__(
+                cls, backend, attn_selector_config, num_heads
+            ),
+        )
 
     patched.__func__._xpu_patched = True  # type: ignore[attr-defined]
     XPUPlatform.get_attn_backend_cls = patched
