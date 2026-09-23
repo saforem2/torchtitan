@@ -101,7 +101,7 @@ def _set_rope_backend(
     from torchtitan.models.common import ComplexRoPE, CosSinRoPE
 
     target_cls = ComplexRoPE.Config if backend == "complex" else CosSinRoPE.Config
-    model = cfg.model_spec.model
+    model = cfg.model
     for layer in model.layers:
         old_rope = layer.attention.rope
         if old_rope is None:
@@ -132,7 +132,7 @@ def _set_fp32_residual(
     # poison the plain flavor for the rest of the process. (Verified: without
     # this, a later agpt_80b() returned fp32res blocks.)
     cfg = copy.deepcopy(cfg)
-    model = cfg.model_spec.model
+    model = cfg.model
     model.layers = [
         AgptFp32ResidualBlock.Config(
             **{f.name: getattr(layer, f.name) for f in fields(layer)}
@@ -164,7 +164,7 @@ def _set_fp32_residual_depth(
     )
 
     cfg = copy.deepcopy(cfg)
-    model = cfg.model_spec.model
+    model = cfg.model
     model.layers = [
         AgptFp32ResidualDepthBlock.Config(
             **{f.name: getattr(layer, f.name) for f in fields(layer)}
@@ -173,7 +173,7 @@ def _set_fp32_residual_depth(
     ]
     # Rebuild the model config itself as the fp32-residual model subclass,
     # preserving every field (incl. the freshly-swapped layers).
-    cfg.model_spec.model = AgptFp32ResidualModel.Config(
+    cfg.model = AgptFp32ResidualModel.Config(
         **{f.name: getattr(model, f.name) for f in fields(model)}
     )
     return cfg
@@ -202,7 +202,7 @@ def agpt_2b_tied() -> FaultTolerantTrainer.Config:
     # validation (tied vs untied loss@fixed-tokens). state_dict_adapter already
     # handles the tied case (adapter lines 82,103).
     cfg = agpt_2b_real()
-    cfg.model_spec.model.enable_weight_tying = True
+    cfg.model.enable_weight_tying = True
     return cfg
 
 
@@ -297,7 +297,7 @@ def agpt(
     # differ (gemma 256128, Llama-3 128256, OLMo-2 100352) stay correct and
     # cannot drift from the model. Guarded because not every loss Config has
     # the field -- ChunkedLossWrapper, set by some configs below, does not.
-    _vocab = getattr(getattr(cfg.model_spec, "model", None), "vocab_size", None)
+    _vocab = getattr(cfg.model, "vocab_size", None)
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
@@ -355,7 +355,7 @@ def agpt(
 def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
     return FaultTolerantTrainer.Config(
         hf_assets_path="./tests/assets/hf/gemma-7b",
-        model_spec=model_registry(flavor),
+        model=model_registry(flavor),
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
         optimizer=default_adamw(lr=8e-4),
@@ -467,7 +467,7 @@ def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
     in docs/production/agpt/30b-exp/README.md Section 6.
     """
     cfg = agpt_debugmodel_local()
-    cfg.model_spec = model_registry("debugmodel_qknorm")
+    cfg.model = model_registry("debugmodel_qknorm")
     return cfg
 
 
@@ -1899,25 +1899,17 @@ def agpt_70b_wide() -> FaultTolerantTrainer.Config:
 # 8530891. Anything at or above the onset blows up on the first optimizer step.
 _AGPT_80B_LR_ONSET = 1.36e-6
 
-# Identify 80B by model_spec.flavor, NOT by geometry. Geometry does not
-# separate the sizes: ezpz_agpt_50b_wide and ezpz_agpt_70b_wide are BOTH
-# dim=9216, the same width as the 80B base flavor, so a `dim >= 8192` test
-# would block them on a ceiling measured for a different model. Every 80B
-# variant's flavor starts with "80B" (80B, 80B_alt, 80B_wide, 80B_deep,
-# 80B_deep_alt, 80B_qknorm, 80B_qknorm_softcap, 80B_softcap) and no other
-# size does -- verified by enumerating every agpt config in the registry.
-_AGPT_80B_FLAVOR_PREFIX = "80b"
+# Exact 80B geometries. Width alone is insufficient: 50B and 70B variants
+# also use dim=9216.
+_AGPT_80B_GEOMETRIES = {(9216, 84), (10752, 48), (7680, 96)}
 
 
 def _is_80b_config(cfg: FaultTolerantTrainer.Config) -> bool:
     """True if *cfg* is an 80B-class agpt model."""
-    try:
-        flavor = cfg.model_spec.flavor
-    except AttributeError:
-        return False
-    if not isinstance(flavor, str):
-        return False
-    return flavor.lower().startswith(_AGPT_80B_FLAVOR_PREFIX)
+    model = cfg.model
+    return (getattr(model, "dim", None), len(getattr(model, "layers", ()))) in (
+        _AGPT_80B_GEOMETRIES
+    )
 
 
 def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:

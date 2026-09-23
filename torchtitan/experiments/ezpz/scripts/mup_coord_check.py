@@ -245,7 +245,7 @@ def run_worker(args: argparse.Namespace) -> int:
         )
     else:
         model_cfg = _build_agpt_config(**build_kwargs)
-    config.model_spec.model = model_cfg
+    config.model = model_cfg
     if hasattr(config.loss, "global_vocab_size"):
         config.loss.global_vocab_size = int(args.vocab_size)
     # AC replays the forward, so every hook would fire twice per step with

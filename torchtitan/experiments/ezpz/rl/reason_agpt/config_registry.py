@@ -98,20 +98,20 @@ from torchtitan.rl.rubric import Rubric
 from torchtitan.rl.trainer import Trainer
 
 
-def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
+def _agpt_rl_model_config(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     """``ezpz.agpt.model_registry("2b-rl")`` for RL: LoRA (wqkv/wo) + fp32 lm_head.
 
     Converter order: LoRA first (wraps the base linears in frozen+adapter form),
     then the lm_head fp32 cast (RL logprob/KL math needs fp32 logits).
     """
-    model_spec = agpt_model_registry(
+    model_config = agpt_model_registry(
         "2b-rl",
         converters=[LMHeadCastConverter.Config()],
     )
-    model_spec.model = cast(
+    model_config = cast(
         Any,
         transform_model_config_(
-            model_spec.model,
+            model_config,
             [
                 LoRATransform(
                     handlers=(LinearLoRAHandler(),),
@@ -122,7 +122,7 @@ def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
             ],
         ),
     )
-    return model_spec
+    return model_config
 
 
 def _gsm8k_rollouter(
@@ -182,9 +182,9 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
-    model_spec = _agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
+    model_config = _agpt_rl_model_config(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
     return Controller.Config(
-        model_spec=model_spec,
+        model_config=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.
         # Default points at the Stage-1 cold-start CoT-SFT checkpoint (cot.md).
         hf_assets_path="outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf",
@@ -234,7 +234,7 @@ def _agpt_grpo_config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
                     clip_eps=clip_eps,
-                    global_vocab_size=decoder_vocab_size(model_spec),
+                    global_vocab_size=decoder_vocab_size(model_config),
                 ),
             ),
         ),

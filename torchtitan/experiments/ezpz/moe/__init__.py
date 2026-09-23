@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from torchtitan.components.optimizer import register_moe_load_balancing_hook
+
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -41,7 +41,7 @@ from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRout
 
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.deepseek_v3 import DeepSeekV3Router
-from torchtitan.protocols.model_spec import ModelSpec
+
 from torchtitan.protocols.module import Module
 
 from .experts import ExpertComputeBackend, EzpzGroupedExperts
@@ -61,8 +61,7 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
     return make_ffn_config(**kwargs)
 
 
-from .parallelize import parallelize_moe
-from .state_dict_adapter import moeStateDictAdapter
+
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
@@ -345,7 +344,7 @@ def make_ezpz_moe_config(
 
 
 __all__ = [
-    "parallelize_moe",
+
     "moeModel",
     "moe_configs",
 ]
@@ -1360,9 +1359,9 @@ def model_registry(
     flavor: str,
     moe_comm_backend: str = "standard",
     quantization: list | None = None,
-) -> ModelSpec:
+) -> moeModel.Config:
     from torchtitan.config.transform.quantization import QuantizationConverter
-    from torchtitan.distributed.pipeline_parallel import pipeline_llm
+
 
     config = moe_configs[flavor]()
 
@@ -1389,24 +1388,26 @@ def model_registry(
     # #4328 made max_context_length a required ModelSpec field. Read it off the
     # flavor's own RoPE config (same approach as the agpt twin) so the spec
     # cannot drift from the model it describes.
-    rope_cfg = config.layers[0].attention.rope
-    if rope_cfg is None:
+    if config.layers[0].attention.rope is None:
         raise ValueError(
             f"moe flavor {flavor!r} has no RoPE config, so max_context_length "
-            "cannot be derived for its ModelSpec"
+            "cannot be derived"
         )
 
-    return ModelSpec(
-        name="moe",
-        flavor=flavor,
-        model=config,
-        max_context_length=rope_cfg.max_context_length,
-        parallelize_fn=parallelize_moe,
-        pipelining_fn=pipeline_llm,
-        post_optimizer_build_fn=register_moe_load_balancing_hook,
-        state_dict_adapter=(
-            None
-            if flavor == "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic"
-            else moeStateDictAdapter
-        ),
-    )
+    # The full-Sonic backend has no compatible HF adapter. Model ownership
+    # makes this a class-level contract, so use a tiny backend-specific subclass
+    # instead of carrying a registry-side callable bundle.
+    if flavor == "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic":
+        from dataclasses import fields
+
+        class _SonicMoeModel(moeModel):
+            state_dict_adapter_cls = None
+
+            @dataclasses.dataclass(kw_only=True, slots=True)
+            class Config(moeModel.Config):
+                pass
+
+        return _SonicMoeModel.Config(
+            **{field.name: getattr(config, field.name) for field in fields(config)}
+        )
+    return config

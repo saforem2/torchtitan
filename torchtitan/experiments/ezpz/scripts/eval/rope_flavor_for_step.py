@@ -45,7 +45,7 @@ def _flavor_of(run) -> str | None:
     """Extract the flavor from a run's recorded argv.
 
     metadata.args is what the process actually ran, which is why this is
-    trusted over config.model_spec (equivalent here, but a level further from
+    trusted over config.model (equivalent here, but a level further from
     the command line) and over any script default (which lies -- a clone can
     carry several submit scripts and the one you read may not be the one that
     ran).

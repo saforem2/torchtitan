@@ -196,8 +196,7 @@ def to_hf_and_save(
     from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 
     # base spec (NO converters) -> plain base model_config for the adapter.
-    model_spec = agpt_registry(model_flavor)
-    model_config = model_spec.model
+    model_config = agpt_registry(model_flavor)
     adapter = Llama3StateDictAdapter(model_config, base_hf)
 
     hf_sd = adapter.to_hf(merged_tt)

@@ -16,7 +16,6 @@ from typing import get_args
 import pytest
 import torch
 
-from torchtitan.components.optimizer import register_moe_load_balancing_hook
 from torchtitan.experiments.ezpz.agpt import agpt_configs
 from torchtitan.experiments.ezpz.moe import model_registry, moe_configs
 from torchtitan.experiments.ezpz.moe.config_registry import (
@@ -70,7 +69,7 @@ def test_current_sonic_configs_wire_routing_and_layout(
     config_factory, ep_degree, dim, hidden_dim
 ):
     trainer_config = config_factory()
-    model_config = trainer_config.model_spec.model
+    model_config = trainer_config.model
     layers = _moe_layers(model_config)
 
     assert trainer_config.parallelism.expert_parallel_degree == ep_degree
@@ -91,7 +90,7 @@ def test_current_sonic_configs_wire_routing_and_layout(
     "config_factory", [moe_4b_sonic_ep12, moe_7b_sonic_ep12, moe_10b_2b_sdpa_sonic_ep]
 )
 def test_non_square_sonic_meta_models_preserve_weight_shapes(config_factory):
-    config = config_factory().model_spec.model
+    config = config_factory().model
     with torch.device("meta"):
         model = config.build()
 
@@ -109,15 +108,12 @@ def test_non_square_sonic_meta_models_preserve_weight_shapes(config_factory):
 
 
 def test_moe_model_registry_contract_for_sonic_base_flavor():
-    spec = model_registry("10B_2B_sdpa")
+    model_config = model_registry("10B_2B_sdpa")
 
-    assert spec.name == "moe"
-    assert spec.flavor == "10B_2B_sdpa"
-    assert spec.post_optimizer_build_fn is register_moe_load_balancing_hook
-    assert spec.state_dict_adapter is moeStateDictAdapter
-    model_config = spec.model
-    layers = model_config.layers  # pyrefly: ignore [missing-attribute]
-    assert spec.max_context_length == layers[0].attention.rope.max_context_length
+    assert model_config.__class__.__qualname__ == "moeModel.Config"
+    assert model_config.build().state_dict_adapter_cls is moeStateDictAdapter
+    layers = model_config.layers
+    assert layers[0].attention.rope is not None
 
 
 def test_agpt_and_moe_model_registries_are_current_and_distinct():
@@ -136,7 +132,7 @@ def test_agpt_and_moe_model_registries_are_current_and_distinct():
 @pytest.mark.parametrize("enable_sp", [False, True])
 def test_moe_mla_sharding_contract(enable_sp):
     """DeepSeek-derived MoE flavors retain the MLA-specific sharding path."""
-    model_config = moe_debugmodel_sonic().model_spec.model
+    model_config = moe_debugmodel_sonic().model
 
     set_moe_sharding_config(  # pyrefly: ignore [bad-argument-type]
         model_config, enable_sp=enable_sp, enable_ep=True
@@ -164,7 +160,7 @@ def test_moe_mla_sharding_contract(enable_sp):
 @pytest.mark.parametrize("enable_sp", [False, True])
 def test_agpt_50k_gqa_moe_sharding_contract(enable_sp):
     """AGPT uses GQA sharding while DeepSeek-style MoE retains MLA sharding."""
-    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model_spec.model
+    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model
 
     set_moe_sharding_config(  # pyrefly: ignore [bad-argument-type]
         model_config, enable_sp=enable_sp, enable_ep=True
@@ -181,7 +177,7 @@ def test_agpt_50k_gqa_moe_sharding_contract(enable_sp):
 
 
 def test_agpt_50k_gqa_moe_flop_accounting():
-    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model_spec.model
+    model_config = agpt_2b_50k_moe_sdpa_aurora_full_sonic().model
     with torch.device("meta"):
         model = model_config.build()
 
