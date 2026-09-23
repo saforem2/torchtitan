@@ -46,9 +46,9 @@ printf 'MDS154391_GRAIN_SFT_SMOKE_START %s commit=%s model_sha=%s\n' \
   --parallelism.data-parallel-replicate-degree=2 \
   --metrics.log-freq=1 \
   --metrics.no-enable-wandb \
-  --checkpoint.folder="$OUT/checkpoints" \
-  --checkpoint.interval=20 \
-  --checkpoint.async-mode=disabled \
+  --checkpointer.folder="$OUT/checkpoints" \
+  --checkpointer.interval=20 \
+  --checkpointer.async-mode=disabled \
   --debug.seed=42
 rc=$?
 echo "MDS154391_GRAIN_SFT_SMOKE_DONE rc=$rc $(date -Is)"

@@ -45,9 +45,9 @@ printf 'MDS154391_GRAIN_SFT900_START %s commit=%s model_sha=%s\n' \
   --parallelism.data-parallel-shard-degree=12 \
   --parallelism.data-parallel-replicate-degree=8 \
   --metrics.log-freq=10 \
-  --checkpoint.folder="$OUT/checkpoints" \
-  --checkpoint.interval=300 \
-  --checkpoint.async-mode=disabled \
+  --checkpointer.folder="$OUT/checkpoints" \
+  --checkpointer.interval=300 \
+  --checkpointer.async-mode=disabled \
   --debug.seed=42
 rc=$?
 echo "MDS154391_GRAIN_SFT900_DONE rc=$rc $(date -Is)"
