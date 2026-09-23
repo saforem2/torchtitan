@@ -28,7 +28,9 @@ mkdir -p "$OUT"
 cd "$WT" || exit 11
 sha=$(sha256sum "$CKPT/model.safetensors" | cut -d' ' -f1)
 [[ "$sha" == "$EXPECTED_SHA" ]] || { echo "bad model sha $sha"; exit 12; }
-"$V/bin/python" -m torchtitan.experiments.ezpz.rl.train_upstream --help >/dev/null || exit 13
+PYTHONPATH="$WT" "$V/bin/python" -c \
+  'from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.config_registry import rl_sync_agpt_2b_clean as f; c=f(); assert c.async_loop.num_training_steps == 1; assert c.async_loop.validation.num_samples == 8' \
+  || exit 13
 
 echo "AGPT_SFT100_GLOO_SYNC_START $(date -Is) commit=$(git rev-parse HEAD) model_sha=$sha out=$OUT"
 "$V/bin/ezpz" launch --auto-retry --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
