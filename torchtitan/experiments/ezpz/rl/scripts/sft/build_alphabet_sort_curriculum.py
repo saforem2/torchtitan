@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import random
-import shutil
 from pathlib import Path
 
 from datasets import Dataset
@@ -114,7 +113,7 @@ def build(model: Path, output: Path, size: int, seed: int, robust: bool) -> None
 
     dataset = Dataset.from_dict(rows)
     if output.exists():
-        shutil.rmtree(output)
+        raise FileExistsError(f"refusing to replace existing dataset: {output}")
     dataset.save_to_disk(output)
     print(
         f"ALPHABET_CURRICULUM_DONE output={output} rows={len(dataset)} "
