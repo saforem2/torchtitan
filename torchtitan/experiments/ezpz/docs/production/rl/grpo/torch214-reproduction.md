@@ -1345,3 +1345,47 @@ The first scheduled notifier for this job was misconfigured to probe local
 leaving the terminal pane open until manual follow-up. The notifier and pane have
 now been removed. Future remote-HPC monitors must pass a verified SSH-based
 probe before being considered active.
+
+## Next full-weight SFT campaign from MDS step 154391
+
+The bounded GRPO result does not justify a longer RL run. It also does not imply
+that robust-v3 was only a smoke: robust-v3 was a real full-weight SFT from MDS
+`global_step154391`, but on a deliberately narrow synthetic alphabet curriculum.
+The next goal is broad instruction following plus reasoning, not another narrow
+alphabet update.
+
+Historical evidence rejects two tempting alternatives:
+
+- LoRA is deferred until live-adapter, merged-HF, TorchTitan-load, and vLLM-pull
+  parity is demonstrated for AGPT's cos/sin model path.
+- A single combined instruct+CoT stage is not repeated: B3 scored 0.05 GSM8K-CoT
+  and B4a/B4b reached only 0.02/0.065, versus 0.205 for the structured B2 run.
+
+The new campaign therefore reproduces the successful two-stage structure from
+the newer MDS `global_step154391` base:
+
+1. broad full-weight `tulu_math_uc_mix` instruction/math SFT at sequence length
+   1024, then selection of an early checkpoint around step 900;
+2. focused full-weight `gsm8k-r1cot` SFT from the selected Stage-1 checkpoint.
+
+Stage 1 is capped at eight Sunspot nodes (96 ranks). The historical scale bisect
+found 2/4/8 nodes stable and 12/16/32 nodes failing with a scale-specific oneCCL
+GPU fault. The proven batch is per-device batch 2, gradient accumulation 32, and
+global batch 6,144 sequences (about 6.29M tokens per optimizer step). Training
+will stop at 900 steps rather than continue to the historically destructive
+8,672-step full epoch.
+
+The exact 53,276,203-sequence len-1024 packed dataset was no longer present, but
+its 1.12 TB materialized source mix and all component HF caches remain on shared
+`/tegu`. Commit `6c2482662` added a fail-closed one-node materializer using the
+MDS154391 tokenizer. Sunspot job `12478545` is rebuilding the packed dataset at:
+
+```text
+/tegu/datasets/datasets/agpt2b-mds154391-tulu-math-uc-mix-len1024
+```
+
+The job writes to a job-specific temporary path, requires exactly 53,276,203
+rows with `input_ids`, `assistant_masks`, and `seq_lengths`, samples token/mask
+shape and vocabulary bounds, and only then atomically publishes the final path.
+It is monitored through a verified SSH probe and Herdr pane `wC:p2D`. No 8-node
+training job is submitted until this prerequisite passes.
