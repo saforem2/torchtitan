@@ -47,6 +47,7 @@ from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.observability.metrics import MetricsProcessor
 from . import model_registry
+from .sft_data import tulu_math_uc_streaming_dataset
 
 TT_CONFIG_JSON_ENV = "TT_CONFIG_JSON"
 
@@ -622,6 +623,61 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 0.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
+    return cfg
+
+
+_MDS154391_SFT_BASE = os.environ.get(
+    "MDS154391_SFT_BASE",
+    "/lus/tegu/projects/datascience/foremans/artifacts/"
+    "agpt-2b-mds-stage3-mix-step154391-hf",
+)
+
+
+def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
+    """Broad Stage-1 SFT with native Grain streaming and online packing."""
+    base = Path(_MDS154391_SFT_BASE)
+    if not (base / "model-00001-of-00001.safetensors").is_file():
+        raise ValueError(f"MDS154391 HF checkpoint missing at {base}")
+
+    cfg = agpt(
+        "2b-mds",
+        local_batch_size=2,
+        activation_checkpoint_mode="none",
+        seq_len=1024,
+        dtype="float32",
+        compile=True,
+        checkpoint_interval=300,
+        hf_assets_path=str(base),
+    )
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=tulu_math_uc_streaming_dataset(),
+        seed=42,
+        shuffle=True,
+        repeat=True,
+        streaming_shuffle_buffer_size=10_000,
+        num_prefetch_microbatches=2,
+    )
+    cfg.optimizer = default_adamw(lr=2e-5)
+    cfg.lr_scheduler.warmup_steps = 0
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.training.steps = 900
+    # 6,144 packed sequences x 1,024 tokens. At 96 DP ranks and LBS=2 this
+    # resolves to gradient accumulation 32, matching the historical recipe.
+    cfg.training.num_tokens_per_train_step = 6_144 * 1_024
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.initial_load_path = str(base)
+    cfg.checkpointer.initial_load_in_hf = True
+    cfg.checkpointer.initial_load_model_only = True
+    cfg.checkpointer.folder = (
+        "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
+    )
+    cfg.checkpointer.interval = 300
+    cfg.checkpointer.keep_latest_k = 0
+    cfg.metrics.log_freq = 10
+    cfg.metrics.enable_wandb = True
+    cfg.validator = None
     return cfg
 
 
