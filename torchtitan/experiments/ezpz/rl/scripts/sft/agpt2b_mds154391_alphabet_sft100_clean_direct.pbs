@@ -1,0 +1,30 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-alphabet-sft100-clean
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+MODEL=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100/final
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100-clean-direct.jsonl
+EXPECTED_SHA=cd8c185a84c0ef274d04b0be91ba72046b02e7533d9f0507f4948b146e0a5c6e
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu" ZE_AFFINITY_MASK=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+cd "$WT" || exit 11
+sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_SHA" ]] || exit 12
+"$V/bin/python" -u torchtitan/experiments/ezpz/rl/scripts/qwen_direct_control.py "$MODEL" "$OUT"
+rc=$?
+echo "AGPT_ALPHABET_SFT100_CLEAN_DIRECT_DONE rc=$rc output=$OUT"
+exit "$rc"
