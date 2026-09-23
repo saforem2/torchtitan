@@ -1416,5 +1416,36 @@ were closed immediately. The corrected launcher uses distinct `BUILD_DIR` and
 `TMPDIR` variables and fail-closed assertions that the former is under `/tegu`
 and the latter under `/tmp`.
 
-No 8-node training job is submitted until materialization and its two-node smoke
-both pass.
+The materializer path was subsequently retired rather than completed. Native
+TorchTitan now streams the three Hugging Face sources through Grain, normalizes
+Tulu/OpenMath/UltraChat records, applies exact AGPT chat serialization and
+assistant-only labels just in time, mixes them at 65/15/20, and packs online to
+length 1024. Real-source tests and a checkpoint/restore test produced packed
+2x1024 batches and a byte-identical next batch after iterator restoration. The
+incomplete materializer output remains quarantined for provenance and is not a
+training dependency.
+
+Direct HF initialization failed on the 2D HSDP mesh because replicated tensors
+could not be copied into sharded DTensor parameters. Job `12478554` converted
+the verified MDS154391 HF export to a topology-independent native DCP
+(`Exit_status=0`, `.metadata` present, about 7.94 GB), which is now the sole
+model-weight initialization path; the HF directory remains the tokenizer asset
+source.
+
+The first DCP-backed smoke, `12478555`, loaded successfully and reached step 3,
+but then spun in oneCCL pending requests. Explicitly matching the validated
+Sunspot contract (`CCL_PROCESS_LAUNCHER=pmix`, `CCL_OP_SYNC=1`,
+`CCL_ATL_SYNC_COLL=1`, and `ZE_FLAT_DEVICE_HIERARCHY=FLAT`) fixed the stall.
+Retry `12478558` completed all 20 steps with finite loss, published a valid
+step-20 DCP checkpoint, and exited 0.
+
+Stage 1 production job `12478562` was then submitted at exact commit
+`7c97f8b409e4b4bf39c0f0b5bd294cc95305aa30`. At the latest recorded inspection
+it was healthy at step 480/900 with loss 1.11505 and a verified approximately
+23 GB step-300 DCP checkpoint. Because the projected finish is close to the
+8-hour allocation boundary, continuation job `12478578` is dependency-held on
+`afterany:12478562` at commit
+`71bcf67f5a44ebba227736de6a2439565325952b`. It resumes the latest valid
+checkpoint if needed and exits before model construction if step 900 already
+exists. Checkpoints 300, 600, and 900 remain the evaluation gates; Stage 2 is
+not released until Stage-1 checkpoint evaluation passes.
