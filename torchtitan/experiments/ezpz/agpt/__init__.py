@@ -479,6 +479,7 @@ def _build_agpt_config(
         scaling=scaling,
     )
     return AgptModel.Config(
+        max_context_length=max_context_length,
         dim=dim,
         vocab_size=vocab_size,
         tok_embeddings=Embedding.Config(
