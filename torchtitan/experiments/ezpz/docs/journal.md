@@ -2,6 +2,47 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
+
+- The current OLMo-3-vocab coarse-to-fine wave runs from TorchTitan commit
+  `b91e273ec` on 64 Sunspot nodes / 768 ranks at GBS=6144, sequence length
+  4096, with the config-owned dataloader and explicit `CCL_OP_SYNC=1`. Fine
+  sweeps start in fresh trainer processes; they do not continue from coarse
+  weights or optimizer state.
+- 5B AdamW fine job `12478508` completed 100/100 finite points (`rc=0`), with
+  suggested LR **7.17e-5** and blow-up **7.17e-4**. Its CSV minimum is loss
+  7.9258 at LR 6.579e-4.
+- 10B AdamW fine job `12478509` completed 100/100 finite points (`rc=0`), with
+  suggested LR **4.16e-5** and blow-up **4.16e-4**. Its CSV minimum is loss
+  7.8432 at LR 4.642e-4.
+- 30B AdamW fine job `12478510` is running. Widened SophiaG coarse jobs
+  `12478511`–`12478513` remain queued. Muon remains excluded until a canary
+  proves finite gradients, finite weights, and real optimizer updates after
+  the first Newton–Schulz update.
+- Matched 4-node / 48-rank controls held source, model, batch, compile mode,
+  and update count constant on both systems. Async `CCL_OP_SYNC=0` was finite
+  but about 6x slower than synchronous `1`: roughly 29–33 vs 5 seconds/update
+  on Sunspot (`12478515`/`12478516`) and 28–30 vs 4–5 seconds/update on Aurora
+  (`8856473`/`8856474`). The application therefore chooses `1`; shared `ezpz`
+  setup should preserve caller state rather than prescribe transport policy.
+- New production umbrella `8855988` requests all 2,098 Aurora nodes for 12
+  hours in `prod`. It remains queued for capacity and no seat has started.
+  A local monitor quoting bug briefly rendered a stale hold; direct
+  `qstat -xf` showed `job_state=Q`, `Hold_Types=n`, and "Not enough free nodes."
+  The umbrella and LR monitors were corrected to execute their remote probes
+  directly, and the LR coarse-to-fine Herdr pane `wC:p14` was restarted after
+  its in-memory job list was found stale.
+- Published the first durable campaign update and reproducible charts in
+  `b0fad46a7`: interim AdamW-only 5B and 10B per-model PNG/SVG figures plus a
+  completed-model comparison. The charts explicitly distinguish the
+  application suggestion from the observed minimum and will be regenerated at
+  stable paths as valid 30B/SophiaG artifacts arrive.
+- Migrated experiment guidance to agent-agnostic paths in `0c891a8e8`:
+  `AGENTS.md` is canonical, `.agents/skills/alcf-job-preflight/` owns the skill,
+  and `.claude` paths remain compatibility symlinks. Organized the Claude
+  handoff helper under `scripts/agent-handoff/` in `99281ce5e`. All three
+  logical changes were pushed to PR #18's branch.
+
 ## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
 
 - Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
