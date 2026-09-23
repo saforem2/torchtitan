@@ -1,6 +1,6 @@
 #!/bin/bash --login
 #PBS -A datascience
-#PBS -N mds154391-broad-sft900
+#PBS -N mds154391-grain-sft900
 #PBS -l walltime=08:00:00
 #PBS -l filesystems=tegu:home
 #PBS -l select=8
@@ -11,46 +11,44 @@ set -o pipefail
 WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
 V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
 BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
-PRETOK=/tegu/datasets/datasets/agpt2b-mds154391-tulu-math-uc-mix-len1024
-OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-sft900
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
-EXPECTED_ROWS=53276203
 
 cd "$WT" || exit 11
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
-ezpz_setup "$V" || exit 13
-[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 12
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 13
+ezpz_setup "$V" || exit 14
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 15
 export PATH="$V/bin:/opt/pbs/bin:$PATH"
 export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export PYTHONIOENCODING="ascii:replace"
+export MDS154391_SFT_BASE="$BASE"
 
 sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
-[[ "$sha" == "$EXPECTED_MODEL_SHA" ]] || exit 15
-"$V/bin/python" - "$PRETOK" "$EXPECTED_ROWS" <<'PY' || exit 16
-import sys
-from datasets import load_from_disk
-d = load_from_disk(sys.argv[1])
-assert len(d) == int(sys.argv[2]), (len(d), sys.argv[2])
-assert {"input_ids", "assistant_masks", "seq_lengths"} <= set(d.column_names)
-print(f"BROAD_SFT_DATASET_OK rows={len(d)} columns={d.column_names}")
-PY
+[[ "$sha" == "$EXPECTED_MODEL_SHA" ]] || exit 16
 mkdir -p "$OUT"
 
-printf 'MDS154391_BROAD_SFT900_START %s commit=%s model_sha=%s\n' \
+printf 'MDS154391_GRAIN_SFT900_START %s commit=%s model_sha=%s\n' \
   "$(date -Is)" "$(git rev-parse HEAD)" "$sha"
 "$V/bin/ezpz" launch --nproc 96 --nproc_per_node 12 --timeout 1800 -- \
-  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
-  --pretokenized_dataset "$PRETOK" --model_name_or_path "$BASE" \
-  --output_dir "$OUT" --max_steps 900 --num_train_epochs 1 \
-  --learning_rate 2e-5 --lr_scheduler_type constant \
-  --per_device_train_batch_size 2 --gradient_accumulation_steps 32 \
-  --dataset_num_proc 1 --max_train_samples 5529600 --max_length 1024 \
-  --bf16 --fsdp full_shard --logging_steps 10 \
-  --save_strategy steps --save_steps 300 --save_total_limit 3 \
-  --report_to wandb --resume_from_checkpoint "$OUT"
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.train \
+  --module=ezpz.agpt \
+  --config=agpt_2b_mds154391_tulu_math_uc_streaming \
+  --dump-folder="$OUT" \
+  --training.steps=900 \
+  --training.num-tokens-per-train-step=6291456 \
+  --parallelism.tensor-parallel-degree=1 \
+  --parallelism.data-parallel-shard-degree=12 \
+  --parallelism.data-parallel-replicate-degree=8 \
+  --metrics.log-freq=10 \
+  --checkpoint.folder="$OUT/checkpoints" \
+  --checkpoint.interval=300 \
+  --checkpoint.async-mode=disabled \
+  --debug.seed=42
 rc=$?
-echo "MDS154391_BROAD_SFT900_DONE rc=$rc $(date -Is)"
+echo "MDS154391_GRAIN_SFT900_DONE rc=$rc $(date -Is)"
 exit "$rc"
