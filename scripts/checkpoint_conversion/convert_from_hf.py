@@ -17,7 +17,12 @@ from torchtitan.components.checkpointer import ModelWrapper
 @torch.inference_mode()
 def convert_from_hf(input_dir, output_dir, model_name, model_flavor):
     # initialize model to allocate memory for state dict
-    model_module = importlib.import_module(f"torchtitan.models.{model_name}")
+    module_name = (
+        model_name
+        if model_name.startswith("torchtitan.")
+        else f"torchtitan.models.{model_name}"
+    )
+    model_module = importlib.import_module(module_name)
     model_spec = model_module.model_registry(model_flavor)
     model_config = model_spec.model
 
