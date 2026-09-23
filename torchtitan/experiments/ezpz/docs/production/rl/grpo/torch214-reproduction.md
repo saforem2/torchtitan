@@ -816,3 +816,125 @@ The reproduced diagnosis should satisfy all three checks:
 
 Only a stage-3-derived SFT candidate that passes direct semantic inspection
 should proceed to TorchTitan synchronization and GRPO.
+
+## Targeted stage-3 alphabet-sort SFT
+
+A controlled full-weight SFT experiment started from the verified broad MDS
+`stage3-mix/global_step154391` HF conversion rather than the rejected historical
+`checkpoint-900`. The source weight SHA-256 was
+`df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1`.
+
+The deterministic curriculum builder
+[`build_alphabet_sort_curriculum.py`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/rl/scripts/sft/build_alphabet_sort_curriculum.py)
+created 8,192 examples containing one to eight names. It varied the instruction
+wording, supervised only assistant tokens, serialized turns with the recovered
+Gemma contract, and explicitly supervised token 107 (`<end_of_turn>`). The
+held-out evaluation names (`BethMillar`, `ShahramKhosravi`, `AliceZimmer`, and
+`BobYoung`) and distractor names (`QuinnRivera`, `OmarSaito`, and `PiaValdez`)
+were excluded from curriculum generation.
+
+After two fail-closed launcher checks caught an incorrect ancestry SHA and an
+incorrect assertion about the newline following token 107, job `12478521`
+completed 100 full-weight steps over 24 MPICH ranks on two Sunspot nodes. PBS
+reported `Exit_status=0`. The run processed 446,300 tokens in 79.52 seconds,
+reported aggregate training loss `0.06139`, and reached token accuracies of
+`0.9961` to `1.0` in the final steps. Collective FSDP model saving completed.
+
+The final artifact is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100/final
+model.safetensors SHA-256: cd8c185a84c0ef274d04b0be91ba72046b02e7533d9f0507f4948b146e0a5c6e
+config.json SHA-256: 761b56c19a67201ca1204eddb50798cdf30d5a4ddb5fa5a8fb535e797a36ebfd
+tokenizer_config.json SHA-256: 72fa042775bf2f16182acbccf1f4562734476c6ab121ab370e38242153141e97
+safetensors tensors: 111
+```
+
+### Clean held-out direct generation
+
+The first clean-control invocation accidentally reused the Qwen harness and did
+not stop on AGPT token 107. Its first blocks were correct, but generation then
+repeated those blocks until the token limit. The corrected AGPT harness used
+`stop_token_ids=[1, 107]`; job `12478524` exited 0 with **8/8 exact answers and
+8/8 proper stops**. All four samples for each prompt were identical:
+
+```text
+Prompt: Sort these names in alphabetical order by FIRST name: BethMillar
+Output:
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+```
+
+```text
+Prompt: Sort these names in alphabetical order by FIRST name:
+        ShahramKhosravi, AliceZimmer, BobYoung
+Output:
+<alphabetical_sorted>
+AliceZimmer
+BobYoung
+ShahramKhosravi
+</alphabetical_sorted>
+```
+
+This demonstrates held-out task generalization: those names were absent from the
+curriculum, the requested order was not memorized, and all completions terminated
+at the AGPT EOT token.
+
+### Distractor-example stress test
+
+Job `12478522` used the same model and stop IDs but appended a formatting example
+with different names. All eight generations used one correctly closed output
+block and stopped at EOT, but **0/8 contained only the requested names**. The raw
+outputs were:
+
+```text
+# BethMillar samples 1, 2, and 4
+<alphabetical_sorted>
+OmarSaito
+QuinnRivera
+PiaValdez
+BethMillar
+</alphabetical_sorted>
+
+# BethMillar sample 3
+<alphabetical_sorted>
+BethMillar
+OmarSaito
+QuinnRivera
+PiaValdez
+</alphabetical_sorted>
+
+# Three-name sample 1
+<alphabetical_sorted>
+OmarSaito
+QuinnRivera
+PiaValdez
+BobYoung
+ShahramKhosravi
+</alphabetical_sorted>
+
+# Three-name samples 2 and 3
+<alphabetical_sorted>
+AliceZimmer
+BobYoung
+PiaValdez
+QuinnRivera
+</alphabetical_sorted>
+
+# Three-name sample 4
+<alphabetical_sorted>
+AmirSaito
+BobYoung
+AliceZimmer
+PiaValdez
+QuinnRivera
+</alphabetical_sorted>
+```
+
+The targeted SFT therefore learned clean alphabet sorting, exact output framing,
+and EOT termination, but remains vulnerable to copying names from a conflicting
+in-context demonstration. The current artifact qualifies for a synchronization
+parity test on the clean prompt; it does not yet qualify as a robust final policy
+or for longer GRPO. A follow-up curriculum must explicitly train contrastive
+examples in which formatting demonstrations contain names that must be ignored.
