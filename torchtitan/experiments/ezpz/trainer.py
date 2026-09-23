@@ -476,7 +476,10 @@ class FaultTolerantTrainer(TorchFTTrainer):
         def __post_init__(self):
             if self.checkpoint is not None:
                 self.checkpointer = self.checkpoint
-            super().__post_init__()
+            # ``@dataclass(slots=True)`` returns a replacement class object;
+            # call the parent explicitly so Python 3.12 does not use the stale
+            # class captured by zero-argument ``super()``.
+            TorchFTTrainer.Config.__post_init__(self)
             self.checkpoint = self.checkpointer
 
     engine_cls: type[TrainingEngine] = EzpzTrainingEngine
