@@ -631,6 +631,11 @@ _MDS154391_SFT_BASE = os.environ.get(
     "/lus/tegu/projects/datascience/foremans/artifacts/"
     "agpt-2b-mds-stage3-mix-step154391-hf",
 )
+_MDS154391_SFT_DCP = os.environ.get(
+    "MDS154391_SFT_DCP",
+    "/lus/tegu/projects/datascience/foremans/artifacts/"
+    "agpt-2b-mds-stage3-mix-step154391-dcp/step-0",
+)
 
 
 def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
@@ -638,6 +643,9 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     base = Path(_MDS154391_SFT_BASE)
     if not (base / "model-00001-of-00001.safetensors").is_file():
         raise ValueError(f"MDS154391 HF checkpoint missing at {base}")
+    dcp_base = Path(_MDS154391_SFT_DCP)
+    if not (dcp_base / ".metadata").is_file():
+        raise ValueError(f"MDS154391 DCP checkpoint missing at {dcp_base}")
 
     cfg = agpt(
         "2b-mds",
@@ -667,8 +675,8 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     # resolves to gradient accumulation 32, matching the historical recipe.
     cfg.training.num_tokens_per_train_step = 6_144 * 1_024
     assert cfg.checkpointer is not None
-    cfg.checkpointer.initial_load_path = str(base)
-    cfg.checkpointer.initial_load_in_hf = True
+    cfg.checkpointer.initial_load_path = str(dcp_base)
+    cfg.checkpointer.initial_load_in_hf = False
     cfg.checkpointer.initial_load_model_only = True
     cfg.checkpointer.folder = (
         "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
