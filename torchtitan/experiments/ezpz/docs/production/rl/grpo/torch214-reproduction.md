@@ -1263,3 +1263,25 @@ Robust-SFT-v3 is therefore the first AGPT candidate in this report to pass the
 conjunctive clean and adversarial semantic release gate. It may proceed to a
 small bounded GRPO experiment; this direct-generation result does not by itself
 establish that GRPO improves the policy.
+
+## Robust-SFT-v3 bounded GRPO canary
+
+Commit `9d2200546` adds a dedicated fail-closed canary rather than reusing the
+obsolete checkpoint-900 launcher. Its protected-runtime preflight confirmed the
+exact robust-v3 model SHA, LoRA rank 8 with alpha 16 on `wqkv` and `wo`, three
+optimizer steps, four prompt groups per step with eight samples each, one turn
+with at most five names, learning rate `2e-6`, 128-token maximum generation,
+checkpoint interval 1, eight validation samples, and no explicit TorchStore
+transport override.
+
+Sunspot job `12478544` was submitted from commit `9d2200546` on 2026-09-22 and
+is monitored in Herdr pane `wC:p2C`. Its output directory is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-robust-v3-grpo3-12478544
+```
+
+This run is an integration and learning-signal canary only. Acceptance requires
+bounded raw rollouts, non-pathological reward variance and gradients, all three
+optimizer/synchronization steps, and post-run clean plus adversarial direct
+evaluation. Throughput or reward alone cannot establish improvement.
