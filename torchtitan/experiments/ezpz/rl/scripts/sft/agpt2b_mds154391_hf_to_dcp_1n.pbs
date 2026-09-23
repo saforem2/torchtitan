@@ -22,6 +22,7 @@ git checkout --detach "$EXPECTED_COMMIT"
 test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
 source <(curl -fsSL https://bit.ly/ezpz-utils)
 ezpz_setup "$V"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
 
 test -f "$SOURCE/model-00001-of-00001.safetensors"
 actual=$(sha256sum "$SOURCE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
