@@ -150,7 +150,10 @@ def parallelize_moe(
     # now just calls model.parallelize. The sync landed: #4419 deleted
     # parallelism.spmd_backend, so both arms collapse to one unconditional
     # call, matching core.
-    model.parallelize(parallel_dims)
+    # BaseModel.parallelize() owns this lifecycle now and called this custom
+    # implementation from moeModel.parallelize(). Invoke only the internal
+    # config-driven TP/EP sharding pass here; calling model.parallelize() recurses.
+    model._parallelize(parallel_dims)
 
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
     # gone -- see the import-site note above.

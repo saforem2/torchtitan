@@ -115,6 +115,11 @@ class TorchTitanGPUWorker(VLLMWorker):
         # allocations on PyTorch's default allocator.
         # The parent method checks enable_cumem_allocator and returns a no-op
         # context when it is disabled.
+        # XPUWorker does not provide CUDA CuMem semantics. Never call its
+        # inherited/private implementation for XPU, even if an upstream config
+        # accidentally leaves enable_cumem_allocator enabled.
+        if current_platform.is_xpu():
+            return nullcontext()
         if tag == "weights":
             return super()._maybe_get_memory_pool_context(tag)
         return nullcontext()
