@@ -90,7 +90,6 @@ _trainer_loop
 import asyncio
 import logging
 import math
-import os
 import time
 import warnings
 from dataclasses import dataclass, field, replace
@@ -135,6 +134,7 @@ from torchtitan.rl.rollout.rollouter import Rollouter
 from torchtitan.rl.rollout.types import GenerateFn
 from torchtitan.rl.trainer import Trainer
 from torchtitan.rl.types import Completion, TrainerStepBatch
+from torchtitan.torchstore_compat import torchstore_transport_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -145,29 +145,11 @@ def _torchstore_strategy_from_env() -> ts.LocalRankStrategy:
     This affects only trainer/generator weight transfer; TorchTitan model
     collectives continue to use their configured accelerator backend.
     """
-    requested = os.environ.get("TORCHTITAN_TORCHSTORE_TRANSPORT", "auto").lower()
-    if requested in ("", "auto", "unset"):
+    transport = torchstore_transport_from_env()
+    if transport is None:
         return ts.LocalRankStrategy()
-
-    # torchstore does not re-export TransportType from its top-level package.
-    # Import lazily so default deployments do not require a particular
-    # torchstore transport module layout until an override is requested.
-    from importlib import import_module
-
-    TransportType = import_module("torchstore.transport").TransportType
-    transports = {
-        "gloo": TransportType.Gloo,
-        "xccl": TransportType.XCCL,
-        "shared_memory": TransportType.SharedMemory,
-        "monarch_rpc": TransportType.MonarchRPC,
-    }
-    if requested not in transports:
-        raise ValueError(
-            "TORCHTITAN_TORCHSTORE_TRANSPORT must be one of "
-            f"auto, gloo, xccl, shared_memory, monarch_rpc; got {requested!r}"
-        )
-    logger.warning("Forcing TorchStore weight transport to %s", requested)
-    return ts.LocalRankStrategy(default_transport_type=transports[requested])
+    logger.warning("Forcing TorchStore weight transport to %s", transport)
+    return ts.LocalRankStrategy(default_transport_type=transport)
 
 
 @dataclass(kw_only=True, slots=True)
