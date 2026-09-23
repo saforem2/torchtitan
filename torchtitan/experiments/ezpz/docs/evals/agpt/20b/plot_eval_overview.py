@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Overlay v1 (bf16-master, broken) vs v2 (fp32-master, current) 20B
 eval scores on a single figure per task.
 
@@ -36,8 +42,8 @@ REPO_ROOT = Path(__file__).resolve().parents[7]
 # can't be conflated. Mirror docs/evals/agpt/2b/plot_eval_overview.py.
 V2_TRAJECTORIES = {
     # node_count -> (results dir, GBS)
-    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 3_072),   # LBS=1 × 256N × 12 GPUs ÷ TP=2 ⇒ 1536 dp-shards × 2 micro-batches
-    512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),  # LBS=2 × 512N × 12 GPUs (no TP)
+    256: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-256n", 6_144),
+    512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n", 12_288),
 }
 
 # BOTH 20B chains changed RoPE convention mid-flight, and every eval exported
@@ -52,6 +58,19 @@ V2_CORRECTED = {
     512: (REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-ropefix", 4401),
 }
 
+# Later, correctly exported segments of the same trajectories. These must be
+# applied after the RoPE splice: they already used ``20b_real`` and therefore
+# must not be discarded merely because the dedicated ropefix sweep ended
+# earlier. Keep this aligned with plot_evals_combined.py::extra_subdirs.
+V2_EXTRA = {
+    512: [REPO_ROOT / "outputs" / "evals" / "agpt-20b-v2-512n-constlr"],
+}
+
+# Correctly exported production-tail results that landed in the legacy base
+# directory. Whitelist exact steps rather than re-admitting every post-switch
+# base result, because the others were exported with the wrong RoPE flavor.
+V2_TRUSTED_BASE_STEPS = {256: {16_000}}
+
 # Pin every number to one shot count. The eval scripts write `<task>@<N>shot`
 # keys plus a bare `<task>` alias for whichever group ran LAST, so on steps
 # where a 25-shot ARC-C pass followed the 0-shot pass the bare key IS the
@@ -62,6 +81,9 @@ SHOTS = "0shot"
 # (pre-torchtitan SophiaG, 140K steps / 7.77T tokens). Same trajectory
 # overlay used on the 2B eval page.
 MDS_RESULTS_BASE = REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds"
+MDS_RESULTS_EXTRA = [
+    REPO_ROOT / "outputs" / "evals" / "agpt-2b-mds-7771T" / "stage3-mix"
+]
 # MDS tokens/iter is CONSTANT across all 3 stages: micro=1 x grad-acc=2 x
 # (256 nodes x 12 GPU) = GBS 6144, x seq 8192 = 50,331,648 tok/iter.
 #
@@ -81,12 +103,42 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # v1 (bf16-tainted) scores from the eval README. Steps × GBS=3072 × seq=8192.
 V1_RESULTS = {
-    100:   {"hellaswag": 0.2650, "arc_easy": 0.2571, "arc_challenge": 0.2560, "winogrande": 0.4957},
-    500:   {"hellaswag": 0.2562, "arc_easy": 0.2712, "arc_challenge": 0.2355, "winogrande": 0.4886},
-    1000:  {"hellaswag": 0.2549, "arc_easy": 0.2647, "arc_challenge": 0.2440, "winogrande": 0.5178},
-    1500:  {"hellaswag": 0.2505, "arc_easy": 0.2681, "arc_challenge": 0.2398, "winogrande": 0.4807},
-    2000:  {"hellaswag": 0.2480, "arc_easy": 0.2740, "arc_challenge": 0.2543, "winogrande": 0.5020},
-    2500:  {"hellaswag": 0.2462, "arc_easy": 0.2736, "arc_challenge": 0.2483, "winogrande": 0.5193},
+    100: {
+        "hellaswag": 0.2650,
+        "arc_easy": 0.2571,
+        "arc_challenge": 0.2560,
+        "winogrande": 0.4957,
+    },
+    500: {
+        "hellaswag": 0.2562,
+        "arc_easy": 0.2712,
+        "arc_challenge": 0.2355,
+        "winogrande": 0.4886,
+    },
+    1000: {
+        "hellaswag": 0.2549,
+        "arc_easy": 0.2647,
+        "arc_challenge": 0.2440,
+        "winogrande": 0.5178,
+    },
+    1500: {
+        "hellaswag": 0.2505,
+        "arc_easy": 0.2681,
+        "arc_challenge": 0.2398,
+        "winogrande": 0.4807,
+    },
+    2000: {
+        "hellaswag": 0.2480,
+        "arc_easy": 0.2740,
+        "arc_challenge": 0.2543,
+        "winogrande": 0.5020,
+    },
+    2500: {
+        "hellaswag": 0.2462,
+        "arc_easy": 0.2736,
+        "arc_challenge": 0.2483,
+        "winogrande": 0.5193,
+    },
 }
 V1_GBS = 3072  # LBS=1
 V1_SEQ = 8192
@@ -100,22 +152,27 @@ TASK_TITLES = {
     "winogrande": "Winogrande",
 }
 RANDOM_BASELINE = {
-    "hellaswag": 0.25,       # 4-way
-    "arc_easy": 0.25,        # 4-way
-    "arc_challenge": 0.25,   # 4-way
-    "winogrande": 0.50,      # 2-way
+    "hellaswag": 0.25,  # 4-way
+    "arc_easy": 0.25,  # 4-way
+    "arc_challenge": 0.25,  # 4-way
+    "winogrande": 0.50,  # 2-way
 }
 
 
-def _acc(metrics: dict) -> float | None:
-    """lm-eval reports `acc_norm,none` for HellaSwag/ARC; `acc,none` for Winogrande."""
-    for k in ("acc_norm,none", "acc,none"):
+def _acc(metrics: dict, task: str) -> float | None:
+    """Read the canonical metric used by the published 20B tables."""
+    keys = (
+        ("acc_norm,none", "acc,none")
+        if task in {"hellaswag", "arc_challenge"}
+        else ("acc,none", "acc_norm,none")
+    )
+    for k in keys:
         if k in metrics:
             return float(metrics[k])
     return None
 
 
-def _task_metrics(results: dict, task: str) -> dict | None:
+def _task_metrics(results: dict, task: str, n_shot: dict | None = None) -> dict | None:
     """Metrics for `task`, pinned to SHOTS when the file records shot counts.
 
     Returns None when shot-tagged keys exist but not at SHOTS, rather than
@@ -127,11 +184,21 @@ def _task_metrics(results: dict, task: str) -> dict | None:
         return tagged
     if any(k.startswith(f"{task}@") for k in results):
         return None
+    if isinstance(n_shot, dict) and task in n_shot:
+        try:
+            if int(n_shot[task]) != 0:
+                return None
+        except (TypeError, ValueError):
+            return None
     # Untagged few-shot: SHOTS_SPEC="5:mmlu;25:arc_challenge" batches wrote no
     # @Nshot keys, so they look 0-shot by key shape while holding 25-shot
     # numbers. mmlu's presence is the tell -- a plain 0-shot commonsense pass
     # never includes it. Measured ~4pp high on 2b_v2_256's ARC-C.
-    if task == "arc_challenge" and any(k.startswith("mmlu") for k in results):
+    if (
+        task == "arc_challenge"
+        and any(k.startswith("mmlu") for k in results)
+        and not (isinstance(n_shot, dict) and task in n_shot)
+    ):
         return None
     m = results.get(task)
     return m if isinstance(m, dict) else None
@@ -141,6 +208,8 @@ def load_v2_trajectory(
     results_base: Path,
     corrected_base: Path | None = None,
     switch_step: int | None = None,
+    extra_bases: list[Path] | None = None,
+    trusted_base_steps: set[int] | None = None,
 ) -> dict[int, dict[str, float]]:
     """Load a chain's evals, splicing corrected results over the post-switch half.
 
@@ -150,9 +219,21 @@ def load_v2_trajectory(
     DROPPED, never backfilled from the original: the original value there is
     the wrongly-permuted one this exists to remove, and a visible gap beats a
     plausible wrong point.
+
+    Optional `extra_bases` contain correctly exported continuation segments
+    and are merged last. Duplicate steps are allowed: later extra bases win
+    over earlier ones, and all extras win over the base/corrected splice.
+    `trusted_base_steps` explicitly restores known-good exports that were
+    written to the legacy base directory after the RoPE switch.
     """
     out = _load_one(results_base)
+    extra: dict[int, dict[str, float]] = {}
+    for base in extra_bases or []:
+        for step, scores in _load_one(base).items():
+            extra.setdefault(step, {}).update(scores)
     if corrected_base is None or switch_step is None:
+        for step, scores in extra.items():
+            out.setdefault(step, {}).update(scores)
         return out
 
     corrected = _load_one(corrected_base)
@@ -172,6 +253,12 @@ def load_v2_trajectory(
     for step, scores in corrected.items():
         if step >= switch_step:
             merged.setdefault(step, scores)
+    for step in trusted_base_steps or set():
+        if step in out:
+            merged[step] = out[step]
+    # Correctly exported continuation segments win their own steps outright.
+    for step, scores in extra.items():
+        merged.setdefault(step, {}).update(scores)
     for t, n in sorted(dropped.items()):
         print(
             f"  NOTE [{results_base.name}/{t}]: {n} post-switch point(s) dropped"
@@ -200,9 +287,10 @@ def _load_one(results_base: Path) -> dict[int, dict[str, float]]:
         # lm-eval JSON either has {task: {metric: value, ...}} or wraps in
         # {"results": {task: ...}}. Handle both.
         results = payload.get("results", payload)
+        n_shot = payload.get("n-shot")
         for task in TASKS:
-            m = _task_metrics(results, task)
-            if m is not None and (acc := _acc(m)) is not None:
+            m = _task_metrics(results, task, n_shot)
+            if m is not None and (acc := _acc(m, task)) is not None:
                 scores[task] = acc
         if scores:
             out[step] = scores
@@ -213,20 +301,28 @@ def load_mds() -> dict[int, dict[str, float]]:
     """2B-MDS reference layout: <stage>/step-<N>/results/results.json with 3
     stages all symlinked to the same physical ckpt dir for SophiaG. Average
     across replicates (XPU lm-eval is not bitwise-deterministic)."""
-    if not MDS_RESULTS_BASE.exists():
+    bases = [MDS_RESULTS_BASE] + MDS_RESULTS_EXTRA
+    if not any(base.exists() for base in bases):
         return {}
     by_step: dict[int, dict[str, list[float]]] = {}
-    for p in sorted(MDS_RESULTS_BASE.glob("*/step-*/results/results.json")):
-        try:
-            step = int(p.parent.parent.name.split("-")[1])
-        except ValueError:
+    for base in bases:
+        if not base.exists():
             continue
-        with p.open() as f:
-            payload = json.load(f)
-        results = payload.get("results", payload)
-        for task in TASKS:
-            if task in results and (acc := _acc(results[task])) is not None:
-                by_step.setdefault(step, {}).setdefault(task, []).append(acc)
+        paths = sorted(base.glob("*/step-*/results/results.json"))
+        paths += sorted(base.glob("step-*/results/results.json"))
+        for p in paths:
+            try:
+                step = int(p.parent.parent.name.split("-")[1])
+            except ValueError:
+                continue
+            with p.open() as f:
+                payload = json.load(f)
+            results = payload.get("results", payload)
+            n_shot = payload.get("n-shot")
+            for task in TASKS:
+                m = _task_metrics(results, task, n_shot)
+                if m is not None and (acc := _acc(m, task)) is not None:
+                    by_step.setdefault(step, {}).setdefault(task, []).append(acc)
     return {
         step: {task: sum(vs) / len(vs) for task, vs in d.items()}
         for step, d in sorted(by_step.items())
@@ -243,7 +339,11 @@ V2_STYLE = {
     # 20B 256N was a one-off NODE_FAIL run; kept here as orange (the
     # user's shared palette doesn't reserve a color for it).
     256: {"color": "#fb8c00", "marker": "^", "label_prefix": "v2 256N"},
-    512: {"color": "#1b8a3a", "marker": "D", "label_prefix": "v2 512N sync"},
+    512: {
+        "color": "#1b8a3a",
+        "marker": "D",
+        "label_prefix": "v2 512N sync -> const-LR",
+    },
 }
 
 
@@ -266,11 +366,21 @@ def plot_per_task(
         v1_y = [v1[s][task] for s in v1_steps]
 
         ax.axhline(
-            RANDOM_BASELINE[task], color="#808080", lw=1, ls=":", label="random",
+            RANDOM_BASELINE[task],
+            color="#808080",
+            lw=1,
+            ls=":",
+            label="random",
         )
         ax.plot(
-            v1_tokens, v1_y, marker="o", ms=4, lw=1.4,
-            color="#94a3b8", alpha=0.85, label=f"v1 256N (n={len(v1_steps)})",
+            v1_tokens,
+            v1_y,
+            marker="o",
+            ms=4,
+            lw=1.4,
+            color="#94a3b8",
+            alpha=0.85,
+            label=f"v1 256N (n={len(v1_steps)})",
         )
 
         # 2B-MDS reference (different model size — included to show the
@@ -280,8 +390,14 @@ def plot_per_task(
             mds_tokens = [s * MDS_TOKENS_PER_STEP / 1e9 for s in mds_steps]
             mds_y = [mds[s][task] for s in mds_steps]
             ax.plot(
-                mds_tokens, mds_y, marker="x", ms=5, lw=1.4,
-                color="C0", alpha=0.85, linestyle="--",
+                mds_tokens,
+                mds_y,
+                marker="x",
+                ms=5,
+                lw=1.4,
+                color="C0",
+                alpha=0.85,
+                linestyle="--",
                 label=f"2B-MDS SophiaG ref (n={len(mds_steps)})",
             )
 
@@ -291,7 +407,9 @@ def plot_per_task(
         for nodes, v2_traj in v2_by_nodes.items():
             if not v2_traj:
                 continue
-            style = V2_STYLE.get(nodes, {"color": "#666", "marker": "x", "label_prefix": f"v2 {nodes}N"})
+            style = V2_STYLE.get(
+                nodes, {"color": "#666", "marker": "x", "label_prefix": f"v2 {nodes}N"}
+            )
             gbs = v2_gbs[nodes]
             v2_steps = sorted(v2_traj)
             v2_tokens = [_tokens_for(s, gbs, V2_SEQ) for s in v2_steps]
@@ -301,9 +419,13 @@ def plot_per_task(
                 continue
             xs, ys = zip(*v2_pts)
             ax.plot(
-                xs, ys,
-                marker=style["marker"], ms=6, lw=1.8,
-                color=style["color"], alpha=1.0,
+                xs,
+                ys,
+                marker=style["marker"],
+                ms=6,
+                lw=1.8,
+                color=style["color"],
+                alpha=1.0,
                 label=f"{style['label_prefix']} (n={len(xs)})",
             )
             all_y_max = max(all_y_max, max(ys))
@@ -318,7 +440,8 @@ def plot_per_task(
     # directly over the climbing trajectories.
     handles, labels = axes.flat[0].get_legend_handles_labels()
     fig.legend(
-        handles, labels,
+        handles,
+        labels,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.98),
         ncol=min(len(labels), 4),
@@ -351,7 +474,7 @@ def print_table(
     for nodes in sorted(v2_by_nodes):
         v2 = v2_by_nodes[nodes]
         gbs = v2_gbs[nodes]
-        label = "v2 512N sync" if nodes == 512 else f"v2 {nodes}N"
+        label = "v2 512N sync -> const-LR" if nodes == 512 else f"v2 {nodes}N"
         for step in sorted(v2):
             s = v2[step]
             tok = _tokens_for(step, gbs, V2_SEQ)
@@ -370,7 +493,13 @@ def main() -> None:
     v2_gbs = {}
     for nodes, (path, gbs) in V2_TRAJECTORIES.items():
         corrected_path, switch = V2_CORRECTED.get(nodes, (None, None))
-        traj = load_v2_trajectory(path, corrected_path, switch)
+        traj = load_v2_trajectory(
+            path,
+            corrected_path,
+            switch,
+            V2_EXTRA.get(nodes),
+            V2_TRUSTED_BASE_STEPS.get(nodes),
+        )
         v2_by_nodes[nodes] = traj
         v2_gbs[nodes] = gbs
         print(f"loaded v2 {nodes}N: {len(traj)} steps from {path}")

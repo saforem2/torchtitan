@@ -2,6 +2,9 @@
 
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md)
 > for the v2 lm-eval results.
+> **Latest backfill:** step 16,000 (`8846651`, finished successfully on
+> 2026-09-21) — HellaSwag `acc_norm` 0.6809, ARC-Easy `acc` 0.7054,
+> ARC-Challenge 25-shot `acc_norm` 0.4420, Winogrande `acc` 0.6117.
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
