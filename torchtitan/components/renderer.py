@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import tyro
 from renderers import create_renderer, Renderer
@@ -104,8 +104,12 @@ class ExtraStopTokensRendererConfig(RendererConfig):
     extra_stop_token_ids: tuple[int, ...]
 
     def build(self, *, tokenizer: HuggingFaceTokenizer) -> Renderer:
-        return _RendererWithExtraStopTokens(
-            self.renderer.build(tokenizer=tokenizer), self.extra_stop_token_ids
+        # The wrapper delegates the renderer protocol through __getattr__.
+        return cast(
+            Renderer,
+            _RendererWithExtraStopTokens(
+                self.renderer.build(tokenizer=tokenizer), self.extra_stop_token_ids
+            ),
         )
 
 

@@ -68,7 +68,11 @@ class BaseTokenizer(ABC, Configurable):
                     ("name:endgeneration",), drop_needle=True
                 )
                 return jinja2.nodes.CallBlock(
-                    self.call_method("_render"), [], [], body
+                    # Supplied dynamically by jinja2.ext.Extension.
+                    self.call_method("_render"),  # pyrefly: ignore[missing-attribute]
+                    [],
+                    [],
+                    body,
                 ).set_lineno(lineno)
 
             def _render(self, caller):
