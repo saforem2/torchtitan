@@ -75,6 +75,40 @@ def from_renderers(config: PrimeRendererConfig) -> RendererConfig:
     return RenderersConfigAdapter(renderers_config=config)
 
 
+class _RendererWithExtraStopTokens:
+    """Delegate renderer behavior while extending role-boundary stop tokens."""
+
+    def __init__(self, renderer: Renderer, extra_stop_token_ids: tuple[int, ...]):
+        self._renderer = renderer
+        self._extra_stop_token_ids = extra_stop_token_ids
+
+    def __getattr__(self, name: str):
+        return getattr(self._renderer, name)
+
+    def get_stop_token_ids(self) -> list[int]:
+        return list(
+            dict.fromkeys(
+                [
+                    *self._renderer.get_stop_token_ids(),
+                    *self._extra_stop_token_ids,
+                ]
+            )
+        )
+
+
+@dataclass(kw_only=True, slots=True)
+class ExtraStopTokensRendererConfig(RendererConfig):
+    """Wrap another renderer and add model-specific generation stop IDs."""
+
+    renderer: RendererConfig
+    extra_stop_token_ids: tuple[int, ...]
+
+    def build(self, *, tokenizer: HuggingFaceTokenizer) -> Renderer:
+        return _RendererWithExtraStopTokens(
+            self.renderer.build(tokenizer=tokenizer), self.extra_stop_token_ids
+        )
+
+
 class RendererTokenizerWrapper:
     """Adapt TorchTitan's loaded tokenizer to `renderers.OffsetTokenizer`.
 

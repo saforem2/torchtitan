@@ -47,7 +47,7 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
-from torchtitan.components.renderer import from_renderers
+from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
 from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
@@ -184,7 +184,10 @@ def _agpt_grpo_config(
         # AuroraGPT uses the original Gemma chat template with
         # <start_of_turn>/<end_of_turn>. Gemma4RendererConfig expects the newer
         # <|turn> vocabulary, so use the checkpoint's own Jinja template.
-        renderer=from_renderers(DefaultRendererConfig()),
+        renderer=ExtraStopTokensRendererConfig(
+            renderer=from_renderers(DefaultRendererConfig()),
+            extra_stop_token_ids=(107,),
+        ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),

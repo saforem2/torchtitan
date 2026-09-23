@@ -16,6 +16,7 @@ from renderers import (
     Tokenizer,
 )
 from torchtitan.components.renderer import (
+    ExtraStopTokensRendererConfig,
     from_renderers,
     RendererConfig,
     RenderersConfigAdapter,
