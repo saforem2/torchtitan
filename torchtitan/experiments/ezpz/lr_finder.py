@@ -27,6 +27,11 @@ import torch
 import torch.distributed as dist
 
 from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.experiments.ezpz.lr_finder_validation import (
+    exponential_lr_schedule,
+    validate_sweep_config,
+    validate_sweep_results,
+)
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
@@ -123,8 +128,15 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     training_steps = trainer.config.training.steps
     total_iters = max(1, int(training_steps * config.fraction))
     warmup_steps = int(total_iters * config.warmup_fraction)
-    sweep_steps = total_iters - warmup_steps
-    mult = (config.max_lr / config.init_lr) ** (1.0 / max(1, sweep_steps))
+    sweep_steps = validate_sweep_config(
+        config.init_lr,
+        config.max_lr,
+        config.fraction,
+        training_steps,
+        config.warmup_fraction,
+    )
+    lr_schedule = exponential_lr_schedule(config.init_lr, config.max_lr, sweep_steps)
+    mult = lr_schedule[1] / lr_schedule[0]
 
     logger.info(
         f"LR Finder: sweeping from {config.init_lr:.2e} to {config.max_lr:.2e} "
@@ -137,7 +149,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         )
 
     # Set initial LR on all optimizer param groups
-    curr_lr = config.init_lr
+    curr_lr = lr_schedule[0]
     for optimizer in trainer.optimizers.optimizers:
         for param_group in optimizer.param_groups:
             param_group["lr"] = curr_lr
@@ -168,10 +180,6 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     # against a fictional axis, so EVERY LR-finder number in this repo
     # predating it has to be re-measured.
     #
-    # Restored after the loop rather than in a finally: try/finally would mean
-    # re-indenting the whole loop body, and a botched re-indent is a worse bug
-    # than this one. An exception mid-sweep leaves it suspended, which is
-    # acceptable -- the finder is the whole job in every launcher we have.
     _sched = getattr(trainer, "lr_schedulers", None)
     _orig_step = getattr(_sched, "step", None) if _sched is not None else None
     if _orig_step is not None:
@@ -189,51 +197,70 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             "resulting curve will be meaningless."
         )
 
-    for i in range(total_iters):
-        trainer.step += 1
-        in_warmup = i < warmup_steps
+    try:
+        for i in range(total_iters):
+            trainer.step += 1
+            in_warmup = i < warmup_steps
 
-        # Run one training step; returns global_avg_loss
-        loss_val = trainer.train_step(data_iterator)
-        if loss_val is None:
-            continue
+            # Run one training step; returns global_avg_loss
+            loss_val = trainer.train_step(data_iterator)
+            if loss_val is None:
+                if not in_warmup:
+                    raise RuntimeError(
+                        "LR Finder produced no loss during sweep; refusing partial sweep"
+                    )
+                continue
 
-        if isinstance(loss_val, torch.Tensor):
-            loss_val = float(loss_val.item())
+            if isinstance(loss_val, torch.Tensor):
+                loss_val = float(loss_val.item())
 
-        batch_num += 1
+            batch_num += 1
 
-        # EMA-smoothed loss with bias correction
-        avg_loss = config.beta * avg_loss + (1.0 - config.beta) * loss_val
-        smoothed_loss = avg_loss / (1.0 - config.beta**batch_num)
+            # EMA-smoothed loss with bias correction
+            avg_loss = config.beta * avg_loss + (1.0 - config.beta) * loss_val
+            smoothed_loss = avg_loss / (1.0 - config.beta**batch_num)
 
-        if smoothed_loss < best_loss or batch_num == 1:
-            best_loss = smoothed_loss
+            if smoothed_loss < best_loss or batch_num == 1:
+                best_loss = smoothed_loss
 
-        # Only record data points during the sweep phase
-        if not in_warmup:
-            lrs.append(curr_lr)
-            losses.append(smoothed_loss)
+            # Only record data points during the sweep phase
+            if not in_warmup:
+                lrs.append(curr_lr)
+                losses.append(smoothed_loss)
 
-        # Log progress
-        log_freq = trainer.config.metrics.log_freq
-        if (i + 1) % log_freq == 0:
-            phase = "warmup" if in_warmup else "sweep"
-            logger.info(
-                f"LR Finder [{phase}]: step {i + 1}/{total_iters}, "
-                f"lr={curr_lr:.8f}, smoothed_loss={smoothed_loss:.4f}"
-            )
+            # Log progress
+            log_freq = trainer.config.metrics.log_freq
+            if (i + 1) % log_freq == 0:
+                phase = "warmup" if in_warmup else "sweep"
+                logger.info(
+                    f"LR Finder [{phase}]: step {i + 1}/{total_iters}, "
+                    f"lr={curr_lr:.8f}, smoothed_loss={smoothed_loss:.4f}"
+                )
 
-        # Advance LR exponentially only during sweep
-        if not in_warmup:
-            curr_lr *= mult
-            for optimizer in trainer.optimizers.optimizers:
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = curr_lr
+            # Advance LR exponentially only during sweep. Avoid assigning one
+            # step beyond max_lr after the final recorded endpoint.
+            if not in_warmup and len(lrs) < sweep_steps:
+                curr_lr = lr_schedule[len(lrs)]
+                for optimizer in trainer.optimizers.optimizers:
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = curr_lr
+    finally:
+        if _orig_step is not None:
+            assert _sched is not None
+            _sched.step = _orig_step
+            logger.info("LR Finder: LR scheduler restored")
 
-    if _orig_step is not None:
-        _sched.step = _orig_step
-        logger.info("LR Finder: LR scheduler restored")
+    # Validate before creating or appending any artifact. A partial, empty, or
+    # non-finite curve is not a successful finder run and must make the launcher
+    # fail instead of leaving success-looking CSV/NPZ/PNG files behind.
+    validate_sweep_results(lrs, losses, expected_points=sweep_steps)
+    blow_up_lrs = find_optimal_lr(lrs, losses, smooth_frac=config.smooth_frac)
+    if not blow_up_lrs:
+        raise RuntimeError(
+            "LR Finder could not detect a blow-up point; refusing to mark "
+            "the sweep successful. Run a wider coarse sweep or inspect the curve."
+        )
+    suggested = blow_up_lrs[0] / 10
 
     # Save results on rank 0
     rank = int(os.environ.get("RANK", "0"))
@@ -258,9 +285,9 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         os.makedirs(out_dir, exist_ok=True)
 
         # Metadata for this run
-        from datetime import datetime
+        from datetime import datetime, UTC
 
-        run_timestamp = datetime.now().isoformat()
+        run_timestamp = datetime.now(UTC).isoformat()
         job_id = os.environ.get(
             "PBS_JOBID",
             os.environ.get("SLURM_JOB_ID", "local"),
@@ -274,9 +301,14 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         # If file exists with outdated header, rename as backup.
         csv_path = os.path.join(out_dir, "lr_finder_data.csv")
         new_header = [
-            "learning_rate", "loss",
-            "timestamp", "job_id", "hostname", "world_size",
-            "global_batch_size", "seq_len",
+            "learning_rate",
+            "loss",
+            "timestamp",
+            "job_id",
+            "hostname",
+            "world_size",
+            "global_batch_size",
+            "seq_len",
         ]
         write_header = True
         if os.path.isfile(csv_path):
@@ -299,11 +331,18 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             if write_header:
                 writer.writerow(new_header)
             for lr, loss in zip(lrs, losses):
-                writer.writerow([
-                    lr, loss,
-                    run_timestamp, job_id, hostname, world_size,
-                    global_batch_size, seq_len,
-                ])
+                writer.writerow(
+                    [
+                        lr,
+                        loss,
+                        run_timestamp,
+                        job_id,
+                        hostname,
+                        world_size,
+                        global_batch_size,
+                        seq_len,
+                    ]
+                )
         logger.info(f"LR Finder: appended {len(lrs)} rows to {csv_path}")
 
         # NPZ
@@ -320,64 +359,16 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         except ImportError:
             logger.warning("numpy not available, skipping NPZ output")
 
-        # Derivative-based optimal LR analysis
-        try:
-            blow_up_lrs = find_optimal_lr(
-                lrs, losses, smooth_frac=config.smooth_frac
+        # Derivative-based optimal LR analysis (validated before artifacts).
+        logger.info(
+            f"LR Finder: suggested LR = {suggested:.2e} "
+            f"(blow-up at {blow_up_lrs[0]:.2e})"
+        )
+        if len(blow_up_lrs) > 1:
+            logger.info(
+                f"LR Finder: all blow-up points: "
+                f"{[f'{lr:.2e}' for lr in blow_up_lrs]}"
             )
-            if blow_up_lrs:
-                suggested = blow_up_lrs[0] / 10
-                logger.info(
-                    f"LR Finder: suggested LR = {suggested:.2e} "
-                    f"(blow-up at {blow_up_lrs[0]:.2e})"
-                )
-                if len(blow_up_lrs) > 1:
-                    logger.info(
-                        f"LR Finder: all blow-up points: "
-                        f"{[f'{lr:.2e}' for lr in blow_up_lrs]}"
-                    )
-            else:
-                suggested = None
-                # DISTINGUISH "the sweep never blew up" FROM "the model was
-                # broken the whole time". Both reach this branch, and the
-                # generic advice ("increase max_lr") is actively wrong for the
-                # second: job 12474361 swept a config that was NaN from step 2
-                # at lr=1e-6, wrote 90 rows of NaN to CSV/NPZ/PNG, logged only
-                # this warning, and exited rc=0. Every artifact of a healthy
-                # run, none of the signal -- and the advice pointed away from
-                # the cause (bf16 overflow in Muon's Newton-Schulz, see
-                # optimizer/muon.py:_NS_BF16_SAFE_DIM).
-                import math as _math
-
-                _finite = [x for x in losses if x is not None and _math.isfinite(x)]
-                _n_bad = len(losses) - len(_finite)
-                if not _finite:
-                    logger.error(
-                        f"LR Finder: ALL {len(losses)} loss values are "
-                        f"NaN/inf. The sweep measured nothing -- this is a "
-                        f"broken model or optimizer, NOT a learning-rate "
-                        f"range problem, and raising max_lr will not help. "
-                        f"Check the first sweep step: if it is already NaN at "
-                        f"the smallest LR, the failure is numerical (dtype "
-                        f"overflow, bad init, or an unstable optimizer path). "
-                        f"The saved CSV/NPZ/plot contain only NaN."
-                    )
-                elif _n_bad:
-                    logger.warning(
-                        f"LR Finder: could not detect blow-up point, and "
-                        f"{_n_bad} of {len(losses)} points are NaN/inf. "
-                        f"Treat the suggestion as unreliable and inspect the "
-                        f"curve before using it."
-                    )
-                else:
-                    logger.warning(
-                        "LR Finder: could not detect blow-up point. "
-                        "Try increasing max_lr or fraction."
-                    )
-        except Exception as e:
-            suggested = None
-            logger.warning(f"LR Finder: derivative analysis failed: {e}")
-            blow_up_lrs = []
 
         # Plot
         try:
@@ -390,9 +381,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             # eval / docs charts. apply_style is import-safe in the XPU
             # training .venv (loads the stylesheet from file rather than
             # importing ambivalent, which would pull IPython).
-            from torchtitan.experiments.ezpz.utils.plot_style import (
-                apply_style,
-            )
+            from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
             apply_style()
 
@@ -442,9 +431,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         except ImportError:
             logger.warning("matplotlib not available, skipping plot output")
 
-        logger.info(
-            f"LR Finder complete. {len(lrs)} data points saved to {out_dir}/"
-        )
+        logger.info(f"LR Finder complete. {len(lrs)} data points saved to {out_dir}/")
 
     # Synchronize all ranks before exit
     if dist.is_initialized():
