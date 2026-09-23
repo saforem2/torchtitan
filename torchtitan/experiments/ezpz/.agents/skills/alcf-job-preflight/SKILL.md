@@ -30,7 +30,7 @@ reproduced the same five omissions repeatedly.
 ## Submit through the wrapper, not qsub directly
 
 ```bash
-.claude/skills/alcf-job-preflight/submit.sh <worktree> <venv> <machine> <job.sh>
+.agents/skills/alcf-job-preflight/submit.sh <worktree> <venv> <machine> <job.sh>
 ```
 
 `preflight.sh` exits non-zero, but that only helps if something acts on it.
