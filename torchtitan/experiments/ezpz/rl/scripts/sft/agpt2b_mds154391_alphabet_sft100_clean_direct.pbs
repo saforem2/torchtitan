@@ -24,7 +24,9 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 cd "$WT" || exit 11
 sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
 [[ "$sha" == "$EXPECTED_SHA" ]] || exit 12
-"$V/bin/python" -u torchtitan/experiments/ezpz/rl/scripts/qwen_direct_control.py "$MODEL" "$OUT"
+"$V/bin/python" -u \
+  torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py \
+  "$MODEL" "$OUT" --no-format-example
 rc=$?
 echo "AGPT_ALPHABET_SFT100_CLEAN_DIRECT_DONE rc=$rc output=$OUT"
 exit "$rc"

@@ -14,28 +14,33 @@ from pathlib import Path
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-PROMPTS = [
+BASE_PROMPTS = [
     "Sort these names in alphabetical order by FIRST name: BethMillar\n\n"
     "Reply with ONLY this block, one name per line, nothing before or after:\n"
-    "<alphabetical_sorted>\nName1\nName2\n...\n</alphabetical_sorted>\n\n"
-    "Formatting example (DIFFERENT names -- do not reuse these; sort the names "
-    "given above instead):\n<alphabetical_sorted>\nQuinnRivera\nOmarSaito\n"
-    "PiaValdez\n</alphabetical_sorted>",
+    "<alphabetical_sorted>\nName1\nName2\n...\n</alphabetical_sorted>",
     "Sort these names in alphabetical order by FIRST name: "
     "ShahramKhosravi, AliceZimmer, BobYoung\n\n"
     "Reply with ONLY this block, one name per line, nothing before or after:\n"
-    "<alphabetical_sorted>\nName1\nName2\n...\n</alphabetical_sorted>\n\n"
-    "Formatting example (DIFFERENT names -- do not reuse these; sort the names "
-    "given above instead):\n<alphabetical_sorted>\nQuinnRivera\nOmarSaito\n"
-    "PiaValdez\n</alphabetical_sorted>",
+    "<alphabetical_sorted>\nName1\nName2\n...\n</alphabetical_sorted>",
 ]
+FORMAT_EXAMPLE = (
+    "\n\nFormatting example (DIFFERENT names -- do not reuse these; sort the names "
+    "given above instead):\n<alphabetical_sorted>\nQuinnRivera\nOmarSaito\n"
+    "PiaValdez\n</alphabetical_sorted>"
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--no-format-example", action="store_true")
     args = parser.parse_args()
+
+    prompts = [
+        prompt if args.no_format_example else prompt + FORMAT_EXAMPLE
+        for prompt in BASE_PROMPTS
+    ]
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     rendered = [
@@ -44,7 +49,7 @@ def main() -> None:
             tokenize=False,
             add_generation_prompt=True,
         )
-        for prompt in PROMPTS
+        for prompt in prompts
     ]
     llm = LLM(
         model=str(args.model),
@@ -67,7 +72,7 @@ def main() -> None:
     outputs = llm.generate(rendered, params)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w") as stream:
-        for prompt, rendered_prompt, result in zip(PROMPTS, rendered, outputs):
+        for prompt, rendered_prompt, result in zip(prompts, rendered, outputs):
             for item in result.outputs:
                 row = {
                     "prompt": prompt,
