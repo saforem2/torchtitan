@@ -168,6 +168,41 @@ class FaultTolerantTrainer(Configurable):
     engine: FaultTolerantTrainingEngine
     engine_cls: type[TrainingEngine] = FaultTolerantTrainingEngine
 
+    # Keep the public Trainer surface while engine-owned state lives on the
+    # composed FaultTolerantTrainingEngine.  ezpz entry points and diagnostics
+    # intentionally operate on either trainer implementation.
+    @property
+    def optimizers(self):
+        return self.engine.optimizers
+
+    @property
+    def lr_schedulers(self):
+        return self.engine.lr_schedulers
+
+    @property
+    def model_parts(self):
+        return self.engine.model_parts
+
+    @property
+    def checkpointer(self):
+        return self.engine.checkpointer
+
+    @property
+    def device(self):
+        return self.engine.device
+
+    @property
+    def parallel_dims(self):
+        return self.engine.parallel_dims
+
+    @property
+    def step(self) -> int:
+        return self.engine.num_completed_steps
+
+    @step.setter
+    def step(self, value: int) -> None:
+        self.engine.num_completed_steps = value
+
     @record
     def __init__(self, config: Config):
         self.config = config
@@ -341,6 +376,9 @@ class FaultTolerantTrainer(Configurable):
                 time.perf_counter() - data_load_start
             )
             yield microbatch
+
+    # Compatibility alias used by ezpz's LR finder.
+    batch_generator = microbatch_generator
 
     def train_step(self, data_iterator: Iterator[TrainingMicrobatch]):
         engine = self.engine

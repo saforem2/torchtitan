@@ -85,6 +85,30 @@ def test_ft_trainer_composes_specialized_training_engine() -> None:
     assert issubclass(ft.FaultTolerantTrainingEngine, TrainingEngine)
 
 
+def test_ft_trainer_exposes_engine_owned_state() -> None:
+    trainer = object.__new__(ft.FaultTolerantTrainer)
+    trainer.engine = SimpleNamespace(
+        optimizers=object(),
+        lr_schedulers=object(),
+        model_parts=[object()],
+        checkpointer=object(),
+        device=torch.device("cpu"),
+        parallel_dims=object(),
+        num_completed_steps=7,
+    )
+
+    assert trainer.optimizers is trainer.engine.optimizers
+    assert trainer.lr_schedulers is trainer.engine.lr_schedulers
+    assert trainer.model_parts is trainer.engine.model_parts
+    assert trainer.checkpointer is trainer.engine.checkpointer
+    assert trainer.device is trainer.engine.device
+    assert trainer.parallel_dims is trainer.engine.parallel_dims
+    assert trainer.step == 7
+    trainer.step = 8
+    assert trainer.engine.num_completed_steps == 8
+    assert trainer.batch_generator.__func__ is trainer.microbatch_generator.__func__
+
+
 def test_ft_trainer_uses_engine_cls_hook() -> None:
     built = []
 
