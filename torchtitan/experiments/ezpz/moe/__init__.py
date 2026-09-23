@@ -1337,6 +1337,7 @@ def _agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> moeModel.Config:
             )
         )
     return moeModel.Config(
+        max_context_length=rope.max_context_length,
         vocab_size=50304,
         dim=dim,
         tok_embeddings=Embedding.Config(
