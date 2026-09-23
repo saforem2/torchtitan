@@ -15,7 +15,7 @@ BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-st
 PRETOK=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-alphabet-curriculum-v1
 OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100
 EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
-EXPECTED_CODE_COMMIT=9620726db3b48f452b81b51693dd3e9fa36f59f9
+EXPECTED_CODE_COMMIT=9620726db313636e3053a5ec68ee52538dea121d
 
 export PATH="$V/bin:/opt/pbs/bin:$PATH"
 export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
