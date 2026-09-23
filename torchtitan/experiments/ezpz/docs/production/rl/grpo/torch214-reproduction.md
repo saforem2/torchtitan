@@ -9,26 +9,37 @@
 
 ## Executive conclusion
 
-The observed AGPT-2B failure is a combination of two distinct issues:
+The evidence separates the rejected historical artifact from the subsequently
+trained stage-3-derived policies:
 
-1. **The reconstructed HF interface did not match SFT training.** It added a
-   BOS token that training did not use, applied generic whitespace trimming,
-   serialized system roles differently, omitted assistant generation markers,
-   and inherited reversed BOS/EOS metadata. These are concrete export defects
-   and are now repaired.
-2. **The checkpoint is still a poor model for this task after repairing that
-   interface.** Direct native-vLLM generation from checkpoint-900 remains
-   semantically malformed. The earlier `global_step138650` base is likewise a
-   weak instruction follower under the same prompt contract. The interface
-   defects explain bad stopping and some prompt mismatch, but not the poor
-   content.
+1. **Historical `checkpoint-900` is rejected.** Its reconstructed HF interface
+   did not match SFT training: it added an unused BOS token, applied generic
+   whitespace trimming, serialized system roles differently, omitted assistant
+   generation markers, and inherited reversed BOS/EOS metadata. Repairing those
+   export defects fixed serialization and stopping mismatches, but direct
+   native-vLLM generation from that same checkpoint remained semantically
+   malformed. The earlier `global_step138650` base was also a weak instruction
+   follower under the recovered prompt contract.
+2. **The genuine broad MDS stage-3 base is coherent but not instruction-tuned.**
+   Direct generation from `stage3-mix/global_step154391` produced coherent base
+   completions, making it the controlled starting point for new full-weight SFT
+   rather than evidence that `checkpoint-900` was usable.
+3. **Targeted SFT from the MDS base succeeds on the clean task.** The SFT-100
+   candidate achieved 8/8 exact held-out clean generations with correct AGPT EOT
+   termination. It also passed bounded automatic TorchTitan/TorchStore
+   synchronization. This supersedes any broad claim that the current AGPT
+   candidate is semantically malformed.
+4. **Robustness—not basic task learning or synchronization—is the remaining
+   blocker.** The first targeted candidate scored 0/8 under conflicting
+   distractor examples. Robust-SFT-v2 preserved 8/8 clean behavior and improved
+   the adversarial suite to 5/8, but three single-name cases still leaked,
+   repeated, or failed to terminate cleanly. No current AGPT policy therefore
+   qualifies for bounded GRPO yet.
 
-This conclusion does **not** rely on reward or throughput. It follows from raw
-completion inspection and three controlled comparisons:
-
-- AGPT direct load, bypassing TorchTitan and TorchStore;
-- a known-good Qwen model through both direct and synchronized execution;
-- direct generation from the genuine MDS stage-3 7.771T base.
+These conclusions do **not** rely on reward, loss, token accuracy, or throughput
+alone. They follow from raw completion inspection across direct AGPT loading, a
+known-good Qwen control, the genuine MDS stage-3 base, held-out clean and
+adversarial SFT evaluations, and pre/post TorchStore synchronization.
 
 ## Artifacts and environment
 
