@@ -161,3 +161,34 @@ def test_ft_engine_installs_all_reduce_hook_after_model_initialization() -> None
     engine.ft_manager.maybe_set_all_reduce_hook.assert_called_once_with(
         engine.model_parts
     )
+
+
+@pytest.mark.parametrize("ft_aware", [False, True])
+def test_ft_engine_passes_manager_only_to_ft_checkpointer(ft_aware) -> None:
+    engine = object.__new__(ft.FaultTolerantTrainingEngine)
+    config = MagicMock()
+    checkpointer_config = (
+        ft.TorchFTCheckpointManager.Config()
+        if ft_aware
+        else MagicMock(spec=["build"])
+    )
+    config.checkpointer = checkpointer_config
+    engine.config = config
+    engine.model_parts = [MagicMock()]
+    engine.optimizers = MagicMock()
+    engine.lr_schedulers = MagicMock()
+    engine.output_dir = "/tmp/output"
+    engine.ft_manager = MagicMock()
+    build = MagicMock(return_value="checkpointer")
+
+    with patch.object(checkpointer_config, "build", build):
+        ft.FaultTolerantTrainingEngine._initialize_checkpointer(
+            engine,
+            dataloader=MagicMock(),
+            sd_adapter=MagicMock(),
+        )
+
+    kwargs = build.call_args.kwargs
+    assert ("ft_manager" in kwargs) is ft_aware
+    if ft_aware:
+        assert kwargs["ft_manager"] is engine.ft_manager

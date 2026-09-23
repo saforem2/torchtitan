@@ -139,7 +139,7 @@ class FaultTolerantTrainingEngine(TrainingEngine):
         checkpointer_config = self.config.checkpointer
         if checkpointer_config is None:
             return
-        self.checkpointer = checkpointer_config.build(
+        build_kwargs = dict(
             dataloader=dataloader,
             model_parts=self.model_parts,
             optimizers=self.optimizers,
@@ -147,8 +147,14 @@ class FaultTolerantTrainingEngine(TrainingEngine):
             states={"train_state": self},
             sd_adapter=sd_adapter,
             base_folder=self.output_dir,
-            ft_manager=self.ft_manager,
         )
+        # Not every FaultTolerantTrainer recipe uses the FT-aware checkpoint
+        # manager.  Base CheckpointManager.Config owns a constructor without an
+        # ``ft_manager`` argument, while TorchFTCheckpointManager.Config needs
+        # it for replica-local dataloader state and in-memory state transfer.
+        if isinstance(checkpointer_config, TorchFTCheckpointManager.Config):
+            build_kwargs["ft_manager"] = self.ft_manager
+        self.checkpointer = checkpointer_config.build(**build_kwargs)
 
 
 class FaultTolerantTrainer(Configurable):
