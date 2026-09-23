@@ -14,11 +14,22 @@ weight-tying, etc.) is inherited.
 
 from dataclasses import dataclass
 
+from torchtitan.experiments.torchft.diloco import fragment_llm
 from torchtitan.models.llama3.model import Llama3Model
+
+from .state_dict_adapter import AgptStateDictAdapter
 
 
 class AgptModel(Llama3Model):
     """Llama3 with agpt's QK-Norm-aware sharding setter."""
+
+    state_dict_adapter_cls = AgptStateDictAdapter
+    _fragment = staticmethod(fragment_llm)
+
+    def parallelize(self, **kwargs):
+        from .parallelize import parallelize_llama
+
+        return parallelize_llama(self, **kwargs)
 
     @dataclass(kw_only=True, slots=True)
     class Config(Llama3Model.Config):

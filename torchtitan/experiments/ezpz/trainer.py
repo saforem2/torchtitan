@@ -193,20 +193,20 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
 
     def _initialize_model(
         self,
-        model_spec,
         *,
         compile_config,
+        hf_assets_path,
         create_seed_checkpoint: bool = False,
     ) -> None:
         super()._initialize_model(
-            model_spec,
             compile_config=compile_config,
+            hf_assets_path=hf_assets_path,
             create_seed_checkpoint=create_seed_checkpoint,
         )
         config = self.config
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
-                model_name=model_spec.name,
+                model_name=type(self.model_config).__qualname__,
                 parallel_dims=self.parallel_dims,
                 training=config.training,
                 parallelism=config.parallelism,
@@ -251,17 +251,15 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
 
     def initialize(
         self,
-        model_spec,
         *,
         compile_config,
-        sd_adapter,
+        hf_assets_path,
         dataloader: BaseDataLoader | None = None,
         create_seed_checkpoint: bool = False,
     ) -> None:
         super().initialize(
-            model_spec,
             compile_config=compile_config,
-            sd_adapter=sd_adapter,
+            hf_assets_path=hf_assets_path,
             dataloader=dataloader,
             create_seed_checkpoint=create_seed_checkpoint,
         )
@@ -486,8 +484,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         if config.checkpoint is not None:
             config.checkpointer = config.checkpoint
         self.config = config
-        model_spec = config.model_spec
-        model_config = model_spec.model
+        model_config = config.model
         model_config.update_from_config(config=config)
         if config.override.imports:
             apply_overrides(config.override, config)
@@ -568,14 +565,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
         color = self.metrics_processor.color
 
         engine.initialize(
-            model_spec,
             compile_config=config.compile,
             dataloader=self.dataloader,
-            sd_adapter=(
-                model_spec.state_dict_adapter(model_config, config.hf_assets_path)
-                if model_spec.state_dict_adapter
-                else None
-            ),
+            hf_assets_path=config.hf_assets_path,
             create_seed_checkpoint=config.create_seed_checkpoint,
         )
 
@@ -898,11 +890,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     else 0
                 ),
                 optimizer=engine.optimizers,
-                fragment_fn=(
-                    config.model_spec.fragment_fn
-                    if hasattr(config.model_spec, "fragment_fn")
-                    else None
-                ),
+                fragment_fn=getattr(engine.model_cls, "_fragment", None),
             ):
                 wall_deadline = self._resolve_walltime_deadline()
                 if config.save_on_signal:

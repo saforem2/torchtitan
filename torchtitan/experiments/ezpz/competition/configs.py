@@ -378,7 +378,7 @@ def full_2b_adamw():
 def full_2b_adamw_qknorm():
     """AdamW + QK-Norm — wall-clock champion, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.model_spec = agpt("2b_qknorm").model_spec
+    cfg.model = agpt("2b_qknorm").model
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.checkpointer.folder = "checkpoints/full_2b_adamw_qknorm"
     return cfg
@@ -403,7 +403,7 @@ def full_2b_mano():
 def full_2b_mano_qknorm():
     """Mano + QK-Norm — best combo, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.model_spec = agpt("2b_qknorm").model_spec
+    cfg.model = agpt("2b_qknorm").model
     cfg.optimizer = default_mano(lr=3.0e-4)
     cfg.checkpointer.folder = "checkpoints/full_2b_mano_qknorm"
     return cfg

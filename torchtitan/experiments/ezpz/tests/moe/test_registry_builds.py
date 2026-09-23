@@ -70,7 +70,7 @@ def test_sonic_flavors_select_the_sonic_backend():
         "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
     )
     with torch.device("meta"):
-        model = cfg.model_spec.model.build()
+        model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model -- the subclass is not wired"
     assert all(r._wants_routing() for r in routed), (
@@ -87,7 +87,7 @@ def test_default_backend_does_not_take_the_routing_path():
 
     cfg = moe_debugmodel()
     with torch.device("meta"):
-        model = cfg.model_spec.model.build()
+        model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model"
     assert not any(r._wants_routing() for r in routed), (

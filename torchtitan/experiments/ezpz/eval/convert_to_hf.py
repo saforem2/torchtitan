@@ -27,14 +27,13 @@ def convert_to_hf(
         model_module = importlib.import_module(f"torchtitan.{model_name}")
     else:
         model_module = importlib.import_module(f"torchtitan.models.{model_name}")
-    model_spec = model_module.model_registry(model_flavor)
-    model_config = model_spec.model
+    model_config = model_module.model_registry(model_flavor)
 
     with torch.device("cpu"):
         model = model_config.build()
     model = ModelWrapper(model)
 
-    sd_adapter = model_spec.state_dict_adapter(model_config, hf_assets_path)
+    sd_adapter = type(model).state_dict_adapter_cls(model_config, hf_assets_path)
     assert (
         sd_adapter is not None
     ), "trying to convert checkpoint from DCP to HF safetensors format, but sd_adapter is not provided."

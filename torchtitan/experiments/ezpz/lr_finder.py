@@ -266,7 +266,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     rank = int(os.environ.get("RANK", "0"))
     if rank == 0:
         # Group outputs: lr_finder/ezpz/<name>/<flavor>/<optimizer>/
-        model_spec = trainer.config.model_spec
+        model_config = trainer.config.model
         # Derive optimizer name from container class
         opt_cls = type(trainer.optimizers).__name__
         opt_name = (
@@ -275,10 +275,9 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             .lower()
             or "adamw"
         )
-        if model_spec is not None:
-            sub_path = os.path.join(
-                "ezpz", model_spec.name, model_spec.flavor, opt_name
-            )
+        if model_config is not None:
+            model_name = type(model_config).__qualname__.removesuffix(".Config")
+            sub_path = os.path.join("ezpz", model_name, opt_name)
         else:
             sub_path = os.path.join("unknown", opt_name)
         out_dir = os.path.join(trainer.config.dump_folder, "lr_finder", sub_path)

@@ -41,7 +41,7 @@ def _factory(module_name: str, factory_name: str, json_path: Path, monkeypatch):
 def _expert_backends(cfg) -> set[str]:
     return {
         layer.moe.routed_experts.inner_experts.compute_backend
-        for layer in cfg.model_spec.model.layers
+        for layer in cfg.model.layers
         if layer.moe is not None
     }
 
@@ -110,7 +110,7 @@ def test_retained_agpt_json_factories_load(
 ):
     cfg = _factory(module_name, factory_name, MOE_RUNS / json_name, monkeypatch)
 
-    assert cfg.model_spec.model.vocab_size == 50_304
+    assert cfg.model.vocab_size == 50_304
     if ac_type is None:
         assert cfg.activation_checkpoint is None
     else:
@@ -122,7 +122,7 @@ def test_retained_agpt_json_factories_load(
     if backend is not None:
         assert cfg.parallelism.expert_parallel_degree == 12
         assert _expert_backends(cfg) == {backend}
-        assert cfg.model_spec.state_dict_adapter is None
+        assert cfg.model.build().state_dict_adapter_cls is None
 
 
 def test_agpt_json_rejects_checkpoint_rotation(monkeypatch, tmp_path):
