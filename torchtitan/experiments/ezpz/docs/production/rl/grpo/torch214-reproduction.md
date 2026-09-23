@@ -3,8 +3,9 @@
 > **Status (2026-09-23):** the Torch 2.14 Monarch/TorchStore/vLLM XPU path is
 > operational. Robust-SFT-v3, trained from the broad MDS stage-3 base, passes
 > both held-out gates: clean 8/8 and adversarial 8/8, with exact output framing
-> and EOT termination. It is the first AGPT candidate in this report eligible
-> for a small bounded GRPO canary.
+> and EOT termination. A three-step bounded GRPO canary completed technically,
+> but did not establish improvement on its broader mixed FIRST/LAST task and is
+> rejected as a policy advance. Robust-SFT-v3 remains the accepted artifact.
 
 ## Executive conclusion
 
@@ -35,6 +36,14 @@ trained stage-3-derived policies:
    adversarial, with all samples bounded and EOT-terminated. It qualifies for a
    small bounded GRPO canary; any resulting policy must still be re-evaluated on
    both suites before being accepted.
+5. **The bounded GRPO canary is an integration pass, not a policy improvement.**
+   All three optimizer and synchronization steps completed and every recorded
+   completion was bounded, but exact post-validation correctness was 3/8 and
+   mean validation reward changed from 0.758 to 0.698 on different prompts. The
+   GRPO environment also mixed FIRST- and LAST-name tasks although robust-v3 SFT
+   trained FIRST-name sorting, while its fuzzy character reward assigned high
+   partial credit to semantically wrong outputs. The policy-version-3 checkpoint
+   is rejected; no longer run should continue from it.
 
 These conclusions do **not** rely on reward, loss, token accuracy, or throughput
 alone. They follow from raw completion inspection across direct AGPT loading, a
@@ -1274,14 +1283,65 @@ with at most five names, learning rate `2e-6`, 128-token maximum generation,
 checkpoint interval 1, eight validation samples, and no explicit TorchStore
 transport override.
 
-Sunspot job `12478544` was submitted from commit `9d2200546` on 2026-09-22 and
-is monitored in Herdr pane `wC:p2C`. Its output directory is:
+Sunspot job `12478544` ran from commit `9d2200546` and completed all three
+optimizer steps with PBS `Exit_status=0`. It loaded the exact v3 artifact,
+selected automatic TorchStore transport (`TransportType.Unset`), completed the
+initial 7.94 GB publication/pull, published and pulled after every step, saved
+DCP checkpoints at steps 1, 2, and 3, ran post-step validation, and shut down
+cleanly. The output directory is:
 
 ```text
 /lus/tegu/projects/datascience/foremans/reproductions/agpt2b-robust-v3-grpo3-12478544
 ```
 
-This run is an integration and learning-signal canary only. Acceptance requires
-bounded raw rollouts, non-pathological reward variance and gradients, all three
-optimizer/synchronization steps, and post-run clean plus adversarial direct
-evaluation. Throughput or reward alone cannot establish improvement.
+The three step summaries were:
+
+| Step | rollout reward mean | gradient norm | loss | LR |
+|---:|---:|---:|---:|---:|
+| 1 | 0.86 | 0.0032 | 0.0000027 | 0.000001 |
+| 2 | 0.95 | 0 | 0 | 0.000002 |
+| 3 | 0.83 | 0.022 | -0.00006 | 0.000002 |
+
+Validation reward mean changed from `0.758` before training to `0.698` after
+training. The pre/post prompts were different, so this is not a paired estimate
+of degradation, but it is also not evidence of improvement.
+
+Raw inspection of all 40 rows in `rollout_samples.jsonl` found every completion
+bounded, single-block, and EOT-terminated. Exact task correctness on the broader
+random one-to-five-name FIRST/LAST distribution was:
+
+| Partition / policy version | Exact | Rows | Mean recorded reward |
+|---|---:|---:|---:|
+| pre-validation / 0 | 0 | 8 | 0.758 validation summary |
+| training / 0 | 6 | 8 | included with policy-0 mean below |
+| all recorded / 0 | 6 | 16 | 0.812 |
+| training / 1 | 6 | 8 | 0.950 |
+| training / 2 | 3 | 8 | 0.784 |
+| post-validation / 3 | 3 | 8 | 0.698 |
+
+The failures included incorrect ordering, omitted names, truncated/mutated
+names, and one hallucinated pair (`ChenQichen`, `DomenicChen`). Representative
+post-policy failures were:
+
+```text
+Prompt: sort XiaobinChen, TimoEkholm by FIRST name
+Expected: TimoEkholm, XiaobinChen
+Generated: XiaobinChen, TimoEkholm
+
+Prompt: sort ToshihikoFujimori, AndreaPetri, RuihongYue, OlgutaBuse,
+        YoshitakaKoyama by FIRST name
+Generated: AndreaPetri, Fujimori, YoshitakaKoyama, OlgutaBuse, RuihongYue
+```
+
+The canary therefore passes the bounded GRPO integration and nonzero-learning-
+signal test, but it does **not** establish policy improvement and must not be
+extended as-is. Robust-v3 remains the accepted pre-GRPO artifact. Any further RL
+experiment needs a paired fixed validation suite and a reward/task design that
+matches the desired FIRST-name behavior rather than mixing untrained LAST-name
+cases.
+
+The first scheduled notifier for this job was misconfigured to probe local
+`qstat` and local paths rather than SSH to Sunspot. It failed after one probe,
+leaving the terminal pane open until manual follow-up. The notifier and pane have
+now been removed. Future remote-HPC monitors must pass a verified SSH-based
+probe before being considered active.
