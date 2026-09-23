@@ -61,6 +61,12 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
     return make_ffn_config(**kwargs)
 
 
+def _model_max_context_length(layers: list[TransformerBlock.Config]) -> int:
+    rope = getattr(layers[0].attention, "rope", None)
+    if rope is None:
+        raise ValueError("MoE attention config must define RoPE")
+    return rope.max_context_length
+
 
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
@@ -620,6 +626,7 @@ def _debugmodel() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -678,6 +685,7 @@ def _debugmodel_flex_attn() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -738,6 +746,7 @@ def _small() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -796,6 +805,7 @@ def _16b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -858,6 +868,7 @@ def _236b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -921,6 +932,7 @@ def _671b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -979,6 +991,7 @@ def _500m() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1037,6 +1050,7 @@ def _2b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1098,6 +1112,7 @@ def _4b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1160,6 +1175,7 @@ def _7b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1218,6 +1234,7 @@ def _10b_2b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
