@@ -8,8 +8,20 @@ byte-identical to `allenai/Olmo-3-1025-7B`.
 **Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
 **Machine:** Aurora `next-eval` and Sunspot `workq`, 64N production-batch sweeps
 
-Status as of 2026-09-22: **PARTIAL RESULTS; COARSE-TO-FINE REDESIGN IN
-PROGRESS.** The original Aurora
+Status as of 2026-09-23: **ACTIVE COARSE-TO-FINE REPLACEMENT CAMPAIGN.**
+The current Sunspot wave is pinned to TorchTitan commit `b91e273ec`, uses 64
+nodes / 768 ranks, GBS=6144, sequence length 4096, the config-owned OLMo-3
+dataloader, and explicit `CCL_OP_SYNC=1`. Each fine sweep starts in a fresh
+trainer process rather than continuing from coarse-run weights.
+
+The first two fine AdamW arms are complete with 100/100 finite points and fresh
+CSVs: 5B job `12478508` suggests **7.17e-5** (blow-up `7.17e-4`), and 10B
+job `12478509` suggests **4.16e-5** (blow-up `4.16e-4`). Job `12478510`
+(30B AdamW fine) is running; widened SophiaG coarse jobs `12478511`–`12478513`
+remain queued. Muon remains excluded because its first-update Newton–Schulz
+corruption has not passed a finite-gradient, finite-weight, real-update canary.
+
+Earlier replacement attempts remain useful provenance. The original Aurora
 submissions failed before training for two successive runtime-contract defects:
 first stale `spmd-types`, then a pip `impi-rt` library shadowing Aurora's site
 MPICH/PMIx (`PMIX_Init returned -25`). The isolated `.venv.next-eval` runtime,
@@ -141,19 +153,40 @@ place, and `qalter -v` cannot help either: the old script sets LRF_MAX_LR with
 an unconditional `export`, which overwrites anything injected. 8837397/8/9 are
 the corrected replacements.
 
-## Results
+## Current coarse-to-fine wave (2026-09-22/23)
 
-Verified results as of 2026-09-21. A minimum at the final sampled LR means the
-curve was still descending and **does not constitute a defensible LR
-recommendation**; the sweep window must be extended or interpreted alongside
-the completed curve.
+All fine arms use a fresh trainer initialization. The completed rows below were
+validated from the job-specific CSVs, not transcribed from plots. `finite`
+counts every row with finite LR and loss; a recommendation is published only
+when the application detected an interior blow-up.
 
-### Interim completed-run snapshot
+| job | model / optimizer | stage | points | finite | min loss | LR at min | suggested LR | blow-up | status |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| `12478508` | 5B / AdamW | fine | 100 | 100 | 7.9258 | 6.579e-4 | **7.17e-5** | 7.17e-4 | complete, PBS exit 0 |
+| `12478509` | 10B / AdamW | fine | 100 | 100 | 7.8432 | 4.642e-4 | **4.16e-5** | 4.16e-4 | complete, PBS exit 0 |
+| `12478510` | 30B / AdamW | fine | — | — | — | — | — | — | running |
+| `12478511` | 5B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
+| `12478512` | 10B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
+| `12478513` | 30B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
+
+### Current per-model charts
+
+These stable paths are **interim AdamW-only charts**, not completed
+all-optimizer comparisons. They will be regenerated at the same paths as valid
+SophiaG results arrive. Muon is intentionally omitted pending a valid canary.
+
+| model | chart |
+|---|---|
+| 5B | ![5B OLMo-3-vocab AdamW fine sweep](figures/olmo2tok-gbs6144/lr_finder_5b_olmo2tok.png) |
+| 10B | ![10B OLMo-3-vocab AdamW fine sweep](figures/olmo2tok-gbs6144/lr_finder_10b_olmo2tok.png) |
+
+![5B and 10B AdamW fine sweeps](figures/olmo2tok-gbs6144/lr_finder_comparison.png)
+
+## Earlier completed-run snapshot (2026-09-21)
 
 ![Interim OLMo-3-vocab LR-finder curves](figures/2026-09-21-olmo3-gbs6144-interim.png)
 
-This is intentionally an **interim** chart and will be regenerated in place as
-additional full sweeps finish. It includes only three explicitly approved,
+The older chart is intentionally an **interim historical snapshot**. It includes only three explicitly approved,
 complete 150-point sweeps—not five-point smokes or failed/invalid runs. The
 current snapshot contains Sunspot
 `12478315` (5B AdamW), `12478327` (5B Mano), and `12478328` (10B Mano). The
