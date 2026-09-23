@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Render the current OLMo-3-vocab coarse-to-fine LR campaign.
 
 The raw CSVs remain cluster artifacts. Pass a directory containing paths of the
@@ -65,20 +71,31 @@ def style_ax(ax: plt.Axes) -> None:
     ax.set_facecolor("white")
 
 
-def draw_model(ax: plt.Axes, model: str, arms: dict[str, tuple[np.ndarray, np.ndarray]]) -> None:
+def draw_model(
+    ax: plt.Axes, model: str, arms: dict[str, tuple[np.ndarray, np.ndarray]]
+) -> None:
     for optimizer, (lrs, losses) in sorted(arms.items()):
         color = COLORS[optimizer]
         label = LABELS[optimizer]
         minimum = int(np.argmin(losses))
         ax.plot(lrs, losses, color=color, linewidth=2, label=label)
         ax.scatter(
-            [lrs[minimum]], [losses[minimum]], color=color, edgecolors="white",
-            linewidths=1.25, s=70, zorder=4, label=f"{label} minimum",
+            [lrs[minimum]],
+            [losses[minimum]],
+            color=color,
+            edgecolors="white",
+            linewidths=1.25,
+            s=70,
+            zorder=4,
+            label=f"{label} minimum",
         )
         recommendation = suggested_lr(model, optimizer)
         if recommendation is not None:
             ax.axvline(
-                recommendation, color=color, linestyle=":", linewidth=1.8,
+                recommendation,
+                color=color,
+                linestyle=":",
+                linewidth=1.8,
                 label=f"{label} suggested LR = {recommendation:.2e}",
             )
     style_ax(ax)
@@ -88,7 +105,9 @@ def draw_model(ax: plt.Axes, model: str, arms: dict[str, tuple[np.ndarray, np.nd
 
 def save(fig: plt.Figure, stem: Path) -> None:
     fig.patch.set_facecolor("white")
-    fig.savefig(stem.with_suffix(".png"), dpi=160, bbox_inches="tight", facecolor="white")
+    fig.savefig(
+        stem.with_suffix(".png"), dpi=160, bbox_inches="tight", facecolor="white"
+    )
     fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
@@ -110,7 +129,9 @@ def main() -> int:
         fig.suptitle("Coarse-to-fine LR finder — current valid arms", fontweight="bold")
         save(fig, args.output_dir / f"lr_finder_{model}")
 
-    fig, axes = plt.subplots(1, len(order), figsize=(7 * len(order), 5.5), squeeze=False, facecolor="white")
+    fig, axes = plt.subplots(
+        1, len(order), figsize=(7 * len(order), 5.5), squeeze=False, facecolor="white"
+    )
     for ax, model in zip(axes[0], order):
         draw_model(ax, model, results[model])
     fig.suptitle("AdamW fine sweeps — completed models", fontweight="bold")
