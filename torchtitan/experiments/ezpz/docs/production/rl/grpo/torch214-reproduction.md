@@ -1209,9 +1209,20 @@ serialization, assistant-only masks, EOT supervision, 100 steps, learning rate
 
 A protected-runtime preflight over 32 rows confirmed 16 adversarial rows, exactly
 eight single-name adversarial rows, and canonical `[107, 108]` tails. The code is
-in commits `870cb9278` and `be043ef62`. Sunspot job `12478541` was submitted from
-commit `8e9049d4b` on 2026-09-22 and is monitored in Herdr pane `wC:p27`.
+in commits `870cb9278` and `be043ef62`.
 
-The release gate remains conjunctive: clean 8/8 exact and EOT, adversarial 8/8
-exact and EOT, with no distractor leakage, repetition, or truncation. Training
-metrics alone cannot advance this candidate.
+Sunspot job `12478541` ran from commit `8e9049d4b` and completed with PBS
+`Exit_status=0`. The full dataset preflight confirmed 8,192 rows, 4,096
+adversarial rows, and exactly 2,048 single-name adversarial rows. The 100 steps
+completed in 74.44 seconds with aggregate training loss `0.06451`; collective
+saving succeeded. The artifact is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/
+  agpt2b-mds154391-alphabet-robust-v3-sft100/final
+model.safetensors SHA-256: 2e075c04a8560a0a4f197a24e3638148f491eb507dbb0506ef8ef14f5c4aaf17
+```
+
+These training metrics establish technical completion only. The release gate
+remains conjunctive: clean 8/8 exact and EOT, adversarial 8/8 exact and EOT, with
+no distractor leakage, repetition, or truncation.
