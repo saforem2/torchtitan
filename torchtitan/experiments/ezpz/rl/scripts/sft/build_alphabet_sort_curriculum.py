@@ -85,7 +85,12 @@ def build(
         if robust_v3:
             row_class = index % 4
             is_distractor = row_class >= 2
-            count = 1 if row_class == 2 else 1 + (group % 8)
+            if row_class == 2:
+                count = 1
+            elif row_class == 3:
+                count = 2 + (group % 7)
+            else:
+                count = 1 + (group % 8)
         else:
             is_distractor = robust and index % 8 < 2
             count = 1 + (group % 8) if robust else 1 + (index % 8)
