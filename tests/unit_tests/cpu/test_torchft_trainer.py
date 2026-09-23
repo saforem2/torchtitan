@@ -121,7 +121,7 @@ def test_ft_trainer_uses_engine_cls_hook() -> None:
         engine_cls = CustomEngine
 
     config = ft.FaultTolerantTrainer.Config(
-        model_spec=model_registry("debugmodel"),
+        model=model_registry("debugmodel"),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
     )

@@ -25,6 +25,7 @@ from vllm import EngineArgs, LLMEngine, SamplingParams
 from vllm.config import AttentionConfig, CompilationConfig
 from vllm.config.compilation import CompilationMode, CUDAGraphMode, PassConfig
 from vllm.outputs import RequestOutput
+from vllm.platforms import current_platform
 from vllm.sampling_params import RequestOutputKind
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
@@ -906,7 +907,11 @@ class VLLMGenerator(Configurable):
             ),
             # Enables RequestOutput.metrics, so generator metrics can be returned
             disable_log_stats=False,
-            enable_cumem_allocator=config.enable_cumem_allocator,
+            # CuMem is CUDA-specific. XPU uses its native allocator and the
+            # TorchStore transports already validated for that platform.
+            enable_cumem_allocator=(
+                config.enable_cumem_allocator and not current_platform.is_xpu()
+            ),
         )
         engine_kwargs["max_model_len"] = model_config.max_context_length
         engine_kwargs["max_num_seqs"] = self._max_num_seqs
