@@ -39,6 +39,17 @@ def test_from_renderers_returns_adapter() -> None:
     assert config.renderers_config is renderers_config
 
 
+def test_extra_stop_tokens_preserve_order_and_deduplicate() -> None:
+    tokenizer = HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
+    base = from_renderers(Qwen3RendererConfig(enable_thinking=False))
+    base_stops = base.build(tokenizer=tokenizer).get_stop_token_ids()
+    renderer = ExtraStopTokensRendererConfig(
+        renderer=base,
+        extra_stop_token_ids=(base_stops[-1], 123456),
+    ).build(tokenizer=tokenizer)
+    assert renderer.get_stop_token_ids() == [*base_stops, 123456]
+
+
 def test_build_renders_with_titan_tokenizer() -> None:
     tokenizer = HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
     renderer = RenderersConfigAdapter(
