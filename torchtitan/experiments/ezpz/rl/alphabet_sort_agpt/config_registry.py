@@ -275,6 +275,27 @@ def rl_sync_agpt_2b_clean() -> Controller.Config:
     return config
 
 
+def rl_grpo_agpt_2b_bounded_v3() -> Controller.Config:
+    """Three-step GRPO canary for the clean/adversarial-gated robust-v3 policy.
+
+    Keep the experiment deliberately small while sampling a harder one-turn
+    distribution (up to five names) than the direct release gate. The launcher
+    supplies the exact robust-v3 HF artifact and retains all raw rollouts.
+    """
+    config = _agpt_grpo_config(
+        num_training_steps=3,
+        num_groups_per_train_step=4,
+        max_turns=1,
+        max_names_per_turn=5,
+        lr=2e-6,
+    )
+    config.async_loop.validation = ValidationConfig(num_samples=8)
+    assert config.trainer.checkpointer is not None
+    config.trainer.checkpointer.interval = 1
+    config.generator.sampling.max_tokens = 128
+    return config
+
+
 # --- "beat v5" sweep (2026-07-19): all on the easy task (the winner), each
 # --- combining/extending the levers v5/v6 left on the table. ---
 
