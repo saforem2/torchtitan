@@ -1,11 +1,11 @@
 # Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis
 
-> **Status (2026-09-22):** the Torch 2.14 Monarch/TorchStore/vLLM XPU path is
-> operational, but the tested AGPT-2B SFT checkpoint is not suitable for the
-> alphabet-sort GRPO run. The malformed output originates before RL weight
-> synchronization. A known-good Qwen control survives the complete path, while
-> the genuine broad MDS stage-3 7.771T checkpoint generates coherent base-model
-> text and is the preferred base for corrected SFT.
+> **Status (2026-09-23):** the Torch 2.14 Monarch/TorchStore/vLLM XPU path is
+> operational. A stage-3-derived AGPT SFT checkpoint passes clean direct
+> generation and automatic TorchStore synchronization with bounded pre/post
+> outputs. A distractor-resistant SFT follow-up improved the adversarial suite
+> from 0/8 to 5/8 without regressing its 8/8 clean score, but still fails the
+> semantic release gate; bounded GRPO remains blocked on policy robustness.
 
 ## Executive conclusion
 
@@ -938,3 +938,250 @@ in-context demonstration. The current artifact qualifies for a synchronization
 parity test on the clean prompt; it does not yet qualify as a robust final policy
 or for longer GRPO. A follow-up curriculum must explicitly train contrastive
 examples in which formatting demonstrations contain names that must be ignored.
+
+## TorchTitan and TorchStore synchronization gate
+
+The clean-passing SFT-100 artifact exposed two compatibility gaps before the
+weight-transfer test could run:
+
+1. TorchTitan's text-only Jinja renderer rejected Transformers' assistant-mask
+   `{% generation %}...{% endgeneration %}` extension. Commit `9716b6540d`
+   added a byte-preserving no-op extension. A real-artifact comparison then
+   rendered exactly the same serialized prompt through Transformers and
+   TorchTitan.
+2. The generic `DefaultRenderer` returned only EOS token 1 as a generation stop.
+   AGPT uses token 107 (`<end_of_turn>`) as its normal assistant boundary. Commits
+   `4ed6f887bb` and `180f52edbf` added a reusable extra-stop-token renderer
+   adapter and configured AGPT with stop IDs `[1, 107]`.
+
+The failed setup attempts are retained as controlled evidence:
+
+| Job | Exit | Finding |
+|---|---:|---|
+| `12478526` | 13 | Invalid wrapper preflight invoked `train_upstream --help` without required `--module`; no controller was launched. |
+| `12478528` | 1 | Reached controller construction, then failed on the unsupported Jinja `generation` tag. |
+| `12478531` | 0 | Forced-Gloo transport completed, but before the renderer fix every validation sample repeated after a correct block until 128 tokens. |
+
+Job `12478536` reran the one-step integration after both renderer fixes, using
+forced Gloo only as a weight-transfer isolation control. PBS reported
+`Exit_status=0`. TorchStore published and pulled the 7.94 GB model twice:
+
+```text
+initial trainer put: 3.4063 s, 2.33 GB/s
+initial generator get: 3.1322 s, 2.54 GB/s
+post-step trainer put: completed
+post-step generator get: completed
+pre-validation mean response length: 23.62
+post-validation mean response length: 23.12
+```
+
+The authoritative raw artifact is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/
+  agpt2b-sft100-torchstore-sync-12478536/rollout_samples.jsonl
+```
+
+All eight policy-version-0 validation rows were exact, contained one output
+block, and ended at AGPT EOT:
+
+```text
+<alphabetical_sorted>
+JonathanPritchard
+SukanyaRandhawa
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+GianmassimoTasinato
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+CameronPratt
+MarioSantos
+ShyamUpadhyay
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+JonathanBraithwaite
+QingxingCao
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+DhairyaMalhotra
+JamesClark
+YuHasegawa
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+UriLerner
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+AmitabhaBagchi
+</alphabetical_sorted><end_of_turn>
+
+<alphabetical_sorted>
+DinushaVatsalan
+MarlanScully
+WeitaoDuan
+</alphabetical_sorted><end_of_turn>
+```
+
+All eight policy-version-1 rows were likewise bounded, single-block, and
+EOT-terminated. Four received exact reward 1.0; the remaining four received
+partial rewards on a different post-validation prompt set. Because the built-in
+validation iterator advances between passes and the logged gradient norm was
+zero, these unmatched rows are evidence that version-1 weights reached vLLM and
+remained bounded, not an apples-to-apples semantic regression measurement.
+
+### Standard and explicit-XCCL controls
+
+Gloo is not the target production transport. Historical job `12478403` first
+showed that the standard `LocalRankStrategy` with `TransportType.Unset` could
+complete both TorchStore publications/pulls, one optimizer step, and shutdown.
+
+Job `12478538` repeated that automatic, no-override path with the SFT-100 AGPT
+artifact and the corrected stop-token contract. No
+`TORCHTITAN_TORCHSTORE_TRANSPORT`, `TORCHSTORE_GLOO_ENABLED`, or
+`TORCHSTORE_XCCL_ENABLED` variable was present. PBS reported `Exit_status=0`:
+
+```text
+TorchStore strategy: TransportType.Unset
+initial trainer put: 4.3504 s, 1.83 GB/s
+initial generator get: 0.3648 s, 21.79 GB/s
+post-step trainer put: 0.0725 s, 109.61 GB/s
+post-step generator get: 0.2689 s, 29.56 GB/s
+pre-validation mean response length: 23.62
+post-validation mean response length: 23.12
+```
+
+The raw policy-version-0 validation set was 8/8 reward 1.0, 8/8 single-block,
+and 8/8 EOT-terminated. Policy-version 1 was 8/8 single-block and 8/8
+EOT-terminated; 4/8 received reward 1.0 on the different advancing validation
+prompt set. The authoritative artifact is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/
+  agpt2b-sft100-torchstore-sync-12478538/rollout_samples.jsonl
+```
+
+This is the primary successful synchronization result. `TransportType.Unset`
+means TorchStore selected its standard transport automatically; the report does
+not relabel that selection as XCCL without direct evidence.
+
+Job `12478537` therefore forced `TransportType.XCCL` explicitly while holding the
+AGPT model, renderer, actor topology, and one-step recipe fixed. It initialized
+both actors and entered the first trainer publication, then stopped after
+`flatten` and `cast`; no batch publication completed, no rollout JSONL was
+created, and the log remained unchanged for more than eleven minutes. The
+oneCCL diagnostic was:
+
+```text
+CCL_PROCESS_LAUNCHER changed to none
+CCL_ATL_TRANSPORT changed to ofi
+could not get local_idx/count from environment variables, trying to get them from ATL
+```
+
+Repeated compute-node probes showed the controller and actor processes sleeping
+in `epoll` with no log growth. The disposable canary was cancelled and reached
+PBS `Exit_status=143`. Thus the current evidence is:
+
+- automatic TorchStore selection: full AGPT integration and bounded-output pass
+  (`12478538`; earlier control `12478403` also passed);
+- forced Gloo weight transfer: AGPT integration and bounded-output pass
+  (`12478536`);
+- explicitly forced XCCL weight transfer under the current Monarch TCP-KVS actor
+  bootstrap: first-publication hang (`12478537`).
+
+This failure must not be described as a model-quality defect or as failure of
+TorchTitan's ordinary XCCL training collectives. It is specific to forcing
+TorchStore's weight-transfer transport to XCCL with the current actor bootstrap.
+
+## Distractor-resistant SFT follow-up
+
+A second 8,192-row deterministic curriculum retained 75% clean examples and
+used 25% contrastive examples split evenly between two held-out-safe formatting
+wrappers. Target and distractor names were disjoint, distractors appeared only
+in the user prompt, and the completion contained only sorted target names.
+Training restarted from the same MDS stage-3 base rather than continuing from
+SFT-100, preserving a controlled curriculum comparison.
+
+Sunspot job `12478527` completed 100/100 full-weight steps across 24 MPICH ranks
+on two nodes and exited 0:
+
+```text
+train_runtime: 91.38 s
+train_loss: 0.07072
+final-step loss: 0.007229
+final-step token accuracy: 0.9961
+```
+
+The collective save produced:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/
+  agpt2b-mds154391-alphabet-robust-sft100/final/model.safetensors
+SHA-256: 8e1af0b6a5da8cacfd1e57b772fe7f511385a68ae42cb1c9b555736f76cb7224
+```
+
+Direct clean evaluation job `12478529` passed **8/8 exact and 8/8 EOT**. The
+outputs were unchanged from the accepted SFT-100 clean control.
+
+Adversarial evaluation job `12478530` improved from 0/8 to **5/8 exact**, with
+5/8 proper EOT stops and distractor leakage in 3/8. All four three-name samples
+were exact. One of four single-name samples was exact; the other three began
+with a correct block but continued generating repeated or hallucinated blocks
+until the 128-token limit. Representative failures were:
+
+```text
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+Dina
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+Elicia
+Pamita
+QuinnRivera
+</alphabetical_sorted>
+...
+```
+
+```text
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+Diego
+BethMillar
+</alphabetical_sorted>
+<alphabetical_sorted>
+Felix
+OmarSaito
+QuinnRivera
+</alphabetical_sorted>
+...
+```
+
+The v2 curriculum therefore materially improves distractor resistance without
+regressing clean behavior, but it fails the mandatory 8/8 adversarial and EOT
+gates. It is rejected for GRPO. A controlled v3 should target the observed
+failure mode—single-name adversarial prompts and explicit EOT supervision—rather
+than changing the base checkpoint, optimizer recipe, and curriculum together.
+
+## Current decision
+
+The stage-3-derived SFT-100 policy passes clean direct generation and the
+TorchTitan/TorchStore integration gate through the standard automatic transport
+path. Forced Gloo remains an isolation control; explicit TorchStore XCCL requires
+a separate actor-bootstrap fix.
+Neither SFT-100 nor robust-SFT-v2 passes the adversarial semantic release gate.
+No AGPT policy in this report should advance to bounded GRPO yet.

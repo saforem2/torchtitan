@@ -1,5 +1,46 @@
 # Upstream Sync Log
 
+## Current landing (2026-09-23): upstream `0fd69d0b`, landed and validated
+
+The Sync 84 trial described below is historical. The current branch
+`sync/upstream-0fd69d0b` landed the audited upstream merge as `fa3147727`
+(`Merge upstream TorchTitan through 0fd69d0b4`) and now contains every commit in
+`upstream/main` at `0fd69d0b43d8dd0ab59ea0fc1b71def9e091df14`. Follow-up ezpz
+ports and fixes continue above that merge; the validated integration point was
+`416e12cb82190a70aa744f4954cbbe5a81c02a31`.
+
+The current integration is published as
+[PR #21](https://github.com/saforem2/torchtitan/pull/21), targeting `ezpz` from
+`sync/upstream-0fd69d0b`. Actionable review findings were resolved and branch
+lint passed. The merge preserved both MLA and GQA sharding paths.
+
+### Current validation status
+
+- The audited local suite completed with **98 passed and 2 legitimate
+  platform/dependency skips**, plus nine parameterized subtests.
+- `aurora_full_sonic` is ported and validated on the current TorchTitan stack;
+  activation checkpointing remains disabled for that backend.
+- The restored production-shaped
+  `AGPT_2B_50K_MOE_sdpa_aurora_full_sonic` factory completed a current-stack
+  Sunspot validation on 12 XPU ranks (job `12478353`, commit `b8e070ba4`).
+- The Torch 2.14 Monarch/TorchStore/vLLM work continued on this same branch.
+  Automatic TorchStore synchronization of the stage-3-derived AGPT SFT-100
+  checkpoint completed end to end in Sunspot job `12478538`, including initial
+  publication/pull, one optimizer step, second publication/pull, bounded pre-
+  and post-sync validation, checkpointing, and clean shutdown.
+- Explicitly forcing TorchStore XCCL is **not** a supported result yet: job
+  `12478537` hung in the first publication under the current Monarch TCP-KVS
+  actor bootstrap and was cancelled. This does not invalidate ordinary XCCL
+  training collectives or the successful automatic TorchStore path.
+
+Detailed AGPT checkpoint, SFT, synchronization, and raw-generation evidence is
+maintained in
+[`torch214-reproduction.md`](https://github.com/saforem2/torchtitan/blob/sync/upstream-0fd69d0b/torchtitan/experiments/ezpz/docs/production/rl/grpo/torch214-reproduction.md).
+
+The remainder of this file preserves the state and reasoning at each older sync
+checkpoint. Statements such as “not landed” below describe those historical
+moments and are superseded by this section.
+
 
 ## Sync 84 (2026-09-15): 148 commits, MERGED IN A TRIAL WORKTREE, not landed
 
