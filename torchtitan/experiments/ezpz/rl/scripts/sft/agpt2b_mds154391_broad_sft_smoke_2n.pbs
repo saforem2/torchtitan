@@ -22,6 +22,9 @@ ezpz_setup "$V" || exit 14
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 15
 export PATH="$V/bin:/opt/pbs/bin:$PATH"
 export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
@@ -34,6 +37,10 @@ sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
 
 printf 'MDS154391_GRAIN_SFT_SMOKE_START %s commit=%s model_sha=%s\n' \
   "$(date -Is)" "$(git rev-parse HEAD)" "$sha"
+printf 'MDS154391_GRAIN_SFT_COMM CCL_PROCESS_LAUNCHER=%s CCL_OP_SYNC=%s CCL_ATL_SYNC_COLL=%s ZE_FLAT_DEVICE_HIERARCHY=%s\n' \
+  "$CCL_PROCESS_LAUNCHER" "$CCL_OP_SYNC" "$CCL_ATL_SYNC_COLL" "$ZE_FLAT_DEVICE_HIERARCHY"
+[[ "$CCL_PROCESS_LAUNCHER" == pmix && "$CCL_OP_SYNC" == 1 && \
+   "$CCL_ATL_SYNC_COLL" == 1 ]] || exit 17
 "$V/bin/ezpz" launch --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
   "$V/bin/python" -u -m torchtitan.experiments.ezpz.train \
   --module=ezpz.agpt \
