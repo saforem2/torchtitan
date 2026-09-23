@@ -1196,3 +1196,22 @@ path. Forced Gloo remains an isolation control; explicit TorchStore XCCL require
 a separate actor-bootstrap fix.
 Neither SFT-100 nor robust-SFT-v2 passes the adversarial semantic release gate.
 No AGPT policy in this report should advance to bounded GRPO yet.
+
+## Robust-SFT-v3: controlled single-name/EOT follow-up
+
+Robust-SFT-v2 isolated the remaining failure to three stochastic single-name
+adversarial samples that began with a correct block and then leaked, repeated, or
+failed to terminate cleanly. V3 changes only the deterministic curriculum mix:
+50% clean rows, 50% adversarial rows, and exactly 25% of all rows as single-name
+adversarial cases. The base checkpoint, 8,192-row size, seed 154391, recovered
+serialization, assistant-only masks, EOT supervision, 100 steps, learning rate
+`1e-5`, and global batch 48 remain fixed.
+
+A protected-runtime preflight over 32 rows confirmed 16 adversarial rows, exactly
+eight single-name adversarial rows, and canonical `[107, 108]` tails. The code is
+in commits `870cb9278` and `be043ef62`. Sunspot job `12478541` was submitted from
+commit `8e9049d4b` on 2026-09-22 and is monitored in Herdr pane `wC:p27`.
+
+The release gate remains conjunctive: clean 8/8 exact and EOT, adversarial 8/8
+exact and EOT, with no distractor leakage, repetition, or truncation. Training
+metrics alone cannot advance this candidate.
