@@ -35,6 +35,16 @@ sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
 [[ "$sha" == "$EXPECTED_MODEL_SHA" ]] || exit 16
 mkdir -p "$OUT"
 
+# A dependency-gated continuation may start after the first allocation has
+# already completed step 900. Avoid spending eight nodes rebuilding the model
+# just to discover that training is finished.
+FINAL_METADATA="$OUT/checkpoints/agpt2b-mds154391-tulu-math-uc-streaming/step-900/.metadata"
+if [[ -s "$FINAL_METADATA" ]]; then
+  echo "MDS154391_GRAIN_SFT900_ALREADY_COMPLETE metadata=$FINAL_METADATA"
+  echo "MDS154391_GRAIN_SFT900_DONE rc=0 $(date -Is)"
+  exit 0
+fi
+
 printf 'MDS154391_GRAIN_SFT900_START %s commit=%s model_sha=%s\n' \
   "$(date -Is)" "$(git rev-parse HEAD)" "$sha"
 printf 'MDS154391_GRAIN_SFT_COMM CCL_PROCESS_LAUNCHER=%s CCL_OP_SYNC=%s CCL_ATL_SYNC_COLL=%s ZE_FLAT_DEVICE_HIERARCHY=%s\n' \
