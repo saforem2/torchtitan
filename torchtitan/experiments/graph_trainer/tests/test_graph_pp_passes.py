@@ -116,10 +116,9 @@ def _trace_dsv3_moe_block_stage(
     torch.manual_seed(0)
 
     with _stable_flex_attention_compile_config():
-        model_spec = dsv3_model_registry("debugmodel", attn_backend="flex")
-        model_config = model_spec.model
+        model_config = dsv3_model_registry("debugmodel", attn_backend="flex")
         runtime_config = Trainer.Config(
-            model_spec=model_spec,
+            model=model_config,
             training=TrainingConfig(
                 num_tokens_per_microbatch_per_dp_rank=batch_size * seq_len,
                 max_context_length=seq_len,
@@ -469,6 +468,7 @@ class _GraphPPDsv3FSDPTest(FSDPTest):
             pp=1,
             ep=1,
             world_size=self.world_size,
+            enable_sequence_parallel=False,
         )
 
 

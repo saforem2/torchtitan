@@ -36,9 +36,9 @@ from torchtitan.distributed.spmd_types import (
 )
 from torchtitan.distributed.utils import set_batch_invariance
 from torchtitan.models.common.attention import FlexInnerAttention, VarlenInnerAttention
+from torchtitan.models.common.decoder import Decoder
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
-from torchtitan.protocols.model_spec import ModelSpec
 from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
 from torchtitan.rl.distributed.routing.intra_generator import IntraGeneratorRouter
 from torchtitan.rl.model.batch_invariance import force_logprobs_fn_for_batch_invariance
@@ -678,7 +678,7 @@ class VLLMGenerator(Configurable):
 
     Args:
         config: Generator-specific configuration.
-        model_spec: TorchTitan model specification.
+        model_config: TorchTitan model configuration.
         model_path: Path to the HF model checkpoint.
         compile_config: Per-layer torch.compile config shared with the
             trainer so both sides compile identically.
@@ -723,6 +723,18 @@ class VLLMGenerator(Configurable):
 
         gpu_memory_limit: float = 0.9
         """Fraction of GPU memory to use for the vLLM engine (0.0 to 1.0)."""
+
+        enable_cumem_allocator: bool = True
+        """Use vLLM's CuMem pool for tensors transferred over RDMA.
+
+        TorchTitan enables PyTorch's expandable-segments allocator to reduce
+        fragmentation. It can change the physical GPU memory behind an address,
+        invalidating NIXL's RDMA registration for that memory.
+
+        vLLM's CuMem pool disables expandable segments for its allocations,
+        keeping their memory mappings stable. This option puts model weights in
+        that pool.
+        """
 
         max_num_batched_tokens: int | None = None
         """vLLM chunked-prefill chunk size: max tokens scheduled per engine step
@@ -806,7 +818,7 @@ class VLLMGenerator(Configurable):
         self,
         config: Config,
         *,
-        model_spec: ModelSpec,
+        model_config: Decoder.Config,
         model_path: str,
         compile_config: CompileConfig | None,
         max_num_seqs: int,
@@ -827,7 +839,7 @@ class VLLMGenerator(Configurable):
         sl.log_trace_instant("structured_logger_started")
 
         self.config = config
-        self.model_spec = model_spec
+        self.model_config = model_config
 
         self._max_num_seqs = max_num_seqs
 
@@ -847,7 +859,7 @@ class VLLMGenerator(Configurable):
 
         # Register TorchTitan model + parser with vLLM
         register_to_vllm(
-            model_spec,
+            model_config,
             parallelism=config.parallelism,
             compile_config=compile_config,
             checkpointer_config=config.checkpointer,
@@ -855,7 +867,7 @@ class VLLMGenerator(Configurable):
         )
 
         # Set vLLM environment variables from config before any vLLM initialization
-        attention_backend = model_spec.model.first_full_attention_backend
+        attention_backend = model_config.first_full_attention_backend
         assert isinstance(
             attention_backend,
             (VarlenInnerAttention.Config, FlexInnerAttention.Config),
@@ -876,7 +888,7 @@ class VLLMGenerator(Configurable):
         enable_ep = config.parallelism.expert_parallel_degree > 1
         engine_kwargs = dict(
             # ``model`` is the path to the HF checkpoint directory. The
-            # config is sourced from torchtitan's ModelSpec via
+            # config is sourced from TorchTitan's model config via
             # ``config_format=TORCHTITAN_CONFIG_FORMAT`` (no config.json
             # read), but vLLM still uses this path to locate the
             # tokenizer assets and the safetensors weight shards.
@@ -884,7 +896,7 @@ class VLLMGenerator(Configurable):
             trust_remote_code=True,
             # Use the torchtitan custom config parser (registered by
             # register_to_vllm above). It builds PretrainedConfig from
-            # ModelSpec instead of reading config.json from disk.
+            # model config instead of reading config.json from disk.
             config_format=TORCHTITAN_CONFIG_FORMAT,
             dtype=config.model_dtype,
             tensor_parallel_size=config.parallelism.tensor_parallel_degree,
@@ -910,8 +922,9 @@ class VLLMGenerator(Configurable):
             ),
             # Enables RequestOutput.metrics, so generator metrics can be returned
             disable_log_stats=False,
+            enable_cumem_allocator=config.enable_cumem_allocator,
         )
-        engine_kwargs["max_model_len"] = model_spec.max_context_length
+        engine_kwargs["max_model_len"] = model_config.max_context_length
         engine_kwargs["max_num_seqs"] = self._max_num_seqs
         if config.max_num_batched_tokens is not None:
             engine_kwargs["max_num_batched_tokens"] = config.max_num_batched_tokens
