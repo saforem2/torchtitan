@@ -79,10 +79,10 @@ def build(model: Path, output: Path, size: int, seed: int) -> None:
         prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
         completion_ids = tokenizer.encode(completion, add_special_tokens=False)
         input_ids = prefix_ids + completion_ids
-        if input_ids[0] != 106 or input_ids[-1] != 107:
+        if input_ids[0] != 106 or input_ids[-2:] != [107, 108]:
             raise ValueError(
                 f"serialization mismatch at row {index}: "
-                f"first={input_ids[0]} last={input_ids[-1]}"
+                f"first={input_ids[0]} tail={input_ids[-4:]}"
             )
         rows["input_ids"].append(input_ids)
         rows["assistant_masks"].append(
