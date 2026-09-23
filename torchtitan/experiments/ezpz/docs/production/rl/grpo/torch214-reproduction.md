@@ -1387,5 +1387,23 @@ MDS154391 tokenizer. Sunspot job `12478545` is rebuilding the packed dataset at:
 The job writes to a job-specific temporary path, requires exactly 53,276,203
 rows with `input_ids`, `assistant_masks`, and `seq_lengths`, samples token/mask
 shape and vocabulary bounds, and only then atomically publishes the final path.
-It is monitored through a verified SSH probe and Herdr pane `wC:p2D`. No 8-node
-training job is submitted until this prerequisite passes.
+
+Initial materialization job `12478545` failed after 11 minutes with PBS
+`Exit_status=1` before writing any packed artifact. Component loading/filtering
+reached the 939,343-row source, then Hugging Face `multiprocess` failed while
+starting its manager:
+
+```text
+OSError: AF_UNIX path too long
+EOFError
+```
+
+The output path isolation worked: the canonical dataset path remained absent and
+no partial temporary dataset was published. The root cause was the UNIX-domain
+manager socket path inherited from an overly long temporary directory, not the
+source cache or dataset contents. The terminal pane and notifier were removed
+after manual follow-up; their delayed cleanup is a monitoring-process failure.
+The replacement launcher uses short node-local `/tmp/mx-<jobid>` paths for
+`TMPDIR`, `TMP`, and `TEMP` while retaining dataset output on shared `/tegu`.
+No 8-node training job is submitted until materialization and its two-node smoke
+both pass.

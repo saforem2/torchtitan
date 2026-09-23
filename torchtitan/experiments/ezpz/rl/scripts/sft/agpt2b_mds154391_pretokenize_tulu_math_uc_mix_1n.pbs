@@ -30,6 +30,14 @@ export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 export PYTHONIOENCODING="ascii:replace"
+# Hugging Face datasets/multiprocess creates AF_UNIX manager sockets below the
+# process temp directory. Long Lustre/worktree-derived paths exceed sun_path's
+# 108-byte limit (job 12478545). Keep all multiprocessing control sockets local
+# and short; the dataset itself remains on shared /tegu.
+export TMPDIR="/tmp/mx-${PBS_JOBID%%.*}"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
+mkdir -p "$TMPDIR" || exit 19
+trap 'rm -rf "$TMPDIR"' EXIT
 
 sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
 [[ "$sha" == "$EXPECTED_MODEL_SHA" ]] || { echo "bad model sha $sha"; exit 15; }
