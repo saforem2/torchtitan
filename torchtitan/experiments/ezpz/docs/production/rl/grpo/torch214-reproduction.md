@@ -1405,5 +1405,16 @@ source cache or dataset contents. The terminal pane and notifier were removed
 after manual follow-up; their delayed cleanup is a monitoring-process failure.
 The replacement launcher uses short node-local `/tmp/mx-<jobid>` paths for
 `TMPDIR`, `TMP`, and `TEMP` while retaining dataset output on shared `/tegu`.
+
+Replacement job `12478549` was cancelled after 45 seconds (`Exit_status=127`)
+before source processing or artifact creation. Preflight inspection of its first
+log lines found that the launcher had reused shell variable `TMP` for both the
+shared dataset build path and the process temporary directory. Exporting
+`TMP="$TMPDIR"` therefore redirected `--pretokenize_to` toward node-local
+`/tmp`. The job was cancelled before it could write there; its pane and notifier
+were closed immediately. The corrected launcher uses distinct `BUILD_DIR` and
+`TMPDIR` variables and fail-closed assertions that the former is under `/tegu`
+and the latter under `/tmp`.
+
 No 8-node training job is submitted until materialization and its two-node smoke
 both pass.
