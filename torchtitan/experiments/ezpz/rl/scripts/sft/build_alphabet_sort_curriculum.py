@@ -45,6 +45,12 @@ INSTRUCTIONS = (
     "{names}\n\nOutput exactly:\n"
     f"{OPEN_TAG}\nName1\nName2\n...\n{CLOSE_TAG}",
 )
+DISTRACTOR_INSTRUCTIONS = (
+    "\n\nExample of the required output format only; its names are unrelated and "
+    "must not appear in your answer:\n",
+    "\n\nUse the following block only as a formatting illustration. Ignore every "
+    "name in it and answer for the requested list:\n",
+)
 FORBIDDEN = {
     "BethMillar",
     "ShahramKhosravi",
@@ -64,14 +70,30 @@ def _make_names(rng: random.Random, count: int) -> list[str]:
     return names
 
 
-def build(model: Path, output: Path, size: int, seed: int) -> None:
+def build(model: Path, output: Path, size: int, seed: int, robust: bool) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model, local_files_only=True)
     rng = random.Random(seed)
     rows = {"input_ids": [], "assistant_masks": [], "seq_lengths": []}
     for index in range(size):
-        count = 1 + (index % 8)
-        names = _make_names(rng, count)
-        prompt = INSTRUCTIONS[index % len(INSTRUCTIONS)].format(names=", ".join(names))
+        group = index // 8
+        count = 1 + (group % 8) if robust else 1 + (index % 8)
+        distractor_count = 2 + ((index // 64) % 4)
+        sampled = _make_names(
+            rng, count + (distractor_count if robust and index % 8 < 2 else 0)
+        )
+        names = sampled[:count]
+        prompt = INSTRUCTIONS[
+            group % len(INSTRUCTIONS) if robust else index % len(INSTRUCTIONS)
+        ].format(names=", ".join(names))
+        if robust and index % 8 < 2:
+            distractors = sampled[count:]
+            rng.shuffle(distractors)
+            prompt += (
+                DISTRACTOR_INSTRUCTIONS[index % 2]
+                + f"{OPEN_TAG}\n"
+                + "\n".join(distractors)
+                + f"\n{CLOSE_TAG}"
+            )
         ordered = sorted(names, key=lambda name: name.casefold())
         response = f"{OPEN_TAG}\n" + "\n".join(ordered) + f"\n{CLOSE_TAG}"
         prefix = f"{START_USER}{prompt}{END_TURN}{START_MODEL}"
@@ -96,7 +118,8 @@ def build(model: Path, output: Path, size: int, seed: int) -> None:
     dataset.save_to_disk(output)
     print(
         f"ALPHABET_CURRICULUM_DONE output={output} rows={len(dataset)} "
-        f"seed={seed} max_length={max(map(len, rows['input_ids']))}"
+        f"seed={seed} robust={robust} "
+        f"max_length={max(map(len, rows['input_ids']))}"
     )
 
 
@@ -106,8 +129,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--size", type=int, default=8192)
     parser.add_argument("--seed", type=int, default=154391)
+    parser.add_argument("--robust", action="store_true")
     args = parser.parse_args()
-    build(args.model, args.output, args.size, args.seed)
+    build(args.model, args.output, args.size, args.seed, args.robust)
 
 
 if __name__ == "__main__":

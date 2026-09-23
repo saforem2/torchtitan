@@ -1,0 +1,55 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-sft100-gloo-sync
+#PBS -l walltime=00:45:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+CKPT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100/final
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-sft100-torchstore-sync-${PBS_JOBID%%.*}
+EXPECTED_SHA=cd8c185a84c0ef274d04b0be91ba72046b02e7533d9f0507f4948b146e0a5c6e
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export ZE_AFFINITY_MASK=0,1 ZES_ENABLE_SYSMAN=1
+export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
+export TORCHSTORE_GLOO_ENABLED=1 TORCHSTORE_XCCL_ENABLED=0
+export TORCHINDUCTOR_MAX_AUTOTUNE=0 VLLM_ENABLE_V1_MULTIPROCESSING=1
+export WANDB_MODE=disabled HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+mkdir -p "$OUT"
+cd "$WT" || exit 11
+sha=$(sha256sum "$CKPT/model.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_SHA" ]] || { echo "bad model sha $sha"; exit 12; }
+"$V/bin/python" -m torchtitan.experiments.ezpz.rl.train_upstream --help >/dev/null || exit 13
+
+echo "AGPT_SFT100_GLOO_SYNC_START $(date -Is) commit=$(git rev-parse HEAD) model_sha=$sha out=$OUT"
+"$V/bin/ezpz" launch --auto-retry --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_upstream \
+  --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
+  --config rl_sync_agpt_2b_clean \
+  --hf_assets_path="$CKPT" \
+  --dump_folder="$OUT" \
+  --async-loop.num-training-steps=1 \
+  --async-loop.num-prompts-per-train-step=2 \
+  --async-loop.num-samples-per-prompt=4 \
+  --async-loop.target-offpolicy-steps=0 \
+  --async-loop.validation.num-samples=8 \
+  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --generator.sampling.max-tokens=128 \
+  --generator.parallelism.data-parallel-degree=1 \
+  --generator.parallelism.tensor-parallel-degree=1 \
+  --trainer.parallelism.data-parallel-shard-degree=1 \
+  --trainer.parallelism.tensor-parallel-degree=1 \
+  --trainer.checkpointer.interval=1 \
+  --metrics.no-enable-wandb
+rc=$?
+echo "AGPT_SFT100_GLOO_SYNC_DONE rc=$rc $(date -Is)"
+exit "$rc"

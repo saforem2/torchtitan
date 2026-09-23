@@ -66,6 +66,7 @@ from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
 from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
 from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
+from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
 from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
 from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
 from torchtitan.rl.losses import GRPOLoss
@@ -103,10 +104,13 @@ def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
 
 
 def _agpt_rollouter(
-    *, max_turns: int, max_names_per_turn: int, shaped: bool = False
+    *,
+    max_turns: int,
+    max_names_per_turn: int,
+    shaped: bool = False,
+    few_shot: bool = True,
 ) -> Rollouter.Config:
-    """Upstream AlphabetSortRollouter with: our few-shot env, a linear reward
-    (similarity_power=1), and the given task difficulty."""
+    """Configure alphabet-sort rollout prompts and reward shaping."""
     worker = RolloutWorker.Config(
         rubric=Rubric.Config(
             reward_fns=[
@@ -115,7 +119,11 @@ def _agpt_rollouter(
                 else RewardAlphabetSort.Config(weight=1.0, similarity_power=1)
             ]
         ),
-        message_env=AgptFewShotAlphabetSortEnv.Config(),
+        message_env=(
+            AgptFewShotAlphabetSortEnv.Config()
+            if few_shot
+            else AlphabetSortEnv.Config()
+        ),
     )
     return Rollouter.Config(
         train_dataset=AlphabetSortDataset.Config(
@@ -244,6 +252,24 @@ def rl_grpo_lora_agpt_2b_easy() -> Controller.Config:
         max_names_per_turn=3,
         lr=2e-5,
     )
+
+
+def rl_sync_agpt_2b_clean() -> Controller.Config:
+    """One-step clean-prompt config for TorchStore synchronization validation."""
+    config = _agpt_grpo_config(
+        num_training_steps=1,
+        num_groups_per_train_step=2,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=2e-6,
+    )
+    config.rollouter = _agpt_rollouter(
+        max_turns=1,
+        max_names_per_turn=3,
+        few_shot=False,
+    )
+    config.async_loop.validation = ValidationConfig(num_samples=8)
+    return config
 
 
 # --- "beat v5" sweep (2026-07-19): all on the easy task (the winner), each
