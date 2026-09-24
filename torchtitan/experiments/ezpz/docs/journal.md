@@ -75,6 +75,12 @@ Running log of what's happening, session by session. Most recent first.
   `8863325` removes only the obsolete enable token, retains
   `--checkpointer.folder/interval/async-mode`, and is queued for the same three
   five-step arms.
+- `8863325` later received two Aurora nodes but exited 11 in one second: the
+  wrapper checkout path had been advanced to `7c9876d8b` while its fail-closed
+  `EXPECTED` value still named `3735edde4`. No arm launched and no training
+  allocation was consumed beyond startup. The hash was corrected to the exact
+  clean checkout head and replacement `8864160` was submitted for the unchanged
+  TP1/TP2/MoE acceptance test.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
