@@ -342,6 +342,8 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
 
         if key.startswith("blendcorpus."):
             remapped = f"dataloader.{key.removeprefix('blendcorpus.')}"
+        elif key == "checkpoint" or key.startswith("checkpoint."):
+            remapped = f"checkpointer{key.removeprefix('checkpoint')}"
         else:
             remapped = _LEGACY_KEY_REMAP.get(key, key)
 

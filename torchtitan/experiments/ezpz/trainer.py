@@ -474,28 +474,26 @@ class FaultTolerantTrainer(TorchFTTrainer):
         wandb_watch: bool = False
 
         def __post_init__(self):
-            if self.checkpoint is not None:
-                self.checkpointer = self.checkpoint
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
             # class captured by zero-argument ``super()``.
             TorchFTTrainer.Config.__post_init__(self)
+            # ``checkpointer`` is canonical. Legacy ``--checkpoint.*`` CLI
+            # options are translated before parsing, so copying the alias back
+            # here would silently erase canonical CLI overrides and specialized
+            # checkpointer subclasses.
             self.checkpoint = self.checkpointer
 
     engine_cls: type[TrainingEngine] = EzpzTrainingEngine
 
     @record
     def __init__(self, config: Config):
-        if config.checkpoint is not None:
-            config.checkpointer = config.checkpoint
         self.config = config
         model_spec = config.model_spec
         model_config = model_spec.model
         model_config.update_from_config(config=config)
         if config.override.imports:
             apply_overrides(config.override, config)
-        if config.checkpoint is not None:
-            config.checkpointer = config.checkpoint
         config.__post_init__()
 
         self.engine = self.engine_cls(

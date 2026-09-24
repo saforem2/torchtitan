@@ -12,6 +12,7 @@ from torchtitan.experiments.ezpz.grain_checkpoint import (
     GrainStreamingCheckpointManager,
     _optional_hf_previous_state_missing_keys,
 )
+from torchtitan.experiments.ezpz.train import _translate_legacy_args
 
 
 class _State(Stateful):
@@ -106,6 +107,14 @@ class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
         self.assertEqual(
             cfg.checkpointer.folder,
             "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming",
+        )
+
+    def test_legacy_checkpoint_options_translate_to_canonical_namespace(self):
+        self.assertEqual(
+            _translate_legacy_args(
+                ["--checkpoint.folder=/tmp/ckpt", "--checkpoint.interval", "7"]
+            ),
+            ["--checkpointer.folder", "/tmp/ckpt", "--checkpointer.interval", "7"],
         )
 
 
