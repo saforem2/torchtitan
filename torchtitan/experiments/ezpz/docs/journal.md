@@ -161,6 +161,16 @@ Running log of what's happening, session by session. Most recent first.
   Controlled canary `12478625` changes only local batch 2→1 while preserving
   GBS 6144 through accumulation, the LR range, mesh, checkpoints, synchronous
   oneCCL, 64 active nodes, four spares, and native auto-retry.
+- LBS1 canary `12478625` proved that ordinary fresh-step memory is not the sole
+  problem: attempt 1 completed step 1 and saved DCP in 61.77 seconds. Attempt 2
+  restored in 883.75 seconds but then hit both
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES` and
+  `UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`; attempt 3 restored again in 208.23
+  seconds and remains active in the post-restore update window. This isolates
+  the recurring failure to resumed execution rather than initial model
+  construction or the DCP payload itself. Matched compile-off control `12478633`
+  was submitted with LBS1, GBS 6144, mesh, LR range, DCP, communication, active
+  nodes, and spares held fixed; only `LRF_NO_COMPILE=1` changes.
 
 ## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
 
