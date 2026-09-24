@@ -156,7 +156,11 @@ def merge_lora(
             merged[f"{p}.qkv_linear.wv.weight"] = wv
 
         # --- carry the rest of this layer's non-lora params through ---
-        for suf in ("attention_norm.weight", "ffn_norm.weight", "feed_forward.w2.weight"):
+        for suf in (
+            "attention_norm.weight",
+            "ffn_norm.weight",
+            "feed_forward.w2.weight",
+        ):
             merged[f"layers.{i}.{suf}"] = sd[f"layers.{i}.{suf}"].to(torch.float32)
         w13_key = f"layers.{i}.feed_forward.w13.weight"
         if w13_key in sd:
@@ -169,8 +173,10 @@ def merge_lora(
     for k in ("tok_embeddings.weight", "norm.weight", "lm_head.weight"):
         merged[k] = sd[k].to(torch.float32)
 
-    print(f"[merge] folded LoRA into {n_wo} wo + {n_wqkv} wqkv layers "
-          f"(scaling={scaling}, hpk={hpk}, r={r}, head_dim={head_dim})")
+    print(
+        f"[merge] folded LoRA into {n_wo} wo + {n_wqkv} wqkv layers "
+        f"(scaling={scaling}, hpk={hpk}, r={r}, head_dim={head_dim})"
+    )
     # sanity: no lora keys should survive
     leftover = [k for k in merged if "lora" in k]
     assert not leftover, f"lora keys leaked into merged sd: {leftover[:4]}"
@@ -200,8 +206,10 @@ def to_hf_and_save(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     save_file(hf_sd, str(out / "model.safetensors"), metadata={"format": "pt"})
-    print(f"[save] wrote {len(hf_sd)} tensors -> {out / 'model.safetensors'} "
-          f"(dtype={export_dtype})")
+    print(
+        f"[save] wrote {len(hf_sd)} tensors -> {out / 'model.safetensors'} "
+        f"(dtype={export_dtype})"
+    )
 
     # copy config + tokenizer (chat_template + eos fix) from the base HF dir.
     base = Path(base_hf)
