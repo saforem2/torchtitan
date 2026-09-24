@@ -47,6 +47,14 @@ Running log of what's happening, session by session. Most recent first.
   `/opt/aurora/26.181.0/modulefiles` plus `frameworks/2026.1.0` contract. The
   three-arm AGPT TP=1 / TP=2 / MoE training validation will be submitted only
   after that preflight passes.
+- Runtime preflight `8863046` subsequently failed before application import at
+  exit 20 with the same `libsycl.so.9` / `urGraphGetIdExp` error. Loading the
+  framework module alone was insufficient because the staged archive contains
+  its own `libsycl` and `libur_loader`, and they must remain first together in
+  the loader path. Replacement one-node preflight `8863095`, pinned to current
+  PR #21 head `63e30735c`, explicitly prepends `/tmp/.venv.next-eval/lib` and
+  records the resolved `libur_loader`; it is queued. No full training retry is
+  authorized until that import gate succeeds.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
