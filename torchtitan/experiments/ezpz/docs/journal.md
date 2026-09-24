@@ -119,6 +119,23 @@ Running log of what's happening, session by session. Most recent first.
   Later attempts hit nullable Grain restore state
   `examples_iterable.previous_state`. The next valid experiment is a wider
   fresh LR range, not checkpoint resume.
+- The completed `12478591` trajectory was still descending at its upper endpoint:
+  smoothed loss 8.4828 at LR 2.8e-4. Fresh job `12478624` therefore extends the
+  range by one decade to 2.8e-3 over 100 points; it preserves GBS 6144, sequence
+  length 4096, full activation checkpointing, `CCL_OP_SYNC=1`, 64 active nodes,
+  and four spares.
+- The LR runner does use native `ezpz launch --auto-retry --spare-nodes auto`.
+  With `LRF_ACTIVE_NODES=64` inside a 68-node PBS allocation, all four extra
+  nodes are genuine spares. `12478591` made three attempts (two blind swaps),
+  and `12478607` made three attempts (two scraped-node swaps); auto-retry could
+  not fix failures that recurred across the distributed job.
+- The 30B DCP fix is effective but not sufficient: `12478607` saved a 293 GB
+  checkpoint at 42.31 GiB/rank and restored it successfully, then failed in
+  post-restore backward/FSDP reduction. Attempts included GPU page-fault aborts
+  and `UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`, rather than checkpoint corruption.
+  Controlled canary `12478625` changes only local batch 2→1 while preserving
+  GBS 6144 through accumulation, the LR range, mesh, checkpoints, synchronous
+  oneCCL, 64 active nodes, four spares, and native auto-retry.
 
 ## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
 
