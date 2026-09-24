@@ -140,7 +140,8 @@ export LRF_IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"
 # GBS or by job, so two concurrent submissions for the same size would
 # overwrite each other's CSV/plot/npz.
 _job_tag="${PBS_JOBID%%.*}"
-_run_tag="${_job_tag:-$(date +%Y%m%d_%H%M%S)}"
+_run_tag="${LRF_RUN_ID:-${_job_tag:-$(date +%Y%m%d_%H%M%S)}}"
+export LRF_RUN_ID="${_run_tag}"
 export LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${MODEL_SIZE}_olmo2tok_gbs${LRF_GBS}_${LRF_OPTIMIZERS// /-}_${_run_tag}}"
 
 echo "=========================================================="

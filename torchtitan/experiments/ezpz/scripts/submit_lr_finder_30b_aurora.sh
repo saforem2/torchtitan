@@ -119,7 +119,8 @@ export LRF_IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"
 # Keep the three optimizers' CSV/plot/npz from colliding with any existing 30B
 # finder outputs (the trainer keys that path on model+optimizer, not on GBS).
 _job_tag="${PBS_JOBID%%.*}"
-_run_tag="${_job_tag:-$(date +%Y%m%d_%H%M%S)}"
+_run_tag="${LRF_RUN_ID:-${_job_tag:-$(date +%Y%m%d_%H%M%S)}}"
+export LRF_RUN_ID="${_run_tag}"
 export LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_30b_gbs6144_${_run_tag}}"
 
 echo "=========================================================="
