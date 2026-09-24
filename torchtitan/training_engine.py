@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -464,6 +465,17 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
 
                 self.forward_backward_body_fn = run_with_cuda_graph
 
+    def _get_train_context(self) -> contextlib.AbstractContextManager[None]:
+        """Build the per-step model execution context.
+
+        Subclasses may compose backend-specific contexts without retaining the
+        train-context state that was removed with ModelSpec.
+        """
+        return dist_utils.get_spmd_context(
+            parallel_dims=self.parallel_dims,
+            spmd_typechecking=self.config.debug.spmd_typechecking,
+        )
+
     @sl.log_trace_span("prepare_step")
     def prepare_step(
         self,
@@ -622,10 +634,16 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
         model_kwargs: dict[str, Any],
         loss_kwargs: dict[str, Any],
     ) -> torch.Tensor:
-        with dist_utils.get_spmd_context(
-            parallel_dims=self.parallel_dims,
-            spmd_typechecking=self.config.debug.spmd_typechecking,
-        ):
+        train_context = getattr(self, "_get_train_context", None)
+        context = (
+            train_context()
+            if train_context is not None
+            else dist_utils.get_spmd_context(
+                parallel_dims=self.parallel_dims,
+                spmd_typechecking=self.config.debug.spmd_typechecking,
+            )
+        )
+        with context:
             pred = self.model_parts[0](inputs, **model_kwargs)
             loss, self.loss_metrics = self.loss_fn(
                 pred,
@@ -645,10 +663,16 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
         model_kwargs: list[dict[str, Any]],
         loss_kwargs: dict[str, Any],
     ) -> torch.Tensor:
-        with dist_utils.get_spmd_context(
-            parallel_dims=self.parallel_dims,
-            spmd_typechecking=self.config.debug.spmd_typechecking,
-        ):
+        train_context = getattr(self, "_get_train_context", None)
+        context = (
+            train_context()
+            if train_context is not None
+            else dist_utils.get_spmd_context(
+                parallel_dims=self.parallel_dims,
+                spmd_typechecking=self.config.debug.spmd_typechecking,
+            )
+        )
+        with context:
             losses = [] if self.pp_has_last_stage else None
             self.pp_schedule.step(
                 arg_mbs=inputs,

@@ -7,6 +7,7 @@
 import math
 import os
 import time
+from contextlib import AbstractContextManager
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -179,6 +180,20 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     _history_bridge: Any | None
     _last_grad_norm: float | None
 
+    def _model_name(self) -> str:
+        """Return the stable registry identity formerly carried by ModelSpec."""
+        module = self.model_cls.__module__.split(".")
+        if "ezpz" in module:
+            index = module.index("ezpz")
+            if len(module) > index + 1:
+                return ".".join(module[index : index + 2])
+        return self.model_cls.__qualname__
+
+    @property
+    def diloco_fragment_fn(self):
+        """Resolve DiLoCo fragmentation from the model's lifecycle owner."""
+        return getattr(self.model_cls, "_fragment", None)
+
     def _initialize_distributed_runtime(self) -> None:
         from torchtitan.experiments.ezpz.gloo_new_group_workaround import (
             maybe_install_gloo_new_group_workaround,
@@ -206,7 +221,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         config = self.config
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
-                model_name=type(self.model_config).__qualname__,
+                model_name=self._model_name(),
                 parallel_dims=self.parallel_dims,
                 training=config.training,
                 parallelism=config.parallelism,
@@ -240,14 +255,16 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
 
     def _initialize_forward_backward(self) -> None:
         super()._initialize_forward_backward()
-        if getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
-            self.train_context = native_ddp_autocast_context(
-                self.train_context, self.device.type
-            )
         if not self.parallel_dims.pp_enabled:
             self.forward_backward_body_fn = maybe_wrap_with_xpu_graph(
                 self._non_pp_forward_backward_body
             )
+
+    def _get_train_context(self) -> AbstractContextManager[None]:
+        context = super()._get_train_context
+        if getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
+            return native_ddp_autocast_context(context, self.device.type)()
+        return context()
 
     def initialize(
         self,
@@ -616,7 +633,6 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 tokenizer=self.tokenizer,
                 parallel_dims=parallel_dims,
                 loss_fn=engine.loss_fn,
-                validation_context=engine.train_context,
                 metrics_processor=self.metrics_processor,
                 seq_len=config.training.max_context_length,
                 num_tokens_per_microbatch=num_tokens_per_microbatch,
@@ -891,7 +907,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     else 0
                 ),
                 optimizer=engine.optimizers,
-                fragment_fn=getattr(engine.model_cls, "_fragment", None),
+                fragment_fn=engine.diloco_fragment_fn,
             ):
                 wall_deadline = self._resolve_walltime_deadline()
                 if config.save_on_signal:

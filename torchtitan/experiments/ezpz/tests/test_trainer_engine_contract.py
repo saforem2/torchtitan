@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -151,3 +152,52 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
 
     wrapped.assert_called_once_with(engine._non_pp_forward_backward_body)
     assert engine.forward_backward_body_fn == "wrapped"
+
+
+def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch):
+    engine = object.__new__(EzpzTrainingEngine)
+    engine.config = SimpleNamespace(
+        sdc_replayer=None,
+        training=SimpleNamespace(disable_cuda_graphs=True),
+        debug=SimpleNamespace(spmd_typechecking=False),
+        parallelism=SimpleNamespace(enable_data_parallel_native_ddp=True),
+    )
+    engine.model_parts = [object()]
+    engine.parallel_dims = SimpleNamespace(pp_enabled=False)
+    engine.device = torch.device("cpu")
+    composed = Mock(return_value=nullcontext)
+    monkeypatch.setattr(
+        "torchtitan.experiments.ezpz.trainer.native_ddp_autocast_context",
+        composed,
+    )
+    monkeypatch.setattr(
+        "torchtitan.experiments.ezpz.trainer.maybe_wrap_with_xpu_graph",
+        lambda fn: fn,
+    )
+
+    engine._initialize_forward_backward()
+
+    context = engine._get_train_context()
+    assert isinstance(context, nullcontext)
+    composed.assert_called_once()
+    assert callable(composed.call_args.args[0])
+    assert composed.call_args.args[1] == "cpu"
+
+
+def test_ezpz_model_identity_survives_modelspec_removal():
+    engine = object.__new__(EzpzTrainingEngine)
+    engine.model_cls = type(
+        "AgptModel",
+        (),
+        {"__module__": "torchtitan.experiments.ezpz.agpt.model"},
+    )
+
+    assert engine._model_name() == "ezpz.agpt"
+
+
+def test_ezpz_diloco_fragment_hook_is_owned_by_model_class():
+    fragment = object()
+    engine = object.__new__(EzpzTrainingEngine)
+    engine.model_cls = type("Model", (), {"_fragment": fragment})
+
+    assert engine.diloco_fragment_fn is fragment
