@@ -2,6 +2,96 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-24 (sunspot) -- MDS154391 two-stage reproduction complete; GRPO stack smoke queued
+
+The journal was not updated during this campaign. This entry reconstructs the
+results from PBS records, retained logs, trainer state, checkpoint metadata, and
+raw semantic generations rather than from remembered status messages.
+
+### Stage 1: broad SFT and semantic checkpoint selection
+
+- Job `12478590` completed the native Grain broad-SFT run at step 900 with
+  `Exit_status=0`. Final reported loss was `1.02522`, gradient norm `1.2596`,
+  HBM `19.40 GiB/rank`, and throughput `2,071 tokens/s/rank`.
+- Immutable DCP checkpoints at steps 300, 600, and 900 were retained under
+  `agpt2b-mds154391-broad-grain-sft900/checkpoints/`.
+- GSM8K-200 raw-generation evaluation selected step 600 by semantics, not loss:
+
+  | checkpoint | correct | accuracy | strict `<answer>` envelope |
+  |---|---:|---:|---:|
+  | 300 | 47/200 | 23.5% | 0% |
+  | 600 | 52/200 | 26.0% | 0% |
+  | 900 | 48/200 | 24.0% | 0% |
+
+  The generations were coherent multi-step arithmetic. Step 600 was therefore
+  the Stage-2 seed despite step 900 being later.
+- Eval jobs `12478604`, `12478605`, and `12478606` each wrote all 200 rows, then
+  wedged during vLLM teardown because the `EngineCore` child remained alive.
+  Their eventual `143` statuses were operator cleanup after artifact validation,
+  not semantic failures. The evaluator now calls
+  `llm.llm_engine.engine_core.shutdown()` in `finally`.
+
+### Stage 2: focused GSM8K-R1CoT SFT
+
+- The first run, `12478612`, was technically healthy but scientifically wrong:
+  packing plus gradient accumulation 10 produced only 12 optimizer steps. It was
+  cancelled at authoritative step 4/12 (`Exit_status=143`); its partial output is
+  retained but non-authoritative.
+- Corrected job `12478614`, pinned to commit
+  `8acf6c7b152ae5ccaeb26688b7f451ad7b6a1728`, used gradient accumulation 1 and
+  the Stage-1 step-600 HF export. It completed exactly 93/93 optimizer steps,
+  three epochs, and checkpoints 31, 62, and 93 with `Exit_status=0`. Final train
+  loss was `0.4852`; the final HF model is approximately 7.94 GB.
+- Semantic eval job `12478618` completed with `Exit_status=0` and retained 200
+  raw generations. Results: 197/200 format-valid (`98.5%`), 43/200 strict-answer
+  correct (`21.5%`), and 3/200 truncated or unclosed. Raw correct, incorrect,
+  malformed, and truncated samples were inspected. This reproduces historical
+  B2 behavior (98.5% format, approximately 20.5% accuracy): focused Stage 2
+  taught the answer envelope but did not improve the broad checkpoint's 26.0%
+  exact-answer accuracy.
+
+### GRPO functionality smoke
+
+- Commit `89cba3c023c93e03235f73a108cf203007202bad` adds a fail-closed one-node,
+  20-step Monarch/TorchStore/vLLM GRPO smoke starting from the completed Stage-2
+  model. It uses the validated `rl_grpo_lora_agpt_2b_gsm8k_b2smoke` config:
+  8 prompts/step, 4 samples/prompt, fp32 generation, maximum 700 generated tokens,
+  and checkpoints every 10 steps.
+- Acceptance requires initial and post-update policy-weight synchronization,
+  nonzero policy versions, real reward-bearing updates, checkpoints 10 and 20,
+  bounded raw rollouts, and clean actor shutdown. This is a stack-functionality
+  test, not evidence that GRPO improves quality.
+- PBS job `12478619` is currently queued and has not executed application code.
+
+### 30B synchronous-DCP cache fix
+
+- Old-cache jobs retained hook-generated contiguous tensors and consumed about
+  `57.23 GiB/rank`, then failed during step-2 FSDP all-gather with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`.
+- Commit `1d58869cde6a055d3d9ac5ec221eab756e81d34f` makes synchronous DCP state-dict
+  generation lazy while preserving stable cached storage for asynchronous DCP.
+- Canary `12478607` completed step 1 at `42.31 GiB/rank`, about 15 GiB/rank below
+  the old-cache runs, and wrote a complete 293 GB synchronous checkpoint in
+  74.7 seconds. This strongly validates the memory-retention fix.
+- Attempt 1 subsequently suffered multi-rank `SIGSEGV` during step-2 FSDP
+  unshard, not the prior OOM. Attempt 2 restored the 293 GB checkpoint in 863.9
+  seconds and entered the resumed update. The PBS job has now ended with
+  `Exit_status=1`; the terminal attempt-2 failure still requires classification.
+  Dependent full retry `12478608` was not released as a validated success.
+
+### Other diagnosis and operational changes
+
+- 5B job `12478591` was not an OOM. Attempt 1 completed its LR range but found no
+  blow-up point; generic failover incorrectly retried that scientific outcome.
+  Later attempts hit nullable Grain restore state
+  `examples_iterable.previous_state`. A wider fresh LR range is the correct next
+  experiment, not checkpoint resume.
+- Stage-2 progress now comes from `trainer_state.json`, not numbers accidentally
+  parsed from seed paths or partially-created checkpoint directories.
+- The active dashboard remains in Herdr pane `wC:p38`; the obsolete
+  `old-sunspot-monitor` pane was closed. The sole event-driven notifier is
+  `/Users/sam/.hermes/scripts/alcf-significant-events.py` on `mbph`.
+
 ## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
 
 - Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
