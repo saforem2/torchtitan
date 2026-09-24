@@ -8,17 +8,37 @@ byte-identical to `allenai/Olmo-3-1025-7B`.
 **Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
 **Machine:** Aurora `next-eval` and Sunspot `workq`, 64N production-batch sweeps
 
-Status as of 2026-09-21: **ACTIVE REPLACEMENT CAMPAIGN.** The original Aurora
+Status as of 2026-09-24: **ACTIVE COARSE-TO-FINE REPLACEMENT CAMPAIGN.**
+The Sunspot production sweeps use 64 active nodes / 768 ranks, GBS=6144,
+sequence length 4096, the config-owned OLMo-3 dataloader, and explicit
+`CCL_OP_SYNC=1`. Every independently initialized fine sweep starts from the
+same clean initialization rather than continuing from coarse-run weights.
+
+Validated results now include 5B and 10B AdamW fine sweeps, widened SophiaG
+coarse sweeps for all three sizes, and the 10B SophiaG fine sweep. The 5B
+SophiaG fine job `12478568` exhausted walltime after non-resumable retries and
+is not plotted as a completed fine result. The 30B SophiaG fine job `12478570`
+is still running, and the 75-point resumable 30B AdamW replacement `12478581`
+is queued over `[3e-7, 1e-2]`. PR #23 supplies the checkpoint/resume mechanism
+validated by interruption canary `12478576` -> `12478580`; this results page
+remains the publication unit. Muon remains excluded because its first-update
+Newton–Schulz corruption has not passed a finite-gradient, finite-weight,
+real-update canary.
+
+Earlier replacement attempts remain useful provenance. The original Aurora
 submissions failed before training for two successive runtime-contract defects:
 first stale `spmd-types`, then a pip `impi-rt` library shadowing Aurora's site
 MPICH/PMIx (`PMIX_Init returned -25`). The isolated `.venv.next-eval` runtime,
 an explicit `impi-rt` rejection gate, and archive-derived activation path were
-validated by Aurora job `8846942`: 5/5 finite Muon points plus CSV/NPZ/PNG.
-Clean full Aurora replacements `8847068`–`8847073` are queued.
+validated the runtime contract with Aurora job `8846942`, but later forensic
+analysis showed that its Muon optimizer became non-finite after the first
+update. Clean Aurora replacements `8847068`–`8847073` all terminated: the Muon
+arms are invalid optimizer evidence, while the SophiaG arms remained finite
+until a launcher timeout stopped their partial sweeps.
 
 Sunspot is producing the first full results. Jobs `12478315` (5B AdamW) and
 `12478328` (10B Mano) completed 150/150 finite points with fresh artifacts;
-`12478327` (5B Mano) is running. The first canonical 30B Mano job `12478329`
+`12478327` (5B Mano) also completed 150/150. The first canonical 30B Mano job `12478329`
 stalled at zero points with `dp_shard=8` and was cancelled. A `dp_shard=12`
 control on the canonical 16,384-wide FFN (`12478356`) failed correctly because
 16,384 is not divisible by 12. A separately named, checkpoint-incompatible
@@ -137,29 +157,110 @@ place, and `qalter -v` cannot help either: the old script sets LRF_MAX_LR with
 an unconditional `export`, which overwrites anything injected. 8837397/8/9 are
 the corrected replacements.
 
-## Results
+## Current coarse-to-fine wave (2026-09-22/23)
 
-Verified results as of 2026-09-21. A minimum at the final sampled LR means the
-curve was still descending and **does not constitute a defensible LR
-recommendation**; the sweep window must be extended or interpreted alongside
-the completed curve.
+All fine arms use a fresh trainer initialization. The completed rows below were
+validated from the job-specific CSVs, not transcribed from plots. `finite`
+counts every row with finite LR and loss; a recommendation is published only
+when the application detected an interior blow-up.
+
+| job | model / optimizer | stage | points | finite | min loss | LR at min | suggested LR | blow-up | status |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| `12478508` | 5B / AdamW | fine | 100 | 100 | 7.9258 | 6.579e-4 | **7.17e-5** | 7.17e-4 | complete, PBS exit 0 |
+| `12478509` | 10B / AdamW | fine | 100 | 100 | 7.8432 | 4.642e-4 | **4.16e-5** | 4.16e-4 | complete, PBS exit 0 |
+| `12478510` | 30B / AdamW | fine | 94 / 100 | 94 | 8.0275 | 1.601e-4 | — | — | infrastructure failure; partial curve excluded |
+| `12478581` | 30B / AdamW | resumable fine, 75 points | — | — | — | — | — | — | queued; `[3e-7, 1e-2]`, checkpoint every 5 points |
+| `12478511` | 5B / SophiaG | widened coarse | 30 | 30 | 11.7588 | 2.395e-5 | **2.80e-6** | 2.80e-5 | complete, PBS exit 0 |
+| `12478512` | 10B / SophiaG | widened coarse | 30 | 30 | — | — | **1.66e-6** | 1.66e-5 | complete, PBS exit 0 |
+| `12478513` | 30B / SophiaG | widened coarse | 30 | 30 | 11.6722 | 7.880e-6 | **6.48e-7** | 6.48e-6 | complete, PBS exit 0 |
+| `12478568` | 5B / SophiaG | fine | — | — | — | — | — | — | walltime after retries; no completed fine artifact |
+| `12478569` | 10B / SophiaG | fine | 100 | 100 | 8.0347 | 1.660e-4 | 3.24e-7 [1] | 3.24e-6 | complete, PBS exit 0 |
+| `12478570` | 30B / SophiaG | fine | — | — | — | — | — | — | running; no terminal artifact yet |
+
+[1] The application detector emitted `3.24e-7`, below the fine sweep's sampled
+range (`1.66e-6`–`1.66e-4`). The chart marks it as outside the sampled range;
+it is not presented as a measured fine optimum.
+
+### Current per-model charts
+
+These stable paths contain only artifact-validated completed arms. Coarse and
+fine stages are labeled explicitly; incomplete fine sweeps are omitted. The
+30B panel currently contains SophiaG coarse only and states that both fine
+results are pending. Muon is intentionally omitted pending a valid canary.
+
+| model | chart | included completed arms |
+|---|---|---|
+| 5B | ![5B OLMo-3-vocab LR sweeps](figures/olmo2tok-gbs6144/lr_finder_5b_olmo2tok.png) | AdamW fine; SophiaG coarse |
+| 10B | ![10B OLMo-3-vocab LR sweeps](figures/olmo2tok-gbs6144/lr_finder_10b_olmo2tok.png) | AdamW fine; SophiaG fine |
+| 30B | ![30B OLMo-3-vocab SophiaG coarse sweep](figures/olmo2tok-gbs6144/lr_finder_30b_olmo2tok.png) | SophiaG coarse only; fine pending |
+
+![Current validated OLMo-3-vocab LR-finder arms](figures/olmo2tok-gbs6144/lr_finder_comparison.png)
+
+## Earlier completed-run snapshot (2026-09-21)
+
+![Interim OLMo-3-vocab LR-finder curves](figures/2026-09-21-olmo3-gbs6144-interim.png)
+
+The older chart is intentionally an **interim historical snapshot**. It includes only three explicitly approved,
+complete 150-point sweeps—not five-point smokes or failed/invalid runs. The
+current snapshot contains Sunspot
+`12478315` (5B AdamW), `12478327` (5B Mano), and `12478328` (10B Mano). The
+optimizer minima marked at the edge of a search window are observations, not
+yet recommended learning rates.
+
+The chart is reproducible directly from the committed source CSVs with:
+
+```bash
+python torchtitan/experiments/ezpz/scripts/plot_olmo3_lrf_interim.py \
+  --output torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/agpt-v2/figures/2026-09-21-olmo3-gbs6144-interim.png
+```
+
+This reproduces the chart from the committed CSVs once the current environment
+has `matplotlib` installed; the repository requirements do not install it.
+
+[`plot_olmo3_lrf_interim.py`](../../../../../scripts/plot_olmo3_lrf_interim.py)
+requires exactly 150 finite rows for each allowlisted PBS job and verifies each
+committed CSV's SHA-256 digest. The CSV schema does not record gradient/update
+health; that evidence was checked from each job's terminal logs before its
+digest was allowlisted. This prevents arbitrary or partial CSVs—including the
+finite-loss but optimizer-invalid Aurora Muon output—from entering the chart.
+
+### Aurora W&B runs
+
+There is not currently a separate shared W&B Report. The six clean replacement
+runs are available individually:
+
+- Muon: [5B (`8847068`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2abqxxcc), [10B (`8847069`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/3m93gxnj), [30B (`8847070`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/346ucb4v)
+- SophiaG: [5B (`8847071`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/spix9udq), [10B (`8847072`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/sgmfddmr), [30B (`8847073`)](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/2usu7dw9)
 
 | job | machine | model / optimizer | points | finite | min loss | LR at min | status |
 |---|---|---|---:|---:|---:|---:|---|
 | 12478315 | Sunspot | 5B / AdamW | 150 | 150 | 8.3131 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478392` queued |
 | 12478328 | Sunspot | 10B / Mano | 150 | 150 | 9.1098 | 9.261e-4 | complete; minimum at final point; shard-4 extended replacement `12478393` queued |
-| 12478327 | Sunspot | 5B / Mano | 87+ | 87+ | provisional | provisional | running |
+| 12478327 | Sunspot | 5B / Mano | 150 | 150 | 9.2289 | 9.261e-4 | complete; minimum at final point |
 | 12478385 | Sunspot | 5B / AdamW | 5 | 5 | 11.9914 | 1.585e-5 | shard-4 smoke passed; 8.45 GiB model memory |
 | 12478386 | Sunspot | 10B / Mano | 5 | 5 | 11.9901 | 1.585e-5 | shard-4 smoke passed; 13.88 GiB model memory |
 | 12478392 | Sunspot | 5B / AdamW | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
 | 12478393 | Sunspot | 10B / Mano | — | — | — | — | shard-4 extended `1e-5`–`1e-1` window queued |
 | 12478362 | Sunspot | 30B-dp12 / Mano | 5 | 5 | 11.8506 | 1.000e-4 | smoke passed; minimum at final point |
 | 12478375 | Sunspot | 30B-dp12 / Mano | — | — | — | — | full 150-point run queued |
-| 8846942 | Aurora | 5B / Muon | 5 | 5 | — | — | runtime/PMIx smoke passed |
-| 8847068–8847073 | Aurora | 5/10/30B Muon + SophiaG | — | — | — | — | clean-runtime replacements queued |
+| 8846942 | Aurora | 5B / Muon | 5 | 5 losses | — | — | runtime passed, but optimizer became non-finite after its first update; invalid as a training canary |
+| 8847068 | Aurora | 5B / Muon | 150 | 150 losses | — | — | finished (`exit=0`), but gradients were non-finite from step 2; excluded from comparison chart |
+| 8847069 | Aurora | 10B / Muon | 61 / 150 | partial | — | — | failed (`exit=1`); loss and gradients non-finite by step 60 |
+| 8847070 | Aurora | 30B / Muon | 6 / 150 | partial | — | — | failed (`exit=1`) before completing sweep |
+| 8847071 | Aurora | 5B / SophiaG | 97 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
+| 8847072 | Aurora | 10B / SophiaG | 60 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
+| 8847073 | Aurora | 30B / SophiaG | 10 / 150 | finite partial | — | — | launcher timeout at 6,000 s (`exit=1`) |
 
 ### Controlled failures and decisions
 
+- Aurora `8847068` wrote 150 finite loss values but had non-finite gradients
+  from step 2 onward. Its apparent loss curve is not valid optimizer evidence
+  and is deliberately excluded from the interim comparison figure.
+- Aurora `8847069`–`8847073` terminated with `Exit_status=1` after only
+  61/6/97/60/10 sweep points respectively. The Muon arms were non-finite or
+  otherwise unhealthy; the SophiaG arms were stopped by a submitter bug that
+  overwrote the requested timeout with 6,000 seconds. Their partial data remain
+  linked in W&B for diagnosis but are not completed LR-finder results.
 - `12478325`, 10B AdamW: failed after 14 minutes; replacement `12478340` is queued.
 - `12478329`, canonical 30B Mano with `dp_shard=8`: entered the sweep but
   completed zero points and stalled in oneCCL/MPI pending requests; cancelled.

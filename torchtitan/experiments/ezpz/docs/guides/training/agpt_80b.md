@@ -23,7 +23,7 @@ this guide assumes you've done that and have a working `.venv/` +
 >   step 2. If you must stay on AdamW use ~5e-7; prefer mano or sophiag. The
 >   small-batch "AdamW 1.1e-5" number does not transfer (~14x lower ceiling at
 >   production batch). Measurements:
->   [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+>   [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/agpt-v1/80b/README.md).
 > - **`compile=OFF`**. `compile=ON` triggers a
 >   `DeviceMesh`-in-saved-tensors AOT autograd crash on torch 2.13 for
 >   every 80B-family config (smallest reproducer: `agpt_50b_wide`,

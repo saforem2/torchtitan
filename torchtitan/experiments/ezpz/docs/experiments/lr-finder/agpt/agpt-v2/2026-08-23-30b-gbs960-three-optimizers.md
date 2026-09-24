@@ -97,4 +97,4 @@ calmer on grad_norm than AdamW at matched LR.
   `outputs/lrfind-30b-mano/...` (suggested 1.29e-04) -- different batch, NOT
   comparable to the table above.
 * These LRs feed Phase 2 of the fixed-batch optimizer comparison:
-  [`../../optimizer-comparison/README.md`](../../optimizer-comparison/README.md)
+  [`../../../optimizer-comparison/README.md`](../../../optimizer-comparison/README.md)

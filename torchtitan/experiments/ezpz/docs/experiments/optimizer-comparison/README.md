@@ -441,7 +441,7 @@ step 14 and burned ~12h. That is what the blow-up detection is for.
 
 ## Phase 1 RESULTS (2026-08-23, jobs 12473714/15/16)
 
-![30B LR-finder sweeps, three optimizers at GBS=960 on fineweb-edu](../lr-finder/agpt/figures/lrfind_30b_gbs960.svg)
+![30B LR-finder sweeps, three optimizers at GBS=960 on fineweb-edu](../lr-finder/agpt/agpt-v2/figures/lrfind_30b_gbs960.svg)
 
 These sweeps are what set the LRs every Phase 2 arm runs at, so they are the
 premise the whole comparison rests on. Each curve descends smoothly to a
@@ -456,7 +456,7 @@ steps. And the three minima sit within 1.8x of each other, far tighter than
 the spread the same optimizers show ACROSS batch sizes.
 
 Regenerate with `python3 torchtitan/experiments/ezpz/scripts/plot_lrfind_30b.py`.
-Full writeup: [2026-08-23-30b-gbs960-three-optimizers.md](../lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md).
+Full writeup: [2026-08-23-30b-gbs960-three-optimizers.md](../lr-finder/agpt/agpt-v2/2026-08-23-30b-gbs960-three-optimizers.md).
 
 All three swept 1e-6 -> 1e-1 over 100 steps at GBS=960 on fineweb-edu, and all
 three produced a real blow-up, so every suggestion is a measurement rather than

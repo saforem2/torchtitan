@@ -265,7 +265,7 @@ qsub \
 
 Submit one size and optimizer per job when independent failure and accounting
 matter. For the full ladder, see the
-[OLMo-3 LR-finder report and job map](../experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md).
+[OLMo-3 LR-finder report and job map](../experiments/lr-finder/agpt/agpt-v2/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md).
 
 ## Failure signatures
 

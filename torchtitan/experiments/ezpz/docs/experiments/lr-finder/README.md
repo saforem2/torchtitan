@@ -138,9 +138,9 @@ Results are split by model family, then by model size (each size has its own
 page + `figures/`):
 
 - **agpt (dense)** -- [index](agpt/README.md) (master LR table + cross-model
-  findings), with per-size pages: [2B](agpt/2b/README.md) /
-  [20B](agpt/20b/README.md) /
-  [80B](agpt/80b/README.md) (incl. the GBS=6144 production-batch finding +
+  findings), with per-size pages: [2B](agpt/agpt-v1/2b/README.md) /
+  [20B](agpt/agpt-v1/20b/README.md) /
+  [80B](agpt/agpt-v1/80b/README.md) (incl. the GBS=6144 production-batch finding +
   LR-ceiling-vs-GBS trend).
 - **moe (sparse)** -- [index](moe/README.md), with per-config pages:
   [debugmodel](moe/debugmodel/README.md) / [500M](moe/500m/README.md) /
@@ -158,7 +158,7 @@ page + `figures/`):
 80B *production* batch (GBS=6144) the AdamW number above does NOT hold -- its
 usable LR collapses to ~7e-7 (a NaN cliff) and mano becomes the best-behaved
 optimizer. See the
-[agpt 80B page](agpt/80b/README.md).
+[agpt 80B page](agpt/agpt-v1/80b/README.md).
 
 ### Cross-family key findings
 
@@ -224,8 +224,8 @@ documented in the Megatron-DeepSpeed notes.
 
 Per-model pages (each holds all dates / machines / batch sizes for that model):
 
-- **agpt** -- [index](agpt/README.md) | [2B](agpt/2b/README.md) |
-  [20B](agpt/20b/README.md) | [80B](agpt/80b/README.md)
+- **agpt** -- [index](agpt/README.md) | [2B](agpt/agpt-v1/2b/README.md) |
+  [20B](agpt/agpt-v1/20b/README.md) | [80B](agpt/agpt-v1/80b/README.md)
 - **moe** -- [index](moe/README.md) | [debugmodel](moe/debugmodel/README.md) |
   [500M](moe/500m/README.md) | [2B](moe/2b/README.md) | [4B](moe/4b/README.md) |
   [7B](moe/7b/README.md)
@@ -305,7 +305,7 @@ LRF_MODELS="2b 20b" LRF_OPTIMIZERS="adamw muon sophiag" \
 # filenames by machine, e.g. sunspot_2b.png, when committing):
 python3 torchtitan/experiments/ezpz/utils/plot_lr_finder.py \
     --data-dir outputs/lr_finder/ezpz/ezpz.agpt \
-    --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/figures
+    --output-dir torchtitan/experiments/ezpz/docs/experiments/lr-finder/agpt/agpt-v1/figures
 ```
 
 ## References

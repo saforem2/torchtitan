@@ -2,6 +2,235 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
+
+- Reconciled the active results branch with `ezpz`. PR #19 is at
+  `5050be833`, mergeable, and green. The AGPT LR documentation now separates
+  v1 (`2B/20B/80B`) from v2 (`5B/10B/30B`) and carries immutable source CSVs
+  plus reproducible plots for validated results. PR #23 merged resumable
+  LR-finder support at `7fc6661341`; 97 affected tests passed, and a
+  cross-allocation Sunspot canary loaded step 2 and completed 10/10 without
+  duplicate rows.
+- Final validated AdamW results remain 5B job `12478508` (100/100; suggested
+  LR 7.17e-5) and 10B job `12478509` (100/100; suggested LR 4.16e-5). The
+  original 30B job `12478510` reached 94/100 before a shepherd/rank failure
+  exhausted its failover nodes; it had no resumable checkpoint or terminal
+  CSV, so the partial curve is not published as a completed recommendation.
+- SophiaG coarse jobs `12478511`--`12478513` completed. The 30B coarse result
+  suggested 6.48e-7 (detector LR 6.48e-6). Fine jobs were mixed: 10B
+  `12478569` completed 100/100, while 5B `12478568` stopped at 32/100 and 30B
+  `12478570` stopped at 97/100. The latter had no complete resumable state, so
+  independently initialized points were not appended to its trajectory.
+- Checkpointed replacements `12478591` and `12478592` did not produce valid
+  terminal SophiaG artifacts. The 30B AdamW DCP/cache-fix canaries also remain
+  unresolved: Aurora `8862818` failed during XCCL communicator initialization
+  with `std::bad_alloc`, and dependent `8862819` never ran; Sunspot `12478607`
+  reached terminal exit 1 without an LR point, and dependent `12478608` never
+  ran. These are blockers, not successful curves. Earlier invalid three-point
+  canaries (`12478600/01` and `8862752/53`) were superseded because the
+  validator requires at least five points.
+- MDS154391 Stage 2 job `12478614` completed 93/93 at exit 0 and wrote
+  `checkpoint-93`. Evaluation job `12478618` completed at exit 0 with 200
+  generation rows. GRPO job `12478619` is queued. Earlier step-300/600/900
+  evaluation jobs `12478604`--`12478606` each produced a complete 200-row
+  artifact; their later cancellation status does not invalidate those verified
+  artifacts.
+- PR #21 was repeatedly refreshed before hardware validation; its current head
+  at this entry is `a35f99bef`. Aurora attempts `8862873`, `8862937`, and
+  `8862965` all failed before optimizer work and therefore do **not** validate
+  the PR. `8862873` tripped an over-strict checkout-cleanliness guard. The later
+  runs exposed a runtime bootstrap mismatch: the isolated next-eval archive's
+  PyTorch could not resolve `urGraphGetIdExp` from `libsycl.so.9` because the
+  wrapper had not loaded Aurora's `frameworks/2026.1.0` runtime. No arm wrote a
+  run log, finite step, or checkpoint. One-node job `8863046` is queued as a
+  fail-fast runtime import preflight using the repository's established
+  `/opt/aurora/26.181.0/modulefiles` plus `frameworks/2026.1.0` contract. The
+  three-arm AGPT TP=1 / TP=2 / MoE training validation will be submitted only
+  after that preflight passes.
+- Runtime preflight `8863046` subsequently failed before application import at
+  exit 20 with the same `libsycl.so.9` / `urGraphGetIdExp` error. Loading the
+  framework module alone was insufficient because the staged archive contains
+  its own `libsycl` and `libur_loader`, and they must remain first together in
+  the loader path. Replacement one-node preflight `8863095`, pinned to current
+  PR #21 head `63e30735c`, explicitly prepends `/tmp/.venv.next-eval/lib` and
+  records the resolved `libur_loader`; it is queued. No full training retry is
+  authorized until that import gate succeeds.
+- Before `8863095` started, PR #21 advanced again to `67a164df`; the queued
+  stale-head preflight was cancelled without consuming an allocation. Exact-head
+  replacement `8863110` uses the same corrected bundled-library gate and is
+  queued in `next-eval`.
+- Preflight `8863110` passed at exit 0 with XPU torch
+  `2.15.0.dev20260919+xpu`; `ldd` confirmed `libsycl.so.9` resolved its
+  `libur_loader.so.0` from the staged archive, and the TorchTitan import closure
+  passed. The only subsequent PR #21 change was journal documentation, so full
+  exact-head job `8863184` was submitted at `3735edde4` for AGPT TP=1, AGPT
+  TP=2, and MoE. Each arm still must produce five finite optimizer steps and a
+  nonempty DCP metadata file.
+- Full job `8863184` failed in its first arm before training because the wrapper
+  passed obsolete Tyro option `--checkpoint.enable`; the current interface uses
+  enabled `checkpointer` fields directly. This was a wrapper CLI failure, not an
+  optimizer, model, XCCL, or checkpoint-write failure. The branch also advanced
+  with an unrelated µfmt failure in the LoRA export helper; the exact CI format
+  diff was applied and pushed as `7c9876d8b`. Corrected exact-head replacement
+  `8863325` removes only the obsolete enable token, retains
+  `--checkpointer.folder/interval/async-mode`, and is queued for the same three
+  five-step arms.
+- `8863325` later received two Aurora nodes but exited 11 in one second: the
+  wrapper checkout path had been advanced to `7c9876d8b` while its fail-closed
+  `EXPECTED` value still named `3735edde4`. No arm launched and no training
+  allocation was consumed beyond startup. The hash was corrected to the exact
+  clean checkout head and replacement `8864160` was submitted for the unchanged
+  TP1/TP2/MoE acceptance test.
+- Sunspot upstream-sync smoke `12478635` failed before training because its
+  wrapper passed obsolete `--checkpointer.no-enable`; all three arms exited from
+  CLI parsing without optimizer work. A concurrent worker submitted corrected
+  retry `12478636`, which is now running and is tracked separately from the
+  Aurora exact-head validation.
+- Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
+  2**. Completed and superseded jobs were removed from live polling; unresolved
+  failures remain visible so cleanup does not conceal blockers. Scheduler exit
+  zero alone is never accepted as LR or PR validation: each successful training
+  arm must show real finite optimizer steps and a fresh nonempty checkpoint.
+
+### MDS154391 Stage 1 and semantic checkpoint selection
+
+- Stage-1 job `12478590` completed native Grain broad SFT at step 900 with
+  `Exit_status=0`: final loss 1.02522, gradient norm 1.2596, HBM 19.40
+  GiB/rank, and throughput 2,071 tokens/s/rank. Immutable DCP checkpoints at
+  steps 300, 600, and 900 were retained.
+- GSM8K-200 raw-generation evaluation selected step 600 by semantics rather
+  than final training loss: step 300 scored 47/200 (23.5%), step 600 scored
+  52/200 (26.0%), and step 900 scored 48/200 (24.0%). None used the strict
+  `<answer>` envelope before focused Stage 2.
+- Jobs `12478604`--`12478606` each wrote all 200 rows, then wedged during vLLM
+  teardown because the `EngineCore` child remained alive. Their eventual 143
+  statuses were operator cleanup after artifact validation. The evaluator now
+  calls `llm.llm_engine.engine_core.shutdown()` in `finally`.
+
+### MDS154391 Stage 2 and GRPO smoke
+
+- Initial Stage-2 job `12478612` was technically healthy but scientifically
+  misconfigured: packing plus gradient accumulation 10 yielded only 12
+  optimizer steps. It was cancelled at authoritative step 4/12 and its partial
+  output is non-authoritative.
+- Corrected job `12478614`, pinned to `8acf6c7b152ae5ccaeb26688b7f451ad7b6a1728`,
+  used gradient accumulation 1 and the Stage-1 step-600 HF export. It completed
+  exactly 93/93 optimizer steps, three epochs, checkpoints 31/62/93, final loss
+  0.4852, and an approximately 7.94 GB HF model at `Exit_status=0`.
+- Semantic eval `12478618` retained 200 raw generations: 197/200 format-valid
+  (98.5%), 43/200 strict-answer correct (21.5%), and 3/200 truncated or
+  unclosed. Focused Stage 2 reproduced the historical B2 answer-envelope
+  behavior but did not improve the broad step-600 checkpoint's 26.0% exact
+  accuracy.
+- Commit `89cba3c023c93e03235f73a108cf203007202bad` adds a fail-closed one-node,
+  20-step Monarch/TorchStore/vLLM GRPO smoke from the completed Stage-2 model.
+  Acceptance requires initial and post-update policy synchronization, nonzero
+  policy versions, real reward-bearing updates, checkpoints 10 and 20, bounded
+  raw rollouts, and clean actor shutdown. Job `12478619` is queued; this is a
+  stack-functionality test, not evidence that GRPO improves model quality.
+- Replacement GRPO job `12478621` completed 20/20 at exit 0 with nonzero reward
+  (0.36--0.56 in the inspected steps), nonzero gradient norms, checkpoint-10,
+  checkpoint-20, bounded rollout samples, and the terminal done marker. This
+  validates stack functionality, not downstream quality improvement.
+
+### Additional DCP and 5B diagnosis
+
+- Old-cache 30B runs retained hook-generated contiguous tensors at about 57.23
+  GiB/rank and then failed during step-2 FSDP all-gather. Commit
+  `1d58869cde6a055d3d9ac5ec221eab756e81d34f` makes synchronous DCP state-dict
+  generation lazy while preserving stable cached storage for asynchronous DCP.
+- Canary `12478607` completed step 1 at 42.31 GiB/rank, about 15 GiB/rank below
+  old-cache runs, and wrote a complete 293 GB synchronous checkpoint in 74.7
+  seconds. Attempt 1 then hit multi-rank `SIGSEGV` during step-2 FSDP unshard;
+  attempt 2 restored the checkpoint in 863.9 seconds and entered the resumed
+  update before the job ended at exit 1. The terminal attempt-2 failure still
+  requires classification, and dependent `12478608` was not released.
+- 5B job `12478591` was not an OOM. Attempt 1 completed its range but found no
+  blow-up point; generic failover incorrectly retried that scientific outcome.
+  Later attempts hit nullable Grain restore state
+  `examples_iterable.previous_state`. The next valid experiment is a wider
+  fresh LR range, not checkpoint resume.
+- The completed `12478591` trajectory was still descending at its upper endpoint:
+  smoothed loss 8.4828 at LR 2.8e-4. Fresh job `12478624` therefore extends the
+  range by one decade to 2.8e-3 over 100 points; it preserves GBS 6144, sequence
+  length 4096, full activation checkpointing, `CCL_OP_SYNC=1`, 64 active nodes,
+  and four spares.
+- Wide job `12478624` completed 100/100 at exit 0 in 01:01:38. Validated terminal
+  artifacts include a 100-row CSV, NPZ, and PNG. The detector suggested
+  `7.04e-7` with primary blow-up at `7.04e-6` and reported a second crossing at
+  `4.96e-4`; minimum raw loss was `8.65569` at point 77. The completed job was
+  removed from live polling and promoted to a compact verified result card.
+- The LR runner does use native `ezpz launch --auto-retry --spare-nodes auto`.
+  With `LRF_ACTIVE_NODES=64` inside a 68-node PBS allocation, all four extra
+  nodes are genuine spares. `12478591` made three attempts (two blind swaps),
+  and `12478607` made three attempts (two scraped-node swaps); auto-retry could
+  not fix failures that recurred across the distributed job.
+- The 30B DCP fix is effective but not sufficient: `12478607` saved a 293 GB
+  checkpoint at 42.31 GiB/rank and restored it successfully, then failed in
+  post-restore backward/FSDP reduction. Attempts included GPU page-fault aborts
+  and `UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`, rather than checkpoint corruption.
+  Controlled canary `12478625` changes only local batch 2→1 while preserving
+  GBS 6144 through accumulation, the LR range, mesh, checkpoints, synchronous
+  oneCCL, 64 active nodes, four spares, and native auto-retry.
+- LBS1 canary `12478625` proved that ordinary fresh-step memory is not the sole
+  problem: attempt 1 completed step 1 and saved DCP in 61.77 seconds. Attempt 2
+  restored in 883.75 seconds but then hit both
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES` and
+  `UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY`; attempt 3 restored again in 208.23
+  seconds and remains active in the post-restore update window. This isolates
+  the recurring failure to resumed execution rather than initial model
+  construction or the DCP payload itself. Matched compile-off control `12478633`
+  was submitted with LBS1, GBS 6144, mesh, LR range, DCP, communication, active
+  nodes, and spares held fixed; only `LRF_NO_COMPILE=1` changes.
+- `12478625` finished at exit 1 after 01:06:41. Its third attempt also restored
+  step 1 successfully, then failed with `UR_RESULT_ERROR_OUT_OF_RESOURCES` on a
+  different rank. The compiled LBS1 hypothesis is therefore closed: reducing
+  activation load permits the fresh update and DCP save but does not make the
+  resumed compiled update viable. Compile-off control `12478633` has started,
+  confirms `--compile.no-enable`, and is initializing checkpoint-enabled
+  training; it has not yet completed its first update.
+
+## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
+
+- The current OLMo-3-vocab coarse-to-fine wave runs from TorchTitan commit
+  `b91e273ec` on 64 Sunspot nodes / 768 ranks at GBS=6144, sequence length
+  4096, with the config-owned dataloader and explicit `CCL_OP_SYNC=1`. Fine
+  sweeps start in fresh trainer processes; they do not continue from coarse
+  weights or optimizer state.
+- 5B AdamW fine job `12478508` completed 100/100 finite points (`rc=0`), with
+  suggested LR **7.17e-5** and blow-up **7.17e-4**. Its CSV minimum is loss
+  7.9258 at LR 6.579e-4.
+- 10B AdamW fine job `12478509` completed 100/100 finite points (`rc=0`), with
+  suggested LR **4.16e-5** and blow-up **4.16e-4**. Its CSV minimum is loss
+  7.8432 at LR 4.642e-4.
+- 30B AdamW fine job `12478510` is running. Widened SophiaG coarse jobs
+  `12478511`–`12478513` remain queued. Muon remains excluded until a canary
+  proves finite gradients, finite weights, and real optimizer updates after
+  the first Newton–Schulz update.
+- Matched 4-node / 48-rank controls held source, model, batch, compile mode,
+  and update count constant on both systems. Async `CCL_OP_SYNC=0` was finite
+  but about 6x slower than synchronous `1`: roughly 29–33 vs 5 seconds/update
+  on Sunspot (`12478515`/`12478516`) and 28–30 vs 4–5 seconds/update on Aurora
+  (`8856473`/`8856474`). The application therefore chooses `1`; shared `ezpz`
+  setup should preserve caller state rather than prescribe transport policy.
+- New production umbrella `8855988` requests all 2,098 Aurora nodes for 12
+  hours in `prod`. It remains queued for capacity and no seat has started.
+  A local monitor quoting bug briefly rendered a stale hold; direct
+  `qstat -xf` showed `job_state=Q`, `Hold_Types=n`, and "Not enough free nodes."
+  The umbrella and LR monitors were corrected to execute their remote probes
+  directly, and the LR coarse-to-fine Herdr pane `wC:p14` was restarted after
+  its in-memory job list was found stale.
+- Published the first durable campaign update and reproducible charts in
+  `b0fad46a7`: interim AdamW-only 5B and 10B per-model PNG/SVG figures plus a
+  completed-model comparison. The charts explicitly distinguish the
+  application suggestion from the observed minimum and will be regenerated at
+  stable paths as valid 30B/SophiaG artifacts arrive.
+- Migrated experiment guidance to agent-agnostic paths in `0c891a8e8`:
+  `AGENTS.md` is canonical, `.agents/skills/alcf-job-preflight/` owns the skill,
+  and `.claude` paths remain compatibility symlinks. Organized the Claude
+  handoff helper under `scripts/agent-handoff/` in `99281ce5e`. All three
+  logical changes were pushed to PR #18's branch.
+
 ## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
 
 - Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
@@ -437,7 +666,7 @@ Continues the 2026-09-06 entry below, after the machine was made usable again.
   factor of **1.12**. Removing a 15.677x multiplier from 21.5% of parameters
   moved the optimum 12%, so the AdamW-path majority anchors the curve. Read
   5.68e-04 as a property of the hybrid, not of Muon.
-  [lr-finder/agpt/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md).
+  [lr-finder/agpt/agpt-v2/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/agpt-v2/2026-08-30-30b-gbs960-muon.md).
 - **Muon's shape cutoff is now a parameter, and a real-Muon arm exists.** The
   gate was `max(p.shape) <= 10000`, hardcoded at three sites, with the code's
   own comment reading "need to change this!!!". Its intent is to keep
@@ -6547,3 +6776,21 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Merged upstream main into ezpz branch
 - Upstream changes included GraphTrainer bucketing fixes,
   SAC + FSDP improvements, and Qwen3-VL fused QKV support
+
+## 2026-09-24 — LR-finder resume validation and chart refresh
+
+- Validated cross-allocation LR-finder recovery with Sunspot jobs `12478576`
+  and `12478580`: the resumed job loaded `step-2`, continued at point 3, and
+  completed 10/10 finite points with checkpoints at 2/4/6/8/10 and terminal
+  CSV/NPZ/PNG artifacts.
+- Submitted resumable 30B AdamW replacement `12478581`: 75 endpoint-inclusive
+  logarithmic points over `[3e-7, 1e-2]`, checkpointing every five points.
+- Validated 10B SophiaG fine job `12478569`: 100/100 finite rows and terminal
+  CSV/NPZ/PNG artifacts. Its detector output (`3.24e-7`) is below the sampled
+  fine range and is labeled accordingly rather than promoted as a measured
+  optimum.
+- Recorded 5B SophiaG fine `12478568` as walltime-truncated and excluded it
+  from completed-result charts.
+- Regenerated stable 5B/10B/30B and comparison charts from committed immutable
+  CSV copies. The 30B panel is explicitly SophiaG coarse only until fine
+  artifacts arrive.
