@@ -124,34 +124,46 @@ def merge_lora(
             n_wo += 1
         merged[f"{p}.wo.weight"] = wo
 
-        # --- wqkv (fused adapter) -> split delta onto base wq/wk/wv ---
-        wq = sd[f"{p}.qkv_linear.wq.weight"].to(torch.float32)
-        wk = sd[f"{p}.qkv_linear.wk.weight"].to(torch.float32)
-        wv = sd[f"{p}.qkv_linear.wv.weight"].to(torch.float32)
+        # --- wqkv: support current native-fused and historical split DCPs ---
         qa = sd.get(f"{p}.qkv_linear.wqkv.lora_a.weight")
         qb = sd.get(f"{p}.qkv_linear.wqkv.lora_b.weight")
+        delta = None
         if qa is not None and qb is not None:
             in_dim = qa.shape[1]
             delta = scaling * (qb.to(torch.float32) @ qa.to(torch.float32))
-            # split exactly like FusedQKVLinear._split_qkv_on_save (weight, ndim=4)
-            w = delta.reshape(n_kv_heads, r, head_dim, in_dim)
-            wq = wq + w[:, :hpk].reshape(-1, in_dim)
-            wk = wk + w[:, hpk].reshape(-1, in_dim)
-            wv = wv + w[:, hpk + 1].reshape(-1, in_dim)
             n_wqkv += 1
-        merged[f"{p}.qkv_linear.wq.weight"] = wq
-        merged[f"{p}.qkv_linear.wk.weight"] = wk
-        merged[f"{p}.qkv_linear.wv.weight"] = wv
+
+        fused_key = f"{p}.qkv_linear.wqkv.weight"
+        if fused_key in sd:
+            fused = sd[fused_key].to(torch.float32)
+            if delta is not None:
+                assert delta.shape == fused.shape, (delta.shape, fused.shape)
+                fused = fused + delta
+            merged[fused_key] = fused
+        else:
+            wq = sd[f"{p}.qkv_linear.wq.weight"].to(torch.float32)
+            wk = sd[f"{p}.qkv_linear.wk.weight"].to(torch.float32)
+            wv = sd[f"{p}.qkv_linear.wv.weight"].to(torch.float32)
+            if delta is not None:
+                # Match QKVLinear's native interleaved grouping.
+                in_dim = delta.shape[1]
+                w = delta.reshape(n_kv_heads, r, head_dim, in_dim)
+                wq = wq + w[:, :hpk].reshape(-1, in_dim)
+                wk = wk + w[:, hpk].reshape(-1, in_dim)
+                wv = wv + w[:, hpk + 1].reshape(-1, in_dim)
+            merged[f"{p}.qkv_linear.wq.weight"] = wq
+            merged[f"{p}.qkv_linear.wk.weight"] = wk
+            merged[f"{p}.qkv_linear.wv.weight"] = wv
 
         # --- carry the rest of this layer's non-lora params through ---
-        for suf in (
-            "attention_norm.weight",
-            "ffn_norm.weight",
-            "feed_forward.w1.weight",
-            "feed_forward.w2.weight",
-            "feed_forward.w3.weight",
-        ):
+        for suf in ("attention_norm.weight", "ffn_norm.weight", "feed_forward.w2.weight"):
             merged[f"layers.{i}.{suf}"] = sd[f"layers.{i}.{suf}"].to(torch.float32)
+        w13_key = f"layers.{i}.feed_forward.w13.weight"
+        if w13_key in sd:
+            merged[w13_key] = sd[w13_key].to(torch.float32)
+        else:
+            for suf in ("feed_forward.w1.weight", "feed_forward.w3.weight"):
+                merged[f"layers.{i}.{suf}"] = sd[f"layers.{i}.{suf}"].to(torch.float32)
 
     # --- non-layer params (embeddings, final norm, lm_head) ---
     for k in ("tok_embeddings.weight", "norm.weight", "lm_head.weight"):
