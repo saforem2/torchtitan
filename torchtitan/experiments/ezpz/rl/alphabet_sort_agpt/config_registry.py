@@ -163,7 +163,7 @@ def _agpt_grpo_config(
     )
     model_config = _agpt_rl_model_config(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
     return Controller.Config(
-        model_config=model_config,
+        model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -185,7 +185,7 @@ def _agpt_grpo_config(
         # <|turn> vocabulary, so use the checkpoint's own Jinja template.
         renderer=ExtraStopTokensRendererConfig(
             renderer=from_renderers(DefaultRendererConfig()),
-            extra_stop_token_ids=(107,),
+            extra_stop_token_ids=(1, 107),
         ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(

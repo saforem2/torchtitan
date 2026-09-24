@@ -184,7 +184,7 @@ def _agpt_grpo_config(
     )
     model_config = _agpt_rl_model_config(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
     return Controller.Config(
-        model_config=model_config,
+        model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.
         # Default points at the Stage-1 cold-start CoT-SFT checkpoint (cot.md).
         hf_assets_path="outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf",
