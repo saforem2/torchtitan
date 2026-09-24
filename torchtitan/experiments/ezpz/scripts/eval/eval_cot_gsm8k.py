@@ -168,7 +168,15 @@ def main() -> None:
         # the production inference contract.
         stop_token_ids=[1, 107],
     )
-    outputs = llm.generate(prompts, sp)
+    try:
+        outputs = llm.generate(prompts, sp)
+    finally:
+        # vLLM V1 owns a separate EngineCore process.  On the validated XPU
+        # build it does not exit merely because generation returned, leaving the
+        # parent blocked in multiprocessing cleanup.  Use the engine client's
+        # supported teardown hook so batch jobs can reach their validators and
+        # final completion marker.
+        llm.llm_engine.engine_core.shutdown()
 
     texts = []
     finish_reasons = []
