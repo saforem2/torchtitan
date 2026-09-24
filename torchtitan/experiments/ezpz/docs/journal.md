@@ -2,6 +2,57 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
+
+- Reconciled the active results branch with `ezpz`. PR #19 is at
+  `5050be833`, mergeable, and green. The AGPT LR documentation now separates
+  v1 (`2B/20B/80B`) from v2 (`5B/10B/30B`) and carries immutable source CSVs
+  plus reproducible plots for validated results. PR #23 merged resumable
+  LR-finder support at `7fc6661341`; 97 affected tests passed, and a
+  cross-allocation Sunspot canary loaded step 2 and completed 10/10 without
+  duplicate rows.
+- Final validated AdamW results remain 5B job `12478508` (100/100; suggested
+  LR 7.17e-5) and 10B job `12478509` (100/100; suggested LR 4.16e-5). The
+  original 30B job `12478510` reached 94/100 before a shepherd/rank failure
+  exhausted its failover nodes; it had no resumable checkpoint or terminal
+  CSV, so the partial curve is not published as a completed recommendation.
+- SophiaG coarse jobs `12478511`--`12478513` completed. The 30B coarse result
+  suggested 6.48e-7 (detector LR 6.48e-6). Fine jobs were mixed: 10B
+  `12478569` completed 100/100, while 5B `12478568` stopped at 32/100 and 30B
+  `12478570` stopped at 97/100. The latter had no complete resumable state, so
+  independently initialized points were not appended to its trajectory.
+- Checkpointed replacements `12478591` and `12478592` did not produce valid
+  terminal SophiaG artifacts. The 30B AdamW DCP/cache-fix canaries also remain
+  unresolved: Aurora `8862818` failed during XCCL communicator initialization
+  with `std::bad_alloc`, and dependent `8862819` never ran; Sunspot `12478607`
+  reached terminal exit 1 without an LR point, and dependent `12478608` never
+  ran. These are blockers, not successful curves. Earlier invalid three-point
+  canaries (`12478600/01` and `8862752/53`) were superseded because the
+  validator requires at least five points.
+- MDS154391 Stage 2 job `12478614` completed 93/93 at exit 0 and wrote
+  `checkpoint-93`. Evaluation job `12478618` completed at exit 0 with 200
+  generation rows. GRPO job `12478619` is queued. Earlier step-300/600/900
+  evaluation jobs `12478604`--`12478606` each produced a complete 200-row
+  artifact; their later cancellation status does not invalidate those verified
+  artifacts.
+- PR #21 was repeatedly refreshed before hardware validation; its current head
+  at this entry is `a35f99bef`. Aurora attempts `8862873`, `8862937`, and
+  `8862965` all failed before optimizer work and therefore do **not** validate
+  the PR. `8862873` tripped an over-strict checkout-cleanliness guard. The later
+  runs exposed a runtime bootstrap mismatch: the isolated next-eval archive's
+  PyTorch could not resolve `urGraphGetIdExp` from `libsycl.so.9` because the
+  wrapper had not loaded Aurora's `frameworks/2026.1.0` runtime. No arm wrote a
+  run log, finite step, or checkpoint. One-node job `8863046` is queued as a
+  fail-fast runtime import preflight using the repository's established
+  `/opt/aurora/26.181.0/modulefiles` plus `frameworks/2026.1.0` contract. The
+  three-arm AGPT TP=1 / TP=2 / MoE training validation will be submitted only
+  after that preflight passes.
+- Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
+  2**. Completed and superseded jobs were removed from live polling; unresolved
+  failures remain visible so cleanup does not conceal blockers. Scheduler exit
+  zero alone is never accepted as LR or PR validation: each successful training
+  arm must show real finite optimizer steps and a fresh nonempty checkpoint.
+
 ## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
 
 - The current OLMo-3-vocab coarse-to-fine wave runs from TorchTitan commit
