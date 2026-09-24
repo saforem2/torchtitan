@@ -79,10 +79,10 @@ native auto-retry and then to the ~2,098N umbrellas; see
 ## Eval scores
 
 See [`docs/evals/agpt/20b/`](../../../evals/agpt/20b/README.md) for the
-current 20B lm-eval tables and the **🏁 headline** finding above (which is
-a 2026-07-24 snapshot -- both chains have advanced well past it since). At
-step 4,400 (~442.9B tokens) v2 512N sync reaches ARC-Easy **0.6641**
-and HellaSwag `acc_norm` **0.6346** — beating the 2B 256N async chain
-at step-69,900 / ~3.52T tokens (HSn 0.5552) by a wide per-token margin.
-The 20B per-token efficiency advantage is dramatic and the chain has
-not begun to plateau yet.
+current 20B lm-eval tables and the **🏁 headline** finding above. The latest
+production-tail backfills finished successfully on 2026-09-21 at **step
+16,000** for 256N (`8846651`) and **step 10,900** for the 512N constant-LR
+fork (`8846649`). Their HellaSwag `acc_norm` scores are 0.6809 and 0.6804;
+ARC-Easy `acc` is 0.7054 and 0.6965, respectively. The eval page records all
+seven tasks and keeps the new 25-shot ARC-Challenge values separate from the
+0-shot trajectory curves.

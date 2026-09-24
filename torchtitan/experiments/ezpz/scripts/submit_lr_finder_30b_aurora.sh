@@ -101,21 +101,27 @@ export LRF_SEQ_LEN=4096
 
 # 150 probes over 5 decades = 30 points/decade.
 export LRF_STEPS=1000
-export LRF_FRACTION=0.15
-export LRF_INIT_LR=1e-8
-export LRF_MAX_LR=1e-3
+export LRF_MODE="${LRF_MODE:-custom}"
+if [[ "${LRF_MODE}" == custom ]]; then
+    export LRF_FRACTION="${LRF_FRACTION:-0.15}"
+    export LRF_INIT_LR="${LRF_INIT_LR:-1e-8}"
+    export LRF_MAX_LR="${LRF_MAX_LR:-1e-3}"
+fi
 
 # 30B needs full AC (exp05: none OOMs, selective errors) and trains compiled.
 export LRF_AC=full
 
 # ~19 s/step x 150 = ~48 min of stepping, plus compile (~10-15 min at this size)
 # and startup. 100 min per optimizer, 3 optimizers, inside a 6 h walltime.
-export LRF_TIMEOUT=6000
-export LRF_IDLE_TIMEOUT=1800
+export LRF_TIMEOUT="${LRF_TIMEOUT:-6000}"
+export LRF_IDLE_TIMEOUT="${LRF_IDLE_TIMEOUT:-1800}"
 
 # Keep the three optimizers' CSV/plot/npz from colliding with any existing 30B
 # finder outputs (the trainer keys that path on model+optimizer, not on GBS).
-export LRF_DUMP_FOLDER="outputs/lr_finder_30b_gbs6144"
+_job_tag="${PBS_JOBID%%.*}"
+_run_tag="${LRF_RUN_ID:-${_job_tag:-$(date +%Y%m%d_%H%M%S)}}"
+export LRF_RUN_ID="${_run_tag}"
+export LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_30b_gbs6144_${_run_tag}}"
 
 echo "=========================================================="
 echo " 30B LR finder -- PRODUCTION batch"

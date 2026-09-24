@@ -12,6 +12,12 @@
 #   LRF_FRACTION    — fraction of steps to sweep (default: 0.1)
 #   LRF_INIT_LR     — starting LR (default: 1e-6)
 #   LRF_MAX_LR      — max LR (default: 1.0)
+#   LRF_HF_ASSETS_PATH — optional compute-visible tokenizer/assets directory
+#   LRF_MODE        — custom (legacy defaults), coarse, or fine. Coarse uses a
+#                     broad default window. Fine requires explicit INIT/MAX
+#                     bounds obtained from a successful coarse run. Invoke the
+#                     script again for fine mode: each stage then starts a new
+#                     trainer process and therefore a fresh model/optimizer.
 #   LRF_TIMEOUT     — per-run timeout in seconds (default: 1800)
 #   LRF_DFL_NAME    — data list basename (default "books"). MUST match the
 #                     config's tokenizer: books.txt is Llama2-tokenized on
@@ -63,7 +69,12 @@ fi
 export PATH="/opt/pbs/bin:${PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
-export CCL_OP_SYNC=1
+# This workload owns its collective policy. Matched 4-node / 48-rank controls
+# on both Aurora and Sunspot found asynchronous oneCCL about 6x slower while
+# both modes remained finite, so default this application to synchronous ops.
+# Callers can still opt into a controlled async experiment with CCL_OP_SYNC=0.
+export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"
+echo "lr-finder: CCL_OP_SYNC=${CCL_OP_SYNC}"
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
@@ -216,10 +227,32 @@ fi
 LRF_MODELS="${LRF_MODELS:-2b 20b}"
 LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw muon sophiag}"
 LRF_STEPS="${LRF_STEPS:-1000}"
-LRF_FRACTION="${LRF_FRACTION:-0.1}"
-LRF_INIT_LR="${LRF_INIT_LR:-1e-6}"
-LRF_MAX_LR="${LRF_MAX_LR:-1.0}"
+LRF_MODE="${LRF_MODE:-custom}"
+case "${LRF_MODE}" in
+    coarse)
+        LRF_FRACTION="${LRF_FRACTION:-0.10}"
+        LRF_INIT_LR="${LRF_INIT_LR:-1e-8}"
+        LRF_MAX_LR="${LRF_MAX_LR:-1e-1}"
+        ;;
+    fine)
+        if [[ -z "${LRF_INIT_LR:-}" || -z "${LRF_MAX_LR:-}" ]]; then
+            echo "lr-finder FATAL: fine mode requires caller-supplied LRF_INIT_LR and LRF_MAX_LR" >&2
+            exit 2
+        fi
+        LRF_FRACTION="${LRF_FRACTION:-0.20}"
+        ;;
+    custom)
+        LRF_FRACTION="${LRF_FRACTION:-0.1}"
+        LRF_INIT_LR="${LRF_INIT_LR:-1e-6}"
+        LRF_MAX_LR="${LRF_MAX_LR:-1.0}"
+        ;;
+    *)
+        echo "lr-finder FATAL: LRF_MODE must be custom, coarse, or fine (got ${LRF_MODE})" >&2
+        exit 2
+        ;;
+esac
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
+LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"
 LRF_LBS="${LRF_LBS:-1}"
 # Sequence length. Was hardcoded to 8192 in the launch below, which is wrong
 # for any model whose measurements are at another length: every 30B datapoint
@@ -282,14 +315,17 @@ NUM_NODES="${NHOSTS:-${SLURM_NNODES:-1}}"
 # submitted in the same second) get DISTINCT per-run dirs. date alone is
 # second-resolution and collides on simultaneous submits.
 _JOBTAG="${PBS_JOBID%%.*}"
-OUTDIR="outputs/lr_finder/${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}"
+LRF_RUN_ID="${LRF_RUN_ID:-${TIMESTAMP}${_JOBTAG:+_${_JOBTAG}}}"
+OUTDIR="outputs/lr_finder/${LRF_RUN_ID}"
 mkdir -p "${OUTDIR}"
 # The trainer writes the CSV/plot/npz under <dump_folder>/lr_finder/
 # ezpz.agpt/<flavor>/<optimizer>/ -- a path keyed by model+optimizer, NOT
 # by GBS. Concurrent same-(model,optimizer) jobs at different GBS therefore
 # clobber each other's CSV. Set LRF_DUMP_FOLDER per job (default ./outputs)
 # so a trend sweep isolates each GBS's outputs.
-LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs}"
+# Stage-specific defaults prevent a fine pass from appending to the coarse
+# CSV. Explicit submitter paths remain authoritative.
+LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}_${LRF_RUN_ID}}"
 
 # Data list. The default is books.txt for historical reasons, but on Aurora
 # that points at dolma/data_v1.7_Llama2Tokenizer -- LLAMA-2 token ids. Sweeping
@@ -346,6 +382,7 @@ echo " LR Finder Sweep — ${TIMESTAMP}"
 echo " devices=${NGPUS}  nodes=${NUM_NODES}"
 echo " models: ${LRF_MODELS}"
 echo " optimizers: ${LRF_OPTIMIZERS}"
+echo " mode: ${LRF_MODE} (fresh trainer process per model/optimizer)"
 echo " LR range: ${LRF_INIT_LR} → ${LRF_MAX_LR}"
 echo " finder steps: ${FINDER_STEPS} (${LRF_FRACTION} × ${LRF_STEPS})"
 echo "============================================================"
@@ -399,6 +436,11 @@ for model in "${MODELS[@]}"; do
     gbs_args=()
     if [[ -n "${LRF_TOKENS_PER_TRAIN_STEP}" ]]; then
         gbs_args=(--training.num-tokens-per-train-step "${LRF_TOKENS_PER_TRAIN_STEP}")
+    fi
+
+    asset_args=()
+    if [[ -n "${LRF_HF_ASSETS_PATH:-}" ]]; then
+        asset_args=(--hf-assets-path "${LRF_HF_ASSETS_PATH}")
     fi
 
     # Optional shared index-cache dir. The blendcorpus index cold-builds
@@ -468,6 +510,7 @@ for model in "${MODELS[@]}"; do
             python3 -m torchtitan.experiments.ezpz.train \
             --module ezpz.agpt \
             --config "${config}" \
+            "${asset_args[@]}" \
             --job.dump-folder "${LRF_DUMP_FOLDER}" \
             --optimizer "${opt}" \
             --training.steps "${LRF_STEPS}" \
@@ -475,7 +518,6 @@ for model in "${MODELS[@]}"; do
             "${gbs_args[@]}" \
             --training.max-context-length "${LRF_SEQ_LEN}" \
             --metrics.log_freq 1 \
-            --checkpoint.no-enable \
             "${dataloader_args[@]}" \
             "${cache_args[@]}" \
             --lr_finder.enable \
@@ -484,6 +526,11 @@ for model in "${MODELS[@]}"; do
             --lr_finder.fraction "${LRF_FRACTION}" \
             "${tp_args[@]}" \
             "$@" \
+            --checkpoint.enable \
+            --checkpoint.folder "checkpoints/lr_finder_${label}" \
+            --checkpoint.interval "${LRF_CHECKPOINT_INTERVAL}" \
+            --checkpoint.no-last-save-model-only \
+            --checkpoint.async-mode disabled \
             "${ac_subcommand[@]}" \
             >"${logfile}" 2>&1
         exit_code=$?
@@ -500,6 +547,8 @@ for model in "${MODELS[@]}"; do
             R_STATUS[$RUN_IDX]="TIMEOUT"
         elif grep -q 'OUT_OF_RESOURCES\|out of memory\|OOM' "${logfile}"; then
             R_STATUS[$RUN_IDX]="OOM"
+        elif ((exit_code != 0)); then
+            R_STATUS[$RUN_IDX]="FAIL(rc=${exit_code})"
         elif grep -q 'LR Finder complete' "${logfile}"; then
             R_STATUS[$RUN_IDX]="OK"
         elif grep -q 'Traceback\|Error\|Exception\|Fatal Python error\|terminate called\|died from signal\|ur_die:' "${logfile}"; then
@@ -583,7 +632,7 @@ REPORT="${OUTDIR}/report.md"
     echo ""
     echo "Logs: \`${OUTDIR}/\`"
     echo ""
-    echo "LR finder curves saved to \`outputs/lr_finder/ezpz/\`"
+    echo "LR finder curves saved under \`${LRF_DUMP_FOLDER}/lr_finder/\`"
 } >"${REPORT}"
 
 echo "============================================================"
