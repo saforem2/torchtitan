@@ -66,6 +66,15 @@ Running log of what's happening, session by session. Most recent first.
   exact-head job `8863184` was submitted at `3735edde4` for AGPT TP=1, AGPT
   TP=2, and MoE. Each arm still must produce five finite optimizer steps and a
   nonempty DCP metadata file.
+- Full job `8863184` failed in its first arm before training because the wrapper
+  passed obsolete Tyro option `--checkpoint.enable`; the current interface uses
+  enabled `checkpointer` fields directly. This was a wrapper CLI failure, not an
+  optimizer, model, XCCL, or checkpoint-write failure. The branch also advanced
+  with an unrelated µfmt failure in the LoRA export helper; the exact CI format
+  diff was applied and pushed as `7c9876d8b`. Corrected exact-head replacement
+  `8863325` removes only the obsolete enable token, retains
+  `--checkpointer.folder/interval/async-mode`, and is queued for the same three
+  five-step arms.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
