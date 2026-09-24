@@ -36,9 +36,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
-from torchtitan.experiments.ezpz.grain_checkpoint import (
-    GrainStreamingCheckpointManager,
-)
+from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
     default_muon,
@@ -688,9 +686,7 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     cfg.checkpointer.initial_load_path = str(dcp_base)
     cfg.checkpointer.initial_load_in_hf = False
     cfg.checkpointer.initial_load_model_only = True
-    cfg.checkpointer.folder = (
-        "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
-    )
+    cfg.checkpointer.folder = "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
     cfg.checkpointer.interval = 300
     cfg.checkpointer.keep_latest_k = 0
     # FaultTolerantTrainer retains ``checkpoint`` as a legacy CLI alias and its

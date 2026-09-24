@@ -94,9 +94,7 @@ class AgptChatProcessor(SampleProcessor):
         token_mask: list[bool],
     ) -> tuple[str, list[int], list[bool]]:
         next_text = full_text + text
-        next_tokens = self._tokenizer.encode(
-            next_text, add_bos=False, add_eos=False
-        )
+        next_tokens = self._tokenizer.encode(next_text, add_bos=False, add_eos=False)
         if next_tokens[: len(full_tokens)] != full_tokens:
             raise ValueError(
                 "AGPT chat segment changed an earlier token boundary; refusing "
@@ -172,7 +170,11 @@ def _source(
             name=name,
             split=split,
         ),
-        pre_filters=(lambda sample, source=source: _has_usable_assistant_turn(sample, source=source),),
+        pre_filters=(
+            lambda sample, source=source: _has_usable_assistant_turn(
+                sample, source=source
+            ),
+        ),
         processor=AgptChatProcessor.Config(source=source),
         post_filters=(lambda sequence: sequence is not None,),
     )

@@ -68,8 +68,8 @@ def extract_cot_answer(text: str) -> tuple[bool, str | None]:
     if m:
         span = m.group(1)
         boxed = _BOXED_RE.search(span)
-        ans = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
-        return (ans is not None), ans
+        answer = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
+        return (answer is not None), answer
     # Not well-formed: strip any <think> block, then look for boxed / #### only
     # (NO last-number fallback -- that would score CoT scratch numbers).
     stripped = _THINK_RE.sub("", text)
@@ -131,11 +131,15 @@ def summarize(texts, finish_reasons, fmts, corrects):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, help="HF checkpoint dir (with chat template)")
+    ap.add_argument(
+        "--model", required=True, help="HF checkpoint dir (with chat template)"
+    )
     ap.add_argument("--limit", type=int, default=200, help="num test examples")
     ap.add_argument("--dtype", default="float32", help="vLLM dtype (fp32 for agpt-2b)")
     ap.add_argument("--max-tokens", type=int, default=768)
-    ap.add_argument("--temperature", type=float, default=0.0, help="0 = greedy headline")
+    ap.add_argument(
+        "--temperature", type=float, default=0.0, help="0 = greedy headline"
+    )
     ap.add_argument("--gpu-mem", type=float, default=0.70)
     ap.add_argument("--out", default=None, help="write per-example jsonl here")
     args = ap.parse_args()
@@ -186,8 +190,10 @@ def main() -> None:
     for i, o in enumerate(outputs):
         text = o.outputs[0].text
         finish_reason = o.outputs[0].finish_reason
-        fmt_ok, ans = extract_cot_answer(text)
-        correct = ans is not None and golds[i] is not None and ans == golds[i]
+        fmt_ok, answer = extract_cot_answer(text)
+        correct = (
+            answer is not None and golds[i] is not None and answer == golds[i]
+        )
         texts.append(text)
         finish_reasons.append(finish_reason)
         fmts.append(fmt_ok)
@@ -199,7 +205,7 @@ def main() -> None:
                 "prompt": prompts[i],
                 "generation": text,
                 "format_ok": fmt_ok,
-                "pred": ans,
+                "pred": answer,
                 "gold": golds[i],
                 "correct": correct,
                 "gen_len": len(text),
@@ -210,12 +216,14 @@ def main() -> None:
     summary = summarize(
         texts=texts, finish_reasons=finish_reasons, fmts=fmts, corrects=corrects
     )
-    summary.update({
-        "model": args.model,
-        "dtype": args.dtype,
-        "temperature": args.temperature,
-        "max_tokens": args.max_tokens,
-    })
+    summary.update(
+        {
+            "model": args.model,
+            "dtype": args.dtype,
+            "temperature": args.temperature,
+            "max_tokens": args.max_tokens,
+        }
+    )
     print(json.dumps(summary, indent=2))
 
     if args.out:

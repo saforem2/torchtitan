@@ -1,17 +1,20 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
 
 from __future__ import annotations
 
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 from torch.distributed.checkpoint.stateful import Stateful
 
 from torchtitan.experiments.ezpz.grain_checkpoint import (
-    GrainStreamingCheckpointManager,
     _optional_hf_previous_state_missing_keys,
+    GrainStreamingCheckpointManager,
 )
 from torchtitan.experiments.ezpz.train import _translate_legacy_args
 
@@ -91,9 +94,7 @@ class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
         )
 
         cfg = agpt_2b_mds154391_tulu_math_uc_streaming()
-        self.assertIsInstance(
-            cfg.checkpointer, GrainStreamingCheckpointManager.Config
-        )
+        self.assertIsInstance(cfg.checkpointer, GrainStreamingCheckpointManager.Config)
         self.assertIs(cfg.checkpoint, cfg.checkpointer)
         self.assertEqual(
             cfg.checkpointer.folder,
@@ -102,9 +103,7 @@ class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
         self.assertTrue(cfg.checkpointer.initial_load_path.endswith("/step-0"))
 
         cfg.__post_init__()
-        self.assertIsInstance(
-            cfg.checkpointer, GrainStreamingCheckpointManager.Config
-        )
+        self.assertIsInstance(cfg.checkpointer, GrainStreamingCheckpointManager.Config)
         self.assertEqual(
             cfg.checkpointer.folder,
             "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming",
