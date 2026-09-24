@@ -28,6 +28,13 @@ import numpy as np
 COLORS = {"adamw": "#1769aa", "sophiag": "#2e7d32"}
 LABELS = {"adamw": "AdamW", "sophiag": "SophiaG"}
 MODEL_LABELS = {"5b_olmo2tok": "5B", "10b_olmo2tok": "10B", "30b_olmo2tok": "30B"}
+STAGES = {
+    ("5b_olmo2tok", "adamw"): "fine",
+    ("5b_olmo2tok", "sophiag"): "coarse",
+    ("10b_olmo2tok", "adamw"): "fine",
+    ("10b_olmo2tok", "sophiag"): "fine",
+    ("30b_olmo2tok", "sophiag"): "coarse",
+}
 
 
 def load(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -59,7 +66,10 @@ def suggested_lr(model: str, optimizer: str) -> float | None:
     # Application-validated recommendations from the current fine artifacts.
     return {
         ("5b_olmo2tok", "adamw"): 7.17e-5,
+        ("5b_olmo2tok", "sophiag"): 2.80e-6,
         ("10b_olmo2tok", "adamw"): 4.16e-5,
+        ("10b_olmo2tok", "sophiag"): 3.24e-7,
+        ("30b_olmo2tok", "sophiag"): 6.48e-7,
     }.get((model, optimizer))
 
 
@@ -76,7 +86,8 @@ def draw_model(
 ) -> None:
     for optimizer, (lrs, losses) in sorted(arms.items()):
         color = COLORS[optimizer]
-        label = LABELS[optimizer]
+        stage = STAGES.get((model, optimizer), "")
+        label = f"{LABELS[optimizer]} {stage}".strip()
         minimum = int(np.argmin(losses))
         ax.plot(lrs, losses, color=color, linewidth=2, label=label)
         ax.scatter(
@@ -91,15 +102,30 @@ def draw_model(
         )
         recommendation = suggested_lr(model, optimizer)
         if recommendation is not None:
+            inside = lrs.min() <= recommendation <= lrs.max()
+            qualifier = (
+                "suggested LR" if inside else "detector LR (outside sampled range)"
+            )
             ax.axvline(
                 recommendation,
                 color=color,
                 linestyle=":",
                 linewidth=1.8,
-                label=f"{label} suggested LR = {recommendation:.2e}",
+                label=f"{label} {qualifier} = {recommendation:.2e}",
             )
     style_ax(ax)
     ax.set_title(f"{MODEL_LABELS.get(model, model)} OLMo-3-vocab")
+    if model == "30b_olmo2tok" and set(arms) == {"sophiag"}:
+        ax.text(
+            0.5,
+            0.98,
+            "SophiaG coarse only — fine result pending",
+            transform=ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
+        )
     ax.legend(framealpha=0.95, fontsize=9)
 
 
@@ -134,7 +160,7 @@ def main() -> int:
     )
     for ax, model in zip(axes[0], order):
         draw_model(ax, model, results[model])
-    fig.suptitle("AdamW fine sweeps — completed models", fontweight="bold")
+    fig.suptitle("Current validated LR-finder arms", fontweight="bold")
     fig.tight_layout()
     save(fig, args.output_dir / "lr_finder_comparison")
     return 0

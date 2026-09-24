@@ -8,18 +8,22 @@ byte-identical to `allenai/Olmo-3-1025-7B`.
 **Data:** olmo-mix-1124 `wiki` subset, precached, via Grain + inline OLMo-3 tokenization
 **Machine:** Aurora `next-eval` and Sunspot `workq`, 64N production-batch sweeps
 
-Status as of 2026-09-23: **ACTIVE COARSE-TO-FINE REPLACEMENT CAMPAIGN.**
-The current Sunspot wave is pinned to TorchTitan commit `b91e273ec`, uses 64
-nodes / 768 ranks, GBS=6144, sequence length 4096, the config-owned OLMo-3
-dataloader, and explicit `CCL_OP_SYNC=1`. Each fine sweep starts in a fresh
-trainer process rather than continuing from coarse-run weights.
+Status as of 2026-09-24: **ACTIVE COARSE-TO-FINE REPLACEMENT CAMPAIGN.**
+The Sunspot production sweeps use 64 active nodes / 768 ranks, GBS=6144,
+sequence length 4096, the config-owned OLMo-3 dataloader, and explicit
+`CCL_OP_SYNC=1`. Every independently initialized fine sweep starts from the
+same clean initialization rather than continuing from coarse-run weights.
 
-The first two fine AdamW arms are complete with 100/100 finite points and fresh
-CSVs: 5B job `12478508` suggests **7.17e-5** (blow-up `7.17e-4`), and 10B
-job `12478509` suggests **4.16e-5** (blow-up `4.16e-4`). Job `12478510`
-(30B AdamW fine) is running; widened SophiaG coarse jobs `12478511`–`12478513`
-remain queued. Muon remains excluded because its first-update Newton–Schulz
-corruption has not passed a finite-gradient, finite-weight, real-update canary.
+Validated results now include 5B and 10B AdamW fine sweeps, widened SophiaG
+coarse sweeps for all three sizes, and the 10B SophiaG fine sweep. The 5B
+SophiaG fine job `12478568` exhausted walltime after non-resumable retries and
+is not plotted as a completed fine result. The 30B SophiaG fine job `12478570`
+is still running, and the 75-point resumable 30B AdamW replacement `12478581`
+is queued over `[3e-7, 1e-2]`. PR #23 supplies the checkpoint/resume mechanism
+validated by interruption canary `12478576` -> `12478580`; this results page
+remains the publication unit. Muon remains excluded because its first-update
+Newton–Schulz corruption has not passed a finite-gradient, finite-weight,
+real-update canary.
 
 Earlier replacement attempts remain useful provenance. The original Aurora
 submissions failed before training for two successive runtime-contract defects:
@@ -164,23 +168,33 @@ when the application detected an interior blow-up.
 |---|---|---|---:|---:|---:|---:|---:|---:|---|
 | `12478508` | 5B / AdamW | fine | 100 | 100 | 7.9258 | 6.579e-4 | **7.17e-5** | 7.17e-4 | complete, PBS exit 0 |
 | `12478509` | 10B / AdamW | fine | 100 | 100 | 7.8432 | 4.642e-4 | **4.16e-5** | 4.16e-4 | complete, PBS exit 0 |
-| `12478510` | 30B / AdamW | fine | — | — | — | — | — | — | running |
-| `12478511` | 5B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
-| `12478512` | 10B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
-| `12478513` | 30B / SophiaG | widened coarse | — | — | — | — | — | — | queued |
+| `12478510` | 30B / AdamW | fine | 94 / 100 | 94 | 8.0275 | 1.601e-4 | — | — | infrastructure failure; partial curve excluded |
+| `12478581` | 30B / AdamW | resumable fine, 75 points | — | — | — | — | — | — | queued; `[3e-7, 1e-2]`, checkpoint every 5 points |
+| `12478511` | 5B / SophiaG | widened coarse | 30 | 30 | 11.7588 | 2.395e-5 | **2.80e-6** | 2.80e-5 | complete, PBS exit 0 |
+| `12478512` | 10B / SophiaG | widened coarse | 30 | 30 | — | — | **1.66e-6** | 1.66e-5 | complete, PBS exit 0 |
+| `12478513` | 30B / SophiaG | widened coarse | 30 | 30 | 11.6722 | 7.880e-6 | **6.48e-7** | 6.48e-6 | complete, PBS exit 0 |
+| `12478568` | 5B / SophiaG | fine | — | — | — | — | — | — | walltime after retries; no completed fine artifact |
+| `12478569` | 10B / SophiaG | fine | 100 | 100 | 8.0347 | 1.660e-4 | 3.24e-7 [1] | 3.24e-6 | complete, PBS exit 0 |
+| `12478570` | 30B / SophiaG | fine | — | — | — | — | — | — | running; no terminal artifact yet |
+
+[1] The application detector emitted `3.24e-7`, below the fine sweep's sampled
+range (`1.66e-6`–`1.66e-4`). The chart marks it as outside the sampled range;
+it is not presented as a measured fine optimum.
 
 ### Current per-model charts
 
-These stable paths are **interim AdamW-only charts**, not completed
-all-optimizer comparisons. They will be regenerated at the same paths as valid
-SophiaG results arrive. Muon is intentionally omitted pending a valid canary.
+These stable paths contain only artifact-validated completed arms. Coarse and
+fine stages are labeled explicitly; incomplete fine sweeps are omitted. The
+30B panel currently contains SophiaG coarse only and states that both fine
+results are pending. Muon is intentionally omitted pending a valid canary.
 
-| model | chart |
-|---|---|
-| 5B | ![5B OLMo-3-vocab AdamW fine sweep](figures/olmo2tok-gbs6144/lr_finder_5b_olmo2tok.png) |
-| 10B | ![10B OLMo-3-vocab AdamW fine sweep](figures/olmo2tok-gbs6144/lr_finder_10b_olmo2tok.png) |
+| model | chart | included completed arms |
+|---|---|---|
+| 5B | ![5B OLMo-3-vocab LR sweeps](figures/olmo2tok-gbs6144/lr_finder_5b_olmo2tok.png) | AdamW fine; SophiaG coarse |
+| 10B | ![10B OLMo-3-vocab LR sweeps](figures/olmo2tok-gbs6144/lr_finder_10b_olmo2tok.png) | AdamW fine; SophiaG fine |
+| 30B | ![30B OLMo-3-vocab SophiaG coarse sweep](figures/olmo2tok-gbs6144/lr_finder_30b_olmo2tok.png) | SophiaG coarse only; fine pending |
 
-![5B and 10B AdamW fine sweeps](figures/olmo2tok-gbs6144/lr_finder_comparison.png)
+![Current validated OLMo-3-vocab LR-finder arms](figures/olmo2tok-gbs6144/lr_finder_comparison.png)
 
 ## Earlier completed-run snapshot (2026-09-21)
 

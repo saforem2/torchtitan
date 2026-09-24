@@ -24,6 +24,24 @@ production batch (GBS=6144) AdamW's usable LR collapses to ~7e-7 and 1e-6
 sits on a NaN cliff. Prefer the production-batch results below; treat the
 small-batch table as a rough starting point for *small* runs only.
 
+### OLMo-3-vocab ladder at GBS=6144 (active campaign)
+
+These are model-size × optimizer results at the production batch. A value is
+listed only for a completed, artifact-validated arm; coarse recommendations
+remain labeled coarse and incomplete fine sweeps are not promoted.
+
+| Model | AdamW | SophiaG | current evidence |
+|---|---:|---:|---|
+| 5B | **7.17e-5** (fine) | **2.80e-6** (coarse) | AdamW fine complete; SophiaG fine walltime-truncated |
+| 10B | **4.16e-5** (fine) | `3.24e-7` detector [1] | both fine artifacts complete |
+| 30B | pending | **6.48e-7** (coarse) | SophiaG fine running; resumable AdamW fine queued |
+
+[1] The 10B SophiaG detector value is below its fine sweep's sampled range;
+it is recorded for provenance, not claimed as a measured fine optimum.
+
+Per-model curves and the complete job table are in the
+[September OLMo-3-vocab campaign page](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md).
+
 ### 80B at the production batch (GBS=6144) -- the validated guidance
 
 | Optimizer @ GBS=6144 | usable LR | min loss | behavior |
@@ -177,4 +195,4 @@ files in this directory and were missing from this index entirely until
 | 2026-08-23 | [30B GBS=960, three optimizers](2026-08-23-30b-gbs960-three-optimizers.md) | AdamW 3.05e-05, Mano 5.61e-05, SophiaG 3.55e-05 (Sunspot, 16N) |
 | 2026-08-23 | [30B Mano on Sunspot](2026-08-23-30b-mano-sunspot.md) | Mano arm detail |
 | 2026-08-30 | [30B GBS=960, Muon](2026-08-30-30b-gbs960-muon.md) | Muon arm |
-| 2026-09-18 / updated 2026-09-23 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; current coarse-to-fine wave has completed 5B/10B AdamW fine results and interim per-model charts; 30B/SophiaG pending |
+| 2026-09-18 / updated 2026-09-24 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; validated AdamW fine (5B/10B), SophiaG coarse (5B/10B/30B), and SophiaG fine (10B) evidence; remaining fine arms explicitly pending/incomplete |

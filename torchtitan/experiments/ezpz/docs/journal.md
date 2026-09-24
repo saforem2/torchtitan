@@ -6588,3 +6588,21 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Merged upstream main into ezpz branch
 - Upstream changes included GraphTrainer bucketing fixes,
   SAC + FSDP improvements, and Qwen3-VL fused QKV support
+
+## 2026-09-24 — LR-finder resume validation and chart refresh
+
+- Validated cross-allocation LR-finder recovery with Sunspot jobs `12478576`
+  and `12478580`: the resumed job loaded `step-2`, continued at point 3, and
+  completed 10/10 finite points with checkpoints at 2/4/6/8/10 and terminal
+  CSV/NPZ/PNG artifacts.
+- Submitted resumable 30B AdamW replacement `12478581`: 75 endpoint-inclusive
+  logarithmic points over `[3e-7, 1e-2]`, checkpointing every five points.
+- Validated 10B SophiaG fine job `12478569`: 100/100 finite rows and terminal
+  CSV/NPZ/PNG artifacts. Its detector output (`3.24e-7`) is below the sampled
+  fine range and is labeled accordingly rather than promoted as a measured
+  optimum.
+- Recorded 5B SophiaG fine `12478568` as walltime-truncated and excluded it
+  from completed-result charts.
+- Regenerated stable 5B/10B/30B and comparison charts from committed immutable
+  CSV copies. The 30B panel is explicitly SophiaG coarse only until fine
+  artifacts arrive.
