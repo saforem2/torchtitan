@@ -33,9 +33,10 @@ from torchtitan.config.transform import (
 )
 from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.models.common.config_utils import decoder_vocab_size
+from torchtitan.models.common.decoder import Decoder
 from torchtitan.models.gpt_oss import model_registry as gpt_oss_model_registry
 from torchtitan.models.qwen3 import model_registry
-from torchtitan.protocols.model_spec import ModelSpec
+from torchtitan.models.qwen3_5 import model_registry as qwen3_5_model_registry
 from torchtitan.rl.components.training_sample_builder import TrainingSampleBuilder
 from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
 from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
@@ -77,7 +78,7 @@ def _qwen3_rl_model_registry(
     seq_len: int,
     attn_backend: str,
     converters: list[ModelConfigConverter.Config] | None = None,
-) -> ModelSpec:
+) -> Decoder.Config:
     """``qwen3.model_registry`` for RL, with the lm_head fp32 cast always on.
 
     RL logprob / KL math needs the lm_head logits in fp32, so every RL config
@@ -95,11 +96,11 @@ def rl_grpo_qwen3_0_6b_varlen() -> Controller.Config:
     """GRPO training config for Qwen3-0.6B (6 GPUs: 4 gen + 2 train)."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_rl_model_registry(
+    model_config = _qwen3_rl_model_registry(
         "0.6B", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-0.6B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -139,7 +140,7 @@ def rl_grpo_qwen3_0_6b_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -177,9 +178,11 @@ def rl_grpo_qwen3_0_6b_flex() -> Controller.Config:
     """GRPO training config for Qwen3-0.6B with flex attention (4 GPUs: 2 gen + 2 train)."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_rl_model_registry("0.6B", seq_len=seq_len, attn_backend="flex")
+    model_config = _qwen3_rl_model_registry(
+        "0.6B", seq_len=seq_len, attn_backend="flex"
+    )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-0.6B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -215,7 +218,7 @@ def rl_grpo_qwen3_0_6b_flex() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -244,13 +247,13 @@ def rl_grpo_qwen3_0_6b_flex_batch_invariant() -> Controller.Config:
     forward (even at data_parallel_shard_degree=1), matching the bf16 generator.
     """
     config = rl_grpo_qwen3_0_6b_flex()
-    config.model_spec = _qwen3_rl_model_registry(
+    config.model = _qwen3_rl_model_registry(
         "0.6B",
         seq_len=config.trainer.training.max_context_length,
         attn_backend="flex",
         converters=[BatchInvariantFlexConverter.Config()],
     )
-    block_size = config.model_spec.model.layers[0].attention.inner_attention.block_size
+    block_size = config.model.layers[0].attention.inner_attention.block_size
     config.async_loop.batcher = dataclasses.replace(
         config.async_loop.batcher, per_sample_pad_multiple=block_size
     )
@@ -258,7 +261,6 @@ def rl_grpo_qwen3_0_6b_flex_batch_invariant() -> Controller.Config:
     # latest weights before generating so trainer/generator logprobs stay
     # bitwise-identical (bit_wise/logprob_diff == 0) every step, not just step 1.
     config.async_loop.target_offpolicy_steps = 0
-    config.async_loop.window_fraction = None
     config.trainer = dataclasses.replace(
         config.trainer,
         debug=_BATCH_INVARIANT_DEBUG,
@@ -283,9 +285,9 @@ def rl_grpo_gpt_oss_20b_varlen() -> Controller.Config:
     """
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = gpt_oss_model_registry("20b", seq_len=seq_len, attn_backend="varlen")
+    model_config = gpt_oss_model_registry("20b", seq_len=seq_len, attn_backend="varlen")
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/gpt-oss-20b",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -325,7 +327,7 @@ def rl_grpo_gpt_oss_20b_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -349,11 +351,11 @@ def rl_grpo_gpt_oss_debug_varlen() -> Controller.Config:
     """Small GPT-OSS debug config (random init) to exercise the full RL loop."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = gpt_oss_model_registry(
+    model_config = gpt_oss_model_registry(
         "debugmodel", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="tests/assets/tokenizer",
         async_loop=AsyncLoopConfig(
             num_training_steps=3,
@@ -390,7 +392,7 @@ def rl_grpo_gpt_oss_debug_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -426,18 +428,17 @@ def rl_grpo_gpt_oss_debug_varlen_batch_invariant() -> Controller.Config:
     batch_invariant_config = DebugConfig(batch_invariant=True, deterministic=True)
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = gpt_oss_model_registry(
+    model_config = gpt_oss_model_registry(
         "debugmodel", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="tests/assets/tokenizer",
         async_loop=AsyncLoopConfig(
             num_training_steps=3,
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
             target_offpolicy_steps=0,
-            window_fraction=None,
             num_prompts_per_train_step=5,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),
@@ -475,7 +476,7 @@ def rl_grpo_gpt_oss_debug_varlen_batch_invariant() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -503,11 +504,11 @@ def rl_grpo_qwen3_1_7b() -> Controller.Config:
     """GRPO training config for Qwen3-1.7B (6 GPUs: 4 gen + 2 train)."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_rl_model_registry(
+    model_config = _qwen3_rl_model_registry(
         "1.7B", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-1.7B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -542,7 +543,7 @@ def rl_grpo_qwen3_1_7b() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -566,9 +567,11 @@ def rl_grpo_qwen3_14b() -> Controller.Config:
     """GRPO training config for Qwen3-14B (16 GPUs: 8 gen + 8 train)."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_rl_model_registry("14B", seq_len=seq_len, attn_backend="varlen")
+    model_config = _qwen3_rl_model_registry(
+        "14B", seq_len=seq_len, attn_backend="varlen"
+    )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-14B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -604,7 +607,7 @@ def rl_grpo_qwen3_14b() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -633,11 +636,11 @@ def rl_grpo_qwen3_moe_debug_varlen() -> Controller.Config:
     """
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = model_registry(
+    model_config = model_registry(
         "debugmodel_moe", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="tests/assets/tokenizer",
         async_loop=AsyncLoopConfig(
             num_training_steps=5,
@@ -675,7 +678,7 @@ def rl_grpo_qwen3_moe_debug_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -709,7 +712,7 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
     that config disables it -- DeepEP v2's inference dispatch is a static, host-sync-free
     EXPAND layout, so this generator enables CUDA graph capture.
 
-    Per-role config from ONE shared model_spec: the trainer uses it as-is (compact,
+    Per-role config from one shared model config: the trainer uses it as-is (compact,
     host-synced, backward-able DeepEP path), while the generator applies per-actor
     overrides (``generator.override``) to its own copy (``fused_swiglu`` +
     ``deepep_override`` with ``cuda_graph_compatible=True``) to switch its dispatchers to the
@@ -717,7 +720,7 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
     trainer and weight sync are unaffected.
     """
     config = rl_grpo_qwen3_moe_debug_varlen()
-    config.model_spec = model_registry(
+    config.model = model_registry(
         "debugmodel_moe",
         seq_len=config.trainer.training.max_context_length,
         attn_backend="varlen",
@@ -732,7 +735,7 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
             loss_config,
             loss_fn=dataclasses.replace(
                 loss_config.loss_fn,
-                global_vocab_size=decoder_vocab_size(config.model_spec),
+                global_vocab_size=decoder_vocab_size(config.model),
             ),
         ),
     )
@@ -746,7 +749,7 @@ def rl_grpo_qwen3_moe_debug_deepep() -> Controller.Config:
             ),
         ]
     )
-    config.generator.cuda_graph = VLLMCudaGraphConfig(mode="FULL_AND_PIECEWISE")
+    config.generator.cuda_graph = VLLMCudaGraphConfig(mode="FULL")
     # vLLM's per-step token budget. The wrapper derives DeepEP's per-rank buffer capacity
     # from this scheduler limit, CUDA graph capture sizes, CP, and SP.
     config.generator.max_num_batched_tokens = 2048
@@ -770,21 +773,20 @@ def rl_grpo_qwen3_moe_debug_varlen_batch_invariant() -> Controller.Config:
     """
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = model_registry(
+    model_config = model_registry(
         "debugmodel_moe",
         seq_len=seq_len,
         attn_backend="varlen",
         moe_comm_backend="standard",
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="tests/assets/tokenizer",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
             target_offpolicy_steps=0,
-            window_fraction=None,
             num_prompts_per_train_step=8,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),
@@ -823,7 +825,7 @@ def rl_grpo_qwen3_moe_debug_varlen_batch_invariant() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -855,9 +857,9 @@ def rl_grpo_qwen3_30b_a3b_varlen() -> Controller.Config:
     """
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = model_registry("30B-A3B", seq_len=seq_len, attn_backend="varlen")
+    model_config = model_registry("30B-A3B", seq_len=seq_len, attn_backend="varlen")
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-30B-A3B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -895,7 +897,7 @@ def rl_grpo_qwen3_30b_a3b_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -965,11 +967,11 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant() -> Controller.Config:
     batch_invariant_config = DebugConfig(batch_invariant=True, deterministic=True)
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_rl_model_registry(
+    model_config = _qwen3_rl_model_registry(
         "0.6B", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3-0.6B",
         num_generators=3,
         async_loop=AsyncLoopConfig(
@@ -977,7 +979,6 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant() -> Controller.Config:
             # Batch invariance: strict on-policy so trainer/generator logprobs
             # stay bitwise-identical every step.
             target_offpolicy_steps=0,
-            window_fraction=None,
             num_prompts_per_train_step=8,
             num_samples_per_prompt=num_samples_per_prompt,
             validation=ValidationConfig(num_samples=20),
@@ -1011,7 +1012,7 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
@@ -1038,7 +1039,7 @@ def _qwen3_5_rl_model_registry(
     seq_len: int,
     attn_backend: str = "varlen",
     converters: list[ModelConfigConverter.Config] | None = None,
-) -> ModelSpec:
+) -> Decoder.Config:
     """``qwen3_5.model_registry`` for RL, with the lm_head fp32 cast always on.
 
     RL logprob / KL math needs the lm_head logits in fp32, so every RL config
@@ -1059,11 +1060,11 @@ def rl_grpo_qwen3_5_9b_varlen() -> Controller.Config:
     """Qwen3.5-9B GRPO with trainer and generator TP=2 (6 GPUs)."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_5_rl_model_registry(
+    model_config = _qwen3_5_rl_model_registry(
         "9B", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="torchtitan/rl/example_checkpoint/Qwen3.5-9B",
         async_loop=AsyncLoopConfig(
             num_training_steps=10,
@@ -1099,14 +1100,13 @@ def rl_grpo_qwen3_5_9b_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
         generator=VLLMGenerator.Config(
             model_dtype="bfloat16",
-            # GDN decode supports full capture; prefill breaks into eager pieces.
-            cuda_graph=VLLMCudaGraphConfig(mode="FULL_AND_PIECEWISE"),
+            cuda_graph=VLLMCudaGraphConfig(mode="FULL"),
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1,
                 tensor_parallel_degree=2,
@@ -1124,11 +1124,7 @@ def rl_grpo_qwen3_5_9b_varlen() -> Controller.Config:
 def rl_grpo_qwen3_5_9b_varlen_batch_invariant() -> Controller.Config:
     """On-policy, batch-invariant Qwen3.5-9B GRPO with matching TP=2."""
     config = rl_grpo_qwen3_5_9b_varlen()
-    config.async_loop = dataclasses.replace(
-        config.async_loop,
-        target_offpolicy_steps=0,
-        window_fraction=None,
-    )
+    config.async_loop = dataclasses.replace(config.async_loop, target_offpolicy_steps=0)
     config.trainer = dataclasses.replace(
         config.trainer,
         debug=_BATCH_INVARIANT_DEBUG,
@@ -1149,11 +1145,11 @@ def rl_grpo_qwen3_5_debug_varlen() -> Controller.Config:
     """Random-init Qwen3.5 GRPO config for CI."""
     num_samples_per_prompt = 8
     seq_len = 2048
-    model_spec = _qwen3_5_rl_model_registry(
+    model_config = _qwen3_5_rl_model_registry(
         "debugmodel", seq_len=seq_len, attn_backend="varlen"
     )
     return Controller.Config(
-        model_spec=model_spec,
+        model=model_config,
         hf_assets_path="tests/assets/tokenizer",
         async_loop=AsyncLoopConfig(
             num_training_steps=5,
@@ -1188,13 +1184,13 @@ def rl_grpo_qwen3_5_debug_varlen() -> Controller.Config:
             loss=ChunkedLossWrapper.Config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
-                    global_vocab_size=decoder_vocab_size(model_spec)
+                    global_vocab_size=decoder_vocab_size(model_config)
                 ),
             ),
         ),
         generator=VLLMGenerator.Config(
             model_dtype="bfloat16",
-            cuda_graph=VLLMCudaGraphConfig(mode="FULL_AND_PIECEWISE"),
+            cuda_graph=VLLMCudaGraphConfig(mode="FULL"),
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1,
                 tensor_parallel_degree=2,
@@ -1212,11 +1208,7 @@ def rl_grpo_qwen3_5_debug_varlen() -> Controller.Config:
 def rl_grpo_qwen3_5_debug_varlen_batch_invariant() -> Controller.Config:
     """On-policy, batch-invariant Qwen3.5 GRPO config for CI."""
     config = rl_grpo_qwen3_5_debug_varlen()
-    config.async_loop = dataclasses.replace(
-        config.async_loop,
-        target_offpolicy_steps=0,
-        window_fraction=None,
-    )
+    config.async_loop = dataclasses.replace(config.async_loop, target_offpolicy_steps=0)
     config.trainer = dataclasses.replace(
         config.trainer,
         debug=_BATCH_INVARIANT_DEBUG,
@@ -1239,7 +1231,7 @@ def rl_grpo_qwen3_6_27b_varlen_perf() -> Controller.Config:
     """
     seq_len = 65536
     config = rl_grpo_qwen3_5_9b_varlen()
-    config.model_spec = _qwen3_5_rl_model_registry(
+    config.model = _qwen3_5_rl_model_registry(
         "27B", seq_len=seq_len, attn_backend="varlen"
     )
     config.hf_assets_path = "torchtitan/rl/example_checkpoint/Qwen3.6-27B"
@@ -1253,7 +1245,7 @@ def rl_grpo_qwen3_6_27b_varlen_perf() -> Controller.Config:
             loss_config,
             loss_fn=dataclasses.replace(
                 loss_config.loss_fn,
-                global_vocab_size=decoder_vocab_size(config.model_spec),
+                global_vocab_size=decoder_vocab_size(config.model),
             ),
         ),
         optimizer=dataclasses.replace(
