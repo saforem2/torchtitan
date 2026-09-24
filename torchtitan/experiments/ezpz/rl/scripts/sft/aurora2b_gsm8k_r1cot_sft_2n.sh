@@ -9,7 +9,7 @@
 # Stage 2 of the MDS154391 reproduction: continue the best broad-SFT semantic
 # checkpoint (step 600) on gsm8k-r1cot -- gsm8k rationales wrapped
 # in the <think>/<answer> envelope -- to teach the model to EMIT reasoning
-# traces. 7473 examples, 3 epochs, 2N, GAS=10 gives checkpoint 93.
+# traces. 7473 examples, 3 epochs, 2N, packed online gives checkpoint 93.
 #
 # Gate (measured by scripts/eval/eval_cot_gsm8k.py on a saved checkpoint):
 #   format hit-rate ~0 -> >90%, CoT accuracy no worse than the 0.15 baseline.
@@ -50,7 +50,7 @@ python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl mis
 # Base = the shipped full-mix SFT deliverable (instruction-tuned; has seen math
 # rationales but does not emit a delimited <think> block). Continue-SFT from it.
 MODEL_PATH="${MODEL_PATH:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/evals/step-600/hf}"
-CKPT_DIR="${CKPT_DIR:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n}"
+CKPT_DIR="${CKPT_DIR:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2}"
 MAX_LENGTH="${MAX_LENGTH:-2048}"      # MUST be >1024: the <answer> tail would truncate
 NUM_EPOCHS="${NUM_EPOCHS:-3}"
 LR="${LR:-2e-5}"
@@ -76,7 +76,7 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --num_train_epochs "${NUM_EPOCHS}" \
     --learning_rate "${LR}" \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 10 \
+    --gradient_accumulation_steps 1 \
     --max_length "${MAX_LENGTH}" \
     --bf16 --fsdp full_shard \
     --gradient_checkpointing \
