@@ -74,6 +74,12 @@ raw semantic generations rather than from remembered status messages.
 - Fresh retry `12478621` is running. It must show non-truncated terminal
   rollouts, component rewards, nonzero advantages/gradients, policy sync, and
   checkpoints 10/20 before the GRPO stack is called functional.
+- Its first retained batch validates the stop-token correction: 36/36 rollouts
+  completed rather than truncating, all 36 had nonzero componentized rewards,
+  and 12 had nonzero normalized advantages. Jobs `12478622` and `12478623` were
+  submitted concurrently to evaluate standalone HF checkpoints 31 and 62 on the
+  same fixed GSM8K-200 set; these test whether an earlier Stage-2 checkpoint
+  retains the formatting gain with less accuracy regression than checkpoint 93.
 
 ### 30B synchronous-DCP cache fix
 
