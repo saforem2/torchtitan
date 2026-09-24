@@ -89,15 +89,29 @@ _PROMPT_SUFFIX = (
 
 
 def build_prompts(tokenizer, questions: list[str]) -> list[str]:
-    out = []
-    for q in questions:
-        msgs = [{"role": "user", "content": q + _PROMPT_SUFFIX}]
-        out.append(
-            tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=True
+    """Serialize prompts exactly like Stage-1 AGPT SFT.
+
+    The MDS tokenizer intentionally has no Hugging Face ``chat_template``.
+    Stage-1 used explicit Gemma-style turn markers with no BOS/EOS, so evaluation
+    must not delegate formatting to ``apply_chat_template``.  Validate the
+    resulting special-token IDs to fail closed if the supplied tokenizer is not
+    the AGPT tokenizer used for training.
+    """
+    prompts = [
+        "<start_of_turn>user\n"
+        + (question + _PROMPT_SUFFIX).lstrip("\n")
+        + "<end_of_turn>\n<start_of_turn>model\n"
+        for question in questions
+    ]
+    for prompt in prompts[:1]:
+        ids = tokenizer.encode(prompt, add_special_tokens=False)
+        if not ids or ids[0] != 106 or ids[-1] != 108 or 107 not in ids:
+            raise ValueError(
+                "AGPT prompt serialization/tokenizer mismatch: expected first "
+                "token 106, an end-of-turn token 107, and trailing newline 108; "
+                f"got first={ids[0] if ids else None}, last={ids[-1] if ids else None}"
             )
-        )
-    return out
+    return prompts
 
 
 def summarize(texts, finish_reasons, fmts, corrects):
