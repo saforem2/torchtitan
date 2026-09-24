@@ -61,7 +61,19 @@ raw semantic generations rather than from remembered status messages.
   nonzero policy versions, real reward-bearing updates, checkpoints 10 and 20,
   bounded raw rollouts, and clean actor shutdown. This is a stack-functionality
   test, not evidence that GRPO improves quality.
-- PBS job `12478619` is currently queued and has not executed application code.
+- Initial smoke `12478619` proved model load, vLLM rollout, initial TorchStore
+  sync (7.94 GB at 1.81 GB/s), repeated post-step sync (about 100 GB/s), and
+  policy-version advancement 0 through 4. However, all 100 retained rollouts
+  reached the 700-token limit: the default renderer supplied only eos ID 1 and
+  omitted AGPT `<end_of_turn>` ID 107. Every sample was therefore classified
+  `truncated_length`, producing zero reward, loss, and gradient. The run was
+  cancelled after step 4 (`Exit_status=143`) rather than wasting 20 no-op steps.
+- Commit `5e3da9fc6ba87f550ea875b67ff9b2ba23ae7ade` wraps the default renderer
+  with explicit AGPT stop IDs `(1, 107)`. The built renderer returned `[1, 107]`
+  in the protected runtime and all 9 focused renderer tests passed.
+- Fresh retry `12478621` is running. It must show non-truncated terminal
+  rollouts, component rewards, nonzero advantages/gradients, policy sync, and
+  checkpoints 10/20 before the GRPO stack is called functional.
 
 ### 30B synchronous-DCP cache fix
 
