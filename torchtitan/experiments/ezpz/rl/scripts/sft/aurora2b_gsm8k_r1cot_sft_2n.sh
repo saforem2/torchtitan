@@ -32,9 +32,19 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
 
 cd "${SUBMIT_DIR}"
+actual_commit=$(git rev-parse HEAD) || exit 2
+[[ "${actual_commit}" == "${EXPECTED_COMMIT}" ]] || {
+    echo "FATAL: commit mismatch expected=${EXPECTED_COMMIT} actual=${actual_commit}"
+    exit 2
+}
+git diff --quiet && git diff --cached --quiet || {
+    echo "FATAL: tracked worktree changes present"
+    exit 2
+}
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 
 # Base = the shipped full-mix SFT deliverable (instruction-tuned; has seen math
