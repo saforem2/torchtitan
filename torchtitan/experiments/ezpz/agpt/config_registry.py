@@ -693,6 +693,11 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     )
     cfg.checkpointer.interval = 300
     cfg.checkpointer.keep_latest_k = 0
+    # FaultTolerantTrainer retains ``checkpoint`` as a legacy CLI alias and its
+    # post-init synchronizes that alias back into ``checkpointer``. Keep both
+    # references identical so config parsing cannot erase this specialized
+    # manager or its MDS initialization/resume paths.
+    cfg.checkpoint = cfg.checkpointer
     cfg.metrics.log_freq = 10
     cfg.metrics.enable_wandb = True
     cfg.validator = None

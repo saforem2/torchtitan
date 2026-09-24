@@ -92,6 +92,21 @@ class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
         self.assertIsInstance(
             cfg.checkpointer, GrainStreamingCheckpointManager.Config
         )
+        self.assertIs(cfg.checkpoint, cfg.checkpointer)
+        self.assertEqual(
+            cfg.checkpointer.folder,
+            "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming",
+        )
+        self.assertTrue(cfg.checkpointer.initial_load_path.endswith("/step-0"))
+
+        cfg.__post_init__()
+        self.assertIsInstance(
+            cfg.checkpointer, GrainStreamingCheckpointManager.Config
+        )
+        self.assertEqual(
+            cfg.checkpointer.folder,
+            "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming",
+        )
 
 
 if __name__ == "__main__":
