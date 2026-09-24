@@ -76,10 +76,20 @@ raw semantic generations rather than from remembered status messages.
   checkpoints 10/20 before the GRPO stack is called functional.
 - Its first retained batch validates the stop-token correction: 36/36 rollouts
   completed rather than truncating, all 36 had nonzero componentized rewards,
-  and 12 had nonzero normalized advantages. Jobs `12478622` and `12478623` were
-  submitted concurrently to evaluate standalone HF checkpoints 31 and 62 on the
-  same fixed GSM8K-200 set; these test whether an earlier Stage-2 checkpoint
-  retains the formatting gain with less accuracy regression than checkpoint 93.
+  and 12 had nonzero normalized advantages. A later raw-rollout audit through
+  policy version 19 covered 328 samples: 327 completed, 327 were format-valid
+  and answer-extractable, 106 were exact-correct, 268 had nonzero advantages,
+  and one pathological repetitive sample truncated. Stratified inspection of
+  low-, middle-, high-reward and latest-policy samples found fluent, on-topic
+  arithmetic: correct samples had concise valid derivations, while failures were
+  mostly coherent setup/arithmetic mistakes rather than gibberish. Since wrong
+  but well-formed answers receive the 0.25 format/extractability floor, reward
+  alone is not a quality verdict; held-out semantic evaluation remains required.
+  Trainer steps 16-19 showed nonzero gradient norms 0.18-0.25.
+  Jobs `12478622` and `12478623` were submitted concurrently to evaluate
+  standalone HF checkpoints 31 and 62 on the same fixed GSM8K-200 set; these
+  test whether an earlier Stage-2 checkpoint retains the formatting gain with
+  less accuracy regression than checkpoint 93.
 
 ### 30B synchronous-DCP cache fix
 
