@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot the 30B GBS=960 LR-finder sweeps for AdamW / Mano / SophiaG.
 
 The finder writes a per-arm lr_vs_loss.png under outputs/, but outputs/ is
