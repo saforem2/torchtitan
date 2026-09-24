@@ -1,0 +1,98 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+from __future__ import annotations
+
+import unittest
+from unittest import mock
+
+from torch.distributed.checkpoint.stateful import Stateful
+
+from torchtitan.experiments.ezpz.grain_checkpoint import (
+    GrainStreamingCheckpointManager,
+    _optional_hf_previous_state_missing_keys,
+)
+
+
+class _State(Stateful):
+    def __init__(self, state):
+        self.state = state
+
+    def state_dict(self):
+        return self.state
+
+    def load_state_dict(self, state_dict):
+        self.state = state_dict
+
+
+class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
+    def test_allows_only_nullable_dataloader_previous_state(self):
+        states = {
+            "train_state": _State({"step": 600}),
+            "dataloader": _State(
+                {
+                    "version": 1,
+                    "dp_rank_0": {
+                        "hf": {
+                            "examples_iterable": {
+                                "previous_state": None,
+                                "num_chunks_since_previous_state": 0,
+                            }
+                        }
+                    },
+                }
+            ),
+        }
+        checkpoint_keys = {
+            "train_state.step",
+            "dataloader.version",
+            "dataloader.dp_rank_0.hf.examples_iterable.num_chunks_since_previous_state",
+        }
+
+        self.assertEqual(
+            _optional_hf_previous_state_missing_keys(states, checkpoint_keys),
+            {"dataloader.dp_rank_0.hf.examples_iterable.previous_state"},
+        )
+
+    def test_rejects_missing_required_training_state(self):
+        states = {
+            "train_state": _State({"step": 600}),
+            "dataloader": _State(
+                {"dp_rank_0": {"hf": {"examples_iterable": {"previous_state": None}}}}
+            ),
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "train_state.step"):
+            _optional_hf_previous_state_missing_keys(states, set())
+
+    def test_rejects_non_null_previous_state(self):
+        states = {
+            "dataloader": _State(
+                {
+                    "dp_rank_0": {
+                        "hf": {"examples_iterable": {"previous_state": {"shard": 4}}}
+                    }
+                }
+            )
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "previous_state"):
+            _optional_hf_previous_state_missing_keys(states, set())
+
+    @mock.patch(
+        "torchtitan.experiments.ezpz.agpt.config_registry.Path.is_file",
+        return_value=True,
+    )
+    def test_mds_streaming_recipe_uses_compatible_manager(self, _is_file):
+        from torchtitan.experiments.ezpz.agpt.config_registry import (
+            agpt_2b_mds154391_tulu_math_uc_streaming,
+        )
+
+        cfg = agpt_2b_mds154391_tulu_math_uc_streaming()
+        self.assertIsInstance(
+            cfg.checkpointer, GrainStreamingCheckpointManager.Config
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

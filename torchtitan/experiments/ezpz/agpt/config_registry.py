@@ -6,7 +6,7 @@
 
 import json
 import os
-from dataclasses import is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,6 +36,9 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.grain_checkpoint import (
+    GrainStreamingCheckpointManager,
+)
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
     default_muon,
@@ -674,7 +677,14 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     # 6,144 packed sequences x 1,024 tokens. At 96 DP ranks and LBS=2 this
     # resolves to gradient accumulation 32, matching the historical recipe.
     cfg.training.num_tokens_per_train_step = 6_144 * 1_024
-    assert cfg.checkpointer is not None
+    prior_checkpointer = cfg.checkpointer
+    assert prior_checkpointer is not None
+    cfg.checkpointer = GrainStreamingCheckpointManager.Config(
+        **{
+            field.name: getattr(prior_checkpointer, field.name)
+            for field in fields(prior_checkpointer)
+        }
+    )
     cfg.checkpointer.initial_load_path = str(dcp_base)
     cfg.checkpointer.initial_load_in_hf = False
     cfg.checkpointer.initial_load_model_only = True
