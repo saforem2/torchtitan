@@ -71,25 +71,31 @@ raw semantic generations rather than from remembered status messages.
 - Commit `5e3da9fc6ba87f550ea875b67ff9b2ba23ae7ade` wraps the default renderer
   with explicit AGPT stop IDs `(1, 107)`. The built renderer returned `[1, 107]`
   in the protected runtime and all 9 focused renderer tests passed.
-- Fresh retry `12478621` is running. It must show non-truncated terminal
-  rollouts, component rewards, nonzero advantages/gradients, policy sync, and
-  checkpoints 10/20 before the GRPO stack is called functional.
-- Its first retained batch validates the stop-token correction: 36/36 rollouts
-  completed rather than truncating, all 36 had nonzero componentized rewards,
-  and 12 had nonzero normalized advantages. A later raw-rollout audit through
-  policy version 19 covered 328 samples: 327 completed, 327 were format-valid
-  and answer-extractable, 106 were exact-correct, 268 had nonzero advantages,
-  and one pathological repetitive sample truncated. Stratified inspection of
-  low-, middle-, high-reward and latest-policy samples found fluent, on-topic
-  arithmetic: correct samples had concise valid derivations, while failures were
-  mostly coherent setup/arithmetic mistakes rather than gibberish. Since wrong
-  but well-formed answers receive the 0.25 format/extractability floor, reward
-  alone is not a quality verdict; held-out semantic evaluation remains required.
-  Trainer steps 16-19 showed nonzero gradient norms 0.18-0.25.
-  Jobs `12478622` and `12478623` were submitted concurrently to evaluate
-  standalone HF checkpoints 31 and 62 on the same fixed GSM8K-200 set; these
-  test whether an earlier Stage-2 checkpoint retains the formatting gain with
-  less accuracy regression than checkpoint 93.
+- Corrected retry `12478621` completed 20/20 steps with `Exit_status=0`,
+  checkpoints 10 and 20, policy versions through 20, nonzero reward-bearing
+  gradients, repeated post-update TorchStore synchronization, and clean actor
+  shutdown. Its final rollout corpus contained 360 samples: 359 completed,
+  359 format-valid, 114 exact-correct, 278 with nonzero advantages, and one
+  pathological repetitive truncation.
+- Raw-rollout inspection across low-, middle-, high-reward and late-policy
+  strata found fluent, on-topic arithmetic rather than broad gibberish. Correct
+  samples had concise valid derivations; failures were mostly coherent setup or
+  arithmetic errors. Wrong but well-formed answers receive the 0.25
+  format/extractability floor, so reward alone is not a semantic quality verdict.
+- Stage-2 checkpoint evals completed cleanly: checkpoint 31 scored 33/200
+  (`16.5%`) with 170/200 format-valid (`85.0%`); checkpoint 62 scored 39/200
+  (`19.5%`) with 198/200 format-valid (`99.0%`); checkpoint 93 remained best at
+  43/200 (`21.5%`) and 197/200 (`98.5%`).
+- Initial GRPO merge/eval `12478626` failed closed because the legacy exporter
+  expected split Q/K/V keys while current DCP stores fused `wqkv` and `w13`.
+  Commit `e3b127ec9a25dded79167d0f167a26566d514cfd` added explicit dual-schema
+  support. Real preflight folded adapters in all 12 layers and changed 48
+  attention tensors relative to the base.
+- Corrected merge/eval `12478627` completed with `Exit_status=0`: GRPO step 20
+  scored exactly 43/200 (`21.5%`) with 197/200 format-valid (`98.5%`), identical
+  aggregate metrics to the Stage-2 base. The merge was real; deterministic
+  generations changed on 7/200 examples, but none changed correctness. The
+  20-step run therefore validates the full GRPO stack, not a quality gain.
 
 ### 30B synchronous-DCP cache fix
 
