@@ -1072,14 +1072,19 @@ def model_registry(
         for c in converters:
             config = c.build().convert(config)
 
-    # #4328 made max_context_length a required ModelSpec field. Read it off the
-    # flavor's own RoPE config rather than restating a constant here: that is
-    # where _build_agpt_config already threaded it, so the spec cannot drift
-    # from the model it describes.
-    if config.layers[0].attention.rope is None:
+    # The direct model contract stores this value on Decoder.Config. Keep the
+    # validation here because the registry caches templates and converters may
+    # replace attention subtrees before the config is returned.
+    rope = config.layers[0].attention.rope
+    if rope is None:
         raise ValueError(
             f"agpt flavor {flavor!r} has no RoPE config, so max_context_length "
-            "cannot be derived"
+            "cannot be validated"
+        )
+    if config.max_context_length != rope.max_context_length:
+        raise ValueError(
+            f"agpt flavor {flavor!r} has inconsistent context lengths: "
+            f"model={config.max_context_length}, rope={rope.max_context_length}"
         )
 
     return config
