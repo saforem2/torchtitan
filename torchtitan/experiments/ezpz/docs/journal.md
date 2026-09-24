@@ -144,6 +144,11 @@ Running log of what's happening, session by session. Most recent first.
   range by one decade to 2.8e-3 over 100 points; it preserves GBS 6144, sequence
   length 4096, full activation checkpointing, `CCL_OP_SYNC=1`, 64 active nodes,
   and four spares.
+- Wide job `12478624` completed 100/100 at exit 0 in 01:01:38. Validated terminal
+  artifacts include a 100-row CSV, NPZ, and PNG. The detector suggested
+  `7.04e-7` with primary blow-up at `7.04e-6` and reported a second crossing at
+  `4.96e-4`; minimum raw loss was `8.65569` at point 77. The completed job was
+  removed from live polling and promoted to a compact verified result card.
 - The LR runner does use native `ezpz launch --auto-retry --spare-nodes auto`.
   With `LRF_ACTIVE_NODES=64` inside a 68-node PBS allocation, all four extra
   nodes are genuine spares. `12478591` made three attempts (two blind swaps),
