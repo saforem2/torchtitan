@@ -161,7 +161,7 @@ has its own token/step goal in the linked page.
 > / sophiag ~1e-6 clean). TEAM DECISION OPEN: SophiaG vs mano. Full plan +
 > launch log:
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md);
-> LR-finder: [lr-finder/agpt/80b](../experiments/lr-finder/agpt/80b/README.md).
+> LR-finder: [lr-finder/agpt/80b](../experiments/lr-finder/agpt/agpt-v1/80b/README.md).
 
 </details>
 

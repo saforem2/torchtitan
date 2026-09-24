@@ -18,7 +18,7 @@
 >   NaN 1.36e-6).
 >
 > The consolidated per-optimizer table lives in
-> [`lr-finder/agpt/80b/README.md`](../../lr-finder/agpt/80b/README.md).
+> [`lr-finder/agpt/agpt-v1/80b/README.md`](../../lr-finder/agpt/agpt-v1/80b/README.md).
 
 The earlier LR-finder ran at **GBS=192** (world_size x LBS / TP, no GAS)
 -- ~32x below the ~6144 production target. Optimal LR is batch-size

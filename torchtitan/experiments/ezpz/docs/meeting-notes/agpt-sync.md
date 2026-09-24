@@ -647,7 +647,7 @@ Measured on a meta-device build: **21.5% of parameters (5.64B of 26.20B).**
 The other 78.5% run an internal AdamW branch.
 
 The LR follows the majority, which was measured rather than assumed: the
-no-rescale arm ([`12474327`](../experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md), `adjuster_lr_ref=False`) suggested 5.09e-04
+no-rescale arm ([`12474327`](../experiments/lr-finder/agpt/agpt-v2/2026-08-30-30b-gbs960-muon.md), `adjuster_lr_ref=False`) suggested 5.09e-04
 against the rescaled arm's 5.68e-04 -- **a factor of 1.12 for a 15.677x change
 in how the Muon minority is stepped.** So 5.68e-04 is close to what the
 AdamW-path parameters want, not what Muon wants.
@@ -805,7 +805,7 @@ simply got less done.
 
 Sunspot, 16N per arm, GBS=960 fixed, constant LR after a 20-step warmup, LRs
 from a per-optimizer
-[finder](../experiments/lr-finder/agpt/2026-08-23-30b-gbs960-three-optimizers.md) at
+[finder](../experiments/lr-finder/agpt/agpt-v2/2026-08-23-30b-gbs960-three-optimizers.md) at
 that exact batch (AdamW 3.05e-5, Mano 5.61e-5, SophiaG 3.55e-5 -- all measured
 blow-ups, not defaults).
 

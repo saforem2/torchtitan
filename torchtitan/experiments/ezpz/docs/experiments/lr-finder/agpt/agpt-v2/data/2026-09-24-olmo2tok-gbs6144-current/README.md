@@ -2,7 +2,7 @@
 
 These immutable CSV copies reproduce the stable charts in
 `../../figures/olmo2tok-gbs6144/` via
-`../../../../../scripts/plot_olmo2tok_coarse_fine.py`.
+`../../../../../../scripts/plot_olmo2tok_coarse_fine.py`.
 
 Included completed arms:
 

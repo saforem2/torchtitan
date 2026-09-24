@@ -478,7 +478,7 @@ Continues the 2026-09-06 entry below, after the machine was made usable again.
   factor of **1.12**. Removing a 15.677x multiplier from 21.5% of parameters
   moved the optimum 12%, so the AdamW-path majority anchors the curve. Read
   5.68e-04 as a property of the hybrid, not of Muon.
-  [lr-finder/agpt/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/2026-08-30-30b-gbs960-muon.md).
+  [lr-finder/agpt/agpt-v2/2026-08-30-30b-gbs960-muon.md](experiments/lr-finder/agpt/agpt-v2/2026-08-30-30b-gbs960-muon.md).
 - **Muon's shape cutoff is now a parameter, and a real-Muon arm exists.** The
   gate was `max(p.shape) <= 10000`, hardcoded at three sites, with the code's
   own comment reading "need to change this!!!". Its intent is to keep

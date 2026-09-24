@@ -100,7 +100,7 @@
 > (256N init segfault) is a separate, still-open blocker. History:
 > [20260703-80b-512n-sophiag-nan.md](../../../experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md),
 > [20260628-80b-sophiag-constant-lr-512-1024-2048.md](../../../experiments/agpt/aurora/20260628-80b-sophiag-constant-lr-512-1024-2048.md).
-> LR-finder: [lr-finder/agpt/80b](../../../experiments/lr-finder/agpt/80b/README.md).
+> LR-finder: [lr-finder/agpt/80b](../../../experiments/lr-finder/agpt/agpt-v1/80b/README.md).
 
 ## Every 80B experiment, in one place
 

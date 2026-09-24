@@ -14,8 +14,9 @@ per-model charts and a comparison containing only the available valid arms.
 Example:
   python plot_olmo2tok_coarse_fine.py \
       --data-dir /tmp/olmo2tok-lrf \
-      --output-dir docs/experiments/lr-finder/agpt/figures/olmo2tok-gbs6144
+      --output-dir docs/experiments/lr-finder/agpt/agpt-v2/figures/olmo2tok-gbs6144
 """
+
 from __future__ import annotations
 
 import argparse

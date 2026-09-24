@@ -17,7 +17,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
 
@@ -101,6 +100,7 @@ def main() -> None:
         / "experiments"
         / "lr-finder"
         / "agpt"
+        / "agpt-v2"
         / "data"
         / "2026-09-21-olmo3-gbs6144-interim",
     )
