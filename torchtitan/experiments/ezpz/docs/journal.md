@@ -53,6 +53,61 @@ Running log of what's happening, session by session. Most recent first.
   zero alone is never accepted as LR or PR validation: each successful training
   arm must show real finite optimizer steps and a fresh nonempty checkpoint.
 
+### MDS154391 Stage 1 and semantic checkpoint selection
+
+- Stage-1 job `12478590` completed native Grain broad SFT at step 900 with
+  `Exit_status=0`: final loss 1.02522, gradient norm 1.2596, HBM 19.40
+  GiB/rank, and throughput 2,071 tokens/s/rank. Immutable DCP checkpoints at
+  steps 300, 600, and 900 were retained.
+- GSM8K-200 raw-generation evaluation selected step 600 by semantics rather
+  than final training loss: step 300 scored 47/200 (23.5%), step 600 scored
+  52/200 (26.0%), and step 900 scored 48/200 (24.0%). None used the strict
+  `<answer>` envelope before focused Stage 2.
+- Jobs `12478604`--`12478606` each wrote all 200 rows, then wedged during vLLM
+  teardown because the `EngineCore` child remained alive. Their eventual 143
+  statuses were operator cleanup after artifact validation. The evaluator now
+  calls `llm.llm_engine.engine_core.shutdown()` in `finally`.
+
+### MDS154391 Stage 2 and GRPO smoke
+
+- Initial Stage-2 job `12478612` was technically healthy but scientifically
+  misconfigured: packing plus gradient accumulation 10 yielded only 12
+  optimizer steps. It was cancelled at authoritative step 4/12 and its partial
+  output is non-authoritative.
+- Corrected job `12478614`, pinned to `8acf6c7b152ae5ccaeb26688b7f451ad7b6a1728`,
+  used gradient accumulation 1 and the Stage-1 step-600 HF export. It completed
+  exactly 93/93 optimizer steps, three epochs, checkpoints 31/62/93, final loss
+  0.4852, and an approximately 7.94 GB HF model at `Exit_status=0`.
+- Semantic eval `12478618` retained 200 raw generations: 197/200 format-valid
+  (98.5%), 43/200 strict-answer correct (21.5%), and 3/200 truncated or
+  unclosed. Focused Stage 2 reproduced the historical B2 answer-envelope
+  behavior but did not improve the broad step-600 checkpoint's 26.0% exact
+  accuracy.
+- Commit `89cba3c023c93e03235f73a108cf203007202bad` adds a fail-closed one-node,
+  20-step Monarch/TorchStore/vLLM GRPO smoke from the completed Stage-2 model.
+  Acceptance requires initial and post-update policy synchronization, nonzero
+  policy versions, real reward-bearing updates, checkpoints 10 and 20, bounded
+  raw rollouts, and clean actor shutdown. Job `12478619` is queued; this is a
+  stack-functionality test, not evidence that GRPO improves model quality.
+
+### Additional DCP and 5B diagnosis
+
+- Old-cache 30B runs retained hook-generated contiguous tensors at about 57.23
+  GiB/rank and then failed during step-2 FSDP all-gather. Commit
+  `1d58869cde6a055d3d9ac5ec221eab756e81d34f` makes synchronous DCP state-dict
+  generation lazy while preserving stable cached storage for asynchronous DCP.
+- Canary `12478607` completed step 1 at 42.31 GiB/rank, about 15 GiB/rank below
+  old-cache runs, and wrote a complete 293 GB synchronous checkpoint in 74.7
+  seconds. Attempt 1 then hit multi-rank `SIGSEGV` during step-2 FSDP unshard;
+  attempt 2 restored the checkpoint in 863.9 seconds and entered the resumed
+  update before the job ended at exit 1. The terminal attempt-2 failure still
+  requires classification, and dependent `12478608` was not released.
+- 5B job `12478591` was not an OOM. Attempt 1 completed its range but found no
+  blow-up point; generic failover incorrectly retried that scientific outcome.
+  Later attempts hit nullable Grain restore state
+  `examples_iterable.previous_state`. The next valid experiment is a wider
+  fresh LR range, not checkpoint resume.
+
 ## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
 
 - The current OLMo-3-vocab coarse-to-fine wave runs from TorchTitan commit
