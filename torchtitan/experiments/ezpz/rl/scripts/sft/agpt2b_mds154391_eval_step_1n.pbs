@@ -8,7 +8,7 @@
 #PBS -j oe
 set -o pipefail
 
-WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+WT="${WT:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8}"
 V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
 ASSETS=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
 ROOT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900
