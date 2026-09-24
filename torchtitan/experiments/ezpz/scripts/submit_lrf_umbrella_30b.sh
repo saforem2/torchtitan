@@ -77,7 +77,7 @@
 # trainer-1 (20b-n512) and trainer-3 (2b-n512). The 2B the note says OOMs at
 # 512N has in fact been training compiled at 512N continuously.
 #
-# Disabling it pre-emptively also corrupted the experiment, not just the speed:
+# Disabling it preemptively also corrupted the experiment, not just the speed:
 # an LR calibrated uncompiled is not necessarily the LR you want for a compiled
 # production run, so the sweep would have answered a slightly different
 # question than the one being asked.
