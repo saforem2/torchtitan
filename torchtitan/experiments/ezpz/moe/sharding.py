@@ -108,6 +108,7 @@ def _set_moe_layer_sharding(
         if enable_sp
         else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
+    replicated_input_layout = dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
 
     if isinstance(attention, GQAttention.Config):
         # AGPT-MoE uses the same fused GQA block as dense AGPT. Delegate to the
@@ -158,8 +159,10 @@ def _set_moe_layer_sharding(
     attention.wkv_a.sharding_config = replicate_weight
     attention.kv_norm.sharding_config = replicate_weight
 
-    attention.wkv_b.sharding_config = colwise_config()
-    attention.wo.sharding_config = rowwise_config(output_sp=enable_sp)
+    attention.wkv_b.sharding_config = colwise_config(
+        input_layout=replicated_input_layout
+    )
+    attention.wo.sharding_config = rowwise_config(output_layout=attn_x_layout)
 
     # Static LocalMapConfig on the inner-attention config (upstream #2986
     # replaced runtime DTensor detection in `LocalMapInnerAttention` with
@@ -169,14 +172,18 @@ def _set_moe_layer_sharding(
     # Query projection: depends on q_lora_rank
     if attention.q_lora_rank == 0:
         assert attention.wq is not None
-        attention.wq.sharding_config = colwise_config()
+        attention.wq.sharding_config = colwise_config(
+            input_layout=replicated_input_layout
+        )
     else:
         # Low-rank: wq_a + q_norm stay Replicate DTensors; wq_b is Colwise.
         assert attention.wq_a is not None
         assert attention.wq_b is not None
         attention.wq_a.sharding_config = replicate_weight
         attention.q_norm.sharding_config = replicate_weight
-        attention.wq_b.sharding_config = colwise_config()
+        attention.wq_b.sharding_config = colwise_config(
+            input_layout=replicated_input_layout
+        )
 
     _set_moe_ffn_sharding(
         layer_cfg,
