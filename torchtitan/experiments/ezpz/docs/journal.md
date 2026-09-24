@@ -81,6 +81,11 @@ Running log of what's happening, session by session. Most recent first.
   allocation was consumed beyond startup. The hash was corrected to the exact
   clean checkout head and replacement `8864160` was submitted for the unchanged
   TP1/TP2/MoE acceptance test.
+- Sunspot upstream-sync smoke `12478635` failed before training because its
+  wrapper passed obsolete `--checkpointer.no-enable`; all three arms exited from
+  CLI parsing without optimizer work. A concurrent worker submitted corrected
+  retry `12478636`, which is now running and is tracked separately from the
+  Aurora exact-head validation.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
