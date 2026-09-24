@@ -37,12 +37,13 @@ Validated knobs baked in (from the alphabet_sort_agpt 3-way study + the CoT plan
     std-normalized advantage.
 
 EOS / stop handling: the controller fills ``sampling.stop_token_ids`` from
-``renderer.get_stop_token_ids()`` (controller.py:370), which for the gemma/"auto"
-renderer resolves the AuroraGPT-2B stop set (eos ``</s>``=1 and
-``<end_of_turn>``=107 -- the gemma turn boundary). Generation therefore stops at
-the end-of-turn token AND the eos token, so a ``<think>``/``<answer>`` completion
-terminates cleanly. Nothing to override here; ``enable_thinking`` is left off
-(the gemma/"auto" renderer has no reasoning channel -- reasoning is prompt-driven
+``renderer.get_stop_token_ids()``. ``DefaultRendererConfig`` does not infer the
+AuroraGPT-2B ``<end_of_turn>`` boundary from this tokenizer, so the config wraps
+it with ``ExtraStopTokensRendererConfig(extra_stop_token_ids=(1, 107))``: eos
+``</s>``=1 plus ``<end_of_turn>``=107. Without this explicit contract, vLLM
+continues after a complete answer until ``max_tokens`` and every rollout is
+classified as truncated with zero reward. ``enable_thinking`` remains off (the
+gemma/"auto" renderer has no reasoning channel -- reasoning is prompt-driven
 and regex-scored, per the CoT plan).
 
 Also pass ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups``
@@ -63,7 +64,7 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
-from torchtitan.components.renderer import from_renderers
+from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
 from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
@@ -201,7 +202,14 @@ def _agpt_grpo_config(
         # AuroraGPT uses the original Gemma chat template with
         # <start_of_turn>/<end_of_turn>. Use the checkpoint's own Jinja template;
         # reasoning remains prompt-driven and regex-scored.
-        renderer=from_renderers(DefaultRendererConfig()),
+        # DefaultRendererConfig does not infer AuroraGPT's <end_of_turn> token
+        # from this tokenizer. Add the exact AGPT EOS/turn-boundary IDs so vLLM
+        # returns one completed response instead of repeating answer blocks until
+        # max_tokens, which the rollout layer classifies as truncated and scores 0.
+        renderer=ExtraStopTokensRendererConfig(
+            renderer=from_renderers(DefaultRendererConfig()),
+            extra_stop_token_ids=(1, 107),
+        ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),

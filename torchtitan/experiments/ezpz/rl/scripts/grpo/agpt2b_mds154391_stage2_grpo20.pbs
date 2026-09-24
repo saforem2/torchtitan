@@ -67,6 +67,7 @@ assert c.async_loop.num_samples_per_prompt == 4
 assert c.generator.model_dtype == "float32"
 assert c.generator.sampling.max_tokens == 700
 assert c.trainer.checkpointer.interval == 10
+assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
 assert not any(os.environ.get(x) for x in (
     "TORCHTITAN_TORCHSTORE_TRANSPORT", "TORCHSTORE_GLOO_ENABLED", "TORCHSTORE_XCCL_ENABLED"
 ))
