@@ -55,6 +55,10 @@ Running log of what's happening, session by session. Most recent first.
   PR #21 head `63e30735c`, explicitly prepends `/tmp/.venv.next-eval/lib` and
   records the resolved `libur_loader`; it is queued. No full training retry is
   authorized until that import gate succeeds.
+- Before `8863095` started, PR #21 advanced again to `67a164df`; the queued
+  stale-head preflight was cancelled without consuming an allocation. Exact-head
+  replacement `8863110` uses the same corrected bundled-library gate and is
+  queued in `next-eval`.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
