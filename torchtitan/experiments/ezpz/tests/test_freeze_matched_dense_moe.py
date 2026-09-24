@@ -7,14 +7,11 @@
 """Contracts for the frozen Aurora MoE source image."""
 
 import importlib.util
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 
-FREEZER = (
-    Path(__file__).parents[1]
-    / "submit/aurora/freeze_matched_dense_moe_2n_1100.py"
-)
+FREEZER = Path(__file__).parents[1] / "submit/aurora/freeze_matched_dense_moe_2n_1100.py"
 SPEC = importlib.util.spec_from_file_location("freeze_matched_dense_moe", FREEZER)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
