@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import unittest
 from unittest import mock
+from pathlib import Path
 
 from torch.distributed.checkpoint.stateful import Stateful
 
@@ -116,6 +117,19 @@ class TestGrainStreamingCheckpointCompatibility(unittest.TestCase):
             ),
             ["--checkpointer.folder", "/tmp/ckpt", "--checkpointer.interval", "7"],
         )
+
+    def test_stage1_launchers_target_recipe_checkpoint_series(self):
+        scripts = Path(__file__).parents[1] / "rl" / "scripts" / "sft"
+        expected = (
+            '--checkpointer.folder="$OUT/checkpoints/'
+            'agpt2b-mds154391-tulu-math-uc-streaming"'
+        )
+        for name in (
+            "agpt2b_mds154391_broad_sft_smoke_2n.pbs",
+            "agpt2b_mds154391_broad_sft900_8n.pbs",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(expected, (scripts / name).read_text())
 
 
 if __name__ == "__main__":

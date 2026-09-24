@@ -53,7 +53,7 @@ printf 'MDS154391_GRAIN_SFT_COMM CCL_PROCESS_LAUNCHER=%s CCL_OP_SYNC=%s CCL_ATL_
   --parallelism.data-parallel-replicate-degree=2 \
   --metrics.log-freq=1 \
   --metrics.no-enable-wandb \
-  --checkpointer.folder="$OUT/checkpoints" \
+  --checkpointer.folder="$OUT/checkpoints/agpt2b-mds154391-tulu-math-uc-streaming" \
   --checkpointer.interval=20 \
   --checkpointer.async-mode=disabled \
   --debug.seed=42
