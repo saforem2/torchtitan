@@ -45,7 +45,7 @@
 # oneCCL collective abort; use torchmuon if needed"
 # (docs/experiments/lr-finder/agpt/2b/README.md). That abort is a collective
 # fault, not an LR cliff, so a `muon` seat would burn 522 nodes producing no
-# curve. torch.optim.Muon is also ~35% faster (CLAUDE.md).
+# curve. torch.optim.Muon is also ~35% faster (AGENTS.md).
 #
 # AND MUON IS EXPECTED TO WORK AT THIS SIZE. Its 80B failure was bf16 overflow
 # in Newton-Schulz at dim=9216. Both muon.py and mano.py gate on
@@ -99,7 +99,7 @@
 # still exits 0 through the finder; a seat whose curve never turns over has
 # found nothing. Both are reported in the summary at the end.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md -- venv activate
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md -- venv activate
 # trips unbound vars and -u also kills lmod.
 set -o pipefail
 

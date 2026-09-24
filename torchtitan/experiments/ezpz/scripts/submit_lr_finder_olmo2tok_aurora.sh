@@ -74,7 +74,7 @@
 # only to complete the table, never as a launch recommendation, and if an arm
 # is ever run then --grad-norm-abort=20.0 is mandatory (it is 0.0 by default).
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1

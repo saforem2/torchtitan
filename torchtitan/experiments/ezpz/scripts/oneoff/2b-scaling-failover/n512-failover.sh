@@ -26,7 +26,7 @@
 # so a bad-node hit at init swaps in a spare instead of killing the
 # entire benchmark.
 #
-# Per CLAUDE.md / scaling docs convention: GBS = NGPUS × LBS × GAS / TP
+# Per AGENTS.md / scaling docs convention: GBS = NGPUS × LBS × GAS / TP
 # At n=512, TP=1, LBS=2, GAS=1: GBS = 6,144 × 2 / 1 = 12,288 (matches
 # production 2B 512N chain).
 

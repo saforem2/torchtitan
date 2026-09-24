@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve()
 REPO = HERE.parents[5]
 PACKAGE = REPO / "vendor" / "aurora_moe_dropin"
 NON_RUNTIME_PREFIXES = (
+    ".agents/",
     ".ci/",
     ".claude/",
     ".github/",

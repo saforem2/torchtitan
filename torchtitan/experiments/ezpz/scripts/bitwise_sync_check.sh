@@ -9,7 +9,7 @@
 #
 # Bitwise-equivalence smoke for upstream-sync verification.
 #
-# Per the root CLAUDE.md project rule:
+# Per the root AGENTS.md project rule:
 #   "Non-computation changes (e.g. activation checkpointing, refactoring)
 #    must produce identical loss before vs. after with --debug.seed=42
 #    and --debug.deterministic."
@@ -20,12 +20,12 @@
 # bit-identical for any pure-refactor / import-rename merge.
 #
 # Implementation note: each phase runs from an ephemeral `git worktree
-# add` checkout under .claude/worktrees/. This avoids `git stash` /
-# `git checkout` on the main working tree (which job 12468296 spent its
-# full 1h walltime on — the stash -u walk of thousands of untracked
-# .venv.tar.gz-* backups + core.* dumps + outputs/ tree never finished).
-# Worktrees are sub-second to create and don't touch the main tree at
-# all.
+# add` checkout under a configurable, agent-neutral scratch root. This
+# avoids `git stash` / `git checkout` on the main working tree (which job
+# 12468296 spent its full 1h walltime on — the stash -u walk of thousands
+# of untracked .venv.tar.gz-* backups + core.* dumps + outputs/ tree never
+# finished). Worktrees are sub-second to create and don't touch the main
+# tree at all.
 #
 # Usage (from a login node, with this script as the qsub argument):
 #
@@ -39,7 +39,7 @@
 #                      to HEAD's first parent if omitted)
 #   STEPS             default: 20  (cheap; enough to surface drift)
 #   MODEL             default: 2b
-#   SEED              default: 42  (matches CLAUDE.md convention)
+#   SEED              default: 42  (matches AGENTS.md convention)
 #
 # Output: logs/bitwise-sync-check-${PBS_JOBID}/
 #   head.log         post-merge run output
@@ -83,9 +83,10 @@ LOG_DIR="${SUBMIT_DIR}/logs/bitwise-sync-check-${JOBID_SHORT}"
 mkdir -p "${LOG_DIR}"
 
 # Ephemeral worktrees — one per commit. Detached HEAD so we don't
-# need to mint or clean up branch refs. Worktrees live under
-# .claude/worktrees/ which is already gitignored by convention here.
-WT_BASE="${SUBMIT_DIR}/.claude/worktrees/bitwise-sync-${JOBID_SHORT}"
+# need to mint or clean up branch refs. Keep them outside the checkout by
+# default; override EZPZ_WORKTREE_ROOT when a site requires another scratch FS.
+WORKTREE_ROOT="${EZPZ_WORKTREE_ROOT:-${TMPDIR:-/tmp}/torchtitan-ezpz-worktrees}"
+WT_BASE="${WORKTREE_ROOT}/bitwise-sync-${JOBID_SHORT}"
 WT_HEAD="${WT_BASE}/head"
 WT_PRE="${WT_BASE}/pre"
 mkdir -p "${WT_BASE}"

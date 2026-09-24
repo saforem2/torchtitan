@@ -23,7 +23,7 @@
 # Output (in this clone):
 #   outputs/evals/agpt-2b-v2/step-{N}/{hf,results}/
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 export http_proxy=http://proxy.alcf.anl.gov:3128

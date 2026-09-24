@@ -26,7 +26,7 @@
 # separators and rejects the whole thing with "cannot send environment with
 # the job". Setting the vars inside the script sidesteps the quoting entirely.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}" || exit 1

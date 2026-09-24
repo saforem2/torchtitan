@@ -32,7 +32,7 @@
 #   LRF_STEPS / LRF_FRACTION / LRF_INIT_LR / LRF_MAX_LR / LRF_TIMEOUT
 #
 # NOTE: SophiaG and Muon are documented-broken at 80B (bf16 overflow in
-# the Hessian / Newton-Schulz at dim=9216 -- see CLAUDE.md); a sweep that
+# the Hessian / Newton-Schulz at dim=9216 -- see AGENTS.md); a sweep that
 # includes them will likely NaN early at the optimizer level regardless of
 # LR. AdamW and Mano are the meaningful 80B sweeps.
 

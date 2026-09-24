@@ -78,7 +78,7 @@
 # is broken at 80B via bf16 overflow in Newton-Schulz at dim=9216; 30B's 6144
 # might be survivable, but that is a separate question.)
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
