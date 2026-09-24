@@ -59,6 +59,13 @@ Running log of what's happening, session by session. Most recent first.
   stale-head preflight was cancelled without consuming an allocation. Exact-head
   replacement `8863110` uses the same corrected bundled-library gate and is
   queued in `next-eval`.
+- Preflight `8863110` passed at exit 0 with XPU torch
+  `2.15.0.dev20260919+xpu`; `ldd` confirmed `libsycl.so.9` resolved its
+  `libur_loader.so.0` from the staged archive, and the TorchTitan import closure
+  passed. The only subsequent PR #21 change was journal documentation, so full
+  exact-head job `8863184` was submitted at `3735edde4` for AGPT TP=1, AGPT
+  TP=2, and MoE. Each arm still must produce five finite optimizer steps and a
+  nonempty DCP metadata file.
 - Consolidated monitoring into the single Herdr pane **LR + MDS154391 Stage
   2**. Completed and superseded jobs were removed from live polling; unresolved
   failures remain visible so cleanup does not conceal blockers. Scheduler exit
@@ -101,6 +108,10 @@ Running log of what's happening, session by session. Most recent first.
   policy versions, real reward-bearing updates, checkpoints 10 and 20, bounded
   raw rollouts, and clean actor shutdown. Job `12478619` is queued; this is a
   stack-functionality test, not evidence that GRPO improves model quality.
+- Replacement GRPO job `12478621` completed 20/20 at exit 0 with nonzero reward
+  (0.36--0.56 in the inspected steps), nonzero gradient norms, checkpoint-10,
+  checkpoint-20, bounded rollout samples, and the terminal done marker. This
+  validates stack functionality, not downstream quality improvement.
 
 ### Additional DCP and 5B diagnosis
 
