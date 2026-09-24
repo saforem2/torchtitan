@@ -202,7 +202,9 @@ def test_ft_engine_passes_manager_only_to_ft_checkpointer(ft_aware) -> None:
     engine.output_dir = "/tmp/output"
     engine.ft_manager = MagicMock()
     build = MagicMock(return_value="checkpointer")
-    build_target = ft.TorchFTCheckpointManager.Config if ft_aware else checkpointer_config
+    build_target = (
+        ft.TorchFTCheckpointManager.Config if ft_aware else checkpointer_config
+    )
 
     with patch.object(build_target, "build", build):
         ft.FaultTolerantTrainingEngine._initialize_checkpointer(

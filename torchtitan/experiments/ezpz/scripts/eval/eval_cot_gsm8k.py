@@ -191,9 +191,7 @@ def main() -> None:
         text = o.outputs[0].text
         finish_reason = o.outputs[0].finish_reason
         fmt_ok, answer = extract_cot_answer(text)
-        correct = (
-            answer is not None and golds[i] is not None and answer == golds[i]
-        )
+        correct = answer is not None and golds[i] is not None and answer == golds[i]
         texts.append(text)
         finish_reasons.append(finish_reason)
         fmts.append(fmt_ok)
