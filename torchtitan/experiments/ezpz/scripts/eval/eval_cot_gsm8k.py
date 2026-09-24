@@ -149,8 +149,10 @@ def main() -> None:
     sp = SamplingParams(
         temperature=args.temperature,
         max_tokens=args.max_tokens,
-        stop=["</answer>"],
-        include_stop_str_in_output=True,
+        # AuroraGPT's canonical generation terminators.  Using a textual
+        # ``</answer>`` stop hides malformed continuations and diverges from
+        # the production inference contract.
+        stop_token_ids=[1, 107],
     )
     outputs = llm.generate(prompts, sp)
 
@@ -169,9 +171,18 @@ def main() -> None:
         fmts.append(fmt_ok)
         corrects.append(correct)
         rows.append(
-            {"idx": i, "format_ok": fmt_ok, "pred": ans, "gold": golds[i],
-             "correct": correct, "gen_len": len(text),
-             "finish_reason": finish_reason}
+            {
+                "idx": i,
+                "question": questions[i],
+                "prompt": prompts[i],
+                "generation": text,
+                "format_ok": fmt_ok,
+                "pred": ans,
+                "gold": golds[i],
+                "correct": correct,
+                "gen_len": len(text),
+                "finish_reason": finish_reason,
+            }
         )
 
     summary = summarize(
