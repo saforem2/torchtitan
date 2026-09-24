@@ -31,12 +31,14 @@ def convert_to_hf(
 
     with torch.device("cpu"):
         model = model_config.build()
+    adapter_cls = type(model).state_dict_adapter_cls
     model = ModelWrapper(model)
 
-    sd_adapter = type(model).state_dict_adapter_cls(model_config, hf_assets_path)
-    assert (
-        sd_adapter is not None
-    ), "trying to convert checkpoint from DCP to HF safetensors format, but sd_adapter is not provided."
+    assert adapter_cls is not None, (
+        "trying to convert checkpoint from DCP to HF safetensors format, "
+        "but the model has no state dict adapter."
+    )
+    sd_adapter = adapter_cls(model_config, hf_assets_path)
 
     # RoPE convention is NOT recoverable from the checkpoint: both rope caches
     # are registered with persistent=False, so nothing on disk says which one

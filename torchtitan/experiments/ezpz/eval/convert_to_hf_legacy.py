@@ -84,10 +84,11 @@ def convert_legacy_to_hf(
 
     with torch.device("cpu"):
         model = model_config.build()
+    adapter_cls = type(model).state_dict_adapter_cls
     model = ModelWrapper(model)
 
-    sd_adapter = type(model).state_dict_adapter_cls(model_config, hf_assets_path)
-    assert sd_adapter is not None
+    assert adapter_cls is not None, "model has no state dict adapter"
+    sd_adapter = adapter_cls(model_config, hf_assets_path)
 
     state_dict = model._get_state_dict()
 

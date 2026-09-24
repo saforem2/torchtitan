@@ -33,8 +33,8 @@ Merge math (LoRA delta W' = W + (alpha/rank) * B @ A):
           v=[:, hpk+1]) and add each slice to the base wq/wk/wv.
 
 The result is a pure-base torchtitan state dict (wq/wk/wv/wo/...), which is then
-remapped to HF layout by Llama3StateDictAdapter.to_hf (which applies HF's Q/K rope
-permutation) and written as a single model.safetensors. config.json + tokenizer
+remapped to HF layout by AgptStateDictAdapter.to_hf (which applies the Q/K rope
+permutation only for complex RoPE) and written as a single model.safetensors. config.json + tokenizer
 (with gemma chat_template + eos_token_id=[1,107] fix) are copied from the base HF
 dir the LoRA was trained on.
 
@@ -193,11 +193,14 @@ def to_hf_and_save(
     export_dtype: torch.dtype,
 ) -> None:
     from torchtitan.experiments.ezpz.agpt import model_registry as agpt_registry
-    from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
+    from torchtitan.experiments.ezpz.agpt.state_dict_adapter import (
+        AgptStateDictAdapter,
+    )
 
-    # base spec (NO converters) -> plain base model_config for the adapter.
+    # No converters: build the plain base config for the adapter. LoRA has
+    # already been folded into ``merged_tt`` above.
     model_config = agpt_registry(model_flavor)
-    adapter = Llama3StateDictAdapter(model_config, base_hf)
+    adapter = AgptStateDictAdapter(model_config, base_hf)
 
     hf_sd = adapter.to_hf(merged_tt)
     hf_sd = {k: v.to(export_dtype).contiguous() for k, v in hf_sd.items()}
