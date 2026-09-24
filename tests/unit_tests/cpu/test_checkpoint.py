@@ -1724,6 +1724,33 @@ class TestModelWrapper(unittest.TestCase):
         # ... and the in-place refresh picked up the updated parameter.
         self.assertTrue(torch.all(sd2["a"] == 1.0))
 
+    def test_uncached_hook_tensor_does_not_retain_storage(self):
+        class HookedModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.zeros(4, 2, 3))
+                self.register_state_dict_post_hook(self._split)
+
+            @staticmethod
+            def _split(module, state_dict, prefix, local_metadata):
+                w = state_dict.pop(f"{prefix}w")
+                state_dict[f"{prefix}a"] = w[:, 0].contiguous()
+                state_dict[f"{prefix}b"] = w[:, 1].contiguous()
+
+        model = HookedModule()
+        wrapper = ModelWrapper(model, cache_state_dict=False)
+
+        self.assertIsNone(wrapper.cached_state_dict)
+        sd1 = wrapper.state_dict()
+        ptr_a = sd1["a"].untyped_storage().data_ptr()
+        with torch.no_grad():
+            model.w.fill_(3.0)
+        sd2 = wrapper.state_dict()
+
+        self.assertNotEqual(sd2["a"].untyped_storage().data_ptr(), ptr_a)
+        self.assertTrue(torch.all(sd2["a"] == 3.0))
+        self.assertIsNone(wrapper.cached_state_dict)
+
     def test_fsdp_unsharded_tensor_checkpoint(self):
         class FSDPWeight(_ShardedFSDPTensor):
             pass

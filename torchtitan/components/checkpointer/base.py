@@ -123,15 +123,25 @@ class ModelWrapper(Stateful):
         cache will become stale.
     """
 
-    def __init__(self, model: nn.Module | list[nn.Module]) -> None:
+    def __init__(
+        self,
+        model: nn.Module | list[nn.Module],
+        *,
+        cache_state_dict: bool = True,
+    ) -> None:
         self.model = [model] if isinstance(model, nn.Module) else model
-        self.cached_state_dict = self._get_state_dict()
+        self.cache_state_dict = cache_state_dict
+        self.cached_state_dict = self._get_state_dict() if cache_state_dict else None
 
     def _get_state_dict(self) -> dict[str, Any]:
         # TorchTitan already makes model state_dict keys canonical.
         return {k: v for model in self.model for k, v in model.state_dict().items()}
 
     def state_dict(self) -> dict[str, Any]:
+        if not self.cache_state_dict:
+            return self._get_state_dict()
+
+        assert self.cached_state_dict is not None
         # Recompute the state dict so hook-produced tensors reflect the current
         # parameters, then merge into the cache without changing storage objects.
         for key, value in self._get_state_dict().items():
@@ -152,7 +162,8 @@ class ModelWrapper(Stateful):
         for model in self.model:
             model.load_state_dict(state_dict, strict=False)
         # Refresh the cache so state_dict() reflects the freshly loaded values.
-        self.cached_state_dict = self._get_state_dict()
+        if self.cache_state_dict:
+            self.cached_state_dict = self._get_state_dict()
 
 
 @runtime_checkable

@@ -171,10 +171,26 @@ class CheckpointManager(BaseCheckpointManager):
         self.interval = config.interval
         self._storage = _FilesystemCheckpointStorage()
 
+        try:
+            self.async_mode = AsyncMode(config.async_mode)
+        except ValueError as e:
+            raise ValueError(
+                f"Unknown checkpoint async_mode {config.async_mode}"
+            ) from e
+
         self.states = states
         self.states.update(
             {
-                MODEL: ModelWrapper(model_parts),
+                # Synchronous DCP consumes hook-produced state tensors before
+                # returning, so retaining stable copies between saves only
+                # wastes device memory. This matters for fused modules whose
+                # state-dict hooks split weights with contiguous(), which can
+                # otherwise pin several GiB for large models. Async modes keep
+                # stable storage because their workers may outlive this call.
+                MODEL: ModelWrapper(
+                    model_parts,
+                    cache_state_dict=self.async_mode != AsyncMode.DISABLED,
+                ),
                 OPTIMIZER: optimizers,
                 DATALOADER: dataloader,
                 LR_SCHEDULER: lr_schedulers,
@@ -201,13 +217,6 @@ class CheckpointManager(BaseCheckpointManager):
             )
 
         # Async & Distributed Infrastructure
-        try:
-            self.async_mode = AsyncMode(config.async_mode)
-        except ValueError as e:
-            raise ValueError(
-                f"Unknown checkpoint async_mode {config.async_mode}"
-            ) from e
-
         self.pg: dist.ProcessGroup | None = None
         if self.async_mode in (AsyncMode.ASYNC, AsyncMode.ASYNC_WITH_PINNED_MEM):
             self.pg = cast(dist.ProcessGroup, dist.new_group(backend="gloo"))
