@@ -171,6 +171,13 @@ Running log of what's happening, session by session. Most recent first.
   construction or the DCP payload itself. Matched compile-off control `12478633`
   was submitted with LBS1, GBS 6144, mesh, LR range, DCP, communication, active
   nodes, and spares held fixed; only `LRF_NO_COMPILE=1` changes.
+- `12478625` finished at exit 1 after 01:06:41. Its third attempt also restored
+  step 1 successfully, then failed with `UR_RESULT_ERROR_OUT_OF_RESOURCES` on a
+  different rank. The compiled LBS1 hypothesis is therefore closed: reducing
+  activation load permits the fresh update and DCP save but does not make the
+  resumed compiled update viable. Compile-off control `12478633` has started,
+  confirms `--compile.no-enable`, and is initializing checkpoint-enabled
+  training; it has not yet completed its first update.
 
 ## 2026-09-23 (sunspot/aurora) -- coarse-to-fine LR wave producing recommendations
 
