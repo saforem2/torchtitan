@@ -422,7 +422,7 @@ def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
 
 def _set_moe_compute_backend(spec, backend: str) -> None:
     # Set the expert compute_backend on every MoE layer's inner_experts
-    # config in a built ModelSpec. model_registry() does not expose a
+    # config returned by model_registry(). The registry does not expose a
     # compute_backend arg, and it lives on EzpzGroupedExperts.Config
     # (routed_experts.inner_experts), so set it here post-build. Setting an
     # explicit value also survives model.py's grouped_mm->for_loop rewrite,

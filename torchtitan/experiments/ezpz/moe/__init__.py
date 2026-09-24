@@ -1403,9 +1403,8 @@ def model_registry(
             assert isinstance(q, QuantizationConverter.Config)
             q.build().convert(config)
 
-    # #4328 made max_context_length a required ModelSpec field. Read it off the
-    # flavor's own RoPE config (same approach as the agpt twin) so the spec
-    # cannot drift from the model it describes.
+    # Read context length from the flavor's own RoPE config (same approach as
+    # the AGPT twin) so the registry cannot drift from the model it describes.
     if config.layers[0].attention.rope is None:
         raise ValueError(
             f"moe flavor {flavor!r} has no RoPE config, so max_context_length "
