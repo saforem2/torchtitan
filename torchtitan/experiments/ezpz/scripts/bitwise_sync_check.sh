@@ -83,9 +83,10 @@ LOG_DIR="${SUBMIT_DIR}/logs/bitwise-sync-check-${JOBID_SHORT}"
 mkdir -p "${LOG_DIR}"
 
 # Ephemeral worktrees — one per commit. Detached HEAD so we don't
-# need to mint or clean up branch refs. Keep them outside the checkout by
-# default; override EZPZ_WORKTREE_ROOT when a site requires another scratch FS.
-WORKTREE_ROOT="${EZPZ_WORKTREE_ROOT:-${TMPDIR:-/tmp}/torchtitan-ezpz-worktrees}"
+# need to mint or clean up branch refs. Keep them outside the checkout but on
+# the same shared filesystem by default: PBS compute-node /tmp is node-local.
+# Override EZPZ_WORKTREE_ROOT when a site requires another shared scratch FS.
+WORKTREE_ROOT="${EZPZ_WORKTREE_ROOT:-${SUBMIT_DIR}/../.torchtitan-ezpz-worktrees}"
 WT_BASE="${WORKTREE_ROOT}/bitwise-sync-${JOBID_SHORT}"
 WT_HEAD="${WT_BASE}/head"
 WT_PRE="${WT_BASE}/pre"
