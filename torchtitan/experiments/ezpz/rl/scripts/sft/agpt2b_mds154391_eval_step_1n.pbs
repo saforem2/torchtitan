@@ -14,9 +14,9 @@ ASSETS=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-
 ROOT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900
 CKPT_ROOT="$ROOT/checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
 EVAL_ROOT="$ROOT/evals"
-: "${STEP:?submit with -v STEP=300 or STEP=600}"
+: "${STEP:?submit with -v STEP=300, STEP=600, or STEP=900}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
-[[ "$STEP" == 300 || "$STEP" == 600 ]] || exit 10
+[[ "$STEP" == 300 || "$STEP" == 600 || "$STEP" == 900 ]] || exit 10
 
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 12
