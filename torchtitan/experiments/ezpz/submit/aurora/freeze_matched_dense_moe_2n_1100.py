@@ -31,6 +31,8 @@ NON_RUNTIME_PREFIXES = (
     "docs/",
     "tests/",
     "vendor/",
+    "torchtitan/experiments/ezpz/.agents/",
+    "torchtitan/experiments/ezpz/.claude/",
     "torchtitan/experiments/ezpz/docs/",
 )
 
