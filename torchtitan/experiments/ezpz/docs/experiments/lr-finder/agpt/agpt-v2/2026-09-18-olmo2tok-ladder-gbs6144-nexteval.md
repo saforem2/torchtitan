@@ -169,17 +169,35 @@ when the application detected an interior blow-up.
 | `12478508` | 5B / AdamW | fine | 100 | 100 | 7.9258 | 6.579e-4 | **7.17e-5** | 7.17e-4 | complete, PBS exit 0 |
 | `12478509` | 10B / AdamW | fine | 100 | 100 | 7.8432 | 4.642e-4 | **4.16e-5** | 4.16e-4 | complete, PBS exit 0 |
 | `12478510` | 30B / AdamW | fine | 94 / 100 | 94 | 8.0275 | 1.601e-4 | — | — | infrastructure failure; partial curve excluded |
-| `12478581` | 30B / AdamW | resumable fine, 75 points | — | — | — | — | — | — | queued; `[3e-7, 1e-2]`, checkpoint every 5 points |
+| `12478581` | 30B / AdamW | resumable fine, 75 points | — | — | — | — | — | — | failed before a valid terminal curve; excluded |
 | `12478511` | 5B / SophiaG | widened coarse | 30 | 30 | 11.7588 | 2.395e-5 | **2.80e-6** | 2.80e-5 | complete, PBS exit 0 |
 | `12478512` | 10B / SophiaG | widened coarse | 30 | 30 | — | — | **1.66e-6** | 1.66e-5 | complete, PBS exit 0 |
 | `12478513` | 30B / SophiaG | widened coarse | 30 | 30 | 11.6722 | 7.880e-6 | **6.48e-7** | 6.48e-6 | complete, PBS exit 0 |
 | `12478568` | 5B / SophiaG | fine | — | — | — | — | — | — | walltime after retries; no completed fine artifact |
 | `12478569` | 10B / SophiaG | fine | 100 | 100 | 8.0347 | 1.660e-4 | 3.24e-7 [1] | 3.24e-6 | complete, PBS exit 0 |
-| `12478570` | 30B / SophiaG | fine | — | — | — | — | — | — | running; no terminal artifact yet |
+| `12478570` | 30B / SophiaG | fine | 97 / 100 | 97 | — | — | — | — | failed without complete resumable state; partial curve excluded |
 
 [1] The application detector emitted `3.24e-7`, below the fine sweep's sampled
 range (`1.66e-6`–`1.66e-4`). The chart marks it as outside the sampled range;
 it is not presented as a measured fine optimum.
+
+### Aurora 30B scale diagnosis (2026-09-25)
+
+Aurora job `8862818` requested 68 nodes and launched 64 active nodes / 768
+ranks plus four failover spares. It produced no LR point and did not reach model
+training. The first seed broadcast lazily created XCCL communicators and many
+ranks failed in `ProcessGroupXCCL::initXCCLComm` with `std::bad_alloc`; later
+PMI/KVS timeouts were cascades. Therefore its report-level `OOM` label must not
+be interpreted as a demonstrated 30B model- or optimizer-memory failure.
+
+The corrective experiment is communicator-first. Job `8869722` is the 4-active-
+node / 48-rank baseline (four additional nodes are genuine auto-retry spares),
+using `dp_replicate=6`, `dp_shard=8`, queue-provided oneAPI 2026.1.0, the
+immutable custom Torch 2.15 archive, explicit `CCL_OP_SYNC=1`, and native
+`ezpz launch --auto-retry`. It exercises the failed global broadcast plus
+global, DP-shard, and DP-replicate collectives. If valid, the ladder advances
+to 16, 32, and 64 active nodes; the full 30B five-update canary is gated on the
+communicator result rather than launched speculatively.
 
 ### Current per-model charts
 

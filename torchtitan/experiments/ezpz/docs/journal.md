@@ -7,6 +7,27 @@ Running log of what's happening, session by session. Most recent first.
 - PR #21 head `1f4aff12bf55a36f2c7cad0cfbf453ac3cde4e35` passed the final hardware gates. Aurora job `8868654` completed AGPT TP=1, AGPT TP=2, and MoE with five finite optimizer updates and a nonempty DCP checkpoint for every arm; its terminal `VALIDATED` artifact and PBS exit 0 were inspected. Sunspot job `12478675` passed exact numerical parity, Perlmutter job `58868718` completed three finite CUDA optimizer steps with a checkpoint, and exact-head Polaris job `7659410` finished at exit 0 with `VERDICT: ok`.
 - PR #21 was merged into `ezpz` as merge commit `2824eb064` (`Merge PR #21: sync current TorchTitan into ezpz`); the validated PR head is an ancestor of `origin/ezpz`. The PR gate is closed and is no longer an active dashboard item.
 - Production umbrella chain 0 was incorrectly labeled failed by the dashboard because its parser matched `FAILOVER STOP: success`. Chain 0 actually reached its planned final step `23746`, saved the final checkpoint, logged `Training completed`, and exited 0. The parser now treats only explicit failure forms as failures and renders successful terminal chains as complete. Chain 3's non-finite loss remains unresolved.
+- Aurora-only follow-up is isolated in a detached `origin/ezpz` worktree at
+  `550d2c670`. Umbrella `8855988` chain 3 was finite through step `39942`
+  (loss `2.69423`, grad norm `0.3955`) and became non-finite at step `39943`.
+  The current umbrella restored `step-42400`, which was already downstream of
+  that divergence, so its immediate step-42401 NaN and later NaN checkpoints
+  are continuation of a poisoned trajectory, not a new resume-only failure.
+  The last checkpoint before the boundary is `step-39900`; the planned exact
+  512-node replay will load full model/optimizer/scheduler/dataloader state from
+  that checkpoint into job-unique outputs with diagnostics every step and
+  `nan_abort_consecutive=1`. Production checkpoints and runtimes remain untouched.
+- Reclassified Aurora 30B job `8862818`: the 64-active-node / 768-rank canary
+  did **not** demonstrate model or optimizer OOM. It failed before training when
+  the first seed broadcast lazily created XCCL communicators; many ranks emitted
+  `ProcessGroupXCCL::initXCCLComm` / `std::bad_alloc`, followed by PMI/KVS
+  timeout cascades. Communicator-only baseline `8869722` was submitted on
+  `next-eval` with 4 active nodes / 48 ranks plus four real spares, `dp=6x8`,
+  queue-provided oneAPI 2026.1.0, immutable Torch 2.15 archive checksum
+  `878013c487311ef73069b3a8a4172a1b79cee98e9cf459eddf3fd5bd09b5b3cc`,
+  explicit `CCL_OP_SYNC=1`, and native `ezpz launch --auto-retry`. It is the
+  first rung of an adaptive 4 -> 16 -> 32 -> 64 active-node XCCL ladder and is
+  queued at this entry.
 
 ## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
 
