@@ -132,12 +132,14 @@ def main() -> None:
     reasons: Counter[str] = Counter()
     accepted_hashes: set[str] = set()
     contaminated = 0
+    contaminated_indices: set[int] = set()
 
     for source_index, question, gold, request in zip(order, questions, golds, outputs):
         accepted_for_problem = False
         collision, collision_reason = detector.is_contaminated(question)
         if collision:
             contaminated += 1
+            contaminated_indices.add(source_index)
         for sample_index, item in enumerate(request.outputs):
             text = item.text
             accepted, reason = assess_trace(text, item.finish_reason, gold)
@@ -183,6 +185,8 @@ def main() -> None:
     accepted_path = args.output_dir / "accepted_sft.jsonl"
     _write_jsonl_atomic(raw_path, raw_rows)
     _write_jsonl_atomic(accepted_path, accepted_rows)
+    accepted_indices = {row["source_index"] for row in accepted_rows}
+    leaked = sorted(contaminated_indices & accepted_indices)
     report = {
         "model": str(args.model),
         "seed": args.seed,
@@ -192,6 +196,8 @@ def main() -> None:
         "accepted_problems": len(accepted_rows),
         "acceptance_rate": len(accepted_rows) / len(questions) if questions else 0.0,
         "test_collisions": contaminated,
+        "test_collisions_excluded": contaminated - len(leaked),
+        "test_collisions_leaked": len(leaked),
         "reasons": dict(sorted(reasons.items())),
         "raw_sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
         "accepted_sha256": hashlib.sha256(accepted_path.read_bytes()).hexdigest(),
@@ -200,8 +206,13 @@ def main() -> None:
     report_tmp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     report_tmp.replace(args.output_dir / "report.json")
     print(json.dumps(report, indent=2, sort_keys=True), flush=True)
-    if contaminated:
-        raise RuntimeError(f"GSM8K test contamination detected in {contaminated} rows")
+    # Detecting a collision is expected and healthy: those problems are dropped
+    # before selection. Only a contaminated problem that survived INTO the
+    # corpus is a real leak, and that must fail closed.
+    if leaked:
+        raise RuntimeError(f"GSM8K test contamination leaked into the corpus: {leaked}")
+    if len(accepted_rows) != len(accepted_indices):
+        raise RuntimeError("accepted corpus contains more than one trace per problem")
     if len(accepted_rows) < args.minimum_accepted:
         raise RuntimeError(
             f"accepted {len(accepted_rows)} problems; required {args.minimum_accepted}"
