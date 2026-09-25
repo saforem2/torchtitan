@@ -42,25 +42,49 @@ It supplies separate trainer/generator `HostMeshes` to the existing
 `train_upstream.spawn_proc_mesh()` path; model, controller, reward, and
 checkpoint logic remain the normal TorchTitan RL implementation.
 
-## Why cross-host runs force Gloo
+## Why the validated cross-host launcher currently forces Gloo
 
-TorchStore's automatic `TransportType.Unset` selection worked on one host, but
-selected host-local shared memory when trainer and generator moved to different
-hosts. The remote generator correctly rejected that storage volume:
+TorchStore's intended automatic (`TransportType.Unset`) preference order is:
+
+```text
+same-host SharedMemory
+→ TorchComms / MonarchRDMA
+→ XCCL when available
+→ Gloo
+→ MonarchRPC
+```
+
+The successful one-host automatic runs (`12478538`, `12478621`) logged
+`TransportType.Unset`. Because trainer and generator were colocated, the
+expected first choice was SharedMemory; those jobs do **not** establish that
+automatic selection chose XCCL.
+
+The explicit-XCCL control `12478537` held the model and one-host actor topology
+fixed but hung during the first publication after flatten/cast. Thus forced
+XCCL is not a passing result on this stack.
+
+For the two-host topology, automatic-selection job `12478709` incorrectly
+entered the SharedMemory path even though the generator was remote. This points
+to a locality/hostname-classification defect in the current integration, not a
+design rule that cross-host TorchStore must use Gloo. The remote generator
+correctly rejected the inaccessible shared-memory volume:
 
 ```text
 Shared memory storage not found. This may indicate the storage volume is on a different host.
 ```
 
-For this topology set:
+Until automatic locality resolution is fixed and revalidated, the committed
+two-host launcher pins the known-good network fallback:
 
 ```bash
 export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
 ```
 
-Gloo is the validated CPU-staged network transport on XPU. Forced TorchStore
-XCCL is **not** validated: prior controls stalled during first publication. Do
-not silently replace Gloo with XCCL or relabel the passing result as RDMA/XCCL.
+Gloo is therefore the **currently validated workaround** for this cross-host
+topology. It is not the preferred design endpoint, and it does not prove that
+automatic XCCL cannot work after the locality bug is corrected. Do not silently
+replace Gloo with XCCL or relabel the passing result as RDMA/XCCL without a new
+hardware gate.
 
 ## Required evidence before promotion
 
@@ -313,7 +337,7 @@ state, a parser check, or model construction.
 |---|---|---|
 | attach config-push timeout | full RL imports exceeded Monarch's default attach window, or reverse channel is unroutable | retain the tested 120 s timeout; first confirm the lightweight two-host actor preflight |
 | `KeyError: 'hosts'` | integer host slice dropped the named dimension | use `hosts.slice(hosts=slice(i, i + 1))` |
-| `Shared memory storage not found` | TorchStore auto-selected host-local storage across hosts | force `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo` |
+| `Shared memory storage not found` | automatic selection misclassified the remote volume as local and chose SharedMemory | use the validated Gloo workaround; separately fix/retest locality metadata before relying on `Unset` |
 | non-controller rank times out after 300 s | wrapper's FileStore coordination timeout is shorter than healthy RL startup/training | retain the tested 30-minute timeout |
 | forced XCCL hangs after flatten/cast | TorchStore XCCL transport remains unvalidated on this actor bootstrap | return to Gloo; treat XCCL as a separate experiment |
 | vLLM engine fails after inheriting CCL/FI settings | standalone EngineCore inherited launcher transport state | use the committed XPU environment scrub; compare against the validated launcher |

@@ -22,6 +22,9 @@ def test_rl_index_points_to_current_production_runbook():
     assert "Production / multi-node GRPO today: TRL" not in text
     assert "## Inspectable rollout examples" in current
     assert "Artifact row 16, policy version 1" in current
+    assert "intended automatic (`TransportType.Unset`) preference order" in current
+    assert "currently validated workaround" in current
+    assert "cross-host runs force Gloo" not in current
 
 
 def test_legacy_operator_pages_are_marked_deprecated():
