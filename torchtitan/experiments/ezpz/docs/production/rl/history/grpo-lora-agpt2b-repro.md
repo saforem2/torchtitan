@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Historical reproduction.** The environment and launch commands below
 > predate the current production multi-host path and Aurora `next-eval` image.
-> Start from [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+> Start from [`../monarch.md`](../monarch.md).
 
 **Goal:** repeat the reproduced Qwen3-0.6B alphabet_sort GRPO+LoRA smoke, but with
 the SFT deliverable **checkpoint-900** (AuroraGPT-2B) in the loop, so the reward

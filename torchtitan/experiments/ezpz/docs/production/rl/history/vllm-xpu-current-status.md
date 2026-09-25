@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Historical despite `current` in the filename.** Do not use this page's
 > runtime snippets for new jobs. Follow
-> [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+> [`../monarch.md`](../monarch.md).
 
 ## Summary
 

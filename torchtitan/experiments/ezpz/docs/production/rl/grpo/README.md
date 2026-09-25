@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > For current production launch instructions, use
-> [Monarch + TorchStore + vLLM on XPU](../monarch-torchstore-vllm.md). The rows
+> [Monarch + TorchStore + vLLM on XPU](../monarch.md). The rows
 > below are completed experiment records; links to TRL/server-mode launchers are
 > historical reproductions, not the default path for new runs.
 

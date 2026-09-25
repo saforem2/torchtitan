@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Historical reproduction using a pre-current runtime.** Do not copy its
 > oneAPI 2025.3 or environment setup into a new job. Use
-> [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+> [`../monarch.md`](../monarch.md).
 
 **Goal:** reproduce songhappy/torchtitan@rl `GRPO_LORA_XPU.md` on Sunspot -- the
 UPSTREAM `torchtitan.experiments.rl` path (Monarch actors + TorchStore weight

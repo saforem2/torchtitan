@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **Current production instructions:** use
-> [Production RL with Monarch, TorchStore, and vLLM on XPU](monarch-torchstore-vllm.md).
+> [Production RL with Monarch, TorchStore, and vLLM on XPU](monarch.md).
 > It contains the validated Sunspot two-host contract and the Aurora
 > `next-eval` runtime/preflight requirements. The TRL and July-era pages below
 > remain available for historical reproduction but are not the default runbook.
@@ -43,7 +43,7 @@ TorchStore policy synchronization, and vLLM generation. Sunspot has passed the
 full two-host gate; Aurora `next-eval` has a defined runtime contract but still
 requires its own multi-host RL hardware gate before production use.
 
-Start here: [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md).
+Start here: [`monarch.md`](monarch.md).
 
 ## Historical frameworks and compatibility paths
 
@@ -57,7 +57,7 @@ production runbook linked above.
 
 | # | Path | Framework | Generation | Entry point | venv | Status | Doc |
 |---|------|-----------|------------|-------------|------|--------|-----|
-| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | current machine-specific runtime | **Sunspot two-host validated; Aurora next-eval gate pending** | [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md) |
+| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | current machine-specific runtime | **Sunspot two-host validated; Aurora next-eval gate pending** | [`monarch.md`](monarch.md) |
 | A2 | TRL + vLLM-server | TRL `GRPOTrainer` | `trl vllm-serve` (on-policy, weight-sync) | `rl.train_grpo` `--use_vllm --vllm_mode server` | `rl-vllm` | **deprecated for new production; historical validation retained** | [`trl.md`](trl.md) |
 | A1 | TRL + `.generate()` | TRL `GRPOTrainer` | HF `.generate()` per-rank | `rl.train_grpo` (no `--use_vllm`) | `rl-vllm` | works (slow fallback) | [`trl.md`](trl.md) |
 | B (historical) | Monarch + TorchStore + vLLM | older vendored bring-up | vLLM (Monarch actor) | `rl.train_upstream` | `rl-grpo-lora` | one-host/two-tile historical result | [`monarch.md`](monarch.md) |
@@ -67,7 +67,7 @@ A1 and A2 are the same TRL `GRPOTrainer` with two generation backends (toggle
 
 ### Which to use
 - **Production / multi-host GRPO today:** follow
-  [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md). The committed
+  [`monarch.md`](monarch.md). The committed
   Sunspot launcher is the validated reference; Aurora `next-eval` requires the
   separate runtime and hardware gate documented there.
 - **Historical TRL reproduction:** use [`trl.md`](trl.md) only when explicitly
@@ -85,7 +85,7 @@ qsub -v EXPECTED_COMMIT="$(git rev-parse HEAD)" \
   torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_multihost_torchstore_validate.pbs
 
 # Aurora next-eval uses a different runtime/archive contract. Do not port this
-# PBS header or venv path verbatim; follow monarch-torchstore-vllm.md.
+# PBS header or venv path verbatim; follow monarch.md.
 ```
 
 ## Tasks (TRL path)
@@ -129,7 +129,7 @@ The SFT deliverable used by path B is
 ```
 docs/production/rl/
   README.md      <- this hub
-  monarch-torchstore-vllm.md <- current production runbook
+  monarch.md <- current production runbook
   trl.md         <- deprecated TRL reproduction path
   monarch.md     <- historical single-host Monarch bring-up/results
   grpo/          <- per-run GRPO results + charts (aurora2b sft_arithmetic, ...)
@@ -143,7 +143,7 @@ docs/production/rl/
   and generator on distinct hosts, Gloo policy transfer, three finite GRPO
   updates, pre/post generation, policy versions 0→3, checkpoints 1/2/3, and
   clean exit (job `12478711`). Production contract:
-  [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md).
+  [`monarch.md`](monarch.md).
 - **TRL + vLLM-server:** 1 node (job 12468780), cross-node generation (12469976),
   multi-trainer-node 3N/24-rank (12470083) -- all works. Detail + evidence:
   [`trl.md`](trl.md), [`grpo/`](grpo/README.md).

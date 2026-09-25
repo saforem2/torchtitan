@@ -4,7 +4,7 @@
 > **Historical diagnosis, not current launch instructions.** This document
 > explains failures and fixes in the legacy TRL + external vLLM-server stack.
 > New production runs should follow
-> [the current Monarch + TorchStore + vLLM runbook](monarch-torchstore-vllm.md).
+> [the current Monarch + TorchStore + vLLM runbook](monarch.md).
 > Its runtime and Aurora `next-eval` requirements supersede the environment
 > snippets in this page.
 
