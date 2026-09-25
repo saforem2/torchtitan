@@ -2,6 +2,12 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-25 (Aurora/Sunspot/Polaris/Perlmutter) -- PR #21 merged after exact-head validation
+
+- PR #21 head `1f4aff12bf55a36f2c7cad0cfbf453ac3cde4e35` passed the final hardware gates. Aurora job `8868654` completed AGPT TP=1, AGPT TP=2, and MoE with five finite optimizer updates and a nonempty DCP checkpoint for every arm; its terminal `VALIDATED` artifact and PBS exit 0 were inspected. Sunspot job `12478675` passed exact numerical parity, Perlmutter job `58868718` completed three finite CUDA optimizer steps with a checkpoint, and exact-head Polaris job `7659410` finished at exit 0 with `VERDICT: ok`.
+- PR #21 was merged into `ezpz` as merge commit `2824eb064` (`Merge PR #21: sync current TorchTitan into ezpz`); the validated PR head is an ancestor of `origin/ezpz`. The PR gate is closed and is no longer an active dashboard item.
+- Production umbrella chain 0 was incorrectly labeled failed by the dashboard because its parser matched `FAILOVER STOP: success`. Chain 0 actually reached its planned final step `23746`, saved the final checkpoint, logged `Training completed`, and exited 0. The parser now treats only explicit failure forms as failures and renders successful terminal chains as complete. Chain 3's non-finite loss remains unresolved.
+
 ## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
 
 - Reconciled the active results branch with `ezpz`. PR #19 is at
