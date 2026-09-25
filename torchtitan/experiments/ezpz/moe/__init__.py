@@ -12,6 +12,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 
@@ -65,12 +66,22 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
     up_init = kwargs["w2w3_param_init"].get("weight")
 
     def _init_legacy_order(t):
-        legacy = t.new_empty(t.shape[1], 2, *t.shape[2:])
+        if isinstance(t, DTensor):
+            local = t.to_local()
+            stacked = torch.empty(
+                tuple(t.shape), device=local.device, dtype=local.dtype
+            )
+        else:
+            stacked = t
+        legacy = stacked.new_empty(stacked.shape[1], 2, *stacked.shape[2:])
         if gate_init is not None:
             gate_init(legacy[:, 0])
         if up_init is not None:
             up_init(legacy[:, 1])
-        t.copy_(legacy.transpose(0, 1))
+        stacked.copy_(legacy.transpose(0, 1))
+        if isinstance(t, DTensor):
+            sharded = distribute_tensor(stacked, t.device_mesh, t.placements)
+            t.to_local().copy_(sharded.to_local())
 
     assert cfg.w13.param_init is not None
     cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_legacy_order}
