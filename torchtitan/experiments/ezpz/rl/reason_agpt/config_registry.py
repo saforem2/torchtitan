@@ -182,7 +182,9 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
-    model_config = _agpt_rl_model_config(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank)
+    model_config = _agpt_rl_model_config(
+        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
+    )
     return Controller.Config(
         model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.

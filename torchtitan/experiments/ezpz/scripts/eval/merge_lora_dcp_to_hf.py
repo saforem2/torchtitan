@@ -193,9 +193,7 @@ def to_hf_and_save(
     export_dtype: torch.dtype,
 ) -> None:
     from torchtitan.experiments.ezpz.agpt import model_registry as agpt_registry
-    from torchtitan.experiments.ezpz.agpt.state_dict_adapter import (
-        AgptStateDictAdapter,
-    )
+    from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
 
     # No converters: build the plain base config for the adapter. LoRA has
     # already been folded into ``merged_tt`` above.

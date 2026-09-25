@@ -14,7 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -412,7 +411,6 @@ def make_ezpz_moe_config(
 
 
 __all__ = [
-
     "moeModel",
     "moe_configs",
 ]
@@ -1441,7 +1439,6 @@ def model_registry(
     quantization: list | None = None,
 ) -> moeModel.Config:
     from torchtitan.config.transform.quantization import QuantizationConverter
-
 
     config = moe_configs[flavor]()
 

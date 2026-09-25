@@ -227,16 +227,13 @@ def _set_moe_ffn_sharding(
         shared = layer_cfg.moe.shared_experts
         if shared is not None and shared.w13.__class__.__name__ == "Config":
             module_cls = getattr(shared.w13, "__class__", None)
-            if (
-                module_cls is not None
-                and module_cls.__qualname__.startswith(
-                    "_LegacyInterleavedColumnParallelLinear."
-                )
+            if module_cls is not None and module_cls.__qualname__.startswith(
+                "_LegacyInterleavedColumnParallelLinear."
             ):
                 assert shared.w13.sharding_config is not None
-                shared.w13.sharding_config.state_shardings["weight"] = (
-                    dense_param_placement(tp=spmd.S(0))
-                )
-                shared.w13.sharding_config.state_shardings["bias"] = (
-                    dense_param_placement(tp=spmd.S(0))
-                )
+                shared.w13.sharding_config.state_shardings[
+                    "weight"
+                ] = dense_param_placement(tp=spmd.S(0))
+                shared.w13.sharding_config.state_shardings[
+                    "bias"
+                ] = dense_param_placement(tp=spmd.S(0))

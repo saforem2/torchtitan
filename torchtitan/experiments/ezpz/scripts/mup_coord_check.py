@@ -145,9 +145,9 @@ def run_worker(args: argparse.Namespace) -> int:
     os.environ.setdefault("WORLD_SIZE", str(ezpz.distributed.get_world_size()))
 
     import torch
+    from torchtitan.components.optimizer import default_adamw
 
     from torchtitan.config import ConfigManager
-    from torchtitan.components.optimizer import default_adamw
     from torchtitan.experiments.ezpz.agpt import _build_agpt_config
     from torchtitan.experiments.ezpz.logging import init_logger
 
@@ -570,7 +570,7 @@ def _print_table(summary: dict[str, Any]) -> None:
         cells = "".join(f"{v:>12.5f}" for v in vals)
         print(f"{(m + tag):<36}{cells}{sl:>9.3f}")
     print()
-    print(f"slope = d log2(l1) / d log2(width).  0 = width-invariant (muP).")
+    print("slope = d log2(l1) / d log2(width).  0 = width-invariant (muP).")
     print(
         f"max |slope| over non-control modules at step {steps}: "
         f"{summary['max_abs_slope_last_step']:.3f} "
@@ -606,7 +606,9 @@ def _plot(summary: dict[str, Any], out_dir: str) -> str | None:
     mods = sorted(summary["modules"])
     ncol = 4
     nrow = (len(mods) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(3.4 * ncol, 2.7 * nrow), squeeze=False)
+    fig, axes = plt.subplots(
+        nrow, ncol, figsize=(3.4 * ncol, 2.7 * nrow), squeeze=False
+    )
     cmap = plt.get_cmap("viridis")
     for idx, m in enumerate(mods):
         ax = axes[idx // ncol][idx % ncol]

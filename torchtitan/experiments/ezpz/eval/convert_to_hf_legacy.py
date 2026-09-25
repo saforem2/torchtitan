@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Variant of convert_to_hf.py that handles legacy DCP checkpoints
 # from before the qkv_linear submodule was introduced.
 #
@@ -22,6 +28,7 @@ import torch
 import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint import HuggingFaceStorageWriter
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
+
 from torchtitan.components.checkpointer import ModelWrapper
 from torchtitan.config import TORCH_DTYPE_MAP
 
@@ -58,8 +65,11 @@ class LegacyKeyRenamePlanner(DefaultLoadPlanner):
         self._reverse_map: dict[str, str] = {}
         for new_key, tensor in state_dict.items():
             old_key = _new_to_old(new_key)
-            if old_key is not None and metadata is not None \
-                    and old_key in metadata.state_dict_metadata:
+            if (
+                old_key is not None
+                and metadata is not None
+                and old_key in metadata.state_dict_metadata
+            ):
                 renamed_sd[old_key] = tensor
                 self._reverse_map[old_key] = new_key
             else:
@@ -120,7 +130,9 @@ def convert_legacy_to_hf(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert LEGACY DCP weights to HF format.")
+    parser = argparse.ArgumentParser(
+        description="Convert LEGACY DCP weights to HF format."
+    )
     parser.add_argument("input_dir", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--hf_assets_path", type=Path, default="./assets/hf/gemma-7b")

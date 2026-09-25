@@ -46,9 +46,7 @@ class AgptModel(Llama3Model):
             # Explicit super(AgptModel.Config, self) is required because
             # bare super() in a slots=True nested-class dataclass can't
             # resolve the enclosing class name correctly.
-            super(AgptModel.Config, self).update_from_config(
-                config=config, **kwargs
-            )
+            super(AgptModel.Config, self).update_from_config(config=config, **kwargs)
 
             from torchtitan.experiments.ezpz.agpt.sharding import (
                 set_agpt_sharding_config,

@@ -30,7 +30,6 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 
-
 from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
 from torchtitan.models.common import (
     ComplexRoPE,
@@ -301,7 +300,6 @@ class ReLUSquaredGLU(BinaryActivationFn):
 
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 
-
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
 
@@ -310,7 +308,6 @@ __all__ = [
     "XPUScaledDotProductAttention",
     "_default_inner_attention",
     "model_registry",
-
 ]
 
 
@@ -1061,7 +1058,6 @@ def model_registry(
     # validate_converter_compatibility. Same one-arg contract: it takes the
     # converter Config list and raises on an incompatible combination.
     from torchtitan.config.transform.converter import validate_converter_compatibility
-
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,

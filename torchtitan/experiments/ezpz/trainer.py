@@ -7,8 +7,8 @@
 import math
 import os
 import time
-from contextlib import AbstractContextManager
 from collections.abc import Iterable, Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, cast
