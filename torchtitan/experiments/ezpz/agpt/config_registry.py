@@ -1064,7 +1064,7 @@ def agpt_20b_noac() -> FaultTolerantTrainer.Config:
         partial         PASS (skipped)        vc_check (ran)
         full_dtensor    vc_check (ran)        vc_check (ran)
 
-    CLAUDE.md describes the bug as "compile + AC + TP". compile and
+    AGENTS.md describes the bug as "compile + AC + TP". compile and
     parallelize are both confirmed necessary; AC is the untested leg and the
     one that decides the remedy. If AC is required, selective AC may dodge it
     (as it did for the MoE router recompute bug) and we keep compile AND TP.

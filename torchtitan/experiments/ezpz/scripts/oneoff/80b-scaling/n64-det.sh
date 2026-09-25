@@ -11,7 +11,7 @@
 # the deterministic fix that worked at n=32 (8539896). If clean,
 # determinism is the production-viable fix at production scale.
 #
-# Per CLAUDE.md: NEVER use --debug.deterministic_warn_only.
+# Per AGENTS.md: NEVER use --debug.deterministic_warn_only.
 
 cd /flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz
 

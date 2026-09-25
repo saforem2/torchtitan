@@ -23,7 +23,7 @@
 # write time only step-100 + step-200 are saved; later runs of this
 # script will pick up newer ckpts as they land.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md — venv
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md — venv
 # activate has unbound vars and would trigger on first source.
 set -o pipefail
 
@@ -38,7 +38,7 @@ echo "Modules loaded."
 cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
 
 # This eval pipeline runs against the bare frameworks/2025.3.1 module
-# stack (NOT the user venv) per CLAUDE.md — user venv has transformers
+# stack (NOT the user venv) per AGENTS.md — user venv has transformers
 # 5.6.2 which breaks lm-eval's HF backend.
 #
 # But the convert_to_hf step needs torchtitan + the v2 model registry —

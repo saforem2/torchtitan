@@ -13,7 +13,7 @@
 #     interpreter via BootstrapCommand(program=...) for the worker side.
 #   - Eliminates py3.13 vs py3.14 ABI debugging surface entirely.
 #
-# CRITICAL: per CLAUDE.md golden rule #5, NEVER pip install anything
+# CRITICAL: per AGENTS.md golden rule #5, NEVER pip install anything
 # that depends on torch without `--no-deps --no-cache --link-mode=copy`.
 # Specifically: `xgrammar` declares `triton` (vanilla) as a Linux/x86_64
 # dep, which will silently overwrite triton-xpu and break vLLM-XPU. The

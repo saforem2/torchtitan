@@ -14,7 +14,7 @@
 #       -v NHOSTS_TRAIN=512,FAILOVER_MAX_RETRIES=2 \
 #       scripts/submit_agpt_80b_aurora_venv_failover.sh
 #
-# Working-config provenance (see CLAUDE.md "v2 — 80B"):
+# Working-config provenance (see AGENTS.md "v2 — 80B"):
 # - 80B v2 path identified 2026-05-05 in 4N smoke (job 12466025):
 #   AdamW LR=1e-6, TP=2, AC=full, compile=OFF, fp32-master.
 #   Loss descended cleanly 12.98 -> 10.46 over 20 steps.

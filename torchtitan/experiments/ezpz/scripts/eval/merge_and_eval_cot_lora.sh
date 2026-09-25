@@ -12,7 +12,7 @@
 #   qsub -v DCP=<...>/checkpoint/step-100,BASE=<base-hf>,OUT=<merged-hf-dir>,LIMIT=200 \
 #       torchtitan/experiments/ezpz/scripts/eval/merge_and_eval_cot_lora.sh
 #
-# no set -euo: module load returns nonzero under Lmod (CLAUDE.md rule)
+# no set -euo: module load returns nonzero under Lmod (AGENTS.md rule)
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "${PBS_O_WORKDIR:-$REPO}" || exit 9
 
