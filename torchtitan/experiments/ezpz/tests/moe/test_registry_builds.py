@@ -120,6 +120,23 @@ def test_routed_experts_wires_dispatcher_meshes(monkeypatch):
     }
 
 
+def test_routed_experts_prefers_live_sparse_ep_mesh(monkeypatch):
+    from torchtitan.experiments.ezpz.moe import routed_experts as routed_module
+
+    class Dispatcher:
+        ep_mesh = "stale-ep-mesh"
+
+    routed = object.__new__(routed_module.EzpzRoutedExperts)
+    routed.token_dispatcher = Dispatcher()
+    monkeypatch.setattr(
+        routed_module,
+        "spmd_sparse_mesh",
+        lambda: {"ep": "live-ep-mesh"},
+    )
+
+    assert routed._resolve_ep_mesh() == "live-ep-mesh"
+
+
 def test_default_backend_does_not_take_the_routing_path():
     """The other five backends must be untouched by the sonic plumbing."""
     import torch

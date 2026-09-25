@@ -19,6 +19,7 @@ wants them. Everything else takes the identical path as before.
 
 from dataclasses import dataclass
 
+from torchtitan.distributed.spmd_types import spmd_sparse_mesh
 from torchtitan.models.common.moe import RoutedExperts
 
 
@@ -53,6 +54,15 @@ class EzpzRoutedExperts(RoutedExperts):
             tp_mesh=parallel_dims.get_optional_mesh("tp"),
         )
 
+    def _resolve_ep_mesh(self):
+        """Return the live sparse EP mesh, falling back for older lifecycles."""
+        sparse_mesh = spmd_sparse_mesh()
+        return (
+            sparse_mesh["ep"]
+            if sparse_mesh is not None
+            else getattr(self.token_dispatcher, "ep_mesh", None)
+        )
+
     def forward(
         self,
         x_TD,
@@ -74,7 +84,10 @@ class EzpzRoutedExperts(RoutedExperts):
         # plus the routing decision and returns combined output, so we must
         # NOT run the token dispatcher around it. Doing both would route
         # twice.
-        ep_mesh = getattr(self.token_dispatcher, "ep_mesh", None)
+        # Current upstream owns sparse-mesh lifetime in the SPMD runtime
+        # context. Prefer that authoritative mesh; retain the dispatcher field
+        # as compatibility for older TorchTitan lifecycles.
+        ep_mesh = self._resolve_ep_mesh()
         return self.inner_experts(
             x_TD,
             num_local_tokens_per_expert_E,
