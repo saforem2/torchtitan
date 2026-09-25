@@ -86,7 +86,6 @@ from torchtitan.rl.controller import Controller
 from torchtitan.rl.train import (
     _compute_generator_world_size,
     _compute_trainer_world_size,
-    breakable_cuda_graph_env,
     HostMeshes,
 )
 
@@ -212,7 +211,7 @@ async def main():
             per_generator_world_size,
             host_meshes=None,
             num_generators=config.num_generators,
-            generator_env=breakable_cuda_graph_env(config.generator),
+            generator_env=None,
         )
         await rl_trainer.setup_async(
             trainer_mesh=trainer_mesh,

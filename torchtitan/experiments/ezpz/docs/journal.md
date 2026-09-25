@@ -6651,6 +6651,30 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 
 ---
 
+## 2026-09-25 — Post-merge multi-host RL and Sunspot 30B diagnosis
+
+- PR #25 fixed checkpoint-selector translation and current checkpointer ownership;
+  it merged into `ezpz` as `550d2c670a02866661c133dd09b499ae6844bc7f`.
+- Controlled 26.2B Sunspot runs showed the failure is fresh-start FSDP transient
+  memory pressure, not DCP restore corruption. Shard-16 failed in first all-gather;
+  shard-32 cleared forward unshard and failed in backward reduce-scatter with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`. Replica count, local batch size, and
+  `CCL_SYCL_KERNEL_SYNC=0` did not remove the defect. Large core files were left
+  untouched.
+- Job `12478702` first proved one Monarch actor graph could span two physical
+  Sunspot hosts.
+- Job `12478711` then passed the full production gate at exact commit
+  `738109e8d4481ebb723622db0d1a34b9c8907203`: trainer and vLLM generator on
+  separate hosts, TorchStore `TransportType.Gloo`, pre/post validation, three
+  finite GRPO updates, policy versions 0 through 3, 40/40 completed nonzero-
+  reward rollouts, DCP checkpoints at steps 1/2/3, clean shutdown, and PBS exit
+  zero. Automatic transport had selected host-local shared memory and is not
+  valid across hosts; explicit Gloo is required for this topology.
+- Full report:
+  [`experiments/2026-09-25-sunspot-multihost-rl-validation.md`](experiments/2026-09-25-sunspot-multihost-rl-validation.md).
+
+---
+
 ## 2026-04-23 — XPU fixes, upstream merge
 
 ### XCCL Barrier Fix
