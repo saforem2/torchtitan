@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Superseded.** This page's conclusion that Monarch/TorchStore is blocked was
 > overturned by later hardware validation. Do not reuse its runtime commands.
-> See [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+> See [`../monarch.md`](../monarch.md).
 
 ## TL;DR
 
@@ -246,7 +246,7 @@ that doesn't produce SYCL-USM-device memory.
 
 At the time of this investigation, Track C remained the working production
 path. That conclusion is superseded by the current
-[`Monarch + TorchStore + vLLM` runbook](../monarch-torchstore-vllm.md). The `xpu_overrides.py`
+[`Monarch + TorchStore + vLLM` runbook](../monarch.md). The `xpu_overrides.py`
 patches added during this investigation are independently useful (the
 RNG-state USM allocator fix, the LOCAL_RANK hook, the set_device pin)
 and are kept in place for future Monarch attempts.

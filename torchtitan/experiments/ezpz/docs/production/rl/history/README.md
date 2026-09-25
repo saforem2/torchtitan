@@ -3,12 +3,12 @@
 Superseded historical records from the 2026-06 RL/vLLM-XPU bring-up. Kept for
 the landmine record; **not current status**. For where GRPO on XPU stands
 today, see
-[`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+[`../monarch.md`](../monarch.md).
 
 > [!WARNING]
 > Every page in this directory is historical. Environment snippets here predate
 > the current Aurora `next-eval` runtime. Start from
-> [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md), not from a
+> [`../monarch.md`](../monarch.md), not from a
 > command copied out of `history/`.
 
 | Doc | Date | What it captured |

@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > **Deprecated investigation notes, not an operator guide.** Use
-> [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md) for current
+> [`../monarch.md`](../monarch.md) for current
 > production and Aurora `next-eval` instructions.
 
 **Date:** 2026-06-10

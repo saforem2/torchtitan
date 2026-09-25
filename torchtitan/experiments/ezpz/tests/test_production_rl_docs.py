@@ -10,20 +10,22 @@ from pathlib import Path
 
 
 DOCS = Path(__file__).parents[1] / "docs" / "production" / "rl"
-CURRENT = "monarch-torchstore-vllm.md"
+CURRENT = "monarch.md"
 
 
 def test_rl_index_points_to_current_production_runbook():
     text = (DOCS / "README.md").read_text()
+    current = (DOCS / CURRENT).read_text()
 
     assert "**Current production instructions:**" in text
     assert CURRENT in text
     assert "Production / multi-node GRPO today: TRL" not in text
+    assert "## Inspectable rollout examples" in current
+    assert "Artifact row 16, policy version 1" in current
 
 
 def test_legacy_operator_pages_are_marked_deprecated():
     for relative in (
-        "monarch.md",
         "trl.md",
         "2026-07-06_multinode-grpo-root-cause.md",
     ):
@@ -43,6 +45,7 @@ def test_runtime_history_pages_have_direct_deprecation_banners():
     for relative in (
         "2026-06-13-bringup-and-2026-07-01-desync.md",
         "2026-06-14_monarch-torch213-deep-dive.md",
+        "2026-07-19_monarch-single-host-grpo.md",
         "grpo-lora-agpt2b-repro.md",
         "grpo-lora-xpu-repro.md",
         "upstream-rl-port-status.md",

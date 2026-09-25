@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > **Deprecated runtime/launch instructions.** This is a historical bring-up
-> record. Use [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md)
+> record. Use [`../monarch.md`](../monarch.md)
 > for current Sunspot production and Aurora `next-eval` requirements.
 
 End-of-session writeup. Burned ~16 PBS jobs (12468799 → 12468815)

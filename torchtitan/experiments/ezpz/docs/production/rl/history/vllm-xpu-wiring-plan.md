@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Pre-implementation design document.** The architecture and environment have
 > since changed. Follow
-> [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md) for the
+> [`../monarch.md`](../monarch.md) for the
 > implemented production path and Aurora `next-eval` contract.
 
 **Date:** 2026-06-13

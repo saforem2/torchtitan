@@ -1,157 +1,332 @@
-# GRPO+LoRA on XPU: Monarch + TorchStore + vLLM
+# Production RL with Monarch, TorchStore, and vLLM on XPU
 
-> [!WARNING]
-> **Deprecated as an operator guide.** This page documents the July-era
-> one-host/two-tile bring-up, older `rl-grpo-lora` runtime, and reward studies.
-> For new production or multi-host work, use
-> [the current Monarch + TorchStore + vLLM runbook](monarch-torchstore-vllm.md).
-> Do not copy the environment or launcher commands below onto Aurora
-> `next-eval`.
+**Current production runbook. Last updated: 2026-09-25.**
 
-> **Last updated: 2026-08-30.** "WORKS" below is a path-validation result
-> from 2026-07-19, not a running job -- the most recent Monarch GRPO run on
-> record is 2026-07-20. Nothing on this page is training or queued.
+> [!IMPORTANT]
+> This page is the canonical operator guide for the current upstream-style
+> TorchTitan RL path. Older TRL server-mode, oneAPI 2025.3, Torch 2.12/2.13,
+> external-fork, and pre-`next-eval` instructions are retained only as historical
+> reproductions. Do not copy their environment setup into a new production run.
 
-> **2026-09-22 reproduction:** the current Torch 2.14 stack is being rerun
-> against the regenerated, hash-pinned SFT checkpoint-900 export. See
-> [Torch 2.14 Monarch GRPO reproduction](grpo/torch214-reproduction.md) for
-> job IDs, provenance, interim metrics, and final acceptance criteria.
+## Current status
 
-**Current status doc** for the UPSTREAM `torchtitan.experiments.rl` RL path
-(Monarch actors + TorchStore weight store + vLLM generation), vendored into
-**our** repo under `experiments/ezpz/` and verified end-to-end on Sunspot XPU.
-For TRL-based GRPO see [`trl.md`](trl.md); for the bring-up chronology and
-superseded investigations see [`history/`](history/README.md).
+| Machine / queue | Status | Validated contract |
+|---|---|---|
+| Sunspot `workq` | **Validated end to end** | Two physical hosts; one trainer actor on host 0; one vLLM generator actor on host 1; Monarch scheduler-SPMD mesh; TorchStore Gloo transport; three finite GRPO updates; pre/post generation; checkpoints; clean shutdown. Job `12478711`, PBS exit 0. |
+| Aurora `next-eval` | **Runtime contract established; multi-host RL gate still required** | oneAPI 2026.1 + an image-independent, versioned `.venv.next-eval` archive; no frameworks Conda environment; 12 flat XPU tiles per node. Do not call Aurora production-ready until the same actor, weight-sync, optimizer, artifact, and shutdown gates pass there. |
 
-## Status: WORKS, vendored + verified (2026-07-19)
-
-GRPO+LoRA on AuroraGPT-2B (the SFT checkpoint-900 deliverable) runs end-to-end
-from **our** repo -- no dependence on external fork checkouts on the invocation --
-driving the current-upstream `experiments/rl` engine with **our** `ezpz.agpt`
-model, on 2 XPU tiles:
-
-```
-Train | Step: 1/2/3   ~1765 tok/s (steady state)
-reward_mean ~0.16   nonzero ~53%   max 1.0
-```
-
-(job 12471049; matches the fork-based v5 baseline, so the vendored path has the
-same learning dynamics.) A 100-step easy-task run shows a rising reward curve
-(0.167 -> ~0.26); see [Reward study](#reward-study-task-difficulty-is-the-lever-not-lr).
-
-**Design guarantee:** the entire XPU enablement is a THIN overlay under
-`experiments/ezpz/` -- **zero edits to `experiments/rl/` (upstream) or
-`torchtitan/models/**` (core).** All XPU compatibility is applied as runtime
-monkeypatches from `ezpz/rl/xpu_overrides.py` (assert-and-fail-loud if an upstream
-target is renamed).
+The merged implementation landed through PR #26. The authoritative Sunspot
+hardware report is
+[Sunspot multi-host Monarch, TorchStore, and vLLM validation](../../experiments/2026-09-25-sunspot-multihost-rl-validation.md).
 
 ## Architecture
 
-`experiments/rl/` IS current upstream torchtitan (it ships the RL engine:
-controller, actors, vLLM wrapper, TorchStore weight-sync). We do NOT copy it.
-Instead a thin ezpz overlay drives it:
+The controller builds one Monarch actor graph over scheduler-launched host
+workers:
 
-| Piece | Role |
-|---|---|
-| `ezpz/rl/train_upstream.py` | Entry point. Applies `apply_all_xpu_patches()` BEFORE importing `rl/`, then delegates to the upstream `Controller` (spawn -> setup_async -> run). |
-| `ezpz/rl/xpu_overrides.py` | The XPU patch suite (per-actor via the spawn `_bootstrap`): `init_distributed` PALS injection, XPU attention backend, FSDP2 AVG->SUM, `current_stream` deferral, `create_block_mask` `separate_full_blocks` strip, etc. |
-| `ezpz/rl/alphabet_sort_agpt/` | The overlay config module: `rl_grpo_lora_agpt_2b()` + `_easy()`. Backs the upstream engine with `ezpz.agpt.model_registry("2b-rl", converters=[LoRA, LMHeadCast])`. |
-| `ezpz/agpt/` | Our AuroraGPT model (`model_registry`, `parallelize`). Gained `converters=`, `skip_dp`, and the `2b-rl` config for RL. |
+```text
+PBS allocation
+  └─ ezpz launch: one rank per host
+       └─ host_mesh_from_store(): one Monarch host mesh
+            ├─ host 0 slice → trainer ProcMesh → TrainerActor
+            └─ host 1 slice → generator ProcMesh → vLLM GeneratorActor
 
-The upstream engine consumes our `FaultTolerantModelSpec` (a `ModelSpec` subclass)
-directly, and `--module` accepts an arbitrary dotted path, so the overlay needs no
-registry edits.
-
-## How to run it
-
-Build the venv once, stage the checkpoint, then run from the **repo root**:
-
-```bash
-# 1. build venvs/rl-grpo-lora (torchstore/monarch/vllm from source + ezpz + XPU patches)
-bash torchtitan/experiments/ezpz/rl/scripts/build_rl_grpo_lora_venv.sh
-
-# 2. stage ckpt-900: symlink weights + inject the gemma chat_template into a COPIED
-#    tokenizer (never mutates the SFT deliverable)
-bash torchtitan/experiments/ezpz/rl/scripts/grpo/stage_agpt2b.sh
-
-# 3. GRPO on 2 tiles (COMPOSITE), from the repo root
-bash torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_grpo.sh
-#   CONFIG=rl_grpo_lora_agpt_2b        -> stock task, short smoke
-#   CONFIG=rl_grpo_lora_agpt_2b_easy   -> 1 turn / <=3 names + lr 2e-5 (the learning config, default)
+TrainerActor ── TorchStore/Gloo policy publication ──> GeneratorActor/vLLM
+      │                                                    │
+      └──────────── gradients + optimizer updates <─ rollouts/rewards
 ```
 
-The launcher runs the entry point:
+The production entry point is
+`torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_train_upstream.py`.
+It supplies separate trainer/generator `HostMeshes` to the existing
+`train_upstream.spawn_proc_mesh()` path; model, controller, reward, and
+checkpoint logic remain the normal TorchTitan RL implementation.
 
-```bash
-python -m torchtitan.experiments.ezpz.rl.train_upstream \
-    --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
-    --config rl_grpo_lora_agpt_2b_easy \
-    --hf_assets_path <staged ckpt-900 dir> \
-    --async-loop.training-sample-builder.no-drop-zero-std-reward-groups
+## Why cross-host runs force Gloo
+
+TorchStore's automatic `TransportType.Unset` selection worked on one host, but
+selected host-local shared memory when trainer and generator moved to different
+hosts. The remote generator correctly rejected that storage volume:
+
+```text
+Shared memory storage not found. This may indicate the storage volume is on a different host.
 ```
 
-### CRITICAL: run from the repo root
+For this topology set:
 
-The `rl-grpo-lora` venv's editable `torchtitan` maps to the external build fork.
-Running from the **repo root** makes our cwd-local `torchtitan` win, so both
-`experiments.ezpz` (overlay + agpt) AND `experiments.rl` (current-upstream engine)
-resolve from our repo, while monarch/torchstore/vllm come from the venv. A neutral
-cwd picks the fork -> `ModuleNotFoundError: torchtitan.experiments.ezpz`. The
-launcher `cd`s to the repo root for this reason.
+```bash
+export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
+```
 
-## Baked-in settings (learned from the runs)
+Gloo is the validated CPU-staged network transport on XPU. Forced TorchStore
+XCCL is **not** validated: prior controls stalled during first publication. Do
+not silently replace Gloo with XCCL or relabel the passing result as RDMA/XCCL.
 
-The overlay config hard-codes the settings that make agpt-2b GRPO actually work
-and learn on XPU (why, in [history/grpo-lora-agpt2b-repro.md](history/grpo-lora-agpt2b-repro.md)):
+## Required evidence before promotion
 
-| Setting | Value | Why |
+A scheduler state or model load is not a pass. Require all of the following:
+
+1. exact checkout SHA asserted by the batch script;
+2. clean tracked worktree;
+3. trainer and generator placement on distinct host identities;
+4. explicit `TransportType.Gloo` in the controller log;
+5. vLLM pre-training generation completes;
+6. initial trainer policy publication and generator pull complete;
+7. at least three finite optimizer updates with finite loss and gradient norm;
+8. policy versions advance in retained rollout rows;
+9. post-training generation completes;
+10. non-empty rollout JSONL and DCP checkpoint metadata/data shards exist;
+11. actor/process-mesh shutdown is clean;
+12. scheduler exit is zero.
+
+The passing Sunspot reference produced 40/40 completed nonzero-reward rollouts,
+policy versions 0 through 3, and DCP checkpoints at steps 1, 2, and 3.
+
+## Inspectable rollout examples
+
+The authoritative raw artifact for job `12478711` is:
+
+```text
+/lus/tegu/projects/datascience/foremans/reproductions/
+  agpt2b-mds154391-broad-grain-sft900/grpo/
+  agpt2b-multihost-sync-12478711/rollout_samples.jsonl
+```
+
+It contains 40 rows: 16 at policy version 0 and eight each at versions 1, 2,
+and 3. Every row has `status="completed"`; all 40 have nonzero total reward.
+The renderer stores the reasoning body in `reasoning_content` and the answer
+tail in `content`, so the examples below reconstruct the raw sampled response
+as `<think>{reasoning_content}</think>{content}`.
+
+### Exact-correct updated-policy rollout
+
+Artifact row 16, policy version 1, training sample, reward `0.8`:
+
+```text
+User: A cake of 400 grams is divided into eight equal parts. Nathalie eats
+one-eighth of the cake, and Pierre eats double what Nathalie ate. How much did
+Pierre eat, in grams?
+
+Assistant:
+<think>
+Nathalie eats 1/8 x 400g = 50g of cake.
+Pierre eats 2 x 50g = 100g of cake.
+</think>
+<answer>\boxed{100}</answer><end_of_turn>
+```
+
+Reward components:
+
+```text
+ThinkFormatReward       1.0
+AnswerExtractableReward 1.0
+AnswerCloseReward       0.0
+AnswerCorrectReward     1.0
+```
+
+This proves the remote vLLM actor consumed an updated policy version and
+returned a bounded, correctly formatted, exact-answer completion.
+
+### Well-formed partial-credit rollout
+
+Artifact row 24, policy version 2, training sample, reward
+`0.31666666666666665`:
+
+```text
+User: John can play 200 beats per minute. If he plays 2 hours a day for 3 days
+how many beats does he play?
+
+Assistant:
+<think>
+He played for 60*2=120 minutes
+That means he played 120*200=24000 beats
+</think>
+<answer>\boxed{24000}</answer><end_of_turn>
+```
+
+The response is bounded and format-valid, but it omits the three-day factor.
+The scorer therefore records:
+
+```text
+ThinkFormatReward       1.0
+AnswerExtractableReward 1.0
+AnswerCloseReward       0.33333333333333337
+AnswerCorrectReward     0.0
+```
+
+This is useful negative evidence: the pipeline distinguishes successful
+generation/formatting and partial numeric closeness from exact task correctness.
+
+### Post-training validation can still be wrong
+
+Artifact row 32, policy version 3, validation sample, reward `0.25`, emits a
+well-formed but incorrect answer (`148`) after flawed traffic arithmetic. All
+eight policy-version-3 validation rows were completed and bounded, but none had
+`AnswerCorrectReward=1.0`. Therefore the job proves multi-host runtime and
+policy-version advancement, **not** semantic improvement. Never promote a model
+from these rollout snippets or aggregate reward alone; run a fixed paired
+held-out evaluation.
+
+## Sunspot: validated two-host reference
+
+Use a clean detached worktree at an immutable pushed SHA. The merged validation
+launcher is:
+
+```bash
+qsub \
+  -v EXPECTED_COMMIT="$(git rev-parse HEAD)" \
+  torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_multihost_torchstore_validate.pbs
+```
+
+The launcher owns these machine-specific settings:
+
+```bash
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
+export CCL_PROCESS_LAUNCHER=none
+export CCL_ATL_TRANSPORT=ofi
+export FI_PROVIDER=tcp
+export CCL_KVS_IP_PORT="${head_node}_${port}"
+```
+
+It launches two scheduler ranks (`-n 2 -ppn 1`), then the entry point spawns one
+trainer XPU actor on the first host and one generator XPU actor on the second.
+The committed PBS script is a bounded production validation, not a long quality
+campaign; change training budget only after the unmodified gate passes.
+
+## Aurora `next-eval`: current runtime contract
+
+Aurora `next-eval` uses the TEST compute image, not the ordinary production
+image. New RL work must use all of the following:
+
+```text
+queue: next-eval
+account: AuroraGPT
+filesystems: home:flare
+runtime module: oneapi/release/2026.1.0 (+ hdf5, pti-gpu as needed)
+Python/PyTorch: image-independent, versioned .venv.next-eval archive
+base frameworks Conda environment: forbidden
+XPU hierarchy: ZE_FLAT_DEVICE_HIERARCHY=FLAT
+```
+
+A representative allocation header is:
+
+```bash
+#PBS -A AuroraGPT
+#PBS -q next-eval
+#PBS -l select=2
+#PBS -l walltime=00:45:00
+#PBS -l filesystems=home:flare
+```
+
+Inside the allocation:
+
+```bash
+if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
+  source /etc/bash.bashrc.local
+fi
+module load oneapi/release/2026.1.0 hdf5 pti-gpu
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export PATH="/opt/pbs/bin:${PATH}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils)
+ezpz_setup_job
+
+VENV_ROOT=<shared directory containing the validated archive>
+ARCHIVE="${VENV_ROOT}/.venv.next-eval.tar.gz"
+ezpz yeet --src "${ARCHIVE}"
+source /tmp/.venv.next-eval/bin/activate
+export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export PYTHONPATH="${PBS_O_WORKDIR}${PYTHONPATH:+:${PYTHONPATH}}"
+```
+
+The archive name and extraction directory must be versioned and asserted by the
+wrapper; do not overwrite a production archive in place. If the current archive
+extracts under a different node-local basename, derive and assert that path
+instead of assuming `/tmp/.venv.next-eval`.
+
+### Aurora fail-closed preflight
+
+Before allocating a full RL run, execute this on every selected host using the
+node-local interpreter that will launch the actors:
+
+```bash
+python3 - <<'PY'
+import importlib.metadata as metadata
+import inspect
+import torch
+
+import monarch
+import torchstore
+import vllm
+from spmd_types import SpmdType
+from torchtitan.experiments.ezpz.rl import train_upstream
+from torchtitan.rl.controller import Controller
+
+assert torch.__version__.startswith("2.15.") and "+xpu" in torch.__version__
+assert metadata.version("spmd-types") == "0.2.5"
+assert torch.xpu.is_available()
+assert torch.xpu.device_count() == 12
+assert callable(train_upstream.spawn_proc_mesh)
+print(torch.__version__, monarch.__file__, torchstore.__file__, vllm.__file__, SpmdType, Controller)
+PY
+```
+
+Also reject pip MPI runtimes such as `impi-rt`; site MPICH/PMIx must remain
+authoritative. Import success on the login node is not a compute-node preflight.
+
+### Aurora promotion sequence
+
+Aurora has not yet passed the final multi-host RL gate. Promote in this order:
+
+1. two-host actor-placement preflight with distinct host identities;
+2. same two-host AGPT validation shape as Sunspot;
+3. require explicit Gloo, pre/post vLLM generation, three finite updates,
+   policy-version advancement, checkpoints, rollout artifacts, clean shutdown,
+   and PBS exit 0;
+4. only then increase actor counts, model size, or training budget.
+
+Do not claim Aurora success from the generic communicator probe, scheduler
+state, a parser check, or model construction.
+
+## Operational invariants
+
+- Use one scheduler allocation and one Monarch actor graph. Two independent MPI
+  controllers are not an equivalent multi-host test.
+- Keep checkpoints, datasets, repository, and outputs on the shared filesystem;
+  only the runtime venv is node-local.
+- Namespace output, TorchStore/FileStore rendezvous, and ports by PBS job ID.
+- Retain the 120-second Monarch attach timeout and 30-minute coordination-store
+  timeout: full RL/vLLM imports exceeded the defaults during healthy startup.
+- Use dimension-preserving host slices (`slice(0, 1)`, not integer `0`) so role
+  meshes retain the named `hosts` dimension.
+- Scrub standalone vLLM subprocesses of machine-specific CCL/FI variables when
+  the launcher does so; do not reintroduce inherited transport pollution.
+- Never infer model-quality improvement from a mechanically successful GRPO
+  run. Evaluate a fixed held-out set with retained raw generations.
+
+## Failure signatures
+
+| Symptom | Meaning | Action |
 |---|---|---|
-| `generator.model_dtype` | `float32` | **THE coherence fix.** bf16 corrupts agpt-2b generation through vLLM (large vocab/ffn -> rounding flips greedy argmax); fp32 is coherent. |
-| reward `similarity_power` | `1` (linear) | stock `**4` starves GRPO of gradient; linear gives partial-credit variance that trains. |
-| few-shot format env | one-shot | model rarely emits `<alphabetical_sorted>` unprompted; one-shot (bare lines, distinct example) raises the hit rate for dense signal. |
-| attention | `flex` | RL generator asserts varlen|flex; varlen lacks an XPU flash kernel; flex + `max_autotune=False` works (matches the proven runs). |
+| attach config-push timeout | full RL imports exceeded Monarch's default attach window, or reverse channel is unroutable | retain the tested 120 s timeout; first confirm the lightweight two-host actor preflight |
+| `KeyError: 'hosts'` | integer host slice dropped the named dimension | use `hosts.slice(hosts=slice(i, i + 1))` |
+| `Shared memory storage not found` | TorchStore auto-selected host-local storage across hosts | force `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo` |
+| non-controller rank times out after 300 s | wrapper's FileStore coordination timeout is shorter than healthy RL startup/training | retain the tested 30-minute timeout |
+| forced XCCL hangs after flatten/cast | TorchStore XCCL transport remains unvalidated on this actor bootstrap | return to Gloo; treat XCCL as a separate experiment |
+| vLLM engine fails after inheriting CCL/FI settings | standalone EngineCore inherited launcher transport state | use the committed XPU environment scrub; compare against the validated launcher |
 
-## Reward study (task difficulty is the lever, not LR)
+## Historical and deprecated paths
 
-A controlled 3-way GRPO+LoRA comparison (all fp32 + few-shot + linear reward):
-
-| Run | Change | Reward trend | Verdict |
-|---|---|---|---|
-| default task, lr 2e-5 | -- | flat ~0.13 (format 50->82%, no reward gain) | null |
-| **easy task (1 turn, <=3 names)**, lr 2e-5 | task difficulty | **0.17 -> 0.26 rising** | **learns** |
-| default task, lr 5e-5 | higher LR | flat/down ~0.13 | null |
-
-GRPO improves the policy when the task is in the model's reach; the null default-task
-run (format hit 82% with zero reward gain) shows format-optimization is a dead end --
-only sort-quality moves reward. Live dashboards (kitcat + ambivalent):
-`rl/scripts/grpo_lora_agpt2b_patches/rl_dash3.py`.
-
-## The XPU integration bugs (all fixed as runtime patches, not core edits)
-
-Found + fixed while vendoring; each is a patch in `xpu_overrides.py` or a config
-choice, keeping `experiments/rl/` and core untouched:
-
-1. `torch.accelerator.get_memory_info` returns free=0 on XPU (vLLM refused to
-   start). Upstream vLLM's `get_mem_info_wrapper` already fixes it; a documented
-   fallback patch (`patch_vllm_xpu_mem.py`) covers kernel builds where it doesn't.
-2. RL generator asserts varlen|flex attention -> `2b-rl` uses flex.
-3. FlexAttention `max_autotune` -> XPU OUT_OF_RESOURCES -> overlay disables it.
-4. Generation `torch.cuda.current_stream()` -> "not compiled with CUDA": stale
-   ezpz patch stripped it; current vLLM wraps it dynamo-safe in a partial, so the
-   patch now DEFERS to upstream.
-5. Trainer `create_block_mask(separate_full_blocks=...)` TypeError (torch XPU
-   wheel lacks the kwarg; core passes it unconditionally) -> wrap the module-global
-   `_compiled_create_block_mask` to strip it.
-
-## Dependencies
-
-External venv (`venvs/rl-grpo-lora`, py3.12; built by the script above):
-torch 2.12+xpu, triton-xpu 3.7.1, vllm (from source) + vllm-xpu-kernels 0.1.10,
-torchstore + monarch (songhappy forks @ xpu-upstream, from source),
-saforem2/ezpz (`--no-deps`). Clones live outside the repo in `~/rl-repro/`.
-
-## References
-
-- **Full vendoring writeup + the bug-by-bug repro:** [history/grpo-lora-agpt2b-repro.md](history/grpo-lora-agpt2b-repro.md)
-- **The original Qwen3-0.6B reproduction (the USM-wall crossing):** [history/grpo-lora-xpu-repro.md](history/grpo-lora-xpu-repro.md)
-- **Why the earlier Monarch port stalled (superseded):** [history/upstream-rl-port-status.md](history/upstream-rl-port-status.md), [history/2026-06-14_monarch-torch213-deep-dive.md](history/2026-06-14_monarch-torch213-deep-dive.md)
+- [`trl.md`](trl.md): legacy TRL `GRPOTrainer` + external vLLM-server path. Kept
+  for reproduction; not the current production recommendation.
+- [`2026-07-06_multinode-grpo-root-cause.md`](2026-07-06_multinode-grpo-root-cause.md):
+  historical diagnosis of the legacy TRL multi-trainer-node path.
+- [`monarch.md`](monarch.md): July-era one-host/two-tile Monarch result and reward
+  studies. Useful history, superseded as an operator guide by this page.
+- [`history/`](history/README.md): pre-current runtime bring-up records; never use
+  their environment snippets as new-run instructions.
+- [Aurora `next-eval` newer-PyTorch guide](../../guides/running-with-newer-pytorch-next-eval.md):
+  detailed TEST-image environment and archive handling.
