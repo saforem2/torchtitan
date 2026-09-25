@@ -6,7 +6,7 @@
 """GRPO+LoRA-on-XPU config for AuroraGPT-2B GSM8K chain-of-thought (Stage 2 of the
 CoT plan, docs/production/rl/plans/cot.md).
 
-Thin ezpz overlay: imports the UPSTREAM ``torchtitan.experiments.rl`` engine and
+Thin ezpz overlay: imports the UPSTREAM ``torchtitan.rl`` engine and
 backs it with OUR ``ezpz.agpt`` model (``model_registry("2b-rl", converters=...)``).
 Nothing in ``experiments/rl/`` or core is modified. Sibling of
 ``alphabet_sort_agpt/`` -- same structure and validated XPU knobs, but the task is
@@ -37,12 +37,13 @@ Validated knobs baked in (from the alphabet_sort_agpt 3-way study + the CoT plan
     std-normalized advantage.
 
 EOS / stop handling: the controller fills ``sampling.stop_token_ids`` from
-``renderer.get_stop_token_ids()`` (controller.py:370), which for the gemma/"auto"
-renderer resolves the AuroraGPT-2B stop set (eos ``</s>``=1 and
-``<end_of_turn>``=107 -- the gemma turn boundary). Generation therefore stops at
-the end-of-turn token AND the eos token, so a ``<think>``/``<answer>`` completion
-terminates cleanly. Nothing to override here; ``enable_thinking`` is left off
-(the gemma/"auto" renderer has no reasoning channel -- reasoning is prompt-driven
+``renderer.get_stop_token_ids()``. ``DefaultRendererConfig`` does not infer the
+AuroraGPT-2B ``<end_of_turn>`` boundary from this tokenizer, so the config wraps
+it with ``ExtraStopTokensRendererConfig(extra_stop_token_ids=(1, 107))``: eos
+``</s>``=1 plus ``<end_of_turn>``=107. Without this explicit contract, vLLM
+continues after a complete answer until ``max_tokens`` and every rollout is
+classified as truncated with zero reward. ``enable_thinking`` remains off (the
+gemma/"auto" renderer has no reasoning channel -- reasoning is prompt-driven
 and regex-scored, per the CoT plan).
 
 Also pass ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups``
@@ -51,20 +52,26 @@ on the CLI so all-zero-reward cold-start groups still assemble a batch.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import torch
+from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.config.transform.lora import LoRAConverter
+from torchtitan.components.loss import ChunkedLossWrapper
+
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.components.optimizer import default_adamw
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TrainingConfig,
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config.transform import (
+    LinearLoRAHandler,
+    LoRATransform,
+    transform_model_config_,
 )
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import GSM8KReasonDataset
 from torchtitan.experiments.ezpz.rl.reason_agpt.env import GSM8KReasonEnv
@@ -74,44 +81,48 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
     AnswerExtractableReward,
     ThinkFormatReward,
 )
-from torchtitan.experiments.ezpz.rl.reason_agpt.rollouter import GSM8KReasonRollouter
-from torchtitan.experiments.rl.actors.generator import (
-    SamplingConfig,
-    VLLMCudagraphConfig,
-    VLLMGenerator,
+from torchtitan.experiments.ezpz.rl.reason_agpt.rollouter import (
+    GSM8KReasonRollouter,
+    GSM8KReasonWorker,
 )
-from torchtitan.experiments.rl.actors.trainer import PolicyTrainer
-from torchtitan.experiments.rl.components.batcher import BatchConfig, Batcher
-from torchtitan.experiments.rl.controller import (
-    AsyncLoopConfig,
-    Controller,
-    ValidationConfig,
-)
-from torchtitan.experiments.rl.environment import TokenEnv
-from torchtitan.experiments.rl.losses import GRPOLoss
-from torchtitan.config.transform.cast_linear import LMHeadCastConverter
-from torchtitan.experiments.rl.models.vllm_registry import InferenceParallelismConfig
-from torchtitan.experiments.rl.observability.metrics import MetricsProcessor
-from torchtitan.components.renderer import RendererConfig
-from torchtitan.experiments.rl.rollout.advantage import AdvantageEstimator
-from torchtitan.experiments.rl.rubrics import Rubric
+from torchtitan.models.common.config_utils import decoder_vocab_size
+from torchtitan.rl.components.training_sample_builder import TrainingSampleBuilder
+from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
+from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
+from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
+from torchtitan.rl.losses import GRPOLoss
+from torchtitan.rl.observability.metrics import MetricsProcessor
+from torchtitan.rl.rollout.advantage import AdvantageEstimator
+from torchtitan.rl.rollout.environment import TokenEnv
+from torchtitan.rl.rubric import Rubric
+from torchtitan.rl.trainer import Trainer
 
 
-def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
+def _agpt_rl_model_config(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     """``ezpz.agpt.model_registry("2b-rl")`` for RL: LoRA (wqkv/wo) + fp32 lm_head.
 
     Converter order: LoRA first (wraps the base linears in frozen+adapter form),
     then the lm_head fp32 cast (RL logprob/KL math needs fp32 logits).
     """
-    return agpt_model_registry(
+    model_config = agpt_model_registry(
         "2b-rl",
-        converters=[
-            LoRAConverter.Config(
-                rank=lora_rank, alpha=lora_alpha, target_modules=["wqkv", "wo"]
-            ),
-            LMHeadCastConverter.Config(),
-        ],
+        converters=[LMHeadCastConverter.Config()],
     )
+    model_config = cast(
+        Any,
+        transform_model_config_(
+            model_config,
+            [
+                LoRATransform(
+                    handlers=(LinearLoRAHandler(),),
+                    rank=lora_rank,
+                    alpha=lora_alpha,
+                    target_modules=["wqkv", "wo"],
+                )
+            ],
+        ),
+    )
+    return model_config
 
 
 def _gsm8k_rollouter(
@@ -126,20 +137,20 @@ def _gsm8k_rollouter(
         validation_dataset=GSM8KReasonDataset.Config(
             seed=99, split="test", max_steps=0, shuffle=False
         ),
-        rubric=Rubric.Config(
-            reward_fns=[
-                ThinkFormatReward.Config(weight=0.20),
-                AnswerExtractableReward.Config(weight=0.05),
-                AnswerCloseReward.Config(weight=0.20),
-                AnswerCorrectReward.Config(weight=0.55),
-            ],
-            truncation_reward=0.0,
+        worker=GSM8KReasonWorker.Config(
+            rubric=Rubric.Config(
+                reward_fns=[
+                    ThinkFormatReward.Config(weight=0.20),
+                    AnswerExtractableReward.Config(weight=0.05),
+                    AnswerCloseReward.Config(weight=0.20),
+                    AnswerCorrectReward.Config(weight=0.55),
+                ],
+                truncation_reward=0.0,
+            ),
+            message_env=GSM8KReasonEnv.Config(),
+            token_env=TokenEnv.Config(max_rollout_tokens=2048, max_num_turns=1),
+            advantage=AdvantageEstimator.Config(should_std_normalize=True),
         ),
-        message_env=GSM8KReasonEnv.Config(),
-        token_env=TokenEnv.Config(max_rollout_tokens=2048, max_num_turns=1),
-        # Standard GRPO (std-normalized advantage) -- the CoT plan's Path B knob;
-        # the dense closeness reward supplies the within-group std to normalize by.
-        advantage=AdvantageEstimator.Config(should_std_normalize=True),
     )
 
 
@@ -160,6 +171,7 @@ def _agpt_grpo_config(
     # register limits -> OUT_OF_RESOURCES). Matches the working alphabet_sort_agpt
     # run. Must run before the model is compiled; recompile the cached flex kernel.
     from torch.nn.attention.flex_attention import flex_attention
+
     from torchtitan.models.common.attention import FlexInnerAttention
 
     FlexInnerAttention.inductor_configs = {
@@ -170,10 +182,11 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
+    model_config = _agpt_rl_model_config(
+        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
+    )
     return Controller.Config(
-        model_spec=_agpt_rl_model_spec(
-            lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
-        ),
+        model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.
         # Default points at the Stage-1 cold-start CoT-SFT checkpoint (cot.md).
         hf_assets_path="outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf",
@@ -182,48 +195,63 @@ def _agpt_grpo_config(
             num_prompts_per_train_step=num_groups_per_train_step,
             num_samples_per_prompt=group_size,
             validation=ValidationConfig(num_samples=20),
-            batcher=Batcher.Config(
-                batch=BatchConfig(local_batch_size=2, seq_len=2048),
+            training_sample_builder=TrainingSampleBuilder.Config(
+                drop_zero_std_reward_groups=False
             ),
         ),
-        compile=CompileConfig(enable=True, backend="aot_eager"),
+        compile=CompileConfig(backend="aot_eager"),
         rollouter=_gsm8k_rollouter(max_steps=max_steps, num_samples=num_samples),
-        # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
-        # ckpt dir must carry a chat_template. enable_thinking=False: the gemma/auto
-        # renderer has no reasoning channel; reasoning is prompt-driven + regex-scored.
-        renderer=RendererConfig(name="auto", enable_thinking=False),
+        # AuroraGPT uses the original Gemma chat template with
+        # <start_of_turn>/<end_of_turn>. Use the checkpoint's own Jinja template;
+        # reasoning remains prompt-driven and regex-scored.
+        # DefaultRendererConfig does not infer AuroraGPT's <end_of_turn> token
+        # from this tokenizer. Add the exact AGPT EOS/turn-boundary IDs so vLLM
+        # returns one completed response instead of repeating answer blocks until
+        # max_tokens, which the rollout layer classifies as truncated and scores 0.
+        renderer=ExtraStopTokensRendererConfig(
+            renderer=from_renderers(DefaultRendererConfig()),
+            extra_stop_token_ids=(1, 107),
+        ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
-        trainer=PolicyTrainer.Config(
+        trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2, decay_type="linear"
             ),
-            training=TrainingConfig(dtype="float32"),
+            training=TrainingConfig(
+                dtype="float32",
+                disable_cuda_graphs=True,
+                num_tokens_per_microbatch_per_dp_rank=2 * 2048,
+                max_context_length=2048,
+            ),
             parallelism=ParallelismConfig(
                 data_parallel_shard_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(
-                enable=True,
+            checkpointer=CheckpointManager.Config(
                 initial_load_in_hf=True,
                 interval=ckpt_interval,
                 last_save_model_only=False,
             ),
-            loss=GRPOLoss.Config(clip_eps=clip_eps),
+            loss=ChunkedLossWrapper.Config(
+                num_chunks=8,
+                loss_fn=GRPOLoss.Config(
+                    clip_eps=clip_eps,
+                    global_vocab_size=decoder_vocab_size(model_config),
+                ),
+            ),
         ),
         generator=VLLMGenerator.Config(
             # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
             model_dtype="float32",
             gpu_memory_limit=0.70,
-            cudagraph=VLLMCudagraphConfig(enable=False),
+            cuda_graph=VLLMCudaGraphConfig(mode="NONE"),
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(enable=False),
+            checkpointer=None,
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
-            sampling=SamplingConfig(
-                temperature=0.8, top_p=0.95, max_tokens=max_tokens
-            ),
+            sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=max_tokens),
         ),
     )
 

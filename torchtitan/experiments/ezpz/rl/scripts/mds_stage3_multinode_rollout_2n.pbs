@@ -1,0 +1,39 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-2n-rollout
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+MODEL=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/mds154391-2n-rollout-${PBS_JOBID%%.*}
+EXPECTED_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+
+source /soft/compilers/oneapi/2026.1.0/oneapi/setvars.sh --force
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+export ZE_AFFINITY_MASK=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/mds154391-2n-${PBS_JOBID%%.*}
+mkdir -p "$TMPDIR" "$OUT"
+cd "$WT" || exit 11
+
+sha=$(sha256sum "$MODEL/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_SHA" ]] || { echo "bad model sha $sha"; exit 12; }
+echo "MDS_MULTINODE_START $(date -Is) model_sha=$sha"
+
+mpiexec -n 2 -ppn 1 --cpu-bind none \
+  "$V/bin/python" -u \
+  torchtitan/experiments/ezpz/rl/scripts/mds_stage3_multinode_rollout.py \
+  "$MODEL" "$OUT" "$EXPECTED_SHA"
+rc=$?
+echo "MDS_MULTINODE_EXIT rc=$rc $(date -Is)"
+exit "$rc"

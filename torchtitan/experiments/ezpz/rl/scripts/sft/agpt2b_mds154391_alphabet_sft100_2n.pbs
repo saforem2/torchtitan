@@ -1,0 +1,70 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mds154391-alphabet-sft
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+MPIEXEC=/opt/cray/pals/1.8/bin/mpiexec
+BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+PRETOK=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-alphabet-curriculum-v1
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100
+EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+EXPECTED_CODE_COMMIT=9620726db313636e3053a5ec68ee52538dea121d
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1
+export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=8000
+export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=8000
+export TORCH_CPP_LOG_LEVEL=ERROR
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export PYTHONIOENCODING="ascii:replace"
+export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/alphabet-sft-${PBS_JOBID%%.*}
+mkdir -p "$TMPDIR"
+cd "$WT" || exit 11
+
+commit=$(git rev-parse HEAD)
+model_sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+git merge-base --is-ancestor "$EXPECTED_CODE_COMMIT" "$commit" || exit 12
+[[ "$model_sha" == "$EXPECTED_MODEL_SHA" ]] || exit 13
+[[ -x "$MPIEXEC" && ! -e "$V/bin/mpiexec" ]] || exit 14
+rm -rf "$OUT"
+"$V/bin/python" \
+  torchtitan/experiments/ezpz/rl/scripts/sft/build_alphabet_sort_curriculum.py \
+  --model "$BASE" --output "$PRETOK" --size 8192 --seed 154391 || exit 15
+
+echo "MDS154391_ALPHABET_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
+"$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
+  "$V/bin/python" -c \
+  'from mpi4py import MPI; v=MPI.Get_library_version(); assert "MPICH" in v and "Intel(R) MPI" not in v, v; print(f"MPI_PREFLIGHT rank={MPI.COMM_WORLD.rank} size={MPI.COMM_WORLD.size} host={MPI.Get_processor_name()}")' \
+  || exit 17
+
+"$MPIEXEC" -n 24 -ppn 12 --cpu-bind none \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --pretokenized_dataset "$PRETOK" \
+  --model_name_or_path "$BASE" \
+  --output_dir "$OUT" \
+  --max_steps 100 \
+  --num_train_epochs 1 \
+  --learning_rate 1e-5 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 2 \
+  --dataset_num_proc 1 \
+  --max_length 1024 \
+  --bf16 --fsdp full_shard \
+  --logging_steps 1 \
+  --save_strategy no \
+  --report_to none
+rc=$?
+echo "MDS154391_ALPHABET_SFT_DONE rc=$rc $(date -Is)"
+exit "$rc"

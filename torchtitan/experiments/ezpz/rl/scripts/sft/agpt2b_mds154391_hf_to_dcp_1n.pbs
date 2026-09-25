@@ -1,0 +1,50 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-hf-to-dcp
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -euo pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+SOURCE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+FINAL=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-dcp/step-0
+BUILD="${FINAL}.building-${PBS_JOBID%%.*}"
+EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+cd "$WT"
+git fetch origin sync/upstream-0fd69d0b
+git checkout --detach "$EXPECTED_COMMIT"
+test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+source <(curl -fsSL https://bit.ly/ezpz-utils)
+ezpz_setup "$V"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+
+test -f "$SOURCE/model-00001-of-00001.safetensors"
+actual=$(sha256sum "$SOURCE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+test "$actual" = "$EXPECTED_MODEL_SHA"
+test ! -e "$FINAL"
+test ! -e "$BUILD"
+mkdir -p "$(dirname "$FINAL")"
+
+echo "MDS154391_HF_TO_DCP_START $(date --iso-8601=seconds) commit=$EXPECTED_COMMIT source_sha=$actual build=$BUILD"
+set +e
+"$V/bin/python" scripts/checkpoint_conversion/convert_from_hf.py \
+  "$SOURCE" "$BUILD" \
+  --model_name torchtitan.experiments.ezpz.agpt \
+  --model_flavor 2b-mds
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+  echo "MDS154391_HF_TO_DCP_DONE rc=$rc $(date --iso-8601=seconds)"
+  exit "$rc"
+fi
+
+test -s "$BUILD/.metadata"
+mv "$BUILD" "$FINAL"
+test -s "$FINAL/.metadata"
+echo "MDS154391_HF_TO_DCP_DONE rc=0 $(date --iso-8601=seconds) final=$FINAL"

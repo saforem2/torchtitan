@@ -236,11 +236,12 @@ def _stable_config_value(value: Any) -> Any:
 def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
     """Fingerprint configuration that defines an exact LR-finder trajectory."""
     config = trainer.config
-    model_spec = config.model_spec
+    # Production configs own the model directly. Lightweight utility/test
+    # trainers may intentionally omit it; fingerprint that absence rather than
+    # failing before resume state can be validated.
+    model_config = getattr(config, "model", None)
     payload = {
-        "model": None
-        if model_spec is None
-        else {"name": model_spec.name, "flavor": model_spec.flavor},
+        "model": _stable_config_value(model_config),
         "optimizer_container": type(trainer.optimizers).__qualname__,
         "optimizer_config": _stable_config_value(config.optimizer),
         "dataloader_config": _stable_config_value(config.dataloader),
@@ -502,8 +503,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     # Save results on rank 0
     rank = int(os.environ.get("RANK", "0"))
     if rank == 0:
-        # Group outputs: lr_finder/ezpz/<name>/<flavor>/<optimizer>/
-        model_spec = trainer.config.model_spec
+        # Group outputs by the direct model config type and optimizer.
+        model_config = trainer.config.model
         # Derive optimizer name from container class
         opt_cls = type(trainer.optimizers).__name__
         opt_name = (
@@ -512,12 +513,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             .lower()
             or "adamw"
         )
-        if model_spec is not None:
-            sub_path = os.path.join(
-                "ezpz", model_spec.name, model_spec.flavor, opt_name
-            )
-        else:
-            sub_path = os.path.join("unknown", opt_name)
+        model_name = type(model_config).__qualname__.removesuffix(".Config")
+        sub_path = os.path.join("ezpz", model_name, opt_name)
         out_dir = os.path.join(trainer.config.dump_folder, "lr_finder", sub_path)
         os.makedirs(out_dir, exist_ok=True)
 

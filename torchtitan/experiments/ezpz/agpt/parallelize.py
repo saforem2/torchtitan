@@ -142,10 +142,13 @@ def parallelize_llama(
     # sharding_config declarations were filled in by update_from_config (see
     # model.py), and #3159 made Module.parallelize take ParallelDims so each
     # Module resolves its own SPMD submesh.
-    model.parallelize(parallel_dims)
+    # BaseModel.parallelize() owns this lifecycle now and called this custom
+    # implementation from AgptModel.parallelize(). Invoke only the internal
+    # config-driven sharding pass here; calling model.parallelize() would recurse.
+    model._parallelize(parallel_dims)
 
     model_compile_enabled = (
-        compile_config.enable and "model" in compile_config.components
+        compile_config is not None and "model" in compile_config.components
     )
 
     # 57th sync: PR #3674 refactored AC into a Configurable policy

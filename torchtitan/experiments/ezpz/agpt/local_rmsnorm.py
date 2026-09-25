@@ -109,7 +109,9 @@ class LocalShardRMSNorm(RMSNorm):
         first_norm_dim = ndim - len(self.normalized_shape)
         for placement in x.placements:
             if isinstance(placement, Shard):
-                shard_dim = placement.dim if placement.dim >= 0 else ndim + placement.dim
+                shard_dim = (
+                    placement.dim if placement.dim >= 0 else ndim + placement.dim
+                )
                 assert shard_dim < first_norm_dim, (
                     "LocalShardRMSNorm requires the normalized dims to be "
                     f"unsharded, but placement {placement} shards normalized "
@@ -154,9 +156,7 @@ class LocalShardRMSNorm(RMSNorm):
             grad_placements=[Partial()] * len(weight.placements)
         )
 
-        out_local = F.rms_norm(
-            x_local, self.normalized_shape, weight_local, self.eps
-        )
+        out_local = F.rms_norm(x_local, self.normalized_shape, weight_local, self.eps)
 
         # Re-anchor the output as a DTensor with the same placement as the
         # input; the output gradient (from the recomputed backward) flows back

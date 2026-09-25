@@ -52,6 +52,32 @@ class BaseTokenizer(ABC, Configurable):
         import jinja2.ext
         import jinja2.sandbox
 
+        class GenerationExtension(jinja2.ext.Extension):
+            """Render HF assistant-tracking blocks without span bookkeeping.
+
+            Transformers uses ``{% generation %}`` to identify assistant token
+            spans when an assistant mask is requested. TorchTitan renders text
+            only, so the compatible behavior is to preserve the block body.
+            """
+
+            tags = {"generation"}
+
+            def parse(self, parser):
+                lineno = next(parser.stream).lineno
+                body = parser.parse_statements(
+                    ("name:endgeneration",), drop_needle=True
+                )
+                return jinja2.nodes.CallBlock(
+                    # Supplied dynamically by jinja2.ext.Extension.
+                    self.call_method("_render"),  # pyrefly: ignore[missing-attribute]
+                    [],
+                    [],
+                    body,
+                ).set_lineno(lineno)
+
+            def _render(self, caller):
+                return caller()
+
         def raise_exception(msg):
             raise jinja2.exceptions.TemplateError(msg)
 
@@ -74,7 +100,7 @@ class BaseTokenizer(ABC, Configurable):
         env = jinja2.sandbox.ImmutableSandboxedEnvironment(
             trim_blocks=True,
             lstrip_blocks=True,
-            extensions=[jinja2.ext.loopcontrols],
+            extensions=[jinja2.ext.loopcontrols, GenerationExtension],
         )
         env.globals["raise_exception"] = raise_exception
         env.globals["strftime_now"] = strftime_now

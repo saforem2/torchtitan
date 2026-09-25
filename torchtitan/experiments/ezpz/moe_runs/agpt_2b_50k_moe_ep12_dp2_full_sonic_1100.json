@@ -21,9 +21,6 @@
     "context_parallel_degree": 1,
     "expert_parallel_degree": 12
   },
-  "compile": {
-    "enable": false
-  },
   "lr_scheduler": {
     "warmup_steps": 100,
     "total_steps": 1100,
@@ -43,10 +40,6 @@
     "shuffle": true,
     "shuffle_sample_in_corpus": true,
     "append_eod": true
-  },
-  "checkpoint": {
-    "enable": false,
-    "keep_latest_k": 0
   },
   "metrics": {
     "enable_wandb": true,

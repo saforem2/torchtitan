@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""XPU shims for upstream `torchtitan.experiments.rl/`.
+"""XPU shims for upstream `torchtitan.rl/`.
 
 Upstream `rl/` has two CUDA-specific touch points that need shimming
 on Intel XPU (Aurora / Sunspot):
@@ -85,6 +85,8 @@ class EzpzPerHostProvisioner:
     @staticmethod
     def make_bootstrap_command_for_gpu_ids(
         gpu_ids: list[int],
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> Callable:
         """Return a per-Point callable producing a ``BootstrapCommand``.
 
@@ -125,23 +127,16 @@ class EzpzPerHostProvisioner:
                     f"could not extract rank from Point: {point} "
                     f"(attrs={dir(point)})"
                 )
-            my_tile = gpu_ids[rank_in_mesh]
+            local_rank = rank_in_mesh % local_size
             env_overlay = {
-                # NARROW mask: each actor sees exactly ONE tile.
-                # Reasons:
-                #   (a) Isolates the SYCL primary context to one tile,
-                #       so oneDNN/onemkl allocators don't fight over
-                #       which tile to put a tensor on.
-                #   (b) Each actor's LOCAL_RANK=0 maps to its only
-                #       visible tile, so torch.xpu.set_device(0) works
-                #       transparently.
-                # Trade-off: forbids intra-actor multi-tile work, which
-                # we don't need at TP=1.
-                "ZE_AFFINITY_MASK": str(my_tile),
-                "LOCAL_RANK": "0",
+                # Every process in a mesh must see the full mesh allocation;
+                # oneCCL rejects narrow per-rank masks. LOCAL_RANK selects the
+                # process's tile from this common visible set.
+                "ZE_AFFINITY_MASK": ",".join(str(g) for g in gpu_ids),
+                "LOCAL_RANK": str(local_rank),
                 "RANK": str(rank_in_mesh),
                 "WORLD_SIZE": str(num_gpus),
-                "PALS_LOCAL_RANKID": str(rank_in_mesh),
+                "PALS_LOCAL_RANKID": str(local_rank),
                 "PALS_RANKID": str(rank_in_mesh),
                 "PALS_LOCAL_SIZE": str(local_size),
                 "PALS_NODEID": "0",
@@ -173,6 +168,8 @@ class EzpzPerHostProvisioner:
             ):
                 if k in os.environ:
                     env_overlay[k] = os.environ[k]
+            if extra_env:
+                env_overlay.update(extra_env)
             return base_cmd.with_env(env_overlay)
 
         return _per_rank
@@ -209,12 +206,20 @@ class EzpzPerHostProvisioner:
             import sys as _sys
 
             _candidate_keys = [
-                "LOCAL_RANK", "RANK", "WORLD_SIZE",
-                "MONARCH_RANK", "MONARCH_LOCAL_RANK", "MONARCH_WORLD_SIZE",
-                "HYPERACTOR_RANK", "HYPERACTOR_LOCAL_RANK",
-                "PALS_LOCAL_RANKID", "PALS_RANKID",
-                "PMI_RANK", "PMI_LOCAL_RANK",
-                "PMIX_RANK", "PMIX_LOCAL_RANK",
+                "LOCAL_RANK",
+                "RANK",
+                "WORLD_SIZE",
+                "MONARCH_RANK",
+                "MONARCH_LOCAL_RANK",
+                "MONARCH_WORLD_SIZE",
+                "HYPERACTOR_RANK",
+                "HYPERACTOR_LOCAL_RANK",
+                "PALS_LOCAL_RANKID",
+                "PALS_RANKID",
+                "PMI_RANK",
+                "PMI_LOCAL_RANK",
+                "PMIX_RANK",
+                "PMIX_LOCAL_RANK",
             ]
             _hits = {k: os.environ[k] for k in _candidate_keys if k in os.environ}
             _monarch_kv = {
@@ -281,6 +286,22 @@ class EzpzPerHostProvisioner:
             os.environ["PALS_NODEID"] = "0"
             os.environ["PALS_DEPTH"] = "1"
             os.environ["PALS_PMI"] = "pmix"
+
+            # vLLM -> tilelang -> tvm imports readline.  When Monarch starts
+            # actors in a background process group, readline can otherwise
+            # receive SIGTTOU while touching the controlling terminal.  Warm
+            # it with SIGTTOU blocked before importing torch/vLLM dependencies,
+            # matching torchtitan.rl.train._bootstrap_generator.
+            if os.isatty(0):
+                import signal
+
+                previous_mask = signal.pthread_sigmask(
+                    signal.SIG_BLOCK, {signal.SIGTTOU}
+                )
+                try:
+                    import readline  # noqa: F401
+                finally:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
@@ -375,7 +396,7 @@ def patch_has_cuda_capability_for_xpu() -> None:
 
     Replaces it with `has_xpu_kernels` (always False) so the FA3-vs-FA2
     branches throughout `rl/` take the FA2 path on XPU. Call BEFORE
-    importing anything from `torchtitan.experiments.rl`.
+    importing anything from `torchtitan.rl`.
 
     Idempotent.
     """
@@ -540,6 +561,7 @@ def patch_torch_xpu_set_device_for_single_tile() -> None:
     # use a sys.audit hook... actually simpler: just override the
     # __getitem__ via instance method swap.
     import os as _os
+
     _orig_getitem = _os.environ.__class__.__getitem__
 
     def _patched_getitem(self, key):
@@ -600,9 +622,7 @@ def patch_torch_cuda_aliases_for_xpu() -> None:
 
     _aliased._xpu_aliased = True  # type: ignore[attr-defined]
     torch.cuda.current_device = _aliased
-    logger.info(
-        "Aliased torch.cuda.current_device → torch.xpu.current_device (XPU)"
-    )
+    logger.info("Aliased torch.cuda.current_device → torch.xpu.current_device (XPU)")
 
 
 def patch_dtensor_make_replicate_for_xpu() -> None:
@@ -650,9 +670,7 @@ def patch_dtensor_make_replicate_for_xpu() -> None:
         # etc.) all hits are deterministic re-computation, not broadcast.
         my_coordinate = device_mesh.get_coordinate()
         if my_coordinate is None:
-            return local_tensor.new_empty(
-                0, requires_grad=local_tensor.requires_grad
-            )
+            return local_tensor.new_empty(0, requires_grad=local_tensor.requires_grad)
         return local_tensor.contiguous()
 
     _patched._xpu_patched = True
@@ -728,6 +746,7 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
         torch.cuda.set_stream = torch.xpu.set_stream
         try:
             from vllm.v1.worker.xpu_model_runner import supports_xpu_graph
+
             if supports_xpu_graph():
                 torch.cuda.graph = torch.xpu.graph
                 torch.cuda.CUDAGraph = torch.xpu.XPUGraph
@@ -745,6 +764,15 @@ def patch_vllm_xpu_no_alias_current_stream() -> None:
         flush=True,
         file=__import__("sys").stderr,
     )
+
+
+def _select_vllm_xpu_attention_backend(selected_backend, backend_enum, fallback):
+    """Map TorchTitan-only attention choices to vLLM-XPU implementations."""
+    if selected_backend == backend_enum.CUSTOM:
+        return backend_enum.CUSTOM.get_path()
+    if selected_backend == backend_enum.FLEX_ATTENTION:
+        return backend_enum.TRITON_ATTN.get_path()
+    return fallback(selected_backend)
 
 
 def patch_vllm_xpu_attention_backend() -> None:
@@ -775,9 +803,13 @@ def patch_vllm_xpu_attention_backend() -> None:
 
     @classmethod
     def patched(cls, selected_backend, attn_selector_config, num_heads=None):
-        if selected_backend == AttentionBackendEnum.CUSTOM:
-            return AttentionBackendEnum.CUSTOM.get_path()
-        return orig.__func__(cls, selected_backend, attn_selector_config, num_heads)
+        return _select_vllm_xpu_attention_backend(
+            selected_backend,
+            AttentionBackendEnum,
+            lambda backend: orig.__func__(
+                cls, backend, attn_selector_config, num_heads
+            ),
+        )
 
     patched.__func__._xpu_patched = True  # type: ignore[attr-defined]
     XPUPlatform.get_attn_backend_cls = patched
@@ -815,11 +847,7 @@ def patch_vllm_xpu_skip_oneccl_warmup() -> None:
 
     def patched_all_reduce(tensor, *args, **kwargs):
         # Cheap inspection: only suppress the literal warmup tensor.
-        if (
-            tensor is not None
-            and tensor.numel() == 1
-            and tensor.device.type == "xpu"
-        ):
+        if tensor is not None and tensor.numel() == 1 and tensor.device.type == "xpu":
             # Check the call stack one frame up.
             import sys as _sys
 
@@ -977,7 +1005,7 @@ def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
     Call this at the top of any entrypoint that pulls in
-    `torchtitan.experiments.rl.*`. Currently:
+    `torchtitan.rl.*`. Currently:
       1. `has_cuda_capability` → always False on XPU.
       2. `OffsetBasedRNGTracker.__init__` → skip the broadcast at
          world_size=1.

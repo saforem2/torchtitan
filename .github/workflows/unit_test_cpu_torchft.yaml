@@ -22,6 +22,9 @@ permissions:
 
 jobs:
   build-test:
+    # The reusable workflow runs on PyTorch's private runner fleet, which is
+    # unavailable to forks and otherwise leaves pull-request checks queued.
+    if: github.repository_owner == 'pytorch'
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       docker-image: torchtitan-ubuntu-22.04-clang12

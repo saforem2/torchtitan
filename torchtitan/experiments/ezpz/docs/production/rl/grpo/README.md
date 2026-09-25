@@ -13,6 +13,9 @@
 > the sharded `checkpoint-900/` before reproducing them (see
 > [SFT evals](../../sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md#recommendation)).
 
+Current Torch 2.14 rerun status, exact checkpoint hash, jobs, and interim
+metrics are tracked in [Torch 2.14 Monarch GRPO reproduction](torch214-reproduction.md).
+
 ## Index
 
 | Base | Recipe | Status | Reward (last 10 mean) | Steps | Checkpoint | Trajectory |

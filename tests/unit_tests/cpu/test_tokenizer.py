@@ -453,6 +453,18 @@ class TestBaseTokenizerChatTemplate(unittest.TestCase):
         result = tok.apply_chat_template([])
         self.assertEqual(result, "012")
 
+    def test_generation_block_preserves_rendered_text(self):
+        """HF assistant-mask tags are transparent for text-only rendering."""
+        tok = DummyTokenizer()
+        tok.set_chat_template(
+            "before{% generation %}{{ messages[0]['content'] }}"
+            "{% endgeneration %}after"
+        )
+        self.assertEqual(
+            tok.apply_chat_template([{"role": "assistant", "content": "answer"}]),
+            "beforeanswerafter",
+        )
+
     def test_strftime_now(self):
         """Test that strftime_now works in templates."""
         from datetime import datetime

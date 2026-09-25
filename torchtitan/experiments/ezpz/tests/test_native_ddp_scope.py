@@ -14,7 +14,7 @@ import torch
 from torch.multiprocessing.spawn import spawn
 
 from torchtitan.components.loss import CrossEntropyLoss, MSELoss
-from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.config import TrainingConfig
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.ezpz.agpt import parallelize as agpt_parallelize
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
@@ -34,6 +34,7 @@ def _parallel_dims(*, pp: int = 1) -> ParallelDims:
         tp=1,
         pp=pp,
         ep=1,
+        enable_sequence_parallel=False,
         world_size=2 * pp,
     )
 
@@ -120,7 +121,7 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
         def __init__(self) -> None:
             self.parallelized = False
 
-        def parallelize(self, _parallel_dims) -> None:
+        def _parallelize(self, _parallel_dims) -> None:
             self.parallelized = True
 
     model = Model()
@@ -134,7 +135,7 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
         parallel_dims=_parallel_dims(),
         training=TrainingConfig(max_context_length=8),
         parallelism=_parallelism(),
-        compile_config=CompileConfig(enable=False),
+        compile_config=None,
         ac_config=None,
         dump_folder=".",
     )

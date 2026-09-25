@@ -19,10 +19,10 @@ What needs overriding from upstream `VLLMGenerator`:
      for non-H100. The simplest port is "always set block_size=256
      on XPU" (the non-CUDA-9.0 branch).
 
-  2. **`cudagraph.enable` config**. vLLM-XPU's compilation pipeline
+  2. **`cuda_graph.mode` config**. vLLM-XPU's compilation pipeline
      does not support CUDA-graph capture. Force `enforce_eager=True`
-     unconditionally. Could surface this as an `EzpzVLLMCudagraphConfig`
-     subclass that ignores the `enable` field, or override the
+     unconditionally. Could surface this as an `EzpzVLLMCudaGraphConfig`
+     subclass that fixes `mode="NONE"`, or override the
      `engine_kwargs` construction directly.
 
   3. **`AttentionBackendEnum`** — upstream uses
@@ -57,21 +57,17 @@ this class is what plugs vLLM-XPU into that framework.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-
-import torch
+from dataclasses import dataclass
+from typing import Literal
 
 # Upstream imports — note these only resolve in the rl-vllm venv
 # (py3.12 + torch 2.12 + monarch + vllm-xpu). Don't import this module
 # from a context that doesn't have all of those.
 try:
-    from torchtitan.experiments.rl.actors.generator import (
-        VLLMCudagraphConfig,
-        VLLMGenerator,
-    )
-except ImportError as e:  # noqa: BLE001
+    from torchtitan.rl.generator import VLLMCudaGraphConfig, VLLMGenerator
+except ImportError as e:
     raise ImportError(
-        "EzpzVLLMGenerator requires upstream `torchtitan.experiments.rl.actors`"
+        "EzpzVLLMGenerator requires upstream `torchtitan.rl.generator`"
         " which only resolves in the rl-vllm venv (py3.12 + torch 2.12 +"
         " monarch + vllm-xpu). See docs/production/rl/history/vllm-xpu-wiring-plan.md."
     ) from e
@@ -81,16 +77,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True, slots=True)
-class EzpzVLLMCudagraphConfig(VLLMCudagraphConfig):
+class EzpzVLLMCudaGraphConfig(VLLMCudaGraphConfig):
     """vLLM cudagraph config that always disables capture on XPU.
 
     vLLM-XPU's compilation pipeline does not currently support
-    CUDA-graph capture. Setting `enable=False` here propagates
-    `enforce_eager=True` into the engine args via upstream
+    CUDA-graph capture. Setting `mode="NONE"` here selects eager
+    execution through upstream
     `VLLMGenerator`'s existing logic.
     """
 
-    enable: bool = False
+    mode: Literal["NONE", "FULL_DECODE_ONLY", "FULL_AND_PIECEWISE", "FULL"] = "NONE"
 
 
 class EzpzVLLMGenerator(VLLMGenerator):
@@ -103,7 +99,7 @@ class EzpzVLLMGenerator(VLLMGenerator):
     # TODO Phase 3a: override engine-args construction
     #   - skip `has_cuda_capability(9, 0)` check (always set
     #     block_size=256, like the non-H100 branch upstream)
-    #   - force `enforce_eager=True` via EzpzVLLMCudagraphConfig
+    #   - force eager execution via EzpzVLLMCudaGraphConfig
     #     default
     #   - map our attention configs to XPU-supported vLLM backends
 

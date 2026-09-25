@@ -50,12 +50,6 @@ if TYPE_CHECKING:
 DP = MeshAxisName.DP
 TP = MeshAxisName.TP
 
-_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
-    "w1_EFD": spmd.S(1),
-    "w2_EDF": spmd.S(2),
-    "w3_EFD": spmd.S(1),
-}
-
 
 def set_kimi_k3_sharding_config(
     config: "KimiK3Model.Config",
@@ -141,9 +135,9 @@ def _set_mla_sharding(
     attn_x_layout: SpmdType,
     enable_sp: bool,
 ) -> None:
+    replicated_input_layout = dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     attention_cfg.sharding_config = ShardingConfig(
         in_src_shardings={"x_TD": attn_x_layout},
-        in_dst_shardings={"x_TD": dense_activation_placement(tp=spmd.R, cp=spmd.S(0))},
     )
     replicate_weight = ShardingConfig(
         state_shardings={"weight": dense_param_placement(tp=spmd.R)},
@@ -152,10 +146,16 @@ def _set_mla_sharding(
     attention_cfg.q_norm.sharding_config = replicate_weight
     attention_cfg.wkv_a.sharding_config = replicate_weight
     attention_cfg.kv_norm.sharding_config = replicate_weight
-    attention_cfg.wq_b.sharding_config = colwise_config()
-    attention_cfg.wkv_b.sharding_config = colwise_config()
-    attention_cfg.gate.sharding_config = colwise_config()
-    attention_cfg.wo.sharding_config = rowwise_config(output_sp=enable_sp)
+    attention_cfg.wq_b.sharding_config = colwise_config(
+        input_layout=replicated_input_layout
+    )
+    attention_cfg.wkv_b.sharding_config = colwise_config(
+        input_layout=replicated_input_layout
+    )
+    attention_cfg.gate.sharding_config = colwise_config(
+        input_layout=replicated_input_layout
+    )
+    attention_cfg.wo.sharding_config = rowwise_config(output_layout=attn_x_layout)
     set_gqa_inner_attention_local_spmd(attention_cfg.inner_attention)
 
 
@@ -168,14 +168,17 @@ def _set_kda_sharding(
     """Head-sharded TP for KDA, as Qwen3.5's GatedDeltaNet; low-rank ``forget_a`` is
     replicated.
     """
+    replicated_input_layout = dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     for name in ("q_proj", "k_proj", "v_proj", "forget_b", "beta", "output_gate"):
-        getattr(kda_cfg, name).sharding_config = colwise_config()
+        getattr(kda_cfg, name).sharding_config = colwise_config(
+            input_layout=replicated_input_layout
+        )
     replicate_weight = ShardingConfig(
         state_shardings={"weight": dense_param_placement(tp=spmd.R)},
     )
     kda_cfg.forget_a.sharding_config = replicate_weight
     kda_cfg.output_norm.sharding_config = replicate_weight
-    kda_cfg.output_proj.sharding_config = rowwise_config(output_sp=enable_sp)
+    kda_cfg.output_proj.sharding_config = rowwise_config(output_layout=attn_x_layout)
 
     projected_placement = dense_activation_placement(tp=spmd.S(1), cp=spmd.S(0))
     head_placement = attention_activation_placement()
@@ -212,7 +215,6 @@ def _set_kda_sharding(
             "dt_bias": parameter_placement,
         },
         in_src_shardings={"x_TD": attn_x_layout},
-        in_dst_shardings={"x_TD": dense_activation_placement(tp=spmd.R, cp=spmd.S(0))},
     )
 
 
@@ -227,7 +229,6 @@ def _set_latent_moe_sharding(
         moe_cfg,
         enable_ep=enable_ep,
         enable_sp=enable_sp,
-        expert_param_layout=_GROUPED_EXPERTS_PARAM_LAYOUT,
     )
     token_shard = dense_sequence_parallel_placement()
     routed_experts = moe_cfg.routed_experts.sharding_config
@@ -247,24 +248,15 @@ def _set_latent_moe_sharding(
             "x_TD": token_shard,
         }
     moe_cfg.routed_down.sharding_config = routed_down
-    token_sharded = enable_ep or enable_sp
+    token_sharded = enable_ep
     routed_norm = norm_config(enable_sp=token_sharded)
     routed_up = _tp_unsharded_weight_config(token_sharded=token_sharded)
     partial = dense_activation_placement(tp=spmd.P, cp=spmd.S(0))
-    if enable_ep and not enable_sp:
+    if enable_sp:
+        routed_experts.out_dst_shardings = token_shard
+    elif enable_ep:
         routed_experts.out_dst_shardings = token_shard
         routed_up.out_src_shardings = token_shard
-        routed_up.out_dst_shardings = partial
-    elif not enable_sp:
-        # The experts' Partial output is reduced at the norm's boundary;
-        # routed_up re-enters Partial so the MoE exit reduces it once.
-        routed_norm.in_src_shardings = {"x": partial}
-        routed_norm.in_dst_shardings = {
-            "x": dense_activation_placement(tp=spmd.I, cp=spmd.S(0))
-        }
-        routed_up.out_src_shardings = dense_activation_placement(
-            tp=spmd.I, cp=spmd.S(0)
-        )
         routed_up.out_dst_shardings = partial
     moe_cfg.routed_norm.sharding_config = routed_norm
     moe_cfg.routed_up.sharding_config = routed_up

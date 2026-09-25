@@ -8,5 +8,15 @@
   draft: false
 
 "ciflow/rl":
-  - torchtitan/experiments/rl/**
+  - torchtitan/rl/**
+  - tests/rl/**
+  - tests/unit_tests/rl/**
+  - scripts/rl/**
+  - torchtitan/trainer.py
+  - torchtitan/components/checkpointer/**
+  - torchtitan/components/data/**
+  - torchtitan/distributed/cuda_graph.py
+  - torchtitan/models/common/**
+  - torchtitan/models/qwen3_5/**
+  - torchtitan/models/qwen3_8/**
   - .github/workflows/integration_test_8gpu_rl.yaml

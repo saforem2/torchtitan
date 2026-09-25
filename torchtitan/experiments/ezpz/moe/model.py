@@ -247,6 +247,17 @@ class moeModel(Decoder):  # noqa: N801
     moe Transformer model with attention and feed-forward layers.
     """
 
+    @classmethod
+    def _register_optimizer_hooks(cls, optimizers, model_parts, parallel_dims) -> None:
+        from torchtitan.components.optimizer import register_moe_load_balancing_hook
+
+        register_moe_load_balancing_hook(optimizers, model_parts, parallel_dims)
+
+    def parallelize(self, **kwargs):
+        from .parallelize import parallelize_moe
+
+        return parallelize_moe(self, **kwargs)
+
     @dataclass(kw_only=True, slots=True)
     class Config(Decoder.Config):
         dim: int = 2048
@@ -392,3 +403,9 @@ class moeModel(Decoder):  # noqa: N801
                 )
 
             return nparams, 6 * active_nparams + attention_op_flops
+
+
+# Imported after moeModel is defined because the adapter annotates its config.
+from .state_dict_adapter import moeStateDictAdapter  # noqa: E402
+
+moeModel.state_dict_adapter_cls = moeStateDictAdapter

@@ -40,24 +40,10 @@ from torchtitan.models.common.moe_sharding import (
 )
 from torchtitan.protocols.sharding import ShardingConfig
 
+_GROUPED_EXPERT_PARAM_NAMES = ("w1_EFD", "w2_EDF", "w3_EFD")
+
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
-
-
-# Routed-expert layout for the shared ``GroupedExperts`` / ``EzpzGroupedExperts``.
-# After upstream PR #3425 (41st sync, MoE [8/n] shape-suffix rename), the
-# parameters are named w{1,2,3}_E{F,D}D using Shazeer shape-suffix style.
-# Matches upstream ``deepseek_v3.sharding._GROUPED_EXPERTS_PARAM_LAYOUT``.
-# spmd.S(n), NOT DTensor Shard(n): resolve_placements feeds these through
-# spmd_type_to_dtensor_placement, which only understands spmd_types. A DTensor
-# Shard reaches it as an unrecognized object and dies with the unhelpfully
-# identical-looking "Unknown spmd type: S(1)". Matches upstream
-# deepseek_v3/sharding.py, which migrated this table; our fork missed the replay.
-_GROUPED_EXPERTS_PARAM_LAYOUT: dict[str, spmd.PerMeshAxisSpmdType] = {
-    "w1_EFD": spmd.S(1),
-    "w2_EDF": spmd.S(2),
-    "w3_EFD": spmd.S(1),
-}
 
 
 def set_moe_sharding_config(
@@ -124,6 +110,7 @@ def _set_moe_layer_sharding(
         if enable_sp
         else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
     )
+    replicated_input_layout = dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
 
     if isinstance(attention, GQAttention.Config):
         # AGPT-MoE uses the same fused GQA block as dense AGPT. Delegate to the
@@ -174,8 +161,10 @@ def _set_moe_layer_sharding(
     attention.wkv_a.sharding_config = replicate_weight
     attention.kv_norm.sharding_config = replicate_weight
 
-    attention.wkv_b.sharding_config = colwise_config()
-    attention.wo.sharding_config = rowwise_config(output_sp=enable_sp)
+    attention.wkv_b.sharding_config = colwise_config(
+        input_layout=replicated_input_layout
+    )
+    attention.wo.sharding_config = rowwise_config(output_layout=attn_x_layout)
 
     # Static LocalMapConfig on the inner-attention config (upstream #2986
     # replaced runtime DTensor detection in `LocalMapInnerAttention` with
@@ -185,14 +174,18 @@ def _set_moe_layer_sharding(
     # Query projection: depends on q_lora_rank
     if attention.q_lora_rank == 0:
         assert attention.wq is not None
-        attention.wq.sharding_config = colwise_config()
+        attention.wq.sharding_config = colwise_config(
+            input_layout=replicated_input_layout
+        )
     else:
         # Low-rank: wq_a + q_norm stay Replicate DTensors; wq_b is Colwise.
         assert attention.wq_a is not None
         assert attention.wq_b is not None
         attention.wq_a.sharding_config = replicate_weight
         attention.q_norm.sharding_config = replicate_weight
-        attention.wq_b.sharding_config = colwise_config()
+        attention.wq_b.sharding_config = colwise_config(
+            input_layout=replicated_input_layout
+        )
 
     _set_moe_ffn_sharding(
         layer_cfg,
@@ -226,5 +219,34 @@ def _set_moe_ffn_sharding(
             layer_cfg.moe,
             enable_ep=enable_ep,
             enable_sp=enable_sp,
-            expert_param_layout=_GROUPED_EXPERTS_PARAM_LAYOUT,
         )
+        # Upstream leaves GroupedExperts unconfigured when EP is disabled.
+        # Full-SPMD FSDP requires those parameters to be DTensors before it
+        # takes ownership of the DP axis.
+        inner_experts = layer_cfg.moe.routed_experts.inner_experts
+        if not enable_ep and inner_experts.sharding_config is None:
+            replicated = dense_param_placement(tp=spmd.R)
+            inner_experts.sharding_config = ShardingConfig(
+                state_shardings={
+                    name: replicated for name in _GROUPED_EXPERT_PARAM_NAMES
+                }
+            )
+        # The ezpz compatibility FFN deliberately retains pre-sync physical
+        # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
+        # Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for
+        # the historical 2-D parameter the corresponding output-feature axis
+        # is dimension 0. Keep the activation contract installed above, but
+        # restore the parameter placement so every FSDP/TP rank owns rows.
+        shared = layer_cfg.moe.shared_experts
+        if shared is not None and shared.w13.__class__.__name__ == "Config":
+            module_cls = getattr(shared.w13, "__class__", None)
+            if module_cls is not None and module_cls.__qualname__.startswith(
+                "_LegacyInterleavedColumnParallelLinear."
+            ):
+                assert shared.w13.sharding_config is not None
+                shared.w13.sharding_config.state_shardings[
+                    "weight"
+                ] = dense_param_placement(tp=spmd.S(0))
+                shared.w13.sharding_config.state_shardings[
+                    "bias"
+                ] = dense_param_placement(tp=spmd.S(0))

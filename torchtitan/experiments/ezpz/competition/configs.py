@@ -23,12 +23,6 @@ from torchtitan.experiments.ezpz.optimizer import (
     default_sophiag,
     default_spam,
     default_torch_muon,
-    ManoOptimizersContainer,
-    MuonOptimizersContainer,
-    ScheduleFreeOptimizersContainer,
-    SPAMOptimizersContainer,
-    SophiaGOptimizersContainer,
-    TorchMuonOptimizersContainer,
 )
 
 # Fixed competition parameters — same for all configs
@@ -66,7 +60,7 @@ def _speedrun_base():
     cfg.training.steps = STEPS
 
     # No checkpointing for speedruns
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
 
     # LR schedule: WSD (warmup 20, stable to 800, decay last 200)
     cfg.lr_scheduler.warmup_steps = 20
@@ -84,7 +78,6 @@ def speedrun_2b_adamw():
     """AdamW baseline — LR from LR finder (1.3e-3)."""
     cfg = _speedrun_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw"
     return cfg
 
 
@@ -92,7 +85,6 @@ def speedrun_2b_muon():
     """Muon — best NanoGPT speedrun optimizer. LR from LR finder (2.4e-3)."""
     cfg = _speedrun_base()
     cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon"
     return cfg
 
 
@@ -100,7 +92,6 @@ def speedrun_2b_sophiag():
     """SophiaG — second-order Hessian approx. LR from LR finder (3.1e-4)."""
     cfg = _speedrun_base()
     cfg.optimizer = default_sophiag(lr=3.1e-4)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_sophiag"
     return cfg
 
 
@@ -108,7 +99,6 @@ def speedrun_2b_muon_aggressive():
     """Muon with 2x LR — pushing convergence speed."""
     cfg = _speedrun_base()
     cfg.optimizer = default_muon(lr=4.8e-3)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon_aggressive"
     return cfg
 
 
@@ -116,7 +106,6 @@ def speedrun_2b_adamw_high_lr():
     """AdamW with 2x LR — testing upper bound."""
     cfg = _speedrun_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.6e-3
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw_high_lr"
     return cfg
 
 
@@ -128,7 +117,6 @@ def speedrun_2b_adamw_short_decay():
     cfg = _speedrun_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.lr_scheduler.decay_ratio = 0.1
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw_short_decay"
     return cfg
 
 
@@ -137,7 +125,6 @@ def speedrun_2b_adamw_cosine():
     cfg = _speedrun_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.lr_scheduler.decay_type = "cosine"
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw_cosine"
     return cfg
 
 
@@ -147,7 +134,6 @@ def speedrun_2b_adamw_fast_warmup():
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.lr_scheduler.warmup_steps = 5
     cfg.lr_scheduler.decay_ratio = 0.1
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw_fast_warmup"
     return cfg
 
 
@@ -156,7 +142,6 @@ def speedrun_2b_muon_short_decay():
     cfg = _speedrun_base()
     cfg.optimizer = default_muon(lr=2.4e-3)
     cfg.lr_scheduler.decay_ratio = 0.1
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon_short_decay"
     return cfg
 
 
@@ -166,7 +151,6 @@ def speedrun_2b_muon_fast_warmup():
     cfg.optimizer = default_muon(lr=2.4e-3)
     cfg.lr_scheduler.warmup_steps = 5
     cfg.lr_scheduler.decay_ratio = 0.1
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon_fast_warmup"
     return cfg
 
 
@@ -177,7 +161,6 @@ def speedrun_2b_mano():
     """Mano — manifold-normalized optimizer, 1.75x faster than Muon."""
     cfg = _speedrun_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_mano"
     return cfg
 
 
@@ -185,7 +168,6 @@ def speedrun_2b_spam():
     """SPAM — spike-aware Adam with momentum reset."""
     cfg = _speedrun_base()
     cfg.optimizer = default_spam(lr=1.3e-3)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_spam"
     return cfg
 
 
@@ -216,7 +198,6 @@ def speedrun_2b_adamw_qknorm():
     """AdamW + QK-Norm — stabilizes early attention training."""
     cfg = _speedrun_qknorm_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_adamw_qknorm"
     return cfg
 
 
@@ -224,7 +205,6 @@ def speedrun_2b_muon_qknorm():
     """Muon + QK-Norm — best optimizer + attention stabilization."""
     cfg = _speedrun_qknorm_base()
     cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon_qknorm"
     return cfg
 
 
@@ -235,7 +215,6 @@ def speedrun_2b_mano_high_lr():
     """Mano with higher LR (6e-4) — try to close gap to Muon."""
     cfg = _speedrun_base()
     cfg.optimizer = default_mano(lr=6.0e-4)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_mano_high_lr"
     return cfg
 
 
@@ -243,7 +222,6 @@ def speedrun_2b_mano_1e3():
     """Mano with LR=1e-3 — aggressive push."""
     cfg = _speedrun_base()
     cfg.optimizer = default_mano(lr=1.0e-3)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_mano_1e3"
     return cfg
 
 
@@ -252,7 +230,6 @@ def speedrun_2b_muon_cosine():
     cfg = _speedrun_base()
     cfg.optimizer = default_muon(lr=2.4e-3)
     cfg.lr_scheduler.decay_type = "cosine"
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_muon_cosine"
     return cfg
 
 
@@ -261,7 +238,6 @@ def speedrun_2b_mano_cosine():
     cfg = _speedrun_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
     cfg.lr_scheduler.decay_type = "cosine"
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_mano_cosine"
     return cfg
 
 
@@ -269,7 +245,6 @@ def speedrun_2b_mano_qknorm():
     """Mano + QK-Norm — fast manifold optimizer with attention stabilization."""
     cfg = _speedrun_qknorm_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.checkpoint.folder = "checkpoints/speedrun_2b_mano_qknorm"
     return cfg
 
 
@@ -307,7 +282,7 @@ def _speedrun_variant_base(variant: str):
     cfg.dataloader.dataset = DATASET_LOCAL
     cfg.dataloader.dataset_path = None
     cfg.training.steps = STEPS
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.lr_scheduler.warmup_steps = 20
     cfg.lr_scheduler.decay_ratio = 0.2
     cfg.lr_scheduler.decay_type = "cosine"
@@ -387,7 +362,7 @@ def _full_train_base():
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.0
 
-    cfg.checkpoint.enable = True
+    assert cfg.checkpointer is not None
 
     return cfg
 
@@ -396,16 +371,16 @@ def full_2b_adamw():
     """AdamW baseline, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.checkpoint.folder = "checkpoints/full_2b_adamw"
+    cfg.checkpointer.folder = "checkpoints/full_2b_adamw"
     return cfg
 
 
 def full_2b_adamw_qknorm():
     """AdamW + QK-Norm — wall-clock champion, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.model_spec = agpt("2b_qknorm").model_spec
+    cfg.model = agpt("2b_qknorm").model
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.checkpoint.folder = "checkpoints/full_2b_adamw_qknorm"
+    cfg.checkpointer.folder = "checkpoints/full_2b_adamw_qknorm"
     return cfg
 
 
@@ -413,7 +388,7 @@ def full_2b_muon():
     """Muon — best loss optimizer, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
     cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.checkpoint.folder = "checkpoints/full_2b_muon"
+    cfg.checkpointer.folder = "checkpoints/full_2b_muon"
     return cfg
 
 
@@ -421,16 +396,16 @@ def full_2b_mano():
     """Mano — fast manifold optimizer, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.checkpoint.folder = "checkpoints/full_2b_mano"
+    cfg.checkpointer.folder = "checkpoints/full_2b_mano"
     return cfg
 
 
 def full_2b_mano_qknorm():
     """Mano + QK-Norm — best combo, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.model_spec = agpt("2b_qknorm").model_spec
+    cfg.model = agpt("2b_qknorm").model
     cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.checkpoint.folder = "checkpoints/full_2b_mano_qknorm"
+    cfg.checkpointer.folder = "checkpoints/full_2b_mano_qknorm"
     return cfg
 
 
@@ -462,7 +437,7 @@ def _r4_base(variant: str = "2b"):
     cfg.dataloader.dataset_path = None
     cfg.training.steps = STEPS
     cfg.training.global_batch_size = gbs
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
 
     # Cosine WSD (best schedule from earlier rounds)
     cfg.lr_scheduler.warmup_steps = 20
@@ -558,7 +533,7 @@ def r5_mano_lr3e4():
     """Mano at 3e-4 (baseline from LR finder)."""
     cfg = _r5_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.checkpoint.folder = "checkpoints/r5_mano_lr3e4"
+    cfg.checkpointer.folder = "checkpoints/r5_mano_lr3e4"
     return cfg
 
 
@@ -566,7 +541,7 @@ def r5_mano_lr6e4():
     """Mano at 6e-4 (2x baseline)."""
     cfg = _r5_base()
     cfg.optimizer = default_mano(lr=6.0e-4)
-    cfg.checkpoint.folder = "checkpoints/r5_mano_lr6e4"
+    cfg.checkpointer.folder = "checkpoints/r5_mano_lr6e4"
     return cfg
 
 
@@ -574,7 +549,7 @@ def r5_mano_lr1e3():
     """Mano at 1e-3 (3.3x baseline)."""
     cfg = _r5_base()
     cfg.optimizer = default_mano(lr=1.0e-3)
-    cfg.checkpoint.folder = "checkpoints/r5_mano_lr1e3"
+    cfg.checkpointer.folder = "checkpoints/r5_mano_lr1e3"
     return cfg
 
 
@@ -582,7 +557,7 @@ def r5_mano_lr2e3():
     """Mano at 2e-3 (6.7x baseline — aggressive)."""
     cfg = _r5_base()
     cfg.optimizer = default_mano(lr=2.0e-3)
-    cfg.checkpoint.folder = "checkpoints/r5_mano_lr2e3"
+    cfg.checkpointer.folder = "checkpoints/r5_mano_lr2e3"
     return cfg
 
 
@@ -594,9 +569,9 @@ def r5_adamw_constant_lr():
     cfg = _r5_base()
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.lr_scheduler.decay_ratio = 0.0  # no decay — stable phase only
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = 200
-    cfg.checkpoint.folder = "checkpoints/r5_adamw_constant_lr"
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = 200
+    cfg.checkpointer.folder = "checkpoints/r5_adamw_constant_lr"
     return cfg
 
 
@@ -605,9 +580,9 @@ def r5_mano_constant_lr():
     cfg = _r5_base()
     cfg.optimizer = default_mano(lr=3.0e-4)
     cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = 200
-    cfg.checkpoint.folder = "checkpoints/r5_mano_constant_lr"
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = 200
+    cfg.checkpointer.folder = "checkpoints/r5_mano_constant_lr"
     return cfg
 
 
@@ -629,7 +604,7 @@ def r5_schedulefree():
     # No LR schedule needed — schedule-free handles it internally
     cfg.lr_scheduler.warmup_steps = 0
     cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.checkpoint.folder = "checkpoints/r5_schedulefree"
+    cfg.checkpointer.folder = "checkpoints/r5_schedulefree"
     return cfg
 
 
@@ -655,7 +630,7 @@ def smoke_2b_50steps():
     cfg.dataloader.dataset = DATASET
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
     cfg.lr_scheduler.warmup_steps = 5
     cfg.lr_scheduler.decay_ratio = 0.0
@@ -698,12 +673,12 @@ def smoke_2b_async_ckpt():
     cfg.lr_scheduler.decay_ratio = 0.0
     cfg.metrics.log_freq = 1
 
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.async_mode = "async"
-    cfg.checkpoint.enable_first_step_checkpoint = True
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.async_mode = "async"
+    cfg.checkpointer.enable_first_step_checkpoint = True
     # Unique dir each run so concurrent submissions don't collide and
     # nobody resumes from a stale dir.
-    cfg.checkpoint.folder = f"checkpoints/smoke_async_ckpt_{int(time.time())}"
+    cfg.checkpointer.folder = f"checkpoints/smoke_async_ckpt_{int(time.time())}"
     return cfg
 
 
@@ -716,8 +691,8 @@ def smoke_2b_async_ckpt_pinned():
     allocation paths — run after the plain async test passes.
     """
     cfg = smoke_2b_async_ckpt()
-    cfg.checkpoint.async_mode = "async_with_pinned_mem"
-    cfg.checkpoint.folder = cfg.checkpoint.folder.replace(
+    cfg.checkpointer.async_mode = "async_with_pinned_mem"
+    cfg.checkpointer.folder = cfg.checkpointer.folder.replace(
         "smoke_async_ckpt_", "smoke_async_ckpt_pinned_"
     )
     return cfg

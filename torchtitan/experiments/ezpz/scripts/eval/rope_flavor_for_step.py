@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Which RoPE flavor was a given checkpoint step trained with?
 
 The agpt chains changed RoPE convention mid-flight: commit 5ffb850a1
@@ -45,10 +51,9 @@ def _flavor_of(run) -> str | None:
     """Extract the flavor from a run's recorded argv.
 
     metadata.args is what the process actually ran, which is why this is
-    trusted over config.model_spec (equivalent here, but a level further from
-    the command line) and over any script default (which lies -- a clone can
-    carry several submit scripts and the one you read may not be the one that
-    ran).
+    trusted over the resolved config (a level further from the command line)
+    and over any script default (which lies -- a clone can carry several submit
+    scripts and the one you read may not be the one that ran).
     """
     md = getattr(run, "metadata", None) or {}
     for arg in md.get("args") or []:
@@ -94,7 +99,9 @@ def build_map(api, run_ids: list[str], *, want_steps: bool) -> list[dict]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--chain", help="trajectory key, e.g. 20b_v2_512")
     ap.add_argument("--step", type=int, help="checkpoint step to resolve")
     ap.add_argument("--all", action="store_true", help="summarise every live chain")
@@ -141,7 +148,10 @@ def main() -> int:
         return 0
 
     if args.chain not in chains:
-        print(f"unknown chain {args.chain!r}; known: {', '.join(sorted(chains))}", file=sys.stderr)
+        print(
+            f"unknown chain {args.chain!r}; known: {', '.join(sorted(chains))}",
+            file=sys.stderr,
+        )
         return 2
 
     recs = build_map(api, chains[args.chain], want_steps=True)

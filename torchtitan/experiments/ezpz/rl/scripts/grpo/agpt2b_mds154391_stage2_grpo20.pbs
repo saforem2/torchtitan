@@ -1,0 +1,98 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-grpo20
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+CKPT="${CKPT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/grpo/agpt2b-mds154391-stage2-grpo20-${PBS_JOBID%%.*}}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+cd "$WT" || exit 11
+actual_commit=$(git rev-parse HEAD) || exit 15
+[[ "$actual_commit" == "$EXPECTED_COMMIT" ]] || {
+  echo "FATAL: commit mismatch expected=$EXPECTED_COMMIT actual=$actual_commit"
+  exit 15
+}
+git diff --quiet && git diff --cached --quiet || {
+  echo "FATAL: tracked worktree changes present"
+  exit 15
+}
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export TORCHINDUCTOR_MAX_AUTOTUNE=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
+export WANDB_MODE=disabled HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+
+# Monarch owns trainer/generator actor topology. Keep the validated same-node
+# TCP-KVS bootstrap and leave TorchStore transport unset to exercise production
+# automatic weight synchronization.
+unset TORCHTITAN_TORCHSTORE_TRANSPORT TORCHSTORE_GLOO_ENABLED TORCHSTORE_XCCL_ENABLED
+unset CCL_OP_SYNC CCL_OFI_PROVIDER
+unset FI_CXI_DEFAULT_CQ_SIZE FI_CXI_DEFAULT_TX_SIZE FI_CXI_OFLOW_BUF_COUNT
+unset FI_CXI_OFLOW_BUF_SIZE FI_CXI_RDZV_EAGER_SIZE FI_CXI_RDZV_THRESHOLD
+unset FI_CXI_REQ_BUF_MAX_CACHED FI_CXI_REQ_BUF_MIN_POSTED FI_CXI_REQ_BUF_SIZE
+unset FI_CXI_RX_MATCH_MODE FI_MR_CACHE_MAX_COUNT FI_MR_CACHE_MAX_SIZE
+export CCL_PROCESS_LAUNCHER=none
+export CCL_ATL_TRANSPORT=ofi
+export FI_PROVIDER=tcp
+export CCL_KVS_IP_PORT="127.0.0.1_$((29500 + ${PBS_JOBID%%.*} % 1000))"
+
+[[ -s "$CKPT/model.safetensors" ]] || { echo "FATAL: model missing"; exit 16; }
+[[ -s "$CKPT/chat_template.jinja" ]] || { echo "FATAL: chat template missing"; exit 16; }
+model_sha=$(sha256sum "$CKPT/model.safetensors" | cut -d' ' -f1)
+[[ ! -e "$OUT" ]] || { echo "FATAL: output exists: $OUT"; exit 17; }
+mkdir -p "$OUT"
+
+PYTHONPATH="$WT" "$V/bin/python" - <<'PY' || exit 18
+import os
+from torchtitan.experiments.ezpz.rl.reason_agpt.config_registry import (
+    rl_grpo_lora_agpt_2b_gsm8k_b2smoke,
+)
+c = rl_grpo_lora_agpt_2b_gsm8k_b2smoke()
+assert c.async_loop.num_training_steps == 20
+assert c.async_loop.num_prompts_per_train_step == 8
+assert c.async_loop.num_samples_per_prompt == 4
+assert c.generator.model_dtype == "float32"
+assert c.generator.sampling.max_tokens == 700
+assert c.trainer.checkpointer.interval == 10
+assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
+assert not any(os.environ.get(x) for x in (
+    "TORCHTITAN_TORCHSTORE_TRANSPORT", "TORCHSTORE_GLOO_ENABLED", "TORCHSTORE_XCCL_ENABLED"
+))
+print("MDS154391_GRPO20_PREFLIGHT_OK")
+PY
+
+echo "MDS154391_GRPO20_START commit=$actual_commit model_sha=$model_sha out=$OUT $(date -Is)"
+"$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_upstream \
+  --module torchtitan.experiments.ezpz.rl.reason_agpt \
+  --config rl_grpo_lora_agpt_2b_gsm8k_b2smoke \
+  --hf_assets_path="$CKPT" \
+  --dump_folder="$OUT" \
+  --async-loop.num-training-steps=20 \
+  --async-loop.num-prompts-per-train-step=8 \
+  --async-loop.num-samples-per-prompt=4 \
+  --async-loop.target-offpolicy-steps=0 \
+  --async-loop.validation.num-samples=20 \
+  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --generator.sampling.max-tokens=700 \
+  --generator.parallelism.data-parallel-degree=1 \
+  --generator.parallelism.tensor-parallel-degree=1 \
+  --trainer.parallelism.data-parallel-shard-degree=1 \
+  --trainer.parallelism.tensor-parallel-degree=1 \
+  --trainer.checkpointer.interval=10 \
+  --metrics.no-enable-wandb
+rc=$?
+echo "MDS154391_GRPO20_DONE rc=$rc $(date -Is)"
+exit "$rc"

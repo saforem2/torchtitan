@@ -68,8 +68,8 @@ def extract_cot_answer(text: str) -> tuple[bool, str | None]:
     if m:
         span = m.group(1)
         boxed = _BOXED_RE.search(span)
-        ans = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
-        return (ans is not None), ans
+        answer = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
+        return (answer is not None), answer
     # Not well-formed: strip any <think> block, then look for boxed / #### only
     # (NO last-number fallback -- that would score CoT scratch numbers).
     stripped = _THINK_RE.sub("", text)
@@ -89,15 +89,29 @@ _PROMPT_SUFFIX = (
 
 
 def build_prompts(tokenizer, questions: list[str]) -> list[str]:
-    out = []
-    for q in questions:
-        msgs = [{"role": "user", "content": q + _PROMPT_SUFFIX}]
-        out.append(
-            tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=True
+    """Serialize prompts exactly like Stage-1 AGPT SFT.
+
+    The MDS tokenizer intentionally has no Hugging Face ``chat_template``.
+    Stage-1 used explicit Gemma-style turn markers with no BOS/EOS, so evaluation
+    must not delegate formatting to ``apply_chat_template``.  Validate the
+    resulting special-token IDs to fail closed if the supplied tokenizer is not
+    the AGPT tokenizer used for training.
+    """
+    prompts = [
+        "<start_of_turn>user\n"
+        + (question + _PROMPT_SUFFIX).lstrip("\n")
+        + "<end_of_turn>\n<start_of_turn>model\n"
+        for question in questions
+    ]
+    for prompt in prompts[:1]:
+        ids = tokenizer.encode(prompt, add_special_tokens=False)
+        if not ids or ids[0] != 106 or ids[-1] != 108 or 107 not in ids:
+            raise ValueError(
+                "AGPT prompt serialization/tokenizer mismatch: expected first "
+                "token 106, an end-of-turn token 107, and trailing newline 108; "
+                f"got first={ids[0] if ids else None}, last={ids[-1] if ids else None}"
             )
-        )
-    return out
+    return prompts
 
 
 def summarize(texts, finish_reasons, fmts, corrects):
@@ -117,11 +131,15 @@ def summarize(texts, finish_reasons, fmts, corrects):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, help="HF checkpoint dir (with chat template)")
+    ap.add_argument(
+        "--model", required=True, help="HF checkpoint dir (with chat template)"
+    )
     ap.add_argument("--limit", type=int, default=200, help="num test examples")
     ap.add_argument("--dtype", default="float32", help="vLLM dtype (fp32 for agpt-2b)")
     ap.add_argument("--max-tokens", type=int, default=768)
-    ap.add_argument("--temperature", type=float, default=0.0, help="0 = greedy headline")
+    ap.add_argument(
+        "--temperature", type=float, default=0.0, help="0 = greedy headline"
+    )
     ap.add_argument("--gpu-mem", type=float, default=0.70)
     ap.add_argument("--out", default=None, help="write per-example jsonl here")
     args = ap.parse_args()
@@ -149,10 +167,20 @@ def main() -> None:
     sp = SamplingParams(
         temperature=args.temperature,
         max_tokens=args.max_tokens,
-        stop=["</answer>"],
-        include_stop_str_in_output=True,
+        # AuroraGPT's canonical generation terminators.  Using a textual
+        # ``</answer>`` stop hides malformed continuations and diverges from
+        # the production inference contract.
+        stop_token_ids=[1, 107],
     )
-    outputs = llm.generate(prompts, sp)
+    try:
+        outputs = llm.generate(prompts, sp)
+    finally:
+        # vLLM V1 owns a separate EngineCore process.  On the validated XPU
+        # build it does not exit merely because generation returned, leaving the
+        # parent blocked in multiprocessing cleanup.  Use the engine client's
+        # supported teardown hook so batch jobs can reach their validators and
+        # final completion marker.
+        llm.llm_engine.engine_core.shutdown()
 
     texts = []
     finish_reasons = []
@@ -162,27 +190,38 @@ def main() -> None:
     for i, o in enumerate(outputs):
         text = o.outputs[0].text
         finish_reason = o.outputs[0].finish_reason
-        fmt_ok, ans = extract_cot_answer(text)
-        correct = ans is not None and golds[i] is not None and ans == golds[i]
+        fmt_ok, answer = extract_cot_answer(text)
+        correct = answer is not None and golds[i] is not None and answer == golds[i]
         texts.append(text)
         finish_reasons.append(finish_reason)
         fmts.append(fmt_ok)
         corrects.append(correct)
         rows.append(
-            {"idx": i, "format_ok": fmt_ok, "pred": ans, "gold": golds[i],
-             "correct": correct, "gen_len": len(text),
-             "finish_reason": finish_reason}
+            {
+                "idx": i,
+                "question": questions[i],
+                "prompt": prompts[i],
+                "generation": text,
+                "format_ok": fmt_ok,
+                "pred": answer,
+                "gold": golds[i],
+                "correct": correct,
+                "gen_len": len(text),
+                "finish_reason": finish_reason,
+            }
         )
 
     summary = summarize(
         texts=texts, finish_reasons=finish_reasons, fmts=fmts, corrects=corrects
     )
-    summary.update({
-        "model": args.model,
-        "dtype": args.dtype,
-        "temperature": args.temperature,
-        "max_tokens": args.max_tokens,
-    })
+    summary.update(
+        {
+            "model": args.model,
+            "dtype": args.dtype,
+            "temperature": args.temperature,
+            "max_tokens": args.max_tokens,
+        }
+    )
     print(json.dumps(summary, indent=2))
 
     if args.out:

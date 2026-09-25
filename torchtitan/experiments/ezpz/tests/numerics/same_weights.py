@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Decisive test: give BOTH trees bit-identical weights, then compare outputs.
 
 The earlier A/B differed because #4535's fused w13 consumes the RNG stream in a
@@ -9,14 +15,18 @@ the other tree, and compare the forward.
 If the merge is numerically sound, the remaining delta is float-regrouping
 scale (one fused GEMM vs three) and nothing more.
 """
-import sys, json, os
+import json
+import os
+import sys
+
 tree = sys.argv[1]
-mode = sys.argv[2]          # "save" or "load"
+mode = sys.argv[2]  # "save" or "load"
 path = sys.argv[3]
 sys.path.insert(0, tree)
 
 import torch
 import torchtitan
+
 assert tree in torchtitan.__file__, torchtitan.__file__
 from torchtitan.experiments.ezpz.agpt import agpt_configs, set_ezpz_max_context_length
 
@@ -34,8 +44,15 @@ if mode == "save":
 else:
     sd = torch.load(path, map_location="cpu", weights_only=True)
     missing, unexpected = model.load_state_dict(sd, strict=True), None
-    print("LOADSTATUS" + json.dumps({"missing": list(getattr(missing, "missing_keys", [])),
-                                     "unexpected": list(getattr(missing, "unexpected_keys", []))}))
+    print(
+        "LOADSTATUS"
+        + json.dumps(
+            {
+                "missing": list(getattr(missing, "missing_keys", [])),
+                "unexpected": list(getattr(missing, "unexpected_keys", [])),
+            }
+        )
+    )
 
 model = model.to(dev).to(torch.float32).eval()
 g = torch.Generator(device="cpu").manual_seed(SEED)
@@ -45,10 +62,13 @@ ids = torch.randint(0, vocab, (T,), generator=g).to(dev)
 with torch.no_grad():
     logits = model(ids)
 
-out = {"tree": os.path.basename(tree.rstrip("/")), "mode": mode,
-       "logits_sum": float(logits.double().sum()),
-       "logits_absmax": float(logits.abs().max()),
-       "logits_mean": float(logits.double().mean()),
-       "logits_std": float(logits.double().std())}
+out = {
+    "tree": os.path.basename(tree.rstrip("/")),
+    "mode": mode,
+    "logits_sum": float(logits.double().sum()),
+    "logits_absmax": float(logits.abs().max()),
+    "logits_mean": float(logits.double().mean()),
+    "logits_std": float(logits.double().std()),
+}
 torch.save(logits.cpu(), path + f".logits.{os.path.basename(tree)}")
 print("JSONLINE" + json.dumps(out))

@@ -20,18 +20,12 @@ import torch
 import torch.distributed
 from torch.distributed import get_rank, get_world_size, is_initialized
 
+import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
+
 from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.config import ConfigManager
-from torchtitan.experiments.ezpz.logging import init_logger
+from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
-    ADOPTOptimizersContainer,
-    ManoOptimizersContainer,
-    MuonClipOptimizersContainer,
-    MuonOptimizersContainer,
-    ScheduleFreeOptimizersContainer,
-    SPAMOptimizersContainer,
-    SophiaGOptimizersContainer,
-    TorchMuonOptimizersContainer,
     default_adopt,
     default_mano,
     default_muon,
@@ -40,10 +34,8 @@ from torchtitan.experiments.ezpz.optimizer import (
     default_sophiag,
     default_spam,
     default_torch_muon,
+    SophiaGOptimizersContainer,
 )
-from torchtitan.experiments.ezpz.logging import logger
-
-import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
 DEFAULT_MODULE = "ezpz.agpt"
 DEFAULT_CONFIG = "ezpz_agpt_2b"
@@ -350,6 +342,8 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
 
         if key.startswith("blendcorpus."):
             remapped = f"dataloader.{key.removeprefix('blendcorpus.')}"
+        elif key == "checkpoint" or key.startswith("checkpoint."):
+            remapped = f"checkpointer{key.removeprefix('checkpoint')}"
         else:
             remapped = _LEGACY_KEY_REMAP.get(key, key)
 
@@ -540,14 +534,16 @@ def main(args: list[str] | None = None) -> None:
                 if ezpz.distributed.get_rank() == 0:
                     logger.exception(e)
 
-        if config.checkpoint.create_seed_checkpoint:
+        if config.create_seed_checkpoint:
             assert (
                 int(os.environ["WORLD_SIZE"]) == 1
             ), "Must create seed checkpoint using a single device, to disable sharding."
             assert (
-                config.checkpoint.enable
-            ), "Must enable checkpointing when creating a seed checkpoint."
-            trainer.checkpointer.save(curr_step=0, last_step=True)
+                config.checkpointer is not None
+            ), "Must configure checkpointer when creating a seed checkpoint."
+            # FaultTolerantTrainer delegates checkpoint ownership to its
+            # TrainingEngine; it does not expose ``checkpointer`` directly.
+            trainer.engine.save_checkpoint(last_step=True)
             logger.info("Created seed checkpoint")
         elif config.lr_finder.enable:
             from torchtitan.experiments.ezpz.lr_finder import run_lr_finder
@@ -581,8 +577,9 @@ if __name__ == "__main__":
     # "leaked semaphore" warnings on shutdown (the semaphores are
     # kernel-cleaned anyway when the process group dies).
     try:
-        from multiprocessing.resource_tracker import _resource_tracker as _rt
         import signal
+        from multiprocessing.resource_tracker import _resource_tracker as _rt
+
         if getattr(_rt, "_pid", None) is not None:
             os.kill(_rt._pid, signal.SIGKILL)
     except Exception:

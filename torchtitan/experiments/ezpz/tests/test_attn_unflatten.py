@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Regression test for the folded-attention unflatten in agpt/__init__.py.
 
 #4121 ("fold batch dim") hands attention a 3D tensor. The layout is
@@ -50,9 +56,7 @@ import textwrap
 
 import torch
 
-_SRC = (
-    pathlib.Path(__file__).resolve().parents[1] / "agpt" / "__init__.py"
-)
+_SRC = pathlib.Path(__file__).resolve().parents[1] / "agpt" / "__init__.py"
 
 
 def _committed_unflatten_block() -> str:
@@ -97,9 +101,7 @@ def _roundtrip(B: int, L: int, N: int, H: int, n_kv: int | None = None):
     """Fold a known 4D tensor, run the shipped code, compare exactly."""
     n_kv = n_kv or N
     q_ref = torch.arange(B * L * N * H, dtype=torch.float32).view(B, L, N, H)
-    k_ref = torch.arange(B * L * n_kv * H, dtype=torch.float32).view(
-        B, L, n_kv, H
-    )
+    k_ref = torch.arange(B * L * n_kv * H, dtype=torch.float32).view(B, L, n_kv, H)
     v_ref = k_ref.clone()
     ns = {
         # [T, N, H] with T = B*L -- the batch dim folded into tokens.

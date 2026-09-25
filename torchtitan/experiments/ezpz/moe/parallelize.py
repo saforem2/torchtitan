@@ -36,7 +36,12 @@ import torch.distributed
 import torch.nn as nn
 from ezpz.models import summarize_model
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    DataParallelMeshDims,
+    fully_shard,
+    MixedPrecisionPolicy,
+)
 from torch.distributed.tensor import Shard
 
 from torchtitan.config import (
@@ -46,13 +51,14 @@ from torchtitan.config import (
     TrainingConfig,
 )
 from torchtitan.distributed import ParallelDims
-from torch.distributed.fsdp import DataParallelMeshDims
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
+from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
 )
-from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
+from torchtitan.experiments.ezpz.logging import logger
+
 # 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
 # now enabled inside apply_compile from parallel_dims. Importing it is an
 # ImportError. This file compiles per-block directly (see the compile block
@@ -61,7 +67,6 @@ from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 # That is not a regression: the call below only ran under tp_enabled, and the
 # MoE path has never been validated with async TP on XPU.
 from torchtitan.experiments.ezpz.moe import moeModel
-from torchtitan.experiments.ezpz.logging import logger
 
 
 def disable_fsdp_gradient_division(model: nn.Module) -> None:
@@ -145,13 +150,27 @@ def parallelize_moe(
     # now just calls model.parallelize. The sync landed: #4419 deleted
     # parallelism.spmd_backend, so both arms collapse to one unconditional
     # call, matching core.
-    model.parallelize(parallel_dims)
+    # BaseModel.parallelize() owns this lifecycle now and called this custom
+    # implementation from moeModel.parallelize(). Invoke only the internal
+    # config-driven TP/EP sharding pass here; calling model.parallelize() recurses.
+    model._parallelize(parallel_dims)
+
+    # The custom token dispatchers are Configurable helpers rather than Module
+    # children, so recursive Module._parallelize cannot wire their runtime
+    # meshes. Preserve the pre-model-ownership lifecycle explicitly here.
+    ep_mesh = parallel_dims.get_optional_mesh("ep")
+    tp_mesh = parallel_dims.get_optional_mesh("tp")
+    for module in model.modules():
+        token_dispatcher = getattr(module, "token_dispatcher", None)
+        wire_meshes = getattr(token_dispatcher, "wire_meshes", None)
+        if callable(wire_meshes):
+            wire_meshes(ep_mesh=ep_mesh, tp_mesh=tp_mesh)
 
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
     # gone -- see the import-site note above.
 
     model_compile_enabled = (
-        compile_config.enable and "model" in compile_config.components
+        compile_config is not None and "model" in compile_config.components
     )
 
     # 57th sync: PR #3674 refactored AC into a Configurable policy
@@ -273,9 +292,7 @@ def apply_fsdp(
             expert_params = set(
                 transformer_block.moe.routed_experts.inner_experts.parameters()
             )
-            num_experts = (
-                transformer_block.moe.routed_experts.inner_experts.num_experts
-            )
+            num_experts = transformer_block.moe.routed_experts.inner_experts.num_experts
 
             if ep_degree > 1:
                 assert edp_mesh is not None
@@ -289,7 +306,9 @@ def apply_fsdp(
             # Fall back to Shard(0) if not (avoids uneven sharding error).
             if efsdp_ep_size > num_experts:
                 expert_w = next(
-                    iter(transformer_block.moe.routed_experts.inner_experts.parameters())
+                    iter(
+                        transformer_block.moe.routed_experts.inner_experts.parameters()
+                    )
                 )
                 if expert_w.shape[1] % efsdp_ep_size == 0:
                     expert_shard_placement = Shard(1)
@@ -305,6 +324,7 @@ def apply_fsdp(
                     reshard_after_forward=reshard_after_forward,
                 )
             elif ep_degree == 1:
+
                 def _experts_shard_placement_fn(
                     param: nn.Parameter,
                     _expert_params: set = expert_params,

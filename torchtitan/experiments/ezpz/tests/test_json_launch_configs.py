@@ -41,7 +41,7 @@ def _factory(module_name: str, factory_name: str, json_path: Path, monkeypatch):
 def _expert_backends(cfg) -> set[str]:
     return {
         layer.moe.routed_experts.inner_experts.compute_backend
-        for layer in cfg.model_spec.model.layers
+        for layer in cfg.model.layers
         if layer.moe is not None
     }
 
@@ -66,8 +66,10 @@ def test_agpt_launch_jsons_use_current_schema():
         assert not (
             isinstance(activation_checkpoint, dict) and "mode" in activation_checkpoint
         ), path
-        checkpoint = data.get("checkpoint", {})
-        assert checkpoint.get("keep_latest_k", 0) == 0, path
+        assert "checkpoint" not in data, path
+        assert "enable" not in data.get("compile", {}), path
+        checkpointer = data.get("checkpointer", {})
+        assert checkpointer.get("keep_latest_k", 0) == 0, path
 
 
 @pytest.mark.parametrize(
@@ -108,18 +110,19 @@ def test_retained_agpt_json_factories_load(
 ):
     cfg = _factory(module_name, factory_name, MOE_RUNS / json_name, monkeypatch)
 
-    assert cfg.model_spec.model.vocab_size == 50_304
+    assert cfg.model.vocab_size == 50_304
     if ac_type is None:
         assert cfg.activation_checkpoint is None
     else:
         assert isinstance(cfg.activation_checkpoint, ac_type)
-    assert cfg.checkpoint.keep_latest_k == 0
+    if cfg.checkpointer is not None:
+        assert cfg.checkpointer.keep_latest_k == 0
     assert cfg.optimizer.param_groups[0].optimizer_name == "AdamW"
     assert cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] == pytest.approx(2.2e-4)
     if backend is not None:
         assert cfg.parallelism.expert_parallel_degree == 12
         assert _expert_backends(cfg) == {backend}
-        assert cfg.model_spec.state_dict_adapter is None
+        assert cfg.model.build().state_dict_adapter_cls is None
 
 
 def test_agpt_json_rejects_checkpoint_rotation(monkeypatch, tmp_path):

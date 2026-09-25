@@ -17,10 +17,46 @@ future change turns a factory into an object (or vice versa) the counts move
 and this test says so, instead of silently passing.
 """
 
+from typing import Any, cast
+
 import pytest
 
 from torchtitan.experiments.ezpz.agpt import agpt_configs
 from torchtitan.experiments.ezpz.moe import moe_configs
+
+
+def test_fused_ffn_preserves_legacy_storage_and_rng_assignment():
+    import torch
+
+    from torchtitan.experiments.ezpz.moe import _dtensor_safe_fused_ffn_config
+
+    gate_init = {"weight": lambda t: torch.nn.init.normal_(t, std=0.1)}
+    up_init = {"weight": lambda t: torch.nn.init.normal_(t, std=0.2)}
+    cfg = _dtensor_safe_fused_ffn_config(
+        dim=7,
+        hidden_dim=5,
+        w1_param_init=gate_init,
+        w2w3_param_init=up_init,
+    )
+
+    linear = cfg.w13.build()
+
+    torch.manual_seed(42)
+    legacy = torch.empty(5, 2, 7)
+    gate_init["weight"](legacy[:, 0])
+    up_init["weight"](legacy[:, 1])
+    expected = legacy.flatten(0, 1)
+
+    torch.manual_seed(42)
+    actual = linear.weight
+    assert actual.shape == (10, 7)
+    assert cfg.w13.param_init is not None
+    cfg.w13.param_init["weight"](actual)
+
+    assert torch.equal(actual, expected)
+
+    x = torch.randn(3, 7)
+    assert linear(x).shape == (3, 2, 5)
 
 
 def _materialize(value):
@@ -70,12 +106,69 @@ def test_sonic_flavors_select_the_sonic_backend():
         "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
     )
     with torch.device("meta"):
-        model = cfg.model_spec.model.build()
+        model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model -- the subclass is not wired"
     assert all(r._wants_routing() for r in routed), (
-        "EzpzRoutedExperts must forward the routing decision for this backend"
+        "sonic model routed experts did not select the routing-aware path"
     )
+
+
+def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
+    """Upstream RoutedExperts initializes every dispatcher unconditionally."""
+    from torchtitan.experiments.ezpz.moe.token_dispatcher import (
+        AllToAllTokenDispatcher,
+        LocalTokenDispatcher,
+    )
+
+    for config in (
+        LocalTokenDispatcher.Config(num_experts=4, top_k=2),
+        AllToAllTokenDispatcher.Config(num_experts=4, top_k=2),
+    ):
+        dispatcher = config.build()
+        assert dispatcher.init_buffer() is None
+
+
+def test_routed_experts_wires_dispatcher_meshes(monkeypatch):
+    """The recursive Module lifecycle must retain the old dispatcher handoff."""
+    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+    from torchtitan.models.common.moe import RoutedExperts
+
+    class ParallelDims:
+        def get_optional_mesh(self, name):
+            return f"{name}-mesh"
+
+    class Dispatcher:
+        def wire_meshes(self, **kwargs):
+            self.meshes = kwargs
+
+    routed = object.__new__(EzpzRoutedExperts)
+    routed.token_dispatcher = Dispatcher()
+    monkeypatch.setattr(RoutedExperts, "_parallelize", lambda self, dims: None)
+
+    routed._parallelize(cast(Any, ParallelDims()))
+
+    assert routed.token_dispatcher.meshes == {
+        "ep_mesh": "ep-mesh",
+        "tp_mesh": "tp-mesh",
+    }
+
+
+def test_routed_experts_prefers_live_sparse_ep_mesh(monkeypatch):
+    from torchtitan.experiments.ezpz.moe import routed_experts as routed_module
+
+    class Dispatcher:
+        ep_mesh = "stale-ep-mesh"
+
+    routed = object.__new__(routed_module.EzpzRoutedExperts)
+    routed.token_dispatcher = Dispatcher()
+    monkeypatch.setattr(
+        routed_module,
+        "spmd_sparse_mesh",
+        lambda: {"ep": "live-ep-mesh"},
+    )
+
+    assert routed._resolve_ep_mesh() == "live-ep-mesh"
 
 
 def test_default_backend_does_not_take_the_routing_path():
@@ -87,7 +180,7 @@ def test_default_backend_does_not_take_the_routing_path():
 
     cfg = moe_debugmodel()
     with torch.device("meta"):
-        model = cfg.model_spec.model.build()
+        model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model"
     assert not any(r._wants_routing() for r in routed), (

@@ -24,17 +24,17 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 
 import ezpz
 import ezpz.distributed
 
 from torchtitan.experiments.ezpz.rl.datasets_sft import (
-    SFT_REGISTRY,
     _is_mix_spec,
     _parse_mix_spec,
     get_sft_dataset,
+    SFT_REGISTRY,
 )
+
 # Reuse the helpers from train_grpo so we don't drift between the two
 # training entry points.
 from torchtitan.experiments.ezpz.rl.train_grpo import (
@@ -181,16 +181,23 @@ class EzpzSFTArgs:
             )
 
 
+_EZPZ_SFT_CONFIG_CLS = None
+
+
 def _ezpz_sft_config_cls():
     """Build EzpzSFTConfig lazily so importing this module doesn't drag
     in TRL/transformers (which pull in torch)."""
+
+    global _EZPZ_SFT_CONFIG_CLS
+    if _EZPZ_SFT_CONFIG_CLS is not None:
+        return _EZPZ_SFT_CONFIG_CLS
 
     from trl import SFTConfig
 
     @dataclass
     class EzpzSFTConfig(SFTConfig):
         # --- output / cadence -------------------------------------------------
-        output_dir: Optional[str] = field(
+        output_dir: str | None = field(
             default=None,
             metadata={
                 "help": (
@@ -209,7 +216,7 @@ def _ezpz_sft_config_cls():
         bf16: bool = True
         gradient_accumulation_steps: int = 1
         gradient_checkpointing: bool = True
-        torch_empty_cache_steps: Optional[int] = 1
+        torch_empty_cache_steps: int | None = 1
 
         # --- SFT specifics -----------------------------------------------------
         # Compute loss only on the assistant turn(s), not on the user
@@ -236,7 +243,7 @@ def _ezpz_sft_config_cls():
         # at ~3-4 min on a 104-core SPR node, well under the barrier
         # ceiling. Sapphire Rapids has the cores; rank 0 is alone in its
         # process so num_proc=32 has bandwidth.
-        dataset_num_proc: Optional[int] = 32
+        dataset_num_proc: int | None = 32
 
         def __post_init__(self):
             # Same FSDP + gradient_checkpointing migration as
@@ -249,6 +256,7 @@ def _ezpz_sft_config_cls():
                     fsdp_cfg = {}
                 elif isinstance(fsdp_cfg, str):
                     import json
+
                     with open(fsdp_cfg, encoding="utf-8") as f:
                         fsdp_cfg = json.load(f)
                 else:
@@ -266,6 +274,7 @@ def _ezpz_sft_config_cls():
                     mik = {}
                 elif isinstance(mik, str):
                     import json
+
                     mik = json.loads(mik)
                 else:
                     mik = dict(mik)
@@ -274,6 +283,14 @@ def _ezpz_sft_config_cls():
                 self.model_init_kwargs = mik
             super().__post_init__()
 
+    # Trainer checkpoints pickle TrainingArguments. A function-local class is
+    # otherwise unpickleable (job 12478482 reached step 10, wrote model
+    # weights, then failed saving training_args.bin). Publish a stable module
+    # identity while retaining lazy TRL import behavior.
+    EzpzSFTConfig.__module__ = __name__
+    EzpzSFTConfig.__qualname__ = "EzpzSFTConfig"
+    globals()["EzpzSFTConfig"] = EzpzSFTConfig
+    _EZPZ_SFT_CONFIG_CLS = EzpzSFTConfig
     return EzpzSFTConfig
 
 
@@ -298,11 +315,13 @@ def _patch_sharded_tensor_device_for_xpu() -> None:
     (``torch.xpu``, ``torch.cuda``, etc.). Safe no-op on CUDA hosts.
     """
     try:
-        from torch.distributed._shard.sharded_tensor._ops import tensor_ops
-        from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+        from torch.distributed._shard.sharded_tensor._ops import (  # noqa: F401
+            tensor_ops as _tensor_ops,
+        )
         from torch.distributed._shard.sharded_tensor._ops.tensor_ops import (
             _sharded_op_impl,
         )
+        from torch.distributed._shard.sharded_tensor.api import ShardedTensor
     except ImportError:
         return
 
@@ -343,8 +362,8 @@ def _patch_sharded_tensor_device_for_xpu() -> None:
 
 
 def main() -> None:
-    from trl import SFTTrainer
     from transformers import AutoTokenizer, HfArgumentParser
+    from trl import SFTTrainer
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
@@ -422,7 +441,11 @@ def main() -> None:
         ezpz.distributed.setup_wandb(
             project_name="torchtitan.ezpz.sft",
             config=_build_wandb_config(
-                ezpz_args, config, model_name, device_type, rank,
+                ezpz_args,
+                config,
+                model_name,
+                device_type,
+                rank,
             ),
         )
 
@@ -436,16 +459,15 @@ def main() -> None:
             f"{kind!r} fallback"
         )
 
+    import threading
+    import time
+
     # Same shape as _prefetch_and_broadcast_model: rank 0 builds the
     # dataset first (which triggers the HF Hub download into the local
     # cache), then we barrier so worker ranks load from the warm cache
     # instead of all 384 ranks hammering HF Hub with concurrent xet-read
     # requests (job 12468217 died this way with HTTP 429 storms +
     # ".incomplete/dataset_info.json not found" cascade failures).
-    import torch.distributed as dist
-    from datetime import timedelta
-    import threading
-    import time
 
     def _rank0_progress_beacon(stop_event, label):
         """Print a heartbeat every 30s so it's obvious rank 0 is still
@@ -456,7 +478,9 @@ def main() -> None:
         """
         t0 = time.monotonic()
         while not stop_event.wait(timeout=30):
-            log.info(f"[prefetch] rank 0 still building {label} ({time.monotonic()-t0:.0f}s elapsed)")
+            log.info(
+                f"[prefetch] rank 0 still building {label} ({time.monotonic()-t0:.0f}s elapsed)"
+            )
 
     # Build the dataset on EVERY rank, no barrier. Two reasons:
     #   1. The interleaved-mix loader now uses a disk cache at
@@ -539,9 +563,7 @@ def main() -> None:
             )
             config.packing = False
     else:
-        log.info(
-            f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)..."
-        )
+        log.info(f"[rank {rank}] building SFT dataset (mix-cache warm path: <5s)...")
         beacon_stop = threading.Event()
         beacon = threading.Thread(
             target=_rank0_progress_beacon,
@@ -569,6 +591,50 @@ def main() -> None:
             f"[rank {rank}] Truncated to first {ezpz_args.max_train_samples} "
             f"samples (--max_train_samples)"
         )
+
+    if use_pretokenized:
+        # TRL 0.29 no longer treats input_ids alone as fully trainer-ready: it
+        # builds a labels column and truncates inside main_process_first(). On
+        # a multi-million-row packed dataset that leaves every worker blocked
+        # in a oneCCL barrier for hours. Materialize labels after the optional
+        # smoke-test slice, then explicitly skip all TRL dataset preparation.
+        if "labels" not in dataset.column_names:
+            mask_column = (
+                "assistant_masks"
+                if "assistant_masks" in dataset.column_names
+                else "completion_mask"
+            )
+
+            def _build_pretokenized_labels(example):
+                mask = example[mask_column]
+                return {
+                    "labels": [
+                        token_id if keep else -100
+                        for token_id, keep in zip(
+                            example["input_ids"], mask, strict=True
+                        )
+                    ]
+                }
+
+            mask_columns = [
+                column
+                for column in ("assistant_masks", "completion_mask")
+                if column in dataset.column_names
+            ]
+            dataset = dataset.map(
+                _build_pretokenized_labels,
+                remove_columns=mask_columns,
+                num_proc=1,
+                desc="Building trainer-ready labels",
+            )
+            log.info(
+                f"[rank {rank}] built labels from {mask_column} for "
+                f"{len(dataset)} pre-tokenized samples"
+            )
+        config.dataset_kwargs = {
+            **(config.dataset_kwargs or {}),
+            "skip_prepare_dataset": True,
+        }
 
     trainer = SFTTrainer(
         model=model_name,
@@ -657,13 +723,15 @@ def main() -> None:
     trainer.train(resume_from_checkpoint=rfc or None)
     log.info(f"[rank {rank}] Training complete.")
 
-    if rank == 0 and not ezpz_args.no_save:
+    if not ezpz_args.no_save:
         save_path = os.path.join(config.output_dir, "final")
-        try:
-            trainer.save_model(save_path)
-            log.info(f"Model saved to {save_path}")
-        except Exception as e:
-            log.warning(f"Failed to save model to {save_path}: {e}")
+        # FSDP2 state-dict gathering is collective: every rank must enter
+        # save_model(). Calling it only on rank 0 disconnects the remaining
+        # ranks while rank 0 is still inside all-gather (job 12478483).
+        trainer.save_model(save_path)
+        if rank == 0:
+            tokenizer.save_pretrained(save_path)
+            log.info(f"Model and tokenizer saved to {save_path}")
 
 
 if __name__ == "__main__":

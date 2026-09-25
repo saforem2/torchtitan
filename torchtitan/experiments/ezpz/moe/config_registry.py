@@ -62,6 +62,24 @@ def _apply_config_overrides(
     overrides: dict[str, Any],
     path: str = "",
 ) -> None:
+    if not path:
+        checkpoint = overrides.pop("checkpoint", None)
+        if checkpoint is not None:
+            enabled = checkpoint.pop("enable", True)
+            target.checkpointer = CheckpointManager.Config() if enabled else None
+            if enabled:
+                overrides["checkpointer"] = checkpoint
+
+        compile_config = overrides.get("compile")
+        if isinstance(compile_config, dict) and "enable" in compile_config:
+            enabled = compile_config.pop("enable")
+            if enabled:
+                if target.compile is None:
+                    target.compile = CompileConfig()
+            else:
+                target.compile = None
+                overrides.pop("compile")
+
     for key, value in overrides.items():
         if not hasattr(target, key):
             raise KeyError(f"Unknown config field {key!r} at path {path or '<root>'}.")
@@ -113,7 +131,7 @@ def _config_from_json(base_fn) -> FaultTolerantTrainer.Config:
 def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
     return FaultTolerantTrainer.Config(
         hf_assets_path="./assets/hf/gemma-7b",
-        model_spec=model_registry(flavor),
+        model=model_registry(flavor),
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
         optimizer=default_adamw(lr=8e-4),
@@ -131,7 +149,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=MetricsProcessor.Config(log_freq=10),
-        checkpoint=CheckpointManager.Config(
+        checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -203,7 +221,7 @@ def moe(
     # differ (gemma 256128, Llama-3 128256, OLMo-2 100352) stay correct and
     # cannot drift from the model. Guarded because not every loss Config has
     # the field -- ChunkedLossWrapper, set by some configs below, does not.
-    _vocab = getattr(getattr(cfg.model_spec, "model", None), "vocab_size", None)
+    _vocab = getattr(cfg.model, "vocab_size", None)
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
@@ -229,9 +247,9 @@ def moe(
     cfg.metrics.log_freq = 1
     cfg.metrics.enable_wandb = True
     if compile:
-        cfg.compile = CompileConfig(enable=True)
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = checkpoint_interval
+        cfg.compile = CompileConfig()
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = checkpoint_interval
     return cfg
 
 
@@ -271,20 +289,20 @@ def moe_debugmodel_ep() -> FaultTolerantTrainer.Config:
     (see docs/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md).
     """
     cfg = moe("debugmodel", local_batch_size=2)
-    cfg.model_spec = model_registry("debugmodel", moe_comm_backend="standard")
+    cfg.model = model_registry("debugmodel", moe_comm_backend="standard")
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
 def moe_debugmodel_flex_attn() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel()
-    cfg.model_spec = model_registry("debugmodel_flex_attn")
+    cfg.model = model_registry("debugmodel_flex_attn")
     return cfg
 
 
 def moe_debugmodel_flex_attn_hf() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel_hf()
-    cfg.model_spec = model_registry("debugmodel_flex_attn_hf")
+    cfg.model = model_registry("debugmodel_flex_attn_hf")
     return cfg
 
 
@@ -354,7 +372,7 @@ def moe_16b() -> FaultTolerantTrainer.Config:
     # (known-bugs/moe-flex-attention-blockmask.md); moe_small and moe_10b_2b
     # got the opt-in then and this flavor was missed.
     cfg.dataloader.emit_positions = True
-    cfg.compile = CompileConfig(enable=True, components=["loss"])
+    cfg.compile = CompileConfig(components=["loss"])
     return cfg
 
 
@@ -370,11 +388,11 @@ def moe_671b() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 10000
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
-    cfg.checkpoint.interval = 500
-    cfg.compile = CompileConfig(enable=True, components=["loss"])
+    cfg.checkpointer.interval = 500
+    cfg.compile = CompileConfig(components=["loss"])
     # Quantization is now applied to the config at model_registry time
     # rather than to the runtime model (#3127). Re-register with Float8.
-    cfg.model_spec = model_registry(
+    cfg.model = model_registry(
         "671B",
         quantization=[
             # filter_fqns is an EXCLUDE-list: matched Linears stay bf16 (not fp8).
@@ -390,26 +408,26 @@ def moe_671b() -> FaultTolerantTrainer.Config:
 
 def moe_7b_ep() -> FaultTolerantTrainer.Config:
     cfg = moe_7b()
-    cfg.model_spec = model_registry("7B", moe_comm_backend="standard")
+    cfg.model = model_registry("7B", moe_comm_backend="standard")
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
 def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
     cfg = moe_10b_2b_sdpa()
-    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
-def _set_moe_compute_backend(spec, backend: str) -> None:
+def _set_moe_compute_backend(model_config, backend: str) -> None:
     # Set the expert compute_backend on every MoE layer's inner_experts
-    # config in a built ModelSpec. model_registry() does not expose a
+    # config returned by model_registry(). The registry does not expose a
     # compute_backend arg, and it lives on EzpzGroupedExperts.Config
     # (routed_experts.inner_experts), so set it here post-build. Setting an
     # explicit value also survives model.py's grouped_mm->for_loop rewrite,
     # which only fires when compute_backend == "grouped_mm".
-    for layer_cfg in spec.model.layers:
+    for layer_cfg in model_config.layers:
         if layer_cfg.moe is not None:
             layer_cfg.moe.routed_experts.inner_experts.compute_backend = backend
 
@@ -422,8 +440,8 @@ def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer
     vocab-projection memory pressure.
     """
     cfg = moe(flavor, local_batch_size=1, activation_checkpoint_mode="none")
-    cfg.model_spec = model_registry(flavor, moe_comm_backend="standard")
-    _set_moe_compute_backend(cfg.model_spec, backend)
+    cfg.model = model_registry(flavor, moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model, backend)
     cfg.parallelism.expert_parallel_degree = ep
     return cfg
 
@@ -465,8 +483,8 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
     # batched-bmm expert compute (padded (E, cap, D) -> 3 torch.bmm) instead
     # of the serial for_loop that grouped_mm auto-falls-back to on XPU.
     cfg = moe_10b_2b_sdpa()
-    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
-    _set_moe_compute_backend(cfg.model_spec, "bmm")
+    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model, "bmm")
     return cfg
 
 
@@ -476,7 +494,7 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
 def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
     # for_loop experts + hybridep comm backend (dispatch/compute overlap) at EP=12.
     cfg = moe_10b_2b_sdpa()
-    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="hybridep")
+    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="hybridep")
     cfg.parallelism.expert_parallel_degree = 12
     return cfg
 
@@ -484,8 +502,8 @@ def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
 def _bmm_ep_cf(cf: float) -> FaultTolerantTrainer.Config:
     # bmm EP=12 with an explicit capacity_factor, for the throughput sweep.
     cfg = moe_10b_2b_sdpa()
-    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
-    for layer_cfg in cfg.model_spec.model.layers:
+    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    for layer_cfg in cfg.model.layers:
         if layer_cfg.moe is not None:
             ie = layer_cfg.moe.routed_experts.inner_experts
             ie.compute_backend = "bmm"
@@ -518,7 +536,7 @@ def moe_debugmodel_sonic() -> FaultTolerantTrainer.Config:
     aurora_moe's rank = dp_rank * EP + ep_rank at EP=2/8/12 (job 8836277).
     """
     cfg = moe_debugmodel_ep()
-    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    _set_moe_compute_backend(cfg.model, "aurora_full_sonic")
     return cfg
 
 
@@ -529,7 +547,7 @@ def moe_10b_2b_sdpa_sonic_ep() -> FaultTolerantTrainer.Config:
     sonic backend swapped in, so the two are directly comparable for timing.
     """
     cfg = moe_10b_2b_sdpa_bmm_ep()
-    _set_moe_compute_backend(cfg.model_spec, "aurora_full_sonic")
+    _set_moe_compute_backend(cfg.model, "aurora_full_sonic")
     return cfg
 
 
@@ -547,7 +565,7 @@ def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
-    cfg.checkpoint.keep_latest_k = 0
+    cfg.checkpointer.keep_latest_k = 0
     return cfg
 
 
@@ -556,8 +574,8 @@ def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
     # `activation-checkpoint:none` on the CLI, since EP>1 selective-AC
     # recompute of the expert all_to_all aborts on the frameworks RC torch.
     cfg = moe_10b_2b_sdpa()
-    cfg.model_spec = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
-    _set_moe_compute_backend(cfg.model_spec, "bmm")
+    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _set_moe_compute_backend(cfg.model, "bmm")
     cfg.parallelism.expert_parallel_degree = 12
     return cfg
 
@@ -576,7 +594,7 @@ def moe_2b_ep() -> FaultTolerantTrainer.Config:
     keeping the global batch reasonable.
     """
     cfg = moe("2B", local_batch_size=2)
-    cfg.model_spec = model_registry("2B", moe_comm_backend="standard")
+    cfg.model = model_registry("2B", moe_comm_backend="standard")
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
@@ -592,7 +610,7 @@ def moe_10b_2b() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
-    cfg.checkpoint.interval = 100
+    cfg.checkpointer.interval = 100
     return cfg
 
 
@@ -616,7 +634,7 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_type = "cosine"
     cfg.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
-    cfg.checkpoint.interval = 100
+    cfg.checkpointer.interval = 100
     return cfg
 
 
@@ -640,7 +658,7 @@ def smoke_moe_500m_50steps() -> FaultTolerantTrainer.Config:
     cfg.dataloader.dataset = "HuggingFaceFW/fineweb-edu"
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 8e-4
     cfg.lr_scheduler.warmup_steps = 5
     cfg.lr_scheduler.decay_ratio = 0.0

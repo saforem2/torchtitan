@@ -29,7 +29,6 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
-from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 
 from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
 from torchtitan.models.common import (
@@ -300,8 +299,7 @@ class ReLUSquaredGLU(BinaryActivationFn):
 
 
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
-from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
-from torchtitan.experiments.torchft.config.job_config import FaultTolerantModelSpec
+
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
 
@@ -310,7 +308,6 @@ __all__ = [
     "XPUScaledDotProductAttention",
     "_default_inner_attention",
     "model_registry",
-    "parallelize_llama",
 ]
 
 
@@ -479,6 +476,7 @@ def _build_agpt_config(
         scaling=scaling,
     )
     return AgptModel.Config(
+        max_context_length=max_context_length,
         dim=dim,
         vocab_size=vocab_size,
         tok_embeddings=Embedding.Config(
@@ -1053,16 +1051,13 @@ def model_registry(
     flavor: str,
     attn_backend: str = "sdpa",
     converters: list | None = None,
-) -> FaultTolerantModelSpec:
+) -> AgptModel.Config:
     from copy import deepcopy
 
     # Upstream #4684 (post-sync-84) renamed validate_converter_order ->
     # validate_converter_compatibility. Same one-arg contract: it takes the
     # converter Config list and raises on an incompatible combination.
     from torchtitan.config.transform.converter import validate_converter_compatibility
-
-    from torchtitan.distributed.pipeline_parallel import pipeline_llm
-    from torchtitan.experiments.torchft.diloco import fragment_llm
 
     # [ezpz] deepcopy: agpt_configs[flavor] is a shared prebuilt config object
     # (unlike qwen3/llama3 which rebuild per call); converters mutate the tree,
@@ -1073,25 +1068,19 @@ def model_registry(
         for c in converters:
             config = c.build().convert(config)
 
-    # #4328 made max_context_length a required ModelSpec field. Read it off the
-    # flavor's own RoPE config rather than restating a constant here: that is
-    # where _build_agpt_config already threaded it, so the spec cannot drift
-    # from the model it describes.
-    rope_cfg = config.layers[0].attention.rope
-    if rope_cfg is None:
+    # The direct model contract stores this value on Decoder.Config. Keep the
+    # validation here because the registry caches templates and converters may
+    # replace attention subtrees before the config is returned.
+    rope = config.layers[0].attention.rope
+    if rope is None:
         raise ValueError(
             f"agpt flavor {flavor!r} has no RoPE config, so max_context_length "
-            "cannot be derived for its ModelSpec"
+            "cannot be validated"
+        )
+    if config.max_context_length != rope.max_context_length:
+        raise ValueError(
+            f"agpt flavor {flavor!r} has inconsistent context lengths: "
+            f"model={config.max_context_length}, rope={rope.max_context_length}"
         )
 
-    return FaultTolerantModelSpec(
-        name="ezpz.agpt",
-        flavor=flavor,
-        model=config,
-        max_context_length=rope_cfg.max_context_length,
-        parallelize_fn=parallelize_llama,
-        pipelining_fn=pipeline_llm,
-        post_optimizer_build_fn=None,
-        state_dict_adapter=AgptStateDictAdapter,
-        fragment_fn=fragment_llm,
-    )
+    return config

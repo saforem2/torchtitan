@@ -29,9 +29,9 @@ permissions:
 
 jobs:
   build-test:
-    # Skip scheduled runs on forks, where they would only fail and email the fork owner
+    # PyTorch's private GPU runner fleet is unavailable to forks.
     if: >-
-      (github.repository_owner == 'pytorch' || github.event_name != 'schedule') &&
+      github.repository_owner == 'pytorch' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:

@@ -21,9 +21,6 @@
     "context_parallel_degree": 1,
     "expert_parallel_degree": 12
   },
-  "compile": {
-    "enable": false
-  },
   "lr_scheduler": {
     "warmup_steps": 2,
     "total_steps": 5,
@@ -35,10 +32,6 @@
     "dataset": "c4_test",
     "dataset_path": null,
     "train_iters": 5
-  },
-  "checkpoint": {
-    "enable": false,
-    "keep_latest_k": 0
   },
   "metrics": {
     "enable_wandb": false,
