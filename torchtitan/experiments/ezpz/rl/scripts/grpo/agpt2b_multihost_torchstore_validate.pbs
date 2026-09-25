@@ -44,7 +44,7 @@ case "${TORCHSTORE_TRANSPORT}" in
     unset TORCHTITAN_TORCHSTORE_TRANSPORT
     export TORCHSTORE_SHARED_MEMORY_ENABLED=0
     ;;
-  gloo|xccl)
+  gloo|xccl|monarch_rdma)
     export TORCHTITAN_TORCHSTORE_TRANSPORT="${TORCHSTORE_TRANSPORT}"
     ;;
   *) echo "FATAL: unsupported TORCHSTORE_TRANSPORT=${TORCHSTORE_TRANSPORT}"; exit 15 ;;
@@ -75,7 +75,7 @@ assert c.async_loop.num_samples_per_prompt == 4
 assert c.generator.model_dtype == "float32"
 assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
 requested = os.environ.get("TORCHTITAN_TORCHSTORE_TRANSPORT", "auto")
-assert requested in {"auto", "gloo", "xccl"}
+assert requested in {"auto", "gloo", "xccl", "monarch_rdma"}
 if os.environ.get("TORCHSTORE_TRANSPORT") == "auto_no_shm":
     assert os.environ["TORCHSTORE_SHARED_MEMORY_ENABLED"] == "0"
 print(

@@ -19,5 +19,5 @@ def test_multihost_launcher_allowlists_network_transport_controls():
     assert 'TORCHSTORE_TRANSPORT="${TORCHSTORE_TRANSPORT:-gloo}"' in text
     assert "auto_no_shm)" in text
     assert "TORCHSTORE_SHARED_MEMORY_ENABLED=0" in text
-    assert "gloo|xccl)" in text
+    assert "gloo|xccl|monarch_rdma)" in text
     assert "unsupported TORCHSTORE_TRANSPORT" in text
