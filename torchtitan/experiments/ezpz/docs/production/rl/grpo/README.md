@@ -1,5 +1,11 @@
 # Production GRPO
 
+> [!IMPORTANT]
+> For current production launch instructions, use
+> [Monarch + TorchStore + vLLM on XPU](../monarch-torchstore-vllm.md). The rows
+> below are completed experiment records; links to TRL/server-mode launchers are
+> historical reproductions, not the default path for new runs.
+
 > Last updated: 2026-08-30
 
 > GRPO-tuned checkpoints derived from SFT'd or pre-trained AuroraGPT

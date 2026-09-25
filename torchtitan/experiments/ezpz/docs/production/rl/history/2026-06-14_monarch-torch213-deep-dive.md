@@ -1,5 +1,10 @@
 # Monarch + torch 2.13 deep-dive (2026-06-14)
 
+> [!WARNING]
+> **Deprecated runtime/launch instructions.** This is a historical bring-up
+> record. Use [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md)
+> for current Sunspot production and Aurora `next-eval` requirements.
+
 End-of-session writeup. Burned ~16 PBS jobs (12468799 → 12468815)
 adding layer after layer of XPU compatibility patches. Got past
 every torchtitan + DCP + XCCL issue we hit. Final blocker is a

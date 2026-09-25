@@ -1,5 +1,13 @@
 # Multi-trainer-node GRPO on XPU: root cause (2026-07-06)
 
+> [!WARNING]
+> **Historical diagnosis, not current launch instructions.** This document
+> explains failures and fixes in the legacy TRL + external vLLM-server stack.
+> New production runs should follow
+> [the current Monarch + TorchStore + vLLM runbook](monarch-torchstore-vllm.md).
+> Its runtime and Aurora `next-eval` requirements supersede the environment
+> snippets in this page.
+
 **TL;DR.** The "multi-trainer-node hang" documented over the 2026-07-01
 overnight session was **not a rank desync** and **not a silent
 object-collective stall**. It was two independent, sequential failures, both

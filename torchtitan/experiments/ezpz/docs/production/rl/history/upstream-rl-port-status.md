@@ -1,5 +1,10 @@
 # Upstream `torchtitan.experiments.rl.train` port status (2026-06-13)
 
+> [!WARNING]
+> **Superseded.** This page's conclusion that Monarch/TorchStore is blocked was
+> overturned by later hardware validation. Do not reuse its runtime commands.
+> See [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+
 ## TL;DR
 
 The XPU compatibility layer needed to run upstream's GRPO loop is
@@ -239,7 +244,9 @@ that doesn't produce SYCL-USM-device memory.
   DTensor collective wrappers) to allocate via `torch.empty(device=...)`
   + copy_ rather than `.to(device)`. Too intrusive to do as a shim.
 
-Track C remains the working production path. The `xpu_overrides.py`
+At the time of this investigation, Track C remained the working production
+path. That conclusion is superseded by the current
+[`Monarch + TorchStore + vLLM` runbook](../monarch-torchstore-vllm.md). The `xpu_overrides.py`
 patches added during this investigation are independently useful (the
 RNG-state USM allocator fix, the LOCAL_RANK hook, the set_device pin)
 and are kept in place for future Monarch attempts.

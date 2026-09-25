@@ -1,5 +1,13 @@
 # GRPO+LoRA on XPU: Monarch + TorchStore + vLLM
 
+> [!WARNING]
+> **Deprecated as an operator guide.** This page documents the July-era
+> one-host/two-tile bring-up, older `rl-grpo-lora` runtime, and reward studies.
+> For new production or multi-host work, use
+> [the current Monarch + TorchStore + vLLM runbook](monarch-torchstore-vllm.md).
+> Do not copy the environment or launcher commands below onto Aurora
+> `next-eval`.
+
 > **Last updated: 2026-08-30.** "WORKS" below is a path-validation result
 > from 2026-07-19, not a running job -- the most recent Monarch GRPO run on
 > record is 2026-07-20. Nothing on this page is training or queued.

@@ -1,5 +1,10 @@
 # GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900
 
+> [!WARNING]
+> **Historical reproduction.** The environment and launch commands below
+> predate the current production multi-host path and Aurora `next-eval` image.
+> Start from [`../monarch-torchstore-vllm.md`](../monarch-torchstore-vllm.md).
+
 **Goal:** repeat the reproduced Qwen3-0.6B alphabet_sort GRPO+LoRA smoke, but with
 the SFT deliverable **checkpoint-900** (AuroraGPT-2B) in the loop, so the reward
 signal reflects a trained model instead of base Qwen (which scored 0).

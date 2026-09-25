@@ -1,5 +1,13 @@
 # GRPO on Intel XPU: TRL `GRPOTrainer`
 
+> [!WARNING]
+> **Deprecated for new production runs.** This page preserves the legacy TRL
+> `GRPOTrainer` + external vLLM-server path and its July 2026 evidence. The
+> current production runbook is
+> [Monarch + TorchStore + vLLM on XPU](monarch-torchstore-vllm.md). In
+> particular, do not reuse this page's oneAPI 2025.3 / Torch 2.12 environment
+> on Aurora `next-eval`.
+
 > **Last updated: 2026-08-30.** The status table below is unchanged since
 > 2026-07-06 and still reflects what was validated then; "works" means the
 > path was proven, not that anything is running now. No TRL GRPO job has
