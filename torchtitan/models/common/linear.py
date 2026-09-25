@@ -47,6 +47,14 @@ class Linear(nn.Linear, Module):
         out_features: int
         num_linears: int = 1
         bias: bool = False
+        legacy_interleaved_compute: bool = False
+        """Flatten stacked projections in historical output-row order.
+
+        Storage remains ``[num_linears, out_features, in_features]``; only the
+        physical GEMM row order becomes ``[out_features, num_linears, ...]``.
+        This is an opt-in numerical-compatibility path for checkpoints whose
+        trajectories depend on the former interleaved fused projection.
+        """
 
     def __init__(self, config: Config):
         super().__init__(
@@ -56,6 +64,11 @@ class Linear(nn.Linear, Module):
         )
         self.out_features = config.out_features
         self.num_linears = config.num_linears
+        self.legacy_interleaved_compute = config.legacy_interleaved_compute
+        if self.legacy_interleaved_compute and config.num_linears == 1:
+            raise ValueError(
+                "legacy_interleaved_compute requires num_linears greater than 1"
+            )
         if config.num_linears > 1:
             self.weight = nn.Parameter(
                 self.weight.detach().unflatten(
@@ -83,6 +96,14 @@ class Linear(nn.Linear, Module):
         self,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Flatten stacked parameters for one linear operation."""
+        if self.legacy_interleaved_compute:
+            weight = self.weight.transpose(0, 1).contiguous().flatten(0, 1)
+            bias = (
+                None
+                if self.bias is None
+                else self.bias.transpose(0, 1).contiguous().flatten()
+            )
+            return weight, bias
         weight = self.weight.flatten(0, -2)
         bias = None if self.bias is None else self.bias.flatten()
         return weight, bias
@@ -91,6 +112,10 @@ class Linear(nn.Linear, Module):
         """Restore the logical stacked output dimensions after a linear operation."""
         if self.num_linears == 1:
             return output
+        if self.legacy_interleaved_compute:
+            return output.unflatten(
+                -1, (self.out_features, self.num_linears)
+            ).transpose(-2, -1)
         return output.unflatten(-1, self.weight.shape[:-1])
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -102,6 +127,8 @@ class Linear(nn.Linear, Module):
         result = nn.Linear.extra_repr(self)
         if self.num_linears > 1:
             result += f", num_linears={self.num_linears}"
+        if self.legacy_interleaved_compute:
+            result += ", legacy_interleaved_compute=True"
         return result
 
     def _linear(
