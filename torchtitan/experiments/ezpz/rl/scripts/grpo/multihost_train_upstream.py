@@ -16,6 +16,7 @@ from pathlib import Path
 
 import torch.distributed as dist
 from monarch._src.spmd.host_mesh import host_mesh_from_store
+from monarch.config import configure
 from torchtitan.config import ConfigManager
 
 # Importing this module applies the XPU compatibility patches before rl imports.
@@ -86,6 +87,7 @@ def main() -> None:
     if args.multihost_world_size != 2:
         raise ValueError("this entry point requires exactly two scheduler hosts")
 
+    configure(mesh_attach_config_timeout="120s")
     rank = _rank()
     store = dist.FileStore(str(args.multihost_store), args.multihost_world_size)
     hosts = host_mesh_from_store(
@@ -104,6 +106,7 @@ def main() -> None:
         return
 
     assert hosts is not None
+    hosts.initialized.get()
     init_logger()
     os.environ["MONARCH_ACTOR_QUEUE_DISPATCH"] = "0"
     config = ConfigManager().parse_args(config_args)
@@ -117,7 +120,6 @@ def main() -> None:
     sl.log_trace_instant("structured_logger_started")
 
     try:
-        hosts.initialized.get()
         asyncio.run(_run_controller(config, hosts))
         print("MULTIHOST_TORCHSTORE_VLLM_OK", flush=True)
     finally:
