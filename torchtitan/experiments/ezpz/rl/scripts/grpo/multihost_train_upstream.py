@@ -66,7 +66,7 @@ async def _run_controller(config: Controller.Config, hosts) -> None:
             per_generator_world_size,
             host_meshes=placement,
             num_generators=config.num_generators,
-            generator_env=train_upstream.breakable_cuda_graph_env(config.generator),
+            generator_env=None,
         )
         await controller.setup_async(
             trainer_mesh=trainer_mesh,
