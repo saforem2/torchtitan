@@ -6685,6 +6685,12 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
   gate; GRPO is not released and Stage-2 remains accepted.
 - Stage-3 report:
   [`experiments/2026-09-25-mds154391-stage3-star.md`](experiments/2026-09-25-mds154391-stage3-star.md).
+- Aurora coordination: umbrella chain 3 is healthy through step 39,942 and
+  becomes non-finite at 39,943; step 42,400 and later checkpoints are poisoned.
+  The first 48-rank communicator probe (`8869722`) was a harness failure
+  (`LOCAL_RANK` missing on every rank, auto-retry stopped pre-training, exit
+  143), not an XCCL result. Corrected probe `8870327` is queued; exact-topology
+  chain-3 replay remains blocked until that communicator baseline passes.
 
 ---
 
