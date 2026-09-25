@@ -72,7 +72,7 @@ docs/
 │   │   └── historical/v1-bf16/    <- Collapsed v1 (frozen-norm) trajectories
 │   ├── cpt/                       <- Continued pre-training (olmo x dolmino ratio sweep)
 │   ├── sft/agpt/                  <- Supervised fine-tuning recipes + evals
-│   ├── rl/                        <- GRPO production work (grpo/, history/, plans/, monarch.md, trl.md)
+│   ├── rl/                        <- GRPO production work (current Monarch/TorchStore/vLLM runbook + history)
 │   ├── polaris/                   <- Polaris (A100) production chains
 │   └── moe/10b_2b_sdpa_ep/        <- 10B-2B MoE SDPA + EP experiment
 │

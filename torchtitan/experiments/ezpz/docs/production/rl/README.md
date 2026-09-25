@@ -1,20 +1,27 @@
 # RL (GRPO) on Intel XPU
 
-> **Last updated: 2026-08-30.** No GRPO run is training or queued. The
-> statuses below ("works", "complete", "study") describe validated paths
-> and finished runs, not activity -- the most recent GRPO job on this page
-> is from 2026-07-20.
+> [!IMPORTANT]
+> **Current production instructions:** use
+> [Production RL with Monarch, TorchStore, and vLLM on XPU](monarch-torchstore-vllm.md).
+> It contains the validated Sunspot two-host contract and the Aurora
+> `next-eval` runtime/preflight requirements. The TRL and July-era pages below
+> remain available for historical reproduction but are not the default runbook.
+
+> **Last updated: 2026-09-25.** The newest production-path validation is the
+> two-host Monarch/TorchStore/vLLM job `12478711`. The result proves runtime
+> integration, not model-quality improvement. Historical result tables remain
+> below for context.
 
 > [!IMPORTANT]
 > **For the 2B model's post-training results, start at
 > [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** -- SFT and RL
 > together, with what each actually bought.
 >
-> Short version for RL: **GRPO perfects format but has not moved accuracy on
-> the metric we care about.** 100 gated steps on the best SFT base held format
-> at **1.000** with zero drift, and moved GSM8K-CoT **0.205 -> 0.215** (~2
-> problems, noise). At ~20% solve rate with `group_size=4` most groups are
-> all-wrong, so the advantage is zero.
+> Short version for quality: **mechanically successful GRPO has not yet moved
+> held-out accuracy on the metric we care about.** The current multi-host gate
+> validates actors, policy transfer, generation, optimization, checkpoints, and
+> shutdown only. Quality promotion still requires a separate paired semantic
+> evaluation.
 >
 > What RL *has* delivered: a genuinely solved task (sum_digits, accuracy_reward
 > ~0.4 -> ~0.9 over 1000 steps), a **+168%** reward-shaping result, and
@@ -29,44 +36,56 @@
 Reinforcement learning (GRPO) for AuroraGPT / Qwen3 on ALCF XPU systems
 (Sunspot / Aurora). This is the **status hub** -- it routes to the per-path docs.
 
-## Two frameworks
+## Current production path
 
-There are two independent GRPO stacks. TRL is the mature, multi-node-validated
-path; the Monarch stack is the upstream `torchtitan.experiments.rl` engine,
-recently vendored into our repo and verified (2026-07-19).
+The current path is upstream-style TorchTitan RL with Monarch actors,
+TorchStore policy synchronization, and vLLM generation. Sunspot has passed the
+full two-host gate; Aurora `next-eval` has a defined runtime contract but still
+requires its own multi-host RL hardware gate before production use.
+
+Start here: [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md).
+
+## Historical frameworks and compatibility paths
+
+Two older framework views remain documented. TRL is a legacy compatibility path
+that was multi-node-validated in July 2026. The Monarch page records the older
+single-host bring-up and reward studies. Neither replaces the current
+production runbook linked above.
 
 > [!NOTE]
 > See [GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900](history/grpo-lora-agpt2b-repro.md)
 
 | # | Path | Framework | Generation | Entry point | venv | Status | Doc |
 |---|------|-----------|------------|-------------|------|--------|-----|
-| A2 | **TRL + vLLM-server** | TRL `GRPOTrainer` | `trl vllm-serve` (on-policy, weight-sync) | `rl.train_grpo` `--use_vllm --vllm_mode server` | `rl-vllm` | **works** 1N / cross-node / multi-trainer-node | [`trl.md`](trl.md) |
+| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | current machine-specific runtime | **Sunspot two-host validated; Aurora next-eval gate pending** | [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md) |
+| A2 | TRL + vLLM-server | TRL `GRPOTrainer` | `trl vllm-serve` (on-policy, weight-sync) | `rl.train_grpo` `--use_vllm --vllm_mode server` | `rl-vllm` | **deprecated for new production; historical validation retained** | [`trl.md`](trl.md) |
 | A1 | TRL + `.generate()` | TRL `GRPOTrainer` | HF `.generate()` per-rank | `rl.train_grpo` (no `--use_vllm`) | `rl-vllm` | works (slow fallback) | [`trl.md`](trl.md) |
-| B | **Monarch + TorchStore + vLLM** | upstream `experiments.rl` | vLLM (Monarch actor) | `rl.train_upstream` | `rl-grpo-lora` | **works** (2-tile verified, vendored) | [`monarch.md`](monarch.md) |
+| B (historical) | Monarch + TorchStore + vLLM | older vendored bring-up | vLLM (Monarch actor) | `rl.train_upstream` | `rl-grpo-lora` | one-host/two-tile historical result | [`monarch.md`](monarch.md) |
 
 A1 and A2 are the same TRL `GRPOTrainer` with two generation backends (toggle
 `--use_vllm`); B is a separate architecture.
 
 ### Which to use
-- **Production / multi-node GRPO today: TRL + vLLM-server (A2)** -- the validated,
-  scaled path. See [`trl.md`](trl.md).
+- **Production / multi-host GRPO today:** follow
+  [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md). The committed
+  Sunspot launcher is the validated reference; Aurora `next-eval` requires the
+  separate runtime and hardware gate documented there.
+- **Historical TRL reproduction:** use [`trl.md`](trl.md) only when explicitly
+  reproducing the legacy server-mode path.
 - **Fast local sanity check with no server: TRL `.generate()` (A1)** -- same entry
   point, drop the `--use_vllm` flags.
-- **Upstream Monarch+TorchStore+vLLM (B)** -- now runs from our repo on 2 tiles
-  (agpt-2b GRPO+LoRA); the on-policy RDMA-weight-store architecture. See
-  [`monarch.md`](monarch.md).
+- **Older single-host Monarch studies:** see [`monarch.md`](monarch.md) for
+  reward experiments and bring-up details, not current launch instructions.
 
 ## Quick start
 
 ```bash
-# A2 -- TRL + vLLM-server (recommended). Use the ready-made PBS scripts (they handle
-# the server subshell, health poll, tile/node partitioning, venv, XPU env):
-bash torchtitan/experiments/ezpz/rl/scripts/grpo/qwen3_vllm_server_smoke.sh   # 1N
-# details + cross-node / multi-trainer-node scripts: trl.md
+# Current two-host Sunspot production validation:
+qsub -v EXPECTED_COMMIT="$(git rev-parse HEAD)" \
+  torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_multihost_torchstore_validate.pbs
 
-# B -- Monarch + TorchStore + vLLM (agpt-2b GRPO+LoRA), from the REPO ROOT:
-bash torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_grpo.sh
-# details: monarch.md
+# Aurora next-eval uses a different runtime/archive contract. Do not port this
+# PBS header or venv path verbatim; follow monarch-torchstore-vllm.md.
 ```
 
 ## Tasks (TRL path)
@@ -110,8 +129,9 @@ The SFT deliverable used by path B is
 ```
 docs/production/rl/
   README.md      <- this hub
-  trl.md         <- TRL GRPOTrainer (vLLM-server + .generate fallback): status, run, stack
-  monarch.md     <- Monarch + TorchStore + vLLM (vendored, verified): status, run, arch
+  monarch-torchstore-vllm.md <- current production runbook
+  trl.md         <- deprecated TRL reproduction path
+  monarch.md     <- historical single-host Monarch bring-up/results
   grpo/          <- per-run GRPO results + charts (aurora2b sft_arithmetic, ...)
   2026-07-06_multinode-grpo-root-cause.md   <- TRL multi-node root-cause (evidence)
   history/       <- superseded investigations + bring-up chronology + prior reproductions
@@ -119,16 +139,22 @@ docs/production/rl/
 
 ## Verified results (headline)
 
+- **Current Monarch + TorchStore + vLLM:** two physical Sunspot hosts, trainer
+  and generator on distinct hosts, Gloo policy transfer, three finite GRPO
+  updates, pre/post generation, policy versions 0→3, checkpoints 1/2/3, and
+  clean exit (job `12478711`). Production contract:
+  [`monarch-torchstore-vllm.md`](monarch-torchstore-vllm.md).
 - **TRL + vLLM-server:** 1 node (job 12468780), cross-node generation (12469976),
   multi-trainer-node 3N/24-rank (12470083) -- all works. Detail + evidence:
   [`trl.md`](trl.md), [`grpo/`](grpo/README.md).
 - **Monarch + TorchStore + vLLM:** agpt-2b GRPO+LoRA 2-tile, Train steps fire
   ~1765 tok/s, reward 0.16->0.26 on the easy task (job 12471049) -- runs from our
-  repo, zero core edits. Detail: [`monarch.md`](monarch.md).
+  repo, zero core edits. Historical detail: [`monarch.md`](monarch.md).
 
-## Dependencies
+## Historical dependency snapshots
 
-Two venvs (both py3.12, torch 2.12+xpu, triton-xpu 3.7.1):
+The following venvs reproduce the older TRL and single-host Monarch studies;
+they are not the Aurora `next-eval` production runtime:
 - `venvs/rl-vllm` (A1/A2): vllm + vllm-xpu-kernels + trl. Build:
   [`rl/scripts/build_rl_vllm_venv.sh`](../../../rl/scripts/build_rl_vllm_venv.sh).
 - `venvs/rl-grpo-lora` (B): + torchstore/monarch (from source) + ezpz. Build:
