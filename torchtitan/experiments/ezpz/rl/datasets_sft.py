@@ -18,8 +18,8 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from datasets import Dataset
 
@@ -127,7 +127,9 @@ def _fast_interleave_matches_stock(seed: int = 42) -> bool:
             for i, L in enumerate((97, 20, 43))
         ]
         want = interleave_datasets(
-            dsets, probabilities=probs, seed=seed,
+            dsets,
+            probabilities=probs,
+            seed=seed,
             stopping_strategy="all_exhausted",
         )["__v"]
         got = _interleave_all_exhausted_fast(dsets, probs, seed)["__v"]
@@ -138,8 +140,10 @@ def _fast_interleave_matches_stock(seed: int = 42) -> bool:
                 "datasets version; falling back to the (slow) stock path."
             )
     except Exception as e:  # noqa: BLE001 -- never let the guard break a build
-        log.warning(f"[mix-cache] fast-interleave self-check errored ({e}); "
-                    "using stock path.")
+        log.warning(
+            f"[mix-cache] fast-interleave self-check errored ({e}); "
+            "using stock path."
+        )
         _FAST_INTERLEAVE_VERIFIED = False
     return _FAST_INTERLEAVE_VERIFIED
 
@@ -299,6 +303,7 @@ def _materialized_mix_load_or_build(
         # Another rank beat us to it — fine, clean up our tmp and use
         # theirs.
         import shutil
+
         shutil.rmtree(tmp_dir, ignore_errors=True)
     log.info(
         f"[mix-cache] saved + renamed in {time.monotonic()-t1:.1f}s "
@@ -505,10 +510,10 @@ def _openr1_format_row(ex):
         boxes = _OPENR1_BOXED_RE.findall(gen)
         if not boxes:
             continue
-        ans = boxes[-1].strip()
-        if not trace or not ans:
+        answer = boxes[-1].strip()
+        if not trace or not answer:
             continue
-        completion = f"<think>{trace}</think>\n<answer>\\boxed{{{ans}}}</answer>"
+        completion = f"<think>{trace}</think>\n<answer>\\boxed{{{answer}}}</answer>"
         return {
             "prompt": [{"role": "user", "content": ex["problem"] + _OPENR1_SUFFIX}],
             "completion": [{"role": "assistant", "content": completion}],
@@ -551,7 +556,7 @@ def _build_openr1_math_cot():
 
     Selects a verified-correct (correctness_math_verify) + complete generation
     per problem, keeps its R1 reasoning trace, and normalizes the final answer
-    to <answer>\\boxed{ans}</answer>. Rows with no correct+boxed generation
+    to ``<answer>\\boxed{answer}</answer>``. Rows with no correct+boxed generation
     are dropped: map() emits a same-shaped empty-content sentinel row (NOT an
     empty-list sentinel -- see _openr1_map_row) and filter() removes it by
     content truthiness. Needs the HF download cached first (see
@@ -686,8 +691,6 @@ def _build_math_alpaca_mix(
     yielded examples will be roughly ``max_size / max_weight`` so the
     sampled proportions actually match the requested weights.
     """
-    from datasets import interleave_datasets
-
     if len(weights) != 3:
         raise ValueError(
             f"math_alpaca_mix weights must be (w_metamath, w_gsm8k, w_alpaca); "
@@ -800,9 +803,7 @@ def _build_openmath_instruct2() -> Dataset:
     def _format(ex):
         return {
             "prompt": [{"role": "user", "content": ex["problem"]}],
-            "completion": [
-                {"role": "assistant", "content": ex["generated_solution"]}
-            ],
+            "completion": [{"role": "assistant", "content": ex["generated_solution"]}],
         }
 
     return raw.map(_format, remove_columns=raw.column_names)
@@ -877,8 +878,6 @@ def _build_tulu_math_uc_mix(
     largest is fully consumed — OpenMathInstruct-2 is ~14M, so the
     effective size is dominated by it at ~93M after scaling.
     """
-    from datasets import interleave_datasets
-
     if len(weights) != 3:
         raise ValueError(
             f"tulu_math_uc_mix weights must be (w_tulu, w_math, w_uc); "
@@ -889,7 +888,9 @@ def _build_tulu_math_uc_mix(
 
     return _materialized_mix_load_or_build(
         component_names=[
-            "tulu-3-sft-mixture", "OpenMathInstruct-2", "ultrachat-200k",
+            "tulu-3-sft-mixture",
+            "OpenMathInstruct-2",
+            "ultrachat-200k",
         ],
         weights=list(weights),
         seed=seed,
@@ -1044,7 +1045,7 @@ def _openthoughts_format_row(ex):
     return None if it can't be cleanly wrapped (caller drops None rows).
 
     Keeps the R1 reasoning trace (the <|begin_of_thought|> span) verbatim and
-    normalizes the final answer to <answer>\\boxed{ans}</answer>, taking the
+    normalizes the final answer to ``<answer>\\boxed{answer}</answer>``, taking the
     LAST \\boxed{} anywhere in the assistant turn. Rows with no boxed answer are
     dropped: OpenThoughts' code-generation rows end in a code block, not a boxed
     scalar, so they don't fit an <answer>\\boxed{}</answer> tail and would teach
@@ -1069,10 +1070,10 @@ def _openthoughts_format_row(ex):
     boxes = _OPENR1_BOXED_RE.findall(assistant)
     if not boxes:
         return None
-    ans = boxes[-1].strip()
-    if not ans:
+    answer = boxes[-1].strip()
+    if not answer:
         return None
-    completion = f"<think>{trace}</think>\n<answer>\\boxed{{{ans}}}</answer>"
+    completion = f"<think>{trace}</think>\n<answer>\\boxed{{{answer}}}</answer>"
     return {
         "prompt": [{"role": "user", "content": question + _OPENR1_SUFFIX}],
         "completion": [{"role": "assistant", "content": completion}],
@@ -1252,6 +1253,58 @@ def _is_mix_spec(name: str) -> bool:
     return ":" in name
 
 
+# ---------------------------------------------------------------------------
+# stage3-star -- self-distilled GSM8K traces accepted by the Stage-3 sampler
+# ---------------------------------------------------------------------------
+
+STAGE3_STAR_PATH_ENV = "EZPZ_STAGE3_STAR_PATH"
+
+
+def _build_stage3_star() -> Dataset:
+    """Load accepted Stage-3 STaR rows written by ``stage3_star_generate.py``.
+
+    The sampler already enforces exact-answer correctness, a valid
+    ``<think>``/``<answer>`` envelope, natural termination, a reasoning-depth
+    floor, deduplication, one trace per problem, and GSM8K-test
+    decontamination, and it emits chat-shaped ``prompt``/``completion`` rows.
+    This loader only resolves the corpus path and fails closed on a missing or
+    malformed file so a silent empty corpus can never train.
+    """
+    import datasets as hf_datasets
+
+    path = os.environ.get(STAGE3_STAR_PATH_ENV, "")
+    if not path:
+        raise ValueError(
+            f"set {STAGE3_STAR_PATH_ENV} to the accepted_sft.jsonl produced by "
+            "torchtitan/experiments/ezpz/rl/scripts/stage3_star_generate.py"
+        )
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"{STAGE3_STAR_PATH_ENV} does not exist: {path}")
+
+    raw = hf_datasets.load_dataset("json", data_files=path, split="train")
+    missing = {"prompt", "completion"} - set(raw.column_names)
+    if missing:
+        raise ValueError(f"{path} is missing required column(s): {sorted(missing)}")
+    if len(raw) == 0:
+        raise ValueError(f"{path} contains no accepted STaR rows")
+    return raw.select_columns(["prompt", "completion"])
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="stage3-star",
+        build=_build_stage3_star,
+        description=(
+            "Teacher-free GSM8K STaR traces sampled from the Stage-2 checkpoint "
+            "and accepted only when exact-answer correct, envelope-valid, "
+            "naturally terminated, multi-step, deduplicated, and "
+            "GSM8K-test-decontaminated. Path comes from "
+            f"${STAGE3_STAR_PATH_ENV}."
+        ),
+    )
+)
+
+
 def _parse_mix_spec(spec: str) -> tuple[list[str], list[float]]:
     """Parse 'a:0.5,b:0.3,c:0.2' into (['a','b','c'], [0.5,0.3,0.2])."""
     pairs = [p.strip() for p in spec.split(",") if p.strip()]
@@ -1274,13 +1327,9 @@ def _parse_mix_spec(spec: str) -> tuple[list[str], list[float]]:
         # float() accepts 'NaN' and 'inf'; reject both — they'd silently
         # poison interleave_datasets' probabilities.
         if not (wval == wval) or wval == float("inf") or wval == float("-inf"):
-            raise ValueError(
-                f"Mix-spec weight {w!r} (in {pair!r}) isn't finite"
-            )
+            raise ValueError(f"Mix-spec weight {w!r} (in {pair!r}) isn't finite")
         if wval < 0:
-            raise ValueError(
-                f"Mix-spec weight {w!r} (in {pair!r}) is negative"
-            )
+            raise ValueError(f"Mix-spec weight {w!r} (in {pair!r}) is negative")
         weights.append(wval)
     total = sum(weights)
     if total <= 0:
@@ -1298,15 +1347,12 @@ def _build_ad_hoc_mix(spec: str, seed: int = 42) -> Dataset:
     `interleave_datasets(stopping_strategy='all_exhausted')`, same
     as the canonical hardcoded mixes.
     """
-    from datasets import interleave_datasets
-
     names, weights = _parse_mix_spec(spec)
     for n in names:
         if n not in SFT_REGISTRY:
             available = ", ".join(sorted(SFT_REGISTRY))
             raise ValueError(
-                f"Mix-spec references unknown dataset {n!r}. "
-                f"Available: {available}"
+                f"Mix-spec references unknown dataset {n!r}. " f"Available: {available}"
             )
     return _materialized_mix_load_or_build(
         component_names=names,

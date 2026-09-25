@@ -6672,6 +6672,25 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
   valid across hosts; explicit Gloo is required for this topology.
 - Full report:
   [`experiments/2026-09-25-sunspot-multihost-rl-validation.md`](experiments/2026-09-25-sunspot-multihost-rl-validation.md).
+- PR #26 merged the multi-host support into `ezpz` as
+  `c7605bf1cafeabe82109eea56bcf85b41f3df4a7` after exact-head lint passed.
+- A teacher-free Stage-3 STaR campaign then sampled 59,784 GSM8K training
+  rollouts. The verified corpus retained 4,294 unique exact-correct traces
+  (57.46% of problems), excluded all four conservative test-set collisions,
+  and had zero leakage. Two-node SFT job `12478715` completed 100 finite steps
+  and exited zero, but fixed semantic evaluation job `12478718` scored only
+  37/200 correct versus the Stage-2 baseline's 43/200. Format was 198/200 versus
+  197/200 and length terminations improved 3→1, but paired flips favored the
+  baseline 21 to 15 (exact McNemar p=0.405). The candidate fails the promotion
+  gate; GRPO is not released and Stage-2 remains accepted.
+- Stage-3 report:
+  [`experiments/2026-09-25-mds154391-stage3-star.md`](experiments/2026-09-25-mds154391-stage3-star.md).
+- Aurora coordination: umbrella chain 3 is healthy through step 39,942 and
+  becomes non-finite at 39,943; step 42,400 and later checkpoints are poisoned.
+  The first 48-rank communicator probe (`8869722`) was a harness failure
+  (`LOCAL_RANK` missing on every rank, auto-retry stopped pre-training, exit
+  143), not an XCCL result. Corrected probe `8870327` is queued; exact-topology
+  chain-3 replay remains blocked until that communicator baseline passes.
 
 ---
 
