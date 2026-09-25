@@ -155,6 +155,17 @@ def parallelize_moe(
     # config-driven TP/EP sharding pass here; calling model.parallelize() recurses.
     model._parallelize(parallel_dims)
 
+    # The custom token dispatchers are Configurable helpers rather than Module
+    # children, so recursive Module._parallelize cannot wire their runtime
+    # meshes. Preserve the pre-model-ownership lifecycle explicitly here.
+    ep_mesh = parallel_dims.get_optional_mesh("ep")
+    tp_mesh = parallel_dims.get_optional_mesh("tp")
+    for module in model.modules():
+        token_dispatcher = getattr(module, "token_dispatcher", None)
+        wire_meshes = getattr(token_dispatcher, "wire_meshes", None)
+        if callable(wire_meshes):
+            wire_meshes(ep_mesh=ep_mesh, tp_mesh=tp_mesh)
+
     # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
     # gone -- see the import-site note above.
 
