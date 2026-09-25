@@ -28,6 +28,20 @@ def test_torchstore_strategy_rejects_unknown_transport(monkeypatch):
         torchstore_transport_from_env()
 
 
+def test_torchstore_strategy_selects_monarch_rdma(monkeypatch):
+    from torchtitan.torchstore_compat import torchstore_transport_from_env
+
+    transport_module = SimpleNamespace(
+        TransportType=SimpleNamespace(MonarchRDMA="monarch-rdma")
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules, "torchstore.transport", transport_module
+    )
+    monkeypatch.setenv("TORCHTITAN_TORCHSTORE_TRANSPORT", "monarch_rdma")
+
+    assert torchstore_transport_from_env() == "monarch-rdma"
+
+
 def test_xpu_flex_attention_uses_triton_backend():
     from torchtitan.experiments.ezpz.rl import xpu_overrides
 

@@ -21,11 +21,13 @@ def torchstore_transport_from_env():
         "xccl": "XCCL",
         "shared_memory": "SharedMemory",
         "monarch_rpc": "MonarchRPC",
+        "monarch_rdma": "MonarchRDMA",
     }
     if requested not in names:
         raise ValueError(
             "TORCHTITAN_TORCHSTORE_TRANSPORT must be one of "
-            f"auto, gloo, xccl, shared_memory, monarch_rpc; got {requested!r}"
+            "auto, gloo, xccl, shared_memory, monarch_rpc, monarch_rdma; "
+            f"got {requested!r}"
         )
 
     # Validate before importing so bad configuration is diagnosed even in a
