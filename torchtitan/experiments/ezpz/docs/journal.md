@@ -28,6 +28,25 @@ Running log of what's happening, session by session. Most recent first.
   explicit `CCL_OP_SYNC=1`, and native `ezpz launch --auto-retry`. It is the
   first rung of an adaptive 4 -> 16 -> 32 -> 64 active-node XCCL ladder and is
   queued at this entry.
+- Initial communicator probes `8869722` and `8870224` were invalid harness
+  attempts: raw PALS launches do not export Torchrun's `LOCAL_RANK` and
+  `RANK`/`WORLD_SIZE` variables. Probe `8870327` reached the default XCCL group
+  and global broadcast, then failed because plain `init_device_mesh()` attempted
+  unsupported XCCL `split_group`; this is exactly why the application installs
+  `xccl_split_group_workaround`. Corrected 48-rank job `8870482` now uses
+  `ezpz.distributed.setup_torch()` plus that same TorchTitan workaround.
+- Submitted 24-hour successor umbrella `8870515` with a 2,098-node large-queue
+  envelope. It deliberately launches only healthy seats 1, 2, and 4: 20B-512,
+  20B-256, and 2B-256 stage 2 (1,024 active nodes total plus ten spares per
+  seat). Completed seat 0 and poisoned seat 3 are excluded; older individual
+  jobs remain held, so there is no checkpoint collision. The oversized envelope
+  is intentional because Aurora's `medium` class caps walltime at 18 hours and
+  the `large` class requires at least 2,000 requested nodes.
+- Submitted chain-3 exact-topology diagnostic `8870516`: 512 active nodes plus
+  ten spares, full-state restore from clean checkpoint `step-39900`, production
+  compile/topology/data/LR preserved, diagnostics every step, immediate
+  non-finite abort, job-unique output/checkpoint sink, and no writes to the
+  production checkpoint tree.
 
 ## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
 
