@@ -236,7 +236,10 @@ def _stable_config_value(value: Any) -> Any:
 def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
     """Fingerprint configuration that defines an exact LR-finder trajectory."""
     config = trainer.config
-    model_config = config.model
+    # Production configs own the model directly. Lightweight utility/test
+    # trainers may intentionally omit it; fingerprint that absence rather than
+    # failing before resume state can be validated.
+    model_config = getattr(config, "model", None)
     payload = {
         "model": _stable_config_value(model_config),
         "optimizer_container": type(trainer.optimizers).__qualname__,
