@@ -35,7 +35,8 @@ export VLLM_ENABLE_V1_MULTIPROCESSING=1
 export WANDB_MODE=disabled HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-unset TORCHTITAN_TORCHSTORE_TRANSPORT TORCHSTORE_GLOO_ENABLED TORCHSTORE_XCCL_ENABLED
+export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
+unset TORCHSTORE_GLOO_ENABLED TORCHSTORE_XCCL_ENABLED
 unset CCL_OP_SYNC CCL_OFI_PROVIDER
 export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi FI_PROVIDER=tcp
 head_node=$(head -1 "$PBS_NODEFILE")
@@ -52,6 +53,7 @@ PORT=$((35000 + ${PBS_JOBID%%.*} % 20000))
 "$V/bin/python" -m py_compile \
   torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_train_upstream.py
 "$V/bin/python" - <<'PY'
+import os
 from torchtitan.experiments.ezpz.rl.reason_agpt.config_registry import (
     rl_grpo_lora_agpt_2b_gsm8k_b2smoke,
 )
@@ -59,6 +61,7 @@ c = rl_grpo_lora_agpt_2b_gsm8k_b2smoke()
 assert c.async_loop.num_samples_per_prompt == 4
 assert c.generator.model_dtype == "float32"
 assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
+assert os.environ["TORCHTITAN_TORCHSTORE_TRANSPORT"] == "gloo"
 print("MULTIHOST_RL_PREFLIGHT_OK")
 PY
 
