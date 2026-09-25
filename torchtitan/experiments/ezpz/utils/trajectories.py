@@ -716,6 +716,10 @@ TRAJECTORIES: list[dict] = [
         "readme": f"{_DOCS}/2b/n256/README.md",
         "gbs": 6144,
         "seq_len": SEQ_LEN,
+        # This chain loads the completed 256N stage-1 checkpoint at step
+        # 92,859, then restarts its own step counter at 1. Keep the inherited
+        # tokens on cumulative-token plots instead of drawing stage 2 from 0.
+        "prior_tokens": 92_859 * 6144 * SEQ_LEN,
         # Same stage-2 dolmino budget as the n512 sibling.
         "token_target": 2_390_375_382_006,
         "wandb_run_ids": [
