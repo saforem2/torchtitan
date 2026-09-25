@@ -6691,6 +6691,14 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
   (`LOCAL_RANK` missing on every rank, auto-retry stopped pre-training, exit
   143), not an XCCL result. Corrected probe `8870327` is queued; exact-topology
   chain-3 replay remains blocked until that communicator baseline passes.
+- Follow-up TorchStore transport controls closed the remaining RDMA question on
+  the Sunspot runtime. Job `12478720` left transport automatic but disabled
+  SharedMemory; with TorchComms unavailable and MonarchRDMA capability reported
+  available, it stalled before the first publication and timed out after 30
+  minutes (`Exit_status=143`). Job `12478722` then explicitly selected
+  `TransportType.MonarchRDMA`; the TorchStore storage-volume actor crashed with
+  `SIGSEGV` during the initial trainer policy push (`Exit_status=1`). Thus Gloo
+  remains the only cross-host transport validated end to end on this stack.
 
 ---
 
