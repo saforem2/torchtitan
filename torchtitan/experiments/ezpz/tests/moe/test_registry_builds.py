@@ -17,6 +17,8 @@ future change turns a factory into an object (or vice versa) the counts move
 and this test says so, instead of silently passing.
 """
 
+from typing import Any, cast
+
 import pytest
 
 from torchtitan.experiments.ezpz.agpt import agpt_configs
@@ -91,6 +93,31 @@ def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
     ):
         dispatcher = config.build()
         assert dispatcher.init_buffer() is None
+
+
+def test_routed_experts_wires_dispatcher_meshes(monkeypatch):
+    """The recursive Module lifecycle must retain the old dispatcher handoff."""
+    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+    from torchtitan.models.common.moe import RoutedExperts
+
+    class ParallelDims:
+        def get_optional_mesh(self, name):
+            return f"{name}-mesh"
+
+    class Dispatcher:
+        def wire_meshes(self, **kwargs):
+            self.meshes = kwargs
+
+    routed = object.__new__(EzpzRoutedExperts)
+    routed.token_dispatcher = Dispatcher()
+    monkeypatch.setattr(RoutedExperts, "_parallelize", lambda self, dims: None)
+
+    routed._parallelize(cast(Any, ParallelDims()))
+
+    assert routed.token_dispatcher.meshes == {
+        "ep_mesh": "ep-mesh",
+        "tp_mesh": "tp-mesh",
+    }
 
 
 def test_default_backend_does_not_take_the_routing_path():

@@ -38,6 +38,21 @@ class EzpzRoutedExperts(RoutedExperts):
             getattr(self.inner_experts, "compute_backend", None) == "aurora_full_sonic"
         )
 
+    def _parallelize(self, parallel_dims) -> None:
+        """Parallelize children, then install dispatcher mesh ownership.
+
+        Before upstream moved to recursive ``Module._parallelize``,
+        ``RoutedExperts.parallelize`` performed this handoff explicitly. The
+        custom ezpz dispatcher is not itself a ``Module``, so recursion cannot
+        discover or wire it. Restore the lifecycle at the owning routed-experts
+        boundary and preserve TP coordinates for sequence-parallel dispatch.
+        """
+        super()._parallelize(parallel_dims)
+        self.token_dispatcher.wire_meshes(
+            ep_mesh=parallel_dims.get_optional_mesh("ep"),
+            tp_mesh=parallel_dims.get_optional_mesh("tp"),
+        )
+
     def forward(
         self,
         x_TD,
