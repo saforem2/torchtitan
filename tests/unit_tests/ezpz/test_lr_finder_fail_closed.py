@@ -128,6 +128,19 @@ def test_runner_forces_resumable_checkpoint_contract_after_caller_arguments():
     assert "--checkpoint.no-enable" not in text[caller_args:]
 
 
+def test_ezpz_translation_preserves_checkpoint_component_selection_flags():
+    from torchtitan.experiments.ezpz.train import _translate_legacy_args
+
+    assert _translate_legacy_args(["--checkpoint.enable"]) == ["--checkpoint.enable"]
+    assert _translate_legacy_args(["--checkpoint.no-enable"]) == [
+        "--checkpoint.no-enable"
+    ]
+    assert _translate_legacy_args(["--checkpoint.interval", "7"]) == [
+        "--checkpointer.interval",
+        "7",
+    ]
+
+
 def test_runner_supports_stable_run_identity_for_walltime_resume():
     script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
     text = script.read_text()

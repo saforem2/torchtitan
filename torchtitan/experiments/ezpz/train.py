@@ -340,7 +340,18 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
             i += 2 if consume_next else 1
             continue
 
-        if key.startswith("blendcorpus."):
+        if key in {
+            "checkpoint.enable",
+            "checkpoint.no-enable",
+            "no-checkpoint.enable",
+            "no-checkpoint-enable",
+        }:
+            # ConfigManager owns optional-component selection. Preserve these
+            # legacy flags until its migration pass; rewriting them to
+            # --checkpointer.enable creates a nonexistent field on the selected
+            # CheckpointManager.Config subcommand.
+            remapped = key
+        elif key.startswith("blendcorpus."):
             remapped = f"dataloader.{key.removeprefix('blendcorpus.')}"
         elif key == "checkpoint" or key.startswith("checkpoint."):
             remapped = f"checkpointer{key.removeprefix('checkpoint')}"
