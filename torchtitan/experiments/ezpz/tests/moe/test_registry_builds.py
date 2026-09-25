@@ -39,6 +39,8 @@ def test_fused_ffn_preserves_legacy_storage_and_rng_assignment():
         w2w3_param_init=up_init,
     )
 
+    linear = cfg.w13.build()
+
     torch.manual_seed(42)
     legacy = torch.empty(5, 2, 7)
     gate_init["weight"](legacy[:, 0])
@@ -46,7 +48,6 @@ def test_fused_ffn_preserves_legacy_storage_and_rng_assignment():
     expected = legacy.flatten(0, 1)
 
     torch.manual_seed(42)
-    linear = cfg.w13.build()
     actual = linear.weight
     assert actual.shape == (10, 7)
     assert cfg.w13.param_init is not None
