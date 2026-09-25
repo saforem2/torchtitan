@@ -218,3 +218,25 @@ def _set_moe_ffn_sharding(
             enable_ep=enable_ep,
             enable_sp=enable_sp,
         )
+        # The ezpz compatibility FFN deliberately retains pre-sync physical
+        # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
+        # Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for
+        # the historical 2-D parameter the corresponding output-feature axis
+        # is dimension 0. Keep the activation contract installed above, but
+        # restore the parameter placement so every FSDP/TP rank owns rows.
+        shared = layer_cfg.moe.shared_experts
+        if shared is not None and shared.w13.__class__.__name__ == "Config":
+            module_cls = getattr(shared.w13, "__class__", None)
+            if (
+                module_cls is not None
+                and module_cls.__qualname__.startswith(
+                    "_LegacyInterleavedColumnParallelLinear."
+                )
+            ):
+                assert shared.w13.sharding_config is not None
+                shared.w13.sharding_config.state_shardings["weight"] = (
+                    dense_param_placement(tp=spmd.S(0))
+                )
+                shared.w13.sharding_config.state_shardings["bias"] = (
+                    dense_param_placement(tp=spmd.S(0))
+                )

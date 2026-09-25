@@ -25,7 +25,7 @@ from torchtitan.experiments.ezpz.agpt import agpt_configs
 from torchtitan.experiments.ezpz.moe import moe_configs
 
 
-def test_stacked_ffn_preserves_legacy_rng_assignment():
+def test_fused_ffn_preserves_legacy_storage_and_rng_assignment():
     import torch
 
     from torchtitan.experiments.ezpz.moe import _dtensor_safe_fused_ffn_config
@@ -43,14 +43,19 @@ def test_stacked_ffn_preserves_legacy_rng_assignment():
     legacy = torch.empty(5, 2, 7)
     gate_init["weight"](legacy[:, 0])
     up_init["weight"](legacy[:, 1])
-    expected = legacy.transpose(0, 1).contiguous()
+    expected = legacy.flatten(0, 1)
 
     torch.manual_seed(42)
-    actual = torch.empty(2, 5, 7)
+    linear = cfg.w13.build()
+    actual = linear.weight
+    assert actual.shape == (10, 7)
     assert cfg.w13.param_init is not None
     cfg.w13.param_init["weight"](actual)
 
     assert torch.equal(actual, expected)
+
+    x = torch.randn(3, 7)
+    assert linear(x).shape == (3, 2, 5)
 
 
 def _materialize(value):

@@ -12,7 +12,6 @@ from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 
@@ -37,7 +36,7 @@ from torchtitan.models.common.config_utils import (
     make_ffn_config,
     make_gqa_config,
 )
-from torchtitan.models.common.linear import RouterGateLinear
+from torchtitan.models.common.linear import ColumnParallelLinear, RouterGateLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
 
 from torchtitan.models.common.param_init import depth_scaled_std
@@ -51,40 +50,76 @@ from .model import Attention, moeModel, moeTransformerBlock
 from .routed_experts import EzpzRoutedExperts
 
 
-def _dtensor_safe_fused_ffn_config(**kwargs):
-    """Build stacked ``[2, F, D]`` weights with pre-sync logical RNG order.
+class _LegacyInterleavedColumnParallelLinear(ColumnParallelLinear):
+    """Stacked-projection API backed by historical interleaved 2-D storage."""
 
-    Upstream changed fused gate/up storage from interleaved ``[2F, D]`` to
-    stacked ``[2, F, D]``. Initializing ``t[0]`` then ``t[1]`` changes which
-    random draws land in each logical projection, breaking deterministic
-    trajectory parity. Draw into the historical ``[F, 2, D]`` view, then
-    transpose into the new physical layout. This preserves old initialization
-    without reverting upstream's stack-friendly representation.
-    """
+    @dataclasses.dataclass(kw_only=True, slots=True)
+    class Config(ColumnParallelLinear.Config):
+        pass
+
+    def __init__(self, config: Config):
+        if config.num_linears != 2:
+            raise ValueError("legacy fused FFN projection requires num_linears=2")
+        # Bypass Linear.__init__'s [N, F, D] reshape. Keeping [2F, D] means
+        # FSDP shards the full fused output axis, as it did pre-sync.
+        nn.Linear.__init__(
+            self,
+            config.in_features,
+            config.num_linears * config.out_features,
+            bias=config.bias,
+        )
+        self.out_features = config.out_features
+        self.num_linears = config.num_linears
+
+    def _unflatten_output(self, output):
+        return output.unflatten(-1, (-1, 2)).transpose(-2, -1)
+
+
+def _dtensor_safe_fused_ffn_config(**kwargs):
+    """Build a fused FFN with the pre-sync 2-D storage and shard-local init."""
     cfg = make_ffn_config(**kwargs)
+    stacked_cfg = cfg.w13
+    cfg.w13 = _LegacyInterleavedColumnParallelLinear.Config(
+        in_features=stacked_cfg.in_features,
+        out_features=stacked_cfg.out_features,
+        num_linears=stacked_cfg.num_linears,
+        bias=stacked_cfg.bias,
+        param_init=stacked_cfg.param_init,
+        sharding_config=stacked_cfg.sharding_config,
+    )
+    core_init = cfg.w13.param_init["weight"] if cfg.w13.param_init else None
     gate_init = kwargs["w1_param_init"].get("weight")
     up_init = kwargs["w2w3_param_init"].get("weight")
 
-    def _init_legacy_order(t):
-        if isinstance(t, DTensor):
-            local = t.to_local()
-            stacked = torch.empty(
-                tuple(t.shape), device=local.device, dtype=local.dtype
-            )
-        else:
-            stacked = t
-        legacy = stacked.new_empty(stacked.shape[1], 2, *stacked.shape[2:])
-        if gate_init is not None:
-            gate_init(legacy[:, 0])
-        if up_init is not None:
-            up_init(legacy[:, 1])
-        stacked.copy_(legacy.transpose(0, 1))
-        if isinstance(t, DTensor):
-            sharded = distribute_tensor(stacked, t.device_mesh, t.placements)
-            t.to_local().copy_(sharded.to_local())
+    def _init_striped(t):
+        if not hasattr(t, "to_local"):
+            if core_init is not None:
+                gate_up = t.unflatten(0, (-1, 2))
+                if gate_init is not None:
+                    gate_init(gate_up[:, 0])
+                if up_init is not None:
+                    up_init(gate_up[:, 1])
+            return
+        local = t.to_local()
+        if local.numel() == 0:
+            return
+        offset = 0
+        mesh = getattr(t, "device_mesh", None)
+        for axis, placement in enumerate(getattr(t, "placements", ())):
+            if getattr(placement, "dim", None) == 0 and mesh is not None:
+                rank = mesh.get_local_rank(axis)
+                chunk, remainder = divmod(t.shape[0], mesh.size(axis))
+                offset += rank * chunk + min(rank, remainder)
+        gate_start = 0 if offset % 2 == 0 else 1
+        gate_rows = local[gate_start::2]
+        up_rows = local[1 - gate_start :: 2]
+        if gate_init is not None and gate_rows.numel():
+            gate_init(gate_rows)
+        if up_init is not None and up_rows.numel():
+            up_init(up_rows)
 
     assert cfg.w13.param_init is not None
-    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_legacy_order}
+    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_striped}
     return cfg
 
 
