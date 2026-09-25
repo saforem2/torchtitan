@@ -48,8 +48,8 @@ async def _run_controller(config: Controller.Config, hosts) -> None:
         raise ValueError("two-host validation requires exactly one generator")
 
     placement = HostMeshes(
-        trainer=hosts.slice(hosts=0),
-        generators=[hosts.slice(hosts=1)],
+        trainer=hosts.slice(hosts=slice(0, 1)),
+        generators=[hosts.slice(hosts=slice(1, 2))],
         gpus_per_node=12,
     )
     print(
