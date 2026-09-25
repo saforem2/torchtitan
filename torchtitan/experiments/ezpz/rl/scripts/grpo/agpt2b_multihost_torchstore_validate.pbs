@@ -35,7 +35,20 @@ export VLLM_ENABLE_V1_MULTIPROCESSING=1
 export WANDB_MODE=disabled HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
+export TORCHSTORE_TRANSPORT="${TORCHSTORE_TRANSPORT:-gloo}"
+case "${TORCHSTORE_TRANSPORT}" in
+  auto)
+    unset TORCHTITAN_TORCHSTORE_TRANSPORT TORCHSTORE_SHARED_MEMORY_ENABLED
+    ;;
+  auto_no_shm)
+    unset TORCHTITAN_TORCHSTORE_TRANSPORT
+    export TORCHSTORE_SHARED_MEMORY_ENABLED=0
+    ;;
+  gloo|xccl)
+    export TORCHTITAN_TORCHSTORE_TRANSPORT="${TORCHSTORE_TRANSPORT}"
+    ;;
+  *) echo "FATAL: unsupported TORCHSTORE_TRANSPORT=${TORCHSTORE_TRANSPORT}"; exit 15 ;;
+esac
 unset TORCHSTORE_GLOO_ENABLED TORCHSTORE_XCCL_ENABLED
 unset CCL_OP_SYNC CCL_OFI_PROVIDER
 export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi FI_PROVIDER=tcp
@@ -61,11 +74,17 @@ c = rl_grpo_lora_agpt_2b_gsm8k_b2smoke()
 assert c.async_loop.num_samples_per_prompt == 4
 assert c.generator.model_dtype == "float32"
 assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
-assert os.environ["TORCHTITAN_TORCHSTORE_TRANSPORT"] == "gloo"
-print("MULTIHOST_RL_PREFLIGHT_OK")
+requested = os.environ.get("TORCHTITAN_TORCHSTORE_TRANSPORT", "auto")
+assert requested in {"auto", "gloo", "xccl"}
+if os.environ.get("TORCHSTORE_TRANSPORT") == "auto_no_shm":
+    assert os.environ["TORCHSTORE_SHARED_MEMORY_ENABLED"] == "0"
+print(
+    f"MULTIHOST_RL_PREFLIGHT_OK transport={requested} "
+    f"shared_memory={os.environ.get('TORCHSTORE_SHARED_MEMORY_ENABLED', 'default')}"
+)
 PY
 
-echo "MULTIHOST_RL_START commit=$actual_commit trainer_host=0 generator_host=1 out=$OUT $(date -Is)"
+echo "MULTIHOST_RL_START commit=$actual_commit transport=$TORCHSTORE_TRANSPORT trainer_host=0 generator_host=1 out=$OUT $(date -Is)"
 set +e
 "$V/bin/ezpz" launch -n 2 -ppn 1 --cpu-bind none --timeout 1800 -- \
   "$V/bin/python" -u \
