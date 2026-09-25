@@ -63,15 +63,19 @@ The failed jobs were necessary to isolate the production requirements:
 - `12478708`: attachment passed, but integer host slices removed the `hosts`
   dimension and caused `KeyError: 'hosts'` in role provisioning.
 - `12478709`: role placement and vLLM initialization passed, but automatic
-  TorchStore selection chose host-local shared memory; the remote generator
-  rejected it with `Shared memory storage not found`.
+  TorchStore selection misclassified the remote storage volume as local and
+  entered the SharedMemory path; the generator rejected it with
+  `Shared memory storage not found`. This is a current locality-resolution bug,
+  not evidence that TorchStore's intended automatic cross-host order prefers
+  SharedMemory.
 - `12478710`: forced Gloo completed cross-host vLLM pre-validation, but the
   non-controller rank's default five-minute `FileStore.get()` timeout killed the
   otherwise healthy MPI world before training completed.
 
 The final implementation uses Monarch's scheduler-SPMD `host_mesh_from_store`,
 dimension-preserving host slices, a 120-second attach timeout, a 30-minute
-coordination-store timeout, and explicit Gloo transport for cross-host weights.
+coordination-store timeout, and explicit Gloo as the validated workaround for
+the current automatic locality-resolution bug.
 
 ## Scope of the claim
 
