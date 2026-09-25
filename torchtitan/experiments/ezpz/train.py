@@ -342,9 +342,13 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
 
         if key in {
             "checkpoint.enable",
+            "checkpoint-enable",
             "checkpoint.no-enable",
             "no-checkpoint.enable",
             "no-checkpoint-enable",
+            "checkpoint.create-seed-checkpoint",
+            "checkpoint.no-create-seed-checkpoint",
+            "no-checkpoint.create-seed-checkpoint",
         }:
             # ConfigManager owns optional-component selection. Preserve these
             # legacy flags until its migration pass; rewriting them to
