@@ -25,6 +25,34 @@ from torchtitan.experiments.ezpz.agpt import agpt_configs
 from torchtitan.experiments.ezpz.moe import moe_configs
 
 
+def test_stacked_ffn_preserves_legacy_rng_assignment():
+    import torch
+
+    from torchtitan.experiments.ezpz.moe import _dtensor_safe_fused_ffn_config
+
+    gate_init = {"weight": lambda t: torch.nn.init.normal_(t, std=0.1)}
+    up_init = {"weight": lambda t: torch.nn.init.normal_(t, std=0.2)}
+    cfg = _dtensor_safe_fused_ffn_config(
+        dim=7,
+        hidden_dim=5,
+        w1_param_init=gate_init,
+        w2w3_param_init=up_init,
+    )
+
+    torch.manual_seed(42)
+    legacy = torch.empty(5, 2, 7)
+    gate_init["weight"](legacy[:, 0])
+    up_init["weight"](legacy[:, 1])
+    expected = legacy.transpose(0, 1).contiguous()
+
+    torch.manual_seed(42)
+    actual = torch.empty(2, 5, 7)
+    assert cfg.w13.param_init is not None
+    cfg.w13.param_init["weight"](actual)
+
+    assert torch.equal(actual, expected)
+
+
 def _materialize(value):
     """Return the Config for a registry entry, factory or pre-built alike."""
     return value() if callable(value) else value

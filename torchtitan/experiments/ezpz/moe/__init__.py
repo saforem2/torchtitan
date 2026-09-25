@@ -51,14 +51,30 @@ from .routed_experts import EzpzRoutedExperts
 
 
 def _dtensor_safe_fused_ffn_config(**kwargs):
-    """Build the native stacked ``[2, F, D]`` gate/up projection config.
+    """Build stacked ``[2, F, D]`` weights with pre-sync logical RNG order.
 
-    Upstream now gives the projection axis its own dimension, so FSDP shards
-    the expert dimension without splitting interleaved gate/up rows.  The old
-    offset-aware striped initializer would initialize the new layout
-    incorrectly; the core initializer is now DTensor safe.
+    Upstream changed fused gate/up storage from interleaved ``[2F, D]`` to
+    stacked ``[2, F, D]``. Initializing ``t[0]`` then ``t[1]`` changes which
+    random draws land in each logical projection, breaking deterministic
+    trajectory parity. Draw into the historical ``[F, 2, D]`` view, then
+    transpose into the new physical layout. This preserves old initialization
+    without reverting upstream's stack-friendly representation.
     """
-    return make_ffn_config(**kwargs)
+    cfg = make_ffn_config(**kwargs)
+    gate_init = kwargs["w1_param_init"].get("weight")
+    up_init = kwargs["w2w3_param_init"].get("weight")
+
+    def _init_legacy_order(t):
+        legacy = t.new_empty(t.shape[1], 2, *t.shape[2:])
+        if gate_init is not None:
+            gate_init(legacy[:, 0])
+        if up_init is not None:
+            up_init(legacy[:, 1])
+        t.copy_(legacy.transpose(0, 1))
+
+    assert cfg.w13.param_init is not None
+    cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_legacy_order}
+    return cfg
 
 
 def _model_max_context_length(layers: list[TransformerBlock.Config]) -> int:
