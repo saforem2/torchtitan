@@ -62,7 +62,6 @@ def _dtensor_safe_fused_ffn_config(**kwargs):
     without reverting upstream's stack-friendly representation.
     """
     cfg = make_ffn_config(**kwargs)
-    cfg.w13.legacy_interleaved_compute = True
     gate_init = kwargs["w1_param_init"].get("weight")
     up_init = kwargs["w2w3_param_init"].get("weight")
 

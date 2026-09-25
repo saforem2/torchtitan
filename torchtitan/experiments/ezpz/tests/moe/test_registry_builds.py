@@ -53,49 +53,6 @@ def test_stacked_ffn_preserves_legacy_rng_assignment():
     assert torch.equal(actual, expected)
 
 
-def test_stacked_ffn_preserves_legacy_forward_and_backward_order():
-    import torch
-    import torch.nn.functional as F
-
-    from torchtitan.experiments.ezpz.moe import _dtensor_safe_fused_ffn_config
-
-    cfg = _dtensor_safe_fused_ffn_config(
-        dim=7,
-        hidden_dim=5,
-        w1_param_init={"weight": torch.nn.init.normal_},
-        w2w3_param_init={"weight": torch.nn.init.normal_},
-    )
-    linear = cfg.w13.build().to(dtype=torch.bfloat16)
-    assert linear.legacy_interleaved_compute
-
-    torch.manual_seed(123)
-    stacked = torch.randn(2, 5, 7, dtype=torch.bfloat16)
-    x = torch.randn(11, 7, dtype=torch.bfloat16, requires_grad=True)
-    upstream_grad = torch.randn(11, 2, 5, dtype=torch.bfloat16)
-    with torch.no_grad():
-        linear.weight.copy_(stacked)
-
-    actual = linear(x)
-    actual.backward(upstream_grad)
-    actual_x_grad = x.grad.detach().clone()
-    actual_weight_grad = linear.weight.grad.detach().clone()
-
-    legacy_weight = (
-        stacked.transpose(0, 1).contiguous().flatten(0, 1).detach().requires_grad_()
-    )
-    legacy_x = x.detach().clone().requires_grad_()
-    legacy_flat = F.linear(legacy_x, legacy_weight)
-    expected = legacy_flat.unflatten(-1, (5, 2)).transpose(-2, -1)
-    expected.backward(upstream_grad)
-
-    assert torch.equal(actual, expected)
-    assert torch.equal(actual_x_grad, legacy_x.grad)
-    assert torch.equal(
-        actual_weight_grad,
-        legacy_weight.grad.unflatten(0, (5, 2)).transpose(0, 1),
-    )
-
-
 def _materialize(value):
     """Return the Config for a registry entry, factory or pre-built alike."""
     return value() if callable(value) else value
