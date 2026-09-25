@@ -54,25 +54,12 @@ REPORT="${STAR_DIR%/}/report.json"
 [[ -s "${REPORT}" ]] || { echo "FATAL: corpus report missing: ${REPORT}"; exit 16; }
 [[ ! -e "${CKPT_DIR}" ]] || { echo "FATAL: output exists: ${CKPT_DIR}"; exit 17; }
 
-python3 - "${REPORT}" "${ACCEPTED}" "${STAGE3_MIN_ACCEPTED}" <<'PY' || exit 18
-import json
-import sys
-
-report_path, accepted_path, minimum = sys.argv[1], sys.argv[2], int(sys.argv[3])
-report = json.loads(open(report_path).read())
-rows = sum(1 for line in open(accepted_path) if line.strip())
-if report["test_collisions"]:
-    raise SystemExit(f"FATAL: {report['test_collisions']} GSM8K-test collisions")
-if report["accepted_problems"] != rows:
-    raise SystemExit(
-        f"FATAL: report claims {report['accepted_problems']} accepted rows; file has {rows}"
-    )
-if rows < minimum:
-    raise SystemExit(f"FATAL: {rows} accepted rows below required {minimum}")
-print(
-    "STAGE3_SFT_CORPUS_OK rows=%d acceptance_rate=%.4f" % (rows, report["acceptance_rate"])
-)
-PY
+# Single source of truth for the corpus gate: the tested verifier. Detecting a
+# GSM8K-test collision is healthy (those problems are dropped); only a
+# contaminated problem that survived INTO the corpus is disqualifying.
+python3 -m torchtitan.experiments.ezpz.rl.scripts.stage3_star_verify \
+    --output-dir "${STAR_DIR%/}" \
+    --minimum-accepted "${STAGE3_MIN_ACCEPTED}" || exit 18
 
 export EZPZ_STAGE3_STAR_PATH="${ACCEPTED}"
 LOG_DIR="logs/stage3-sft-${PBS_JOBID%%.*}"
