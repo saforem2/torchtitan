@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import torch.distributed as dist
@@ -90,6 +91,11 @@ def main() -> None:
     configure(mesh_attach_config_timeout="120s")
     rank = _rank()
     store = dist.FileStore(str(args.multihost_store), args.multihost_world_size)
+    # Non-controller ranks wait here for the complete RL lifecycle, including
+    # vLLM startup, validation, weight transfers, optimizer steps, and shutdown.
+    # FileStore defaults to five minutes, which can expire during a healthy run
+    # and tear down rank 0's actor graph through the outer MPI launcher.
+    store.set_timeout(timedelta(minutes=30))
     hosts = host_mesh_from_store(
         store,
         monarch_port=args.multihost_port,
