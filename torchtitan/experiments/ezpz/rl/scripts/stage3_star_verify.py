@@ -24,10 +24,13 @@ def verify(output_dir: Path, minimum_accepted: int) -> dict:
             raise FileNotFoundError(f"missing required artifact: {path}")
 
     report = json.loads(report_path.read_text())
-    raw = [json.loads(line) for line in raw_path.read_text().splitlines() if line]
-    accepted = [
-        json.loads(line) for line in accepted_path.read_text().splitlines() if line
-    ]
+    # JSONL rows are newline-DELIMITED but their string values legitimately
+    # contain newlines, so iterate real file records instead of splitting the
+    # whole text on every newline.
+    with raw_path.open() as stream:
+        raw = [json.loads(line) for line in stream if line.strip()]
+    with accepted_path.open() as stream:
+        accepted = [json.loads(line) for line in stream if line.strip()]
 
     contaminated = {
         row["source_index"] for row in raw if str(row["reason"]).startswith("contam")

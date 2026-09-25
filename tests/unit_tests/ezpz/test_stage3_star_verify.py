@@ -12,7 +12,13 @@ from torchtitan.experiments.ezpz.rl.scripts.stage3_star_verify import verify
 
 def _corpus(tmp_path, *, leak: bool):
     raw_rows = [
-        {"source_index": 1, "reason": "accepted", "accepted": True},
+        {
+            "source_index": 1,
+            "reason": "accepted",
+            "accepted": True,
+            # Real generations embed newlines; the verifier must not split on them.
+            "generation": "<think>step one.\nstep two.</think>\n<answer>4</answer>",
+        },
         {"source_index": 2, "reason": "contaminated_ngram", "accepted": leak},
         {"source_index": 3, "reason": "incorrect", "accepted": False},
     ]
