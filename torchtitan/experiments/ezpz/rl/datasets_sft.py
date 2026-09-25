@@ -1252,6 +1252,58 @@ def _is_mix_spec(name: str) -> bool:
     return ":" in name
 
 
+# ---------------------------------------------------------------------------
+# stage3-star -- self-distilled GSM8K traces accepted by the Stage-3 sampler
+# ---------------------------------------------------------------------------
+
+STAGE3_STAR_PATH_ENV = "EZPZ_STAGE3_STAR_PATH"
+
+
+def _build_stage3_star() -> Dataset:
+    """Load accepted Stage-3 STaR rows written by ``stage3_star_generate.py``.
+
+    The sampler already enforces exact-answer correctness, a valid
+    ``<think>``/``<answer>`` envelope, natural termination, a reasoning-depth
+    floor, deduplication, one trace per problem, and GSM8K-test
+    decontamination, and it emits chat-shaped ``prompt``/``completion`` rows.
+    This loader only resolves the corpus path and fails closed on a missing or
+    malformed file so a silent empty corpus can never train.
+    """
+    import datasets as hf_datasets
+
+    path = os.environ.get(STAGE3_STAR_PATH_ENV, "")
+    if not path:
+        raise ValueError(
+            f"set {STAGE3_STAR_PATH_ENV} to the accepted_sft.jsonl produced by "
+            "torchtitan/experiments/ezpz/rl/scripts/stage3_star_generate.py"
+        )
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"{STAGE3_STAR_PATH_ENV} does not exist: {path}")
+
+    raw = hf_datasets.load_dataset("json", data_files=path, split="train")
+    missing = {"prompt", "completion"} - set(raw.column_names)
+    if missing:
+        raise ValueError(f"{path} is missing required column(s): {sorted(missing)}")
+    if len(raw) == 0:
+        raise ValueError(f"{path} contains no accepted STaR rows")
+    return raw.select_columns(["prompt", "completion"])
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="stage3-star",
+        build=_build_stage3_star,
+        description=(
+            "Teacher-free GSM8K STaR traces sampled from the Stage-2 checkpoint "
+            "and accepted only when exact-answer correct, envelope-valid, "
+            "naturally terminated, multi-step, deduplicated, and "
+            "GSM8K-test-decontaminated. Path comes from "
+            f"${STAGE3_STAR_PATH_ENV}."
+        ),
+    )
+)
+
+
 def _parse_mix_spec(spec: str) -> tuple[list[str], list[float]]:
     """Parse 'a:0.5,b:0.3,c:0.2' into (['a','b','c'], [0.5,0.3,0.2])."""
     pairs = [p.strip() for p in spec.split(",") if p.strip()]
