@@ -257,6 +257,16 @@ class LocalTokenDispatcher(Configurable):
         self.top_k = config.top_k
         self.score_before_experts = config.score_before_experts
 
+    def init_buffer(self) -> None:
+        """Initialize backend communication buffers, if any.
+
+        The standard all-to-all dispatcher has no persistent communication
+        buffer, but upstream ``RoutedExperts._init_self_buffers`` invokes this
+        lifecycle hook unconditionally. Keep the no-op on the shared custom
+        dispatcher base so every ezpz dispatcher satisfies the current model
+        ownership contract; buffer-owning subclasses may override it.
+        """
+
     def wire_meshes(
         self,
         *,

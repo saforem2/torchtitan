@@ -74,8 +74,23 @@ def test_sonic_flavors_select_the_sonic_backend():
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model -- the subclass is not wired"
     assert all(r._wants_routing() for r in routed), (
-        "EzpzRoutedExperts must forward the routing decision for this backend"
+        "sonic model routed experts did not select the routing-aware path"
     )
+
+
+def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
+    """Upstream RoutedExperts initializes every dispatcher unconditionally."""
+    from torchtitan.experiments.ezpz.moe.token_dispatcher import (
+        AllToAllTokenDispatcher,
+        LocalTokenDispatcher,
+    )
+
+    for config in (
+        LocalTokenDispatcher.Config(num_experts=4, top_k=2),
+        AllToAllTokenDispatcher.Config(num_experts=4, top_k=2),
+    ):
+        dispatcher = config.build()
+        assert dispatcher.init_buffer() is None
 
 
 def test_default_backend_does_not_take_the_routing_path():
