@@ -38,6 +38,23 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
         }
 
 
+def test_ezpz_moe_sharding_distributes_experts_without_ep():
+    config = moe_configs["debugmodel"]()
+
+    set_moe_sharding_config(config, enable_sp=False, enable_ep=False)
+
+    moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
+    assert moe_layers
+    for moe in moe_layers:
+        sharding = moe.routed_experts.inner_experts.sharding_config
+        assert sharding is not None
+        assert set(sharding.state_shardings) == {
+            "w1_EFD",
+            "w2_EDF",
+            "w3_EFD",
+        }
+
+
 def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():
     config = moe_configs["debugmodel"]()
     adapter = moeStateDictAdapter(config, hf_assets_path=None)
