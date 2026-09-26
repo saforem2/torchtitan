@@ -74,6 +74,8 @@ Training job `12478743` started from Stage-2 checkpoint 93 and completed 100/100
 steps over 24 XPU ranks at LR 5e-6. It exited 0 with finite loss and gradients
 and produced checkpoints 25/50/75/100.
 
+![MetaMath training loss, token accuracy, and gradient norm](figures/stage4_training_curves.svg)
+
 ## Checkpoint sweep
 
 All checkpoints were evaluated with deterministic fp32 vLLM generation,
@@ -87,10 +89,14 @@ AGPT's exact prompt serialization, and stop IDs `[1, 107]`.
 | 75 | 58 (29.0%) | 200 | 0 | best training checkpoint |
 | 100 | 59 (29.5%) | 196 | 4 | reject: format gate |
 
+![GSM8K-200 accuracy, strict format rate, and truncations by checkpoint](figures/stage4_checkpoint_sweep.svg)
+
 On the full test set, the unmerged step-75 model scored 375/1,319 (28.43%),
 with 1,302 strict-format outputs and 16 truncations. Relative to baseline, the
 fixed 200-example subset contained 30 wrong-to-correct and 15 correct-to-wrong
 transitions, for a net gain of 15.
+
+![Full GSM8K comparison of the Stage-2 baseline, math checkpoint, and accepted interpolation](figures/stage4_full_gsm8k.svg)
 
 Representative improvement:
 
@@ -121,6 +127,8 @@ Formula: `broad + alpha * (math - broad)`.
 | **0.65** | **385/1,319 (29.19%)** | **1,295** | 23 | **8/8** |
 | 0.70 | 368/1,319 (27.90%) | 1,291 | 26 | 8/8 |
 | 0.75 | 375/1,319 (28.43%) | 1,297 | 21 | 7/8 |
+
+![Instruction/math interpolation candidates and nondominated frontier](figures/stage4_interpolation_pareto.svg)
 
 Alpha 0.65 is the selected Pareto point: it sacrifices six correct GSM8K
 answers relative to the narrowly best alpha 0.60, but restores bounded output on
@@ -154,3 +162,14 @@ its own accepted lineage, not parity with larger instruction models.
 - `scripts/eval/eval_cot_gsm8k.py`: canonical `openai/gsm8k` dataset ID.
 - `scripts/eval/agpt_general_sanity.py`.
 - `scripts/eval/interpolate_hf_checkpoints.py`.
+
+Regenerate the figures from the retained training log with:
+
+```bash
+python3 torchtitan/experiments/ezpz/docs/experiments/plot_agpt2b_stage4.py \
+  --training-log /path/to/agpt2b-mm-distill.o12478743
+```
+
+Without `--training-log`, the script uses the checked-in compact trajectory for
+offline documentation builds; checkpoint and evaluation values are always the
+terminal hardware results recorded above.
