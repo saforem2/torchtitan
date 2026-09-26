@@ -6895,11 +6895,15 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Built a separately named immutable Python 3.12 archive from the validated
   source venv with `renderers==0.1.11`: checksum
   `d577dab5dbe0866fa90b4b7d8a21c14ab8afa8ca0ede79ea416e3c677b61b8fe`.
-  Archive integrity and a fresh extracted-runtime import passed. Compute-node
-  preflight `8872176` is queued; no replay retry will be submitted until it
-  passes.
-- Successor umbrella `8870515` remains queued for insufficient free nodes; no
-  seat artifacts exist.
+  Archive integrity and a fresh extracted-runtime import passed.
+- Compute-node preflight `8872176` finished successfully (`Exit_status=0`) and
+  emitted `T3_RUNTIME_IMPORT_PASS renderers=0.1.11` plus
+  `T3_RUNTIME_PREFLIGHT_VALIDATED` for that exact archive checksum.
+- Submitted exact-topology replay retry `8872915` from immutable code commit
+  `550d2c670a02866661c133dd09b499ae6844bc7f` with 512 active nodes and 10
+  spares. It is queued. Before submission, source `step-39900` still contained
+  6,145 files with `.metadata` mtime `2026-09-22 06:30:02 UTC`.
+- Successor umbrella `8870515` remains queued; no seat artifacts exist.
 
 ## 2026-09-24 — LR-finder resume validation and chart refresh
 
