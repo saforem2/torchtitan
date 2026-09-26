@@ -1,0 +1,93 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-eval
+#PBS -l walltime=04:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${WT:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8}"
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+ASSETS=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+ROOT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900
+CKPT_ROOT="$ROOT/checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
+EVAL_ROOT="$ROOT/evals"
+: "${STEP:?submit with -v STEP=300, STEP=600, or STEP=900}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+[[ "$STEP" == 300 || "$STEP" == 600 || "$STEP" == 900 ]] || exit 10
+
+cd "$WT" || exit 11
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 12
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 13
+ezpz_setup "$V" || exit 14
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 15
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export TOKENIZERS_PARALLELISM=false
+export ONEAPI_DEVICE_SELECTOR=level_zero:0
+
+SRC="$CKPT_ROOT/step-$STEP"
+FINAL="$EVAL_ROOT/step-$STEP/hf"
+RESULT="$EVAL_ROOT/step-$STEP/gsm8k-200"
+BUILD="$EVAL_ROOT/step-$STEP/hf.building-${PBS_JOBID%%.*}"
+[[ -s "$SRC/.metadata" ]] || exit 16
+mkdir -p "$EVAL_ROOT/step-$STEP" "$RESULT"
+
+echo "MDS154391_EVAL_START step=$STEP commit=$(git rev-parse HEAD) source=$SRC $(date -Is)"
+if [[ ! -s "$FINAL/model.safetensors.index.json" ]]; then
+  [[ ! -e "$BUILD" ]] || exit 17
+  mkdir -p "$BUILD"
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.eval.convert_to_hf \
+    "$SRC" "$BUILD" \
+    --hf_assets_path "$ASSETS" \
+    --model_name experiments.ezpz.agpt \
+    --model_flavor 2b-mds \
+    --export_dtype bfloat16 || { rc=$?; echo "MDS154391_EVAL_CONVERT_FAILED rc=$rc"; exit "$rc"; }
+  cp "$ASSETS/config.json" "$BUILD/config.json"
+  for f in tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json; do
+    [[ -s "$ASSETS/$f" ]] || exit 18
+    cp "$ASSETS/$f" "$BUILD/$f"
+  done
+  "$V/bin/python" - "$BUILD" "$SRC" <<'PY' || exit 19
+import json, pathlib, sys
+p, src = pathlib.Path(sys.argv[1]), sys.argv[2]
+cfg = json.loads((p / "config.json").read_text())
+want = {"hidden_size": 2048, "num_hidden_layers": 12,
+        "num_attention_heads": 16, "num_key_value_heads": 4,
+        "intermediate_size": 11008, "vocab_size": 256000,
+        "rope_theta": 50000}
+assert all(cfg.get(k) == v for k, v in want.items()), (cfg, want)
+prov = json.loads((p / "ezpz_export.json").read_text())
+assert prov["model_flavor"] == "2b-mds" and prov["rope"] == "complex", prov
+assert prov["source_dcp"] == src, prov
+assert (p / "model.safetensors.index.json").stat().st_size > 0
+print("MDS154391_EVAL_EXPORT_VALID", want, prov)
+PY
+  [[ ! -e "$FINAL" ]] || exit 20
+  mv "$BUILD" "$FINAL"
+fi
+
+[[ -s "$FINAL/model.safetensors.index.json" ]] || exit 21
+rm -f "$RESULT/generations.jsonl" "$RESULT/eval.log"
+set +e
+"$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+  --model "$FINAL" --limit 200 --dtype float32 --max-tokens 768 \
+  --out "$RESULT/generations.jsonl" 2>&1 | tee "$RESULT/eval.log"
+rc=${PIPESTATUS[0]}
+set -e
+[[ $rc -eq 0 ]] || { echo "MDS154391_EVAL_GENERATE_FAILED rc=$rc"; exit "$rc"; }
+"$V/bin/python" - "$RESULT/generations.jsonl" <<'PY' || exit 22
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+rows = [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+assert len(rows) == 200, len(rows)
+assert all("generation" in r and "question" in r for r in rows)
+print("MDS154391_EVAL_ROWS", len(rows))
+for r in rows[:8]:
+    print("RAW", json.dumps({k: r[k] for k in
+          ("idx", "question", "generation", "pred", "gold", "correct")}, ensure_ascii=True))
+PY
+echo "MDS154391_EVAL_DONE step=$STEP rc=0 $(date -Is)"

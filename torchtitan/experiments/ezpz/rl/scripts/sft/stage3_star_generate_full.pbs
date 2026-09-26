@@ -1,0 +1,54 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N stage3-star-full
+#PBS -l walltime=02:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+MODEL="${MODEL:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage3/star-full-${PBS_JOBID%%.*}}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+cd "$WT" || exit 11
+actual_commit=$(git rev-parse HEAD) || exit 15
+[[ "$actual_commit" == "$EXPECTED_COMMIT" ]] || exit 15
+git diff --quiet && git diff --cached --quiet || exit 15
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
+export ZE_AFFINITY_MASK=0
+unset CCL_OP_SYNC CCL_PROCESS_LAUNCHER CCL_ATL_TRANSPORT CCL_OFI_PROVIDER
+unset FI_PROVIDER FI_LOG_LEVEL FI_LOG_PROV FI_LOG_LOCATION
+[[ -s "$MODEL/model.safetensors" ]] || { echo "FATAL: model missing"; exit 16; }
+[[ -s "$MODEL/tokenizer.json" ]] || { echo "FATAL: tokenizer missing"; exit 16; }
+model_sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
+[[ ! -e "$OUT" ]] || { echo "FATAL: output exists: $OUT"; exit 17; }
+
+"$V/bin/python" -m py_compile \
+  torchtitan/experiments/ezpz/rl/scripts/stage3_star_generate.py || exit 18
+mkdir -p "$OUT"
+echo "STAGE3_STAR_FULL_START commit=$actual_commit model_sha=$model_sha out=$OUT $(date -Is)"
+"$V/bin/python" -u \
+  torchtitan/experiments/ezpz/rl/scripts/stage3_star_generate.py \
+  --model "$MODEL" \
+  --output-dir "$OUT" \
+  --limit 0 \
+  --samples-per-prompt 8 \
+  --seed 154391 \
+  --temperature 0.8 \
+  --top-p 0.95 \
+  --max-tokens 700 \
+  --minimum-accepted 2000
+rc=$?
+echo "STAGE3_STAR_FULL_DONE rc=$rc $(date -Is)"
+exit "$rc"

@@ -12,10 +12,7 @@ import pytest
 import torch
 
 from torchtitan.config import ParallelismConfig, TrainingConfig
-from torchtitan.experiments.graph_trainer.configs import (
-    GraphTrainerCompileConfig,
-    validate_autoparallel_config,
-)
+from torchtitan.experiments.graph_trainer.configs import GraphTrainerCompileConfig
 
 
 class _FakeMesh:
@@ -112,22 +109,6 @@ def test_autoparallel_integration_matrix():
     assert all(test.ngpu == 4 for tests in suites.values() for test in tests)
 
 
-def test_autoparallel_config_validation():
-    with pytest.raises(ValueError, match="only supports --compile.mode aot_fx_trace"):
-        validate_autoparallel_config(
-            GraphTrainerCompileConfig(
-                mode="jit",
-                enable_autoparallel=True,
-            )
-        )
-
-    compile_config = GraphTrainerCompileConfig(
-        inductor_compilation="regional",
-        enable_autoparallel=True,
-    )
-    validate_autoparallel_config(compile_config)
-
-
 def test_autoparallel_graph_pass_selection_uses_regular_memory_policy():
     from torchtitan.experiments.graph_trainer import passes
 
@@ -139,9 +120,9 @@ def test_autoparallel_graph_pass_selection_uses_regular_memory_policy():
         compile=GraphTrainerCompileConfig(
             enable_autoparallel=True,
             enable_async_tensor_parallel=False,
-            disable_passes=["cudagraph_pass"],
+            disable_passes=["cuda_graph_pass"],
         ),
-        model_spec=SimpleNamespace(model=SimpleNamespace(layers=[object()])),
+        model=SimpleNamespace(layers=[object()]),
         parallelism=SimpleNamespace(
             fsdp_reshard_after_forward="always",
             pipeline_parallel_degree=1,

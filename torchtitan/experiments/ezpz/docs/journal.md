@@ -2,6 +2,130 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-24 (sunspot) -- MDS154391 two-stage reproduction complete; GRPO stack smoke queued
+
+The journal was not updated during this campaign. This entry reconstructs the
+results from PBS records, retained logs, trainer state, checkpoint metadata, and
+raw semantic generations rather than from remembered status messages.
+
+### Stage 1: broad SFT and semantic checkpoint selection
+
+- Job `12478590` completed the native Grain broad-SFT run at step 900 with
+  `Exit_status=0`. Final reported loss was `1.02522`, gradient norm `1.2596`,
+  HBM `19.40 GiB/rank`, and throughput `2,071 tokens/s/rank`.
+- Immutable DCP checkpoints at steps 300, 600, and 900 were retained under
+  `agpt2b-mds154391-broad-grain-sft900/checkpoints/`.
+- GSM8K-200 raw-generation evaluation selected step 600 by semantics, not loss:
+
+  | checkpoint | correct | accuracy | strict `<answer>` envelope |
+  |---|---:|---:|---:|
+  | 300 | 47/200 | 23.5% | 0% |
+  | 600 | 52/200 | 26.0% | 0% |
+  | 900 | 48/200 | 24.0% | 0% |
+
+  The generations were coherent multi-step arithmetic. Step 600 was therefore
+  the Stage-2 seed despite step 900 being later.
+- Eval jobs `12478604`, `12478605`, and `12478606` each wrote all 200 rows, then
+  wedged during vLLM teardown because the `EngineCore` child remained alive.
+  Their eventual `143` statuses were operator cleanup after artifact validation,
+  not semantic failures. The evaluator now calls
+  `llm.llm_engine.engine_core.shutdown()` in `finally`.
+
+### Stage 2: focused GSM8K-R1CoT SFT
+
+- The first run, `12478612`, was technically healthy but scientifically wrong:
+  packing plus gradient accumulation 10 produced only 12 optimizer steps. It was
+  cancelled at authoritative step 4/12 (`Exit_status=143`); its partial output is
+  retained but non-authoritative.
+- Corrected job `12478614`, pinned to commit
+  `8acf6c7b152ae5ccaeb26688b7f451ad7b6a1728`, used gradient accumulation 1 and
+  the Stage-1 step-600 HF export. It completed exactly 93/93 optimizer steps,
+  three epochs, and checkpoints 31, 62, and 93 with `Exit_status=0`. Final train
+  loss was `0.4852`; the final HF model is approximately 7.94 GB.
+- Semantic eval job `12478618` completed with `Exit_status=0` and retained 200
+  raw generations. Results: 197/200 format-valid (`98.5%`), 43/200 strict-answer
+  correct (`21.5%`), and 3/200 truncated or unclosed. Raw correct, incorrect,
+  malformed, and truncated samples were inspected. This reproduces historical
+  B2 behavior (98.5% format, approximately 20.5% accuracy): focused Stage 2
+  taught the answer envelope but did not improve the broad checkpoint's 26.0%
+  exact-answer accuracy.
+
+### GRPO functionality smoke
+
+- Commit `89cba3c023c93e03235f73a108cf203007202bad` adds a fail-closed one-node,
+  20-step Monarch/TorchStore/vLLM GRPO smoke starting from the completed Stage-2
+  model. It uses the validated `rl_grpo_lora_agpt_2b_gsm8k_b2smoke` config:
+  8 prompts/step, 4 samples/prompt, fp32 generation, maximum 700 generated tokens,
+  and checkpoints every 10 steps.
+- Acceptance requires initial and post-update policy-weight synchronization,
+  nonzero policy versions, real reward-bearing updates, checkpoints 10 and 20,
+  bounded raw rollouts, and clean actor shutdown. This is a stack-functionality
+  test, not evidence that GRPO improves quality.
+- Initial smoke `12478619` proved model load, vLLM rollout, initial TorchStore
+  sync (7.94 GB at 1.81 GB/s), repeated post-step sync (about 100 GB/s), and
+  policy-version advancement 0 through 4. However, all 100 retained rollouts
+  reached the 700-token limit: the default renderer supplied only eos ID 1 and
+  omitted AGPT `<end_of_turn>` ID 107. Every sample was therefore classified
+  `truncated_length`, producing zero reward, loss, and gradient. The run was
+  cancelled after step 4 (`Exit_status=143`) rather than wasting 20 no-op steps.
+- Commit `5e3da9fc6ba87f550ea875b67ff9b2ba23ae7ade` wraps the default renderer
+  with explicit AGPT stop IDs `(1, 107)`. The built renderer returned `[1, 107]`
+  in the protected runtime and all 9 focused renderer tests passed.
+- Corrected retry `12478621` completed 20/20 steps with `Exit_status=0`,
+  checkpoints 10 and 20, policy versions through 20, nonzero reward-bearing
+  gradients, repeated post-update TorchStore synchronization, and clean actor
+  shutdown. Its final rollout corpus contained 360 samples: 359 completed,
+  359 format-valid, 114 exact-correct, 278 with nonzero advantages, and one
+  pathological repetitive truncation.
+- Raw-rollout inspection across low-, middle-, high-reward and late-policy
+  strata found fluent, on-topic arithmetic rather than broad gibberish. Correct
+  samples had concise valid derivations; failures were mostly coherent setup or
+  arithmetic errors. Wrong but well-formed answers receive the 0.25
+  format/extractability floor, so reward alone is not a semantic quality verdict.
+- Stage-2 checkpoint evals completed cleanly: checkpoint 31 scored 33/200
+  (`16.5%`) with 170/200 format-valid (`85.0%`); checkpoint 62 scored 39/200
+  (`19.5%`) with 198/200 format-valid (`99.0%`); checkpoint 93 remained best at
+  43/200 (`21.5%`) and 197/200 (`98.5%`).
+- Initial GRPO merge/eval `12478626` failed closed because the legacy exporter
+  expected split Q/K/V keys while current DCP stores fused `wqkv` and `w13`.
+  Commit `e3b127ec9a25dded79167d0f167a26566d514cfd` added explicit dual-schema
+  support. Real preflight folded adapters in all 12 layers and changed 48
+  attention tensors relative to the base.
+- Corrected merge/eval `12478627` completed with `Exit_status=0`: GRPO step 20
+  scored exactly 43/200 (`21.5%`) with 197/200 format-valid (`98.5%`), identical
+  aggregate metrics to the Stage-2 base. The merge was real; deterministic
+  generations changed on 7/200 examples, but none changed correctness. The
+  20-step run therefore validates the full GRPO stack, not a quality gain.
+
+### 30B synchronous-DCP cache fix
+
+- Old-cache jobs retained hook-generated contiguous tensors and consumed about
+  `57.23 GiB/rank`, then failed during step-2 FSDP all-gather with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`.
+- Commit `1d58869cde6a055d3d9ac5ec221eab756e81d34f` makes synchronous DCP state-dict
+  generation lazy while preserving stable cached storage for asynchronous DCP.
+- Canary `12478607` completed step 1 at `42.31 GiB/rank`, about 15 GiB/rank below
+  the old-cache runs, and wrote a complete 293 GB synchronous checkpoint in
+  74.7 seconds. This strongly validates the memory-retention fix.
+- Attempt 1 subsequently suffered multi-rank `SIGSEGV` during step-2 FSDP
+  unshard, not the prior OOM. Attempt 2 restored the 293 GB checkpoint in 863.9
+  seconds and entered the resumed update. The PBS job has now ended with
+  `Exit_status=1`; the terminal attempt-2 failure still requires classification.
+  Dependent full retry `12478608` was not released as a validated success.
+
+### Other diagnosis and operational changes
+
+- 5B job `12478591` was not an OOM. Attempt 1 completed its LR range but found no
+  blow-up point; generic failover incorrectly retried that scientific outcome.
+  Later attempts hit nullable Grain restore state
+  `examples_iterable.previous_state`. A wider fresh LR range is the correct next
+  experiment, not checkpoint resume.
+- Stage-2 progress now comes from `trainer_state.json`, not numbers accidentally
+  parsed from seed paths or partially-created checkpoint directories.
+- The active dashboard remains in Herdr pane `wC:p38`; the obsolete
+  `old-sunspot-monitor` pane was closed. The sole event-driven notifier is
+  `/Users/sam/.hermes/scripts/alcf-significant-events.py` on `mbph`.
+
 ## 2026-09-21 (aurora) -- umbrella 8828612 reached walltime; continuation queued
 
 - Production umbrella `8828612` ran on 2,098 nodes from 2026-09-19 22:48 UTC
@@ -6524,6 +6648,57 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Merged upstream `pytorch/torchtitan` main into ezpz branch
 - Reverted `.ezpz-interactive-launch.sh` tracking change
 - Added interactive launch script and loss CSVs
+
+---
+
+## 2026-09-25 — Post-merge multi-host RL and Sunspot 30B diagnosis
+
+- PR #25 fixed checkpoint-selector translation and current checkpointer ownership;
+  it merged into `ezpz` as `550d2c670a02866661c133dd09b499ae6844bc7f`.
+- Controlled 26.2B Sunspot runs showed the failure is fresh-start FSDP transient
+  memory pressure, not DCP restore corruption. Shard-16 failed in first all-gather;
+  shard-32 cleared forward unshard and failed in backward reduce-scatter with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`. Replica count, local batch size, and
+  `CCL_SYCL_KERNEL_SYNC=0` did not remove the defect. Large core files were left
+  untouched.
+- Job `12478702` first proved one Monarch actor graph could span two physical
+  Sunspot hosts.
+- Job `12478711` then passed the full production gate at exact commit
+  `738109e8d4481ebb723622db0d1a34b9c8907203`: trainer and vLLM generator on
+  separate hosts, TorchStore `TransportType.Gloo`, pre/post validation, three
+  finite GRPO updates, policy versions 0 through 3, 40/40 completed nonzero-
+  reward rollouts, DCP checkpoints at steps 1/2/3, clean shutdown, and PBS exit
+  zero. Automatic transport had selected host-local shared memory and is not
+  valid across hosts; explicit Gloo is required for this topology.
+- Full report:
+  [`experiments/2026-09-25-sunspot-multihost-rl-validation.md`](experiments/2026-09-25-sunspot-multihost-rl-validation.md).
+- PR #26 merged the multi-host support into `ezpz` as
+  `c7605bf1cafeabe82109eea56bcf85b41f3df4a7` after exact-head lint passed.
+- A teacher-free Stage-3 STaR campaign then sampled 59,784 GSM8K training
+  rollouts. The verified corpus retained 4,294 unique exact-correct traces
+  (57.46% of problems), excluded all four conservative test-set collisions,
+  and had zero leakage. Two-node SFT job `12478715` completed 100 finite steps
+  and exited zero, but fixed semantic evaluation job `12478718` scored only
+  37/200 correct versus the Stage-2 baseline's 43/200. Format was 198/200 versus
+  197/200 and length terminations improved 3→1, but paired flips favored the
+  baseline 21 to 15 (exact McNemar p=0.405). The candidate fails the promotion
+  gate; GRPO is not released and Stage-2 remains accepted.
+- Stage-3 report:
+  [`experiments/2026-09-25-mds154391-stage3-star.md`](experiments/2026-09-25-mds154391-stage3-star.md).
+- Aurora coordination: umbrella chain 3 is healthy through step 39,942 and
+  becomes non-finite at 39,943; step 42,400 and later checkpoints are poisoned.
+  The first 48-rank communicator probe (`8869722`) was a harness failure
+  (`LOCAL_RANK` missing on every rank, auto-retry stopped pre-training, exit
+  143), not an XCCL result. Corrected probe `8870327` is queued; exact-topology
+  chain-3 replay remains blocked until that communicator baseline passes.
+- Follow-up TorchStore transport controls closed the remaining RDMA question on
+  the Sunspot runtime. Job `12478720` left transport automatic but disabled
+  SharedMemory; with TorchComms unavailable and MonarchRDMA capability reported
+  available, it stalled before the first publication and timed out after 30
+  minutes (`Exit_status=143`). Job `12478722` then explicitly selected
+  `TransportType.MonarchRDMA`; the TorchStore storage-volume actor crashed with
+  `SIGSEGV` during the initial trainer policy push (`Exit_status=1`). Thus Gloo
+  remains the only cross-host transport validated end to end on this stack.
 
 ---
 

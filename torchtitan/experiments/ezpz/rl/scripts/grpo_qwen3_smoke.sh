@@ -7,7 +7,7 @@
 #PBS -q workq
 #PBS -j oe
 #
-# First end-to-end attempt at upstream `torchtitan.experiments.rl.train`
+# First end-to-end attempt at upstream `torchtitan.rl.train`
 # on Sunspot XPU, via the ezpz mirror entrypoint
 # `torchtitan.experiments.ezpz.rl.train_upstream` which applies XPU
 # compatibility patches before importing upstream.
@@ -81,8 +81,8 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # TCP-KVS rendezvous config and joins the same XCCL world.
 "${SUBMIT_DIR}/venvs/rl-vllm/bin/python" \
     -m torchtitan.experiments.ezpz.rl.train_upstream \
-    --module rl --config rl_grpo_qwen3_0_6b_varlen \
-    --hf_assets_path "${SUBMIT_DIR}/torchtitan/experiments/rl/example_checkpoint/Qwen3-0.6B" \
+    --module alphabet_sort --config rl_grpo_qwen3_0_6b_varlen \
+    --hf_assets_path "${SUBMIT_DIR}/torchtitan/rl/example_checkpoint/Qwen3-0.6B" \
     --trainer.debug.seed 42 \
     2>&1 | tee -a "${LOG_DIR}/run.log"
 # --trainer.debug.seed 42: skip seed-broadcast branch in set_determinism

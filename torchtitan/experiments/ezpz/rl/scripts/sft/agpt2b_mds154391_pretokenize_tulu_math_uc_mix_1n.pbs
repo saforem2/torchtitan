@@ -1,0 +1,80 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-pretokenize-tulu
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+FINAL=/tegu/datasets/datasets/agpt2b-mds154391-tulu-math-uc-mix-len1024
+BUILD_DIR=${FINAL}.building-${PBS_JOBID%%.*}
+EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+EXPECTED_ROWS=53276203
+
+cd "$WT" || exit 11
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export PYTHONIOENCODING="ascii:replace"
+# Hugging Face datasets/multiprocess creates AF_UNIX manager sockets below the
+# process temp directory. Long Lustre/worktree-derived paths exceed sun_path's
+# 108-byte limit (job 12478545). Keep all multiprocessing control sockets local
+# and short; the dataset itself remains on shared /tegu.
+export TMPDIR="/tmp/mx-${PBS_JOBID%%.*}"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
+mkdir -p "$TMPDIR" || exit 19
+trap 'rm -rf "$TMPDIR"' EXIT
+
+sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_MODEL_SHA" ]] || { echo "bad model sha $sha"; exit 15; }
+[[ ! -e "$FINAL" ]] || { echo "refusing to overwrite $FINAL"; exit 16; }
+[[ "$BUILD_DIR" == /tegu/* ]] || { echo "unsafe build path $BUILD_DIR"; exit 20; }
+[[ "$TMPDIR" == /tmp/* ]] || { echo "unsafe process temp $TMPDIR"; exit 21; }
+[[ ! -e "$BUILD_DIR" ]] || "$HOME/.local/bin/backup" "$BUILD_DIR"
+
+printf 'MDS154391_PRETOKENIZE_START %s commit=%s model_sha=%s build=%s tmpdir=%s\n' \
+  "$(date -Is)" "$(git rev-parse HEAD)" "$sha" "$BUILD_DIR" "$TMPDIR"
+"$V/bin/ezpz" launch --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --sft_dataset tulu_math_uc_mix \
+  --model_name_or_path "$BASE" \
+  --pretokenize_to "$BUILD_DIR" \
+  --max_length 1024 \
+  --dataset_num_proc 8 \
+  --report_to none
+rc=$?
+[[ "$rc" -eq 0 ]] || { echo "MDS154391_PRETOKENIZE_DONE rc=$rc"; exit "$rc"; }
+
+"$V/bin/python" - "$BUILD_DIR" "$EXPECTED_ROWS" <<'PY' || exit 17
+import sys
+from datasets import load_from_disk
+path, expected_rows = sys.argv[1], int(sys.argv[2])
+dataset = load_from_disk(path)
+assert len(dataset) == expected_rows, (len(dataset), expected_rows)
+required = {"input_ids", "assistant_masks", "seq_lengths"}
+assert required <= set(dataset.column_names), dataset.column_names
+for index in (0, len(dataset) // 2, len(dataset) - 1):
+    row = dataset[index]
+    ids, mask = row["input_ids"], row["assistant_masks"]
+    assert len(ids) == len(mask) == 1024, (index, len(ids), len(mask))
+    assert max(ids) < 256000, (index, max(ids))
+    assert any(mask), index
+print(f"MDS154391_PRETOKENIZE_VALID rows={len(dataset)} columns={dataset.column_names}")
+PY
+
+mv "$BUILD_DIR" "$FINAL" || exit 18
+printf 'MDS154391_PRETOKENIZE_DONE rc=0 %s final=%s\n' "$(date -Is)" "$FINAL"

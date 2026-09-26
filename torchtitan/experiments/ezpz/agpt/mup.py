@@ -199,7 +199,7 @@ def mup_attention_scale(
 # one would silently reparametrize the standard one -- the global in
 # `set_ezpz_max_context_length` is safe only because that value is genuinely
 # process-wide), and it is NOT a new positional parameter. The forwards below
-# re-declare the inherited positional parameter NAMES exactly, unchanged:
+# redeclare the inherited positional parameter NAMES exactly, unchanged:
 # `set_gqa_inner_attention_local_spmd` (models/common/decoder_sharding.py:299-314)
 # keys `in_dst_shardings` by positional-arg name, and the local_map contract
 # check asserts under TP>1 when a mapped input is missing. Renaming
@@ -537,17 +537,13 @@ def summarize_mup_param_groups(
 
     for pg in param_groups:
         rx = re.compile(pg.pattern)
-        names = [
-            n for n, p in all_named if n not in claimed and rx.search(n)
-        ]
+        names = [n for n, p in all_named if n not in claimed and rx.search(n)]
         claimed.update(names)
         key = pattern_to_key.get(pg.pattern, "?")
         for n in names:
             expected = classify_mup_group(canonical_fqn(n))
             if key != "?" and expected != key:
-                misrouted.append(
-                    {"param": n, "landed_in": key, "should_be": expected}
-                )
+                misrouted.append({"param": n, "landed_in": key, "should_be": expected})
         groups.append(
             {
                 "role": key,
@@ -555,9 +551,7 @@ def summarize_mup_param_groups(
                 "lr": pg.optimizer_kwargs.get("lr"),
                 "weight_decay": pg.optimizer_kwargs.get("weight_decay"),
                 "num_params": len(names),
-                "num_elements": sum(
-                    p.numel() for n, p in all_named if n in set(names)
-                ),
+                "num_elements": sum(p.numel() for n, p in all_named if n in set(names)),
                 "examples": [canonical_fqn(n) for n in names[:3]],
             }
         )
@@ -631,9 +625,7 @@ def build_mup_agpt_config(
             "silently keep the standard 1/sqrt(head_dim) scale"
         )
     if dim % n_heads != 0:
-        raise ValueError(
-            f"dim ({dim}) must be divisible by n_heads ({n_heads})"
-        )
+        raise ValueError(f"dim ({dim}) must be divisible by n_heads ({n_heads})")
     if kwargs.get("enable_weight_tying"):
         # Weight tying is incompatible with muP's separate embedding and
         # unembedding LR groups: with the two sharing one tensor,
@@ -650,9 +642,7 @@ def build_mup_agpt_config(
         )
 
     head_dim = dim // n_heads
-    resolved_base_head_dim = (
-        head_dim if base_head_dim is None else base_head_dim
-    )
+    resolved_base_head_dim = head_dim if base_head_dim is None else base_head_dim
     scale = mup_attention_scale(
         head_dim,
         resolved_base_head_dim,

@@ -1,0 +1,51 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-inst-gate
+#PBS -l walltime=00:30:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+: "${MODEL:?submit with -v MODEL=<model-dir>}"
+: "${RESULT:?submit with -v RESULT=<new-result-dir>}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+module load oneapi/release/2025.3.1 hdf5 pti-gpu
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
+git diff --quiet && git diff --cached --quiet || exit 14
+[[ -s "$MODEL/model.safetensors" && -s "$MODEL/tokenizer.json" ]] || exit 15
+[[ ! -e "$RESULT" ]] || exit 16
+mkdir -p "$RESULT"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export VLLM_ENABLE_V1_MULTIPROCESSING=1 HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+
+"$V/bin/python" -u torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py \
+  "$MODEL" "$RESULT/clean.jsonl" --no-format-example
+"$V/bin/python" -u torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py \
+  "$MODEL" "$RESULT/adversarial.jsonl"
+"$V/bin/python" - "$RESULT/clean.jsonl" "$RESULT/adversarial.jsonl" <<'PY'
+import json,re,sys
+expected=[['BethMillar'],['AliceZimmer','BobYoung','ShahramKhosravi']]
+for path,label in zip(sys.argv[1:],('clean','adversarial')):
+ rows=[json.loads(x) for x in open(path,encoding='utf-8') if x.strip()]
+ assert len(rows)==8,(label,len(rows))
+ correct=0; bounded=0
+ for i,row in enumerate(rows):
+  match=re.search(r'<alphabetical_sorted>\s*(.*?)\s*</alphabetical_sorted>',row['text'],re.S)
+  names=[] if not match else [x.strip() for x in match.group(1).splitlines() if x.strip()]
+  correct += names==expected[i//4]
+  bounded += row['finish_reason']=='stop'
+ print(f'AGPT2B_INSTRUCTION_GATE {label} correct={correct}/8 bounded={bounded}/8')
+ if correct != 8 or bounded != 8:
+  raise SystemExit(f'REJECT {label} correct={correct} bounded={bounded}')
+print('AGPT2B_INSTRUCTION_GATE_PASS')
+PY

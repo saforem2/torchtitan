@@ -1,5 +1,11 @@
 # Production GRPO
 
+> [!IMPORTANT]
+> For current production launch instructions, use
+> [Monarch + TorchStore + vLLM on XPU](../monarch.md). The rows
+> below are completed experiment records; links to TRL/server-mode launchers are
+> historical reproductions, not the default path for new runs.
+
 > Last updated: 2026-08-30
 
 > GRPO-tuned checkpoints derived from SFT'd or pre-trained AuroraGPT
@@ -12,6 +18,9 @@
 > consolidated `-hf` export is **no longer on disk** -- re-consolidate from
 > the sharded `checkpoint-900/` before reproducing them (see
 > [SFT evals](../../sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md#recommendation)).
+
+Current Torch 2.14 rerun status, exact checkpoint hash, jobs, and interim
+metrics are tracked in [Torch 2.14 Monarch GRPO reproduction](torch214-reproduction.md).
 
 ## Index
 

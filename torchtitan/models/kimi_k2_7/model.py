@@ -8,6 +8,8 @@
 https://github.com/sgl-project/sglang/blob/e0c0c0a45cb1bda90392bfa2bba4184f5b0638a0/python/sglang/srt/models/kimi_k25.py
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -15,7 +17,8 @@ import spmd_types as spmd
 import torch
 from torch import nn
 
-from torchtitan.config import ParallelismConfig
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.distributed.spmd_types import (
     annotate_input_spmd_types,
@@ -29,7 +32,10 @@ from torchtitan.models.common.attention import (
 from torchtitan.models.common.decoder import Decoder
 from torchtitan.models.common.decoder_sharding import decoder_input_sharding
 from torchtitan.models.common.multimodal import (
+    add_zero_vision_dependency,
+    build_dummy_vision_inputs,
     get_vision_positions,
+    MultimodalModel,
     scatter_vision_embeds,
 )
 from torchtitan.models.common.vision_encoder_sharding import multimodal_input_sharding
@@ -39,10 +45,24 @@ from torchtitan.models.deepseek_v3.model import (
 )
 
 from .sharding import set_kimi_k2_5_sharding_config
+from .state_dict_adapter import KimiK25StateDictAdapter
 from .vision_encoder import KimiK25VisionEncoder
 
 
-class KimiK25Model(DeepSeekV3Model):
+class KimiK25Model(MultimodalModel, DeepSeekV3Model):
+    state_dict_adapter_cls = KimiK25StateDictAdapter
+    multimodal_encoder_fqns = ("vision_encoder",)
+
+    @classmethod
+    def _register_optimizer_hooks(cls, optimizers, model_parts, parallel_dims) -> None:
+        from torchtitan.components.optimizer import register_moe_load_balancing_hook
+        from torchtitan.models.kimi_k2_7.qk_clip import register_qk_clip_hook
+
+        register_moe_load_balancing_hook(optimizers, model_parts, parallel_dims)
+        register_qk_clip_hook(optimizers, model_parts, parallel_dims)
+
+    pipeline_first_stage_module_fqns = ("vision_encoder",)
+
     """Kimi K2.5: DeepSeekV3 language model with a MoonViT3d vision encoder.
 
     Forward pass flow::
@@ -105,6 +125,33 @@ class KimiK25Model(DeepSeekV3Model):
             config.vision_encoder.build() if config.vision_encoder is not None else None
         )
 
+    def parallelize(
+        self,
+        *,
+        parallel_dims: ParallelDims,
+        training: TrainingConfig,
+        parallelism: ParallelismConfig,
+        compile_config: CompileConfig | None,
+        ac_config: ActivationCheckpointingConfig | None,
+        dump_folder: str,
+        skip_dp: bool = False,
+    ) -> KimiK25Model:
+        if parallel_dims.cp_enabled:
+            raise NotImplementedError(
+                "Context Parallel is not yet supported for Kimi K2.5: vision "
+                "scatter needs the full sequence before CP would shard it."
+            )
+
+        return super().parallelize(
+            parallel_dims=parallel_dims,
+            training=training,
+            parallelism=parallelism,
+            compile_config=compile_config,
+            ac_config=ac_config,
+            dump_folder=dump_folder,
+            skip_dp=skip_dp,
+        )
+
     def preprocess_inputs(
         self,
         input_dict: dict[str, torch.Tensor],
@@ -113,8 +160,10 @@ class KimiK25Model(DeepSeekV3Model):
         parallelism: ParallelismConfig,
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
+        **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
         """Build masks, CP-shard, SPMD-wrap, and return the batch."""
+        del kwargs
         # Function-local import avoids a circular import.
         from torchtitan.distributed.context_parallel.api import (
             prepare_context_parallel_input,
@@ -158,7 +207,7 @@ class KimiK25Model(DeepSeekV3Model):
         grid_thw: torch.Tensor | None,
         pixel_values_videos: torch.Tensor | None = None,
         grid_thw_videos: torch.Tensor | None = None,
-        special_tokens: dict[str, int],
+        special_tokens: dict[str, int] | None,
     ) -> torch.Tensor:
         """Embed tokens, run the vision encoder, scatter features into text.
 
@@ -176,8 +225,18 @@ class KimiK25Model(DeepSeekV3Model):
         if pixel_values_videos is not None and grid_thw_videos is not None:
             modalities.append((pixel_values_videos, grid_thw_videos))
 
-        if not modalities:
-            return inputs_embeds
+        is_dummy = not modalities
+        if is_dummy:
+            if self.vision_encoder is None:
+                return inputs_embeds
+            kernel_h, kernel_w = self.vision_encoder.merge_kernel_size
+            modalities.append(
+                build_dummy_vision_inputs(
+                    patch_dim=self.vision_encoder.patch_embed.in_features,
+                    grid_thw=(1, kernel_h, kernel_w),
+                    device=inputs_embeds.device,
+                )
+            )
         # TODO: support mixed image+video batches. Upstream fix: when
         # image_id == video_id, emit one document-ordered vision stream so the
         # runs stay modality-agnostic and this branch goes away.
@@ -187,12 +246,16 @@ class KimiK25Model(DeepSeekV3Model):
         # encoder is present (text-only configs never populate pixels).
         assert self.vision_encoder is not None
 
-        placeholder_id = special_tokens["image_id"]
-        assert placeholder_id == special_tokens["video_id"]
-
         # Patches arrive float32; match the encoder's compute dtype for the matmul.
         pixels = pixels.to(self.vision_encoder.patch_embed.weight.dtype)
         vision_embeds = self.vision_encoder(pixels, grid_thw=grid)
+        if is_dummy:
+            return add_zero_vision_dependency(inputs_embeds, vision_embeds)
+
+        if special_tokens is None:
+            raise ValueError("special_tokens are required for multimodal inputs.")
+        placeholder_id = special_tokens["image_id"]
+        assert placeholder_id == special_tokens["video_id"]
         # MoonViT collapses time (temporal pooling) and merges 2x2 spatially, so
         # the token count is (h/kh)*(w/kw), independent of t.
         kh, kw = self.vision_encoder.merge_kernel_size
@@ -249,7 +312,7 @@ class KimiK25Model(DeepSeekV3Model):
                     grid_thw=grid_thw,
                     pixel_values_videos=pixel_values_videos,
                     grid_thw_videos=grid_thw_videos,
-                    special_tokens=special_tokens,  # pyrefly: ignore [bad-argument-type]
+                    special_tokens=special_tokens,
                 )
             else:
                 x = tokens

@@ -33,8 +33,8 @@ Merge math (LoRA delta W' = W + (alpha/rank) * B @ A):
           v=[:, hpk+1]) and add each slice to the base wq/wk/wv.
 
 The result is a pure-base torchtitan state dict (wq/wk/wv/wo/...), which is then
-remapped to HF layout by Llama3StateDictAdapter.to_hf (which applies HF's Q/K rope
-permutation) and written as a single model.safetensors. config.json + tokenizer
+remapped to HF layout by AgptStateDictAdapter.to_hf (which applies the Q/K rope
+permutation only for complex RoPE) and written as a single model.safetensors. config.json + tokenizer
 (with gemma chat_template + eos_token_id=[1,107] fix) are copied from the base HF
 dir the LoRA was trained on.
 
@@ -124,41 +124,59 @@ def merge_lora(
             n_wo += 1
         merged[f"{p}.wo.weight"] = wo
 
-        # --- wqkv (fused adapter) -> split delta onto base wq/wk/wv ---
-        wq = sd[f"{p}.qkv_linear.wq.weight"].to(torch.float32)
-        wk = sd[f"{p}.qkv_linear.wk.weight"].to(torch.float32)
-        wv = sd[f"{p}.qkv_linear.wv.weight"].to(torch.float32)
+        # --- wqkv: support current native-fused and historical split DCPs ---
         qa = sd.get(f"{p}.qkv_linear.wqkv.lora_a.weight")
         qb = sd.get(f"{p}.qkv_linear.wqkv.lora_b.weight")
+        delta = None
         if qa is not None and qb is not None:
             in_dim = qa.shape[1]
             delta = scaling * (qb.to(torch.float32) @ qa.to(torch.float32))
-            # split exactly like FusedQKVLinear._split_qkv_on_save (weight, ndim=4)
-            w = delta.reshape(n_kv_heads, r, head_dim, in_dim)
-            wq = wq + w[:, :hpk].reshape(-1, in_dim)
-            wk = wk + w[:, hpk].reshape(-1, in_dim)
-            wv = wv + w[:, hpk + 1].reshape(-1, in_dim)
             n_wqkv += 1
-        merged[f"{p}.qkv_linear.wq.weight"] = wq
-        merged[f"{p}.qkv_linear.wk.weight"] = wk
-        merged[f"{p}.qkv_linear.wv.weight"] = wv
+
+        fused_key = f"{p}.qkv_linear.wqkv.weight"
+        if fused_key in sd:
+            fused = sd[fused_key].to(torch.float32)
+            if delta is not None:
+                assert delta.shape == fused.shape, (delta.shape, fused.shape)
+                fused = fused + delta
+            merged[fused_key] = fused
+        else:
+            wq = sd[f"{p}.qkv_linear.wq.weight"].to(torch.float32)
+            wk = sd[f"{p}.qkv_linear.wk.weight"].to(torch.float32)
+            wv = sd[f"{p}.qkv_linear.wv.weight"].to(torch.float32)
+            if delta is not None:
+                # Match QKVLinear's native interleaved grouping.
+                in_dim = delta.shape[1]
+                w = delta.reshape(n_kv_heads, r, head_dim, in_dim)
+                wq = wq + w[:, :hpk].reshape(-1, in_dim)
+                wk = wk + w[:, hpk].reshape(-1, in_dim)
+                wv = wv + w[:, hpk + 1].reshape(-1, in_dim)
+            merged[f"{p}.qkv_linear.wq.weight"] = wq
+            merged[f"{p}.qkv_linear.wk.weight"] = wk
+            merged[f"{p}.qkv_linear.wv.weight"] = wv
 
         # --- carry the rest of this layer's non-lora params through ---
         for suf in (
             "attention_norm.weight",
             "ffn_norm.weight",
-            "feed_forward.w1.weight",
             "feed_forward.w2.weight",
-            "feed_forward.w3.weight",
         ):
             merged[f"layers.{i}.{suf}"] = sd[f"layers.{i}.{suf}"].to(torch.float32)
+        w13_key = f"layers.{i}.feed_forward.w13.weight"
+        if w13_key in sd:
+            merged[w13_key] = sd[w13_key].to(torch.float32)
+        else:
+            for suf in ("feed_forward.w1.weight", "feed_forward.w3.weight"):
+                merged[f"layers.{i}.{suf}"] = sd[f"layers.{i}.{suf}"].to(torch.float32)
 
     # --- non-layer params (embeddings, final norm, lm_head) ---
     for k in ("tok_embeddings.weight", "norm.weight", "lm_head.weight"):
         merged[k] = sd[k].to(torch.float32)
 
-    print(f"[merge] folded LoRA into {n_wo} wo + {n_wqkv} wqkv layers "
-          f"(scaling={scaling}, hpk={hpk}, r={r}, head_dim={head_dim})")
+    print(
+        f"[merge] folded LoRA into {n_wo} wo + {n_wqkv} wqkv layers "
+        f"(scaling={scaling}, hpk={hpk}, r={r}, head_dim={head_dim})"
+    )
     # sanity: no lora keys should survive
     leftover = [k for k in merged if "lora" in k]
     assert not leftover, f"lora keys leaked into merged sd: {leftover[:4]}"
@@ -175,12 +193,12 @@ def to_hf_and_save(
     export_dtype: torch.dtype,
 ) -> None:
     from torchtitan.experiments.ezpz.agpt import model_registry as agpt_registry
-    from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
+    from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
 
-    # base spec (NO converters) -> plain base model_config for the adapter.
-    model_spec = agpt_registry(model_flavor)
-    model_config = model_spec.model
-    adapter = Llama3StateDictAdapter(model_config, base_hf)
+    # No converters: build the plain base config for the adapter. LoRA has
+    # already been folded into ``merged_tt`` above.
+    model_config = agpt_registry(model_flavor)
+    adapter = AgptStateDictAdapter(model_config, base_hf)
 
     hf_sd = adapter.to_hf(merged_tt)
     hf_sd = {k: v.to(export_dtype).contiguous() for k, v in hf_sd.items()}
@@ -188,8 +206,10 @@ def to_hf_and_save(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     save_file(hf_sd, str(out / "model.safetensors"), metadata={"format": "pt"})
-    print(f"[save] wrote {len(hf_sd)} tensors -> {out / 'model.safetensors'} "
-          f"(dtype={export_dtype})")
+    print(
+        f"[save] wrote {len(hf_sd)} tensors -> {out / 'model.safetensors'} "
+        f"(dtype={export_dtype})"
+    )
 
     # copy config + tokenizer (chat_template + eos fix) from the base HF dir.
     base = Path(base_hf)

@@ -151,30 +151,46 @@ def maybe_install_xccl_split_group_workaround() -> None:
             # If no PG is initialized yet, just call through — upstream
             # will error with the right message.
             return original_init_one_process_group(
-                sub_layout, rank_map, dim_name, backend_override,
-                *extra_args, **extra_kwargs,
+                sub_layout,
+                rank_map,
+                dim_name,
+                backend_override,
+                *extra_args,
+                **extra_kwargs,
             )
 
         accel = torch.accelerator.current_accelerator()
         if accel is None:
             return original_init_one_process_group(
-                sub_layout, rank_map, dim_name, backend_override,
-                *extra_args, **extra_kwargs,
+                sub_layout,
+                rank_map,
+                dim_name,
+                backend_override,
+                *extra_args,
+                **extra_kwargs,
             )
 
         try:
             parent_backend = default_group._get_backend(accel)
         except Exception:
             return original_init_one_process_group(
-                sub_layout, rank_map, dim_name, backend_override,
-                *extra_args, **extra_kwargs,
+                sub_layout,
+                rank_map,
+                dim_name,
+                backend_override,
+                *extra_args,
+                **extra_kwargs,
             )
 
         if getattr(parent_backend, "supports_splitting", False):
             # NCCL / well-behaved backend — take the upstream fast path.
             return original_init_one_process_group(
-                sub_layout, rank_map, dim_name, backend_override,
-                *extra_args, **extra_kwargs,
+                sub_layout,
+                rank_map,
+                dim_name,
+                backend_override,
+                *extra_args,
+                **extra_kwargs,
             )
 
         # ``supports_splitting`` is False (xccl today): steer the upstream
@@ -189,8 +205,12 @@ def maybe_install_xccl_split_group_workaround() -> None:
         try:
             default_group.bound_device_id = None  # type: ignore[attr-defined]
             return original_init_one_process_group(
-                sub_layout, rank_map, dim_name, backend_override,
-                *extra_args, **extra_kwargs,
+                sub_layout,
+                rank_map,
+                dim_name,
+                backend_override,
+                *extra_args,
+                **extra_kwargs,
             )
         finally:
             default_group.bound_device_id = saved_bound_device_id  # type: ignore[attr-defined]

@@ -14,7 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from torchtitan.components.optimizer import register_moe_load_balancing_hook
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -32,88 +31,109 @@ from torchtitan.models.common import (
 from torchtitan.models.common.activation import Sigmoid, Softmax
 from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import (
+    fused_grouped_gate_up_param_init,
     get_attention_config,
     make_ffn_config,
     make_gqa_config,
 )
-from torchtitan.models.common.linear import RouterGateLinear
+from torchtitan.models.common.linear import (
+    ColumnParallelLinear,
+    GroupedLinear,
+    RouterGateLinear,
+)
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
 
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.deepseek_v3 import DeepSeekV3Router
-from torchtitan.protocols.model_spec import ModelSpec
+
 from torchtitan.protocols.module import Module
 
-from .experts import ExpertComputeBackend, EzpzGroupedExperts
+from .experts import ExpertComputeBackend
 from .model import Attention, moeModel, moeTransformerBlock
 
 from .routed_experts import EzpzRoutedExperts
 
 
+class _LegacyInterleavedColumnParallelLinear(ColumnParallelLinear):
+    """Stacked-projection API backed by historical interleaved 2-D storage."""
+
+    @dataclasses.dataclass(kw_only=True, slots=True)
+    class Config(ColumnParallelLinear.Config):
+        pass
+
+    def __init__(self, config: Config):
+        if config.num_linears != 2:
+            raise ValueError("legacy fused FFN projection requires num_linears=2")
+        # Bypass Linear.__init__'s [N, F, D] reshape. Keeping [2F, D] means
+        # FSDP shards the full fused output axis, as it did pre-sync.
+        nn.Linear.__init__(
+            self,
+            config.in_features,
+            config.num_linears * config.out_features,
+            bias=config.bias,
+        )
+        self.out_features = config.out_features
+        self.num_linears = config.num_linears
+
+    def _unflatten_output(self, output):
+        return output.unflatten(-1, (-1, 2)).transpose(-2, -1)
+
+
 def _dtensor_safe_fused_ffn_config(**kwargs):
-    """``make_ffn_config`` whose w13 init survives an unevenly sharded DTensor.
-
-    #4535 made the fused gate/up projection the default. Core's
-    ``_make_fused_linear_init`` (models/common/config_utils.py:58) does
-
-        gate_up = t.unflatten(0, (-1, 2))
-        gate_init(gate_up[:, 0]); up_init(gate_up[:, 1])
-
-    i.e. w13 rows INTERLEAVE gate and up: even rows gate, odd rows up.
-
-    ``parallelize_moe`` calls ``fully_shard`` with ``Shard(0)`` over the whole
-    transformer block, so ``shared_experts.w13`` (1024 rows) arrives as a
-    DTensor sharded on dim 0 across ``dp_shard``. Two failures follow:
-
-    1. ``unflatten`` on the GLOBAL DTensor demands even divisibility --
-       1024 % 24 != 0 -- raising "Cannot unflatten unevenly sharded tensor"
-       (job 12477656, 52 ranks).
-    2. Unflattening the LOCAL shard is not enough either: FSDP splits 1024
-       into 16 shards of 43 and 8 of 42, both ODD, so a shard can begin on an
-       *up* row (rank1 starts at global row 43). That raises "[-1, 2] don't
-       multiply up to dim 0 (35)" -- and had the sizes been even it would have
-       silently applied the WRONG initializer to half the ranks (job 12477667).
-
-    So the init must know each shard's GLOBAL row offset and stripe from
-    there: with offset ``o`` the local even/odd split inverts when ``o`` is
-    odd.
-
-    Wraps core rather than editing it, per the experiments-folder rule.
-    """
+    """Build a fused FFN with the pre-sync 2-D storage and shard-local init."""
     cfg = make_ffn_config(**kwargs)
-    if not cfg.w13.param_init or "weight" not in cfg.w13.param_init:
-        return cfg
-    core_init = cfg.w13.param_init["weight"]
+    stacked_cfg = cfg.w13
+    cfg.w13 = _LegacyInterleavedColumnParallelLinear.Config(
+        in_features=stacked_cfg.in_features,
+        out_features=stacked_cfg.out_features,
+        num_linears=stacked_cfg.num_linears,
+        bias=stacked_cfg.bias,
+        param_init=stacked_cfg.param_init,
+        sharding_config=stacked_cfg.sharding_config,
+    )
+    core_init = cfg.w13.param_init["weight"] if cfg.w13.param_init else None
     gate_init = kwargs["w1_param_init"].get("weight")
     up_init = kwargs["w2w3_param_init"].get("weight")
 
     def _init_striped(t):
         if not hasattr(t, "to_local"):
-            core_init(t)  # plain tensor: core's path is already correct
+            if core_init is not None:
+                gate_up = t.unflatten(0, (-1, 2))
+                if gate_init is not None:
+                    gate_init(gate_up[:, 0])
+                if up_init is not None:
+                    up_init(gate_up[:, 1])
             return
         local = t.to_local()
         if local.numel() == 0:
             return
         offset = 0
         mesh = getattr(t, "device_mesh", None)
-        for axis, pl in enumerate(getattr(t, "placements", ())):
-            if getattr(pl, "dim", None) == 0 and mesh is not None:
+        for axis, placement in enumerate(getattr(t, "placements", ())):
+            if getattr(placement, "dim", None) == 0 and mesh is not None:
                 rank = mesh.get_local_rank(axis)
-                chunk, rem = divmod(t.shape[0], mesh.size(axis))
-                offset += rank * chunk + min(rank, rem)
-        g_start = 0 if offset % 2 == 0 else 1
-        gate_rows, up_rows = local[g_start::2], local[1 - g_start :: 2]
+                chunk, remainder = divmod(t.shape[0], mesh.size(axis))
+                offset += rank * chunk + min(rank, remainder)
+        gate_start = 0 if offset % 2 == 0 else 1
+        gate_rows = local[gate_start::2]
+        up_rows = local[1 - gate_start :: 2]
         if gate_init is not None and gate_rows.numel():
             gate_init(gate_rows)
         if up_init is not None and up_rows.numel():
             up_init(up_rows)
 
+    assert cfg.w13.param_init is not None
     cfg.w13.param_init = {**cfg.w13.param_init, "weight": _init_striped}
     return cfg
 
 
-from .parallelize import parallelize_moe
-from .state_dict_adapter import moeStateDictAdapter
+def _model_max_context_length(layers: list[TransformerBlock.Config]) -> int:
+    rope = getattr(layers[0].attention, "rope", None)
+    if rope is None:
+        raise ValueError("MoE attention config must define RoPE")
+    return rope.max_context_length
+
+
 from .token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
@@ -351,19 +371,8 @@ def make_ezpz_experts_config(
     non_blocking_capacity_factor: float | None = None,
     compute_backend: ExpertComputeBackend = "grouped_mm",
 ) -> RoutedExperts.Config:
-    """Build an EzpzGroupedExperts.Config from the same args as upstream
-    `make_experts_config`, plus a `compute_backend` selector.
-    """
-    inner = EzpzGroupedExperts.Config(
-        dim=dim,
-        hidden_dim=hidden_dim,
-        num_experts=num_experts,
-        param_init=param_init,
-        compute_backend=compute_backend,
-    )
-    # #3859: token_dispatcher is now a sibling of the grouped experts
-    # under a RoutedExperts local_map region, not a child of the experts
-    # config.
+    """Build upstream-layout routed experts plus an ezpz backend selector."""
+
     dispatcher = make_ezpz_token_dispatcher_config(
         num_experts=num_experts,
         top_k=top_k,
@@ -375,7 +384,23 @@ def make_ezpz_experts_config(
     # backends that take (x, num_tokens_per_expert), but it forwards the
     # router's decision to inner_experts for aurora_full_sonic, which core
     # drops at models/common/moe.py:163.
-    return EzpzRoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
+    return EzpzRoutedExperts.Config(
+        w13=GroupedLinear.Config(
+            group_size=num_experts,
+            in_features=dim,
+            out_features=hidden_dim,
+            num_linears=2,
+            param_init=fused_grouped_gate_up_param_init(param_init),
+        ),
+        w2=GroupedLinear.Config(
+            group_size=num_experts,
+            in_features=hidden_dim,
+            out_features=dim,
+            param_init={"weight": param_init["w2_EDF"]},
+        ),
+        token_dispatcher=dispatcher,
+        compute_backend=compute_backend,
+    )
 
 
 def make_ezpz_moe_config(
@@ -396,7 +421,6 @@ def make_ezpz_moe_config(
 
 
 __all__ = [
-    "parallelize_moe",
     "moeModel",
     "moe_configs",
 ]
@@ -672,6 +696,7 @@ def _debugmodel() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -730,6 +755,7 @@ def _debugmodel_flex_attn() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -790,6 +816,7 @@ def _small() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -848,6 +875,7 @@ def _16b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -910,6 +938,7 @@ def _236b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -973,6 +1002,7 @@ def _671b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1031,6 +1061,7 @@ def _500m() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1089,6 +1120,7 @@ def _2b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1150,6 +1182,7 @@ def _4b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1212,6 +1245,7 @@ def _7b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1270,6 +1304,7 @@ def _10b_2b() -> moeModel.Config:
         ),
     )
     return moeModel.Config(
+        max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1372,6 +1407,7 @@ def _agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> moeModel.Config:
             )
         )
     return moeModel.Config(
+        max_context_length=rope.max_context_length,
         vocab_size=50304,
         dim=dim,
         tok_embeddings=Embedding.Config(
@@ -1411,9 +1447,8 @@ def model_registry(
     flavor: str,
     moe_comm_backend: str = "standard",
     quantization: list | None = None,
-) -> ModelSpec:
+) -> moeModel.Config:
     from torchtitan.config.transform.quantization import QuantizationConverter
-    from torchtitan.distributed.pipeline_parallel import pipeline_llm
 
     config = moe_configs[flavor]()
 
@@ -1424,7 +1459,7 @@ def model_registry(
         if layer_cfg.moe is not None:
             routed_cfg = layer_cfg.moe.routed_experts
             routed_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
-                num_experts=routed_cfg.inner_experts.num_experts,
+                num_experts=routed_cfg.w13.group_size,
                 top_k=routed_cfg.token_dispatcher.top_k,
                 score_before_experts=routed_cfg.token_dispatcher.score_before_experts,
                 comm_backend=moe_comm_backend,
@@ -1437,27 +1472,28 @@ def model_registry(
             assert isinstance(q, QuantizationConverter.Config)
             q.build().convert(config)
 
-    # #4328 made max_context_length a required ModelSpec field. Read it off the
-    # flavor's own RoPE config (same approach as the agpt twin) so the spec
-    # cannot drift from the model it describes.
-    rope_cfg = config.layers[0].attention.rope
-    if rope_cfg is None:
+    # Read context length from the flavor's own RoPE config (same approach as
+    # the AGPT twin) so the registry cannot drift from the model it describes.
+    if config.layers[0].attention.rope is None:
         raise ValueError(
             f"moe flavor {flavor!r} has no RoPE config, so max_context_length "
-            "cannot be derived for its ModelSpec"
+            "cannot be derived"
         )
 
-    return ModelSpec(
-        name="moe",
-        flavor=flavor,
-        model=config,
-        max_context_length=rope_cfg.max_context_length,
-        parallelize_fn=parallelize_moe,
-        pipelining_fn=pipeline_llm,
-        post_optimizer_build_fn=register_moe_load_balancing_hook,
-        state_dict_adapter=(
-            None
-            if flavor == "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic"
-            else moeStateDictAdapter
-        ),
-    )
+    # The full-Sonic backend has no compatible HF adapter. Model ownership
+    # makes this a class-level contract, so use a tiny backend-specific subclass
+    # instead of carrying a registry-side callable bundle.
+    if flavor == "AGPT_2B_50K_MOE_sdpa_aurora_full_sonic":
+        from dataclasses import fields
+
+        class _SonicMoeModel(moeModel):
+            state_dict_adapter_cls = None
+
+            @dataclasses.dataclass(kw_only=True, slots=True)
+            class Config(moeModel.Config):
+                pass
+
+        return _SonicMoeModel.Config(
+            **{field.name: getattr(config, field.name) for field in fields(config)}
+        )
+    return config

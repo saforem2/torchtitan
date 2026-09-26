@@ -1,5 +1,10 @@
 # vLLM-XPU on torch 2.13 — investigation findings
 
+> [!WARNING]
+> **Deprecated investigation notes, not an operator guide.** Use
+> [`../monarch.md`](../monarch.md) for current
+> production and Aurora `next-eval` instructions.
+
 **Date:** 2026-06-10
 **Goal:** Determine whether we can replace the current all-ranks-generate
 HF `.generate()` path in `ezpz/rl` with a vLLM-backed

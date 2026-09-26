@@ -44,8 +44,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from torchtitan.experiments.rl.rollout import Rollout
-from torchtitan.experiments.rl.rubrics import RewardFn
+from torchtitan.rl.rollout import Rollout
+from torchtitan.rl.rubric import RewardFn
 
 # --- <think>/<answer> parsing (ported verbatim from rl/tasks/gsm8k_reason.py) ---
 
@@ -79,8 +79,8 @@ def _answer_span(text: str) -> tuple[bool, str | None]:
     if m:
         span = m.group(1)
         boxed = _BOXED_RE.search(span)
-        ans = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
-        return (ans is not None), ans
+        answer = _norm_num(boxed.group(1)) if boxed else _norm_num(span)
+        return (answer is not None), answer
     # No envelope -> NOT format_ok AND no answer. (Previously accepted a bare
     # \boxed{} here, which let extractable/close/correct fire without the
     # <think>/<answer> envelope -- the reward-hack path that decayed format
@@ -156,8 +156,8 @@ class AnswerExtractableReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        format_ok, ans = _answer_span(_completion_text(rollout))
-        return 1.0 if (format_ok and ans is not None) else 0.0
+        format_ok, answer = _answer_span(_completion_text(rollout))
+        return 1.0 if (format_ok and answer is not None) else 0.0
 
 
 class AnswerCloseReward(RewardFn):
@@ -173,10 +173,10 @@ class AnswerCloseReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        format_ok, ans = _answer_span(_completion_text(rollout))
+        format_ok, answer = _answer_span(_completion_text(rollout))
         if not format_ok:
             return 0.0
-        return _relative_closeness(ans, env_input.answer)
+        return _relative_closeness(answer, env_input.answer)
 
 
 class AnswerCorrectReward(RewardFn):
@@ -190,11 +190,11 @@ class AnswerCorrectReward(RewardFn):
         pass
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
-        format_ok, ans = _answer_span(_completion_text(rollout))
+        format_ok, answer = _answer_span(_completion_text(rollout))
         if not format_ok:
             return 0.0
         gold = env_input.answer
-        return 1.0 if (ans is not None and gold and ans == str(gold)) else 0.0
+        return 1.0 if (answer is not None and gold and answer == str(gold)) else 0.0
 
 
 __all__ = [

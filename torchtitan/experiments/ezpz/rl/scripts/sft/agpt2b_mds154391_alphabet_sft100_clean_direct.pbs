@@ -1,0 +1,34 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-alphabet-sft100-clean
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+MODEL=${MODEL:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100/final}
+OUT=${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-sft100-clean-direct.jsonl}
+EXPECTED_SHA=${EXPECTED_SHA:-cd8c185a84c0ef274d04b0be91ba72046b02e7533d9f0507f4948b146e0a5c6e}
+
+cd "$WT" || exit 11
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_SHA" ]] || exit 15
+[[ ! -e "$OUT" ]] || "$HOME/.local/bin/backup" "$OUT"
+"$V/bin/python" -u \
+  torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py \
+  "$MODEL" "$OUT" --no-format-example
+rc=$?
+echo "AGPT_ALPHABET_SFT100_CLEAN_DIRECT_DONE rc=$rc output=$OUT"
+exit "$rc"

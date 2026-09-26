@@ -20,17 +20,17 @@ from torchtitan.experiments.ezpz.moe.experts import (
     _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
     _sonic_weight_layouts,
-    EzpzGroupedExperts,
 )
-
-from torchtitan.models.common.moe import GroupedExperts
+from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher
+from torchtitan.models.common.linear import GroupedLinear
 
 
 def _clone_for_grad(tensor: torch.Tensor) -> torch.Tensor:
     return tensor.clone().detach().requires_grad_(True)
 
 
-def _init_grouped_experts_weights(module: GroupedExperts) -> None:
+def _init_grouped_experts_weights(module: EzpzRoutedExperts) -> None:
     """Randomize the expert weights in place.
 
     Names are the post-#3425 shape-suffixed ones (w1_EFD / w2_EDF / w3_EFD),
@@ -38,9 +38,8 @@ def _init_grouped_experts_weights(module: GroupedExperts) -> None:
     w1/w2/w3 and raises AttributeError here.
     """
     with torch.no_grad():
-        module.w1_EFD.copy_(torch.randn_like(module.w1_EFD))
-        module.w2_EDF.copy_(torch.randn_like(module.w2_EDF))
-        module.w3_EFD.copy_(torch.randn_like(module.w3_EFD))
+        module.w13.weight.copy_(torch.randn_like(module.w13.weight))
+        module.w2.weight.copy_(torch.randn_like(module.w2.weight))
 
 
 class TestMoEExpertBackends(unittest.TestCase):
@@ -282,11 +281,22 @@ class TestMoEExpertBackends(unittest.TestCase):
         # raises TypeError here.
 
         def _build(backend):
-            return EzpzGroupedExperts(
-                EzpzGroupedExperts.Config(
-                    dim=dim,
-                    hidden_dim=hidden_dim,
-                    num_experts=num_experts,
+            return EzpzRoutedExperts(
+                EzpzRoutedExperts.Config(
+                    w13=GroupedLinear.Config(
+                        group_size=num_experts,
+                        in_features=dim,
+                        out_features=hidden_dim,
+                        num_linears=2,
+                    ),
+                    w2=GroupedLinear.Config(
+                        group_size=num_experts,
+                        in_features=hidden_dim,
+                        out_features=dim,
+                    ),
+                    token_dispatcher=LocalTokenDispatcher.Config(
+                        num_experts=num_experts, top_k=1
+                    ),
                     compute_backend=backend,
                 )
             )
@@ -297,7 +307,7 @@ class TestMoEExpertBackends(unittest.TestCase):
         num_tokens_per_expert = torch.tensor([3, 0, 2, 1, 4], dtype=torch.int64)
         total_tokens = int(num_tokens_per_expert.sum().item())
         x = torch.randn(total_tokens, dim, dtype=torch.bfloat16)
-        ref_out = ref.forward(x, num_tokens_per_expert)
+        ref_out = ref._run_backend(x, num_tokens_per_expert)
 
         # Every backend that does not need an absent external package.
         # aurora_sycl is excluded here: it requires aurora_moe and its
@@ -305,10 +315,9 @@ class TestMoEExpertBackends(unittest.TestCase):
         for backend in ("bmm_nodrop", "bmm"):
             test = _build(backend)
             with torch.no_grad():
-                test.w1_EFD.copy_(ref.w1_EFD)
-                test.w2_EDF.copy_(ref.w2_EDF)
-                test.w3_EFD.copy_(ref.w3_EFD)
-            out = test.forward(x, num_tokens_per_expert)
+                test.w13.weight.copy_(ref.w13.weight)
+                test.w2.weight.copy_(ref.w2.weight)
+            out = test._run_backend(x, num_tokens_per_expert)
             # `bmm` pads to a capacity_factor-derived capacity and DROPS
             # overflow tokens, so it only matches when nothing overflows.
             # With counts [3,0,2,1,4] over 5 experts, cap = ceil(10/5*1.25)

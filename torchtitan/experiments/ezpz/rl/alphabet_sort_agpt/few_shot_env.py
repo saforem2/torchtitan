@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from torchtitan.experiments.rl.environment import MessageEnvInitOutput
-from torchtitan.experiments.rl.examples.alphabet_sort.env import AlphabetSortEnv
+from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
+from torchtitan.rl.rollout.environment import MessageEnvInitOutput
 
 
 class AgptFewShotAlphabetSortEnv(AlphabetSortEnv):

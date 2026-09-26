@@ -1,0 +1,61 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N mds154391-grpo20-eval
+#PBS -l walltime=00:40:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+DCP="${DCP:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/grpo/agpt2b-mds154391-stage2-grpo20-12478621/checkpoint/step-20}"
+BASE="${BASE:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/grpo/eval-step20/merged-hf}"
+GEN="${GEN:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/grpo/eval-step20/gsm8k-200/generations.jsonl}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export ZE_AFFINITY_MASK=0
+export TORCHINDUCTOR_MAX_AUTOTUNE=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
+export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+cd "$WT" || exit 11
+actual=$(git rev-parse HEAD) || exit 14
+[[ "$actual" == "$EXPECTED_COMMIT" ]] || { echo "FATAL: commit mismatch"; exit 14; }
+git diff --quiet && git diff --cached --quiet || { echo "FATAL: tracked changes"; exit 14; }
+[[ -s "$DCP/.metadata" && -s "$BASE/model.safetensors" ]] || { echo "FATAL: input missing"; exit 15; }
+[[ ! -e "$OUT" ]] || { echo "FATAL: output exists: $OUT"; exit 16; }
+mkdir -p "$(dirname "$GEN")"
+rm -f "$GEN"
+
+echo "MDS154391_GRPO20_EVAL_START commit=$actual dcp=$DCP"
+PYTHONPATH="$WT" "$V/bin/python" torchtitan/experiments/ezpz/scripts/eval/merge_lora_dcp_to_hf.py \
+  --dcp "$DCP" --base-hf "$BASE" --out "$OUT" \
+  --lora-rank 8 --lora-alpha 16 --model-flavor 2b-rl --export-dtype float32 || exit 20
+[[ -s "$OUT/model.safetensors" ]] || exit 21
+"$V/bin/python" - "$BASE/model.safetensors" "$OUT/model.safetensors" <<'PY' || exit 22
+from safetensors import safe_open
+import sys, torch
+with safe_open(sys.argv[1], framework="pt", device="cpu") as a, safe_open(sys.argv[2], framework="pt", device="cpu") as b:
+    names=sorted(set(a.keys()) & set(b.keys()))
+    changed=[]
+    for name in names:
+        x,y=a.get_tensor(name),b.get_tensor(name)
+        if x.shape == y.shape and not torch.equal(x,y): changed.append(name)
+print(f"MDS154391_GRPO20_MERGE_CHECK shared={len(names)} changed={len(changed)} sample={changed[:4]}")
+assert changed, "merged model is byte-identical to base"
+PY
+"$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+  --model "$OUT" --limit 200 --dtype float32 --max-tokens 768 --out "$GEN" || exit 23
+"$V/bin/python" - "$GEN" <<'PY' || exit 24
+import json,sys
+rows=[json.loads(x) for x in open(sys.argv[1],encoding="utf-8") if x.strip()]
+assert len(rows)==200
+print(f"MDS154391_GRPO20_EVAL_ROWS rows={len(rows)} correct={sum(bool(r['correct']) for r in rows)} format={sum(bool(r['format_ok']) for r in rows)}")
+PY
+echo "MDS154391_GRPO20_EVAL_DONE"

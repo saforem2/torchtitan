@@ -16,6 +16,7 @@ from renderers import (
     Tokenizer,
 )
 from torchtitan.components.renderer import (
+    ExtraStopTokensRendererConfig,
     from_renderers,
     RendererConfig,
     RenderersConfigAdapter,
@@ -38,6 +39,17 @@ def test_from_renderers_returns_adapter() -> None:
     assert config.renderers_config is renderers_config
 
 
+def test_extra_stop_tokens_preserve_order_and_deduplicate() -> None:
+    tokenizer = HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
+    base = from_renderers(Qwen3RendererConfig(enable_thinking=False))
+    base_stops = base.build(tokenizer=tokenizer).get_stop_token_ids()
+    renderer = ExtraStopTokensRendererConfig(
+        renderer=base,
+        extra_stop_token_ids=(base_stops[-1], 123456),
+    ).build(tokenizer=tokenizer)
+    assert renderer.get_stop_token_ids() == [*base_stops, 123456]
+
+
 def test_build_renders_with_titan_tokenizer() -> None:
     tokenizer = HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
     renderer = RenderersConfigAdapter(
@@ -58,10 +70,9 @@ def test_build_renders_with_titan_tokenizer() -> None:
     ("renderers_config", "reason"),
     [
         (AutoRendererConfig(), "MODEL_RENDERER_MAP"),
-        (DefaultRendererConfig(), "special-token variables"),
     ],
 )
-def test_auto_and_default_are_refused(renderers_config, reason: str) -> None:
+def test_auto_is_refused(renderers_config, reason: str) -> None:
     tokenizer = HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
     with pytest.raises(ValueError) as error:
         RenderersConfigAdapter(renderers_config=renderers_config).build(
@@ -69,6 +80,23 @@ def test_auto_and_default_are_refused(renderers_config, reason: str) -> None:
         )
     assert reason in str(error.value)
     assert "Pick the model's renderer" in str(error.value)
+
+
+def test_default_renderer_matches_hf_chat_template() -> None:
+    transformers = pytest.importorskip("transformers")
+    from renderers import create_renderer
+
+    messages = [{"role": "user", "content": "hi"}]
+    config = DefaultRendererConfig()
+    hf = create_renderer(
+        transformers.AutoTokenizer.from_pretrained(_TOKENIZER_PATH), config
+    )
+    titan = RenderersConfigAdapter(renderers_config=config).build(
+        tokenizer=HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH)
+    )
+    assert titan.render_ids(messages, add_generation_prompt=True) == hf.render_ids(
+        messages, add_generation_prompt=True
+    )
 
 
 def test_config_to_dict_is_json() -> None:

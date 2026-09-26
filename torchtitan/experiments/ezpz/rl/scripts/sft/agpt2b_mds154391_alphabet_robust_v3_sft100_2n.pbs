@@ -1,0 +1,76 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mds154391-robust-v3
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+BASE=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+PRETOK=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-alphabet-curriculum-v3-robust
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-robust-v3-sft100
+EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+EXPECTED_CODE_COMMIT=9620726db313636e3053a5ec68ee52538dea121d
+
+cd "$WT" || exit 11
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+[[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
+[[ -x "$V/bin/ezpz" && ! -e "$V/bin/mpiexec" ]] || exit 15
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export PYTHONIOENCODING="ascii:replace"
+export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/alphabet-robust-v3-${PBS_JOBID%%.*}
+mkdir -p "$TMPDIR"
+
+commit=$(git rev-parse HEAD)
+model_sha=$(sha256sum "$BASE/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+git merge-base --is-ancestor "$EXPECTED_CODE_COMMIT" "$commit" || exit 16
+[[ "$model_sha" == "$EXPECTED_MODEL_SHA" ]] || exit 17
+[[ ! -e "$PRETOK" ]] || "$HOME/.local/bin/backup" "$PRETOK"
+[[ ! -e "$OUT" ]] || "$HOME/.local/bin/backup" "$OUT"
+
+"$V/bin/python" torchtitan/experiments/ezpz/rl/scripts/sft/build_alphabet_sort_curriculum.py \
+  --model "$BASE" --output "$PRETOK" --size 8192 --seed 154391 --robust-v3 \
+  || exit 18
+
+"$V/bin/python" - "$PRETOK" <<'PY' || exit 19
+import sys
+from datasets import load_from_disk
+from transformers import AutoTokenizer
+path = sys.argv[1]
+dataset = load_from_disk(path)
+tokenizer = AutoTokenizer.from_pretrained(
+    "/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf",
+    local_files_only=True,
+)
+texts = [tokenizer.decode(ids, skip_special_tokens=False) for ids in dataset["input_ids"]]
+wrappers = sum("Example of the required output format only" in text or "Use the following block only as a formatting illustration" in text for text in texts)
+single_adversarial = sum(("Example of the required output format only" in text or "Use the following block only as a formatting illustration" in text) and text.split("<end_of_turn>", 1)[0].split(":", 1)[1].split("\n", 1)[0].count(",") == 0 for text in texts)
+assert len(dataset) == 8192
+assert wrappers == 4096, wrappers
+assert single_adversarial == 2048, single_adversarial
+assert all(ids[-2:] == [107, 108] for ids in dataset["input_ids"])
+assert all(len(ids) == len(mask) for ids, mask in zip(dataset["input_ids"], dataset["assistant_masks"]))
+print(f"ROBUST_V3_PREFLIGHT rows={len(dataset)} adversarial={wrappers} single_adversarial={single_adversarial}")
+PY
+
+echo "MDS154391_ROBUST_V3_SFT_START $(date -Is) commit=$commit model_sha=$model_sha"
+"$V/bin/ezpz" launch --auto-retry --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --pretokenized_dataset "$PRETOK" --model_name_or_path "$BASE" \
+  --output_dir "$OUT" --max_steps 100 --num_train_epochs 1 \
+  --learning_rate 1e-5 --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 2 --dataset_num_proc 1 --max_length 1024 \
+  --bf16 --fsdp full_shard --logging_steps 1 --save_strategy no --report_to none
+rc=$?
+echo "MDS154391_ROBUST_V3_SFT_DONE rc=$rc $(date -Is)"
+exit "$rc"

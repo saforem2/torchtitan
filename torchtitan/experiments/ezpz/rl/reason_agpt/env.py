@@ -29,7 +29,7 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.data import (
     GSM8KReasonSample,
     PROMPT_SUFFIX,
 )
-from torchtitan.experiments.rl.environment import (
+from torchtitan.rl.rollout.environment import (
     MessageEnv,
     MessageEnvInitOutput,
     MessageEnvStepOutput,

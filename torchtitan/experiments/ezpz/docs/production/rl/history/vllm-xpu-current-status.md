@@ -1,5 +1,10 @@
 # vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)
 
+> [!WARNING]
+> **Historical despite `current` in the filename.** Do not use this page's
+> runtime snippets for new jobs. Follow
+> [`../monarch.md`](../monarch.md).
+
 ## Summary
 
 | Component | Status | Notes |

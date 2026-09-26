@@ -17,11 +17,12 @@ CKPT=/home/foremans/rl-repro/run/agpt2b-ckpt900   # staged: symlinked weights + 
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 PY=$REPO/venvs/rl-grpo-lora/bin/python
 echo "AGPT2B-FP32 START $(date +%T) host=$(hostname) ckpt=$CKPT"
-timeout 3300 $PY -u -m torchtitan.experiments.rl.train \
-    --module alphabet_sort --config rl_grpo_lora_agpt_2b \
+timeout 3300 $PY -u -m torchtitan.experiments.ezpz.rl.train_upstream \
+    --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
+    --config rl_grpo_lora_agpt_2b \
     --hf_assets_path="$CKPT" \
     --async-loop.num-training-steps=3 \
-    --async-loop.num-groups-per-train-step=4 \
+    --async-loop.num-prompts-per-train-step=4 \
     --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
     --dump_folder="$REPO/outputs/rl_lora_agpt2b_fp32" \
     --trainer.parallelism.data-parallel-shard-degree=1 \

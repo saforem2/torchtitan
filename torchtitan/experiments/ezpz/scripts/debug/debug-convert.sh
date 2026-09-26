@@ -27,8 +27,7 @@ import torch.distributed.checkpoint as dcp
 from torchtitan.experiments.ezpz.agpt import model_registry
 from torchtitan.components.checkpointer import ModelWrapper
 
-spec = model_registry('2b')
-config = spec.model
+config = model_registry('2b')
 
 with torch.device('cpu'):
     model = config.build()

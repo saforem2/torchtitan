@@ -236,11 +236,12 @@ def _stable_config_value(value: Any) -> Any:
 def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
     """Fingerprint configuration that defines an exact LR-finder trajectory."""
     config = trainer.config
-    model_spec = config.model_spec
+    # Production configs own the model directly. Lightweight utility/test
+    # trainers may intentionally omit it; fingerprint that absence rather than
+    # failing before resume state can be validated.
+    model_config = getattr(config, "model", None)
     payload = {
-        "model": None
-        if model_spec is None
-        else {"name": model_spec.name, "flavor": model_spec.flavor},
+        "model": _stable_config_value(model_config),
         "optimizer_container": type(trainer.optimizers).__qualname__,
         "optimizer_config": _stable_config_value(config.optimizer),
         "dataloader_config": _stable_config_value(config.dataloader),
@@ -346,13 +347,17 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         trajectory_fingerprint=_trajectory_fingerprint(trainer),
         base_seeds=base_seeds,
     )
-    if not getattr(trainer.checkpointer, "enable", False):
+    checkpointer = getattr(trainer, "checkpointer", None)
+    if checkpointer is None:
         raise RuntimeError(
             "LR Finder requires checkpointing so interrupted sweeps can resume"
         )
-    trainer.checkpointer.states["lr_finder"] = finder_state
-    checkpoint_loaded = trainer.checkpointer.load(
-        step=trainer.config.checkpoint.load_step
+    checkpointer.states["lr_finder"] = finder_state
+    checkpointer_config = getattr(trainer.config, "checkpointer", None)
+    if checkpointer_config is None:
+        checkpointer_config = getattr(trainer.config, "checkpoint", None)
+    checkpoint_loaded = checkpointer.load(
+        step=getattr(checkpointer_config, "load_step", -1)
     )
     if checkpoint_loaded and not finder_state.loaded and trainer.step != 0:
         raise RuntimeError(
@@ -471,7 +476,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
                         param_group["lr"] = curr_lr
             finder_state.next_iter = i + 1
             if finder_state.next_iter < total_iters:
-                trainer.checkpointer.save(trainer.step)
+                checkpointer.save(trainer.step)
     finally:
         if _orig_step is not None:
             assert _sched is not None
@@ -481,8 +486,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     # Validate before creating or appending any artifact. A partial, empty, or
     # non-finite curve is not a successful finder run and must make the launcher
     # fail instead of leaving success-looking CSV/NPZ/PNG files behind.
-    trainer.checkpointer.maybe_wait_for_staging()
-    trainer.checkpointer.maybe_wait_for_saving()
+    checkpointer.maybe_wait_for_staging()
+    checkpointer.maybe_wait_for_saving()
     lrs = finder_state.lrs
     losses = finder_state.losses
     validate_sweep_results(lrs, losses, expected_points=sweep_steps)
@@ -495,15 +500,15 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
     suggested = blow_up_lrs[0] / 10
     # Only a semantically valid curve earns the terminal checkpoint. Otherwise
     # the latest automatic resume point remains the preceding periodic save.
-    trainer.checkpointer.save(trainer.step, last_step=True)
-    trainer.checkpointer.maybe_wait_for_staging()
-    trainer.checkpointer.maybe_wait_for_saving()
+    checkpointer.save(trainer.step, last_step=True)
+    checkpointer.maybe_wait_for_staging()
+    checkpointer.maybe_wait_for_saving()
 
     # Save results on rank 0
     rank = int(os.environ.get("RANK", "0"))
     if rank == 0:
-        # Group outputs: lr_finder/ezpz/<name>/<flavor>/<optimizer>/
-        model_spec = trainer.config.model_spec
+        # Group outputs by the direct model config type and optimizer.
+        model_config = trainer.config.model
         # Derive optimizer name from container class
         opt_cls = type(trainer.optimizers).__name__
         opt_name = (
@@ -512,12 +517,8 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             .lower()
             or "adamw"
         )
-        if model_spec is not None:
-            sub_path = os.path.join(
-                "ezpz", model_spec.name, model_spec.flavor, opt_name
-            )
-        else:
-            sub_path = os.path.join("unknown", opt_name)
+        model_name = type(model_config).__qualname__.removesuffix(".Config")
+        sub_path = os.path.join("ezpz", model_name, opt_name)
         out_dir = os.path.join(trainer.config.dump_folder, "lr_finder", sub_path)
         os.makedirs(out_dir, exist_ok=True)
 

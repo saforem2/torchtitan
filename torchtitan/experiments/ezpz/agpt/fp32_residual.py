@@ -49,10 +49,10 @@ from dataclasses import dataclass
 
 import torch
 
+from torchtitan.experiments.ezpz.agpt.model import AgptModel
+
 from torchtitan.models.common.attention import AttentionMasksType
 from torchtitan.models.llama3.model import Llama3TransformerBlock
-
-from torchtitan.experiments.ezpz.agpt.model import AgptModel
 
 
 class AgptFp32ResidualBlock(Llama3TransformerBlock):
@@ -108,9 +108,7 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
         # to the lm_head dtype before the head.
         dt = self._sublayer_dtype()
 
-        attn_out = self.attention(
-            self.attention_norm(x), attention_masks, positions
-        )
+        attn_out = self.attention(self.attention_norm(x), attention_masks, positions)
         h = x.float() + attn_out.float()
 
         ffn_out = self.feed_forward(self.ffn_norm(h.to(dt)))

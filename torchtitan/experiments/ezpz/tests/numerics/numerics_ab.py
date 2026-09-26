@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Seeded fused-vs-unfused QKV/gate-up numerics A/B across the sync-84 merge.
 
 Runs ONE tree per invocation (argv[1] = tree root) so the two trees never share
@@ -9,18 +15,19 @@ What this actually tests: #4526 made QKV fusion mandatory (1 GEMM, not 3) and
 bitwise equality is NOT expected; the question is whether the difference is at
 float-rounding scale or something larger.
 """
-import sys, json, os
+import json
+import os
+import sys
+
 tree = sys.argv[1]
 sys.path.insert(0, tree)
 
 import torch
 import torchtitan
+
 assert tree in torchtitan.__file__, torchtitan.__file__
 
-from torchtitan.experiments.ezpz.agpt import (
-    agpt_configs,
-    set_ezpz_max_context_length,
-)
+from torchtitan.experiments.ezpz.agpt import agpt_configs, set_ezpz_max_context_length
 
 FLAVOR = os.environ.get("AB_FLAVOR", "debugmodel")
 SEED = 42
@@ -46,9 +53,13 @@ g = torch.Generator(device="cpu").manual_seed(SEED)
 vocab = model.tok_embeddings.weight.shape[0]
 ids = torch.randint(0, vocab, (T,), generator=g).to(dev)
 
-out = {"tree": os.path.basename(tree.rstrip("/")), "flavor": FLAVOR,
-       "device": dev, "torch": torch.__version__,
-       "params": sum(p.numel() for p in model.parameters())}
+out = {
+    "tree": os.path.basename(tree.rstrip("/")),
+    "flavor": FLAVOR,
+    "device": dev,
+    "torch": torch.__version__,
+    "params": sum(p.numel() for p in model.parameters()),
+}
 
 with torch.no_grad():
     logits = model(ids)
@@ -63,12 +74,20 @@ model.train()
 logits = model(ids)
 loss = logits.float().pow(2).mean()
 loss.backward()
-gn = torch.sqrt(sum((p.grad.double()**2).sum() for p in model.parameters() if p.grad is not None))
+gn = torch.sqrt(
+    sum((p.grad.double() ** 2).sum() for p in model.parameters() if p.grad is not None)
+)
 out["loss"] = float(loss)
 out["grad_norm"] = float(gn)
 # per-tensor fingerprint of the largest few, to localize any divergence
-tops = sorted(((float(p.grad.double().norm()), n) for n,p in model.named_parameters()
-               if p.grad is not None), reverse=True)[:5]
-out["top5_grad"] = [[n, v] for v,n in tops]
+tops = sorted(
+    (
+        (float(p.grad.double().norm()), n)
+        for n, p in model.named_parameters()
+        if p.grad is not None
+    ),
+    reverse=True,
+)[:5]
+out["top5_grad"] = [[n, v] for v, n in tops]
 
 print("JSONLINE" + json.dumps(out))

@@ -23,9 +23,39 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
     AnswerExtractableReward,
     ThinkFormatReward,
 )
-from torchtitan.experiments.rl.environment import TokenEnv
-from torchtitan.experiments.rl.rollout.rollouter import Rollouter
-from torchtitan.experiments.rl.rubrics import Rubric
+from torchtitan.rl.rollout.advantage import AdvantageEstimator
+from torchtitan.rl.rollout.environment import TokenEnv
+from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
+from torchtitan.rl.rubric import Rubric
+
+
+class GSM8KReasonWorker(RolloutWorker):
+    """GSM8K environment, reward rubric, and advantage estimator."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(RolloutWorker.Config):
+        rubric: Rubric.Config = field(
+            default_factory=lambda: Rubric.Config(
+                reward_fns=[
+                    ThinkFormatReward.Config(weight=0.05),
+                    AnswerExtractableReward.Config(weight=0.05),
+                    AnswerCloseReward.Config(weight=0.20),
+                    AnswerCorrectReward.Config(weight=0.70),
+                ],
+                truncation_reward=0.0,
+            )
+        )
+        message_env: GSM8KReasonEnv.Config = field(
+            default_factory=GSM8KReasonEnv.Config
+        )
+        token_env: TokenEnv.Config = field(
+            default_factory=lambda: TokenEnv.Config(
+                max_rollout_tokens=2048, max_num_turns=1
+            )
+        )
+        advantage: AdvantageEstimator.Config = field(
+            default_factory=lambda: AdvantageEstimator.Config(should_std_normalize=True)
+        )
 
 
 class GSM8KReasonRollouter(Rollouter):
@@ -47,27 +77,6 @@ class GSM8KReasonRollouter(Rollouter):
                 shuffle=False,
             )
         )
-        rubric: Rubric.Config = field(
-            default_factory=lambda: Rubric.Config(
-                # Weights carried over from rl/tasks/gsm8k_reason.py (0.05 / 0.05 /
-                # 0.20 / 0.70). The Rubric normalizes them to sum to 1.0, preserving
-                # the ratio. Each fn is separate so reward_breakdown keeps per-
-                # component metrics (the CoT plan's Path B requirement).
-                reward_fns=[
-                    ThinkFormatReward.Config(weight=0.05),
-                    AnswerExtractableReward.Config(weight=0.05),
-                    AnswerCloseReward.Config(weight=0.20),
-                    AnswerCorrectReward.Config(weight=0.70),
-                ],
-                # A truncated rollout has no <answer> -> no reward / learning signal.
-                truncation_reward=0.0,
-            )
-        )
-        message_env: GSM8KReasonEnv.Config = field(
-            default_factory=GSM8KReasonEnv.Config
-        )
-        token_env: TokenEnv.Config = field(
-            default_factory=lambda: TokenEnv.Config(
-                max_rollout_tokens=2048, max_num_turns=1
-            )
+        worker: GSM8KReasonWorker.Config = field(
+            default_factory=GSM8KReasonWorker.Config
         )

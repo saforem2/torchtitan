@@ -1,0 +1,38 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mds154391-alphabet-direct
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-sync-416e12cb8
+V=/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214
+SOURCE_MODEL=/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf
+MODEL=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-staged-hf
+OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-alphabet-direct.jsonl
+EXPECTED_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644fd1
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+export ZE_AFFINITY_MASK=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+cd "$WT" || exit 11
+sha=$(sha256sum "$SOURCE_MODEL/model-00001-of-00001.safetensors" | cut -d' ' -f1)
+[[ "$sha" == "$EXPECTED_SHA" ]] || { echo "bad model sha $sha"; exit 12; }
+rm -rf "$MODEL"
+mkdir -p "$MODEL"
+cp -a --reflink=auto "$SOURCE_MODEL"/. "$MODEL"/
+"$V/bin/python" \
+  torchtitan/experiments/ezpz/rl/scripts/repair_agpt_hf_artifact.py \
+  "$MODEL"
+"$V/bin/python" -u torchtitan/experiments/ezpz/rl/scripts/agpt_direct_control.py "$MODEL" "$OUT"
+rc=$?
+echo "AGPT_MDS154391_ALPHABET_DIRECT_DONE rc=$rc output=$OUT"
+exit "$rc"

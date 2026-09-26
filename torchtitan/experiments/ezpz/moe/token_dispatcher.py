@@ -257,6 +257,16 @@ class LocalTokenDispatcher(Configurable):
         self.top_k = config.top_k
         self.score_before_experts = config.score_before_experts
 
+    def init_buffer(self) -> None:
+        """Initialize backend communication buffers, if any.
+
+        The standard all-to-all dispatcher has no persistent communication
+        buffer, but upstream ``RoutedExperts._init_self_buffers`` invokes this
+        lifecycle hook unconditionally. Keep the no-op on the shared custom
+        dispatcher base so every ezpz dispatcher satisfies the current model
+        ownership contract; buffer-owning subclasses may override it.
+        """
+
     def wire_meshes(
         self,
         *,
@@ -383,9 +393,12 @@ class LocalTokenDispatcher(Configurable):
                 _record_moe_fastpath("score_after_experts_bf16")
             else:
                 _record_moe_fastpath("score_after_experts")
-            routed_output_RD = routed_output_RD * metadata.topk_scores_experts_sorted_N.to(
-                routed_output_RD.dtype
-            ).reshape(-1, 1)
+            routed_output_RD = (
+                routed_output_RD
+                * metadata.topk_scores_experts_sorted_N.to(
+                    routed_output_RD.dtype
+                ).reshape(-1, 1)
+            )
 
         out_TD = _scatter_add_1d_forward_or_autograd(
             out_TD,
@@ -430,7 +443,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
     dispatch (reorder + EP all-to-all) and combine (reverse).
 
     ``ep_mesh`` and the ``sp_size`` / ``sp_rank`` SP coordinates are wired
-    by the owning ``GroupedExperts.parallelize`` override via
+    by the owning ``EzpzRoutedExperts._parallelize`` override via
     ``wire_meshes``.
     """
 
@@ -516,9 +529,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
         # which keeps behavior consistent if a user mistakenly only
         # exports the env var on rank 0's host.
         self._normal_equal_a2a_policy = self._resolve_normal_equal_a2a_policy(ep_mesh)
-        self._normal_equal_a2a_telemetry = (
-            _normal_equal_a2a_padding_telemetry_enabled()
-        )
+        self._normal_equal_a2a_telemetry = _normal_equal_a2a_padding_telemetry_enabled()
 
     @staticmethod
     def _resolve_normal_equal_a2a_policy(ep_mesh: DeviceMesh | None) -> str:
@@ -692,9 +703,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
             "normal_equal_a2a_padding_local_overhead_bp", int(local_ratio * 10000)
         )
         if reduce_global:
-            local_ratio_tensor = torch.tensor(
-                [int(local_ratio * 10000)], device=device
-            )
+            local_ratio_tensor = torch.tensor([int(local_ratio * 10000)], device=device)
             worst_ratio = all_to_all_single(
                 local_ratio_tensor.expand(self.ep_mesh.size()).contiguous(),
                 None,
@@ -1067,9 +1076,12 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
                 _record_moe_fastpath("score_after_experts_bf16")
             else:
                 _record_moe_fastpath("score_after_experts")
-            routed_output_RD = routed_output_RD * metadata.topk_scores_experts_sorted_N.to(
-                routed_output_RD.dtype
-            ).reshape(-1, 1)
+            routed_output_RD = (
+                routed_output_RD
+                * metadata.topk_scores_experts_sorted_N.to(
+                    routed_output_RD.dtype
+                ).reshape(-1, 1)
+            )
 
         # With SP, token indices are 0-based within the local shard.
         # Map them to global positions in the full-size scatter buffer
@@ -1139,7 +1151,7 @@ class TorchAOTokenDispatcher(AllToAllTokenDispatcher):
         # It also does padding to make sure the number of tokens each expert
         # gets locally is a multiple of `self.pad_multiple`.
         # Note that this will create side effects when wrapping the for-loop
-        # implementation of GroupedExperts, as it does not need padding.
+        # implementation of the expert compute path, as it does not need padding.
         from torchao.prototype.moe_training.ep.permute import permute_and_pad
 
         # pyrefly: ignore [missing-attribute]

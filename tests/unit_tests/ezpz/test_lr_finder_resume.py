@@ -8,6 +8,7 @@
 
 from copy import deepcopy
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import torch
@@ -187,6 +188,21 @@ class _Trainer:
         loss = next(iterator)
         self.dataloader.cursor += 1
         return loss
+
+
+def test_lr_finder_accepts_checkpointer_without_legacy_enable_field(monkeypatch):
+    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(
+        "torchtitan.experiments.ezpz.lr_finder.find_optimal_lr",
+        lambda lrs, losses, smooth_frac: [lrs[-1]],
+    )
+    trainer = _Trainer([8.0, 7.0, 6.0, 5.0, 6.0])
+    del trainer.checkpointer.enable
+
+    run_lr_finder(cast(Any, trainer))
+
+    assert trainer.checkpointer.saved is not None
+    assert trainer.checkpointer.saved["step"] == 5
 
 
 def test_interrupted_resume_matches_uninterrupted_lr_and_ema(monkeypatch):

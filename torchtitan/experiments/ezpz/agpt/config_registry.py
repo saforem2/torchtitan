@@ -6,7 +6,7 @@
 
 import json
 import os
-from dataclasses import is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,6 +36,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_mano,
     default_muon,
@@ -47,6 +48,7 @@ from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.observability.metrics import MetricsProcessor
 from . import model_registry
+from .sft_data import tulu_math_uc_streaming_dataset
 
 TT_CONFIG_JSON_ENV = "TT_CONFIG_JSON"
 
@@ -69,7 +71,7 @@ def agpt_2b_50k() -> FaultTolerantTrainer.Config:
         hf_assets_path="./assets/hf/llama-2-32k-sp",
     )
     cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.checkpoint.keep_latest_k = 0
+    cfg.checkpointer.keep_latest_k = 0
     return cfg
 
 
@@ -99,7 +101,7 @@ def _set_rope_backend(
     from torchtitan.models.common import ComplexRoPE, CosSinRoPE
 
     target_cls = ComplexRoPE.Config if backend == "complex" else CosSinRoPE.Config
-    model = cfg.model_spec.model
+    model = cfg.model
     for layer in model.layers:
         old_rope = layer.attention.rope
         if old_rope is None:
@@ -130,7 +132,7 @@ def _set_fp32_residual(
     # poison the plain flavor for the rest of the process. (Verified: without
     # this, a later agpt_80b() returned fp32res blocks.)
     cfg = copy.deepcopy(cfg)
-    model = cfg.model_spec.model
+    model = cfg.model
     model.layers = [
         AgptFp32ResidualBlock.Config(
             **{f.name: getattr(layer, f.name) for f in fields(layer)}
@@ -162,7 +164,7 @@ def _set_fp32_residual_depth(
     )
 
     cfg = copy.deepcopy(cfg)
-    model = cfg.model_spec.model
+    model = cfg.model
     model.layers = [
         AgptFp32ResidualDepthBlock.Config(
             **{f.name: getattr(layer, f.name) for f in fields(layer)}
@@ -171,7 +173,7 @@ def _set_fp32_residual_depth(
     ]
     # Rebuild the model config itself as the fp32-residual model subclass,
     # preserving every field (incl. the freshly-swapped layers).
-    cfg.model_spec.model = AgptFp32ResidualModel.Config(
+    cfg.model = AgptFp32ResidualModel.Config(
         **{f.name: getattr(model, f.name) for f in fields(model)}
     )
     return cfg
@@ -200,7 +202,7 @@ def agpt_2b_tied() -> FaultTolerantTrainer.Config:
     # validation (tied vs untied loss@fixed-tokens). state_dict_adapter already
     # handles the tied case (adapter lines 82,103).
     cfg = agpt_2b_real()
-    cfg.model_spec.model.enable_weight_tying = True
+    cfg.model.enable_weight_tying = True
     return cfg
 
 
@@ -295,7 +297,7 @@ def agpt(
     # differ (gemma 256128, Llama-3 128256, OLMo-2 100352) stay correct and
     # cannot drift from the model. Guarded because not every loss Config has
     # the field -- ChunkedLossWrapper, set by some configs below, does not.
-    _vocab = getattr(getattr(cfg.model_spec, "model", None), "vocab_size", None)
+    _vocab = getattr(cfg.model, "vocab_size", None)
     if _vocab is not None and hasattr(cfg.loss, "global_vocab_size"):
         cfg.loss.global_vocab_size = int(_vocab)
     cfg.debug.print_config = True
@@ -342,18 +344,18 @@ def agpt(
     cfg.metrics.log_freq = 1
     cfg.metrics.enable_wandb = True
     if compile:
-        cfg.compile = CompileConfig(enable=True)
+        cfg.compile = CompileConfig()
     cfg.parallelism.fsdp_reshard_after_forward = fsdp_reshard_after_forward
     cfg.parallelism.tensor_parallel_degree = tensor_parallel_degree
-    cfg.checkpoint.enable = True
-    cfg.checkpoint.interval = checkpoint_interval
+    assert cfg.checkpointer is not None
+    cfg.checkpointer.interval = checkpoint_interval
     return cfg
 
 
 def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
     return FaultTolerantTrainer.Config(
         hf_assets_path="./tests/assets/hf/gemma-7b",
-        model_spec=model_registry(flavor),
+        model=model_registry(flavor),
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
         optimizer=default_adamw(lr=8e-4),
@@ -371,7 +373,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=MetricsProcessor.Config(log_freq=10),
-        checkpoint=CheckpointManager.Config(
+        checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -446,7 +448,7 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     )
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
-    cfg.checkpoint.enable = False
+    cfg.checkpointer = None
     cfg.training.steps = 10
     cfg.training.max_context_length = 512
     # 2 seqs x 512 = 1024 tokens (#4121 unit change)
@@ -465,7 +467,7 @@ def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
     in docs/production/agpt/30b-exp/README.md Section 6.
     """
     cfg = agpt_debugmodel_local()
-    cfg.model_spec = model_registry("debugmodel_qknorm")
+    cfg.model = model_registry("debugmodel_qknorm")
     return cfg
 
 
@@ -573,8 +575,8 @@ def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
             "first. A missing base would otherwise silently load nothing and "
             "train from random init."
         )
-    cfg.checkpoint.initial_load_path = _MDS_ANNEAL_BASE
-    cfg.checkpoint.initial_load_model_only = True
+    cfg.checkpointer.initial_load_path = _MDS_ANNEAL_BASE
+    cfg.checkpointer.initial_load_model_only = True
     # Stream a raw-text HF math dataset -> gemma tokenization at runtime. Drop
     # the blendcorpus data_file_list path so the HF hub path is used.
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
@@ -603,7 +605,7 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 0.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 1.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-flat"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-flat"
     return cfg
 
 
@@ -621,7 +623,80 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 1.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 0.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
+    return cfg
+
+
+_MDS154391_SFT_BASE = os.environ.get(
+    "MDS154391_SFT_BASE",
+    "/lus/tegu/projects/datascience/foremans/artifacts/"
+    "agpt-2b-mds-stage3-mix-step154391-hf",
+)
+_MDS154391_SFT_DCP = os.environ.get(
+    "MDS154391_SFT_DCP",
+    "/lus/tegu/projects/datascience/foremans/artifacts/"
+    "agpt-2b-mds-stage3-mix-step154391-dcp/step-0",
+)
+
+
+def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
+    """Broad Stage-1 SFT with native Grain streaming and online packing."""
+    base = Path(_MDS154391_SFT_BASE)
+    if not (base / "model-00001-of-00001.safetensors").is_file():
+        raise ValueError(f"MDS154391 HF checkpoint missing at {base}")
+    dcp_base = Path(_MDS154391_SFT_DCP)
+    if not (dcp_base / ".metadata").is_file():
+        raise ValueError(f"MDS154391 DCP checkpoint missing at {dcp_base}")
+
+    cfg = agpt(
+        "2b-mds",
+        local_batch_size=2,
+        activation_checkpoint_mode="none",
+        seq_len=1024,
+        dtype="float32",
+        compile=True,
+        checkpoint_interval=300,
+        hf_assets_path=str(base),
+    )
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=tulu_math_uc_streaming_dataset(),
+        seed=42,
+        shuffle=True,
+        repeat=True,
+        streaming_shuffle_buffer_size=10_000,
+        num_prefetch_microbatches=2,
+    )
+    cfg.optimizer = default_adamw(lr=2e-5)
+    cfg.lr_scheduler.warmup_steps = 0
+    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.lr_scheduler.decay_type = "linear"
+    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.training.steps = 900
+    # 6,144 packed sequences x 1,024 tokens. At 96 DP ranks and LBS=2 this
+    # resolves to gradient accumulation 32, matching the historical recipe.
+    cfg.training.num_tokens_per_train_step = 6_144 * 1_024
+    prior_checkpointer = cfg.checkpointer
+    assert prior_checkpointer is not None
+    cfg.checkpointer = GrainStreamingCheckpointManager.Config(
+        **{
+            field.name: getattr(prior_checkpointer, field.name)
+            for field in fields(prior_checkpointer)
+        }
+    )
+    cfg.checkpointer.initial_load_path = str(dcp_base)
+    cfg.checkpointer.initial_load_in_hf = False
+    cfg.checkpointer.initial_load_model_only = True
+    cfg.checkpointer.folder = "checkpoints/agpt2b-mds154391-tulu-math-uc-streaming"
+    cfg.checkpointer.interval = 300
+    cfg.checkpointer.keep_latest_k = 0
+    # FaultTolerantTrainer retains ``checkpoint`` as a legacy CLI alias and its
+    # post-init synchronizes that alias back into ``checkpointer``. Keep both
+    # references identical so config parsing cannot erase this specialized
+    # manager or its MDS initialization/resume paths.
+    cfg.checkpoint = cfg.checkpointer
+    cfg.metrics.log_freq = 10
+    cfg.metrics.enable_wandb = True
+    cfg.validator = None
     return cfg
 
 
@@ -657,7 +732,7 @@ def agpt_2b_mds_mix_owm() -> FaultTolerantTrainer.Config:
     cfg = _agpt_2b_mds_mix_base()
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET  # open-web-math/open-web-math
     cfg.dataloader.dataset_path = None
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-owm"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-mix-owm"
     return cfg
 
 
@@ -672,7 +747,7 @@ def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
     cfg = _agpt_2b_mds_mix_base()
     cfg.dataloader.dataset = "fineweb_edu_local"
     cfg.dataloader.dataset_path = None
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-mds-mix-edu"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-mix-edu"
     return cfg
 
 
@@ -708,7 +783,7 @@ def _agpt_2b_mds_mix_blend(
         seed=42,
         stopping_strategy="all_exhausted",
     )
-    cfg.checkpoint.folder = folder
+    cfg.checkpointer.folder = folder
     return cfg
 
 
@@ -763,7 +838,7 @@ def _agpt_2b_mds_mix_blend_src(
         seed=42,
         stopping_strategy="all_exhausted",
     )
-    cfg.checkpoint.folder = folder
+    cfg.checkpointer.folder = folder
     return cfg
 
 
@@ -833,8 +908,8 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
             "path of the step-92859 DCP. A missing base would silently load "
             "nothing and train from random init."
         )
-    cfg.checkpoint.initial_load_path = _OLMO_ANNEAL_BASE
-    cfg.checkpoint.initial_load_model_only = True
+    cfg.checkpointer.initial_load_path = _OLMO_ANNEAL_BASE
+    cfg.checkpointer.initial_load_model_only = True
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
     cfg.dataloader.dataset_path = None
     cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
@@ -850,7 +925,7 @@ def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 0.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 1.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
     return cfg
 
 
@@ -861,7 +936,7 @@ def agpt_2b_olmo_anneal_wsd() -> FaultTolerantTrainer.Config:
     cfg.lr_scheduler.decay_ratio = 1.0
     cfg.lr_scheduler.decay_type = "linear"
     cfg.lr_scheduler.min_lr_factor = 0.0
-    cfg.checkpoint.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
     return cfg
 
 
@@ -1824,25 +1899,17 @@ def agpt_70b_wide() -> FaultTolerantTrainer.Config:
 # 8530891. Anything at or above the onset blows up on the first optimizer step.
 _AGPT_80B_LR_ONSET = 1.36e-6
 
-# Identify 80B by model_spec.flavor, NOT by geometry. Geometry does not
-# separate the sizes: ezpz_agpt_50b_wide and ezpz_agpt_70b_wide are BOTH
-# dim=9216, the same width as the 80B base flavor, so a `dim >= 8192` test
-# would block them on a ceiling measured for a different model. Every 80B
-# variant's flavor starts with "80B" (80B, 80B_alt, 80B_wide, 80B_deep,
-# 80B_deep_alt, 80B_qknorm, 80B_qknorm_softcap, 80B_softcap) and no other
-# size does -- verified by enumerating every agpt config in the registry.
-_AGPT_80B_FLAVOR_PREFIX = "80b"
+# Exact 80B geometries. Width alone is insufficient: 50B and 70B variants
+# also use dim=9216.
+_AGPT_80B_GEOMETRIES = {(9216, 84), (10752, 48), (7680, 96)}
 
 
 def _is_80b_config(cfg: FaultTolerantTrainer.Config) -> bool:
     """True if *cfg* is an 80B-class agpt model."""
-    try:
-        flavor = cfg.model_spec.flavor
-    except AttributeError:
-        return False
-    if not isinstance(flavor, str):
-        return False
-    return flavor.lower().startswith(_AGPT_80B_FLAVOR_PREFIX)
+    model = cfg.model
+    return (getattr(model, "dim", None), len(getattr(model, "layers", ()))) in (
+        _AGPT_80B_GEOMETRIES
+    )
 
 
 def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:

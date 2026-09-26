@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -13,11 +15,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention.flex_attention import and_masks, BlockMask
 
-from torchtitan.config import ParallelismConfig
-from torchtitan.distributed.parallel_dims import ParallelDims
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
+from torchtitan.distributed.parallel_dims import MeshAxisName, ParallelDims
 from torchtitan.distributed.spmd_types import (
     annotate_input_spmd_types,
+    spmd_dense_sp_enabled,
     spmd_local_context,
+    spmd_mesh_group,
 )
 from torchtitan.distributed.utils import is_in_batch_invariant_mode
 from torchtitan.models.common.attention import (
@@ -36,8 +41,11 @@ from torchtitan.models.common.decoder_sharding import decoder_input_sharding
 from torchtitan.models.common.embedding import Embedding
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.multimodal import (
+    add_zero_vision_dependency,
+    build_dummy_vision_inputs,
     build_vision_bank_indices,
     gather_vision_embeds,
+    MultimodalModel,
 )
 from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.vision_encoder_sharding import multimodal_input_sharding
@@ -46,6 +54,7 @@ from torchtitan.models.utils import (
     quadratic_attention_flops_per_token,
 )
 from torchtitan.protocols.module import Module
+from .state_dict_adapter import MuseGlimmerStateDictAdapter
 
 from .vision_encoder import MuseGlimmerVisionAdapter, MuseGlimmerVisionEncoder
 
@@ -114,6 +123,18 @@ class Attention(GQAttention):
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        tp_group = spmd_mesh_group(MeshAxisName.TP)
+        if tp_group is not None:
+            # qkv and the output gate both consume x, so gather once at their
+            # common attention boundary.
+            x_TD = spmd.redistribute(
+                x_TD,
+                tp_group,
+                src=spmd.S(0) if spmd_dense_sp_enabled() else spmd.I,
+                dst=spmd.R,
+                backward_options={"op_dtype": x_TD.dtype},
+            )
+
         num_tokens = x_TD.shape[0]
         xq, xk, xv = self.qkv_linear(x_TD)
 
@@ -259,7 +280,16 @@ class EmbeddingWithNorm(Module):
         return self.norm(self.embedding(tokens))
 
 
-class MuseGlimmerModel(Decoder):
+class MuseGlimmerModel(MultimodalModel):
+    state_dict_adapter_cls = MuseGlimmerStateDictAdapter
+    multimodal_encoder_fqns = ("vision_encoder",)
+    pipeline_first_stage_module_fqns = (
+        "vision_encoder",
+        "vision_adapter",
+        "vision_projection",
+        "perception_emb_norm",
+    )
+
     """Muse Glimmer decoder-only language model.
 
     Args:
@@ -357,6 +387,33 @@ class MuseGlimmerModel(Decoder):
             config.vision_adapter.build() if config.vision_adapter is not None else None
         )
 
+    def parallelize(
+        self,
+        *,
+        parallel_dims: ParallelDims,
+        training: TrainingConfig,
+        parallelism: ParallelismConfig,
+        compile_config: CompileConfig | None,
+        ac_config: ActivationCheckpointingConfig | None,
+        dump_folder: str,
+        skip_dp: bool = False,
+    ) -> MuseGlimmerModel:
+        if self.vision_encoder is not None and parallel_dims.tp_enabled:
+            assert self.vision_encoder.num_heads % parallel_dims.tp == 0, (
+                f"vision num_heads ({self.vision_encoder.num_heads}) must be "
+                f"divisible by TP degree ({parallel_dims.tp})"
+            )
+
+        return super().parallelize(
+            parallel_dims=parallel_dims,
+            training=training,
+            parallelism=parallelism,
+            compile_config=compile_config,
+            ac_config=ac_config,
+            dump_folder=dump_folder,
+            skip_dp=skip_dp,
+        )
+
     def preprocess_inputs(
         self,
         input_dict: dict[str, torch.Tensor],
@@ -365,8 +422,10 @@ class MuseGlimmerModel(Decoder):
         parallelism: ParallelismConfig,
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
+        **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
         """Build first-stage vision-bank indices and masks, then shard the batch."""
+        del kwargs
         from .sharding import vision_bank_indices_placement
 
         batch: dict[str, Any] = dict(input_dict)
@@ -375,11 +434,12 @@ class MuseGlimmerModel(Decoder):
         pixel_values_videos = batch.get("pixel_values_videos")
         grid_thw_videos = batch.get("grid_thw_videos")
         special_tokens = batch.get("special_tokens")
+        has_images = pixel_values is not None
         if pixel_values_videos is not None or grid_thw_videos is not None:
             raise NotImplementedError(
                 "Muse Glimmer vision encoder does not support video inputs."
             )
-        if pixel_values is not None:
+        if has_images:
             vision_encoder_config = cast(
                 MuseGlimmerModel.Config, self.config
             ).vision_encoder
@@ -447,20 +507,23 @@ class MuseGlimmerModel(Decoder):
         return inputs, labels, batch
 
     def _get_vision_features(
-        self, pixel_values: torch.Tensor, grid_thw: torch.Tensor
+        self,
+        pixel_values: torch.Tensor | None,
+        grid_thw: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Encode packed ``pixel_values`` and adapter-project into features.
+        """Encode packed pixels into the normalized LLM-dimension vision bank.
 
-        Mirrors qwen3_5's ``_get_vision_embeds``: runs the owned encoder +
-        adapter and returns ``[T, adapter_dim]``. ``pixel_values`` contains all
-        visual patches packed into one sequence, and ``grid_thw`` describes each
-        visual item's contiguous segment.
+        ``pixel_values`` contains all visual patches packed into one sequence,
+        and ``grid_thw`` describes each visual item's contiguous segment.
         """
         assert self.vision_encoder is not None and self.vision_adapter is not None
-        feats = self.vision_adapter(
+        assert self.vision_projection is not None
+        assert self.perception_emb_norm is not None
+        assert pixel_values is not None and grid_thw is not None
+        vision_features_VD = self.vision_adapter(
             self.vision_encoder(pixel_values, grid_thw=grid_thw)
         )
-        return feats
+        return self.perception_emb_norm(self.vision_projection(vision_features_VD))
 
     def _prepare_multimodal_embeds(
         self,
@@ -471,17 +534,24 @@ class MuseGlimmerModel(Decoder):
         vision_bank_indices_T: torch.Tensor | None,
     ) -> torch.Tensor:
         """Build and inject image embeddings on the embedding pipeline stage."""
-        if pixel_values is None:
+        if self.vision_encoder is None:
             return h_TD
-        assert grid_thw is not None
-        assert vision_bank_indices_T is not None
-        assert self.vision_projection is not None
-        assert self.perception_emb_norm is not None
 
-        vision_features_VD = self._get_vision_features(pixel_values, grid_thw)
-        vision_bank_VD = self.perception_emb_norm(
-            self.vision_projection(vision_features_VD)
-        )
+        image_is_dummy = pixel_values is None
+        if image_is_dummy:
+            grid_size = self.vision_encoder.downsample_factor
+            pixel_values, grid_thw = build_dummy_vision_inputs(
+                patch_dim=self.vision_encoder.conv1_linear.in_features,
+                grid_thw=(1, grid_size, grid_size),
+                device=h_TD.device,
+            )
+        vision_bank_VD = self._get_vision_features(pixel_values, grid_thw)
+        if image_is_dummy:
+            return add_zero_vision_dependency(h_TD, vision_bank_VD)
+
+        assert grid_thw is not None
+        if vision_bank_indices_T is None:
+            raise ValueError("vision_bank_indices_T is required for image inputs")
         return gather_vision_embeds(
             h_TD,
             vision_bank_VD=vision_bank_VD,

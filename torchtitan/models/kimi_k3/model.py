@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -12,11 +14,16 @@ import torch
 from torch import nn
 from torch.nn.attention.flex_attention import BlockMask
 
-from torchtitan.config import ParallelismConfig
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.distributed import utils as dist_utils
+from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.parallel_dims import MeshAxisName, ParallelDims
 from torchtitan.distributed.spmd_types import (
     annotate_input_spmd_types,
+    annotate_replicated_parameters,
+    spmd_dense_sp_enabled,
     spmd_local_context,
+    spmd_mesh_group,
 )
 from torchtitan.models.common import FeedForward, Linear
 from torchtitan.models.common.attention import (
@@ -31,7 +38,10 @@ from torchtitan.models.common.attention import (
 from torchtitan.models.common.decoder import Decoder
 from torchtitan.models.common.decoder_sharding import decoder_input_sharding
 from torchtitan.models.common.multimodal import (
+    add_zero_vision_dependency,
+    build_dummy_vision_inputs,
     get_vision_positions,
+    MultimodalModel,
     scatter_vision_embeds,
 )
 from torchtitan.models.common.nn_modules import RMSNorm
@@ -46,6 +56,7 @@ from torchtitan.protocols.module import Module
 
 from .kda import KDA
 from .moe import KimiLatentMoE
+from .state_dict_adapter import KimiK3StateDictAdapter
 from .vision_encoder import KimiK3VisionEncoder
 
 KimiK3AttentionMaskDict = dict[str, BlockMask | VarlenMetadata | None]
@@ -111,6 +122,18 @@ class KimiMLAAttention(BaseAttention):
         positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         del positions
+
+        tp_group = spmd_mesh_group(MeshAxisName.TP)
+        if tp_group is not None:
+            # The MLA and gate projections all consume x. Gather once at their
+            # common attention boundary.
+            x_TD = spmd.redistribute(
+                x_TD,
+                tp_group,
+                src=spmd.S(0) if spmd_dense_sp_enabled() else spmd.I,
+                dst=spmd.R,
+                backward_options={"op_dtype": x_TD.dtype},
+            )
 
         q_THK = local_head_split(
             self.wq_b(self.q_norm(self.wq_a(x_TD))), self.q_head_dim
@@ -286,7 +309,18 @@ class KimiK3TransformerBlock(Module):
         return prefix_sum_TD + h_TD, block_residual_TND
 
 
-class KimiK3Model(Decoder):
+class KimiK3Model(MultimodalModel):
+    state_dict_adapter_cls = KimiK3StateDictAdapter
+    multimodal_encoder_fqns = ("vision_encoder",)
+
+    @classmethod
+    def _register_optimizer_hooks(cls, optimizers, model_parts, parallel_dims) -> None:
+        from torchtitan.components.optimizer import register_moe_quantile_balancing_hook
+
+        register_moe_quantile_balancing_hook(optimizers, model_parts, parallel_dims)
+
+    supports_pipeline_parallel = False
+
     @dataclass(kw_only=True, slots=True)
     class Config(Decoder.Config):
         layers: list[KimiK3TransformerBlock.Config]
@@ -354,6 +388,51 @@ class KimiK3Model(Decoder):
             config.vision_encoder.build() if config.vision_encoder is not None else None
         )
 
+    def parallelize(
+        self,
+        *,
+        parallel_dims: ParallelDims,
+        training: TrainingConfig,
+        parallelism: ParallelismConfig,
+        compile_config: CompileConfig | None,
+        ac_config: ActivationCheckpointingConfig | None,
+        dump_folder: str,
+        skip_dp: bool = False,
+    ) -> KimiK3Model:
+        unsupported = [
+            name
+            for name, enabled in (
+                ("pipeline parallel", parallel_dims.pp_enabled),
+                ("context parallel", parallel_dims.cp_enabled),
+            )
+            if enabled
+        ]
+        if unsupported:
+            raise NotImplementedError(
+                "Kimi K3 currently supports FSDP2 data parallelism only; "
+                f"disable {', '.join(unsupported)}."
+            )
+        if compile_config is not None and "model" in compile_config.components:
+            raise NotImplementedError("Kimi K3 does not support model compilation yet.")
+
+        from torchtitan.distributed.utils import get_spmd_context
+
+        with get_spmd_context(parallel_dims=parallel_dims):
+            annotate_replicated_parameters(self, parallel_dims)
+            self._parallelize(parallel_dims)
+            if ac_config is not None:
+                policy = ac_config.build(dump_folder=dump_folder)
+                policy.apply(self)
+                if self.vision_encoder is not None:
+                    policy.apply(self.vision_encoder)
+            if not skip_dp:
+                self._apply_fsdp(
+                    parallel_dims=parallel_dims,
+                    training=training,
+                    parallelism=parallelism,
+                )
+        return self
+
     def preprocess_inputs(
         self,
         input_dict: dict[str, torch.Tensor],
@@ -362,8 +441,10 @@ class KimiK3Model(Decoder):
         parallelism: ParallelismConfig,
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
+        **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
         """Build masks and annotate K3 multimodal inputs."""
+        del kwargs
         batch: dict[str, Any] = dict(input_dict)
         positions = batch.get("positions")
         padding_mask = batch.get("padding_mask", None)
@@ -381,6 +462,12 @@ class KimiK3Model(Decoder):
 
         input_sharding = {**decoder_input_sharding(), **multimodal_input_sharding()}
         batch = annotate_input_spmd_types(parallel_dims, batch, input_sharding)
+        attention_masks = batch.get("attention_masks")
+        if attention_masks is not None:
+            kda_metadata = attention_masks.get("kda")
+            if isinstance(kda_metadata, VarlenMetadata):
+                with dist_utils.get_spmd_context(parallel_dims=parallel_dims):
+                    kda_metadata.annotate_spmd_types()
 
         inputs = batch.pop("input")
         labels = batch.pop("labels")
@@ -435,16 +522,27 @@ class KimiK3Model(Decoder):
                 "pixel_values and grid_thw must either both be provided or "
                 "both be omitted."
             )
-        if pixel_values is None:
-            return embeddings_TD
+        is_dummy = pixel_values is None
+        if is_dummy:
+            if self.vision_encoder is None:
+                return embeddings_TD
+            kernel_h, kernel_w = self.vision_encoder.merge_kernel_size
+            pixel_values, grid_thw = build_dummy_vision_inputs(
+                patch_dim=self.vision_encoder.patch_embed.in_features,
+                grid_thw=(1, kernel_h, kernel_w),
+                device=embeddings_TD.device,
+            )
         assert grid_thw is not None
         if self.vision_encoder is None:
             raise ValueError("pixel_values were provided without a vision encoder.")
-        if special_tokens is None:
-            raise ValueError("special_tokens are required for multimodal inputs.")
 
         pixel_values = pixel_values.to(self.vision_encoder.patch_embed.weight.dtype)
         vision_embeds = self.vision_encoder(pixel_values, grid_thw=grid_thw)
+        if is_dummy:
+            return add_zero_vision_dependency(embeddings_TD, vision_embeds)
+
+        if special_tokens is None:
+            raise ValueError("special_tokens are required for multimodal inputs.")
         # MoonViT collapses time and merges spatially, so the text-side token
         # count per item is (h/kh)*(w/kw), independent of t.
         kernel_h, kernel_w = self.vision_encoder.merge_kernel_size

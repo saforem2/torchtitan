@@ -6,38 +6,51 @@
 #PBS -q workq
 #PBS -j oe
 #
-# Stage 1 (CoT plan): cold-start CoT-SFT smoke. Continue-SFT the instruction-
-# tuned agpt-2b (checkpoint-900-hf) on gsm8k-r1cot -- gsm8k rationales wrapped
+# Stage 2 of the MDS154391 reproduction: continue the best broad-SFT semantic
+# checkpoint (step 600) on gsm8k-r1cot -- gsm8k rationales wrapped
 # in the <think>/<answer> envelope -- to teach the model to EMIT reasoning
-# traces. 7473 examples, 2 epochs, 8N: a short smoke (~10-20 min train).
+# traces. 7473 examples, 3 epochs, 2N, packed online gives checkpoint 93.
 #
 # Gate (measured by scripts/eval/eval_cot_gsm8k.py on a saved checkpoint):
 #   format hit-rate ~0 -> >90%, CoT accuracy no worse than the 0.15 baseline.
 #
 # Usage: qsub torchtitan/experiments/ezpz/rl/scripts/sft/aurora2b_gsm8k_r1cot_sft.sh
-# no set -e (module load returns nonzero under Lmod); pipefail only.
+# Do not use `set -e`: module load may return nonzero under Lmod.  The launch
+# pipeline is checked explicitly below so training failures cannot be hidden.
+set -u
 set -o pipefail
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
 
 cd "${SUBMIT_DIR}"
-source .venv/bin/activate
+actual_commit=$(git rev-parse HEAD) || exit 2
+[[ "${actual_commit}" == "${EXPECTED_COMMIT}" ]] || {
+    echo "FATAL: commit mismatch expected=${EXPECTED_COMMIT} actual=${actual_commit}"
+    exit 2
+}
+git diff --quiet && git diff --cached --quiet || {
+    echo "FATAL: tracked worktree changes present"
+    exit 2
+}
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 
 # Base = the shipped full-mix SFT deliverable (instruction-tuned; has seen math
 # rationales but does not emit a delimited <think> block). Continue-SFT from it.
-MODEL_PATH="${MODEL_PATH:-outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
-CKPT_DIR="${CKPT_DIR:-outputs/sft/agpt2b-gsm8k-r1cot-2n}"
+MODEL_PATH="${MODEL_PATH:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/evals/step-600/hf}"
+CKPT_DIR="${CKPT_DIR:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2}"
 MAX_LENGTH="${MAX_LENGTH:-2048}"      # MUST be >1024: the <answer> tail would truncate
 NUM_EPOCHS="${NUM_EPOCHS:-3}"
 LR="${LR:-2e-5}"
@@ -49,7 +62,7 @@ fi
 LOG_DIR="logs/sft-agpt2b-gsm8k-r1cot-2n-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}" "${CKPT_DIR}"
 
-echo "=== Stage 1 cold-start CoT-SFT: agpt-2b ckpt-900 + gsm8k-r1cot ===" \
+echo "=== Stage 2 CoT-SFT: MDS154391 step 600 + gsm8k-r1cot ===" \
     | tee "${LOG_DIR}/run.log"
 echo "base=${MODEL_PATH} epochs=${NUM_EPOCHS} lr=${LR} max_len=${MAX_LENGTH}" \
     | tee -a "${LOG_DIR}/run.log"
@@ -71,6 +84,11 @@ ezpz launch python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --save_strategy epoch \
     --save_total_limit 4 \
     --report_to wandb \
-    2>&1 | tee -a "${LOG_DIR}/run.log" || true
+    2>&1 | tee -a "${LOG_DIR}/run.log"
+rc=${PIPESTATUS[0]}
+if (( rc != 0 )); then
+    echo "FATAL: Stage 2 training failed rc=${rc}" | tee -a "${LOG_DIR}/run.log"
+    exit "${rc}"
+fi
 
 echo "=== DONE: log ${LOG_DIR}/, ckpts ${CKPT_DIR}/ ===" | tee -a "${LOG_DIR}/run.log"

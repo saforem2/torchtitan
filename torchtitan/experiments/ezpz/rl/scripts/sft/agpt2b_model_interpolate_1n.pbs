@@ -1,0 +1,26 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-merge
+#PBS -l walltime=00:30:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+: "${BASE:?submit with -v BASE=<broad-model-dir>}"
+: "${TUNED:?submit with -v TUNED=<math-model-dir>}"
+: "${OUTPUT:?submit with -v OUTPUT=<new-output-dir>}"
+: "${ALPHA:?submit with -v ALPHA=<0..1>}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
+git diff --quiet && git diff --cached --quiet || exit 14
+"$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/interpolate_hf_checkpoints.py \
+  --base "$BASE" --tuned "$TUNED" --output "$OUTPUT" --alpha "$ALPHA"
+sha256sum "$OUTPUT/model.safetensors" "$OUTPUT/tokenizer.json" "$OUTPUT/config.json"

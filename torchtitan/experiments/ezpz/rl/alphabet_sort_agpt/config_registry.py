@@ -5,11 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 """GRPO+LoRA-on-XPU config for AuroraGPT-2B (the SFT checkpoint-900 deliverable).
 
-Thin ezpz overlay: imports the UPSTREAM `torchtitan.experiments.rl` engine and
+Thin ezpz overlay: imports the UPSTREAM `torchtitan.rl` engine and
 backs it with OUR `ezpz.agpt` model (`model_registry("2b-rl", converters=...)`).
 Nothing in `experiments/rl/` or core is modified. `ezpz.agpt.model_registry`
-returns a `FaultTolerantModelSpec`, which the RL engine consumes as a plain
-`ModelSpec` (it reads only common fields).
+returns the model config consumed directly by the RL controller.
 
 Invoke via the arbitrary-dotted-path `--module` branch of the ConfigManager:
 
@@ -35,79 +34,83 @@ below caps its autotune. The generator uses vLLM own attention regardless.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import torch
+from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.config.transform.lora import LoRAConverter
+from torchtitan.components.loss import ChunkedLossWrapper
+
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import LRSchedulersContainer
-from torchtitan.components.optimizer import default_adamw
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TrainingConfig,
+from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
+from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config.transform import (
+    LinearLoRAHandler,
+    LoRATransform,
+    transform_model_config_,
 )
+from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
 )
-from torchtitan.experiments.rl.actors.generator import (
-    SamplingConfig,
-    VLLMCudagraphConfig,
-    VLLMGenerator,
-)
-from torchtitan.experiments.rl.actors.trainer import PolicyTrainer
-from torchtitan.experiments.rl.components.batcher import BatchConfig, Batcher
-from torchtitan.experiments.rl.controller import (
-    AsyncLoopConfig,
-    Controller,
-    ValidationConfig,
-)
-from torchtitan.experiments.rl.examples.alphabet_sort.data import AlphabetSortDataset
-from torchtitan.experiments.rl.examples.alphabet_sort.rollouter import (
-    AlphabetSortRollouter,
-)
-from torchtitan.experiments.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
-from torchtitan.experiments.rl.losses import GRPOLoss
-from torchtitan.config.transform.cast_linear import LMHeadCastConverter
-from torchtitan.experiments.rl.models.vllm_registry import InferenceParallelismConfig
-from torchtitan.experiments.rl.observability.metrics import MetricsProcessor
-from torchtitan.components.renderer import RendererConfig
-from torchtitan.experiments.rl.rubrics import Rubric
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
 )
+from torchtitan.models.common.config_utils import decoder_vocab_size
+from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
+from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
+from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
+from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
+from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
+from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
+from torchtitan.rl.losses import GRPOLoss
+from torchtitan.rl.observability.metrics import MetricsProcessor
+from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
+from torchtitan.rl.rubric import Rubric
+from torchtitan.rl.trainer import Trainer
 
 
-def _agpt_rl_model_spec(*, lora_rank: int = 8, lora_alpha: float = 16.0):
+def _agpt_rl_model_config(*, lora_rank: int = 8, lora_alpha: float = 16.0):
     """`ezpz.agpt.model_registry("2b-rl")` for RL: LoRA (wqkv/wo) + fp32 lm_head.
 
     Converter order: LoRA first (wraps the base linears in frozen+adapter form),
     then the lm_head fp32 cast (RL logprob/KL math needs fp32 logits).
     """
-    return agpt_model_registry(
+    model_config = agpt_model_registry(
         "2b-rl",
-        converters=[
-            LoRAConverter.Config(rank=lora_rank, alpha=lora_alpha, target_modules=["wqkv", "wo"]),
-            LMHeadCastConverter.Config(),
-        ],
+        converters=[LMHeadCastConverter.Config()],
     )
+    model_config = cast(
+        Any,
+        transform_model_config_(
+            model_config,
+            [
+                LoRATransform(
+                    handlers=(LinearLoRAHandler(),),
+                    rank=lora_rank,
+                    alpha=lora_alpha,
+                    target_modules=["wqkv", "wo"],
+                )
+            ],
+        ),
+    )
+    return model_config
 
 
 def _agpt_rollouter(
-    *, max_turns: int, max_names_per_turn: int, shaped: bool = False
-) -> AlphabetSortRollouter.Config:
-    """Upstream AlphabetSortRollouter with: our few-shot env, a linear reward
-    (similarity_power=1), and the given task difficulty."""
-    return AlphabetSortRollouter.Config(
-        train_dataset=AlphabetSortDataset.Config(
-            seed=42, max_turns=max_turns, max_names_per_turn=max_names_per_turn
-        ),
-        validation_dataset=AlphabetSortDataset.Config(
-            seed=99, max_turns=max_turns, max_names_per_turn=max_names_per_turn
-        ),
+    *,
+    max_turns: int,
+    max_names_per_turn: int,
+    shaped: bool = False,
+    few_shot: bool = True,
+) -> Rollouter.Config:
+    """Configure alphabet-sort rollout prompts and reward shaping."""
+    worker = RolloutWorker.Config(
         rubric=Rubric.Config(
             reward_fns=[
                 ShapedRewardAlphabetSort.Config(weight=1.0)
@@ -115,7 +118,20 @@ def _agpt_rollouter(
                 else RewardAlphabetSort.Config(weight=1.0, similarity_power=1)
             ]
         ),
-        message_env=AgptFewShotAlphabetSortEnv.Config(),
+        message_env=(
+            AgptFewShotAlphabetSortEnv.Config()
+            if few_shot
+            else AlphabetSortEnv.Config()
+        ),
+    )
+    return Rollouter.Config(
+        train_dataset=AlphabetSortDataset.Config(
+            seed=42, max_turns=max_turns, max_names_per_turn=max_names_per_turn
+        ),
+        validation_dataset=AlphabetSortDataset.Config(
+            seed=99, max_turns=max_turns, max_names_per_turn=max_names_per_turn
+        ),
+        worker=worker,
     )
 
 
@@ -134,6 +150,7 @@ def _agpt_grpo_config(
     # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
     # before the model is compiled; recompile the cached flex kernel.
     from torch.nn.attention.flex_attention import flex_attention
+
     from torchtitan.models.common.attention import FlexInnerAttention
 
     FlexInnerAttention.inductor_configs = {
@@ -144,8 +161,11 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
+    model_config = _agpt_rl_model_config(
+        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
+    )
     return Controller.Config(
-        model_spec=_agpt_rl_model_spec(lora_rank=lora_rank, lora_alpha=2.0 * lora_rank),
+        model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -155,47 +175,57 @@ def _agpt_grpo_config(
             num_prompts_per_train_step=num_groups_per_train_step,
             num_samples_per_prompt=8,
             validation=ValidationConfig(num_samples=20),
-            batcher=Batcher.Config(
-                batch=BatchConfig(local_batch_size=2, seq_len=2048),
-            ),
         ),
-        compile=CompileConfig(enable=True, backend="aot_eager"),
+        compile=CompileConfig(backend="aot_eager"),
         rollouter=_agpt_rollouter(
             max_turns=max_turns,
             max_names_per_turn=max_names_per_turn,
             shaped=shaped_reward,
         ),
-        # name="auto": resolve gemma/llama tokenizer from hf_assets_path. The staged
-        # ckpt dir must carry a chat_template (SFT gemma template injected at staging
-        # time -- scripts/stage_agpt2b.sh).
-        renderer=RendererConfig(name="auto", enable_thinking=False),
+        # AuroraGPT uses the original Gemma chat template with
+        # <start_of_turn>/<end_of_turn>. Gemma4RendererConfig expects the newer
+        # <|turn> vocabulary, so use the checkpoint's own Jinja template.
+        renderer=ExtraStopTokensRendererConfig(
+            renderer=from_renderers(DefaultRendererConfig()),
+            extra_stop_token_ids=(1, 107),
+        ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
-        trainer=PolicyTrainer.Config(
+        trainer=Trainer.Config(
             optimizer=default_adamw(lr=lr),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2, decay_type="linear"
             ),
-            training=TrainingConfig(dtype="float32"),
+            training=TrainingConfig(
+                dtype="float32",
+                disable_cuda_graphs=True,
+                num_tokens_per_microbatch_per_dp_rank=2 * 2048,
+                max_context_length=2048,
+            ),
             parallelism=ParallelismConfig(
                 data_parallel_shard_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(
-                enable=True,
+            checkpointer=CheckpointManager.Config(
                 initial_load_in_hf=True,
                 interval=20,
                 last_save_model_only=False,
             ),
-            loss=GRPOLoss.Config(clip_eps=clip_eps),
+            loss=ChunkedLossWrapper.Config(
+                num_chunks=8,
+                loss_fn=GRPOLoss.Config(
+                    clip_eps=clip_eps,
+                    global_vocab_size=decoder_vocab_size(model_config),
+                ),
+            ),
         ),
         generator=VLLMGenerator.Config(
             # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
             model_dtype="float32",
             gpu_memory_limit=0.70,
-            cudagraph=VLLMCudagraphConfig(enable=False),
+            cuda_graph=VLLMCudaGraphConfig(mode="NONE"),
             parallelism=InferenceParallelismConfig(
                 data_parallel_degree=1, tensor_parallel_degree=1
             ),
-            checkpoint=CheckpointManager.Config(enable=False),
+            checkpointer=None,
             sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=700),
         ),
     )
@@ -228,8 +258,48 @@ def rl_grpo_lora_agpt_2b_easy() -> Controller.Config:
     )
 
 
+def rl_sync_agpt_2b_clean() -> Controller.Config:
+    """One-step clean-prompt config for TorchStore synchronization validation."""
+    config = _agpt_grpo_config(
+        num_training_steps=1,
+        num_groups_per_train_step=2,
+        max_turns=1,
+        max_names_per_turn=3,
+        lr=2e-6,
+    )
+    config.rollouter = _agpt_rollouter(
+        max_turns=1,
+        max_names_per_turn=3,
+        few_shot=False,
+    )
+    config.async_loop.validation = ValidationConfig(num_samples=8)
+    return config
+
+
+def rl_grpo_agpt_2b_bounded_v3() -> Controller.Config:
+    """Three-step GRPO canary for the clean/adversarial-gated robust-v3 policy.
+
+    Keep the experiment deliberately small while sampling a harder one-turn
+    distribution (up to five names) than the direct release gate. The launcher
+    supplies the exact robust-v3 HF artifact and retains all raw rollouts.
+    """
+    config = _agpt_grpo_config(
+        num_training_steps=3,
+        num_groups_per_train_step=4,
+        max_turns=1,
+        max_names_per_turn=5,
+        lr=2e-6,
+    )
+    config.async_loop.validation = ValidationConfig(num_samples=8)
+    assert config.trainer.checkpointer is not None
+    config.trainer.checkpointer.interval = 1
+    config.generator.sampling.max_tokens = 128
+    return config
+
+
 # --- "beat v5" sweep (2026-07-19): all on the easy task (the winner), each
 # --- combining/extending the levers v5/v6 left on the table. ---
+
 
 def rl_grpo_lora_agpt_2b_w1() -> Controller.Config:
     """w1 = v5 easy task + v6's higher LR (5e-5). The untested v5xv6 combo:

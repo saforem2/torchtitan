@@ -1,0 +1,66 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -l walltime=00:30:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+
+# Semantic GSM8K-200 gate for the completed MDS154391 Stage-2 HF model.
+set -o pipefail
+
+module load oneapi/release/2025.3.1 hdf5 pti-gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export CCL_ATL_SYNC_COLL=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export ZE_AFFINITY_MASK=0
+export TORCH_CPP_LOG_LEVEL=ERROR
+export TORCHINDUCTOR_MAX_AUTOTUNE=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
+export HF_DATASETS_OFFLINE=1
+export HF_HUB_OFFLINE=1
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+MODEL="${MODEL:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/eval-step93/gsm8k-200/generations.jsonl}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
+cd "${SUBMIT_DIR}" || exit 9
+actual_commit=$(git rev-parse HEAD) || exit 2
+[[ "${actual_commit}" == "${EXPECTED_COMMIT}" ]] || {
+    echo "FATAL: commit mismatch expected=${EXPECTED_COMMIT} actual=${actual_commit}"
+    exit 2
+}
+git diff --quiet && git diff --cached --quiet || {
+    echo "FATAL: tracked worktree changes present"
+    exit 2
+}
+[[ -s "${MODEL}/model.safetensors" ]] || { echo "FATAL: model missing"; exit 3; }
+[[ -s "${MODEL}/tokenizer.json" ]] || { echo "FATAL: tokenizer missing"; exit 3; }
+mkdir -p "$(dirname "${OUT}")"
+rm -f "${OUT}"
+
+echo "MDS154391_STAGE2_EVAL_START commit=${actual_commit} model=${MODEL}"
+python3 -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+    --model "${MODEL}" --limit 200 --dtype float32 --max-tokens 768 --out "${OUT}"
+rc=${PIPESTATUS[0]}
+if (( rc != 0 )); then
+    echo "MDS154391_STAGE2_EVAL_FAILED rc=${rc}"
+    exit "${rc}"
+fi
+python3 - "${OUT}" <<'PY'
+import json, sys
+p = sys.argv[1]
+with open(p, encoding="utf-8") as f:
+    rows = [json.loads(line) for line in f if line.strip()]
+assert len(rows) == 200, len(rows)
+assert all("prompt" in row and "generation" in row for row in rows)
+print(f"MDS154391_STAGE2_EVAL_ROWS rows={len(rows)} correct={sum(bool(r['correct']) for r in rows)} format={sum(bool(r['format_ok']) for r in rows)}")
+PY
+echo "MDS154391_STAGE2_EVAL_DONE"
