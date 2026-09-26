@@ -6880,6 +6880,24 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Upstream changes included GraphTrainer bucketing fixes,
   SAC + FSDP improvements, and Qwen3-VL fused QKV support
 
+## 2026-09-26 — Aurora chain-3 exact replay
+
+- Exact 512-node replay `8870516` started from the intended isolated output
+  path but failed before checkpoint restore or training. All ranks hit
+  `ModuleNotFoundError: No module named 'renderers'`; PBS finished with exit
+  `143` after ezpz classified two pre-training attempts as stuck.
+- The pinned source requires `renderers==0.1.11`, but the immutable archive
+  checksum `91313deccfb65bda5ace1dea55523c80279b6886ff0ea73a8b411fea0cd214e3`
+  does not contain it. This is a runtime-artifact failure, not evidence about
+  the step-39900 checkpoint or chain-3 numerics.
+- Source `step-39900` remains unchanged (6,145 files; `.metadata` mtime
+  `2026-09-22 06:30:02 UTC`) and the job-unique checkpoint sink is empty.
+- Building a separately named immutable Python 3.12 archive from the validated
+  source venv that contains `renderers==0.1.11`; it must pass integrity,
+  extracted-runtime import, and compute-node preflight before any replay retry.
+- Successor umbrella `8870515` remains queued for insufficient free nodes; no
+  seat artifacts exist.
+
 ## 2026-09-24 — LR-finder resume validation and chart refresh
 
 - Validated cross-allocation LR-finder recovery with Sunspot jobs `12478576`
