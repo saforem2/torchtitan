@@ -2,6 +2,17 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-26 (Aurora) -- exact chain-3 replay starts
+
+- Exact-topology replay `8870516` started at 12:32:32 CDT on 522 allocated
+  nodes (512 active plus ten spares). At the first post-start probe PBS showed
+  it running; the job-unique output directory existed but contained no files,
+  so staging had not yet produced a console or restore marker. The isolated
+  checkpoint sink was empty. Source `step-39900` remained unchanged: 6,145
+  top-level files and `.metadata` mtime `2026-09-22 06:30:02 UTC`.
+- Successor umbrella `8870515` remains queued for insufficient free nodes and
+  has no seat artifacts.
+
 ## 2026-09-26 (Aurora) -- first 768-rank XCCL execution passes
 
 - Job `8870976`, the first of two required 64-active-node plus four-spare
@@ -21,9 +32,10 @@ Running log of what's happening, session by session. Most recent first.
   `878013c487311ef73069b3a8a4172a1b79cee98e9cf459eddf3fd5bd09b5b3cc`.
   No configured XCCL/PMI/failure signature was present. The Aurora communicator
   gate is therefore closed after two clean target-scale executions; chain-3
-  replay `8870516` remains queued for nodes.
-- Successor umbrella `8870515` and exact chain-3 replay `8870516` remain queued
-  without fresh application artifacts.
+  replay `8870516` subsequently started at 12:32:32 CDT.
+- Successor umbrella `8870515` remains queued without fresh application
+  artifacts. Exact replay `8870516` is running; its output directory exists,
+  but staging has not yet emitted a console or restore marker.
 
 ## 2026-09-26 (Aurora) -- XCCL ladder reaches 384 ranks
 
