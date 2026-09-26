@@ -1056,9 +1056,18 @@ remained bounded, not an apples-to-apples semantic regression measurement.
 
 ### Standard and explicit-XCCL controls
 
-Gloo is not the target production transport. Historical job `12478403` first
-showed that the standard `LocalRankStrategy` with `TransportType.Unset` could
-complete both TorchStore publications/pulls, one optimizer step, and shutdown.
+> [!IMPORTANT]
+> **Topology scope:** every passing `Unset` result in this subsection used a
+> same-host trainer/generator actor topology. It proves that TorchStore's
+> automatic selection policy completed the integration, but it does not prove
+> that the resolved backend was XCCL or any other network transport. For the
+> current two-host matrix and production recommendation, see
+> [`../monarch.md`](../monarch.md#why-the-validated-cross-host-launcher-currently-forces-gloo).
+
+Gloo was not the intended production endpoint in this historical same-host
+study. Job `12478403` first showed that the standard `LocalRankStrategy` with
+`TransportType.Unset` could complete both TorchStore publications/pulls, one
+optimizer step, and shutdown while trainer and generator were colocated.
 
 Job `12478538` repeated that automatic, no-override path with the SFT-100 AGPT
 artifact and the corrected stop-token contract. No
@@ -1085,9 +1094,11 @@ prompt set. The authoritative artifact is:
   agpt2b-sft100-torchstore-sync-12478538/rollout_samples.jsonl
 ```
 
-This is the primary successful synchronization result. `TransportType.Unset`
-means TorchStore selected its standard transport automatically; the report does
-not relabel that selection as XCCL without direct evidence.
+This is the primary successful **same-host** synchronization result.
+`TransportType.Unset` means TorchStore selected its standard transport
+automatically. Because same-host SharedMemory is first in TorchStore's priority
+order, this report does not relabel that selection as XCCL without a resolved-
+transport log.
 
 Job `12478537` therefore forced `TransportType.XCCL` explicitly while holding the
 AGPT model, renderer, actor topology, and one-step recipe fixed. It initialized
@@ -1106,16 +1117,19 @@ Repeated compute-node probes showed the controller and actor processes sleeping
 in `epoll` with no log growth. The disposable canary was cancelled and reached
 PBS `Exit_status=143`. Thus the current evidence is:
 
-- automatic TorchStore selection: full AGPT integration and bounded-output pass
-  (`12478538`; earlier control `12478403` also passed);
-- forced Gloo weight transfer: AGPT integration and bounded-output pass
-  (`12478536`);
-- explicitly forced XCCL weight transfer under the current Monarch TCP-KVS actor
+- same-host automatic TorchStore selection: full AGPT integration and
+  bounded-output pass (`12478538`; earlier control `12478403` also passed),
+  resolved backend not directly logged;
+- same-host forced Gloo weight transfer: AGPT integration and bounded-output
+  pass (`12478536`);
+- same-host explicitly forced XCCL under the current Monarch TCP-KVS actor
   bootstrap: first-publication hang (`12478537`).
 
 This failure must not be described as a model-quality defect or as failure of
 TorchTitan's ordinary XCCL training collectives. It is specific to forcing
 TorchStore's weight-transfer transport to XCCL with the current actor bootstrap.
+Later two-host controls are maintained in the canonical production guide rather
+than retroactively extending this historical same-host campaign.
 
 ## Distractor-resistant SFT follow-up
 
