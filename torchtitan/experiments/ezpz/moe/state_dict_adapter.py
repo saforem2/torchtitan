@@ -17,7 +17,7 @@ from torchtitan.models.utils import MoEStateDictAdapter
 from .model import moeModel
 
 
-class moeStateDictAdapter(MoEStateDictAdapter):
+class moeStateDictAdapter(MoEStateDictAdapter):  # noqa: N801
     """
     StateDictAdapter for moe model.
     """
@@ -100,15 +100,9 @@ class moeStateDictAdapter(MoEStateDictAdapter):
         1. Convert between the HF shape and the torchtitan shape.
         2. Split the grouped-linear weights into separate expert weights.
         """
-        state_dict = dict(state_dict)
-        for key in list(state_dict):
-            if not key.endswith(".moe.routed_experts.w13.weight"):
-                continue
-            w13 = state_dict.pop(key)
-            prefix = key.removesuffix("w13.weight")
-            w1, w3 = w13.unbind(1)
-            state_dict[f"{prefix}w1_EFD"] = w1
-            state_dict[f"{prefix}w3_EFD"] = w3
+        state_dict = self._native_fused_linears_to_hf(
+            state_dict, split_routed_experts=True
+        )
 
         to_hf_map = {v: k for k, v in self.from_hf_map.items()}
 
@@ -129,9 +123,9 @@ class moeStateDictAdapter(MoEStateDictAdapter):
 
                 # Store grouped-weight metadata for from_hf().
                 if isinstance(value, DTensor):
-                    self.grouped_expert_weight_placements[abstract_key] = (
-                        value.placements
-                    )
+                    self.grouped_expert_weight_placements[
+                        abstract_key
+                    ] = value.placements
                     self.grouped_expert_weight_shape[abstract_key] = value.shape
                     self.grouped_expert_weight_mesh[abstract_key] = value.device_mesh
 
@@ -231,23 +225,4 @@ class moeStateDictAdapter(MoEStateDictAdapter):
                 new_key = self.from_hf_map[key]
                 state_dict[new_key] = value
 
-        routed_gate_keys = [
-            key for key in state_dict if key.endswith(".moe.routed_experts.w1_EFD")
-        ]
-        routed_up_keys = {
-            key for key in state_dict if key.endswith(".moe.routed_experts.w3_EFD")
-        }
-        for key in routed_gate_keys:
-            prefix = key.removesuffix("w1_EFD")
-            up_key = f"{prefix}w3_EFD"
-            if up_key not in state_dict:
-                raise ValueError(f"Missing routed-expert up weight for {key}")
-            routed_up_keys.remove(up_key)
-            state_dict[f"{prefix}w13.weight"] = torch.stack(
-                (state_dict.pop(key), state_dict.pop(up_key)), dim=1
-            )
-        if routed_up_keys:
-            up_key = min(routed_up_keys)
-            raise ValueError(f"Missing routed-expert gate weight for {up_key}")
-
-        return state_dict
+        return self._native_fused_linears_from_hf(state_dict, fuse_routed_experts=True)

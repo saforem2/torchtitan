@@ -131,6 +131,9 @@ class StateDictAdapter(BaseStateDictAdapter):
         self._qkv_linear_sharding: dict[
             str, tuple[DeviceMesh, tuple[Placement, ...]]
         ] = {}
+        self._stacked_linear_sharding: dict[
+            str, tuple[DeviceMesh, tuple[Placement, ...]]
+        ] = {}
         if hf_assets_path:
             mapping_path = os.path.join(hf_assets_path, "model.safetensors.index.json")
             try:
@@ -170,8 +173,8 @@ class StateDictAdapter(BaseStateDictAdapter):
                     f"got {type(rope).__qualname__}."
                 )
 
-    @staticmethod
     def _split_stacked_linear(
+        self,
         state_dict: dict[str, Any],
         *,
         fused_key: str,
@@ -186,6 +189,10 @@ class StateDictAdapter(BaseStateDictAdapter):
         # has size one. HF checkpoint conversion needs complete logical
         # projections, so mirror QKV conversion and replicate before splitting.
         if isinstance(tensor, DTensor):
+            self._stacked_linear_sharding[fused_key] = (
+                tensor.device_mesh,
+                tensor.placements,
+            )
             tensor = tensor.redistribute(
                 tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
             )
@@ -193,8 +200,8 @@ class StateDictAdapter(BaseStateDictAdapter):
         assert len(projections) == len(logical_keys)
         state_dict.update(zip(logical_keys, projections, strict=True))
 
-    @staticmethod
     def _stack_logical_linears(
+        self,
         state_dict: dict[str, Any],
         *,
         fused_key: str,
@@ -204,9 +211,15 @@ class StateDictAdapter(BaseStateDictAdapter):
         """Stack logical projection parameters into one native parameter."""
         if not all(key in state_dict for key in logical_keys):
             return
-        state_dict[fused_key] = torch.stack(
-            [state_dict.pop(key) for key in logical_keys], dim=dim
-        )
+        fused = torch.stack([state_dict.pop(key) for key in logical_keys], dim=dim)
+        if fused_key in self._stacked_linear_sharding:
+            mesh, placements = self._stacked_linear_sharding[fused_key]
+            if not isinstance(fused, DTensor):
+                raise TypeError(
+                    f"Expected DTensor while restoring {fused_key}, got {type(fused)}"
+                )
+            fused = fused.redistribute(mesh, placements)
+        state_dict[fused_key] = fused
 
     def _split_qkv_linear(
         self,

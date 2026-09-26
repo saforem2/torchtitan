@@ -40,6 +40,7 @@ jobs:
   # Tag pushes are independent of the PR base, so stacked PRs are covered.
   set-matrix-fake-pg:
     if: >-
+      github.repository_owner == 'pytorch' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/ciflow/fake-pg/')
     uses: ./.github/workflows/set-matrix.yaml

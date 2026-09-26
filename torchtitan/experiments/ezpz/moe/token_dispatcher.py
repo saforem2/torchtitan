@@ -443,7 +443,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
     dispatch (reorder + EP all-to-all) and combine (reverse).
 
     ``ep_mesh`` and the ``sp_size`` / ``sp_rank`` SP coordinates are wired
-    by the owning ``GroupedExperts.parallelize`` override via
+    by the owning ``EzpzRoutedExperts._parallelize`` override via
     ``wire_meshes``.
     """
 
@@ -1151,7 +1151,7 @@ class TorchAOTokenDispatcher(AllToAllTokenDispatcher):
         # It also does padding to make sure the number of tokens each expert
         # gets locally is a multiple of `self.pad_multiple`.
         # Note that this will create side effects when wrapping the for-loop
-        # implementation of GroupedExperts, as it does not need padding.
+        # implementation of the expert compute path, as it does not need padding.
         from torchao.prototype.moe_training.ep.permute import permute_and_pad
 
         # pyrefly: ignore [missing-attribute]

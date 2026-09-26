@@ -78,9 +78,7 @@ def test_current_sonic_configs_wire_routing_and_layout(
     assert {layer.routed_experts.compute_backend for layer in layers} == {
         "aurora_full_sonic"
     }
-    assert {layer.routed_experts.w13.out_features for layer in layers} == {
-        hidden_dim
-    }
+    assert {layer.routed_experts.w13.out_features for layer in layers} == {hidden_dim}
     assert all(
         isinstance(layer.routed_experts, EzpzRoutedExperts.Config) for layer in layers
     )

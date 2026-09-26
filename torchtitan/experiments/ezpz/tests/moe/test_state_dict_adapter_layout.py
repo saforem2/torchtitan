@@ -29,9 +29,7 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
     assert moe_layers
     for moe in moe_layers:
         assert moe.routed_experts.w13.sharding_config is not None
-        assert set(
-            moe.routed_experts.w13.sharding_config.state_shardings
-        ) == {
+        assert set(moe.routed_experts.w13.sharding_config.state_shardings) == {
             "weight",
         }
 

@@ -19,14 +19,15 @@ from torchtitan.distributed.spmd_types import maybe_set_sparse_mesh, spmd_sparse
 from torchtitan.models.common.moe import RoutedExperts
 
 from .experts import (
+    _env_flag_enabled,
     _run_experts_aurora_full_sonic,
     _run_experts_aurora_sycl,
     _run_experts_bmm,
     _run_experts_bmm_nodrop,
     _run_experts_for_loop,
     ExpertComputeBackend,
-    _env_flag_enabled,
 )
+
 
 class EzpzRoutedExperts(RoutedExperts):
     """RoutedExperts that can hand the routing decision to inner_experts."""
@@ -34,7 +35,7 @@ class EzpzRoutedExperts(RoutedExperts):
     # Without its own nested Config the subclass inherits RoutedExperts.Config,
     # whose build() constructs the PARENT -- the override would never run and
     # the sonic backend would silently get the two-argument contract. Follows
-    # the EzpzGroupedExperts pattern (kw_only + slots).
+    # the fork's other specialized module configs (kw_only + slots).
     @dataclass(kw_only=True, slots=True)
     class Config(RoutedExperts.Config):
         compute_backend: ExpertComputeBackend = "grouped_mm"
@@ -46,9 +47,7 @@ class EzpzRoutedExperts(RoutedExperts):
         self.capacity_factor = config.capacity_factor
 
     def _wants_routing(self) -> bool:
-        return (
-            self.compute_backend == "aurora_full_sonic"
-        )
+        return self.compute_backend == "aurora_full_sonic"
 
     def _parallelize(self, parallel_dims) -> None:
         """Parallelize children, then install dispatcher mesh ownership.
@@ -123,12 +122,22 @@ class EzpzRoutedExperts(RoutedExperts):
             w2 = w2.to_local()
         return w13[:, 0], w2, w13[:, 1]
 
-    def _run_backend(self, x, counts, *, topk_scores=None, topk_indices=None, ep_mesh=None):
+    def _run_backend(
+        self, x, counts, *, topk_scores=None, topk_indices=None, ep_mesh=None
+    ):
         w1, w2, w3 = self._weights()
         if self.compute_backend == "for_loop":
             if _env_flag_enabled("TT_MOE_CHECKPOINT_EXPERTS"):
-                return checkpoint(_run_experts_for_loop, w1, w2, w3, x, counts,
-                                  use_reentrant=False, preserve_rng_state=False)
+                return checkpoint(
+                    _run_experts_for_loop,
+                    w1,
+                    w2,
+                    w3,
+                    x,
+                    counts,
+                    use_reentrant=False,
+                    preserve_rng_state=False,
+                )
             return _run_experts_for_loop(w1, w2, w3, x, counts)
         if self.compute_backend == "bmm":
             return _run_experts_bmm(w1, w2, w3, x, counts, self.capacity_factor)
@@ -138,6 +147,13 @@ class EzpzRoutedExperts(RoutedExperts):
             return _run_experts_aurora_sycl(w1, w2, w3, x, counts)
         if self.compute_backend == "aurora_full_sonic":
             return _run_experts_aurora_full_sonic(
-                w1, w2, w3, x, counts, topk_scores=topk_scores,
-                topk_indices=topk_indices, ep_mesh=ep_mesh)
+                w1,
+                w2,
+                w3,
+                x,
+                counts,
+                topk_scores=topk_scores,
+                topk_indices=topk_indices,
+                ep_mesh=ep_mesh,
+            )
         raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")

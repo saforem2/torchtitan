@@ -137,7 +137,7 @@ def _run_experts_bmm(
     Tokens assigned to an expert beyond its capacity are dropped: their
     output rows are zero, matching standard capacity-limited MoE dispatch
     semantics. `x` is assumed sorted by expert, as required by the
-    `EzpzGroupedExperts.forward` contract.
+    `EzpzRoutedExperts` expert-compute contract.
     """
     E = w1.shape[0]
     R = x.shape[0]
@@ -225,7 +225,7 @@ def _run_experts_bmm_nodrop(
     names (w1_EFD/w2_EDF/w3_EFD are unpacked by the caller).
 
     `x` is assumed sorted by expert, matching the
-    `EzpzGroupedExperts.forward` contract.
+    `EzpzRoutedExperts` expert-compute contract.
     """
     counts = num_tokens_per_expert.to(device=x.device, dtype=torch.int64)
     if counts.numel() == 0:
