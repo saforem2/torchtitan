@@ -73,6 +73,17 @@ correctly rejected the inaccessible shared-memory volume:
 Shared memory storage not found. This may indicate the storage volume is on a different host.
 ```
 
+Two follow-up controls tested the remaining automatic/RDMA question directly:
+
+| Job | Selection | Result |
+|---|---|---|
+| `12478720` | `Unset` with SharedMemory disabled | The log remained at TorchStore initialization for 30 minutes with no completed publication, generation, or optimizer step; the coordination timeout terminated the job (`Exit_status=143`). In this runtime TorchComms availability was false and MonarchRDMA availability was true, so MonarchRDMA was the expected automatic candidate, but TorchStore did not emit its resolved-transport log before the stall. |
+| `12478722` | Explicit `TransportType.MonarchRDMA` | Backend selection was confirmed in the log. The TorchStore storage-volume actor crashed with `SIGSEGV` during the initial trainer `push_model_state_dict`; no rollout or optimizer step completed (`Exit_status=1`). |
+
+TorchComms was not testable in this environment: the `torchcomms` package was
+absent and both TorchComms availability probes returned false. MonarchRDMA was
+available at capability-probe level, but the explicit end-to-end control failed.
+
 Until automatic locality resolution is fixed and revalidated, the committed
 two-host launcher pins the known-good network fallback:
 
@@ -338,6 +349,8 @@ state, a parser check, or model construction.
 | attach config-push timeout | full RL imports exceeded Monarch's default attach window, or reverse channel is unroutable | retain the tested 120 s timeout; first confirm the lightweight two-host actor preflight |
 | `KeyError: 'hosts'` | integer host slice dropped the named dimension | use `hosts.slice(hosts=slice(i, i + 1))` |
 | `Shared memory storage not found` | automatic selection misclassified the remote volume as local and chose SharedMemory | use the validated Gloo workaround; separately fix/retest locality metadata before relying on `Unset` |
+| `Unset` + SharedMemory disabled freezes before publication | automatic network selection did not complete; in the tested runtime MonarchRDMA was the expected available candidate | inspect the resolved-transport log and backend availability; do not call capability detection a transfer pass |
+| forced MonarchRDMA kills the storage-volume actor | current MonarchRDMA path crashed during initial trainer publication | preserve the core/log; use validated Gloo pending an RDMA-specific fix |
 | non-controller rank times out after 300 s | wrapper's FileStore coordination timeout is shorter than healthy RL startup/training | retain the tested 30-minute timeout |
 | forced XCCL hangs after flatten/cast | TorchStore XCCL transport remains unvalidated on this actor bootstrap | return to Gloo; treat XCCL as a separate experiment |
 | vLLM engine fails after inheriting CCL/FI settings | standalone EngineCore inherited launcher transport state | use the committed XPU environment scrub; compare against the validated launcher |

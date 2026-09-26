@@ -71,6 +71,15 @@ The failed jobs were necessary to isolate the production requirements:
 - `12478710`: forced Gloo completed cross-host vLLM pre-validation, but the
   non-controller rank's default five-minute `FileStore.get()` timeout killed the
   otherwise healthy MPI world before training completed.
+- `12478720`: automatic selection with SharedMemory disabled remained at the
+  first TorchStore operation for 30 minutes, completed no publication or
+  rollout, and terminated with `Exit_status=143`. TorchComms was unavailable;
+  MonarchRDMA was the expected available automatic candidate, but no
+  `[ts-transport] resolved=...` line was emitted before the stall.
+- `12478722`: explicit `TransportType.MonarchRDMA` confirmed backend selection,
+  then the TorchStore storage-volume actor died from `SIGSEGV` during the
+  initial trainer publication. No rollout or optimizer step completed; PBS
+  recorded `Exit_status=1`.
 
 The final implementation uses Monarch's scheduler-SPMD `host_mesh_from_store`,
 dimension-preserving host slices, a 120-second attach timeout, a 30-minute
@@ -82,6 +91,6 @@ the current automatic locality-resolution bug.
 This proves cross-host actor routing, vLLM generation, TorchStore policy
 synchronization, optimizer execution, checkpoint writing, and clean shutdown for
 the two-host AGPT-2B validation topology. It does not claim that forced XCCL
-TorchStore transfer works; prior XCCL controls remain failed/hung. It also does
-not establish a model-quality improvement, which requires paired semantic
+or MonarchRDMA TorchStore transfer works; those controls remain failed. It also
+does not establish a model-quality improvement, which requires paired semantic
 evaluation.
