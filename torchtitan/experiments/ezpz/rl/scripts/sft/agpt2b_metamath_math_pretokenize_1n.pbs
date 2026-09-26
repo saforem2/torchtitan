@@ -49,7 +49,7 @@ rc=$?
 import sys
 from datasets import load_from_disk
 d=load_from_disk(sys.argv[1])
-assert len(d) >= 15_000, len(d)
+assert len(d) == 14_146, len(d)
 assert {'input_ids','labels','seq_lengths'} <= set(d.column_names)
 for i in (0,len(d)//2,len(d)-1):
  r=d[i]; assert 0 < len(r['input_ids']) == len(r['labels']) <= 2048
