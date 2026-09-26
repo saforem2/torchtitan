@@ -1,0 +1,64 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mm-pretokenize
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+BASE="${BASE:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+FINAL="${FINAL:-/tegu/datasets/datasets/agpt2b-metamath-gsm-distill-len2048-v1}"
+BUILD="${FINAL}.building-${PBS_JOBID%%.*}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+commit=$(git rev-parse HEAD) || exit 14
+[[ "$commit" == "$EXPECTED_COMMIT" ]] || exit 14
+git diff --quiet && git diff --cached --quiet || exit 14
+[[ -s "$BASE/model.safetensors" ]] || exit 15
+[[ ! -e "$FINAL" && ! -e "$BUILD" ]] || exit 16
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export TMPDIR="/tmp/mm-${PBS_JOBID%%.*}"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+printf 'AGPT2B_MM_PRETOKENIZE_START commit=%s build=%s\n' "$commit" "$BUILD"
+"$V/bin/ezpz" launch --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --sft_dataset metamath-gsm-distill \
+  --model_name_or_path "$BASE" \
+  --pretokenize_to "$BUILD" \
+  --max_length 2048 \
+  --dataset_num_proc 16 \
+  --report_to none
+rc=$?
+[[ $rc -eq 0 ]] || { echo "AGPT2B_MM_PRETOKENIZE_DONE rc=$rc"; exit "$rc"; }
+"$V/bin/python" - "$BUILD" <<'PY' || exit 17
+import sys
+from datasets import load_from_disk
+dataset=load_from_disk(sys.argv[1])
+assert len(dataset) >= 20_000, len(dataset)
+assert {"input_ids", "assistant_masks", "seq_lengths"} <= set(dataset.column_names)
+for i in (0, len(dataset)//2, len(dataset)-1):
+ row=dataset[i]
+ assert len(row["input_ids"]) == len(row["assistant_masks"]) == 2048
+ assert any(row["assistant_masks"])
+print(f"AGPT2B_MM_PRETOKENIZE_VALID rows={len(dataset)} columns={dataset.column_names}")
+PY
+mv "$BUILD" "$FINAL"
+echo "AGPT2B_MM_PRETOKENIZE_DONE rc=0 final=$FINAL"
