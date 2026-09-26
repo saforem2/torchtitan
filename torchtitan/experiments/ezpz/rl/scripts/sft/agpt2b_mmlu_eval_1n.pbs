@@ -59,7 +59,7 @@ args=(
 if [[ -n "$LIMIT" ]]; then args+=(--limit "$LIMIT"); fi
 printf 'AGPT2B_MMLU_START commit=%s model=%s tasks=%s limit=%s\n' \
   "$(git rev-parse HEAD)" "$MODEL" "$TASKS" "${LIMIT:-full}"
-"$V/bin/python" -u -m lm_eval "${args[@]}"
+"$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/lm_eval_transformers5_compat.py "${args[@]}"
 rc=$?
 echo "AGPT2B_MMLU_DONE rc=$rc result=$RESULT"
 exit "$rc"
