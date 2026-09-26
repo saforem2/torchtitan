@@ -47,6 +47,14 @@ Running log of what's happening, session by session. Most recent first.
   compile/topology/data/LR preserved, diagnostics every step, immediate
   non-finite abort, job-unique output/checkpoint sink, and no writes to the
   production checkpoint tree.
+- Corrected communicator probe `8870482` passed at 48 ranks / four active nodes
+  (`dp_replicate=6`, `dp_shard=8`): global broadcast, TorchTitan-workaround
+  DeviceMesh construction, both DP subgroup all-reduces/barriers, terminal
+  `XCCL_MESH_PROBE_PASS`, `VALIDATED`, and PBS exit 0. Promoted job `8870561`
+  also passed at 192 ranks / 16 active nodes (`dp=24x8`) with the same terminal
+  evidence and exit 0. The 384-rank / 32-active-node rung is queued as
+  `8870915`; chain-3 replay `8870516` remains queued for 512 active nodes rather
+  than failed.
 
 ## 2026-09-24 (sunspot/aurora) -- resumable LR recovery, Stage 2, and exact-head PR validation
 
