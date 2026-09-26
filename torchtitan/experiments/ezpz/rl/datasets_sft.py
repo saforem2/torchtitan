@@ -696,6 +696,80 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# metamath-math-distill -- concise, held-out-safe competition math traces
+# ---------------------------------------------------------------------------
+
+_METAMATH_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_METAMATH_MATH_EXPECTED_ROWS = 118_376
+
+
+def _format_metamath_math_row(ex):
+    """Normalize one boxed MetaMath MATH trace into the AGPT CoT envelope."""
+    response = str(ex.get("response", "")).strip()
+    boxes = _METAMATH_BOXED_RE.findall(response)
+    if not boxes:
+        return None
+    trace = re.sub(r"\n?The answer is:\s*.*$", "", response, flags=re.IGNORECASE | re.DOTALL).strip()
+    query = str(ex.get("query", "")).strip()
+    answer = boxes[-1].strip()
+    if not query or not trace or not answer or len(trace) > 1200:
+        return None
+    return {
+        "prompt": [{"role": "user", "content": query + _COT_PROMPT_SUFFIX}],
+        "completion": [
+            {
+                "role": "assistant",
+                "content": f"<think>{trace}</think>\n<answer>\\boxed{{{answer}}}</answer>",
+            }
+        ],
+    }
+
+
+def _build_metamath_math_distill() -> Dataset:
+    """Build MetaMath MATH augmentation with exact MATH-test decontamination."""
+    from datasets import Dataset, load_dataset
+
+    raw = load_dataset("meta-math/MetaMathQA", split="train")
+    math_test = load_dataset("DigitalLearningGmbH/MATH-lighteval", split="test")
+    math_500 = load_dataset("HuggingFaceH4/MATH-500", split="test")
+
+    def normalize(text):
+        return " ".join(str(text).casefold().split())
+
+    held_out = {normalize(problem) for problem in math_test["problem"]}
+    held_out.update(normalize(problem) for problem in math_500["problem"])
+    rows = []
+    for ex in raw:
+        if ex.get("type") not in {"MATH_AnsAug", "MATH_Rephrased"}:
+            continue
+        if normalize(ex.get("query", "")) in held_out:
+            continue
+        if normalize(ex.get("original_question", "")) in held_out:
+            continue
+        formatted = _format_metamath_math_row(ex)
+        if formatted is not None:
+            rows.append(formatted)
+    if len(rows) != _METAMATH_MATH_EXPECTED_ROWS:
+        raise ValueError(
+            "metamath-math-distill row-count drift: "
+            f"expected {_METAMATH_MATH_EXPECTED_ROWS}, got {len(rows)}"
+        )
+    return Dataset.from_list(rows).shuffle(seed=154391)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="metamath-math-distill",
+        build=_build_metamath_math_distill,
+        description=(
+            "MetaMathQA MATH answer-augmented and rephrased traces, capped at "
+            "1,200 characters and decontaminated against MATH test/MATH-500."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # alpaca — broad instruction-following (52k examples)
 # ---------------------------------------------------------------------------
 

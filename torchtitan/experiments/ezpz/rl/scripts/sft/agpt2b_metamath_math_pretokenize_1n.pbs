@@ -1,0 +1,60 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-math-pretoken
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=1
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+BASE="${BASE:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage4/accepted/agpt2b-stage4-metamath-alpha65}"
+FINAL="${FINAL:-/tegu/datasets/datasets/agpt2b-metamath-math-distill-len2048-v1}"
+BUILD="${FINAL}.building-${PBS_JOBID%%.*}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
+git diff --quiet && git diff --cached --quiet || exit 14
+[[ -s "$BASE/model.safetensors" ]] || exit 15
+[[ ! -e "$FINAL" && ! -e "$BUILD" ]] || exit 16
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export TMPDIR="/tmp/m5-${PBS_JOBID%%.*}"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+printf 'AGPT2B_MATH_PRETOKEN_START commit=%s build=%s\n' "$(git rev-parse HEAD)" "$BUILD"
+"$V/bin/ezpz" launch --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --sft_dataset metamath-math-distill \
+  --model_name_or_path "$BASE" \
+  --pretokenize_to "$BUILD" \
+  --max_length 2048 --dataset_num_proc 16 --report_to none
+rc=$?
+[[ $rc -eq 0 ]] || exit "$rc"
+"$V/bin/python" - "$BUILD" <<'PY' || exit 17
+import sys
+from datasets import load_from_disk
+d=load_from_disk(sys.argv[1])
+assert len(d) >= 15_000, len(d)
+assert {'input_ids','labels','seq_lengths'} <= set(d.column_names)
+for i in (0,len(d)//2,len(d)-1):
+ r=d[i]; assert 0 < len(r['input_ids']) == len(r['labels']) <= 2048
+ assert any(v != -100 for v in r['labels'])
+print('AGPT2B_MATH_PRETOKEN_VALID',len(d),d.column_names)
+PY
+mv "$BUILD" "$FINAL"
+echo "AGPT2B_MATH_PRETOKEN_DONE final=$FINAL"
