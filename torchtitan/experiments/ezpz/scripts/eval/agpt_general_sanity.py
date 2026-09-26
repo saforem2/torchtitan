@@ -30,13 +30,14 @@ def main() -> None:
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     rendered = [
-        tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        "<start_of_turn>user\n"
+        + prompt.lstrip("\n")
+        + "<end_of_turn>\n<start_of_turn>model\n"
         for prompt in PROMPTS
     ]
+    ids = tokenizer.encode(rendered[0], add_special_tokens=False)
+    if not ids or ids[0] != 106 or ids[-1] != 108 or 107 not in ids:
+        raise ValueError("AGPT tokenizer or prompt serialization mismatch")
     llm = LLM(
         model=str(args.model),
         tokenizer=str(args.model),
