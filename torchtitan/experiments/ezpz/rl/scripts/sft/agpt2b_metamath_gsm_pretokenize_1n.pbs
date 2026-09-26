@@ -56,11 +56,11 @@ dataset=load_from_disk(sys.argv[1])
 # source contributes >100k filtered rows and deterministically packs to 17,844
 # length-2048 sequences with the current tokenizer and TRL version.
 assert len(dataset) == 17_844, len(dataset)
-assert {"input_ids", "assistant_masks", "seq_lengths"} <= set(dataset.column_names)
+assert {"input_ids", "labels", "seq_lengths"} <= set(dataset.column_names)
 for i in (0, len(dataset)//2, len(dataset)-1):
  row=dataset[i]
- assert len(row["input_ids"]) == len(row["assistant_masks"]) == 2048
- assert any(row["assistant_masks"])
+ assert 0 < len(row["input_ids"]) == len(row["labels"]) <= 2048
+ assert any(label != -100 for label in row["labels"])
 print(f"AGPT2B_MM_PRETOKENIZE_VALID rows={len(dataset)} columns={dataset.column_names}")
 PY
 mv "$BUILD" "$FINAL"
