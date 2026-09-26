@@ -21,7 +21,7 @@ from torchtitan.components.loss import CrossEntropyLoss
 from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
 from torchtitan.config.transform.quantization import (
-    Float8GroupedExpertsConverter,
+    Float8GroupedLinearConverter,
     Float8LinearConverter,
 )
 from torchtitan.distributed.activation_checkpoint import FullAC
@@ -400,7 +400,7 @@ def moe_671b() -> FaultTolerantTrainer.Config:
             # nothing, so the precision-sensitive LM head was silently quantized
             # to fp8. Replayed from upstream deepseek_v3 fix #4008 (2026-07-29).
             Float8LinearConverter.Config(filter_fqns=["lm_head", "router.gate"]),
-            Float8GroupedExpertsConverter.Config(),
+            Float8GroupedLinearConverter.Config(),
         ],
     )
     return cfg
@@ -421,15 +421,15 @@ def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
 
 
 def _set_moe_compute_backend(model_config, backend: str) -> None:
-    # Set the expert compute_backend on every MoE layer's inner_experts
+    # Set the expert compute_backend on every MoE layer's routed-experts
     # config returned by model_registry(). The registry does not expose a
-    # compute_backend arg, and it lives on EzpzGroupedExperts.Config
-    # (routed_experts.inner_experts), so set it here post-build. Setting an
+    # compute_backend arg, and it lives on EzpzRoutedExperts.Config, so set it
+    # here post-build. Setting an
     # explicit value also survives model.py's grouped_mm->for_loop rewrite,
     # which only fires when compute_backend == "grouped_mm".
     for layer_cfg in model_config.layers:
         if layer_cfg.moe is not None:
-            layer_cfg.moe.routed_experts.inner_experts.compute_backend = backend
+            layer_cfg.moe.routed_experts.compute_backend = backend
 
 
 def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer.Config:
@@ -505,7 +505,7 @@ def _bmm_ep_cf(cf: float) -> FaultTolerantTrainer.Config:
     cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
     for layer_cfg in cfg.model.layers:
         if layer_cfg.moe is not None:
-            ie = layer_cfg.moe.routed_experts.inner_experts
+            ie = layer_cfg.moe.routed_experts
             ie.compute_backend = "bmm"
             ie.capacity_factor = cf
     cfg.parallelism.expert_parallel_degree = 12

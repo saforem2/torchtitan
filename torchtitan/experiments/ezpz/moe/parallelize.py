@@ -139,7 +139,7 @@ def parallelize_moe(
     # ``sharding_config`` declarations were filled in by
     # ``update_from_config`` (see model.py + sharding.py), covering both
     # dense (attention, dense FFN) and MoE (router, shared/routed experts)
-    # submodules. ``GroupedExperts.parallelize`` additionally wires the
+    # submodules. ``EzpzRoutedExperts._parallelize`` additionally wires the
     # EP/TP meshes onto the token dispatcher.
     # 79th sync (#4085): under full_dtensor/spmd_types this must run
     # UNCONDITIONALLY -- it is what makes the params DTensors on the SPMD mesh,
@@ -289,10 +289,8 @@ def apply_fsdp(
     for layer_id, transformer_block in model.layers.items():
         if transformer_block.moe_enabled:
             assert hasattr(transformer_block, "moe")
-            expert_params = set(
-                transformer_block.moe.routed_experts.inner_experts.parameters()
-            )
-            num_experts = transformer_block.moe.routed_experts.inner_experts.num_experts
+            expert_params = set(transformer_block.moe.routed_experts.parameters())
+            num_experts = transformer_block.moe.routed_experts.w13.group_size
 
             if ep_degree > 1:
                 assert edp_mesh is not None
@@ -305,11 +303,7 @@ def apply_fsdp(
             # the hidden dim to be evenly divisible by the world size.
             # Fall back to Shard(0) if not (avoids uneven sharding error).
             if efsdp_ep_size > num_experts:
-                expert_w = next(
-                    iter(
-                        transformer_block.moe.routed_experts.inner_experts.parameters()
-                    )
-                )
+                expert_w = next(iter(transformer_block.moe.routed_experts.parameters()))
                 if expert_w.shape[1] % efsdp_ep_size == 0:
                     expert_shard_placement = Shard(1)
                 else:

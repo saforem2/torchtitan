@@ -40,7 +40,7 @@ def _factory(module_name: str, factory_name: str, json_path: Path, monkeypatch):
 
 def _expert_backends(cfg) -> set[str]:
     return {
-        layer.moe.routed_experts.inner_experts.compute_backend
+        layer.moe.routed_experts.compute_backend
         for layer in cfg.model.layers
         if layer.moe is not None
     }

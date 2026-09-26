@@ -13,7 +13,6 @@ import spmd_types as spmd
 import torch
 import torch.nn.functional as F
 import torch_remat as remat
-from torch import nn
 
 from torchtitan.distributed.spmd_types import (
     maybe_set_sparse_mesh,
@@ -28,7 +27,7 @@ from torchtitan.models.common.activation import (
 )
 from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.models.common.feed_forward import FeedForward
-from torchtitan.models.common.linear import RouterGateLinear
+from torchtitan.models.common.linear import GroupedLinear, RouterGateLinear
 from torchtitan.protocols.module import Module
 
 from .token_dispatcher import LocalTokenDispatcher
@@ -48,91 +47,38 @@ from .token_dispatcher import LocalTokenDispatcher
 #        for the up/gate projections and (E, D, F) for the down one)
 
 
-class GroupedExperts(Module):
+class RoutedExperts(Module):
+    """Local SPMD region with first-class grouped expert projections."""
+
     @dataclass(kw_only=True, slots=True)
     class Config(Module.Config):
-        dim: int
-        hidden_dim: int
-        num_experts: int
+        w13: GroupedLinear.Config
+        w2: GroupedLinear.Config
+        token_dispatcher: LocalTokenDispatcher.Config
         activation_fn: BinaryActivationFn.Config = field(default_factory=SwiGLU.Config)
 
+        def __post_init__(self) -> None:
+            if self.w13.group_size != self.w2.group_size:
+                raise ValueError("w13 and w2 must contain the same number of experts")
+            if self.token_dispatcher.num_experts != self.w13.group_size:
+                raise ValueError(
+                    "token dispatcher and grouped linears must contain the same "
+                    "number of experts"
+                )
+            if self.w13.in_features != self.w2.out_features:
+                raise ValueError("w13 input and w2 output dimensions must match")
+            if self.w13.num_linears != 2:
+                raise ValueError("w13 output must contain gate and up projections")
+            if self.w13.out_features != self.w2.in_features:
+                raise ValueError("w13 output and w2 input dimensions must match")
+            if self.w2.num_linears != 1:
+                raise ValueError("w2 must contain one down projection")
+
     def __init__(self, config: Config):
         super().__init__()
-        self.num_experts = config.num_experts
-        self.w1_EFD = nn.Parameter(
-            torch.empty(config.num_experts, config.hidden_dim, config.dim)
-        )
-        self.w2_EDF = nn.Parameter(
-            torch.empty(config.num_experts, config.dim, config.hidden_dim)
-        )
-        self.w3_EFD = nn.Parameter(
-            torch.empty(config.num_experts, config.hidden_dim, config.dim)
-        )
+        self.w13 = config.w13.build()
+        self.w2 = config.w2.build()
         self.activation_fn = config.activation_fn.build()
-
-    def forward(
-        self,
-        x_RD: torch.Tensor,
-        num_tokens_per_expert_E: torch.Tensor,
-    ) -> torch.Tensor:
-        """Raw expert computation without dispatch/combine.
-
-        Shape suffixes here describe logical grouped-mm inputs, not physical
-        sharding. Under EP, E may be a local shard of experts; under SP, R may
-        be a local token shard. Keep logical capital suffixes here to avoid
-        encoding a specific parallel layout in these local tensor names.
-        """
-        offsets_E = torch.cumsum(num_tokens_per_expert_E, dim=0, dtype=torch.int32)
-        if spmd.is_type_checking() and spmd_mesh_size("ep") == 1:
-            for axis in ("dp", "cp"):
-                # if no EP, convert to V for grouped_mm, which would otherwise see
-                # x:R, w1:V, offsets:P in local SPMD typechecking.
-                # spmd.P is not currently allowed to mix with spmd.V.
-                # TODO(pianpwk): likely relax this in spmd_types.
-                spmd.mutate_type(offsets_E, axis, src=spmd.P, dst=spmd.V)
-
-        gate_RF = self._grouped_mm(
-            A=x_RD.bfloat16(), weight_EOI=self.w1_EFD, offs=offsets_E
-        )
-        up_RF = self._grouped_mm(
-            A=x_RD.bfloat16(), weight_EOI=self.w3_EFD, offs=offsets_E
-        )
-        h_RF = self.activation_fn(gate_RF, up_RF)
-        return self._grouped_mm(A=h_RF, weight_EOI=self.w2_EDF, offs=offsets_E).type_as(
-            x_RD
-        )
-
-    def _grouped_mm(
-        self, *, A: torch.Tensor, weight_EOI: torch.Tensor, offs: torch.Tensor
-    ) -> torch.Tensor:
-        """Grouped matmul of ``A @ weight_EOI.transpose(-2, -1)``.
-
-        ``weight_EOI`` is the grouped expert weight in its stored
-        ``(experts, out_features, in_features)`` orientation; the transpose to
-        the grouped-GEMM right operand happens here. Overridable seam for
-        low-precision variants (e.g. the MXFP8 converter swaps this for a
-        scaled grouped GEMM). Variants receive the weight rather than its
-        transpose because a quantized representation may be owned by the
-        weight's FSDP unshard lifetime and is keyed off the stored orientation.
-        Keeping the op here -- rather than behind a tensor-subclass
-        ``__torch_function__`` -- means it is captured by FX tracers such as
-        graph_trainer's make_fx path.
-        """
-        return torch._grouped_mm(A, weight_EOI.bfloat16().transpose(-2, -1), offs=offs)
-
-
-class RoutedExperts(Module):
-    """Local SPMD region composing token_dispatcher and inner_experts
-    as sibling nodes so each can be overridden independently."""
-
-    @dataclass(kw_only=True, slots=True)
-    class Config(Module.Config):
-        inner_experts: GroupedExperts.Config
-        token_dispatcher: LocalTokenDispatcher.Config
-
-    def __init__(self, config: Config):
-        super().__init__()
-        self.inner_experts = config.inner_experts.build()
         self.token_dispatcher = config.token_dispatcher.build()
 
     def _init_self_buffers(self, *, buffer_device: torch.device | None = None) -> None:
@@ -161,10 +107,24 @@ class RoutedExperts(Module):
             topk_expert_ids_TK,
             num_local_tokens_per_expert_E,
         )
+        offsets_E = torch.cumsum(
+            num_global_tokens_per_local_expert_e,
+            dim=0,
+            dtype=torch.int32,
+        )
+        if spmd.is_type_checking() and spmd_mesh_size("ep") == 1:
+            for axis in ("dp", "cp"):
+                # Without EP, grouped_mm otherwise sees input:R, weight:V, and
+                # offsets:P in local SPMD type checking. spmd.P cannot currently
+                # mix with spmd.V, so expose offsets as replicated here.
+                # TODO(pianpwk): Relax this restriction in spmd_types.
+                spmd.mutate_type(offsets_E, axis, src=spmd.P, dst=spmd.V)
+
         with maybe_set_sparse_mesh():
-            routed_output_RD = self.inner_experts(
-                routed_input_RD, num_global_tokens_per_local_expert_e
-            )
+            gate_up_R2F = self.w13(routed_input_RD.bfloat16(), offsets_E)
+            gate_RF, up_RF = gate_up_R2F.unbind(dim=-2)
+            hidden_RF = self.activation_fn(gate_RF, up_RF, offsets=offsets_E)
+            routed_output_RD = self.w2(hidden_RF, offsets_E).type_as(routed_input_RD)
         out_TD = self.token_dispatcher.combine(
             routed_output_RD,
             metadata,
@@ -286,11 +246,13 @@ class TokenChoiceTopKRouter(Module):
                 )
 
         if self._debug_force_load_balance:
-            topk_expert_ids_TK, topk_scores_TK = self._debug_force_load_balance_routing(
-                scores_TE
-            )
+            topk_expert_ids_TK, topk_scores_TK = remat.region(
+                self._debug_force_load_balance_routing,
+                "routing_decision",
+                recompute=False,
+            )(scores_TE)
+            remat.recompute_needs_tensor(topk_expert_ids_TK, topk_scores_TK)
         else:
-            # Routing choices must remain identical between forward and replay.
             topk_expert_ids_TK = remat.region(
                 self._select_experts,
                 "routing_decision",
@@ -301,10 +263,9 @@ class TokenChoiceTopKRouter(Module):
                 padding_mask_T=padding_mask_T,
                 **router_kwargs,
             )
-
+            remat.recompute_needs_tensor(topk_expert_ids_TK)
             # The expert bias is only used for routing. The gating value is
             # still derived from the original scores.
-            remat.recompute_needs_tensor(topk_expert_ids_TK)
             topk_scores_TK = scores_TE.gather(dim=-1, index=topk_expert_ids_TK)
 
         if self.route_norm:
@@ -332,11 +293,9 @@ class TokenChoiceTopKRouter(Module):
                 if padding_mask_T is None
                 else routing_map_TE & ~padding_mask_T.unsqueeze(-1)
             )
-            # TODO: Activation Checkpointing has the side effect of double counting tokens_per_expert_E --
-            #       first in the forward pass, and then in the backward pass. However, this has no
-            #       effect on the expert bias update thanks to the torch.sign() operator.
-            with torch.no_grad():
-                self.tokens_per_expert_E.add_(masked_routing_map_TE.sum(dim=0))
+            if not remat.is_recomputing():
+                with torch.no_grad():
+                    self.tokens_per_expert_E.add_(masked_routing_map_TE.sum(dim=0))
             if self.aux_loss is not None:
                 topk_scores_TK = self.aux_loss(
                     scores_TE,
@@ -395,12 +354,13 @@ class QuantileBalancedTopKRouter(TokenChoiceTopKRouter):
             dim=-1,
             sorted=True,
         )
-        self.quantile_balancer.observe(
-            scores_TE,
-            topk_plus_one_scores[:, self.top_k :],
-            expert_bias_E,
-            padding_mask_T,
-        )
+        if not remat.is_recomputing():
+            self.quantile_balancer.observe(
+                scores_TE,
+                topk_plus_one_scores[:, self.top_k :],
+                expert_bias_E,
+                padding_mask_T,
+            )
         return topk_plus_one_expert_ids[:, : self.top_k].contiguous()
 
 
@@ -640,7 +600,7 @@ class MoE(Module):
        a. dispatch (TokenDispatcher) — reorder tokens by expert assignment.
           With EP, also performs all-to-all communication to send tokens
           to expert-owning ranks.
-       b. expert computation (GroupedExperts, local tensors)
+       b. expert computation (W13, activation, and W2 on local tensors)
        c. combine (TokenDispatcher) — reverse the dispatch reordering.
           - LocalTokenDispatcher (no EP): scatter_add only.
           - AllToAll: all-to-all communication, then scatter_add.
@@ -658,10 +618,24 @@ class MoE(Module):
         load_balance_coeff: float | None = 1e-3
         shared_experts: FeedForward.Config | None = None
 
+        def __post_init__(self) -> None:
+            expert_counts = {
+                "moe": self.num_experts,
+                "router": self.router.num_experts,
+                "routed_experts": self.routed_experts.w13.group_size,
+            }
+            if len(set(expert_counts.values())) != 1:
+                raise ValueError(
+                    "MoE expert counts must match: "
+                    + ", ".join(
+                        f"{owner}={count}" for owner, count in expert_counts.items()
+                    )
+                )
+
     def __init__(self, config: Config):
         super().__init__()
 
-        num_experts = config.num_experts
+        self.num_experts = config.num_experts
         self.routed_experts = config.routed_experts.build()
         self.router = config.router.build()
         self.shared_experts = (
@@ -677,7 +651,7 @@ class MoE(Module):
             assert self.load_balance_coeff > 0.0
             self.register_buffer(
                 "expert_bias_E",
-                torch.zeros(num_experts, dtype=torch.float32),
+                torch.zeros(self.num_experts, dtype=torch.float32),
                 persistent=True,
             )
         else:
@@ -701,10 +675,9 @@ class MoE(Module):
         Under TP, the MoE wrapper's ``sharding_config`` (set by
         ``set_moe_sharding_config``) handles input/output redistribution:
         input is redistributed from sp_layout to desired_input_layouts;
-        output is redistributed to sp_layout. GroupedExperts operates in a
-        local SPMD region. When EP internally
-        sequence-shards tokens across TP, the caller must provide a TP-divisible
-        token count.
+        output is redistributed to sp_layout. Routed expert computation runs
+        in a local SPMD region. When EP internally sequence-shards tokens across
+        TP, the caller must provide a TP-divisible token count.
         """
         # topk scores and expert IDs have shape (T, K); the routing map (T, E)
         # marks the experts each token is routed to (built inside the router).
@@ -740,6 +713,6 @@ class MoE(Module):
         with torch.device(buffer_device):
             if self.load_balance_coeff is not None:
                 self.expert_bias_E = torch.zeros(
-                    self.routed_experts.inner_experts.num_experts,
+                    self.router.num_experts,
                     dtype=torch.float32,
                 )
