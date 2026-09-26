@@ -2,6 +2,20 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-26 (Aurora) -- XCCL ladder reaches 384 ranks
+
+- Job `8870915` completed the 32-active-node plus four-spare XCCL mesh probe
+  at 384 ranks (`dp_replicate=48`, `dp_shard=8`) with `Exit_status=0`.
+  The job-unique console contains `XCCL_MESH_PROBE_PASS`; `VALIDATED` records
+  commit `550d2c670a02866661c133dd09b499ae6844bc7f` and isolated archive SHA-256
+  `878013c487311ef73069b3a8a4172a1b79cee98e9cf459eddf3fd5bd09b5b3cc`.
+  No configured failure signature was present.
+- Submitted first 64-active-node plus four-spare execution as `8870976` at
+  768 ranks (`dp_replicate=96`, `dp_shard=8`). It is queued. Two clean
+  executions are required before model promotion.
+- Successor umbrella `8870515` and exact chain-3 replay `8870516` remain queued
+  without fresh application artifacts.
+
 ## 2026-09-25 (Aurora/Sunspot/Polaris/Perlmutter) -- PR #21 merged after exact-head validation
 
 - PR #21 head `1f4aff12bf55a36f2c7cad0cfbf453ac3cde4e35` passed the final hardware gates. Aurora job `8868654` completed AGPT TP=1, AGPT TP=2, and MoE with five finite optimizer updates and a nonempty DCP checkpoint for every arm; its terminal `VALIDATED` artifact and PBS exit 0 were inspected. Sunspot job `12478675` passed exact numerical parity, Perlmutter job `58868718` completed three finite CUDA optimizer steps with a checkpoint, and exact-head Polaris job `7659410` finished at exit 0 with `VERDICT: ok`.
