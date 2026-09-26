@@ -13,6 +13,10 @@ V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
 : "${MODEL:?submit with -v MODEL=<checkpoint-or-final>}"
 : "${RESULT:?submit with -v RESULT=<new-result-dir>}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+LIMIT="${LIMIT:-200}"
+MIN_CORRECT="${MIN_CORRECT:-47}"
+MIN_FORMAT="${MIN_FORMAT:-197}"
+MAX_UNCLOSED="${MAX_UNCLOSED:-3}"
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
 source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
@@ -37,20 +41,21 @@ model_sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
 
 printf 'AGPT2B_STAGE4_EVAL_START commit=%s model_sha=%s model=%s\n' "$commit" "$model_sha" "$MODEL" | tee "$RESULT/eval.log"
 "$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
-  --model "$MODEL" --limit 200 --dtype float32 --max-tokens 768 --out "$OUT" 2>&1 | tee -a "$RESULT/eval.log"
+  --model "$MODEL" --limit "$LIMIT" --dtype float32 --max-tokens 768 \
+  --out "$OUT" 2>&1 | tee -a "$RESULT/eval.log"
 rc=${PIPESTATUS[0]}
 [[ $rc -eq 0 ]] || { echo "AGPT2B_STAGE4_EVAL_FAILED rc=$rc"; exit "$rc"; }
-"$V/bin/python" - "$OUT" <<'PY' | tee -a "$RESULT/eval.log"
+"$V/bin/python" - "$OUT" "$LIMIT" "$MIN_CORRECT" "$MIN_FORMAT" "$MAX_UNCLOSED" <<'PY' | tee -a "$RESULT/eval.log"
 import json, statistics, sys
 rows=[json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-assert len(rows)==200, len(rows)
+expected, min_correct, min_format, max_unclosed = map(int, sys.argv[2:])
+assert len(rows)==expected, (len(rows), expected)
 correct=sum(bool(r["correct"]) for r in rows)
 fmt=sum(bool(r["format_ok"]) for r in rows)
 unclosed=sum(r.get("finish_reason")=="length" for r in rows)
 lengths=[len(r.get("generation", "")) for r in rows]
-print(f"AGPT2B_STAGE4_EVAL_ROWS rows=200 correct={correct} format={fmt} unclosed={unclosed} mean_chars={statistics.mean(lengths):.2f}")
-# Promotion is deliberately stricter than the 43/200 baseline and preserves format.
-if correct < 47 or fmt < 197 or unclosed > 3:
+print(f"AGPT2B_STAGE4_EVAL_ROWS rows={expected} correct={correct} format={fmt} unclosed={unclosed} mean_chars={statistics.mean(lengths):.2f}")
+if correct < min_correct or fmt < min_format or unclosed > max_unclosed:
     raise SystemExit(f"REJECT correct={correct} format={fmt} unclosed={unclosed}")
 print("AGPT2B_STAGE4_PROMOTION_GATE_PASS")
 PY
