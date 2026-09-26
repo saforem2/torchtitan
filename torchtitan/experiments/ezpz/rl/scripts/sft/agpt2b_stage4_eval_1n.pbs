@@ -1,0 +1,56 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-stage4-eval
+#PBS -l walltime=00:45:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+: "${MODEL:?submit with -v MODEL=<checkpoint-or-final>}"
+: "${RESULT:?submit with -v RESULT=<new-result-dir>}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+module load oneapi/release/2025.3.1 hdf5 pti-gpu
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+commit=$(git rev-parse HEAD) || exit 14
+[[ "$commit" == "$EXPECTED_COMMIT" ]] || { echo "FATAL commit expected=$EXPECTED_COMMIT actual=$commit"; exit 14; }
+git diff --quiet && git diff --cached --quiet || { echo "FATAL dirty worktree"; exit 14; }
+[[ -s "$MODEL/model.safetensors" && -s "$MODEL/tokenizer.json" ]] || { echo "FATAL invalid model $MODEL"; exit 15; }
+[[ ! -e "$RESULT" ]] || { echo "FATAL refusing existing result $RESULT"; exit 16; }
+mkdir -p "$RESULT"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export TORCH_CPP_LOG_LEVEL=ERROR TORCHINDUCTOR_MAX_AUTOTUNE=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=1 HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+OUT="$RESULT/generations.jsonl"
+model_sha=$(sha256sum "$MODEL/model.safetensors" | cut -d' ' -f1)
+
+printf 'AGPT2B_STAGE4_EVAL_START commit=%s model_sha=%s model=%s\n' "$commit" "$model_sha" "$MODEL" | tee "$RESULT/eval.log"
+"$V/bin/python" -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+  --model "$MODEL" --limit 200 --dtype float32 --max-tokens 768 --out "$OUT" 2>&1 | tee -a "$RESULT/eval.log"
+rc=${PIPESTATUS[0]}
+[[ $rc -eq 0 ]] || { echo "AGPT2B_STAGE4_EVAL_FAILED rc=$rc"; exit "$rc"; }
+"$V/bin/python" - "$OUT" <<'PY' | tee -a "$RESULT/eval.log"
+import json, statistics, sys
+rows=[json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+assert len(rows)==200, len(rows)
+correct=sum(bool(r["correct"]) for r in rows)
+fmt=sum(bool(r["format_ok"]) for r in rows)
+unclosed=sum(r.get("finish_reason")=="length" for r in rows)
+lengths=[len(r.get("generation", "")) for r in rows]
+print(f"AGPT2B_STAGE4_EVAL_ROWS rows=200 correct={correct} format={fmt} unclosed={unclosed} mean_chars={statistics.mean(lengths):.2f}")
+# Promotion is deliberately stricter than the 43/200 baseline and preserves format.
+if correct < 47 or fmt < 197 or unclosed > 3:
+    raise SystemExit(f"REJECT correct={correct} format={fmt} unclosed={unclosed}")
+print("AGPT2B_STAGE4_PROMOTION_GATE_PASS")
+PY
