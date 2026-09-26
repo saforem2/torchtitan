@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -23,27 +24,31 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager as fm  # noqa: E402
 
-try:
-    import ambivalent  # noqa: E402
+# ambivalent is required — silent fallback hides style regressions.
+# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
+import ambivalent  # noqa: E402
 
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-except ImportError:
-    plt.style.use("seaborn-v0_8-whitegrid")
+plt.style.use(ambivalent.STYLES["ambivalent"])
 
-plt.rcParams.update(
-    {
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
-        "savefig.facecolor": "white",
-        "savefig.transparent": False,
-        "text.color": "#222222",
-        "axes.labelcolor": "#222222",
-        "axes.titlecolor": "#222222",
-        "xtick.color": "#222222",
-        "ytick.color": "#222222",
-    }
-)
+# Iosevka may be a user-local drop-in; system installs are already discoverable.
+_IOSEVKA_DIR = Path(os.path.expanduser("~/.local/share/fonts/Iosevka"))
+if _IOSEVKA_DIR.is_dir():
+    for _font in _IOSEVKA_DIR.iterdir():
+        if _font.suffix.lower() in {".ttf", ".ttc", ".otf"}:
+            fm.fontManager.addfont(_font)
+plt.rcParams["font.family"] = ["Iosevka", "DejaVu Sans Mono", "monospace"]
+# Math text must match the label family instead of falling back to DejaVu.
+plt.rcParams["mathtext.fontset"] = "custom"
+plt.rcParams["mathtext.rm"] = "Iosevka"
+plt.rcParams["mathtext.it"] = "Iosevka:italic"
+plt.rcParams["mathtext.bf"] = "Iosevka:bold"
+plt.rcParams["mathtext.sf"] = "Iosevka"
+plt.rcParams["mathtext.tt"] = "Iosevka"
+# Transparent background is the house convention; the checkerboard in previews
+# is intentional transparency, not a rendering defect.
+plt.rcParams["savefig.transparent"] = True
 
 HERE = Path(__file__).parent
 FIGURES = HERE / "figures"
@@ -83,10 +88,8 @@ def parse_training_log(path: Path | None):
 def save(fig, stem: str):
     FIGURES.mkdir(exist_ok=True)
     fig.tight_layout()
-    fig.savefig(FIGURES / f"{stem}.svg", bbox_inches="tight", facecolor="white")
-    fig.savefig(
-        FIGURES / f"{stem}.png", dpi=170, bbox_inches="tight", facecolor="white"
-    )
+    fig.savefig(FIGURES / f"{stem}.svg", bbox_inches="tight", transparent=True)
+    fig.savefig(FIGURES / f"{stem}.png", dpi=170, bbox_inches="tight", transparent=True)
     plt.close(fig)
 
 
@@ -175,7 +178,7 @@ def full_eval_and_pareto():
             s=190 if selected else 90,
             marker="*" if selected else "o",
             color="#2ca02c" if selected else ("#3366cc" if b == 8 else "#d62728"),
-            edgecolor="white",
+            edgecolor="none",
             linewidth=1,
             zorder=3,
         )
@@ -209,7 +212,9 @@ def full_eval_and_pareto():
         fontsize=8,
         ha="center",
     )
-    ax.legend(loc="upper left")
+    # Upper-centre is the only region free of both candidates and the
+    # Stage-2 reference line at x=20.39.
+    ax.legend(loc="upper center", framealpha=0.0)
     save(fig, "stage4_interpolation_pareto")
 
 
