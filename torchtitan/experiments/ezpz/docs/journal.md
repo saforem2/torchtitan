@@ -14,6 +14,14 @@ Running log of what's happening, session by session. Most recent first.
 - Submitted the independent second 768-rank execution as `8871023`; it is
   queued with the same immutable source/runtime contract. Model promotion
   remains blocked until this second execution passes.
+- `8871023` subsequently passed independently at 768 ranks with
+  `XCCL_MESH_PROBE_PASS nodes=64 ranks=768 dp_rep=96 dp_shard=8`, auto-retry
+  success on attempt 1, launcher exit 0, PBS `Exit_status=0`, and job-unique
+  `VALIDATED` recording commit `550d2c670` plus archive SHA-256
+  `878013c487311ef73069b3a8a4172a1b79cee98e9cf459eddf3fd5bd09b5b3cc`.
+  No configured XCCL/PMI/failure signature was present. The Aurora communicator
+  gate is therefore closed after two clean target-scale executions; chain-3
+  replay `8870516` remains queued for nodes.
 - Successor umbrella `8870515` and exact chain-3 replay `8870516` remain queued
   without fresh application artifacts.
 
