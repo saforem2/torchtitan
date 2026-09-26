@@ -40,7 +40,12 @@ def main() -> None:
         for path in source.iterdir():
             if path.name.endswith(".safetensors") or path.name.endswith(".bin"):
                 continue
-            if path.name in {"optimizer.pt", "scheduler.pt", "trainer_state.json"}:
+            if path.name in {
+                "model.safetensors.index.json",
+                "optimizer.pt",
+                "scheduler.pt",
+                "trainer_state.json",
+            }:
                 continue
             target = args.output / path.name
             if not target.exists() and path.is_file():
@@ -68,6 +73,8 @@ def main() -> None:
             else:
                 raise ValueError(f"non-floating tensor differs: {key}")
     save_file(merged, args.output / "model.safetensors")
+    if (args.output / "model.safetensors.index.json").exists():
+        raise RuntimeError("single-file export contains a stale shard index")
     metadata = {
         "base": str(args.base),
         "tuned": str(args.tuned),
