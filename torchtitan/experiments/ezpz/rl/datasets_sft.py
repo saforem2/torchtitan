@@ -700,7 +700,10 @@ register_sft_dataset(
 # ---------------------------------------------------------------------------
 
 _METAMATH_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
-_METAMATH_MATH_EXPECTED_ROWS = 118_376
+_METAMATH_MATH_EXPECTED_ROWS = 118_375
+_METAMATH_MATH_EXPECTED_DIGEST = (
+    "568e6d50d542a5d4143d8dbc5a11f9e76fc365d01839ba47368e85ac2c2178f4"
+)
 
 
 def _format_metamath_math_row(ex):
@@ -739,6 +742,7 @@ def _build_metamath_math_distill() -> Dataset:
     held_out = {normalize(problem) for problem in math_test["problem"]}
     held_out.update(normalize(problem) for problem in math_500["problem"])
     rows = []
+    normalized_queries = []
     for ex in raw:
         if ex.get("type") not in {"MATH_AnsAug", "MATH_Rephrased"}:
             continue
@@ -749,10 +753,17 @@ def _build_metamath_math_distill() -> Dataset:
         formatted = _format_metamath_math_row(ex)
         if formatted is not None:
             rows.append(formatted)
+            normalized_queries.append(normalize(ex["query"]))
     if len(rows) != _METAMATH_MATH_EXPECTED_ROWS:
         raise ValueError(
             "metamath-math-distill row-count drift: "
             f"expected {_METAMATH_MATH_EXPECTED_ROWS}, got {len(rows)}"
+        )
+    digest = hashlib.sha256("\n".join(normalized_queries).encode()).hexdigest()
+    if digest != _METAMATH_MATH_EXPECTED_DIGEST:
+        raise ValueError(
+            "metamath-math-distill digest drift: "
+            f"expected {_METAMATH_MATH_EXPECTED_DIGEST}, got {digest}"
         )
     return Dataset.from_list(rows).shuffle(seed=154391)
 
