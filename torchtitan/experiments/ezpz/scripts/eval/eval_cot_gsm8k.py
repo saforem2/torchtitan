@@ -148,7 +148,7 @@ def main() -> None:
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
 
-    ds = load_dataset("gsm8k", "main", split="test")
+    ds = load_dataset("openai/gsm8k", "main", split="test")
     if args.limit:
         ds = ds.select(range(min(args.limit, len(ds))))
     questions = [r["question"] for r in ds]
