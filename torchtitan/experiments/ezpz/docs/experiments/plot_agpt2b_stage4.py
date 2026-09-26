@@ -23,12 +23,11 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager as fm  # noqa: E402
-
 # ambivalent is required — silent fallback hides style regressions.
 # Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
 import ambivalent  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager as fm  # noqa: E402
 
 plt.style.use(ambivalent.STYLES["ambivalent"])
 
