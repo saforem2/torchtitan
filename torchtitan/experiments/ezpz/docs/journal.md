@@ -6892,9 +6892,12 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
   the step-39900 checkpoint or chain-3 numerics.
 - Source `step-39900` remains unchanged (6,145 files; `.metadata` mtime
   `2026-09-22 06:30:02 UTC`) and the job-unique checkpoint sink is empty.
-- Building a separately named immutable Python 3.12 archive from the validated
-  source venv that contains `renderers==0.1.11`; it must pass integrity,
-  extracted-runtime import, and compute-node preflight before any replay retry.
+- Built a separately named immutable Python 3.12 archive from the validated
+  source venv with `renderers==0.1.11`: checksum
+  `d577dab5dbe0866fa90b4b7d8a21c14ab8afa8ca0ede79ea416e3c677b61b8fe`.
+  Archive integrity and a fresh extracted-runtime import passed. Compute-node
+  preflight `8872176` is queued; no replay retry will be submitted until it
+  passes.
 - Successor umbrella `8870515` remains queued for insufficient free nodes; no
   seat artifacts exist.
 
