@@ -624,6 +624,78 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# metamath-gsm-distill -- concise augmented GSM traces for Stage-2 repair
+# ---------------------------------------------------------------------------
+
+_METAMATH_FINAL_RE = re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)")
+_COT_PROMPT_SUFFIX = (
+    "\nReason step by step inside <think></think>, then give the final "
+    "answer inside <answer>\\boxed{}</answer>."
+)
+
+
+def _format_metamath_gsm_row(ex):
+    """Normalize one MetaMath GSM trace into AGPT's concise CoT envelope."""
+    response = str(ex.get("response", ""))
+    match = _METAMATH_FINAL_RE.search(response)
+    if not match:
+        return None
+    trace = response[: match.start()].strip()
+    answer = match.group(1).replace(",", "")
+    query = str(ex.get("query", "")).strip()
+    if not query or not trace or len(trace) > 1200:
+        return None
+    return {
+        "prompt": [{"role": "user", "content": query + _COT_PROMPT_SUFFIX}],
+        "completion": [
+            {
+                "role": "assistant",
+                "content": f"<think>{trace}</think>\n<answer>\\boxed{{{answer}}}</answer>",
+            }
+        ],
+    }
+
+
+def _build_metamath_gsm_distill() -> Dataset:
+    """Build a deterministic, GSM8K-test-decontaminated distillation set."""
+    from datasets import Dataset, load_dataset
+
+    raw = load_dataset("meta-math/MetaMathQA", split="train")
+    test = load_dataset("openai/gsm8k", "main", split="test")
+
+    def normalize(text):
+        return " ".join(str(text).casefold().split())
+
+    held_out = {normalize(question) for question in test["question"]}
+    rows = []
+    for ex in raw:
+        if ex.get("type") not in {"GSM_AnsAug", "GSM_Rephrased"}:
+            continue
+        if normalize(ex.get("query", "")) in held_out:
+            continue
+        if normalize(ex.get("original_question", "")) in held_out:
+            continue
+        formatted = _format_metamath_gsm_row(ex)
+        if formatted is not None:
+            rows.append(formatted)
+    if len(rows) < 100_000:
+        raise ValueError(f"metamath-gsm-distill unexpectedly small: {len(rows)} rows")
+    return Dataset.from_list(rows).shuffle(seed=154391)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="metamath-gsm-distill",
+        build=_build_metamath_gsm_distill,
+        description=(
+            "MetaMathQA GSM answer-augmented and rephrased traces, normalized "
+            "to AGPT's concise CoT envelope and decontaminated against GSM8K test."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # alpaca — broad instruction-following (52k examples)
 # ---------------------------------------------------------------------------
 

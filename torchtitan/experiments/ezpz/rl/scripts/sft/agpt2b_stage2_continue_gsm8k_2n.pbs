@@ -1,0 +1,65 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-stage2-cont
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+BASE="${BASE:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/agpt2b-mds154391-step600-gsm8k-r1cot-2n-r2/final}"
+ROOT="${ROOT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage4/gsm8k-cont-${PBS_JOBID%%.*}}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
+
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+commit=$(git rev-parse HEAD) || exit 14
+[[ "$commit" == "$EXPECTED_COMMIT" ]] || { echo "FATAL commit expected=$EXPECTED_COMMIT actual=$commit"; exit 14; }
+git diff --quiet && git diff --cached --quiet || { echo "FATAL dirty worktree"; exit 14; }
+[[ -s "$BASE/model.safetensors" && -s "$BASE/tokenizer.json" ]] || { echo "FATAL invalid base $BASE"; exit 15; }
+[[ ! -e "$ROOT" ]] || { echo "FATAL refusing existing output $ROOT"; exit 16; }
+mkdir -p "$ROOT"
+base_sha=$(sha256sum "$BASE/model.safetensors" | cut -d' ' -f1)
+
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD=8000
+export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD=8000
+export TORCH_CPP_LOG_LEVEL=ERROR
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/agpt2b-stage2-cont-${PBS_JOBID%%.*}
+mkdir -p "$TMPDIR"
+
+printf 'AGPT2B_STAGE2_CONT_START commit=%s base_sha=%s root=%s\n' "$commit" "$base_sha" "$ROOT"
+"$V/bin/ezpz" launch --auto-retry --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
+  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+  --sft_dataset gsm8k-r1cot \
+  --model_name_or_path "$BASE" \
+  --output_dir "$ROOT" \
+  --max_steps 32 \
+  --num_train_epochs 1 \
+  --learning_rate 5e-6 \
+  --lr_scheduler_type linear \
+  --warmup_steps 0 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 1 \
+  --dataset_num_proc 32 \
+  --max_length 2048 \
+  --bf16 --fsdp full_shard \
+  --logging_steps 1 \
+  --save_strategy steps --save_steps 8 --save_total_limit 4 \
+  --report_to none
+rc=$?
+echo "AGPT2B_STAGE2_CONT_DONE rc=$rc $(date -Is)"
+exit "$rc"
