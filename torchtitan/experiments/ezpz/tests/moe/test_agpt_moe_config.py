@@ -75,10 +75,10 @@ def test_current_sonic_configs_wire_routing_and_layout(
     assert trainer_config.parallelism.expert_parallel_degree == ep_degree
     assert model_config.dim == dim
     assert layers
-    assert {layer.routed_experts.inner_experts.compute_backend for layer in layers} == {
+    assert {layer.routed_experts.compute_backend for layer in layers} == {
         "aurora_full_sonic"
     }
-    assert {layer.routed_experts.inner_experts.hidden_dim for layer in layers} == {
+    assert {layer.routed_experts.w13.out_features for layer in layers} == {
         hidden_dim
     }
     assert all(
@@ -99,11 +99,12 @@ def test_non_square_sonic_meta_models_preserve_weight_shapes(config_factory):
     ]
     assert routed
     for module in routed:
-        experts = module.inner_experts
-        num_experts, hidden_dim, dim = experts.w1_EFD.shape
+        experts = module
+        num_experts, projections, hidden_dim, dim = experts.w13.weight.shape
+        assert projections == 2
         assert dim != hidden_dim
-        assert tuple(experts.w2_EDF.shape) == (num_experts, dim, hidden_dim)
-        assert tuple(experts.w3_EFD.shape) == (num_experts, hidden_dim, dim)
+        assert tuple(experts.w2.weight.shape) == (num_experts, dim, hidden_dim)
+        assert tuple(experts.w13.weight[:, 1].shape) == (num_experts, hidden_dim, dim)
         assert module._wants_routing()
 
 

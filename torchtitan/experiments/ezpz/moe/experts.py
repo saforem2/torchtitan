@@ -6,8 +6,9 @@
 
 """ezpz expert compute backends for MoE.
 
-Subclasses upstream `GroupedExperts` to add a `compute_backend` selector
-without modifying core. Current HEAD registers six backends:
+Provides alternate compute kernels for upstream ``GroupedLinear`` weights.
+The backend selector lives on :class:`EzpzRoutedExperts`, matching the current
+upstream ownership boundary. Current HEAD registers six backends:
 
 - ``"grouped_mm"`` (default): defer to upstream's ``torch._grouped_mm``
   path. Requires SM90+ on CUDA; on XPU there is no grouped-mm fallback.
@@ -21,20 +22,11 @@ without modifying core. Current HEAD registers six backends:
 
 import math
 import os
-from dataclasses import dataclass
 from typing import Literal
 
 import torch
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor
-from torch.utils.checkpoint import checkpoint
-
-# GroupedExperts comes straight from upstream — the local `.moe` copy
-# was deleted because it was byte-identical to the upstream module. See
-# moe/__init__.py for the same import-re-route.
-from torchtitan.models.common.moe import GroupedExperts
-
 
 ExpertComputeBackend = Literal[
     "for_loop", "grouped_mm", "bmm", "bmm_nodrop", "aurora_sycl", "aurora_full_sonic"
@@ -525,101 +517,3 @@ def _run_experts_aurora_full_sonic(
         down,
         expert_backend="sycl_sonic",
     )
-
-
-class EzpzGroupedExperts(GroupedExperts):
-    """GroupedExperts variant that selects between expert compute backends.
-
-    Defers to upstream's grouped-mm path by default. Set ``compute_backend``
-    to ``"for_loop"`` or ``"bmm"`` on devices without grouped-mm support
-    (e.g. XPU, pre-SM90 CUDA); ``"bmm"`` is the compile-friendly, batched
-    alternative to the serial ``"for_loop"`` path.
-    """
-
-    @dataclass(kw_only=True, slots=True)
-    class Config(GroupedExperts.Config):
-        compute_backend: ExpertComputeBackend = "grouped_mm"
-        # Only used by the "bmm" backend: bounds the padded per-expert
-        # capacity as `ceil(R / E * capacity_factor)`, where R is the
-        # total routed token count and E the number of experts. Tokens
-        # assigned to an expert beyond capacity are dropped (zeroed).
-        capacity_factor: float = 1.25
-
-    def __init__(self, config: Config):
-        super().__init__(config)
-        self.compute_backend: ExpertComputeBackend = config.compute_backend
-        self.capacity_factor: float = config.capacity_factor
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        num_tokens_per_expert: torch.Tensor,
-        *,
-        topk_scores: torch.Tensor | None = None,
-        topk_indices: torch.Tensor | None = None,
-        ep_mesh: object | None = None,
-    ) -> torch.Tensor:
-        # topk_scores / topk_indices / ep_mesh are ONLY consumed by the
-        # "aurora_full_sonic" backend, which needs the routing decision and an
-        # EP mesh that the (x, num_tokens_per_expert) contract does not carry.
-        # They are keyword-only and default to None so every existing caller --
-        # and the other five backends -- are untouched. RoutedExperts passes
-        # them via EzpzRoutedExperts (moe/routed_experts.py); core's
-        # RoutedExperts drops them at models/common/moe.py:163, which is the
-        # entire reason this plumbing exists.
-        # NOTE: this method is intentionally NOT marked with
-        # @torch.compiler.disable. The grouped_mm and bmm paths delegate to
-        # compile-friendly implementations (upstream's `super().forward()`
-        # and `_run_experts_bmm` respectively), and we want torch.compile
-        # to see them. Only the for-loop path is opted out of compile, via
-        # the module-level @torch.compiler.disable decorator on
-        # `_run_experts_for_loop`.
-        if self.compute_backend == "grouped_mm":
-            return super().forward(x, num_tokens_per_expert)
-
-        # Param names use Shazeer shape-suffix style post upstream PR #3425
-        # (41st sync): w1_EFD, w2_EDF, w3_EFD.
-        if isinstance(self.w1_EFD, DTensor):
-            w1 = self.w1_EFD.to_local()
-            # pyrefly: ignore [missing-attribute]
-            w2 = self.w2_EDF.to_local()
-            # pyrefly: ignore [missing-attribute]
-            w3 = self.w3_EFD.to_local()
-        else:
-            w1 = self.w1_EFD
-            w2 = self.w2_EDF
-            w3 = self.w3_EFD
-
-        if self.compute_backend == "for_loop":
-            if _env_flag_enabled("TT_MOE_CHECKPOINT_EXPERTS"):
-                return checkpoint(
-                    _run_experts_for_loop,
-                    w1,
-                    w2,
-                    w3,
-                    x,
-                    num_tokens_per_expert,
-                    use_reentrant=False,
-                    preserve_rng_state=False,
-                )
-            return _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
-        if self.compute_backend == "bmm":
-            return _run_experts_bmm(
-                w1, w2, w3, x, num_tokens_per_expert, self.capacity_factor
-            )
-        if self.compute_backend == "bmm_nodrop":
-            return _run_experts_bmm_nodrop(w1, w2, w3, x, num_tokens_per_expert)
-        if self.compute_backend == "aurora_sycl":
-            return _run_experts_aurora_sycl(w1, w2, w3, x, num_tokens_per_expert)
-        if self.compute_backend == "aurora_full_sonic":
-            return _run_experts_aurora_full_sonic(
-                w1,
-                w2,
-                w3,
-                x,
-                num_tokens_per_expert,
-                topk_scores=topk_scores,
-                topk_indices=topk_indices,
-                ep_mesh=ep_mesh,
-            )
-        raise ValueError(f"Unknown expert compute backend: {self.compute_backend!r}")

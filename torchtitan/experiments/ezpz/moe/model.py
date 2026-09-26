@@ -284,7 +284,7 @@ class moeModel(Decoder):  # noqa: N801
             # compute_backend, so this stays.
             for layer_cfg in self.layers:
                 if layer_cfg.moe is not None:
-                    experts_cfg = layer_cfg.moe.routed_experts.inner_experts
+                    experts_cfg = layer_cfg.moe.routed_experts
                     if getattr(
                         experts_cfg, "compute_backend", "grouped_mm"
                     ) == "grouped_mm" and not has_cuda_capability(9, 0):

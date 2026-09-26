@@ -289,10 +289,8 @@ def apply_fsdp(
     for layer_id, transformer_block in model.layers.items():
         if transformer_block.moe_enabled:
             assert hasattr(transformer_block, "moe")
-            expert_params = set(
-                transformer_block.moe.routed_experts.inner_experts.parameters()
-            )
-            num_experts = transformer_block.moe.routed_experts.inner_experts.num_experts
+            expert_params = set(transformer_block.moe.routed_experts.parameters())
+            num_experts = transformer_block.moe.routed_experts.w13.group_size
 
             if ep_degree > 1:
                 assert edp_mesh is not None
@@ -307,7 +305,7 @@ def apply_fsdp(
             if efsdp_ep_size > num_experts:
                 expert_w = next(
                     iter(
-                        transformer_block.moe.routed_experts.inner_experts.parameters()
+                        transformer_block.moe.routed_experts.parameters()
                     )
                 )
                 if expert_w.shape[1] % efsdp_ep_size == 0:

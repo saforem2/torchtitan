@@ -40,7 +40,6 @@ from torchtitan.models.common.moe_sharding import (
 )
 from torchtitan.protocols.sharding import ShardingConfig
 
-_GROUPED_EXPERT_PARAM_NAMES = ("w1_EFD", "w2_EDF", "w3_EFD")
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
@@ -220,17 +219,7 @@ def _set_moe_ffn_sharding(
             enable_ep=enable_ep,
             enable_sp=enable_sp,
         )
-        # Upstream leaves GroupedExperts unconfigured when EP is disabled.
-        # Full-SPMD FSDP requires those parameters to be DTensors before it
-        # takes ownership of the DP axis.
-        inner_experts = layer_cfg.moe.routed_experts.inner_experts
-        if not enable_ep and inner_experts.sharding_config is None:
-            replicated = dense_param_placement(tp=spmd.R)
-            inner_experts.sharding_config = ShardingConfig(
-                state_shardings={
-                    name: replicated for name in _GROUPED_EXPERT_PARAM_NAMES
-                }
-            )
+
         # The ezpz compatibility FFN deliberately retains pre-sync physical
         # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
         # Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for

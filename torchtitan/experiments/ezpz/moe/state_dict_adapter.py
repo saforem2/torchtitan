@@ -44,9 +44,9 @@ class moeStateDictAdapter(MoEStateDictAdapter):  # noqa: N801
             "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
             "model.layers.{}.post_attention_layernorm.weight": "layers.{}.ffn_norm.weight",
             # MoE Module
-            "model.layers.{}.mlp.experts.{}.gate_proj.weight": "layers.{}.moe.routed_experts.inner_experts.w1_EFD",
-            "model.layers.{}.mlp.experts.{}.up_proj.weight": "layers.{}.moe.routed_experts.inner_experts.w3_EFD",
-            "model.layers.{}.mlp.experts.{}.down_proj.weight": "layers.{}.moe.routed_experts.inner_experts.w2_EDF",
+            "model.layers.{}.mlp.experts.{}.gate_proj.weight": "layers.{}.moe.routed_experts.w1_EFD",
+            "model.layers.{}.mlp.experts.{}.up_proj.weight": "layers.{}.moe.routed_experts.w3_EFD",
+            "model.layers.{}.mlp.experts.{}.down_proj.weight": "layers.{}.moe.routed_experts.w2.weight",
             "model.layers.{}.mlp.gate.weight": "layers.{}.moe.router.gate.weight",
             "model.layers.{}.mlp.shared_experts.gate_proj.weight": "layers.{}.moe.shared_experts.w1.weight",
             "model.layers.{}.mlp.shared_experts.up_proj.weight": "layers.{}.moe.shared_experts.w3.weight",
@@ -101,13 +101,15 @@ class moeStateDictAdapter(MoEStateDictAdapter):  # noqa: N801
         1. Convert between the HF shape and the torchtitan shape.
         2. Split the GroupedExperts' weight into separate expert's weight.
         """
-        state_dict = self._native_fused_linears_to_hf(state_dict)
+        state_dict = self._native_fused_linears_to_hf(
+            state_dict, split_routed_experts=True
+        )
         to_hf_map = {v: k for k, v in self.from_hf_map.items()}
 
         hf_state_dict = {}
 
         for key, value in state_dict.items():
-            if "moe.routed_experts.inner_experts" in key:
+            if self._is_expert_weight_key(key):
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 # pyrefly: ignore [missing-attribute]
                 layer_num = re.search(r"\d+", key).group(0)
@@ -217,4 +219,6 @@ class moeStateDictAdapter(MoEStateDictAdapter):  # noqa: N801
                 new_key = self.from_hf_map[key]
                 state_dict[new_key] = value
 
-        return self._native_fused_linears_from_hf(state_dict)
+        return self._native_fused_linears_from_hf(
+            state_dict, fuse_routed_experts=True
+        )

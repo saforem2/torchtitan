@@ -28,17 +28,15 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
     moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
     assert moe_layers
     for moe in moe_layers:
-        assert moe.routed_experts.inner_experts.sharding_config is not None
+        assert moe.routed_experts.w13.sharding_config is not None
         assert set(
-            moe.routed_experts.inner_experts.sharding_config.state_shardings
+            moe.routed_experts.w13.sharding_config.state_shardings
         ) == {
-            "w1_EFD",
-            "w2_EDF",
-            "w3_EFD",
+            "weight",
         }
 
 
-def test_ezpz_moe_sharding_distributes_experts_without_ep():
+def test_ezpz_moe_sharding_leaves_grouped_linears_local_without_ep():
     config = moe_configs["debugmodel"]()
 
     set_moe_sharding_config(config, enable_sp=False, enable_ep=False)
@@ -46,13 +44,8 @@ def test_ezpz_moe_sharding_distributes_experts_without_ep():
     moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
     assert moe_layers
     for moe in moe_layers:
-        sharding = moe.routed_experts.inner_experts.sharding_config
-        assert sharding is not None
-        assert set(sharding.state_shardings) == {
-            "w1_EFD",
-            "w2_EDF",
-            "w3_EFD",
-        }
+        assert moe.routed_experts.w13.sharding_config is None
+        assert moe.routed_experts.w2.sharding_config is None
 
 
 def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():

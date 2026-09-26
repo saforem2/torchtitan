@@ -31,11 +31,16 @@ from torchtitan.models.common import (
 from torchtitan.models.common.activation import Sigmoid, Softmax
 from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import (
+    fused_grouped_gate_up_param_init,
     get_attention_config,
     make_ffn_config,
     make_gqa_config,
 )
-from torchtitan.models.common.linear import ColumnParallelLinear, RouterGateLinear
+from torchtitan.models.common.linear import (
+    ColumnParallelLinear,
+    GroupedLinear,
+    RouterGateLinear,
+)
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
 
 from torchtitan.models.common.param_init import depth_scaled_std
@@ -43,7 +48,7 @@ from torchtitan.models.deepseek_v3 import DeepSeekV3Router
 
 from torchtitan.protocols.module import Module
 
-from .experts import ExpertComputeBackend, EzpzGroupedExperts
+from .experts import ExpertComputeBackend
 from .model import Attention, moeModel, moeTransformerBlock
 
 from .routed_experts import EzpzRoutedExperts
@@ -366,19 +371,8 @@ def make_ezpz_experts_config(
     non_blocking_capacity_factor: float | None = None,
     compute_backend: ExpertComputeBackend = "grouped_mm",
 ) -> RoutedExperts.Config:
-    """Build an EzpzGroupedExperts.Config from the same args as upstream
-    `make_experts_config`, plus a `compute_backend` selector.
-    """
-    inner = EzpzGroupedExperts.Config(
-        dim=dim,
-        hidden_dim=hidden_dim,
-        num_experts=num_experts,
-        param_init=param_init,
-        compute_backend=compute_backend,
-    )
-    # #3859: token_dispatcher is now a sibling of the grouped experts
-    # under a RoutedExperts local_map region, not a child of the experts
-    # config.
+    """Build upstream-layout routed experts plus an ezpz backend selector."""
+
     dispatcher = make_ezpz_token_dispatcher_config(
         num_experts=num_experts,
         top_k=top_k,
@@ -390,7 +384,23 @@ def make_ezpz_experts_config(
     # backends that take (x, num_tokens_per_expert), but it forwards the
     # router's decision to inner_experts for aurora_full_sonic, which core
     # drops at models/common/moe.py:163.
-    return EzpzRoutedExperts.Config(inner_experts=inner, token_dispatcher=dispatcher)
+    return EzpzRoutedExperts.Config(
+        w13=GroupedLinear.Config(
+            group_size=num_experts,
+            in_features=dim,
+            out_features=hidden_dim,
+            num_linears=2,
+            param_init=fused_grouped_gate_up_param_init(param_init),
+        ),
+        w2=GroupedLinear.Config(
+            group_size=num_experts,
+            in_features=hidden_dim,
+            out_features=dim,
+            param_init={"weight": param_init["w2_EDF"]},
+        ),
+        token_dispatcher=dispatcher,
+        compute_backend=compute_backend,
+    )
 
 
 def make_ezpz_moe_config(
@@ -1449,7 +1459,7 @@ def model_registry(
         if layer_cfg.moe is not None:
             routed_cfg = layer_cfg.moe.routed_experts
             routed_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
-                num_experts=routed_cfg.inner_experts.num_experts,
+                num_experts=routed_cfg.w13.group_size,
                 top_k=routed_cfg.token_dispatcher.top_k,
                 score_before_experts=routed_cfg.token_dispatcher.score_before_experts,
                 comm_backend=moe_comm_backend,
