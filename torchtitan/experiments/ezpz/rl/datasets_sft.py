@@ -781,6 +781,91 @@ register_sft_dataset(
 
 
 # ---------------------------------------------------------------------------
+# openmath-verified-replay -- verified broad math + GSM retention replay
+# ---------------------------------------------------------------------------
+
+_OPENMATH_TARGETS = {"augmented_math": 150_000, "augmented_gsm8k": 50_000}
+
+
+def _normalize_math_answer(text):
+    return re.sub(r"\s+", "", str(text).strip().replace(",", "").replace("$", ""))
+
+
+def _format_openmath_verified_row(ex):
+    """Keep only concise OpenMath rows whose boxed answer matches the gold."""
+    solution = str(ex.get("generated_solution", "")).strip()
+    boxes = _METAMATH_BOXED_RE.findall(solution)
+    if not boxes or len(solution) > 1200:
+        return None
+    answer = str(ex.get("expected_answer", "")).strip()
+    if not answer or _normalize_math_answer(boxes[-1]) != _normalize_math_answer(answer):
+        return None
+    problem = str(ex.get("problem", "")).strip()
+    if not problem:
+        return None
+    return {
+        "prompt": [{"role": "user", "content": problem + _COT_PROMPT_SUFFIX}],
+        "completion": [
+            {
+                "role": "assistant",
+                "content": f"<think>{solution}</think>\n<answer>\\boxed{{{answer}}}</answer>",
+            }
+        ],
+    }
+
+
+def _build_openmath_verified_replay() -> Dataset:
+    """Build deterministic verified MATH/GSM replay without held-out overlap."""
+    from collections import Counter
+
+    from datasets import Dataset, load_dataset
+
+    raw = load_dataset("nvidia/OpenMathInstruct-2", split="train").shuffle(seed=154391)
+    math_test = load_dataset("DigitalLearningGmbH/MATH-lighteval", split="test")
+    math_500 = load_dataset("HuggingFaceH4/MATH-500", split="test")
+    gsm_test = load_dataset("openai/gsm8k", "main", split="test")
+
+    def normalize(text):
+        return " ".join(str(text).casefold().split())
+
+    held_out = {normalize(problem) for problem in math_test["problem"]}
+    held_out.update(normalize(problem) for problem in math_500["problem"])
+    held_out.update(normalize(question) for question in gsm_test["question"])
+    counts = Counter()
+    rows = []
+    for ex in raw:
+        source = str(ex.get("problem_source", ""))
+        if source not in _OPENMATH_TARGETS or counts[source] >= _OPENMATH_TARGETS[source]:
+            continue
+        if normalize(ex.get("problem", "")) in held_out:
+            continue
+        formatted = _format_openmath_verified_row(ex)
+        if formatted is None:
+            continue
+        rows.append(formatted)
+        counts[source] += 1
+        if all(counts[name] == target for name, target in _OPENMATH_TARGETS.items()):
+            break
+    if dict(counts) != _OPENMATH_TARGETS:
+        raise ValueError(
+            f"openmath-verified-replay quota drift: expected {_OPENMATH_TARGETS}, got {dict(counts)}"
+        )
+    return Dataset.from_list(rows).shuffle(seed=154391)
+
+
+register_sft_dataset(
+    SFTDataset(
+        name="openmath-verified-replay",
+        build=_build_openmath_verified_replay,
+        description=(
+            "200k concise OpenMathInstruct-2 rows with exact boxed/gold agreement: "
+            "150k augmented MATH plus 50k augmented GSM8K retention replay."
+        ),
+    )
+)
+
+
+# ---------------------------------------------------------------------------
 # alpaca — broad instruction-following (52k examples)
 # ---------------------------------------------------------------------------
 
