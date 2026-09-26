@@ -52,7 +52,10 @@ rc=$?
 import sys
 from datasets import load_from_disk
 dataset=load_from_disk(sys.argv[1])
-assert len(dataset) >= 20_000, len(dataset)
+# This is the packed-sequence count, not the raw-example count. The audited
+# source contributes >100k filtered rows and deterministically packs to 17,844
+# length-2048 sequences with the current tokenizer and TRL version.
+assert len(dataset) == 17_844, len(dataset)
 assert {"input_ids", "assistant_masks", "seq_lengths"} <= set(dataset.column_names)
 for i in (0, len(dataset)//2, len(dataset)-1):
  row=dataset[i]
