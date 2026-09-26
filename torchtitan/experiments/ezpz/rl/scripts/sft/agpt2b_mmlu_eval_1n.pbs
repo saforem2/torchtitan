@@ -1,0 +1,65 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N agpt2b-mmlu
+#PBS -l walltime=06:00:00
+#PBS -l select=1
+#PBS -l filesystems=tegu:home
+#PBS -q workq
+#PBS -j oe
+set -o pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+OVERLAY="${OVERLAY:-/lus/tegu/projects/datascience/foremans/venvs/overlays/lm-eval-torch214}"
+: "${MODEL:?submit with -v MODEL=<hf-model-dir>}"
+: "${RESULT:?submit with -v RESULT=<new-result-dir>}"
+: "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<sha>}"
+TASKS="${TASKS:-mmlu,mmlu_continuation}"
+LIMIT="${LIMIT:-}"
+
+module load oneapi/release/2025.3.1 hdf5 pti-gpu
+source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+ezpz_setup "$V" || exit 13
+cd "$WT" || exit 11
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
+git diff --quiet && git diff --cached --quiet || exit 14
+[[ -d "$MODEL" && -s "$MODEL/config.json" && -s "$MODEL/tokenizer.json" ]] || exit 15
+[[ -d "$OVERLAY/lm_eval" ]] || exit 16
+[[ ! -e "$RESULT" ]] || exit 17
+mkdir -p "$RESULT"
+
+export PYTHONPATH="$OVERLAY:$WT${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
+export HF_HOME=/tegu/datasets/datasets/hf
+export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
+export HF_HUB_ENABLE_HF_TRANSFER=0
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+"$V/bin/python" - <<'PY' || exit 18
+import torch, transformers, vllm
+from lm_eval.tasks import TaskManager
+assert torch.__version__ == "2.14.0+xpu", torch.__version__
+assert transformers.__version__ == "5.17.0", transformers.__version__
+assert "mmlu" in TaskManager().all_tasks
+print("AGPT2B_MMLU_RUNTIME_OK", torch.__version__, transformers.__version__, vllm.__version__)
+PY
+
+args=(
+  --model vllm
+  --model_args "pretrained=$MODEL,tensor_parallel_size=1,dtype=float32,gpu_memory_utilization=0.70,max_model_len=4096,enforce_eager=True"
+  --tasks "$TASKS"
+  --batch_size auto
+  --num_fewshot 5
+  --output_path "$RESULT"
+  --log_samples
+)
+if [[ -n "$LIMIT" ]]; then args+=(--limit "$LIMIT"); fi
+printf 'AGPT2B_MMLU_START commit=%s model=%s tasks=%s limit=%s\n' \
+  "$(git rev-parse HEAD)" "$MODEL" "$TASKS" "${LIMIT:-full}"
+"$V/bin/python" -u -m lm_eval "${args[@]}"
+rc=$?
+echo "AGPT2B_MMLU_DONE rc=$rc result=$RESULT"
+exit "$rc"
