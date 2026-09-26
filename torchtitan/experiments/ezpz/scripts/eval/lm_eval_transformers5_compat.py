@@ -11,9 +11,13 @@ import runpy
 import transformers
 
 
-if not hasattr(transformers, "AutoModelForVision2Seq"):
-    transformers._objects[
-        "AutoModelForVision2Seq"
-    ] = transformers.AutoModelForImageTextToText  # type: ignore[attr-defined]
+def main() -> None:
+    if not hasattr(transformers, "AutoModelForVision2Seq"):
+        transformers._objects[  # type: ignore[attr-defined]
+            "AutoModelForVision2Seq"
+        ] = transformers.AutoModelForImageTextToText
+    runpy.run_module("lm_eval", run_name="__main__")
 
-runpy.run_module("lm_eval", run_name="__main__")
+
+if __name__ == "__main__":
+    main()
