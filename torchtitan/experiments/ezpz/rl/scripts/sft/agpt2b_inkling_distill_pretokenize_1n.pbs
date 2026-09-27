@@ -16,8 +16,7 @@ FINAL="${FINAL:-/tegu/datasets/datasets/agpt2b-inkling-distill-len2048-v1}"
 BUILD="${FINAL}.building-${PBS_JOBID%%.*}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
-ezpz_setup "$V" || exit 13
+module load oneapi/release/2025.3.1 hdf5 pti-gpu || exit 12
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
 git diff --quiet && git diff --cached --quiet || exit 14
@@ -40,8 +39,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 printf 'AGPT2B_INKLING_PRETOKEN_START commit=%s source_sha=%s build=%s\n' \
   "$(git rev-parse HEAD)" "$(sha256sum "$SOURCE" | cut -d' ' -f1)" "$BUILD"
-"$V/bin/ezpz" launch --nproc 1 --nproc_per_node 1 --timeout 1800 -- \
-  "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
+"$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
   --sft_dataset inkling-distill \
   --model_name_or_path "$BASE" \
   --pretokenize_to "$BUILD" \
