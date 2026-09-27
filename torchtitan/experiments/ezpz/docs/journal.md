@@ -2,6 +2,23 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-27 (Aurora) -- replay replacement remains queued
+
+- Scheduler history confirms original exact-topology replay `8870516` is
+  terminal with `Exit_status=143` after `00:31:18`. Both auto-retry attempts
+  failed before checkpoint restore because the old immutable archive lacked
+  `renderers`; no optimizer step or tensor diagnostic ran. Its job-unique sink
+  remains empty.
+- Replacement `8873944` remains queued for 512 active nodes plus ten spares,
+  currently blocked by offline/ineligible-node availability. It retains commit
+  `550d2c670a02866661c133dd09b499ae6844bc7f` and validated archive SHA-256
+  `d577dab5dbe0866fa90b4b7d8a21c14ab8afa8ca0ede79ea416e3c677b61b8fe`; no
+  output directory exists yet.
+- Successor umbrella `8870515` also remains queued with no seat artifacts; its
+  scheduler comment likewise reports an offline/ineligible node. Source
+  `step-39900` is unchanged at 6,145 files with `.metadata` mtime
+  `2026-09-22 06:30:02 UTC`; sinks for `8870516` and `8872915` remain empty.
+
 ## 2026-09-26 (Aurora) -- exact chain-3 replay starts
 
 - Exact-topology replay `8870516` started at 12:32:32 CDT on 522 allocated
