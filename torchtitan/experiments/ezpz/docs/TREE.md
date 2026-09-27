@@ -107,7 +107,7 @@ docs/
 │   ├── README.md
 │   ├── agpt/{aurora,polaris,sunspot}/   <- Per-machine smoke / benchmark / incident reports
 │   ├── moe/{aurora,polaris,sunspot}/
-│   ├── lr-finder/agpt/{2b,20b,80b}/ + lr-finder/moe/{debugmodel,500m,2b,4b,7b}/
+│   ├── lr-finder/agpt/{2b,5b,10b,20b,30b,80b}/ + lr-finder/moe/{debugmodel,500m,2b,4b,7b}/
 │   ├── mup/                       <- muP ladder: audit, design, staged plan
 │   ├── optimizer-comparison/      <- Fixed-batch AdamW vs Mano vs SophiaG
 │   └── synthetic/aurora/

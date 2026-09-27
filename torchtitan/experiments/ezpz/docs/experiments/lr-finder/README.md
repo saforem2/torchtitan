@@ -139,7 +139,8 @@ page + `figures/`):
 
 - **agpt (dense)** -- [index](agpt/README.md) (master LR table + cross-model
   findings), with per-size pages: [2B](agpt/2b/README.md) /
-  [20B](agpt/20b/README.md) /
+  [5B](agpt/5b/README.md) / [10B](agpt/10b/README.md) /
+  [20B](agpt/20b/README.md) / [30B](agpt/30b/README.md) /
   [80B](agpt/80b/README.md) (incl. the GBS=6144 production-batch finding +
   LR-ceiling-vs-GBS trend).
 - **moe (sparse)** -- [index](moe/README.md), with per-config pages:
@@ -225,7 +226,9 @@ documented in the Megatron-DeepSpeed notes.
 Per-model pages (each holds all dates / machines / batch sizes for that model):
 
 - **agpt** -- [index](agpt/README.md) | [2B](agpt/2b/README.md) |
-  [20B](agpt/20b/README.md) | [80B](agpt/80b/README.md)
+  [5B](agpt/5b/README.md) | [10B](agpt/10b/README.md) |
+  [20B](agpt/20b/README.md) | [30B](agpt/30b/README.md) |
+  [80B](agpt/80b/README.md)
 - **moe** -- [index](moe/README.md) | [debugmodel](moe/debugmodel/README.md) |
   [500M](moe/500m/README.md) | [2B](moe/2b/README.md) | [4B](moe/4b/README.md) |
   [7B](moe/7b/README.md)
