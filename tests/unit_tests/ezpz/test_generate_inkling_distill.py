@@ -22,6 +22,20 @@ def test_prompt_hash_normalizes_case_and_whitespace():
     assert _mod.prompt_hash("  Hello\n WORLD ") == _mod.prompt_hash("hello world")
 
 
+def test_sample_unique_rows_backfills_duplicates():
+    seen = {_mod.prompt_hash("duplicate")}
+    rows = [
+        {"prompt": "duplicate"},
+        {"prompt": "unique one"},
+        {"prompt": "unique two"},
+        {"prompt": "unique three"},
+    ]
+    selected = _mod._sample_unique_rows(rows, 3, 154391, seen)
+    assert len(selected) == 3
+    assert all(row["prompt"] != "duplicate" for row in selected)
+    assert len({row["prompt_hash"] for row in selected}) == 3
+
+
 def test_parse_json_object_accepts_plain_and_fenced_json():
     assert _mod.parse_json_object('{"response":"ok"}') == {"response": "ok"}
     assert _mod.parse_json_object('```json\n{"response":"ok"}\n```') == {

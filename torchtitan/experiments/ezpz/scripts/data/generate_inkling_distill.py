@@ -196,12 +196,27 @@ def _held_out_hashes() -> set[str]:
     return hashes
 
 
-def _sample_rows(rows: list[dict[str, Any]], count: int, seed: int) -> list[dict[str, Any]]:
-    if len(rows) < count:
-        raise ValueError(f"source has {len(rows)} eligible rows, needs {count}")
-    rng = random.Random(seed)
-    rng.shuffle(rows)
-    return rows[:count]
+def _sample_unique_rows(
+    rows: list[dict[str, Any]], count: int, seed: int, seen: set[str]
+) -> list[dict[str, Any]]:
+    """Deterministically sample a full quota while skipping global duplicates."""
+    candidates = list(rows)
+    random.Random(seed).shuffle(candidates)
+    selected = []
+    for row in candidates:
+        digest = prompt_hash(row["prompt"])
+        if digest in seen:
+            continue
+        seen.add(digest)
+        row = dict(row)
+        row["prompt_hash"] = digest
+        selected.append(row)
+        if len(selected) == count:
+            return selected
+    raise ValueError(
+        f"source has only {len(selected)} unique eligible rows after deduplication; "
+        f"needs {count}"
+    )
 
 
 def prepare(output: Path) -> None:
@@ -209,6 +224,7 @@ def prepare(output: Path) -> None:
 
     held_out = _held_out_hashes()
     selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
 
     gsm = load_dataset("openai/gsm8k", "main", split="train")
     gsm_rows = []
@@ -217,7 +233,9 @@ def prepare(output: Path) -> None:
         answer = extract_gsm_answer(row["answer"])
         if prompt and answer and len(prompt) <= PROMPT_LIMIT and prompt_hash(prompt) not in held_out:
             gsm_rows.append({"prompt": prompt, "expected_answer": answer})
-    for row in _sample_rows(gsm_rows, SOURCE_QUOTAS["math_gsm8k"], SEED + 1):
+    for row in _sample_unique_rows(
+        gsm_rows, SOURCE_QUOTAS["math_gsm8k"], SEED + 1, seen
+    ):
         selected.append({"category": "math_gsm8k", "source": "openai/gsm8k", **row})
 
     om = load_dataset("nvidia/OpenMathInstruct-2", split="train")
@@ -229,7 +247,9 @@ def prepare(output: Path) -> None:
         answer = str(row.get("expected_answer", "")).strip()
         if prompt and answer and len(prompt) <= PROMPT_LIMIT and prompt_hash(prompt) not in held_out:
             om_rows.append({"prompt": prompt, "expected_answer": answer})
-    for row in _sample_rows(om_rows, SOURCE_QUOTAS["math_openmath"], SEED + 2):
+    for row in _sample_unique_rows(
+        om_rows, SOURCE_QUOTAS["math_openmath"], SEED + 2, seen
+    ):
         selected.append({"category": "math_openmath", "source": "nvidia/OpenMathInstruct-2", **row})
 
     tulu = load_dataset("allenai/tulu-3-sft-mixture", split="train")
@@ -244,27 +264,22 @@ def prepare(output: Path) -> None:
             continue
         by_source[category].append({"prompt": prompt})
     for offset, (category, source) in enumerate(TULU_SOURCE_MAP.items(), start=10):
-        for row in _sample_rows(by_source[category], SOURCE_QUOTAS[category], SEED + offset):
+        for row in _sample_unique_rows(
+            by_source[category], SOURCE_QUOTAS[category], SEED + offset, seen
+        ):
             selected.append({"category": category, "source": source, **row})
 
     if len(selected) != sum(SOURCE_QUOTAS.values()):
         raise AssertionError((len(selected), SOURCE_QUOTAS))
-    seen: set[str] = set()
-    unique = []
     for row in selected:
-        digest = prompt_hash(row["prompt"])
-        if digest in seen:
-            continue
-        seen.add(digest)
-        row["prompt_hash"] = digest
+        digest = row["prompt_hash"]
         row["id"] = f"inkling-{row['category']}-{digest[:16]}"
-        unique.append(row)
-    if len(unique) != len(selected):
-        raise ValueError(f"duplicate prompts selected: {len(selected) - len(unique)}")
-    unique.sort(key=lambda x: x["id"])
+    # Deterministically mix categories so any prefix (for example a 100-row
+    # canary) samples the whole recipe rather than one alphabetic category.
+    random.Random(SEED + 100).shuffle(selected)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w") as f:
-        for row in unique:
+        for row in selected:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     meta = {
