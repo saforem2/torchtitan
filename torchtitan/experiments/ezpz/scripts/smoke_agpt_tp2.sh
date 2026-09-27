@@ -30,7 +30,7 @@
 # Env knobs:
 #   MODEL    default `2b` — picks `agpt_${MODEL}_chunkedce`
 #   STEPS    default 3
-#   SEED     default 42 (matches CLAUDE.md convention)
+#   SEED     default 42 (matches AGENTS.md convention)
 
 set -o pipefail
 

@@ -69,7 +69,7 @@
 # 5 nodes = 4 train + 1 spare. 2B is pure DP and DCP reshards on load, so node
 # count does not affect whether the seed loads.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 MAIN=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz

@@ -13,7 +13,7 @@
 # computation, so any divergence between the two runs is attributable
 # *only* to the clip-norm change — removes RNG/FP chaos as a confound.
 #
-# Per CLAUDE.md: NEVER use --debug.deterministic_warn_only.
+# Per AGENTS.md: NEVER use --debug.deterministic_warn_only.
 
 cd /flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz
 

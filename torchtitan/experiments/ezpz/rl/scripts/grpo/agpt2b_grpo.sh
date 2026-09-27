@@ -7,7 +7,7 @@
 # staged ckpt dir with the gemma chat_template (scripts/grpo_lora_agpt2b_patches/
 # stage_agpt2b.sh). Run on a compute node (2 tiles).
 #
-# no set -e: module load returns nonzero under Lmod (CLAUDE.md rule)
+# no set -e: module load returns nonzero under Lmod (AGENTS.md rule)
 LOCK=/tmp/foremans/agpt2b_grpo.lock
 if [ -e "$LOCK" ]; then echo "ALREADY RUNNING (lock $LOCK) -- abort"; exit 3; fi
 mkdir -p /tmp/foremans; touch "$LOCK"; trap 'rm -f "$LOCK"' EXIT

@@ -63,7 +63,7 @@ _queue_for_nodes() {
 _walltime_for_nodes() {
     local n=$1
     # 2B-only sweep at BENCH_STEPS=20 needs:
-    #   yeet-env (~70s @ 8N -> ~755s @ 4096N per CLAUDE.md table)
+    #   yeet-env (~70s @ 8N -> ~755s @ 4096N per AGENTS.md table)
     #   DDP init (~5-10 min at large N)
     #   torch.compile (~7-15 min for 2B)
     #   20 training steps (~3 min)

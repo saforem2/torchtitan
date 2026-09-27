@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve()
 REPO = HERE.parents[5]
 PACKAGE = REPO / "vendor" / "aurora_moe_dropin"
 NON_RUNTIME_PREFIXES = (
+    ".agents/",
     ".ci/",
     ".claude/",
     ".github/",
@@ -30,6 +31,8 @@ NON_RUNTIME_PREFIXES = (
     "docs/",
     "tests/",
     "vendor/",
+    "torchtitan/experiments/ezpz/.agents/",
+    "torchtitan/experiments/ezpz/.claude/",
     "torchtitan/experiments/ezpz/docs/",
 )
 
@@ -46,12 +49,17 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def is_non_runtime_path(path: str) -> bool:
+    """Return whether a repo-relative path is agent metadata or other non-runtime data."""
+    return path.startswith(NON_RUNTIME_PREFIXES)
+
+
 def tracked_files():
     raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=str(REPO))
     paths = [
         value.decode()
         for value in raw.split(b"\0")
-        if value and not value.decode().startswith(NON_RUNTIME_PREFIXES)
+        if value and not is_non_runtime_path(value.decode())
     ]
     return sorted(set(paths))
 

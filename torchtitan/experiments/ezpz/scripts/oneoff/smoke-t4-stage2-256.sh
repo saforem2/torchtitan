@@ -38,7 +38,7 @@
 # symlinked cache. It still answers the flavor question, which is the one that
 # can corrupt a chain. Cache-hit verification needs a real 256N launch.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 MAIN=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz

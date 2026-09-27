@@ -16,7 +16,7 @@
 # 6 spare nodes + FAILOVER_MAX_RETRIES=2 — same overprovisioning
 # pattern as the det sweep scripts.
 #
-# Per CLAUDE.md: NEVER use --debug.deterministic_warn_only.
+# Per AGENTS.md: NEVER use --debug.deterministic_warn_only.
 
 cd /flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz
 

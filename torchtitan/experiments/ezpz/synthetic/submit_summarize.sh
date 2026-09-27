@@ -7,7 +7,7 @@
 # (debug-scaling, 1 node, 1h) -- not a production data-gen pipeline.
 #
 # NOTE: no `set -euo pipefail` (venv activate trips unbound vars; see ezpz
-# CLAUDE.md). Single node, TP=1: NO `ezpz launch` / mpiexec wrapper -- bare
+# AGENTS.md). Single node, TP=1: NO `ezpz launch` / mpiexec wrapper -- bare
 # python, exactly like the vLLM XPU smoke (an outer launcher adds nothing at
 # TP=1 and breaks oneCCL PMIx state).
 #

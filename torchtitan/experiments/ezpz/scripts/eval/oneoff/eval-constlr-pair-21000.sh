@@ -42,7 +42,7 @@
 # be numerically equivalent when each is exported with its matching flavor, but
 # "supposed to be" is not a measurement.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 MAIN_REPO=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz

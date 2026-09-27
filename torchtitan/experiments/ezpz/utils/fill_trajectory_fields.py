@@ -27,7 +27,7 @@ README.md are NOT auto-propagated here (their numbers were hand-set and
 carry surrounding narrative); refresh those manually or via the
 docs/README.md index table that refresh_docs_readme_table.py owns.
 
-HARD RULES (mirrors the design + CLAUDE.md):
+HARD RULES (mirrors the design + AGENTS.md):
   - NEVER rewrite narrative prose, Status paragraphs, Progress/Logs
     tables, or the parentheticals after a value. Only the scalar token.
   - "VALID" step = a ``step-N`` dir (digits only) that has ``.metadata``

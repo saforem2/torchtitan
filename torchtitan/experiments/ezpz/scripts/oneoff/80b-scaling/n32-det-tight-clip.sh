@@ -13,7 +13,7 @@
 # use seed=42 and --debug.deterministic so anything that differs
 # step-by-step is *purely* the clip-norm changing the math.
 #
-# Per CLAUDE.md: NEVER use --debug.deterministic_warn_only.
+# Per AGENTS.md: NEVER use --debug.deterministic_warn_only.
 
 cd /flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz
 

@@ -22,7 +22,7 @@
 # Expected memory: ~42 GiB per tile (extrapolated from n=32 TP=4
 # fp32-mp run 8537349). Well under the 64 GiB cap.
 #
-# Per CLAUDE.md: NEVER use --debug.deterministic_warn_only.
+# Per AGENTS.md: NEVER use --debug.deterministic_warn_only.
 
 cd /flare/AuroraGPT/foremans/runs/agpt-80b-v2/torchtitan-ezpz
 

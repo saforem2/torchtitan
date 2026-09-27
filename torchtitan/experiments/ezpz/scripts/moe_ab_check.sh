@@ -71,7 +71,11 @@ HEAD_SHA="$(git rev-parse "${HEAD_COMMIT}")"
 BASE_SHORT="${BASE_SHA:0:9}"
 HEAD_SHORT="${HEAD_SHA:0:9}"
 
-WT_BASE="${SUBMIT_DIR}/.claude/worktrees/moe-ab-${JOBID_SHORT}"
+# Worktrees must be visible to every rank, so default to shared storage next to
+# the checkout rather than compute-node-local /tmp. Override when another shared
+# scratch filesystem is preferred.
+WORKTREE_ROOT="${EZPZ_WORKTREE_ROOT:-${SUBMIT_DIR}/../.torchtitan-ezpz-worktrees}"
+WT_BASE="${WORKTREE_ROOT}/moe-ab-${JOBID_SHORT}"
 WT_BASELINE="${WT_BASE}/baseline"
 WT_HEAD="${WT_BASE}/head"
 mkdir -p "${WT_BASE}"

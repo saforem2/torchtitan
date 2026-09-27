@@ -41,7 +41,7 @@
 # PASS: reaches step 3+ compiled, no OOM, memory well under ~90%.
 # FAIL: OOM or a compile error -> set LRF_NO_COMPILE=1 on the umbrella.
 
-# PBS scripts must NOT use `set -euo pipefail` per CLAUDE.md.
+# PBS scripts must NOT use `set -euo pipefail` per AGENTS.md.
 set -o pipefail
 
 MAIN=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz

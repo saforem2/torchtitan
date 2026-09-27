@@ -11,7 +11,7 @@
 #
 #   qsub -v CKPT=<hf-dir>,LIMIT=200 torchtitan/experiments/ezpz/scripts/eval/submit_cot_eval.sh
 #
-# no set -euo: module load returns nonzero under Lmod (CLAUDE.md rule)
+# no set -euo: module load returns nonzero under Lmod (AGENTS.md rule)
 
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "${PBS_O_WORKDIR:-$REPO}" || exit 9
