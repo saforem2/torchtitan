@@ -6899,10 +6899,17 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Compute-node preflight `8872176` finished successfully (`Exit_status=0`) and
   emitted `T3_RUNTIME_IMPORT_PASS renderers=0.1.11` plus
   `T3_RUNTIME_PREFLIGHT_VALIDATED` for that exact archive checksum.
-- Submitted exact-topology replay retry `8872915` from immutable code commit
-  `550d2c670a02866661c133dd09b499ae6844bc7f` with 512 active nodes and 10
-  spares. It is queued. Before submission, source `step-39900` still contained
-  6,145 files with `.metadata` mtime `2026-09-22 06:30:02 UTC`.
+- Exact-topology replay retry `8872915` started but failed closed before staging
+  or application launch (`Exit_status=19`, walltime `00:00:18`): line 30 tried
+  to activate a nonexistent sibling `.venv` beside the immutable archive. This
+  was a wrapper bootstrap-path defect, not replay evidence; there were no
+  optimizer steps, no full-state restore, and no non-finite tensor capture.
+- Preserved the `8872915` wrapper, changed only the bootstrap interpreter to the
+  established production `ezpz` venv used by preflight `8872176`, and submitted
+  replacement `8873944` with the same immutable code commit, archive checksum,
+  512 active nodes, 10 spares, and job-unique sink. It is queued.
+- Source `step-39900` remains unchanged at 6,145 files with `.metadata` mtime
+  `2026-09-22 06:30:02 UTC`; sinks for `8870516` and `8872915` are empty.
 - Successor umbrella `8870515` remains queued; no seat artifacts exist.
 
 ## 2026-09-24 — LR-finder resume validation and chart refresh
