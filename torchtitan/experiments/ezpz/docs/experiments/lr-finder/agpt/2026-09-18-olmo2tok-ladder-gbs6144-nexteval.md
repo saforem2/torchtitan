@@ -18,18 +18,25 @@ loss CSV alone is not enough.
 
 | model | AdamW | SophiaG |
 |---|---:|---:|
-| 5B | **`7.17e-5`** | open |
-| 10B | **`4.16e-5`** | open |
+| 5B | open; detector `7.17e-5`, basin minimum `6.58e-4` | open |
+| 10B | open; detector `4.16e-5`, basin minimum `4.64e-4` | open |
 | 30B | open | open |
 
-### Final recommendations
+### AdamW detector results
 
-- **5B AdamW:** job `12478508`, 100/100 points, suggested LR `7.17e-5`,
-  blow-up `7.17e-4`.
-- **10B AdamW:** job `12478509`, 100/100 points, suggested LR `4.16e-5`,
-  blow-up `4.16e-4`.
-Each final arm started from a clean initialization. The fine sweeps did not
-continue from coarse-run weights.
+- **5B AdamW:** job `12478508`, 100/100 points. The observed minimum is
+  `6.58e-4`; the low-loss basin spans roughly `4e-4`–`9e-4`. The detector's
+  crossing is `7.17e-4`, and its generic crossing-divided-by-10 heuristic emits
+  `7.17e-5`.
+- **10B AdamW:** job `12478509`, 100/100 points. The observed minimum is
+  `4.64e-4`; the detector crossing is `4.16e-4`, yielding `4.16e-5` after the
+  same 10× safety factor.
+
+Neither curve shows a catastrophic blow-up inside the sampled window. These
+numbers are conservative detector suggestions, not measured optimal training
+LRs. Production guidance remains open pending fixed-LR validation near each
+observed basin. Every fine sweep started from a clean initialization rather
+than continuing from coarse-run weights.
 
 ## Open results
 
