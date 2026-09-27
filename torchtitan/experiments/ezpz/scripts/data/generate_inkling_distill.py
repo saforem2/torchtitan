@@ -286,7 +286,7 @@ def prepare(output: Path) -> None:
         "created_at": dt.datetime.now(dt.UTC).isoformat(),
         "seed": SEED,
         "quotas": SOURCE_QUOTAS,
-        "rows": len(unique),
+        "rows": len(selected),
         "sha256": digest,
         "held_out_hash_count": len(held_out),
     }
