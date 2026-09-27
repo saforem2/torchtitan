@@ -13,10 +13,11 @@ V="${V:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20
 BASE="${BASE:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage7/accepted/agpt2b-stage7-reanchor900-alpha65}"
 PRETOK="${PRETOK:-/tegu/datasets/datasets/agpt2b-inkling-distill-len2048-v1}"
 ROOT="${ROOT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-inkling-distill/stage9/inkling-${PBS_JOBID%%.*}}"
+MAX_STEPS="${MAX_STEPS:-40}"
+SAVE_STEPS="${SAVE_STEPS:-10}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
-ezpz_setup "$V" || exit 13
+module load oneapi/release/2026.1.0 hdf5 pti-gpu || exit 12
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
 git diff --quiet && git diff --cached --quiet || exit 14
@@ -38,15 +39,15 @@ export TMPDIR=/lus/tegu/projects/datascience/foremans/tmp/agpt2b-inkling-distill
 mkdir -p "$TMPDIR"
 
 printf 'AGPT2B_INKLING_DISTILL_START commit=%s root=%s\n' "$(git rev-parse HEAD)" "$ROOT"
-"$V/bin/ezpz" launch --auto-retry --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
+"$V/bin/python" "$V/bin/ezpz" launch --auto-retry --nproc 24 --nproc_per_node 12 --timeout 1800 -- \
   "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_sft \
   --pretokenized_dataset "$PRETOK" --model_name_or_path "$BASE" \
-  --output_dir "$ROOT" --max_steps 40 --num_train_epochs 1 \
+  --output_dir "$ROOT" --max_steps "$MAX_STEPS" --num_train_epochs 1 \
   --learning_rate 2e-6 --lr_scheduler_type linear --warmup_steps 4 \
   --per_device_train_batch_size 1 --gradient_accumulation_steps 1 \
   --dataset_num_proc 1 --max_length 2048 --assistant_only_loss false \
   --bf16 --fsdp full_shard --logging_steps 1 \
-  --save_strategy steps --save_steps 10 --save_total_limit 4 --report_to none
+  --save_strategy steps --save_steps "$SAVE_STEPS" --save_total_limit 4 --report_to none
 rc=$?
 echo "AGPT2B_INKLING_DISTILL_DONE rc=$rc $(date -Is)"
 exit "$rc"
