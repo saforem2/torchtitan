@@ -5,7 +5,10 @@ page is the cross-model index (master recommended-LR table + findings that
 span model sizes / machines). Per-model detail lives in its own page:
 
 - **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (never cliffs)
+- **[agpt 5B OLMo-tokenizer](5b/README.md)** -- GBS=6144 AdamW/SophiaG sweeps + live fixed-LR validation
+- **[agpt 10B OLMo-tokenizer](10b/README.md)** -- GBS=6144 AdamW/SophiaG evidence; recommendations open
 - **[agpt 20B](20b/README.md)** -- small-batch finders (no trend yet)
+- **[agpt 30B OLMo-tokenizer](30b/README.md)** -- incomplete LR curves + FSDP2/XCCL runtime diagnosis
 - **[agpt 80B](80b/README.md)** -- GBS=192 finder, GBS=6144 production batch, LR-ceiling-vs-GBS trend
 
 For how the finder works, its knobs, and usage, see the
@@ -162,17 +165,19 @@ Per-model pages (each holds all dates / machines / batch sizes for that model):
 | Model | Page | Experiments |
 |-------|------|-------------|
 | 2B  | [2b/README.md](2b/README.md)   | Aurora/Sunspot/Polaris small-batch (Apr 12-21) + production-batch trend (Jun 28: never cliffs) |
+| 5B  | [5b/README.md](5b/README.md)   | OLMo-tokenizer GBS=6144 sweeps + fixed-LR AdamW validation |
+| 10B | [10b/README.md](10b/README.md) | OLMo-tokenizer GBS=6144 AdamW/SophiaG evidence |
 | 20B | [20b/README.md](20b/README.md) | Aurora/Sunspot/Polaris small-batch (Apr 12-21) |
+| 30B | [30b/README.md](30b/README.md) | OLMo-tokenizer incomplete curves + FSDP2/XCCL diagnosis |
 | 80B | [80b/README.md](80b/README.md) | GBS=192 finder (Apr 21), GBS=6144 production (Jun 27), LR-ceiling-vs-GBS trend |
 
-The OLMo-3-vocab ladder (historical config name: `olmo2tok`) has no per-model
-page yet; its reports live as dated
-files in this directory and were missing from this index entirely until
-2026-09-18 -- three finished 30B sweeps that nothing linked to.
+The OLMo-3-vocab ladder retains the historical `olmo2tok` config name. Its
+per-model pages separate 5B, 10B, and 30B evidence while the dated campaign
+report preserves the cross-model chronology.
 
 | Date | Report | What |
 |------|--------|------|
 | 2026-08-23 | [30B GBS=960, three optimizers](2026-08-23-30b-gbs960-three-optimizers.md) | AdamW 3.05e-05, Mano 5.61e-05, SophiaG 3.55e-05 (Sunspot, 16N) |
 | 2026-08-23 | [30B Mano on Sunspot](2026-08-23-30b-mano-sunspot.md) | Mano arm detail |
 | 2026-08-30 | [30B GBS=960, Muon](2026-08-30-30b-gbs960-muon.md) | Muon arm |
-| 2026-09-18 / updated 2026-09-21 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; active replacement campaign with verified partial results |
+| 2026-09-18 / updated 2026-09-27 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; recommendations remain open pending fixed-LR/runtime validation |
