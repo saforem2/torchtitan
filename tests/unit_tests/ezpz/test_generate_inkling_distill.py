@@ -43,6 +43,17 @@ def test_parse_json_object_accepts_plain_and_fenced_json():
     }
 
 
+def test_request_payload_pins_json_mode_and_low_reasoning():
+    payload = _mod._request_payload(
+        {"category": "instruction_flan", "prompt": "Say hello."}, 512
+    )
+    assert payload["model"] == "inkling-bf16"
+    assert payload["temperature"] == 0
+    assert payload["max_tokens"] == 512
+    assert payload["reasoning_effort"] == "low"
+    assert payload["response_format"] == {"type": "json_object"}
+
+
 def test_validate_math_requires_exact_gold_answer():
     base = {
         "id": "x",

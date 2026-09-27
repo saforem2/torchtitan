@@ -320,13 +320,19 @@ def _token() -> str:
     ).strip()
 
 
-def _request(row: dict[str, Any], token: str, max_tokens: int, retries: int) -> dict[str, Any]:
-    payload = {
+def _request_payload(row: dict[str, Any], max_tokens: int) -> dict[str, Any]:
+    return {
         "model": MODEL,
         "temperature": 0,
         "max_tokens": max_tokens,
+        "reasoning_effort": "low",
+        "response_format": {"type": "json_object"},
         "messages": _teacher_messages(row),
     }
+
+
+def _request(row: dict[str, Any], token: str, max_tokens: int, retries: int) -> dict[str, Any]:
+    payload = _request_payload(row, max_tokens)
     data = json.dumps(payload).encode()
     last_error = ""
     for attempt in range(retries + 1):
