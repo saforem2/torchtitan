@@ -26,22 +26,31 @@ The coarse sweep `12478444` tested through `1e-1`. LRs `1e-3` and `1e-2`
 remained finite for their individual sweep updates, but that does not prove
 sustained fixed-LR stability.
 
-The matched 100-update matrix uses identical fresh initialization, seed 42,
+The matched 100-update matrices use identical fresh initialization, seed 42,
 GBS=6144, sequence length 4096, LBS=2/GAS=4, `dp_shard=4`,
 `dp_replicate=192`, five warmup steps, then constant LR.
 
-| LR | job | current status |
-|---:|---:|---|
-| `1e-4` | `12478895` | active canonical arm |
-| `3e-4` | `12478896` | queued |
-| `1e-3` | `12478897` | queued canonical arm; diagnostic `12478892` completed 100 finite updates |
-| `3e-3` | `12478898` | queued |
-| `1e-2` | `12478899` | queued |
+The first matrix completed 100 finite updates at every LR. Every arm wrote a
+false `INVALID` marker because the wrapper searched stdout for an update-ratio
+metric emitted only to W&B/TensorBoard. These are valid training trajectories
+after post-hoc checks of scheduler exit, finite loss/gradients, and real
+updates; the marker itself is not evidence of failure.
 
-Diagnostic job `12478892` ended at loss `6.89134` with finite gradients after
-100 updates. It is supporting evidence only because its wrapper produced a
-false `INVALID` marker. At matched progress, the `1e-4` arm was below the
-`1e-3` trajectory, so higher LR is not automatically better.
+| LR | first job | step-100 loss | interpretation |
+|---:|---:|---:|---|
+| `1e-4` | `12478890` | `5.70206` | best endpoint in the first matrix |
+| `3e-4` | `12478891` | `6.23678` | finite, worse than `1e-4` |
+| `1e-3` | `12478892` | `6.89134` | finite, worse than `1e-4` |
+| `3e-3` | `12478893` | `7.15027` | finite, worse than `1e-4` |
+| `1e-2` | `12478894` | `14.96573` | finite but clearly unstable/poor |
+
+The canonical rerun uses jobs `12478895`–`12478899`. Job `12478895`
+reproduced the `1e-4` endpoint exactly: loss `5.70206` after 100 updates. It
+also produced a fresh 768-shard checkpoint and real update-ratio evidence
+(median `7.05e-5`, max `1.76e-3`). This is a deterministic confirmation, not
+an independent seed replicate. The other rerun arms are monitored separately;
+their live scheduler state belongs in the dashboard rather than this durable
+page.
 
 A winner requires 100 finite updates, finite gradients, real parameter-change
 evidence, a fresh checkpoint, and comparison of the full matched trajectory.

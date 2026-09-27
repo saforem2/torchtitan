@@ -30,7 +30,9 @@ sustained instability.
 ## SophiaG
 
 Job `12478569` completed 100 points, but the loss was still decreasing at the
-upper endpoint `1.66e-4`. The fine window therefore did not bracket the basin.
+upper endpoint `1.66e-4` (the exact minimum is sample 100/100, with only three
+local upticks across the curve). The fine window therefore did not bracket the
+basin.
 A replacement must start from the same clean initialization and extend above
 `1.66e-4`; independently initialized points must not be appended to this curve.
 

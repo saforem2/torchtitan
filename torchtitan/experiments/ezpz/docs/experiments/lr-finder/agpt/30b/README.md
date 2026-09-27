@@ -37,7 +37,7 @@ Gradient accumulation, compilation, checkpoint corruption, and persistent HBM
 alone do not explain the failure. More blind topology permutations are not LR
 evidence. The next model step is a minimal FSDP2/XCCL collective reproducer.
 
-## Artifact policy
+## Artifacts
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)
 - [Evidence manifest](../data/2026-09-24-olmo2tok-gbs6144-verified/README.md)
