@@ -2,6 +2,87 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-27 (sunspot) -- 5B AdamW fixed-LR matrix: wrapper false-INVALID root-caused and fixed
+
+### The false INVALID was a wrapper bug, not a science failure
+
+The v2 submitter `5b-adamw-fixed-lr-v2.pbs` gated its `VALIDATED` marker on
+
+```bash
+grep -q 'diag/update_ratio_max' "$LOG"
+```
+
+but `diag/update_ratio_max` is produced by
+`torchtitan/experiments/ezpz/diagnostics/__init__.py:212` and handed to the
+metrics logger -- it reaches W&B and TensorBoard and **never stdout**. Confirmed
+by direct count on job `12478895`: `0` occurrences of `update_ratio` anywhere in
+the 718 KB console log, versus `198` occurrences inside
+`run-ye6i2w6e.wandb`. The gate can therefore never pass, so every arm that runs
+perfectly still writes `INVALID` and the wrapper exits nonzero. This is the same
+class of defect catalogued on 2026-09-16: a check that returns the same answer
+whether or not the thing works.
+
+This retires the earlier framing that only `12478892` carried a "wrapper-only
+false INVALID marker". It is systematic across the whole matrix.
+
+### Arms adjudicated against the real acceptance contract
+
+Added `adjudicate_fixed_lr.py` (remote repo root, `/usr/bin/python3.11` -- the
+login default is Python 3.6 and rejects `from __future__ import annotations`).
+It checks the five real criteria and writes
+`VALIDATED_POSTHOC` / `INVALID_POSTHOC` JSON next to each arm.
+
+| job | LR | PBS | steps | nonfinite | final loss | final grad | update_ratio max/median | ckpt | verdict |
+|---|---|---|---:|---:|---:|---:|---|---|---|
+| `12478895` | 1e-4 | finished(exit=0) | 100/100 | 0 | 5.70206 | 0.6114 | 1.76e-3 / 7.05e-5 | 768 shards + `.metadata`, 55.8 GB | **VALIDATED** |
+| `12478892` | 1e-3 (diagnostic v1) | finished(exit=0) | 100/100 | 0 | 6.89134 | 0.5910 | 1.79e-3 / 1.30e-4 | 768 shards + `.metadata` | **VALIDATED** |
+| `12478896` | 3e-4 | running | -- | -- | -- | -- | -- | -- | pending |
+| `12478897` | 1e-3 | queued | -- | -- | -- | -- | -- | -- | pending |
+| `12478898` | 3e-3 | queued | -- | -- | -- | -- | -- | -- | pending |
+| `12478899` | 1e-2 | queued | -- | -- | -- | -- | -- | -- | pending |
+
+Both completed arms show real optimizer work, not merely finite losses:
+`diag/update_ratio_min` is `2.07e-7` (LR=1e-4) and `2.20e-6` (LR=1e-3), 243
+parameters carry gradients, 0 are frozen, and `diag/clip_fired = 0` with
+`clip_headroom > 1.6`, so clipping never masked the trajectory.
+
+### Matched trajectories so far (identical seed 42, fresh init, GBS 6144)
+
+| step | LR=1e-4 loss | LR=1e-3 loss | LR=1e-4 grad | LR=1e-3 grad |
+|---:|---:|---:|---:|---:|
+| 1 | 11.98051 | 11.98051 | 2.3190 | 2.3190 |
+| 2 | 11.10704 | 17.42651 | 2.9995 | 71.3191 |
+| 5 | 12.27560 | 14.27604 | 31.0375 | 76.0778 |
+| 10 | 9.50286 | 11.47980 | 15.0125 | 25.1504 |
+| 25 | 7.50742 | 7.94368 | 3.4958 | 3.6615 |
+| 50 | 6.70066 | 7.34670 | 3.9287 | 1.9261 |
+| 75 | 6.11304 | 7.24173 | 1.3656 | 2.3233 |
+| 100 | **5.70206** | 6.89134 | 0.6114 | 0.5910 |
+
+Step 1 is bit-identical across arms, confirming the shared initialization. LR=1e-3
+takes a large early excursion (grad norm 71.3 at step 2, 76.1 at step 5) and never
+recovers the gap; LR=1e-4 stays bounded and ends 1.19 nats lower. **No LR is being
+recommended yet** -- 1e-4 is currently the lowest sampled point, so the curve may
+still be descending toward smaller LR, and 3e-4 (the interesting intermediate) is
+only now running. Three of five arms remain unmeasured.
+
+### Changes landed
+
+- `adjudicate_fixed_lr.py` -- artifact-based acceptance adjudicator.
+- `5b-adamw-fixed-lr-v3.pbs` -- replaces the impossible stdout grep with the
+  adjudicator's verdict, and forces `rc=1` when the wrapper would otherwise
+  exit zero on an `INVALID` verdict. Syntax-checked with `bash -n` locally and
+  on Sunspot.
+- Dashboard pane `wC:p43` (`LR + MDS154391 Stage 2`) now prefers the post-hoc
+  verdict and renders it as `validated*` / `failed*`; verified the restarted
+  pane shows `12478895` and `12478892` as `validated*`.
+
+The four not-yet-terminal arms were **not** cancelled. Their queued snapshot of
+v2 runs an identical training command -- only the marker logic differs -- so
+destroying a 64-node queue position to change a post-run `printf` would have
+cost real allocation for no scientific gain. They will be adjudicated post-hoc
+by the same script.
+
 ## 2026-09-24 (sunspot) -- MDS154391 two-stage reproduction complete; GRPO stack smoke queued
 
 The journal was not updated during this campaign. This entry reconstructs the
