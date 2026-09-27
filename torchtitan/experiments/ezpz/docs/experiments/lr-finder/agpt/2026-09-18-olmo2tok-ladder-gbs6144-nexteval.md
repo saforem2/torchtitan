@@ -18,7 +18,7 @@ loss CSV alone is not enough.
 
 | model | AdamW | SophiaG |
 |---|---:|---:|
-| 5B | **`7.17e-5`** | **`7.04e-7`** |
+| 5B | **`7.17e-5`** | open |
 | 10B | **`4.16e-5`** | open |
 | 30B | open | open |
 
@@ -28,13 +28,20 @@ loss CSV alone is not enough.
   blow-up `7.17e-4`.
 - **10B AdamW:** job `12478509`, 100/100 points, suggested LR `4.16e-5`,
   blow-up `4.16e-4`.
-- **5B SophiaG:** job `12478624`, 100/100 points, suggested LR `7.04e-7`,
-  blow-up `7.04e-6`.
-
 Each final arm started from a clean initialization. The fine sweeps did not
 continue from coarse-run weights.
 
 ## Open results
+
+### 5B SophiaG
+
+Job `12478624` completed 100/100 points and bracketed an interior loss basin.
+Its raw minimum is `5.63e-4` at sample 77. The detector returned crossings at
+`7.04e-6` and `4.96e-4`. The previously reported `7.04e-7` recommendation used
+the first crossing, which is a low-LR noise wiggle before the basin. The
+corrected post-minimum rule selects `4.96e-4`, yielding a safety-scaled
+candidate of `4.96e-5`. That corrected candidate still requires a clean
+validation run before publication as a final recommendation.
 
 ### 10B SophiaG
 
