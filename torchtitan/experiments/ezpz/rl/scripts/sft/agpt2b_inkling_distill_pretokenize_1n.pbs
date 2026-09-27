@@ -16,7 +16,7 @@ FINAL="${FINAL:-/tegu/datasets/datasets/agpt2b-inkling-distill-len2048-v1}"
 BUILD="${FINAL}.building-${PBS_JOBID%%.*}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-module load oneapi/release/2025.3.1 hdf5 pti-gpu || exit 12
+module load oneapi/release/2026.1.0 hdf5 pti-gpu || exit 12
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
 git diff --quiet && git diff --cached --quiet || exit 14
