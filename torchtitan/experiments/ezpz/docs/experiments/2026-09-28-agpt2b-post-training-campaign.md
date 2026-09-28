@@ -14,23 +14,35 @@ The major campaign lesson is consistent across SFT, STaR, GRPO, OpenMath, and In
 
 ## Current model and rollback
 
-| metric | Stage-4 rollback | Stage-7 accepted |
-|---|---:|---:|
-| GSM8K full | 385/1,319 (29.19%) | 386/1,319 (29.26%) |
-| paired GSM8K wins | 45 | 46 |
-| exact McNemar p-value | -- | 1.0 |
-| GSM8K format-valid | 1,295 | 1,297 |
-| GSM8K truncations | 23 | 20 |
-| IFEval instruction-loose | 33.93% | **35.85%** |
-| IFEval instruction-strict | 32.25% | **33.45%** |
-| IFEval prompt-loose | 19.59% | **21.26%** |
-| IFEval prompt-strict | 19.04% | **19.96%** |
-| MATH-500 | 3.2% | 3.8% |
-| MMLU letters | 25.30% | 25.10% |
-| MMLU continuation | 35.50% | 35.51% |
-| broad sanity | 8/8 bounded | 8/8 bounded, cleaner semantics |
+| metric | MDS Stage-3 base (7.77T) | Stage-4 rollback | Stage-7 accepted |
+|---|---:|---:|---:|
+| GSM8K full | 1.67% (5-shot; unmatched) | 385/1,319 (29.19%) | 386/1,319 (29.26%) |
+| paired GSM8K wins | not evaluated | 45 | 46 |
+| exact McNemar p-value | not evaluated | -- | 1.0 |
+| GSM8K format-valid | not evaluated | 1,295 | 1,297 |
+| GSM8K truncations | not evaluated | 23 | 20 |
+| IFEval instruction-loose | not evaluated | 33.93% | **35.85%** |
+| IFEval instruction-strict | not evaluated | 32.25% | **33.45%** |
+| IFEval prompt-loose | not evaluated | 19.59% | **21.26%** |
+| IFEval prompt-strict | not evaluated | 19.04% | **19.96%** |
+| MATH-500 | not evaluated | 3.2% | 3.8% |
+| MMLU letters, 5-shot | 24.63% | **25.30%** | 25.10% |
+| MMLU continuation | not evaluated | 35.50% | **35.51%** |
+| broad sanity | coherent base completions; not instruction-scored | 8/8 bounded | 8/8 bounded, cleaner semantics |
 
-The GSM8K difference is noise, not a claimed gain. Stage-7 was promoted because every IFEval axis improved, formatting and truncation improved, raw responses were cleaner, and MMLU/GSM8K were non-inferior within uncertainty.
+The base column refers to the genuine broad MDS `stage3-mix/global_step154391`
+endpoint at 7,770,753,466,368 consumed tokens, not the frequently mislabeled
+`global_step138650`/`ntok7770B` artifact, which is the Stage-2 terminus at
+7.064T. Job `8747067` measured the base at 5-shot MMLU 24.63% and 5-shot GSM8K
+1.67%; those are reported with their shot contract and are not treated as
+matched replacements for the post-training generation metrics. The same base
+scored ARC-Easy 71.38%, ARC-Challenge@25 41.64%, and HellaSwag 58.74%, showing
+stronger commonsense completion than its MMLU/GSM8K scores imply. IFEval,
+MATH-500, continuation MMLU, and the exact full GSM8K generation contract were
+not run on this base, so the table marks them `not evaluated` rather than
+inferring values.
+
+The GSM8K difference between Stage-4 and Stage-7 is noise, not a claimed gain. Stage-7 was promoted because every IFEval axis improved, formatting and truncation improved, raw responses were cleaner, and MMLU/GSM8K were non-inferior within uncertainty.
 
 Detailed lineage and checkpoint evidence: [Stage-4 MetaMath distillation and Stage-7 re-anchoring](2026-09-26-agpt2b-stage4-metamath.md).
 
