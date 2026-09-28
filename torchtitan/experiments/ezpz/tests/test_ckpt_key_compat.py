@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, ".")
 from torchtitan.experiments.ezpz.ckpt_key_compat import (  # noqa: E402
     to_flat, to_nested, needs_flat_attention_compat,
+    needs_split_qkv_compat, split_qkv_to_fused,
     head_to_old, head_to_new, needs_output_head_compat,
 )
 from torch.distributed.checkpoint import FileSystemReader  # noqa: E402
@@ -60,6 +61,25 @@ check("to_nested is idempotent",
 check("round-trip flat->nested->flat",
       to_flat(to_nested("layers.7.attention.wv.weight"))
       == "layers.7.attention.wv.weight")
+
+print()
+print("=== unit: split-QKV to native fused conversion ===")
+import torch  # noqa: E402
+wq = torch.arange(8 * 3, dtype=torch.float32).reshape(8, 3)
+wk = 100 + torch.arange(4 * 3, dtype=torch.float32).reshape(4, 3)
+wv = 200 + torch.arange(4 * 3, dtype=torch.float32).reshape(4, 3)
+fused = split_qkv_to_fused(wq, wk, wv, head_dim=2)
+expected = torch.cat(
+    [
+        wq.reshape(2, 2, 2, 3),
+        wk.reshape(2, 1, 2, 3),
+        wv.reshape(2, 1, 2, 3),
+    ],
+    dim=1,
+).reshape(16, 3)
+check("split Q/K/V is packed by KV group", torch.equal(fused, expected))
+check("from9200 split QKV is detected", needs_split_qkv_compat(NESTED))
+check("missing path is not split QKV", not needs_split_qkv_compat("/nonexistent/step-1"))
 
 print()
 print("=== detection on the real seeds ===")

@@ -75,6 +75,8 @@ import contextlib
 import re
 from typing import Any
 
+import torch
+
 # layers.<N>.attention.<wq|wk|wv>.<rest>  ->  ...attention.qkv_linear.<w?>.<rest>
 # Anchored on the attention prefix so nothing else in the tree can match, and
 # scoped to the three projections the wrapper actually absorbed (wo stayed put).
@@ -172,6 +174,93 @@ def needs_flat_attention_compat(checkpoint_dir: str) -> bool:
     has_nested = any("attention.qkv_linear." in k for k in keys)
     has_flat = any(_OLD_TO_NEW.search(k) for k in keys)
     return has_flat and not has_nested
+
+
+def needs_split_qkv_compat(checkpoint_dir: str) -> bool:
+    """True when a native DCP stores logical Q/K/V instead of packed QKV."""
+    from torch.distributed.checkpoint import FileSystemReader  # noqa: PLC0415
+
+    try:
+        keys = FileSystemReader(checkpoint_dir).read_metadata().state_dict_metadata.keys()
+    except Exception:
+        return False
+    has_split = any("attention.qkv_linear.wq.weight" in key for key in keys)
+    has_fused = any("attention.qkv_linear.wqkv.weight" in key for key in keys)
+    return has_split and not has_fused
+
+
+def split_qkv_to_fused(
+    wq: torch.Tensor, wk: torch.Tensor, wv: torch.Tensor, *, head_dim: int
+) -> torch.Tensor:
+    """Pack logical Q/K/V weights using QKVLinear's KV-group ordering."""
+    num_kv_heads = wk.shape[0] // head_dim
+    heads_per_kv = wq.shape[0] // (num_kv_heads * head_dim)
+    tail = wq.shape[1:]
+    q = wq.reshape(num_kv_heads, heads_per_kv, head_dim, *tail)
+    k = wk.reshape(num_kv_heads, 1, head_dim, *tail)
+    v = wv.reshape(num_kv_heads, 1, head_dim, *tail)
+    return torch.cat([q, k, v], dim=1).reshape(-1, *tail)
+
+
+def _install_split_qkv_model_compat(checkpointer: Any) -> None:
+    """Restore the former native-DCP hooks for a legacy split-QKV load."""
+    model_wrapper = getattr(checkpointer, "states", {}).get("model")
+    models = getattr(model_wrapper, "model", ())
+    from torchtitan.models.common.attention import QKVLinear  # noqa: PLC0415
+    from torch.distributed.tensor import DTensor, Replicate  # noqa: PLC0415
+
+    def split_on_save(module, state_dict, prefix, local_metadata) -> None:
+        del local_metadata
+        for param in ("weight", "bias"):
+            key = f"{prefix}wqkv.{param}"
+            if key not in state_dict:
+                continue
+            tensor = state_dict.pop(key)
+            if isinstance(tensor, DTensor):
+                tensor = tensor.redistribute(
+                    tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
+                )
+            num_kv_heads = tensor.shape[0] // (module.r_dim * module.head_dim)
+            tail = tensor.shape[1:]
+            packed = tensor.reshape(
+                num_kv_heads, module.r_dim, module.head_dim, *tail
+            )
+            state_dict[f"{prefix}wq.{param}"] = packed[
+                :, : module.heads_per_kv
+            ].reshape(-1, *tail).contiguous()
+            state_dict[f"{prefix}wk.{param}"] = packed[
+                :, module.heads_per_kv
+            ].reshape(-1, *tail).contiguous()
+            state_dict[f"{prefix}wv.{param}"] = packed[
+                :, module.heads_per_kv + 1
+            ].reshape(-1, *tail).contiguous()
+
+    def merge_on_load(module, state_dict, prefix, *args) -> None:
+        del args
+        for param in ("weight", "bias"):
+            keys = tuple(f"{prefix}{name}.{param}" for name in ("wq", "wk", "wv"))
+            if not all(key in state_dict for key in keys):
+                continue
+            wq, wk, wv = (state_dict.pop(key) for key in keys)
+            if isinstance(wq, DTensor):
+                wq, wk, wv = (
+                    tensor.redistribute(
+                        tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
+                    )
+                    for tensor in (wq, wk, wv)
+                )
+            state_dict[f"{prefix}wqkv.{param}"] = split_qkv_to_fused(
+                wq, wk, wv, head_dim=module.head_dim
+            )
+
+    for model in models:
+        for module in model.modules():
+            if isinstance(module, QKVLinear) and not getattr(
+                module, "_legacy_split_qkv_compat", False
+            ):
+                module.register_state_dict_post_hook(split_on_save)
+                module.register_load_state_dict_pre_hook(merge_on_load)
+                module._legacy_split_qkv_compat = True
 
 
 def install_flat_attention_compat(
@@ -375,8 +464,12 @@ def maybe_install_flat_attention_compat(
 
         want_attention = needs_flat_attention_compat(step_dir)
         want_head = needs_output_head_compat(step_dir)
-        if not (want_attention or want_head):
+        want_split_qkv = needs_split_qkv_compat(step_dir)
+        if not (want_attention or want_head or want_split_qkv):
             return False
+
+        if want_split_qkv:
+            _install_split_qkv_model_compat(checkpointer)
 
         install_flat_attention_compat(
             checkpointer, attention=want_attention, head=want_head
@@ -389,6 +482,8 @@ def maybe_install_flat_attention_compat(
             )
         if want_head:
             needed.append("the pre-rename head (output.weight -> lm_head.weight)")
+        if want_split_qkv:
+            needed.append("split Q/K/V weights packed into native fused wqkv")
         log.warning(
             "%s holds PRE-REFACTOR keys: %s. Installing the remap so it can be "
             "loaded by current code. This is a key rename only -- no tensor is "
