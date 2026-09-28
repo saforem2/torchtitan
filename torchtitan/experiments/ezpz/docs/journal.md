@@ -2,6 +2,21 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-27 (mbpr) -- fix `cos_sin` DCP -> HF fused-weight omission
+
+`AgptStateDictAdapter.to_hf()` bypassed
+`_native_fused_linears_to_hf()` for `_real` (`CosSinRoPE`) flavors. The adapter
+therefore ignored native `wqkv` and `w13` tensors while still exporting `wo` and
+`w2`. A meta-device `2b_real` reproduction exported 1,370,015,744 of
+1,986,578,432 parameters: 616,562,688 missing (31.0%).
+
+The adapter now splits native fused QKV and MLP tensors before applying the
+`cos_sin` no-permute key mapping. The regression test checks all five formerly
+missing HF projections and exact parameter-count preservation. Meta-device
+impact checks now export 1,986,578,432 / 1,986,578,432 parameters for `2b_real`
+and 20,742,804,480 / 20,742,804,480 for `20b_real`. Complex-RoPE exports still
+use the unchanged parent path.
+
 ## 2026-09-27 (sunspot) -- 5B AdamW fixed-LR matrix: wrapper false-INVALID root-caused and fixed
 
 ### The false INVALID was a wrapper bug, not a science failure
