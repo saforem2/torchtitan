@@ -4,6 +4,198 @@
 
 ---
 
+## 2026-09-28
+
+> [!IMPORTANT]
+> **Headline:** Stage-7 remains the accepted AGPT-2B checkpoint. It improves
+> instruction following and bounded behavior without measurable GSM8K/MMLU
+> regression, but it does not solve the base model's near-chance MMLU ceiling.
+> Stage-9 proved that ALCF Inkling can generate a clean, auditable synthetic
+> corpus at useful throughput; its student is not promotable so far because the
+> best checkpoint regressed GSM8K-200 from 59/200 to 48/200. The final IFEval
+> gate is waiting behind full-machine reservations.
+>
+> **Today's decisions:** choose the next base-model lever; close or retain
+> Stage-9 after IFEval; decide whether to rebuild or retire the quarantined
+> Sunspot environments; and confirm the post-reservation production/recovery
+> order on Aurora and Sunspot.
+>
+> **Canonical overview:** [AGPT-2B post-training campaign: SFT, distillation,
+> synthetic data, and RL](https://github.com/saforem2/torchtitan/blob/1db5a6a9b7aba952b11f4aae4b79ce7de499c0f7/torchtitan/experiments/ezpz/docs/experiments/2026-09-28-agpt2b-post-training-campaign.md)
+> ([commit `1db5a6a9b7`](https://github.com/saforem2/torchtitan/commit/1db5a6a9b7aba952b11f4aae4b79ce7de499c0f7)).
+
+### 1. Stage-7 is still the accepted model; Stage-9 is not
+
+Stage-7 re-anchors the Stage-4 MetaMath specialist against broad SFT step 900
+at alpha 0.65. Relative to Stage-4, full GSM8K is statistically tied
+(386/1,319 versus 385/1,319; exact McNemar `p=1.0`) and MMLU is flat within one
+standard error. The promotion basis is instruction following and operational
+behavior: all four IFEval metrics improved, format-valid GSM8K outputs rose
+1,295 -> 1,297, truncations fell 23 -> 20, and the direct generations are
+cleaner. Stage-4 remains the rollback.
+
+Detailed lineage: [Stage-4 MetaMath distillation and Stage-7
+re-anchoring](https://github.com/saforem2/torchtitan/blob/1db5a6a9b7aba952b11f4aae4b79ce7de499c0f7/torchtitan/experiments/ezpz/docs/experiments/2026-09-26-agpt2b-stage4-metamath.md).
+
+Stage-9 trained successfully for 40 finite steps on the Inkling corpus. Its
+checkpoint sweep improved formatting and brevity monotonically, but correctness
+moved in the wrong direction:
+
+| checkpoint | GSM8K-200 | format-valid | truncations |
+|---:|---:|---:|---:|
+| Stage-7 accepted | **59** | 194 | 6 |
+| Stage-9 step 10 | 48 | 196 | 4 |
+| step 20 | 44 | 197 | 3 |
+| step 30 | 46 | 198 | 2 |
+| step 40 | 43 | 199 | 1 |
+
+Step 10 is 8/8 bounded and semantically correct on the direct sanity prompts,
+but formatting alone cannot justify promotion. Original IFEval job `12478986`
+remains queued. Replacement attempts `12478987` and `12478988` demonstrated
+that apparent free nodes were unavailable under the active full-machine
+reservation; they are redundant and should not consume later queue capacity.
+Do not promote Stage-9 unless IFEval is large enough to justify the clear math
+regression.
+
+### 2. Inkling synthetic generation worked; the student recipe needs less exposure
+
+The ALCF Minerva `inkling-bf16` endpoint generated all 5,000 requests without
+an API retry. The deterministic manifest balanced math, instruction following,
+code, science, and multilingual prompts and excluded normalized overlap with
+20,654 held-out GSM8K, MATH, IFEval, and MMLU prompts.
+
+Low reasoning effort plus JSON mode changed the 100-prompt canary from 51%
+accepted at 48,621 tokens to 85% accepted at 30,238 tokens. Full validation
+retained 4,115/5,000 rows (82.3%); math rows required exact teacher/gold answer
+agreement. These packed into 342 sequences with 282,496 supervised tokens.
+
+The generation pipeline is reusable; the 40-step continuation is not. A future
+Inkling control should change effective exposure rather than generate more of
+the same data: fewer than 10 steps, lower LR, broad-data replay, or interpolation
+back toward Stage-7.
+
+Full methods and hashes: [AGPT-2B Inkling synthetic-data
+distillation](https://github.com/saforem2/torchtitan/blob/f65c0b6fc8c463b90432bdce0a15abaa452d6670/torchtitan/experiments/ezpz/docs/experiments/2026-09-28-agpt2b-inkling-distillation.md).
+
+### 3. Stronger-base strategy is the highest-leverage open decision
+
+The current AGPT-2B lineage remains effectively chance on letter-choice MMLU
+(~25.1%); continuation MMLU is ~35.5%. More narrow SFT has repeatedly improved
+formatting while degrading correctness or retention:
+
+- teacher-free STaR: 43/200 -> 37/200 GSM8K;
+- MetaMath MATH: MATH-500 flat, full GSM8K 21.53%;
+- verified OpenMath: repetition and full GSM8K 25.78%;
+- Inkling Stage-9: best 48/200 versus Stage-7 at 59/200.
+
+**Recommended order of operations:**
+
+1. Audit existing later/better pretrained and CPT checkpoints under the same
+   MMLU-continuation, IFEval, and GSM8K contracts before another optimizer run.
+2. Prefer broad CPT only when a candidate corpus targets measured knowledge
+   deficits and is mixed with general replay; do not treat more math tokens as
+   base strengthening.
+3. Use short, source-balanced SFT only after selecting the stronger base.
+4. If no existing 2B checkpoint materially improves MMLU continuation, move the
+   quality campaign to a larger or better-pretrained model rather than spending
+   more allocations rescuing this 2B lineage.
+
+**Meeting ask:** do we first screen the completed production 2B/CPT checkpoints,
+or start a parallel 7B/20B post-training lane? The former is cheaper; the latter
+is more likely to move the capability ceiling.
+
+### 4. RL / GRPO is mechanically validated, but is not the current quality lever
+
+The TRL and Monarch/TorchStore/vLLM paths both execute real XPU RL. The latest
+multi-host Sunspot validation placed trainer and generator on separate hosts,
+used Gloo policy transport, completed three finite optimizer updates, wrote
+checkpoints, and shut down cleanly.
+
+Evidence: [Sunspot multi-host Monarch/TorchStore/vLLM
+validation](https://github.com/saforem2/torchtitan/blob/1db5a6a9b7aba952b11f4aae4b79ce7de499c0f7/torchtitan/experiments/ezpz/docs/experiments/2026-09-25-sunspot-multihost-rl-validation.md).
+
+RL solved an in-reach arithmetic task and demonstrated that componentized reward
+shaping beats a saturating reward. It did not produce a promoted general-quality
+checkpoint. On GSM8K, gated GRPO moved 20.5% -> 21.5%, within noise; a weaker
+reward increased reward while held-out accuracy fell.
+
+**Meeting recommendation:** pause general-quality GRPO until a stronger cold
+start/base exists. Keep the validated stack for targeted, verifiable tasks with
+nonzero group-level correctness variance.
+
+### 5. Sunspot runtime incident is quarantined, not an active model-work blocker
+
+The overbroad `core.*` cleanup removed legitimate package/source files as well
+as crash dumps. The original shared venvs remain corrupt and should not be used.
+This no longer blocks current work: the isolated Torch 2.14 runtime plus isolated
+TRL/Accelerate and vLLM overlays passed compute-node imports, one-node
+pretokenization, a two-node optimizer smoke, the complete Stage-9 SFT run, and
+checkpoint evaluation.
+
+The dashboard should show this under verified/quarantined outcomes, not open
+blockers. The held high-LR replacements are stale remnants from the incident,
+not evidence that current post-training is blocked.
+
+**Meeting ask:** rebuild the shared environments immutably from manifests, or
+retire them and promote the validated isolated runtime? Do not attempt piecemeal
+in-place repair.
+
+### 6. Aurora and Sunspot are reserved, not down
+
+Both machines entered system reservations today:
+
+- Sunspot reservation `M12478630`: Sep 28 14:00 -> Sep 29 03:30.
+- Aurora reservation `M8863464`: Sep 28 14:00 -> Sep 29 04:30.
+
+Nodes may appear `free` in `pbsnodes` while remaining unavailable to our queues.
+This is why resubmitted IFEval copies continued receiving offline/ineligible
+placement estimates.
+
+Aurora production state at the latest verified update:
+
+- successor umbrella `8870515`: released and queued;
+- independent 20B-512 fork `8874846`: released and queued;
+- chain-3 paired CCL control `8876446`: queued;
+- no new application artifacts yet.
+
+**Meeting ask:** after reservations release, prioritize the small Stage-9 IFEval
+first, then the two-node chain-3 control, while allowing the production jobs to
+retain their existing queue age.
+
+### 7. Reporting and chart gap
+
+The campaign now has a canonical narrative and detailed component reports, but
+visual coverage is uneven. Stage-4 has Ambivalent/Iosevka/transparent figures;
+Stage-7/8/9 and the synthetic-generation report are still table-heavy.
+
+**Required chart set:**
+
+1. campaign checkpoint progression and accepted/rejected stages;
+2. Stage-7 versus Stage-4 retention/instruction comparison;
+3. Inkling canary efficiency and accepted/rejected corpus composition;
+4. Stage-9 training curves and checkpoint correctness/format/truncation tradeoff.
+
+All figures must use the repository's Ambivalent + Iosevka + transparent house
+style and retain reproducible renderers.
+
+### Decisions / asks for the team
+
+1. **Keep Stage-7 accepted?** Recommended: yes. Keep Stage-4 as rollback.
+2. **Close Stage-9 after IFEval?** Recommended: reject unless IFEval is materially
+   better than Stage-7 despite the 11-example GSM8K-200 regression.
+3. **Next base-model lane?** Choose between screening existing 2B/CPT checkpoints
+   first or opening a 7B/20B post-training lane in parallel.
+4. **RL priority?** Recommended: no more general-quality GRPO until the base/cold
+   start is stronger; retain RL for targeted verifiable tasks.
+5. **Runtime recovery?** Rebuild immutable shared environments or retire them;
+   do not repair the damaged venvs in place.
+6. **Post-reservation order?** Stage-9 IFEval -> chain-3 paired control -> preserve
+   production queue age for `8870515`/`8874846`.
+7. **Reporting:** complete the four-figure campaign chart suite and link it from
+   the canonical overview.
+
+---
+
 ## 2026-08-31
 
 > [!IMPORTANT]
