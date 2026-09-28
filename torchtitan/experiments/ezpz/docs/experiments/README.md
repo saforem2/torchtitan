@@ -4,6 +4,7 @@ Benchmark results organized by experiment type and machine.
 
 ## Experiments
 
+- [**AGPT-2B complete post-training campaign**](2026-09-28-agpt2b-post-training-campaign.md) -- Canonical synthesis of SFT, STaR, MetaMath/OpenMath, checkpoint interpolation, RL/GRPO, Inkling synthetic data, promotion gates, and current accepted artifacts.
 - [**AGPT-2B Inkling synthetic-data distillation**](2026-09-28-agpt2b-inkling-distillation.md) -- 5,000-prompt ALCF Minerva teacher-generation campaign, 4,115 accepted examples, bounded Stage-9 SFT, and checkpoint evaluation.
 - [**AGPT-2B Stage-4 MetaMath distillation**](2026-09-26-agpt2b-stage4-metamath.md) -- MetaMath GSM distillation, capability-retention interpolation, and accepted checkpoint lineage.
 - [**agpt/**](agpt/) -- Dense AuroraGPT models (2B, 7B, 20B, 80B)

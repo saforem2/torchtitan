@@ -1,5 +1,10 @@
 # AuroraGPT-2B post-training: complete status
 
+> **Current campaign overview (through 2026-09-28):**
+> [SFT, distillation, synthetic data, checkpoint interpolation, and RL](../experiments/2026-09-28-agpt2b-post-training-campaign.md).
+> This page preserves the detailed pre-September SFT/GRPO record; the overview
+> carries the current accepted Stage-7 model and later negative results.
+
 **Last updated:** 2026-08-13. Covers all SFT and RL/GRPO work on the 2B model.
 Every number here is quoted from a run doc; links go to the source.
 
