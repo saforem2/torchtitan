@@ -253,6 +253,7 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
                 wq, wk, wv, head_dim=module.head_dim
             )
 
+    installed = False
     for model in models:
         for module in model.modules():
             if isinstance(module, QKVLinear) and not getattr(
@@ -261,6 +262,13 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
                 module.register_state_dict_post_hook(split_on_save)
                 module.register_load_state_dict_pre_hook(merge_on_load)
                 module._legacy_split_qkv_compat = True
+                installed = True
+
+    # ModelWrapper builds its stable-storage cache before this compatibility
+    # detector runs. Rebuild it after registering the hooks so DCP requests the
+    # split keys that exist on disk rather than retaining the stale fused key.
+    if installed and model_wrapper is not None:
+        model_wrapper.cached_state_dict = model_wrapper._get_state_dict()
 
 
 def install_flat_attention_compat(

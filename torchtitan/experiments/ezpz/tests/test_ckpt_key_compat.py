@@ -82,6 +82,32 @@ check("from9200 split QKV is detected", needs_split_qkv_compat(NESTED))
 check("missing path is not split QKV", not needs_split_qkv_compat("/nonexistent/step-1"))
 
 print()
+print("=== unit: split-QKV hook refreshes ModelWrapper cache ===")
+from torchtitan.components.checkpointer.base import ModelWrapper  # noqa: E402
+from torchtitan.experiments.ezpz.ckpt_key_compat import (  # noqa: E402
+    _install_split_qkv_model_compat,
+)
+from torchtitan.models.common.attention import QKVLinear  # noqa: E402
+from torchtitan.models.common.linear import Linear  # noqa: E402
+qkv_config = QKVLinear.Config(
+    head_dim=2,
+    n_heads=4,
+    n_kv_heads=2,
+    wqkv=Linear.Config(in_features=3, out_features=16, bias=False),
+)
+qkv_model = qkv_config.build()
+wrapper = ModelWrapper(qkv_model)
+check("cache initially has native fused key", "wqkv.weight" in wrapper.cached_state_dict)
+check("cache initially lacks split key", "wq.weight" not in wrapper.cached_state_dict)
+class Checkpointer:
+    states = {"model": wrapper}
+_install_split_qkv_model_compat(Checkpointer())
+check("compat refresh removes stale fused key", "wqkv.weight" not in wrapper.cached_state_dict)
+check("compat refresh adds split Q/K/V keys", all(
+    key in wrapper.cached_state_dict for key in ("wq.weight", "wk.weight", "wv.weight")
+))
+
+print()
 print("=== detection on the real seeds ===")
 check("from9500 detected as needing compat", needs_flat_attention_compat(FLAT))
 check("from9200 detected as NOT needing compat",
