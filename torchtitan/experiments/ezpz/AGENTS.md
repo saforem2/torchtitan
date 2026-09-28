@@ -67,7 +67,7 @@
 ## Environment Setup
 
 - **torch 2.13 venv:** `.venv/` in repo root, copy to compute with `ezpz yeet-env`
-- **torch 2.10 conda env:** `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env`
+- **torch 2.10 conda env:** `source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env`
   Loads `frameworks/2025.3.1` module + user venv overlay. Has lm_eval, vllm, transformers.
 - **PBS scripts must NOT use `set -euo pipefail`** — venv activate has unbound vars,
   and `-u` also kills lmod (`ZSH_EVAL_CONTEXT: unbound variable`). Use

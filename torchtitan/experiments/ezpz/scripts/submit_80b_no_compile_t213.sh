@@ -47,7 +47,7 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.an
 # cwd ($HOME under default qsub). Stash the real submit dir first.
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 cd "${SUBMIT_DIR}"
 source .venv/bin/activate

@@ -48,7 +48,7 @@ STEPS="${STEPS:-3}"
 SEED="${SEED:-42}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
 source .venv/bin/activate

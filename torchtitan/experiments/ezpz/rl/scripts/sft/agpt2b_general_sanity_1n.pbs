@@ -13,7 +13,12 @@ V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
 : "${MODEL:?submit with -v MODEL=<model-dir>}"
 : "${OUT:?submit with -v OUT=<jsonl>}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<sha>}"
-module load oneapi/release/2026.1.0 hdf5 pti-gpu || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
+ezpz_setup_job || exit 13
+ezpz_load_modules || exit 13
+export VIRTUAL_ENV="$V" PATH="$V/bin:$PATH"
+hash -r
+[[ "$(command -v python)" == "$V/bin/python" ]] || exit 13
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14
 git diff --quiet && git diff --cached --quiet || exit 14

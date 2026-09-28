@@ -33,7 +33,7 @@ cd torchtitan
 ## 3. Set up the base environment
 
 ```bash
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 ```
 
 ## 4. Copy the prebuilt venv

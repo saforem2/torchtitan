@@ -42,7 +42,7 @@ fi
 if [[ -f "$EZPZ_UTILS" ]]; then
     source "$EZPZ_UTILS"
 else
-    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+    source <(curl -fsSL --max-time 30 https://ezpz.cool/utils.sh)
 fi
 ezpz_setup_job
 

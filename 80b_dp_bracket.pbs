@@ -66,7 +66,7 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export PYTORCH_XPU_ALLOC_CONF=expandable_segments:True
 export CCL_LOG_LEVEL=ERROR
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 8
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 8
 ezpz_setup .venv || exit 8
 python3 -c "import torch;print('torch',torch.__version__)" 2>&1 | tail -1
 if ! python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry" >/dev/null 2>&1; then

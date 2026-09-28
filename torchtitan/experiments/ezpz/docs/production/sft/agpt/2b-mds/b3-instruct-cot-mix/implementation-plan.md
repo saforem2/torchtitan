@@ -343,7 +343,7 @@ export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
 export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 source .venv/bin/activate
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
@@ -424,7 +424,7 @@ export HF_HUB_OFFLINE=1
 export HF_HOME=/tegu/datasets/datasets/hf
 export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"; source .venv/bin/activate
 BASE_MODEL="${HOME}/global_step138650"
 PRETOK_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"

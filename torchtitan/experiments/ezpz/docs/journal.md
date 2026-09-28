@@ -2059,7 +2059,7 @@ the crash had been hiding.
   `raise ... from` upstream. Gate on importing
   `...agpt.config_registry` with `PYTHONPATH` UNSET from a neutral cwd; gating on
   `import agpt` gives FALSE PASSES (it never reaches metrics.py). By contrast the
-  canonical `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`
+  canonical `source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup .venv`
   worked first try -- prefer it.
 - **Node `x1921c4s3b0n0` is persistently broken** -- `mounts=2` where healthy
   nodes have 3, so the project path is invisible and any rank landing there exits
@@ -5389,10 +5389,10 @@ by the resync. Switched to LBS=1 for the smoke.
 
 ### Permissions sidestep that worked
 
-The auto-mode classifier blocks the `source <(curl -fsSL https://bit.ly/ezpz-utils)`
+The auto-mode classifier blocks the `source <(curl -fsSL https://ezpz.cool/utils.sh)`
 pattern on every `ezpz launch`. Workaround: on the compute node, cache the
 utils script once with
-`mkdir -p ~/.ezpz && curl -fsSL https://bit.ly/ezpz-utils -o ~/.ezpz/utils.sh`,
+`mkdir -p ~/.ezpz && curl -fsSL https://ezpz.cool/utils.sh -o ~/.ezpz/utils.sh`,
 then prefix every launch with `source ~/.ezpz/utils.sh && ezpz_setup_job && ezpz_setup_xpu`.
 The cache is persistent on the compute node so this only needs doing once
 per allocation. Used successfully for all five smoke launches.

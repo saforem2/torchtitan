@@ -99,7 +99,7 @@ known venv tarball instead:
 
 ```bash
 cd /flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
-source <(curl -fsSL https://bit.ly/ezpz-utils)
+source <(curl -fsSL https://ezpz.cool/utils.sh)
 ezpz_setup_job
 
 VENV_ROOT=/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz

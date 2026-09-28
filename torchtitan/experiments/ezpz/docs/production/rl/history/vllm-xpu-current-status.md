@@ -101,7 +101,7 @@ overrides too.
 In `vllm_xpu_bare_smoke.sh` (and any other vLLM smoke):
 
 ```bash
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 # After ezpz_setup_job (keep the PBS / nodefile bookkeeping), strip
 # the oneCCL/libfabric env vars it/ezpz_setup_env exported. vLLM's

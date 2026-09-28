@@ -34,7 +34,7 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
 export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 cd "${PBS_O_WORKDIR:-$(pwd)}"
 source .venv/bin/activate

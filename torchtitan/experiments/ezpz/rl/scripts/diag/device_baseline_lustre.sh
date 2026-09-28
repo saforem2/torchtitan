@@ -22,7 +22,7 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 cd "${SUBMIT_DIR}"
 # Check out the train_grpo.py from BEFORE b7ded2dc4 to test baseline

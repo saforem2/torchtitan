@@ -15,7 +15,7 @@ OUT=/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-robust-v3-grpo3
 EXPECTED_SHA=2e075c04a8560a0a4f197a24e3638148f491eb507dbb0506ef8ef14f5c4aaf17
 
 cd "$WT" || exit 11
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
 

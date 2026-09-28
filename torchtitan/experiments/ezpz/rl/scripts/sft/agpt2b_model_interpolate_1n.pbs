@@ -16,7 +16,7 @@ V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
 : "${ALPHA:?submit with -v ALPHA=<0..1>}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14

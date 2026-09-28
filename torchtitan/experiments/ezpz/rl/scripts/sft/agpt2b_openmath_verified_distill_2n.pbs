@@ -15,7 +15,7 @@ PRETOK="${PRETOK:-/tegu/datasets/datasets/agpt2b-openmath-verified-replay-len204
 ROOT="${ROOT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage6/openmath-verified-${PBS_JOBID%%.*}}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 14

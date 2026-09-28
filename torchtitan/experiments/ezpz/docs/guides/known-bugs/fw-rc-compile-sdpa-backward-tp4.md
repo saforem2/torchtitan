@@ -32,7 +32,7 @@
 > **The low TP=4 MFU is NOT an RC4 regression** (control run, job 12472583). The
 > same four rungs on the production `.venv` stack (torch
 > `2.13.0.dev20260519+xpu`, oneAPI 2025.3.1, via
-> `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`) land
+> `source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup .venv`) land
 > within ~1.5% of RC4 everywhere:
 >
 > | rung | .venv MFU | RC4 MFU | delta |
@@ -143,7 +143,7 @@ intel/torch-xpu-ops #3093 is unrelated (NestedTensor forward "no viable backend"
 ## Workaround
 
 - **Compiled TP=4:** use the `.venv` stack (torch `dev20260519+xpu` + oneAPI
-  2025.3.1, via `source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup .venv`).
+  2025.3.1, via `source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup .venv`).
   Proven to train compiled at TP=4.
 - **On the RC stack:** run eager (`--compile.no-enable`) -- proven to train; or keep
   TP<=2 if compile is required.

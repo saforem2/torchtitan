@@ -26,7 +26,7 @@ export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0
 export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-mds-gs138650/step-0}"
 
 cd "$REPO" || exit 9
-curl -fsSL https://bit.ly/ezpz-utils -o /tmp/ezu.sh 2>/dev/null
+curl -fsSL https://ezpz.cool/utils.sh -o /tmp/ezu.sh 2>/dev/null
 source /tmp/ezu.sh >/dev/null 2>&1
 
 # Env-setup guard: ezpz_setup can transiently fail on a compute node (Lustre /

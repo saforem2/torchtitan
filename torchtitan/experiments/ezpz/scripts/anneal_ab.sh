@@ -63,7 +63,7 @@ export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-mds
 export OLMO_ANNEAL_BASE="${OLMO_ANNEAL_BASE:-$REPO/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859}"
 
 cd "$REPO" || exit 9
-curl -fsSL https://bit.ly/ezpz-utils -o /tmp/ezu.sh 2>/dev/null
+curl -fsSL https://ezpz.cool/utils.sh -o /tmp/ezu.sh 2>/dev/null
 source /tmp/ezu.sh >/dev/null 2>&1
 ezpz_setup .venv >/dev/null 2>&1
 echo "torch=$(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null)"

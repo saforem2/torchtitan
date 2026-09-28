@@ -75,7 +75,7 @@ export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 export DISTILL_MAX_THINK_CHARS="${DISTILL_MAX_THINK_CHARS:-16000}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 source .venv/bin/activate
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }

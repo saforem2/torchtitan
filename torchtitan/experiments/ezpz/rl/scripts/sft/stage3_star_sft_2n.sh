@@ -38,7 +38,7 @@ export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup "${VENV}"
 cd "${SUBMIT_DIR}" || exit 11
 actual_commit=$(git rev-parse HEAD) || exit 15
 [[ "${actual_commit}" == "${EXPECTED_COMMIT}" ]] || {

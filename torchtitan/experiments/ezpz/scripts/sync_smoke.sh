@@ -109,7 +109,7 @@ else
 fi
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
 # Production code path: yeet the repo-root .venv.tar.gz (torch 2.13) to

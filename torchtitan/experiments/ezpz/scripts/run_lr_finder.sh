@@ -93,7 +93,7 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.an
 cd "${PBS_O_WORKDIR:-$(pwd)}"
 
 set +u
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 set -u
 
 # LRF_VENV_SRC names a venv tarball OUTSIDE this repo to broadcast instead of

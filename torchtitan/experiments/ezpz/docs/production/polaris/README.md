@@ -98,7 +98,7 @@ smoke-before-prod practice). Three real issues surfaced and were fixed:
    @ 8 GPUs) but fits at scale (3.05 GiB @ 40 GPUs, ~0.24 GiB @ 512).
    Pure-FSDP shard scales with GPU count -> smoke at >=10N, not 2N.
 2. **bit.ly 429 broke env bootstrap.** The submit script's fallback
-   `curl https://bit.ly/ezpz-utils` was rate-limited (HTTP 429),
+   `curl https://ezpz.cool/utils.sh` was rate-limited (HTTP 429),
    leaving every ezpz function undefined -> cascade to `libcudart.so.12`
    + venv failure. Fixed by pre-creating `.ezpz-utils-cache/ezpz-utils.sh`
    in the repo root (script prefers the local cache over curl).

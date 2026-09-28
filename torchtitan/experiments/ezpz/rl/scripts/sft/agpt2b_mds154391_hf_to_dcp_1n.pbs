@@ -20,7 +20,7 @@ cd "$WT"
 git fetch origin sync/upstream-0fd69d0b
 git checkout --detach "$EXPECTED_COMMIT"
 test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-source <(curl -fsSL https://bit.ly/ezpz-utils)
+source <(curl -fsSL https://ezpz.cool/utils.sh)
 ezpz_setup "$V"
 export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
 

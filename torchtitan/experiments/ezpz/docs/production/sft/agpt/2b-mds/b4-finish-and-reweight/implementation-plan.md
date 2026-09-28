@@ -278,7 +278,7 @@ export HF_DATASETS_OFFLINE=0   # gsm8k is small + may need download; proxy on
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"; source .venv/bin/activate
 BASE_MODEL="${BASE_MODEL:-$SUBMIT_DIR/outputs/evals/cot/b3-3605-hf-diag}"
 CKPT_DIR="outputs/sft/agpt2b-b4a-gsm8k-finish"

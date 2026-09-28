@@ -35,7 +35,7 @@ mkdir -p "/tmp/vllm-${USER}"
 export TMPDIR="/tmp/vllm-${USER}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
 # train_upstream.py also pops these on the controller side, but

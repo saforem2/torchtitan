@@ -113,7 +113,7 @@ cd /flare/AuroraGPT/<your-user>/<your-clone>/
 export http_proxy="http://proxy.alcf.anl.gov:3128"
 export https_proxy="http://proxy.alcf.anl.gov:3128"
 export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.anl.gov"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job && ezpz_load_modules
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job && ezpz_load_modules
 source .venv/bin/activate
 
 # Broadcast tarball to all 4 nodes (~70s for 8 nodes, ~91s at 64)

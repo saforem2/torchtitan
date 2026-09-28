@@ -44,7 +44,7 @@ export TORCH_CPP_LOG_LEVEL=ERROR
 # place regardless of what ezpz_setup_job mutates.
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 cd "${SUBMIT_DIR}"
 echo "=== smoke[diag] cwd=$(pwd)"

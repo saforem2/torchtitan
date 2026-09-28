@@ -30,7 +30,7 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 echo "=== [1] ezpz_setup_env ==="
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 python3 -c 'import torch; print("  torch :", torch.__version__, "| xpu:", torch.xpu.is_available())'
 
 echo

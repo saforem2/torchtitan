@@ -50,7 +50,7 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 # COMPOSITE shows 6 and every --nproc 12 launch fails ngpus validation.
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 ```
 
 `ezpz_setup_env` detects the active RC conda env and creates/activates a

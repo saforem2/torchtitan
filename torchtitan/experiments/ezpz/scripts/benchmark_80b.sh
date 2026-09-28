@@ -24,7 +24,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 # Environment setup
 # ---------------------------------------------------------------------------
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 
 if ! command -v ezpz >/dev/null; then
     uv pip install --no-cache --link-mode=copy "git+https://github.com/saforem2/ezpz"

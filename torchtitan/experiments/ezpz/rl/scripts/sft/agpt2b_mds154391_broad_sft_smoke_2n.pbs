@@ -17,7 +17,7 @@ EXPECTED_MODEL_SHA=df4a7289d4eddb57c380d14ceb4c510d7ee6c55b5b79a7ef0f96a3a61e644
 
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 12
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 13
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 13
 ezpz_setup "$V" || exit 14
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 15
 export PATH="$V/bin:/opt/pbs/bin:$PATH"

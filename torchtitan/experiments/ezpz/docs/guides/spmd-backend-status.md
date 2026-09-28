@@ -8,7 +8,7 @@ venv:
 ```bash
 module use /opt/aurora/26.181.0/modulefiles
 module load frameworks/2026.1.0
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 # -> venvs/sunspot/torchtitan-aurora_frameworks-2026.1.0
 ```
 

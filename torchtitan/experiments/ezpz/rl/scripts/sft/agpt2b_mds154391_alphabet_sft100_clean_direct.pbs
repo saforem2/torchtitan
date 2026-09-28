@@ -15,7 +15,7 @@ OUT=${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds15439
 EXPECTED_SHA=${EXPECTED_SHA:-cd8c185a84c0ef274d04b0be91ba72046b02e7533d9f0507f4948b146e0a5c6e}
 
 cd "$WT" || exit 11
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
 export PATH="$V/bin:/opt/pbs/bin:$PATH"

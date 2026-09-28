@@ -7,7 +7,7 @@ export PBS_NODEFILE="${PBS_NODEFILE}"
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 
 cd /lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
 export PYTHONPATH="$(pwd):${PYTHONPATH}"

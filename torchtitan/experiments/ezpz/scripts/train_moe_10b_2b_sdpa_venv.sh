@@ -13,7 +13,7 @@ export CCL_OP_SYNC=1
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 cd "${PBS_O_WORKDIR:-$(pwd)}"
 source .venv/bin/activate

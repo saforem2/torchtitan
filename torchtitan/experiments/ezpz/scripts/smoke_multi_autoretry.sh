@@ -65,7 +65,7 @@ if [[ -f "$EZPZ_UTILS" ]]; then
     source "$EZPZ_UTILS"
 fi
 if ! declare -F ezpz_load_modules >/dev/null || ! declare -F ezpz_setup_job >/dev/null; then
-    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+    source <(curl -fsSL --max-time 30 https://ezpz.cool/utils.sh)
 fi
 declare -F ezpz_load_modules >/dev/null || { echo "ezpz_load_modules unavailable"; exit 2; }
 declare -F ezpz_setup_job >/dev/null || { echo "ezpz_setup_job unavailable"; exit 2; }

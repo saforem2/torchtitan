@@ -47,7 +47,7 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
-source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL --max-time 30 https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 # Use the Lustre .venv directly (single node, no yeet needed for a pilot).
 source .venv/bin/activate

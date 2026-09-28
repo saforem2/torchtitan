@@ -17,7 +17,7 @@ cd "${REPO_ROOT}"
 # Lmod scripts used by ezpz env setup can reference unset vars (e.g. ZSH_EVAL_CONTEXT),
 # so temporarily disable nounset during environment initialization.
 set +u
-source <(curl -fsSL https://bit.ly/ezpz-utils)
+source <(curl -fsSL https://ezpz.cool/utils.sh)
 ezpz_setup_env
 set -u
 

@@ -38,7 +38,7 @@ if [[ -z "${NHOSTS_TRAIN:-}" ]]; then
 fi
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 
 # Stash the failover helpers if they're being used; fall back to a
 # plain ezpz launch if failover_run isn't available (single-node smoke).

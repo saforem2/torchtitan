@@ -20,7 +20,7 @@ EVAL_ROOT="$ROOT/evals"
 
 cd "$WT" || exit 11
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || exit 12
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 13
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 13
 ezpz_setup "$V" || exit 14
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 15
 export PATH="$V/bin:/opt/pbs/bin:$PATH"

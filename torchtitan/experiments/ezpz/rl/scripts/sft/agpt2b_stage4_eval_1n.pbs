@@ -19,7 +19,7 @@ MIN_FORMAT="${MIN_FORMAT:-197}"
 MAX_UNCLOSED="${MAX_UNCLOSED:-3}"
 
 module load oneapi/release/2025.3.1 hdf5 pti-gpu
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 cd "$WT" || exit 11
 commit=$(git rev-parse HEAD) || exit 14

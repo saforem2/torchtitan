@@ -34,7 +34,7 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 python3 -c 'import torch; print("torch", torch.__version__, "| xpu", torch.xpu.is_available(), "|", torch.xpu.device_count(), "devices")'
 echo
 

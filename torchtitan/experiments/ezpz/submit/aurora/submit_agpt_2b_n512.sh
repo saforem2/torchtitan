@@ -11,7 +11,7 @@
 # ---- Environment ----
 cd "${PBS_O_WORKDIR}" || exit 1
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 # Kill stale palsd processes from previous runs, but spare our own process tree
 _my_pids=$(ps -o pid= --ppid $$ 2>/dev/null | tr '\n' '|')
 _stale_palsd=$(ps aux | grep -E "$USER.+palsd" | grep -v grep | grep -v -E "^\S+\s+($$|${_my_pids%|})\s" | awk '{print $2}')

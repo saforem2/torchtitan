@@ -30,7 +30,7 @@ MODEL="${MODEL:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds
 OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage2/eval-step93/gsm8k-200/generations.jsonl}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup "${VENV}"
 cd "${SUBMIT_DIR}" || exit 9
 actual_commit=$(git rev-parse HEAD) || exit 2
 [[ "${actual_commit}" == "${EXPECTED_COMMIT}" ]] || {

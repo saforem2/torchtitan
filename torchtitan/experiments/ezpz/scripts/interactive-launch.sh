@@ -19,7 +19,7 @@ echo "Logging to: ${LOGFILE}" >&2
 {
     # set +u needed: lmod/ezpz reference unset vars
     set +u
-    source <(curl -fsSL https://bit.ly/ezpz-utils)
+    source <(curl -fsSL https://ezpz.cool/utils.sh)
     ezpz_setup_env
 
     if ! command -v ezpz >/dev/null; then

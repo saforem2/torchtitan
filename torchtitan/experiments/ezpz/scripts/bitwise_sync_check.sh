@@ -61,7 +61,7 @@ export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
 
 HEAD_COMMIT="${HEAD_COMMIT:-$(git rev-parse HEAD)}"

@@ -14,7 +14,7 @@ MODEL="${MODEL:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds
 OUT="${OUT:-/lus/tegu/projects/datascience/foremans/reproductions/agpt2b-mds154391-broad-grain-sft900/stage3/star-canary-${PBS_JOBID%%.*}}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils) || exit 12
+source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
 ezpz_setup "$V" || exit 13
 [[ "$ZE_FLAT_DEVICE_HIERARCHY" == FLAT ]] || exit 14
 cd "$WT" || exit 11

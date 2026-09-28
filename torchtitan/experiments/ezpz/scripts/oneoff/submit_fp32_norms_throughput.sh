@@ -41,7 +41,7 @@ cd "${PBS_O_WORKDIR:-$(pwd)}"
 # urEnqueueCooperativeKernelLaunchE) -- that killed job 8757164.
 source .venv/bin/activate
 
-source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+source <(curl -fsSL --max-time 30 https://ezpz.cool/utils.sh)
 ezpz_setup_job
 
 # Broadcast the venv to node-local /tmp, then run from there.

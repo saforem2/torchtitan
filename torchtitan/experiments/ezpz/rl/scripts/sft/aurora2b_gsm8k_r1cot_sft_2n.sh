@@ -33,7 +33,7 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup "${VENV}"
 
 cd "${SUBMIT_DIR}"
 actual_commit=$(git rev-parse HEAD) || exit 2

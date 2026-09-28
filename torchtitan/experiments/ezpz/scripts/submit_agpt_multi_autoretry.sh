@@ -563,7 +563,7 @@ EZPZ_UTILS="${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh"
 if [[ -f "$EZPZ_UTILS" ]]; then
     source "$EZPZ_UTILS"
 else
-    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+    source <(curl -fsSL --max-time 30 https://ezpz.cool/utils.sh)
 fi
 
 # ---- Pre-stage each model's venv (dedup by resolved src|dst) ------------------

@@ -34,7 +34,7 @@
 1. Load modules and export environment variables[^ezpz-setup]:
 
    ```bash
-   source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job && ezpz_load_modules
+   source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job && ezpz_load_modules
    ```
 
 1. Create venv:
@@ -233,7 +233,7 @@ For more detail (full sweep, plots, methodology) see the
    created:
 
    ```bash
-   source <(curl -fsSL https://bit.ly/ezpz-utils)
+   source <(curl -fsSL https://ezpz.cool/utils.sh)
    ezpz_setup_job
    ezpz_setup_xpu
    source .venv/bin/activate
