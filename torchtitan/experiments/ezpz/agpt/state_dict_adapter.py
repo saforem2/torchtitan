@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 # RoPE-aware DCP<->HF state-dict adapter for the ezpz agpt models.
 #
 # WHY THIS EXISTS
@@ -79,10 +85,7 @@ class AgptStateDictAdapter(Llama3StateDictAdapter):
                 # NOTE: intentionally NO _permute on wq/wk here.
                 new_key = new_key.format(layer_num)
             else:
-                if (
-                    self.model_config.enable_weight_tying
-                    and key == "lm_head.weight"
-                ):
+                if self.model_config.enable_weight_tying and key == "lm_head.weight":
                     if self.fqn_to_index_mapping:
                         self.fqn_to_index_mapping.pop("lm_head.weight", None)
                     continue
@@ -105,9 +108,7 @@ class AgptStateDictAdapter(Llama3StateDictAdapter):
             and "lm_head.weight" not in hf_state_dict
         ):
             assert "model.embed_tokens.weight" in hf_state_dict
-            hf_state_dict["lm_head.weight"] = hf_state_dict[
-                "model.embed_tokens.weight"
-            ]
+            hf_state_dict["lm_head.weight"] = hf_state_dict["model.embed_tokens.weight"]
 
         state_dict: dict[str, Any] = {}
         for key, value in hf_state_dict.items():
