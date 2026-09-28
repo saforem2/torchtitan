@@ -64,6 +64,7 @@ class AgptStateDictAdapter(Llama3StateDictAdapter):
             return super().to_hf(state_dict)
 
         # CosSinRoPE: HF-native rotate_half layout -> map keys, NO Q/K permute.
+        state_dict = self._native_fused_linears_to_hf(state_dict)
         to_hf_map = {v: k for k, v in self.from_hf_map.items() if v is not None}
         hf_state_dict: dict[str, Any] = {}
         import re

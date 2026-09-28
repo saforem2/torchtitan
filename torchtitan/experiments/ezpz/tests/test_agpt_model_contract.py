@@ -50,6 +50,25 @@ def test_model_owns_adapter_pipeline_fragment_and_xpu_parallelization() -> None:
     parallelize.assert_called_once_with(model, marker="xpu")
 
 
+def test_cos_sin_hf_export_splits_native_fused_linears() -> None:
+    config = model_registry("2b_real")
+    adapter = AgptStateDictAdapter(config, hf_assets_path=None)
+    with torch.device("meta"):
+        model = config.build()
+
+    native_state_dict = model.state_dict()
+    hf_state_dict = adapter.to_hf(native_state_dict)
+
+    assert "model.layers.0.self_attn.q_proj.weight" in hf_state_dict
+    assert "model.layers.0.self_attn.k_proj.weight" in hf_state_dict
+    assert "model.layers.0.self_attn.v_proj.weight" in hf_state_dict
+    assert "model.layers.0.mlp.gate_proj.weight" in hf_state_dict
+    assert "model.layers.0.mlp.up_proj.weight" in hf_state_dict
+    assert sum(value.numel() for value in hf_state_dict.values()) == sum(
+        value.numel() for value in native_state_dict.values()
+    )
+
+
 def test_qknorm_sharding_and_parameter_flop_accounting_survive() -> None:
     config = model_registry("debugmodel_qknorm")
 
