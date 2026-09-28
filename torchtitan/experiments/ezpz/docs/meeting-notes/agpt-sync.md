@@ -123,7 +123,51 @@ reward increased reward while held-out accuracy fell.
 start/base exists. Keep the validated stack for targeted, verifiable tasks with
 nonzero group-level correctness variance.
 
-### 5. Sunspot runtime incident is quarantined, not an active model-work blocker
+### 5. 80B numerical instability remains open; the old overflow diagnosis is retracted
+
+The current canonical status is in [The 80B NaN: what is known, what is
+refuted, what is open](https://github.com/saforem2/torchtitan/blob/b3f1b4cc8c14feab862ba915406d9c7110a6ff75/torchtitan/experiments/ezpz/docs/guides/known-bugs/80b-nan-what-we-know.md).
+The earlier claim that this was a root-caused "bf16 residual-stream overflow"
+is wrong: bf16 and fp32 have nearly the same exponent range, measured
+activations were nowhere near overflow, and moving the named residual operation
+to fp32 did not prevent the failure.
+
+**What is established:**
+
+- the non-finite failure is reproducible and optimizer-independent: SophiaG,
+  Mano, and AdamW have failed in controlled 80B regimes;
+- fp32 activations completed 120/120 steps at a DP where bf16 failed, but cost
+  about 3.4x throughput and also changed the optimization trajectory;
+- the failure is DP-sensitive, while a matched GBS experiment showed that batch
+  size alone has the opposite variance-only signature;
+- `lm_head.weight` carries about 44x the gradient norm of the next tensor, and
+  its concentration relative to the layer mean grows predictably with DP;
+- clipping fires on every step; once one gradient becomes infinite, global
+  clipping converts the other finite gradients to zero and the offender to NaN;
+- historical failures occurred at 1e-6 or below, including an effective LR of
+  3.87e-9 at one death point, so an oversized LR is not a sufficient explanation.
+
+**What is not established:** the first tensor and operation that become
+non-finite in the actual failing regime, whether `lm_head` concentration causes
+the failure, whether depth is causal, or whether a practical bf16 stabilization
+works at production scale. A 64-node, DP=192, AdamW LR 5e-7 control ran 12 clean
+steps; that is a safe local corner, not proof of production stability. No 80B
+production model is currently advancing.
+
+**Next discriminating work:**
+
+1. run the working per-tensor non-finite capture in the failing regime and name
+   the first affected tensor;
+2. rerun the 48/72/84-layer depth ladder at LR 5e-7;
+3. test output-logit z-loss as the cheapest untried score-bounding control;
+4. require multiple finite production-scale steps before calling any corner
+   stable.
+
+**Meeting ask:** fund one instrumented production-regime capture before any
+new 80B optimizer or architecture sweep. Do not present fp32 as a production
+solution until its 3.4x throughput cost and confounds are accepted explicitly.
+
+### 6. Sunspot runtime incident is quarantined, not an active model-work blocker
 
 The overbroad `core.*` cleanup removed legitimate package/source files as well
 as crash dumps. The original shared venvs remain corrupt and should not be used.
@@ -150,7 +194,7 @@ from the incident, not evidence that current post-training is blocked.
 retire them and promote the validated isolated runtime? Do not attempt piecemeal
 in-place repair.
 
-### 6. Aurora and Sunspot are reserved, not down
+### 7. Aurora and Sunspot are reserved, not down
 
 Both machines entered system reservations today:
 
@@ -172,7 +216,7 @@ Aurora production state at the latest verified update:
 first, then the two-node chain-3 control, while allowing the production jobs to
 retain their existing queue age.
 
-### 7. Reporting and chart gap
+### 8. Reporting and chart gap
 
 The campaign now has a canonical narrative and detailed component reports, but
 visual coverage is uneven. Stage-4 has Ambivalent/Iosevka/transparent figures;
@@ -197,11 +241,13 @@ style and retain reproducible renderers.
    first or opening a 7B/20B post-training lane in parallel.
 4. **RL priority?** Recommended: no more general-quality GRPO until the base/cold
    start is stronger; retain RL for targeted verifiable tasks.
-5. **Runtime recovery?** Rebuild immutable shared environments or retire them;
+5. **80B instability?** Fund one instrumented production-regime non-finite
+   capture before another optimizer/architecture sweep.
+6. **Runtime recovery?** Rebuild immutable shared environments or retire them;
    do not repair the damaged venvs in place.
-6. **Post-reservation order?** Stage-9 IFEval -> chain-3 paired control -> preserve
+7. **Post-reservation order?** Stage-9 IFEval -> chain-3 paired control -> preserve
    production queue age for `8870515`/`8874846`.
-7. **Reporting:** complete the four-figure campaign chart suite and link it from
+8. **Reporting:** complete the four-figure campaign chart suite and link it from
    the canonical overview.
 
 ---
