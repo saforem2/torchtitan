@@ -224,6 +224,8 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
     from torchtitan.models.common.attention import QKVLinear  # noqa: PLC0415
     from torch.distributed.tensor import DTensor, Replicate  # noqa: PLC0415
 
+    native_sharding: dict[str, tuple[Any, tuple[Any, ...]]] = {}
+
     def split_on_save(module, state_dict, prefix, local_metadata) -> None:
         del local_metadata
         for param in ("weight", "bias"):
@@ -232,6 +234,7 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
                 continue
             tensor = state_dict.pop(key)
             if isinstance(tensor, DTensor):
+                native_sharding[key] = (tensor.device_mesh, tensor.placements)
                 tensor = tensor.redistribute(
                     tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
                 )
@@ -264,9 +267,15 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
                     )
                     for tensor in (wq, wk, wv)
                 )
-            state_dict[f"{prefix}wqkv.{param}"] = split_qkv_to_fused(
+            fused_key = f"{prefix}wqkv.{param}"
+            fused = split_qkv_to_fused(
                 wq, wk, wv, head_dim=module.head_dim
             )
+            if fused_key in native_sharding:
+                assert isinstance(fused, DTensor)
+                mesh, placements = native_sharding[fused_key]
+                fused = fused.redistribute(mesh, placements)
+            state_dict[fused_key] = fused
 
     installed = False
     for model in models:
@@ -293,6 +302,8 @@ def _install_split_ffn_model_compat(checkpointer: Any) -> None:
     from torchtitan.models.common.feed_forward import FeedForward  # noqa: PLC0415
     from torch.distributed.tensor import DTensor, Replicate  # noqa: PLC0415
 
+    native_sharding: dict[str, tuple[Any, tuple[Any, ...]]] = {}
+
     def split_on_save(module, state_dict, prefix, local_metadata) -> None:
         del module, local_metadata
         for param in ("weight", "bias"):
@@ -301,6 +312,7 @@ def _install_split_ffn_model_compat(checkpointer: Any) -> None:
                 continue
             tensor = state_dict.pop(key)
             if isinstance(tensor, DTensor):
+                native_sharding[key] = (tensor.device_mesh, tensor.placements)
                 tensor = tensor.redistribute(
                     tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
                 )
@@ -321,7 +333,13 @@ def _install_split_ffn_model_compat(checkpointer: Any) -> None:
                     )
                     for tensor in (w1, w3)
                 )
-            state_dict[f"{prefix}w13.{param}"] = torch.stack([w1, w3], dim=0)
+            fused_key = f"{prefix}w13.{param}"
+            fused = torch.stack([w1, w3], dim=0)
+            if fused_key in native_sharding:
+                assert isinstance(fused, DTensor)
+                mesh, placements = native_sharding[fused_key]
+                fused = fused.redistribute(mesh, placements)
+            state_dict[fused_key] = fused
 
     installed = False
     for model in models:
