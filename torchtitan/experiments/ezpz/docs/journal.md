@@ -2,6 +2,14 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-28 (sunspot) -- Inkling synthetic-data pilot and Stage-9 checkpoint sweep
+
+- Built a deterministic, held-out-decontaminated 5,000-prompt manifest across math, instruction following, code, and science.
+- Generated all 5,000 responses with ALCF Minerva `inkling-bf16`; 4,115 passed schema, length, repetition, and exact-answer checks.
+- Packed the accepted corpus into 342 sequences with 282,496 supervised tokens and completed a finite 40-step, two-node Stage-9 run (`12478970`).
+- The best checkpoint scored 48/200 on the fixed GSM8K slice versus Stage-7's 59/200, while remaining bounded on 8/8 direct prompts. IFEval `12478986` is queued as the final secondary gate.
+- Full methods, hashes, canary comparisons, job ledger, and interpretation: [AGPT-2B Inkling synthetic-data distillation](experiments/2026-09-28-agpt2b-inkling-distillation.md).
+
 ## 2026-09-24 (sunspot) -- MDS154391 two-stage reproduction complete; GRPO stack smoke queued
 
 The journal was not updated during this campaign. This entry reconstructs the
