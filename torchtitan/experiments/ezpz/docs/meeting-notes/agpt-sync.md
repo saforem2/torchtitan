@@ -132,9 +132,19 @@ TRL/Accelerate and vLLM overlays passed compute-node imports, one-node
 pretokenization, a two-node optimizer smoke, the complete Stage-9 SFT run, and
 checkpoint evaluation.
 
-The dashboard should show this under verified/quarantined outcomes, not open
-blockers. The held high-LR replacements are stale remnants from the incident,
-not evidence that current post-training is blocked.
+A separate XPU runtime risk remains open in
+[`ezpz` issue #252](https://github.com/saforem2/ezpz/issues/252):
+`ezpz.examples.fsdp_tp` is stable at TP=1 but TP=2 stalls nondeterministically
+on Sunspot and Aurora after oneCCL reports that explicit dependencies are not
+supported for grouped `reduce_scatter` calls. The reproductions rule out the
+dataset, model size, deterministic shape errors, and isolated bad nodes;
+`CCL_OP_SYNC=1` is the current workaround. This issue is independent of the
+filesystem-deletion incident, but it is relevant to any new TP>1 XPU training
+or evaluation plan.
+
+The dashboard should show the filesystem incident under verified/quarantined
+outcomes, not open blockers. The held high-LR replacements are stale remnants
+from the incident, not evidence that current post-training is blocked.
 
 **Meeting ask:** rebuild the shared environments immutably from manifests, or
 retire them and promote the validated isolated runtime? Do not attempt piecemeal
