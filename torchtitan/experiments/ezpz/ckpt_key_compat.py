@@ -189,6 +189,21 @@ def needs_split_qkv_compat(checkpoint_dir: str) -> bool:
     return has_split and not has_fused
 
 
+def needs_split_ffn_compat(checkpoint_dir: str) -> bool:
+    """True when a native DCP stores logical w1/w3 instead of stacked w13."""
+    from torch.distributed.checkpoint import FileSystemReader  # noqa: PLC0415
+
+    try:
+        keys = FileSystemReader(checkpoint_dir).read_metadata().state_dict_metadata.keys()
+    except Exception:
+        return False
+    has_split = any("feed_forward.w1.weight" in key for key in keys) and any(
+        "feed_forward.w3.weight" in key for key in keys
+    )
+    has_fused = any("feed_forward.w13.weight" in key for key in keys)
+    return has_split and not has_fused
+
+
 def split_qkv_to_fused(
     wq: torch.Tensor, wk: torch.Tensor, wv: torch.Tensor, *, head_dim: int
 ) -> torch.Tensor:
@@ -267,6 +282,58 @@ def _install_split_qkv_model_compat(checkpointer: Any) -> None:
     # ModelWrapper builds its stable-storage cache before this compatibility
     # detector runs. Rebuild it after registering the hooks so DCP requests the
     # split keys that exist on disk rather than retaining the stale fused key.
+    if installed and model_wrapper is not None:
+        model_wrapper.cached_state_dict = model_wrapper._get_state_dict()
+
+
+def _install_split_ffn_model_compat(checkpointer: Any) -> None:
+    """Restore the former native-DCP hooks for a legacy split-FFN load."""
+    model_wrapper = getattr(checkpointer, "states", {}).get("model")
+    models = getattr(model_wrapper, "model", ())
+    from torchtitan.models.common.feed_forward import FeedForward  # noqa: PLC0415
+    from torch.distributed.tensor import DTensor, Replicate  # noqa: PLC0415
+
+    def split_on_save(module, state_dict, prefix, local_metadata) -> None:
+        del module, local_metadata
+        for param in ("weight", "bias"):
+            key = f"{prefix}w13.{param}"
+            if key not in state_dict:
+                continue
+            tensor = state_dict.pop(key)
+            if isinstance(tensor, DTensor):
+                tensor = tensor.redistribute(
+                    tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
+                )
+            state_dict[f"{prefix}w1.{param}"] = tensor[0].contiguous()
+            state_dict[f"{prefix}w3.{param}"] = tensor[1].contiguous()
+
+    def merge_on_load(module, state_dict, prefix, *args) -> None:
+        del module, args
+        for param in ("weight", "bias"):
+            keys = tuple(f"{prefix}{name}.{param}" for name in ("w1", "w3"))
+            if not all(key in state_dict for key in keys):
+                continue
+            w1, w3 = (state_dict.pop(key) for key in keys)
+            if isinstance(w1, DTensor):
+                w1, w3 = (
+                    tensor.redistribute(
+                        tensor.device_mesh, [Replicate()] * tensor.device_mesh.ndim
+                    )
+                    for tensor in (w1, w3)
+                )
+            state_dict[f"{prefix}w13.{param}"] = torch.stack([w1, w3], dim=0)
+
+    installed = False
+    for model in models:
+        for module in model.modules():
+            if isinstance(module, FeedForward) and not getattr(
+                module, "_legacy_split_ffn_compat", False
+            ):
+                module.register_state_dict_post_hook(split_on_save)
+                module.register_load_state_dict_pre_hook(merge_on_load)
+                module._legacy_split_ffn_compat = True
+                installed = True
+
     if installed and model_wrapper is not None:
         model_wrapper.cached_state_dict = model_wrapper._get_state_dict()
 
@@ -473,11 +540,14 @@ def maybe_install_flat_attention_compat(
         want_attention = needs_flat_attention_compat(step_dir)
         want_head = needs_output_head_compat(step_dir)
         want_split_qkv = needs_split_qkv_compat(step_dir)
-        if not (want_attention or want_head or want_split_qkv):
+        want_split_ffn = needs_split_ffn_compat(step_dir)
+        if not (want_attention or want_head or want_split_qkv or want_split_ffn):
             return False
 
         if want_split_qkv:
             _install_split_qkv_model_compat(checkpointer)
+        if want_split_ffn:
+            _install_split_ffn_model_compat(checkpointer)
 
         install_flat_attention_compat(
             checkpointer, attention=want_attention, head=want_head
@@ -492,6 +562,8 @@ def maybe_install_flat_attention_compat(
             needed.append("the pre-rename head (output.weight -> lm_head.weight)")
         if want_split_qkv:
             needed.append("split Q/K/V weights packed into native fused wqkv")
+        if want_split_ffn:
+            needed.append("split gate/up weights packed into native stacked w13")
         log.warning(
             "%s holds PRE-REFACTOR keys: %s. Installing the remap so it can be "
             "loaded by current code. This is a key rename only -- no tensor is "

@@ -9,6 +9,7 @@ sys.path.insert(0, ".")
 from torchtitan.experiments.ezpz.ckpt_key_compat import (  # noqa: E402
     to_flat, to_nested, needs_flat_attention_compat,
     needs_split_qkv_compat, split_qkv_to_fused,
+    needs_split_ffn_compat, _install_split_ffn_model_compat,
     head_to_old, head_to_new, needs_output_head_compat,
 )
 from torch.distributed.checkpoint import FileSystemReader  # noqa: E402
@@ -106,6 +107,40 @@ check("compat refresh removes stale fused key", "wqkv.weight" not in wrapper.cac
 check("compat refresh adds split Q/K/V keys", all(
     key in wrapper.cached_state_dict for key in ("wq.weight", "wk.weight", "wv.weight")
 ))
+
+print()
+print("=== unit: split-FFN hook refreshes ModelWrapper cache ===")
+from torchtitan.models.common.feed_forward import FeedForward  # noqa: E402
+ffn_config = FeedForward.Config(
+    w13=Linear.Config(
+        in_features=3, out_features=4, num_linears=2, bias=False
+    ),
+    w2=Linear.Config(in_features=4, out_features=3, bias=False),
+)
+ffn_model = ffn_config.build()
+ffn_model.w13.weight.data.copy_(
+    torch.arange(24, dtype=ffn_model.w13.weight.dtype).reshape(2, 4, 3)
+)
+ffn_wrapper = ModelWrapper(ffn_model)
+check("FFN cache initially has native fused key", "w13.weight" in ffn_wrapper.cached_state_dict)
+check("FFN cache initially lacks split keys", not any(
+    key in ffn_wrapper.cached_state_dict for key in ("w1.weight", "w3.weight")
+))
+class FFNCheckpointer:
+    states = {"model": ffn_wrapper}
+_install_split_ffn_model_compat(FFNCheckpointer())
+check("FFN compat refresh removes stale fused key", "w13.weight" not in ffn_wrapper.cached_state_dict)
+check("FFN compat refresh adds split gate/up keys", all(
+    key in ffn_wrapper.cached_state_dict for key in ("w1.weight", "w3.weight")
+))
+check("FFN gate rows preserve stacked layout", torch.equal(
+    ffn_wrapper.cached_state_dict["w1.weight"], ffn_model.w13.weight[0]
+))
+check("FFN up rows preserve stacked layout", torch.equal(
+    ffn_wrapper.cached_state_dict["w3.weight"], ffn_model.w13.weight[1]
+))
+check("from9200 split FFN is detected", needs_split_ffn_compat(NESTED))
+check("missing path is not split FFN", not needs_split_ffn_compat("/nonexistent/step-1"))
 
 print()
 print("=== detection on the real seeds ===")
