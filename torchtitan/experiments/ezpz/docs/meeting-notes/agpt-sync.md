@@ -72,8 +72,7 @@ Inkling control should change effective exposure rather than generate more of
 the same data: fewer than 10 steps, lower LR, broad-data replay, or interpolation
 back toward Stage-7.
 
-Full methods and hashes: [AGPT-2B Inkling synthetic-data
-distillation](https://github.com/saforem2/torchtitan/blob/f65c0b6fc8c463b90432bdce0a15abaa452d6670/torchtitan/experiments/ezpz/docs/experiments/2026-09-28-agpt2b-inkling-distillation.md).
+> Full methods, dataset hashes (manifest `d0e831…`, accepted-corpus `c16dcc…`, pretokenized fingerprint `02dc0083…`), API contract (`low` reasoning + `json_object` response format, 512-token cap, 5 retries, concurrency 4), evaluation (GSM8K-200 48/200 paired `p=0.00197` vs Stage-7 at 59/200; format-valid 196/200; IFEval `12479000` exit 0 — loose 39.21 vs 35.85), and chart suite: [Inkling synthetic-data distillation](experiments/2026-09-28-agpt2b-inkling-distillation.md).
 
 ### 3. Stronger-base strategy is the highest-leverage open decision
 
