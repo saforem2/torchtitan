@@ -16,13 +16,17 @@
 2. **Every experiment must be tracked.** Any job submitted or run executed
    must have a clear purpose and be documented in an appropriate markdown
    file under `docs/`. Link reports from parent READMEs. End-of-session,
-   update `docs/journal.md` with what happened.
+   update `docs/journal.md` with job IDs, terminal evidence, artifacts, and the
+   next unresolved gate. The private Agent Vault is the live operations feed;
+   it does not replace repository experiment docs or the journal.
 
 3. **Upstream sync protocol:**
    - When pulling changes from upstream `main`, replay any changes to
      `llama3/` onto `ezpz/agpt/` and `deepseek_v3/` onto `ezpz/moe/`.
    - Always update `docs/upstream-sync.md` with what changed and what
      was replayed.
+   - Keep `docs/upstream-sync.md` limited to actual upstream integration. PBS
+     operations belong in experiment/production docs plus `docs/journal.md`.
 
 4. **Use `backup` instead of `rm`.** The `~/.local/bin/backup` command
    renames with a timestamp instead of deleting.
@@ -45,6 +49,21 @@
 
 10. **Terse responses** — don't summarize what you just did at the end
     of every reply. The user can read the diff.
+
+11. **Operational notification contract:**
+    - Write persistent TorchTitan monitor details to the private Agent Vault at
+      `https://mbph.tail3e7069.ts.net:10444/n/history/torchtitan/index.md`, under
+      the appropriate stable workstream heading. Mirror the consolidated Herdr
+      dashboard to `history/torchtitan/dashboard.md` in that vault.
+    - Deliver material monitor transitions to iMessage/Photon as one short
+      sentence followed by the exact Agent Vault heading URL. Do not send raw
+      scheduler dumps, long cron transcripts, or implementation chronology.
+    - Deliver monitor execution failures to iMessage/Photon too. Keep unchanged
+      healthy polls silent.
+    - Use the URL printed by the vault updater instead of constructing it by
+      hand. Keep one authoritative notifier per campaign and one consolidated
+      Herdr dashboard pane. The consolidated pane must run the repository's
+      Rich Python dashboard; never replace it with an ad hoc shell polling loop.
 
 ## Hardware & Platform
 
