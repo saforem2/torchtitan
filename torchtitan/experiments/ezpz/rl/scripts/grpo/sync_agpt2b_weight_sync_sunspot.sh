@@ -70,7 +70,7 @@ printf 'RL_SYNC_START job=%s commit=%s out=%s\n' "$JOB" "$EXPECTED_SHA" "$OUT" |
     --async-loop.target-offpolicy-steps=0 \
     --async-loop.validation.num-samples=8 \
     --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
-    --generator.sampling.max-tokens=128 \
+    --generator.sampling.max-tokens=256 \
     --generator.parallelism.data-parallel-degree=1 \
     --generator.parallelism.tensor-parallel-degree=1 \
     --trainer.parallelism.data-parallel-shard-degree=1 \
