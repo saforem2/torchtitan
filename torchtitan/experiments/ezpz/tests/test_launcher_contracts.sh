@@ -7,6 +7,8 @@ sonic="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_moe_full
 production="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs"
 resumable="$repo_root/torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
+umbrella="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
+umbrella_successor="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_successor_3seat_ezpz0292.pbs"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -89,5 +91,24 @@ assert_contains "$docs" 'retains all checkpoints' \
     'checkpoint retention documentation must say all checkpoints are retained'
 assert_not_contains "$docs" 'retains the newest two checkpoints' \
     'checkpoint retention documentation must not claim only two are retained'
+
+# Production runtime upgrades are immutable and checksum-gated. The generic
+# umbrella remains reusable; the successor wrapper selects only unfinished
+# seats and pins the validated archives.
+for variable in PROD_20B_VENV_ARCHIVE PROD_20B_VENV_SHA \
+    PROD_2B_VENV_ARCHIVE PROD_2B_VENV_SHA; do
+    assert_contains "$umbrella" "$variable" \
+        "umbrella launcher must support ${variable}"
+    assert_contains "$umbrella_successor" "$variable" \
+        "successor wrapper must pin ${variable}"
+done
+assert_contains "$umbrella" 'sha256sum.*T_VENVSRC' \
+    'umbrella launcher must verify selected archive checksums'
+assert_contains "$umbrella_successor" 'MULTI_ONLY=1,2,4' \
+    'successor must select only unfinished healthy seats'
+assert_contains "$umbrella_successor" '#PBS -l select=1054' \
+    'successor allocation must exactly fit three seats plus spares'
+assert_contains "$umbrella_successor" '#PBS -q medium' \
+    '1054-node successor must target the medium execution queue'
 
 printf 'launcher contract tests: PASS\n'

@@ -4,6 +4,24 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
+- Umbrella `8870515` ended after 12:18:20 with PBS `Exit_status=143` when node
+  `x4418c3s1b0n0` requested allocation termination (`code 15009`). The same node
+  had appeared twice immediately beforehand as the unreachable child in PALS
+  RPC-forward failures. Its ezpz `0.27.3` runtime could not parse that signature,
+  blind-rotated another node, and stopped the 20B-512 seat after two quick deaths.
+  Current ezpz `0.29.2` includes the parser fix from `f51fdc35`.
+- Exact Aurora fault-injection smoke `8879389` passed: initial active host
+  `x4219c2s0b0n0` was recorded as `scraped`, spare `x4219c2s1b0n0` was promoted,
+  attempt 2 succeeded, no blind rotation occurred, and PBS exited 0.
+- Immutable replacement production archives preserve Torch
+  `2.13.0.dev20260428+xpu`, mpi4py `4.1.1`, and BlendCorpus `0.1` while upgrading
+  ezpz to `0.29.2`: 20B SHA-256 `e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc`;
+  2B SHA-256 `d3938eaea27c9026a65f5d7b4c654b3b7b25062a487c8bb61662c1f9a3cd6d6d`.
+  Full tar readback and the exact `8870515` child-node parse passed for both.
+- The successor wrapper selects only unfinished healthy seats 1, 2, and 4 and
+  requests exactly 1,054 nodes for 18 hours in `medium`; it checksum-gates the
+  immutable 20B/2B archives before staging. A two-job dependency chain is queued
+  only after the committed wrapper's full dry-run resolves three disjoint slices.
 - Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
   queue were deleted and verified terminal: chain-3 control `8876446`,
   `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.

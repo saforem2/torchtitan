@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-09-21
+> Last updated: 2026-09-29
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -37,6 +37,21 @@ Reading rules:
 | `8764675` | 08-20 | **12h00m31s / 12h (100%)** | CCL KVS timeout -> segfault at init | 20B-512 10,101->10,699 | 20B-256 11,001->11,800 | **bad_alloc** | SophiaG `update_hessian`: `'dict' object has no attribute 'mul_'` | 2/5 |
 | `8773440` | 08-26 | 5h13m / 12h (43%) | no-start | no-start | 20B-256 **+201** (2.31488 -> 2.24577) | 2B-512clr **+504** (2.74535 -> 2.73836) | 2B-256 **+782** (2.56449 -> 2.54807) | 3/5 |
 | `8828612` | 09-19 | **12h00m23s / 12h (100%)** | not re-audited here | not re-audited here | **20B-256 15,201->16,035** | not re-audited here | not re-audited here | at least 1/5 verified |
+| `8870515` | 09-29 | **12h18m20s / 24h (51%)** | excluded | 20B-512 ->11,190; durable 11,100 | 20B-256 ->17,600; durable 17,500 | excluded | 2B-256 stage 2 ->41,385; durable 41,300 | 3/3 |
+
+`8870515` ended with PBS `Exit_status=143` and `Stageout_status=1` when
+`x4418c3s1b0n0` requested job termination (`code 15009`). Before the parent
+allocation died, seat 1's ezpz `0.27.3` runtime saw that same node twice in
+`Couldn't forward RPC ... to child ...: Resource temporarily unavailable`, but
+the old parser did not extract the child hostname: it blind-rotated once, then
+stopped after two quick deaths. Current ezpz `0.29.2` includes the child-node
+parser from `f51fdc35`; Aurora smoke `8879389` proved named `scraped` eviction,
+spare promotion, and success on attempt 2. Separate immutable 20B and 2B
+production archives preserve the existing Torch/MPI/BlendCorpus stacks while
+upgrading only ezpz. Successor
+`scripts/submit_agpt_successor_3seat_ezpz0292.pbs` selects seats 1, 2, and 4,
+requests exactly 1,054 nodes (512+10, 256+10, 256+10) for the `medium` queue,
+and checksum-gates both archives.
 
 `8828612` started 2026-09-19 22:48 UTC and finished at walltime with PBS
 `Exit_status=-29`. The t2 range is independently verified against W&B config
