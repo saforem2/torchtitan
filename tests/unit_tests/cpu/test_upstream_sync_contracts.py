@@ -93,7 +93,6 @@ def _display_path(path: Path) -> str:
     )
 
 
-@pytest.mark.xfail(reason="active ezpz imports still need upstream-sync migration")
 def test_ezpz_uses_valid_config_imports() -> None:
     failures: list[str] = []
     for path in _active_python_files():
@@ -116,7 +115,6 @@ def test_ezpz_uses_valid_config_imports() -> None:
     assert not failures, "\n" + "\n".join(failures)
 
 
-@pytest.mark.xfail(reason="active ezpz runtime still reads removed comm.mode")
 def test_ezpz_runtime_has_no_removed_comm_or_pipeline_options() -> None:
     failures: list[str] = []
     for path in _active_python_files():
