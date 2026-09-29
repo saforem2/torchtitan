@@ -60,6 +60,8 @@ assert_contains "$rl_sync" 'EXPECTED_MODEL_SHA' \
     'sync RL gate must assert the immutable starting checkpoint'
 assert_contains "$rl_sync" 'train_upstream' \
     'sync RL gate must exercise the real upstream RL bridge'
+assert_contains "$rl_sync" '--config rl_grpo_lora_agpt_2b_easy' \
+    'sync RL gate must use the bounded one-turn task with reward variance'
 assert_contains "$rl_sync" 'RL_SYNC_VERDICT: ok' \
     'sync RL gate must emit a machine-readable semantic success verdict'
 assert_contains "$rl_sync" 'trainer/grad_norm/mean' \

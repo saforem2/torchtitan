@@ -50,10 +50,10 @@ mkdir -p "$OUT"
 "$V/bin/python" - <<'PY' || exit 17
 import importlib.metadata as metadata
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.config_registry import (
-    rl_grpo_lora_agpt_2b,
+    rl_grpo_lora_agpt_2b_easy,
 )
-config = rl_grpo_lora_agpt_2b()
-assert config.async_loop.num_training_steps == 3
+config = rl_grpo_lora_agpt_2b_easy()
+assert config.rollouter.train_dataset.max_turns == 1
 for package in ("torch", "torchmonarch", "torchstore", "vllm"):
     print(package, metadata.version(package))
 PY
@@ -61,7 +61,7 @@ PY
 printf 'RL_SYNC_START job=%s commit=%s out=%s\n' "$JOB" "$EXPECTED_SHA" "$OUT" | tee "$LOG"
 "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_upstream \
     --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
-    --config rl_grpo_lora_agpt_2b \
+    --config rl_grpo_lora_agpt_2b_easy \
     --hf_assets_path="$CKPT" \
     --dump_folder="$OUT" \
     --async-loop.num-training-steps=3 \
