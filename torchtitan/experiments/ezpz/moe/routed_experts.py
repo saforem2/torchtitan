@@ -19,13 +19,13 @@ from torchtitan.distributed.spmd_types import maybe_set_sparse_mesh, spmd_sparse
 from torchtitan.models.common.moe import RoutedExperts
 
 from .experts import (
+    ExpertComputeBackend,
     _env_flag_enabled,
     _run_experts_aurora_full_sonic,
     _run_experts_aurora_sycl,
     _run_experts_bmm,
     _run_experts_bmm_nodrop,
     _run_experts_for_loop,
-    ExpertComputeBackend,
 )
 
 
@@ -45,6 +45,12 @@ class EzpzRoutedExperts(RoutedExperts):
         super().__init__(config)
         self.compute_backend = config.compute_backend
         self.capacity_factor = config.capacity_factor
+        if self._wants_routing() and self.output_postprocess is not None:
+            raise ValueError(
+                "aurora_full_sonic does not support output_postprocess: Sonic "
+                "owns dispatch, expert compute, and combine, so TorchTitan "
+                "cannot apply a route-wise module before combine"
+            )
 
     def _wants_routing(self) -> bool:
         return self.compute_backend == "aurora_full_sonic"
@@ -112,6 +118,8 @@ class EzpzRoutedExperts(RoutedExperts):
         )
         with maybe_set_sparse_mesh():
             routed_output_RD = self._run_backend(routed_input_RD, counts_e)
+            if self.output_postprocess is not None:
+                routed_output_RD = self.output_postprocess(routed_output_RD)
         return self.token_dispatcher.combine(routed_output_RD, metadata, x_TD)
 
     def _weights(self):

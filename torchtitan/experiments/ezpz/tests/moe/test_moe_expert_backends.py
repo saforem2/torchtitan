@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import torch
@@ -17,13 +18,29 @@ from torch.testing import assert_close
 # our capacity-limited `_run_experts_bmm`, which DOES drop overflow tokens.
 from torchtitan.experiments.ezpz.moe.experts import (
     _run_experts_aurora_full_sonic,
-    _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
     _sonic_weight_layouts,
+)
+from torchtitan.experiments.ezpz.moe.experts import (
+    _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
 )
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
 from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher
 from torchtitan.models.common.linear import GroupedLinear
+from torchtitan.protocols.module import Module
+
+
+class _RouteWiseAffineSquare(Module):
+    @dataclass(kw_only=True, slots=True)
+    class Config(Module.Config):
+        dim: int
+
+    def __init__(self, config: Config):
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.linspace(0.5, 1.5, config.dim))
+
+    def forward(self, x):
+        return (x * self.scale.to(x.dtype)).square()
 
 
 def _clone_for_grad(tensor: torch.Tensor) -> torch.Tensor:
@@ -43,6 +60,130 @@ def _init_grouped_experts_weights(module: EzpzRoutedExperts) -> None:
 
 
 class TestMoEExpertBackends(unittest.TestCase):
+    def _build_routed_experts(
+        self,
+        *,
+        score_before_experts,
+        output_postprocess=None,
+        compute_backend="for_loop",
+    ):
+        num_experts, dim, hidden_dim = 3, 4, 6
+        return EzpzRoutedExperts(
+            EzpzRoutedExperts.Config(
+                w13=GroupedLinear.Config(
+                    group_size=num_experts,
+                    in_features=dim,
+                    out_features=hidden_dim,
+                    num_linears=2,
+                ),
+                w2=GroupedLinear.Config(
+                    group_size=num_experts,
+                    in_features=hidden_dim,
+                    out_features=dim,
+                ),
+                token_dispatcher=LocalTokenDispatcher.Config(
+                    num_experts=num_experts,
+                    top_k=2,
+                    score_before_experts=score_before_experts,
+                ),
+                compute_backend=compute_backend,
+                output_postprocess=output_postprocess,
+            )
+        )
+
+    def test_route_wise_output_postprocess_forward_backward_and_optimizer_step(self):
+        routing_cases = {
+            "balanced": torch.tensor([[0, 1], [2, 0], [1, 2]]),
+            "empty_expert": torch.tensor([[0, 1], [1, 0], [0, 1]]),
+            "imbalanced": torch.tensor([[2, 2], [2, 0], [2, 1]]),
+        }
+        for compute_backend in ("for_loop", "bmm_nodrop"):
+            for score_before_experts in (False, True):
+                for name, expert_ids in routing_cases.items():
+                    with self.subTest(
+                        compute_backend=compute_backend,
+                        score_before_experts=score_before_experts,
+                        routing=name,
+                    ):
+                        self._assert_route_wise_training_case(
+                            compute_backend,
+                            score_before_experts,
+                            expert_ids,
+                        )
+
+    def _assert_route_wise_training_case(
+        self, compute_backend, score_before_experts, expert_ids
+    ):
+        torch.manual_seed(17)
+        module = self._build_routed_experts(
+            score_before_experts=score_before_experts,
+            output_postprocess=_RouteWiseAffineSquare.Config(dim=4),
+            compute_backend=compute_backend,
+        )
+        _init_grouped_experts_weights(module)
+        x = torch.randn(3, 4, dtype=torch.bfloat16, requires_grad=True)
+        scores = torch.tensor(
+            [[0.25, 0.75], [0.6, 0.4], [0.8, 0.2]],
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        counts = torch.bincount(expert_ids.flatten(), minlength=3)
+
+        routed_input, routed_counts, metadata = module.token_dispatcher.dispatch(
+            x, scores, expert_ids, counts
+        )
+        expert_output = module._run_backend(routed_input, routed_counts)
+        assert module.output_postprocess is not None
+        expected = module.token_dispatcher.combine(
+            module.output_postprocess(expert_output), metadata, x
+        )
+        wrong_order = module.output_postprocess(
+            module.token_dispatcher.combine(expert_output, metadata, x)
+        )
+        actual = module(x, scores, expert_ids, counts)
+
+        assert_close(actual, expected)
+        self.assertFalse(torch.equal(actual, wrong_order))
+        loss = actual.float().sum()
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(scores.grad)
+        for parameter_name, parameter in module.named_parameters():
+            self.assertIsNotNone(parameter.grad, parameter_name)
+
+        before = {
+            key: value.detach().clone() for key, value in module.named_parameters()
+        }
+        optimizer = torch.optim.SGD(module.parameters(), lr=0.01)
+        optimizer.step()
+        self.assertTrue(
+            all(
+                not torch.equal(before[key], value)
+                for key, value in module.named_parameters()
+            )
+        )
+        self.assertIn("output_postprocess.scale", module.state_dict())
+
+    def test_full_sonic_rejects_route_wise_output_postprocess(self):
+        with self.assertRaisesRegex(
+            ValueError, "aurora_full_sonic.*output_postprocess"
+        ):
+            EzpzRoutedExperts(
+                EzpzRoutedExperts.Config(
+                    w13=GroupedLinear.Config(
+                        group_size=2, in_features=4, out_features=6, num_linears=2
+                    ),
+                    w2=GroupedLinear.Config(
+                        group_size=2, in_features=6, out_features=4
+                    ),
+                    token_dispatcher=LocalTokenDispatcher.Config(
+                        num_experts=2, top_k=1
+                    ),
+                    compute_backend="aurora_full_sonic",
+                    output_postprocess=_RouteWiseAffineSquare.Config(dim=4),
+                )
+            )
+
     def test_full_sonic_rejects_missing_ep_mesh_before_import(self):
         with self.assertRaisesRegex(ValueError, "EP mesh"):
             _run_experts_aurora_full_sonic(
@@ -127,14 +268,14 @@ class TestMoEExpertBackends(unittest.TestCase):
             def get_group(self):
                 raise AssertionError("validation must happen before collectives")
 
-        inputs = dict(
-            w1=torch.empty(2, 3, 4, dtype=torch.bfloat16),
-            w2=torch.empty(2, 4, 3, dtype=torch.bfloat16),
-            w3=torch.empty(2, 3, 4, dtype=torch.bfloat16),
-            x=torch.empty(4, 4, dtype=torch.bfloat16),
-            topk_scores=torch.ones(4, 1),
-            topk_indices=torch.zeros(4, 1, dtype=torch.int64),
-        )
+        inputs = {
+            "w1": torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            "w2": torch.empty(2, 4, 3, dtype=torch.bfloat16),
+            "w3": torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            "x": torch.empty(4, 4, dtype=torch.bfloat16),
+            "topk_scores": torch.ones(4, 1),
+            "topk_indices": torch.zeros(4, 1, dtype=torch.int64),
+        }
         with patch(
             "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
             FakeMesh,
@@ -161,14 +302,14 @@ class TestMoEExpertBackends(unittest.TestCase):
             def get_group(self):
                 raise AssertionError("validation must happen before collectives")
 
-        inputs = dict(
-            w1=torch.empty(2, 3, 4, dtype=torch.bfloat16),
-            w2=torch.empty(2, 4, 3, dtype=torch.bfloat16),
-            w3=torch.empty(2, 3, 4, dtype=torch.bfloat16),
-            x=torch.empty(4, 4, dtype=torch.bfloat16),
-            num_tokens_per_expert=torch.ones(4, dtype=torch.int64),
-            ep_mesh=FakeMesh(),
-        )
+        inputs = {
+            "w1": torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            "w2": torch.empty(2, 4, 3, dtype=torch.bfloat16),
+            "w3": torch.empty(2, 3, 4, dtype=torch.bfloat16),
+            "x": torch.empty(4, 4, dtype=torch.bfloat16),
+            "num_tokens_per_expert": torch.ones(4, dtype=torch.int64),
+            "ep_mesh": FakeMesh(),
+        }
         with patch(
             "torchtitan.experiments.ezpz.moe.experts.DeviceMesh",
             FakeMesh,
