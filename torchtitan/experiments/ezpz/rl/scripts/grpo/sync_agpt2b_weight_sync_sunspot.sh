@@ -50,11 +50,10 @@ mkdir -p "$OUT"
 "$V/bin/python" - <<'PY' || exit 17
 import importlib.metadata as metadata
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.config_registry import (
-    rl_sync_agpt_2b_clean,
+    rl_grpo_lora_agpt_2b,
 )
-config = rl_sync_agpt_2b_clean()
-assert config.async_loop.num_training_steps == 1
-assert config.async_loop.validation.num_samples == 8
+config = rl_grpo_lora_agpt_2b()
+assert config.async_loop.num_training_steps == 3
 for package in ("torch", "torchmonarch", "torchstore", "vllm"):
     print(package, metadata.version(package))
 PY
@@ -62,11 +61,11 @@ PY
 printf 'RL_SYNC_START job=%s commit=%s out=%s\n' "$JOB" "$EXPECTED_SHA" "$OUT" | tee "$LOG"
 "$V/bin/python" -u -m torchtitan.experiments.ezpz.rl.train_upstream \
     --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
-    --config rl_sync_agpt_2b_clean \
+    --config rl_grpo_lora_agpt_2b \
     --hf_assets_path="$CKPT" \
     --dump_folder="$OUT" \
-    --async-loop.num-training-steps=1 \
-    --async-loop.num-prompts-per-train-step=2 \
+    --async-loop.num-training-steps=3 \
+    --async-loop.num-prompts-per-train-step=4 \
     --async-loop.num-samples-per-prompt=4 \
     --async-loop.target-offpolicy-steps=0 \
     --async-loop.validation.num-samples=8 \
@@ -106,7 +105,21 @@ responses = [
     for turn in row.get("turns", [])
 ]
 assert responses and all("<end_of_turn>" in response for response in responses)
-assert (root / "checkpoint/step-1/.metadata").stat().st_size > 0
+assert (root / "checkpoint/step-3/.metadata").stat().st_size > 0
+
+metric_lines = [
+    line for line in (root / "controller.log").read_text(errors="replace").splitlines()
+    if "Train | Step:" in line
+]
+assert len(metric_lines) == 3, len(metric_lines)
+grad_norms = []
+losses = []
+for line in metric_lines:
+    grad_norms.append(float(line.split("trainer/grad_norm/mean:", 1)[1].split()[0]))
+    losses.append(float(line.split("loss/mean:", 1)[1].split()[0]))
+assert all(value == value for value in grad_norms + losses)
+assert any(value > 0 for value in grad_norms), grad_norms
+assert any(value != 0 for value in losses), losses
 
 events = []
 for path in glob.glob(str(root / "structured_logs/*.jsonl")):
@@ -121,6 +134,7 @@ assert "optimizer_step_end" in events
 print(
     "RL_SYNC_VERDICT: ok "
     f"rows={len(rows)} versions={sorted(versions)} "
+    f"grad_norms={grad_norms} losses={losses} "
     f"pushes={events.count('push_model_state_dict_end')} "
     f"pulls={events.count('pull_model_state_dict_end')}"
 )

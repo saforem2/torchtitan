@@ -62,6 +62,8 @@ assert_contains "$rl_sync" 'train_upstream' \
     'sync RL gate must exercise the real upstream RL bridge'
 assert_contains "$rl_sync" 'RL_SYNC_VERDICT: ok' \
     'sync RL gate must emit a machine-readable semantic success verdict'
+assert_contains "$rl_sync" 'trainer/grad_norm/mean' \
+    'sync RL gate must reject a zero-gradient optimizer no-op'
 assert_not_contains "$rl_sync" 'pip install' \
     'sync RL gate must not mutate the protected runtime'
 
