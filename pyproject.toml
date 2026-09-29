@@ -79,6 +79,9 @@ include = ["torchtitan*", "torchtitan_recipes*"]
 [tool.pytest.ini_options]
 addopts = ["--showlocals"]  # show local variables in tracebacks
 testpaths = ["tests"]
+# Integration entry points parse required CLI arguments when run as scripts;
+# collect their unit-tested helpers from dedicated test modules instead.
+python_files = ["test_*.py"]
 markers = [
     "multi_gpu: tests that require multiple physical GPUs",
 ]
