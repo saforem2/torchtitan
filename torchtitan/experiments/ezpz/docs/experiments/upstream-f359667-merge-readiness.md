@@ -7,8 +7,8 @@ Status as of 2026-09-29 for branch `sync/upstream-f359667`.
 The integration merges upstream TorchTitan through
 [`f359667137438bef39274cb869626c3798512ecd`](https://github.com/pytorch/torchtitan/commit/f359667137438bef39274cb869626c3798512ecd)
 at merge commit `780f0a73e2`, then replays the local configuration/topology, MoE,
-RL, and regression-test changes. The first exact-head Sunspot hardware attempt
-used `bb39b72eaa`; the MoE repair found by that run is under final verification.
+RL, and regression-test changes. Sunspot hardware validation now includes the
+MoE repair commit `6913990333`.
 
 The merge preserves both dense AGPT and MoE experiment surfaces. It also adds
 fail-closed handling for fake-SPMD real pipeline groups and repairs executable
@@ -29,7 +29,7 @@ validation paths that independent review found were calling stale APIs.
 | Independent review, first pass | findings fixed locally | validator stale API calls and fake-SPMD topology/serialization risks repaired |
 | Sunspot dense TP=1 | pass | job `12479017`, three optimizer steps, arm exit 0 |
 | Sunspot dense TP=2 | pass | job `12479017`, three optimizer steps, arm exit 0; exercises the TP sharding-contract path |
-| Sunspot MoE TP=1 | failed before training | job `12479017`: FSDP rejected plain routed-expert weights under the full-SPMD `dp_mesh_dims` contract; regression reproduced locally and repaired for retry |
+| Sunspot MoE TP=1 | pass after repair | job `12479018`, commit `6913990333`: three finite optimizer steps, arm exit 0, `VERDICT: ok`; losses 12.95227 -> 12.59636 -> 11.47138 |
 
 The numerical comparison used Python 3.14.7, PyTorch 2.13.0 CPU, one thread,
 model seed `20260929`, input seed `20260930`, and AdamW with LR `8e-4` and

@@ -11,8 +11,12 @@ training: routed expert `weight` parameters remained plain tensors while
 `dp_mesh_dims` requires all parameters on the full SPMD mesh. A focused local
 regression reproduced the missing placement; the ezpz compatibility layer now
 assigns replicated full-SPMD placements to routed expert weights when EP is off.
-The post-fix focused suite passes 73 tests, 2 skips, and 13 subtests. The next
-gate is a MoE-only Sunspot retry on the repaired immutable SHA.
+The post-fix focused suite passes 73 tests, 2 skips, and 13 subtests. MoE-only
+retry `12479018` then finished with PBS exit 0 and `VERDICT: ok` on repaired
+commit `6913990333`: three finite updates with losses 12.95227, 12.59636, and
+11.47138 and gradient norms 0.9651, 1.2498, and 1.7102. Exact-head Sunspot
+dense TP=1, dense TP=2, and MoE liveness are now green. Distributed DCP resume
+and RL/weight-sync remain open, as does exact-head Aurora hardware validation.
 
 The isolated `sync/upstream-f359667` worktree now contains upstream merge
 `780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
