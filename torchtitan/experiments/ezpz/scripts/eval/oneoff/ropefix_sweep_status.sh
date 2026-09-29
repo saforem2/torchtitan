@@ -45,7 +45,15 @@ for arm, switch, tasks in arms:
         present = set(corrected.get("results", corrected))
         for task in tasks:
             need += 1
-            if task in present or any(key.startswith(task + "_") for key in present):
+            if task in present or any(
+                key.startswith(task + "_")
+                or (
+                    key.startswith(task + "@")
+                    and key.endswith("shot")
+                    and key[len(task) + 1 : -4].isdigit()
+                )
+                for key in present
+            ):
                 have += 1
     missing = need - have
     status = "COMPLETE" if missing == 0 else f"pending ({missing} task result{'s' if missing != 1 else ''} left)"

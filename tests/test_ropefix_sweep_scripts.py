@@ -147,3 +147,37 @@ def test_status_reports_complete_only_with_all_task_results(tmp_path: Path) -> N
 
     assert run.stdout.count("COMPLETE") == 3
     assert "pending" not in run.stdout
+
+
+def test_status_accepts_shot_qualified_task_results(tmp_path: Path) -> None:
+    tasks = {
+        "20b-v2-512n": ["arc_challenge", "hellaswag", "arc_easy"],
+        "20b-v2-256n": ["arc_challenge", "hellaswag", "arc_easy"],
+        "2b-v2-512n": [
+            "arc_easy",
+            "hellaswag",
+            "winogrande",
+            "piqa",
+            "openbookqa",
+            "boolq",
+            "mmlu",
+            "arc_challenge",
+        ],
+    }
+    switches = {"20b-v2-512n": 4401, "20b-v2-256n": 3101, "2b-v2-512n": 30401}
+    for arm, required in tasks.items():
+        step = switches[arm]
+        _write_results(tmp_path, arm, step, required)
+        qualified = [f"{task}@5shot" for task in required]
+        _write_results(tmp_path, f"{arm}-ropefix", step, qualified)
+
+    run = subprocess.run(
+        ["bash", str(STATUS)],
+        env=os.environ | {"R": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert run.stdout.count("COMPLETE") == 3
+    assert "pending" not in run.stdout
