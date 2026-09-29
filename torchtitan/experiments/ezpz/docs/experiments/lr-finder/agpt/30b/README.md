@@ -62,6 +62,12 @@ LR-finder state. Checkpoints are written every 25 points without automatic
 purging.
 
 Compute-runtime preflight `12479013` finished with PBS exit 0 and
-`LRF75_PREFLIGHT_PASS` under Torch `2.14.0+xpu`. Dependent sweep `12479014` is
-queued. No basin or LR recommendation will be reported until the job produces
-finite real updates, resumable checkpoints, and a complete 75-point curve.
+`LRF75_PREFLIGHT_PASS` under Torch `2.14.0+xpu`. Sweep `12479014` then failed
+before training because the immutable checkout lacked the OLMo-2 tokenizer.
+After staging the verified tokenizer and adding an explicit wrapper check,
+preflight `12479019` passed. Replacement `12479020` reached distributed/model
+startup but rank 35 segfaulted before step 1; PBS recorded exit 143 and no LR
+point or checkpoint exists. This reproduces the native pre-step boundary on the
+measured geometry, so another blind retry is not justified. No basin or LR
+recommendation will be reported until a controlled native-runtime diagnostic
+identifies a working path and a complete trajectory is produced.

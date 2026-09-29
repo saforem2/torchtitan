@@ -18,6 +18,23 @@ commit `6913990333`: three finite updates with losses 12.95227, 12.59636, and
 dense TP=1, dense TP=2, and MoE liveness are now green. Distributed DCP resume
 and RL/weight-sync remain open, as does exact-head Aurora hardware validation.
 
+Exact-head DCP retry `12479022` closed the distributed-checkpoint gate on commit
+`c228830bd3`: an uninterrupted four-step control was compared with a separate
+four-step run that wrote full state at step 2 and a fresh process that loaded
+that checkpoint. Resumed steps 3 and 4 matched the control's loss and gradient
+norm exactly, and a new full step-4 checkpoint was written; PBS exit was 0. The
+first harness attempt `12479021` had successfully saved and resumed but used a
+different total-step schedule and an ANSI-sensitive parser, so its failed
+verdict was a harness defect rather than a DCP failure.
+
+The exact-head RL/weight-sync launcher is ready at commit `b0e660ec58`, but its
+mandatory preflight correctly refused submission: the protected
+`rl-monarch-torch214` environment is missing
+`torch.fx.experimental.unification.core` and `blendcorpus`. Older RL venvs are
+on Torch 2.12/2.13 and stale `spmd-types`; none is a valid substitute for the
+current sync. The protected environment was not modified. This gate requires a
+fresh isolated RL runtime or a verified immutable archive.
+
 The isolated `sync/upstream-f359667` worktree now contains upstream merge
 `780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
 changes. The committed collectable ezpz suite reached 260 passed, 2 skipped, and

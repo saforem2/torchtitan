@@ -30,6 +30,7 @@ validation paths that independent review found were calling stale APIs.
 | Sunspot dense TP=1 | pass | job `12479017`, three optimizer steps, arm exit 0 |
 | Sunspot dense TP=2 | pass | job `12479017`, three optimizer steps, arm exit 0; exercises the TP sharding-contract path |
 | Sunspot MoE TP=1 | pass after repair | job `12479018`, commit `6913990333`: three finite optimizer steps, arm exit 0, `VERDICT: ok`; losses 12.95227 -> 12.59636 -> 11.47138 |
+| Sunspot distributed checkpoint resume | exact pass | job `12479022`, commit `c228830bd3`: uninterrupted control; full step-2 save; fresh-process load; resumed steps 3-4 loss/gradient exact; full step-4 save; PBS exit 0 |
 
 The numerical comparison used Python 3.14.7, PyTorch 2.13.0 CPU, one thread,
 model seed `20260929`, input seed `20260930`, and AdamW with LR `8e-4` and
@@ -76,8 +77,8 @@ than hidden with broad skips.
 ## Required before PR
 
 - Complete final independent review/security scan and fix/reverify any blocker.
-- Run representative Sunspot dense, MoE, RL/weight-sync, and distributed
-  checkpoint save/load/resume gates on the exact integration SHA.
+- Run representative Sunspot RL/weight-sync on the exact integration SHA. The
+  dense, MoE, and distributed checkpoint save/load/resume gates are green.
 - Run representative Aurora dense and MoE gates through the established
   `aurora-tt-ezpz` ownership path.
 - Re-run the complete collectable ezpz suite after the review fixes are
