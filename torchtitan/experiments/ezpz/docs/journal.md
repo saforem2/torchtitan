@@ -35,6 +35,28 @@ on Torch 2.12/2.13 and stale `spmd-types`; none is a valid substitute for the
 current sync. The protected environment was not modified. This gate requires a
 fresh isolated RL runtime or a verified immutable archive.
 
+The RL runtime blocker was closed without modifying the protected environment.
+A new project-filesystem overlay used the validated healthy Torch 2.14 base and
+copied complete cached vLLM/tvm-ffi artifacts while reading the remaining
+Monarch/TorchStore dependencies from the quarantined environment. After adding
+the missing Torch 2.14 `pipeline_per_edge_p2p` config compatibility shim,
+exact-head job `12479027` finished with PBS exit 0 and
+`RL_SYNC_VERDICT: ok`: 20/20 completed bounded rollouts, policy versions 0 and
+1, two trainer pushes, two generator pulls, a real optimizer step, and a
+nonempty full step-1 checkpoint. This established same-host transport plumbing,
+but the zero loss/gradient meant it did not establish a real policy update.
+Harder same-host jobs `12479028` and `12479029` each completed three finite,
+nonzero-gradient updates and wrote three checkpoints, but respectively 2/40 and
+5/40 rollouts hit the generation cap.
+
+The final acceptance run `12479032` used two physical Sunspot hosts and the
+repository's scheduler-SPMD path with explicit TorchStore Gloo. After increasing
+the actor attach timeout to cover the measured cold import, it completed 40/40
+bounded rollouts across policy versions 0–3, four trainer pushes and four
+generator pulls, three finite updates (gradient norms 0.35, 0.34, 0.28), and
+three full checkpoints. PBS exited 0 with `RL_MULTIHOST_VERDICT: ok`. This closes
+the exact-head Sunspot RL/weight-sync gate.
+
 The isolated `sync/upstream-f359667` worktree now contains upstream merge
 `780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
 changes. The committed collectable ezpz suite reached 260 passed, 2 skipped, and
