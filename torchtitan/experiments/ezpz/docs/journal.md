@@ -4,6 +4,16 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 
+Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
+project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
+steps with arm exit 0. The MoE arm failed during FSDP initialization before
+training: routed expert `weight` parameters remained plain tensors while
+`dp_mesh_dims` requires all parameters on the full SPMD mesh. A focused local
+regression reproduced the missing placement; the ezpz compatibility layer now
+assigns replicated full-SPMD placements to routed expert weights when EP is off.
+The post-fix focused suite passes 73 tests, 2 skips, and 13 subtests. The next
+gate is a MoE-only Sunspot retry on the repaired immutable SHA.
+
 The isolated `sync/upstream-f359667` worktree now contains upstream merge
 `780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
 changes. The committed collectable ezpz suite reached 260 passed, 2 skipped, and

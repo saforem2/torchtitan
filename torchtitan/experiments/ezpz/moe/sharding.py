@@ -233,6 +233,18 @@ def _set_moe_ffn_sharding(
             enable_sp=enable_sp,
         )
 
+        # Core deliberately leaves routed expert weights unsharded when EP is
+        # disabled. That was valid for the removed partial-DTensor backend, but
+        # FSDP's full-SPMD ``dp_mesh_dims`` contract rejects plain tensors.
+        # Materialize replicated DTensors here so FSDP can subsequently shard
+        # them over DP without changing their TP/EP semantics.
+        if not enable_ep:
+            replicated_weight = ShardingConfig(
+                state_shardings={"weight": dense_param_placement(tp=spmd.R)}
+            )
+            layer_cfg.moe.routed_experts.w13.sharding_config = replicated_weight
+            layer_cfg.moe.routed_experts.w2.sharding_config = replicated_weight
+
         # The ezpz compatibility FFN deliberately retains pre-sync physical
         # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
         # Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for
