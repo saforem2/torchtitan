@@ -4,6 +4,13 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
+- Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
+  queue were deleted and verified terminal: chain-3 control `8876446`,
+  `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.
+  A post-delete `qselect -u foremans -q next-eval` returned zero jobs. Any
+  scientifically necessary successor must be redesigned for and submitted to
+  a supported production queue; none of these stale queued jobs should be
+  treated as an active gate.
 - Production umbrella `8870515` allocated 2,098 nodes. All three seats reached
   finite optimizer updates. Verified progress included 20B-512 step 11,176,
   20B-256 step 17,065, and 2B-256 step 37,591; complete checkpoints were
