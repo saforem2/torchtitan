@@ -46,10 +46,10 @@ from torch.distributed.tensor import Shard
 
 from torchtitan.config import (
     CompileConfig,
-    ParallelismConfig,
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy

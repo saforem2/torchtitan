@@ -47,7 +47,8 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
 from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
 from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
-from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,

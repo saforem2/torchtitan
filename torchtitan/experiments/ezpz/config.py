@@ -32,7 +32,7 @@ in our port reads them.
 from dataclasses import dataclass
 from typing import Literal
 
-from torchtitan.config.configs import ParallelismConfig
+from torchtitan.config.parallelism import ParallelismConfig
 
 __all__ = ["EzpzParallelismConfig"]
 

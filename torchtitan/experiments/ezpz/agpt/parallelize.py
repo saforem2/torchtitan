@@ -40,10 +40,10 @@ from torch.distributed.fsdp import (
 
 from torchtitan.config import (
     CompileConfig,
-    ParallelismConfig,
     TORCH_DTYPE_MAP,
     TrainingConfig,
 )
+from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig

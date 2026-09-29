@@ -149,13 +149,14 @@ class EzpzValidator(Validator):
             # torchtitan/components/validate.py. Both attributes come from the
             # base Validator (self.parallel_dims, self.parallelism set in its
             # __init__), so no plumbing is needed here.
-            inputs, labels, extra_kwargs = cast(
-                BaseModel, model_parts[0]
-            ).preprocess_inputs(
-                {**input_dict, "labels": labels},
-                parallel_dims=self.parallel_dims,
-                parallelism=self.parallelism,
-            )
+            with dist_utils.get_spmd_context(parallel_dims=self.parallel_dims):
+                inputs, labels, extra_kwargs = cast(
+                    BaseModel, model_parts[0]
+                ).preprocess_inputs(
+                    {**input_dict, "labels": labels},
+                    parallel_dims=self.parallel_dims,
+                    parallelism=self.parallelism,
+                )
 
             local_valid_tokens = torch.tensor(0, dtype=torch.int64, device=device_type)
             local_valid_tokens += (labels != IGNORE_INDEX).sum()
