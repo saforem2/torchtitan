@@ -6,6 +6,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
 sonic="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_moe_full_sonic_2n_1100.pbs"
 production="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs"
 resumable="$repo_root/torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh"
+dcp_sync="$repo_root/torchtitan/experiments/ezpz/scripts/sync_dcp_resume_sunspot.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -34,6 +35,19 @@ assert_contains "$resumable" 'exit "\$\{rc\}"' \
     'resumable SFT must return the ezpz launch status'
 assert_not_contains "$resumable" '\|[[:space:]]*tee.*\|\|[[:space:]]*true' \
     'resumable SFT must not swallow launcher/timeout failures'
+
+# The sync DCP gate must compare a resumed trajectory with an uninterrupted
+# control and preserve full checkpoint state at the save boundary.
+assert_contains "$dcp_sync" 'run_phase control 4' \
+    'sync DCP gate must run the four-step uninterrupted control'
+assert_contains "$dcp_sync" 'run_phase save 2' \
+    'sync DCP gate must run the two-step save phase'
+assert_contains "$dcp_sync" 'run_phase resume 4' \
+    'sync DCP gate must destroy/rebuild and resume through step four'
+assert_contains "$dcp_sync" '--checkpoint.no-last-save-model-only' \
+    'sync DCP save must include optimizer, scheduler, and dataloader state'
+assert_contains "$dcp_sync" 'DCP_SYNC_VERDICT: ok' \
+    'sync DCP gate must emit a machine-readable success verdict'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \
