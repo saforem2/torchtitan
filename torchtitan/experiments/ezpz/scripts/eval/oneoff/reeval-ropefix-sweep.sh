@@ -96,14 +96,19 @@ for step in $STEPS; do
     # jobs 8766059/8766061 exited in 1s with "0 ok, 36 skipped, 0 failed" and
     # Exit_status=0, because the arc/hellaswag pass had already written a file
     # at every step. Exit 0 plus no work looks identical to success.
-    if [[ -f "$RES/results.json" ]] && RES_JSON="$RES/results.json" WANT="$TASKS" python3 -c '
+    if [[ -f "$RES/results.json" ]] && RES_JSON="$RES/results.json" WANT="$TASKS" SHOTS_SPEC="${SHOTS_SPEC:-}" python3 -c '
 import json, os, sys
 want = {t for t in os.environ["WANT"].split(",") if t}
+for group in os.environ.get("SHOTS_SPEC", "").split(";"):
+    _, _, tasks = group.partition(":")
+    want.update(t for t in tasks.split(",") if t)
 try:
     have = set(json.load(open(os.environ["RES_JSON"])))
 except Exception:
     sys.exit(1)          # unreadable -> re-run it
-sys.exit(0 if want <= have else 1)
+missing = [t for t in want
+           if t not in have and not any(k == t or k.startswith(t + "_") for k in have)]
+sys.exit(0 if not missing else 1)
 '; then
         echo "[skip] have step-$step (all of: $TASKS)"; n_skip=$((n_skip+1)); continue
     fi
@@ -168,6 +173,7 @@ if _misshot:
                      "pass SHOTS_SPEC (e.g. 5:mmlu;25:arc_challenge)")
 
 merged = {}
+n_shot = {}
 for shots, tset in groups:
     if not tset:
         continue
@@ -177,9 +183,32 @@ for shots, tset in groups:
         model_args=f"pretrained={hf},dtype=bfloat16,trust_remote_code=True",
         tasks=tset, device="xpu:0", batch_size=8, num_fewshot=shots,
     )
-    merged.update(out["results"])
-with open(os.path.join(res, "results.json"), "w") as fh:
-    json.dump(merged, fh, indent=2)
+    for task, metrics in out["results"].items():
+        merged[f"{task}@{shots}shot"] = metrics
+        merged[task] = metrics
+    for task, actual_shots in (out.get("n-shot") or {}).items():
+        n_shot[task] = actual_shots
+        n_shot[f"{task}@{shots}shot"] = actual_shots
+    for task in out["results"]:
+        n_shot.setdefault(task, shots)
+        n_shot.setdefault(f"{task}@{shots}shot", shots)
+
+# A sweep can fill one missing task group in a step that already contains
+# useful results. Preserve those results instead of replacing the whole file.
+out_path = os.path.join(res, "results.json")
+existing = {}
+if os.path.exists(out_path):
+    try:
+        existing = json.load(open(out_path))
+    except Exception:
+        existing = {}
+existing.update(merged)
+previous_n_shot = existing.get("n-shot") or {}
+previous_n_shot.update(n_shot)
+if previous_n_shot:
+    existing["n-shot"] = previous_n_shot
+with open(out_path, "w") as fh:
+    json.dump(existing, fh, indent=2)
 PYEOF
 
     if [[ -f "$RES/results.json" ]]; then
