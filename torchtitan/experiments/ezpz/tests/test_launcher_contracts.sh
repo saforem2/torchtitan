@@ -40,14 +40,16 @@ assert_not_contains "$resumable" '\|[[:space:]]*tee.*\|\|[[:space:]]*true' \
 # control and preserve full checkpoint state at the save boundary.
 assert_contains "$dcp_sync" 'run_phase control 4' \
     'sync DCP gate must run the four-step uninterrupted control'
-assert_contains "$dcp_sync" 'run_phase save 2' \
-    'sync DCP gate must run the two-step save phase'
+assert_contains "$dcp_sync" 'run_phase save 4' \
+    'sync DCP gate must keep the save phase schedule identical to the control'
 assert_contains "$dcp_sync" 'run_phase resume 4' \
     'sync DCP gate must destroy/rebuild and resume through step four'
 assert_contains "$dcp_sync" '--checkpoint.no-last-save-model-only' \
     'sync DCP save must include optimizer, scheduler, and dataloader state'
 assert_contains "$dcp_sync" 'DCP_SYNC_VERDICT: ok' \
     'sync DCP gate must emit a machine-readable success verdict'
+assert_contains "$dcp_sync" 'ansi_escape' \
+    'sync DCP metric parser must strip terminal color sequences'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \

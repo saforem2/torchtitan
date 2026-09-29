@@ -69,7 +69,7 @@ run_phase() {
 }
 
 run_phase control 4 --checkpoint.no-enable || exit $?
-run_phase save 2 \
+run_phase save 4 \
     --checkpoint.enable \
     --checkpoint.folder "$CKPT" \
     --checkpoint.interval 2 \
@@ -101,10 +101,12 @@ pattern = re.compile(
     r"step:\s+(?P<step>[0-9]+)\s+loss:\s+(?P<loss>[0-9.eE+-]+)"
     r"\s+grad_norm:\s+(?P<grad>[0-9.eE+-]+)"
 )
+ansi_escape = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 def metrics(path: str) -> dict[int, tuple[float, float]]:
     found = {}
-    for match in pattern.finditer(Path(path).read_text(errors="replace")):
+    text = ansi_escape.sub("", Path(path).read_text(errors="replace"))
+    for match in pattern.finditer(text):
         found[int(match["step"])] = (float(match["loss"]), float(match["grad"]))
     return found
 
