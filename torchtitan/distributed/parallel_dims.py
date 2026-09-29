@@ -13,7 +13,6 @@ product, and how EP reuses ranks from the dense mesh.
 from __future__ import annotations
 
 import logging
-
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
