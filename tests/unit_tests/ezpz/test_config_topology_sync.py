@@ -228,6 +228,24 @@ def test_xpu_init_wrapper_preserves_signature_keywords_and_return(monkeypatch) -
     assert signature.return_annotation is DistributedTopology
 
 
+def test_xpu_patch_registers_missing_pipeline_per_edge_config(monkeypatch) -> None:
+    import torch.distributed as torch_dist
+    from torchtitan.experiments.ezpz.rl import xpu_overrides
+
+    monkeypatch.setattr(xpu_overrides.torch.cuda, "is_available", lambda: False)
+    dist_config = getattr(torch_dist, "config")
+    monkeypatch.delitem(
+        dist_config._config,
+        "pipeline_per_edge_p2p",
+        raising=False,
+    )
+
+    xpu_overrides.patch_torch_distributed_config_for_xpu()
+
+    dist_config.pipeline_per_edge_p2p = True
+    assert dist_config.pipeline_per_edge_p2p is True
+
+
 def os_environ_subset(*keys: str) -> tuple[str | None, ...]:
     import os
 
