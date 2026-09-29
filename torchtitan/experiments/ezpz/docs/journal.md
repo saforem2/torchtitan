@@ -41,6 +41,46 @@ initializations.
 Persistent operations and subsequent terminal transitions are mirrored to the
 private [TorchTitan Agent Vault](https://mbph.tail3e7069.ts.net:10444/n/history/torchtitan/index.md).
 
+## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
+
+- Production umbrella `8870515` allocated 2,098 nodes. All three seats reached
+  finite optimizer updates. Verified progress included 20B-512 step 11,176,
+  20B-256 step 17,065, and 2B-256 step 37,591; complete checkpoints were
+  independently observed at 20B-256 step 17,000 and 2B-256 step 37,500. A
+  transient/incomplete 20B-512 step-11,200 directory was not accepted as a
+  checkpoint. Later 2B-256 logging stopped at step 39,454 while ranks remained
+  live, so that seat is treated as a suspected stall rather than healthy
+  progress pending supervisor/terminal evidence.
+- Tail-evaluation backfills `8878144` and `8878145` were submitted for the
+  current 20B-512 step-11,100 and 20B-256 step-17,000 checkpoints. Scheduler
+  completion alone is not acceptance; fresh terminal `results.json` artifacts
+  remain the gate.
+- The isolated 20B-512 continuation source at step 3,000 remains complete:
+  6,145 files including nonempty metadata. The private step-3,100 destination
+  remains empty and is not a checkpoint. No failed staging smoke modified the
+  canonical production chain.
+- Fork attempts `8874846` and `8877631` failed before restore/training: the
+  former used a broken launcher/shebang, while the latter broadcast the
+  immutable runtime but expected `/tmp/.venv-20b-s3000-spmd025` after `ezpz`
+  had extracted `/tmp/.venv-20b-s3000-spmd025-20260927`.
+- One-node staging controls then exposed two stale-wrapper prerequisites.
+  `8878636` repeated the undated-directory expectation. `8878677` used the
+  corrected dated directory but invoked `ezpz` through a shared-checkout venv
+  whose absolute Python shebang was missing on the compute image. Both failed
+  before archive staging, restore, or optimizer work.
+- Replacement staging smoke `8878708` used the compute-visible production-clone
+  launcher venv (`ezpz 0.27.3`) to stage the immutable archive (SHA-256
+  `b8e12eecc5eb67cbe6a20e05f7f23bac322f18f58d09e243af9aa04775725e55`). It
+  finished with `Exit_status=22` and `Stageout_status=1` after `ezpz` reported a
+  successful 48.2-second stage to the expected target
+  `/tmp/.venv-20b-s3000-spmd025-20260927/`. The wrapper then checked that
+  node-local path from the wrong execution context and emitted
+  `STAGING_PATH_MISMATCH`; imports were not exercised. The next one-node control
+  must validate and import through the allocated hostfile on the target node.
+  A later gate must additionally restore step 3,000, execute finite optimizer
+  updates, and write a fresh nonempty checkpoint; an import-only pass is
+  insufficient.
+
 ## 2026-09-27 (mbpr) -- fix `cos_sin` DCP -> HF fused-weight omission
 
 `AgptStateDictAdapter.to_hf()` bypassed

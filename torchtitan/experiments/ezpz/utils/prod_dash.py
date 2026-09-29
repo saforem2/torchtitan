@@ -776,9 +776,10 @@ def _kick_detached_refresh():
         open(lock, "w").close()
     except Exception:
         return
-    cmd = ("cd %%s && PD_LOCAL=1 PD_FRESH=1 PD_QUIET=1 .venv/bin/python3 "
+    cmd = ("cd %%s && PD_LOCAL=1 PD_FRESH=1 PD_QUIET=1 %%s "
            "torchtitan/experiments/ezpz/utils/prod_dash.py --board "
-           ">/tmp/prod_dash_refresh.log 2>&1; rm -f %%s" %% (REPO, lock))
+           ">/tmp/prod_dash_refresh.log 2>&1; rm -f %%s" %%
+           (REPO, sys.executable, lock))
     try:
         subprocess.Popen(["bash", "-c", cmd], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -891,6 +892,50 @@ _CLONE_DIRS = [
     _RUNS + "/agpt-2b-constlr-from9200/torchtitan-ezpz",
 ]
 
+
+def _active_job_roots(jobs):
+    """Discover checkout roots from the active jobs' PBS output paths.
+
+    Production jobs often run from short-lived diagnostic or worktree clones
+    that cannot be enumerated safely in a static list. Querying the jobs we are
+    already inspecting keeps discovery bounded and follows those clones.
+    """
+    if not jobs:
+        return []
+    try:
+        out = subprocess.run(
+            ["/opt/pbs/bin/qstat", "-f", "-F", "json"]
+            + [j["id"] for j in jobs],
+            capture_output=True, text=True, timeout=30,
+        ).stdout
+        records = json.loads(out).get("Jobs", {}).values()
+    except Exception:
+        return []
+    roots = []
+    for record in records:
+        path = record.get("Output_Path") or record.get("Error_Path") or ""
+        # PBS encodes remote paths as host:/absolute/path. Strip only the host
+        # prefix; colons elsewhere are left alone.
+        if ":/" in path:
+            path = path.split(":", 1)[1]
+        root = os.path.dirname(path)
+        if root and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _checkpoint_bases(path, text):
+    """Return output checkpoint bases without mistaking resume inputs for outputs."""
+    if os.path.basename(path).startswith("trainer-"):
+        matches = re.findall(
+            r"--checkpoint\.folder(?:=|\s+)checkpoints/"
+            r"(agpt-[A-Za-z0-9._-]+)",
+            text,
+        )
+    else:
+        matches = [match.group(1) for match in CKPT_RE.finditer(text)]
+    return list(dict.fromkeys(matches))
+
 def live_layer():
     """Per running job: resolve its ckpt dir + freshest (step, loss). Only the
     handful of logs belonging to CURRENT qstat jobs are read (cheap), unlike the
@@ -901,7 +946,7 @@ def live_layer():
     live = {}  # ckpt_base -> {state, jobid, step, loss, tps, mfu, age}
     states = {}  # ckpt_base -> worst-known state (R>Q>H)
     rank = {"R": 3, "Q": 2, "H": 1, "E": 0}
-    search_roots = [REPO] + _CLONE_DIRS
+    search_roots = [REPO] + _CLONE_DIRS + _active_job_roots(jobs)
     for j in jobs:
         cand = []
         for root in search_roots:
@@ -936,9 +981,9 @@ def live_layer():
                 head = ANSI.sub("", open(p, errors="replace").read(200000))
             except (FileNotFoundError, IsADirectoryError):
                 continue
-            for m in CKPT_RE.finditer(head):
-                if (m.group(1), p) not in bases:
-                    bases.append((m.group(1), p))
+            for base in _checkpoint_bases(p, head):
+                if (base, p) not in bases:
+                    bases.append((base, p))
         if not bases:
             continue
         # Group each chain's logs so a chain's tip is read only from ITS OWN

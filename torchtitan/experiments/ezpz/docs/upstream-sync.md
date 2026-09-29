@@ -41,7 +41,22 @@ See the
 [standalone merge-readiness report](experiments/upstream-f359667-merge-readiness.md)
 for the live evidence matrix.
 
-## Current landing (2026-09-23): upstream `0fd69d0b`, landed and validated
+## Previous landing (2026-09-26): upstream `58d2f429`, landed and validated
+
+PR [#37](https://github.com/saforem2/torchtitan/pull/37) landed as merge commit
+`3254972de6bf08fc5ce7d3fbad817b586dce98b7`, integrating 17 upstream commits
+through `58d2f429ef`.
+
+The material ezpz replay was the upstream routed-expert migration to first-class
+`GroupedLinear` projections. The local MoE implementation was ported while
+preserving the XPU/Sonic expert backends; HF and DTensor routed-expert state-dict
+round trips were updated for the new layout. The integration recorded **244
+passed, 2 skipped, and 9 subtests**; all 22 workflow YAML files parsed and the
+exact-head CI passed.
+
+The previous `0fd69d0b` integration below is retained as historical provenance.
+
+## Earlier landing (2026-09-23): upstream `0fd69d0b`, landed and validated
 
 The Sync 84 trial described below is historical. The current branch
 `sync/upstream-0fd69d0b` landed the audited upstream merge as `fa3147727`
