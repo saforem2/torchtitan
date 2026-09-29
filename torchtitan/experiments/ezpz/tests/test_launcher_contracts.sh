@@ -8,6 +8,7 @@ production="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_den
 resumable="$repo_root/torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh"
 dcp_sync="$repo_root/torchtitan/experiments/ezpz/scripts/sync_dcp_resume_sunspot.sh"
 rl_sync="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_weight_sync_sunspot.sh"
+rl_multihost="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_multihost_weight_sync_sunspot.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -70,6 +71,17 @@ assert_contains "$rl_sync" '--generator.sampling.max-tokens=256' \
     'sync RL gate must retain enough generation budget for bounded completion'
 assert_not_contains "$rl_sync" 'pip install' \
     'sync RL gate must not mutate the protected runtime'
+
+assert_contains "$rl_multihost" 'TORCHTITAN_TORCHSTORE_TRANSPORT=gloo' \
+    'multi-host sync gate must force the validated Gloo weight transport'
+assert_contains "$rl_multihost" 'multihost_train_upstream.py' \
+    'multi-host sync gate must use the scheduler-SPMD entry point'
+assert_contains "$rl_multihost" 'RL_MULTIHOST_VERDICT: ok' \
+    'multi-host sync gate must emit a machine-readable semantic verdict'
+assert_contains "$rl_multihost" 'trainer/grad_norm/mean' \
+    'multi-host sync gate must require nonzero gradient evidence'
+assert_not_contains "$rl_multihost" 'pip install' \
+    'multi-host sync gate must not mutate the isolated runtime'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \
