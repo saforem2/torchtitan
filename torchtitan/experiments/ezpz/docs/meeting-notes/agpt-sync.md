@@ -11,9 +11,8 @@
 > instruction following and bounded behavior without measurable GSM8K/MMLU
 > regression, but it does not solve the base model's near-chance MMLU ceiling.
 > Stage-9 proved that ALCF Inkling can generate a clean, auditable synthetic
-> corpus at useful throughput; its student is not promotable so far because the
-> best checkpoint regressed GSM8K-200 from 59/200 to 48/200. The final IFEval
-> gate is waiting behind full-machine reservations.
+> corpus at useful throughput; its student is rejected because full GSM8K
+> regressed from 386/1,319 to 338/1,319 despite improving all four IFEval axes.
 >
 > **Today's decisions:** choose the next base-model lever; close or retain
 > Stage-9 after IFEval; decide whether to rebuild or retire the quarantined
@@ -49,13 +48,12 @@ moved in the wrong direction:
 | step 30 | 46 | 198 | 2 |
 | step 40 | 43 | 199 | 1 |
 
-Step 10 is 8/8 bounded and semantically correct on the direct sanity prompts,
-but formatting alone cannot justify promotion. Original IFEval job `12478986`
-remains queued. Replacement attempts `12478987` and `12478988` demonstrated
-that apparent free nodes were unavailable under the active full-machine
-reservation; they are redundant and should not consume later queue capacity.
-Do not promote Stage-9 unless IFEval is large enough to justify the clear math
-regression.
+Step 10 is 8/8 bounded and semantically correct on the direct sanity prompts and
+improves every IFEval axis (instruction-loose 35.85% -> 39.21%). Full GSM8K
+job `12479001` nevertheless scored 338/1,319 versus Stage-7's 386/1,319. Paired
+flips were 140 Stage-7-only versus 92 Stage-9-only, exact McNemar `p=0.00197`.
+Stage-9 is therefore rejected: the instruction gain does not satisfy the
+predeclared primary non-inferiority requirement.
 
 ### 2. Inkling synthetic generation worked; the student recipe needs less exposure
 
@@ -235,8 +233,8 @@ style and retain reproducible renderers.
 ### Decisions / asks for the team
 
 1. **Keep Stage-7 accepted?** Recommended: yes. Keep Stage-4 as rollback.
-2. **Close Stage-9 after IFEval?** Recommended: reject unless IFEval is materially
-   better than Stage-7 despite the 11-example GSM8K-200 regression.
+2. **Close Stage-9?** Yes: reject. Its IFEval gain is real, but full GSM8K
+   regressed significantly and failed the primary non-inferiority gate.
 3. **Next base-model lane?** Choose between screening existing 2B/CPT checkpoints
    first or opening a 7B/20B post-training lane in parallel.
 4. **RL priority?** Recommended: no more general-quality GRPO until the base/cold

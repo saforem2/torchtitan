@@ -59,7 +59,7 @@ Detailed lineage and checkpoint evidence: [Stage-4 MetaMath distillation and Sta
 | Stage-6 OpenMath | 150k augmented-MATH + 50k augmented-GSM, exact-answer verified | weak MATH gains, repetition, full GSM8K 25.78% | rejected |
 | Stage-7 re-anchor | broad step 900 + Stage-4 math step 75, alpha 0.65 | better IFEval and behavior with flat GSM8K/MMLU | **accepted** |
 | Stage-8 alpha sweep | step-900 anchor, alpha 0.45-0.75 | alpha 0.55/0.60 improved development GSM8K; alpha 0.55 retained MMLU | promising but not promoted over Stage-7 |
-| Stage-9 Inkling | 4,115 verified synthetic examples, 40-step SFT | concise 8/8 sanity, but best GSM8K-200 only 48/200 | provisional rejection; IFEval queued |
+| Stage-9 Inkling | 4,115 verified synthetic examples, 40-step SFT | all IFEval axes improved, but full GSM8K regressed to 338/1,319 | rejected |
 
 ## SFT and distillation findings
 
@@ -115,7 +115,13 @@ The accepted corpus packed into 342 sequences with 282,496 supervised tokens. St
 | step 30 | 46 | 198 | 2 |
 | step 40 | 43 | 199 | 1 |
 
-Step 10 remained 8/8 bounded and semantically correct on the direct sanity set. IFEval `12478986` is the final secondary gate. Full details, hashes, API settings, acceptance breakdowns, and job IDs are in [AGPT-2B Inkling synthetic-data distillation](2026-09-28-agpt2b-inkling-distillation.md).
+Step 10 remained 8/8 bounded and semantically correct on the direct sanity set.
+It also improved all four IFEval axes (instruction-loose 35.85% -> 39.21%), but
+full GSM8K regressed from 386/1,319 to 338/1,319. The paired comparison had 140
+Stage-7-only wins versus 92 Stage-9-only wins (`p=0.00197`), so the primary
+non-inferiority gate failed and Stage-9 was rejected. Full details, hashes, API
+settings, acceptance breakdowns, and job IDs are in [AGPT-2B Inkling
+synthetic-data distillation](2026-09-28-agpt2b-inkling-distillation.md).
 
 ## What the campaign established
 

@@ -4,12 +4,12 @@ Date: 2026-09-28
 
 ## Status and decision
 
-**Stage-9 training is complete, but the model is not promoted.** The best
-checkpoint, step 10, is coherent and bounded on 8/8 direct-generation prompts,
-but scores 48/200 on the fixed GSM8K development slice versus 59/200 for the
-accepted Stage-7 model. A final IFEval job (`12478986`) is queued. Stage-9 will
-remain rejected unless that job shows a material instruction-following gain
-large enough to justify the math regression.
+**Stage-9 is rejected for promotion.** Step 10 materially improves all four
+IFEval axes and remains coherent and bounded on 8/8 direct-generation prompts,
+but full GSM8K falls to 338/1,319 (25.63%) from Stage-7's 386/1,319 (29.26%).
+The paired comparison has 140 Stage-7-only wins versus 92 Stage-9-only wins,
+with exact McNemar `p=0.00197`; this is a significant correctness regression,
+not small-slice noise.
 
 The accepted production artifact remains Stage-7. See the prior
 [Stage-4/Stage-7 lineage report](2026-09-26-agpt2b-stage4-metamath.md).
@@ -153,8 +153,22 @@ serializer, and canonical stop IDs `[1, 107]`.
 
 Step 10 is the only checkpoint advanced. Its direct sanity outputs are concise
 and semantically correct on 8/8 prompts, including Earth, Chicago, `$21`, `17`,
-and `fish`; all terminate normally. The remaining IFEval job `12478986` is
-queued as of this report's cutoff.
+and `fish`; all terminate normally. Full IFEval job `12479000` completed with
+exit 0 and improved every axis versus Stage-7:
+
+| IFEval metric | Stage-7 | Stage-9 step 10 |
+|---|---:|---:|
+| instruction loose | 35.85% | **39.21%** |
+| instruction strict | 33.45% | **37.29%** |
+| prompt loose | 21.26% | **24.77%** |
+| prompt strict | 19.96% | **23.48%** |
+
+Because that is a material secondary-capability gain, step 10 advanced to full
+GSM8K job `12479001`. The artifact contains all 1,319 generations and passed the
+format/truncation gates (1,291 format-valid; 27 truncations), but correctness was
+338/1,319 (25.63%) versus Stage-7's 386/1,319 (29.26%). Paired flips were 140
+Stage-7-only versus 92 Stage-9-only, exact McNemar `p=0.00197`. Stage-9 therefore
+fails the primary non-inferiority gate and is rejected.
 
 ## Interpretation
 
@@ -183,4 +197,7 @@ more continuation on the same 4,115 rows.
 - `12478971`-`12478978`: GSM8K/sanity sweep; GSM8K artifacts valid, first sanity
   submissions rejected before inference due to a variable-name mismatch.
 - `12478985`: corrected step-10 sanity evaluation, 8/8 bounded, exit 0.
-- `12478986`: step-10 IFEval, queued at report cutoff.
+- `12479000`: full step-10 IFEval, exit 0; all four axes improved over Stage-7.
+- `12479001`: full 1,319-example GSM8K, complete artifact; 338 correct,
+  1,291 format-valid, 27 truncations; wrapper exit 1 because the promotion gate
+  correctly rejected the candidate.
