@@ -45,7 +45,7 @@ from torchtitan.components.loss import ChunkedLossWrapper
 # 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
 # a re-export shim when the optimizer components were grouped into a package
 # by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.optimizer import LRSchedulersContainer, default_adamw
 from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
 from torchtitan.config import CompileConfig, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
