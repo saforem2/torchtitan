@@ -537,6 +537,37 @@ class TestParallelDimsMeshOperations(unittest.TestCase):
         self.assertIs(pp_mesh.get_group(), group)
 
     @patch("torchtitan.distributed.parallel_dims.device_type", "cpu")
+    def test_real_pp_group_rejects_multi_axis_pp_mesh(self):
+        group = dist.distributed_c10d._get_default_group()
+        topology = DistributedTopology(
+            world_size=1,
+            real_pp_group_for_fake_spmd=group,
+        )
+        parallel_dims = ParallelDims.from_config(ParallelismConfig(), topology)
+        parallel_dims.build_mesh()
+
+        with self.assertRaisesRegex(ValueError, "Multi-axis.*'pp'.*unsupported"):
+            parallel_dims.get_optional_mesh(["pp", "dp"], include_singleton_axes=True)
+
+    def test_real_pp_group_parallel_dims_fails_serialization_explicitly(self):
+        import pickle
+
+        parallel_dims = ParallelDims(
+            dp_replicate=1,
+            dp_shard=1,
+            cp=1,
+            tp=1,
+            pp=1,
+            ep=1,
+            world_size=1,
+            enable_sequence_parallel=False,
+            _real_pp_group_for_fake_spmd=object(),
+        )
+
+        with self.assertRaisesRegex(TypeError, "live real-PP process group"):
+            pickle.dumps(parallel_dims)
+
+    @patch("torchtitan.distributed.parallel_dims.device_type", "cpu")
     def test_get_mesh_invalid_name(self):
         """Test getting mesh with invalid name raises error."""
         parallel_dims = ParallelDims(

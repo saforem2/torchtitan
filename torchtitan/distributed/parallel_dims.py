@@ -102,7 +102,9 @@ class ParallelDims:
     ep: int
     world_size: int
     enable_sequence_parallel: bool
-    _real_pp_group_for_fake_spmd: dist.ProcessGroup | None = None
+    _real_pp_group_for_fake_spmd: dist.ProcessGroup | None = field(
+        default=None, compare=False, repr=False
+    )
     # Cache by axis name(s); DeviceMesh equality is by identity, so reuse the
     # same object instead of re-slicing a submesh on every lookup.
     _single_axis_meshes: dict[str, DeviceMesh] = field(default_factory=dict)
@@ -130,6 +132,14 @@ class ParallelDims:
 
     def __post_init__(self):
         self._validate()
+
+    def __getstate__(self):
+        if self._real_pp_group_for_fake_spmd is not None:
+            raise TypeError(
+                "ParallelDims with a live real-PP process group cannot be serialized; "
+                "reconstruct it from DistributedTopology in the destination process"
+            )
+        return self.__dict__
 
     def _validate(self):
         dp_replicate, dp_shard, cp, tp, pp, ep = (
@@ -379,6 +389,13 @@ class ParallelDims:
 
         if len(dims) == 1:
             return self._single_axis_meshes[dims[0]]
+
+        if self._real_pp_group_for_fake_spmd is not None and "pp" in dims:
+            raise ValueError(
+                "Multi-axis meshes containing 'pp' are unsupported with the "
+                "real_pp_fake_spmd backend because the PP axis uses a separate "
+                "real process group"
+            )
 
         # Cache to ensure mesh equality by object identity.
         key = tuple(dims)

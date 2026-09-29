@@ -6,10 +6,10 @@
 
 import importlib
 import inspect
+from types import SimpleNamespace
 from unittest.mock import ANY
 
 import pytest
-
 from torchtitan.config.configs import CommConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed import DistributedTopology, ParallelDims
@@ -35,12 +35,16 @@ def test_parallelism_config_imports_follow_upstream_move(module_name: str) -> No
         "torchtitan/experiments/ezpz/rl/reason_agpt/config_registry.py",
     ],
 )
-def test_rl_registry_parallelism_imports_follow_upstream_move(relative_path: str) -> None:
+def test_rl_registry_parallelism_imports_follow_upstream_move(
+    relative_path: str,
+) -> None:
     from pathlib import Path
 
     source = Path(relative_path).read_text()
     assert "from torchtitan.config.parallelism import ParallelismConfig" in source
-    assert "from torchtitan.config import CompileConfig, ParallelismConfig" not in source
+    assert (
+        "from torchtitan.config import CompileConfig, ParallelismConfig" not in source
+    )
 
 
 def test_ezpz_parallelism_config_constructs_with_core_fields() -> None:
@@ -107,14 +111,70 @@ def test_removed_local_tensor_comm_mode_fails_closed() -> None:
         _translate_legacy_args(["--comm.mode", "local_tensor"])
 
 
-def test_validator_preprocesses_inside_spmd_context() -> None:
-    validator = importlib.import_module("torchtitan.experiments.ezpz.validator")
-    source = inspect.getsource(validator.EzpzValidator.validate)
+def test_validator_runs_a_real_validation_pass(monkeypatch) -> None:
+    """Execute validate() rather than inspecting its source. The SPMD
+    context path is stubbed with a no-op to avoid requiring a distributed
+    init; the important behavior (preprocess -> forward -> loss) runs.
+    """
+    import torch
+    import torchtitan.experiments.ezpz.validator as validator_module
+    from torchtitan.experiments.ezpz.validator import EzpzValidator
 
-    context_line = source.index("with dist_utils.get_spmd_context")
-    preprocess_line = source.index(".preprocess_inputs(")
-    loss_line = source.index("local_valid_tokens =")
-    assert context_line < preprocess_line < loss_line
+    monkeypatch.setattr(validator_module.utils, "device_type", "cpu")
+
+    class _Model(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Linear(4, 4)
+
+        def preprocess_inputs(self, batch, *, parallel_dims, parallelism):
+            labels = batch.pop("labels")
+            return batch["input"], labels, {}
+
+        def forward(self, inputs, **kwargs):
+            return self.weight(inputs)
+
+    class _Metrics:
+        ntokens_since_last_log = 0
+        logged: list[tuple[float, int]] = []
+
+        def log_validation(self, loss, step):
+            type(self).logged.append((float(loss), step))
+
+    parallel_dims = ParallelDims(
+        dp_replicate=1,
+        dp_shard=1,
+        cp=1,
+        tp=1,
+        pp=1,
+        ep=1,
+        world_size=1,
+        enable_sequence_parallel=False,
+    )
+
+    validator = object.__new__(EzpzValidator)
+    validator.parallel_dims = parallel_dims
+    validator.parallelism = ParallelismConfig()
+    validator.metrics_processor = _Metrics()
+    validator.config = SimpleNamespace(steps=1)
+    validator.loss_fn = lambda predictions, labels: (predictions.float().sum(), {})
+    batch = {
+        "input": torch.ones(2, 4),
+        "labels": torch.zeros(2, dtype=torch.long),
+    }
+    validator._cached_dataloader = [batch]
+    validator._get_validation_dataloader = lambda: validator._cached_dataloader
+    import torchtitan.distributed.utils as du
+
+    monkeypatch.setattr(
+        du,
+        "get_spmd_context",
+        lambda **kw: __import__("contextlib").nullcontext(),
+    )
+    model = _Model()
+    validator.validate([model], step=3)
+    assert _Metrics.logged and _Metrics.logged[-1][1] == 3
+    assert model.training
 
 
 def test_xpu_init_wrapper_preserves_signature_keywords_and_return(monkeypatch) -> None:
@@ -161,7 +221,10 @@ def test_xpu_init_wrapper_preserves_signature_keywords_and_return(monkeypatch) -
     assert calls == [(ANY, True, "dump", [7], 4)]
     assert os_environ_subset("PALS_LOCAL_RANKID", "PALS_RANKID") == ("3", "7")
     signature = inspect.signature(patched)
-    assert signature.parameters["pipeline_parallel_degree"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert (
+        signature.parameters["pipeline_parallel_degree"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
     assert signature.return_annotation is DistributedTopology
 
 

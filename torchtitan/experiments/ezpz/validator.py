@@ -162,7 +162,7 @@ class EzpzValidator(Validator):
             local_valid_tokens += (labels != IGNORE_INDEX).sum()
 
             if parallel_dims.dp_enabled:
-                batch_mesh = parallel_dims.get_mesh("batch")
+                batch_mesh = parallel_dims.get_mesh("dp")
                 global_valid_tokens = dist_utils.dist_sum(
                     local_valid_tokens, batch_mesh, None
                 )
@@ -176,7 +176,7 @@ class EzpzValidator(Validator):
                 assert self.pp_schedule is not None
                 assert self.pp_has_first_stage is not None
                 assert self.pp_has_last_stage is not None
-                with self.validation_context():
+                with dist_utils.get_spmd_context(parallel_dims=self.parallel_dims):
                     targets, losses = (
                         (labels, []) if self.pp_has_last_stage else (None, None)
                     )
@@ -200,7 +200,7 @@ class EzpzValidator(Validator):
                 else:
                     loss_sum = torch.tensor([-1.0], device=device_type)
             else:
-                with self.validation_context():
+                with dist_utils.get_spmd_context(parallel_dims=self.parallel_dims):
                     assert len(model_parts) == 1
                     predictions = model_parts[0](inputs, **extra_kwargs)
                     # loss_fn (BaseLoss.__call__) returns (loss, metrics_dict)

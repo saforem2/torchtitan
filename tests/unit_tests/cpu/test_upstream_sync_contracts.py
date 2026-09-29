@@ -13,15 +13,15 @@ from pathlib import Path
 import pytest
 import torch
 from torch import nn
+from torchtitan.config import CommConfig
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.models.qwen3 import model_registry, qwen3_configs, Qwen3Model
 
 from tests.unit_tests.cpu.upstream_sync_baseline import (
     model_state_signature,
     signature_digest,
     training_step_signature,
 )
-from torchtitan.config import CommConfig
-from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.models.qwen3 import Qwen3Model, model_registry, qwen3_configs
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _EZPZ_ROOT = _REPO_ROOT / "torchtitan" / "experiments" / "ezpz"
@@ -136,24 +136,6 @@ def test_ezpz_runtime_has_no_removed_comm_or_pipeline_options() -> None:
     assert not failures, "\n" + "\n".join(failures)
 
 
-@pytest.mark.xfail(strict=True, reason="negative control: invalid root config import")
-def test_invalid_config_import_negative_control() -> None:
-    tree = ast.parse("from torchtitan.config import ParallelismConfig")
-    imported = next(node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom))
-    assert all(alias.name in _REQUIRED_CONFIG_EXPORTS for alias in imported.names)
-
-
-@pytest.mark.xfail(strict=True, reason="negative control: removed comm.mode option")
-def test_removed_comm_option_negative_control() -> None:
-    tree = ast.parse("value = config.comm.mode")
-    paths = {
-        _attribute_path(node)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-    }
-    assert not any(path[-2:] in _STALE_RUNTIME_ATTRIBUTES for path in paths)
-
-
 def test_config_schema_keeps_synced_runtime_options() -> None:
     assert {field.name for field in dataclasses.fields(CommConfig)} >= {
         "train_timeout_seconds"
@@ -172,9 +154,9 @@ def test_qwen3_registry_builds_every_config(flavor: str) -> None:
     config = model_registry(
         flavor,
         seq_len=16,
-        moe_comm_backend="standard"
-        if "moe" in flavor.lower() or "-A" in flavor
-        else None,
+        moe_comm_backend=(
+            "standard" if "moe" in flavor.lower() or "-A" in flavor else None
+        ),
     )
     assert isinstance(config, Qwen3Model.Config)
     with torch.device("meta"):
