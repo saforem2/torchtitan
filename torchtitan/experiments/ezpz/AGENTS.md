@@ -65,6 +65,16 @@
       Herdr dashboard pane. The consolidated pane must run the repository's
       Rich Python dashboard; never replace it with an ad hoc shell polling loop.
 
+12. **Sunspot filesystem placement:**
+    - Run multi-node training from a pinned checkout under
+      `/lus/tegu/projects/datascience/foremans/projects/saforem2/`, and keep
+      high-volume logs, outputs, and checkpoints on `/lus/tegu`.
+    - Do not launch new multi-node training from `$HOME`. Home is acceptable for
+      small control files, but it is not the production I/O path.
+    - Before submission, record and assert the immutable source SHA and verify
+      that `PBS_O_WORKDIR`, output, log, and checkpoint roots resolve to the
+      project filesystem.
+
 ## Hardware & Platform
 
 - **Machines:** Sunspot (Intel Max 1550 XPU), Aurora (Intel Max 1550 XPU), Polaris (A100)
