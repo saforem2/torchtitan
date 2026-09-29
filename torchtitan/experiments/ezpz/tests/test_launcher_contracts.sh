@@ -7,6 +7,7 @@ sonic="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_moe_full
 production="$repo_root/torchtitan/experiments/ezpz/submit/aurora/submit_agpt_dense_moe_256n_50k.pbs"
 resumable="$repo_root/torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_gs138650_tulu_math_uc_mix_8n_gbs6144.sh"
 dcp_sync="$repo_root/torchtitan/experiments/ezpz/scripts/sync_dcp_resume_sunspot.sh"
+rl_sync="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_weight_sync_sunspot.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -50,6 +51,19 @@ assert_contains "$dcp_sync" 'DCP_SYNC_VERDICT: ok' \
     'sync DCP gate must emit a machine-readable success verdict'
 assert_contains "$dcp_sync" 'ansi_escape' \
     'sync DCP metric parser must strip terminal color sequences'
+
+# Exact-head RL gate must preserve the validated one-controller Monarch path
+# while proving both weight transfers and a real optimizer update.
+assert_contains "$rl_sync" 'EXPECTED_SHA' \
+    'sync RL gate must assert the immutable source SHA'
+assert_contains "$rl_sync" 'EXPECTED_MODEL_SHA' \
+    'sync RL gate must assert the immutable starting checkpoint'
+assert_contains "$rl_sync" 'train_upstream' \
+    'sync RL gate must exercise the real upstream RL bridge'
+assert_contains "$rl_sync" 'RL_SYNC_VERDICT: ok' \
+    'sync RL gate must emit a machine-readable semantic success verdict'
+assert_not_contains "$rl_sync" 'pip install' \
+    'sync RL gate must not mutate the protected runtime'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \
