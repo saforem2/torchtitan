@@ -6,11 +6,11 @@
 
 from pathlib import Path
 
-
 SCRIPT = (
     Path(__file__).parents[3]
     / "torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_multihost_torchstore_validate.pbs"
 )
+ENTRYPOINT = SCRIPT.with_name("multihost_train_upstream.py")
 
 
 def test_multihost_launcher_allowlists_network_transport_controls():
@@ -21,3 +21,9 @@ def test_multihost_launcher_allowlists_network_transport_controls():
     assert "TORCHSTORE_SHARED_MEMORY_ENABLED=0" in text
     assert "gloo|xccl|monarch_rdma)" in text
     assert "unsupported TORCHSTORE_TRANSPORT" in text
+
+
+def test_multihost_entrypoint_allows_slow_actor_imports():
+    text = ENTRYPOINT.read_text()
+
+    assert 'mesh_attach_config_timeout="300s"' in text
