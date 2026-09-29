@@ -51,7 +51,9 @@ production archives preserve the existing Torch/MPI/BlendCorpus stacks while
 upgrading only ezpz. Successor
 `scripts/submit_agpt_successor_3seat_ezpz0292.pbs` selects seats 1, 2, and 4,
 requests exactly 1,054 nodes (512+10, 256+10, 256+10) for the `medium` queue,
-and checksum-gates both archives.
+and checksum-gates both archives. The committed wrapper at `816f46e1cc` passed
+its 1,054-node dry-run and was submitted as head `8879474`; follower `8879475`
+is dependency-held with `afterany:8879474`.
 
 `8828612` started 2026-09-19 22:48 UTC and finished at walltime with PBS
 `Exit_status=-29`. The t2 range is independently verified against W&B config

@@ -20,8 +20,10 @@ Running log of what's happening, session by session. Most recent first.
   Full tar readback and the exact `8870515` child-node parse passed for both.
 - The successor wrapper selects only unfinished healthy seats 1, 2, and 4 and
   requests exactly 1,054 nodes for 18 hours in `medium`; it checksum-gates the
-  immutable 20B/2B archives before staging. A two-job dependency chain is queued
-  only after the committed wrapper's full dry-run resolves three disjoint slices.
+  immutable 20B/2B archives before staging. Its full dry-run resolved exactly
+  three disjoint slices (522 + 266 + 266 = 1,054) against committed source
+  `816f46e1cc`. Head `8879474` is queued; follower `8879475` is dependency-held
+  with `afterany:8879474`.
 - Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
   queue were deleted and verified terminal: chain-3 control `8876446`,
   `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.
