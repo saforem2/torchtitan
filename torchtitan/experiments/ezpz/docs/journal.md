@@ -2,6 +2,45 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
+
+The isolated `sync/upstream-f359667` worktree now contains upstream merge
+`780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
+changes. The committed collectable ezpz suite reached 260 passed, 2 skipped, and
+14 subtests. Independent review then found stale validator API calls and
+fake-SPMD topology/serialization risks; those are fixed locally and the focused
+post-review suite passes 50 tests with 2 skips. The full unit-level ezpz suite
+passes 75 tests with 2 skips.
+
+The pre-sync/post-sync numerical gate passed exactly at zero tolerance for
+`llama3/debugmodel` and `deepseek_v3/debugmodel`: identical initialization,
+outputs, losses, gradients, AdamW state, and post-step parameters across two
+updates. Checkpoints saved after step 0 loaded in both directions and reproduced
+uninterrupted step 1 exactly. This closes local numerical and ordinary
+checkpoint-state parity; distributed DCP and accelerator behavior remain open.
+See the
+[merge-readiness report](experiments/upstream-f359667-merge-readiness.md).
+
+On Sunspot, corrected 5B chain `12479007`-`12479010` uses the isolated Torch
+2.14 XPU runtime and invokes `ezpz.cli:main` through the verified interpreter to
+avoid the copied venv's stale console-script shebang. Preflight `12479007` and
+five-step `1e-4` canary `12479008` finished with exit 0. The canary's inline
+`INVALID` is a known stdout-only predicate defect: W&B run
+[`qxkw7004`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/qxkw7004)
+contains the optimizer diagnostics. The `3e-5` control `12479009` is running;
+`1e-5` job `12479010` is queued.
+
+Historical 30B AdamW job `12478510` cannot be resumed because checkpointing was
+disabled on code predating durable LR-finder state. A fresh 75-point trajectory
+was submitted at the measured-good TP1, `dp_replicate=48`, `dp_shard=16`
+geometry on source `45f2e72d05`, with checkpoints every 25 points. Compute
+runtime preflight `12479013` passed; production job `12479014` is queued. The
+fresh trajectory avoids scientifically invalid stitching across independent
+initializations.
+
+Persistent operations and subsequent terminal transitions are mirrored to the
+private [TorchTitan Agent Vault](https://mbph.tail3e7069.ts.net:10444/n/history/torchtitan/index.md).
+
 ## 2026-09-27 (mbpr) -- fix `cos_sin` DCP -> HF fused-weight omission
 
 `AgptStateDictAdapter.to_hf()` bypassed

@@ -8,6 +8,7 @@ Benchmark results organized by experiment type and machine.
 - [**moe/**](moe/) -- Mixture of Experts models (500M--10B)
 - [**lr-finder/**](lr-finder/) -- Learning rate finder sweeps across models and optimizers
 - [**synthetic/**](synthetic/) -- Synthetic mid-training data (summarize olmo-mix-1124)
+- [**Upstream `f359667` merge readiness**](upstream-f359667-merge-readiness.md) -- static, numerical, checkpoint, hardware, and review gates
 
 ## Naming Convention
 

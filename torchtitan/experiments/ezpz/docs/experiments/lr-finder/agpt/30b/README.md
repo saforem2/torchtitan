@@ -44,3 +44,24 @@ evidence. The next model step is a minimal FSDP2/XCCL collective reproducer.
 
 Partial fine curves are deliberately not committed as successful evidence.
 No independently initialized points will be appended to an existing trajectory.
+
+## 2026-09-29 fresh resumable AdamW sweep
+
+Job `12478510` reached 94/100 finite AdamW updates and then exhausted walltime,
+but it cannot be resumed: its command disabled checkpointing and its source
+predated durable `LRFinderState`. No model, optimizer, dataloader, or finder
+cursor exists on disk. W&B history alone cannot continue the trajectory, and
+new independently initialized points will not be stitched onto it.
+
+A replacement uses one fresh 75-point trajectory over the same `3e-7` to
+`3e-4` window at the measured-good 64-node geometry: TP1,
+`dp_replicate=48`, `dp_shard=16`, 768 ranks, sequence length 4096, GBS 6144,
+and full activation checkpointing. Source is
+`45f2e72d0522b1bd8457d0ad645533658f3ff293`, which includes resumable
+LR-finder state. Checkpoints are written every 25 points without automatic
+purging.
+
+Compute-runtime preflight `12479013` finished with PBS exit 0 and
+`LRF75_PREFLIGHT_PASS` under Torch `2.14.0+xpu`. Dependent sweep `12479014` is
+queued. No basin or LR recommendation will be reported until the job produces
+finite real updates, resumable checkpoints, and a complete 75-point curve.

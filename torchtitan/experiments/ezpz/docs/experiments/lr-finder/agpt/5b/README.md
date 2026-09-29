@@ -55,6 +55,22 @@ page.
 A winner requires 100 finite updates, finite gradients, real parameter-change
 evidence, a fresh checkpoint, and comparison of the full matched trajectory.
 
+### 2026-09-29 lower-control replacement chain
+
+The copied isolated venv has a stale `bin/ezpz` shebang, so the replacement
+wrapper invokes `ezpz.cli:main` through the verified interpreter instead of the
+console script. Runtime/parser preflight `12479007` finished with exit 0.
+Five-step `1e-4` canary `12479008` completed five finite updates and exited 0;
+its inline `INVALID` marker repeats the known stdout-only predicate defect, while
+W&B run [`qxkw7004`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/qxkw7004)
+contains the optimizer diagnostics. The `3e-5` arm `12479009` is running under
+W&B run [`wzpyq053`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/wzpyq053),
+and `1e-5` arm `12479010` is queued behind it.
+
+These jobs close the missing lower-LR controls; they do not establish a winner
+until both 100-step runs have terminal scheduler records, finite gradient/update
+evidence, and fresh checkpoint artifacts.
+
 ## Artifacts
 
 - [5B AdamW CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478508-5b-adamw-fine.csv)

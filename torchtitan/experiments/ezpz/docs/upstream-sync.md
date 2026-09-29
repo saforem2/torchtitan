@@ -1,5 +1,46 @@
 # Upstream Sync Log
 
+## Current trial (2026-09-29): upstream `f359667`, validation in progress
+
+Branch `sync/upstream-f359667` merges upstream through
+[`f359667137438bef39274cb869626c3798512ecd`](https://github.com/pytorch/torchtitan/commit/f359667137438bef39274cb869626c3798512ecd)
+as `780f0a73e2`. It replays the local configuration/topology, MoE, RL, and
+regression surfaces as `32e72d34f9`, `1aa37d3b57`, `0aa353bdd3`, and
+`92d0e85c32`/`967b308ccf`.
+
+Independent review exposed three real runtime risks after the initial green
+suite: `EzpzValidator` requested nonexistent mesh axis `batch`, called a removed
+`self.validation_context()`, and fake-SPMD could silently expose invalid
+multi-axis PP meshes or attempt to serialize a live process group. The current
+uncommitted fixes use the `dp` mesh, enter `get_spmd_context()`, and fail closed
+for unsupported topology and serialization. The validator test now executes a
+real CPU validation pass; tautological strict-`xfail` controls were removed.
+
+Validation completed so far:
+
+- collectable ezpz suite after replay: **260 passed, 2 skipped, 14 subtests**;
+- focused post-review suite: **50 passed, 2 skipped**;
+- full `tests/unit_tests/ezpz`: **75 passed, 2 skipped**;
+- broad collection comparison: all 33 pre-sync collection failures are shared;
+  five post-only files are newly added tests;
+- deterministic dense and MoE pre/post parity passed at `rtol=0`, `atol=0` for
+  two AdamW updates, including exact outputs, losses, gradients, optimizer state,
+  post-step parameters, and bidirectional pre/post checkpoint resume.
+
+The numerical gate compares clean pre-sync `7d32b27055` with post-sync
+`967b308ccf` using `llama3/debugmodel` and `deepseek_v3/debugmodel`. Its script
+SHA-256 is
+`5b5cfe04d075ad4ea4718d0c08e03dc4a7217bb5236adb92efc8659b71a9b9ae`.
+Because native `FlexInnerAttention` backward is unsupported on this CPU runtime,
+only the inner-attention runtime module was replaced with deterministic causal
+eager attention; distributed DCP remains a hardware gate.
+
+The PR is deliberately not open. Sunspot dense/MoE/RL/checkpoint gates, Aurora
+dense/MoE gates, the final independent review, and exact-head CI remain pending.
+See the
+[standalone merge-readiness report](experiments/upstream-f359667-merge-readiness.md)
+for the live evidence matrix.
+
 ## Current landing (2026-09-23): upstream `0fd69d0b`, landed and validated
 
 The Sync 84 trial described below is historical. The current branch
