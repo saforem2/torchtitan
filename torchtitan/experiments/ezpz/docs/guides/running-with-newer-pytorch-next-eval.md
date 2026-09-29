@@ -1,6 +1,6 @@
 # Running with newer PyTorch on Aurora `next-eval`
 
-**Last validated:** 2026-09-19
+**Last validated:** 2026-09-29
 
 > [!IMPORTANT]
 > `next-eval` does **not** use Aurora's normal production image. Its compute
@@ -20,8 +20,8 @@
 The reusable environment used here lives at:
 
 ```text
-/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv
-/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.tar.gz
+/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval
+/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz/.venv.next-eval.tar.gz
 ```
 
 | component | validated value |
@@ -38,8 +38,9 @@ The reusable environment used here lives at:
 | XPU layout | 12 tiles/node with `ZE_FLAT_DEVICE_HIERARCHY=FLAT` |
 
 The Python is intentionally independent of `/opt/aurora`: that makes the venv
-start on both the login node and the TEST BKC compute nodes. The tarball is
-broadcast to node-local `/tmp/.venv` before launch.
+start on both the login node and the TEST BKC compute nodes. The versioned
+tarball is broadcast to node-local `/tmp/.venv.next-eval` before launch. Never
+overwrite or borrow the production `.venv`/`.venv.tar.gz` for this queue.
 
 ## 1. Request `next-eval`
 
@@ -99,14 +100,14 @@ known venv tarball instead:
 
 ```bash
 cd /flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
-source <(curl -fsSL https://bit.ly/ezpz-utils)
+source <(curl -fsSL https://ezpz.cool/utils.sh)
 ezpz_setup_job
 
 VENV_ROOT=/flare/AuroraGPT/foremans/runs/agpt-2b-v2/torchtitan-ezpz
-source "${VENV_ROOT}/.venv/bin/activate"
-ezpz yeet --src "${VENV_ROOT}/.venv.tar.gz"
+source "${VENV_ROOT}/.venv.next-eval/bin/activate"
+ezpz yeet --src "${VENV_ROOT}/.venv.next-eval.tar.gz"
 deactivate
-source /tmp/.venv/bin/activate
+source /tmp/.venv.next-eval/bin/activate
 export LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # Code comes from the current checkout; the tarball supplies the runtime.
@@ -164,7 +165,7 @@ XPU devices: 12
 ```
 
 A successful scheduler state or process exit is not sufficient evidence. The
-preflight must run from `/tmp/.venv`, after broadcast, using the same
+preflight must run from `/tmp/.venv.next-eval`, after broadcast, using the same
 `PYTHONPATH` and modules as training.
 
 ## 5. Updating the reusable venv
