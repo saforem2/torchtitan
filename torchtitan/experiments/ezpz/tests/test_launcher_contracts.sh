@@ -126,6 +126,10 @@ assert_contains "$fsdp_probe_py" 'maybe_install_xccl_split_group_workaround' \
     'standalone 30B storage probe must install the XCCL mesh workaround'
 assert_contains "$fsdp_probe_py" 'MASTER_ADDR' \
     'standalone 30B storage probe must configure env rendezvous under PALS'
+assert_contains "$fsdp_probe_py" 'global gradient' \
+    'sparse embedding gradients must be validated over the full shard group'
+assert_contains "$fsdp_probe_py" 'global parameter update' \
+    'probe acceptance must require a globally nonzero optimizer update'
 assert_contains "$fsdp_probe" 'SKIP_RAW_CONTROLS' \
     'FSDP-only retries must preserve completed raw controls without rerunning them'
 assert_contains "$fsdp_probe" 'exit 96' \

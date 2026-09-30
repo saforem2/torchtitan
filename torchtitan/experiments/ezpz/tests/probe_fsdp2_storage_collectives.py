@@ -116,6 +116,8 @@ def main() -> None:
 
     for step in range(1, args.iterations + 1):
         optimizer.zero_grad(set_to_none=True)
+        parameter = next(module.parameters())
+        before = parameter.to_local().detach().clone()
         tokens = torch.tensor(
             [[rank % 100352, (rank + step) % 100352]],
             dtype=torch.long,
@@ -128,17 +130,25 @@ def main() -> None:
             raise RuntimeError(f"non-finite/zero loss at step {step}: {float(loss)}")
         print(f"FORWARD_OK step={step} loss={float(loss):.9g}", flush=True)
         loss.backward()
-        parameter = next(module.parameters())
         grad = parameter.grad
         if grad is None or not bool(torch.isfinite(grad.to_local()).all()):
             raise RuntimeError(f"non-finite/missing gradient at step {step}")
-        grad_norm = float(grad.to_local().float().norm())
+        grad_sq = grad.to_local().float().square().sum()
+        dist.all_reduce(grad_sq, group=parallel_dims.get_mesh("dp_shard").get_group())
+        grad_norm = float(grad_sq.sqrt())
         if not math.isfinite(grad_norm) or grad_norm == 0.0:
-            raise RuntimeError(f"non-finite/zero gradient at step {step}: {grad_norm}")
+            raise RuntimeError(f"non-finite/zero global gradient at step {step}: {grad_norm}")
         print(f"BACKWARD_OK step={step} grad_norm={grad_norm:.9g}", flush=True)
         optimizer.step()
         torch.xpu.synchronize()
-        print(f"UPDATE_OK step={step}", flush=True)
+        update_sq = (parameter.to_local().detach() - before).float().square().sum()
+        dist.all_reduce(update_sq, group=parallel_dims.get_mesh("dp_shard").get_group())
+        update_norm = float(update_sq.sqrt())
+        if not math.isfinite(update_norm) or update_norm == 0.0:
+            raise RuntimeError(
+                f"non-finite/zero global parameter update at step {step}: {update_norm}"
+            )
+        print(f"UPDATE_OK step={step} update_norm={update_norm:.9g}", flush=True)
         dist.barrier(group=parallel_dims.get_mesh("dp_shard").get_group())
         if args.dp_replicate > 1:
             dist.barrier(group=parallel_dims.get_mesh("dp_replicate").get_group())
