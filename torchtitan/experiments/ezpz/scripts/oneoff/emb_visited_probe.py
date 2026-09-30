@@ -19,7 +19,7 @@ os.environ.setdefault("TORCH_DEVICE", "cpu")
 import sys
 
 sys.argv = ["x"]
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
 from torchtitan.experiments.ezpz.logging import init_logger
 
 init_logger()
@@ -47,7 +47,7 @@ argv = [
     "--metrics.no-enable-wandb",
     "--optim.lr-scheduler.warmup-steps=5",
 ]
-cfg = ConfigManager().parse_args(argv)
+cfg = LegacyConfigLoader().parse_args(argv)
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 
 cfg.optim.optimizer = default_adamw(lr=8e-4)

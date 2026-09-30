@@ -77,7 +77,7 @@ import logging
 
 from monarch.actor import ProcMesh, this_host
 
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
 from torchtitan.rl.controller import Controller
@@ -190,7 +190,7 @@ def spawn_proc_mesh(
 async def main():
     init_logger()
     os.environ["MONARCH_ACTOR_QUEUE_DISPATCH"] = "0"
-    config = ConfigManager().parse_args()
+    config = LegacyConfigLoader().parse_args()
     assert isinstance(config, Controller.Config)
     sl.init_structured_logger(
         source="rl_controller",

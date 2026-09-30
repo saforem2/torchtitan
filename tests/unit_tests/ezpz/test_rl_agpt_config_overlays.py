@@ -28,8 +28,10 @@ from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,
+    ModelConfigTransformContext,
     transform_model_config_,
 )
+from torchtitan.config import TrainingConfig
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.spmd_types import (
@@ -62,6 +64,10 @@ def _rl_model_config():
                     target_modules=["wqkv", "wo"],
                 )
             ],
+            context=ModelConfigTransformContext(
+                training=TrainingConfig(max_context_length=2048),
+                parallelism=ParallelismConfig(),
+            ),
         ),
     )
 
@@ -207,12 +213,10 @@ def test_every_retained_rl_factory_constructs(module_name: str) -> None:
 
 def test_agpt_rl_model_key_and_layout_contracts_are_stable() -> None:
     config = _rl_model_config()
-    config.update_from_config(
-        config=SimpleNamespace(
-            parallelism=ParallelismConfig(
-                data_parallel_shard_degree=1,
-                tensor_parallel_degree=1,
-            )
+    config.set_sharding_(
+        ParallelismConfig(
+            data_parallel_shard_degree=1,
+            tensor_parallel_degree=1,
         )
     )
     with torch.device("meta"):
@@ -264,7 +268,7 @@ def test_agpt_rl_model_key_and_layout_contracts_are_stable() -> None:
 
 def test_buffer_canonical_fqns_are_covered_by_layouts() -> None:
     config = _rl_model_config()
-    config.update_from_config(config=SimpleNamespace(parallelism=ParallelismConfig()))
+    config.set_sharding_(ParallelismConfig())
     with torch.device("meta"):
         model = config.build()
     layouts = _state_dict_layouts(model)

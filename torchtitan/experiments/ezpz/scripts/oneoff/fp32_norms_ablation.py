@@ -116,7 +116,7 @@ def main() -> None:
 
     import torch
 
-    from torchtitan.config import ConfigManager
+    from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
     from torchtitan.experiments.ezpz.logging import init_logger
 
     init_logger()
@@ -141,7 +141,7 @@ def main() -> None:
         *args.extra,
     ]
 
-    config = ConfigManager().parse_args(argv)
+    config = LegacyConfigLoader().parse_args(argv)
 
     # Set the optimizer programmatically: `--optimizer adamw` is consumed by
     # ezpz train.py's own pre-parser, and tyro (which we call directly here)

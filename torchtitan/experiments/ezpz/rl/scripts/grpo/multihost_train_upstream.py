@@ -18,7 +18,7 @@ from pathlib import Path
 import torch.distributed as dist
 from monarch._src.spmd.host_mesh import host_mesh_from_store
 from monarch.config import configure
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
 
 # Importing this module applies the XPU compatibility patches before rl imports.
 from torchtitan.experiments.ezpz.rl import train_upstream
@@ -119,7 +119,7 @@ def main() -> None:
     hosts.initialized.get()
     init_logger()
     os.environ["MONARCH_ACTOR_QUEUE_DISPATCH"] = "0"
-    config = ConfigManager().parse_args(config_args)
+    config = LegacyConfigLoader().parse_args(config_args)
     assert isinstance(config, Controller.Config)
     sl.init_structured_logger(
         source="rl_controller",

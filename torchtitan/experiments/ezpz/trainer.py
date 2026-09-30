@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import math
 import os
 import time
@@ -518,8 +519,12 @@ class FaultTolerantTrainer(TorchFTTrainer):
     @record
     def __init__(self, config: Config):
         self.config = config
-        model_config = config.model
-        model_config.update_from_config(config=config)
+        model_config = copy.deepcopy(config.model)
+        model_config.set_sharding_(config.parallelism)
+        apply_debug = getattr(model_config, "apply_ezpz_debug_", None)
+        if apply_debug is not None:
+            apply_debug(config.debug)
+        config.model = model_config
         if config.override.imports:
             apply_overrides(config.override, config)
         config.__post_init__()

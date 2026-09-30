@@ -33,7 +33,7 @@ def test_ft_applies_ffn_lora_override_before_model_build(monkeypatch):
         ).transform(config)
 
     config = ft.FaultTolerantTrainer.Config(
-        model=model_registry("debugmodel"),
+        model=model_registry("debugmodel", seq_len=2048),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
     )
@@ -132,7 +132,7 @@ def test_ft_trainer_uses_engine_cls_hook() -> None:
         engine_cls = CustomEngine
 
     config = ft.FaultTolerantTrainer.Config(
-        model=model_registry("debugmodel"),
+        model=model_registry("debugmodel", seq_len=2048),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
     )
@@ -145,7 +145,7 @@ def test_ft_trainer_uses_engine_cls_hook() -> None:
 
 def test_ft_rejects_cuda_graphed_fsdp_gradient_accumulation(monkeypatch) -> None:
     config = ft.FaultTolerantTrainer.Config(
-        model=model_registry("debugmodel"),
+        model=model_registry("debugmodel", seq_len=2048),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
     )

@@ -10,7 +10,7 @@ from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel
 def test_moe_routed_weights_have_spmd_placement_without_ep() -> None:
     """FSDP with dp_mesh_dims requires every parameter on the full SPMD mesh."""
     config = moe_debugmodel()
-    config.model.update_from_config(config=config)
+    config.model.set_sharding_(config.parallelism)
     layer = next(layer for layer in config.model.layers if layer.moe is not None)
 
     for grouped_linear in (

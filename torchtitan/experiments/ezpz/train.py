@@ -23,7 +23,7 @@ from torch.distributed import get_rank, get_world_size, is_initialized
 import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
 from torchtitan.components.optim import OptimizersContainer
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
 from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
     default_adamw,
@@ -365,7 +365,7 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
             "checkpoint.no-create-seed-checkpoint",
             "no-checkpoint.create-seed-checkpoint",
         }:
-            # ConfigManager owns optional-component selection. Preserve these
+            # LegacyConfigLoader owns optional-component selection. Preserve these
             # legacy flags until its migration pass; rewriting them to
             # --checkpointer.enable creates a nonexistent field on the selected
             # CheckpointManager.Config subcommand.
@@ -448,7 +448,7 @@ def main(args: list[str] | None = None) -> None:
     )
 
     logger.info(f"\n{json.dumps(parsed_args, indent=4, sort_keys=True)}")
-    config_manager = ConfigManager()
+    config_manager = LegacyConfigLoader()
     try:
         config: Any = config_manager.parse_args(parsed_args)
     except Exception as parse_exc:

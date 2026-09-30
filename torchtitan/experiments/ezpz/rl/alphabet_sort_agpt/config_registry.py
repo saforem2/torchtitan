@@ -49,6 +49,7 @@ from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,
+    ModelConfigTransformContext,
     transform_model_config_,
 )
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
@@ -96,6 +97,10 @@ def _agpt_rl_model_config(*, lora_rank: int = 8, lora_alpha: float = 16.0):
                     target_modules=["wqkv", "wo"],
                 )
             ],
+            context=ModelConfigTransformContext(
+                training=TrainingConfig(max_context_length=2048),
+                parallelism=ParallelismConfig(),
+            ),
         ),
     )
     return model_config

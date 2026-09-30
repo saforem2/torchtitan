@@ -246,7 +246,7 @@ def agpt(
     hf_assets_path: str = "./assets/hf/gemma-7b",
     dataset_path: str | None = None,
 ) -> FaultTolerantTrainer.Config:
-    cfg = _base_config(flavor)
+    cfg = _base_config(flavor, max_context_length=seq_len)
     cfg.hf_assets_path = hf_assets_path
     # 79th sync (#4085): upstream flipped the DEFAULT spmd_backend to
     # "spmd_types", under which every ezpz config dies with
@@ -350,10 +350,21 @@ def agpt(
     return cfg
 
 
-def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
+def _base_config(
+    flavor: str, max_context_length: int | None = None
+) -> FaultTolerantTrainer.Config:
+    model = model_registry(flavor)
+    if max_context_length is None:
+        max_context_length = model.max_context_length
+    model.max_context_length = max_context_length
+    for layer in model.layers:
+        attention = getattr(layer, "attention", None)
+        rope = getattr(attention, "rope", None)
+        if rope is not None:
+            rope.max_context_length = max_context_length
     return FaultTolerantTrainer.Config(
         hf_assets_path="./tests/assets/hf/gemma-7b",
-        model=model_registry(flavor),
+        model=model,
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
         optim=Optim.Config(
@@ -366,9 +377,9 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             ),
         ),
         training=TrainingConfig(
-            # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
-            num_tokens_per_microbatch_per_dp_rank=8 * 2048,
-            max_context_length=2048,
+            # #4121: tokens, not sequences.
+            num_tokens_per_microbatch_per_dp_rank=8 * max_context_length,
+            max_context_length=max_context_length,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),

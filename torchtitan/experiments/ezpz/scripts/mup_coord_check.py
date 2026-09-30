@@ -146,7 +146,7 @@ def run_worker(args: argparse.Namespace) -> int:
 
     import torch
 
-    from torchtitan.config import ConfigManager
+    from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
     from torchtitan.experiments.ezpz.agpt import _build_agpt_config
     from torchtitan.experiments.ezpz.logging import init_logger
     from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
@@ -200,7 +200,7 @@ def run_worker(args: argparse.Namespace) -> int:
         *args.extra,
     ]
 
-    config = ConfigManager().parse_args(argv)
+    config = LegacyConfigLoader().parse_args(argv)
     # muP changes BOTH halves and needs both to be measured together: the
     # d^-1 readout init does nothing on its own under Adam (which is
     # scale-invariant in the gradient), and the eta/m hidden LR group does

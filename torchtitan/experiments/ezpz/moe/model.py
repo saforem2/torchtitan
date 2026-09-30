@@ -267,22 +267,7 @@ class moeModel(Decoder):  # noqa: N801
         dim: int = 2048
         vocab_size: int = 102400
 
-        def update_from_config(
-            self,
-            *,
-            config,
-            **kwargs,
-        ) -> None:
-            # Run Decoder.Config's validation + MoE/TP/EP checks first.
-            # After PR #3395 (42nd sync) base validation moved from
-            # per-model overrides into the shared Decoder.Config helper.
-            # After PR #3458 (47th sync) per-layer rope sync is no longer
-            # needed: each Attention.Config carries its own RoPE.Config
-            # instance instead of inheriting fields from self.rope.
-            Decoder.Config.update_from_config(self, config=config, **kwargs)
-            parallelism = config.parallelism
-            debug = config.debug
-
+        def set_sharding_(self, parallelism) -> None:
             # for_loop fallback when CUDA SM90+ grouped_mm is unavailable
             # (notably on XPU). Upstream Decoder.Config doesn't know about
             # compute_backend, so this stays.
@@ -301,16 +286,7 @@ class moeModel(Decoder):  # noqa: N801
                             "back to for_loop expert backend.",
                         )
                         experts_cfg.compute_backend = "for_loop"
-                    layer_cfg.moe.router._debug_force_load_balance = (
-                        debug.moe_force_load_balance
-                    )
-                    if hasattr(
-                        layer_cfg.moe.routed_experts.token_dispatcher,
-                        "force_load_balance",
-                    ):
-                        layer_cfg.moe.routed_experts.token_dispatcher.force_load_balance = (
-                            debug.moe_force_load_balance
-                        )
+
                     # Detect deepep/hybridep configs by the dispatcher
                     # Config class, not by a `comm_backend` attribute that
                     # doesn't exist on the dispatcher Config. The old
@@ -364,6 +340,17 @@ class moeModel(Decoder):  # noqa: N801
                 enable_sp=parallelism.enable_sequence_parallel,
                 enable_ep=parallelism.expert_parallel_degree > 1,
             )
+
+        def apply_ezpz_debug_(self, debug) -> None:
+            for layer_cfg in self.layers:
+                if layer_cfg.moe is None:
+                    continue
+                layer_cfg.moe.router._debug_force_load_balance = (
+                    debug.moe_force_load_balance
+                )
+                dispatcher = layer_cfg.moe.routed_experts.token_dispatcher
+                if hasattr(dispatcher, "force_load_balance"):
+                    dispatcher.force_load_balance = debug.moe_force_load_balance
 
         def get_nparams_and_flops(
             self, model: nn.Module, seq_len: int
