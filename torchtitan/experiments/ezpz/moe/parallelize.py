@@ -50,7 +50,7 @@ from torchtitan.config import (
     TrainingConfig,
 )
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.ezpz.fsdp_compat import (
@@ -109,7 +109,7 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
 def parallelize_moe(
     model: moeModel,
     *,
-    parallel_dims: ParallelDims,
+    parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
@@ -121,6 +121,7 @@ def parallelize_moe(
     The passed-in model preferably should be on meta device. Otherwise
     the model must fit on GPU or CPU memory.
     """
+    parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""

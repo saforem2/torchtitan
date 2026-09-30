@@ -45,7 +45,7 @@ from torchtitan.config import (
 )
 from torchtitan.config.parallelism import ParallelismConfig
 
-from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
@@ -100,7 +100,7 @@ def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
 def parallelize_llama(
     model: Llama3Model,
     *,
-    parallel_dims: ParallelDims,
+    parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
@@ -113,6 +113,7 @@ def parallelize_llama(
     The passed-in model preferably should be on meta device. Otherwise
     the model must fit on GPU or CPU memory.
     """
+    parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""

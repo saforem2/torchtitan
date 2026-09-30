@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 
 from torchtitan.distributed.fsdp import resolve_fsdp_mesh
-from torchtitan.distributed.parallel_dims import ParallelDims
+from torchtitan.distributed.parallelism_context import ParallelismContext
 from torchtitan.distributed.spmd_types import annotate_replicated_parameters
 from torchtitan.experiments.ezpz.xccl_split_group_workaround import (
     maybe_install_xccl_split_group_workaround,
@@ -72,7 +72,7 @@ def main() -> None:
     print(f"PG_READY rank={rank} world={world} local_rank={local_rank}", flush=True)
 
     maybe_install_xccl_split_group_workaround()
-    parallel_dims = ParallelDims(
+    parallel_dims = ParallelismContext(
         dp_replicate=args.dp_replicate,
         dp_shard=args.dp_shard,
         cp=1,

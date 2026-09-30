@@ -16,7 +16,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from torchtitan.components.loss import CrossEntropyLoss
 from torchtitan.config import TrainingConfig
-from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 
 
@@ -111,7 +111,7 @@ def native_ddp_autocast_context(
 def validate_native_ddp(
     *,
     model_name: str,
-    parallel_dims: ParallelDims,
+    parallel_dims: ParallelismContext,
     training: TrainingConfig,
     parallelism: EzpzParallelismConfig,
     loss_fn: object,

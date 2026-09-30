@@ -16,7 +16,7 @@ from torch.multiprocessing.spawn import spawn
 
 from torchtitan.components.loss import CrossEntropyLoss, MSELoss
 from torchtitan.config import TrainingConfig
-from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.experiments.ezpz.agpt import parallelize as agpt_parallelize
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.native_ddp import (
@@ -28,8 +28,8 @@ from torchtitan.experiments.ezpz.native_ddp import (
 from torchtitan.models.common.linear import Linear
 
 
-def _parallel_dims(*, pp: int = 1) -> ParallelDims:
-    return ParallelDims(
+def _parallel_dims(*, pp: int = 1) -> ParallelismContext:
+    return ParallelismContext(
         dp_replicate=2,
         dp_shard=1,
         cp=1,
