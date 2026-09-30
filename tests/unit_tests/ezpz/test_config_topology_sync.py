@@ -91,6 +91,24 @@ def test_parallel_dims_from_topology_matches_direct_construction() -> None:
     assert actual == expected
 
 
+def test_20b_depth48_probe_preserves_width_without_mutating_20b() -> None:
+    from torchtitan.experiments.ezpz.agpt.config_registry import (
+        agpt_20b,
+        agpt_20b_depth48_probe,
+    )
+
+    baseline = agpt_20b()
+    probe = agpt_20b_depth48_probe()
+
+    assert len(baseline.model.layers) == 64
+    assert len(probe.model.layers) == 48
+    assert probe.model.tok_embeddings.embedding_dim == 5120
+    assert probe.model.tok_embeddings.num_embeddings == 256128
+    assert probe.model.layers[0].feed_forward.w13.out_features == (
+        baseline.model.layers[0].feed_forward.w13.out_features
+    )
+
+
 def test_legacy_comm_mode_translates_to_backend() -> None:
     from torchtitan.experiments.ezpz.train import _translate_legacy_args
 

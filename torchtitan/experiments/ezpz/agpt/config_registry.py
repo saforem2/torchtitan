@@ -1053,6 +1053,20 @@ def agpt_20b() -> FaultTolerantTrainer.Config:
     return agpt("20b")
 
 
+def agpt_20b_depth48_probe() -> FaultTolerantTrainer.Config:
+    """Diagnostic 20B-width model with 48 of the canonical 64 layers.
+
+    This isolates the number of FSDP groups/backward collectives while keeping
+    the 20B tensor dimensions, tokenizer, data path, and training policy intact.
+    It is not checkpoint-compatible with the canonical 20B model.
+    """
+    import copy
+
+    cfg = copy.deepcopy(agpt_20b())
+    cfg.model.layers = cfg.model.layers[:48]
+    return cfg
+
+
 def agpt_20b_noac() -> FaultTolerantTrainer.Config:
     """agpt_20b with activation checkpointing OFF.
 
