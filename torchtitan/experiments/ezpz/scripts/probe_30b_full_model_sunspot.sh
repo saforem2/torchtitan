@@ -32,6 +32,13 @@ load_pinned_ezpz_utils || exit $?
 export PATH="/opt/pbs/bin:$PATH"
 ezpz_setup_job || exit $?
 ezpz_load_modules || exit $?
+# Opt-in: the frameworks module supplies the Torch build for venvs that layer
+# on top of it (system-site-packages). Without it those venvs cannot resolve
+# libmkl and `import torch` fails before rank 0 initializes.
+if [[ "${PROBE_LOAD_FRAMEWORKS:-0}" == "1" ]]; then
+    module use /opt/aurora/26.181.0/modulefiles || exit 91
+    module load frameworks/2026.1.0 || exit 92
+fi
 export VIRTUAL_ENV="$V"
 export PATH="$V/bin:$PATH"
 hash -r
