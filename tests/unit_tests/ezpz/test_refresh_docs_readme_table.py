@@ -30,10 +30,7 @@ def test_refresh_recently_updated_rewrites_tracked_doc_count(
         "old\n"
         "<!-- END recently-updated (auto-generated) -->\n"
     )
-    rows = [
-        ("2026-09-30", f"Doc {index}", f"./doc-{index}.md")
-        for index in range(303)
-    ]
+    rows = [("2026-09-30", f"Doc {index}", f"./doc-{index}.md") for index in range(303)]
     monkeypatch.setattr(MODULE, "_collect_doc_rows", lambda _: rows)
 
     assert MODULE.refresh_recently_updated(readme)
