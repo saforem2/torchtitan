@@ -138,6 +138,14 @@ def parallelize_llama(
     # llama3/parallelize.py:41. The old else-arm (TP-only parallelize for the
     # partial_dtensor backend) is unreachable and was removed with it.
     #
+    legacy_partial_dtensor = os.environ.get("EZPZ_LEGACY_PARTIAL_DTENSOR") == "1"
+    if legacy_partial_dtensor and (
+        parallel_dims.tp_enabled or parallel_dims.cp_enabled or parallel_dims.ep_enabled
+    ):
+        raise ValueError(
+            "EZPZ_LEGACY_PARTIAL_DTENSOR=1 supports dense TP=1, CP=1, EP=1 only"
+        )
+
     # TP goes through the config-based sharding API: the model's
     # sharding_config declarations were filled in by update_from_config (see
     # model.py), and #3159 made Module.parallelize take ParallelDims so each
@@ -145,7 +153,13 @@ def parallelize_llama(
     # BaseModel.parallelize() owns this lifecycle now and called this custom
     # implementation from AgptModel.parallelize(). Invoke only the internal
     # config-driven sharding pass here; calling model.parallelize() would recurse.
-    model._parallelize(parallel_dims)
+    if not legacy_partial_dtensor:
+        model._parallelize(parallel_dims)
+    else:
+        logger.info(
+            "Using legacy partial-DTensor FSDP compatibility path: "
+            "plain parameters before FSDP"
+        )
 
     model_compile_enabled = (
         compile_config is not None and "model" in compile_config.components
@@ -182,7 +196,11 @@ def parallelize_llama(
     # mirror that here rather than hardcoding either name.
     # #4419 deleted parallelism.spmd_backend; unconditional now, matching core
     # llama3/parallelize.py:65.
-    dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
+    if legacy_partial_dtensor:
+        dp_mesh = parallel_dims.get_mesh("dp_shard")
+        dp_mesh_dims = None
+    else:
+        dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
 
     # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
     # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16

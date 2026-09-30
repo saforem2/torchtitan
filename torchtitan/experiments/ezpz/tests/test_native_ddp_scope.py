@@ -7,6 +7,7 @@
 import os
 import tempfile
 from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -142,6 +143,71 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
 
     assert result is model
     assert model.parallelized
+
+
+def test_agpt_legacy_partial_dtensor_uses_plain_fsdp_mesh(monkeypatch) -> None:
+    class Model:
+        def _parallelize(self, _parallel_dims) -> None:
+            pytest.fail("legacy partial-DTensor path must leave parameters plain")
+
+    mesh = object()
+    parallel_dims = SimpleNamespace(
+        seq_len_divisor=1,
+        tp_enabled=False,
+        cp_enabled=False,
+        ep_enabled=False,
+        pp_enabled=False,
+        dp_replicate_enabled=False,
+        get_mesh=lambda name: mesh if name == "dp_shard" else None,
+    )
+    parallelism = SimpleNamespace(
+        enable_data_parallel_native_ddp=False,
+        fsdp_reshard_after_forward="default",
+    )
+    calls = []
+    monkeypatch.setenv("EZPZ_LEGACY_PARTIAL_DTENSOR", "1")
+    monkeypatch.setattr(
+        agpt_parallelize,
+        "apply_fsdp",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    model = Model()
+    result = agpt_parallelize.parallelize_llama(
+        cast(Any, model),
+        parallel_dims=cast(Any, parallel_dims),
+        training=TrainingConfig(max_context_length=8),
+        parallelism=cast(Any, parallelism),
+        compile_config=cast(Any, None),
+        ac_config=None,
+        dump_folder=".",
+    )
+
+    assert result is model
+    assert len(calls) == 1
+    assert calls[0][0][1] is mesh
+    assert calls[0][1]["dp_mesh_dims"] is None
+
+
+def test_agpt_legacy_partial_dtensor_rejects_tp(monkeypatch) -> None:
+    monkeypatch.setenv("EZPZ_LEGACY_PARTIAL_DTENSOR", "1")
+    parallel_dims = SimpleNamespace(
+        seq_len_divisor=1,
+        tp_enabled=True,
+        cp_enabled=False,
+        ep_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="supports dense TP=1, CP=1, EP=1 only"):
+        agpt_parallelize.parallelize_llama(
+            cast(Any, object()),
+            parallel_dims=cast(Any, parallel_dims),
+            training=TrainingConfig(max_context_length=8),
+            parallelism=cast(Any, object()),
+            compile_config=cast(Any, None),
+            ac_config=None,
+            dump_folder=".",
+        )
 
 
 def _run_two_rank_equivalence(rank: int, rendezvous: str, result_file: str) -> None:
