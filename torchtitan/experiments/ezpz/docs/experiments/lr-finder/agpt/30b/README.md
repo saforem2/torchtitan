@@ -103,11 +103,49 @@ device synchronization (`12479079`), and the combined output-event control
 were already exhausted before packing. These unsuccessful monkeypatches were
 removed from the maintained branch.
 
-No safe local runtime or topology workaround remains: the preserved Torch 2.13
-runtime cannot satisfy current `dp_mesh_dims` DTensor construction, and the
-available Torch 2.15 environment is corrupt (`torch.fx.experimental.unification.core`
-is missing). Production 30B LR remains blocked pending a repaired newer XPU
-runtime or an upstream PyTorch/XCCL fix. Another 64-node sweep is not justified.
+Subsequent matched-runtime work explains why the historical 30B campaign could
+train while the current path cannot. The successful August campaign used Torch
+2.13, `partial_dtensor`, and pure FSDP over 192 ranks; this is verified directly
+from the preserved `12473743`/`12473744` logs. Current upstream removed both the
+backend selector and `partial_dtensor` in #4419.
+
+Current-head job `12479081` recreated the historical 16-node, 192-rank, LBS=5,
+GBS=960 geometry under Torch 2.14 and still failed before step 1. Although the
+mesh resolved as `dp_shard=192`, FSDP attempted a 36.35-GiB all-gather while
+29.84 GiB was resident per rank. This is nearly the same resident memory seen
+at `dp_shard=16`, so increasing shard degree did not restore the historical
+memory behavior.
+
+The Torch 2.15 environment was then repaired rather than discarded. A previous
+cleanup had deleted 38 legitimate package files whose basenames matched
+`core.py`, `core.pyi`, or `core.h`. Reinstalling the exact
+`torch==2.15.0.dev20260915+xpu` wheel and affected packages, plus restoring the
+exact cached Triton file, produced an integrity scan of 33,409 RECORD files with
+zero missing and zero mismatched. Matched 192-rank job `12479083` nevertheless
+failed with the same 36.35-GiB first-forward FSDP all-gather as Torch 2.14.
+
+Frameworks `2026.1.0` Torch `2.13.0a0+gitcf30153` was also tested. Current head
+already calls `_parallelize(parallel_dims)` unconditionally, but job `12479084`
+still hit the pytorch/pytorch#181519 contract during FSDP construction: a plain
+`weight` remained where `dp_mesh_dims` requires a full-mesh DTensor.
+
+An opt-in ezpz compatibility experiment then recreated the old TP=1 contract:
+leave parameters plain before FSDP, use the one-dimensional `dp_shard` mesh, and
+omit `DataParallelMeshDims`. Torch 2.15 5B job `12479085` passed three updates
+(`loss3=11.99557`, `grad3=1.8735`), proving the path is functional at smaller
+scale. It did not recover 30B: Torch 2.15 job `12479086` still attempted the
+36.35-GiB first-forward all-gather, while frameworks Torch 2.13 job `12479087`
+attempted a 72-GiB all-gather during fused-FFN parameter initialization at
+`gate_init(t[0])`. No 30B job in this sequence completed one update.
+
+Restoring `full_dtensor` is not a narrow version of the historical solution:
+the successful jobs used `partial_dtensor`, while compiled AGPT on
+`full_dtensor` previously failed the `vc_check` `DeviceMesh` assertion. Upstream
+removed `full_dtensor` in #4217 (34 files) and later removed DTensor forward /
+backward support in #4419 (139 files across the current delta). Production 30B
+LR therefore remains blocked pending a fix to the current full-SPMD/FSDP
+materialization behavior or a deliberately maintained legacy stack. Another
+large LR sweep is not justified until a canary completes three real updates.
 
 ## Artifacts
 

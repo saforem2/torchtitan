@@ -2,6 +2,42 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Sunspot) -- 30B backend/runtime reconstruction
+
+Historical logs establish that the successful 30B optimizer campaign used
+Torch 2.13 with `partial_dtensor` and pure FSDP over 192 ranks. Current-head
+Torch 2.14 job `12479081` recreated its 16-node/LBS=5/GBS=960 geometry but
+failed before step 1: FSDP attempted a 36.35-GiB all-gather with 29.84 GiB
+already resident per rank. Resident memory was nearly unchanged from shard-16,
+so shard-192 did not restore the historical memory behavior.
+
+The shared Torch 2.15 environment was repaired after proving that a broad
+`core*` cleanup had deleted 38 legitimate package files. The exact Torch wheel
+and affected packages were reinstalled, Triton's missing file was restored at
+its RECORD hash, and 33,409 RECORD files verified with zero missing or
+mismatched. Current-head job `12479083` then reproduced Torch 2.14's same
+36.35-GiB first-forward all-gather OOM. Frameworks `2026.1.0` Torch 2.13 job
+`12479084` reached FSDP construction but still reproduced pytorch/pytorch#181519
+despite current head's unconditional `_parallelize`: a plain `weight` remained
+where `dp_mesh_dims` requires a full-mesh DTensor. Attempt `12479082` was a
+harness-only failure because its batch script did not load the frameworks module
+needed to resolve MKL; the corrected wrapper is committed.
+
+An opt-in dense TP=1 legacy compatibility path was added at commit `c484260c02`:
+skip full-SPMD parameter annotation, use the one-dimensional `dp_shard` mesh,
+and omit `DataParallelMeshDims`. Focused tests pass. Torch 2.15 5B job `12479085`
+validated the mechanism with three finite updates (`loss3=11.99557`,
+`grad3=1.8735`, PBS exit 0). The 30B escalations failed: Torch 2.15 `12479086`
+still requested the 36.35-GiB first-forward all-gather, and frameworks Torch
+2.13 `12479087` requested 72 GiB during fused-FFN initialization at
+`gate_init(t[0])`. Thus neither a repaired newer runtime nor mesh-only emulation
+of `partial_dtensor` restores 30B on current head.
+
+`full_dtensor` is not the historical working path. It previously failed compiled
+AGPT's `vc_check` on `DeviceMesh`; restoring it would reverse #4217 and much of
+#4419 rather than provide a bounded experiment-local fix. No production 30B LR
+run is released until a current-head canary completes three genuine updates.
+
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 
 The 30B pre-step failure discriminator completed on Sunspot. Job `12479051`
