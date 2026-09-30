@@ -54,18 +54,6 @@ from torchtitan.training_engine import TrainingEngine
 _CLIP_FOREACH_LOGGED = False
 
 
-def _local_attention_seq_len(
-    max_context_length: int, seq_len_divisor: int
-) -> int:
-    """Return the token length seen by local attention after TP/CP sharding."""
-    if max_context_length % seq_len_divisor != 0:
-        raise ValueError(
-            f"max_context_length {max_context_length} must be divisible by "
-            f"the parallel sequence divisor {seq_len_divisor}"
-        )
-    return max_context_length // seq_len_divisor
-
-
 def _clip_foreach() -> bool:
     """Whether to use the fused multi-tensor path in ``clip_grad_norm_``.
 
@@ -588,12 +576,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         from torchtitan.experiments.ezpz.agpt import set_ezpz_max_context_length
 
-        set_ezpz_max_context_length(
-            _local_attention_seq_len(
-                config.training.max_context_length,
-                parallelism_context.seq_len_divisor,
-            )
-        )
+        set_ezpz_max_context_length(config.training.max_context_length)
 
         self.metrics_processor = config.metrics.build(
             parallelism_context=parallelism_context,

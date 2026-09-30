@@ -20,11 +20,7 @@ ezpz_stub.get_rank = lambda: 0
 ezpz_stub.distributed = SimpleNamespace(verify_wandb=lambda: False)
 sys.modules.setdefault("ezpz", ezpz_stub)
 
-from torchtitan.experiments.ezpz.trainer import (
-    _local_attention_seq_len,
-    EzpzTrainingEngine,
-    FaultTolerantTrainer,
-)
+from torchtitan.experiments.ezpz.trainer import EzpzTrainingEngine, FaultTolerantTrainer
 from torchtitan.training_engine import TrainingEngine
 
 
@@ -48,15 +44,6 @@ def test_ezpz_trainer_uses_training_engine_state_contract():
 
     assert issubclass(FaultTolerantTrainer.engine_cls, TrainingEngine)
     assert trainer.state_dict() == {"step": 4, "ntokens_seen": 17}
-
-
-def test_attention_reshape_uses_tp_local_sequence_length():
-    assert _local_attention_seq_len(512, 2) == 256
-
-
-def test_attention_reshape_rejects_uneven_sequence_sharding():
-    with pytest.raises(ValueError, match="must be divisible"):
-        _local_attention_seq_len(512, 3)
 
 
 def test_ezpz_batch_ramp_reads_engine_completed_steps():
