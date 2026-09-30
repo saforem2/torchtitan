@@ -13,6 +13,7 @@ V="${PROBE_VENV:?set PROBE_VENV}"
 EXPECTED_SHA="${EXPECTED_SHA:?set EXPECTED_SHA}"
 TOKENIZER="${TOKENIZER:?set TOKENIZER}"
 JOB="${PBS_JOBID%%.*}"
+MODEL_CONFIG="${CANARY_MODEL_CONFIG:-agpt_30b_olmo2tok_smoke}"
 NPROC="${CANARY_NPROC:-48}"
 DP_REPLICATE="${CANARY_DP_REPLICATE:-3}"
 DP_SHARD="${CANARY_DP_SHARD:-16}"
@@ -50,7 +51,7 @@ export EZPZ_DIAG_ECHO=1
 run_model() {
     "$V/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt \
-    --config agpt_30b_olmo2tok_smoke \
+    --config "$MODEL_CONFIG" \
     --hf-assets-path "$TOKENIZER" \
     --job.dump-folder "$OUT" \
     --optimizer adamw \
@@ -69,7 +70,7 @@ run_model() {
     --diagnostics-interval 1 \
     activation-checkpoint:full
 }
-export V D TOKENIZER OUT NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
+export V D TOKENIZER OUT MODEL_CONFIG NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
 export -f run_model
 
 if [[ "$NPROC" -eq 16 ]]; then

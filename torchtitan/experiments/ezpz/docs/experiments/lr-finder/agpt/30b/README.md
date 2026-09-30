@@ -55,6 +55,18 @@ The next controlled escalation is a four-node full-model canary at
 updates with positive update-ratio evidence before any 64-node LR sweep is
 released.
 
+That escalation failed before step 1 in both forms. HSDP job `12479056`
+(`3 x 16`, 48 ranks) built the 26.20B model at 32.64 GiB/rank, entered step 1,
+then rank 16 was killed after a Level Zero `MPL_gpu_imemcpy`/MPI pipeline
+failure during a oneCCL scale-out all-reduce. Pure-FSDP job `12479057`
+(`1 x 16`, 16 ranks) also built the model and entered step 1, then ranks 12 and
+14 raised `UR_RESULT_ERROR_OUT_OF_RESOURCES` from `loss.backward()` before
+gradient clipping or an optimizer update. Removing the HSDP replicate axis
+therefore does not remove the full-model failure. Since the exact-size raw
+collectives and one-embedding FSDP lifecycle pass, the remaining boundary is
+the full model's repeated collective/resource pressure. The next control keeps
+64 layers and the same shard-16 runtime while reducing model width to 20B.
+
 ## Artifacts
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)

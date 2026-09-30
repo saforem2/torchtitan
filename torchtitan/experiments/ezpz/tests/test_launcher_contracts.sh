@@ -150,7 +150,7 @@ assert_not_contains "$fsdp_probe_py" 'pip install' \
 
 # The next escalation after a green synthetic probe is a four-node full-model
 # canary, not a blind 64-node LR sweep.
-assert_contains "$full_model_probe" '--config agpt_30b_olmo2tok_smoke' \
+assert_contains "$full_model_probe" 'CANARY_MODEL_CONFIG:-agpt_30b_olmo2tok_smoke' \
     '30B full-model canary must use the canonical OLMo-tokenizer model'
 assert_contains "$full_model_probe" 'CANARY_NPROC:-48' \
     '30B full-model canary must retain a 48-rank launch path'

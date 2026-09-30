@@ -17,6 +17,17 @@ production-scale LR restart. Intermediate jobs `12479049`, `12479052`,
 `12479053`, and `12479054` exposed and corrected probe-only launcher,
 rendezvous, sparse-gradient, and XCCL AVG-versus-SUM contract errors.
 
+The first full-model escalation did not clear the blocker. HSDP canary
+`12479056` (`3 x 16`, 48 ranks, commit `f38c35ec99`) built the 26.20B model at
+32.64 GiB/rank and entered step 1, then failed during `loss.backward()` with a
+Level Zero `MPL_gpu_imemcpy`/MPI pipeline assertion in oneCCL scale-out
+all-reduce; PBS exit was 137. Pure-FSDP control `12479057` (`1 x 16`, 16 ranks,
+commit `7b6ad55de6`) also built the model and entered step 1, then ranks 12 and
+14 reported `UR_RESULT_ERROR_OUT_OF_RESOURCES` from backward before clipping or
+an optimizer update; PBS exit was 143. This exonerates the HSDP replica axis as
+the primary cause but confirms a full-model, pre-update collective/resource
+ceiling. A current-head 20B/64-layer pure-FSDP control is the next size rung.
+
 Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
 project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
 steps with arm exit 0. The MoE arm failed during FSDP initialization before
