@@ -211,3 +211,16 @@ def test_direct_context_length_override_synchronizes_model_and_rope() -> None:
         if getattr(layer, "attention", None) is not None
         and getattr(layer.attention, "rope", None) is not None
     )
+
+
+def test_legacy_activation_checkpoint_none_subcommand() -> None:
+    config = LegacyConfigLoader().parse_args(
+        [
+            "--module=ezpz.agpt",
+            "--config=agpt_debugmodel",
+            "activation-checkpoint:none",
+        ]
+    )
+    config = cast(Any, config)
+
+    assert config.activation_checkpoint is None

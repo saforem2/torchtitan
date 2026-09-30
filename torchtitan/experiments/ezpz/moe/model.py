@@ -6,7 +6,7 @@
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import spmd_types as spmd
 import torch
@@ -22,6 +22,7 @@ from torchtitan.models.common.attention import (
     ScaledDotProductInnerAttention,
 )
 from torchtitan.models.common.decoder import Decoder, TransformerBlock
+from torchtitan.models.common.moe import RoundRobinTokenChoiceTopKRouter
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.rope import RoPE
@@ -346,7 +347,13 @@ class moeModel(Decoder):  # noqa: N801
             for layer_cfg in self.layers:
                 if layer_cfg.moe is None:
                     continue
-                layer_cfg.moe.router._debug_force_load_balance = force_load_balance
+                if force_load_balance:
+                    layer_cfg.moe.router = RoundRobinTokenChoiceTopKRouter.Config(
+                        **{
+                            field.name: getattr(layer_cfg.moe.router, field.name)
+                            for field in fields(layer_cfg.moe.router)
+                        }
+                    )
                 dispatcher = layer_cfg.moe.routed_experts.token_dispatcher
                 if hasattr(dispatcher, "force_load_balance"):
                     dispatcher.force_load_balance = force_load_balance

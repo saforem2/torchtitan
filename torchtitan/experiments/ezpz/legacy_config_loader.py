@@ -76,6 +76,17 @@ class LegacyConfigLoader:
         i = 0
         while i < len(tokens):
             token = tokens[i]
+            if token.startswith("activation-checkpoint:"):
+                mode = token.partition(":")[2]
+                if mode in {"none", "disabled"}:
+                    config.activation_checkpoint = None  # type: ignore[attr-defined]
+                else:
+                    raise ValueError(
+                        "Legacy activation-checkpoint subcommands currently "
+                        f"support only :none, got {token!r}"
+                    )
+                i += 1
+                continue
             if not token.startswith("--"):
                 raise ValueError(f"Unexpected positional argument: {token!r}")
 
