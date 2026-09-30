@@ -167,7 +167,7 @@ class _Trainer:
             checkpoint=SimpleNamespace(load_step=-1),
             metrics=SimpleNamespace(log_freq=1000),
             model_spec=None,
-            optimizer=SimpleNamespace(name="sgd"),
+            optim=SimpleNamespace(optimizer=SimpleNamespace(name="sgd")),
             dataloader=SimpleNamespace(dataset="test"),
             parallelism=SimpleNamespace(
                 data_parallel_replicate_degree=1,

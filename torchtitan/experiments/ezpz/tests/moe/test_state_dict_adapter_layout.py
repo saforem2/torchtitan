@@ -36,7 +36,7 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
         }
 
 
-def test_ezpz_moe_sharding_leaves_grouped_linears_local_without_ep():
+def test_ezpz_moe_sharding_replicates_grouped_linears_without_ep():
     config = moe_configs["debugmodel"]()
 
     set_moe_sharding_config(config, enable_sp=False, enable_ep=False)
@@ -44,8 +44,9 @@ def test_ezpz_moe_sharding_leaves_grouped_linears_local_without_ep():
     moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
     assert moe_layers
     for moe in moe_layers:
-        assert moe.routed_experts.w13.sharding_config is None
-        assert moe.routed_experts.w2.sharding_config is None
+        for linear in (moe.routed_experts.w13, moe.routed_experts.w2):
+            assert linear.sharding_config is not None
+            assert set(linear.sharding_config.state_shardings) == {"weight"}
 
 
 @pytest.mark.parametrize(

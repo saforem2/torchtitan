@@ -14,6 +14,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import spmd_types as spmd
@@ -30,7 +31,7 @@ from torchtitan.config.transform import (
     transform_model_config_,
 )
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
-from torchtitan.distributed.parallel_dims import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.spmd_types import (
     dtensor_to_plain_tensor_state_dict,
     plain_tensor_to_dtensor_state_dict,
@@ -85,17 +86,18 @@ def _check_plain_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
         timeout=timedelta(seconds=60),
     )
     try:
-        parallel_dims = ParallelDims(
-            dp_replicate=1,
-            dp_shard=1,
-            cp=1,
-            tp=2,
-            pp=1,
-            ep=1,
-            world_size=2,
-            enable_sequence_parallel=False,
-        )
-        parallel_dims.build_mesh()
+        with patch("torchtitan.distributed.parallelism_context.device_type", "cpu"):
+            parallelism_context = ParallelismContext(
+                dp_replicate=1,
+                dp_shard=1,
+                cp=1,
+                tp=2,
+                pp=1,
+                ep=1,
+                world_size=2,
+                enable_sequence_parallel=False,
+            )
+            parallelism_context.build_mesh()
         plain = {
             "weight": torch.arange(6, dtype=torch.float32).reshape(2, 3) + rank,
             "buffer": torch.arange(4, dtype=torch.int64),
@@ -109,7 +111,7 @@ def _check_plain_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
         dtensor_state = plain_tensor_to_dtensor_state_dict(
             plain,
             state_dict_layouts=layouts,
-            parallel_dims=parallel_dims,
+            parallelism_context=parallelism_context,
         )
         restored = dtensor_to_plain_tensor_state_dict(dtensor_state)
 
@@ -275,8 +277,8 @@ def test_buffer_canonical_fqns_are_covered_by_layouts() -> None:
     assert {canonical_fqn(name) for name in wrapped_buffer_fqns}.issubset(layouts)
 
 
-def test_parallel_dims_with_none_process_group_is_picklable() -> None:
-    parallel_dims = ParallelDims(
+def test_parallelism_context_with_none_process_group_is_picklable() -> None:
+    parallelism_context = ParallelismContext(
         dp_replicate=1,
         dp_shard=1,
         cp=1,
@@ -288,9 +290,9 @@ def test_parallel_dims_with_none_process_group_is_picklable() -> None:
         _real_pp_group_for_fake_spmd=None,
     )
 
-    restored = pickle.loads(pickle.dumps(parallel_dims))
+    restored = pickle.loads(pickle.dumps(parallelism_context))
 
-    assert restored == parallel_dims
+    assert restored == parallelism_context
     assert restored._real_pp_group_for_fake_spmd is None
 
 
