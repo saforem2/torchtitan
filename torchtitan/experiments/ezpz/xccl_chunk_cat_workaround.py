@@ -69,6 +69,10 @@ def maybe_install_xccl_chunk_cat_workaround() -> bool:
         world_size: int,
     ) -> None:
         if reduce_scatter_input.device.type == "xpu":
+            # Drain queued FSDP work before allocating/copying the next
+            # reduce-scatter input. The failing 30B path otherwise reaches this
+            # boundary with Level Zero command-list resources exhausted.
+            torch.xpu.synchronize(reduce_scatter_input.device)
             chunk_cat_copy_in(unsharded_grads, reduce_scatter_input, world_size)
         else:
             original(unsharded_grads, reduce_scatter_input, world_size)
