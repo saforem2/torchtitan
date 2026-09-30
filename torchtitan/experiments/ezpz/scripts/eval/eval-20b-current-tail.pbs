@@ -9,10 +9,13 @@
 
 set -o pipefail
 
-W=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-sync-f4e678c023
+W=${EVAL_WORKTREE:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-eval-tail-df38362235}
+EXPECTED_SHA=${EVAL_EXPECTED_SHA:?set EVAL_EXPECTED_SHA to the tested commit}
 CONVERT_VENV=/flare/AuroraGPT/foremans/venvs/xpu-torch215
 HF_ASSETS_PATH=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b
 cd "$W" || exit 1
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || exit 3
+[[ -z "$(git status --porcelain --untracked-files=no)" ]] || exit 4
 
 export V2_REPO="$W"
 export CONVERT_VENV HF_ASSETS_PATH

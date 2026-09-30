@@ -22,5 +22,6 @@ assert_not_contains "$eval_script" 'Conversion FAILED .*continue' 'conversion fa
 assert_contains "$tail_wrapper" 'STEPS=11100' '512N retry must target durable step 11100'
 assert_contains "$tail_wrapper" 'STEPS=17500' '256N retry must target latest durable step 17500'
 assert_contains "$tail_wrapper" 'MODEL_FLAVOR=20b_real' 'tail eval must use the verified cos_sin flavor'
+assert_contains "$tail_wrapper" 'EVAL_EXPECTED_SHA.*set EVAL_EXPECTED_SHA' 'tail eval must require a tested source SHA'
 
 printf 'eval tail runtime contracts: PASS\n'
