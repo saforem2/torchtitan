@@ -16,7 +16,12 @@ Running log of what's happening, session by session. Most recent first.
   independent fail-closed jobs `8880872` (`2b_real`, step 23,746) and `8880873`
   (complex `2b`, step 41,300). Both target seven measurements and isolated
   Flare output paths. Canonical chart regeneration remains gated on accepted
-  artifacts from both jobs.
+  artifacts from both jobs. Job `8880873` subsequently finished with PBS exit
+  0 and a validated seven-measurement artifact for 2B-256 stage-2 step 41,300:
+  HellaSwag `acc_norm=0.5557`, ARC-Easy `acc=0.6717`, Winogrande `acc=0.5493`,
+  PIQA `acc_norm=0.7193`, OpenBookQA `acc_norm=0.3980`, BoolQ `acc=0.5477`, and
+  ARC-Challenge 25-shot `acc_norm=0.3968`. Artifact SHA-256:
+  `757d01be81933a310ad5a33b28840481266579079d98dda821e3ae0be706f945`.
 - The production and eval charts still reflect the pre-tail September 27 data
   snapshot. Human-authored pages are being reconciled now; generated charts
   and tables must be rebuilt on Aurora after the two stage-2 evals finish so no

@@ -31,7 +31,9 @@
 > has not been reconfirmed from that job's own logs here. Either way it adds
 > no tokens to this chain. The separate stage-2 arm later reached persisted
 > **step 41,300**, verified on Aurora on 2026-09-30 with 3,072 shards plus
-> nonempty `.metadata`. Tail evaluation `8880873` is queued for this endpoint.
+> nonempty `.metadata`. Tail evaluation `8880873` completed with PBS exit 0 and
+> seven finite measurements; HellaSwag `acc_norm=0.5557`, ARC-Easy `acc=0.6717`,
+> and ARC-Challenge 25-shot `acc_norm=0.3968`.
 >
 > Earlier 2026-06-28: a 2h "sneak" run `8572612` advanced step-86,200 ->
 > 86,674 (256N, +474 steps / 19 ckpts, loss **2.65**) -- the first run

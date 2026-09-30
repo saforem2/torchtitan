@@ -60,8 +60,8 @@ being backfilled.**
 - **The active work is downstream of those two.** The current persisted heads
   are **23,746 / 41,300 / 39,200** (512N stage 2 / 256N stage 2 / 512N
   constant-LR). Umbrella `8870515` advanced the 256N stage-2 arm to 41,300;
-  the other two heads remained unchanged. Endpoint evals are queued as
-  `8880872` (512N stage 2) and `8880873` (256N stage 2).
+  the other two heads remained unchanged. Endpoint eval `8880873` completed for
+  the 256N stage-2 head; `8880872` remains active for the 512N stage-2 head.
 
 **Headlines (2026-07-24) -- superseded, kept as the record of that day.
 The "LIVE" and step figures in this block are NOT current:**
