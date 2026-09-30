@@ -35,10 +35,7 @@ from torchtitan.distributed.pipeline_parallel import (
     _get_pp_rank_to_stage_indices_mapping,
     _split_module,
 )
-from torchtitan.experiments.graph_trainer.configs import (
-    GraphTrainerCompileConfig,
-    trace_input_preparer_keys,
-)
+from torchtitan.experiments.graph_trainer.configs import GraphTrainerCompileConfig
 from torchtitan.experiments.graph_trainer.graph_builder import (
     GraphTrainerStageGraphProvider,
 )
@@ -52,11 +49,7 @@ from torchtitan.experiments.graph_trainer.graph_pp.runner import (
     ZERO_GRAD_ACCUMS,
 )
 from torchtitan.experiments.graph_trainer.graph_pp.stage import GraphPipelineStage
-from torchtitan.experiments.graph_trainer.registry import (
-    PASS_PIPELINE_REGISTRY,
-    TRACE_CALL_INPUT_PREPARERS,
-    TRACE_INPUT_PREPARERS,
-)
+from torchtitan.experiments.graph_trainer.registry import PASS_PIPELINE_REGISTRY
 from torchtitan.protocols.model import BaseModel
 
 
@@ -351,6 +344,7 @@ def _validate_graph_pp_config(
 def _register_graph_runtime(
     schedule: _PipelineScheduleRuntime,
     *,
+    is_spmd: bool,
     fsdp_policy: GraphRuntimeFSDPPolicy,
     gradient_accumulation_policy: GraphRuntimeGradientAccumulationPolicy,
     compile_config: GraphTrainerCompileConfig,
@@ -383,7 +377,11 @@ def _register_graph_runtime(
     )
     if warn_if_cuda_graph_pass_requested:
         graph_provider._warn_if_cuda_graph_pass_requested()
-    return register_graph_schedule(schedule, graph_provider=graph_provider)
+    return register_graph_schedule(
+        schedule,
+        graph_provider=graph_provider,
+        is_spmd=is_spmd,
+    )
 
 
 def _make_spmd_graph_runtime(
@@ -425,16 +423,6 @@ def _make_spmd_graph_runtime(
             "GraphRuntime scheduled SPMD graph extraction does not support "
             "custom pass pipelines yet"
         )
-    trace_preparer_names = set(trace_input_preparer_keys(compile_config))
-    unsupported_preparers = trace_preparer_names.intersection(
-        TRACE_INPUT_PREPARERS.keys() | TRACE_CALL_INPUT_PREPARERS.keys()
-    )
-    if requires_graph_extraction and unsupported_preparers:
-        raise ValueError(
-            "GraphRuntime scheduled SPMD graph extraction does not support "
-            "trace-input preparers "
-            f"yet: {sorted(unsupported_preparers)}"
-        )
     schedule = _make_spmd_runtime_schedule(
         stage,
         num_microbatches=num_microbatches,
@@ -449,6 +437,7 @@ def _make_spmd_graph_runtime(
     )
     return _register_graph_runtime(
         schedule,
+        is_spmd=True,
         fsdp_policy=fsdp_policy,
         gradient_accumulation_policy=gradient_accumulation_policy,
         compile_config=compile_config,
@@ -483,6 +472,7 @@ def _make_pipeline_parallel_graph_runtime(
     )
     return _register_graph_runtime(
         schedule,
+        is_spmd=False,
         fsdp_policy=fsdp_policy,
         gradient_accumulation_policy=gradient_accumulation_policy,
         compile_config=compile_config,
