@@ -37,6 +37,8 @@
 #                     gives GBS=6144 matching submit_agpt_2b_aurora_venv.sh).
 #   LRF_ACTIVE_NODES — training nodes within a larger PBS allocation; remaining
 #                     nodes are available to ezpz --spare-nodes auto.
+#   LRF_EXPECTED_SHA  — fail unless the checkout is at this exact source SHA.
+#   LRF_CHECKPOINT_ENABLE — set to 0 for a bounded non-resumable canary.
 
 set -o pipefail
 
@@ -74,6 +76,9 @@ export CCL_PROCESS_LAUNCHER=pmix
 # both modes remained finite, so default this application to synchronous ops.
 # Callers can still opt into a controlled async experiment with CCL_OP_SYNC=0.
 export CCL_OP_SYNC="${CCL_OP_SYNC:-1}"
+export CCL_ATL_SYNC_COLL="${CCL_ATL_SYNC_COLL:-1}"
+export CCL_SYCL_KERNEL_SYNC="${CCL_SYCL_KERNEL_SYNC:-0}"
+export CCL_KVS_MODE="${CCL_KVS_MODE:-pmi}"
 echo "lr-finder: CCL_OP_SYNC=${CCL_OP_SYNC}"
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
@@ -93,7 +98,7 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.an
 cd "${PBS_O_WORKDIR:-$(pwd)}"
 
 set +u
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_job
 set -u
 
 # LRF_VENV_SRC names a venv tarball OUTSIDE this repo to broadcast instead of
@@ -152,6 +157,13 @@ else
 fi
 if [[ -z "${LRF_VENV_DIR}" ]]; then
     source "${LRF_RUNTIME_VENV:-/tmp/.venv}/bin/activate"
+fi
+if [[ -n "${LRF_EXPECTED_SHA:-}" ]]; then
+    _actual_sha="$(git rev-parse HEAD)"
+    if [[ "${_actual_sha}" != "${LRF_EXPECTED_SHA}" ]]; then
+        echo "lr-finder FATAL: expected SHA ${LRF_EXPECTED_SHA}, found ${_actual_sha}" >&2
+        exit 2
+    fi
 fi
 # The Aurora nightly wheel bundles a newer Unified Runtime loader than the
 # system module tree. Let callers opt into that ordering; Sunspot's validated
@@ -253,6 +265,7 @@ case "${LRF_MODE}" in
 esac
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
 LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"
+LRF_CHECKPOINT_ENABLE="${LRF_CHECKPOINT_ENABLE:-1}"
 LRF_LBS="${LRF_LBS:-1}"
 # Sequence length. Was hardcoded to 8192 in the launch below, which is wrong
 # for any model whose measurements are at another length: every 30B datapoint
@@ -477,6 +490,10 @@ for model in "${MODELS[@]}"; do
         R_OPT[$RUN_IDX]="${opt}"
 
         start_seconds=$SECONDS
+        checkpoint_args=(--checkpoint.enable)
+        if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]; then
+            checkpoint_args=(--checkpoint.no-enable)
+        fi
 
         # Use `ezpz launch --auto-retry` (the same path the production
         # submit scripts use, e.g. submit_agpt_2b_autoretry.sh) rather than
@@ -526,7 +543,7 @@ for model in "${MODELS[@]}"; do
             --lr_finder.fraction "${LRF_FRACTION}" \
             "${tp_args[@]}" \
             "$@" \
-            --checkpoint.enable \
+            "${checkpoint_args[@]}" \
             --checkpoint.folder "checkpoints/lr_finder_${label}" \
             --checkpoint.interval "${LRF_CHECKPOINT_INTERVAL}" \
             --checkpoint.no-last-save-model-only \
