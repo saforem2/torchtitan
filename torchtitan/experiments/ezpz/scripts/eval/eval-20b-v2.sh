@@ -212,23 +212,25 @@ PYCHK
             echo "[1/2] Conversion FAILED for step ${step} (rc=${convert_rc})" >&2
             exit "${convert_rc}"
         fi
-        # Copy HF config + tokenizer assets from the eval clone (we
-        # already have these, no need to pull from v2 clone).
-        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/agpt_20b_config.json" \
-            "${HF_DIR_ABS}/config.json"
-        cp "${HF_ASSETS_PATH}"/tokenizer.{json,model} "${HF_DIR_ABS}/"
-        cp "${HF_ASSETS_PATH}/tokenizer_config.json" "${HF_DIR_ABS}/"
-        cp "${HF_ASSETS_PATH}/special_tokens_map.json" "${HF_DIR_ABS}/"
         echo "[1/2] Conversion done."
     else
         echo "[1/2] HF already converted, skipping."
     fi
 
+    # Install inference assets even when conversion is skipped. A previous
+    # conversion may have completed before asset copy failed, and eval-only
+    # retries must repair that directory without reading the DCP again.
+    cp "${V2_REPO}/torchtitan/experiments/ezpz/eval/configs/agpt_20b_config.json" \
+        "${HF_DIR_ABS}/config.json" || exit 1
+    cp "${HF_ASSETS_PATH}"/tokenizer.{json,model} "${HF_DIR_ABS}/" || exit 1
+    cp "${HF_ASSETS_PATH}/tokenizer_config.json" "${HF_DIR_ABS}/" || exit 1
+    cp "${HF_ASSETS_PATH}/special_tokens_map.json" "${HF_DIR_ABS}/" || exit 1
+
     # Sanity check: bail if conversion produced no model file.
     if [[ ! -f "${HF_DIR_ABS}/model.safetensors.index.json" \
           && ! -f "${HF_DIR_ABS}/model.safetensors" ]]; then
-        echo "[1/2] No model file in ${HF_DIR_ABS} — skipping eval"
-        continue
+        echo "[1/2] No model file in ${HF_DIR_ABS} — aborting eval" >&2
+        exit 1
     fi
 
     # ---- Step 2: lm-eval (bare frameworks venv + tt-lm-eval overlay) ----
