@@ -22,15 +22,19 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-30 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-09-30 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
+| 2026-09-30 | [Running with Newer PyTorch (>= 2.10)](./guides/running-with-newer-pytorch.md) |
+| 2026-09-30 | [Running with newer PyTorch on Aurora prod](./guides/running-with-newer-pytorch-next-eval.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-09-30 | [Evaluation Results](./evals/README.md) |
+| 2026-09-30 | [docs/ tree map](./TREE.md) |
 | 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-09-29 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
@@ -41,18 +45,16 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
 | 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
 | 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
-| 2026-09-27 | [docs/ tree map](./TREE.md) |
 | 2026-09-26 | [Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis](./production/rl/grpo/torch214-reproduction.md) |
 | 2026-09-26 | [AGPT-2B Stage-4 MetaMath distillation and model interpolation](./experiments/2026-09-26-agpt2b-stage4-metamath.md) |
-| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
-| 2026-09-25 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
-| 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
+| 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
 | 2026-09-25 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
 | 2026-09-25 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
 | 2026-09-25 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./production/rl/history/upstream-rl-port-status.md) |
@@ -76,8 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-21 | [PR #17 MoE integration: merge-readiness review](./experiments/pr17-moe-merge-readiness.md) |
 | 2026-09-21 | [MoE expert backends across four machines](./experiments/moe-expert-backends-4machine.md) |
 | 2026-09-21 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-09-21 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
-| 2026-09-21 | [Claude Session Log](./claude-sessions.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -145,7 +145,7 @@ relevant guide before suggesting work that touches one of these.
 |------|-------|---------:|
 | [Aurora quickstart: frameworks/2026.1.0](./guides/aurora-quickstart-frameworks-rc.md) | **Start here for new setups.** Validation-queue recipe on the RC module -- no venv tarball, no relocation step. The four required exports (libglog on `LD_LIBRARY_PATH`, both proxies, `ZE_FLAT_DEVICE_HIERARCHY=FLAT`) each cost a failed job to find. Carries the validated 5-corner matrix from job `8789506`: compiled agpt TP=2 works here (the June `.venv` cannot), moe TP>1 needs `6e4e1996f`. | 2026-08-30 |
 | [Aurora quickstart: shared torch 2.13 tarball](./guides/aurora-quickstart-tarball.md) | The pre-RC path -- debug-scaling queue, shared venv tarball, `relocate-venv.sh`. Correct until the RC is the default module on your nodes. | 2026-08-28 |
-| [Running with Newer PyTorch (≥ 2.10)](./guides/running-with-newer-pytorch.md) | torch 2.13 venv setup + at-scale yeet (8N → 4096N) | 2026-09-19 |
+| [Running with Newer PyTorch (≥ 2.10)](./guides/running-with-newer-pytorch.md) | torch 2.13 venv setup + at-scale yeet (8N → 4096N) | 2026-09-30 |
 | [Reference Baselines](./baselines/README.md) | Training curves and benchmarks | 2026-04-29 |
 | [Dense Model Configs](./configs/dense.md) | 2B / 20B / 50B / 80B | 2026-04-26 |
 | [MoE Variants](./configs/moe.md) | 500M-10B | 2026-04-26 |
