@@ -28,6 +28,19 @@ an optimizer update; PBS exit was 143. This exonerates the HSDP replica axis as
 the primary cause but confirms a full-model, pre-update collective/resource
 ceiling. A current-head 20B/64-layer pure-FSDP control is the next size rung.
 
+Canary instrumentation was then corrected. `12479064` had completed backward
+and optimizer work but crashed in the opt-in per-parameter diagnostics, which
+added hundreds of DTensor all-reduces; it was not a valid 10B training failure.
+With diagnostics removed, 10B job `12479065` completed three finite AdamW
+updates and exited 0 (`12.01583 -> 11.97582`, grad norm `2.3522 -> 2.4822`).
+Corrected 20B `12479066` still failed in first backward. Algorithm controls
+`12479059`/`12479060`, node-local shard control `12479061`, and IPC-cache
+control `12479062` all failed. Torch 2.13 `12479063` never became a runtime A/B:
+current `dp_mesh_dims` rejected a plain `weight` during FSDP construction.
+Depth-48 eager job `12479067` hit a real HBM OOM. These eager canaries differed
+from the compiled production 30B launcher, so the maintained canary now retains
+compile for the next production-shaped check.
+
 Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
 project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
 steps with arm exit 0. The MoE arm failed during FSDP initialization before

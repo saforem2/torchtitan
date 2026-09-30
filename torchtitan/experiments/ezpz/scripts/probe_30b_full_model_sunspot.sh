@@ -63,7 +63,6 @@ run_model() {
     --parallelism.tensor-parallel-degree 1 \
     --parallelism.data-parallel-replicate-degree "$DP_REPLICATE" \
     --parallelism.data-parallel-shard-degree "$DP_SHARD" \
-    --compile.no-enable \
     --metrics.no-enable-wandb \
     --checkpoint.no-enable \
     activation-checkpoint:full

@@ -67,6 +67,26 @@ collectives and one-embedding FSDP lifecycle pass, the remaining boundary is
 the full model's repeated collective/resource pressure. The next control keeps
 64 layers and the same shard-16 runtime while reducing model width to 20B.
 
+That initial size ladder accidentally enabled the trainer's heavyweight
+per-parameter diagnostics on every step and disabled compile. The diagnostics
+launch an extra DTensor reduction per parameter, and the 10B run `12479064`
+completed backward/optimizer work before aborting inside
+`diagnostics.collect_param_stats`; it was not a training-path failure.
+Corrected non-intrusive 10B job `12479065` completed three finite AdamW updates
+(loss `12.01583 -> 11.97582`, gradient norm `2.3522 -> 2.4822`) with PBS exit
+0. Corrected 20B job `12479066` still failed in first backward with
+`UR_RESULT_ERROR_OUT_OF_RESOURCES`; `rabenseifner`, host-staged `ring`,
+node-local shard-12, and IPC-cache controls (`12479059`-`12479062`) did not
+remove that Torch 2.14 eager-path failure. Torch 2.13 job `12479063` was not a
+runtime A/B: it failed earlier at FSDP construction because a plain parameter
+violated the current `dp_mesh_dims` DTensor contract.
+
+The eager controls also diverged from the production 30B launcher, which keeps
+compile enabled. A 20B-width/48-layer eager rung (`12479067`) reached a genuine
+63.98-GiB HBM OOM. The maintained canary now preserves production compile
+before the next 30B topology decision; eager failures cannot by themselves
+reject the compiled production path.
+
 ## Artifacts
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)
