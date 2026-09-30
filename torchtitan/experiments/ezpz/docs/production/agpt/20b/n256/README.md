@@ -105,16 +105,14 @@
 | umbrellas `8784462`..`8828611` t2 | 2026-09-05..17 | -- | 12,401 -> **15,242** | 2.22184 -> **2.42473** | -- | -- | Four productive legs (`8784462`, `8808931`, `8812215`, `8828611`) advanced the persisted head through step 15,200; `8808932` made no progress after a startup `std::bad_alloc`. |
 | `8828612` t2 | 2026-09-19/20 | -- | 15,201 -> **16,036** | 2.19908 -> **2.45566** | -- | -- | **Latest umbrella outcome.** Persisted step 16,000. The sibling 20B-512 seat made no progress after two startup `std::bad_alloc` failures. Remote logs and checkpoint tree verified 2026-09-21. |
 
-**Latest checkpoint:** step-16,000 (173 step dirs, audited on Aurora 2026-09-21).
+**Latest checkpoint:** step-17,500 (disk-audited on Aurora 2026-09-30; 3,073 files including nonempty metadata).
 
-**Cumulative persisted steps:** 16,000 (disk-confirmed)
+**Cumulative persisted steps:** 17,500 (disk-confirmed)
 
-**Tokens consumed:** 16,000 x 6,144 x 8,192 = **805.3B tokens** (17.2%)
-target)
+**Tokens consumed:** 17,500 x 6,144 x 8,192 = **880.8B tokens** (18.8% of 4.67T target)
 
-**Loss:** 2.4596 at the last logged step, 16,036 (`8828612` t2). This is a
-single-step value; the lower 2.19908 at resumed step 15,201 is the usual
-post-checkpoint reload boundary and not a like-for-like trend endpoint.
+**Loss:** 2.41783 at the last logged step, 17,600 (`8870515` t2). This is a
+single-step value after the persisted step-17,500 checkpoint.
 
 > **Corrected 2026-08-17** (and again 2026-08-30, see the status header).
 > This page previously carried three different step
