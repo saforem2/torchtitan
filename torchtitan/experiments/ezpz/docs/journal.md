@@ -15,8 +15,14 @@ Running log of what's happening, session by session. Most recent first.
   finite metrics were validated. Selected normalized accuracies were HellaSwag
   `0.687512`, ARC-Easy `0.681397`, PIQA `0.768226`, OpenBookQA `0.374000`, and
   ARC-Challenge-25 `0.443686`; WinoGrande accuracy was `0.598264` and BoolQ
-  accuracy was `0.630275`. Gated 20B-256 step-17,500 sibling `8880658` is
-  queued from exact commit `975e43931a`.
+  accuracy was `0.630275`. Gated 20B-256 step-17,500 sibling `8880658` then
+  ran from exact commit `975e43931a`.
+- 20B-256 step-17,500 sibling `8880658` also completed PBS exit 0 with a
+  fresh, validated 3,012-byte `results.json`. Expected shot-qualified keys were
+  complete and finite. Metrics: HellaSwag norm `0.678650`, ARC-Easy norm
+  `0.664562`, WinoGrande `0.569850`, PIQA norm `0.767138`, OpenBookQA norm
+  `0.378000`, BoolQ `0.619878`, and ARC-Challenge-25 norm `0.450512`.
+  The intended 20B tail-evaluation backfill is complete.
 - Sunspot production controls isolated the 30B runtime and memory boundaries.
   Corrected compiled 10B job `12479065` completed three finite updates.
   Disabling backward prefetch or SYCL output events clears the earlier 20B
