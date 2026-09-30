@@ -33,10 +33,24 @@ still requested the 36.35-GiB first-forward all-gather, and frameworks Torch
 `gate_init(t[0])`. Thus neither a repaired newer runtime nor mesh-only emulation
 of `partial_dtensor` restores 30B on current head.
 
-`full_dtensor` is not the historical working path. It previously failed compiled
-AGPT's `vc_check` on `DeviceMesh`; restoring it would reverse #4217 and much of
-#4419 rather than provide a bounded experiment-local fix. No production 30B LR
-run is released until a current-head canary completes three genuine updates.
+Exact historical-source attempt `12479088` ran commit `5a26d8e7c5c05cd38bec7ab4eb48036e5ba54c6d`
+with the package versions recorded by successful job `12473743`, but the shared
+runtime had later lost 17 `core.py` files and could only be repaired as a copy;
+the attempt did not reproduce a clean historical baseline.
+
+The source regression was then identified directly. Upstream #4808 changed
+fused FFN `w13` from `[2F,D]` to `[2,F,D]` and added a required FSDP `Shard(1)`
+override. AGPT's copied FSDP wrapper omitted that replay, so default `Shard(0)`
+padded the two-element axis to the DP shard degree. The resulting allocations
+match the failures exactly: about 36 GiB BF16 and 72 GiB FP32 at shard 192.
+Commit `cde3c93227` mirrors core's existing
+`linear_param_shard_placements()` mapping. Focused tests pass. Job `12479089`
+then failed closed because shard 192 cannot evenly divide matrix-row dimension
+16,384; the corrected `3 x 64` HSDP job `12479090` completed three finite 30B
+updates on repaired Torch 2.15 with PBS exit 0, `loss3=11.8405`, and
+`grad3=3.5988`. This closes the full-model runtime gate without restoring
+`full_dtensor`; subsequent 30B work must retain a dimension-compatible shard
+degree and the stacked-linear placement override.
 
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 

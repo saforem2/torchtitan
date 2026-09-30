@@ -138,14 +138,34 @@ scale. It did not recover 30B: Torch 2.15 job `12479086` still attempted the
 attempted a 72-GiB all-gather during fused-FFN parameter initialization at
 `gate_init(t[0])`. No 30B job in this sequence completed one update.
 
-Restoring `full_dtensor` is not a narrow version of the historical solution:
+Exact historical-source job `12479088` used commit
+`5a26d8e7c5c05cd38bec7ab4eb48036e5ba54c6d` and package versions recovered
+from the successful jobs' W&B manifests. It did not reproduce the old success
+under the subsequently modified shared runtime, so it remains provenance
+evidence rather than a new known-good baseline.
+
+The decisive source delta was upstream #4808: fused FFN `w13` changed from
+`[2F,D]` to stacked `[2,F,D]`, and core added an FSDP placement override that
+shards matrix rows (`Shard(1)`). AGPT maintains a copied FSDP wrapper and had
+not replayed that override. Its default `Shard(0)` padded the two-element
+projection axis to the shard degree. At shard degree 192 this predicts the
+observed allocations exactly: about 36 GiB in BF16 and 72 GiB in FP32.
+
+Commit `cde3c93227` mirrors core's `linear_param_shard_placements()` contract in
+AGPT. The first shard-192 attempt, `12479089`, correctly replaced the giant OOM
+with a fail-fast divisibility error because `16384` is not divisible by `192`.
+The dimension-compatible HSDP topology is `dp_replicate=3`, `dp_shard=64`.
+Job `12479090` used that topology on repaired Torch 2.15 and completed three
+finite updates with PBS exit 0 and `FULL_MODEL_CANARY_PASS`; terminal metrics
+were `loss3=11.8405`, `grad3=3.5988`.
+
+Restoring `full_dtensor` is unnecessary and is not the historical solution:
 the successful jobs used `partial_dtensor`, while compiled AGPT on
-`full_dtensor` previously failed the `vc_check` `DeviceMesh` assertion. Upstream
-removed `full_dtensor` in #4217 (34 files) and later removed DTensor forward /
-backward support in #4419 (139 files across the current delta). Production 30B
-LR therefore remains blocked pending a fix to the current full-SPMD/FSDP
-materialization behavior or a deliberately maintained legacy stack. Another
-large LR sweep is not justified until a canary completes three real updates.
+`full_dtensor` previously failed the `vc_check` `DeviceMesh` assertion. The 30B
+runtime gate is now green on current head with Torch 2.15 and HSDP `3 x 64`.
+Production LR work may resume only through this validated topology and wrapper;
+shard-192 is invalid for stacked `w13` because its matrix-row dimension is
+16,384.
 
 ## Artifacts
 
