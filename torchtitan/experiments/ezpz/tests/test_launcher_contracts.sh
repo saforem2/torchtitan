@@ -20,6 +20,12 @@ fail() {
     exit 1
 }
 
+# Golden Rule: experiment launchers belong under experiments/ezpz, never at
+# repository root. This keeps ad hoc cluster artifacts out of shared core.
+if find "$repo_root" -maxdepth 1 -type f -name '*.pbs' -print -quit | grep -q .; then
+    fail 'PBS launcher found at repository root'
+fi
+
 assert_contains() {
     local file=$1 pattern=$2 message=$3
     grep -Eq -- "$pattern" "$file" || fail "$message"
