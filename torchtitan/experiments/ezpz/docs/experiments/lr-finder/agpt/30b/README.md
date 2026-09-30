@@ -10,11 +10,12 @@ For methodology and acceptance criteria, see the
 
 **AdamW LR: open. SophiaG LR: open.**
 
-No complete fine curve has produced real terminal training evidence.
+The bounded 10-point AdamW canary now provides complete coarse evidence, but no
+matched fixed-LR validation has promoted a production learning rate.
 
 | optimizer | evidence | interpretation |
 |---|---|---|
-| AdamW | `12478510`, 94/100 points | incomplete; excluded |
+| AdamW | `12479108`, 10/10 points | coarse canary; sampled minimum `1e-5`, fixed-LR validation pending |
 | SophiaG | `12478513`, 30-point coarse; `12478570`, 97/100 fine | coarse candidate `6.48e-7` is diagnostic only; incomplete fine curve excluded |
 | Muon | excluded | first-update Newton–Schulz corruption remains unresolved |
 
@@ -174,6 +175,25 @@ shard-192 is invalid for stacked `w13` because its matrix-row dimension is
 
 Partial fine curves are deliberately not committed as successful evidence.
 No independently initialized points will be appended to an existing trajectory.
+
+## 2026-09-30 upstream-integrated AdamW canary
+
+Upstream-integrated commit `7cc86ebc750d8455e1b8a0f6dc6177797f0d010b`
+first passed the full-model gate in job `12479105`: repaired Torch 2.15, 192
+ranks on 16 nodes, HSDP `3 x 64`, three finite updates, PBS exit 0,
+`loss3=11.83799`, `grad3=3.6425`, and `FULL_MODEL_CANARY_PASS`.
+
+Job `12479108` then completed the authorized AdamW-only bounded LR canary at
+the same topology and GBS 960 (3,932,160 tokens), with ten finite monotonically
+increasing LR samples from `1e-7` through `1e-4` and PBS exit 0. The sampled
+smoothed-loss minimum was `11.677259086400811` at `1e-5`; all three higher
+samples rose (`12.1063`, `12.7745`, `12.9396`), so the coarse run brackets a
+basin. The logged `6.70e-7` value is a safety-scaled detector candidate from a
+`6.70e-6` crossing, not the empirical minimum or a production recommendation.
+Evidence and hashes are recorded in the
+[canary manifest](../data/2026-09-30-30b-adamw-canary/README.md).
+
+The optimizer matrix remains blocked pending matched fixed-LR validation.
 
 ## 2026-09-29 fresh resumable AdamW sweep
 

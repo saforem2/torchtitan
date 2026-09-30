@@ -1,5 +1,28 @@
 # Upstream Sync Log
 
+## Current trial (2026-09-30): upstream `97e673b779`, hardware-qualified
+
+Branch `sync/upstream-97e673b779` merges upstream through
+[`97e673b779de03dd209f86a01ccb81f7fa9c5851`](https://github.com/pytorch/torchtitan/commit/97e673b779de03dd209f86a01ccb81f7fa9c5851).
+The semantic replay migrated ezpz to `components.optim`, nested `Optim`,
+`TrainingEngine`, and `ParallelismContext`; removed retired per-block model
+compilation; and preserved AGPT's stacked-linear `Shard(1)` FSDP placement.
+
+Static/exact-runtime gates include Torch 2.15 import/config construction, 163
+focused tests, compileall, diff checks, and independent review. Sunspot job
+`12479099` passed dense TP1 and MoE. TP2 full activation checkpointing remains
+an explicit limitation because checkpoint replay compares global 512-token
+metadata with TP-local 256-token metadata; no-AC control `12479103` passed three
+finite TP2 updates. This limitation was not hidden by disabling determinism
+checks or broad skips.
+
+The full 30B hardware gate passed in job `12479105` on repaired Torch 2.15,
+192 ranks / 16 nodes, HSDP `3 x 64`, with three finite updates and PBS exit 0.
+The bounded AdamW-only LR canary `12479108` then completed ten finite points and
+wrote validated CSV/NPZ/plot artifacts. Its sampled coarse minimum is `1e-5`;
+fixed-LR validation remains required before a production recommendation or
+optimizer-matrix release.
+
 ## Current trial (2026-09-29): upstream `f359667`, validation in progress
 
 Branch `sync/upstream-f359667` merges upstream through

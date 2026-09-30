@@ -2,6 +2,34 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Sunspot) -- upstream `97e673b779` integration and 30B AdamW canary
+
+Branch `sync/upstream-97e673b779` integrates upstream through `97e673b779` and
+the concurrent `origin/ezpz` documentation commit. Optimizer/config and
+`TrainingEngine`/`ParallelismContext` migrations are complete. Exact Torch 2.15
+imports/config construction passed, the combined focused suite passed 163 tests,
+and independent review found and closed one stale MoE per-block compile path.
+
+Hardware job `12479099` passed dense TP1 and MoE but exposed a TP2 attention
+reshape assumption. Follow-up jobs `12479100`-`12479102` showed that TP2 with
+full activation checkpointing is not recompute-stable: saved global-token
+metadata (512) is compared with recomputed TP-local metadata (256). Geometry
+experiments did not solve it and were reverted. The exact no-AC control
+`12479103` completed three finite TP2 updates with PBS exit 0 (`loss3=10.55887`,
+`grad3=0.6776`), isolating the limitation to full-AC/SPMD replay rather than TP.
+
+The decisive 30B gate `12479105` passed on repaired Torch 2.15 at 192 ranks / 16
+nodes with HSDP `3 x 64`: three finite updates, PBS exit 0,
+`FULL_MODEL_CANARY_PASS`, `loss3=11.83799`, and `grad3=3.6425`.
+
+AdamW LR canary `12479108` then completed ten finite points over `1e-7` to
+`1e-4` at GBS 960. The sampled smoothed-loss minimum is `11.677259086400811` at
+`1e-5`, with loss increasing at all three higher samples. The runner's
+`6.70e-7` output is a safety-scaled detector candidate, not the measured
+optimum. CSV/plot evidence is preserved under
+`docs/experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/`. The
+optimizer matrix remains blocked pending fixed-LR validation.
+
 ## 2026-09-30 (Sunspot) -- 30B backend/runtime reconstruction
 
 Historical logs establish that the successful 30B optimizer campaign used
