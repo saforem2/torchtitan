@@ -21,18 +21,12 @@ class OptimizerFusedLayout:
 
     qkv: dict[str, tuple[int, int, tuple[int, ...]]]
     stacked: dict[str, tuple[int, ...]]
-    qkv_bias: dict[str, tuple[int, int, tuple[int, ...]]] = field(
-        default_factory=dict
-    )
+    qkv_bias: dict[str, tuple[int, int, tuple[int, ...]]] = field(default_factory=dict)
 
 
 def _qkv_optimizer_layouts(layout: OptimizerFusedLayout):
-    yield from (
-        (prefix, "weight", spec) for prefix, spec in layout.qkv.items()
-    )
-    yield from (
-        (prefix, "bias", spec) for prefix, spec in layout.qkv_bias.items()
-    )
+    yield from ((prefix, "weight", spec) for prefix, spec in layout.qkv.items())
+    yield from ((prefix, "bias", spec) for prefix, spec in layout.qkv_bias.items())
 
 
 def _split_qkv(
@@ -101,10 +95,14 @@ def _split_optimizer_state(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in state_dict.items():
-        for prefix, param_name, (
-            head_dim,
-            heads_per_kv,
-            fused_shape,
+        for (
+            prefix,
+            param_name,
+            (
+                head_dim,
+                heads_per_kv,
+                fused_shape,
+            ),
         ) in _qkv_optimizer_layouts(layout):
             marker = f"{prefix}wqkv.{param_name}."
             if marker not in key:
@@ -202,10 +200,14 @@ def _fuse_optimizer_state(
     native_sharding: dict[str, tuple[Any, tuple[Any, ...]]],
 ) -> dict[str, Any]:
     result = dict(state_dict)
-    for prefix, param_name, (
-        head_dim,
-        _heads_per_kv,
-        _fused_shape,
+    for (
+        prefix,
+        param_name,
+        (
+            head_dim,
+            _heads_per_kv,
+            _fused_shape,
+        ),
     ) in _qkv_optimizer_layouts(layout):
         marker = f"{prefix}wq.{param_name}."
         for key in [item for item in result if marker in item]:
@@ -231,6 +233,7 @@ def _fuse_optimizer_state(
                 else _collapse_equal(values, fused_key)
             )
             if fused_key in native_sharding:
+                assert isinstance(fused, DTensor)
                 mesh, placements = native_sharding[fused_key]
                 fused = fused.redistribute(mesh, placements)
             result[fused_key] = fused
@@ -256,6 +259,7 @@ def _fuse_optimizer_state(
                 else _collapse_equal(values, fused_key)
             )
             if fused_key in native_sharding:
+                assert isinstance(fused, DTensor)
                 mesh, placements = native_sharding[fused_key]
                 fused = fused.redistribute(mesh, placements)
             result[fused_key] = fused
@@ -295,9 +299,7 @@ class LogicalOptimizerState:
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        fused = _fuse_optimizer_state(
-            state_dict, self.layout, self.native_sharding
-        )
+        fused = _fuse_optimizer_state(state_dict, self.layout, self.native_sharding)
         for key, value in self.current_defaults.items():
             fused.setdefault(key, value)
         self.optimizer.load_state_dict(fused)
@@ -340,9 +342,7 @@ def _optimizer_layout(
                 tuple(model_state[key].shape),
             )
         bias_key = f"{prefix}wqkv.bias"
-        bias_markers = tuple(
-            f"{prefix}{name}.bias." for name in ("wq", "wk", "wv")
-        )
+        bias_markers = tuple(f"{prefix}{name}.bias." for name in ("wq", "wk", "wv"))
         has_split_bias = any(
             any(marker in checkpoint_key for marker in bias_markers)
             for checkpoint_key in checkpoint_keys
@@ -363,9 +363,7 @@ def _optimizer_layout(
     for fqn, _config, _parent, _ in adapter.model_config.traverse(FeedForward.Config):
         prefix = f"{fqn}." if fqn else ""
         key = f"{prefix}w13.weight"
-        logical_markers = tuple(
-            f"{prefix}{name}.weight." for name in ("w1", "w3")
-        )
+        logical_markers = tuple(f"{prefix}{name}.weight." for name in ("w1", "w3"))
         has_split = any(
             any(marker in checkpoint_key for marker in logical_markers)
             for checkpoint_key in checkpoint_keys
