@@ -20,12 +20,8 @@ ezpz_stub.get_rank = lambda: 0
 ezpz_stub.distributed = SimpleNamespace(verify_wandb=lambda: False)
 sys.modules.setdefault("ezpz", ezpz_stub)
 
-from torchtitan.experiments.ezpz.agpt import (
-    _ezpz_attention_batch_and_seq_len,
-    set_ezpz_max_context_length,
-)
 from torchtitan.experiments.ezpz.trainer import (
-    _attention_microbatch_geometry,
+    _local_attention_seq_len,
     EzpzTrainingEngine,
     FaultTolerantTrainer,
 )
@@ -54,20 +50,13 @@ def test_ezpz_trainer_uses_training_engine_state_contract():
     assert trainer.state_dict() == {"step": 4, "ntokens_seen": 17}
 
 
-def test_attention_reshape_preserves_microbatch_cardinality():
-    assert _attention_microbatch_geometry(512, 1024) == (512, 2)
-
-
-def test_attention_reshape_adapts_to_tp_local_token_count():
-    set_ezpz_max_context_length(512, 512)
-
-    assert _ezpz_attention_batch_and_seq_len(512) == (1, 512)
-    assert _ezpz_attention_batch_and_seq_len(256) == (1, 256)
+def test_attention_reshape_uses_tp_local_sequence_length():
+    assert _local_attention_seq_len(512, 2) == 256
 
 
 def test_attention_reshape_rejects_uneven_sequence_sharding():
     with pytest.raises(ValueError, match="must be divisible"):
-        _attention_microbatch_geometry(512, 1023)
+        _local_attention_seq_len(512, 3)
 
 
 def test_ezpz_batch_ramp_reads_engine_completed_steps():
