@@ -30,6 +30,25 @@ optimum. CSV/plot evidence is preserved under
 `docs/experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/`. The
 optimizer matrix remains blocked pending fixed-LR validation.
 
+The final integration candidate then incorporated historical full-state
+checkpoint migration PR #47 as `a4283256de`. On that exact production-code
+head, DCP job `12479113` exited 0, wrote nonempty step-2 and step-4 metadata,
+loaded step 2, and reproduced uninterrupted step-3/4 loss and gradient values
+exactly. Two-host RL/weight-sync job `12479114` also exited 0 with 40/40
+completed rollouts, policy versions 0–3, four pushes/pulls, three full
+checkpoints, and finite nonzero gradient norms `0.28`, `0.27`, `0.27`. Its
+isolated overlay uses BlendCorpus `feat/remove-deepspeed` at
+`50502b0c9de37887bdf2123b13293e264ab9942f`; the protected RL venv was not
+modified.
+
+Matched 30B AdamW fixed-LR jobs `12479115`–`12479117` each completed ten finite
+updates on the same `3 x 64` topology. Final loss/gradient values were
+`10.62454/31.9376` at `4.64e-6`, `10.11744/8.4969` at `1e-5`, and
+`10.42669/33.6769` at `2.15e-5`. `1e-5` is therefore the best tested
+short-horizon candidate; longer training remains required for a production
+recommendation. The final collectable suite passed 382 tests with 4 skips and
+21 subtests after migrating stale test fixtures.
+
 ## 2026-09-30 (Sunspot) -- 30B backend/runtime reconstruction
 
 Historical logs establish that the successful 30B optimizer campaign used

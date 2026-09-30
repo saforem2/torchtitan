@@ -8,14 +8,16 @@ For methodology and acceptance criteria, see the
 
 ## Status
 
-**AdamW LR: open. SophiaG LR: open.**
+**AdamW short-horizon candidate: `1e-5`. SophiaG LR: open.**
 
-The bounded 10-point AdamW canary now provides complete coarse evidence, but no
-matched fixed-LR validation has promoted a production learning rate.
+The bounded 10-point AdamW canary now provides complete coarse evidence, and a
+matched 10-update fixed-LR matrix validates `1e-5` as the best tested
+short-horizon candidate. Longer representative training remains required before
+calling it a production recommendation.
 
 | optimizer | evidence | interpretation |
 |---|---|---|
-| AdamW | `12479108`, 10/10 points | coarse canary; sampled minimum `1e-5`, fixed-LR validation pending |
+| AdamW | `12479108`, then `12479115`–`12479117` | `1e-5` is the best tested 10-update candidate; longer validation pending |
 | SophiaG | `12478513`, 30-point coarse; `12478570`, 97/100 fine | coarse candidate `6.48e-7` is diagnostic only; incomplete fine curve excluded |
 | Muon | excluded | first-update Newton–Schulz corruption remains unresolved |
 
@@ -193,7 +195,18 @@ basin. The logged `6.70e-7` value is a safety-scaled detector candidate from a
 Evidence and hashes are recorded in the
 [canary manifest](../data/2026-09-30-30b-adamw-canary/README.md).
 
-The optimizer matrix remains blocked pending matched fixed-LR validation.
+Matched fixed-LR jobs on commit `a4283256de3aa2850757cb13ee818c0990d66aa1`
+all completed ten finite updates with PBS exit 0:
+
+| LR | job | final loss | final grad norm | result |
+|---:|---:|---:|---:|---|
+| `4.641588833612779e-6` | `12479115` | `10.62454` | `31.9376` | pass |
+| `1e-5` | `12479116` | `10.11744` | `8.4969` | best tested short-horizon arm |
+| `2.154434690031884e-5` | `12479117` | `10.42669` | `33.6769` | pass, but noisier gradients |
+
+These matched runs promote `1e-5` from coarse minimum to a validated
+short-horizon candidate. They do not establish long-horizon production
+stability or authorize the broader optimizer matrix.
 
 ## 2026-09-29 fresh resumable AdamW sweep
 

@@ -23,6 +23,20 @@ wrote validated CSV/NPZ/plot artifacts. Its sampled coarse minimum is `1e-5`;
 fixed-LR validation remains required before a production recommendation or
 optimizer-matrix release.
 
+The candidate then incorporated historical full-state checkpoint migration PR
+[#47](https://github.com/saforem2/torchtitan/pull/47) as `a4283256de`.
+Final-head DCP job `12479113` reproduced uninterrupted step-3/4 metrics exactly
+after a step-2 save/load and wrote nonempty step-2/step-4 metadata. Final-head
+two-host RL job `12479114` completed 40/40 rollouts, policy versions 0–3, four
+pushes/pulls, three finite nonzero-gradient updates, three checkpoints, and PBS
+exit 0. The collectable suite passed 382 tests, 4 skips, and 21 subtests.
+
+Matched 30B AdamW jobs `12479115`–`12479117` each completed ten finite updates
+at `4.64e-6`, `1e-5`, and `2.15e-5`. The `1e-5` arm had the lowest final loss
+and substantially lower final gradient norm than the outer arms, making it the
+best tested short-horizon candidate. This does not yet establish long-horizon
+production stability.
+
 ## Current trial (2026-09-29): upstream `f359667`, validation in progress
 
 Branch `sync/upstream-f359667` merges upstream through
