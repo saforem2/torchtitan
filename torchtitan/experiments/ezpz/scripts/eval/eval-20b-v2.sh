@@ -31,7 +31,9 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 export HF_HUB_ENABLE_HF_TRANSFER=0
 
-cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}" || exit 1
+EVAL_OUTPUT_ROOT="${EVAL_OUTPUT_ROOT:-${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}}"
+mkdir -p "$EVAL_OUTPUT_ROOT" || exit 1
+cd "$EVAL_OUTPUT_ROOT" || exit 1
 
 # This eval pipeline runs against the bare frameworks/2025.3.1 module
 # stack (NOT the user venv) per AGENTS.md — user venv has transformers

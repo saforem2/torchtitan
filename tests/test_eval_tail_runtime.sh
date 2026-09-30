@@ -14,7 +14,8 @@ assert_not_contains() {
     ! grep -Eq -- "$pattern" "$file" || { echo "FAIL: $message" >&2; exit 1; }
 }
 
-assert_contains "$eval_script" 'CONVERT_VENV=' 'conversion runtime must be explicit'
+assert_contains "$eval_script" 'CONVERT_VENV' 'conversion runtime must be explicit'
+assert_contains "$eval_script" 'EVAL_OUTPUT_ROOT' 'evaluation outputs must not follow PBS_O_WORKDIR'
 assert_contains "$eval_script" 'import spmd_types, torchtitan' 'conversion preflight must import spmd_types'
 assert_contains "$eval_script" 'Conversion FAILED for step.*rc=' 'conversion failure must be explicit and carry rc'
 assert_contains "$eval_script" 'exit "\$\{convert_rc\}"' 'conversion failure must propagate nonzero'
@@ -22,6 +23,7 @@ assert_not_contains "$eval_script" 'Conversion FAILED .*continue' 'conversion fa
 assert_contains "$tail_wrapper" 'STEPS=11100' '512N retry must target durable step 11100'
 assert_contains "$tail_wrapper" 'STEPS=17500' '256N retry must target latest durable step 17500'
 assert_contains "$tail_wrapper" 'MODEL_FLAVOR=20b_real' 'tail eval must use the verified cos_sin flavor'
+assert_contains "$tail_wrapper" 'EVAL_OUTPUT_ROOT=/flare/AuroraGPT/foremans/scratch/evals/tail-current' 'tail eval must write large artifacts to Flare'
 assert_contains "$tail_wrapper" 'EVAL_EXPECTED_SHA.*set EVAL_EXPECTED_SHA' 'tail eval must require a tested source SHA'
 
 printf 'eval tail runtime contracts: PASS\n'
