@@ -2,6 +2,29 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Aurora) -- historical DCP model versus full-state compatibility
+
+- Tail-evaluation retry `8880334` was canceled and reached PBS `F`, exit 143,
+  before writing weights after its inherited `PBS_O_WORKDIR=/home/foremans`
+  would have placed the roughly 40 GB HF export under home. Commit
+  `2f2787faf73aacb1e7239ec5fa2007b8ef534583` pins large eval artifacts to
+  `/flare/AuroraGPT/foremans/scratch/evals/tail-current`; replacement canary
+  `8880485` is queued for 20B-512 step 11,100. The step-17,500 sibling remains
+  gated on a complete HF export and entry into lm-eval.
+- Four-node TP2/DP-shard-24 restore `8880383` removed the SophiaG state-init OOM
+  from `8880302`, then every rank failed DCP load because the historical
+  checkpoint stores split `wq/wk/wv` and `w1/w3` while current code requests
+  fused `wqkv/w13`. No update or checkpoint was accepted.
+- The existing compatibility branch was ported cleanly onto exact head
+  `f4e678c023`, producing `250b3a144a9d5949314afb9d99299e3904d8a533`.
+  Its model hooks are hardware-proven: chain-3 job `8876148` restored legacy
+  step 39,900 and reached gradient clipping. That evidence is model-only,
+  however. Step 3,000 is full-state: DCP metadata also stores split SophiaG
+  `state.*` and `param_groups.*` keys. A safe full-state retry therefore
+  requires sharding-preserving optimizer-state migration in addition to the
+  proven model hooks. No model-only fallback or freshly initialized optimizer
+  will be accepted as resumption evidence.
+
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 
 Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
