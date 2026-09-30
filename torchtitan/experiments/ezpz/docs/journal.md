@@ -4,6 +4,26 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
+- Tail eval `8878144` exposed a false-success wrapper path: DCP conversion ran
+  without `spmd_types`, printed `Conversion FAILED`, continued, and returned PBS
+  exit 0 with no `results.json`. Sibling `8878145` was cancelled before
+  allocation. The corrected pipeline uses the isolated Torch 2.15 conversion
+  runtime (`spmd-types==0.2.5`) separately from the frameworks-2025.3.1 lm-eval
+  overlay, passes explicit shared tokenizer assets, and propagates conversion
+  failures nonzero. Replacement targets are the latest durable heads: 20B-512
+  step 11,100 and 20B-256 step 17,500.
+- Corrected retries `8880289` and `8880292` then failed closed with PBS exit 1,
+  exposing a second, shared converter boundary. Both historical DCPs store
+  logical `wq/wk/wv` and `w1/w3` tensors, while the current model build exposes
+  fused `wqkv` and `w13`; direct DCP load therefore rejected the absent fused
+  key before evaluation. `convert_to_hf.py` now derives a load destination that
+  matches exact DCP metadata through the authoritative state-dict adapter and
+  rejects any unrepresentable model state. Focused tests cover fused, logical,
+  and incomplete schemas. Real metadata probes for both checkpoints resolved
+  579 model tensors with zero unmatched keys and expected layer-0 shapes:
+  Q `[5120, 5120]`, K/V `[1024, 5120]`, gate/up `[14336, 5120]`.
+- Retry policy is canary-first: convert/evaluate step 11,100, require complete
+  HF weights and entry into lm-eval, then submit step 17,500.
 - Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
   queue were deleted and verified terminal: chain-3 control `8876446`,
   `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.
