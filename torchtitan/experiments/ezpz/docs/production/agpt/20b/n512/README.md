@@ -100,15 +100,14 @@
 | `8828611` t1 | 2026-09-16/17 | -- | 10,501 -> **10,905** | 2.26607 -> **2.31773** | -- | -- | Three attempts; the first two logged 10 and 41 steps without a save, and attempt 3 persisted step 10,900. |
 | `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | **Latest umbrella outcome.** Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
 
-**Latest checkpoint:** step-10,900 in the constant-LR fork (20 step dirs,
-audited on Aurora 2026-09-21; written by umbrella `8828611` seat t1, which
-logged through step 10,905)
+**Latest checkpoint:** step-11,100 in the constant-LR fork (disk-audited on
+Aurora 2026-09-30; umbrella `8870515` logged through step 11,190)
 
-**Cumulative steps:** 10,900 (disk-confirmed)
+**Cumulative steps:** 11,100 (disk-confirmed)
 
-**Tokens consumed:** 10,900 x 12,288 x 8,192 = 1.1T tokens (23.5% of 4.67T target)
+**Tokens consumed:** 11,100 x 12,288 x 8,192 = **1,117.4B tokens** (23.9% of 4.67T target)
 
-**Loss:** 2.3151 (last logged step 10,905, umbrella `8828611` t1). This is a
+**Loss:** 2.31773 (last retained published value, step 10,905). This is a
 single-step value from the current constant-LR fork.
 
 ### Recovery

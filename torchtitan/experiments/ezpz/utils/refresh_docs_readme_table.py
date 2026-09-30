@@ -73,6 +73,10 @@ RECENT_LIMIT = 25  # rows shown in the always-visible table
 RECENT_EXTRA = 25  # additional rows tucked into the <details> block
 # H1 title at the top of a markdown doc (first "# ..." line).
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+RECENT_COUNT_RE = re.compile(
+    r"(The 25 most-recently-changed docs by git commit date \(across all )\d+(\n"
+    r"docs, not just the curated tables below\)\.)"
+)
 
 
 def doc_title(path: Path) -> str:
@@ -155,8 +159,14 @@ def refresh_recently_updated(readme_path: Path, *, dry_run: bool = False) -> boo
         return False
     pre, rest = text.split(RECENT_BEGIN, 1)
     _, post = rest.split(RECENT_END, 1)
+    rows = _collect_doc_rows(readme_path)
     table = build_recently_updated(readme_path)
     new_text = f"{pre}{RECENT_BEGIN}\n{table}\n{RECENT_END}{post}"
+    new_text = RECENT_COUNT_RE.sub(
+        rf"\g<1>{len(rows)}\g<2>",
+        new_text,
+        count=1,
+    )
     if new_text == text:
         print("  [recently-updated] already current")
         return False
