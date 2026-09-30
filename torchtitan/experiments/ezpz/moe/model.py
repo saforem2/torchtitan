@@ -260,7 +260,9 @@ class moeModel(Decoder):  # noqa: N801
     def parallelize(self, **kwargs):
         from .parallelize import parallelize_moe
 
-        return parallelize_moe(self, **kwargs)
+        parallelism_context = kwargs["parallelism_context"]
+        with parallelism_context.activate_spmd():
+            return parallelize_moe(self, **kwargs)
 
     @dataclass(kw_only=True, slots=True)
     class Config(Decoder.Config):

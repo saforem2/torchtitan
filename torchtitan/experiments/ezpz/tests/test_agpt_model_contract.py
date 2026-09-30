@@ -6,7 +6,8 @@
 
 """Regression coverage for AGPT's direct BaseModel.Config contract."""
 
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import Mock, patch
 
 import torch
 
@@ -42,12 +43,28 @@ def test_model_owns_adapter_pipeline_fragment_and_xpu_parallelization() -> None:
     assert type(model).parallelize is AgptModel.parallelize
 
     sentinel = object()
+    entered = []
+
+    @contextmanager
+    def activate_spmd():
+        entered.append(True)
+        yield
+
+    parallelism_context = Mock(activate_spmd=activate_spmd)
     with patch(
         "torchtitan.experiments.ezpz.agpt.parallelize.parallelize_llama",
         return_value=sentinel,
     ) as parallelize:
-        assert model.parallelize(marker="xpu") is sentinel
-    parallelize.assert_called_once_with(model, marker="xpu")
+        assert (
+            model.parallelize(
+                marker="xpu", parallelism_context=parallelism_context
+            )
+            is sentinel
+        )
+    assert entered == [True]
+    parallelize.assert_called_once_with(
+        model, marker="xpu", parallelism_context=parallelism_context
+    )
 
 
 def test_cos_sin_hf_export_splits_native_fused_linears() -> None:

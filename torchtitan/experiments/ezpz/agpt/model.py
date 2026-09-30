@@ -29,7 +29,9 @@ class AgptModel(Llama3Model):
     def parallelize(self, **kwargs):
         from .parallelize import parallelize_llama
 
-        return parallelize_llama(self, **kwargs)
+        parallelism_context = kwargs["parallelism_context"]
+        with parallelism_context.activate_spmd():
+            return parallelize_llama(self, **kwargs)
 
     @dataclass(kw_only=True, slots=True)
     class Config(Llama3Model.Config):
