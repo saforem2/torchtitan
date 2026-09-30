@@ -6,7 +6,6 @@
 
 import functools
 import json
-
 import logging
 import os
 import re
@@ -20,7 +19,6 @@ from torch.distributed.tensor import DTensor, Replicate
 from torch.distributed.tensor.placement_types import Placement
 
 from .model import BaseModel
-
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +364,10 @@ class StateDictAdapter(BaseStateDictAdapter):
 
         return result
 
+    def native_fused_to_logical(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Expose native fused linear parameters under logical projection keys."""
+        return self._native_fused_linears_to_hf(state_dict)
+
     def _native_fused_linears_from_hf(
         self,
         state_dict: dict[str, Any],
@@ -422,6 +424,10 @@ class StateDictAdapter(BaseStateDictAdapter):
                 )
 
         return result
+
+    def native_logical_to_fused(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Pack logical projection parameters into native fused linears."""
+        return self._native_fused_linears_from_hf(state_dict)
 
     def get_hf_storage_reader(
         self, path: str, from_quantized: bool = False

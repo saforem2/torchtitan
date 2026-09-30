@@ -14,7 +14,7 @@ import threading
 import time
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, cast, Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import torch
 import torch.distributed as dist
@@ -28,23 +28,32 @@ from torch.distributed.checkpoint.state_dict_saver import (
     AsyncCheckpointerType,
     AsyncSaveResponse,
 )
+
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.observability import structured_logger as sl
 from torchtitan.tools import filesystem
 from torchtitan.tools.utils import GarbageCollection
 
 from .base import (
-    BaseCheckpointManager,
     DATALOADER,
     EMA,
     LR_SCHEDULER,
     MODEL,
-    ModelWrapper,
     OPTIMIZER,
+    BaseCheckpointManager,
+    ModelWrapper,
     purge_thread,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _native_storage_reader(checkpoint_id: str):
+    if filesystem.is_remote(checkpoint_id):
+        from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
+
+        return FsspecReader(checkpoint_id)
+    return dcp.FileSystemReader(checkpoint_id)
 
 
 if TYPE_CHECKING:
@@ -56,6 +65,8 @@ if TYPE_CHECKING:
     # constant imported above, so alias it here.
     from torchtitan.components.optimizer import (  # noqa: N811
         EMA as EMAContainer,
+    )
+    from torchtitan.components.optimizer import (
         LRSchedulersContainer,
         OptimizersContainer,
     )
@@ -404,7 +415,27 @@ class CheckpointManager(BaseCheckpointManager):
             state_dict = self.sd_adapter.from_hf(hf_state_dict)
             states[MODEL].load_state_dict(state_dict)
         else:
-            dcp.load(state_dict, checkpoint_id=checkpoint_id)
+            if self.sd_adapter is None:
+                dcp.load(state_dict, checkpoint_id=checkpoint_id)
+            else:
+                storage_reader = _native_storage_reader(checkpoint_id)
+                from .legacy_native_dcp import prepare_legacy_native_load
+
+                checkpoint_metadata = (
+                    storage_reader.read_metadata().state_dict_metadata
+                )
+                model_keys = (
+                    set(states[MODEL].state_dict()) if MODEL in states else set()
+                )
+                state_dict, finish_load = prepare_legacy_native_load(
+                    state_dict,
+                    model_keys,
+                    checkpoint_metadata,
+                    self.sd_adapter,
+                )
+
+                dcp.load(state_dict, storage_reader=storage_reader)
+                state_dict = finish_load(state_dict)
 
             # TODO: Since we flatten the model states in state_dict, we need to
             # manually call load_state_dict() for the model. Need to fix this.
