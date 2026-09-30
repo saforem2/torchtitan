@@ -84,3 +84,47 @@ This run replaces the earlier incomplete SophiaG material for this model:
 the 30-point coarse sweep `12478513` and the truncated 97/100 fine curve
 `12478570`. Those remain historical records and are not resumable — no finder
 cursor survives on disk.
+
+## Matched fixed-LR arms (2026-09-30)
+
+Three constant-LR arms bracket the coarse basin. All ran on the same clean
+checkout `7cc86ebc750d8455e1b8a0f6dc6177797f0d010b`, the same runtime, and the
+same HSDP `3 × 64` / 192-rank topology, from fresh initialization, via
+`scripts/fixed_lr_30b_sunspot.pbs`.
+
+| LR | job | final loss | final grad norm | scheduler |
+|---:|---:|---:|---:|---|
+| `4.641589e-6` | `12479138` | 12.89341 | 57.8217 | exit 0 |
+| **`1e-5`** | `12479139` | **11.70675** | **13.4430** | exit 0 |
+| `2.154435e-5` | `12479140` | 11.84853 | 46.7220 | exit 0 |
+
+Every arm completed all ten updates with finite, positive loss and gradient
+norm, so `1e-5` is the best tested short-horizon SophiaG LR on both final loss
+and final gradient norm. That is the same sampled LR the coarse curve selected.
+
+### Gradient-norm excursions are not SophiaG-specific
+
+All three SophiaG arms show gradient norm rising from ~3.5 to 45–70 partway
+through the run. The matched AdamW arms (`12479115`–`12479117`) show the same
+pattern at the same geometry, for example `12479116` peaking at 45.65 before
+settling to 8.50. This is therefore a property of this fresh-init, warmup-free,
+10-update probe, **not** evidence of the known 30B SophiaG divergence bug.
+
+### SophiaG is materially worse than AdamW at 10 updates
+
+At matched LR and identical geometry:
+
+| LR | AdamW final loss | SophiaG final loss |
+|---:|---:|---:|
+| `4.641589e-6` | 10.62454 | 12.89341 |
+| `1e-5` | 10.11744 | 11.70675 |
+| `2.154435e-5` | 10.42669 | 11.84853 |
+
+SophiaG's `4.641589e-6` arm is the clearest concern: it reached 10.66 at step 7
+and then degraded to 12.89 by step 10, so its endpoint is worse than its own
+mid-run trajectory.
+
+**Conclusion.** `1e-5` is a validated short-horizon SophiaG candidate and the
+correct choice *within* SophiaG. It is not a production recommendation, and on
+this 10-update evidence SophiaG does not beat AdamW at any tested LR. A longer
+representative run is required before any production LR or optimizer change.
