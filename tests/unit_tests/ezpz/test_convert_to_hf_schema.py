@@ -7,9 +7,7 @@
 import pytest
 
 from torchtitan.components.checkpointer import ModelWrapper
-from torchtitan.experiments.ezpz.eval.convert_to_hf import (
-    _checkpoint_load_state_dict,
-)
+from torchtitan.experiments.ezpz.eval.convert_to_hf import _checkpoint_load_state_dict
 from torchtitan.models.llama3 import llama3_configs
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
