@@ -13,6 +13,7 @@ fsdp_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_fsdp2_xccl_
 fsdp_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py"
 collective_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_collective_op.py"
 full_model_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_full_model_sunspot.sh"
+umbrella="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -31,6 +32,17 @@ assert_not_contains() {
         fail "$message"
     fi
 }
+
+# Broadcast archives are relocated to a caller-selected /tmp directory. The
+# activation script may retain its build-time VIRTUAL_ENV, so the umbrella must
+# execute staged entry points by absolute path instead of sourcing it and
+# accidentally falling back to $HOME/bin.
+assert_not_contains "$umbrella" 'source "\$venvdst/bin/activate"' \
+    'umbrella must not source a non-relocatable staged activation script'
+assert_contains "$umbrella" '"\$venvdst/bin/ezpz" launch' \
+    'umbrella must execute staged ezpz by absolute path'
+assert_contains "$umbrella" '"\$venvdst/bin/python" -m torchtitan.experiments.ezpz.train' \
+    'umbrella payload must execute staged Python by absolute path'
 
 # Keep the public ezpz invocation; only fix status handling around its pipeline.
 assert_contains "$resumable" '^[[:space:]]*ezpz launch ' \
