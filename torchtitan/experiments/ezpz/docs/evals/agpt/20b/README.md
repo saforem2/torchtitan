@@ -2,7 +2,7 @@
 
 > **Living document** — updated as new eval results come in.
 >
-> Last updated: 2026-09-21
+> Last updated: 2026-09-30
 >
 > **Training curves:** see [`docs/production/agpt/20b/`](../../../production/agpt/20b/README.md)
 > for loss / throughput / MFU dashboards (v1 256N + v2 512N).
@@ -16,6 +16,12 @@
 > (`agpt-20b-v2`, 512N) advanced cleanly through step-4,500 (453B
 > tokens, 2026-06-10), with monotonic per-benchmark progression
 > throughout.
+>
+> **Current endpoint coverage:** 20B-512 step 11,100 (`8880564`) and 20B-256
+> step 17,500 (`8880658`) both have accepted seven-measurement artifacts. The
+> six ordinary tasks are 0-shot; ARC-Challenge is 25-shot and remains labeled
+> separately. Generated charts are pending a data-complete Aurora rerender so
+> these two endpoint rows are not silently omitted.
 
 ## Setup
 
@@ -231,13 +237,15 @@ resume), 8535041 (single step-2400), 8535121 (step-4200 + step-4300).
 | **v2 512N sync** | **6,000** | **604.0** | **0.6086** | **0.6481** | **0.3635** | **0.5825** | **0.7563** | **0.3640** | **0.5807** |
 | **v2 256N** | **16,000** | **805.3** | **0.6809** | **0.7054** | **—** | **0.6117** | **0.7693** | **0.3740** | **0.6248** |
 | **v2 512N const-LR** | **10,900** | **1,097.2** | **0.6804** | **0.6965** | **—** | **0.5777** | **0.7726** | **0.3440** | **0.6321** |
+| **v2 256N** | **17,500** | **880.8** | **0.6786** | **0.6814** | **—** | **0.5699** | **0.7671** | **0.3780** | **0.6199** |
+| **v2 512N const-LR** | **11,100** | **1,117.4** | **0.6875** | **0.7050** | **—** | **0.5983** | **0.7682** | **0.3740** | **0.6303** |
 
-**Note (resolved):** the step-4,500 note here is obsolete. Production-tail
-backfills now cover the disk heads at **20B-512 step 10,900** and **20B-256
-step 16,000**; the 0-shot values are included in the canonical table above,
-and the separately measured 25-shot ARC-C values are recorded below.
+**Endpoint coverage:** production-tail backfills now cover the disk heads at
+**20B-512 step 11,100** and **20B-256 step 17,500**. The six 0-shot values are
+included in the canonical table above, and the separately measured 25-shot
+ARC-Challenge values are recorded below.
 
-### Production-tail backfills (2026-09-21)
+### Production-tail backfills (2026-09-21 and 2026-09-30)
 
 Both jobs finished with `Exit_status=0`, wrote complete `results.json` files,
 and converted with the post-switch `20b_real` RoPE flavor. The six ordinary
@@ -248,10 +256,13 @@ from the 0-shot trajectory curves rather than silently mixing shot counts.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 20B 256N | `8846651` | 16,000 | 805.3B | 0.6809 | 0.7054 | 0.4420 | 0.6117 | 0.7693 | 0.3740 | 0.6248 |
 | 20B 512N const-LR | `8846649` | 10,900 | 1,097.2B | 0.6804 | 0.6965 | 0.4334 | 0.5777 | 0.7726 | 0.3440 | 0.6321 |
+| 20B 256N | `8880658` | 17,500 | 880.8B | 0.6786 | 0.6814 | 0.4505 | 0.5699 | 0.7671 | 0.3780 | 0.6199 |
+| 20B 512N const-LR | `8880564` | 11,100 | 1,117.4B | 0.6875 | 0.7050 | 0.4437 | 0.5983 | 0.7682 | 0.3740 | 0.6303 |
 
-The aggregate production-eval chart and the 20B overview include the new
-0-shot points. ARC-C remains absent from those curves at these two steps
-because no matching 0-shot measurement was run.
+The aggregate production-eval chart and the 20B overview must be rerendered on
+Aurora after importing the two `tail-current` artifacts. ARC-Challenge remains
+absent from the 0-shot curves at these four tail points because only the
+separately labeled 25-shot measurement was run.
 
 ### Δ vs v1 ceiling
 

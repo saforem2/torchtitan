@@ -2,6 +2,53 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Aurora) -- production reporting audit and tail evaluation
+
+- Reconciled the registered production lineages against complete DCP metadata
+  and accepted result artifacts. The base heads are covered: 2B-256 step
+  92,859, 2B-512 step 46,429, 20B-512 step 11,100, and 20B-256 step 17,500 all
+  have accepted endpoint evaluations. The two 20B tail results are jobs
+  `8880564` and `8880658`; both contain six 0-shot tasks plus ARC-Challenge
+  25-shot with finite metrics.
+- Two stage-2 gaps remained. The 2B-512 stage-2 chain is complete at step
+  23,746 but was evaluated only through step 22,300; the 2B-256 stage-2 chain is
+  complete at step 41,300 but was evaluated only through step 28,000. Submitted
+  independent fail-closed jobs `8880872` (`2b_real`, step 23,746) and `8880873`
+  (complex `2b`, step 41,300). Both target seven measurements and isolated
+  Flare output paths. Canonical chart regeneration remains gated on accepted
+  artifacts from both jobs. Both subsequently finished with PBS exit 0 and
+  validated seven-measurement artifacts. For 2B-256 stage-2 step 41,300,
+  `8880873` measured:
+  HellaSwag `acc_norm=0.5557`, ARC-Easy `acc=0.6717`, Winogrande `acc=0.5493`,
+  PIQA `acc_norm=0.7193`, OpenBookQA `acc_norm=0.3980`, BoolQ `acc=0.5477`, and
+  ARC-Challenge 25-shot `acc_norm=0.3968`. Artifact SHA-256:
+  `757d01be81933a310ad5a33b28840481266579079d98dda821e3ae0be706f945`.
+  For 2B-512 stage-2 step 23,746, `8880872` measured HellaSwag
+  `acc_norm=0.5446`, ARC-Easy `acc=0.6789`, Winogrande `acc=0.5328`, PIQA
+  `acc_norm=0.7089`, OpenBookQA `acc_norm=0.3440`, BoolQ `acc=0.5777`, and
+  ARC-Challenge 25-shot `acc_norm=0.4053`. Artifact SHA-256:
+  `8f64e432132173db622c1f019145515d716b1ac240aa3acea9d5853526e55720`.
+- The production and eval charts still reflect the pre-tail September 27 data
+  snapshot. The full 608-result corpus plus all four tail artifacts was overlaid
+  into a clean Aurora checkout and rerendered successfully. The combined eval
+  chart now reaches 20B-512 step 11,100, 20B-256 step 17,500, 2B-512 stage-2
+  step 23,746, and 2B-256 stage-2 step 41,300. SHA-256 values for the generated
+  SVGs are `038c14f57581cd0b9ba20b0f68b33f5f414d59f9c65e773d9a13180a70fa3a11`
+  (combined), `71fd5154b54280f03c72ea2fa5e47a67956c8bc4a602f2ed9966c88fa78c9edd`
+  (2B overview), and
+  `095d41f56e559fdba2f0b1d19505b297a79890fad5abe219b0607fa67afe778f`
+  (20B overview).
+- Exact-head full-state smoke `8880891` used PR #45 commit `6b3246fac9` and
+  finished with PBS exit 143 before DCP load. Its branch was based on the older
+  `44f8a46cef` integration point and lacked the later AGPT full-SPMD
+  parallelization path used by passing gate `8879698`; all ranks rejected a
+  plain parameter during FSDP construction. This does not exercise or refute
+  the legacy DCP migration. Rebase the migration onto the validated sync head
+  before another restore allocation.
+- Production umbrella `8879474` remains queued in `medium`; follower `8879475`
+  remains dependency-held. Neither has launched and no production checkpoint
+  head has changed.
+
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
 - Tail eval `8878144` exposed a false-success wrapper path: DCP conversion ran
@@ -425,7 +472,7 @@ and 538 free. Nothing wrong with the chain; the machine is full.
 
 The depth monitor read `2` throughout. Added a progress monitor keyed on
 checkpoint mtime, which fired at 79h on its first tick.
-||||||| e29bcbcb0
+
 ## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
 
 Asked whether there was anything upstream to pull in. 148 commits, not the 64

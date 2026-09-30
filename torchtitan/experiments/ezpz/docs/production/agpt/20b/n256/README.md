@@ -2,21 +2,20 @@
 
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md)
 > for the v2 lm-eval results.
-> **Latest backfill:** step 16,000 (`8846651`, finished successfully on
-> 2026-09-21) — HellaSwag `acc_norm` 0.6809, ARC-Easy `acc` 0.7054,
-> ARC-Challenge 25-shot `acc_norm` 0.4420, Winogrande `acc` 0.6117.
+> **Latest backfill:** step 17,500 (`8880658`, finished successfully on
+> 2026-09-30) — HellaSwag `acc_norm` 0.6786, ARC-Easy `acc` 0.6814,
+> ARC-Challenge 25-shot `acc_norm` 0.4505, Winogrande `acc` 0.5699.
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-09-21
+> Last updated: 2026-09-30
 >
-> Status: **NOT RUNNING.** The latest umbrella, `8828612`, advanced this chain
-> on 2026-09-19/20 from step 15,201 through step 16,036 and persisted
-> **step-16,000** (**805.3B tokens, 17.2%** of 4.67T). The last logged loss was
-> **2.45566**. The checkpoint head and 173 step directories were verified
-> directly on Aurora on 2026-09-21. This was the latest productive 20B seat;
-> the same umbrella's 20B-512 seat failed twice at startup with
-> `std::bad_alloc` and made no progress.
+> Status: **NOT RUNNING.** Umbrella `8870515` advanced this chain through logged
+> step 17,600 and persisted **step 17,500** (**880.8B tokens**). Step 17,600 is
+> an empty placeholder and is not resumable. Tail eval `8880658` finished with
+> PBS exit 0 and seven finite measurements, including HellaSwag
+> `acc_norm=0.6786`, ARC-Easy `acc=0.6814`, and ARC-Challenge 25-shot
+> `acc_norm=0.4505`.
 >
 > Trajectory since the step-300 stall: `8505255`
 > (sync mode) reached step-1,125; `8558548`/`8558549` carried it

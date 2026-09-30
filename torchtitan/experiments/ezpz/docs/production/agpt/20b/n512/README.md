@@ -1,16 +1,16 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-09-21
+> **Last updated:** 2026-09-30
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status: NOT RUNNING.** Production moved to the constant-LR fork seeded at
-> step 9,000 on 2026-08-21. That fork is persisted at **step 10,900**
-> (~1,097.2B tokens, 23.5% of 4.67T target), with last logged loss
-> **2.31773** at step 10,905. The checkpoint head (20 step directories) was
-> verified directly on Aurora on 2026-09-21. Umbrella `8828611` last advanced
-> it on 2026-09-16/17; the latest umbrella, `8828612`, made no 20B-512
-> progress because both attempts died during startup with `std::bad_alloc`.
+> **Status: NOT RUNNING.** Umbrella `8870515` advanced the constant-LR fork to
+> a disk-verified **step 11,100** (**1,117.4B tokens**). It logged through step
+> 11,190, but step 11,200 is an empty placeholder and is not resumable. Tail
+> eval `8880564` finished with PBS exit 0 and a fresh seven-measurement result:
+> HellaSwag `acc_norm=0.6875`, ARC-Easy `acc=0.7050`, Winogrande `acc=0.5983`,
+> PIQA `acc_norm=0.7682`, OpenBookQA `acc_norm=0.3740`, BoolQ `acc=0.6303`, and
+> ARC-Challenge 25-shot `acc_norm=0.4437`.
 >
 > The progress table below is detailed only through step-5,400 (2026-07-07);
 > everything from step-5,400 to the current head was carried by the ~2,098N
@@ -32,11 +32,8 @@
 > stale legacy conts (8521631/8534294) were superseded by the autoretry
 > chain, which was in turn superseded by the umbrellas.
 >
-> **Latest eval:** the production-tail backfill at step 10,900 (`8846649`)
-> finished successfully on 2026-09-21: HellaSwag `acc_norm` 0.6804,
-> ARC-Easy `acc` 0.6965, ARC-Challenge 25-shot `acc_norm` 0.4334, and
-> Winogrande `acc` 0.5777. See the eval page for all seven tasks and the
-> shot-count distinction.
+> **Latest eval:** step 11,100 (`8880564`, accepted 2026-09-30). See the eval
+> page for all seven metrics and the shot-count distinction.
 >
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md).
 > **🏁 The 20B 512N sync chain is now beating 2B 256N async per token
