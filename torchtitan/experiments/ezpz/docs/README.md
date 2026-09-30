@@ -29,6 +29,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
+| 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-09-29 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
 | 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
@@ -46,13 +47,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
 | 2026-09-25 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
 | 2026-09-25 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
-| 2026-09-25 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./production/rl/history/upstream-rl-port-status.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-25 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./production/rl/history/upstream-rl-port-status.md) |
 | 2026-09-25 | [GRPO+LoRA on Intel XPU: Sunspot reproduction (Monarch + TorchStore + vLLM)](./production/rl/history/grpo-lora-xpu-repro.md) |
 | 2026-09-25 | [GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900](./production/rl/history/grpo-lora-agpt2b-repro.md) |
 | 2026-09-25 | [RL bring-up history](./production/rl/history/README.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-21 | [Claude Session Log](./claude-sessions.md) |
 | 2026-09-19 | [Summaries](./summaries/README.md) |
 | 2026-09-19 | [Twelve days ending 2026-09-18](./summaries/2026-09-18.md) |
-| 2026-09-19 | [Week ending 2026-08-29](./summaries/2026-08-29.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
