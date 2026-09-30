@@ -74,7 +74,11 @@ def main() -> int:
         print(f"world={world} torch={torch.__version__} dev={dev}", flush=True)
 
     op = os.environ.get("EZPZ_PROBE_OP", "reduce_scatter")
-    for mib in (0.001, 1, 16, 64, 144):
+    mib_values = tuple(
+        float(value)
+        for value in os.environ.get("EZPZ_PROBE_MIBS", "0.001 1 16 64 144").split()
+    )
+    for mib in mib_values:
         nbytes = max(2 * world, int(mib * 2**20))
         n = nbytes // 2
         n -= n % world

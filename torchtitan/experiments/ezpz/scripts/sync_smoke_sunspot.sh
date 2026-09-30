@@ -86,7 +86,8 @@ else
 fi
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://ezpz.cool/utils.sh)
+source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
 ezpz_setup_job
 ezpz_load_modules
 cd "${SUBMIT_DIR}" || exit 2

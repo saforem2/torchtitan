@@ -46,6 +46,8 @@
 #   SMOKE_CONFIGS  newline-separated "module:config[:extra cli ...]" specs
 #   SMOKE_STEPS    steps per config (default 3)
 #   SEED           debug seed (default 42)
+#   EZPZ_UTILS     staged utils.sh path (compute nodes have no direct internet)
+#   HF_ASSETS      shared tokenizer assets for clean detached worktrees
 
 set -o pipefail
 
@@ -66,6 +68,8 @@ SEED="${SEED:-42}"
 # docs/experiments/sync84-xpu-smoke.md.
 VENV="${SMOKE_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/.venv}"
 VENV="$(readlink -f "${VENV}")"
+EZPZ_UTILS="${EZPZ_UTILS:-${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh}"
+HF_ASSETS="${HF_ASSETS:-${SUBMIT_DIR:-${PBS_O_WORKDIR:-$PWD}}/assets/hf/gemma-7b}"
 
 # max_context_length must EQUAL num-tokens-per-microbatch-per-dp-rank: the
 # blendcorpus fold emits fixed-length rows and the SDPA wrapper divides by it.
@@ -86,8 +90,14 @@ else
 fi
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
-cd "${SUBMIT_DIR}"
+[[ -s "$EZPZ_UTILS" ]] || { echo "FATAL: staged utils missing: $EZPZ_UTILS"; exit 1; }
+[[ -s "$HF_ASSETS/tokenizer.json" && -s "$HF_ASSETS/tokenizer_config.json" ]] \
+    || { echo "FATAL: tokenizer assets missing: $HF_ASSETS"; exit 1; }
+# shellcheck disable=SC1090
+source "$EZPZ_UTILS" || exit 1
+ezpz_load_modules || exit 1
+ezpz_setup_job || exit 1
+cd "${SUBMIT_DIR}" || { echo "FATAL: cannot cd to ${SUBMIT_DIR}"; exit 1; }
 
 source "${VENV}/bin/activate"
 
@@ -102,6 +112,8 @@ echo "node0:  $(hostname)" | tee -a "${LOG}"
 echo "venv:   ${VENV}" | tee -a "${LOG}"
 echo "tree:   ${SUBMIT_DIR}" | tee -a "${LOG}"
 echo "commit: $(git -C "${SUBMIT_DIR}" log --oneline -1 2>/dev/null)" | tee -a "${LOG}"
+[[ -z "$(git -C "${SUBMIT_DIR}" status --porcelain --untracked-files=no)" ]] \
+    || { echo "VERDICT: dirty_source" | tee -a "$LOG"; exit 1; }
 echo "steps=${STEPS} seed=${SEED}" | tee -a "${LOG}"
 python3 -c "import torch;print('torch:  ',torch.__version__)" 2>&1 | tail -1 | tee -a "${LOG}"
 echo "" | tee -a "${LOG}"
@@ -138,10 +150,12 @@ for spec in "${CONFIGS[@]}"; do
     label="${idx}-${config}"
     echo "" | tee -a "${LOG}"
     echo "--- [${idx}] ${module} / ${config}: ${STEPS} deterministic steps ${extra:+(${extra})} ---" | tee -a "${LOG}"
-    # shellcheck disable=SC2086 -- extra is an intentional word-split arg list
+    # extra is an intentional word-split argument list.
+    # shellcheck disable=SC2086
     ezpz launch python3 -m torchtitan.experiments.ezpz.train \
         --module="${module}" \
         --config="${config}" \
+        --hf-assets-path="${HF_ASSETS}" \
         --training.steps="${STEPS}" \
         --debug.seed="${SEED}" \
         --debug.deterministic \

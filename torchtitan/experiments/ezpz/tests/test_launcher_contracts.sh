@@ -9,6 +9,8 @@ resumable="$repo_root/torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_gs138650
 dcp_sync="$repo_root/torchtitan/experiments/ezpz/scripts/sync_dcp_resume_sunspot.sh"
 rl_sync="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_weight_sync_sunspot.sh"
 rl_multihost="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_multihost_weight_sync_sunspot.sh"
+fsdp_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_fsdp2_xccl_sunspot.sh"
+fsdp_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -82,6 +84,21 @@ assert_contains "$rl_multihost" 'trainer/grad_norm/mean' \
     'multi-host sync gate must require nonzero gradient evidence'
 assert_not_contains "$rl_multihost" 'pip install' \
     'multi-host sync gate must not mutate the isolated runtime'
+
+# The 30B failure discriminator must preserve shard degree 16 while separating
+# raw transport, pure-FSDP storage, and HSDP mesh-interaction failures.
+assert_contains "$fsdp_probe" 'mib="0.001 1 16 64 144"' \
+    '30B XCCL gather/all-reduce uses exact production shard payloads (1/16); 192/1176 reserved for reduce_scatter'
+assert_contains "$fsdp_probe" '--dp-replicate 1 --dp-shard 16' \
+    '30B probe must test pure FSDP at exact shard degree 16'
+assert_contains "$fsdp_probe" '--dp-replicate 3 --dp-shard 16' \
+    '30B probe must test HSDP at exact shard degree 16'
+assert_contains "$fsdp_probe_py" 'FSDP2_XCCL_PROBE_PASS' \
+    '30B storage probe must emit a machine-readable success marker'
+assert_contains "$fsdp_probe_py" 'num_embeddings=100352' \
+    '30B storage probe must use the exact OLMo embedding vocabulary'
+assert_contains "$fsdp_probe_py" 'embedding_dim=6144' \
+    '30B storage probe must use the exact 30B embedding width'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \

@@ -22,7 +22,8 @@ TOKENIZER="$D/assets/hf/gemma-7b"
 mkdir -p "$ROOT"
 cd "$D" || exit 2
 
-source <(curl -fsSL https://ezpz.cool/utils.sh)
+source "$D/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
 ezpz_setup_job
 ezpz_load_modules
 export VIRTUAL_ENV="$V"

@@ -20,7 +20,8 @@ PORT=$((35000 + JOB % 20000))
 LOG="$OUT/controller.log"
 
 cd "$WT" || exit 11
-source <(curl -fsSL https://ezpz.cool/utils.sh)
+source "$WT/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
 ezpz_setup_job
 ezpz_load_modules
 export VIRTUAL_ENV="$V"
