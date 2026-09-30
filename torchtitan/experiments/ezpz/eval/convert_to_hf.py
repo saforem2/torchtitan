@@ -10,6 +10,7 @@
 import argparse
 import importlib
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.distributed.checkpoint as dcp
@@ -17,6 +18,57 @@ from torch.distributed.checkpoint import HuggingFaceStorageWriter
 
 from torchtitan.components.checkpointer import ModelWrapper
 from torchtitan.config import TORCH_DTYPE_MAP
+
+
+def _checkpoint_load_state_dict(
+    state_dict: dict[str, Any],
+    sd_adapter,
+    checkpoint_keys: set[str],
+) -> dict[str, Any]:
+    """Match today's native model state to the schema stored in a DCP.
+
+    Older TorchTitan checkpoints expose fused QKV and gate/up parameters as
+    logical ``wq/wk/wv`` and ``w1/w3`` keys through state-dict hooks. Current
+    model definitions retain the physical ``wqkv`` and ``w13`` parameters.
+    DCP requires the destination keys to match the on-disk schema, so derive
+    both representations through the authoritative model adapter and select
+    the representation actually present in checkpoint metadata.
+    """
+    logical_state_dict = sd_adapter._native_fused_linears_to_hf(state_dict)
+    load_state_dict: dict[str, Any] = {}
+    missing: list[str] = []
+
+    for key, value in state_dict.items():
+        if key in checkpoint_keys:
+            load_state_dict[key] = value
+            continue
+
+        logical_keys = [
+            logical_key
+            for logical_key in logical_state_dict
+            if logical_key in checkpoint_keys
+            and (
+                logical_key.startswith(key.rsplit(".", 2)[0] + ".")
+                if key.endswith(("wqkv.weight", "wqkv.bias", "w13.weight", "w13.bias"))
+                else False
+            )
+        ]
+        if logical_keys:
+            load_state_dict.update(
+                (logical_key, logical_state_dict[logical_key])
+                for logical_key in logical_keys
+            )
+        else:
+            missing.append(key)
+
+    if missing:
+        preview = ", ".join(missing[:8])
+        raise RuntimeError(
+            "Checkpoint schema cannot represent current model state keys: "
+            f"{preview}{' ...' if len(missing) > 8 else ''}"
+        )
+
+    return load_state_dict
 
 
 @torch.inference_mode()
@@ -81,8 +133,15 @@ def convert_to_hf(
         "docs/guides/known-bugs/rope-flavor-mismatch.md"
     )
 
-    # allocate state dict memory with empty weights to load checkpoint
+    # Allocate model memory, then match its state-dict representation to the
+    # exact schema recorded by this checkpoint. Historical AGPT checkpoints
+    # store logical split Q/K/V and gate/up tensors, while current model builds
+    # expose physically fused wqkv and w13 parameters.
     state_dict = model._get_state_dict()
+    checkpoint_keys = set(
+        dcp.FileSystemReader(input_dir).read_metadata().state_dict_metadata
+    )
+    state_dict = _checkpoint_load_state_dict(state_dict, sd_adapter, checkpoint_keys)
     dcp.load(
         state_dict,
         checkpoint_id=input_dir,
