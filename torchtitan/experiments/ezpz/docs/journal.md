@@ -4,6 +4,14 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-30 (Aurora) -- production reporting audit and tail evaluation
 
+- Aurora's supported submission entry point is now the `prod` routing queue,
+  whose production destinations use the current BKC and provide oneAPI 2026.1
+  by default. The canonical newer-PyTorch guide was updated accordingly, and
+  the separate `next-eval` page was collapsed into it. Historical oneAPI
+  2025.3.1 instructions remain in a closed disclosure for reproducibility,
+  while new operator examples use `qsub -q prod`. The guide also warns not
+  to load `frameworks/2026.1.0`, whose bundled PyTorch is not the isolated
+  Torch 2.15 runtime used by the validated path.
 - Reconciled the registered production lineages against complete DCP metadata
   and accepted result artifacts. The base heads are covered: 2B-256 step
   92,859, 2B-512 step 46,429, 20B-512 step 11,100, and 20B-256 step 17,500 all
