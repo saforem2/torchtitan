@@ -94,8 +94,7 @@ docs/
 │   ├── loss-reporting-tp-dist-reduce.md
 │   ├── perlmutter-debug-host.md
 │   ├── polaris-fresh-venv.md
-│   ├── running-with-newer-pytorch.md
-│   ├── running-with-newer-pytorch-next-eval.md <- Aurora prod + oneAPI 2026.1 / image-independent venv
+│   ├── running-with-newer-pytorch.md <- Aurora prod + oneAPI 2026.1; legacy 2025.3.1 collapsed
 │   ├── spmd-backend-status.md
 │   ├── training-dtype-bf16-norm-freeze.md  <- Root cause of the v1 -> v2 restart
 │   ├── xpu-attention-issues.md

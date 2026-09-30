@@ -365,5 +365,5 @@ state, a parser check, or model construction.
   studies. Useful history, superseded as an operator guide by this page.
 - [`history/`](history/README.md): pre-current runtime bring-up records; never use
   their environment snippets as new-run instructions.
-- [Aurora `prod` newer-PyTorch guide](../../guides/running-with-newer-pytorch-next-eval.md):
+- [Aurora `prod` newer-PyTorch guide](../../guides/running-with-newer-pytorch.md):
   current oneAPI 2026.1 environment and image-independent archive handling.
