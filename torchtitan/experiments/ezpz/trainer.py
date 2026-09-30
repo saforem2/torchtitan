@@ -20,7 +20,6 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhaustedError
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
-from torchtitan.components.optim import LRSchedulersContainer, OptimizersContainer
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
 from torchtitan.experiments.ezpz import signal_stop
@@ -497,22 +496,11 @@ class FaultTolerantTrainer(TorchFTTrainer):
         diagnostics_attention: bool = False
         history_bridge: bool = False
         wandb_watch: bool = False
-        # Compatibility aliases retained for existing ezpz recipes. The
-        # upstream lifecycle consumes the canonical nested ``optim`` config.
-        optimizer: OptimizersContainer.Config = field(
-            default_factory=OptimizersContainer.Config
-        )
-        lr_scheduler: LRSchedulersContainer.Config = field(
-            default_factory=LRSchedulersContainer.Config
-        )
-
         def __post_init__(self):
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
             # class captured by zero-argument ``super()``.
             TorchFTTrainer.Config.__post_init__(self)
-            self.optim.optimizer = self.optimizer
-            self.optim.lr_scheduler = self.lr_scheduler
             # ``checkpointer`` is canonical. Legacy ``--checkpoint.*`` CLI
             # options are translated before parsing, so copying the alias back
             # here would silently erase canonical CLI overrides and specialized
