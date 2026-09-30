@@ -109,6 +109,53 @@ def test_20b_depth48_probe_preserves_width_without_mutating_20b() -> None:
     )
 
 
+def test_disable_backward_prefetch_configures_every_fsdp_module(monkeypatch) -> None:
+    import torch.nn as nn
+
+    from torchtitan.experiments.ezpz.agpt.parallelize import (
+        maybe_disable_fsdp_backward_prefetch,
+    )
+
+    class FakeFSDP(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefetch_modules = None
+
+        def set_modules_to_backward_prefetch(self, modules) -> None:
+            self.prefetch_modules = modules
+
+    model = nn.Module()
+    model.add_module("first", FakeFSDP())
+    model.add_module("second", FakeFSDP())
+    monkeypatch.setenv("EZPZ_DISABLE_FSDP_BACKWARD_PREFETCH", "1")
+
+    assert maybe_disable_fsdp_backward_prefetch(model) == 2
+    assert model.first.prefetch_modules == [model.first]
+    assert model.second.prefetch_modules == [model.second]
+
+
+def test_disable_backward_prefetch_is_opt_in(monkeypatch) -> None:
+    import torch.nn as nn
+
+    from torchtitan.experiments.ezpz.agpt.parallelize import (
+        maybe_disable_fsdp_backward_prefetch,
+    )
+
+    class FakeFSDP(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefetch_modules = None
+
+        def set_modules_to_backward_prefetch(self, modules) -> None:
+            self.prefetch_modules = modules
+
+    model = FakeFSDP()
+    monkeypatch.delenv("EZPZ_DISABLE_FSDP_BACKWARD_PREFETCH", raising=False)
+
+    assert maybe_disable_fsdp_backward_prefetch(model) == 0
+    assert model.prefetch_modules is None
+
+
 def test_legacy_comm_mode_translates_to_backend() -> None:
     from torchtitan.experiments.ezpz.train import _translate_legacy_args
 
