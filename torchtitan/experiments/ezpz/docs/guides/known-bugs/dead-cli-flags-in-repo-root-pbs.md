@@ -1,13 +1,14 @@
-# Dead CLI flags: 99 PBS scripts at the repo root would abort today
+# Dead CLI flags in archived historical PBS scripts
 
-**Status:** documented, deliberately NOT mass-fixed. Read before reusing any
-`.pbs` at the repo root.
+**Status:** the surviving historical launchers were moved from repository root
+to `torchtitan/experiments/ezpz/scripts/legacy/root-pbs/`. They remain
+deliberately unmodified and must be audited before reuse.
 
 ## What
 
 Upstream `#4088` (Grain dataloader) and `#4121` (sequence -> token units)
-removed four CLI flags. **99 of the ~100 `.pbs` scripts at the repo root still
-pass at least one of them on a live (non-comment) line**, and every one of
+removed four CLI flags. **99 historical `.pbs` scripts were found to pass at
+least one of them on a live (non-comment) line**, and every one of
 those scripts would die in flag parsing before reaching a single training step:
 
 | dead flag | removed by | replacement |
@@ -60,7 +61,7 @@ comment lines from live flag lines.
 
 ## What to do instead
 
-**Before reusing any repo-root `.pbs`, grep it:**
+**Before reusing any archived `.pbs`, grep it:**
 
 ```bash
 grep -nE '^[^#]*--(dataloader\.num-workers|training\.seq-len|training\.local-batch-size|training\.global-batch-size)' <script>.pbs

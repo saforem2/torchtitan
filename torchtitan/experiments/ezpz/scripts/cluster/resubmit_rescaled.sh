@@ -12,7 +12,7 @@
 set -o pipefail
 
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
-SCRIPT="$REPO/80b_capture_rescaled.pbs"
+SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/legacy/root-pbs/80b_capture_rescaled.pbs"
 NEED=32
 cd "$REPO" || exit 1
 export PATH=/opt/pbs/bin:$PATH
