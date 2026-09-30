@@ -7,7 +7,6 @@ import argparse
 import math
 import os
 
-import spmd_types as spmd
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -16,6 +15,9 @@ from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torchtitan.distributed.fsdp import resolve_fsdp_mesh
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.distributed.spmd_types import annotate_replicated_parameters
+from torchtitan.experiments.ezpz.xccl_split_group_workaround import (
+    maybe_install_xccl_split_group_workaround,
+)
 
 
 def _rank_env() -> tuple[int, int, int]:
@@ -26,6 +28,18 @@ def _rank_env() -> tuple[int, int, int]:
     world = int(os.environ.get("WORLD_SIZE", "0"))
     if world <= 1:
         raise RuntimeError(f"invalid distributed rank environment: world={world}")
+    if not 0 <= rank < world:
+        raise RuntimeError(f"invalid global rank: rank={rank}, world={world}")
+    if not 0 <= local_rank < 12:
+        raise RuntimeError(f"invalid Sunspot local rank: local_rank={local_rank}")
+    pals_rank = os.environ.get("PALS_RANKID")
+    pals_local_rank = os.environ.get("PALS_LOCAL_RANKID")
+    if pals_rank is not None and int(pals_rank) != rank:
+        raise RuntimeError(f"RANK={rank} disagrees with PALS_RANKID={pals_rank}")
+    if pals_local_rank is not None and int(pals_local_rank) != local_rank:
+        raise RuntimeError(
+            f"LOCAL_RANK={local_rank} disagrees with PALS_LOCAL_RANKID={pals_local_rank}"
+        )
     return rank, local_rank, world
 
 
@@ -47,6 +61,7 @@ def main() -> None:
     dist.init_process_group(backend="xccl", rank=rank, world_size=world)
     print(f"PG_READY rank={rank} world={world} local_rank={local_rank}", flush=True)
 
+    maybe_install_xccl_split_group_workaround()
     parallel_dims = ParallelDims(
         dp_replicate=args.dp_replicate,
         dp_shard=args.dp_shard,
@@ -85,7 +100,7 @@ def main() -> None:
     )
     module.to_empty(device=torch.device(f"xpu:{local_rank}"))
     with torch.no_grad():
-        module.weight.fill_(0.001 * (rank + 1))
+        module.weight.fill_(0.001)
     optimizer = torch.optim.SGD(module.parameters(), lr=1e-3)
     print("FSDP_WRAPPED", flush=True)
 

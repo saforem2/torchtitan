@@ -11,6 +11,7 @@ rl_sync="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_weig
 rl_multihost="$repo_root/torchtitan/experiments/ezpz/rl/scripts/grpo/sync_agpt2b_multihost_weight_sync_sunspot.sh"
 fsdp_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_fsdp2_xccl_sunspot.sh"
 fsdp_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py"
+collective_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_collective_op.py"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -87,18 +88,44 @@ assert_not_contains "$rl_multihost" 'pip install' \
 
 # The 30B failure discriminator must preserve shard degree 16 while separating
 # raw transport, pure-FSDP storage, and HSDP mesh-interaction failures.
-assert_contains "$fsdp_probe" 'mib="0.001 1 16 64 144"' \
-    '30B XCCL gather/all-reduce uses exact production shard payloads (1/16); 192/1176 reserved for reduce_scatter'
+assert_contains "$fsdp_probe" 'mib="12 73.5"' \
+    '30B XCCL all-gather must use exact BF16 1/16 production shards'
+assert_contains "$fsdp_probe" 'mib="384 2352"' \
+    '30B XCCL reduce-scatter must use exact FP32 production tensors'
+assert_contains "$fsdp_probe" 'mib="24 147"' \
+    '30B XCCL all-reduce must use exact FP32 1/16 production shards'
+assert_contains "$fsdp_probe" 'group_stride=16' \
+    'HSDP all-reduce control must use stride-16 replica groups'
+assert_contains "$fsdp_probe" 'nproc=48' \
+    'HSDP all-reduce control must launch the full four-node reduced topology'
+assert_contains "$fsdp_probe" 'EZPZ_PROBE_DTYPE=' \
+    '30B raw controls must pass the production collective dtype explicitly'
+assert_contains "$collective_probe_py" 'float32.*torch.float32' \
+    'raw collective probe must support production FP32 gradient traffic'
 assert_contains "$fsdp_probe" '--dp-replicate 1 --dp-shard 16' \
     '30B probe must test pure FSDP at exact shard degree 16'
+assert_contains "$fsdp_probe" 'run_fsdp pure-fsdp 16 12' \
+    'pure-FSDP arm must preserve Sunspot production ranks-per-node placement'
 assert_contains "$fsdp_probe" '--dp-replicate 3 --dp-shard 16' \
     '30B probe must test HSDP at exact shard degree 16'
+assert_contains "$fsdp_probe" 'run_fsdp hsdp 48 12' \
+    'HSDP arm must use the exact four-node 48-rank topology'
 assert_contains "$fsdp_probe_py" 'FSDP2_XCCL_PROBE_PASS' \
     '30B storage probe must emit a machine-readable success marker'
 assert_contains "$fsdp_probe_py" 'num_embeddings=100352' \
     '30B storage probe must use the exact OLMo embedding vocabulary'
 assert_contains "$fsdp_probe_py" 'embedding_dim=6144' \
     '30B storage probe must use the exact 30B embedding width'
+assert_contains "$fsdp_probe_py" 'maybe_install_xccl_split_group_workaround' \
+    'standalone 30B storage probe must install the XCCL mesh workaround'
+assert_contains "$fsdp_probe" 'exit 96' \
+    'raw collective arm must fail closed when its success marker is absent'
+assert_contains "$fsdp_probe" 'exit 97' \
+    'FSDP arm must fail closed when its success marker is absent'
+assert_not_contains "$fsdp_probe" 'pip install' \
+    '30B probe must not mutate the isolated runtime'
+assert_not_contains "$fsdp_probe_py" 'pip install' \
+    '30B probe payload must not mutate the isolated runtime'
 
 # A resumable timeout remains a nonzero batch result for schedulers and callers.
 assert_contains "$production" 'resumable=1' \

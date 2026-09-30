@@ -70,33 +70,64 @@ def main() -> int:
     dist.init_process_group(backend="xccl", rank=rank, world_size=world)
 
     dev = torch.device(f"xpu:{local}")
+    process_group = None
+    group_stride = int(os.environ.get("EZPZ_PROBE_GROUP_STRIDE", "0"))
+    if group_stride:
+        if world % group_stride:
+            raise RuntimeError(
+                f"world={world} is not divisible by group stride={group_stride}"
+            )
+        for shard_index in range(group_stride):
+            ranks = list(range(shard_index, world, group_stride))
+            group = dist.new_group(ranks)
+            if rank in ranks:
+                process_group = group
+        if process_group is None:
+            raise RuntimeError(f"rank={rank} was not assigned to a probe group")
+    group_size = dist.get_world_size(process_group) if process_group else world
     if rank == 0:
-        print(f"world={world} torch={torch.__version__} dev={dev}", flush=True)
+        print(
+            f"world={world} group_size={group_size} torch={torch.__version__} dev={dev}",
+            flush=True,
+        )
 
     op = os.environ.get("EZPZ_PROBE_OP", "reduce_scatter")
+    dtype_name = os.environ.get("EZPZ_PROBE_DTYPE", "bfloat16")
+    try:
+        dtype = {
+            "bfloat16": torch.bfloat16,
+            "float32": torch.float32,
+        }[dtype_name]
+    except KeyError as exc:
+        raise SystemExit(f"unknown EZPZ_PROBE_DTYPE={dtype_name}") from exc
+    element_size = torch.empty((), dtype=dtype).element_size()
     mib_values = tuple(
         float(value)
         for value in os.environ.get("EZPZ_PROBE_MIBS", "0.001 1 16 64 144").split()
     )
     for mib in mib_values:
-        nbytes = max(2 * world, int(mib * 2**20))
-        n = nbytes // 2
-        n -= n % world
-        src_t = torch.ones(n, dtype=torch.bfloat16, device=dev)
+        nbytes = max(element_size * group_size, int(mib * 2**20))
+        n = nbytes // element_size
+        n -= n % group_size
+        src_t = torch.ones(n, dtype=dtype, device=dev)
         if op == "reduce_scatter":
-            out = torch.empty(n // world, dtype=torch.bfloat16, device=dev)
-            dist.reduce_scatter_tensor(out, src_t)
+            out = torch.empty(n // group_size, dtype=dtype, device=dev)
+            dist.reduce_scatter_tensor(out, src_t, group=process_group)
         elif op == "all_gather":
-            out = torch.empty(n * world, dtype=torch.bfloat16, device=dev)
-            dist.all_gather_into_tensor(out, src_t)
+            out = torch.empty(n * group_size, dtype=dtype, device=dev)
+            dist.all_gather_into_tensor(out, src_t, group=process_group)
         elif op == "all_reduce":
             out = src_t
-            dist.all_reduce(out)
+            dist.all_reduce(out, group=process_group)
         else:
             raise SystemExit(f"unknown EZPZ_PROBE_OP={op}")
         torch.xpu.synchronize()
         if rank == 0:
-            print(f"  OK {op} {nbytes / 2**20:8.3f} MiB/rank n={n}", flush=True)
+            print(
+                f"  OK {op} dtype={dtype_name} "
+                f"{nbytes / 2**20:8.3f} MiB/rank n={n}",
+                flush=True,
+            )
 
     dist.barrier()
     if rank == 0:
