@@ -189,3 +189,25 @@ def test_legacy_training_geometry_is_order_independent() -> None:
     assert config.training.max_context_length == 4096
     assert config.training.num_tokens_per_microbatch_per_dp_rank == 3 * 4096
     assert config.training.num_tokens_per_train_step == 32 * 4096
+
+
+def test_direct_context_length_override_synchronizes_model_and_rope() -> None:
+    config = LegacyConfigLoader().parse_args(
+        [
+            "--module=ezpz.agpt",
+            "--config=agpt_debugmodel",
+            "--training.max-context-length=512",
+            "--training.num-tokens-per-microbatch-per-dp-rank=512",
+        ]
+    )
+    config = cast(Any, config)
+
+    assert config.training.max_context_length == 512
+    assert config.training.num_tokens_per_microbatch_per_dp_rank == 512
+    assert config.model.max_context_length == 512
+    assert all(
+        layer.attention.rope.max_context_length == 512
+        for layer in config.model.layers
+        if getattr(layer, "attention", None) is not None
+        and getattr(layer.attention, "rope", None) is not None
+    )

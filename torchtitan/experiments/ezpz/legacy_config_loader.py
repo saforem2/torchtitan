@@ -110,6 +110,7 @@ class LegacyConfigLoader:
                 "training.local_batch_size",
                 "training.global_batch_size",
                 "training.seq_len",
+                "training.max_context_length",
             }:
                 # Upstream #4121 replaced sequence-count geometry with token
                 # budgets. Delay these aliases so argv ordering cannot alter
@@ -133,7 +134,7 @@ class LegacyConfigLoader:
 
         training = LegacyConfigLoader._get(config, "training")
         old_seq_len = training.max_context_length
-        raw_seq_len = values.get("seq_len")
+        raw_seq_len = values.get("seq_len", values.get("max_context_length"))
         seq_len = int(raw_seq_len) if raw_seq_len is not None else old_seq_len
         if seq_len <= 0:
             raise ValueError("training.seq_len must be greater than 0")
@@ -142,13 +143,16 @@ class LegacyConfigLoader:
             local_batch_size = int(values["local_batch_size"])
             if local_batch_size <= 0:
                 raise ValueError("training.local_batch_size must be greater than 0")
-        else:
+        elif "seq_len" in values:
             local_batch_size = (
                 training.num_tokens_per_microbatch_per_dp_rank // old_seq_len
             )
+        else:
+            local_batch_size = None
 
         training.max_context_length = seq_len
-        training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
+        if local_batch_size is not None:
+            training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
 
         if "global_batch_size" in values:
             global_batch_size = int(values["global_batch_size"])
