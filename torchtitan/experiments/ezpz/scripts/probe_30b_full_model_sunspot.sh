@@ -13,6 +13,10 @@ V="${PROBE_VENV:?set PROBE_VENV}"
 EXPECTED_SHA="${EXPECTED_SHA:?set EXPECTED_SHA}"
 TOKENIZER="${TOKENIZER:?set TOKENIZER}"
 JOB="${PBS_JOBID%%.*}"
+NPROC="${CANARY_NPROC:-48}"
+DP_REPLICATE="${CANARY_DP_REPLICATE:-3}"
+DP_SHARD="${CANARY_DP_SHARD:-16}"
+TOKENS_PER_STEP="${CANARY_TOKENS_PER_STEP:-196608}"
 OUT="$D/outputs/30b-full-model-canary-$JOB"
 LOG="$OUT/run.log"
 mkdir -p "$OUT"
@@ -43,8 +47,7 @@ export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export EZPZ_DIAG_ECHO=1
 
-"$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
-    --nproc 48 --nproc_per_node 12 --timeout 1800 -- \
+run_model() {
     "$V/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt \
     --config agpt_30b_olmo2tok_smoke \
@@ -55,17 +58,30 @@ export EZPZ_DIAG_ECHO=1
     --training.steps 3 \
     --training.max-context-length 4096 \
     --training.num-tokens-per-microbatch-per-dp-rank 4096 \
-    --training.num-tokens-per-train-step 196608 \
+    --training.num-tokens-per-train-step "$TOKENS_PER_STEP" \
     --parallelism.tensor-parallel-degree 1 \
-    --parallelism.data-parallel-replicate-degree 3 \
-    --parallelism.data-parallel-shard-degree 16 \
+    --parallelism.data-parallel-replicate-degree "$DP_REPLICATE" \
+    --parallelism.data-parallel-shard-degree "$DP_SHARD" \
     --compile.no-enable \
     --metrics.no-enable-wandb \
     --checkpoint.no-enable \
     --diagnostics \
     --diagnostics-interval 1 \
-    activation-checkpoint:full \
-    2>&1 | tee "$LOG"
+    activation-checkpoint:full
+}
+export V D TOKENIZER OUT NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
+export -f run_model
+
+if [[ "$NPROC" -eq 16 ]]; then
+    CPU_BIND_SUNSPOT="list:1-8:9-16:17-24:25-32:33-40:41-48:53-60:61-68:69-76:77-84:85-92:93-100"
+    WORLD_SIZE=16 timeout 1800 mpiexec --envall --line-buffer --np=16 --ppn=12 \
+        --hostfile="$PBS_NODEFILE" --cpu-bind="$CPU_BIND_SUNSPOT" \
+        bash -c 'run_model' 2>&1 | tee "$LOG"
+else
+    "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
+        --nproc "$NPROC" --nproc_per_node 12 --timeout 1800 -- \
+        bash -c 'run_model' 2>&1 | tee "$LOG"
+fi
 rc=${PIPESTATUS[0]}
 if [[ "$rc" -ne 0 ]]; then
     printf 'FULL_MODEL_CANARY_FAILED job=%s rc=%s\n' "$JOB" "$rc" | tee "$OUT/FAILED"

@@ -152,12 +152,14 @@ assert_not_contains "$fsdp_probe_py" 'pip install' \
 # canary, not a blind 64-node LR sweep.
 assert_contains "$full_model_probe" '--config agpt_30b_olmo2tok_smoke' \
     '30B full-model canary must use the canonical OLMo-tokenizer model'
-assert_contains "$full_model_probe" '--nproc 48 --nproc_per_node 12' \
-    '30B full-model canary must use four Sunspot nodes'
-assert_contains "$full_model_probe" '--parallelism.data-parallel-replicate-degree 3' \
+assert_contains "$full_model_probe" 'CANARY_NPROC:-48' \
+    '30B full-model canary must retain a 48-rank launch path'
+assert_contains "$full_model_probe" 'CANARY_DP_REPLICATE:-3' \
     '30B full-model canary must retain the HSDP replicate axis'
-assert_contains "$full_model_probe" '--parallelism.data-parallel-shard-degree 16' \
+assert_contains "$full_model_probe" 'CANARY_DP_SHARD:-16' \
     '30B full-model canary must preserve production shard degree 16'
+assert_contains "$full_model_probe" 'WORLD_SIZE=16 timeout 1800 mpiexec' \
+    '30B full-model canary must support the 16-rank pure-FSDP control'
 assert_contains "$full_model_probe" '--training.steps 3' \
     '30B full-model canary must complete three optimizer updates'
 assert_contains "$full_model_probe" 'FULL_MODEL_CANARY_PASS' \
