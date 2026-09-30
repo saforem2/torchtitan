@@ -17,6 +17,15 @@ Running log of what's happening, session by session. Most recent first.
   ARC-Challenge-25 `0.443686`; WinoGrande accuracy was `0.598264` and BoolQ
   accuracy was `0.630275`. Gated 20B-256 step-17,500 sibling `8880658` is
   queued from exact commit `975e43931a`.
+- Sunspot production controls isolated the 30B runtime and memory boundaries.
+  Corrected compiled 10B job `12479065` completed three finite updates.
+  Disabling backward prefetch or SYCL output events clears the earlier 20B
+  collective failure, but shard-16 then OOMs during lazy AdamW state creation.
+  Canonical 30B shard-32 job `12479076` reduced model memory to 31.24 GiB/rank,
+  then failed in required reduce-scatter packing at
+  `foreach_reduce_scatter_copy_in -> torch._chunk_cat` with
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`. A narrowly scoped XPU `_chunk_cat`
+  fallback is under independent review; no production recommendation exists.
 - Tail-evaluation retry `8880334` was canceled and reached PBS `F`, exit 143,
   before writing weights after its inherited `PBS_O_WORKDIR=/home/foremans`
   would have placed the roughly 40 GB HF export under home. Commit
