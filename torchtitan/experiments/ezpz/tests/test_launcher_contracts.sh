@@ -164,6 +164,8 @@ assert_contains "$full_model_probe" '--training.steps 3' \
     '30B full-model canary must complete three optimizer updates'
 assert_contains "$full_model_probe" 'FULL_MODEL_CANARY_PASS' \
     '30B full-model canary must emit a machine-readable success marker'
+assert_not_contains "$full_model_probe" '--diagnostics' \
+    'full-model canary must not add per-parameter DTensor diagnostic collectives'
 assert_not_contains "$full_model_probe" 'pip install' \
     '30B full-model canary must not mutate the isolated runtime'
 

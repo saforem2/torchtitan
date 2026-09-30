@@ -46,7 +46,7 @@ export CCL_SYCL_KERNEL_SYNC=0
 export CCL_KVS_MODE=pmi
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
-export EZPZ_DIAG_ECHO=1
+
 
 run_model() {
     "$V/bin/python" -m torchtitan.experiments.ezpz.train \
@@ -66,8 +66,6 @@ run_model() {
     --compile.no-enable \
     --metrics.no-enable-wandb \
     --checkpoint.no-enable \
-    --diagnostics \
-    --diagnostics-interval 1 \
     activation-checkpoint:full
 }
 export V D TOKENIZER OUT MODEL_CONFIG NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
@@ -109,14 +107,11 @@ for step in (1, 2, 3):
         raise SystemExit(f"FULL_MODEL_CANARY_INVALID missing metrics step={step}")
     if not all(math.isfinite(value) and value > 0 for value in rows[step]):
         raise SystemExit(f"FULL_MODEL_CANARY_INVALID nonfinite/zero metrics step={step} values={rows[step]}")
-ratios = [float(value) for value in re.findall(r"diag/update_ratio_mean=([0-9.eE+-]+)", text)]
-if not ratios or not any(math.isfinite(value) and value > 0 for value in ratios):
-    raise SystemExit("FULL_MODEL_CANARY_INVALID missing positive update ratio")
 if any(token in text for token in ("Traceback", "SIGSEGV", "died from signal", "OUT_OF_RESOURCES")):
     raise SystemExit("FULL_MODEL_CANARY_INVALID failure signature present")
 verdict = (
     f"FULL_MODEL_CANARY_PASS job={job} commit={commit} steps=3 "
-    f"loss3={rows[3][0]} grad3={rows[3][1]} update_ratio_max={max(ratios)}"
+    f"loss3={rows[3][0]} grad3={rows[3][1]}"
 )
 Path(verdict_path).write_text(verdict + "\n")
 print(verdict)
