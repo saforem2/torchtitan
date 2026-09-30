@@ -2,6 +2,15 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (reporting) -- INCITE Q3 report
+
+Created [`summaries/2026-Q3-incite.md`](summaries/2026-Q3-incite.md) from the
+Q3 retrospectives, production/evaluation trackers, and September 30 accepted
+artifacts. The report records both completed 2B base chains, accepted 20B and
+stage-2 endpoints, XPU SFT/GRPO and MoE results, and the unresolved 80B
+mechanism. Resource usage is reported from the latest documented August 30
+Aurora balance rather than presenting an unsupported September 30 total.
+
 ## 2026-09-30 (Sunspot) -- upstream `97e673b779` integration and 30B AdamW canary
 
 Branch `sync/upstream-97e673b779` integrates upstream through `97e673b779` and

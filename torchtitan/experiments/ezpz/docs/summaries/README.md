@@ -18,6 +18,7 @@ synthesized from the two-week summaries below.
 | Period | Report | Headline |
 |---|---|---|
 | 2026 Q2 (Apr 1 -> Jun 30) | [INCITE Quarterly Report](2026-Q2-incite.md) | 2B base pre-training COMPLETE (4.674T tokens); 20B leading per token; 80B launched; RL (SFT+GRPO) end-to-end on XPU; ~29% Year-2 Aurora burn |
+| 2026 Q3 (Jul 1 -> Sep 30) | [INCITE Quarterly Report](2026-Q3-incite.md) | Both 2B base chains complete; 20B endpoints evaluated; 2B SFT+GRPO operational; MoE correctness proven on XPU; 80B mechanism remains open |
 
 ## Index
 
