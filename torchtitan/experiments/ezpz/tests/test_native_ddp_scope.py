@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+import torch.nn as nn
 from torch.multiprocessing.spawn import spawn
 
 from torchtitan.components.loss import CrossEntropyLoss, MSELoss
@@ -25,6 +26,7 @@ from torchtitan.experiments.ezpz.native_ddp import (
     wrap_native_ddp,
     wrap_native_ddp_loss,
 )
+from torchtitan.models.common.linear import Linear
 
 
 def _parallel_dims(*, pp: int = 1) -> ParallelDims:
@@ -208,6 +210,45 @@ def test_agpt_legacy_partial_dtensor_rejects_tp(monkeypatch) -> None:
             ac_config=None,
             dump_folder=".",
         )
+
+
+def test_agpt_fsdp_shards_stacked_linear_on_matrix_rows(monkeypatch) -> None:
+    class Model(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.enable_weight_tying = False
+            self.tok_embeddings = None
+            self.norm = None
+            self.lm_head = None
+            block = nn.Module()
+            block.w13 = Linear.Config(
+                in_features=4,
+                out_features=3,
+                num_linears=2,
+                bias=True,
+            ).build()
+            self.layers = nn.ModuleDict({"0": block})
+
+    calls = []
+    monkeypatch.setattr(
+        agpt_parallelize,
+        "fully_shard",
+        lambda module, **kwargs: calls.append((module, kwargs)),
+    )
+    model = Model()
+
+    agpt_parallelize.apply_fsdp(
+        model,
+        cast(Any, object()),
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,
+        pp_enabled=False,
+    )
+
+    block_call = next(call for call in calls if call[0] is model.layers["0"])
+    placement_fn = block_call[1]["shard_placement_fn"]
+    assert placement_fn(model.layers["0"].w13.weight) == torch.distributed.tensor.Shard(1)
+    assert placement_fn(model.layers["0"].w13.bias) == torch.distributed.tensor.Shard(1)
 
 
 def _run_two_rank_equivalence(rank: int, rendezvous: str, result_file: str) -> None:

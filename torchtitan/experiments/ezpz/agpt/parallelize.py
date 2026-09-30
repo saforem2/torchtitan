@@ -51,7 +51,10 @@ from torchtitan.distributed.compile import (
     _maybe_regional_inductor_backend,
     apply_compile,
 )
-from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
+from torchtitan.distributed.fsdp import (
+    get_fsdp_reshard_after_forward_policy,
+    linear_param_shard_placements,
+)
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
@@ -373,10 +376,12 @@ def apply_fsdp(
         )
 
     for transformer_block in model.layers.values():
+        stacked_param_placements = linear_param_shard_placements(transformer_block)
         fully_shard(
             transformer_block,
             **fsdp_config,
             reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=stacked_param_placements.get,
         )
 
     if not tied and model.norm is not None and model.lm_head is not None:
