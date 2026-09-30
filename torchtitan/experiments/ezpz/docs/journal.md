@@ -2,6 +2,29 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Aurora) -- production reporting audit and tail evaluation
+
+- Reconciled the registered production lineages against complete DCP metadata
+  and accepted result artifacts. The base heads are covered: 2B-256 step
+  92,859, 2B-512 step 46,429, 20B-512 step 11,100, and 20B-256 step 17,500 all
+  have accepted endpoint evaluations. The two 20B tail results are jobs
+  `8880564` and `8880658`; both contain six 0-shot tasks plus ARC-Challenge
+  25-shot with finite metrics.
+- Two stage-2 gaps remained. The 2B-512 stage-2 chain is complete at step
+  23,746 but was evaluated only through step 22,300; the 2B-256 stage-2 chain is
+  complete at step 41,300 but was evaluated only through step 28,000. Submitted
+  independent fail-closed jobs `8880872` (`2b_real`, step 23,746) and `8880873`
+  (complex `2b`, step 41,300). Both target seven measurements and isolated
+  Flare output paths. Canonical chart regeneration remains gated on accepted
+  artifacts from both jobs.
+- The production and eval charts still reflect the pre-tail September 27 data
+  snapshot. Human-authored pages are being reconciled now; generated charts
+  and tables must be rebuilt on Aurora after the two stage-2 evals finish so no
+  series is silently omitted.
+- Production umbrella `8879474` remains queued in `medium`; follower `8879475`
+  remains dependency-held. Neither has launched and no production checkpoint
+  head has changed.
+
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
 - Tail eval `8878144` exposed a false-success wrapper path: DCP conversion ran
@@ -425,7 +448,7 @@ and 538 free. Nothing wrong with the chain; the machine is full.
 
 The depth monitor read `2` throughout. Added a progress monitor keyed on
 checkpoint mtime, which fired at 79h on its first tick.
-||||||| e29bcbcb0
+
 ## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
 
 Asked whether there was anything upstream to pull in. 148 commits, not the 64

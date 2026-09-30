@@ -1,6 +1,6 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-09-21.**
+> **Last updated: 2026-09-30.**
 >
 > **This is the canonical 2B production chain.**
 >
@@ -32,13 +32,14 @@
 > documents. Post-training work (eval, SFT, forks) should start
 > from `step-46429`.
 >
-> **What took the 512N slot after it (as of 2026-08-30).** The slot
+> **What took the 512N slot after it.** The slot
 > this chain vacated did not stay free: umbrella seat `t0` became the
 > **2B-512 stage-2 dolmino CPT** arm, seeded model-only from
 > `step-46429`, and seat `t3` carries the **512N constant-LR fork**
 > branched at step-9,200. Both are separate checkpoint dirs and
-> neither adds tokens here. **Both are idle**, not finished: Aurora
-> production last trained **2026-08-26** under umbrella `8773440`,
+> neither adds tokens here. The stage-2 arm is now persisted at **step 23,746**
+> with a tail evaluation queued as `8880872`. Historical context: under
+> umbrella `8773440`,
 > where `t3` advanced the constant-LR fork **+504 steps
 > (2.74535 -> 2.73836)** and `t0` logged **0 steps**. `8773440` used
 > only 5h13m of a 12h slot (`Exit_status=-14`) -- `ezpz` 0.21's
