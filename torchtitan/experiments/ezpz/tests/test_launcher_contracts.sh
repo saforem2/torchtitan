@@ -124,6 +124,10 @@ assert_contains "$fsdp_probe_py" 'embedding_dim=6144' \
     '30B storage probe must use the exact 30B embedding width'
 assert_contains "$fsdp_probe_py" 'maybe_install_xccl_split_group_workaround' \
     'standalone 30B storage probe must install the XCCL mesh workaround'
+assert_contains "$fsdp_probe_py" 'set_gradient_divide_factor' \
+    'standalone probe must match production FSDP gradient scaling'
+assert_contains "$fsdp_probe_py" 'set_force_sum_reduction_for_comms' \
+    'standalone probe must avoid unsupported oneCCL AVG reduction'
 assert_contains "$fsdp_probe_py" 'MASTER_ADDR' \
     'standalone 30B storage probe must configure env rendezvous under PALS'
 assert_contains "$fsdp_probe_py" 'global gradient' \

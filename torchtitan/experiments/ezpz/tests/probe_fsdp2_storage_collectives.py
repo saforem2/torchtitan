@@ -108,6 +108,8 @@ def main() -> None:
             cast_forward_inputs=False,
         ),
     )
+    module.set_gradient_divide_factor(1.0)
+    module.set_force_sum_reduction_for_comms(True)
     module.to_empty(device=torch.device(f"xpu:{local_rank}"))
     with torch.no_grad():
         module.weight.fill_(0.001)
