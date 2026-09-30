@@ -1,16 +1,16 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-09-21
+> **Last updated:** 2026-09-30
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status: NOT RUNNING.** Production moved to the constant-LR fork seeded at
-> step 9,000 on 2026-08-21. That fork is persisted at **step 10,900**
-> (~1,097.2B tokens, 23.5% of 4.67T target), with last logged loss
-> **2.31773** at step 10,905. The checkpoint head (20 step directories) was
-> verified directly on Aurora on 2026-09-21. Umbrella `8828611` last advanced
-> it on 2026-09-16/17; the latest umbrella, `8828612`, made no 20B-512
-> progress because both attempts died during startup with `std::bad_alloc`.
+> **Status: NOT RUNNING.** Umbrella `8870515` advanced the constant-LR fork to
+> a disk-verified **step 11,100** (**1,117.4B tokens**). It logged through step
+> 11,190, but step 11,200 is an empty placeholder and is not resumable. Tail
+> eval `8880564` finished with PBS exit 0 and a fresh seven-measurement result:
+> HellaSwag `acc_norm=0.6875`, ARC-Easy `acc=0.7050`, Winogrande `acc=0.5983`,
+> PIQA `acc_norm=0.7682`, OpenBookQA `acc_norm=0.3740`, BoolQ `acc=0.6303`, and
+> ARC-Challenge 25-shot `acc_norm=0.4437`.
 >
 > The progress table below is detailed only through step-5,400 (2026-07-07);
 > everything from step-5,400 to the current head was carried by the ~2,098N
@@ -32,11 +32,8 @@
 > stale legacy conts (8521631/8534294) were superseded by the autoretry
 > chain, which was in turn superseded by the umbrellas.
 >
-> **Latest eval:** the production-tail backfill at step 10,900 (`8846649`)
-> finished successfully on 2026-09-21: HellaSwag `acc_norm` 0.6804,
-> ARC-Easy `acc` 0.6965, ARC-Challenge 25-shot `acc_norm` 0.4334, and
-> Winogrande `acc` 0.5777. See the eval page for all seven tasks and the
-> shot-count distinction.
+> **Latest eval:** step 11,100 (`8880564`, accepted 2026-09-30). See the eval
+> page for all seven metrics and the shot-count distinction.
 >
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md).
 > **🏁 The 20B 512N sync chain is now beating 2B 256N async per token
@@ -103,15 +100,14 @@
 | `8828611` t1 | 2026-09-16/17 | -- | 10,501 -> **10,905** | 2.26607 -> **2.31773** | -- | -- | Three attempts; the first two logged 10 and 41 steps without a save, and attempt 3 persisted step 10,900. |
 | `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | **Latest umbrella outcome.** Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
 
-**Latest checkpoint:** step-10,900 in the constant-LR fork (20 step dirs,
-audited on Aurora 2026-09-21; written by umbrella `8828611` seat t1, which
-logged through step 10,905)
+**Latest checkpoint:** step-11,100 in the constant-LR fork (disk-audited on
+Aurora 2026-09-30; umbrella `8870515` logged through step 11,190)
 
-**Cumulative steps:** 10,900 (disk-confirmed)
+**Cumulative steps:** 11,100 (disk-confirmed)
 
-**Tokens consumed:** 10,900 x 12,288 x 8,192 = 1.1T tokens (23.5% of 4.67T target)
+**Tokens consumed:** 11,100 x 12,288 x 8,192 = **1,117.4B tokens** (23.9% of 4.67T target)
 
-**Loss:** 2.3151 (last logged step 10,905, umbrella `8828611` t1). This is a
+**Loss:** 2.31773 (last retained published value, step 10,905). This is a
 single-step value from the current constant-LR fork.
 
 ### Recovery

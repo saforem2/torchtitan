@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Auto-update the ``Notes`` and ``Modified`` columns in
 ``docs/README.md`` tables.
 
@@ -37,18 +43,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_README = (
-    Path(__file__).resolve().parents[1]
-    / "docs"
-    / "README.md"
-)
+DEFAULT_README = Path(__file__).resolve().parents[1] / "docs" / "README.md"
 
 # Matches a table row whose first cell contains a markdown link.
 ROW_RE = re.compile(r"^\|\s*\[[^\]]+\]\(([^)]+)\)\s*\|")
 
 # Recognisable status-block fields inside per-trajectory READMEs.
 LATEST_CKPT_RE = re.compile(r"^\*\*Latest checkpoint:\*\*\s*(.+)$", re.M)
-CUMULATIVE_STEPS_RE = re.compile(r"^\*\*Cumulative(?: \*persisted\*)? steps:\*\*\s*(.+)$", re.M)
+CUMULATIVE_STEPS_RE = re.compile(
+    r"^\*\*Cumulative(?: \*persisted\*)? steps:\*\*\s*(.+)$", re.M
+)
 TOKENS_RE = re.compile(r"^\*\*Tokens consumed(?: \(persisted\))?:\*\*\s*(.+)$", re.M)
 LOSS_RE = re.compile(r"^\*\*Loss:\*\*\s*(.+)$", re.M)
 
@@ -57,9 +61,7 @@ LOSS_RE = re.compile(r"^\*\*Loss:\*\*\s*(.+)$", re.M)
 # Handles both formats:
 #   "= **4.047T tokens** (**86.6%** of 4.67T target)"
 #   "= **3.07T tokens** (65.7% of 4.67T target)"
-TOKEN_TOTAL_RE = re.compile(
-    r"\*\*([\d.]+[KMBT])\s*tokens\*\*\s*\(\*{0,2}([\d.]+%)"
-)
+TOKEN_TOTAL_RE = re.compile(r"\*\*([\d.]+[KMBT])\s*tokens\*\*\s*\(\*{0,2}([\d.]+%)")
 STEP_NUM_RE = re.compile(r"step-?([\d,]+)", re.I)
 LOSS_NUM_RE = re.compile(r"^([\d.]+)")
 
@@ -73,6 +75,10 @@ RECENT_LIMIT = 25  # rows shown in the always-visible table
 RECENT_EXTRA = 25  # additional rows tucked into the <details> block
 # H1 title at the top of a markdown doc (first "# ..." line).
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+RECENT_COUNT_RE = re.compile(
+    r"(The 25 most-recently-changed docs by git commit date \(across all )\d+(\n"
+    r"docs, not just the curated tables below\)\.)"
+)
 
 
 def doc_title(path: Path) -> str:
@@ -95,8 +101,16 @@ def _collect_doc_rows(readme_path: Path) -> list[tuple[str, str, str]]:
     repo_root = find_repo_root(readme_path)
     docs_dir = readme_path.parent
     out = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-files", str(docs_dir.resolve().relative_to(repo_root)) + "/*.md"],
-        capture_output=True, text=True, check=True,
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "ls-files",
+            str(docs_dir.resolve().relative_to(repo_root)) + "/*.md",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     rows: list[tuple[str, str, str]] = []
     for rel in out.stdout.split():
@@ -155,8 +169,14 @@ def refresh_recently_updated(readme_path: Path, *, dry_run: bool = False) -> boo
         return False
     pre, rest = text.split(RECENT_BEGIN, 1)
     _, post = rest.split(RECENT_END, 1)
+    rows = _collect_doc_rows(readme_path)
     table = build_recently_updated(readme_path)
     new_text = f"{pre}{RECENT_BEGIN}\n{table}\n{RECENT_END}{post}"
+    new_text = RECENT_COUNT_RE.sub(
+        rf"\g<1>{len(rows)}\g<2>",
+        new_text,
+        count=1,
+    )
     if new_text == text:
         print("  [recently-updated] already current")
         return False
@@ -164,6 +184,7 @@ def refresh_recently_updated(readme_path: Path, *, dry_run: bool = False) -> boo
         readme_path.write_text(new_text)
     print(f"  [recently-updated] table refreshed{' (dry-run)' if dry_run else ''}")
     return True
+
 
 # Default token-budget label when a README isn't in the manifest (every
 # current trajectory shares the olmo-mix-1124 4.67T budget).
@@ -205,7 +226,9 @@ def git_last_commit_date(repo_root: Path, path: Path) -> str | None:
     try:
         out = subprocess.run(
             ["git", "-C", str(repo_root), "log", "-1", "--format=%cs", "--", str(rel)],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except subprocess.CalledProcessError:
         return None
@@ -318,8 +341,7 @@ def refresh_readme(readme_path: Path, *, dry_run: bool = False) -> tuple[int, in
 
         target_path = (readme_dir / target_str).resolve()
         if not target_path.exists():
-            print(f"  [missing] {target_str} — leaving row unchanged",
-                  file=sys.stderr)
+            print(f"  [missing] {target_str} — leaving row unchanged", file=sys.stderr)
             updated_lines.append(line)
             continue
 
@@ -379,7 +401,8 @@ def main() -> int:
         help=f"path to README.md (default: {DEFAULT_README})",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="show planned changes without rewriting the file",
     )
     args = parser.parse_args()

@@ -1,0 +1,46 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -l select=1
+#PBS -N eval20b-current
+#PBS -j oe
+
+set -o pipefail
+
+W=${EVAL_WORKTREE:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-eval-tail-df38362235}
+EXPECTED_SHA=${EVAL_EXPECTED_SHA:?set EVAL_EXPECTED_SHA to the tested commit}
+CONVERT_VENV=/flare/AuroraGPT/foremans/venvs/xpu-torch215
+HF_ASSETS_PATH=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b
+EVAL_OUTPUT_ROOT=/flare/AuroraGPT/foremans/scratch/evals/tail-current
+mkdir -p "$EVAL_OUTPUT_ROOT" || exit 5
+cd "$W" || exit 1
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || exit 3
+[[ -z "$(git status --porcelain --untracked-files=no)" ]] || exit 4
+
+export V2_REPO="$W"
+export CONVERT_VENV HF_ASSETS_PATH EVAL_OUTPUT_ROOT
+export MODEL_FLAVOR=20b_real
+export SHOTS_SPEC='0:hellaswag,arc_easy,winogrande,piqa,openbookqa,boolq;25:arc_challenge'
+
+case "${EVAL_CHAIN:?set EVAL_CHAIN=256n or 512n-constlr}" in
+  256n)
+    export STEPS=17500
+    export CKPT_NAME=agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144
+    export LABEL=256n
+    export CKPT_REPO=/flare/AuroraGPT/foremans/runs/agpt-20b-n256/torchtitan-ezpz
+    ;;
+  512n-constlr)
+    export STEPS=11100
+    export CKPT_NAME=agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000
+    export LABEL=512n-constlr
+    export CKPT_REPO=/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz
+    ;;
+  *)
+    echo "unknown EVAL_CHAIN=${EVAL_CHAIN}" >&2
+    exit 2
+    ;;
+esac
+
+exec bash torchtitan/experiments/ezpz/scripts/eval/eval-20b-v2.sh

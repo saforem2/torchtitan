@@ -52,6 +52,32 @@ updates on repaired Torch 2.15 with PBS exit 0, `loss3=11.8405`, and
 `full_dtensor`; subsequent 30B work must retain a dimension-compatible shard
 degree and the stacked-linear placement override.
 
+## 2026-09-30 (Aurora) -- production reporting audit and tail evaluation
+
+- Reconciled the registered production lineages against complete DCP metadata
+  and accepted result artifacts. The base heads are covered: 2B-256 step
+  92,859, 2B-512 step 46,429, 20B-512 step 11,100, and 20B-256 step 17,500 all
+  have accepted endpoint evaluations. The two 20B tail results are jobs
+  `8880564` and `8880658`; both contain six 0-shot tasks plus ARC-Challenge
+  25-shot with finite metrics.
+- Two stage-2 gaps remained. The 2B-512 stage-2 chain is complete at step
+  23,746 but was evaluated only through step 22,300; the 2B-256 stage-2 chain is
+  complete at step 41,300 but was evaluated only through step 28,000. Submitted
+  independent fail-closed jobs `8880872` (`2b_real`, step 23,746) and `8880873`
+  (complex `2b`, step 41,300). Both subsequently finished with PBS exit 0 and
+  validated seven-measurement artifacts.
+- The full 608-result corpus plus all four tail artifacts was overlaid into a
+  clean Aurora checkout and rerendered successfully. The combined eval chart now
+  reaches 20B-512 step 11,100, 20B-256 step 17,500, 2B-512 stage-2 step 23,746,
+  and 2B-256 stage-2 step 41,300.
+- Exact-head full-state smoke `8880891` used PR #45 commit `6b3246fac9` and
+  finished with PBS exit 143 before DCP load. Its branch lacked the later AGPT
+  full-SPMD parallelization path used by passing gate `8879698`; this did not
+  exercise or refute the legacy DCP migration.
+- Production umbrella `8879474` remains queued in `medium`; follower `8879475`
+  remains dependency-held. Neither has launched and no production checkpoint
+  head has changed.
+
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 
 The 30B pre-step failure discriminator completed on Sunspot. Job `12479051`
@@ -591,7 +617,6 @@ and 538 free. Nothing wrong with the chain; the machine is full.
 
 The depth monitor read `2` throughout. Added a progress monitor keyed on
 checkpoint mtime, which fired at 79h on its first tick.
-||||||| e29bcbcb0
 ## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
 
 Asked whether there was anything upstream to pull in. 148 commits, not the 64

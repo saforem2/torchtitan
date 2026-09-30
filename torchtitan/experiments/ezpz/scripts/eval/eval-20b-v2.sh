@@ -31,11 +31,9 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 export HF_HUB_ENABLE_HF_TRANSFER=0
 
-module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1
-echo "PWD: $(pwd)"
-echo "Modules loaded."
-
-cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
+EVAL_OUTPUT_ROOT="${EVAL_OUTPUT_ROOT:-${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}}"
+mkdir -p "$EVAL_OUTPUT_ROOT" || exit 1
+cd "$EVAL_OUTPUT_ROOT" || exit 1
 
 # This eval pipeline runs against the bare frameworks/2025.3.1 module
 # stack (NOT the user venv) per AGENTS.md — user venv has transformers
@@ -45,6 +43,9 @@ cd "${PBS_O_WORKDIR:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/to
 # so source the v2 venv for the conversion, then deactivate before
 # the lm-eval step.
 V2_REPO="${V2_REPO:-${REPO:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz}}"
+CONVERT_VENV="${CONVERT_VENV:-${V2_REPO}/.venv}"
+HF_ASSETS_PATH="${HF_ASSETS_PATH:-${V2_REPO}/assets/hf/gemma-7b}"
+LM_EVAL_VENV="${LM_EVAL_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/venvs/aurora/tt-lm-eval}"
 # The checkpoint may live in a pinned production clone that intentionally lacks
 # the current RoPE-safe adapter.  Keep conversion code rooted in V2_REPO while
 # allowing the DCP source to come from a separate, read-only checkout.
@@ -109,7 +110,20 @@ if [[ "$MODEL_FLAVOR" == *_real ]] \
 ERRMSG
     exit 2
 fi
+[[ -x "${CONVERT_VENV}/bin/python" ]] || {
+    echo "[eval-20b-v2] ERROR: conversion Python missing: ${CONVERT_VENV}/bin/python" >&2
+    exit 2
+}
+[[ -s "${HF_ASSETS_PATH}/tokenizer.json" ]] || {
+    echo "[eval-20b-v2] ERROR: tokenizer assets missing: ${HF_ASSETS_PATH}" >&2
+    exit 2
+}
+[[ -x "${LM_EVAL_VENV}/bin/python" ]] || {
+    echo "[eval-20b-v2] ERROR: lm-eval Python missing: ${LM_EVAL_VENV}/bin/python" >&2
+    exit 2
+}
 echo "[eval-20b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default -- see rope-flavor-mismatch.md)"
+echo "[eval-20b-v2] CONVERT_VENV='${CONVERT_VENV}' HF_ASSETS_PATH='${HF_ASSETS_PATH}'"
 
 for step in $STEPS; do
     DCP_DIR="${CKPT_REPO}/outputs/checkpoints/${V2_CKPT_NAME}/step-${step}"
@@ -175,41 +189,55 @@ PYCHK
         # python tree.
         (
             cd "${V2_REPO}" || exit 1
-            source .venv/bin/activate
+            # Current upstream-native full-SPMD conversion uses the isolated
+            # Torch 2.15 runtime against oneAPI 2026.1. Do not load the older
+            # frameworks/2025.3.1 stack until conversion has completed.
+            module load oneapi/release/2026.1.0 hdf5 pti-gpu || exit 1
+            export LD_PRELOAD="${CONVERT_VENV}/lib/libur_loader.so.0${LD_PRELOAD:+:$LD_PRELOAD}"
             echo "  subshell: pwd=$(pwd)"
-            echo "  subshell: which python3=$(which python3)"
+            echo "  subshell: conversion Python=${CONVERT_VENV}/bin/python"
             echo "  subshell: torchtitan check..."
-            PYTHONPATH=".:${PYTHONPATH:-}" python3 -c "import torchtitan; print('  torchtitan from:', torchtitan.__file__)" \
+            PYTHONPATH=".:${PYTHONPATH:-}" "${CONVERT_VENV}/bin/python" -c "import spmd_types, torchtitan; print('  torchtitan from:', torchtitan.__file__)" \
                 || { echo "  ERROR: torchtitan import failed"; exit 1; }
-            PYTHONPATH=".:${PYTHONPATH:-}" python3 torchtitan/experiments/ezpz/eval/convert_to_hf.py \
+            PYTHONPATH=".:${PYTHONPATH:-}" "${CONVERT_VENV}/bin/python" torchtitan/experiments/ezpz/eval/convert_to_hf.py \
                 "${DCP_DIR}" \
                 "${HF_DIR_ABS}" \
+                --hf_assets_path "${HF_ASSETS_PATH}" \
                 --model_name "experiments.ezpz.agpt" \
                 --model_flavor "${MODEL_FLAVOR}" \
                 --export_dtype "bfloat16"
-        ) || { echo "[1/2] Conversion FAILED — skipping eval for step ${step}"; continue; }
-        # Copy HF config + tokenizer assets from the eval clone (we
-        # already have these, no need to pull from v2 clone).
-        cp "${EVAL_CLONE}/torchtitan/experiments/ezpz/eval/configs/agpt_20b_config.json" \
-            "${HF_DIR_ABS}/config.json"
-        cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer.{json,model} "${HF_DIR_ABS}/"
-        cp "${EVAL_CLONE}"/assets/hf/gemma-7b/tokenizer_config.json "${HF_DIR_ABS}/"
-        cp "${EVAL_CLONE}"/assets/hf/gemma-7b/special_tokens_map.json "${HF_DIR_ABS}/"
+        )
+        convert_rc=$?
+        if (( convert_rc != 0 )); then
+            echo "[1/2] Conversion FAILED for step ${step} (rc=${convert_rc})" >&2
+            exit "${convert_rc}"
+        fi
         echo "[1/2] Conversion done."
     else
         echo "[1/2] HF already converted, skipping."
     fi
 
+    # Install inference assets even when conversion is skipped. A previous
+    # conversion may have completed before asset copy failed, and eval-only
+    # retries must repair that directory without reading the DCP again.
+    cp "${V2_REPO}/torchtitan/experiments/ezpz/eval/configs/agpt_20b_config.json" \
+        "${HF_DIR_ABS}/config.json" || exit 1
+    cp "${HF_ASSETS_PATH}"/tokenizer.{json,model} "${HF_DIR_ABS}/" || exit 1
+    cp "${HF_ASSETS_PATH}/tokenizer_config.json" "${HF_DIR_ABS}/" || exit 1
+    cp "${HF_ASSETS_PATH}/special_tokens_map.json" "${HF_DIR_ABS}/" || exit 1
+
     # Sanity check: bail if conversion produced no model file.
     if [[ ! -f "${HF_DIR_ABS}/model.safetensors.index.json" \
           && ! -f "${HF_DIR_ABS}/model.safetensors" ]]; then
-        echo "[1/2] No model file in ${HF_DIR_ABS} — skipping eval"
-        continue
+        echo "[1/2] No model file in ${HF_DIR_ABS} — aborting eval" >&2
+        exit 1
     fi
 
     # ---- Step 2: lm-eval (bare frameworks venv + tt-lm-eval overlay) ----
     echo "[2/2] Running lm-eval..."
-    source venvs/aurora/tt-lm-eval/bin/activate
+    module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1
+    echo "  lm-eval modules loaded."
+    source "${LM_EVAL_VENV}/bin/activate"
     mkdir -p "${RESULTS_DIR_ABS}"
     HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" SHOTS_SPEC="${SHOTS_SPEC:-}" LIMIT="${LIMIT:-}" \
     python3 << 'PYEOF'
