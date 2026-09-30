@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -21,6 +21,18 @@ class OptimizerFusedLayout:
 
     qkv: dict[str, tuple[int, int, tuple[int, ...]]]
     stacked: dict[str, tuple[int, ...]]
+    qkv_bias: dict[str, tuple[int, int, tuple[int, ...]]] = field(
+        default_factory=dict
+    )
+
+
+def _qkv_optimizer_layouts(layout: OptimizerFusedLayout):
+    yield from (
+        (prefix, "weight", spec) for prefix, spec in layout.qkv.items()
+    )
+    yield from (
+        (prefix, "bias", spec) for prefix, spec in layout.qkv_bias.items()
+    )
 
 
 def _split_qkv(
@@ -89,15 +101,19 @@ def _split_optimizer_state(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in state_dict.items():
-        for prefix, (head_dim, heads_per_kv, fused_shape) in layout.qkv.items():
-            marker = f"{prefix}wqkv.weight."
+        for prefix, param_name, (
+            head_dim,
+            heads_per_kv,
+            fused_shape,
+        ) in _qkv_optimizer_layouts(layout):
+            marker = f"{prefix}wqkv.{param_name}."
             if marker not in key:
                 continue
             if isinstance(value, torch.Tensor) and tuple(value.shape) == fused_shape:
                 if isinstance(value, DTensor):
                     native_sharding[key] = (value.device_mesh, value.placements)
                     logical_keys = tuple(
-                        key.replace(marker, f"{prefix}{name}.weight.")
+                        key.replace(marker, f"{prefix}{name}.{param_name}.")
                         for name in ("wq", "wk", "wv")
                     )
                     if all(item in checkpoint_metadata for item in logical_keys):
@@ -127,7 +143,7 @@ def _split_optimizer_state(
                     f"{tuple(value.shape)} != {fused_shape}"
                 )
             for name, item in zip(("wq", "wk", "wv"), values, strict=True):
-                result[key.replace(marker, f"{prefix}{name}.weight.")] = item
+                result[key.replace(marker, f"{prefix}{name}.{param_name}.")] = item
             break
         else:
             for prefix, fused_shape in layout.stacked.items():
@@ -186,17 +202,21 @@ def _fuse_optimizer_state(
     native_sharding: dict[str, tuple[Any, tuple[Any, ...]]],
 ) -> dict[str, Any]:
     result = dict(state_dict)
-    for prefix, (head_dim, _heads_per_kv, _fused_shape) in layout.qkv.items():
-        marker = f"{prefix}wq.weight."
+    for prefix, param_name, (
+        head_dim,
+        _heads_per_kv,
+        _fused_shape,
+    ) in _qkv_optimizer_layouts(layout):
+        marker = f"{prefix}wq.{param_name}."
         for key in [item for item in result if marker in item]:
             keys = tuple(
-                key.replace(marker, f"{prefix}{name}.weight.")
+                key.replace(marker, f"{prefix}{name}.{param_name}.")
                 for name in ("wq", "wk", "wv")
             )
             if not all(item in result for item in keys):
                 raise ValueError(f"Incomplete historical QKV optimizer state for {key}")
             values = tuple(result.pop(item) for item in keys)
-            fused_key = key.replace(marker, f"{prefix}wqkv.weight.")
+            fused_key = key.replace(marker, f"{prefix}wqkv.{param_name}.")
             if isinstance(values[0], DTensor) and values[0].numel() > 1:
                 values = tuple(
                     value.redistribute(
@@ -293,6 +313,7 @@ def _optimizer_layout(
     from torchtitan.models.common.feed_forward import FeedForward
 
     qkv: dict[str, tuple[int, int, tuple[int, ...]]] = {}
+    qkv_bias: dict[str, tuple[int, int, tuple[int, ...]]] = {}
     stacked: dict[str, tuple[int, ...]] = {}
     for fqn, config, _parent, _ in adapter.model_config.traverse(QKVLinear.Config):
         prefix = f"{fqn}." if fqn else ""
@@ -318,6 +339,27 @@ def _optimizer_layout(
                 config.n_heads // config.n_kv_heads,
                 tuple(model_state[key].shape),
             )
+        bias_key = f"{prefix}wqkv.bias"
+        bias_markers = tuple(
+            f"{prefix}{name}.bias." for name in ("wq", "wk", "wv")
+        )
+        has_split_bias = any(
+            any(marker in checkpoint_key for marker in bias_markers)
+            for checkpoint_key in checkpoint_keys
+        )
+        has_fused_bias = any(
+            f"{bias_key}." in checkpoint_key for checkpoint_key in checkpoint_keys
+        )
+        if has_split_bias and has_fused_bias:
+            raise ValueError(
+                f"Historical optimizer mixes fused and logical QKV keys for {bias_key}"
+            )
+        if has_split_bias and bias_key in model_state:
+            qkv_bias[prefix] = (
+                config.head_dim,
+                config.n_heads // config.n_kv_heads,
+                tuple(model_state[bias_key].shape),
+            )
     for fqn, _config, _parent, _ in adapter.model_config.traverse(FeedForward.Config):
         prefix = f"{fqn}." if fqn else ""
         key = f"{prefix}w13.weight"
@@ -338,7 +380,7 @@ def _optimizer_layout(
             )
         if has_split and key in model_state:
             stacked[prefix] = tuple(model_state[key].shape)
-    return OptimizerFusedLayout(qkv=qkv, stacked=stacked)
+    return OptimizerFusedLayout(qkv=qkv, stacked=stacked, qkv_bias=qkv_bias)
 
 
 def prepare_legacy_native_load(
@@ -402,7 +444,22 @@ def prepare_legacy_native_load(
         if key in checkpoint_keys:
             logical_model[key] = value
             continue
-        converted = adapter.native_fused_to_logical({key: value})
+        conversion_value = value
+        if isinstance(value, DTensor):
+            conversion_value = torch.empty(
+                value.shape, dtype=value.dtype, device="meta"
+            )
+            if ".qkv_linear.wqkv." in key:
+                adapter._qkv_linear_sharding[key] = (
+                    value.device_mesh,
+                    value.placements,
+                )
+            elif ".feed_forward.w13." in key:
+                adapter._stacked_linear_sharding[key] = (
+                    value.device_mesh,
+                    value.placements,
+                )
+        converted = adapter.native_fused_to_logical({key: conversion_value})
         for logical_key, logical_value in converted.items():
             if (
                 isinstance(value, DTensor)

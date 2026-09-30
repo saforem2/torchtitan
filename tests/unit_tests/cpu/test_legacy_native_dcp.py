@@ -88,6 +88,29 @@ def test_logical_optimizer_state_rejects_unsupported_tensor_shape() -> None:
         proxy.state_dict()
 
 
+def test_logical_optimizer_state_roundtrips_qkv_bias() -> None:
+    qkv = "layers.0.attention.qkv_linear."
+    key = f"state.{qkv}wqkv.bias.exp_avg"
+    fused = torch.arange(16, dtype=torch.float32)
+    optimizer = FakeOptimizerState({key: fused})
+    proxy = LogicalOptimizerState(
+        optimizer,
+        OptimizerFusedLayout(
+            qkv={},
+            stacked={},
+            qkv_bias={qkv: (2, 2, (16,))},
+        ),
+    )
+
+    logical = proxy.state_dict()
+
+    assert f"state.{qkv}wq.bias.exp_avg" in logical
+    assert f"state.{qkv}wk.bias.exp_avg" in logical
+    assert f"state.{qkv}wv.bias.exp_avg" in logical
+    proxy.load_state_dict(logical)
+    torch.testing.assert_close(optimizer.loaded[key], fused, rtol=0, atol=0)
+
+
 def test_logical_optimizer_state_rejects_disagreeing_scalars() -> None:
     qkv = "layers.0.attention.qkv_linear."
     optimizer = FakeOptimizerState({})
