@@ -8,18 +8,25 @@ For methodology and acceptance criteria, see the
 
 ## Status
 
-**AdamW short-horizon candidate: `1e-5`. SophiaG LR: open.**
+**AdamW short-horizon candidate: `1e-5`. SophiaG coarse basin: `1e-5`,
+fixed-LR validation pending.**
 
-The bounded 10-point AdamW canary now provides complete coarse evidence, and a
+The bounded 10-point AdamW canary provides complete coarse evidence, and a
 matched 10-update fixed-LR matrix validates `1e-5` as the best tested
-short-horizon candidate. Longer representative training remains required before
-calling it a production recommendation.
+short-horizon candidate. SophiaG now has an equivalent complete coarse curve on
+the same source, runtime, topology, and batch geometry, with an interior basin
+at the same sampled LR. Longer representative training remains required before
+either becomes a production recommendation.
 
 | optimizer | evidence | interpretation |
 |---|---|---|
 | AdamW | `12479108`, then `12479115`–`12479117` | `1e-5` is the best tested 10-update candidate; longer validation pending |
-| SophiaG | `12478513`, 30-point coarse; `12478570`, 97/100 fine | coarse candidate `6.48e-7` is diagnostic only; incomplete fine curve excluded |
+| SophiaG | `12479134`, 10-point coarse, exit 0 | interior basin at `1e-5`; matched fixed-LR arms not yet run |
 | Muon | excluded | first-update Newton–Schulz corruption remains unresolved |
+
+Superseded SophiaG material: 30-point coarse `12478513` and the truncated
+97/100 fine curve `12478570`. Neither is resumable and neither is used for
+guidance.
 
 ## Runtime blocker
 
@@ -174,6 +181,7 @@ shard-192 is invalid for stacked `w13` because its matrix-row dimension is
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)
 - [Evidence manifest](../data/2026-09-24-olmo2tok-gbs6144-verified/README.md)
+- [30B SophiaG bounded canary manifest](../data/2026-09-30-30b-sophiag-canary/README.md)
 
 Partial fine curves are deliberately not committed as successful evidence.
 No independently initialized points will be appended to an existing trajectory.
