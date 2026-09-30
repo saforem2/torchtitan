@@ -257,9 +257,9 @@ def _set_moe_ffn_sharding(
                 "_LegacyInterleavedColumnParallelLinear."
             ):
                 assert shared.w13.sharding_config is not None
-                shared.w13.sharding_config.state_shardings["weight"] = (
-                    dense_param_placement(tp=spmd.S(0))
-                )
-                shared.w13.sharding_config.state_shardings["bias"] = (
-                    dense_param_placement(tp=spmd.S(0))
-                )
+                shared.w13.sharding_config.state_shardings[
+                    "weight"
+                ] = dense_param_placement(tp=spmd.S(0))
+                shared.w13.sharding_config.state_shardings[
+                    "bias"
+                ] = dense_param_placement(tp=spmd.S(0))

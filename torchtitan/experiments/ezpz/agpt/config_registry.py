@@ -26,7 +26,6 @@ from torchtitan.components.data.sources import (
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.config.configs import CompileConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -36,6 +35,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
+    default_adamw,
     default_mano,
     default_muon,
     default_sophiag,

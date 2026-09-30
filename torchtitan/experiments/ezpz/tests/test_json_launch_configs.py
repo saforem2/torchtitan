@@ -64,7 +64,9 @@ def test_agpt_launch_jsons_use_current_schema():
         assert "lr_scheduler" not in data, path
         assert "optimizer" not in data, path
         assert "lr_scheduler" in data.get("optim", {}), path
-        assert not legacy_optimizer.intersection(data.get("optim", {}).get("optimizer", {})), path
+        assert not legacy_optimizer.intersection(
+            data.get("optim", {}).get("optimizer", {})
+        ), path
         activation_checkpoint = data.get("activation_checkpoint")
         assert not (
             isinstance(activation_checkpoint, dict) and "mode" in activation_checkpoint

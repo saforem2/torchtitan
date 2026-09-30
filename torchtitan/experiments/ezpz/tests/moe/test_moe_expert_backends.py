@@ -18,11 +18,9 @@ from torch.testing import assert_close
 # our capacity-limited `_run_experts_bmm`, which DOES drop overflow tokens.
 from torchtitan.experiments.ezpz.moe.experts import (
     _run_experts_aurora_full_sonic,
+    _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
     _run_experts_for_loop,
     _sonic_weight_layouts,
-)
-from torchtitan.experiments.ezpz.moe.experts import (
-    _run_experts_bmm_nodrop as _run_experts_batched_mm_padded,
 )
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
 from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher

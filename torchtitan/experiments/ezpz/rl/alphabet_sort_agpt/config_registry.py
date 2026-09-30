@@ -43,7 +43,6 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
 from torchtitan.config import CompileConfig, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
@@ -54,6 +53,7 @@ from torchtitan.config.transform import (
 )
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
 )

@@ -44,11 +44,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import Shard
 
-from torchtitan.config import (
-    CompileConfig,
-    TORCH_DTYPE_MAP,
-    TrainingConfig,
-)
+from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
@@ -175,7 +171,6 @@ def parallelize_moe(
     # from the save list -- see that file for the rationale.
     if ac_config is not None:
         ac_config.build(dump_folder=dump_folder).apply(model)
-
 
     # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
     # it there is no flattened "fsdp" mesh axis -- asking for it raises

@@ -127,9 +127,13 @@ def test_runner_selects_resumable_or_disabled_checkpoint_contract():
     assert "--checkpoint.no-last-save-model-only" in checkpoint_block
     assert 'LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"' in text
     assert '--checkpoint.folder "checkpoints/lr_finder_${label}"' in checkpoint_block
-    disabled = checkpoint_block.split('if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]', 1)[1]
-    assert 'checkpoint_args=(--checkpoint.no-enable)' in disabled
-    launch_tail = text[caller_args : text.index('            >"${logfile}"', caller_args)]
+    disabled = checkpoint_block.split('if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]', 1)[
+        1
+    ]
+    assert "checkpoint_args=(--checkpoint.no-enable)" in disabled
+    launch_tail = text[
+        caller_args : text.index('            >"${logfile}"', caller_args)
+    ]
     assert '"${checkpoint_args[@]}"' in launch_tail
     assert "--checkpoint.folder" not in launch_tail
 

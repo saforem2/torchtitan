@@ -56,9 +56,7 @@ def test_model_owns_adapter_pipeline_fragment_and_xpu_parallelization() -> None:
         return_value=sentinel,
     ) as parallelize:
         assert (
-            model.parallelize(
-                marker="xpu", parallelism_context=parallelism_context
-            )
+            model.parallelize(marker="xpu", parallelism_context=parallelism_context)
             is sentinel
         )
     assert entered == [True]

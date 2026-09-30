@@ -95,9 +95,7 @@ class EzpzValidator(Validator):
             # **kwargs and ignore what they do not name, so send both pairs.
             # self.num_tokens_per_microbatch is what core now stores -- it dropped
             # self.local_batch_size in #4121.
-            local_batch_size = max(
-                1, self.num_tokens_per_microbatch // self.seq_len
-            )
+            local_batch_size = max(1, self.num_tokens_per_microbatch // self.seq_len)
             self._cached_dataloader = self.dl_config.build(
                 dp_world_size=self.dp_world_size,
                 dp_rank=self.dp_rank,

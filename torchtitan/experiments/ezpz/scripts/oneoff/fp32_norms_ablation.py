@@ -114,7 +114,6 @@ def main() -> None:
     else:
         os.environ.pop("EZPZ_FP32_NORMS", None)
 
-    import ezpz.distributed
     import torch
 
     from torchtitan.config import ConfigManager

@@ -66,11 +66,7 @@ from typing import Any, cast, Literal
 import torch
 import torch.nn as nn
 
-from torchtitan.components.optim import (
-    AdamW,
-    BaseOptimizer,
-    OptimizersContainer,
-)
+from torchtitan.components.optim import AdamW, BaseOptimizer, OptimizersContainer
 
 __all__ = [
     "MUP_PARAM_GROUP_PATTERNS",

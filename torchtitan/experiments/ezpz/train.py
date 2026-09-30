@@ -469,7 +469,9 @@ def main(args: list[str] | None = None) -> None:
             optimizer_overrides,
         )
         logger.info(
-            "Using optimizer: %s (%s)", optimizer_name, type(config.optim.optimizer).__name__
+            "Using optimizer: %s (%s)",
+            optimizer_name,
+            type(config.optim.optimizer).__name__,
         )
 
     # Check the 80B learning rate HERE, not in the config registry.

@@ -19,13 +19,13 @@ from torchtitan.distributed.spmd_types import maybe_set_sparse_mesh, spmd_sparse
 from torchtitan.models.common.moe import RoutedExperts
 
 from .experts import (
-    ExpertComputeBackend,
     _env_flag_enabled,
     _run_experts_aurora_full_sonic,
     _run_experts_aurora_sycl,
     _run_experts_bmm,
     _run_experts_bmm_nodrop,
     _run_experts_for_loop,
+    ExpertComputeBackend,
 )
 
 

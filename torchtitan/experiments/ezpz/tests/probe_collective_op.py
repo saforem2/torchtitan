@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Standalone repro: reduce_scatter_tensor SIGSEGVs on XPU (Sunspot, 2026-08-14).
 
 Minimal, dependency-free (torch only -- no ezpz, no torchtitan). Segfaults with
@@ -63,8 +69,11 @@ def main() -> int:
     os.environ.setdefault("MASTER_ADDR", hf0)
     os.environ.setdefault("MASTER_PORT", "29511")
     if world <= 1:
-        print(f"ABORT: world={world} -- rank env not detected, so this would "
-              f"test NOTHING. Set WORLD_SIZE/RANK explicitly.", flush=True)
+        print(
+            f"ABORT: world={world} -- rank env not detected, so this would "
+            f"test NOTHING. Set WORLD_SIZE/RANK explicitly.",
+            flush=True,
+        )
         return 2
     torch.xpu.set_device(local)
     dist.init_process_group(backend="xccl", rank=rank, world_size=world)

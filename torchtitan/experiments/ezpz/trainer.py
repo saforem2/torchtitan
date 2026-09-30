@@ -237,7 +237,10 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 ),
             )
             self.loss_fn = cast(
-                Any, wrap_native_ddp_loss(self.loss_fn, self.parallelism_context.dp_replicate)
+                Any,
+                wrap_native_ddp_loss(
+                    self.loss_fn, self.parallelism_context.dp_replicate
+                ),
             )
             assert len(self.model_parts) == 1
             self.model_parts[0] = wrap_native_ddp(
@@ -415,7 +418,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         loss: torch.Tensor,
         grad_norm: torch.Tensor,
     ) -> dict[str, Any]:
-        extra_metrics: dict[str, Any] = collect_aux_loss_metrics(self.parallelism_context)
+        extra_metrics: dict[str, Any] = collect_aux_loss_metrics(
+            self.parallelism_context
+        )
         try:
             from torchtitan.experiments.ezpz import zloss as _zloss
 
@@ -496,6 +501,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         diagnostics_attention: bool = False
         history_bridge: bool = False
         wandb_watch: bool = False
+
         def __post_init__(self):
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
@@ -542,7 +548,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
             else None
         )
         self.num_pp_microbatches = (
-            config.parallelism.num_pp_microbatches if parallelism_context.pp_enabled else 1
+            config.parallelism.num_pp_microbatches
+            if parallelism_context.pp_enabled
+            else 1
         )
         num_tokens_per_microbatch = (
             config.training.num_tokens_per_microbatch_per_dp_rank
@@ -1055,8 +1063,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         if (
             config.grad_norm_abort <= 0
             or grad_norm is None
-            or self.engine.num_completed_steps
-            <= config.optim.lr_scheduler.warmup_steps
+            or self.engine.num_completed_steps <= config.optim.lr_scheduler.warmup_steps
         ):
             return False
         if not math.isfinite(grad_norm):

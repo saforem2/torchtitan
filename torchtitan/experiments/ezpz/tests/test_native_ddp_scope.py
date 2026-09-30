@@ -181,7 +181,9 @@ def test_agpt_fsdp_shards_stacked_linear_on_matrix_rows(monkeypatch) -> None:
 
     block_call = next(call for call in calls if call[0] is model.layers["0"])
     placement_fn = block_call[1]["shard_placement_fn"]
-    assert placement_fn(model.layers["0"].w13.weight) == torch.distributed.tensor.Shard(1)
+    assert placement_fn(model.layers["0"].w13.weight) == torch.distributed.tensor.Shard(
+        1
+    )
     assert placement_fn(model.layers["0"].w13.bias) == torch.distributed.tensor.Shard(1)
 
 

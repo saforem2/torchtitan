@@ -1,13 +1,12 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from torchtitan.experiments.ezpz.optimizer.adopt import ADOPT
 from torchtitan.experiments.ezpz.optimizer.containers import (
     ADOPTOptimizersContainer,
-    ManoOptimizersContainer,
-    MuonClipOptimizersContainer,
-    MuonOptimizersContainer,
-    ScheduleFreeOptimizersContainer,
-    SPAMOptimizersContainer,
-    SophiaGOptimizersContainer,
-    TorchMuonOptimizersContainer,
     default_adamw,
     default_adopt,
     default_mano,
@@ -17,6 +16,13 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_sophiag,
     default_spam,
     default_torch_muon,
+    ManoOptimizersContainer,
+    MuonClipOptimizersContainer,
+    MuonOptimizersContainer,
+    ScheduleFreeOptimizersContainer,
+    SophiaGOptimizersContainer,
+    SPAMOptimizersContainer,
+    TorchMuonOptimizersContainer,
 )
 from torchtitan.experiments.ezpz.optimizer.mano import Mano
 from torchtitan.experiments.ezpz.optimizer.muon import Muon, MuonClip, QKInputRecorder

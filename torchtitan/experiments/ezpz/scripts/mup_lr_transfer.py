@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """muP stage 4: does an LR tuned at a small width transfer to a large one?
 
 The coordinate check (scripts/mup_coord_check.py) proves the parametrization
@@ -43,19 +49,35 @@ REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 MIN_RESPONSE = 0.05
 
 
-def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
-            out_dir: str, mup: bool, port: int) -> dict:
+def run_one(
+    *,
+    flavor: str,
+    lr: float,
+    steps: int,
+    seq_len: int,
+    seed: int,
+    out_dir: str,
+    mup: bool,
+    port: int,
+) -> dict:
     """One short training run at a fixed LR. Returns final + mean-tail loss."""
     tag = f"{flavor}_lr{lr:.3e}{'_mup' if mup else '_sp'}"
     log = os.path.join(out_dir, f"{tag}.log")
     argv = [
-        sys.executable, "-m", "torchtitan.experiments.ezpz.train",
-        "--module", "ezpz.agpt", "--config", flavor,
+        sys.executable,
+        "-m",
+        "torchtitan.experiments.ezpz.train",
+        "--module",
+        "ezpz.agpt",
+        "--config",
+        flavor,
         f"--training.steps={steps}",
         f"--training.max-context-length={seq_len}",
         f"--training.num-tokens-per-microbatch-per-dp-rank={seq_len}",
-        "--compile.no-enable", "--checkpoint.no-enable",
-        "--validator.no-enable", "--metrics.no-enable-wandb",
+        "--compile.no-enable",
+        "--checkpoint.no-enable",
+        "--validator.no-enable",
+        "--metrics.no-enable-wandb",
         f"--debug.seed={seed}",
         # Constant LR. A warmup or decay schedule would confound the
         # comparison: the question is which eta is best, not which schedule.
@@ -84,9 +106,12 @@ def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
     env["MASTER_PORT"] = str(port)
     env.setdefault("TORCH_DEVICE", "cpu")
     with open(log, "w") as fh:
-        rc = subprocess.run(argv, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
+        rc = subprocess.run(
+            argv, stdout=fh, stderr=subprocess.STDOUT, env=env
+        ).returncode
     losses = []
     import re
+
     pat = re.compile(r"step:\s+(\d+)\s+loss:\s+([0-9.]+)")
     with open(log, errors="ignore") as fh:
         for line in fh:
@@ -95,28 +120,43 @@ def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
                 losses.append((int(m.group(1)), float(m.group(2))))
     losses.sort()
     if not losses:
-        return {"flavor": flavor, "lr": lr, "rc": rc, "final": None,
-                "tail_mean": None, "n": 0, "log": log}
-    tail = [v for _, v in losses[-max(1, len(losses) // 5):]]
+        return {
+            "flavor": flavor,
+            "lr": lr,
+            "rc": rc,
+            "final": None,
+            "tail_mean": None,
+            "n": 0,
+            "log": log,
+        }
+    tail = [v for _, v in losses[-max(1, len(losses) // 5) :]]
     return {
-        "flavor": flavor, "lr": lr, "rc": rc,
+        "flavor": flavor,
+        "lr": lr,
+        "rc": rc,
         "final": losses[-1][1],
         "tail_mean": sum(tail) / len(tail),
-        "n": len(losses), "last_step": losses[-1][0], "log": log,
+        "n": len(losses),
+        "last_step": losses[-1][0],
+        "log": log,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--flavors", required=True,
-                    help="comma-separated, smallest first (the base rung)")
+    ap.add_argument(
+        "--flavors",
+        required=True,
+        help="comma-separated, smallest first (the base rung)",
+    )
     ap.add_argument("--lrs", required=True, help="comma-separated eta grid")
     ap.add_argument("--steps", type=int, default=60)
     ap.add_argument("--seq-len", type=int, default=512)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--sp", action="store_true",
-                    help="run the SP control instead of muP")
+    ap.add_argument(
+        "--sp", action="store_true", help="run the SP control instead of muP"
+    )
     args = ap.parse_args()
 
     flavors = [f.strip() for f in args.flavors.split(",") if f.strip()]
@@ -128,12 +168,22 @@ def main() -> int:
     for flavor in flavors:
         for lr in lrs:
             port += 1
-            r = run_one(flavor=flavor, lr=lr, steps=args.steps,
-                        seq_len=args.seq_len, seed=args.seed,
-                        out_dir=args.out, mup=not args.sp, port=port)
+            r = run_one(
+                flavor=flavor,
+                lr=lr,
+                steps=args.steps,
+                seq_len=args.seq_len,
+                seed=args.seed,
+                out_dir=args.out,
+                mup=not args.sp,
+                port=port,
+            )
             rows.append(r)
-            print(f"  {flavor:16s} lr={lr:.3e}  rc={r['rc']}  "
-                  f"final={r['final']}  tail={r['tail_mean']}", flush=True)
+            print(
+                f"  {flavor:16s} lr={lr:.3e}  rc={r['rc']}  "
+                f"final={r['final']}  tail={r['tail_mean']}",
+                flush=True,
+            )
 
     # Per-flavor argmin over the grid.
     print("\n" + "=" * 74)
@@ -143,12 +193,20 @@ def main() -> int:
         vals = []
         for lr in lrs:
             m = [r for r in rows if r["flavor"] == flavor and r["lr"] == lr]
-            vals.append(m[0]["tail_mean"] if m and m[0]["tail_mean"] is not None else None)
-        cells = "".join(f"{v:>11.4f}" if v is not None else f"{'VOID':>11s}" for v in vals)
+            vals.append(
+                m[0]["tail_mean"] if m and m[0]["tail_mean"] is not None else None
+            )
+        cells = "".join(
+            f"{v:>11.4f}" if v is not None else f"{'VOID':>11s}" for v in vals
+        )
         good = [(v, lr) for v, lr in zip(vals, lrs) if v is not None]
         best = min(good)[1] if good else None
         argmins[flavor] = best
-        print(f"{flavor:16s} {cells}   {best:.2e}" if best else f"{flavor:16s} {cells}   n/a")
+        print(
+            f"{flavor:16s} {cells}   {best:.2e}"
+            if best
+            else f"{flavor:16s} {cells}   n/a"
+        )
 
     uniq = {v for v in argmins.values() if v is not None}
     idx = {lr: i for i, lr in enumerate(lrs)}
@@ -171,8 +229,11 @@ def main() -> int:
     # a confident NO TRANSFER.
     spans = []
     for flavor in flavors:
-        vals = [r["tail_mean"] for r in rows
-                if r["flavor"] == flavor and r["tail_mean"] is not None]
+        vals = [
+            r["tail_mean"]
+            for r in rows
+            if r["flavor"] == flavor and r["tail_mean"] is not None
+        ]
         if len(vals) >= 2:
             spans.append(max(vals) - min(vals))
     min_span = min(spans) if spans else 0.0
@@ -195,17 +256,28 @@ def main() -> int:
     elif len(uniq) == 1:
         verdict = "TRANSFER -- the optimum is the SAME grid point at every width"
     elif spread <= 1:
-        verdict = ("TRANSFER (within one grid step) -- optima adjacent; "
-                   "tighten the grid to distinguish")
+        verdict = (
+            "TRANSFER (within one grid step) -- optima adjacent; "
+            "tighten the grid to distinguish"
+        )
     else:
-        verdict = (f"NO TRANSFER -- the optimum moves {spread} grid steps "
-                   "across the ladder")
+        verdict = (
+            f"NO TRANSFER -- the optimum moves {spread} grid steps " "across the ladder"
+        )
     print("\nVERDICT: " + verdict)
 
-    summary = {"flavors": flavors, "lrs": lrs, "steps": args.steps,
-               "mup": not args.sp, "argmins": argmins,
-               "argmin_grid_spread": spread, "boundary_pinned": pinned,
-               "min_loss_span": min_span, "verdict": verdict, "rows": rows}
+    summary = {
+        "flavors": flavors,
+        "lrs": lrs,
+        "steps": args.steps,
+        "mup": not args.sp,
+        "argmins": argmins,
+        "argmin_grid_spread": spread,
+        "boundary_pinned": pinned,
+        "min_loss_span": min_span,
+        "verdict": verdict,
+        "rows": rows,
+    }
     sp = os.path.join(args.out, "transfer_summary.json")
     with open(sp, "w") as fh:
         json.dump(summary, fh, indent=2)

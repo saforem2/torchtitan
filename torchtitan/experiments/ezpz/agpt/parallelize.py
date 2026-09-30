@@ -35,11 +35,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
 )
 
-from torchtitan.config import (
-    CompileConfig,
-    TORCH_DTYPE_MAP,
-    TrainingConfig,
-)
+from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelismContext
@@ -109,14 +105,12 @@ def parallelize_llama(
     # config-driven sharding pass here; calling model.parallelize() would recurse.
     model._parallelize(parallel_dims)
 
-
     # 57th sync: PR #3674 refactored AC into a Configurable policy
     # hierarchy. ac_config is now an ActivationCheckpointing.Config
     # subclass (FullAC.Config / SelectiveAC.Config / MemoryBudgetAC.Config)
     # or None. The old `mode="none"` sentinel is replaced by `None`.
     if ac_config is not None:
         ac_config.build(dump_folder=dump_folder).apply(model)
-
 
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.

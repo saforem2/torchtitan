@@ -52,7 +52,7 @@ def patch_torch_distributed_config_for_xpu() -> None:
     if torch.cuda.is_available():
         return
 
-    dist_config = getattr(torch.distributed, "config")
+    dist_config = torch.distributed.config
     if hasattr(dist_config, "pipeline_per_edge_p2p"):
         return
 

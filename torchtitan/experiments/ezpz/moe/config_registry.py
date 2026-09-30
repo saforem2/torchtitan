@@ -16,7 +16,6 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
 from torchtitan.config.transform.quantization import (
     Float8GroupedLinearConverter,
@@ -28,6 +27,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.observability.metrics import MetricsProcessor

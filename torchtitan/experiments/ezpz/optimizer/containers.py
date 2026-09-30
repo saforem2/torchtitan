@@ -1,7 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from dataclasses import dataclass
-from typing import Callable, Any
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -58,9 +66,17 @@ class ADOPTOptimizer(ADOPT, BaseOptimizer):
         foreach: bool | None = True
 
     def __init__(self, config: Config, *, params) -> None:
-        ADOPT.__init__(self, params, lr=config.lr, betas=config.betas, eps=config.eps,
-                      weight_decay=config.weight_decay, decouple=config.decouple,
-                      clip_lambda=config.clip_lambda, foreach=config.foreach)
+        ADOPT.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            decouple=config.decouple,
+            clip_lambda=config.clip_lambda,
+            foreach=config.foreach,
+        )
 
 
 class ADOPTOptimizersContainer(OptimizersContainer):
@@ -78,12 +94,17 @@ class SophiaGOptimizer(SophiaG, BaseOptimizer):
         weight_decay: float = 0.1
 
     def __init__(self, config: Config, *, params) -> None:
-        SophiaG.__init__(self, params, lr=config.lr, betas=config.betas,
-                        rho=config.rho, weight_decay=config.weight_decay)
+        SophiaG.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            rho=config.rho,
+            weight_decay=config.weight_decay,
+        )
 
 
 class SophiaGOptimizersContainer(OptimizersContainer):
-
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
@@ -109,12 +130,19 @@ class MuonOptimizer(Muon, BaseOptimizer):
         muon_max_dim: int = 10000
 
     def __init__(self, config: Config, *, params) -> None:
-        Muon.__init__(self, params, lr=config.lr, wd=config.wd,
-                      momentum=config.momentum, nesterov=config.nesterov,
-                      ns_steps=config.ns_steps, adamw_betas=config.adamw_betas,
-                      adamw_eps=config.adamw_eps,
-                      adjuster_lr_ref=config.adjuster_lr_ref,
-                      muon_max_dim=config.muon_max_dim)
+        Muon.__init__(
+            self,
+            params,
+            lr=config.lr,
+            wd=config.wd,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
+            ns_steps=config.ns_steps,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+            adjuster_lr_ref=config.adjuster_lr_ref,
+            muon_max_dim=config.muon_max_dim,
+        )
 
 
 class MuonOptimizersContainer(OptimizersContainer):
@@ -132,13 +160,22 @@ class MuonClipOptimizer(MuonClip, BaseOptimizer):
         use_sqrt_d: bool = True
 
     def __init__(self, config: Config, *, params) -> None:
-        MuonClip.__init__(self, params, lr=config.lr, wd=config.wd,
-                          momentum=config.momentum, nesterov=config.nesterov,
-                          ns_steps=config.ns_steps, adamw_betas=config.adamw_betas,
-                          adamw_eps=config.adamw_eps,
-                          adjuster_lr_ref=config.adjuster_lr_ref, qk_clip=config.qk_clip,
-                          clip_t=config.clip_t, alpha=config.alpha,
-                          use_sqrt_d=config.use_sqrt_d)
+        MuonClip.__init__(
+            self,
+            params,
+            lr=config.lr,
+            wd=config.wd,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
+            ns_steps=config.ns_steps,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+            adjuster_lr_ref=config.adjuster_lr_ref,
+            qk_clip=config.qk_clip,
+            clip_t=config.clip_t,
+            alpha=config.alpha,
+            use_sqrt_d=config.use_sqrt_d,
+        )
 
 
 class MuonClipOptimizersContainer(MuonOptimizersContainer):
@@ -157,9 +194,15 @@ class ManoOptimizer(Mano, BaseOptimizer):
         adamw_eps: float = 1e-8
 
     def __init__(self, config: Config, *, params) -> None:
-        Mano.__init__(self, params, lr=config.lr, momentum=config.momentum,
-                      weight_decay=config.weight_decay,
-                      adamw_betas=config.adamw_betas, adamw_eps=config.adamw_eps)
+        Mano.__init__(
+            self,
+            params,
+            lr=config.lr,
+            momentum=config.momentum,
+            weight_decay=config.weight_decay,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+        )
 
 
 class ManoOptimizersContainer(OptimizersContainer):
@@ -180,10 +223,17 @@ class ScheduleFreeOptimizer(AdamWScheduleFree, BaseOptimizer):
         weight_lr_power: float = 2.0
 
     def __init__(self, config: Config, *, params) -> None:
-        AdamWScheduleFree.__init__(self, params, lr=config.lr, betas=config.betas,
-                                   eps=config.eps, weight_decay=config.weight_decay,
-                                   warmup_steps=config.warmup_steps, r=config.r,
-                                   weight_lr_power=config.weight_lr_power)
+        AdamWScheduleFree.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            warmup_steps=config.warmup_steps,
+            r=config.r,
+            weight_lr_power=config.weight_lr_power,
+        )
 
 
 class ScheduleFreeOptimizersContainer(OptimizersContainer):
@@ -196,7 +246,6 @@ class ScheduleFreeOptimizersContainer(OptimizersContainer):
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
-
 
     def train_mode(self) -> None:
         """Switch all optimizers to train mode."""
@@ -221,10 +270,17 @@ class SPAMOptimizer(SPAM, BaseOptimizer):
         ema_beta: float = 0.999
 
     def __init__(self, config: Config, *, params) -> None:
-        SPAM.__init__(self, params, lr=config.lr, betas=config.betas, eps=config.eps,
-                      weight_decay=config.weight_decay,
-                      spike_threshold=config.spike_threshold,
-                      delta_t=config.delta_t, ema_beta=config.ema_beta)
+        SPAM.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            spike_threshold=config.spike_threshold,
+            delta_t=config.delta_t,
+            ema_beta=config.ema_beta,
+        )
 
 
 class SPAMOptimizersContainer(OptimizersContainer):
@@ -316,7 +372,11 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
         pass
 
     def __init__(
-        self, config: Config, *, model_parts: list[nn.Module], enable_cuda_graph: bool = False
+        self,
+        config: Config,
+        *,
+        model_parts: list[nn.Module],
+        enable_cuda_graph: bool = False,
     ) -> None:
         import torch.optim
 
@@ -328,9 +388,11 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
                 "TorchMuonOptimizersContainer requires a non-empty param_groups "
                 "(use default_torch_muon(lr=..., **kwargs))"
             )
-        kw = {f.name: getattr(config.optimizers[0], f.name)
-              for f in config.optimizers[0].__dataclass_fields__.values()
-              if f.name != "pattern"}
+        kw = {
+            f.name: getattr(config.optimizers[0], f.name)
+            for f in config.optimizers[0].__dataclass_fields__.values()
+            if f.name != "pattern"
+        }
         lr = kw.pop("lr")
         weight_decay = kw.pop("weight_decay", 0.0)
         adamw_lr_factor = kw.pop("adamw_lr_factor", 1.0)
@@ -383,9 +445,7 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
 
             if not inner_opts:
                 # Empty model part (FSDP sharding) — use a no-op AdamW.
-                inner_opts.append(
-                    torch.optim.AdamW([{"params": []}], lr=lr)
-                )
+                inner_opts.append(torch.optim.AdamW([{"params": []}], lr=lr))
 
             self.optimizers.append(_CompositeOptimizer(inner_opts))
             self._model_part_indices.append(part_idx)
@@ -406,7 +466,10 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
 
 
 def default_adopt(
-    lr: float = 1e-3, *, clip_lambda_power: float = 0.25, decouple: bool = False,
+    lr: float = 1e-3,
+    *,
+    clip_lambda_power: float = 0.25,
+    decouple: bool = False,
     **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """One-group ADOPT config. ADOPT only supports foreach / for-loop, not fused."""
@@ -526,8 +589,12 @@ def default_mano(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Config:
 
 
 def default_schedule_free(
-    lr: float = 3e-4, *, warmup_steps: int = 200, r: float = 0.0,
-    weight_lr_power: float = 2.0, **kwargs: Any,
+    lr: float = 3e-4,
+    *,
+    warmup_steps: int = 200,
+    r: float = 0.0,
+    weight_lr_power: float = 2.0,
+    **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """One-group AdamWScheduleFree config."""
     return ScheduleFreeOptimizersContainer.Config(
@@ -578,10 +645,16 @@ def default_spam(
 
 
 def default_torch_muon(
-    lr: float = 2.4e-3, *, adamw_lr_factor: float = 1.0,
-    momentum: float = 0.95, nesterov: bool = True, ns_steps: int = 5,
-    betas: tuple[float, float] = (0.9, 0.95), eps: float = 1e-8,
-    weight_decay: float = 0.0, **kwargs: Any,
+    lr: float = 2.4e-3,
+    *,
+    adamw_lr_factor: float = 1.0,
+    momentum: float = 0.95,
+    nesterov: bool = True,
+    ns_steps: int = 5,
+    betas: tuple[float, float] = (0.9, 0.95),
+    eps: float = 1e-8,
+    weight_decay: float = 0.0,
+    **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """Single-config for TorchMuonOptimizersContainer.
 

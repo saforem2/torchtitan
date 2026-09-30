@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Probe FSDP2 storage collectives at the canonical 30B embedding shape."""
 
 from __future__ import annotations
@@ -142,7 +148,9 @@ def main() -> None:
         dist.all_reduce(grad_sq, group=parallel_dims.get_mesh("dp_shard").get_group())
         grad_norm = float(grad_sq.sqrt())
         if not math.isfinite(grad_norm) or grad_norm == 0.0:
-            raise RuntimeError(f"non-finite/zero global gradient at step {step}: {grad_norm}")
+            raise RuntimeError(
+                f"non-finite/zero global gradient at step {step}: {grad_norm}"
+            )
         print(f"BACKWARD_OK step={step} grad_norm={grad_norm:.9g}", flush=True)
         optimizer.step()
         torch.xpu.synchronize()

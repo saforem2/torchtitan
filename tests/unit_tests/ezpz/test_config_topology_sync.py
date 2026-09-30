@@ -249,7 +249,7 @@ def test_xpu_patch_registers_missing_pipeline_per_edge_config(monkeypatch) -> No
     from torchtitan.experiments.ezpz.rl import xpu_overrides
 
     monkeypatch.setattr(xpu_overrides.torch.cuda, "is_available", lambda: False)
-    dist_config = getattr(torch_dist, "config")
+    dist_config = torch_dist.config
     monkeypatch.delitem(
         dist_config._config,
         "pipeline_per_edge_p2p",

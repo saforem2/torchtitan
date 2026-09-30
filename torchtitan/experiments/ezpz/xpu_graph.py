@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """XPU graph capture/replay for the ezpz trainer (opt-in).
 
 Core's `torchtitan/distributed/cudagraph.py` implements graph capture but
@@ -235,7 +241,9 @@ class _ForwardBackwardXPUGraphWrapper(XPUGraphWrapper):
         if self._warmup_remaining > 0:
             return super().__call__(*args)
         if any(parameter.grad is not None for parameter in self._parameters):
-            raise RuntimeError("All parameter gradients must be None before XPU graph replay")
+            raise RuntimeError(
+                "All parameter gradients must be None before XPU graph replay"
+            )
         should_record = self._graph is None
         output = super().__call__(*args)
         if should_record:
