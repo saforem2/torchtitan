@@ -13,6 +13,7 @@ fsdp_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_fsdp2_xccl_
 fsdp_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py"
 collective_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_collective_op.py"
 full_model_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_full_model_sunspot.sh"
+sync_sunspot="$repo_root/torchtitan/experiments/ezpz/scripts/sync_smoke_sunspot.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
 
 fail() {
@@ -168,6 +169,8 @@ assert_contains "$full_model_probe" '--training.steps 3' \
     '30B full-model canary must complete three optimizer updates'
 assert_contains "$full_model_probe" 'FULL_MODEL_CANARY_PASS' \
     '30B full-model canary must emit a machine-readable success marker'
+assert_contains "$sync_sunspot" 'tensor-parallel-degree=2 activation-checkpoint:none' \
+    'Sunspot TP2 sync arm must preserve the supported no-AC contract'
 assert_not_contains "$full_model_probe" '--diagnostics' \
     'full-model canary must not add per-parameter DTensor diagnostic collectives'
 assert_not_contains "$full_model_probe" '--compile.no-enable' \

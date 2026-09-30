@@ -342,15 +342,14 @@ class moeModel(Decoder):  # noqa: N801
             )
 
         def apply_ezpz_debug_(self, debug) -> None:
+            force_load_balance = getattr(debug, "moe_force_load_balance", False)
             for layer_cfg in self.layers:
                 if layer_cfg.moe is None:
                     continue
-                layer_cfg.moe.router._debug_force_load_balance = (
-                    debug.moe_force_load_balance
-                )
+                layer_cfg.moe.router._debug_force_load_balance = force_load_balance
                 dispatcher = layer_cfg.moe.routed_experts.token_dispatcher
                 if hasattr(dispatcher, "force_load_balance"):
-                    dispatcher.force_load_balance = debug.moe_force_load_balance
+                    dispatcher.force_load_balance = force_load_balance
 
         def get_nparams_and_flops(
             self, model: nn.Module, seq_len: int
