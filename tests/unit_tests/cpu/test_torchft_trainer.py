@@ -274,8 +274,11 @@ def test_ft_engine_passes_manager_only_to_ft_checkpointer(ft_aware) -> None:
     config.checkpointer = checkpointer_config
     engine.config = config
     engine.model_parts = [MagicMock()]
-    engine.optimizers = MagicMock()
-    engine.lr_schedulers = MagicMock()
+    engine.optim = SimpleNamespace(  # type: ignore[assignment]
+        optimizers=MagicMock(),
+        lr_schedulers=MagicMock(),
+        ema=MagicMock(),
+    )
     engine.output_dir = "/tmp/output"
     engine.ft_manager = MagicMock()
     build = MagicMock(return_value="checkpointer")

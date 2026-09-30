@@ -424,7 +424,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
                     dist.get_rank() if dist.is_initialized() else 0
                 ],
                 i,
-                getattr(trainer, "parallel_dims", None),
+                getattr(trainer, "parallelism_context", None),
             )
             trainer.step += 1
             in_warmup = i < warmup_steps

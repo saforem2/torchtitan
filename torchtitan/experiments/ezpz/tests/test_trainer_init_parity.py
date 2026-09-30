@@ -77,6 +77,19 @@ def test_seed_checkpoint_delegates_to_training_engine() -> None:
     assert "trainer.checkpointer.save(" not in source
 
 
+def test_ezpz_uses_current_engine_contract() -> None:
+    """Reject legacy lifecycle names removed by upstream TrainingEngine."""
+    source = open(EZPZ).read()
+    assert "ParallelDims" not in source
+    assert ".parallel_dims" not in source
+    assert "def optimizer_step(" not in source
+    assert "forward_backward_microbatch(" not in source
+    assert "prepare_step(" not in source
+    assert "super().optim_step()" in source
+    assert "def as_input_dict(" in source
+    assert "self._run_forward_backward = maybe_wrap_with_xpu_graph(" in source
+
+
 def main() -> int:
     bases = class_bases(EZPZ, "FaultTolerantTrainer")
     source = open(EZPZ).read()
@@ -84,6 +97,7 @@ def main() -> int:
         print("FAIL: ezpz must extend TorchFTTrainer and select an engine_cls")
         return 1
     test_seed_checkpoint_delegates_to_training_engine()
+    test_ezpz_uses_current_engine_contract()
 
     print("PASS: ezpz delegates execution state to a TrainingEngine.")
     return 0
