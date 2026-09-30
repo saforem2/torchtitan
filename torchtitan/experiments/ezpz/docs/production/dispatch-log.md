@@ -1,6 +1,6 @@
 # Production dispatch log
 
-> Last updated: 2026-09-21
+> Last updated: 2026-09-30
 
 Every job that targets a **production pre-training chain** -- individual
 submissions AND multi-chain umbrellas -- in one place, because the per-chain
@@ -37,6 +37,32 @@ Reading rules:
 | `8764675` | 08-20 | **12h00m31s / 12h (100%)** | CCL KVS timeout -> segfault at init | 20B-512 10,101->10,699 | 20B-256 11,001->11,800 | **bad_alloc** | SophiaG `update_hessian`: `'dict' object has no attribute 'mul_'` | 2/5 |
 | `8773440` | 08-26 | 5h13m / 12h (43%) | no-start | no-start | 20B-256 **+201** (2.31488 -> 2.24577) | 2B-512clr **+504** (2.74535 -> 2.73836) | 2B-256 **+782** (2.56449 -> 2.54807) | 3/5 |
 | `8828612` | 09-19 | **12h00m23s / 12h (100%)** | not re-audited here | not re-audited here | **20B-256 15,201->16,035** | not re-audited here | not re-audited here | at least 1/5 verified |
+| `8870515` | 09-29 | **12h18m20s / 24h (51%)** | 20B-512 ->11,190 logged; **11,100 durable** | 20B-256 16,801->17,600 logged; **17,500 durable** | 2B-256 stage 2 ->41,385 logged; **41,300 durable** | -- | -- | 3/3 advanced |
+| `8879474` | 09-30 | running / 18h | prestaging; no trainer log yet | prestaging; no trainer log yet | waiting for shared prestage | -- | -- | 0/3 confirmed |
+
+Successor umbrella `8879474` started at 19:08 UTC in `medium` on 1,054 nodes.
+Its pinned 20B runtime archive entered broadcast to the 788 nodes assigned to
+the two 20B seats; no trainer console or finite step existed at the latest
+probe. Follower `8879475` remains dependency-held via `afterany:8879474`.
+
+Before launch, its PBS
+`comment` and `estimated.start_time` **oscillate between scheduling cycles**:
+on 2026-09-30 at 07:15 CDT `Not Running: Job would conflict with reservation or
+top job` / `Thu Oct  1 04:49:20 2026`, and at 07:23-07:26 CDT `Not Running:
+Node is in an ineligible state: offline` / `Thu Oct  1 16:49:20 2026`. `Not
+enough free nodes available` is a third value in the same rotation. Read these
+as per-cycle snapshots, not a blocker progression. `eligible_time` advances
+monotonically (15:10:47 -> 15:19:20). Those observations describe the queueing
+period only and are superseded by the running state above.
+
+`8870515` ended with PBS `Exit_status=143`/`Stageout_status=1` after node
+`x4418c3s1b0n0` requested job termination (`code 15009`). Its 20B-512 seat
+made five long attempts ending 143 and then two 27--28 second PALS RPC launch
+failures against that node; the supervisor stopped the seat as
+`stuck_pre_training`/127. The final incomplete checkpoint directories were
+audited rather than counted: 20B-512 step 11,200 and 20B-256 step 17,600 are
+empty 4-KiB placeholders. Valid heads are step 11,100, step 17,500 (239 GiB,
+3,073 files), and 2B stage-2 step 41,300 (24 GiB, 3,073 files).
 
 `8828612` started 2026-09-19 22:48 UTC and finished at walltime with PBS
 `Exit_status=-29`. The t2 range is independently verified against W&B config
