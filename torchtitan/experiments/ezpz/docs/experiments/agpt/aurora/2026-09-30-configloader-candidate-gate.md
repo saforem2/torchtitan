@@ -1,7 +1,6 @@
 # ConfigLoader production migration gate — Aurora seat-4
 
-**Status:** in progress. Candidate software is frozen; the Aurora hardware gate
-is still open.
+**Status:** seat-4 gate passed; 20B lineage gates remain open.
 
 ## Candidate
 
@@ -54,11 +53,25 @@ production checkpoint is ever written.
 | `8881737` | `fa91efb3f8` | cancelled while queued | candidate superseded before allocation; no log, no output |
 | `8881769` | `e3520c057a` | failed before restore | DP shard 24 cannot evenly shard fused dimension 11008 (`FSDP does not support uneven sharding on dim 1`) |
 | `8881958` | `e3520c057a` | failed before restore | 12,288 tokens/step is not divisible by 16 ranks × 512 tokens (8,192) |
-| `8881991` | `e3520c057a` | active | DP shard 16, 16 ranks, 8 ranks/node, 8,192 tokens/step |
+| `8881991` | `e3520c057a` | semantic pass; wrapper exit 37 | Restored `step-41300`, completed finite updates `41301`–`41303`, wrote fresh full-state checkpoints, restored fresh `step-41303`, and completed finite step `41304` |
 
 Both failures were defects in the diagnostic wrapper's topology arithmetic, not
 evidence about `LegacyConfigLoader` or checkpoint compatibility. Neither run
 reached checkpoint restore.
+
+Job `8881991` satisfied the complete seat-4 contract. The historical restore
+finished in 237.91 seconds. Loss/gradient pairs were `2.58528/3.4850`,
+`2.54956/3.4599`, and `2.73049/3.5645` at steps `41301`–`41303`. Each fresh
+checkpoint contains 17 files totaling 23,846,149,586 bytes, including an
+840,433-byte `.metadata`. The second process restored `step-41303` in 6.76
+seconds and completed step `41304` with loss `2.74505` and gradient norm
+`3.5586`; its checkpoint has the same file/byte counts.
+
+PBS recorded exit 37 because the wrapper searched for one space in
+`Training starts at step 41304`, while the log contains two spaces after the
+timestamp prefix. This postcondition was a false negative after all required
+work and artifacts completed. Reconciled evidence is recorded in
+`RECONCILED_VALIDATION` under the job artifact root.
 
 ## Next gates
 
