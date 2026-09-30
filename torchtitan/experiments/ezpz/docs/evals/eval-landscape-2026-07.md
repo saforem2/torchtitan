@@ -2,6 +2,27 @@
 
 > Last updated: 2026-08-31
 
+> **Coverage audit (2026-09-30).** The modern backfill is no longer merely in
+> progress, but its artifacts are not uniform enough for one combined curve.
+> The reconciled 608-result corpus contains self-describing **MMLU 5-shot**
+> ladders for 20B-256 (15 checkpoints, steps 6,900--8,300) and 20B-512
+> (14 checkpoints, steps 6,550--7,600), plus five MDS base/tail/cooldown
+> endpoints. The older 2B-v2 artifacts contain MMLU values at 8 checkpoints
+> for 256N and 14 for 512N, but neither `n-shot` metadata nor an `@5shot` task
+> key; they must not be silently mixed into a labeled 5-shot curve. GSM8K is
+> sparse: two explicit 5-shot checkpoints per 20B lineage, eight MDS-tail
+> checkpoints, three MDS-cooldown checkpoints, and only isolated or
+> metadata-unknown 2B-v2 results. Therefore:
+>
+> - keep the seven-task commonsense charts as training thermometers;
+> - publish MMLU separately, using only explicit 5-shot artifacts until the
+>   older 2B provenance is recovered or those checkpoints are re-evaluated;
+> - report GSM8K as an endpoint table, not a smooth training curve, until its
+>   checkpoint coverage is dense and shot metadata is uniform.
+>
+> This is why MMLU/GSM8K are absent from the current overview SVGs: their
+> omission is a hard-coded chart contract, not absence from the result corpus.
+
 Decision-focused review of what we evaluate, what modern peers evaluate, and how
 we compare. Grounded in a fact-checked research pass over primary sources (model
 cards, papers, the HF Open LLM Leaderboard blog); numbers are marked
@@ -81,7 +102,7 @@ report ARC-Challenge). Peer numbers [CONFIRMED]:
 The gap is large but **expected** -- HellaSwag climbs steeply *late* in training;
 0.61 at 12% of tokens is mid-trajectory, not final.
 
-### 3b. Modern benchmarks (were unrun; now backfilling) -- peer numbers [CONFIRMED]
+### 3b. Modern benchmarks (backfilled with coverage caveats) -- peer numbers [CONFIRMED]
 | Benchmark | Llama-3.2-1B base | Llama-3.2-3B base | SmolLM3-3B base | OLMo-2-7B | OLMo-2-13B |
 |---|---|---|---|---|---|
 | MMLU (5-sh) | 32.2 | 58.0 | 44.1 (CF*) | 63.7 | 67.5 |
