@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 303
+The 25 most-recently-changed docs by git commit date (across all 302
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -29,8 +29,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
-| 2026-09-30 | [Running with Newer PyTorch (>= 2.10)](./guides/running-with-newer-pytorch.md) |
-| 2026-09-30 | [Running with newer PyTorch on Aurora prod](./guides/running-with-newer-pytorch-next-eval.md) |
+| 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-09-30 | [Evaluation Results](./evals/README.md) |
@@ -47,13 +46,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
 | 2026-09-26 | [Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis](./production/rl/grpo/torch214-reproduction.md) |
 | 2026-09-26 | [AGPT-2B Stage-4 MetaMath distillation and model interpolation](./experiments/2026-09-26-agpt2b-stage4-metamath.md) |
+| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
-| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
 | 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
 | 2026-09-25 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
 | 2026-09-25 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
@@ -78,6 +77,7 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-21 | [PR #17 MoE integration: merge-readiness review](./experiments/pr17-moe-merge-readiness.md) |
 | 2026-09-21 | [MoE expert backends across four machines](./experiments/moe-expert-backends-4machine.md) |
 | 2026-09-21 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
+| 2026-09-21 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
