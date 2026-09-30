@@ -266,6 +266,10 @@ esac
 LRF_TIMEOUT="${LRF_TIMEOUT:-1800}"
 LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"
 LRF_CHECKPOINT_ENABLE="${LRF_CHECKPOINT_ENABLE:-1}"
+if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]; then
+    echo "lr-finder FATAL: checkpointing is required for resumable LR sweeps" >&2
+    exit 2
+fi
 LRF_LBS="${LRF_LBS:-1}"
 # Sequence length. Was hardcoded to 8192 in the launch below, which is wrong
 # for any model whose measurements are at another length: every 30B datapoint

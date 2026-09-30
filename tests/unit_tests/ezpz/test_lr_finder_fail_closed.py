@@ -134,6 +134,17 @@ def test_runner_selects_resumable_or_disabled_checkpoint_contract():
     assert "--checkpoint.folder" not in launch_tail
 
 
+def test_runner_rejects_checkpoint_disabled_lr_sweeps_before_launch():
+    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
+    text = script.read_text()
+    guard = 'if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]'
+    assert guard in text
+    guarded = text.split(guard, 1)[1].split("\nfi\n", 1)[0]
+    assert "checkpointing is required for resumable LR sweeps" in guarded
+    assert "exit 2" in guarded
+    assert text.index(guard) < text.index('    for opt in "${OPTIMIZERS[@]}"; do')
+
+
 def test_ezpz_translation_preserves_checkpoint_component_selection_flags():
     from torchtitan.experiments.ezpz.train import _translate_legacy_args
 
