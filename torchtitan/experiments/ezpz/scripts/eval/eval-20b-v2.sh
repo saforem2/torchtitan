@@ -45,6 +45,7 @@ cd "$EVAL_OUTPUT_ROOT" || exit 1
 V2_REPO="${V2_REPO:-${REPO:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz}}"
 CONVERT_VENV="${CONVERT_VENV:-${V2_REPO}/.venv}"
 HF_ASSETS_PATH="${HF_ASSETS_PATH:-${V2_REPO}/assets/hf/gemma-7b}"
+LM_EVAL_VENV="${LM_EVAL_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/venvs/aurora/tt-lm-eval}"
 # The checkpoint may live in a pinned production clone that intentionally lacks
 # the current RoPE-safe adapter.  Keep conversion code rooted in V2_REPO while
 # allowing the DCP source to come from a separate, read-only checkout.
@@ -115,6 +116,10 @@ fi
 }
 [[ -s "${HF_ASSETS_PATH}/tokenizer.json" ]] || {
     echo "[eval-20b-v2] ERROR: tokenizer assets missing: ${HF_ASSETS_PATH}" >&2
+    exit 2
+}
+[[ -x "${LM_EVAL_VENV}/bin/python" ]] || {
+    echo "[eval-20b-v2] ERROR: lm-eval Python missing: ${LM_EVAL_VENV}/bin/python" >&2
     exit 2
 }
 echo "[eval-20b-v2] MODEL_FLAVOR='${MODEL_FLAVOR}' (explicit; no default -- see rope-flavor-mismatch.md)"
@@ -230,7 +235,7 @@ PYCHK
     echo "[2/2] Running lm-eval..."
     module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1
     echo "  lm-eval modules loaded."
-    source venvs/aurora/tt-lm-eval/bin/activate
+    source "${LM_EVAL_VENV}/bin/activate"
     mkdir -p "${RESULTS_DIR_ABS}"
     HF_DIR_ABS="${HF_DIR_ABS}" RESULTS_DIR_ABS="${RESULTS_DIR_ABS}" TASKS="${TASKS}" SHOTS_SPEC="${SHOTS_SPEC:-}" LIMIT="${LIMIT:-}" \
     python3 << 'PYEOF'

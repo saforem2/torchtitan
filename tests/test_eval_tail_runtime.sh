@@ -16,6 +16,7 @@ assert_not_contains() {
 
 assert_contains "$eval_script" 'CONVERT_VENV' 'conversion runtime must be explicit'
 assert_contains "$eval_script" 'EVAL_OUTPUT_ROOT' 'evaluation outputs must not follow PBS_O_WORKDIR'
+assert_contains "$eval_script" 'LM_EVAL_VENV' 'lm-eval runtime must be independent of output cwd'
 assert_contains "$eval_script" 'import spmd_types, torchtitan' 'conversion preflight must import spmd_types'
 assert_contains "$eval_script" 'Conversion FAILED for step.*rc=' 'conversion failure must be explicit and carry rc'
 assert_contains "$eval_script" 'exit "\$\{convert_rc\}"' 'conversion failure must propagate nonzero'
