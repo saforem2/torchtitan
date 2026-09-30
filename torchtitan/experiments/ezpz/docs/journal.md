@@ -4,6 +4,14 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
+- Tail eval `8878144` exposed a false-success wrapper path: DCP conversion ran
+  without `spmd_types`, printed `Conversion FAILED`, continued, and returned PBS
+  exit 0 with no `results.json`. Sibling `8878145` was cancelled before
+  allocation. The corrected pipeline uses the isolated Torch 2.15 conversion
+  runtime (`spmd-types==0.2.5`) separately from the frameworks-2025.3.1 lm-eval
+  overlay, passes explicit shared tokenizer assets, and propagates conversion
+  failures nonzero. Replacement targets are the latest durable heads: 20B-512
+  step 11,100 and 20B-256 step 17,500.
 - Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
   queue were deleted and verified terminal: chain-3 control `8876446`,
   `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.
