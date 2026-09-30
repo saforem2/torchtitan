@@ -488,7 +488,7 @@ for idx in "${!TRAINERS[@]}"; do
     T_VENVSRC[$idx]="$_vsrc"
 done
 
-# ---- Disjointness assertion (no node may appear in two slices) ---------------
+# ---- Non-overlap assertion (no node may appear in two slices) ----------------
 dupes=$(cat "$MULTI_LOG_DIR"/trainer-*.hostfile 2>/dev/null | sort | uniq -d)
 if [[ -n "$dupes" ]]; then
     die "slices overlap -- the same node(s) appear in multiple trainers:"$'\n'"$dupes"
