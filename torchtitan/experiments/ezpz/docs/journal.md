@@ -26,6 +26,15 @@ Running log of what's happening, session by session. Most recent first.
   `foreach_reduce_scatter_copy_in -> torch._chunk_cat` with
   `UR_RESULT_ERROR_OUT_OF_RESOURCES`. A narrowly scoped XPU `_chunk_cat`
   fallback is under independent review; no production recommendation exists.
+- Final combined 30B control `12479080` confirmed the Level Zero resource leak
+  occurs before reduce-scatter packing: shard-32, backward-prefetch suppression,
+  `CCL_SYCL_OUTPUT_EVENT=0`, XPU synchronization, and the reviewed equivalent
+  copy fallback were all active, but the first `rank_rows.zero_()` still raised
+  `UR_RESULT_ERROR_OUT_OF_RESOURCES`. No update completed. The experimental
+  fallback/prefetch code was removed from maintained source at `ed9825f207`.
+  Further 64-node retries are not justified; the 30B first-update and LR gates
+  are externally blocked on a repaired newer XPU runtime or upstream
+  PyTorch/XCCL remediation.
 - Tail-evaluation retry `8880334` was canceled and reached PBS `F`, exit 143,
   before writing weights after its inherited `PBS_O_WORKDIR=/home/foremans`
   would have placed the roughly 40 GB HF export under home. Commit
