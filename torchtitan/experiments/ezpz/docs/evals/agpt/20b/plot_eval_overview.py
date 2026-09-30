@@ -69,7 +69,7 @@ V2_EXTRA = {
 # Correctly exported production-tail results that landed in the legacy base
 # directory. Whitelist exact steps rather than re-admitting every post-switch
 # base result, because the others were exported with the wrong RoPE flavor.
-V2_TRUSTED_BASE_STEPS = {256: {16_000}}
+V2_TRUSTED_BASE_STEPS = {256: {16_000, 17_500}}
 
 # Pin every number to one shot count. The eval scripts write `<task>@<N>shot`
 # keys plus a bare `<task>` alias for whichever group ran LAST, so on steps

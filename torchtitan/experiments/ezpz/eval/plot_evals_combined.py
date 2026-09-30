@@ -165,9 +165,9 @@ TRAJECTORIES: list[dict] = [
         "eval_subdir": "agpt-20b-v2-256n",
         "corrected_subdir": "agpt-20b-v2-256n-ropefix",
         "switch_step": 3101,
-        # This production-tail export used the corrected 20b_real flavor but
-        # was written to the legacy base directory. Admit only this exact step.
-        "trusted_base_steps": [16000],
+        # These production-tail exports used the corrected 20b_real flavor but
+        # were written to the legacy base directory. Admit only these exact steps.
+        "trusted_base_steps": [16000, 17500],
         "layout": "dcp",
         "tokens_per_step": 6144 * 8192,
         "color": COLOR_20B_TT_256N,

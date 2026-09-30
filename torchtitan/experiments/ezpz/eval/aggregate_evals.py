@@ -90,7 +90,7 @@ DCP_MODEL_OVERRIDES = {
             "base": "agpt-20b-v2-256n",
             "corrected": "agpt-20b-v2-256n-ropefix",
             "switch_step": 3101,
-            "trusted_base_steps": {16_000},
+            "trusted_base_steps": {16_000, 17_500},
         },
         {
             "base": "agpt-20b-v2-512n",
