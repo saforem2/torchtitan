@@ -12,7 +12,7 @@ from unittest.mock import ANY
 import pytest
 from torchtitan.config.configs import CommConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.distributed import DistributedTopology, ParallelDims
+from torchtitan.distributed import DistributedTopology, ParallelismContext
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,7 @@ def test_ezpz_parallelism_config_constructs_with_core_fields() -> None:
     assert config.enable_data_parallel_native_ddp
 
 
-def test_parallel_dims_from_topology_matches_direct_construction() -> None:
+def test_parallelism_context_from_topology_matches_direct_construction() -> None:
     from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 
     config = EzpzParallelismConfig(
@@ -76,8 +76,8 @@ def test_parallel_dims_from_topology_matches_direct_construction() -> None:
     )
     topology = DistributedTopology(world_size=16)
 
-    actual = ParallelDims.from_config(config, topology)
-    expected = ParallelDims(
+    actual = ParallelismContext.from_config(config, topology)
+    expected = ParallelismContext(
         dp_replicate=2,
         dp_shard=2,
         cp=1,
@@ -145,7 +145,7 @@ def test_validator_runs_a_real_validation_pass(monkeypatch) -> None:
             super().__init__()
             self.weight = torch.nn.Linear(4, 4)
 
-        def preprocess_inputs(self, batch, *, parallel_dims, parallelism):
+        def preprocess_inputs(self, batch, *, parallelism_context, parallelism):
             labels = batch.pop("labels")
             return batch["input"], labels, {}
 
@@ -159,7 +159,7 @@ def test_validator_runs_a_real_validation_pass(monkeypatch) -> None:
         def log_validation(self, loss, step):
             type(self).logged.append((float(loss), step))
 
-    parallel_dims = ParallelDims(
+    parallel_dims = ParallelismContext(
         dp_replicate=1,
         dp_shard=1,
         cp=1,
@@ -171,7 +171,7 @@ def test_validator_runs_a_real_validation_pass(monkeypatch) -> None:
     )
 
     validator = object.__new__(EzpzValidator)
-    validator.parallel_dims = parallel_dims
+    validator.parallelism_context = parallel_dims
     validator.parallelism = ParallelismConfig()
     validator.metrics_processor = _Metrics()
     validator.config = SimpleNamespace(steps=1)
@@ -182,12 +182,10 @@ def test_validator_runs_a_real_validation_pass(monkeypatch) -> None:
     }
     validator._cached_dataloader = [batch]
     validator._get_validation_dataloader = lambda: validator._cached_dataloader
-    import torchtitan.distributed.utils as du
-
     monkeypatch.setattr(
-        du,
-        "get_spmd_context",
-        lambda **kw: __import__("contextlib").nullcontext(),
+        parallel_dims,
+        "activate_spmd",
+        lambda **kwargs: __import__("contextlib").nullcontext(),
     )
     model = _Model()
     validator.validate([model], step=3)

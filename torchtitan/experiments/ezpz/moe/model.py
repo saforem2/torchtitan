@@ -248,10 +248,14 @@ class moeModel(Decoder):  # noqa: N801
     """
 
     @classmethod
-    def _register_optimizer_hooks(cls, optimizers, model_parts, parallel_dims) -> None:
-        from torchtitan.components.optimizer import register_moe_load_balancing_hook
+    def _register_optimizer_hooks(
+        cls, optimizers, model_parts, parallelism_context
+    ) -> None:
+        from torchtitan.models.common.moe import register_moe_load_balancing_hook
 
-        register_moe_load_balancing_hook(optimizers, model_parts, parallel_dims)
+        register_moe_load_balancing_hook(
+            optimizers, model_parts, parallelism_context
+        )
 
     def parallelize(self, **kwargs):
         from .parallelize import parallelize_moe

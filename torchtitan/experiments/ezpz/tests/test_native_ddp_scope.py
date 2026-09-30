@@ -134,7 +134,7 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
     )
     result = agpt_parallelize.parallelize_llama(
         cast(Any, model),
-        parallel_dims=_parallel_dims(),
+        parallelism_context=_parallel_dims(),
         training=TrainingConfig(max_context_length=8),
         parallelism=_parallelism(),
         compile_config=None,
