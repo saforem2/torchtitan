@@ -193,25 +193,12 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
             # would raise the "must call set_ezpz_max_context_length" branch
             # below. Imported inside the function because agpt imports heavy
             # model deps at module scope.
-            from torchtitan.experiments.ezpz.agpt import _EZPZ_MAX_CONTEXT_LENGTH
+            from torchtitan.experiments.ezpz.agpt import (
+                _ezpz_attention_batch_and_seq_len,
+            )
 
-            seq_len = _EZPZ_MAX_CONTEXT_LENGTH
-
-            if seq_len is None:
-                raise ValueError(
-                    "3D [T, N, H] attention input but max_context_length is "
-                    "unknown; the trainer must call "
-                    "set_ezpz_max_context_length() before the first forward"
-                )
             num_tokens, num_heads, head_dim = q_THK.shape
-            if num_tokens % seq_len != 0:
-                raise ValueError(
-                    f"token count {num_tokens} is not a multiple of "
-                    f"max_context_length {seq_len}; this wrapper assumes the "
-                    "fixed-length rows the loader emits and cannot reshape a "
-                    "ragged batch"
-                )
-            batch = num_tokens // seq_len
+            batch, seq_len = _ezpz_attention_batch_and_seq_len(num_tokens)
             q_THK = q_THK.view(batch, seq_len, num_heads, head_dim)
             k_THK = k_THK.view(batch, seq_len, -1, head_dim)
             v_THV = v_THV.view(batch, seq_len, -1, head_dim)

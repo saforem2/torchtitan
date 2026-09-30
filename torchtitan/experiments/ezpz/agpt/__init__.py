@@ -10,17 +10,43 @@ from functools import partial
 from typing import Any, Literal
 
 _EZPZ_MAX_CONTEXT_LENGTH: int | None = None
+_EZPZ_SEQUENCES_PER_MICROBATCH: int | None = None
 
 
-def set_ezpz_max_context_length(seq_len: int) -> None:
+def set_ezpz_max_context_length(
+    seq_len: int, num_tokens_per_microbatch: int | None = None
+) -> None:
     """Tell the SDPA wrapper how to unflatten #4121 flat [T, N, H] batches.
 
     Module-level rather than a Config field: the forward's positional-arg names
     are contract-checked under TP>1 (set_gqa_inner_attention_local_spmd matches
     in_dst_shardings by name), so the signature must not change.
     """
-    global _EZPZ_MAX_CONTEXT_LENGTH
+    global _EZPZ_MAX_CONTEXT_LENGTH, _EZPZ_SEQUENCES_PER_MICROBATCH
     _EZPZ_MAX_CONTEXT_LENGTH = int(seq_len)
+    num_tokens = seq_len if num_tokens_per_microbatch is None else num_tokens_per_microbatch
+    if num_tokens % seq_len != 0:
+        raise ValueError(
+            f"num_tokens_per_microbatch {num_tokens} must be divisible by "
+            f"max_context_length {seq_len}"
+        )
+    _EZPZ_SEQUENCES_PER_MICROBATCH = num_tokens // seq_len
+
+
+def _ezpz_attention_batch_and_seq_len(num_tokens: int) -> tuple[int, int]:
+    batch = _EZPZ_SEQUENCES_PER_MICROBATCH
+    if batch is None:
+        raise ValueError(
+            "3D [T, N, H] attention input but microbatch geometry is unknown; "
+            "the trainer must call set_ezpz_max_context_length() before the "
+            "first forward"
+        )
+    if num_tokens % batch != 0:
+        raise ValueError(
+            f"token count {num_tokens} is not divisible by configured "
+            f"sequences per microbatch {batch}"
+        )
+    return batch, num_tokens // batch
 
 
 import torch
@@ -115,22 +141,8 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
         # so neither upstream branch covers this and the adaptation lives here.
         folded = q_THK.ndim == 3
         if folded:
-            seq_len = _EZPZ_MAX_CONTEXT_LENGTH
-            if seq_len is None:
-                raise ValueError(
-                    "3D [T, N, H] attention input but max_context_length is "
-                    "unknown; the trainer must call "
-                    "set_ezpz_max_context_length() before the first forward"
-                )
             num_tokens, num_heads, head_dim = q_THK.shape
-            if num_tokens % seq_len != 0:
-                raise ValueError(
-                    f"token count {num_tokens} is not a multiple of "
-                    f"max_context_length {seq_len}; this wrapper assumes the "
-                    "fixed-length rows ConcatThenSplitPacking emits and cannot "
-                    "reshape a ragged batch"
-                )
-            batch = num_tokens // seq_len
+            batch, seq_len = _ezpz_attention_batch_and_seq_len(num_tokens)
             q_THK = q_THK.view(batch, seq_len, num_heads, head_dim)
             k_THK = k_THK.view(batch, seq_len, -1, head_dim)
             v_THV = v_THV.view(batch, seq_len, -1, head_dim)
