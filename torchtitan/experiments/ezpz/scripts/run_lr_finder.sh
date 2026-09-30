@@ -490,7 +490,13 @@ for model in "${MODELS[@]}"; do
         R_OPT[$RUN_IDX]="${opt}"
 
         start_seconds=$SECONDS
-        checkpoint_args=(--checkpoint.enable)
+        checkpoint_args=(
+            --checkpoint.enable
+            --checkpoint.folder "checkpoints/lr_finder_${label}"
+            --checkpoint.interval "${LRF_CHECKPOINT_INTERVAL}"
+            --checkpoint.no-last-save-model-only
+            --checkpoint.async-mode disabled
+        )
         if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]; then
             checkpoint_args=(--checkpoint.no-enable)
         fi
@@ -544,10 +550,6 @@ for model in "${MODELS[@]}"; do
             "${tp_args[@]}" \
             "$@" \
             "${checkpoint_args[@]}" \
-            --checkpoint.folder "checkpoints/lr_finder_${label}" \
-            --checkpoint.interval "${LRF_CHECKPOINT_INTERVAL}" \
-            --checkpoint.no-last-save-model-only \
-            --checkpoint.async-mode disabled \
             "${ac_subcommand[@]}" \
             >"${logfile}" 2>&1
         exit_code=$?
