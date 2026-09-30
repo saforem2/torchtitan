@@ -98,6 +98,8 @@ assert_contains "$fsdp_probe" 'group_stride=16' \
     'HSDP all-reduce control must use stride-16 replica groups'
 assert_contains "$fsdp_probe" 'nproc=48' \
     'HSDP all-reduce control must launch the full four-node reduced topology'
+assert_contains "$fsdp_probe" '--nproc .*--nproc_per_node 12' \
+    '48-rank raw arm must use the regular four-node ezpz topology'
 assert_contains "$fsdp_probe" 'EZPZ_PROBE_DTYPE=' \
     '30B raw controls must pass the production collective dtype explicitly'
 assert_contains "$collective_probe_py" 'float32.*torch.float32' \
@@ -106,6 +108,10 @@ assert_contains "$fsdp_probe" '--dp-replicate 1 --dp-shard 16' \
     '30B probe must test pure FSDP at exact shard degree 16'
 assert_contains "$fsdp_probe" 'run_fsdp pure-fsdp 16 12' \
     'pure-FSDP arm must preserve Sunspot production ranks-per-node placement'
+assert_contains "$fsdp_probe" 'timeout 600 mpiexec --envall --line-buffer --np=16 --ppn=12' \
+    'irregular 16-rank arm must bypass ezpz even-occupancy inference explicitly'
+assert_contains "$fsdp_probe" '--hostfile=' \
+    'irregular 16-rank arm must preserve scheduler host ordering'
 assert_contains "$fsdp_probe" '--dp-replicate 3 --dp-shard 16' \
     '30B probe must test HSDP at exact shard degree 16'
 assert_contains "$fsdp_probe" 'run_fsdp hsdp 48 12' \

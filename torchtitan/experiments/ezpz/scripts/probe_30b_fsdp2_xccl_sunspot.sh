@@ -37,6 +37,12 @@ export CCL_SYCL_KERNEL_SYNC=0
 export CCL_KVS_MODE=pmi
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
+CPU_BIND_SUNSPOT="list:1-8:9-16:17-24:25-32:33-40:41-48:53-60:61-68:69-76:77-84:85-92:93-100"
+
+run_irregular_16() {
+    WORLD_SIZE=16 timeout 600 mpiexec --envall --line-buffer --np=16 --ppn=12 \
+        --hostfile="$PBS_NODEFILE" --cpu-bind="$CPU_BIND_SUNSPOT" "$@"
+}
 
 run_raw() {
     op=$1
@@ -65,12 +71,20 @@ run_raw() {
             exit 98
             ;;
     esac
-    WORLD_SIZE="$nproc" EZPZ_PROBE_OP="$op" EZPZ_PROBE_DTYPE="$dtype" \
-        EZPZ_PROBE_MIBS="$mib" EZPZ_PROBE_GROUP_STRIDE="$group_stride" \
-        "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
-        --nproc "$nproc" --nproc_per_node 12 --timeout 600 -- \
-        "$V/bin/python" torchtitan/experiments/ezpz/tests/probe_collective_op.py \
-        2>&1 | tee "$log"
+    if [[ "$nproc" -eq 16 ]]; then
+        EZPZ_PROBE_OP="$op" EZPZ_PROBE_DTYPE="$dtype" \
+            EZPZ_PROBE_MIBS="$mib" EZPZ_PROBE_GROUP_STRIDE="$group_stride" \
+            run_irregular_16 "$V/bin/python" \
+            torchtitan/experiments/ezpz/tests/probe_collective_op.py \
+            2>&1 | tee "$log"
+    else
+        WORLD_SIZE="$nproc" EZPZ_PROBE_OP="$op" EZPZ_PROBE_DTYPE="$dtype" \
+            EZPZ_PROBE_MIBS="$mib" EZPZ_PROBE_GROUP_STRIDE="$group_stride" \
+            "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
+            --nproc "$nproc" --nproc_per_node 12 --timeout 600 -- \
+            "$V/bin/python" torchtitan/experiments/ezpz/tests/probe_collective_op.py \
+            2>&1 | tee "$log"
+    fi
     rc=${PIPESTATUS[0]}
     if [[ "$rc" -ne 0 ]]; then
         exit "$rc"
@@ -84,11 +98,17 @@ run_fsdp() {
     ppn=$3
     shift 3
     log="$OUT/$label.log"
-    WORLD_SIZE="$nproc" "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
-        --nproc "$nproc" --nproc_per_node "$ppn" --timeout 900 -- \
-        "$V/bin/python" \
-        torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py \
-        "$@" --iterations 3 2>&1 | tee "$log"
+    if [[ "$nproc" -eq 16 ]]; then
+        run_irregular_16 "$V/bin/python" \
+            torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py \
+            "$@" --iterations 3 2>&1 | tee "$log"
+    else
+        WORLD_SIZE="$nproc" "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
+            --nproc "$nproc" --nproc_per_node "$ppn" --timeout 900 -- \
+            "$V/bin/python" \
+            torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py \
+            "$@" --iterations 3 2>&1 | tee "$log"
+    fi
     rc=${PIPESTATUS[0]}
     if [[ "$rc" -ne 0 ]]; then
         exit "$rc"
