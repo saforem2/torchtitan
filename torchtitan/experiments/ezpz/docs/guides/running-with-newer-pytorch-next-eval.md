@@ -1,17 +1,16 @@
-# Running with newer PyTorch on Aurora `next-eval`
+# Running with newer PyTorch on Aurora `prod`
 
-**Last validated:** 2026-09-19
+**Last validated:** 2026-09-30
 
 > [!IMPORTANT]
-> `next-eval` does **not** use Aurora's normal production image. Its compute
-> nodes currently expose the TEST BKC (`compute_aurora_test_20260831`, software
-> tree `26.181.0`, oneAPI 2026.1), while login nodes and ordinary production
-> queues expose a different stack. A venv built against the production image's
-> `/opt/aurora/26.26.0/spack/...` Python will not start on `next-eval`.
+> Submit new work to Aurora's `prod` routing queue. The production execution
+> queues now use the current BKC and provide the oneAPI 2026.1 stack by default;
+> the former `next-eval` workflow is no longer the operator entry point. Do not
+> load `frameworks/2026.1.0`: its bundled PyTorch is a different runtime from
+> the isolated Torch 2.15 environment validated here.
 >
-> This is a separate recipe from
-> [running-with-newer-pytorch.md](running-with-newer-pytorch.md), which describes
-> the production-image path, and from
+> This image-independent runtime remains separate from the older
+> [site-Python recipe](running-with-newer-pytorch.md) and from
 > [aurora-quickstart-frameworks-rc.md](aurora-quickstart-frameworks-rc.md), which
 > layers a venv on the compute image's bundled framework module.
 
@@ -26,10 +25,11 @@ The reusable environment used here lives at:
 
 | component | validated value |
 |---|---|
-| queue | `next-eval` |
-| compute image | `compute_aurora_test_20260831` |
+| submission queue | `prod` (routing queue) |
+| execution queues | `small`, `medium`, `large`, or matching `backfill-*` route |
+| compute image | current production BKC (`compute_aurora_prod_20260928T161726_a233` when audited) |
 | software tree | `/opt/aurora/26.181.0` |
-| oneAPI | 2026.1 |
+| oneAPI | 2026.1, inherited by default |
 | Python | 3.14.2 from `$HOME/.local/share/uv` |
 | PyTorch | `2.15.0.dev20260919+xpu` |
 | required PyTorch fix | `pytorch/pytorch#181519` (`_resolve_spmd_types_for_storage`) |
@@ -38,26 +38,29 @@ The reusable environment used here lives at:
 | XPU layout | 12 tiles/node with `ZE_FLAT_DEVICE_HIERARCHY=FLAT` |
 
 The Python is intentionally independent of `/opt/aurora`: that makes the venv
-start on both the login node and the TEST BKC compute nodes. The tarball is
+start on both the login node and current production compute nodes. The tarball is
 broadcast to node-local `/tmp/.venv` before launch.
 
-## 1. Request `next-eval`
+## 1. Request `prod`
 
 For an interactive check:
 
 ```bash
-qsub -q next-eval -A AuroraGPT \
+qsub -q prod -A AuroraGPT \
   -l walltime=00:30:00,filesystems=home:flare \
   -l select=2 -I
 ```
 
-`next-eval` permits multi-hour jobs and does not currently impose the node-count
-dead zone that shaped the old production-queue LR-finder scripts. Queue access
-and limits can change; inspect the live configuration rather than relying on
-this page:
+`prod` is a routing queue. PBS selects an execution queue according to node
+count, walltime, and backfill eligibility. Queue access, limits, and the active
+BKC can change; inspect both the route and its destination queues rather than
+relying on a historical queue name:
 
 ```bash
-qstat -Qf next-eval
+qstat -Qf prod
+qstat -Qf small
+qstat -Qf medium
+qstat -Qf large
 ```
 
 ## 2. Load the compute-node environment
@@ -69,7 +72,9 @@ if ! command -v module >/dev/null 2>&1 || [[ -z "${MODULEPATH:-}" ]]; then
   source /etc/bash.bashrc.local
 fi
 
-module load oneapi/release/2026.1.0 hdf5 pti-gpu
+# oneAPI 2026.1 is part of the default production allocation environment.
+# Load only workload-specific additions that are not already present.
+module load hdf5 pti-gpu
 
 export PATH="/opt/pbs/bin:${PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -84,12 +89,12 @@ export ftp_proxy="http://proxy.alcf.anl.gov:3128"
 export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov"
 ```
 
-The TEST image begins with the 2026.1 software tree. Keep the matching oneAPI
-2026.1 runtime with the 2.15 XPU nightly, then prepend `$VIRTUAL_ENV/lib` to
+The production image begins with the 2026.1 software tree. Keep its default
+oneAPI 2026.1 runtime with the 2.15 XPU nightly, then prepend `$VIRTUAL_ENV/lib` to
 `LD_LIBRARY_PATH`: the wheel's bundled Unified Runtime loader exports
 `urGraphGetIdExp`/`urDeviceWaitExp`, while the system loader may advertise the
 same symbol version without exporting those entry points. Record module reload
-messages rather than assuming the queue name alone identifies every library in
+messages rather than assuming the routing queue alone identifies every library in
 the process.
 
 ## 3. Use an image-independent venv
@@ -280,7 +285,7 @@ matter. For the full ladder, see the
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
 | PBS says `Exit_status=0`, report says `CRASH` | wrapper swallowed the launcher status | use the fail-closed runner at or after `fa23dc6d1` |
 | plausible loss with the wrong tokenizer | a pretokenized dataset silently overrode the config dataloader | keep the OLMo-3 config-owned Grain path |
-| import succeeds on login but fails in job | login and `next-eval` images differ | test inside the allocation after venv broadcast |
+| import succeeds on login but fails in job | login and production compute images differ | test inside the allocation after venv broadcast |
 
 ## Related documentation
 

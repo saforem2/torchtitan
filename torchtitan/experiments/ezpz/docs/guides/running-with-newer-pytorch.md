@@ -10,10 +10,10 @@
 > ```
 
 > [!IMPORTANT]
-> For Aurora's `next-eval` TEST image, use the separate
-> [next-eval newer-PyTorch guide](running-with-newer-pytorch-next-eval.md).
-> A production-image venv may not even start there because its base interpreter
-> path does not exist on the compute image.
+> For Aurora's current `prod` queue and default oneAPI 2026.1 stack, use the
+> [image-independent newer-PyTorch guide](running-with-newer-pytorch-next-eval.md).
+> The filename retains `next-eval` for link stability; that queue was the
+> original validation environment and is no longer the submission entry point.
 
 > [!IMPORTANT]
 > To access the internet, you need to set the following environment variables:
