@@ -17,7 +17,7 @@ from torch.distributed.checkpoint import HuggingFaceStorageReader
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from .model import BaseModel
 
@@ -300,8 +300,6 @@ class StateDictAdapter(BaseStateDictAdapter):
                 local_fused = torch.empty(
                     local_shape, dtype=wq.dtype, device=wq.to_local().device
                 )
-                local_start = global_offset[0]
-                local_stop = local_start + local_shape[0]
                 group_rows = (heads_per_kv + 2) * head_dim
                 source_rows = {
                     "q": heads_per_kv * head_dim,
@@ -314,13 +312,33 @@ class StateDictAdapter(BaseStateDictAdapter):
                     "v": (heads_per_kv + 1) * head_dim,
                 }
 
-                # A destination row shard may cut through packed QKV groups.
-                # Gather one logical projection's rows at a time while keeping
-                # any orthogonal (for example TP column) sharding intact, then
-                # copy only the intersections owned by this destination rank.
+                # A destination row shard may cut through packed QKV groups or
+                # use TP-produced _StridedShard placement. Derive this rank's
+                # exact global row indices by replaying the destination
+                # placements on a small index tensor. Gather one logical
+                # projection at a time while preserving orthogonal sharding,
+                # then copy only rows owned by this destination rank.
+                row_indices = torch.arange(global_shape[0])
+                coordinate = mesh.get_coordinate()
+                assert coordinate is not None
+                for mesh_dim, placement in enumerate(placements):
+                    if (
+                        isinstance(placement, (Shard, _StridedShard))
+                        and placement.dim == 0
+                    ):
+                        shards, _ = placement._split_tensor(
+                            row_indices,
+                            mesh.size(mesh_dim=mesh_dim),
+                            with_padding=False,
+                            contiguous=False,
+                        )
+                        row_indices = shards[coordinate[mesh_dim]]
+                assert row_indices.numel() == local_shape[0]
+
                 row_replicated = tuple(
                     Replicate()
-                    if isinstance(placement, Shard) and placement.dim == 0
+                    if isinstance(placement, (Shard, _StridedShard))
+                    and placement.dim == 0
                     else placement
                     for placement in placements
                 )
@@ -331,18 +349,25 @@ class StateDictAdapter(BaseStateDictAdapter):
                     source_local = source.to_local()
                     rows_per_group = source_rows[name]
                     offset_in_group = source_offsets[name]
-                    for group in range(num_kv_heads):
-                        dst_start = group * group_rows + offset_in_group
-                        dst_stop = dst_start + rows_per_group
-                        copy_start = max(dst_start, local_start)
-                        copy_stop = min(dst_stop, local_stop)
-                        if copy_start >= copy_stop:
-                            continue
-                        source_start = group * rows_per_group + copy_start - dst_start
-                        source_stop = source_start + copy_stop - copy_start
-                        local_fused[
-                            copy_start - local_start : copy_stop - local_start
-                        ].copy_(source_local[source_start:source_stop])
+                    within_group = row_indices.remainder(group_rows)
+                    mask = (within_group >= offset_in_group) & (
+                        within_group < offset_in_group + rows_per_group
+                    )
+                    local_positions = mask.nonzero().flatten()
+                    if local_positions.numel() > 0:
+                        source_indices = (
+                            row_indices[mask].div(group_rows, rounding_mode="floor")
+                            * rows_per_group
+                            + within_group[mask]
+                            - offset_in_group
+                        )
+                        local_fused.index_copy_(
+                            0,
+                            local_positions.to(local_fused.device),
+                            source_local.index_select(
+                                0, source_indices.to(source_local.device)
+                            ),
+                        )
                     del source, source_local
 
                 fused = DTensor.from_local(

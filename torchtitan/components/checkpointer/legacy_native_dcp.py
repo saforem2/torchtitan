@@ -11,8 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-from torch.distributed.tensor import DTensor, Replicate
+from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor.placement_types import _StridedShard
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,81 @@ def _fuse_qkv(
     return torch.cat((q, k, v), dim=1).reshape(-1, *tail)
 
 
+def _fuse_qkv_dtensors_to_local_shard(
+    values: tuple[DTensor, DTensor, DTensor],
+    *,
+    head_dim: int,
+    heads_per_kv: int,
+    fused_shape: tuple[int, ...],
+    mesh: Any,
+    placements: tuple[Any, ...],
+) -> DTensor:
+    global_shape = torch.Size(fused_shape)
+    local_shape, _ = compute_local_shape_and_global_offset(
+        global_shape, mesh, placements
+    )
+    local_fused = torch.empty(
+        local_shape, dtype=values[0].dtype, device=values[0].to_local().device
+    )
+    row_indices = torch.arange(global_shape[0])
+    coordinate = mesh.get_coordinate()
+    assert coordinate is not None
+    for mesh_dim, placement in enumerate(placements):
+        if isinstance(placement, (Shard, _StridedShard)) and placement.dim == 0:
+            shards, _ = placement._split_tensor(
+                row_indices,
+                mesh.size(mesh_dim=mesh_dim),
+                with_padding=False,
+                contiguous=False,
+            )
+            row_indices = shards[coordinate[mesh_dim]]
+    assert row_indices.numel() == local_shape[0]
+
+    num_kv_heads = values[1].shape[0] // head_dim
+    group_rows = (heads_per_kv + 2) * head_dim
+    source_rows = (heads_per_kv * head_dim, head_dim, head_dim)
+    source_offsets = (0, heads_per_kv * head_dim, (heads_per_kv + 1) * head_dim)
+    row_replicated = tuple(
+        Replicate()
+        if isinstance(placement, (Shard, _StridedShard)) and placement.dim == 0
+        else placement
+        for placement in placements
+    )
+    for source, rows_per_group, offset_in_group in zip(
+        values, source_rows, source_offsets, strict=True
+    ):
+        source = source.redistribute(mesh, row_replicated)
+        source_local = source.to_local()
+        within_group = row_indices.remainder(group_rows)
+        mask = (within_group >= offset_in_group) & (
+            within_group < offset_in_group + rows_per_group
+        )
+        local_positions = mask.nonzero().flatten()
+        if local_positions.numel() > 0:
+            source_indices = (
+                row_indices[mask].div(group_rows, rounding_mode="floor")
+                * rows_per_group
+                + within_group[mask]
+                - offset_in_group
+            )
+            local_fused.index_copy_(
+                0,
+                local_positions.to(local_fused.device),
+                source_local.index_select(0, source_indices.to(source_local.device)),
+            )
+        del source, source_local
+
+    assert num_kv_heads * group_rows == global_shape[0]
+    return DTensor.from_local(
+        local_fused,
+        mesh,
+        placements,
+        shape=global_shape,
+        stride=torch.empty(global_shape, device="meta").stride(),
+        run_check=False,
+    )
+
+
 def _equal(left: Any, right: Any) -> bool:
     if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
         return torch.equal(left, right)
@@ -69,8 +145,17 @@ def _copies(value: Any, count: int) -> tuple[Any, ...]:
 
 def _empty_dtensor_from_metadata(template: DTensor, metadata: Any) -> DTensor:
     global_shape = torch.Size(metadata.size)
+    # A fused QKV tensor can carry TP-produced _StridedShard placement that
+    # encodes the packed projection grouping. Historical logical Q/K/V tensors
+    # have smaller row dimensions and cannot reuse that fused-layout stride.
+    # DCP needs ordinary row shards for those logical destinations; the adapter
+    # retains the original fused placement and restores it after loading.
+    placements = tuple(
+        Shard(placement.dim) if isinstance(placement, _StridedShard) else placement
+        for placement in template.placements
+    )
     local_shape, _ = compute_local_shape_and_global_offset(
-        global_shape, template.device_mesh, template.placements
+        global_shape, template.device_mesh, placements
     )
     local = torch.empty(
         local_shape,
@@ -81,7 +166,7 @@ def _empty_dtensor_from_metadata(template: DTensor, metadata: Any) -> DTensor:
     return DTensor.from_local(
         local,
         template.device_mesh,
-        template.placements,
+        placements,
         shape=global_shape,
         stride=stride,
     )
@@ -219,23 +304,39 @@ def _fuse_optimizer_state(
                 raise ValueError(f"Incomplete historical QKV optimizer state for {key}")
             values = tuple(result.pop(item) for item in keys)
             fused_key = key.replace(marker, f"{prefix}wqkv.{param_name}.")
-            if isinstance(values[0], DTensor) and values[0].numel() > 1:
-                values = tuple(
-                    value.redistribute(
-                        value.device_mesh,
-                        [Replicate()] * value.device_mesh.ndim,
-                    )
-                    for value in values
-                )
-            fused = (
-                _fuse_qkv(*values, head_dim=head_dim)
-                if isinstance(values[0], torch.Tensor) and values[0].numel() > 1
-                else _collapse_equal(values, fused_key)
-            )
-            if fused_key in native_sharding:
-                assert isinstance(fused, DTensor)
+            if (
+                isinstance(values[0], DTensor)
+                and values[0].numel() > 1
+                and fused_key in native_sharding
+            ):
                 mesh, placements = native_sharding[fused_key]
-                fused = fused.redistribute(mesh, placements)
+                assert all(isinstance(value, DTensor) for value in values)
+                fused = _fuse_qkv_dtensors_to_local_shard(
+                    values,
+                    head_dim=head_dim,
+                    heads_per_kv=_heads_per_kv,
+                    fused_shape=_fused_shape,
+                    mesh=mesh,
+                    placements=placements,
+                )
+            else:
+                if isinstance(values[0], DTensor) and values[0].numel() > 1:
+                    values = tuple(
+                        value.redistribute(
+                            value.device_mesh,
+                            [Replicate()] * value.device_mesh.ndim,
+                        )
+                        for value in values
+                    )
+                fused = (
+                    _fuse_qkv(*values, head_dim=head_dim)
+                    if isinstance(values[0], torch.Tensor) and values[0].numel() > 1
+                    else _collapse_equal(values, fused_key)
+                )
+                if fused_key in native_sharding:
+                    assert isinstance(fused, DTensor)
+                    mesh, placements = native_sharding[fused_key]
+                    fused = fused.redistribute(mesh, placements)
             result[fused_key] = fused
     for prefix in layout.stacked:
         marker = f"{prefix}w1.weight."
