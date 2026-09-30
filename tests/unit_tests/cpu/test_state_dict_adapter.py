@@ -27,7 +27,6 @@ from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 from torchtitan.models.qwen3 import qwen3_configs
 from torchtitan.models.qwen3.model import Qwen3Model
 from torchtitan.models.qwen3.state_dict_adapter import Qwen3StateDictAdapter
-from torchtitan.protocols.state_dict_adapter import StateDictAdapter
 
 
 class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
@@ -35,8 +34,11 @@ class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
         fused = torch.randn(3, 5, 2, 7)
         state_dict = {"experts.w13": fused}
         logical_keys = ("experts.w1", "experts.w3")
+        build_config, max_context_length = llama3_configs["debugmodel"]
+        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
 
-        StateDictAdapter._split_stacked_linear(
+        adapter._split_stacked_linear(
             state_dict,
             fused_key="experts.w13",
             logical_keys=logical_keys,
@@ -47,7 +49,7 @@ class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
         torch.testing.assert_close(state_dict["experts.w1"], fused[:, :, 0, :])
         torch.testing.assert_close(state_dict["experts.w3"], fused[:, :, 1, :])
 
-        StateDictAdapter._stack_logical_linears(
+        adapter._stack_logical_linears(
             state_dict,
             fused_key="experts.w13",
             logical_keys=logical_keys,
@@ -59,6 +61,30 @@ class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
 
 
 class Llama3FusedLinearStateDictAdapterTest(unittest.TestCase):
+    def test_native_fused_logical_roundtrip(self) -> None:
+        build_config, max_context_length = llama3_configs["debugmodel"]
+        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        model = Llama3Model(config)
+        model.init_states()
+        native = model.state_dict()
+        adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
+
+        logical = adapter.native_fused_to_logical(native)
+
+        self.assertNotIn("layers.0.attention.qkv_linear.wqkv.weight", logical)
+        self.assertIn("layers.0.attention.qkv_linear.wq.weight", logical)
+        self.assertIn("layers.0.attention.qkv_linear.wk.weight", logical)
+        self.assertIn("layers.0.attention.qkv_linear.wv.weight", logical)
+        self.assertNotIn("layers.0.feed_forward.w13.weight", logical)
+        self.assertIn("layers.0.feed_forward.w1.weight", logical)
+        self.assertIn("layers.0.feed_forward.w3.weight", logical)
+
+        restored = adapter.native_logical_to_fused(logical)
+
+        self.assertEqual(restored.keys(), native.keys())
+        for key, value in native.items():
+            torch.testing.assert_close(restored[key], value, rtol=0, atol=0)
+
     def test_hf_roundtrip_converts_native_fused_feed_forward(self) -> None:
         build_config, max_context_length = llama3_configs["debugmodel"]
         config = build_config(attn_backend="flex", seq_len=max_context_length)
