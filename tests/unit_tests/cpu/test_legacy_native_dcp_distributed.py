@@ -16,7 +16,7 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
 )
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Shard, distribute_tensor
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 
 from torchtitan.components.checkpointer.legacy_native_dcp import (
     LogicalOptimizerState,
@@ -80,9 +80,9 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
         # 5 KV heads across two shards intentionally cuts through a packed
         # QKV group boundary. The optimizer migration must replicate before
         # reshaping, then restore the original Shard(0) placement.
-        optimizer_qkv_global = torch.arange(
-            40 * 16, dtype=torch.float32
-        ).reshape(40, 16)
+        optimizer_qkv_global = torch.arange(40 * 16, dtype=torch.float32).reshape(
+            40, 16
+        )
         optimizer_qkv = distribute_tensor(
             optimizer_qkv_global,
             mesh,
@@ -128,12 +128,17 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
             ]
             assert isinstance(logical, DTensor)
             assert logical.placements == optimizer_qkv.placements
-        assert sum(
-            logical_optimizer[
-                f"state.layers.0.attention.qkv_linear.{name}.weight.exp_avg"
-            ].to_local().numel()
-            for name in ("wq", "wk", "wv")
-        ) == optimizer_qkv.to_local().numel()
+        assert (
+            sum(
+                logical_optimizer[
+                    f"state.layers.0.attention.qkv_linear.{name}.weight.exp_avg"
+                ]
+                .to_local()
+                .numel()
+                for name in ("wq", "wk", "wv")
+            )
+            == optimizer_qkv.to_local().numel()
+        )
 
         packed = optimizer_qkv_global.reshape(5, 4, 2, 16)
         loaded_globals = {

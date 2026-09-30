@@ -152,9 +152,7 @@ def test_logical_optimizer_state_preserves_current_only_defaults() -> None:
     fused_key = f"param_groups.{qkv}wqkv.weight.fused"
     foreach_key = f"param_groups.{qkv}wqkv.weight.foreach"
     lr_key = f"param_groups.{qkv}wqkv.weight.lr"
-    optimizer = FakeOptimizerState(
-        {fused_key: False, foreach_key: None, lr_key: 1e-4}
-    )
+    optimizer = FakeOptimizerState({fused_key: False, foreach_key: None, lr_key: 1e-4})
     historical_keys = {
         f"param_groups.{qkv}{name}.weight.lr" for name in ("wq", "wk", "wv")
     }

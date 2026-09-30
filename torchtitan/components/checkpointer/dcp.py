@@ -14,7 +14,7 @@ import threading
 import time
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -35,13 +35,13 @@ from torchtitan.tools import filesystem
 from torchtitan.tools.utils import GarbageCollection
 
 from .base import (
+    BaseCheckpointManager,
     DATALOADER,
     EMA,
     LR_SCHEDULER,
     MODEL,
-    OPTIMIZER,
-    BaseCheckpointManager,
     ModelWrapper,
+    OPTIMIZER,
     purge_thread,
 )
 
@@ -65,8 +65,6 @@ if TYPE_CHECKING:
     # constant imported above, so alias it here.
     from torchtitan.components.optimizer import (  # noqa: N811
         EMA as EMAContainer,
-    )
-    from torchtitan.components.optimizer import (
         LRSchedulersContainer,
         OptimizersContainer,
     )
@@ -421,9 +419,7 @@ class CheckpointManager(BaseCheckpointManager):
                 storage_reader = _native_storage_reader(checkpoint_id)
                 from .legacy_native_dcp import prepare_legacy_native_load
 
-                checkpoint_metadata = (
-                    storage_reader.read_metadata().state_dict_metadata
-                )
+                checkpoint_metadata = storage_reader.read_metadata().state_dict_metadata
                 model_keys = (
                     set(states[MODEL].state_dict()) if MODEL in states else set()
                 )
