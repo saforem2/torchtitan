@@ -130,6 +130,8 @@ assert_contains "$fsdp_probe_py" 'global gradient' \
     'sparse embedding gradients must be validated over the full shard group'
 assert_contains "$fsdp_probe_py" 'global parameter update' \
     'probe acceptance must require a globally nonzero optimizer update'
+assert_contains "$fsdp_probe_py" 'shard_index = rank % args.dp_shard' \
+    'probe tokens must exercise every embedding storage shard'
 assert_contains "$fsdp_probe" 'SKIP_RAW_CONTROLS' \
     'FSDP-only retries must preserve completed raw controls without rerunning them'
 assert_contains "$fsdp_probe" 'exit 96' \

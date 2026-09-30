@@ -118,14 +118,17 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         parameter = next(module.parameters())
         before = parameter.to_local().detach().clone()
+        rows_per_shard = 100352 // args.dp_shard
+        shard_index = rank % args.dp_shard
+        first_token = shard_index * rows_per_shard + step
         tokens = torch.tensor(
-            [[rank % 100352, (rank + step) % 100352]],
+            [[first_token, first_token + 1]],
             dtype=torch.long,
             device=f"xpu:{local_rank}",
         )
         output = module(tokens)
         torch.xpu.synchronize()
-        loss = output.float().square().mean()
+        loss = output.float().sum()
         if not math.isfinite(float(loss)) or float(loss) == 0.0:
             raise RuntimeError(f"non-finite/zero loss at step {step}: {float(loss)}")
         print(f"FORWARD_OK step={step} loss={float(loss):.9g}", flush=True)
