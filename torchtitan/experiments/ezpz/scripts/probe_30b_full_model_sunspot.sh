@@ -71,9 +71,9 @@ run_model() {
 export V D TOKENIZER OUT MODEL_CONFIG NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
 export -f run_model
 
-if [[ "$NPROC" -eq 16 ]]; then
+if ((NPROC % 12 != 0)); then
     CPU_BIND_SUNSPOT="list:1-8:9-16:17-24:25-32:33-40:41-48:53-60:61-68:69-76:77-84:85-92:93-100"
-    WORLD_SIZE=16 timeout 1800 mpiexec --envall --line-buffer --np=16 --ppn=12 \
+    WORLD_SIZE="$NPROC" timeout 1800 mpiexec --envall --line-buffer --np="$NPROC" --ppn=12 \
         --hostfile="$PBS_NODEFILE" --cpu-bind="$CPU_BIND_SUNSPOT" \
         bash -c 'run_model' 2>&1 | tee "$LOG"
 else

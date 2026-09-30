@@ -158,8 +158,10 @@ assert_contains "$full_model_probe" 'CANARY_DP_REPLICATE:-3' \
     '30B full-model canary must retain the HSDP replicate axis'
 assert_contains "$full_model_probe" 'CANARY_DP_SHARD:-16' \
     '30B full-model canary must preserve production shard degree 16'
-assert_contains "$full_model_probe" 'WORLD_SIZE=16 timeout 1800 mpiexec' \
-    '30B full-model canary must support the 16-rank pure-FSDP control'
+assert_contains "$full_model_probe" 'NPROC % 12 != 0' \
+    '30B full-model canary must detect irregular Sunspot occupancy'
+assert_contains "$full_model_probe" 'WORLD_SIZE="\$NPROC" timeout 1800 mpiexec' \
+    '30B full-model canary must launch irregular shard degrees with PALS'
 assert_contains "$full_model_probe" '--training.steps 3' \
     '30B full-model canary must complete three optimizer updates'
 assert_contains "$full_model_probe" 'FULL_MODEL_CANARY_PASS' \
