@@ -43,7 +43,7 @@ For the cross-model view (2B + 20B together), see
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
 | [**v2 256N (async)**](n256/README.md) (per-token comparator) | **COMPLETE** 2026-06-29 (step-92,859 = 100% of 4.67T target); finished by cont12 (8558531). Now the base for CPT ([../../cpt/](../../cpt/README.md)) + SFT. | **92,859** | **2.6524** | **~4.674T (100.0%)** |
-| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **COMPLETE (stage 1)** 2026-08-13 19:11 UTC (step-46,429 = 100% of the 4.67T budget), as umbrella 8744247 trainer 0, `FAILOVER STOP: success`, rc=0. No stage-1 budget left. Follow-on stage-2 head is **23,746**; tail eval `8880872` is queued. | **46,429** | **2.6869** | **~4.67T (100.0%)** |
+| [**v2 512N (sync)**](n512/README.md) (canonical chain) | **COMPLETE (stage 1)** 2026-08-13 19:11 UTC (step-46,429 = 100% of the 4.67T budget), as umbrella 8744247 trainer 0, `FAILOVER STOP: success`, rc=0. No stage-1 budget left. Follow-on stage-2 head is **23,746**; tail eval `8880872` passed. | **46,429** | **2.6869** | **~4.67T (100.0%)** |
 | [v2 1024N](n1024/README.md) | Crashed at startup (12,288-rank init OOM/SIGSEGV); not retried | — | — | — |
 | v2 512N sqrt(2)-LR fork | 8467141 → 8467142 (separate ckpt dir `gbs12288-lr3.22e-5`) | 200 | — | ~20B |
 
@@ -60,8 +60,8 @@ being backfilled.**
 - **The active work is downstream of those two.** The current persisted heads
   are **23,746 / 41,300 / 39,200** (512N stage 2 / 256N stage 2 / 512N
   constant-LR). Umbrella `8870515` advanced the 256N stage-2 arm to 41,300;
-  the other two heads remained unchanged. Endpoint eval `8880873` completed for
-  the 256N stage-2 head; `8880872` remains active for the 512N stage-2 head.
+  the other two heads remained unchanged. Endpoint evals `8880872` and
+  `8880873` both completed with validated seven-measurement artifacts.
 
 **Headlines (2026-07-24) -- superseded, kept as the record of that day.
 The "LIVE" and step figures in this block are NOT current:**
