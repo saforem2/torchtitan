@@ -15,13 +15,14 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 302
+The 25 most-recently-changed docs by git commit date (across all 305
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-30 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-09-30 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
@@ -30,29 +31,34 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
 | 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
+| 2026-09-30 | [Upstream f359667 merge readiness](./experiments/upstream-f359667-merge-readiness.md) |
+| 2026-09-30 | [30B AdamW bounded canary evidence](./experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/README.md) |
+| 2026-09-30 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
+| 2026-09-30 | [Aurora production checkpoint migration matrix](./experiments/agpt/aurora/2026-09-30-production-checkpoint-migration-matrix.md) |
+| 2026-09-30 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-09-30 | [Evaluation Results](./evals/README.md) |
 | 2026-09-30 | [docs/ tree map](./TREE.md) |
 | 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
-| 2026-09-29 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-09-29 | [LR Finder — agpt 5B OLMo-tokenizer](./experiments/lr-finder/agpt/5b/README.md) |
+| 2026-09-29 | [Experiment Benchmark Reports](./experiments/README.md) |
+| 2026-09-29 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
 | 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
 | 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
 | 2026-09-27 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-09-27 | [LR Finder — agpt 5B OLMo-tokenizer](./experiments/lr-finder/agpt/5b/README.md) |
-| 2026-09-27 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
-| 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
-| 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
-| 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
-| 2026-09-26 | [Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis](./production/rl/grpo/torch214-reproduction.md) |
-| 2026-09-26 | [AGPT-2B Stage-4 MetaMath distillation and model interpolation](./experiments/2026-09-26-agpt2b-stage4-metamath.md) |
-| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
+| 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
+| 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
+| 2026-09-26 | [Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis](./production/rl/grpo/torch214-reproduction.md) |
+| 2026-09-26 | [AGPT-2B Stage-4 MetaMath distillation and model interpolation](./experiments/2026-09-26-agpt2b-stage4-metamath.md) |
+| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
 | 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
 | 2026-09-25 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
 | 2026-09-25 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
@@ -66,18 +72,12 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-25 | [Production GRPO](./production/rl/grpo/README.md) |
 | 2026-09-25 | [RL (GRPO) on Intel XPU](./production/rl/README.md) |
 | 2026-09-25 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./production/rl/2026-07-06_multinode-grpo-root-cause.md) |
-| 2026-09-25 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
 | 2026-09-25 | [MDS154391 Stage-3 teacher-free STaR experiment](./experiments/2026-09-25-mds154391-stage3-star.md) |
 | 2026-09-22 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-09-21 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
 | 2026-09-21 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/agpt/2b-mds/tulu_math_uc_mix/failover-story.md) |
 | 2026-09-21 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-09-21 | [Production Training Runs — Aurora](./production/README.md) |
-| 2026-09-21 | [MoE training on Aurora](./guides/aurora-moe-training.md) |
-| 2026-09-21 | [PR #17 MoE integration: merge-readiness review](./experiments/pr17-moe-merge-readiness.md) |
-| 2026-09-21 | [MoE expert backends across four machines](./experiments/moe-expert-backends-4machine.md) |
-| 2026-09-21 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-09-21 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -159,7 +159,7 @@ relevant guide before suggesting work that touches one of these.
 | [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-08-31 |
 | [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
 | [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
-| [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-07-11 |
+| [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-09-29 |
 
 ## Sandboxes / Side-channels
 
@@ -172,7 +172,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-09-29 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-09-30 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
