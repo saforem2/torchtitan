@@ -34,6 +34,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORE = os.path.join(HERE, "..", "..", "..", "trainer.py")
 EZPZ = os.path.join(HERE, "..", "trainer.py")
+AGPT_PARALLELIZE = os.path.join(HERE, "..", "agpt", "parallelize.py")
+MOE_PARALLELIZE = os.path.join(HERE, "..", "moe", "parallelize.py")
 
 # Attributes core sets that ezpz intentionally does not, with the reason.
 # Keep this list SHORT and justified -- each entry is a deliberate divergence,
@@ -77,6 +79,27 @@ def test_seed_checkpoint_delegates_to_training_engine() -> None:
     assert "trainer.checkpointer.save(" not in source
 
 
+def test_ezpz_uses_current_engine_contract() -> None:
+    """Reject legacy lifecycle names removed by upstream TrainingEngine."""
+    source = open(EZPZ).read()
+    assert "ParallelDims" not in source
+    assert ".parallel_dims" not in source
+    assert "def optimizer_step(" not in source
+    assert "forward_backward_microbatch(" not in source
+    assert "prepare_step(" not in source
+    assert "super().optim_step()" in source
+    assert "def as_input_dict(" in source
+    assert "self._run_forward_backward = maybe_wrap_with_xpu_graph(" in source
+
+
+def test_ezpz_does_not_restore_removed_model_compilation() -> None:
+    """Upstream #4895 removed standard per-TransformerBlock compilation."""
+    for path in (AGPT_PARALLELIZE, MOE_PARALLELIZE):
+        source = open(path).read()
+        assert '"model" in compile_config.components' not in source
+        assert ".compile(backend=compile_config.backend" not in source
+
+
 def main() -> int:
     bases = class_bases(EZPZ, "FaultTolerantTrainer")
     source = open(EZPZ).read()
@@ -84,6 +107,8 @@ def main() -> int:
         print("FAIL: ezpz must extend TorchFTTrainer and select an engine_cls")
         return 1
     test_seed_checkpoint_delegates_to_training_engine()
+    test_ezpz_uses_current_engine_contract()
+    test_ezpz_does_not_restore_removed_model_compilation()
 
     print("PASS: ezpz delegates execution state to a TrainingEngine.")
     return 0

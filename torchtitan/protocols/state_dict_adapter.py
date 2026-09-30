@@ -6,7 +6,6 @@
 
 import functools
 import json
-
 import logging
 import os
 import re
@@ -16,11 +15,11 @@ from typing import Any
 import torch
 from torch.distributed.checkpoint import HuggingFaceStorageReader
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor, Replicate
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from .model import BaseModel
-
 
 logger = logging.getLogger(__name__)
 
@@ -281,29 +280,109 @@ class StateDictAdapter(BaseStateDictAdapter):
             )
             if not all(key in state_dict for key in logical_keys):
                 continue
-            wq, wk, wv = (state_dict.pop(key) for key in logical_keys)
-            # Loading may provide dim-0-sharded DTensors whose local shapes
-            # cannot express whole QKV groups. Rebuild from replicated inputs,
-            # then restore the native placement captured before HF loading.
-            if isinstance(wq, DTensor):
-                wq, wk, wv = (
-                    tensor.redistribute(
-                        tensor.device_mesh,
-                        [Replicate()] * tensor.device_mesh.ndim,
-                    )
-                    for tensor in (wq, wk, wv)
-                )
+            fused_key = f"{prefix}wqkv.{param_name}"
+            logical = {
+                name: state_dict.pop(key)
+                for name, key in zip(("q", "k", "v"), logical_keys, strict=True)
+            }
+            wq, wk, wv = logical.values()
             num_kv_heads = wk.shape[0] // head_dim
             tail = wq.shape[1:]
-            q = wq.reshape(num_kv_heads, heads_per_kv, head_dim, *tail)
-            k = wk.reshape(num_kv_heads, 1, head_dim, *tail)
-            v = wv.reshape(num_kv_heads, 1, head_dim, *tail)
-            fused_key = f"{prefix}wqkv.{param_name}"
-            fused = torch.cat([q, k, v], dim=1).reshape(-1, *tail)
-            if fused_key in self._qkv_linear_sharding:
-                assert isinstance(fused, DTensor)
+
+            if isinstance(wq, DTensor) and fused_key in self._qkv_linear_sharding:
                 mesh, placements = self._qkv_linear_sharding[fused_key]
-                fused = fused.redistribute(mesh, placements)
+                global_shape = torch.Size(
+                    ((heads_per_kv + 2) * num_kv_heads * head_dim, *tail)
+                )
+                local_shape, global_offset = compute_local_shape_and_global_offset(
+                    global_shape, mesh, placements
+                )
+                local_fused = torch.empty(
+                    local_shape, dtype=wq.dtype, device=wq.to_local().device
+                )
+                group_rows = (heads_per_kv + 2) * head_dim
+                source_rows = {
+                    "q": heads_per_kv * head_dim,
+                    "k": head_dim,
+                    "v": head_dim,
+                }
+                source_offsets = {
+                    "q": 0,
+                    "k": heads_per_kv * head_dim,
+                    "v": (heads_per_kv + 1) * head_dim,
+                }
+
+                # A destination row shard may cut through packed QKV groups or
+                # use TP-produced _StridedShard placement. Derive this rank's
+                # exact global row indices by replaying the destination
+                # placements on a small index tensor. Gather one logical
+                # projection at a time while preserving orthogonal sharding,
+                # then copy only rows owned by this destination rank.
+                row_indices = torch.arange(global_shape[0])
+                coordinate = mesh.get_coordinate()
+                assert coordinate is not None
+                for mesh_dim, placement in enumerate(placements):
+                    if (
+                        isinstance(placement, (Shard, _StridedShard))
+                        and placement.dim == 0
+                    ):
+                        shards, _ = placement._split_tensor(
+                            row_indices,
+                            mesh.size(mesh_dim=mesh_dim),
+                            with_padding=False,
+                            contiguous=False,
+                        )
+                        row_indices = shards[coordinate[mesh_dim]]
+                assert row_indices.numel() == local_shape[0]
+
+                row_replicated = tuple(
+                    Replicate()
+                    if isinstance(placement, (Shard, _StridedShard))
+                    and placement.dim == 0
+                    else placement
+                    for placement in placements
+                )
+                for name in ("q", "k", "v"):
+                    source = logical[name]
+                    assert isinstance(source, DTensor)
+                    source = source.redistribute(mesh, row_replicated)
+                    source_local = source.to_local()
+                    rows_per_group = source_rows[name]
+                    offset_in_group = source_offsets[name]
+                    within_group = row_indices.remainder(group_rows)
+                    mask = (within_group >= offset_in_group) & (
+                        within_group < offset_in_group + rows_per_group
+                    )
+                    local_positions = mask.nonzero().flatten()
+                    if local_positions.numel() > 0:
+                        source_indices = (
+                            row_indices[mask].div(group_rows, rounding_mode="floor")
+                            * rows_per_group
+                            + within_group[mask]
+                            - offset_in_group
+                        )
+                        local_fused.index_copy_(
+                            0,
+                            local_positions.to(local_fused.device),
+                            source_local.index_select(
+                                0, source_indices.to(source_local.device)
+                            ),
+                        )
+                    del source, source_local
+
+                fused = DTensor.from_local(
+                    local_fused,
+                    mesh,
+                    placements,
+                    shape=global_shape,
+                    stride=torch.empty(global_shape, device="meta").stride(),
+                    run_check=False,
+                )
+            else:
+                q = wq.reshape(num_kv_heads, heads_per_kv, head_dim, *tail)
+                k = wk.reshape(num_kv_heads, 1, head_dim, *tail)
+                v = wv.reshape(num_kv_heads, 1, head_dim, *tail)
+                fused = torch.cat([q, k, v], dim=1).reshape(-1, *tail)
             state_dict[fused_key] = fused
 
     def _native_fused_linears_to_hf(
@@ -366,6 +445,10 @@ class StateDictAdapter(BaseStateDictAdapter):
 
         return result
 
+    def native_fused_to_logical(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Expose native fused linear parameters under logical projection keys."""
+        return self._native_fused_linears_to_hf(state_dict)
+
     def _native_fused_linears_from_hf(
         self,
         state_dict: dict[str, Any],
@@ -422,6 +505,10 @@ class StateDictAdapter(BaseStateDictAdapter):
                 )
 
         return result
+
+    def native_logical_to_fused(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Pack logical projection parameters into native fused linears."""
+        return self._native_fused_linears_from_hf(state_dict)
 
     def get_hf_storage_reader(
         self, path: str, from_quantized: bool = False

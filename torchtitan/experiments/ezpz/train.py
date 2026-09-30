@@ -22,10 +22,11 @@ from torch.distributed import get_rank, get_world_size, is_initialized
 
 import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.components.optim import OptimizersContainer
 from torchtitan.config import ConfigManager
 from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
+    default_adamw,
     default_adopt,
     default_mano,
     default_muon,
@@ -308,18 +309,32 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
 
         key = _canonicalize_option(option)
 
-        if key == "job.config-file":
+        if key == "comm.mode":
+            if value == "local_tensor":
+                raise ValueError(
+                    "`--comm.mode=local_tensor` was removed upstream; use "
+                    "`--comm.backend=fake` for topology validation"
+                )
+            if value not in {"fake", "fake_backend"}:
+                raise ValueError(
+                    "legacy `--comm.mode` only supports `fake_backend`; use "
+                    "`--comm.backend` with a current backend value"
+                )
+            translated.extend(["--comm.backend", "fake"])
+            i += 2 if consume_next else 1
+            continue
+        elif key == "job.config-file":
             raise ValueError(
                 "`--job.config-file` is no longer supported for ezpz. "
                 "Use `--module ezpz.agpt --config ezpz_agpt_debugmodel` and CLI overrides instead."
             )
 
-        if key in {"experimental.custom-args-module", "experimental.custom-import"}:
+        elif key in {"experimental.custom-args-module", "experimental.custom-import"}:
             logger.warning("Ignoring deprecated --experimental.* flag for ezpz.")
             i += 2 if consume_next else 1
             continue
 
-        if key == "model.name":
+        elif key == "model.name":
             if value is not None:
                 module_name = value
                 if value.strip().lower() == "blendcorpus":
@@ -328,19 +343,19 @@ def _translate_legacy_args(args: list[str]) -> list[str]:
             i += 2 if consume_next else 1
             continue
 
-        if key == "model.flavor":
+        elif key == "model.flavor":
             if value is not None:
                 translated.extend(["--config", _config_name_from_flavor(value)])
             i += 2 if consume_next else 1
             continue
 
-        if key == "model.tokenizer-backend":
+        elif key == "model.tokenizer-backend":
             if value is not None:
                 legacy_tokenizer_backend = value
             i += 2 if consume_next else 1
             continue
 
-        if key in {
+        elif key in {
             "checkpoint.enable",
             "checkpoint-enable",
             "checkpoint.no-enable",
@@ -448,13 +463,15 @@ def main(args: list[str] | None = None) -> None:
 
     # Swap in the correct optimizer Config subclass if --optimizer was specified
     if optimizer_name is not None:
-        config.optimizer = _build_optimizer_config(
+        config.optim.optimizer = _build_optimizer_config(
             optimizer_name,
-            config.optimizer,
+            config.optim.optimizer,
             optimizer_overrides,
         )
         logger.info(
-            "Using optimizer: %s (%s)", optimizer_name, type(config.optimizer).__name__
+            "Using optimizer: %s (%s)",
+            optimizer_name,
+            type(config.optim.optimizer).__name__,
         )
 
     # Check the 80B learning rate HERE, not in the config registry.
@@ -502,10 +519,6 @@ def main(args: list[str] | None = None) -> None:
     maybe_install_xccl_split_group_workaround()
 
     try:
-        if config.comm.mode == "local_tensor":
-            logger.info("Local tensor mode enabled - skipping training execution")
-            return
-
         try:
             trainer = config.build()
         except Exception as build_exc:

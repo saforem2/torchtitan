@@ -16,6 +16,25 @@ This closes the gap left by one-node job `12478621`: policy publication and
 vLLM consumption now work when trainer and generator reside on different
 physical hosts in one Monarch actor graph.
 
+## Upstream `f359667` exact-head confirmation
+
+Job `12479032` repeated the complete two-host acceptance gate after the
+`f359667` integration, on commit `a893208c8f94c41c16367e1b8cf572db0642a8a3`.
+It used the same explicit TorchStore Gloo topology and produced:
+
+```text
+RL_MULTIHOST_VERDICT: ok rows=40 versions=[0, 1, 2, 3]
+grads=[0.35, 0.34, 0.28]
+losses=[0.037, 0.0059, 0.24]
+pushes=4 pulls=4
+```
+
+All 40 rollouts completed without truncation, checkpoints were written at
+steps 1, 2, and 3, and PBS exited 0. The first exact-head attempt `12479031`
+failed during cross-host actor attachment because the second host's cold import
+consumed almost all of the 120-second attach window. Raising only that timeout
+to 300 seconds allowed the otherwise identical gate to complete.
+
 ## Exact contract
 
 - Commit: `738109e8d4481ebb723622db0d1a34b9c8907203`

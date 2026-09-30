@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """XPU graph capture/replay for the ezpz trainer (opt-in).
 
 Core's `torchtitan/distributed/cudagraph.py` implements graph capture but
@@ -38,9 +44,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 import torch
+
+from torchtitan.distributed.cuda_graph import CUDAGraphInputSpec
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +221,51 @@ class XPUGraphWrapper:
         self._non_tensor_inputs.clear()
 
 
+class _ForwardBackwardXPUGraphWrapper(XPUGraphWrapper):
+    """Preserve capture-created parameter gradients across graph replays."""
+
+    def __init__(
+        self,
+        fn: Callable,
+        example_inputs: Sequence[Any],
+        *,
+        parameters: Iterable[torch.nn.Parameter],
+    ) -> None:
+        self._parameters = tuple(parameters)
+        self._captured_gradients: tuple[
+            tuple[torch.nn.Parameter, torch.Tensor], ...
+        ] | None = None
+        super().__init__(fn, example_inputs)
+
+    def __call__(self, *args):
+        if self._warmup_remaining > 0:
+            return super().__call__(*args)
+        if any(parameter.grad is not None for parameter in self._parameters):
+            raise RuntimeError(
+                "All parameter gradients must be None before XPU graph replay"
+            )
+        should_record = self._graph is None
+        output = super().__call__(*args)
+        if should_record:
+            self._captured_gradients = tuple(
+                (parameter, gradient)
+                for parameter in self._parameters
+                if (gradient := parameter.grad) is not None
+            )
+        assert self._captured_gradients is not None
+        for parameter, gradient in self._captured_gradients:
+            parameter.grad = gradient
+        return output
+
+    def teardown(self) -> None:
+        if self._captured_gradients is not None:
+            for parameter, gradient in self._captured_gradients:
+                if parameter.grad is gradient:
+                    parameter.grad = None
+            self._captured_gradients = None
+        super().teardown()
+
+
 def make_xpu_graph_wrapper(
     fn: Callable,
     example_inputs: Sequence[Any],
@@ -220,7 +274,11 @@ def make_xpu_graph_wrapper(
     return XPUGraphWrapper(fn, example_inputs, static_input_indices)
 
 
-def maybe_wrap_with_xpu_graph(fwd_bwd_fn: Callable) -> Callable:
+def maybe_wrap_with_xpu_graph(
+    fwd_bwd_fn: Callable,
+    *,
+    parameters: Iterable[torch.nn.Parameter] | None = None,
+) -> Callable:
     """Wrap `fwd_bwd_fn` with XPU graph capture, or return it unchanged.
 
     Returns the input untouched -- with a reason logged -- when graphs are not
@@ -245,16 +303,32 @@ def maybe_wrap_with_xpu_graph(fwd_bwd_fn: Callable) -> Callable:
         return fwd_bwd_fn
 
     wrapper: Any = None
+    input_spec: CUDAGraphInputSpec | None = None
 
-    def graphed(*args):
-        nonlocal wrapper
+    def graphed(*args, **kwargs):
+        nonlocal wrapper, input_spec
         if wrapper is None:
-            # Static input indices are unknown here (core derives them from the
-            # trainer's own bookkeeping), so treat every tensor as copy-in.
-            # Correct but slightly slower than the CUDA path's static-weight
-            # optimization; revisit once this is proven numerically.
-            wrapper = make_xpu_graph_wrapper(fwd_bwd_fn, args)
-        return wrapper(*args)
+            input_spec = CUDAGraphInputSpec((args, kwargs))
+
+            def flat_fn(*flat_inputs):
+                assert input_spec is not None
+                call_args, call_kwargs = input_spec.unflatten(flat_inputs)
+                return fwd_bwd_fn(*call_args, **call_kwargs)
+
+            flat_inputs = input_spec.flatten((args, kwargs))
+            wrapper = (
+                _ForwardBackwardXPUGraphWrapper(
+                    flat_fn,
+                    flat_inputs,
+                    parameters=parameters,
+                )
+                if parameters is not None
+                else make_xpu_graph_wrapper(flat_fn, flat_inputs)
+            )
+        else:
+            assert input_spec is not None
+            flat_inputs = input_spec.flatten((args, kwargs))
+        return wrapper(*flat_inputs)
 
     logger.info("XPU graph capture ENABLED (EZPZ_XPU_GRAPHS=1)")
     return graphed

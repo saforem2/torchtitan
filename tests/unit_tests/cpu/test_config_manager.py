@@ -14,14 +14,10 @@ from unittest import mock
 
 import pytest
 import tyro
+from torchtitan.components.optim import AdamW, OptimizersContainer
 from torchtitan.components.validate import Validator
-from torchtitan.config import (
-    CompileConfig,
-    ConfigManager,
-    DebugConfig,
-    ParallelismConfig,
-    TrainingConfig,
-)
+from torchtitan.config import ConfigManager, DebugConfig, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.models.deepseek_v3.config_registry import (
     deepseek_v3_debugmodel_hybridep,
 )
@@ -53,6 +49,16 @@ def cuda_graphs_supported(value: bool):
 
 
 class TestConfigManager(unittest.TestCase):
+    def test_deferred_gradient_reduction_supports_all_reshard_policies(self):
+        for reshard_after_forward in ("default", "always", "never"):
+            with self.subTest(reshard_after_forward=reshard_after_forward):
+                config = ParallelismConfig(
+                    fsdp_defer_gradient_reduction=True,
+                    fsdp_reshard_after_forward=reshard_after_forward,
+                )
+                assert config.fsdp_defer_gradient_reduction
+                assert config.fsdp_reshard_after_forward == reshard_after_forward
+
     def test_model_config_args(self):
         """--module and --config together load the correct config."""
         config_manager = ConfigManager()
@@ -214,30 +220,28 @@ class TestConfigManager(unittest.TestCase):
 
         assert config.parallelism.pipeline_parallel_schedule == "1F1B"
 
-    def test_cuda_graphs_reject_looped_pipeline_schedule(self):
-        with cuda_graphs_supported(True):
-            config_manager = ConfigManager()
-            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
-                with pytest.raises((ValueError, SystemExit)) as exc_info:
-                    config_manager.parse_args(
-                        [
-                            "--module",
-                            "llama3",
-                            "--config",
-                            "llama3_debugmodel",
-                            "--parallelism.pipeline_parallel_degree",
-                            "2",
-                            "--parallelism.pipeline_parallel_schedule",
-                            "Interleaved1F1B",
-                        ]
-                    )
-
-            if isinstance(exc_info.value, SystemExit):
-                assert exc_info.value.code == 2
-                error = stderr.getvalue()
-            else:
-                error = str(exc_info.value)
-            assert "do not support looped pipeline schedules" in error
+    def test_cuda_graphs_allow_looped_pipeline_schedules(self):
+        for schedule in (
+            "Interleaved1F1B",
+            "InterleavedZeroBubble",
+            "ZBVZeroBubble",
+        ):
+            with self.subTest(schedule=schedule), cuda_graphs_supported(True):
+                config = ConfigManager().parse_args(
+                    [
+                        "--module",
+                        "llama3",
+                        "--config",
+                        "llama3_debugmodel",
+                        "--training.disable_cuda_graphs",
+                        "--parallelism.pipeline_parallel_degree",
+                        "2",
+                        "--parallelism.pipeline_parallel_schedule",
+                        schedule,
+                    ]
+                )
+                config.training.disable_cuda_graphs = False
+                config.__post_init__()
 
     def test_cuda_graphs_reject_pipeline_validation(self):
         with cuda_graphs_supported(True):
@@ -263,6 +267,28 @@ class TestConfigManager(unittest.TestCase):
             ["--module", "llama3", "--config", "llama3_debugmodel"]
         )
         assert not config.training.disable_cuda_graphs
+        assert not config.optim.enable_cuda_graph
+
+    def test_optimizer_cuda_graph_requires_cuda_graphs_enabled(self):
+        config = ConfigManager().parse_args(
+            ["--module", "muse_glimmer", "--config", "muse_glimmer_debugmodel"]
+        )
+        config.optim.enable_cuda_graph = True
+        config.training.disable_cuda_graphs = True
+
+        with pytest.raises(ValueError, match="requires CUDA graphs"):
+            config.__post_init__()
+
+    def test_optimizer_cuda_graph_accepts_non_fused_optimizer(self):
+        config = ConfigManager().parse_args(
+            ["--module", "muse_glimmer", "--config", "muse_glimmer_debugmodel"]
+        )
+        config.optim.enable_cuda_graph = True
+        config.optim.optimizer = OptimizersContainer.Config(
+            optimizers=[AdamW.Config(pattern=r".*", fused=False, foreach=True)]
+        )
+
+        config.__post_init__()
 
     def test_cuda_graphs_reject_unsupported_expert_parallelism(self):
         with cuda_graphs_supported(True):
@@ -469,9 +495,8 @@ class TestConfigManager(unittest.TestCase):
         )
         config.sdc_replayer = SDCReplayer.Config()
         config.parallelism.fsdp_symm_mem_scope = "all"
-        config.compile = CompileConfig(enable_async_tensor_parallel=True)
         configs = {
-            "symm_mem_async_tp": config,
+            "symm_mem": config,
             "distributed_gemm": llama3_debugmodel_dist_gemm(seq_len=2048),
             "hybrid_ep": deepseek_v3_debugmodel_hybridep(seq_len=2048),
             "deep_ep": qwen3_moe_deepep(seq_len=512),
@@ -628,13 +653,13 @@ class TestConfigManager(unittest.TestCase):
         )
         assert config.dump_folder == "/tmp/test_tt/"
 
-    def test_parse_module_fqns_per_model_part(self):
-        """module_fqns_per_model_part defaults to None."""
+    def test_parse_pipeline_parallel_module_fqns_per_model_part(self):
+        """pipeline_parallel_module_fqns_per_model_part defaults to None."""
         config_manager = ConfigManager()
         config = config_manager.parse_args(
             ["--module", "llama3", "--config", "llama3_debugmodel"]
         )
-        assert config.parallelism.module_fqns_per_model_part is None
+        assert config.parallelism.pipeline_parallel_module_fqns_per_model_part is None
 
     def test_optional_component_configs_do_not_add_cli_subcommands(self):
         config_manager = ConfigManager()
@@ -701,10 +726,10 @@ class TestConfigManager(unittest.TestCase):
         )
         assert type(config.model).__qualname__ == "FluxModel.Config"
         assert hasattr(config, "encoder")
-        assert config.parallelism.context_parallel_load_balancer == "headtail"
+        assert config.parallelism.context_parallel_load_balancer is None
 
     def test_default_context_parallel_load_balancer(self):
-        assert ParallelismConfig().context_parallel_load_balancer == "headtail"
+        assert ParallelismConfig().context_parallel_load_balancer is None
 
     def test_deepseek_config(self):
         """Test that --module deepseek_v3 --config deepseek_v3_debugmodel works."""

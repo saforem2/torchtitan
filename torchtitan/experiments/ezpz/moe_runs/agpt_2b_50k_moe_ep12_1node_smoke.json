@@ -21,12 +21,14 @@
     "context_parallel_degree": 1,
     "expert_parallel_degree": 12
   },
-  "lr_scheduler": {
-    "warmup_steps": 2,
-    "total_steps": 5,
-    "decay_ratio": 0.0,
-    "decay_type": "cosine",
-    "min_lr_factor": 1.0
+  "optim": {
+    "lr_scheduler": {
+      "warmup_steps": 2,
+      "total_steps": 5,
+      "decay_ratio": 0.0,
+      "decay_type": "cosine",
+      "min_lr_factor": 1.0
+    }
   },
   "dataloader": {
     "dataset": "c4_test",

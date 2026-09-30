@@ -44,13 +44,9 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import Shard
 
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TORCH_DTYPE_MAP,
-    TrainingConfig,
-)
-from torchtitan.distributed import ParallelDims
+from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.ezpz.fsdp_compat import (
@@ -109,7 +105,7 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
 def parallelize_moe(
     model: moeModel,
     *,
-    parallel_dims: ParallelDims,
+    parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
@@ -121,6 +117,7 @@ def parallelize_moe(
     The passed-in model preferably should be on meta device. Otherwise
     the model must fit on GPU or CPU memory.
     """
+    parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
@@ -166,13 +163,6 @@ def parallelize_moe(
         if callable(wire_meshes):
             wire_meshes(ep_mesh=ep_mesh, tp_mesh=tp_mesh)
 
-    # 78th sync (#4045): the maybe_enable_async_tp call that lived here is
-    # gone -- see the import-site note above.
-
-    model_compile_enabled = (
-        compile_config is not None and "model" in compile_config.components
-    )
-
     # 57th sync: PR #3674 refactored AC into a Configurable policy
     # hierarchy. ac_config is now an ActivationCheckpointing.Config
     # subclass or None. The MoE save-set override lives in
@@ -181,16 +171,6 @@ def parallelize_moe(
     # from the save list -- see that file for the rationale.
     if ac_config is not None:
         ac_config.build(dump_folder=dump_folder).apply(model)
-
-    if model_compile_enabled:
-        # Upstream apply_compile_sparse uses fullgraph=True which fails on
-        # XPU after 00b7f569 removed maybe_enable_amp — MoE routing's
-        # dynamic shapes cause recompilation that fullgraph=True forbids.
-        # Apply compile per-block without fullgraph instead.
-        torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
-        for layer_id, block in model.layers.named_children():
-            block.compile(backend=compile_config.backend)
-            model.layers.register_module(layer_id, block)
 
     # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
     # it there is no flattened "fsdp" mesh axis -- asking for it raises

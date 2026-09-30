@@ -94,7 +94,7 @@ def test_ezpz_dataloader_build_preserves_sequence_and_token_kwargs():
         max_context_length=8,
         num_tokens_per_microbatch=16,
         training_steps=3,
-        parallel_dims=SimpleNamespace(),
+        parallelism_context=SimpleNamespace(),  # type: ignore[arg-type]
     )
 
     assert dataloader.max_num_documents is None
@@ -119,7 +119,7 @@ def test_ezpz_dataloader_build_rejects_subsequence_microbatch():
             max_context_length=8,
             num_tokens_per_microbatch=4,
             training_steps=1,
-            parallel_dims=SimpleNamespace(),
+            parallelism_context=SimpleNamespace(),  # type: ignore[arg-type]
         )
 
 
@@ -129,10 +129,13 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
         sdc_replayer=None,
         training=SimpleNamespace(disable_cuda_graphs=True),
         debug=SimpleNamespace(spmd_typechecking=False),
-        parallelism=SimpleNamespace(enable_data_parallel_native_ddp=False),
+        parallelism=SimpleNamespace(
+            enable_data_parallel_native_ddp=False,
+            fsdp_defer_gradient_reduction=False,
+        ),
     )
     engine.model_parts = [object()]
-    engine.parallel_dims = SimpleNamespace(pp_enabled=False)
+    engine.parallelism_context = SimpleNamespace(pp_enabled=False)  # type: ignore[assignment]
     engine.device = torch.device("cpu")
     wrapped = Mock(return_value="wrapped")
     monkeypatch.setattr(
@@ -143,15 +146,11 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
         "torchtitan.experiments.ezpz.trainer.native_ddp_autocast_context",
         Mock(side_effect=AssertionError("native DDP should be disabled")),
     )
-    monkeypatch.setattr(
-        "torchtitan.experiments.ezpz.trainer.dist_utils.get_spmd_context",
-        Mock(return_value="context"),
-    )
-
     engine._initialize_forward_backward()
 
-    wrapped.assert_called_once_with(engine._non_pp_forward_backward_body)
-    assert engine.forward_backward_body_fn == "wrapped"
+    wrapped.assert_called_once()
+    assert wrapped.call_args.kwargs["parameters"] is not None
+    assert engine._run_forward_backward == "wrapped"
 
 
 def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch):
@@ -160,10 +159,13 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
         sdc_replayer=None,
         training=SimpleNamespace(disable_cuda_graphs=True),
         debug=SimpleNamespace(spmd_typechecking=False),
-        parallelism=SimpleNamespace(enable_data_parallel_native_ddp=True),
+        parallelism=SimpleNamespace(
+            enable_data_parallel_native_ddp=True,
+            fsdp_defer_gradient_reduction=False,
+        ),
     )
     engine.model_parts = [object()]
-    engine.parallel_dims = SimpleNamespace(pp_enabled=False)
+    engine.parallelism_context = SimpleNamespace(pp_enabled=False)  # type: ignore[assignment]
     engine.device = torch.device("cpu")
     composed = Mock(return_value=nullcontext)
     monkeypatch.setattr(
@@ -172,7 +174,7 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
     )
     monkeypatch.setattr(
         "torchtitan.experiments.ezpz.trainer.maybe_wrap_with_xpu_graph",
-        lambda fn: fn,
+        lambda fn, **kwargs: fn,
     )
 
     engine._initialize_forward_backward()
@@ -201,3 +203,17 @@ def test_ezpz_diloco_fragment_hook_is_owned_by_model_class():
     engine.model_cls = type("Model", (), {"_fragment": fragment})
 
     assert engine.diloco_fragment_fn is fragment
+
+
+def test_ezpz_optim_step_delegates_to_upstream_optim_lifecycle(monkeypatch):
+    engine = object.__new__(EzpzTrainingEngine)
+    engine.config = SimpleNamespace(diagnostics_attention=False)  # type: ignore[assignment]
+    engine.num_completed_steps = 3
+    optim_step = Mock(return_value=torch.tensor(2.5))
+    monkeypatch.setattr(TrainingEngine, "optim_step", optim_step)
+
+    grad_norm = engine.optim_step()
+
+    optim_step.assert_called_once_with()
+    assert grad_norm.item() == 2.5
+    assert engine._last_grad_norm == 2.5

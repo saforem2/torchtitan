@@ -42,12 +42,10 @@ from renderers import DefaultRendererConfig
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
 
-# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
-# a re-export shim when the optimizer components were grouped into a package
-# by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
-from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import (
     LinearLoRAHandler,
     LoRATransform,
@@ -55,6 +53,7 @@ from torchtitan.config.transform import (
 )
 from torchtitan.config.transform.cast_linear import LMHeadCastConverter
 from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
 )
@@ -191,9 +190,11 @@ def _agpt_grpo_config(
         ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
-            optimizer=default_adamw(lr=lr),
-            lr_scheduler=LRSchedulersContainer.Config(
-                warmup_steps=2, decay_type="linear"
+            optim=Optim.Config(
+                optimizer=default_adamw(lr=lr),
+                lr_scheduler=LRSchedulersContainer.Config(
+                    warmup_steps=2, decay_type="linear"
+                ),
             ),
             training=TrainingConfig(
                 dtype="float32",

@@ -34,6 +34,7 @@ from torchtitan.models.common.config_utils import (
 from torchtitan.models.common.moe import QuantileBalancedTopKRouter
 from torchtitan.models.common.nn_modules import GELU, RMSNorm
 from torchtitan.models.common.vision_encoder import (
+    InvariantRowParallelLinear,
     VisionAttention,
     VisionMLP,
     VisionTransformerBlock,
@@ -111,6 +112,20 @@ def _linear(
         in_features=in_features,
         out_features=out_features,
         bias=bias,
+        param_init=param_init or _LINEAR_INIT,
+    )
+
+
+def _vision_row_parallel_linear(
+    in_features: int,
+    out_features: int,
+    *,
+    param_init: dict[str, Callable] | None = None,
+) -> InvariantRowParallelLinear.Config:
+    return InvariantRowParallelLinear.Config(
+        in_features=in_features,
+        out_features=out_features,
+        bias=False,
         param_init=param_init or _LINEAR_INIT,
     )
 
@@ -237,6 +252,7 @@ def _latent_moe_config(
     *,
     dim: int,
     latent_dim: int,
+    enable_sp: bool,
     expert_hidden_dim: int,
     num_experts: int,
     top_k: int,
@@ -281,6 +297,7 @@ def _latent_moe_config(
             make_shared_expert_ffn_config(
                 dim=dim,
                 hidden_dim=num_shared_experts * expert_hidden_dim,
+                enable_sp=enable_sp,
                 w1_param_init=_LINEAR_INIT,
                 w2w3_param_init=_LINEAR_INIT,
             ),
@@ -322,11 +339,13 @@ def _vision_encoder_config(
             wq=_linear(dim, qkv_dim),
             wk=_linear(dim, qkv_dim),
             wv=_linear(dim, qkv_dim),
-            proj=_linear(qkv_dim, dim),
+            proj=_vision_row_parallel_linear(qkv_dim, dim),
         ),
         mlp=VisionMLP.Config(
             fc1=_linear(dim, hidden_dim, param_init=_fan_in_linear_init(dim)),
-            fc2=_linear(hidden_dim, dim, param_init=_fan_in_linear_init(hidden_dim)),
+            fc2=_vision_row_parallel_linear(
+                hidden_dim, dim, param_init=_fan_in_linear_init(hidden_dim)
+            ),
             act_fn=GELU.Config(approximate="tanh"),
         ),
     )
@@ -350,7 +369,7 @@ def _vision_encoder_config(
                 merged_dim,
                 param_init=_fan_in_linear_init(merged_dim),
             ),
-            linear_2=_linear(
+            linear_2=_vision_row_parallel_linear(
                 merged_dim,
                 text_dim,
                 param_init=_fan_in_linear_init(merged_dim),
@@ -370,6 +389,7 @@ def _kimi_k3_config(
     *,
     max_context_length: int,
     dim: int,
+    enable_sp: bool,
     vocab_size: int,
     num_layers: int,
     full_attention_layers: set[int],
@@ -440,6 +460,7 @@ def _kimi_k3_config(
                     else _latent_moe_config(
                         dim=dim,
                         latent_dim=latent_dim,
+                        enable_sp=enable_sp,
                         expert_hidden_dim=expert_hidden_dim,
                         num_experts=num_experts,
                         top_k=top_k,
@@ -482,38 +503,40 @@ def _debugmodel(
     attn_backend: str,
     moe_comm_backend: str,
     *,
+    enable_sp: bool,
     seq_len: int,
 ) -> KimiK3Model.Config:
-    dim = 1024
+    dim = 256
     return _kimi_k3_config(
         max_context_length=seq_len,
         dim=dim,
+        enable_sp=enable_sp,
         moe_comm_backend=moe_comm_backend,
-        vocab_size=163840,
-        num_layers=24,
-        full_attention_layers={3, 7, 11, 15, 19, 23},
-        attn_res_block_size=12,
-        num_heads=16,
-        q_lora_rank=512,
-        kv_lora_rank=256,
+        vocab_size=2048,
+        num_layers=17,
+        full_attention_layers={3, 7, 11, 15, 16},
+        attn_res_block_size=4,
+        num_heads=4,
+        q_lora_rank=128,
+        kv_lora_rank=64,
         qk_nope_head_dim=64,
         qk_rope_head_dim=32,
         v_head_dim=64,
         kda_head_dim=128,
         conv_kernel_size=4,
-        dense_hidden_dim=4096,
-        latent_dim=512,
-        expert_hidden_dim=384,
-        num_experts=32,
-        top_k=4,
+        dense_hidden_dim=512,
+        latent_dim=128,
+        expert_hidden_dim=128,
+        num_experts=8,
+        top_k=2,
         num_shared_experts=2,
         vision_encoder=_vision_encoder_config(
             text_dim=dim,
-            dim=512,
-            qkv_dim=768,
-            hidden_dim=2048,
-            num_layers=8,
-            num_heads=6,
+            dim=256,
+            qkv_dim=512,
+            hidden_dim=512,
+            num_layers=2,
+            num_heads=4,
             init_pos_emb_height=32,
             init_pos_emb_width=32,
         ),
@@ -525,12 +548,14 @@ def _kimi_k3(
     attn_backend: str,
     moe_comm_backend: str,
     *,
+    enable_sp: bool,
     seq_len: int,
 ) -> KimiK3Model.Config:
     dim = 7168
     return _kimi_k3_config(
         max_context_length=seq_len,
         dim=dim,
+        enable_sp=enable_sp,
         moe_comm_backend=moe_comm_backend,
         vocab_size=163840,
         num_layers=93,
@@ -576,6 +601,7 @@ def model_registry(
     converters: list[ModelConfigConverter.Config] | None = None,
     moe_comm_backend: str = "standard",
     *,
+    enable_sp: bool,
     seq_len: int | None = None,
 ) -> KimiK3Model.Config:
     get_config, max_context_len = kimi_k3_configs[flavor]
@@ -587,6 +613,7 @@ def model_registry(
         )
     config = get_config(
         attn_backend=attn_backend,
+        enable_sp=enable_sp,
         moe_comm_backend=moe_comm_backend,
         seq_len=context_len,
     )

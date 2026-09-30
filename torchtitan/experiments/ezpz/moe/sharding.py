@@ -35,11 +35,11 @@ from torchtitan.models.common.decoder_sharding import (
     set_gqa_attention_sharding,
     set_gqa_inner_attention_local_spmd,
 )
+from torchtitan.models.common.linear import Linear, RowParallelLinear
 from torchtitan.models.common.moe_sharding import (
     set_moe_sharding_config as _set_moe_block_sharding_config,
 )
 from torchtitan.protocols.sharding import ShardingConfig
-
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
@@ -214,11 +214,36 @@ def _set_moe_ffn_sharding(
     # which populates router gate / shared experts / routed experts
     # ``sharding_config`` declarations.
     if layer_cfg.moe is not None:
+        shared = layer_cfg.moe.shared_experts
+        if shared is not None:
+            w2 = shared.w2
+            w2_cls = RowParallelLinear if enable_sp else Linear
+            if type(w2) is not w2_cls.Config:
+                shared.w2 = w2_cls.Config(
+                    in_features=w2.in_features,
+                    out_features=w2.out_features,
+                    num_linears=w2.num_linears,
+                    bias=w2.bias,
+                    param_init=w2.param_init,
+                    sharding_config=w2.sharding_config,
+                )
         _set_moe_block_sharding_config(
             layer_cfg.moe,
             enable_ep=enable_ep,
             enable_sp=enable_sp,
         )
+
+        # Core deliberately leaves routed expert weights unsharded when EP is
+        # disabled. That was valid for the removed partial-DTensor backend, but
+        # FSDP's full-SPMD ``dp_mesh_dims`` contract rejects plain tensors.
+        # Materialize replicated DTensors here so FSDP can subsequently shard
+        # them over DP without changing their TP/EP semantics.
+        if not enable_ep:
+            replicated_weight = ShardingConfig(
+                state_shardings={"weight": dense_param_placement(tp=spmd.R)}
+            )
+            layer_cfg.moe.routed_experts.w13.sharding_config = replicated_weight
+            layer_cfg.moe.routed_experts.w2.sharding_config = replicated_weight
 
         # The ezpz compatibility FFN deliberately retains pre-sync physical
         # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
@@ -226,7 +251,6 @@ def _set_moe_ffn_sharding(
         # the historical 2-D parameter the corresponding output-feature axis
         # is dimension 0. Keep the activation contract installed above, but
         # restore the parameter placement so every FSDP/TP rank owns rows.
-        shared = layer_cfg.moe.shared_experts
         if shared is not None and shared.w13.__class__.__name__ == "Config":
             module_cls = getattr(shared.w13, "__class__", None)
             if module_cls is not None and module_cls.__qualname__.startswith(

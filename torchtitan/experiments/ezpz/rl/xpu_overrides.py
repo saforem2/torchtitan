@@ -37,11 +37,35 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from functools import wraps
 
 import torch
 
+from torchtitan.config import CommConfig
+from torchtitan.distributed import DistributedTopology
 
 logger = logging.getLogger(__name__)
+
+
+def patch_torch_distributed_config_for_xpu() -> None:
+    """Backfill Torch distributed config keys required by newer TorchTitan."""
+    if torch.cuda.is_available():
+        return
+
+    dist_config = torch.distributed.config
+    if hasattr(dist_config, "pipeline_per_edge_p2p"):
+        return
+
+    # Torch's config module rejects assignment to unknown keys. TorchTitan HEAD
+    # sets this key unconditionally, including for PP degree one, while the
+    # validated Torch 2.14 XPU runtime predates the key. Register the same
+    # boolean default that newer Torch exposes before core init_distributed runs.
+    from torch.utils._config_module import _Config, _ConfigEntry
+
+    dist_config._config["pipeline_per_edge_p2p"] = _ConfigEntry(
+        _Config(default=False),
+        "pipeline_per_edge_p2p",
+    )
 
 
 def has_xpu_kernels(*_args, **_kwargs) -> bool:
@@ -350,7 +374,15 @@ def patch_init_distributed_for_xpu() -> None:
     if getattr(orig, "_xpu_patched", False):
         return
 
-    def patched(*args, **kwargs):
+    @wraps(orig)
+    def patched(
+        comm_config: CommConfig,
+        enable_cpu_backend: bool = False,
+        base_folder: str = "",
+        ranks: list[int] | None = None,
+        *,
+        pipeline_parallel_degree: int = 1,
+    ) -> DistributedTopology:
         lr = os.environ.get("LOCAL_RANK")
         r = os.environ.get("RANK")
         if lr is not None:
@@ -373,14 +405,13 @@ def patch_init_distributed_for_xpu() -> None:
         # USM-device allocator returns pointers that sycl::
         # get_pointer_type can't classify. With the gloo CPU backend
         # available, object collectives stay on CPU and avoid xccl.
-        if not torch.cuda.is_available() and len(args) >= 1:
-            comm_config = args[0]
-            # comm_config is positional arg 0; enable_cpu_backend is arg 1
-            if len(args) >= 2:
-                args = (comm_config, True, *args[2:])
-            else:
-                kwargs["enable_cpu_backend"] = True
-        return orig(*args, **kwargs)
+        return orig(
+            comm_config,
+            enable_cpu_backend=True,
+            base_folder=base_folder,
+            ranks=ranks,
+            pipeline_parallel_degree=pipeline_parallel_degree,
+        )
 
     patched._xpu_patched = True  # type: ignore[attr-defined]
     _dutils.init_distributed = patched
@@ -1015,6 +1046,7 @@ def apply_all_xpu_patches() -> None:
          XCCL collective fails the USM pointer check.)
     Provisioner replacement is done in the entrypoint itself.
     """
+    patch_torch_distributed_config_for_xpu()
     patch_has_cuda_capability_for_xpu()
     patch_dtensor_rng_broadcast_for_xpu()
     patch_init_distributed_for_xpu()

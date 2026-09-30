@@ -7,7 +7,7 @@
 #PBS -q workq
 #PBS -j oe
 
-# Aurora twin of sync_smoke.sh: post-upstream-sync smoke on XPU, 2 nodes.
+# Post-upstream-sync smoke on Sunspot XPU, 2 nodes.
 #
 # Same two phases as the sunspot original (import probe, then seeded
 # deterministic train steps with a machine-greppable VERDICT), with three
@@ -64,7 +64,7 @@ SEED="${SEED:-42}"
 # error" from mpiexec. That was wrong -- 8831657 used the resolved path and hit
 # the identical failure. The real cause of that failure is still unknown; see
 # docs/experiments/sync84-xpu-smoke.md.
-VENV="${SMOKE_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214}"
+VENV="${SMOKE_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
 VENV="$(readlink -f "${VENV}")"
 
 # max_context_length must EQUAL num-tokens-per-microbatch-per-dp-rank: the
@@ -86,17 +86,25 @@ else
 fi
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
-cd "${SUBMIT_DIR}"
+source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
+ezpz_setup_job
+ezpz_load_modules
+cd "${SUBMIT_DIR}" || exit 2
 
-source "${VENV}/bin/activate"
+# This copied venv is intentionally bound without sourcing bin/activate: its
+# activation script and console entry points retain paths from the source tree.
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+hash -r
+[[ "$(command -v python)" == "${VENV}/bin/python" ]] || exit 93
 
 JOBID_SHORT="${PBS_JOBID%%.*}"
 LOG_DIR="logs/ezpz-sync-smoke-sunspot-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "${LOG_DIR}"
 LOG="${LOG_DIR}/run.log"
 
-echo "===== ezpz sync smoke (aurora, sync 84) =====" | tee "${LOG}"
+echo "===== ezpz sync smoke (sunspot) =====" | tee "${LOG}"
 date | tee -a "${LOG}"
 echo "node0:  $(hostname)" | tee -a "${LOG}"
 echo "venv:   ${VENV}" | tee -a "${LOG}"
@@ -112,7 +120,7 @@ echo "--- import probe ---" | tee -a "${LOG}"
 # mpiexec there is no PMIX and it aborts with "PMIX_Init returned -25",
 # which reads as a broken tree rather than a bare-shell probe. Run the
 # probe on ONE rank under the launcher instead.
-mpiexec -n 1 --ppn 1 python3 -c "
+mpiexec -n 1 --ppn 1 "${VENV}/bin/python" -c "
 from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.experiments.ezpz.agpt.config_registry import agpt_debugmodel
 from torchtitan.experiments.ezpz.moe.parallelize import parallelize_moe
@@ -142,8 +150,11 @@ for spec in "${CONFIGS[@]}"; do
     label="${idx}-${config}"
     echo "" | tee -a "${LOG}"
     echo "--- [${idx}] ${module} / ${config}: ${STEPS} deterministic steps ${extra:+(${extra})} ---" | tee -a "${LOG}"
-    # shellcheck disable=SC2086 -- extra is an intentional word-split arg list
-    ezpz launch python3 -m torchtitan.experiments.ezpz.train \
+    # shellcheck disable=SC2086
+    # extra is an intentional word-split argument list.
+    "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
+        --nproc 24 --nproc_per_node 12 -- \
+        "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
         --module="${module}" \
         --config="${config}" \
         --training.steps="${STEPS}" \

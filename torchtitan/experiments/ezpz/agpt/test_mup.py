@@ -27,7 +27,7 @@ import math
 import torch
 
 from torchtitan.components.checkpointer.utils import canonical_fqn
-from torchtitan.components.optimizer.optimizer import OptimizersContainer
+from torchtitan.components.optim import OptimizersContainer
 from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.experiments.ezpz.agpt import agpt_configs, mup as M
 
@@ -93,8 +93,8 @@ def test_ladder_varies_width_only():
             len(c.layers),
             c.vocab_size,
             c.layers[0].attention.n_heads // c.layers[0].attention.n_kv_heads,
-            # w13 packs gate and up, so out_features is 2*hidden_dim.
-            (c.layers[0].feed_forward.w13.out_features / 2) / c.layers[0].attention.dim,
+            # Stacked w13 stores two [F, D] projections; out_features is F.
+            c.layers[0].feed_forward.w13.out_features / c.layers[0].attention.dim,
         )
         for c in rungs
     ]
@@ -198,7 +198,7 @@ def test_attention_rejects_conflicting_scale_and_wrong_head_dim():
 def test_lr_groups_scale_hidden_by_one_over_m():
     for dim, m in ((1536, 1.0), (3072, 2.0), (6144, 4.0)):
         oc = M.default_mup_adamw(ETA, dim=dim, base_dim=M.MUP_BASE_DIM)
-        lrs = [pg.optimizer_kwargs["lr"] for pg in oc.param_groups]
+        lrs = [pg.lr for pg in oc.optimizers]
         assert len(lrs) == 4
         # embedding, readout, norms all O(1); only hidden matrices get eta/m.
         # The readout is O(1) BECAUSE its init stayed at fan_in^-1/2 -- the two
@@ -219,7 +219,7 @@ def test_param_groups_partition_cleanly_with_and_without_ac():
             assert any(
                 "_checkpoint_wrapped_module" in n for n, _ in model.named_parameters()
             ), "FullAC did not wrap anything; the trap is untested"
-        rep = M.summarize_mup_param_groups(model, oc.param_groups)
+        rep = M.summarize_mup_param_groups(model, oc.optimizers)
         assert not rep["unclaimed"], rep["unclaimed"][:5]
         assert not rep["empty_groups"], rep["empty_groups"]
         assert not rep["misrouted"], rep["misrouted"][:5]
@@ -261,7 +261,7 @@ def test_param_groups_cover_qk_norm_and_fused_qkv():
             model = cfg.build()
         FullAC.Config().build().apply(model)
         rep = M.summarize_mup_param_groups(
-            model, M.default_mup_adamw(ETA, dim=512, base_dim=256).param_groups
+            model, M.default_mup_adamw(ETA, dim=512, base_dim=256).optimizers
         )
         assert (
             not rep["unclaimed"] and not rep["empty_groups"] and not rep["misrouted"]
@@ -275,7 +275,9 @@ def test_real_optimizer_moves_hidden_group_by_one_over_m():
     model.init_states()
     FullAC.Config().build().apply(model)
     oc = M.default_mup_adamw(ETA, dim=512, base_dim=M.MUP_TINY_BASE_DIM)
-    oc.implementation = "foreach"
+    for optimizer in oc.optimizers:
+        optimizer.fused = False
+        optimizer.foreach = True
     opt = OptimizersContainer(oc, model_parts=[model])
     named = dict(model.named_parameters())
     emb = named["tok_embeddings.weight"]
@@ -292,13 +294,15 @@ def test_real_optimizer_moves_hidden_group_by_one_over_m():
 
 
 def test_scheduler_preserves_group_ratio():
-    from torchtitan.components.optimizer.lr_scheduler import LRSchedulersContainer
+    from torchtitan.components.optim import LRSchedulersContainer
 
     torch.manual_seed(0)
     model = agpt_configs["mup_tiny_512"].build()
     model.init_states()
     oc = M.default_mup_adamw(ETA, dim=512, base_dim=M.MUP_TINY_BASE_DIM)
-    oc.implementation = "foreach"
+    for optimizer in oc.optimizers:
+        optimizer.fused = False
+        optimizer.foreach = True
     opt = OptimizersContainer(oc, model_parts=[model])
     sched = LRSchedulersContainer.Config(
         warmup_steps=2, decay_ratio=0.8, decay_type="linear", min_lr_factor=0.0
@@ -359,11 +363,11 @@ def test_unsupported_attention_paths_are_rejected():
 def test_independent_weight_decay_makes_lr_times_wd_width_invariant():
     a = M.default_mup_adamw(ETA, dim=6144, base_dim=1536)
     b = M.default_mup_adamw(ETA, dim=6144, base_dim=1536, independent_weight_decay=True)
-    ref = a.param_groups[0].optimizer_kwargs
-    ref_prod = ref["lr"] * ref["weight_decay"]
-    ah, bh = a.param_groups[3].optimizer_kwargs, b.param_groups[3].optimizer_kwargs
-    assert math.isclose(ah["lr"] * ah["weight_decay"], ref_prod / 4)
-    assert math.isclose(bh["lr"] * bh["weight_decay"], ref_prod)
+    ref = a.optimizers[0]
+    ref_prod = ref.lr * ref.weight_decay
+    ah, bh = a.optimizers[3], b.optimizers[3]
+    assert math.isclose(ah.lr * ah.weight_decay, ref_prod / 4)
+    assert math.isclose(bh.lr * bh.weight_decay, ref_prod)
 
 
 def test_trainer_configs_build():
@@ -374,7 +378,7 @@ def test_trainer_configs_build():
         "mup_6144_adamw_independent_wd",
     ):
         cfg = getattr(M, name)()
-        assert len(cfg.optimizer.param_groups) == 4, name
+        assert len(cfg.optim.optimizer.optimizers) == 4, name
 
 
 if __name__ == "__main__":

@@ -116,16 +116,37 @@ def test_olmo_submitter_preserves_caller_fine_bounds():
     assert 'LRF_DUMP_FOLDER="${LRF_DUMP_FOLDER:-outputs/lr_finder_${LRF_MODE}' in text
 
 
-def test_runner_forces_resumable_checkpoint_contract_after_caller_arguments():
+def test_runner_selects_resumable_or_disabled_checkpoint_contract():
     script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
     text = script.read_text()
     caller_args = text.index('            "$@" \\\n')
-    checkpoint_on = text.index("            --checkpoint.enable \\\n", caller_args)
-    assert checkpoint_on > caller_args
-    assert "--checkpoint.no-last-save-model-only" in text[checkpoint_on:]
+    optimizer_loop = text.index('    for opt in "${OPTIMIZERS[@]}"; do')
+    checkpoint_start = text.index("        checkpoint_args=(", optimizer_loop)
+    checkpoint_block = text[checkpoint_start:caller_args]
+    assert "--checkpoint.enable" in checkpoint_block
+    assert "--checkpoint.no-last-save-model-only" in checkpoint_block
     assert 'LRF_CHECKPOINT_INTERVAL="${LRF_CHECKPOINT_INTERVAL:-5}"' in text
-    assert '--checkpoint.folder "checkpoints/lr_finder_${label}"' in text
-    assert "--checkpoint.no-enable" not in text[caller_args:]
+    assert '--checkpoint.folder "checkpoints/lr_finder_${label}"' in checkpoint_block
+    disabled = checkpoint_block.split('if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]', 1)[
+        1
+    ]
+    assert "checkpoint_args=(--checkpoint.no-enable)" in disabled
+    launch_tail = text[
+        caller_args : text.index('            >"${logfile}"', caller_args)
+    ]
+    assert '"${checkpoint_args[@]}"' in launch_tail
+    assert "--checkpoint.folder" not in launch_tail
+
+
+def test_runner_rejects_checkpoint_disabled_lr_sweeps_before_launch():
+    script = REPO_ROOT / "torchtitan/experiments/ezpz/scripts/run_lr_finder.sh"
+    text = script.read_text()
+    guard = 'if [[ "${LRF_CHECKPOINT_ENABLE}" == "0" ]]'
+    assert guard in text
+    guarded = text.split(guard, 1)[1].split("\nfi\n", 1)[0]
+    assert "checkpointing is required for resumable LR sweeps" in guarded
+    assert "exit 2" in guarded
+    assert text.index(guard) < text.index('    for opt in "${OPTIMIZERS[@]}"; do')
 
 
 def test_ezpz_translation_preserves_checkpoint_component_selection_flags():

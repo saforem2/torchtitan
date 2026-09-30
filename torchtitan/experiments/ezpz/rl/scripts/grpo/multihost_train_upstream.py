@@ -88,7 +88,11 @@ def main() -> None:
     if args.multihost_world_size != 2:
         raise ValueError("this entry point requires exactly two scheduler hosts")
 
-    configure(mesh_attach_config_timeout="120s")
+    # The current Torch 2.14/vLLM overlay takes roughly 100 seconds to import on
+    # the second host. Leave margin beyond that measured cold-start time so the
+    # first host does not invalidate its actor references just before host 1
+    # finishes joining.
+    configure(mesh_attach_config_timeout="300s")
     rank = _rank()
     store = dist.FileStore(str(args.multihost_store), args.multihost_world_size)
     # Non-controller ranks wait here for the complete RL lifecycle, including

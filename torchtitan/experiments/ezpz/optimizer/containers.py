@@ -1,12 +1,20 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from dataclasses import dataclass
-from typing import Callable, Any
+from typing import Any
 
 import torch
 import torch.nn as nn
 
-from torchtitan.components.optimizer import OptimizersContainer, ParamGroupConfig
+from torchtitan.components.optim import AdamW, BaseOptimizer, OptimizersContainer
 from torchtitan.experiments.ezpz.optimizer.adopt import ADOPT
 from torchtitan.experiments.ezpz.optimizer.mano import Mano
 from torchtitan.experiments.ezpz.optimizer.muon import Muon, MuonClip, QKInputRecorder
@@ -23,6 +31,7 @@ __all__ = [
     "ScheduleFreeOptimizersContainer",
     "SophiaGOptimizersContainer",
     "TorchMuonOptimizersContainer",
+    "default_adamw",
     "default_adopt",
     "default_mano",
     "default_muon",
@@ -34,48 +43,71 @@ __all__ = [
 ]
 
 
+def default_adamw(lr: float = 8e-4, **kwargs: Any) -> OptimizersContainer.Config:
+    return OptimizersContainer.Config(
+        optimizers=[AdamW.Config(pattern=r".*", lr=lr, **kwargs)]
+    )
+
+
 # ---------------------------------------------------------------------------
-# Container subclasses — thin wrappers that register the optimizer class name.
-#
-# Post upstream PR #3269 ("[optimizer] support mixed optimizers"), the
-# Config base lives on OptimizersContainer.Config and just carries
-# ``param_groups: list[ParamGroupConfig]`` + ``implementation``. Each
-# container's only job is to extend ``_resolve_optimizer_factory`` so the
-# pattern-based grouping inside OptimizersContainer.__init__ can dispatch
-# the registered optimizer name to its concrete class. The old per-Config
-# flat ``lr / beta1 / beta2 / eps / weight_decay`` fields are gone —
-# users supply those through ``ParamGroupConfig.optimizer_kwargs`` (see
-# the ``default_<name>(lr=..., **kwargs)`` factories below for the common
-# single-group case, mirroring ``default_adamw``).
+# Configurable optimizer adapters for upstream's BaseOptimizer.Config API.
 # ---------------------------------------------------------------------------
+
+
+class ADOPTOptimizer(ADOPT, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 1e-3
+        betas: tuple[float, float] = (0.9, 0.999)
+        eps: float = 1e-6
+        weight_decay: float = 0.0
+        decouple: bool = False
+        clip_lambda: Callable[[int], float] | None = None
+        foreach: bool | None = True
+
+    def __init__(self, config: Config, *, params) -> None:
+        ADOPT.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            decouple=config.decouple,
+            clip_lambda=config.clip_lambda,
+            foreach=config.foreach,
+        )
 
 
 class ADOPTOptimizersContainer(OptimizersContainer):
-    # Empty Config subclass so OptimizersContainer.Config.build() instantiates
-    # THIS class (which has the ADOPT-registering _resolve_optimizer_factory)
-    # instead of the base. Without this override, .build() builds the base
-    # OptimizersContainer, whose _resolve_optimizer_factory only knows Adam/AdamW.
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
 
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "ADOPT":
-            return ADOPT
-        return OptimizersContainer._resolve_optimizer_factory(name)
+
+class SophiaGOptimizer(SophiaG, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 3e-4
+        betas: tuple[float, float] = (0.965, 0.99)
+        rho: float = 0.04
+        weight_decay: float = 0.1
+
+    def __init__(self, config: Config, *, params) -> None:
+        SophiaG.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            rho=config.rho,
+            weight_decay=config.weight_decay,
+        )
 
 
 class SophiaGOptimizersContainer(OptimizersContainer):
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
-
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "SophiaG":
-            return SophiaG
-        return OptimizersContainer._resolve_optimizer_factory(name)
 
     def update_hessian(self) -> None:
         """Delegate hessian update to each inner SophiaG optimizer."""
@@ -84,16 +116,66 @@ class SophiaGOptimizersContainer(OptimizersContainer):
                 optimizer.update_hessian()
 
 
+class MuonOptimizer(Muon, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 2.4e-3
+        wd: float = 0.0
+        momentum: float = 0.95
+        nesterov: bool = True
+        ns_steps: int = 5
+        adamw_betas: tuple[float, float] = (0.95, 0.95)
+        adamw_eps: float = 1e-8
+        adjuster_lr_ref: bool = True
+        muon_max_dim: int = 10000
+
+    def __init__(self, config: Config, *, params) -> None:
+        Muon.__init__(
+            self,
+            params,
+            lr=config.lr,
+            wd=config.wd,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
+            ns_steps=config.ns_steps,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+            adjuster_lr_ref=config.adjuster_lr_ref,
+            muon_max_dim=config.muon_max_dim,
+        )
+
+
 class MuonOptimizersContainer(OptimizersContainer):
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
 
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "Muon":
-            return Muon
-        return OptimizersContainer._resolve_optimizer_factory(name)
+
+class MuonClipOptimizer(MuonClip, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(MuonOptimizer.Config):
+        qk_clip: bool = True
+        clip_t: float = 100.0
+        alpha: float = 0.5
+        use_sqrt_d: bool = True
+
+    def __init__(self, config: Config, *, params) -> None:
+        MuonClip.__init__(
+            self,
+            params,
+            lr=config.lr,
+            wd=config.wd,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
+            ns_steps=config.ns_steps,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+            adjuster_lr_ref=config.adjuster_lr_ref,
+            qk_clip=config.qk_clip,
+            clip_t=config.clip_t,
+            alpha=config.alpha,
+            use_sqrt_d=config.use_sqrt_d,
+        )
 
 
 class MuonClipOptimizersContainer(MuonOptimizersContainer):
@@ -101,11 +183,26 @@ class MuonClipOptimizersContainer(MuonOptimizersContainer):
     class Config(MuonOptimizersContainer.Config):
         pass
 
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "MuonClip":
-            return MuonClip
-        return MuonOptimizersContainer._resolve_optimizer_factory(name)
+
+class ManoOptimizer(Mano, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 3e-4
+        momentum: float = 0.95
+        weight_decay: float = 0.0
+        adamw_betas: tuple[float, float] = (0.9, 0.95)
+        adamw_eps: float = 1e-8
+
+    def __init__(self, config: Config, *, params) -> None:
+        Mano.__init__(
+            self,
+            params,
+            lr=config.lr,
+            momentum=config.momentum,
+            weight_decay=config.weight_decay,
+            adamw_betas=config.adamw_betas,
+            adamw_eps=config.adamw_eps,
+        )
 
 
 class ManoOptimizersContainer(OptimizersContainer):
@@ -113,11 +210,30 @@ class ManoOptimizersContainer(OptimizersContainer):
     class Config(OptimizersContainer.Config):
         pass
 
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "Mano":
-            return Mano
-        return OptimizersContainer._resolve_optimizer_factory(name)
+
+class ScheduleFreeOptimizer(AdamWScheduleFree, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 3e-4
+        betas: tuple[float, float] = (0.9, 0.95)
+        eps: float = 1e-8
+        weight_decay: float = 0.1
+        warmup_steps: int = 200
+        r: float = 0.0
+        weight_lr_power: float = 2.0
+
+    def __init__(self, config: Config, *, params) -> None:
+        AdamWScheduleFree.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            warmup_steps=config.warmup_steps,
+            r=config.r,
+            weight_lr_power=config.weight_lr_power,
+        )
 
 
 class ScheduleFreeOptimizersContainer(OptimizersContainer):
@@ -131,12 +247,6 @@ class ScheduleFreeOptimizersContainer(OptimizersContainer):
     class Config(OptimizersContainer.Config):
         pass
 
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "AdamWScheduleFree":
-            return AdamWScheduleFree
-        return OptimizersContainer._resolve_optimizer_factory(name)
-
     def train_mode(self) -> None:
         """Switch all optimizers to train mode."""
         for optimizer in self.optimizers:
@@ -148,16 +258,35 @@ class ScheduleFreeOptimizersContainer(OptimizersContainer):
             optimizer.eval()
 
 
+class SPAMOptimizer(SPAM, BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 1.3e-3
+        betas: tuple[float, float] = (0.9, 0.95)
+        eps: float = 1e-8
+        weight_decay: float = 0.1
+        spike_threshold: float = 2.0
+        delta_t: int = 100
+        ema_beta: float = 0.999
+
+    def __init__(self, config: Config, *, params) -> None:
+        SPAM.__init__(
+            self,
+            params,
+            lr=config.lr,
+            betas=config.betas,
+            eps=config.eps,
+            weight_decay=config.weight_decay,
+            spike_threshold=config.spike_threshold,
+            delta_t=config.delta_t,
+            ema_beta=config.ema_beta,
+        )
+
+
 class SPAMOptimizersContainer(OptimizersContainer):
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
         pass
-
-    @staticmethod
-    def _resolve_optimizer_factory(name: str) -> Callable[..., Any]:
-        if name == "SPAM":
-            return SPAM
-        return OptimizersContainer._resolve_optimizer_factory(name)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +338,19 @@ class _CompositeOptimizer(torch.optim.Optimizer):
             opt.load_state_dict(sd)
 
 
+class TorchMuonOptimizer(BaseOptimizer):
+    @dataclass(kw_only=True, slots=True)
+    class Config(BaseOptimizer.Config):
+        lr: float = 2.4e-3
+        adamw_lr_factor: float = 1.0
+        momentum: float = 0.95
+        nesterov: bool = True
+        ns_steps: int = 5
+        betas: tuple[float, float] = (0.9, 0.95)
+        eps: float = 1e-8
+        weight_decay: float = 0.0
+
+
 class TorchMuonOptimizersContainer(OptimizersContainer):
     """Uses torch.optim.Muon (built-in, optimized) for 2D hidden layers
     and torch.optim.AdamW for embeddings/head/1D params.
@@ -230,19 +372,27 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
         pass
 
     def __init__(
-        self, config: Config, *, model_parts: list[nn.Module]
+        self,
+        config: Config,
+        *,
+        model_parts: list[nn.Module],
+        enable_cuda_graph: bool = False,
     ) -> None:
         import torch.optim
 
         # Pull the single-group settings from the first ParamGroupConfig.
         # Callers should use ``default_torch_muon(lr=...)`` below; the
         # explicit-multi-group form isn't supported (shape-based split).
-        if not config.param_groups:
+        if not config.optimizers:
             raise ValueError(
                 "TorchMuonOptimizersContainer requires a non-empty param_groups "
                 "(use default_torch_muon(lr=..., **kwargs))"
             )
-        kw: dict[str, Any] = dict(config.param_groups[0].optimizer_kwargs)
+        kw = {
+            f.name: getattr(config.optimizers[0], f.name)
+            for f in config.optimizers[0].__dataclass_fields__.values()
+            if f.name != "pattern"
+        }
         lr = kw.pop("lr")
         weight_decay = kw.pop("weight_decay", 0.0)
         adamw_lr_factor = kw.pop("adamw_lr_factor", 1.0)
@@ -295,9 +445,7 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
 
             if not inner_opts:
                 # Empty model part (FSDP sharding) — use a no-op AdamW.
-                inner_opts.append(
-                    torch.optim.AdamW([{"params": []}], lr=lr)
-                )
+                inner_opts.append(torch.optim.AdamW([{"params": []}], lr=lr))
 
             self.optimizers.append(_CompositeOptimizer(inner_opts))
             self._model_part_indices.append(part_idx)
@@ -318,7 +466,10 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
 
 
 def default_adopt(
-    lr: float = 1e-3, *, clip_lambda_power: float = 0.25, decouple: bool = False,
+    lr: float = 1e-3,
+    *,
+    clip_lambda_power: float = 0.25,
+    decouple: bool = False,
     **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """One-group ADOPT config. ADOPT only supports foreach / for-loop, not fused."""
@@ -330,11 +481,10 @@ def default_adopt(
             return step**_power
 
     return ADOPTOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            ADOPTOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="ADOPT",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "betas": (0.9, 0.999),
                     "eps": 1e-6,
@@ -345,18 +495,16 @@ def default_adopt(
                 },
             )
         ],
-        implementation="foreach",
     )
 
 
 def default_sophiag(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Config:
     """One-group SophiaG config."""
     return SophiaGOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            SophiaGOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="SophiaG",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "betas": (0.965, 0.99),
                     "rho": 0.04,
@@ -371,11 +519,10 @@ def default_sophiag(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Conf
 def default_muon(lr: float = 2.4e-3, **kwargs: Any) -> OptimizersContainer.Config:
     """One-group Muon config."""
     return MuonOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            MuonOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="Muon",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "wd": 0.0,
                     "momentum": 0.95,
@@ -400,11 +547,10 @@ def default_muon_clip(
 ) -> OptimizersContainer.Config:
     """One-group MuonClip config."""
     return MuonClipOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            MuonClipOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="MuonClip",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "wd": 0.0,
                     "momentum": 0.95,
@@ -426,11 +572,10 @@ def default_muon_clip(
 def default_mano(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Config:
     """One-group Mano config."""
     return ManoOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            ManoOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="Mano",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "momentum": 0.95,
                     "weight_decay": 0.0,
@@ -444,16 +589,19 @@ def default_mano(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Config:
 
 
 def default_schedule_free(
-    lr: float = 3e-4, *, warmup_steps: int = 200, r: float = 0.0,
-    weight_lr_power: float = 2.0, **kwargs: Any,
+    lr: float = 3e-4,
+    *,
+    warmup_steps: int = 200,
+    r: float = 0.0,
+    weight_lr_power: float = 2.0,
+    **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """One-group AdamWScheduleFree config."""
     return ScheduleFreeOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            ScheduleFreeOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="AdamWScheduleFree",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "betas": (0.9, 0.95),
                     "eps": 1e-8,
@@ -478,11 +626,10 @@ def default_spam(
 ) -> OptimizersContainer.Config:
     """One-group SPAM config."""
     return SPAMOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            SPAMOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="SPAM",
-                optimizer_kwargs={
+                **{
                     "lr": lr,
                     "betas": (0.9, 0.95),
                     "eps": 1e-8,
@@ -498,10 +645,16 @@ def default_spam(
 
 
 def default_torch_muon(
-    lr: float = 2.4e-3, *, adamw_lr_factor: float = 1.0,
-    momentum: float = 0.95, nesterov: bool = True, ns_steps: int = 5,
-    betas: tuple[float, float] = (0.9, 0.95), eps: float = 1e-8,
-    weight_decay: float = 0.0, **kwargs: Any,
+    lr: float = 2.4e-3,
+    *,
+    adamw_lr_factor: float = 1.0,
+    momentum: float = 0.95,
+    nesterov: bool = True,
+    ns_steps: int = 5,
+    betas: tuple[float, float] = (0.9, 0.95),
+    eps: float = 1e-8,
+    weight_decay: float = 0.0,
+    **kwargs: Any,
 ) -> OptimizersContainer.Config:
     """Single-config for TorchMuonOptimizersContainer.
 
@@ -511,23 +664,20 @@ def default_torch_muon(
     bespoke __init__.
     """
     return TorchMuonOptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            TorchMuonOptimizer.Config(
                 pattern=r".*",
-                optimizer_name="TorchMuon",  # ignored by bespoke __init__
-                optimizer_kwargs={
-                    "lr": lr,
-                    "weight_decay": weight_decay,
-                    "adamw_lr_factor": adamw_lr_factor,
-                    "momentum": momentum,
-                    "nesterov": nesterov,
-                    "ns_steps": ns_steps,
-                    "betas": betas,
-                    "eps": eps,
-                    **kwargs,
-                },
+                lr=lr,
+                weight_decay=weight_decay,
+                adamw_lr_factor=adamw_lr_factor,
+                momentum=momentum,
+                nesterov=nesterov,
+                ns_steps=ns_steps,
+                betas=betas,
+                eps=eps,
+                **kwargs,
             )
-        ],
+        ]
     )
 
 

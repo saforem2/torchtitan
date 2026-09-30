@@ -93,9 +93,9 @@ class EzpzValidator(Validator):
             # counts SEQUENCES (local_batch_size/seq_len), Grain counts TOKENS
             # (num_tokens_per_batch/max_context_length). Both loaders take
             # **kwargs and ignore what they do not name, so send both pairs.
-            # self.num_tokens_per_batch is what core now stores -- it dropped
+            # self.num_tokens_per_microbatch is what core now stores -- it dropped
             # self.local_batch_size in #4121.
-            local_batch_size = max(1, self.num_tokens_per_batch // self.seq_len)
+            local_batch_size = max(1, self.num_tokens_per_microbatch // self.seq_len)
             self._cached_dataloader = self.dl_config.build(
                 dp_world_size=self.dp_world_size,
                 dp_rank=self.dp_rank,
@@ -103,8 +103,9 @@ class EzpzValidator(Validator):
                 seq_len=self.seq_len,
                 local_batch_size=local_batch_size,
                 max_context_length=self.seq_len,
-                num_tokens_per_batch=self.num_tokens_per_batch,
-                parallel_dims=self.parallel_dims,
+                num_tokens_per_batch=self.num_tokens_per_microbatch,
+                num_tokens_per_microbatch=self.num_tokens_per_microbatch,
+                parallel_dims=self.parallelism_context,
                 **extra,
             )
         return self._cached_dataloader
@@ -118,7 +119,7 @@ class EzpzValidator(Validator):
         for model in model_parts:
             model.eval()
 
-        parallel_dims = self.parallel_dims
+        parallelism_context = self.parallelism_context
 
         accumulated_losses = []
         device_type = utils.device_type
@@ -147,22 +148,23 @@ class EzpzValidator(Validator):
             # labels INSIDE the input dict rather than as a separate arg and
             # reads parallelism off the caller. Mirrors the non-PP branch of
             # torchtitan/components/validate.py. Both attributes come from the
-            # base Validator (self.parallel_dims, self.parallelism set in its
+            # base Validator (self.parallelism_context and self.parallelism set in its
             # __init__), so no plumbing is needed here.
-            inputs, labels, extra_kwargs = cast(
-                BaseModel, model_parts[0]
-            ).preprocess_inputs(
-                {**input_dict, "labels": labels},
-                parallel_dims=self.parallel_dims,
-                parallelism=self.parallelism,
-            )
+            with self.parallelism_context.activate_spmd():
+                inputs, labels, extra_kwargs = cast(
+                    BaseModel, model_parts[0]
+                ).preprocess_inputs(
+                    {**input_dict, "labels": labels},
+                    parallelism_context=self.parallelism_context,
+                    parallelism=self.parallelism,
+                )
 
             local_valid_tokens = torch.tensor(0, dtype=torch.int64, device=device_type)
             local_valid_tokens += (labels != IGNORE_INDEX).sum()
 
-            if parallel_dims.dp_enabled:
-                batch_mesh = parallel_dims.get_mesh("batch")
-                global_valid_tokens = dist_utils.dist_sum(
+            if parallelism_context.dp_enabled:
+                batch_mesh = parallelism_context.get_mesh("dp")
+                global_valid_tokens = dist_utils.dist_sum_tensor(
                     local_valid_tokens, batch_mesh, None
                 )
             else:
@@ -171,11 +173,11 @@ class EzpzValidator(Validator):
                 # the matching note in ezpz/trainer.py.
                 global_valid_tokens = float(local_valid_tokens.item())
 
-            if parallel_dims.pp_enabled:
+            if parallelism_context.pp_enabled:
                 assert self.pp_schedule is not None
                 assert self.pp_has_first_stage is not None
                 assert self.pp_has_last_stage is not None
-                with self.validation_context():
+                with self.parallelism_context.activate_spmd():
                     targets, losses = (
                         (labels, []) if self.pp_has_last_stage else (None, None)
                     )
@@ -199,7 +201,7 @@ class EzpzValidator(Validator):
                 else:
                     loss_sum = torch.tensor([-1.0], device=device_type)
             else:
-                with self.validation_context():
+                with self.parallelism_context.activate_spmd():
                     assert len(model_parts) == 1
                     predictions = model_parts[0](inputs, **extra_kwargs)
                     # loss_fn (BaseLoss.__call__) returns (loss, metrics_dict)
@@ -213,9 +215,9 @@ class EzpzValidator(Validator):
 
         loss = torch.sum(torch.stack(accumulated_losses))
         loss /= num_steps
-        if parallel_dims.dp_cp_enabled:
+        if parallelism_context.dp_cp_enabled:
             global_avg_loss = dist_utils.dist_sum(
-                loss, parallel_dims.get_optional_mesh("loss")
+                loss, parallelism_context.get_optional_mesh("loss")
             )
         else:
             global_avg_loss = float(loss.item())

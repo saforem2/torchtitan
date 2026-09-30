@@ -85,7 +85,7 @@ git clone https://github.com/saforem2/torchtitan --branch ezpz
 cd torchtitan
 
 # 3. Setup environment (loads modules + ezpz helper functions)
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 
 # 4. Launch 2B training
 MODEL=2b bash torchtitan/experiments/ezpz/run_train.sh
@@ -127,7 +127,7 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 # 4. Build the overlay venv on the RC python.
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_env
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
 #    -> venvs/aurora/torchtitan-ezpz-aurora_frameworks-2026.1.0
 
 # 5. Dependencies. -P pins the torch family out of the resolver's reach;

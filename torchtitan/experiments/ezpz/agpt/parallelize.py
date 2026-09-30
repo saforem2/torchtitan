@@ -16,9 +16,6 @@ Differences vs upstream `parallelize_llama`:
 - `disable_fsdp_gradient_division` additionally enables
   `set_force_sum_reduction_for_comms(True)` for non-NCCL backends (CCL on
   XPU). Upstream's version only sets the divide factor.
-- After `apply_compile`, resets `torch._dynamo.config.capture_scalar_outputs`
-  to False. apply_compile sets it True for MoE; that breaks the
-  separately-compiled CrossEntropyLoss for dense models.
 - Names the FSDP grouping `[norm, lm_head]` together with
   `reshard_after_forward=False` (upstream uses
   `reshard_after_forward=reshard_after_forward_policy == "always"`).
@@ -38,66 +35,26 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
 )
 
-from torchtitan.config import (
-    CompileConfig,
-    ParallelismConfig,
-    TORCH_DTYPE_MAP,
-    TrainingConfig,
-)
+from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 
-from torchtitan.distributed import ParallelDims
+from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.compile import (
-    _maybe_regional_inductor_backend,
-    apply_compile,
+
+from torchtitan.distributed.fsdp import (
+    get_fsdp_reshard_after_forward_policy,
+    linear_param_shard_placements,
 )
-from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
-# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED from
-# distributed/tensor_parallel.py -- async TP now happens inside apply_compile,
-# which gained a keyword-only `parallel_dims`. Importing the old symbol is an
-# ImportError, so this replay is mandatory, not cosmetic.
 from torchtitan.models.llama3.model import Llama3Model
-
-
-# [ezpz] max-autotune (and other torch.compile modes) on XPU.
-# The shared torchtitan apply_compile (distributed/compile.py) calls
-# transformer_block.compile(backend=, fullgraph=True) with NO mode=, and its
-# CompileConfig has no `mode` field. torch.compile mode="max-autotune" IS
-# functional on Sunspot XPU (Triton GEMM autotune runs + selects triton_mm_*
-# kernels), so this ezpz-scoped override threads a mode through WITHOUT editing
-# core. Opt in via env: AGPT_COMPILE_MODE=max-autotune (or reduce-overhead, etc).
-# Unset / "default" -> None -> byte-identical to the core apply_compile path.
-# Reuses the core _maybe_regional_inductor_backend so FlexAttention handling is
-# unchanged (its own inductor_configs still set max_autotune=False for the
-# backward, which OOMs on XPU -- that is per-kernel and independent of this).
-def _apply_compile_with_mode(model, compile_config, parallel_dims) -> None:
-    mode = os.environ.get("AGPT_COMPILE_MODE", "").strip() or None
-    if mode in (None, "default"):
-        # 78th sync (#4045): apply_compile is keyword-only now and takes
-        # parallel_dims, because async TP moved inside it.
-        apply_compile(model, compile_config=compile_config, parallel_dims=parallel_dims)
-        return
-    # Mirror apply_compile's dynamo flags + backend resolution, adding mode=.
-    torch._dynamo.config.capture_scalar_outputs = True
-    torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
-    backend = _maybe_regional_inductor_backend(model, compile_config.backend)
-    for _layer_id, transformer_block in model.layers.named_children():
-        transformer_block.compile(backend=backend, mode=mode, fullgraph=True)
-    logger.info(
-        "Compiling each TransformerBlock with torch.compile "
-        "(backend=%s, mode=%s) [ezpz AGPT_COMPILE_MODE]",
-        compile_config.backend,
-        mode,
-    )
 
 
 def parallelize_llama(
     model: Llama3Model,
     *,
-    parallel_dims: ParallelDims,
+    parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
     compile_config: CompileConfig,
@@ -110,6 +67,7 @@ def parallelize_llama(
     The passed-in model preferably should be on meta device. Otherwise
     the model must fit on GPU or CPU memory.
     """
+    parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
@@ -147,24 +105,12 @@ def parallelize_llama(
     # config-driven sharding pass here; calling model.parallelize() would recurse.
     model._parallelize(parallel_dims)
 
-    model_compile_enabled = (
-        compile_config is not None and "model" in compile_config.components
-    )
-
     # 57th sync: PR #3674 refactored AC into a Configurable policy
     # hierarchy. ac_config is now an ActivationCheckpointing.Config
     # subclass (FullAC.Config / SelectiveAC.Config / MemoryBudgetAC.Config)
     # or None. The old `mode="none"` sentinel is replaced by `None`.
     if ac_config is not None:
         ac_config.build(dump_folder=dump_folder).apply(model)
-
-    if model_compile_enabled:
-        _apply_compile_with_mode(model, compile_config, parallel_dims)
-        # apply_compile unconditionally sets capture_scalar_outputs=True
-        # (needed for MoE dynamic shapes). For dense models this breaks
-        # the separately-compiled loss_fn when loss_parallel + ignore_index
-        # produce unbacked symbols in cross_entropy.
-        torch._dynamo.config.capture_scalar_outputs = False
 
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.
@@ -355,10 +301,12 @@ def apply_fsdp(
         )
 
     for transformer_block in model.layers.values():
+        stacked_param_placements = linear_param_shard_placements(transformer_block)
         fully_shard(
             transformer_block,
             **fsdp_config,
             reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=stacked_param_placements.get,
         )
 
     if not tied and model.norm is not None and model.lm_head is not None:

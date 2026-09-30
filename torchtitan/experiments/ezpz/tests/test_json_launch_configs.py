@@ -61,7 +61,12 @@ def test_agpt_launch_jsons_use_current_schema():
         path = MOE_RUNS / json_name
         data = json.loads(path.read_text())
         assert not legacy_training.intersection(data.get("training", {})), path
-        assert not legacy_optimizer.intersection(data.get("optimizer", {})), path
+        assert "lr_scheduler" not in data, path
+        assert "optimizer" not in data, path
+        assert "lr_scheduler" in data.get("optim", {}), path
+        assert not legacy_optimizer.intersection(
+            data.get("optim", {}).get("optimizer", {})
+        ), path
         activation_checkpoint = data.get("activation_checkpoint")
         assert not (
             isinstance(activation_checkpoint, dict) and "mode" in activation_checkpoint
@@ -117,8 +122,8 @@ def test_retained_agpt_json_factories_load(
         assert isinstance(cfg.activation_checkpoint, ac_type)
     if cfg.checkpointer is not None:
         assert cfg.checkpointer.keep_latest_k == 0
-    assert cfg.optimizer.param_groups[0].optimizer_name == "AdamW"
-    assert cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] == pytest.approx(2.2e-4)
+    assert type(cfg.optim.optimizer.optimizers[0]).__qualname__ == "AdamW.Config"
+    assert cfg.optim.optimizer.optimizers[0].lr == pytest.approx(2.2e-4)
     if backend is not None:
         assert cfg.parallelism.expert_parallel_degree == 12
         assert _expert_backends(cfg) == {backend}

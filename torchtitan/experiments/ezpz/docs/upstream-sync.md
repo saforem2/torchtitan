@@ -1,6 +1,84 @@
 # Upstream Sync Log
 
-## Current landing (2026-09-26): upstream `58d2f429`, landed and validated
+## Current trial (2026-09-30): upstream `97e673b779`, hardware-qualified
+
+Branch `sync/upstream-97e673b779` merges upstream through
+[`97e673b779de03dd209f86a01ccb81f7fa9c5851`](https://github.com/pytorch/torchtitan/commit/97e673b779de03dd209f86a01ccb81f7fa9c5851).
+The semantic replay migrated ezpz to `components.optim`, nested `Optim`,
+`TrainingEngine`, and `ParallelismContext`; removed retired per-block model
+compilation; and preserved AGPT's stacked-linear `Shard(1)` FSDP placement.
+
+Static/exact-runtime gates include Torch 2.15 import/config construction, 163
+focused tests, compileall, diff checks, and independent review. Sunspot job
+`12479099` passed dense TP1 and MoE. TP2 full activation checkpointing remains
+an explicit limitation because checkpoint replay compares global 512-token
+metadata with TP-local 256-token metadata; no-AC control `12479103` passed three
+finite TP2 updates. This limitation was not hidden by disabling determinism
+checks or broad skips.
+
+The full 30B hardware gate passed in job `12479105` on repaired Torch 2.15,
+192 ranks / 16 nodes, HSDP `3 x 64`, with three finite updates and PBS exit 0.
+The bounded AdamW-only LR canary `12479108` then completed ten finite points and
+wrote validated CSV/NPZ/plot artifacts. Its sampled coarse minimum is `1e-5`;
+fixed-LR validation remains required before a production recommendation or
+optimizer-matrix release.
+
+The candidate then incorporated historical full-state checkpoint migration PR
+[#47](https://github.com/saforem2/torchtitan/pull/47) as `a4283256de`.
+Final-head DCP job `12479113` reproduced uninterrupted step-3/4 metrics exactly
+after a step-2 save/load and wrote nonempty step-2/step-4 metadata. Final-head
+two-host RL job `12479114` completed 40/40 rollouts, policy versions 0–3, four
+pushes/pulls, three finite nonzero-gradient updates, three checkpoints, and PBS
+exit 0. The collectable suite passed 382 tests, 4 skips, and 21 subtests.
+
+Matched 30B AdamW jobs `12479115`–`12479117` each completed ten finite updates
+at `4.64e-6`, `1e-5`, and `2.15e-5`. The `1e-5` arm had the lowest final loss
+and substantially lower final gradient norm than the outer arms, making it the
+best tested short-horizon candidate. This does not yet establish long-horizon
+production stability.
+
+## Current trial (2026-09-29): upstream `f359667`, validation in progress
+
+Branch `sync/upstream-f359667` merges upstream through
+[`f359667137438bef39274cb869626c3798512ecd`](https://github.com/pytorch/torchtitan/commit/f359667137438bef39274cb869626c3798512ecd)
+as `780f0a73e2`. It replays the local configuration/topology, MoE, RL, and
+regression surfaces as `32e72d34f9`, `1aa37d3b57`, `0aa353bdd3`, and
+`92d0e85c32`/`967b308ccf`.
+
+Independent review exposed three real runtime risks after the initial green
+suite: `EzpzValidator` requested nonexistent mesh axis `batch`, called a removed
+`self.validation_context()`, and fake-SPMD could silently expose invalid
+multi-axis PP meshes or attempt to serialize a live process group. The current
+uncommitted fixes use the `dp` mesh, enter `get_spmd_context()`, and fail closed
+for unsupported topology and serialization. The validator test now executes a
+real CPU validation pass; tautological strict-`xfail` controls were removed.
+
+Validation completed so far:
+
+- collectable ezpz suite after replay: **260 passed, 2 skipped, 14 subtests**;
+- focused post-review suite: **50 passed, 2 skipped**;
+- full `tests/unit_tests/ezpz`: **75 passed, 2 skipped**;
+- broad collection comparison: all 33 pre-sync collection failures are shared;
+  five post-only files are newly added tests;
+- deterministic dense and MoE pre/post parity passed at `rtol=0`, `atol=0` for
+  two AdamW updates, including exact outputs, losses, gradients, optimizer state,
+  post-step parameters, and bidirectional pre/post checkpoint resume.
+
+The numerical gate compares clean pre-sync `7d32b27055` with post-sync
+`967b308ccf` using `llama3/debugmodel` and `deepseek_v3/debugmodel`. Its script
+SHA-256 is
+`5b5cfe04d075ad4ea4718d0c08e03dc4a7217bb5236adb92efc8659b71a9b9ae`.
+Because native `FlexInnerAttention` backward is unsupported on this CPU runtime,
+only the inner-attention runtime module was replaced with deterministic causal
+eager attention; distributed DCP remains a hardware gate.
+
+The PR is deliberately not open. Sunspot dense/MoE/RL/checkpoint gates, Aurora
+dense/MoE gates, the final independent review, and exact-head CI remain pending.
+See the
+[standalone merge-readiness report](experiments/upstream-f359667-merge-readiness.md)
+for the live evidence matrix.
+
+## Previous landing (2026-09-26): upstream `58d2f429`, landed and validated
 
 PR [#37](https://github.com/saforem2/torchtitan/pull/37) landed as merge commit
 `3254972de6bf08fc5ce7d3fbad817b586dce98b7`, integrating 17 upstream commits
@@ -15,7 +93,7 @@ exact-head CI passed.
 
 The previous `0fd69d0b` integration below is retained as historical provenance.
 
-## Previous landing (2026-09-23): upstream `0fd69d0b`, landed and validated
+## Earlier landing (2026-09-23): upstream `0fd69d0b`, landed and validated
 
 The Sync 84 trial described below is historical. The current branch
 `sync/upstream-0fd69d0b` landed the audited upstream merge as `fa3147727`

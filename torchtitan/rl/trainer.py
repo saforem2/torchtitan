@@ -98,7 +98,6 @@ class Trainer(Configurable):
             training=config.training,
             debug=config.debug,
             activation_checkpoint=config.activation_checkpoint,
-            compile_config=compile_config,
             max_num_documents=max_num_documents,
         )
 
@@ -143,8 +142,8 @@ class Trainer(Configurable):
         engine.device_memory_monitor.reset_peak_stats()
 
         # Data parallelism: mesh is available after model construction builds it.
-        self.dp_enabled = engine.parallel_dims.dp_enabled
-        dp_mesh = engine.parallel_dims.get_optional_mesh("dp")
+        self.dp_enabled = engine.parallelism_context.dp_enabled
+        dp_mesh = engine.parallelism_context.get_optional_mesh("dp")
         if dp_mesh is not None:
             self.dp_size = dp_mesh.size()
             self.dp_rank = dp_mesh.get_local_rank()
@@ -197,7 +196,7 @@ class Trainer(Configurable):
         # TODO: switch from plain tensors to DTensor / spmd_types so the
         # reduction op is encoded in the placement instead of split across
         # `sum_reduced_metrics` / `max_reduced_metrics` dicts.
-        loss_mesh = self.engine.parallel_dims.get_optional_mesh("loss")
+        loss_mesh = self.engine.parallelism_context.get_optional_mesh("loss")
 
         out: dict[str, float] = {
             key: dist_utils.dist_sum(value.detach(), loss_mesh)
@@ -237,31 +236,24 @@ class Trainer(Configurable):
         self._step_num_tokens_per_dp_rank = sum(
             rank_batches[self.dp_rank].labels.numel() for rank_batches in training_data
         )
-        microbatch_metrics: list[dict[str, float]] = []
-        num_accumulation_steps = len(training_data)
-        prepared_global_valid_tokens = engine.prepare_step(
-            num_global_valid_tokens,
-            num_accumulation_steps=num_accumulation_steps,
+        result = engine.forward_backward(
+            microbatch_groups=[
+                [rank_batches[self.dp_rank]] for rank_batches in training_data
+            ],
+            global_valid_tokens=num_global_valid_tokens,
         )
-
-        for microbatch_index, rank_batches in enumerate(training_data):
-            local_batch = rank_batches[self.dp_rank]
-
-            engine.forward_backward_microbatch(
-                microbatch_group=[local_batch],
-                global_valid_tokens=prepared_global_valid_tokens,
-                accumulation_index=microbatch_index,
-            )
+        microbatch_metrics: list[dict[str, float]] = []
+        for loss_metrics in result.loss_metrics:
             microbatch_metrics.append(
                 self._reduce_forward_backward_metrics(
                     sum_reduced_metrics={
                         key: value
-                        for key, value in engine.loss_metrics.items()
+                        for key, value in loss_metrics.items()
                         if not key.endswith("/max")
                     },
                     max_reduced_metrics={
                         key: value
-                        for key, value in engine.loss_metrics.items()
+                        for key, value in loss_metrics.items()
                         if key.endswith("/max")
                     },
                 )
@@ -277,17 +269,17 @@ class Trainer(Configurable):
 
         engine = self.engine
         # Capture the learning rates used by this optimizer update before the
-        # scheduler advances in engine.optimizer_step().
-        lr_metrics = engine.lr_schedulers.get_metrics()
+        # scheduler advances in engine.optim_step().
+        lr_metrics = engine.optim.lr_schedulers.get_metrics()
 
-        grad_norm = engine.optimizer_step()
+        grad_norm = engine.optim_step()
 
         # TODO: Move performance, LR, and auxiliary-loss reporting into a shared
         # trainer metrics interface while preserving controller-side aggregation.
         performance = compute_training_performance_metrics(
             num_tokens=self._step_num_tokens_per_dp_rank,
             elapsed_time=time.perf_counter() - self._step_compute_start,
-            non_data_parallel_size=engine.parallel_dims.non_data_parallel_size,
+            non_data_parallel_size=engine.parallelism_context.non_data_parallel_size,
             num_flops_per_token=engine.num_flops_per_token,
             gpu_peak_flops=self.gpu_peak_flops,
             has_quantization=engine.has_quantization,
@@ -321,7 +313,7 @@ class Trainer(Configurable):
                     device_mem_stats.num_alloc_retries
                 ),
                 "trainer/memory/num_ooms": float(device_mem_stats.num_ooms),
-                **collect_aux_loss_metrics(engine.parallel_dims),
+                **collect_aux_loss_metrics(engine.parallelism_context),
                 **(
                     {"trainer/mfu_percent": performance["mfu_percent"]}
                     if "mfu_percent" in performance

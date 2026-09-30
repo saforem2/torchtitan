@@ -15,13 +15,16 @@ from torchtitan.components.data import (
     SingleDatasetConfig,
 )
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.optimizer import (
+from torchtitan.components.optim import (
+    AdamW,
+    DistMuon,
     LRSchedulersContainer,
+    Optim,
     OptimizersContainer,
-    ParamGroupConfig,
 )
 from torchtitan.components.tokenizer import MultiModalTokenizer
-from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.distributed.flex_shard import (
     BlockShard,
@@ -29,7 +32,7 @@ from torchtitan.distributed.flex_shard import (
     ComputeLayout,
     Owned,
 )
-from torchtitan.distributed.parallel_dims import MeshAxisName
+from torchtitan.distributed.parallelism_context import MeshAxisName
 from torchtitan.hf_datasets.multimodal.mm_collator import MultiModalCollator
 from torchtitan.hf_datasets.multimodal.mm_datasets import (
     MM_DATASETS,
@@ -89,7 +92,7 @@ def _kimi_multimodal_dataloader(
 def kimi_k2_5_debugmodel(
     seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
 ) -> Trainer.Config:
-    model_config = model_registry("debugmodel", seq_len=seq_len)
+    model_config = model_registry("debugmodel", enable_sp=True, seq_len=seq_len)
     parallelism = ParallelismConfig()
     return _KimiTrainerConfig(
         loss=ChunkedLossWrapper.Config(
@@ -102,17 +105,19 @@ def kimi_k2_5_debugmodel(
         metrics=MetricsProcessor.Config(log_freq=1),
         model=model_config,
         dataloader=_kimi_multimodal_dataloader(MM_DATASETS["cc12m-test"]),
-        optimizer=_dist_muon_optimizer(
-            model_config,
-            muon_lr=8e-4,
-            adamw_lr=8e-4,
-            parallelism=parallelism,
-        ),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=_dist_muon_optimizer(
+                model_config,
+                muon_lr=8e-4,
+                adamw_lr=8e-4,
+                parallelism=parallelism,
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=1 * model_config.max_context_length,
@@ -129,7 +134,7 @@ def kimi_k2_5_debugmodel(
 def moonlight_16b_a3b(seq_len: int | None = None) -> Trainer.Config:
     """Moonlight 16B-A3B: the text-only DeepSeekV3 sibling (no vision tower)."""
     model_config = model_registry(
-        "moonlight-16B-A3B", seq_len=seq_len, attn_backend="flex"
+        "moonlight-16B-A3B", enable_sp=True, seq_len=seq_len, attn_backend="flex"
     )
     parallelism = ParallelismConfig(
         expert_parallel_degree=8,
@@ -145,17 +150,19 @@ def moonlight_16b_a3b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=_dist_muon_optimizer(
-            model_config,
-            muon_lr=3e-4,
-            adamw_lr=3e-4,
-            parallelism=parallelism,
-        ),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2000,
-            decay_ratio=0.8,
-            decay_type="cosine",
-            min_lr_factor=0.1,
+        optim=Optim.Config(
+            optimizer=_dist_muon_optimizer(
+                model_config,
+                muon_lr=3e-4,
+                adamw_lr=3e-4,
+                parallelism=parallelism,
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2000,
+                decay_ratio=0.8,
+                decay_type="cosine",
+                min_lr_factor=0.1,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
@@ -171,7 +178,9 @@ def moonlight_16b_a3b(seq_len: int | None = None) -> Trainer.Config:
 
 def kimi_vl_a3b(seq_len: int | None = None) -> Trainer.Config:
     """Kimi-VL A3B: Moonlight text tower + 2D MoonViT vision (image-text)."""
-    model_config = model_registry("Kimi-VL-A3B", seq_len=seq_len, attn_backend="flex")
+    model_config = model_registry(
+        "Kimi-VL-A3B", enable_sp=True, seq_len=seq_len, attn_backend="flex"
+    )
     parallelism = ParallelismConfig(
         expert_parallel_degree=8,
     )
@@ -191,17 +200,19 @@ def kimi_vl_a3b(seq_len: int | None = None) -> Trainer.Config:
         # Kimi-VL is a compatibility flavor; resizing intentionally follows
         # Kimi-K2.5 per-side scaling instead of legacy Kimi-VL's side rejection.
         dataloader=_kimi_multimodal_dataloader(MM_DATASETS["cc12m"]),
-        optimizer=_dist_muon_optimizer(
-            model_config,
-            muon_lr=3e-4,
-            adamw_lr=3e-4,
-            parallelism=parallelism,
-        ),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2000,
-            decay_ratio=0.8,
-            decay_type="cosine",
-            min_lr_factor=0.1,
+        optim=Optim.Config(
+            optimizer=_dist_muon_optimizer(
+                model_config,
+                muon_lr=3e-4,
+                adamw_lr=3e-4,
+                parallelism=parallelism,
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2000,
+                decay_ratio=0.8,
+                decay_type="cosine",
+                min_lr_factor=0.1,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=1 * model_config.max_context_length,
@@ -219,7 +230,9 @@ def kimi_k2_5(seq_len: int | None = None) -> Trainer.Config:
     """Full Kimi K2.5 (~1T-total / ~32B-active)."""
     compile_config = CompileConfig(components=["loss"])
     # The report uses BF16 compute; its FP8 path only compresses saved activations.
-    model_config = model_registry("Kimi-K2.5", seq_len=seq_len, attn_backend="flex")
+    model_config = model_registry(
+        "Kimi-K2.5", enable_sp=True, seq_len=seq_len, attn_backend="flex"
+    )
     parallelism = ParallelismConfig(
         pipeline_parallel_schedule="Interleaved1F1B",
         expert_parallel_degree=8,
@@ -235,17 +248,19 @@ def kimi_k2_5(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=_dist_muon_optimizer(
-            model_config,
-            muon_lr=2.2e-4,
-            adamw_lr=2.2e-4,
-            parallelism=parallelism,
-        ),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2000,
-            decay_ratio=0.8,
-            decay_type="cosine",
-            min_lr_factor=0.1,
+        optim=Optim.Config(
+            optimizer=_dist_muon_optimizer(
+                model_config,
+                muon_lr=2.2e-4,
+                adamw_lr=2.2e-4,
+                parallelism=parallelism,
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2000,
+                decay_ratio=0.8,
+                decay_type="cosine",
+                min_lr_factor=0.1,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
@@ -272,17 +287,17 @@ def _per_expert_compute_layout(parallelism: ParallelismConfig) -> ComputeLayout:
         )
 
     # Preserve exact EP-first DTensor ownership. If an EP-local expert count is
-    # smaller than the EFSDP size, add balanced rank assignment only after
-    # benchmarks show that the fixed nonempty EFSDP coordinates are a hotspot.
+    # smaller than the edp_shard size, add balanced rank assignment only after
+    # benchmarks show that the fixed nonempty edp_shard coordinates are a hotspot.
     return ComputeLayout(
         shardings_by_mesh_axis={
-            MeshAxisName.EFSDP.value: Shard(0),
+            MeshAxisName.EDP_SHARD.value: Shard(0),
             MeshAxisName.EP.value: Shard(0),
         },
-        # EP splits the expert dimension first, then EFSDP repartitions each
+        # EP splits the expert dimension first, then edp_shard repartitions each
         # EP-local expert domain, which reverses the storage-mesh axis order.
         shard_order_by_tensor_dim={
-            0: (MeshAxisName.EP.value, MeshAxisName.EFSDP.value),
+            0: (MeshAxisName.EP.value, MeshAxisName.EDP_SHARD.value),
         },
     )
 
@@ -350,15 +365,6 @@ def _dist_muon_optimizer(
         "w2": owned,
     }
     num_layers = len(model_config.layers)
-    muon_kwargs = {
-        "lr": muon_lr,
-        "weight_decay": 0.1,
-        "foreach": False,
-        # Kimi K2 uses 0.2 * sqrt(max(rows, columns))
-        # for shape-consistent AdamW-scale updates instead of Muon's original
-        # aspect-ratio scaling.
-        "adjust_lr_fn": "match_rms_adamw",
-    }
     adamw_kwargs = {
         "lr": adamw_lr,
         "betas": (0.9, 0.95),
@@ -441,27 +447,27 @@ def _dist_muon_optimizer(
         r")$"
     )
     return OptimizersContainer.Config(
-        implementation="foreach",
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            DistMuon.Config(
                 pattern=muon_pattern,
-                optimizer_name="DistMuon",
-                optimizer_kwargs=muon_kwargs,
+                bucket_configs=tuple(bucket_configs),
+                compute_sharding_by_fqn=compute_sharding_by_fqn,
+                lr=muon_lr,
+                weight_decay=0.1,
+                # Kimi K2 uses 0.2 * sqrt(max(rows, columns)) for
+                # shape-consistent AdamW-scale updates instead of Muon's
+                # original aspect-ratio scaling.
+                adjust_lr_fn="match_rms_adamw",
             ),
             # The remaining parameters are embeddings, norms, biases, LM head,
             # and the vision tower.
-            ParamGroupConfig(
+            AdamW.Config(
                 pattern=r".*",
-                optimizer_name="AdamW",
-                optimizer_kwargs=adamw_kwargs,
+                foreach=True,
+                fused=False,
+                **adamw_kwargs,
             ),
         ],
-        optimizer_factory_kwargs_by_name={
-            "DistMuon": {
-                "bucket_configs": tuple(bucket_configs),
-                "compute_sharding_by_fqn": compute_sharding_by_fqn,
-            }
-        },
     )
 
 
@@ -475,22 +481,27 @@ def _align_dist_muon_expert_compute_layouts(
     The registry builds compute layouts from the recipe's declared parallelism,
     but the CLI can still override ``expert_parallel_degree`` afterwards. That
     override decides whether routed experts use the 1D ``dp_shard`` layout or
-    the 2D EP/EFSDP layout, so their layouts have to be rebuilt here.
+    the 2D ep/edp_shard layout, so their layouts have to be rebuilt here.
     """
     # TODO: Remove this function once parallelism can no longer be overridden
     # from the CLI; the registry layouts are then already final.
-    factory_kwargs_by_name = {
-        name: dict(factory_kwargs)
-        for name, factory_kwargs in (
-            optimizer_config.optimizer_factory_kwargs_by_name.items()
-        )
-    }
-    dist_muon_kwargs = factory_kwargs_by_name.get("DistMuon")
-    if dist_muon_kwargs is None:
+    dist_muon_index = next(
+        (
+            index
+            for index, config in enumerate(optimizer_config.optimizers)
+            if isinstance(config, DistMuon.Config)
+        ),
+        None,
+    )
+    if dist_muon_index is None:
         return optimizer_config
+    dist_muon_config = cast(
+        DistMuon.Config,
+        optimizer_config.optimizers[dist_muon_index],
+    )
     compute_sharding_by_fqn = cast(
         dict[str, ComputeLayout],
-        dist_muon_kwargs["compute_sharding_by_fqn"],
+        dist_muon_config.compute_sharding_by_fqn,
     )
     per_expert = _per_expert_compute_layout(parallelism)
     aligned_shardings = {}
@@ -504,10 +515,14 @@ def _align_dist_muon_expert_compute_layouts(
     if not changed:
         return optimizer_config
 
-    dist_muon_kwargs["compute_sharding_by_fqn"] = aligned_shardings
+    optimizers = list(optimizer_config.optimizers)
+    optimizers[dist_muon_index] = replace(
+        dist_muon_config,
+        compute_sharding_by_fqn=aligned_shardings,
+    )
     return replace(
         optimizer_config,
-        optimizer_factory_kwargs_by_name=factory_kwargs_by_name,
+        optimizers=optimizers,
     )
 
 
@@ -515,8 +530,8 @@ def _align_dist_muon_expert_compute_layouts(
 class _KimiTrainerConfig(Trainer.Config):
     def __post_init__(self) -> None:
         Trainer.Config.__post_init__(self)
-        self.optimizer = _align_dist_muon_expert_compute_layouts(
-            self.optimizer,
+        self.optim.optimizer = _align_dist_muon_expert_compute_layouts(
+            self.optim.optimizer,
             parallelism=self.parallelism,
         )
         # TODO(#3353): Support TP-produced _StridedShard layouts in DistMuon.

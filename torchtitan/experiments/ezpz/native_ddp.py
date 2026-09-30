@@ -15,8 +15,9 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.nn.parallel import DistributedDataParallel
 
 from torchtitan.components.loss import CrossEntropyLoss
-from torchtitan.config import ParallelismConfig, TrainingConfig
-from torchtitan.distributed import ParallelDims
+from torchtitan.config import TrainingConfig
+from torchtitan.distributed import ParallelismContext
+from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 
 
 class NativeDDP(DistributedDataParallel):
@@ -110,9 +111,9 @@ def native_ddp_autocast_context(
 def validate_native_ddp(
     *,
     model_name: str,
-    parallel_dims: ParallelDims,
+    parallel_dims: ParallelismContext,
     training: TrainingConfig,
-    parallelism: ParallelismConfig,
+    parallelism: EzpzParallelismConfig,
     loss_fn: object,
     gradient_accumulation_steps: int,
     fault_tolerance_enabled: bool,

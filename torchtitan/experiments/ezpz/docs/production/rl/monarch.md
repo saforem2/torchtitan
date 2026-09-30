@@ -266,7 +266,7 @@ module load oneapi/release/2026.1.0 hdf5 pti-gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export PATH="/opt/pbs/bin:${PATH}"
 
-source <(curl -fsSL https://bit.ly/ezpz-utils)
+source <(curl -fsSL https://ezpz.cool/utils.sh)
 ezpz_setup_job
 
 VENV_ROOT=<shared directory containing the validated archive>

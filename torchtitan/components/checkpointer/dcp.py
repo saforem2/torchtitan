@@ -28,6 +28,7 @@ from torch.distributed.checkpoint.state_dict_saver import (
     AsyncCheckpointerType,
     AsyncSaveResponse,
 )
+
 from torchtitan.config import TORCH_DTYPE_MAP
 from torchtitan.observability import structured_logger as sl
 from torchtitan.tools import filesystem
@@ -47,6 +48,14 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
+def _native_storage_reader(checkpoint_id: str):
+    if filesystem.is_remote(checkpoint_id):
+        from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
+
+        return FsspecReader(checkpoint_id)
+    return dcp.FileSystemReader(checkpoint_id)
+
+
 if TYPE_CHECKING:
     import torch.nn as nn
 
@@ -54,7 +63,7 @@ if TYPE_CHECKING:
 
     # The EMA class shares its name with the ``EMA = "ema"`` state-dict key
     # constant imported above, so alias it here.
-    from torchtitan.components.optimizer import (  # noqa: N811
+    from torchtitan.components.optim import (  # noqa: N811
         EMA as EMAContainer,
         LRSchedulersContainer,
         OptimizersContainer,
@@ -108,7 +117,7 @@ class CheckpointManager(BaseCheckpointManager):
 
         The solution to this problem is optimizer flattening.
         TorchTitan's OptimizersContainer flattens optimizer state dicts to FQN-keyed
-        flat dicts using the utilities in torchtitan/components/optimizer/utils.py.
+        flat dicts using the utilities in torchtitan/components/optim/utils.py.
 
     2. With complex PP schedules, we have multiple model chunks per pp rank. This
     compounds challenge (1) by also requiring us to reason about multiple 'optim'
@@ -131,7 +140,7 @@ class CheckpointManager(BaseCheckpointManager):
         lr_schedulers (LRSchedulersContainer): The lr schedulers used to optimize
             the model.
         ema (Optional[EMA]): Online EMA of model weights, or None when the
-            user hasn't configured one (see torchtitan.components.optimizer.ema.EMA).
+            user hasn't configured one (see torchtitan.components.optim.ema.EMA).
         states (Dict[str, Any]): The states that need to be saved, other than the
             previous components.
         sd_adapter (Optional[type[BaseStateDictAdapter]]): The adapter used to convert
@@ -404,7 +413,25 @@ class CheckpointManager(BaseCheckpointManager):
             state_dict = self.sd_adapter.from_hf(hf_state_dict)
             states[MODEL].load_state_dict(state_dict)
         else:
-            dcp.load(state_dict, checkpoint_id=checkpoint_id)
+            if self.sd_adapter is None:
+                dcp.load(state_dict, checkpoint_id=checkpoint_id)
+            else:
+                storage_reader = _native_storage_reader(checkpoint_id)
+                from .legacy_native_dcp import prepare_legacy_native_load
+
+                checkpoint_metadata = storage_reader.read_metadata().state_dict_metadata
+                model_keys = (
+                    set(states[MODEL].state_dict()) if MODEL in states else set()
+                )
+                state_dict, finish_load = prepare_legacy_native_load(
+                    state_dict,
+                    model_keys,
+                    checkpoint_metadata,
+                    self.sd_adapter,
+                )
+
+                dcp.load(state_dict, storage_reader=storage_reader)
+                state_dict = finish_load(state_dict)
 
             # TODO: Since we flatten the model states in state_dict, we need to
             # manually call load_state_dict() for the model. Need to fix this.

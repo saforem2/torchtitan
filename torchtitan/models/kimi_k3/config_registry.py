@@ -11,13 +11,16 @@ from torch.distributed.tensor import Shard
 
 from torchtitan.components.data import GrainDataLoader, SingleDatasetConfig
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.optimizer import (
+from torchtitan.components.optim import (
+    AdamW,
+    DistMuon,
     LRSchedulersContainer,
+    Optim,
     OptimizersContainer,
-    ParamGroupConfig,
 )
 from torchtitan.components.tokenizer import MultiModalTokenizer
-from torchtitan.config import ParallelismConfig, TrainingConfig
+from torchtitan.config import TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed.activation_checkpoint import SelectiveAC
 from torchtitan.distributed.flex_shard import (
     BlockShard,
@@ -25,7 +28,7 @@ from torchtitan.distributed.flex_shard import (
     ComputeLayout,
     Owned,
 )
-from torchtitan.distributed.parallel_dims import MeshAxisName
+from torchtitan.distributed.parallelism_context import MeshAxisName
 from torchtitan.hf_datasets.multimodal.mm_collator import MultiModalCollator
 from torchtitan.hf_datasets.multimodal.mm_datasets import (
     MM_DATASETS,
@@ -81,7 +84,7 @@ def kimi_k3_debugmodel(
     seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
 ) -> Trainer.Config:
     """Debugmodel with per-head Muon for all logical 2D matrices."""
-    model_config = model_registry("debugmodel", seq_len=seq_len)
+    model_config = model_registry("debugmodel", enable_sp=True, seq_len=seq_len)
     parallelism = ParallelismConfig()
     return _KimiK3TrainerConfig(
         loss=ChunkedLossWrapper.Config(
@@ -94,17 +97,19 @@ def kimi_k3_debugmodel(
         metrics=MetricsProcessor.Config(log_freq=1),
         model=model_config,
         dataloader=_kimi_k3_multimodal_dataloader(MM_DATASETS["cc12m-test"]),
-        optimizer=_dist_muon_optimizer(
-            model_config,
-            muon_lr=8e-4,
-            adamw_lr=8e-4,
-            parallelism=parallelism,
-        ),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=_dist_muon_optimizer(
+                model_config,
+                muon_lr=8e-4,
+                adamw_lr=8e-4,
+                parallelism=parallelism,
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=1 * model_config.max_context_length,
@@ -252,12 +257,6 @@ def _dist_muon_optimizer(
             bucket_configs.append(
                 BucketConfig(name=f"{name}.routed-experts", patterns=routed_fqns)
             )
-    muon_kwargs = {
-        "lr": muon_lr,
-        "weight_decay": 0.1,
-        "foreach": False,
-        "adjust_lr_fn": "match_rms_adamw",
-    }
     adamw_kwargs = {
         "lr": adamw_lr,
         "betas": (0.9, 0.95),
@@ -281,27 +280,24 @@ def _dist_muon_optimizer(
         r")$"
     )
     return OptimizersContainer.Config(
-        implementation="foreach",
-        param_groups=[
-            ParamGroupConfig(
+        optimizers=[
+            DistMuon.Config(
                 pattern=muon_pattern,
-                optimizer_name="DistMuon",
-                optimizer_kwargs=muon_kwargs,
+                bucket_configs=tuple(bucket_configs),
+                compute_sharding_by_fqn=compute_sharding_by_fqn,
+                lr=muon_lr,
+                weight_decay=0.1,
+                adjust_lr_fn="match_rms_adamw",
             ),
             # The remaining parameters are embeddings, norms, biases, the LM
             # head, the KDA scalars/convolutions, and the vision tower.
-            ParamGroupConfig(
+            AdamW.Config(
                 pattern=r".*",
-                optimizer_name="AdamW",
-                optimizer_kwargs=adamw_kwargs,
+                foreach=True,
+                fused=False,
+                **adamw_kwargs,
             ),
         ],
-        optimizer_factory_kwargs_by_name={
-            "DistMuon": {
-                "bucket_configs": tuple(bucket_configs),
-                "compute_sharding_by_fqn": compute_sharding_by_fqn,
-            }
-        },
     )
 
 
@@ -309,13 +305,14 @@ def _dist_muon_optimizer(
 class _KimiK3TrainerConfig(Trainer.Config):
     def __post_init__(self) -> None:
         Trainer.Config.__post_init__(self)
-        self.optimizer = _align_dist_muon_expert_compute_layouts(
-            self.optimizer,
+        self.optim.optimizer = _align_dist_muon_expert_compute_layouts(
+            self.optim.optimizer,
             parallelism=self.parallelism,
         )
         # TODO(#3353): Support TP-produced _StridedShard layouts in DistMuon.
         uses_dist_muon = any(
-            group.optimizer_name == "DistMuon" for group in self.optimizer.param_groups
+            isinstance(config, DistMuon.Config)
+            for config in self.optim.optimizer.optimizers
         )
         if uses_dist_muon and self.parallelism.tensor_parallel_degree > 1:
             # Fail during config parsing, before TP/FSDP creates _StridedShard

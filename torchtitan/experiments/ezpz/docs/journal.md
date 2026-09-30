@@ -2,6 +2,103 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-09-30 (Sunspot) -- upstream `97e673b779` integration and 30B AdamW canary
+
+Branch `sync/upstream-97e673b779` integrates upstream through `97e673b779` and
+the concurrent `origin/ezpz` documentation commit. Optimizer/config and
+`TrainingEngine`/`ParallelismContext` migrations are complete. Exact Torch 2.15
+imports/config construction passed, the combined focused suite passed 163 tests,
+and independent review found and closed one stale MoE per-block compile path.
+
+Hardware job `12479099` passed dense TP1 and MoE but exposed a TP2 attention
+reshape assumption. Follow-up jobs `12479100`-`12479102` showed that TP2 with
+full activation checkpointing is not recompute-stable: saved global-token
+metadata (512) is compared with recomputed TP-local metadata (256). Geometry
+experiments did not solve it and were reverted. The exact no-AC control
+`12479103` completed three finite TP2 updates with PBS exit 0 (`loss3=10.55887`,
+`grad3=0.6776`), isolating the limitation to full-AC/SPMD replay rather than TP.
+
+The decisive 30B gate `12479105` passed on repaired Torch 2.15 at 192 ranks / 16
+nodes with HSDP `3 x 64`: three finite updates, PBS exit 0,
+`FULL_MODEL_CANARY_PASS`, `loss3=11.83799`, and `grad3=3.6425`.
+
+AdamW LR canary `12479108` then completed ten finite points over `1e-7` to
+`1e-4` at GBS 960. The sampled smoothed-loss minimum is `11.677259086400811` at
+`1e-5`, with loss increasing at all three higher samples. The runner's
+`6.70e-7` output is a safety-scaled detector candidate, not the measured
+optimum. CSV/plot evidence is preserved under
+`docs/experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/`. The
+optimizer matrix remains blocked pending fixed-LR validation.
+
+The final integration candidate then incorporated historical full-state
+checkpoint migration PR #47 as `a4283256de`. On that exact production-code
+head, DCP job `12479113` exited 0, wrote nonempty step-2 and step-4 metadata,
+loaded step 2, and reproduced uninterrupted step-3/4 loss and gradient values
+exactly. Two-host RL/weight-sync job `12479114` also exited 0 with 40/40
+completed rollouts, policy versions 0–3, four pushes/pulls, three full
+checkpoints, and finite nonzero gradient norms `0.28`, `0.27`, `0.27`. Its
+isolated overlay uses BlendCorpus `feat/remove-deepspeed` at
+`50502b0c9de37887bdf2123b13293e264ab9942f`; the protected RL venv was not
+modified.
+
+Matched 30B AdamW fixed-LR jobs `12479115`–`12479117` each completed ten finite
+updates on the same `3 x 64` topology. Final loss/gradient values were
+`10.62454/31.9376` at `4.64e-6`, `10.11744/8.4969` at `1e-5`, and
+`10.42669/33.6769` at `2.15e-5`. `1e-5` is therefore the best tested
+short-horizon candidate; longer training remains required for a production
+recommendation. The final collectable suite passed 382 tests with 4 skips and
+21 subtests after migrating stale test fixtures.
+
+## 2026-09-30 (Sunspot) -- 30B backend/runtime reconstruction
+
+Historical logs establish that the successful 30B optimizer campaign used
+Torch 2.13 with `partial_dtensor` and pure FSDP over 192 ranks. Current-head
+Torch 2.14 job `12479081` recreated its 16-node/LBS=5/GBS=960 geometry but
+failed before step 1: FSDP attempted a 36.35-GiB all-gather with 29.84 GiB
+already resident per rank. Resident memory was nearly unchanged from shard-16,
+so shard-192 did not restore the historical memory behavior.
+
+The shared Torch 2.15 environment was repaired after proving that a broad
+`core*` cleanup had deleted 38 legitimate package files. The exact Torch wheel
+and affected packages were reinstalled, Triton's missing file was restored at
+its RECORD hash, and 33,409 RECORD files verified with zero missing or
+mismatched. Current-head job `12479083` then reproduced Torch 2.14's same
+36.35-GiB first-forward all-gather OOM. Frameworks `2026.1.0` Torch 2.13 job
+`12479084` reached FSDP construction but still reproduced pytorch/pytorch#181519
+despite current head's unconditional `_parallelize`: a plain `weight` remained
+where `dp_mesh_dims` requires a full-mesh DTensor. Attempt `12479082` was a
+harness-only failure because its batch script did not load the frameworks module
+needed to resolve MKL; the corrected wrapper is committed.
+
+An opt-in dense TP=1 legacy compatibility path was added at commit `c484260c02`:
+skip full-SPMD parameter annotation, use the one-dimensional `dp_shard` mesh,
+and omit `DataParallelMeshDims`. Focused tests pass. Torch 2.15 5B job `12479085`
+validated the mechanism with three finite updates (`loss3=11.99557`,
+`grad3=1.8735`, PBS exit 0). The 30B escalations failed: Torch 2.15 `12479086`
+still requested the 36.35-GiB first-forward all-gather, and frameworks Torch
+2.13 `12479087` requested 72 GiB during fused-FFN initialization at
+`gate_init(t[0])`. Thus neither a repaired newer runtime nor mesh-only emulation
+of `partial_dtensor` restores 30B on current head.
+
+Exact historical-source attempt `12479088` ran commit `5a26d8e7c5c05cd38bec7ab4eb48036e5ba54c6d`
+with the package versions recorded by successful job `12473743`, but the shared
+runtime had later lost 17 `core.py` files and could only be repaired as a copy;
+the attempt did not reproduce a clean historical baseline.
+
+The source regression was then identified directly. Upstream #4808 changed
+fused FFN `w13` from `[2F,D]` to `[2,F,D]` and added a required FSDP `Shard(1)`
+override. AGPT's copied FSDP wrapper omitted that replay, so default `Shard(0)`
+padded the two-element axis to the DP shard degree. The resulting allocations
+match the failures exactly: about 36 GiB BF16 and 72 GiB FP32 at shard 192.
+Commit `cde3c93227` mirrors core's existing
+`linear_param_shard_placements()` mapping. Focused tests pass. Job `12479089`
+then failed closed because shard 192 cannot evenly divide matrix-row dimension
+16,384; the corrected `3 x 64` HSDP job `12479090` completed three finite 30B
+updates on repaired Torch 2.15 with PBS exit 0, `loss3=11.8405`, and
+`grad3=3.5988`. This closes the full-model runtime gate without restoring
+`full_dtensor`; subsequent 30B work must retain a dimension-compatible shard
+degree and the stacked-linear placement override.
+
 ## 2026-09-30 (Aurora) -- production reporting audit and tail evaluation
 
 - Aurora's supported submission entry point is now the `prod` routing queue,
@@ -22,70 +119,165 @@ Running log of what's happening, session by session. Most recent first.
   23,746 but was evaluated only through step 22,300; the 2B-256 stage-2 chain is
   complete at step 41,300 but was evaluated only through step 28,000. Submitted
   independent fail-closed jobs `8880872` (`2b_real`, step 23,746) and `8880873`
-  (complex `2b`, step 41,300). Both target seven measurements and isolated
-  Flare output paths. Canonical chart regeneration remains gated on accepted
-  artifacts from both jobs. Both subsequently finished with PBS exit 0 and
-  validated seven-measurement artifacts. For 2B-256 stage-2 step 41,300,
-  `8880873` measured:
-  HellaSwag `acc_norm=0.5557`, ARC-Easy `acc=0.6717`, Winogrande `acc=0.5493`,
-  PIQA `acc_norm=0.7193`, OpenBookQA `acc_norm=0.3980`, BoolQ `acc=0.5477`, and
-  ARC-Challenge 25-shot `acc_norm=0.3968`. Artifact SHA-256:
-  `757d01be81933a310ad5a33b28840481266579079d98dda821e3ae0be706f945`.
-  For 2B-512 stage-2 step 23,746, `8880872` measured HellaSwag
-  `acc_norm=0.5446`, ARC-Easy `acc=0.6789`, Winogrande `acc=0.5328`, PIQA
-  `acc_norm=0.7089`, OpenBookQA `acc_norm=0.3440`, BoolQ `acc=0.5777`, and
-  ARC-Challenge 25-shot `acc_norm=0.4053`. Artifact SHA-256:
-  `8f64e432132173db622c1f019145515d716b1ac240aa3acea9d5853526e55720`.
-- The production and eval charts still reflect the pre-tail September 27 data
-  snapshot. The full 608-result corpus plus all four tail artifacts was overlaid
-  into a clean Aurora checkout and rerendered successfully. The combined eval
-  chart now reaches 20B-512 step 11,100, 20B-256 step 17,500, 2B-512 stage-2
-  step 23,746, and 2B-256 stage-2 step 41,300. SHA-256 values for the generated
-  SVGs are `038c14f57581cd0b9ba20b0f68b33f5f414d59f9c65e773d9a13180a70fa3a11`
-  (combined), `71fd5154b54280f03c72ea2fa5e47a67956c8bc4a602f2ed9966c88fa78c9edd`
-  (2B overview), and
-  `095d41f56e559fdba2f0b1d19505b297a79890fad5abe219b0607fa67afe778f`
-  (20B overview).
+  (complex `2b`, step 41,300). Both subsequently finished with PBS exit 0 and
+  validated seven-measurement artifacts.
+- The full 608-result corpus plus all four tail artifacts was overlaid into a
+  clean Aurora checkout and rerendered successfully. The combined eval chart now
+  reaches 20B-512 step 11,100, 20B-256 step 17,500, 2B-512 stage-2 step 23,746,
+  and 2B-256 stage-2 step 41,300.
 - Exact-head full-state smoke `8880891` used PR #45 commit `6b3246fac9` and
-  finished with PBS exit 143 before DCP load. Its branch was based on the older
-  `44f8a46cef` integration point and lacked the later AGPT full-SPMD
-  parallelization path used by passing gate `8879698`; all ranks rejected a
-  plain parameter during FSDP construction. This does not exercise or refute
-  the legacy DCP migration. Rebase the migration onto the validated sync head
-  before another restore allocation.
+  finished with PBS exit 143 before DCP load. Its branch lacked the later AGPT
+  full-SPMD parallelization path used by passing gate `8879698`; this did not
+  exercise or refute the legacy DCP migration.
 - Production umbrella `8879474` remains queued in `medium`; follower `8879475`
   remains dependency-held. Neither has launched and no production checkpoint
   head has changed.
 
+## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
+
+The 30B pre-step failure discriminator completed on Sunspot. Job `12479051`
+passed exact-size raw BF16 all-gather, FP32 reduce-scatter, and FP32 HSDP
+replica-group all-reduce controls. Final job `12479055` (commit
+`199563d0658c00b3b738fff1b597371a07b2a845`) then completed three forward,
+backward, and nonzero optimizer updates in both the pure-FSDP `1 x 16` arm and
+the four-node HSDP `3 x 16` arm; PBS exit was 0 and the artifact contains
+`FSDP2_XCCL_MATRIX_PASS`. This rules out a deterministic raw-XCCL,
+shard-16-storage, or reduced-replicate-axis defect. It does not clear the
+768-rank model, so the next gate is a four-node full-30B canary before any
+production-scale LR restart. Intermediate jobs `12479049`, `12479052`,
+`12479053`, and `12479054` exposed and corrected probe-only launcher,
+rendezvous, sparse-gradient, and XCCL AVG-versus-SUM contract errors.
+
+The first full-model escalation did not clear the blocker. HSDP canary
+`12479056` (`3 x 16`, 48 ranks, commit `f38c35ec99`) built the 26.20B model at
+32.64 GiB/rank and entered step 1, then failed during `loss.backward()` with a
+Level Zero `MPL_gpu_imemcpy`/MPI pipeline assertion in oneCCL scale-out
+all-reduce; PBS exit was 137. Pure-FSDP control `12479057` (`1 x 16`, 16 ranks,
+commit `7b6ad55de6`) also built the model and entered step 1, then ranks 12 and
+14 reported `UR_RESULT_ERROR_OUT_OF_RESOURCES` from backward before clipping or
+an optimizer update; PBS exit was 143. This exonerates the HSDP replica axis as
+the primary cause but confirms a full-model, pre-update collective/resource
+ceiling. A current-head 20B/64-layer pure-FSDP control is the next size rung.
+
+Canary instrumentation was then corrected. `12479064` had completed backward
+and optimizer work but crashed in the opt-in per-parameter diagnostics, which
+added hundreds of DTensor all-reduces; it was not a valid 10B training failure.
+With diagnostics removed, 10B job `12479065` completed three finite AdamW
+updates and exited 0 (`12.01583 -> 11.97582`, grad norm `2.3522 -> 2.4822`).
+Corrected 20B `12479066` still failed in first backward. Algorithm controls
+`12479059`/`12479060`, node-local shard control `12479061`, and IPC-cache
+control `12479062` all failed. Torch 2.13 `12479063` never became a runtime A/B:
+current `dp_mesh_dims` rejected a plain `weight` during FSDP construction.
+Depth-48 eager job `12479067` hit a real HBM OOM. These eager canaries differed
+from the compiled production 30B launcher, so the maintained canary now retains
+compile for the next production-shaped check.
+
+Compiled follow-ups exhausted the remaining safe local controls. `12479068`
+and `12479072` failed before step 1 in FSDP backward unshard/copy-in. Corrected
+10B `12479065` passed three updates; corrected 20B `12479066` failed in
+backward. `CCL_SYCL_OUTPUT_EVENT=0` let 20B `12479071` reach AdamW state
+allocation, where it OOMed, but did not clear 30B. Backward-prefetch suppression
+shifted but did not remove the 30B failure (`12479075`). At dimension-safe
+`dp_shard=32`, `12479076` failed in post-backward `_chunk_cat`; equivalent-copy,
+synchronization, and combined controls `12479078`-`12479080` still failed on the
+first fallback write, proving the resource exhaustion originated earlier. The
+failed monkeypatches were removed. The current Torch 2.14 full-model path is
+blocked above 10B; preserved Torch 2.13 cannot build current full-SPMD FSDP,
+and the available Torch 2.15 venv has missing core package files. No 64-node LR
+retry is justified until a repaired newer XPU runtime or upstream fix exists.
+
+Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
+project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
+steps with arm exit 0. The MoE arm failed during FSDP initialization before
+training: routed expert `weight` parameters remained plain tensors while
+`dp_mesh_dims` requires all parameters on the full SPMD mesh. A focused local
+regression reproduced the missing placement; the ezpz compatibility layer now
+assigns replicated full-SPMD placements to routed expert weights when EP is off.
+The post-fix focused suite passes 73 tests, 2 skips, and 13 subtests. MoE-only
+retry `12479018` then finished with PBS exit 0 and `VERDICT: ok` on repaired
+commit `6913990333`: three finite updates with losses 12.95227, 12.59636, and
+11.47138 and gradient norms 0.9651, 1.2498, and 1.7102. Exact-head Sunspot
+dense TP=1, dense TP=2, and MoE liveness are now green. Distributed DCP resume
+and RL/weight-sync remain open, as does exact-head Aurora hardware validation.
+
+Exact-head DCP retry `12479022` closed the distributed-checkpoint gate on commit
+`c228830bd3`: an uninterrupted four-step control was compared with a separate
+four-step run that wrote full state at step 2 and a fresh process that loaded
+that checkpoint. Resumed steps 3 and 4 matched the control's loss and gradient
+norm exactly, and a new full step-4 checkpoint was written; PBS exit was 0. The
+first harness attempt `12479021` had successfully saved and resumed but used a
+different total-step schedule and an ANSI-sensitive parser, so its failed
+verdict was a harness defect rather than a DCP failure.
+
+The exact-head RL/weight-sync launcher is ready at commit `b0e660ec58`, but its
+mandatory preflight correctly refused submission: the protected
+`rl-monarch-torch214` environment is missing
+`torch.fx.experimental.unification.core` and `blendcorpus`. Older RL venvs are
+on Torch 2.12/2.13 and stale `spmd-types`; none is a valid substitute for the
+current sync. The protected environment was not modified. This gate requires a
+fresh isolated RL runtime or a verified immutable archive.
+
+The RL runtime blocker was closed without modifying the protected environment.
+A new project-filesystem overlay used the validated healthy Torch 2.14 base and
+copied complete cached vLLM/tvm-ffi artifacts while reading the remaining
+Monarch/TorchStore dependencies from the quarantined environment. After adding
+the missing Torch 2.14 `pipeline_per_edge_p2p` config compatibility shim,
+exact-head job `12479027` finished with PBS exit 0 and
+`RL_SYNC_VERDICT: ok`: 20/20 completed bounded rollouts, policy versions 0 and
+1, two trainer pushes, two generator pulls, a real optimizer step, and a
+nonempty full step-1 checkpoint. This established same-host transport plumbing,
+but the zero loss/gradient meant it did not establish a real policy update.
+Harder same-host jobs `12479028` and `12479029` each completed three finite,
+nonzero-gradient updates and wrote three checkpoints, but respectively 2/40 and
+5/40 rollouts hit the generation cap.
+
+The final acceptance run `12479032` used two physical Sunspot hosts and the
+repository's scheduler-SPMD path with explicit TorchStore Gloo. After increasing
+the actor attach timeout to cover the measured cold import, it completed 40/40
+bounded rollouts across policy versions 0–3, four trainer pushes and four
+generator pulls, three finite updates (gradient norms 0.35, 0.34, 0.28), and
+three full checkpoints. PBS exited 0 with `RL_MULTIHOST_VERDICT: ok`. This closes
+the exact-head Sunspot RL/weight-sync gate.
+
+The isolated `sync/upstream-f359667` worktree now contains upstream merge
+`780f0a73e2` plus replayed configuration/topology, MoE, RL, and regression
+changes. The committed collectable ezpz suite reached 260 passed, 2 skipped, and
+14 subtests. Independent review then found stale validator API calls and
+fake-SPMD topology/serialization risks; those are fixed locally and the focused
+post-review suite passes 50 tests with 2 skips. The full unit-level ezpz suite
+passes 75 tests with 2 skips.
+
+The pre-sync/post-sync numerical gate passed exactly at zero tolerance for
+`llama3/debugmodel` and `deepseek_v3/debugmodel`: identical initialization,
+outputs, losses, gradients, AdamW state, and post-step parameters across two
+updates. Checkpoints saved after step 0 loaded in both directions and reproduced
+uninterrupted step 1 exactly. This closes local numerical and ordinary
+checkpoint-state parity; distributed DCP and accelerator behavior remain open.
+See the
+[merge-readiness report](experiments/upstream-f359667-merge-readiness.md).
+
+On Sunspot, corrected 5B chain `12479007`-`12479010` uses the isolated Torch
+2.14 XPU runtime and invokes `ezpz.cli:main` through the verified interpreter to
+avoid the copied venv's stale console-script shebang. Preflight `12479007` and
+five-step `1e-4` canary `12479008` finished with exit 0. The canary's inline
+`INVALID` is a known stdout-only predicate defect: W&B run
+[`qxkw7004`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/qxkw7004)
+contains the optimizer diagnostics. The `3e-5` control `12479009` is running;
+`1e-5` job `12479010` is queued.
+
+Historical 30B AdamW job `12478510` cannot be resumed because checkpointing was
+disabled on code predating durable LR-finder state. A fresh 75-point trajectory
+was submitted at the measured-good TP1, `dp_replicate=48`, `dp_shard=16`
+geometry on source `45f2e72d05`, with checkpoints every 25 points. Compute
+runtime preflight `12479013` passed; production job `12479014` is queued. The
+fresh trajectory avoids scientifically invalid stitching across independent
+initializations.
+
+Persistent operations and subsequent terminal transitions are mirrored to the
+private [TorchTitan Agent Vault](https://mbph.tail3e7069.ts.net:10444/n/history/torchtitan/index.md).
+
 ## 2026-09-29 (Aurora) -- production continuation and isolated 20B fork gates
 
-- Tail eval `8878144` exposed a false-success wrapper path: DCP conversion ran
-  without `spmd_types`, printed `Conversion FAILED`, continued, and returned PBS
-  exit 0 with no `results.json`. Sibling `8878145` was cancelled before
-  allocation. The corrected pipeline uses the isolated Torch 2.15 conversion
-  runtime (`spmd-types==0.2.5`) separately from the frameworks-2025.3.1 lm-eval
-  overlay, passes explicit shared tokenizer assets, and propagates conversion
-  failures nonzero. Replacement targets are the latest durable heads: 20B-512
-  step 11,100 and 20B-256 step 17,500.
-- Corrected retries `8880289` and `8880292` then failed closed with PBS exit 1,
-  exposing a second, shared converter boundary. Both historical DCPs store
-  logical `wq/wk/wv` and `w1/w3` tensors, while the current model build exposes
-  fused `wqkv` and `w13`; direct DCP load therefore rejected the absent fused
-  key before evaluation. `convert_to_hf.py` now derives a load destination that
-  matches exact DCP metadata through the authoritative state-dict adapter and
-  rejects any unrepresentable model state. Focused tests cover fused, logical,
-  and incomplete schemas. Real metadata probes for both checkpoints resolved
-  579 model tensors with zero unmatched keys and expected layer-0 shapes:
-  Q `[5120, 5120]`, K/V `[1024, 5120]`, gate/up `[14336, 5120]`.
-- Retry policy is canary-first: convert/evaluate step 11,100, require complete
-  HF weights and entry into lm-eval, then submit step 17,500.
-- Aurora retired the `next-eval` queue. All four user-owned queued jobs in that
-  queue were deleted and verified terminal: chain-3 control `8876446`,
-  `bench-pr` `8876598`, `hf264` `8878669`, and `sc25-pr4-xccl` `8878807`.
-  A post-delete `qselect -u foremans -q next-eval` returned zero jobs. Any
-  scientifically necessary successor must be redesigned for and submitted to
-  a supported production queue; none of these stale queued jobs should be
-  treated as an active gate.
 - Production umbrella `8870515` allocated 2,098 nodes. All three seats reached
   finite optimizer updates. Verified progress included 20B-512 step 11,176,
   20B-256 step 17,065, and 2B-256 step 37,591; complete checkpoints were
@@ -480,7 +672,6 @@ and 538 free. Nothing wrong with the chain; the machine is full.
 
 The depth monitor read `2` throughout. Added a progress monitor keyed on
 checkpoint mtime, which fired at 79h on its first tick.
-
 ## 2026-09-15 (local) -- sync 84: 148 upstream commits, ten indirect breaks, and moe importing clean while 0 of 14 flavors built
 
 Asked whether there was anything upstream to pull in. 148 commits, not the 64

@@ -114,7 +114,6 @@ def main() -> None:
     else:
         os.environ.pop("EZPZ_FP32_NORMS", None)
 
-    import ezpz.distributed
     import torch
 
     from torchtitan.config import ConfigManager
@@ -138,7 +137,7 @@ def main() -> None:
         "--metrics.log-freq=25",
         "--metrics.no-enable-wandb",
         # LR warmup shorter than the run so the arms reach a steady state.
-        "--lr-scheduler.warmup-steps=20",
+        "--optim.lr-scheduler.warmup-steps=20",
         *args.extra,
     ]
 
@@ -147,9 +146,9 @@ def main() -> None:
     # Set the optimizer programmatically: `--optimizer adamw` is consumed by
     # ezpz train.py's own pre-parser, and tyro (which we call directly here)
     # rejects it.
-    from torchtitan.components.optimizer import default_adamw
+    from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 
-    config.optimizer = default_adamw(lr=args.lr)
+    config.optim.optimizer = default_adamw(lr=args.lr)
 
     trainer = config.build()
 

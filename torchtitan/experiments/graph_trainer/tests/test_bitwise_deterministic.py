@@ -29,7 +29,8 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.data.types import TokenizedTrainingMicrobatch
 from torchtitan.components.loss import CrossEntropyLoss
 from torchtitan.components.tokenizer import HuggingFaceTokenizer
-from torchtitan.config import DebugConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config import DebugConfig, TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.graph_trainer.common_utils import (
     annotate_graph_trainer_model,
     maybe_register_blockmask_pytree_node,
@@ -52,7 +53,7 @@ from torchtitan.experiments.graph_trainer.qwen3 import (
 )
 from torchtitan.experiments.graph_trainer.tests._trainer_test_utils import (
     build_minimal_trainer,
-    single_device_parallel_dims,
+    single_device_parallelism_context,
 )
 from torchtitan.experiments.graph_trainer.trainer import GraphTrainer
 from torchtitan.models.common.attention import FlexInnerAttention
@@ -104,6 +105,7 @@ class BitwiseDeterministicBase(unittest.TestCase):
     """
 
     model_registry: Callable
+    model_registry_kwargs: dict[str, object] = {}
     annotate_model: Callable
     model_flavor: str
     # The unsuffixed subclasses use SDPA (a test-only backend that exercises the
@@ -113,7 +115,9 @@ class BitwiseDeterministicBase(unittest.TestCase):
     attn_backend: str = "sdpa"
 
     def setUp(self):
-        self.parallel_dims = self.enterContext(single_device_parallel_dims())
+        self.parallelism_context = self.enterContext(
+            single_device_parallelism_context()
+        )
 
         # Disable max_autotune for FlexInnerAttention to ensure bitwise-identical
         # results between eager (torch.compile) and traced (regional_inductor)
@@ -132,7 +136,9 @@ class BitwiseDeterministicBase(unittest.TestCase):
 
         _set_deterministic()
         self.model_config = self.model_registry(
-            self.model_flavor, attn_backend=self.attn_backend
+            self.model_flavor,
+            attn_backend=self.attn_backend,
+            **self.model_registry_kwargs,
         )
         # Match Trainer.__init__: model configs consume runtime settings before
         # build. DSv3 uses the synced RoPE length to decide YaRN scaling.
@@ -223,28 +229,32 @@ class BitwiseDeterministicBase(unittest.TestCase):
             compile_disable_passes=compile_disable_passes,
             compile_numerics_changing_optim=numerics_changing_optim,
             tokenizer=HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH),
-            parallel_dims=self.parallel_dims,
+            parallelism_context=self.parallelism_context,
         )
         global_valid_tokens = torch.tensor(NUM_TOKENS, dtype=torch.float, device="cuda")
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
         for _ in range(NUM_STEPS):
             optimizer.zero_grad()
-            loss = trainer.engine.forward_backward_microbatch(
-                microbatch_group=[
-                    TokenizedTrainingMicrobatch(
-                        input=self.inputs,
-                        positions=self.positions,
-                        labels=self.labels,
-                        padding_mask=torch.zeros_like(self.labels, dtype=torch.bool),
-                        num_valid_tokens=self.labels.numel(),
-                    )
+            result = trainer.engine.forward_backward(
+                microbatch_groups=[
+                    [
+                        TokenizedTrainingMicrobatch(
+                            input=self.inputs,
+                            positions=self.positions,
+                            labels=self.labels,
+                            padding_mask=torch.zeros_like(
+                                self.labels, dtype=torch.bool
+                            ),
+                            num_valid_tokens=self.labels.numel(),
+                        )
+                    ]
                 ],
                 global_valid_tokens=global_valid_tokens,
             )
             optimizer.step()
 
-        return loss.detach().clone(), hash_model(model), hash_gradient(model)
+        return result.loss.detach().clone(), hash_model(model), hash_gradient(model)
 
     def _run_steps_with_precompile(
         self, model: nn.Module, *, enable_passes: bool = True
@@ -454,6 +464,7 @@ class TestDSv3BitwiseDeterministic(BitwiseDeterministicBase):
     """Bitwise determinism tests for DeepSeek-v3 debug model."""
 
     model_registry = staticmethod(dsv3_model_registry)
+    model_registry_kwargs = {"enable_sp": True}
     model_flavor = "debugmodel"
     annotate_model = staticmethod(annotate_graph_trainer_model)
 
@@ -590,6 +601,7 @@ class TestDSv3FlexAttnBitwiseDeterministic(BitwiseDeterministicBase):
     """
 
     model_registry = staticmethod(dsv3_model_registry)
+    model_registry_kwargs = {"enable_sp": True}
     model_flavor = "debugmodel"
     attn_backend = "flex"
     annotate_model = staticmethod(annotate_graph_trainer_model)

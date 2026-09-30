@@ -21,7 +21,7 @@ from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhauste
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
-from torchtitan.distributed import ParallelDims, utils as dist_utils
+from torchtitan.distributed import ParallelismContext, utils as dist_utils
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
@@ -75,7 +75,7 @@ def _clip_foreach() -> bool:
 
 def _set_pg_timeouts_xpu_aware(
     timeout: timedelta,
-    parallel_dims: ParallelDims,
+    parallelism_context: ParallelismContext,
 ) -> None:
     """Apply ``timeout`` to every PG in the mesh, with explicit XPU support.
 
@@ -119,7 +119,7 @@ def _set_pg_timeouts_xpu_aware(
 
     timeout_groups: list[torch.distributed.ProcessGroup | None] = [
         mesh.get_group()
-        for mesh in parallel_dims.get_all_one_dimensional_meshes().values()
+        for mesh in parallelism_context.get_all_one_dimensional_meshes().values()
     ] + [None]
     for group in timeout_groups:
         c10d._set_pg_timeout(timeout, group)
@@ -132,7 +132,7 @@ def _set_pg_timeouts_xpu_aware(
 
     groups: list[torch.distributed.ProcessGroup | None] = [
         mesh.get_group()
-        for mesh in parallel_dims.get_all_one_dimensional_meshes().values()
+        for mesh in parallelism_context.get_all_one_dimensional_meshes().values()
     ] + [None]
     patched = 0
     for group in groups:
@@ -222,7 +222,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
                 model_name=self._model_name(),
-                parallel_dims=self.parallel_dims,
+                parallel_dims=self.parallelism_context,
                 training=config.training,
                 parallelism=config.parallelism,
                 loss_fn=self.loss_fn,
@@ -232,33 +232,45 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 fault_tolerance_enabled=config.fault_tolerance.enable,
                 create_seed_checkpoint=create_seed_checkpoint,
                 optimizer_has_param_groups=(
-                    len(config.optimizer.param_groups) != 1
-                    or config.optimizer.param_groups[0].pattern != r".*"
+                    len(config.optim.optimizer.optimizers) != 1
+                    or config.optim.optimizer.optimizers[0].pattern != r".*"
                 ),
             )
             self.loss_fn = cast(
-                Any, wrap_native_ddp_loss(self.loss_fn, self.parallel_dims.dp_replicate)
+                Any,
+                wrap_native_ddp_loss(
+                    self.loss_fn, self.parallelism_context.dp_replicate
+                ),
             )
             assert len(self.model_parts) == 1
             self.model_parts[0] = wrap_native_ddp(
                 self.model_parts[0],
-                self.parallel_dims.get_mesh("dp_replicate"),
+                self.parallelism_context.get_mesh("dp_replicate"),
                 config.parallelism.native_ddp_bucket_cap_mb,
                 config.parallelism.native_ddp_compute_policy,
                 config.parallelism.native_ddp_bucketize_first_iteration,
             )
 
         if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
-            if self.parallel_dims.pp_enabled or len(self.model_parts) != 1:
+            if self.parallelism_context.pp_enabled or len(self.model_parts) != 1:
                 raise ValueError("AGPT dtype probe requires a non-pipeline model")
             install_agpt_dtype_probe(self.model_parts[0])
 
     def _initialize_forward_backward(self) -> None:
         super()._initialize_forward_backward()
-        if not self.parallel_dims.pp_enabled:
-            self.forward_backward_body_fn = maybe_wrap_with_xpu_graph(
-                self._non_pp_forward_backward_body
+        if not self.parallelism_context.pp_enabled:
+            self._run_forward_backward = maybe_wrap_with_xpu_graph(
+                self._run_forward_backward,
+                parameters=(
+                    parameter
+                    for model_part in self.model_parts
+                    for parameter in model_part.parameters()
+                ),
             )
+
+    def _initialize_optim(self) -> None:
+        super()._initialize_optim()
+        self.optim._run_update = self._optim_update
 
     def _get_train_context(self) -> AbstractContextManager[None]:
         context = super()._get_train_context
@@ -302,56 +314,54 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 world_size=int(os.environ.get("WORLD_SIZE", "1")),
             )
 
-    def optimizer_step(self) -> torch.Tensor:
+    def optim_step(self) -> torch.Tensor:
         current_step = self.num_completed_steps + 1
         if getattr(self.config, "diagnostics_attention", False):
             from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
             _attn.set_step(current_step)
 
+        grad_norm = super().optim_step()
+        self._last_grad_norm = float(grad_norm.item())
+        return grad_norm
+
+    def _optim_update(self, loss: torch.Tensor) -> torch.Tensor:
+        """Preserve ezpz's skip-on-nonfinite policy inside Optim.step()."""
         grad_norm = dist_utils.clip_grad_norm_(
-            [p for model in self.model_parts for p in model.parameters()],
-            self.config.training.max_norm,
+            self.optim.parameters,
+            self.config.optim.max_norm,
             foreach=_clip_foreach(),
-            pp_mesh=self.parallel_dims.get_optional_mesh("pp"),
-            ep_enabled=self.parallel_dims.ep_enabled,
+            pp_mesh=self.parallelism_context.get_optional_mesh("pp"),
+            ep_enabled=self.parallelism_context.ep_enabled,
         )
-        if not self.parallel_dims.pp_enabled or self.pp_has_last_stage:
-            loss_mesh = self.parallel_dims.get_optional_mesh("loss")
+        loss_is_finite = torch.isfinite(loss).all().to(torch.int32)
+        if not self.parallelism_context.pp_enabled or self.pp_has_last_stage:
+            loss_mesh = self.parallelism_context.get_optional_mesh("loss")
             if loss_mesh is not None:
                 torch.distributed.all_reduce(
-                    self.loss_is_finite,
+                    loss_is_finite,
                     op=torch.distributed.ReduceOp.MIN,
                     group=loss_mesh.get_group(),
                 )
-        pp_mesh = self.parallel_dims.get_optional_mesh("pp")
+        pp_mesh = self.parallelism_context.get_optional_mesh("pp")
         if pp_mesh is not None:
             torch.distributed.all_reduce(
-                self.loss_is_finite,
+                loss_is_finite,
                 op=torch.distributed.ReduceOp.MIN,
                 group=pp_mesh.get_group(),
             )
-        if hasattr(self, "checkpointer"):
-            self.checkpointer.maybe_wait_for_staging()
-
-        step_is_finite = self.loss_is_finite.logical_and(
-            torch.isfinite(grad_norm).all()
-        )
+        step_is_finite = loss_is_finite.logical_and(torch.isfinite(grad_norm).all())
         if bool(step_is_finite.item()):
-            self.optimizers.step()
+            self.optim.optimizers.step()
         else:
-            self._capture_nonfinite_gradients(current_step, grad_norm)
-            self.optimizers.zero_grad()
+            self._capture_nonfinite_gradients(self.num_completed_steps + 1, grad_norm)
+            self.optim.zero_grad()
             logger.error(
                 "non-finite loss or grad_norm (%s) at step %s: SKIPPING the "
                 "optimizer step to avoid writing NaN into the weights.",
                 grad_norm,
-                current_step,
+                self.num_completed_steps + 1,
             )
-        self.lr_schedulers.step()
-        self.num_completed_steps = current_step
-        self._num_optimizer_steps_since_cuda_graph_init += 1
-        self._last_grad_norm = float(grad_norm.item())
         return grad_norm
 
     def _capture_nonfinite_gradients(self, step: int, grad_norm: torch.Tensor) -> None:
@@ -408,7 +418,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         loss: torch.Tensor,
         grad_norm: torch.Tensor,
     ) -> dict[str, Any]:
-        extra_metrics: dict[str, Any] = collect_aux_loss_metrics(self.parallel_dims)
+        extra_metrics: dict[str, Any] = collect_aux_loss_metrics(
+            self.parallelism_context
+        )
         try:
             from torchtitan.experiments.ezpz import zloss as _zloss
 
@@ -424,7 +436,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 from torchtitan.experiments.ezpz.diagnostics import attention as _attn
 
                 extra_metrics.update(
-                    _diag.clipping_metrics(grad_norm, self.config.training.max_norm)
+                    _diag.clipping_metrics(grad_norm, self.config.optim.max_norm)
                 )
                 extra_metrics.update(
                     _diag.collect_param_stats(
@@ -436,7 +448,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                     self.model_parts, self._diag_prev_weight_norms
                 )
                 extra_metrics.update(ratios)
-                extra_metrics.update(_diag.collect_optimizer_stats(self.optimizers))
+                extra_metrics.update(
+                    _diag.collect_optimizer_stats(self.optim.optimizers)
+                )
                 extra_metrics.update(_attn.drain())
             except Exception as exc:
                 logger.warning("diagnostics failed at step %s: %s", step, exc)
@@ -518,11 +532,11 @@ class FaultTolerantTrainer(TorchFTTrainer):
             fault_tolerance=config.fault_tolerance,
         )
         engine = self.engine
-        parallel_dims = engine.parallel_dims
+        parallelism_context = engine.parallelism_context
         config.maybe_log()
 
-        if parallel_dims.dp_enabled:
-            dp_mesh = parallel_dims.get_mesh("dp")
+        if parallelism_context.dp_enabled:
+            dp_mesh = parallelism_context.get_mesh("dp")
             dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
         else:
             dp_degree, dp_rank = 1, 0
@@ -534,7 +548,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
             else None
         )
         self.num_pp_microbatches = (
-            config.parallelism.num_pp_microbatches if parallel_dims.pp_enabled else 1
+            config.parallelism.num_pp_microbatches
+            if parallelism_context.pp_enabled
+            else 1
         )
         num_tokens_per_microbatch = (
             config.training.num_tokens_per_microbatch_per_dp_rank
@@ -562,7 +578,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             max_context_length=config.training.max_context_length,
             num_tokens_per_microbatch=num_tokens_per_microbatch,
             training_steps=config.training.steps * self.num_pp_microbatches,
-            parallel_dims=parallel_dims,
+            parallelism_context=parallelism_context,
             num_tokens_per_train_step=num_tokens_per_train_step,
         )
 
@@ -571,7 +587,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         set_ezpz_max_context_length(config.training.max_context_length)
 
         self.metrics_processor = config.metrics.build(
-            parallel_dims=parallel_dims,
+            parallelism_context=parallelism_context,
             device_memory_monitor=engine.device_memory_monitor,
             dump_folder=config.dump_folder,
             pp_schedule=config.parallelism.pipeline_parallel_schedule,
@@ -589,16 +605,16 @@ class FaultTolerantTrainer(TorchFTTrainer):
             create_seed_checkpoint=config.create_seed_checkpoint,
         )
 
-        if parallel_dims.pp_enabled:
+        if parallelism_context.pp_enabled:
             from torchtitan.observability.metrics import ensure_pp_loss_visible
 
             ensure_pp_loss_visible(
-                parallel_dims=parallel_dims,
+                parallelism_context=parallelism_context,
                 pp_schedule=config.parallelism.pipeline_parallel_schedule,
                 color=color,
             )
         self.metrics_processor.num_flops_per_token = engine.num_flops_per_token
-        self.metrics_processor.optimizers = engine.optimizers
+        self.metrics_processor.optimizers = engine.optim.optimizers
         self.metrics_processor.model_parts = engine.model_parts
 
         logger.info(
@@ -623,7 +639,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     engine.pp_has_first_stage,
                     engine.pp_has_last_stage,
                 )
-                if parallel_dims.pp_enabled
+                if parallelism_context.pp_enabled
                 else (None, None, None)
             )
             self.validator = validator_config.build(
@@ -631,7 +647,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 dp_world_size=dp_degree,
                 dp_rank=dp_rank,
                 tokenizer=self.tokenizer,
-                parallel_dims=parallel_dims,
+                parallelism_context=parallelism_context,
                 loss_fn=engine.loss_fn,
                 metrics_processor=self.metrics_processor,
                 seq_len=config.training.max_context_length,
@@ -663,7 +679,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             f"gradient accumulation steps {self.gradient_accumulation_steps}, "
             f"sequence length {config.training.max_context_length}, "
             f"total steps {config.training.steps} "
-            f"(warmup {config.lr_scheduler.warmup_steps})"
+            f"(warmup {config.optim.lr_scheduler.warmup_steps})"
         )
 
     def _build_dataloader(
@@ -675,7 +691,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         max_context_length: int,
         num_tokens_per_microbatch: int,
         training_steps: int,
-        parallel_dims: ParallelDims,
+        parallelism_context: ParallelismContext,
         num_tokens_per_train_step: int | None = None,
     ) -> BaseDataLoader:
         local_batch_size = num_tokens_per_microbatch // max_context_length
@@ -699,7 +715,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 (num_tokens_per_train_step or num_tokens_per_microbatch)
                 // max_context_length
             ),
-            parallel_dims=parallel_dims,
+            parallel_dims=parallelism_context,
         )
 
     def microbatch_generator(
@@ -754,7 +770,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         engine = self.engine
         current_step = engine.num_completed_steps + 1
         should_log = self.metrics_processor.should_log(current_step)
-        parallel_dims = engine.parallel_dims
+        parallelism_context = engine.parallelism_context
 
         microbatch_groups: list[list[TrainingMicrobatch]] = []
         local_valid_tokens = 0
@@ -771,41 +787,28 @@ class FaultTolerantTrainer(TorchFTTrainer):
             dtype=torch.int64,
             device=engine.device,
         )
-        if parallel_dims.dp_enabled:
-            dp_mesh = parallel_dims.get_mesh("dp")
+        if parallelism_context.dp_enabled:
+            dp_mesh = parallelism_context.get_mesh("dp")
             global_valid_tokens = dist_utils.dist_sum_tensor(
                 local_valid_tokens_tensor, dp_mesh
             )
         else:
             global_valid_tokens = local_valid_tokens_tensor
 
-        global_valid_tokens = engine.prepare_step(
-            global_valid_tokens,
-            num_accumulation_steps=self.gradient_accumulation_steps,
+        forward_backward_result = engine.forward_backward(
+            microbatch_groups=microbatch_groups,
+            global_valid_tokens=global_valid_tokens,
         )
+        accumulated_loss = forward_backward_result.loss
 
-        accumulated_loss: torch.Tensor | None = None
-        for fwd_bwd_index, microbatch_group in enumerate(microbatch_groups):
-            detached_loss = engine.forward_backward_microbatch(
-                microbatch_group=microbatch_group,
-                global_valid_tokens=global_valid_tokens,
-                accumulation_index=fwd_bwd_index,
-            )
-            if accumulated_loss is None:
-                accumulated_loss = detached_loss.clone()
-            else:
-                accumulated_loss.add_(detached_loss)
-
-        lr_metrics = engine.lr_schedulers.get_metrics() if should_log else {}
-        grad_norm = engine.optimizer_step()
-        if accumulated_loss is None:
-            return None
+        lr_metrics = engine.optim.lr_schedulers.get_metrics() if should_log else {}
+        grad_norm = engine.optim_step()
 
         if not should_log:
             return float(accumulated_loss.detach().item())
 
-        if parallel_dims.dp_cp_enabled:
-            loss_mesh = parallel_dims.get_optional_mesh("loss")
+        if parallelism_context.dp_cp_enabled:
+            loss_mesh = parallelism_context.get_optional_mesh("loss")
             ft_pg = engine.ft_manager.loss_sync_pg
             local_avg_loss = (
                 accumulated_loss * global_valid_tokens / local_valid_tokens_tensor
@@ -838,8 +841,12 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 grad_norm=grad_norm,
             ),
         }
-        if "lr" not in extra_metrics and hasattr(engine.lr_schedulers, "schedulers"):
-            extra_metrics["lr"] = engine.lr_schedulers.schedulers[0].get_last_lr()[0]
+        if "lr" not in extra_metrics and hasattr(
+            engine.optim.lr_schedulers, "schedulers"
+        ):
+            extra_metrics["lr"] = engine.optim.lr_schedulers.schedulers[
+                0
+            ].get_last_lr()[0]
         self.metrics_processor.log(
             engine.num_completed_steps,
             global_avg_loss,
@@ -906,7 +913,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     if hasattr(engine.model_config, "layers")
                     else 0
                 ),
-                optimizer=engine.optimizers,
+                optimizer=engine.optim.optimizers,
                 fragment_fn=engine.diloco_fragment_fn,
             ):
                 wall_deadline = self._resolve_walltime_deadline()
@@ -995,7 +1002,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                                 timeout=timedelta(
                                     seconds=config.comm.train_timeout_seconds
                                 ),
-                                parallel_dims=engine.parallel_dims,
+                                parallelism_context=engine.parallelism_context,
                             )
                 finally:
                     if numerics_capture is not None:
@@ -1056,7 +1063,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         if (
             config.grad_norm_abort <= 0
             or grad_norm is None
-            or self.engine.num_completed_steps <= config.lr_scheduler.warmup_steps
+            or self.engine.num_completed_steps <= config.optim.lr_scheduler.warmup_steps
         ):
             return False
         if not math.isfinite(grad_norm):

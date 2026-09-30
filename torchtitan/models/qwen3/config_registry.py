@@ -17,13 +17,15 @@ from torchtitan.components.data import (
     SingleDatasetConfig,
 )
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
-from torchtitan.components.optimizer import (
-    default_adamw,
+from torchtitan.components.optim import (
+    Adam,
+    AdamW,
     LRSchedulersContainer,
+    Optim,
     OptimizersContainer,
-    ParamGroupConfig,
 )
-from torchtitan.config import CompileConfig, ParallelismConfig, TrainingConfig
+from torchtitan.config import TrainingConfig
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import NVFP4LinearConverter
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
 from torchtitan.hf_datasets.text_datasets import ChatProcessor, DATASETS
@@ -56,12 +58,16 @@ def qwen3_debugmodel(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"]),
             shuffle=False,
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=8 * model_config.max_context_length,
@@ -77,9 +83,6 @@ def qwen3_debugmodel_nvfp4(
     seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
 ) -> Trainer.Config:
     config = qwen3_debugmodel(seq_len=seq_len)
-    model_compile_enabled = (
-        config.compile is not None and "model" in config.compile.components
-    )
     # Convert every decoder-layer Linear while leaving the lm_head in bf16.
     config.model = model_registry(
         "debugmodel",
@@ -87,7 +90,6 @@ def qwen3_debugmodel_nvfp4(
         converters=[
             NVFP4LinearConverter.Config(
                 fqns=["layers"],
-                model_compile_enabled=model_compile_enabled,
             ),
         ],
     )
@@ -99,9 +101,6 @@ def qwen3_debugmodel_first_85_pct_layers_nvfp4(
 ) -> Trainer.Config:
     config = qwen3_debugmodel(seq_len=seq_len)
     assert config.model is not None
-    model_compile_enabled = (
-        config.compile is not None and "model" in config.compile.components
-    )
     # Keep the last 15% of decoder layers and the lm_head in bf16.
     num_layers = len(cast(Qwen3Model.Config, config.model).layers)
     _NVFP4_BF16_TAIL_FRACTION = 0.15
@@ -115,7 +114,6 @@ def qwen3_debugmodel_first_85_pct_layers_nvfp4(
         converters=[
             NVFP4LinearConverter.Config(
                 fqns=fqns,
-                model_compile_enabled=model_compile_enabled,
             ),
         ],
     )
@@ -126,32 +124,27 @@ def qwen3_debugmodel_moe_param_groups(
     seq_len: int | None = DEFAULT_DEBUG_MODEL_SEQ_LEN,
 ) -> Trainer.Config:
     config = qwen3_moe_debug(seq_len=seq_len)
-    config.optimizer = OptimizersContainer.Config(
-        param_groups=[
-            ParamGroupConfig(
+    config.optim.optimizer = OptimizersContainer.Config(
+        optimizers=[
+            AdamW.Config(
                 pattern=r"(?:tok_embeddings|output)\.",
-                optimizer_name="AdamW",
-                optimizer_kwargs={
-                    "lr": 8e-4,
-                    "betas": (0.9, 0.95),
-                    "eps": 1e-8,
-                    "weight_decay": 0.0,
-                },
+                lr=8e-4,
+                betas=(0.9, 0.95),
+                eps=1e-8,
+                weight_decay=0.0,
             ),
-            ParamGroupConfig(
+            Adam.Config(
                 pattern=r"\.router\.gate\.",
-                optimizer_name="Adam",
-                optimizer_kwargs={"lr": 1e-4, "betas": (0.9, 0.95), "eps": 1e-8},
+                lr=1e-4,
+                betas=(0.9, 0.95),
+                eps=1e-8,
             ),
-            ParamGroupConfig(
+            AdamW.Config(
                 pattern=r".*",
-                optimizer_name="AdamW",
-                optimizer_kwargs={
-                    "lr": 8e-4,
-                    "betas": (0.9, 0.95),
-                    "eps": 1e-8,
-                    "weight_decay": 0.1,
-                },
+                lr=8e-4,
+                betas=(0.9, 0.95),
+                eps=1e-8,
+                weight_decay=0.1,
             ),
         ],
     )
@@ -177,12 +170,16 @@ def qwen3_debugmodel_flex_flash(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"]),
             shuffle=False,
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=2,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=2,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=8 * model_config.max_context_length,
@@ -208,8 +205,12 @@ def qwen3_0_6b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=default_adamw(lr=3e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=3e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -233,8 +234,12 @@ def qwen3_1_7b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=20),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=20),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -248,7 +253,6 @@ def qwen3_1_7b(seq_len: int | None = None) -> Trainer.Config:
 def qwen3_8b_first_85_pct_layers_nvfp4(seq_len: int | None = None) -> Trainer.Config:
     config = sft_qwen3_8b_math(seq_len=seq_len)
     assert config.model is not None
-    config.compile = CompileConfig(components=["model"])
     # Keep the last 15% of decoder layers and the lm_head in bf16.
     num_layers = len(cast(Qwen3Model.Config, config.model).layers)
     _NVFP4_BF16_TAIL_FRACTION = 0.15
@@ -263,7 +267,6 @@ def qwen3_8b_first_85_pct_layers_nvfp4(seq_len: int | None = None) -> Trainer.Co
         converters=[
             NVFP4LinearConverter.Config(
                 fqns=fqns,
-                model_compile_enabled=True,
             ),
         ],
     )
@@ -283,8 +286,12 @@ def qwen3_14b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -314,8 +321,12 @@ def qwen3_30b_a3b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=2 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -345,8 +356,12 @@ def qwen3_32b(seq_len: int | None = None) -> Trainer.Config:
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4"]),
         ),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=8e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=600),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=2 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -380,8 +395,12 @@ def qwen3_moe_debug(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"]),
             shuffle=False,
         ),
-        optimizer=default_adamw(lr=3e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=3e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=4 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -428,8 +447,12 @@ def qwen3_moe_deepep(
         dataloader=GrainDataLoader.Config(
             dataset=ConcatThenSplitPackingConfig(dataset=DATASETS["c4_test"]),
         ),
-        optimizer=default_adamw(lr=3e-4),
-        lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=3e-4)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(warmup_steps=2),
+        ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=2 * model_config.max_context_length,
             max_context_length=model_config.max_context_length,
@@ -466,12 +489,16 @@ def sft_qwen3_8b_math(seq_len: int | None = None) -> Trainer.Config:
         ),
         hf_assets_path="./assets/hf/Qwen3-8B",
         model=model_config,
-        optimizer=default_adamw(lr=2e-5),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=15,
-            decay_ratio=0.9,
-            decay_type="cosine",
-            min_lr_factor=0.1,
+        optim=Optim.Config(
+            optimizer=OptimizersContainer.Config(
+                optimizers=[AdamW.Config(pattern=r".*", lr=2e-5)]
+            ),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=15,
+                decay_ratio=0.9,
+                decay_type="cosine",
+                min_lr_factor=0.1,
+            ),
         ),
         training=TrainingConfig(
             num_tokens_per_microbatch_per_dp_rank=1 * model_config.max_context_length,
