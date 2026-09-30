@@ -18,6 +18,8 @@ NPROC="${CANARY_NPROC:-48}"
 DP_REPLICATE="${CANARY_DP_REPLICATE:-3}"
 DP_SHARD="${CANARY_DP_SHARD:-16}"
 TOKENS_PER_STEP="${CANARY_TOKENS_PER_STEP:-196608}"
+TOKENS_PER_MICROBATCH="${CANARY_TOKENS_PER_MICROBATCH:-4096}"
+LAUNCH_TIMEOUT="${CANARY_LAUNCH_TIMEOUT:-1800}"
 OUT="$D/outputs/30b-full-model-canary-$JOB"
 LOG="$OUT/run.log"
 mkdir -p "$OUT"
@@ -58,7 +60,7 @@ run_model() {
     --optimizer.lr 1e-6 \
     --training.steps 3 \
     --training.max-context-length 4096 \
-    --training.num-tokens-per-microbatch-per-dp-rank 4096 \
+    --training.num-tokens-per-microbatch-per-dp-rank "$TOKENS_PER_MICROBATCH" \
     --training.num-tokens-per-train-step "$TOKENS_PER_STEP" \
     --parallelism.tensor-parallel-degree 1 \
     --parallelism.data-parallel-replicate-degree "$DP_REPLICATE" \
@@ -68,16 +70,17 @@ run_model() {
     activation-checkpoint:full
 }
 export V D TOKENIZER OUT MODEL_CONFIG NPROC DP_REPLICATE DP_SHARD TOKENS_PER_STEP
+export TOKENS_PER_MICROBATCH
 export -f run_model
 
 if ((NPROC % 12 != 0)); then
     CPU_BIND_SUNSPOT="list:1-8:9-16:17-24:25-32:33-40:41-48:53-60:61-68:69-76:77-84:85-92:93-100"
-    WORLD_SIZE="$NPROC" timeout 1800 mpiexec --envall --line-buffer --np="$NPROC" --ppn=12 \
+    WORLD_SIZE="$NPROC" timeout "$LAUNCH_TIMEOUT" mpiexec --envall --line-buffer --np="$NPROC" --ppn=12 \
         --hostfile="$PBS_NODEFILE" --cpu-bind="$CPU_BIND_SUNSPOT" \
         bash -c 'run_model' 2>&1 | tee "$LOG"
 else
     "$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
-        --nproc "$NPROC" --nproc_per_node 12 --timeout 1800 -- \
+        --nproc "$NPROC" --nproc_per_node 12 --timeout "$LAUNCH_TIMEOUT" -- \
         bash -c 'run_model' 2>&1 | tee "$LOG"
 fi
 rc=${PIPESTATUS[0]}
