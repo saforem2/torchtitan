@@ -29,9 +29,22 @@ Running log of what's happening, session by session. Most recent first.
   ARC-Challenge 25-shot `acc_norm=0.4053`. Artifact SHA-256:
   `8f64e432132173db622c1f019145515d716b1ac240aa3acea9d5853526e55720`.
 - The production and eval charts still reflect the pre-tail September 27 data
-  snapshot. Human-authored pages are being reconciled now; generated charts
-  and tables must be rebuilt on Aurora from the now-complete endpoint set so no
-  series is silently omitted.
+  snapshot. The full 608-result corpus plus all four tail artifacts was overlaid
+  into a clean Aurora checkout and rerendered successfully. The combined eval
+  chart now reaches 20B-512 step 11,100, 20B-256 step 17,500, 2B-512 stage-2
+  step 23,746, and 2B-256 stage-2 step 41,300. SHA-256 values for the generated
+  SVGs are `038c14f57581cd0b9ba20b0f68b33f5f414d59f9c65e773d9a13180a70fa3a11`
+  (combined), `71fd5154b54280f03c72ea2fa5e47a67956c8bc4a602f2ed9966c88fa78c9edd`
+  (2B overview), and
+  `095d41f56e559fdba2f0b1d19505b297a79890fad5abe219b0607fa67afe778f`
+  (20B overview).
+- Exact-head full-state smoke `8880891` used PR #45 commit `6b3246fac9` and
+  finished with PBS exit 143 before DCP load. Its branch was based on the older
+  `44f8a46cef` integration point and lacked the later AGPT full-SPMD
+  parallelization path used by passing gate `8879698`; all ranks rejected a
+  plain parameter during FSDP construction. This does not exercise or refute
+  the legacy DCP migration. Rebase the migration onto the validated sync head
+  before another restore allocation.
 - Production umbrella `8879474` remains queued in `medium`; follower `8879475`
   remains dependency-held. Neither has launched and no production checkpoint
   head has changed.
