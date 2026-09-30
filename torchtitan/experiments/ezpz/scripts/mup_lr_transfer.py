@@ -59,8 +59,8 @@ def run_one(*, flavor: str, lr: float, steps: int, seq_len: int, seed: int,
         f"--debug.seed={seed}",
         # Constant LR. A warmup or decay schedule would confound the
         # comparison: the question is which eta is best, not which schedule.
-        "--lr-scheduler.warmup-steps=1",
-        "--lr-scheduler.decay-ratio=0.0",
+        "--optim.lr-scheduler.warmup-steps=1",
+        "--optim.lr-scheduler.decay-ratio=0.0",
     ]
     # SWEEPING eta CORRECTLY IS THE WHOLE MEASUREMENT, AND IT IS EASY TO GET
     # WRONG. The first version of this passed

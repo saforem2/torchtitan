@@ -145,7 +145,7 @@ def run_worker(args: argparse.Namespace) -> int:
     os.environ.setdefault("WORLD_SIZE", str(ezpz.distributed.get_world_size()))
 
     import torch
-    from torchtitan.components.optimizer import default_adamw
+    from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 
     from torchtitan.config import ConfigManager
     from torchtitan.experiments.ezpz.agpt import _build_agpt_config
@@ -196,7 +196,7 @@ def run_worker(args: argparse.Namespace) -> int:
         # over a handful of steps leaves the LR near zero, the weights near
         # their init, and the coordinates trivially width-invariant -- a
         # false muP pass produced entirely by the schedule.
-        f"--lr-scheduler.warmup-steps={args.warmup_steps}",
+        f"--optim.lr-scheduler.warmup-steps={args.warmup_steps}",
         *args.extra,
     ]
 
@@ -209,14 +209,14 @@ def run_worker(args: argparse.Namespace) -> int:
     if args.mup:
         from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
 
-        config.optimizer = default_mup_adamw(
+        config.optim.optimizer = default_mup_adamw(
             lr=args.lr,
             dim=dim,
             base_dim=args.mup_base_dim,
             independent_weight_decay=args.mup_independent_wd,
         )
     else:
-        config.optimizer = default_adamw(lr=args.lr)
+        config.optim.optimizer = default_adamw(lr=args.lr)
 
     # THE WIDTH SWAP. Replace the whole model config, built by the one entry
     # point that threads dim into tok_embeddings / layers / norm / lm_head.

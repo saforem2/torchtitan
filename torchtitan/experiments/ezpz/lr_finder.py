@@ -243,7 +243,7 @@ def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
     payload = {
         "model": _stable_config_value(model_config),
         "optimizer_container": type(trainer.optimizers).__qualname__,
-        "optimizer_config": _stable_config_value(config.optimizer),
+        "optimizer_config": _stable_config_value(config.optim.optimizer),
         "dataloader_config": _stable_config_value(config.dataloader),
         "microbatch_tokens": config.training.num_tokens_per_microbatch_per_dp_rank,
         "train_step_tokens": config.training.num_tokens_per_train_step,

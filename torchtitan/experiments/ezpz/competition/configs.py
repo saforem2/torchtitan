@@ -63,10 +63,10 @@ def _speedrun_base():
     cfg.checkpointer = None
 
     # LR schedule: WSD (warmup 20, stable to 800, decay last 200)
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.2
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.2
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
 
     return cfg
 
@@ -77,35 +77,35 @@ def _speedrun_base():
 def speedrun_2b_adamw():
     """AdamW baseline — LR from LR finder (1.3e-3)."""
     cfg = _speedrun_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def speedrun_2b_muon():
     """Muon — best NanoGPT speedrun optimizer. LR from LR finder (2.4e-3)."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
     return cfg
 
 
 def speedrun_2b_sophiag():
     """SophiaG — second-order Hessian approx. LR from LR finder (3.1e-4)."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_sophiag(lr=3.1e-4)
+    cfg.optim.optimizer = default_sophiag(lr=3.1e-4)
     return cfg
 
 
 def speedrun_2b_muon_aggressive():
     """Muon with 2x LR — pushing convergence speed."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_muon(lr=4.8e-3)
+    cfg.optim.optimizer = default_muon(lr=4.8e-3)
     return cfg
 
 
 def speedrun_2b_adamw_high_lr():
     """AdamW with 2x LR — testing upper bound."""
     cfg = _speedrun_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.6e-3
+    cfg.optim.optimizer.optimizers[0].lr = 2.6e-3
     return cfg
 
 
@@ -115,42 +115,42 @@ def speedrun_2b_adamw_high_lr():
 def speedrun_2b_adamw_short_decay():
     """AdamW with 10% decay (vs 20%) — more time at peak LR."""
     cfg = _speedrun_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.decay_ratio = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.decay_ratio = 0.1
     return cfg
 
 
 def speedrun_2b_adamw_cosine():
     """AdamW with cosine decay instead of linear."""
     cfg = _speedrun_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.decay_type = "cosine"
     return cfg
 
 
 def speedrun_2b_adamw_fast_warmup():
     """AdamW with 5-step warmup + 10% decay — max time at peak LR."""
     cfg = _speedrun_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.warmup_steps = 5
-    cfg.lr_scheduler.decay_ratio = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.warmup_steps = 5
+    cfg.optim.lr_scheduler.decay_ratio = 0.1
     return cfg
 
 
 def speedrun_2b_muon_short_decay():
     """Muon with 10% decay — more time at peak LR."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.lr_scheduler.decay_ratio = 0.1
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.lr_scheduler.decay_ratio = 0.1
     return cfg
 
 
 def speedrun_2b_muon_fast_warmup():
     """Muon with 5-step warmup + 10% decay."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.lr_scheduler.warmup_steps = 5
-    cfg.lr_scheduler.decay_ratio = 0.1
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.lr_scheduler.warmup_steps = 5
+    cfg.optim.lr_scheduler.decay_ratio = 0.1
     return cfg
 
 
@@ -160,14 +160,14 @@ def speedrun_2b_muon_fast_warmup():
 def speedrun_2b_mano():
     """Mano — manifold-normalized optimizer, 1.75x faster than Muon."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return cfg
 
 
 def speedrun_2b_spam():
     """SPAM — spike-aware Adam with momentum reset."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_spam(lr=1.3e-3)
+    cfg.optim.optimizer = default_spam(lr=1.3e-3)
     return cfg
 
 
@@ -187,24 +187,24 @@ def _speedrun_qknorm_base():
     cfg.dataloader.dataset = DATASET
     cfg.dataloader.dataset_path = None
     cfg.training.steps = STEPS
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.2
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.2
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
     return cfg
 
 
 def speedrun_2b_adamw_qknorm():
     """AdamW + QK-Norm — stabilizes early attention training."""
     cfg = _speedrun_qknorm_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def speedrun_2b_muon_qknorm():
     """Muon + QK-Norm — best optimizer + attention stabilization."""
     cfg = _speedrun_qknorm_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
     return cfg
 
 
@@ -214,37 +214,37 @@ def speedrun_2b_muon_qknorm():
 def speedrun_2b_mano_high_lr():
     """Mano with higher LR (6e-4) — try to close gap to Muon."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_mano(lr=6.0e-4)
+    cfg.optim.optimizer = default_mano(lr=6.0e-4)
     return cfg
 
 
 def speedrun_2b_mano_1e3():
     """Mano with LR=1e-3 — aggressive push."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_mano(lr=1.0e-3)
+    cfg.optim.optimizer = default_mano(lr=1.0e-3)
     return cfg
 
 
 def speedrun_2b_muon_cosine():
     """Muon + cosine decay — combine best optimizer with best schedule."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
-    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.lr_scheduler.decay_type = "cosine"
     return cfg
 
 
 def speedrun_2b_mano_cosine():
     """Mano + cosine decay — fast optimizer with best schedule."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.lr_scheduler.decay_type = "cosine"
     return cfg
 
 
 def speedrun_2b_mano_qknorm():
     """Mano + QK-Norm — fast manifold optimizer with attention stabilization."""
     cfg = _speedrun_qknorm_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return cfg
 
 
@@ -254,15 +254,15 @@ def speedrun_2b_mano_qknorm():
 def speedrun_2b_torchmuon():
     """torch.optim.Muon — official PyTorch implementation, much faster per-step."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_torch_muon(lr=2.4e-3)
+    cfg.optim.optimizer = default_torch_muon(lr=2.4e-3)
     return cfg
 
 
 def speedrun_2b_torchmuon_cosine():
     """torch.optim.Muon + cosine decay."""
     cfg = _speedrun_base()
-    cfg.optimizer = default_torch_muon(lr=2.4e-3)
-    cfg.lr_scheduler.decay_type = "cosine"
+    cfg.optim.optimizer = default_torch_muon(lr=2.4e-3)
+    cfg.optim.lr_scheduler.decay_type = "cosine"
     return cfg
 
 
@@ -283,38 +283,38 @@ def _speedrun_variant_base(variant: str):
     cfg.dataloader.dataset_path = None
     cfg.training.steps = STEPS
     cfg.checkpointer = None
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.2
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.2
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
     return cfg
 
 
 def speedrun_2b_softcap():
     """AdamW + logit softcapping at 30.0 (Gemma 2 style)."""
     cfg = _speedrun_variant_base("2b_softcap")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def speedrun_2b_relu2():
     """AdamW + ReLU-squared activation in FFN (NanoGPT speedrun)."""
     cfg = _speedrun_variant_base("2b_relu2")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def speedrun_2b_kitchen_sink():
     """QK-Norm + logit softcap + ReLU² — everything combined."""
     cfg = _speedrun_variant_base("2b_kitchen_sink")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def speedrun_2b_mano_kitchen_sink():
     """Mano + QK-Norm + logit softcap + ReLU² — best optimizer + all tweaks."""
     cfg = _speedrun_variant_base("2b_kitchen_sink")
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return cfg
 
 
@@ -357,10 +357,10 @@ def _full_train_base():
 
     # WSD: warmup 2%, stable, cosine decay last 20%
     warmup = max(steps // 50, 10)
-    cfg.lr_scheduler.warmup_steps = warmup
-    cfg.lr_scheduler.decay_ratio = 0.2
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = warmup
+    cfg.optim.lr_scheduler.decay_ratio = 0.2
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
 
     assert cfg.checkpointer is not None
 
@@ -370,7 +370,7 @@ def _full_train_base():
 def full_2b_adamw():
     """AdamW baseline, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     cfg.checkpointer.folder = "checkpoints/full_2b_adamw"
     return cfg
 
@@ -379,7 +379,7 @@ def full_2b_adamw_qknorm():
     """AdamW + QK-Norm — wall-clock champion, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
     cfg.model = agpt("2b_qknorm").model
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     cfg.checkpointer.folder = "checkpoints/full_2b_adamw_qknorm"
     return cfg
 
@@ -387,7 +387,7 @@ def full_2b_adamw_qknorm():
 def full_2b_muon():
     """Muon — best loss optimizer, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.optimizer = default_muon(lr=2.4e-3)
+    cfg.optim.optimizer = default_muon(lr=2.4e-3)
     cfg.checkpointer.folder = "checkpoints/full_2b_muon"
     return cfg
 
@@ -395,7 +395,7 @@ def full_2b_muon():
 def full_2b_mano():
     """Mano — fast manifold optimizer, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     cfg.checkpointer.folder = "checkpoints/full_2b_mano"
     return cfg
 
@@ -404,7 +404,7 @@ def full_2b_mano_qknorm():
     """Mano + QK-Norm — best combo, 10B tokens, 8 nodes."""
     cfg = _full_train_base()
     cfg.model = agpt("2b_qknorm").model
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     cfg.checkpointer.folder = "checkpoints/full_2b_mano_qknorm"
     return cfg
 
@@ -440,10 +440,10 @@ def _r4_base(variant: str = "2b"):
     cfg.checkpointer = None
 
     # Cosine WSD (best schedule from earlier rounds)
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.2
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.2
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
 
     return cfg
 
@@ -451,35 +451,35 @@ def _r4_base(variant: str = "2b"):
 def r4_adamw():
     """AdamW baseline — GAS=8, local dataset."""
     cfg = _r4_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def r4_adamw_qknorm():
     """AdamW + QK-Norm — best wall-clock config from speedruns."""
     cfg = _r4_base("2b_qknorm")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
 def r4_mano():
     """Mano — fast manifold optimizer."""
     cfg = _r4_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return cfg
 
 
 def r4_mano_qknorm():
     """Mano + QK-Norm."""
     cfg = _r4_base("2b_qknorm")
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return cfg
 
 
 def r4_adamw_softcap():
     """AdamW + logit softcapping (FlexAttention). Slow but tests convergence."""
     cfg = _r4_base("2b_softcap")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
@@ -489,7 +489,7 @@ def r4_adamw_qknorm_softcap():
     # kitchen_sink has QK-Norm + softcap + ReLU² — but ReLU² hurt,
     # so let's use a new variant without it
     # For now just use kitchen_sink since we don't have a qknorm+softcap-only variant
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
     return cfg
 
 
@@ -500,7 +500,7 @@ def r4_adamw_higher_lr():
     = 1.3e-3 * sqrt(384/48) = 1.3e-3 * 2.83 = 3.7e-3
     """
     cfg = _r4_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 3.7e-3
+    cfg.optim.optimizer.optimizers[0].lr = 3.7e-3
     return cfg
 
 
@@ -510,7 +510,7 @@ def r4_mano_higher_lr():
     LR_new = 3.0e-4 * sqrt(384/48) = 8.5e-4
     """
     cfg = _r4_base()
-    cfg.optimizer = default_mano(lr=8.5e-4)
+    cfg.optim.optimizer = default_mano(lr=8.5e-4)
     return cfg
 
 
@@ -532,7 +532,7 @@ def _r5_base():
 def r5_mano_lr3e4():
     """Mano at 3e-4 (baseline from LR finder)."""
     cfg = _r5_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     cfg.checkpointer.folder = "checkpoints/r5_mano_lr3e4"
     return cfg
 
@@ -540,7 +540,7 @@ def r5_mano_lr3e4():
 def r5_mano_lr6e4():
     """Mano at 6e-4 (2x baseline)."""
     cfg = _r5_base()
-    cfg.optimizer = default_mano(lr=6.0e-4)
+    cfg.optim.optimizer = default_mano(lr=6.0e-4)
     cfg.checkpointer.folder = "checkpoints/r5_mano_lr6e4"
     return cfg
 
@@ -548,7 +548,7 @@ def r5_mano_lr6e4():
 def r5_mano_lr1e3():
     """Mano at 1e-3 (3.3x baseline)."""
     cfg = _r5_base()
-    cfg.optimizer = default_mano(lr=1.0e-3)
+    cfg.optim.optimizer = default_mano(lr=1.0e-3)
     cfg.checkpointer.folder = "checkpoints/r5_mano_lr1e3"
     return cfg
 
@@ -556,7 +556,7 @@ def r5_mano_lr1e3():
 def r5_mano_lr2e3():
     """Mano at 2e-3 (6.7x baseline — aggressive)."""
     cfg = _r5_base()
-    cfg.optimizer = default_mano(lr=2.0e-3)
+    cfg.optim.optimizer = default_mano(lr=2.0e-3)
     cfg.checkpointer.folder = "checkpoints/r5_mano_lr2e3"
     return cfg
 
@@ -567,8 +567,8 @@ def r5_mano_lr2e3():
 def r5_adamw_constant_lr():
     """AdamW at constant LR (no decay) — for WSM checkpoint merging."""
     cfg = _r5_base()
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.decay_ratio = 0.0  # no decay — stable phase only
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.decay_ratio = 0.0  # no decay — stable phase only
     assert cfg.checkpointer is not None
     cfg.checkpointer.interval = 200
     cfg.checkpointer.folder = "checkpoints/r5_adamw_constant_lr"
@@ -578,8 +578,8 @@ def r5_adamw_constant_lr():
 def r5_mano_constant_lr():
     """Mano at constant LR (no decay) — for WSM checkpoint merging."""
     cfg = _r5_base()
-    cfg.optimizer = default_mano(lr=3.0e-4)
-    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
     assert cfg.checkpointer is not None
     cfg.checkpointer.interval = 200
     cfg.checkpointer.folder = "checkpoints/r5_mano_constant_lr"
@@ -597,13 +597,13 @@ def r5_schedulefree():
     with cosine/WSD (paper recommendation).
     """
     cfg = _r5_base()
-    cfg.optimizer = default_schedule_free(
+    cfg.optim.optimizer = default_schedule_free(
         lr=2.5e-3,  # ~2x higher than scheduled AdamW
         warmup_steps=200,
     )
     # No LR schedule needed — schedule-free handles it internally
-    cfg.lr_scheduler.warmup_steps = 0
-    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
     cfg.checkpointer.folder = "checkpoints/r5_schedulefree"
     return cfg
 
@@ -631,9 +631,9 @@ def smoke_2b_50steps():
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
     cfg.checkpointer = None
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.warmup_steps = 5
-    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.warmup_steps = 5
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
     cfg.metrics.log_freq = 1
     return cfg
 
@@ -668,9 +668,9 @@ def smoke_2b_async_ckpt():
     cfg.dataloader.dataset = DATASET
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 1.3e-3
-    cfg.lr_scheduler.warmup_steps = 5
-    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.optimizer.optimizers[0].lr = 1.3e-3
+    cfg.optim.lr_scheduler.warmup_steps = 5
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
     cfg.metrics.log_freq = 1
 
     assert cfg.checkpointer is not None

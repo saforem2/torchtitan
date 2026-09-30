@@ -61,14 +61,15 @@ survive it trivially.
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Literal
+from typing import Any, cast, Literal
 
 import torch
 import torch.nn as nn
 
-from torchtitan.components.optimizer.optimizer import (
+from torchtitan.components.optim import (
+    AdamW,
+    BaseOptimizer,
     OptimizersContainer,
-    ParamGroupConfig,
 )
 
 __all__ = [
@@ -490,15 +491,14 @@ def default_mup_adamw(
     if independent_weight_decay:
         hidden["weight_decay"] = shared["weight_decay"] * m
 
-    def _group(key: str, opt_kwargs: dict[str, Any]) -> ParamGroupConfig:
-        return ParamGroupConfig(
+    def _group(key: str, opt_kwargs: dict[str, Any]) -> AdamW.Config:
+        return AdamW.Config(
             pattern=MUP_PARAM_GROUP_PATTERNS[key],
-            optimizer_name="AdamW",
-            optimizer_kwargs=opt_kwargs,
+            **opt_kwargs,
         )
 
     return OptimizersContainer.Config(
-        param_groups=[
+        optimizers=[
             _group("embedding", {**shared, "lr": lr}),
             _group("unembedding", {**shared, "lr": readout_lr}),
             _group("norm", {**shared, "lr": lr}),
@@ -509,7 +509,7 @@ def default_mup_adamw(
 
 def summarize_mup_param_groups(
     model: nn.Module,
-    param_groups: list[ParamGroupConfig],
+    param_groups: list[BaseOptimizer.Config],
 ) -> dict[str, Any]:
     """Replay the optimizer's own matching over a real model and audit it.
 
@@ -536,6 +536,7 @@ def summarize_mup_param_groups(
     pattern_to_key = {v: k for k, v in MUP_PARAM_GROUP_PATTERNS.items()}
 
     for pg in param_groups:
+        pg = cast(AdamW.Config, pg)
         rx = re.compile(pg.pattern)
         names = [n for n, p in all_named if n not in claimed and rx.search(n)]
         claimed.update(names)
@@ -548,8 +549,8 @@ def summarize_mup_param_groups(
             {
                 "role": key,
                 "pattern": pg.pattern,
-                "lr": pg.optimizer_kwargs.get("lr"),
-                "weight_decay": pg.optimizer_kwargs.get("weight_decay"),
+                "lr": pg.lr,
+                "weight_decay": pg.weight_decay,
                 "num_params": len(names),
                 "num_elements": sum(p.numel() for n, p in all_named if n in set(names)),
                 "examples": [canonical_fqn(n) for n in names[:3]],
@@ -821,7 +822,7 @@ def _mup_trainer_config(flavor: str, dim: int, base_dim: int, *, lr: float, **kw
     from torchtitan.experiments.ezpz.agpt.config_registry import agpt
 
     cfg = agpt(flavor, hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_mup_adamw(lr, dim=dim, base_dim=base_dim, **kw)
+    cfg.optim.optimizer = default_mup_adamw(lr, dim=dim, base_dim=base_dim, **kw)
     return cfg
 
 

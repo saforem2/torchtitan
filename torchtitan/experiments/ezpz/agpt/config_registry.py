@@ -25,10 +25,8 @@ from torchtitan.components.data.sources import (
 )
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
-# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
-# a re-export shim when the optimizer components were grouped into a package
-# by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.optim import LRSchedulersContainer, Optim
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.config import CommConfig, TrainingConfig
 from torchtitan.config.configs import CompileConfig
 from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
@@ -70,7 +68,7 @@ def agpt_2b_50k() -> FaultTolerantTrainer.Config:
         compile=False,
         hf_assets_path="./assets/hf/llama-2-32k-sp",
     )
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
     cfg.checkpointer.keep_latest_k = 0
     return cfg
 
@@ -358,12 +356,14 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         model=model_registry(flavor),
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=200,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=default_adamw(lr=8e-4),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=200,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
@@ -585,7 +585,7 @@ def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
     # but the fork discards optimizer state; AdamW at a low LR is the safe,
     # batch-robust choice for a short anneal -- consistent with the CPT gentle
     # retry, which also used a low constant LR on the same base family).
-    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
     cfg.metrics.enable_wandb = True
     return cfg
@@ -601,10 +601,10 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     a flat gentle LR -- the null hypothesis for the anneal.
     """
     cfg = _agpt_2b_mds_anneal_base()
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-flat"
     return cfg
 
@@ -619,10 +619,10 @@ def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     window). This is the first true LR anneal applied to the MDS base.
     """
     cfg = _agpt_2b_mds_anneal_base()
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 1.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 1.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-wsd"
     return cfg
 
@@ -666,11 +666,11 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
         streaming_shuffle_buffer_size=10_000,
         num_prefetch_microbatches=2,
     )
-    cfg.optimizer = default_adamw(lr=2e-5)
-    cfg.lr_scheduler.warmup_steps = 0
-    cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.optim.optimizer = default_adamw(lr=2e-5)
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
     cfg.training.steps = 900
     # 6,144 packed sequences x 1,024 tokens. At 96 DP ranks and LBS=2 this
     # resolves to gradient accumulation 32, matching the historical recipe.
@@ -715,10 +715,10 @@ def _agpt_2b_mds_mix_base() -> FaultTolerantTrainer.Config:
     (the anneal winner), same budget -- caller sets the dataset + folder."""
     cfg = _agpt_2b_mds_anneal_base()
     # Flat / constant-LR schedule (the anneal-proven winner).
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
     return cfg
 
 
@@ -912,7 +912,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     cfg.checkpointer.initial_load_model_only = True
     cfg.dataloader.dataset = _MDS_ANNEAL_DATASET
     cfg.dataloader.dataset_path = None
-    cfg.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
+    cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
     cfg.metrics.enable_wandb = True
     return cfg
@@ -921,10 +921,10 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
 def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
     """ARM A (control): fork olmo-mix step-92859, CONSTANT low LR (no decay)."""
     cfg = _agpt_2b_olmo_anneal_base()
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 0.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 1.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-flat"
     return cfg
 
@@ -932,10 +932,10 @@ def agpt_2b_olmo_anneal_flat() -> FaultTolerantTrainer.Config:
 def agpt_2b_olmo_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork olmo-mix step-92859, WSD decay-to-0 anneal."""
     cfg = _agpt_2b_olmo_anneal_base()
-    cfg.lr_scheduler.warmup_steps = 20
-    cfg.lr_scheduler.decay_ratio = 1.0
-    cfg.lr_scheduler.decay_type = "linear"
-    cfg.lr_scheduler.min_lr_factor = 0.0
+    cfg.optim.lr_scheduler.warmup_steps = 20
+    cfg.optim.lr_scheduler.decay_ratio = 1.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-olmo-anneal-wsd"
     return cfg
 
@@ -1519,7 +1519,7 @@ def agpt_olmo2tok_arm(
         raise ValueError(f"lr must be positive, got {lr!r}")
 
     cfg = agpt(f"{size}_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = _LADDER_OPTIMIZER_FACTORIES[optimizer](lr=lr)
+    cfg.optim.optimizer = _LADDER_OPTIMIZER_FACTORIES[optimizer](lr=lr)
     if not decay:
         # Constant after warmup, via the DECAY_RATIO=0 precedent the anneal
         # arms use: decay_ratio=0.0 makes the decay phase zero steps, and
@@ -1532,10 +1532,10 @@ def agpt_olmo2tok_arm(
         # warmup_steps to total_steps and only WARNS, so a very short arm
         # silently becomes all-warmup -- the submit script keeps steps far
         # above 20.
-        cfg.lr_scheduler.warmup_steps = 20
-        cfg.lr_scheduler.decay_ratio = 0.0
-        cfg.lr_scheduler.decay_type = "linear"
-        cfg.lr_scheduler.min_lr_factor = 1.0
+        cfg.optim.lr_scheduler.warmup_steps = 20
+        cfg.optim.lr_scheduler.decay_ratio = 0.0
+        cfg.optim.lr_scheduler.decay_type = "linear"
+        cfg.optim.lr_scheduler.min_lr_factor = 1.0
     return _use_hf_streaming(
         cfg,
         path="json",
@@ -1605,7 +1605,7 @@ def agpt_30b_olmo2tok_mano() -> FaultTolerantTrainer.Config:
     the AdamW baseline are per-token, not per-wallclock.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_mano(lr=3.0e-4)
+    cfg.optim.optimizer = default_mano(lr=3.0e-4)
     return _use_fineweb_edu(cfg)
 
 
@@ -1631,7 +1631,7 @@ def agpt_30b_olmo2tok_sophiag() -> FaultTolerantTrainer.Config:
     shapes differ. Fresh run, own checkpoint folder, per-token comparisons.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_sophiag(lr=3.0e-4)
+    cfg.optim.optimizer = default_sophiag(lr=3.0e-4)
     return _use_fineweb_edu(cfg)
 
 
@@ -1679,7 +1679,7 @@ def agpt_30b_olmo2tok_muon() -> FaultTolerantTrainer.Config:
     per-token comparisons.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_muon(lr=3.0e-4)
+    cfg.optim.optimizer = default_muon(lr=3.0e-4)
     return _use_fineweb_edu(cfg)
 
 
@@ -1725,7 +1725,7 @@ def agpt_30b_olmo2tok_muon_norescale() -> FaultTolerantTrainer.Config:
     NOT a resume target for any other arm. Fresh run, own checkpoint folder.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_muon(lr=3.0e-4, adjuster_lr_ref=False)
+    cfg.optim.optimizer = default_muon(lr=3.0e-4, adjuster_lr_ref=False)
     return _use_fineweb_edu(cfg)
 
 
@@ -1769,7 +1769,7 @@ def _mup_cfg(flavor: str, *, dim: int, base_dim: int) -> FaultTolerantTrainer.Co
     # eval-gibberish failure. mup.py's own _mup_trainer_config already passes
     # this; these config_registry copies dropped it.
     cfg = agpt(flavor, hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_mup_adamw(eta, dim=dim, base_dim=base_dim)
+    cfg.optim.optimizer = default_mup_adamw(eta, dim=dim, base_dim=base_dim)
     return cfg
 
 
@@ -1836,7 +1836,7 @@ def agpt_30b_olmo2tok_muon_ffn() -> FaultTolerantTrainer.Config:
     differs, so the optimizer state shapes do not match.
     """
     cfg = agpt("30b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_muon(lr=3.0e-4, muon_max_dim=20000)
+    cfg.optim.optimizer = default_muon(lr=3.0e-4, muon_max_dim=20000)
     return _use_fineweb_edu(cfg)
 
 
@@ -1865,7 +1865,7 @@ def agpt_30b_olmo2tok_mup() -> FaultTolerantTrainer.Config:
     from torchtitan.experiments.ezpz.agpt.mup import default_mup_adamw
 
     cfg = agpt("mup_6144", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
-    cfg.optimizer = default_mup_adamw(6.4e-5, dim=6144, base_dim=1536)
+    cfg.optim.optimizer = default_mup_adamw(6.4e-5, dim=6144, base_dim=1536)
     return _use_fineweb_edu(cfg)
 
 
@@ -1953,7 +1953,7 @@ def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
     if not _is_80b_config(cfg):
         return
     try:
-        lr = float(cfg.optimizer.param_groups[0].optimizer_kwargs["lr"])
+        lr = float(cfg.optim.optimizer.optimizers[0].lr)
     except (AttributeError, IndexError, KeyError, TypeError):
         return  # non-standard optimizer shape; not ours to police
     if lr >= _AGPT_80B_LR_ONSET:
@@ -1963,7 +1963,7 @@ def _assert_80b_lr_is_survivable(cfg: FaultTolerantTrainer.Config) -> None:
             f"blows up on the first optimizer step and every measurement "
             f"downstream of it is an artifact of the LR.\n"
             f"  Pass e.g. "
-            f"--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7 for AdamW, "
+            f"--optim.optimizer.optimizers.0.lr=5e-7 for AdamW, "
             f"or prefer mano (~3e-6 at its own finder optimum) or sophiag.\n"
             f"  Measurements: docs/guides/training/agpt_80b.md"
         )
@@ -1995,11 +1995,11 @@ def agpt_80b_sophiag() -> FaultTolerantTrainer.Config:
     does not exist in the parser -- the optimizer is a config-level choice, and
     passing a nonexistent flag aborts at parse time.
 
-    Pair with `--lr-scheduler.warmup-steps=4650 --lr-scheduler.decay-ratio=0`
+    Pair with `--optim.lr-scheduler.warmup-steps=4650 --optim.lr-scheduler.decay-ratio=0`
     (both real flags, verified) and a GBS near 6144 to match the calibration.
     """
     cfg = ezpz_agpt_80b()
-    cfg.optimizer = default_sophiag(lr=1.0e-6)
+    cfg.optim.optimizer = default_sophiag(lr=1.0e-6)
     return cfg
 
 
@@ -2012,7 +2012,7 @@ def agpt_80b() -> FaultTolerantTrainer.Config:
     AdamW NaN onset is **1.36e-6** with a usable ceiling of **~7.4e-7**, and
     job 8530891 NaN'd at STEP 2 at 1e-6 -- already 800x below the default.
 
-    Pass `--optimizer.param-groups.0.optimizer-kwargs.lr=5e-7` for AdamW, or
+    Pass `--optim.optimizer.optimizers.0.lr=5e-7` for AdamW, or
     prefer mano/sophiag. Without it the model blows up on the first optimizer
     step and every downstream measurement is an artifact of the LR.
 

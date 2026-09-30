@@ -15,10 +15,8 @@ import ezpz.distributed
 from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
-# 79th sync: upstream #4172 deleted components/lr_scheduler.py (it had become
-# a re-export shim when the optimizer components were grouped into a package
-# by #4140). LRSchedulersContainer now lives in components.optimizer.
-from torchtitan.components.optimizer import default_adamw, LRSchedulersContainer
+from torchtitan.components.optim import LRSchedulersContainer, Optim
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
 from torchtitan.config.transform.quantization import (
     Float8GroupedLinearConverter,
@@ -134,12 +132,14 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         model=model_registry(flavor),
         tokenizer=EZPZTokenizer.Config(backend="hf"),
         loss=CrossEntropyLoss.Config(),
-        optimizer=default_adamw(lr=8e-4),
-        lr_scheduler=LRSchedulersContainer.Config(
-            warmup_steps=200,
-            decay_ratio=0.8,
-            decay_type="linear",
-            min_lr_factor=0.0,
+        optim=Optim.Config(
+            optimizer=default_adamw(lr=8e-4),
+            lr_scheduler=LRSchedulersContainer.Config(
+                warmup_steps=200,
+                decay_ratio=0.8,
+                decay_type="linear",
+                min_lr_factor=0.0,
+            ),
         ),
         training=TrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 8192 = 65536.
@@ -342,7 +342,7 @@ def moe_10b_2b_noac() -> FaultTolerantTrainer.Config:
     selective.
     """
     cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="none")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
     return cfg
 
 
@@ -358,10 +358,10 @@ def moe_16b() -> FaultTolerantTrainer.Config:
         local_batch_size=4,
         hf_assets_path="./assets/hf/deepseek-moe-16b-base",
     )
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.1
-    cfg.lr_scheduler.warmup_steps = 200
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.1
+    cfg.optim.lr_scheduler.warmup_steps = 200
     cfg.training.steps = 1000
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
     cfg.parallelism.expert_parallel_degree = 8
@@ -382,10 +382,10 @@ def moe_671b() -> FaultTolerantTrainer.Config:
         local_batch_size=4,
         hf_assets_path="./assets/hf/DeepSeek-V3.1-Base",
     )
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.lr_scheduler.warmup_steps = 2000
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
+    cfg.optim.lr_scheduler.warmup_steps = 2000
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 10000
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
     cfg.checkpointer.interval = 500
@@ -562,9 +562,9 @@ def agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> FaultTolerantTrainer.Config:
         hf_assets_path="./assets/hf/llama-2-32k-sp",
     )
     cfg.parallelism.expert_parallel_degree = 12
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.1
     cfg.checkpointer.keep_latest_k = 0
     return cfg
 
@@ -606,9 +606,9 @@ def moe_10b_2b() -> FaultTolerantTrainer.Config:
     # default -- they pass with it, so they are left alone.
     cfg = moe("10B_2B", local_batch_size=1, activation_checkpoint_mode="selective")
     cfg.dataloader.emit_positions = True  # flex attention; see moe_small
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
     cfg.checkpointer.interval = 100
     return cfg
@@ -630,9 +630,9 @@ def moe_10b_2b_sdpa() -> FaultTolerantTrainer.Config:
     # shape divergence is fundamental until AC saves the routing
     # result instead of recomputing it.
     cfg = moe("10B_2B_sdpa", local_batch_size=1, activation_checkpoint_mode="selective")
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 2.2e-4
-    cfg.lr_scheduler.decay_type = "cosine"
-    cfg.lr_scheduler.min_lr_factor = 0.1
+    cfg.optim.optimizer.optimizers[0].lr = 2.2e-4
+    cfg.optim.lr_scheduler.decay_type = "cosine"
+    cfg.optim.lr_scheduler.min_lr_factor = 0.1
     cfg.training.steps = 1000
     cfg.checkpointer.interval = 100
     return cfg
@@ -659,9 +659,9 @@ def smoke_moe_500m_50steps() -> FaultTolerantTrainer.Config:
     cfg.dataloader.dataset_path = None
     cfg.training.steps = 50
     cfg.checkpointer = None
-    cfg.optimizer.param_groups[0].optimizer_kwargs["lr"] = 8e-4
-    cfg.lr_scheduler.warmup_steps = 5
-    cfg.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.optimizer.optimizers[0].lr = 8e-4
+    cfg.optim.lr_scheduler.warmup_steps = 5
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
     cfg.metrics.log_freq = 1
     return cfg
 

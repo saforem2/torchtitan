@@ -22,10 +22,11 @@ from torch.distributed import get_rank, get_world_size, is_initialized
 
 import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
-from torchtitan.components.optimizer import default_adamw, OptimizersContainer
+from torchtitan.components.optim import OptimizersContainer
 from torchtitan.config import ConfigManager
 from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
+    default_adamw,
     default_adopt,
     default_mano,
     default_muon,
@@ -462,13 +463,13 @@ def main(args: list[str] | None = None) -> None:
 
     # Swap in the correct optimizer Config subclass if --optimizer was specified
     if optimizer_name is not None:
-        config.optimizer = _build_optimizer_config(
+        config.optim.optimizer = _build_optimizer_config(
             optimizer_name,
-            config.optimizer,
+            config.optim.optimizer,
             optimizer_overrides,
         )
         logger.info(
-            "Using optimizer: %s (%s)", optimizer_name, type(config.optimizer).__name__
+            "Using optimizer: %s (%s)", optimizer_name, type(config.optim.optimizer).__name__
         )
 
     # Check the 80B learning rate HERE, not in the config registry.

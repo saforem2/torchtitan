@@ -23,10 +23,10 @@ argv = ["--module","ezpz.agpt","--config","agpt_debugmodel_local",
         "--compile.no-enable","--checkpoint.no-enable","--validator.no-enable",
         "--debug.seed","42","--debug.deterministic",
         "--metrics.log-freq=100","--metrics.no-enable-wandb",
-        "--lr-scheduler.warmup-steps=5"]
+        "--optim.lr-scheduler.warmup-steps=5"]
 cfg = ConfigManager().parse_args(argv)
-from torchtitan.components.optimizer import default_adamw
-cfg.optimizer = default_adamw(lr=8e-4)
+from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
+cfg.optim.optimizer = default_adamw(lr=8e-4)
 tr = cfg.build()
 
 emb = tr.model_parts[0].tok_embeddings.weight
