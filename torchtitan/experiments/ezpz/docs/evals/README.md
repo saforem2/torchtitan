@@ -8,6 +8,15 @@ Benchmark evaluations of AuroraGPT production checkpoints using
 > (MMLU/GSM8K/ARC-Challenge), and how we compare to SmolLM3-3B / Llama-3.2 /
 > OLMo-2.
 
+> **Modern-task coverage (audited 2026-09-30):** MMLU and GSM8K results exist,
+> but the overview charts intentionally remain the seven-task commonsense
+> training thermometer. The corpus has explicit MMLU-5 ladders for both 20B
+> lineages and several MDS endpoints, while older 2B-v2 MMLU artifacts omit
+> shot metadata. GSM8K coverage is endpoint-sparse. See the strategy review's
+> coverage audit for exact counts and the policy for separate modern-task
+> reporting; these artifacts must not be merged into shared curves by task
+> name alone.
+
 ## All-production overlay (vs tokens)
 
 One chart, 4 panels (HellaSwag acc_norm, ARC-Easy acc, ARC-C acc_norm,
