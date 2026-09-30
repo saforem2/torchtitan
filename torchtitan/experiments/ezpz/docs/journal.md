@@ -4,6 +4,11 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-30 (Aurora) -- historical DCP model versus full-state compatibility
 
+- Tail-evaluation repair PR [#44](https://github.com/saforem2/torchtitan/pull/44)
+  merged into `ezpz` as `44f8a46cef4771d24e112bab85f165146ada9cb0` after
+  lint and review passed. The merged tree matches feature head `975e43931a` for
+  every PR file. The running eval uses an immutable pre-merge checkout, so merge
+  did not change code under test.
 - Tail-evaluation retry `8880334` was canceled and reached PBS `F`, exit 143,
   before writing weights after its inherited `PBS_O_WORKDIR=/home/foremans`
   would have placed the roughly 40 GB HF export under home. Commit
