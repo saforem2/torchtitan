@@ -53,7 +53,7 @@ from torchtitan.experiments.graph_trainer.qwen3 import (
 )
 from torchtitan.experiments.graph_trainer.tests._trainer_test_utils import (
     build_minimal_trainer,
-    single_device_parallel_dims,
+    single_device_parallelism_context,
 )
 from torchtitan.experiments.graph_trainer.trainer import GraphTrainer
 from torchtitan.models.common.attention import FlexInnerAttention
@@ -115,7 +115,9 @@ class BitwiseDeterministicBase(unittest.TestCase):
     attn_backend: str = "sdpa"
 
     def setUp(self):
-        self.parallel_dims = self.enterContext(single_device_parallel_dims())
+        self.parallelism_context = self.enterContext(
+            single_device_parallelism_context()
+        )
 
         # Disable max_autotune for FlexInnerAttention to ensure bitwise-identical
         # results between eager (torch.compile) and traced (regional_inductor)
@@ -227,28 +229,32 @@ class BitwiseDeterministicBase(unittest.TestCase):
             compile_disable_passes=compile_disable_passes,
             compile_numerics_changing_optim=numerics_changing_optim,
             tokenizer=HuggingFaceTokenizer(tokenizer_path=_TOKENIZER_PATH),
-            parallel_dims=self.parallel_dims,
+            parallelism_context=self.parallelism_context,
         )
         global_valid_tokens = torch.tensor(NUM_TOKENS, dtype=torch.float, device="cuda")
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
         for _ in range(NUM_STEPS):
             optimizer.zero_grad()
-            loss = trainer.engine.forward_backward_microbatch(
-                microbatch_group=[
-                    TokenizedTrainingMicrobatch(
-                        input=self.inputs,
-                        positions=self.positions,
-                        labels=self.labels,
-                        padding_mask=torch.zeros_like(self.labels, dtype=torch.bool),
-                        num_valid_tokens=self.labels.numel(),
-                    )
+            result = trainer.engine.forward_backward(
+                microbatch_groups=[
+                    [
+                        TokenizedTrainingMicrobatch(
+                            input=self.inputs,
+                            positions=self.positions,
+                            labels=self.labels,
+                            padding_mask=torch.zeros_like(
+                                self.labels, dtype=torch.bool
+                            ),
+                            num_valid_tokens=self.labels.numel(),
+                        )
+                    ]
                 ],
                 global_valid_tokens=global_valid_tokens,
             )
             optimizer.step()
 
-        return loss.detach().clone(), hash_model(model), hash_gradient(model)
+        return result.loss.detach().clone(), hash_model(model), hash_gradient(model)
 
     def _run_steps_with_precompile(
         self, model: nn.Module, *, enable_passes: bool = True

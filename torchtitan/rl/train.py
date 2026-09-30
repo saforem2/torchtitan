@@ -281,6 +281,7 @@ async def main():
         await rl_trainer.run()
     except KeyboardInterrupt:
         logger.info("Interrupted; attempting graceful shutdown...")
+        raise
     except asyncio.CancelledError:
         logger.exception("RL controller cancelled; propagating failure after shutdown")
         raise

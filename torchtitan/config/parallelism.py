@@ -59,6 +59,9 @@ class ParallelismConfig:
     - "never" will disable `reshard_after_forward` for all forward passes.
     """
 
+    fsdp_defer_gradient_reduction: bool = False
+    """Defer FSDP gradient reduction until the last accumulation step."""
+
     fsdp_symm_mem_scope: Annotated[FSDPSymmMemScope, tyro.conf.Suppress] = None
     """
     Which FSDP modules use symmetric-memory communication. None disables it.
@@ -168,8 +171,9 @@ class ParallelismConfig:
     For MoE models, this must be at least tensor_parallel_degree.
 
     Mesh constraint: the dense region (dp_shard * cp * tp) and sparse region
-    (efsdp * ep) cover the same ranks, so dp_shard * cp * tp == efsdp * ep.
-    EP borrows ranks from FSDP and TP: efsdp = dp_shard * cp * tp / ep.
+    (edp_shard * ep) cover the same ranks, so
+    dp_shard * cp * tp == edp_shard * ep. EP borrows ranks from FSDP and TP:
+    edp_shard = dp_shard * cp * tp / ep.
     pp and dp_replicate are outer dimensions unaffected by this constraint.
     """
 

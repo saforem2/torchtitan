@@ -49,7 +49,6 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "comm.train_timeout_seconds",
         "compile.backend",
         "compile.components",
-        "compile.enable_async_tensor_parallel",
         "dataloader.build_mrope_positions",
         "dataloader.dataset",
         "dataloader.dataset_path",
@@ -106,13 +105,14 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "encoder.clip_encoder",
         "encoder.random_init",
         "encoder.t5_encoder",
-        "ema.buffer_patterns",
-        "ema.decay",
-        "ema.half_life_fraction",
-        "ema.offload_to_cpu",
-        "ema.start_step",
-        "ema.step_bias",
-        "ema.update_every_n_steps",
+        "optim.ema.buffer_patterns",
+        "optim.ema.decay",
+        "optim.ema.half_life_fraction",
+        "optim.ema.offload_to_cpu",
+        "optim.ema.start_step",
+        "optim.ema.step_bias",
+        "optim.ema.update_every_n_steps",
+        "optim.enable_cuda_graph",
         "hf_assets_path",
         "inference.img_size",
         "inference.local_batch_size",
@@ -126,23 +126,17 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "loss.loss_fn.mtp_scale",
         "loss.mtp_scale",
         "loss.num_chunks",
-        "lr_scheduler.decay_ratio",
-        "lr_scheduler.decay_type",
-        "lr_scheduler.min_lr_factor",
-        "lr_scheduler.total_steps",
-        "lr_scheduler.warmup_steps",
+        "optim.lr_scheduler.decay_ratio",
+        "optim.lr_scheduler.decay_type",
+        "optim.lr_scheduler.min_lr_factor",
+        "optim.lr_scheduler.total_steps",
+        "optim.lr_scheduler.warmup_steps",
         "metrics.disable_color_printing",
         "metrics.enable_tensorboard",
         "metrics.enable_wandb",
         "metrics.log_freq",
         "metrics.save_for_all_ranks",
         "metrics.save_tb_folder",
-        "optimizer.implementation",
-        "optimizer.optimizer_factory_kwargs_by_name",
-        "optimizer.param_groups",
-        "optimizer.param_groups.optimizer_kwargs",
-        "optimizer.param_groups.optimizer_name",
-        "optimizer.param_groups.pattern",
         "override.imports",
         "parallelism.context_parallel_degree",
         "parallelism.data_parallel_replicate_degree",
@@ -150,6 +144,7 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "parallelism.enable_fsdp_symm_mem",
         "parallelism.enable_sequence_parallel",
         "parallelism.expert_parallel_degree",
+        "parallelism.fsdp_defer_gradient_reduction",
         "parallelism.fsdp_reshard_after_forward",
         "parallelism.pipeline_parallel_degree",
         "parallelism.pipeline_parallel_first_stage_less_layers",
@@ -189,7 +184,7 @@ _FROZEN_CLI_OPTIONS = frozenset(
         "training.gc_debug",
         "training.gc_freq",
         "training.max_context_length",
-        "training.max_norm",
+        "optim.max_norm",
         "training.mixed_precision_param",
         "training.mixed_precision_reduce",
         "training.num_tokens_per_microbatch_per_dp_rank",
@@ -312,9 +307,8 @@ def _subclasses(config_cls: type) -> set[type]:
 def _config_types(field_type) -> set[type]:
     """The config classes a field may hold, unwrapping Annotated and generics.
 
-    Both unions and containers expand. tyro indexes a ``list[ParamGroupConfig]``
-    per element, so ``--optimizer.param-groups.0.optimizer-kwargs.lr`` is a real
-    option; the index is dropped here and the element's fields are recorded once.
+    Both unions and containers expand. Tyro indexes configurable list elements;
+    the index is dropped here and the element's fields are recorded once.
 
     Subclasses expand too, because a field declared as a component base holds
     whichever implementation the configuration picked -- ``loss.mtp_scale``

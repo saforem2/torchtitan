@@ -672,8 +672,7 @@ class VLLMGenerator(Configurable):
         config: Generator-specific configuration.
         model_config: TorchTitan model configuration.
         model_path: Path to the HF model checkpoint.
-        compile_config: Per-layer torch.compile config shared with the
-            trainer so both sides compile identically.
+        compile_config: Compile configuration shared with the trainer.
         max_num_seqs: vLLM's upper bound on concurrently scheduled sequences (vLLM admits fewer if KV
             is tight); also sets the CUDA-graph capture sizes.
         output_dir: Structured-logger output directory.
@@ -1032,7 +1031,7 @@ class VLLMGenerator(Configurable):
     def _set_determinism(debug: DebugConfig) -> None:
         """Apply deterministic flags for the generator.
 
-        The generator doesn't use torchtitan's ParallelDims, so we apply
+        The generator doesn't use torchtitan's ParallelismContext, so we apply
         the deterministic flags directly instead of using set_determinism().
         """
         if debug.deterministic:
@@ -1377,7 +1376,7 @@ class VLLMGenerator(Configurable):
         dtensor_model_sd = plain_tensor_to_dtensor_state_dict(
             model_sd,
             state_dict_layouts=model.get_state_dict_layouts(),
-            parallel_dims=model.parallel_dims,
+            parallelism_context=model.parallelism_context,
         )
 
         await ts.get_state_dict(

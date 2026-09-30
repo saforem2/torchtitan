@@ -435,7 +435,7 @@ def test_nvfp4_build_configures_local_spmd_sharding(sharding_config_factory, inp
     # Config.build() folds the stock colwise/rowwise sharding into the local
     # SPMD region for the opaque NVFP4 GEMM.
     NVFP4Linear = _nvfp4_linear_cls()
-    from torchtitan.distributed.parallel_dims import MeshAxisName
+    from torchtitan.distributed.parallelism_context import MeshAxisName
     from torchtitan.models.common.decoder_sharding import dense_activation_placement
 
     module = NVFP4Linear.Config(
@@ -528,8 +528,7 @@ def test_qwen3_recipes_resolve(monkeypatch, recipe):
         assert isinstance(dataset.source, HuggingFaceRandomAccessSource.Config)
         assert dataset.source.path == "openai/gsm8k"
         assert config.checkpointer.initial_load_in_hf
-        assert config.compile is not None
-        assert "model" in config.compile.components
+        assert config.compile is None
 
 
 def test_nvfp4_module_buffers_and_native_checkpoint():
