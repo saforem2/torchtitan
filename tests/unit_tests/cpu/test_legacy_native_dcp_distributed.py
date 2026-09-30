@@ -6,6 +6,7 @@
 
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -67,7 +68,13 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
         native = {qkv_key: qkv, ffn_key: ffn}
 
         logical = adapter.native_fused_to_logical(native)
-        restored = adapter.native_logical_to_fused(logical)
+        with mock.patch(
+            "torchtitan.protocols.state_dict_adapter.torch.cat",
+            side_effect=AssertionError(
+                "DTensor QKV restore must not materialize torch.cat"
+            ),
+        ):
+            restored = adapter.native_logical_to_fused(logical)
 
         for key, expected in native.items():
             actual = restored[key]
@@ -76,6 +83,38 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
             torch.testing.assert_close(
                 actual.to_local(), expected.to_local(), rtol=0, atol=0
             )
+
+        # Five KV groups across two ranks puts the Shard(0) boundary at row 20,
+        # halfway through a packed 8-row QKV group. Exercise the destination
+        # intersection-copy path rather than only group-aligned shards.
+        uneven_key = "layers.0.attention.qkv_linear.wqkv.weight"
+        uneven_global = torch.arange(40 * 16, dtype=torch.float32).reshape(40, 16)
+        uneven_native = distribute_tensor(uneven_global, mesh, (Shard(0),))
+        uneven_state = {uneven_key: uneven_native}
+        adapter._split_qkv_linear(
+            uneven_state,
+            prefix="layers.0.attention.qkv_linear.",
+            head_dim=2,
+            heads_per_kv=2,
+        )
+        with mock.patch(
+            "torchtitan.protocols.state_dict_adapter.torch.cat",
+            side_effect=AssertionError(
+                "DTensor QKV restore must not materialize torch.cat"
+            ),
+        ):
+            adapter._merge_qkv_linear(
+                uneven_state,
+                prefix="layers.0.attention.qkv_linear.",
+                head_dim=2,
+                heads_per_kv=2,
+            )
+        uneven_restored = uneven_state[uneven_key]
+        assert isinstance(uneven_restored, DTensor)
+        assert uneven_restored.placements == uneven_native.placements
+        torch.testing.assert_close(
+            uneven_restored.to_local(), uneven_native.to_local(), rtol=0, atol=0
+        )
 
         # 5 KV heads across two shards intentionally cuts through a packed
         # QKV group boundary. The optimizer migration must replicate before
