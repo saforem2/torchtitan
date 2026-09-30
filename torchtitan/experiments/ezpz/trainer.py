@@ -527,6 +527,16 @@ class FaultTolerantTrainer(TorchFTTrainer):
         config.model = model_config
         if config.override.imports:
             apply_overrides(config.override, config)
+        from torchtitan.config.validation import validate_model_training_config
+
+        validate_model_training_config(
+            model_config,
+            parallelism=config.parallelism,
+            training=config.training,
+            debug=config.debug,
+            activation_checkpoint=config.activation_checkpoint,
+            max_num_documents=config.dataloader.max_num_documents,
+        )
 
         self.engine = self.engine_cls(
             config,

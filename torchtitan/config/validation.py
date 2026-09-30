@@ -97,8 +97,22 @@ def validate_model_training_config(
                     f"divisible by expert_parallel_degree ({ep})."
                 )
             routed_weight_sharding = moe.routed_experts.w13.sharding_config
+            routed_weight_layout = (
+                routed_weight_sharding.state_shardings.get("weight")
+                if routed_weight_sharding is not None
+                else None
+            )
+            if routed_weight_layout is not None:
+                from torchtitan.distributed.parallelism_context import MeshAxisName
+                from torchtitan.distributed.spmd_types import spmd_axes
+
+                routed_weight_has_ep = MeshAxisName.EP in spmd_axes(
+                    routed_weight_layout
+                )
+            else:
+                routed_weight_has_ep = False
             if model.tok_embeddings.sharding_config is not None and (
-                (routed_weight_sharding is not None) != (ep > 1)
+                routed_weight_has_ep != (ep > 1)
             ):
                 raise ValueError(
                     f"{moe_fqn} routed-expert sharding does not match "
