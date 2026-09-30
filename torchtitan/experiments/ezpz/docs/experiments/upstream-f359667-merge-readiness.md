@@ -88,5 +88,5 @@ than hidden with broad skips.
   CI plus current review approval.
 
 The branch is not merge-ready until those remaining accelerator and review gates
-produce terminal artifacts. Live operational state is maintained in the
-private [TorchTitan Agent Vault](https://mbph.tail3e7069.ts.net:10444/n/history/torchtitan/index.md).
+produce terminal artifacts. Live operational state is maintained in the private
+TorchTitan Agent Vault (not reachable from public CI runners).
