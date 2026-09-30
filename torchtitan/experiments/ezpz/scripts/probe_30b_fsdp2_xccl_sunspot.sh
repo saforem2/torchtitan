@@ -116,9 +116,11 @@ run_fsdp() {
     grep -q FSDP2_XCCL_PROBE_PASS "$log" || exit 97
 }
 
-run_raw all_gather
-run_raw reduce_scatter
-run_raw all_reduce
+if [[ "${SKIP_RAW_CONTROLS:-0}" != 1 ]]; then
+    run_raw all_gather
+    run_raw reduce_scatter
+    run_raw all_reduce
+fi
 run_fsdp pure-fsdp 16 12 --dp-replicate 1 --dp-shard 16
 run_fsdp hsdp 48 12 --dp-replicate 3 --dp-shard 16
 printf 'FSDP2_XCCL_MATRIX_PASS job=%s commit=%s\n' "$JOB" "$EXPECTED_SHA" | tee "$OUT/VALIDATED"

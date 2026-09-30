@@ -40,6 +40,16 @@ def _rank_env() -> tuple[int, int, int]:
         raise RuntimeError(
             f"LOCAL_RANK={local_rank} disagrees with PALS_LOCAL_RANKID={pals_local_rank}"
         )
+
+    hostfile = os.environ.get("PBS_NODEFILE")
+    master_addr = "127.0.0.1"
+    if hostfile and os.path.exists(hostfile):
+        with open(hostfile) as stream:
+            master_addr = next((line.strip() for line in stream if line.strip()), "")
+        if not master_addr:
+            raise RuntimeError(f"PBS nodefile is empty: {hostfile}")
+    os.environ.setdefault("MASTER_ADDR", master_addr)
+    os.environ.setdefault("MASTER_PORT", "29512")
     return rank, local_rank, world
 
 
