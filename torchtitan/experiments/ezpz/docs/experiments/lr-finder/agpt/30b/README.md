@@ -35,7 +35,25 @@ The Aurora and Sunspot failures are different layers.
 
 Gradient accumulation, compilation, checkpoint corruption, and persistent HBM
 alone do not explain the failure. More blind topology permutations are not LR
-evidence. The next model step is a minimal FSDP2/XCCL collective reproducer.
+evidence.
+
+The maintained reduced reproducer closed that lower-level gate on Sunspot job
+`12479055` (commit `199563d0658c00b3b738fff1b597371a07b2a845`, PBS
+exit 0). It used the exact `100352 x 6144` embedding storage shape and the
+production XCCL/SUM-reduction policy. Pure FSDP (`dp_replicate=1`,
+`dp_shard=16`, 16 ranks with Sunspot's 12+4 placement) and HSDP
+(`dp_replicate=3`, `dp_shard=16`, 48 ranks on four nodes) each completed three
+finite backward passes and three nonzero parameter updates. The HSDP terminal
+gradient norm was `1330.21497` and update norm was `1.3302151`. Earlier job
+`12479051` independently passed exact-size raw BF16 all-gather, FP32
+reduce-scatter, and stride-16-replica FP32 all-reduce controls. This rules out a
+deterministic failure in those raw collectives, the shard-16 FSDP2 storage path,
+or the reduced HSDP replicate axis; it does not prove the 768-rank full model.
+
+The next controlled escalation is a four-node full-model canary at
+`dp_replicate=3`, `dp_shard=16`, TP=1. It must complete three finite AdamW
+updates with positive update-ratio evidence before any 64-node LR sweep is
+released.
 
 ## Artifacts
 
@@ -71,3 +89,8 @@ point or checkpoint exists. This reproduces the native pre-step boundary on the
 measured geometry, so another blind retry is not justified. No basin or LR
 recommendation will be reported until a controlled native-runtime diagnostic
 identifies a working path and a complete trajectory is produced.
+
+Reduced-probe attempts `12479049`, `12479052`, `12479053`, and `12479054` were
+harness-development failures (respectively unsupported uneven `ezpz` occupancy,
+missing rendezvous variables, sparse-gradient validation, and omitted oneCCL
+SUM-reduction policy). None is counted as model or LR evidence.

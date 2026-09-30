@@ -4,6 +4,19 @@ Running log of what's happening, session by session. Most recent first.
 
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 
+The 30B pre-step failure discriminator completed on Sunspot. Job `12479051`
+passed exact-size raw BF16 all-gather, FP32 reduce-scatter, and FP32 HSDP
+replica-group all-reduce controls. Final job `12479055` (commit
+`199563d0658c00b3b738fff1b597371a07b2a845`) then completed three forward,
+backward, and nonzero optimizer updates in both the pure-FSDP `1 x 16` arm and
+the four-node HSDP `3 x 16` arm; PBS exit was 0 and the artifact contains
+`FSDP2_XCCL_MATRIX_PASS`. This rules out a deterministic raw-XCCL,
+shard-16-storage, or reduced-replicate-axis defect. It does not clear the
+768-rank model, so the next gate is a four-node full-30B canary before any
+production-scale LR restart. Intermediate jobs `12479049`, `12479052`,
+`12479053`, and `12479054` exposed and corrected probe-only launcher,
+rendezvous, sparse-gradient, and XCCL AVG-versus-SUM contract errors.
+
 Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
 project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
 steps with arm exit 0. The MoE arm failed during FSDP initialization before
