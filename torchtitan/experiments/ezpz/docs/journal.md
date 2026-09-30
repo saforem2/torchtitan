@@ -41,6 +41,20 @@ Depth-48 eager job `12479067` hit a real HBM OOM. These eager canaries differed
 from the compiled production 30B launcher, so the maintained canary now retains
 compile for the next production-shaped check.
 
+Compiled follow-ups exhausted the remaining safe local controls. `12479068`
+and `12479072` failed before step 1 in FSDP backward unshard/copy-in. Corrected
+10B `12479065` passed three updates; corrected 20B `12479066` failed in
+backward. `CCL_SYCL_OUTPUT_EVENT=0` let 20B `12479071` reach AdamW state
+allocation, where it OOMed, but did not clear 30B. Backward-prefetch suppression
+shifted but did not remove the 30B failure (`12479075`). At dimension-safe
+`dp_shard=32`, `12479076` failed in post-backward `_chunk_cat`; equivalent-copy,
+synchronization, and combined controls `12479078`-`12479080` still failed on the
+first fallback write, proving the resource exhaustion originated earlier. The
+failed monkeypatches were removed. The current Torch 2.14 full-model path is
+blocked above 10B; preserved Torch 2.13 cannot build current full-SPMD FSDP,
+and the available Torch 2.15 venv has missing core package files. No 64-node LR
+retry is justified until a repaired newer XPU runtime or upstream fix exists.
+
 Exact-head Sunspot smoke `12479017` ran commit `bb39b72eaa` from the immutable
 project-filesystem checkout. Dense TP=1 and TP=2 each completed three optimizer
 steps with arm exit 0. The MoE arm failed during FSDP initialization before

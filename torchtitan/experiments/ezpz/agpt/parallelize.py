@@ -263,23 +263,6 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     )
 
 
-def maybe_disable_fsdp_backward_prefetch(model: nn.Module) -> int:
-    """Disable speculative FSDP backward all-gathers for an XPU diagnostic."""
-    if os.environ.get("EZPZ_DISABLE_FSDP_BACKWARD_PREFETCH") != "1":
-        return 0
-    configured = 0
-    for module in model.modules():
-        set_prefetch = getattr(module, "set_modules_to_backward_prefetch", None)
-        if callable(set_prefetch):
-            # A nonempty explicit list disables Torch's default reverse-order
-            # prefetch. Targeting the current module is a no-op because its
-            # parameter group is already unsharded in its pre-backward hook.
-            set_prefetch([module])
-            configured += 1
-    logger.info("Disabled backward prefetch for %d FSDP modules", configured)
-    return configured
-
-
 def apply_fsdp(
     model: nn.Module,
     dp_mesh: DeviceMesh,
@@ -305,11 +288,6 @@ def apply_fsdp(
     inside otherwise-bf16 blocks, which is only expressible by regrouping.
     Empty (the default) leaves the production grouping untouched.
     """
-    from torchtitan.experiments.ezpz.xccl_chunk_cat_workaround import (
-        maybe_install_xccl_chunk_cat_workaround,
-    )
-
-    maybe_install_xccl_chunk_cat_workaround()
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
@@ -394,4 +372,3 @@ def apply_fsdp(
 
     fully_shard(model, **fsdp_config)
     disable_fsdp_gradient_division(model)
-    maybe_disable_fsdp_backward_prefetch(model)

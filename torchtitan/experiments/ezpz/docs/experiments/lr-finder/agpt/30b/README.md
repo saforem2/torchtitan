@@ -87,6 +87,28 @@ compile enabled. A 20B-width/48-layer eager rung (`12479067`) reached a genuine
 before the next 30B topology decision; eager failures cannot by themselves
 reject the compiled production path.
 
+The production-compiled follow-up closes the remaining local hypotheses without
+finding a working 30B update path. Compiled 30B `3 x 16` jobs `12479068` and
+`12479072` failed in FSDP backward unshard/copy-in before step 1. Corrected 10B
+job `12479065` completed three updates, while corrected 20B job `12479066`
+failed in backward, bracketing the current Torch 2.14 full-model ceiling above
+10B. Disabling per-collective SYCL output events let 20B job `12479071` finish
+backward and clipping, but AdamW's lazy moment allocation then exhausted HBM;
+the same flag did not clear 30B. Backward-prefetch-off jobs `12479074`/`12479075`
+shifted the first failure but did not remove it. Dimension-safe `dp_shard=32`
+job `12479076` failed in FSDP post-backward reduce-scatter copy-in at
+`torch._chunk_cat`. A reviewed equivalent copy fallback (`12479078`), explicit
+device synchronization (`12479079`), and the combined output-event control
+(`12479080`) all failed at the fallback's first `zero_()`, proving resources
+were already exhausted before packing. These unsuccessful monkeypatches were
+removed from the maintained branch.
+
+No safe local runtime or topology workaround remains: the preserved Torch 2.13
+runtime cannot satisfy current `dp_mesh_dims` DTensor construction, and the
+available Torch 2.15 environment is corrupt (`torch.fx.experimental.unification.core`
+is missing). Production 30B LR remains blocked pending a repaired newer XPU
+runtime or an upstream PyTorch/XCCL fix. Another 64-node sweep is not justified.
+
 ## Artifacts
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)
