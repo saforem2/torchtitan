@@ -93,8 +93,9 @@ def test_ladder_varies_width_only():
             len(c.layers),
             c.vocab_size,
             c.layers[0].attention.n_heads // c.layers[0].attention.n_kv_heads,
-            # w13 packs gate and up, so out_features is 2*hidden_dim.
-            (c.layers[0].feed_forward.w13.out_features / 2) / c.layers[0].attention.dim,
+            # Stacked w13 stores two [F, D] projections; out_features is F.
+            c.layers[0].feed_forward.w13.out_features
+            / c.layers[0].attention.dim,
         )
         for c in rungs
     ]
