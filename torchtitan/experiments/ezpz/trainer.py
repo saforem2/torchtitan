@@ -527,7 +527,6 @@ class FaultTolerantTrainer(TorchFTTrainer):
         config.model = model_config
         if config.override.imports:
             apply_overrides(config.override, config)
-        config.__post_init__()
 
         self.engine = self.engine_cls(
             config,
