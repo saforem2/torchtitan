@@ -9,6 +9,14 @@ Running log of what's happening, session by session. Most recent first.
   lint and review passed. The merged tree matches feature head `975e43931a` for
   every PR file. The running eval uses an immutable pre-merge checkout, so merge
   did not change code under test.
+- 20B-512 step-11,100 evaluation job `8880564` completed PBS exit 0 with a
+  fresh Flare `results.json`. It evaluated six tasks at zero-shot and
+  ARC-Challenge at 25-shot; all expected namespaced task keys, shot counts, and
+  finite metrics were validated. Selected normalized accuracies were HellaSwag
+  `0.687512`, ARC-Easy `0.681397`, PIQA `0.768226`, OpenBookQA `0.374000`, and
+  ARC-Challenge-25 `0.443686`; WinoGrande accuracy was `0.598264` and BoolQ
+  accuracy was `0.630275`. Gated 20B-256 step-17,500 sibling `8880658` is
+  queued from exact commit `975e43931a`.
 - Tail-evaluation retry `8880334` was canceled and reached PBS `F`, exit 143,
   before writing weights after its inherited `PBS_O_WORKDIR=/home/foremans`
   would have placed the roughly 40 GB HF export under home. Commit
