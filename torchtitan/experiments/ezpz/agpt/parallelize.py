@@ -305,6 +305,11 @@ def apply_fsdp(
     inside otherwise-bf16 blocks, which is only expressible by regrouping.
     Empty (the default) leaves the production grouping untouched.
     """
+    from torchtitan.experiments.ezpz.xccl_chunk_cat_workaround import (
+        maybe_install_xccl_chunk_cat_workaround,
+    )
+
+    maybe_install_xccl_chunk_cat_workaround()
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
