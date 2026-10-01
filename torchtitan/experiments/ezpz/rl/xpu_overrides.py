@@ -1043,8 +1043,8 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     )
 
 
-def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
-    """Exclude Monarch RDMA from TorchStore's automatic XPU selection.
+def patch_torchstore_network_availability_for_xpu() -> None:
+    """Use SharedMemory locally and Gloo remotely under XPU auto selection.
 
     TorchStore's capability probe currently reports Monarch RDMA available
     whenever the host exposes ibverbs, without checking whether the tensor
@@ -1052,9 +1052,16 @@ def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
     MonarchRDMA before Gloo. The backend then crashes its actor with SIGSEGV in
     the first remote model-state pull (jobs 12478722 and 12479170).
 
-    This changes only automatic availability on XPU. An explicit
-    ``TORCHTITAN_TORCHSTORE_TRANSPORT=monarch_rdma`` control still constructs
-    that backend and remains available for future backend qualification.
+    After excluding MonarchRDMA, compute actors report XCCL available and auto
+    selection chooses it before Gloo. That reproduces the same first-pull actor
+    crash in jobs 12479171 and 12479174; explicit-XCCL control 12478537 had
+    already hung at this boundary. Neither backend is qualified for TorchStore
+    weight transfer on this stack.
+
+    This changes only automatic availability probes on XPU, yielding the
+    topology-aware policy SharedMemory when local, otherwise Gloo. Explicit
+    ``monarch_rdma`` and ``xccl`` selectors still construct those backends and
+    remain available for future qualification.
     """
     # The RL controller owns TorchStore transport selection but intentionally
     # has no accelerator tile assigned, so torch.xpu.is_available() is False
@@ -1065,9 +1072,11 @@ def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
 
     import torchstore.transport as transport
     import torchstore.transport.monarch_rdma as monarch_rdma
+    import torchstore.transport.xccl as xccl
 
-    original = monarch_rdma.monarch_rdma_transport_available
-    if getattr(original, "_ezpz_xpu_patched", False):
+    if getattr(
+        monarch_rdma.monarch_rdma_transport_available, "_ezpz_xpu_patched", False
+    ):
         return
 
     def unavailable_on_xpu() -> bool:
@@ -1075,11 +1084,14 @@ def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
 
     unavailable_on_xpu._ezpz_xpu_patched = True  # type: ignore[attr-defined]
     monarch_rdma.monarch_rdma_transport_available = unavailable_on_xpu
+    xccl.xccl_available = unavailable_on_xpu
     # torchstore.transport imports the function into its module namespace.
     transport.monarch_rdma_transport_available = unavailable_on_xpu
+    transport.xccl_available = unavailable_on_xpu
     print(
-        f"[xpu_overrides pid={os.getpid()}] excluded MonarchRDMA from "
-        "TorchStore automatic selection on XPU; explicit controls remain available",
+        f"[xpu_overrides pid={os.getpid()}] set TorchStore XPU automatic policy "
+        "to SharedMemory when local, otherwise Gloo; explicit MonarchRDMA/XCCL "
+        "controls remain available",
         flush=True,
         file=__import__("sys").stderr,
     )
@@ -1113,7 +1125,7 @@ def apply_all_xpu_patches() -> None:
     patch_vllm_xpu_attention_backend()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
-    patch_torchstore_monarch_rdma_availability_for_xpu()
+    patch_torchstore_network_availability_for_xpu()
     # Force FSDP2 grad reduce-scatter to SUM+divide (oneCCL lacks AVG on the
     # scheduler path). Correct regardless of transport; needed for
     # multi-trainer-node FSDP. See patch_fsdp2_force_sum_reduction_for_xpu.

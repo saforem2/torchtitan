@@ -42,16 +42,19 @@ def test_torchstore_strategy_selects_monarch_rdma(monkeypatch):
     assert torchstore_transport_from_env() == "monarch-rdma"
 
 
-def test_xpu_patch_excludes_monarch_rdma_from_automatic_selection(monkeypatch):
+def test_xpu_patch_excludes_unqualified_network_backends_from_auto(monkeypatch):
     import sys
 
     from torchtitan.experiments.ezpz.rl import xpu_overrides
 
     available = lambda: True
     monarch_rdma = SimpleNamespace(monarch_rdma_transport_available=available)
+    xccl = SimpleNamespace(xccl_available=available)
     transport = SimpleNamespace(
         monarch_rdma_transport_available=available,
+        xccl_available=available,
         monarch_rdma=monarch_rdma,
+        xccl=xccl,
     )
     torchstore = SimpleNamespace(transport=transport)
 
@@ -60,14 +63,17 @@ def test_xpu_patch_excludes_monarch_rdma_from_automatic_selection(monkeypatch):
     monkeypatch.setitem(
         sys.modules, "torchstore.transport.monarch_rdma", monarch_rdma
     )
+    monkeypatch.setitem(sys.modules, "torchstore.transport.xccl", xccl)
     monkeypatch.setattr(
         xpu_overrides.torch, "version", SimpleNamespace(xpu="2026.1"), raising=False
     )
 
-    xpu_overrides.patch_torchstore_monarch_rdma_availability_for_xpu()
+    xpu_overrides.patch_torchstore_network_availability_for_xpu()
 
     assert not monarch_rdma.monarch_rdma_transport_available()
     assert not transport.monarch_rdma_transport_available()
+    assert not xccl.xccl_available()
+    assert not transport.xccl_available()
 
 
 def test_non_xpu_build_keeps_monarch_rdma_availability(monkeypatch):
@@ -79,7 +85,7 @@ def test_non_xpu_build_keeps_monarch_rdma_availability(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "torchstore", None)
 
     # Must return before importing or changing TorchStore on a non-XPU build.
-    xpu_overrides.patch_torchstore_monarch_rdma_availability_for_xpu()
+    xpu_overrides.patch_torchstore_network_availability_for_xpu()
 
 
 def test_xpu_flex_attention_uses_triton_backend():
