@@ -496,7 +496,7 @@ for idx in "${!TRAINERS[@]}"; do
     T_VENVSRC[$idx]="$_vsrc"
 done
 
-# ---- Disjointness assertion (no node may appear in two slices) ---------------
+# ---- Non-overlap assertion (no node may appear in two slices) ----------------
 dupes=$(cat "$MULTI_LOG_DIR"/trainer-*.hostfile 2>/dev/null | sort | uniq -d)
 if [[ -n "$dupes" ]]; then
     die "slices overlap -- the same node(s) appear in multiple trainers:"$'\n'"$dupes"
@@ -749,13 +749,18 @@ launch_trainer() {
         # in which case it is a private symlink dir -- see the auto-retry
         # state-collision note above.
         cd "${T_CWD[$idx]}" || { echo "cd failed: ${T_CWD[$idx]}"; exit 97; }
-        # Import torchtitan from THIS clone's (pinned) source tree; run the
-        # driver from the node-local per-model venv.
-        # shellcheck disable=SC1090
-        source "$venvdst/bin/activate" || { echo "activate failed: $venvdst"; exit 98; }
+        # Import torchtitan from THIS clone's pinned source tree and execute
+        # both launcher and payload by absolute paths in the staged venv.
+        # Do not source bin/activate: uv archives can retain their build-time
+        # VIRTUAL_ENV path even though their entry points are relocatable.
+        [[ -x "$venvdst/bin/ezpz" && -x "$venvdst/bin/python" ]] \
+            || { echo "staged venv entry points missing: $venvdst"; exit 98; }
+        export VIRTUAL_ENV="$venvdst"
+        export PATH="$venvdst/bin:$PATH"
+        hash -r
         export MASTER_PORT="$port"; unset MASTER_ADDR
         # shellcheck disable=SC2086
-        ezpz launch \
+        "$venvdst/bin/ezpz" launch \
             --nproc "$nproc" \
             --nproc_per_node "$PPN" \
             --hostfile "$slice" \
@@ -764,7 +769,7 @@ launch_trainer() {
             --timeout "$IDLE_TIMEOUT" \
             "${mfr[@]}" \
             -- \
-            python3 -m torchtitan.experiments.ezpz.train \
+            "$venvdst/bin/python" -m torchtitan.experiments.ezpz.train \
             --module=ezpz.agpt \
             --config="agpt_${model}${rope_suffix}" \
             --checkpoint.enable \
