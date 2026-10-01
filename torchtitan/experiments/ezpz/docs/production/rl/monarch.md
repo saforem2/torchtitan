@@ -1,6 +1,6 @@
 # Production RL with Monarch, TorchStore, and vLLM on XPU
 
-**Current production runbook. Last updated: 2026-09-25.**
+**Current production runbook. Last updated: 2026-10-01.**
 
 > [!IMPORTANT]
 > This page is the canonical operator guide for the current upstream-style
@@ -42,7 +42,7 @@ It supplies separate trainer/generator `HostMeshes` to the existing
 `train_upstream.spawn_proc_mesh()` path; model, controller, reward, and
 checkpoint logic remain the normal TorchTitan RL implementation.
 
-## Why the validated cross-host launcher currently forces Gloo
+## Automatic transport locality and the former forced-Gloo workaround
 
 TorchStore's intended automatic (`TransportType.Unset`) preference order is:
 
@@ -176,7 +176,7 @@ was repaired exclusively from exact RECORD-hash-matching uv cache objects, with
 the previously qualified BlendCorpus commit `50502b0c9de3` installed
 `--no-deps`. The resulting full RECORD existence audit reported zero missing
 files, and the Torch/ezpz/Monarch/TorchStore import closure passed before jobs
-`12479169`–`12479175` ran.
+`12479169`–`12479179` ran.
 
 ## Required evidence before promotion
 
@@ -185,7 +185,9 @@ A scheduler state or model load is not a pass. Require all of the following:
 1. exact checkout SHA asserted by the batch script;
 2. clean tracked worktree;
 3. trainer and generator placement on distinct host identities;
-4. explicit `TransportType.Gloo` in the controller log;
+4. `TORCHSTORE_TRANSPORT=auto` requested and the XPU topology policy installed
+   (`SharedMemory` only when local, otherwise `Gloo`); explicit transport
+   controls must log the requested backend;
 5. vLLM pre-training generation completes;
 6. initial trainer policy publication and generator pull complete;
 7. at least three finite optimizer updates with finite loss and gradient norm;
