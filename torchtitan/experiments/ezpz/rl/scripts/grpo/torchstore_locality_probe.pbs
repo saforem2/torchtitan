@@ -49,7 +49,23 @@ PORT=$((35000 + ${PBS_JOBID%%.*} % 20000))
 echo "LAUNCH_SHELL HOSTNAME=${HOSTNAME:-<unset>} real=$(hostname)"
 
 set +e
-"$V/bin/ezpz" launch -n 2 -ppn 1 --cpu-bind none --timeout 600 -- \
+# Launcher note: this diagnostic uses raw `mpiexec` as an EXPLICIT launcher
+# control rather than `ezpz launch`. The pinned RL runtime
+# (rl-monarch-torch214) currently has a damaged `click` install, so its
+# `bin/ezpz` entry point raises `ModuleNotFoundError: No module named
+# 'click.core'` before any application code runs. That venv is protected and
+# must not be modified to unblock a diagnostic. This probe tests hostname
+# resolution inside spawned actors, not launcher behavior, so the substitution
+# does not weaken the result. Do NOT copy this pattern into a training or
+# acceptance launcher, which must use `ezpz launch`.
+if "$V/bin/python" -c "import ezpz.cli" >/dev/null 2>&1; then
+  LAUNCH=("$V/bin/ezpz" launch -n 2 -ppn 1 --cpu-bind none --timeout 600 --)
+  echo "PROBE_LAUNCHER=ezpz"
+else
+  echo "PROBE_LAUNCHER=mpiexec (ezpz CLI unavailable in $V; protected venv left untouched)"
+  LAUNCH=(mpiexec -n 2 -ppn 1 --cpu-bind none)
+fi
+"${LAUNCH[@]}" \
   "$V/bin/python" -u \
   torchtitan/experiments/ezpz/rl/scripts/grpo/torchstore_locality_probe.py \
   --store "$STORE" --port "$PORT" --world-size 2
