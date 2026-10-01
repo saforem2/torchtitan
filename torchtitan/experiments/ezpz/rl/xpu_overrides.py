@@ -34,8 +34,8 @@ that applies the patches before import-time triggers them).
 
 from __future__ import annotations
 
-import logging
 import importlib
+import logging
 import os
 from collections.abc import Callable
 from functools import wraps
@@ -1107,13 +1107,14 @@ def patch_torchstore_network_availability_for_xpu() -> None:
         return False
 
     unavailable_on_xpu._ezpz_xpu_patched = True  # type: ignore[attr-defined]
-    setattr(monarch_rdma, "monarch_rdma_transport_available", unavailable_on_xpu)
-    setattr(xccl, "xccl_available", unavailable_on_xpu)
-    # torchstore.transport imports the function into its module namespace.
-    setattr(transport, "monarch_rdma_transport_available", unavailable_on_xpu)
-    setattr(transport, "xccl_available", unavailable_on_xpu)
-    setattr(transport, "torchcomms_uniflow_available", unavailable_on_xpu)
-    setattr(transport, "torchcomms_rdma_available", unavailable_on_xpu)
+    monarch_rdma.monarch_rdma_transport_available = unavailable_on_xpu  # type: ignore[attr-defined]
+    xccl.xccl_available = unavailable_on_xpu  # type: ignore[attr-defined]
+    # torchstore.transport imports these probes into its own namespace, so the
+    # defining modules alone are not enough.
+    transport.monarch_rdma_transport_available = unavailable_on_xpu  # type: ignore[attr-defined]
+    transport.xccl_available = unavailable_on_xpu  # type: ignore[attr-defined]
+    transport.torchcomms_uniflow_available = unavailable_on_xpu  # type: ignore[attr-defined]
+    transport.torchcomms_rdma_available = unavailable_on_xpu  # type: ignore[attr-defined]
 
     original_reporter = transport._log_transport_resolution
 
@@ -1129,7 +1130,7 @@ def patch_torchstore_network_availability_for_xpu() -> None:
         )
 
     report_resolution._ezpz_xpu_patched = True  # type: ignore[attr-defined]
-    setattr(transport, "_log_transport_resolution", report_resolution)
+    transport._log_transport_resolution = report_resolution  # type: ignore[attr-defined]
     print(
         f"[xpu_overrides pid={os.getpid()}] set TorchStore XPU automatic policy "
         "to SharedMemory when local, otherwise Gloo; explicit MonarchRDMA/XCCL "
