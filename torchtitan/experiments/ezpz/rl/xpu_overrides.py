@@ -330,6 +330,17 @@ class EzpzPerHostProvisioner:
             # Eager torch import before Monarch's pickle path can race.
             import torch  # noqa: F401
 
+            # Align HOSTNAME with the host this actor actually runs on, before
+            # any TorchStore import resolves locality. MPI/scheduler launchers
+            # propagate the submitting shell's HOSTNAME to every remote rank,
+            # so without this a remote storage volume compares equal to the
+            # local client and automatic selection picks SharedMemory. Measured
+            # on two Sunspot nodes: a rank on x1922c6s5b0n0 inherited
+            # HOSTNAME=x1922c6s3b0n0.
+            from torchtitan.torchstore_compat import repair_hostname_env
+
+            repair_hostname_env()
+
             # Apply XPU patches FIRST (must be installed before any
             # torch.distributed.* import that could trigger XCCL
             # backend registration).

@@ -64,14 +64,54 @@ fixed but hung during the first publication after flatten/cast. Thus forced
 XCCL is not a passing result on this stack.
 
 For the two-host topology, automatic-selection job `12478709` incorrectly
-entered the SharedMemory path even though the generator was remote. This points
-to a locality/hostname-classification defect in the current integration, not a
-design rule that cross-host TorchStore must use Gloo. The remote generator
-correctly rejected the inaccessible shared-memory volume:
+entered the SharedMemory path even though the generator was remote. The remote
+generator correctly rejected the inaccessible shared-memory volume:
 
 ```text
 Shared memory storage not found. This may indicate the storage volume is on a different host.
 ```
+
+### Root cause: `HOSTNAME` is inherited, not per-host
+
+This was a locality-classification defect, and it is now diagnosed. TorchStore
+decides co-location by string-comparing
+`os.environ.get("HOSTNAME", socket.gethostname())` on the client and on the
+storage volume (`torchstore.utils.get_local_hostname`, and
+`StorageVolume.get_id`). `HOSTNAME` is an ordinary exported shell variable, so
+MPI/scheduler launchers propagate the *submitting shell's* value to every
+remote rank.
+
+Two-host Sunspot probe `12479166` measured this directly — one process per
+node, stdlib only:
+
+```text
+LAUNCH HOSTNAME=x1922c6s3b0n0 real=x1922c6s3b0n0
+PROBE_ROW {"env_hostname": "x1922c6s3b0n0", "real_hostname": "x1922c6s3b0n0", "torchstore_resolved": "x1922c6s3b0n0"}
+PROBE_ROW {"env_hostname": "x1922c6s3b0n0", "real_hostname": "x1922c6s5b0n0", "torchstore_resolved": "x1922c6s3b0n0"}
+```
+
+Both ranks resolve to `x1922c6s3b0n0`, so `is_local_to_volume()` returns true
+for a volume that is physically on another node and automatic selection picks
+SharedMemory. The same mechanism has an inverse failure mode: Sunspot's batch
+shell exports `HOSTNAME` as the FQDN while `socket.gethostname()` is short, so
+a genuinely local volume can look remote and silently take a slower transport.
+
+**Fix.** `torchtitan/torchstore_compat.py` gains `repair_hostname_env()`, which
+aligns `HOSTNAME` with the real hostname of the running process. It is called
+in the RL actor bootstrap (before any TorchStore import) and in
+`_torchstore_strategy_from_env()`. It is a no-op when `HOSTNAME` is absent or
+already correct, and it never invents a value. Contracts, including the
+measured two-host values, are locked in
+`tests/rl/unit_tests/cpu/test_torchstore_locality.py`.
+
+Reusable diagnostic:
+`torchtitan/experiments/ezpz/rl/scripts/grpo/torchstore_locality_probe.pbs`.
+
+**This fix is not yet hardware-validated end to end.** The pinned RL runtime
+`rl-monarch-torch214` is currently damaged — both `click.core` and
+`torch.fx.experimental.unification.core` fail to import — so the actor-level
+probe and a full two-host `Unset` RL run cannot execute there. Until a repaired
+isolated RL runtime passes the gate below, the launcher keeps pinning Gloo.
 
 Two follow-up controls tested the remaining automatic/RDMA question directly:
 
@@ -84,8 +124,11 @@ TorchComms was not testable in this environment: the `torchcomms` package was
 absent and both TorchComms availability probes returned false. MonarchRDMA was
 available at capability-probe level, but the explicit end-to-end control failed.
 
-Until automatic locality resolution is fixed and revalidated, the committed
-two-host launcher pins the known-good network fallback:
+The locality defect itself is fixed in source (see the root-cause section
+above), but the fix has **not** been revalidated on hardware because the pinned
+RL runtime is currently broken. Until a two-host `Unset` run passes on a
+repaired runtime, the committed two-host launcher keeps pinning the known-good
+network fallback:
 
 ```bash
 export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
@@ -96,6 +139,20 @@ topology. It is not the preferred design endpoint, and it does not prove that
 automatic XCCL cannot work after the locality bug is corrected. Do not silently
 replace Gloo with XCCL or relabel the passing result as RDMA/XCCL without a new
 hardware gate.
+
+### Gate for removing the forced-Gloo pin
+
+Remove `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo` from the two-host launcher only
+after all of the following, on a repaired isolated RL runtime:
+
+1. `torchstore_locality_probe.pbs` prints `TORCHSTORE_LOCALITY_OK` on two
+   physical hosts;
+2. a two-host run with `TORCHSTORE_TRANSPORT=auto` logs a resolved transport
+   that is **not** SharedMemory (read the `[ts-transport] resolved=` line —
+   `default_transport_type=Unset` names the policy, not the backend);
+3. that same run satisfies every item in "Required evidence before promotion"
+   below;
+4. the result is recorded here with its job ID and resolved transport.
 
 ## Required evidence before promotion
 
