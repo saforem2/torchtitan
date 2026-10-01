@@ -42,6 +42,32 @@ def test_torchstore_strategy_selects_monarch_rdma(monkeypatch):
     assert torchstore_transport_from_env() == "monarch-rdma"
 
 
+def test_xpu_patch_excludes_monarch_rdma_from_automatic_selection(monkeypatch):
+    import sys
+
+    from torchtitan.experiments.ezpz.rl import xpu_overrides
+
+    available = lambda: True
+    monarch_rdma = SimpleNamespace(monarch_rdma_transport_available=available)
+    transport = SimpleNamespace(
+        monarch_rdma_transport_available=available,
+        monarch_rdma=monarch_rdma,
+    )
+    torchstore = SimpleNamespace(transport=transport)
+
+    monkeypatch.setitem(sys.modules, "torchstore", torchstore)
+    monkeypatch.setitem(sys.modules, "torchstore.transport", transport)
+    monkeypatch.setitem(
+        sys.modules, "torchstore.transport.monarch_rdma", monarch_rdma
+    )
+    monkeypatch.setattr(xpu_overrides.torch, "xpu", SimpleNamespace(is_available=lambda: True))
+
+    xpu_overrides.patch_torchstore_monarch_rdma_availability_for_xpu()
+
+    assert not monarch_rdma.monarch_rdma_transport_available()
+    assert not transport.monarch_rdma_transport_available()
+
+
 def test_xpu_flex_attention_uses_triton_backend():
     from torchtitan.experiments.ezpz.rl import xpu_overrides
 

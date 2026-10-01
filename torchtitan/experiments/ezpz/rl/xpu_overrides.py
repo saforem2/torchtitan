@@ -1043,6 +1043,44 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     )
 
 
+def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
+    """Exclude Monarch RDMA from TorchStore's automatic XPU selection.
+
+    TorchStore's capability probe currently reports Monarch RDMA available
+    whenever the host exposes ibverbs, without checking whether the tensor
+    accelerator is supported. On Intel XPU that makes automatic selection pick
+    MonarchRDMA before Gloo. The backend then crashes its actor with SIGSEGV in
+    the first remote model-state pull (jobs 12478722 and 12479170).
+
+    This changes only automatic availability on XPU. An explicit
+    ``TORCHTITAN_TORCHSTORE_TRANSPORT=monarch_rdma`` control still constructs
+    that backend and remains available for future backend qualification.
+    """
+    if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+        return
+
+    import torchstore.transport as transport
+    import torchstore.transport.monarch_rdma as monarch_rdma
+
+    original = monarch_rdma.monarch_rdma_transport_available
+    if getattr(original, "_ezpz_xpu_patched", False):
+        return
+
+    def unavailable_on_xpu() -> bool:
+        return False
+
+    unavailable_on_xpu._ezpz_xpu_patched = True  # type: ignore[attr-defined]
+    monarch_rdma.monarch_rdma_transport_available = unavailable_on_xpu
+    # torchstore.transport imports the function into its module namespace.
+    transport.monarch_rdma_transport_available = unavailable_on_xpu
+    print(
+        f"[xpu_overrides pid={os.getpid()}] excluded MonarchRDMA from "
+        "TorchStore automatic selection on XPU; explicit controls remain available",
+        flush=True,
+        file=__import__("sys").stderr,
+    )
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -1071,6 +1109,7 @@ def apply_all_xpu_patches() -> None:
     patch_vllm_xpu_attention_backend()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
+    patch_torchstore_monarch_rdma_availability_for_xpu()
     # Force FSDP2 grad reduce-scatter to SUM+divide (oneCCL lacks AVG on the
     # scheduler path). Correct regardless of transport; needed for
     # multi-trainer-node FSDP. See patch_fsdp2_force_sum_reduction_for_xpu.
