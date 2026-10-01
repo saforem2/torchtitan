@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 305
+The 25 most-recently-changed docs by git commit date (across all 308
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -23,7 +23,10 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-09-30 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-09-30 | [Summaries](./summaries/README.md) |
+| 2026-09-30 | [INCITE Quarterly Report — Q3 2026 (Jul 1 – Sep 30)](./summaries/2026-Q3-incite.md) |
 | 2026-09-30 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
+| 2026-09-30 | [Production dispatch log](./production/dispatch-log.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
@@ -32,9 +35,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [Development Journal](./journal.md) |
 | 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
 | 2026-09-30 | [Upstream f359667 merge readiness](./experiments/upstream-f359667-merge-readiness.md) |
+| 2026-09-30 | [30B SophiaG bounded LR canary — 2026-09-30](./experiments/lr-finder/agpt/data/2026-09-30-30b-sophiag-canary/README.md) |
 | 2026-09-30 | [30B AdamW bounded canary evidence](./experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/README.md) |
 | 2026-09-30 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
 | 2026-09-30 | [Aurora production checkpoint migration matrix](./experiments/agpt/aurora/2026-09-30-production-checkpoint-migration-matrix.md) |
+| 2026-09-30 | [ConfigLoader production migration gate — Aurora seat-4](./experiments/agpt/aurora/2026-09-30-configloader-candidate-gate.md) |
 | 2026-09-30 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
@@ -42,17 +47,17 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [docs/ tree map](./TREE.md) |
 | 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-09-29 | [LR Finder — agpt 5B OLMo-tokenizer](./experiments/lr-finder/agpt/5b/README.md) |
-| 2026-09-29 | [Experiment Benchmark Reports](./experiments/README.md) |
-| 2026-09-29 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
-| 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
-| 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
-| 2026-09-27 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-09-29 | [Experiment Benchmark Reports](./experiments/README.md) |
+| 2026-09-29 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
+| 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
+| 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
+| 2026-09-27 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
 | 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
 | 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
 | 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
@@ -73,11 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-25 | [RL (GRPO) on Intel XPU](./production/rl/README.md) |
 | 2026-09-25 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./production/rl/2026-07-06_multinode-grpo-root-cause.md) |
 | 2026-09-25 | [MDS154391 Stage-3 teacher-free STaR experiment](./experiments/2026-09-25-mds154391-stage3-star.md) |
-| 2026-09-22 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-09-21 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
-| 2026-09-21 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/agpt/2b-mds/tulu_math_uc_mix/failover-story.md) |
-| 2026-09-21 | [Production dispatch log](./production/dispatch-log.md) |
-| 2026-09-21 | [Production Training Runs — Aurora](./production/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -137,7 +137,7 @@ relevant guide before suggesting work that touches one of these.
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-09-01 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-31 |
-| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-09-19 |
+| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-09-30 |
 
 ## Setup & Reference
 

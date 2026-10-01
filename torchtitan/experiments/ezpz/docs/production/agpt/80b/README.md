@@ -1,6 +1,18 @@
 # Production Training — agpt 80B
 
-> Last updated: 2026-08-14
+> Last updated: 2026-10-01
+
+> [!NOTE]
+> **2026-10-01 software-currency status.** Wall 1 below is unchanged. Adding
+> only what the current migration work does and does not cover: the upstream
+> `ConfigManager`→`ConfigLoader` migration was validated on candidate
+> `e3520c057ae699d45c5fe3d17036f84b73dda88b` for the three active production
+> lineages (2B-256 stage-2 `step-41300`, 20B-512 `step-11100`, 20B-256
+> `step-17500`), each with full-state restore, three finite optimizer updates,
+> a fresh current-format checkpoint, and a fresh-save resume. **80B was not
+> part of that matrix**, so no 80B checkpoint has been restored or advanced on
+> current software. 80B remains absent from the active umbrella seats, and
+> Wall 1 remains the binding scientific blocker independent of this migration.
 
 > [!IMPORTANT]
 > **2026-08-14 -- Wall 1 reproduces on the frameworks RC.** The RC
