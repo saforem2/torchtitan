@@ -1,6 +1,6 @@
 # ConfigLoader production migration gate — Aurora seat-4
 
-**Status:** seat-4 gate passed; 20B lineage gates remain open.
+**Status:** seat 4 and 20B-512 passed; 20B-256 remains open.
 
 ## Candidate
 
@@ -75,10 +75,19 @@ work and artifacts completed. Reconciled evidence is recorded in
 
 ## Next gates
 
-After seat 4 passes, run the 20B lineages independently (`step-11100` and
-`step-17500`), then one three-seat umbrella smoke with job-unique sinks. Only
-after every lineage passes should the production umbrella move to current
-software.
+The 20B-512 lineage passed in job `8882148`. The historical `step-11100`
+restore completed in 2,051.75 seconds. Steps `11101`–`11103` had finite
+loss/gradient pairs `2.59988/5.6665`, `2.82035/5.7522`, and `2.62790/5.2748`.
+Each current-format checkpoint contains 33 files totaling 248,972,711,367
+bytes, including 6,690,302 bytes of metadata. A second process restored fresh
+`step-11103` in 36.85 seconds and completed finite step `11104` at
+`2.68816/4.7086`, then wrote another checkpoint with matching counts. As in
+seat 4, exit 37 was only the wrapper's one-space postcondition after all work
+completed; `RECONCILED_VALIDATION` records the semantic pass.
+
+The 20B-256 retry `8882210` remains. After it passes, run one three-seat
+umbrella smoke with job-unique sinks. Only after every lineage passes should
+the production umbrella move to current software.
 
 A passing gate is a verified full-state restore, real finite optimizer updates,
 nonempty current-format checkpoint metadata and shards, and a fresh-save
