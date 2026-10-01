@@ -4,7 +4,9 @@
 #PBS -l select=520
 #PBS -l walltime=12:00:00
 #PBS -l filesystems=home:flare
-#PBS -q small
+# `small` is from_route_only=True; submit through the `prod` routing queue,
+# which sends a 520-node / 12h request to `small` (256-1024 nodes, max 12h).
+#PBS -q prod
 #PBS -j oe
 
 set -o pipefail
