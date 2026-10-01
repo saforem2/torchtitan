@@ -50,27 +50,25 @@ def test_xpu_patch_excludes_unqualified_network_backends_from_auto(monkeypatch):
     available = lambda: True
     monarch_rdma = SimpleNamespace(monarch_rdma_transport_available=available)
     xccl = SimpleNamespace(xccl_available=available)
+
     class GlooTransportBuffer:
         pass
 
     create_transport_buffer = lambda _ref: GlooTransportBuffer()
-    client = SimpleNamespace(create_transport_buffer=object())
     transport = SimpleNamespace(
         monarch_rdma_transport_available=available,
         xccl_available=available,
         get_available_transport=lambda _ref: SimpleNamespace(name="Gloo"),
         create_transport_buffer=create_transport_buffer,
+        _log_transport_resolution=lambda _ref, _transport: None,
         monarch_rdma=monarch_rdma,
         xccl=xccl,
     )
     torchstore = SimpleNamespace(transport=transport)
 
     monkeypatch.setitem(sys.modules, "torchstore", torchstore)
-    monkeypatch.setitem(sys.modules, "torchstore.client", client)
     monkeypatch.setitem(sys.modules, "torchstore.transport", transport)
-    monkeypatch.setitem(
-        sys.modules, "torchstore.transport.monarch_rdma", monarch_rdma
-    )
+    monkeypatch.setitem(sys.modules, "torchstore.transport.monarch_rdma", monarch_rdma)
     monkeypatch.setitem(sys.modules, "torchstore.transport.xccl", xccl)
     monkeypatch.setattr(
         xpu_overrides.torch, "version", SimpleNamespace(xpu="2026.1"), raising=False
@@ -82,8 +80,6 @@ def test_xpu_patch_excludes_unqualified_network_backends_from_auto(monkeypatch):
     assert not transport.monarch_rdma_transport_available()
     assert not xccl.xccl_available()
     assert not transport.xccl_available()
-    ref = SimpleNamespace(volume_hostname="remote")
-    assert type(client.create_transport_buffer(ref)).__name__ == "GlooTransportBuffer"
 
 
 def test_non_xpu_build_keeps_monarch_rdma_availability(monkeypatch):

@@ -100,7 +100,10 @@ def classify(rows: list[dict[str, Any]]) -> tuple[bool, list[str]]:
     for row in rows:
         inherited_hostname = row.get("inherited_hostname")
         env_hostname = row["env_hostname"]
-        if inherited_hostname is not None and inherited_hostname != row["real_hostname"]:
+        if (
+            inherited_hostname is not None
+            and inherited_hostname != row["real_hostname"]
+        ):
             print(
                 "LOCALITY_REPAIRED "
                 f"inherited={inherited_hostname!r} "

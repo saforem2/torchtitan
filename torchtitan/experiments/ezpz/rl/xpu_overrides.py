@@ -1070,13 +1070,9 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     if not getattr(torch.version, "xpu", None):
         return
 
-    import importlib
-
     import torchstore.transport as transport
     import torchstore.transport.monarch_rdma as monarch_rdma
     import torchstore.transport.xccl as xccl
-
-    client = importlib.import_module("torchstore.client")
 
     if getattr(
         monarch_rdma.monarch_rdma_transport_available, "_ezpz_xpu_patched", False
@@ -1093,25 +1089,21 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     transport.monarch_rdma_transport_available = unavailable_on_xpu
     transport.xccl_available = unavailable_on_xpu
 
-    original_factory = transport.create_transport_buffer
+    original_reporter = transport._log_transport_resolution
 
-    def create_and_report(storage_volume_ref):
-        buffer = original_factory(storage_volume_ref)
+    def report_resolution(storage_volume_ref, transport_type) -> None:
+        original_reporter(storage_volume_ref, transport_type)
         print(
             "TORCHSTORE_AUTO_RESOLVED "
-            f"transport={type(buffer).__name__} "
+            f"transport={transport_type.name} "
             f"volume_hostname={storage_volume_ref.volume_hostname!r} "
             f"client_hostname={os.environ.get('HOSTNAME')!r}",
             flush=True,
             file=__import__("sys").stderr,
         )
-        return buffer
 
-    create_and_report._ezpz_xpu_patched = True  # type: ignore[attr-defined]
-    transport.create_transport_buffer = create_and_report
-    # torchstore.client imports create_transport_buffer eagerly, so replace its
-    # alias too rather than relying only on the module attribute above.
-    setattr(client, "create_transport_buffer", create_and_report)
+    report_resolution._ezpz_xpu_patched = True  # type: ignore[attr-defined]
+    transport._log_transport_resolution = report_resolution
     print(
         f"[xpu_overrides pid={os.getpid()}] set TorchStore XPU automatic policy "
         "to SharedMemory when local, otherwise Gloo; explicit MonarchRDMA/XCCL "
