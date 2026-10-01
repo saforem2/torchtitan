@@ -107,11 +107,10 @@ measured two-host values, are locked in
 Reusable diagnostic:
 `torchtitan/experiments/ezpz/rl/scripts/grpo/torchstore_locality_probe.pbs`.
 
-**This fix is not yet hardware-validated end to end.** The pinned RL runtime
-`rl-monarch-torch214` is currently damaged — both `click.core` and
-`torch.fx.experimental.unification.core` fail to import — so the actor-level
-probe and a full two-host `Unset` RL run cannot execute there. Until a repaired
-isolated RL runtime passes the gate below, the launcher keeps pinning Gloo.
+The actor-local repair passed on two physical hosts in job `12479169`: each
+actor corrected the inherited launcher FQDN to its own short physical hostname,
+the two resolved names were distinct, and the job emitted
+`TORCHSTORE_LOCALITY_OK` with PBS exit 0.
 
 Two follow-up controls tested the remaining automatic/RDMA question directly:
 
@@ -124,35 +123,59 @@ TorchComms was not testable in this environment: the `torchcomms` package was
 absent and both TorchComms availability probes returned false. MonarchRDMA was
 available at capability-probe level, but the explicit end-to-end control failed.
 
-The locality defect itself is fixed in source (see the root-cause section
-above), but the fix has **not** been revalidated on hardware because the pinned
-RL runtime is currently broken. Until a two-host `Unset` run passes on a
-repaired runtime, the committed two-host launcher keeps pinning the known-good
-network fallback:
+The original forced-Gloo fallback was:
 
 ```bash
 export TORCHTITAN_TORCHSTORE_TRANSPORT=gloo
 ```
 
-Gloo is therefore the **currently validated workaround** for this cross-host
-topology. It is not the preferred design endpoint, and it does not prove that
-automatic XCCL cannot work after the locality bug is corrected. Do not silently
-replace Gloo with XCCL or relabel the passing result as RDMA/XCCL without a new
-hardware gate.
+That global pin is no longer required. The repaired XPU automatic policy is
+topology-aware:
 
-### Gate for removing the forced-Gloo pin
+```text
+same host  → SharedMemory
+cross host → Gloo
+```
 
-Remove `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo` from the two-host launcher only
-after all of the following, on a repaired isolated RL runtime:
+MonarchRDMA and XCCL remain explicit experimental controls, but are excluded
+from automatic XPU selection on this runtime. Capability probes had reported
+both as candidates despite neither being a qualified TorchStore weight-transfer
+backend here: explicit MonarchRDMA `12478722` and automatic `12479170` crashed
+with SIGSEGV on the initial pull; explicit XCCL `12478537` hung there, and
+automatic controls `12479171`/`12479174` reproduced that boundary after RDMA
+was excluded.
 
-1. `torchstore_locality_probe.pbs` prints `TORCHSTORE_LOCALITY_OK` on two
-   physical hosts;
-2. a two-host run with `TORCHSTORE_TRANSPORT=auto` logs a resolved transport
-   that is **not** SharedMemory (read the `[ts-transport] resolved=` line —
-   `default_transport_type=Unset` names the policy, not the backend);
-3. that same run satisfies every item in "Required evidence before promotion"
-   below;
-4. the result is recorded here with its job ID and resolved transport.
+Matched explicit-Gloo control `12479172` and final automatic job `12479175`
+both completed the full two-host gate. `12479175` used `TransportType.Unset`,
+completed 40/40 rollouts across policy versions 0–3, four trainer
+publication/generator pulls, three finite nonzero-gradient updates, DCP
+checkpoints at steps 1–3, clean shutdown, and PBS exit 0. Final update metrics:
+
+```text
+step 1: loss=-0.053, grad_norm=0.46
+step 2: loss=-0.021, grad_norm=0.41
+step 3: loss=-0.068, grad_norm=0.40
+RL_MULTIHOST_VERDICT: ok rows=40 versions=[0, 1, 2, 3]
+  grads=[0.46, 0.41, 0.4] losses=[-0.053, -0.021, -0.068]
+  pushes=4 pulls=4
+```
+
+The committed two-host launcher now defaults to `TORCHSTORE_TRANSPORT=auto`;
+operators can still request `gloo`, `xccl`, or `monarch_rdma` explicitly for a
+controlled comparison.
+
+### Runtime used for revalidation
+
+The protected `rl-monarch-torch214` runtime had 41 RECORD-listed files missing
+across 30 packages, including `click.core`, Torch FX unification, SymPy, Triton,
+and vLLM modules. It was not modified. A separate clone at
+`/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001`
+was repaired exclusively from exact RECORD-hash-matching uv cache objects, with
+`py-cpuinfo==9.0.0` reinstalled `--no-deps` for its missing console script and
+the previously qualified BlendCorpus commit `50502b0c9de3` installed
+`--no-deps`. The resulting full RECORD existence audit reported zero missing
+files, and the Torch/ezpz/Monarch/TorchStore import closure passed before jobs
+`12479169`–`12479175` ran.
 
 ## Required evidence before promotion
 

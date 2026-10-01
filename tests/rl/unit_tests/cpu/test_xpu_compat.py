@@ -53,6 +53,7 @@ def test_xpu_patch_excludes_unqualified_network_backends_from_auto(monkeypatch):
     transport = SimpleNamespace(
         monarch_rdma_transport_available=available,
         xccl_available=available,
+        get_available_transport=lambda _ref: SimpleNamespace(name="Gloo"),
         monarch_rdma=monarch_rdma,
         xccl=xccl,
     )
@@ -74,6 +75,8 @@ def test_xpu_patch_excludes_unqualified_network_backends_from_auto(monkeypatch):
     assert not transport.monarch_rdma_transport_available()
     assert not xccl.xccl_available()
     assert not transport.xccl_available()
+    ref = SimpleNamespace(volume_hostname="remote")
+    assert transport.get_available_transport(ref).name == "Gloo"
 
 
 def test_non_xpu_build_keeps_monarch_rdma_availability(monkeypatch):

@@ -1088,6 +1088,23 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     # torchstore.transport imports the function into its module namespace.
     transport.monarch_rdma_transport_available = unavailable_on_xpu
     transport.xccl_available = unavailable_on_xpu
+
+    original_resolver = transport.get_available_transport
+
+    def resolve_and_report(storage_volume_ref):
+        resolved = original_resolver(storage_volume_ref)
+        print(
+            "TORCHSTORE_AUTO_RESOLVED "
+            f"transport={resolved.name} "
+            f"volume_hostname={storage_volume_ref.volume_hostname!r} "
+            f"client_hostname={os.environ.get('HOSTNAME')!r}",
+            flush=True,
+            file=__import__("sys").stderr,
+        )
+        return resolved
+
+    resolve_and_report._ezpz_xpu_patched = True  # type: ignore[attr-defined]
+    transport.get_available_transport = resolve_and_report
     print(
         f"[xpu_overrides pid={os.getpid()}] set TorchStore XPU automatic policy "
         "to SharedMemory when local, otherwise Gloo; explicit MonarchRDMA/XCCL "
