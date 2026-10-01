@@ -23,10 +23,11 @@ SharedMemory path, which fails on the first pull with::
     Shared memory storage not found. This may indicate the storage volume is on
     a different host.
 
-This probe spawns one actor per scheduler host and reports, per actor, the
-``HOSTNAME`` environment variable alongside the real ``socket.gethostname()``.
-It exits non-zero when the pair disagrees, so the defect is observable without
-allocating a model, a vLLM engine, or a weight transfer.
+This probe spawns one actor per scheduler host, captures the inherited
+``HOSTNAME``, applies ``repair_hostname_env()``, and compares the result with
+the real ``socket.gethostname()``. It exits non-zero if the post-repair pair
+still disagrees, so the fix is testable without allocating a model, a vLLM
+engine, or a weight transfer.
 
 Markers:
     ``TORCHSTORE_LOCALITY_OK``     resolution is consistent and distinct per host
@@ -49,14 +50,20 @@ from monarch.actor import Actor, endpoint
 class LocalityProbe(Actor):
     @endpoint
     async def identity(self) -> dict[str, Any]:
-        """Report both hostname sources exactly as TorchStore resolves them."""
-        env_hostname = os.environ.get("HOSTNAME")
+        """Report pre-fix state, apply the repair, and report resolved state."""
+        inherited_hostname = os.environ.get("HOSTNAME")
         real_hostname = socket.gethostname()
+        from torchtitan.torchstore_compat import repair_hostname_env
+
+        repaired = repair_hostname_env()
+        env_hostname = os.environ.get("HOSTNAME")
         return {
+            "inherited_hostname": inherited_hostname,
             "env_hostname": env_hostname,
             "real_hostname": real_hostname,
             # This mirrors torchstore.utils.get_local_hostname() byte for byte.
             "torchstore_resolved": env_hostname or real_hostname,
+            "repair_result": repaired,
             "pid": os.getpid(),
         }
 
@@ -91,7 +98,15 @@ def classify(rows: list[dict[str, Any]]) -> tuple[bool, list[str]]:
         )
 
     for row in rows:
+        inherited_hostname = row.get("inherited_hostname")
         env_hostname = row["env_hostname"]
+        if inherited_hostname is not None and inherited_hostname != row["real_hostname"]:
+            print(
+                "LOCALITY_REPAIRED "
+                f"inherited={inherited_hostname!r} "
+                f"real={row['real_hostname']!r} resolved={env_hostname!r}",
+                flush=True,
+            )
         if env_hostname is not None and env_hostname != row["real_hostname"]:
             problems.append(
                 f"HOSTNAME={env_hostname!r} does not match "
