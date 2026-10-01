@@ -1056,7 +1056,11 @@ def patch_torchstore_monarch_rdma_availability_for_xpu() -> None:
     ``TORCHTITAN_TORCHSTORE_TRANSPORT=monarch_rdma`` control still constructs
     that backend and remains available for future backend qualification.
     """
-    if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+    # The RL controller owns TorchStore transport selection but intentionally
+    # has no accelerator tile assigned, so torch.xpu.is_available() is False
+    # there even under an XPU build. Detect the build/runtime, not controller
+    # device visibility.
+    if not getattr(torch.version, "xpu", None):
         return
 
     import torchstore.transport as transport
