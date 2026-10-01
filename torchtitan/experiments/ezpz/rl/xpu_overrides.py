@@ -35,6 +35,7 @@ that applies the patches before import-time triggers them).
 from __future__ import annotations
 
 import logging
+import importlib
 import os
 from collections.abc import Callable
 from functools import wraps
@@ -1070,9 +1071,32 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     if not getattr(torch.version, "xpu", None):
         return
 
-    import torchstore.transport as transport
-    import torchstore.transport.monarch_rdma as monarch_rdma
-    import torchstore.transport.xccl as xccl
+    try:
+        transport = importlib.import_module("torchstore.transport")
+        monarch_rdma = importlib.import_module("torchstore.transport.monarch_rdma")
+        xccl = importlib.import_module("torchstore.transport.xccl")
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            "The XPU TorchStore compatibility layer requires the fork that "
+            "provides transport.monarch_rdma and transport.xccl. Install the "
+            "repository-pinned xpu-upstream TorchStore revision."
+        ) from exc
+
+    required = (
+        (transport, "monarch_rdma_transport_available"),
+        (transport, "xccl_available"),
+        (transport, "torchcomms_uniflow_available"),
+        (transport, "torchcomms_rdma_available"),
+        (transport, "_log_transport_resolution"),
+        (monarch_rdma, "monarch_rdma_transport_available"),
+        (xccl, "xccl_available"),
+    )
+    missing = [name for module, name in required if not hasattr(module, name)]
+    if missing:
+        raise RuntimeError(
+            "The installed TorchStore lacks XPU automatic-transport APIs: "
+            + ", ".join(sorted(set(missing)))
+        )
 
     if getattr(
         monarch_rdma.monarch_rdma_transport_available, "_ezpz_xpu_patched", False
@@ -1083,11 +1107,13 @@ def patch_torchstore_network_availability_for_xpu() -> None:
         return False
 
     unavailable_on_xpu._ezpz_xpu_patched = True  # type: ignore[attr-defined]
-    monarch_rdma.monarch_rdma_transport_available = unavailable_on_xpu
-    xccl.xccl_available = unavailable_on_xpu
+    setattr(monarch_rdma, "monarch_rdma_transport_available", unavailable_on_xpu)
+    setattr(xccl, "xccl_available", unavailable_on_xpu)
     # torchstore.transport imports the function into its module namespace.
-    transport.monarch_rdma_transport_available = unavailable_on_xpu
-    transport.xccl_available = unavailable_on_xpu
+    setattr(transport, "monarch_rdma_transport_available", unavailable_on_xpu)
+    setattr(transport, "xccl_available", unavailable_on_xpu)
+    setattr(transport, "torchcomms_uniflow_available", unavailable_on_xpu)
+    setattr(transport, "torchcomms_rdma_available", unavailable_on_xpu)
 
     original_reporter = transport._log_transport_resolution
 
@@ -1103,7 +1129,7 @@ def patch_torchstore_network_availability_for_xpu() -> None:
         )
 
     report_resolution._ezpz_xpu_patched = True  # type: ignore[attr-defined]
-    transport._log_transport_resolution = report_resolution
+    setattr(transport, "_log_transport_resolution", report_resolution)
     print(
         f"[xpu_overrides pid={os.getpid()}] set TorchStore XPU automatic policy "
         "to SharedMemory when local, otherwise Gloo; explicit MonarchRDMA/XCCL "
