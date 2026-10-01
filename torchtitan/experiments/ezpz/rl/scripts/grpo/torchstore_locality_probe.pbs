@@ -24,8 +24,14 @@ WT="${PBS_O_WORKDIR:-$(pwd)}"
 V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
 : "${EXPECTED_COMMIT:?submit with -v EXPECTED_COMMIT=<exact-pushed-sha>}"
 
-source <(curl -fsSL https://ezpz.cool/utils.sh) || exit 12
-ezpz_setup "$V" || exit 13
+source "$WT/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
+ezpz_setup_job || exit $?
+ezpz_load_modules || exit $?
+export VIRTUAL_ENV="$V"
+export PATH="$V/bin:/opt/pbs/bin:$PATH"
+hash -r
+[[ "$(command -v python)" == "$V/bin/python" ]] || exit 13
 cd "$WT" || exit 11
 actual_commit=$(git rev-parse HEAD) || exit 15
 [[ "$actual_commit" == "$EXPECTED_COMMIT" ]] || {

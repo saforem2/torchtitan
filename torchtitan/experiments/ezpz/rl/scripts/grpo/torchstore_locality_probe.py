@@ -62,7 +62,7 @@ class LocalityProbe(Actor):
             "env_hostname": env_hostname,
             "real_hostname": real_hostname,
             # This mirrors torchstore.utils.get_local_hostname() byte for byte.
-            "torchstore_resolved": env_hostname or real_hostname,
+            "torchstore_resolved": os.environ.get("HOSTNAME", real_hostname),
             "repair_result": repaired,
             "pid": os.getpid(),
         }

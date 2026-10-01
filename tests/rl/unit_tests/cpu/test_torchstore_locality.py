@@ -101,6 +101,15 @@ def test_repair_is_a_noop_when_hostname_is_absent_or_correct():
     assert correct["HOSTNAME"] == LAUNCHER_HOST
 
 
+def test_explicitly_empty_hostname_is_repaired():
+    """An empty value is not the same as an absent value to TorchStore."""
+    environ = {"HOSTNAME": ""}
+
+    assert hostname_env_is_unreliable(environ, LAUNCHER_HOST)
+    assert repair_hostname_env(environ, LAUNCHER_HOST) == LAUNCHER_HOST
+    assert environ["HOSTNAME"] == LAUNCHER_HOST
+
+
 def test_repair_defaults_to_the_real_process_hostname():
     environ = {"HOSTNAME": "definitely-not-this-host"}
     assert repair_hostname_env(environ) == socket.gethostname()
