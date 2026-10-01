@@ -59,8 +59,11 @@ set +e
 # does not weaken the result. Do NOT copy this pattern into a training or
 # acceptance launcher, which must use `ezpz launch`.
 if "$V/bin/python" -c "import ezpz.cli" >/dev/null 2>&1; then
-  LAUNCH=("$V/bin/ezpz" launch -n 2 -ppn 1 --cpu-bind none --timeout 600 --)
-  echo "PROBE_LAUNCHER=ezpz"
+  # Invoke the CLI module with the selected interpreter. A copied venv's
+  # console-script shebang can still name its source venv even when
+  # `$V/bin/python` and its packages are healthy.
+  LAUNCH=("$V/bin/python" -c "from ezpz.cli import main; main()" launch -n 2 -ppn 1 --cpu-bind none --timeout 600 --)
+  echo "PROBE_LAUNCHER=ezpz-via-selected-python"
 else
   echo "PROBE_LAUNCHER=mpiexec (ezpz CLI unavailable in $V; protected venv left untouched)"
   LAUNCH=(mpiexec -n 2 -ppn 1 --cpu-bind none)
