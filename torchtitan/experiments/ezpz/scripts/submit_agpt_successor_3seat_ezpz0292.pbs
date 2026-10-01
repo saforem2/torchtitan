@@ -1,0 +1,44 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -N agpt-multi-cont-3seat-ezpz0292
+#PBS -l select=1054
+#PBS -l walltime=18:00:00
+#PBS -l filesystems=home:flare
+#PBS -q medium
+#PBS -j oe
+
+set -o pipefail
+
+W=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-umbrella-ezpz0292
+SCRIPT=$W/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh
+EXPECTED_PARENT=7145b0c991c50f27f4f46126e0afe173779b997b
+EXPECTED_SCRIPT_SHA=1808b547470a429fb96c5c0bf47758aa8f82517e99d5015c799a226a4322239d
+PROD_20B_VENV_ARCHIVE=/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/.venv-20b-prod-ezpz0292-f7deda7-20260929.tar.gz
+PROD_20B_VENV_SHA=e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc
+PROD_2B_VENV_ARCHIVE=/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/.venv-2b-prod-ezpz0292-f7deda7-20260929.tar.gz
+PROD_2B_VENV_SHA=d3938eaea27c9026a65f5d7b4c654b3b7b25062a487c8bb61662c1f9a3cd6d6d
+
+cd "$W" || exit 10
+[[ -f "$SCRIPT" ]] || exit 11
+git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD || exit 15
+[[ -z "$(git status --porcelain --untracked-files=no)" ]] || exit 14
+[[ "$(sha256sum "$SCRIPT" | awk '{print $1}')" == "$EXPECTED_SCRIPT_SHA" ]] || exit 16
+for spec in \
+  "$PROD_20B_VENV_ARCHIVE|$PROD_20B_VENV_SHA" \
+  "$PROD_2B_VENV_ARCHIVE|$PROD_2B_VENV_SHA"; do
+    path=${spec%%|*}; expected=${spec#*|}
+    [[ -f "$path" ]] || exit 12
+    [[ "$(sha256sum "$path" | awk '{print $1}')" == "$expected" ]] || exit 13
+done
+
+export MULTI_ONLY=1,2,4
+export SPARES=10
+export IDLE_TIMEOUT=5400
+export SEAT_RELAUNCH=1
+export SEAT_RELAUNCH_MIN_LEFT=2700
+export SEAT_MIN_HEALTHY_SECS=600
+export SEAT_MAX_QUICK_DEATHS=2
+export PROD_20B_VENV_ARCHIVE PROD_20B_VENV_SHA
+export PROD_2B_VENV_ARCHIVE PROD_2B_VENV_SHA
+
+exec bash "$SCRIPT"
