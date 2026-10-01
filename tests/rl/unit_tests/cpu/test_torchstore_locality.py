@@ -22,10 +22,7 @@ remote volume as local and automatic selection picks SharedMemory.
 
 import socket
 
-from torchtitan.torchstore_compat import (
-    hostname_env_is_unreliable,
-    repair_hostname_env,
-)
+from torchtitan.torchstore_compat import hostname_env_is_unreliable, repair_hostname_env
 
 # The exact values observed on Sunspot job 12479166.
 LAUNCHER_HOST = "x1922c6s3b0n0"
