@@ -145,18 +145,19 @@ with SIGSEGV on the initial pull; explicit XCCL `12478537` hung there, and
 automatic controls `12479171`/`12479174` reproduced that boundary after RDMA
 was excluded.
 
-Matched explicit-Gloo control `12479172` and final automatic job `12479175`
-both completed the full two-host gate. `12479175` used `TransportType.Unset`,
+Matched explicit-Gloo control `12479172` and final exact-head automatic job
+`12479177` both completed the full two-host gate. `12479177` used
+`TransportType.Unset`,
 completed 40/40 rollouts across policy versions 0–3, four trainer
 publication/generator pulls, three finite nonzero-gradient updates, DCP
 checkpoints at steps 1–3, clean shutdown, and PBS exit 0. Final update metrics:
 
 ```text
-step 1: loss=-0.053, grad_norm=0.46
-step 2: loss=-0.021, grad_norm=0.41
-step 3: loss=-0.068, grad_norm=0.40
+step 1: loss=0.0480, grad_norm=0.38
+step 2: loss=0.0058, grad_norm=0.27
+step 3: loss=0.0500, grad_norm=0.39
 RL_MULTIHOST_VERDICT: ok rows=40 versions=[0, 1, 2, 3]
-  grads=[0.46, 0.41, 0.4] losses=[-0.053, -0.021, -0.068]
+  grads=[0.38, 0.27, 0.39] losses=[0.048, 0.0058, 0.05]
   pushes=4 pulls=4
 ```
 
