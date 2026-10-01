@@ -1,0 +1,128 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -N agpt20b-s3000-rearm
+#PBS -l select=520
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:flare
+#PBS -q small
+#PBS -j oe
+
+set -o pipefail
+ulimit -c 0
+
+EXPECTED_SHA=e3520c057ae699d45c5fe3d17036f84b73dda88b
+W=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-configloader-e3520c057a
+RUNTIME_ARCHIVE=/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/.venv-t3diag-torch215-181519-20260928.tar.gz
+RUNTIME_SHA=8e95b65f857e35c4cab2444629378827f12197c6da828166bbafea27372b3242
+LAUNCHER_VENV=/flare/AuroraGPT/foremans/venvs/xpu-torch215
+EZPZ_UTILS=/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/ezpz-utils-f7deda7.sh
+HF_ASSETS=/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b
+DATA_LIST=torchtitan/experiments/ezpz/data-lists/aurora/olmo-mix-1124.txt
+SOURCE=/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288/step-3000
+DATA_CACHE=/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288/.cache/olmo-mix-1124/index-cache
+SOURCE_FILES=6145
+J=${PBS_JOBID%%.*}
+FORK_NAME=agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-rearm-from3000-e3520c
+FORK_ROOT=/flare/AuroraGPT/foremans/runs/agpt-20b-s3000-rearm-e3520c
+SINK=$FORK_ROOT/checkpoints/$FORK_NAME
+OUT=$FORK_ROOT/jobs/$J
+NODE_VENV=/tmp/.venv-20b-s3000-rearm
+mkdir -p "$OUT" "$SINK" || exit 10
+cd "$W" || exit 11
+
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || exit 12
+git diff --quiet && git diff --cached --quiet || exit 13
+[[ "$(sha256sum "$RUNTIME_ARCHIVE" | awk '{print $1}')" == "$RUNTIME_SHA" ]] || exit 14
+[[ -s "$SOURCE/.metadata" ]] || exit 15
+[[ "$(find "$SOURCE" -maxdepth 1 -type f | wc -l)" == "$SOURCE_FILES" ]] || exit 16
+[[ -s "$HF_ASSETS/tokenizer.json" && -s "$HF_ASSETS/tokenizer_config.json" ]] || exit 17
+[[ -s "$DATA_LIST" && -d "$DATA_CACHE" ]] || exit 18
+[[ -s "$EZPZ_UTILS" ]] || exit 19
+[[ -x "$LAUNCHER_VENV/bin/python" && -x "$LAUNCHER_VENV/bin/ezpz" ]] || exit 20
+if [[ ! -e "$SINK/step-3000" ]]; then
+  ln -s "$SOURCE" "$SINK/step-3000" || exit 21
+fi
+[[ "$(readlink -f "$SINK/step-3000")" == "$SOURCE" ]] || exit 22
+
+source "$EZPZ_UTILS" || exit 23
+declare -F ezpz_load_modules >/dev/null || exit 24
+declare -F ezpz_setup_job >/dev/null || exit 25
+ezpz_load_modules || exit 26
+ezpz_setup_job || exit 27
+source "$LAUNCHER_VENV/bin/activate" || exit 28
+"$LAUNCHER_VENV/bin/ezpz" yeet --src "$RUNTIME_ARCHIVE" --hostfile "$PBS_NODEFILE" --dst "$NODE_VENV" || exit 29
+deactivate 2>/dev/null || true
+
+export PATH="$NODE_VENV/bin:$PATH"
+export PYTHONPATH="$W${PYTHONPATH:+:$PYTHONPATH}"
+export LD_PRELOAD="$NODE_VENV/lib/libur_loader.so.0${LD_PRELOAD:+:$LD_PRELOAD}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR='opencl:gpu;level_zero:gpu'
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export CCL_SYCL_KERNEL_SYNC=0
+export CCL_ATL_SYNC_COLL=1
+export CCL_KVS_MODE=pmi
+export TORCH_CPP_LOG_LEVEL=ERROR
+
+"$NODE_VENV/bin/python" - <<'PY' 2>&1 | tee "$OUT/import.log"
+import torch
+from torchtitan.experiments.ezpz.legacy_config_loader import LegacyConfigLoader
+assert torch.xpu.is_available() and torch.xpu.device_count() >= 12
+config = LegacyConfigLoader().parse_args([
+    "--module=ezpz.agpt", "--config=agpt_20b",
+    "--training.local-batch-size=2", "--training.global-batch-size=12288",
+    "--training.seq-len=8192", "--training.steps=46429",
+])
+assert config.training.max_context_length == 8192
+assert config.training.num_tokens_per_microbatch_per_dp_rank == 16384
+print("20B_S3000_REARM_IMPORT_PASS", torch.__version__)
+PY
+rc=${PIPESTATUS[0]}
+[[ $rc -eq 0 ]] || exit "$rc"
+"$NODE_VENV/bin/ezpz" launch --help > "$OUT/ezpz-launch-help.txt" || exit 30
+
+echo "20B_S3000_REARM_START job=$J sha=$EXPECTED_SHA source=$SOURCE sink=$SINK" | tee "$OUT/STARTED"
+"$NODE_VENV/bin/ezpz" launch \
+  --auto-retry --nhosts 512 --nproc_per_node 12 --hostfile "$PBS_NODEFILE" \
+  --spare-nodes 8 --timeout 2400 --max-failover-retries 8 -- \
+  "$NODE_VENV/bin/python" -u -m torchtitan.experiments.ezpz.train \
+  --module=ezpz.agpt \
+  --config=agpt_20b \
+  --hf-assets-path="$HF_ASSETS" \
+  --dump-folder="$OUT/run" \
+  --checkpoint.enable \
+  --checkpoint.folder="$SINK" \
+  --checkpoint.interval=100 \
+  --checkpoint.keep-latest-k=0 \
+  --checkpoint.no-last-save-model-only \
+  --checkpoint.async-mode=disabled \
+  --dataloader.dataset=blendcorpus \
+  --dataloader.dataset-path="$DATA_LIST" \
+  --dataloader.data-cache-path="$DATA_CACHE" \
+  --dataloader.num-workers=2 \
+  --validator.enable \
+  --validator.freq=100 \
+  --validator.steps=10 \
+  --metrics.enable-wandb \
+  --optimizer sophiag \
+  --optimizer.lr=2.28e-5 \
+  --lr-scheduler.decay-ratio=0.8 \
+  --lr-scheduler.min-lr-factor=0.1 \
+  --lr-scheduler.warmup-steps=200 \
+  --training.local-batch-size=2 \
+  --training.global-batch-size=12288 \
+  --training.seq-len=8192 \
+  --training.steps=46429 \
+  --parallelism.tensor-parallel-degree=1 \
+  --parallelism.data-parallel-replicate-degree=1 \
+  --parallelism.data-parallel-shard-degree=6144 \
+  --parallelism.pipeline-parallel-degree=1 \
+  --parallelism.context-parallel-degree=1 \
+  --compile.enable \
+  --nan-abort-consecutive=1 \
+  activation-checkpoint:selective \
+  2>&1 | tee "$OUT/train.log"
+rc=${PIPESTATUS[0]}
+printf '20B_S3000_REARM_TERMINAL job=%s rc=%s\n' "$J" "$rc" | tee "$OUT/TERMINAL"
+exit "$rc"
