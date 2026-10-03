@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 305
+The 25 most-recently-changed docs by git commit date (across all 308
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -23,22 +23,36 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-09-30 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-09-30 | [Summaries](./summaries/README.md) |
+| 2026-09-30 | [INCITE Quarterly Report — Q3 2026 (Jul 1 – Sep 30)](./summaries/2026-Q3-incite.md) |
+| 2026-09-30 | [AuroraGPT-80B Scaling & Benchmarks](./scaling/agpt-80b.md) |
 | 2026-09-30 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
+| 2026-09-30 | [Production dispatch log](./production/dispatch-log.md) |
+| 2026-09-30 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 | 2026-09-30 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
 | 2026-09-30 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
+| 2026-09-30 | [Training agpt_80b on Aurora](./guides/training/agpt_80b.md) |
 | 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
 | 2026-09-30 | [Upstream f359667 merge readiness](./experiments/upstream-f359667-merge-readiness.md) |
+| 2026-09-30 | [30B SophiaG bounded LR canary — 2026-09-30](./experiments/lr-finder/agpt/data/2026-09-30-30b-sophiag-canary/README.md) |
 | 2026-09-30 | [30B AdamW bounded canary evidence](./experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/README.md) |
 | 2026-09-30 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
 | 2026-09-30 | [Aurora production checkpoint migration matrix](./experiments/agpt/aurora/2026-09-30-production-checkpoint-migration-matrix.md) |
+| 2026-09-30 | [ConfigLoader production migration gate — Aurora seat-4](./experiments/agpt/aurora/2026-09-30-configloader-candidate-gate.md) |
 | 2026-09-30 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-09-30 | [Evaluation Results](./evals/README.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-09-30 | [docs/ tree map](./TREE.md) |
 | 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-09-29 | [LR Finder — agpt 5B OLMo-tokenizer](./experiments/lr-finder/agpt/5b/README.md) |
@@ -47,12 +61,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
 | 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
 | 2026-09-27 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
 | 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
 | 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
@@ -70,14 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-25 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./production/rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
 | 2026-09-25 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./production/rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
 | 2026-09-25 | [Production GRPO](./production/rl/grpo/README.md) |
-| 2026-09-25 | [RL (GRPO) on Intel XPU](./production/rl/README.md) |
-| 2026-09-25 | [Multi-trainer-node GRPO on XPU: root cause (2026-07-06)](./production/rl/2026-07-06_multinode-grpo-root-cause.md) |
-| 2026-09-25 | [MDS154391 Stage-3 teacher-free STaR experiment](./experiments/2026-09-25-mds154391-stage3-star.md) |
-| 2026-09-22 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-09-21 | [Evals: full-mix 8N SFT (gs138650 x tulu_math_uc_mix_full)](./production/sft/agpt/2b-mds/tulu_math_uc_mix_full/evals/README.md) |
-| 2026-09-21 | [32N SFT: AuroraGPT-2B-sophiag-138650 + tulu_math_uc_mix, end-to-end failover](./production/sft/agpt/2b-mds/tulu_math_uc_mix/failover-story.md) |
-| 2026-09-21 | [Production dispatch log](./production/dispatch-log.md) |
-| 2026-09-21 | [Production Training Runs — Aurora](./production/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -95,7 +95,7 @@ going?" Tracking is per-model and per-node-count.
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-09-30 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**11,100** (11,100 x 12,288 x 8,192 = **1,117.4B tokens**), loss 2.31773. | 2026-09-30 |
 | [20B 256N](./production/agpt/20b/n256/README.md) | step-**17,500** (880.8B tokens, 18.8% of 4.67T), loss 2.41783. | 2026-09-30 |
-| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-08-14 |
+| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a bf16 forward-activation overflow** (root-caused 2026-07-14, task #21): NOT an optimizer bug -- SophiaG (512N) and mano (62N) NaN with the *identical* flat-grad_norm signature, so it is optimizer-independent (the deep bf16 residual stream overflows at 80B's dim=9216 x 84L). fp32-residual prototype trains clean at 4N but STILL NaNs at dp=192 (necessary-but-insufficient); no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-09-30 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is an optimizer-independent bf16 residual-stream overflow; see the 80B README. | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
@@ -137,7 +137,7 @@ relevant guide before suggesting work that touches one of these.
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-09-01 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-31 |
-| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-09-19 |
+| [Periodic Summaries Index](./summaries/README.md) | Index of 2-week / monthly retros | 2026-09-30 |
 
 ## Setup & Reference
 
@@ -157,7 +157,7 @@ relevant guide before suggesting work that touches one of these.
 | [Scaling Index](./scaling/README.md) | Top-level scaling landing page | 2026-06-06 |
 | [agpt 2B scaling](./scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-08-31 |
 | [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-08-31 |
-| [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-04-26 |
+| [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-09-30 |
 | [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
 | [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-09-29 |
 
