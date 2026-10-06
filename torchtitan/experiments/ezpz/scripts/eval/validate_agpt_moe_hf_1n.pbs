@@ -1,0 +1,78 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -q debug
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -N CODEX_MOE_HF_EXPORT
+#PBS -j oe
+
+set -o pipefail
+
+module load oneapi/release/2025.3.1 hdf5 pti-gpu frameworks/2025.3.1 || exit $?
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+for name in TT_REPO TT_SOURCE_SHA TT_DCP TT_TOKENIZER TT_OUTPUT_ROOT TT_DEPS \
+    TT_CONVERT_PY TT_REFERENCE_PRIMARY; do
+    if [[ -z "${!name}" ]]; then
+        echo "${name} is required" >&2
+        exit 2
+    fi
+done
+RUN=${TT_OUTPUT_ROOT}/hf-export-runs/${PBS_JOBID%%.*}
+cd "${TT_REPO}" || exit 2
+bash torchtitan/experiments/ezpz/.agents/skills/alcf-job-preflight/check_source.sh \
+    "${TT_REPO}" "${TT_SOURCE_SHA}" || exit $?
+for path in "${TT_DCP}" "${TT_TOKENIZER}/tokenizer.model" "${TT_DEPS}" \
+    "${TT_CONVERT_PY}" "${TT_REFERENCE_PRIMARY}"; do
+    if [[ ! -e "${path}" ]]; then
+        echo "Missing required input: ${path}" >&2
+        exit 2
+    fi
+done
+if [[ -n "${TT_REFERENCE_SECONDARY:-}" && ! -e "${TT_REFERENCE_SECONDARY}" ]]; then
+    echo "Missing secondary reference: ${TT_REFERENCE_SECONDARY}" >&2
+    exit 2
+fi
+if [[ -e "${RUN}" ]]; then
+    echo "Refusing to reuse output directory: ${RUN}" >&2
+    exit 2
+fi
+mkdir -p "${RUN}/validation" "${RUN}/hf-home"
+if [[ "${TT_TEST_DTENSOR:-0}" == "1" ]]; then
+    PYTHONPATH=${TT_DEPS}:${TT_REPO} "${TT_CONVERT_PY}" -m pytest \
+        -p no:cacheprovider torchtitan/experiments/ezpz/tests/moe/test_agpt_moe_hf_dtensor.py \
+        -v > "${RUN}/validation/dtensor-tests.log" 2>&1 || {
+        cat "${RUN}/validation/dtensor-tests.log"
+        exit 1
+    }
+fi
+
+export HF_HOME=${RUN}/hf-home
+export HF_MODULES_CACHE=${RUN}/hf-home/modules
+export PYTHONPATH=${TT_DEPS}
+export CONVERT_PYTHON=${TT_CONVERT_PY}
+export CONVERT_PYTHONPATH=${TT_DEPS}
+export LM_EVAL_PYTHON=${TT_EVAL_PY:-$(command -v python3)}
+"${LM_EVAL_PYTHON}" -c 'import torch, transformers, lm_eval; print(torch.__version__, transformers.__version__, lm_eval.__version__); assert torch.xpu.is_available()' || exit $?
+bash torchtitan/experiments/ezpz/scripts/eval/convert_and_eval.sh \
+    --model 12b2a --step "${TT_STEP:-27000}" \
+    --dcp-dir "${TT_DCP}" --tokenizer-dir "${TT_TOKENIZER}" \
+    --output-root "${RUN}" --tasks "${TT_TASKS:-arc_easy}" \
+    --batch-size 1 --limit "${TT_LIMIT:-16}" || exit $?
+
+REFERENCE_ARGS=(--reference "${TT_REFERENCE_PRIMARY}")
+if [[ -n "${TT_REFERENCE_SECONDARY:-}" ]]; then
+    REFERENCE_ARGS+=(--reference "${TT_REFERENCE_SECONDARY}")
+fi
+"${LM_EVAL_PYTHON}" -u torchtitan/experiments/ezpz/scripts/eval/validate_agpt_moe_hf.py \
+    --hf-checkpoint "${RUN}/hf" \
+    --source-dcp "${TT_DCP}" \
+    "${REFERENCE_ARGS[@]}" \
+    --output "${RUN}/validation" \
+    --device xpu:0
