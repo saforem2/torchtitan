@@ -1,62 +1,47 @@
 ## Enable Memory Profiling
 
-Launch training job with the following command (or alternatively set configs in your config_registry function)
+Configure profiling in the selected recipe:
+
+```python
+from torchtitan_recipes.tests.models.llama3 import llama3_debugmodel
+
+
+def my_debug_recipe() -> Trainer.Config:
+    config = llama3_debugmodel()
+    config.profiler.enable_memory_snapshot = True
+    config.profiler.save_memory_snapshot_folder = "memory_snapshot"
+    config.profiler.memory_snapshot_freq = 3
+    return config
 ```
-MODULE=llama3 CONFIG=llama3_debugmodel ./run_train.sh --profiler.enable_memory_snapshot --profiler.save_memory_snapshot_folder memory_snapshot
-```
-* `--profiler.enable_memory_snapshot`: to enable memory profiling
-* `--profiler.save_memory_snapshot_folder`: configures the folder which memory snapshots are dumped into (`profiling/memory_snapshot` under the dump folder by default)
-* `--profiler.memory_snapshot_freq`: controls how often regular memory snapshots are taken. When unset, it defaults to `--profiler.profile_freq` for backward compatibility.
-	+ In case of OOMs, the snapshots will be in `step_{step:012d}_exit` under that folder.
-	+ Regular snapshots will be in `step_{step:012d}`.
-	+ For example, set `--profiler.memory_snapshot_freq 3` to take a snapshot every three iterations independently of trace profiling.
+
+Launch it with `MODULE=my_project.recipes CONFIG=my_debug_recipe
+./run_train.sh`. In case of an OOM, the snapshot is written under
+`step_{step:012d}_exit`; regular snapshots use `step_{step:012d}`.
+
+* `profiler.enable_memory_snapshot`: enables memory profiling.
+* `profiler.save_memory_snapshot_folder`: configures the output folder.
+* `profiler.memory_snapshot_freq`: controls how often regular snapshots are
+  taken and defaults to `profiler.profile_freq` when unset.
 
 You can find the saved pickle files in your output folder.
 To visualize a snapshot file, you can drag and drop it to <https://pytorch.org/memory_viz>. To learn more details on memory profiling, please visit this [tutorial](https://pytorch.org/blog/understanding-gpu-memory-1/).
 
-## Overriding Boolean Flags from Config via CLI
-
-Boolean flags are treated as **actions**. To disable a flag from the command line, use the `--no` prefix.
-
-For example, given the following in your config_registry function:
-
-```python
-def my_config() -> Trainer.Config:
-    return Trainer.Config(
-        profiler=Profiler.Config(enable_memory_snapshot=True),
-        # ...
-    )
-```
-You can override it at runtime via CLI with:
-
-```bash
---profiler.no_enable_memory_snapshot
---profiler.no-enable-memory-snapshot  # Equivalent
-```
-
-> Note: `--enable_memory_snapshot=False` will **not** work. Use `--no_enable_memory_snapshot` instead.
-
 ## Debugging Config Values
 
-To inspect how configuration values are interpreted—including those from config_registry functions and CLI overrides—run the config manager directly:
+To inspect a resolved configuration without starting training, use
+`--print-config`:
 
 ```bash
-python -m torchtitan.config.manager --module llama3 --config llama3_8b [your cli args...]
+python -m torchtitan.train \
+  --module torchtitan_recipes.models.llama3 \
+  --config llama3_8b \
+   --print-config
 ```
 
-For example,
-
-```bash
-python -m torchtitan.config.manager --module llama3 --config llama3_8b --profiler.enable_memory_snapshot
-```
-
-To list all available CLI flags and usage:
-
-```bash
-python -m torchtitan.config.manager --module llama3 --config llama3_debugmodel --help
-```
-
-This will print a structured configuration to `stdout`, allowing you to verify that overrides are being applied correctly.
+To list the supported operational CLI options, run
+`python -m torchtitan.train --help`. Training behavior is configured in the
+recipe rather than through general section flags. See
+[the configuration guide](../torchtitan/config/README.md).
 
 ## Fake Backend Debugging
 
@@ -94,11 +79,12 @@ The logical world size must be divisible by `P`. The environment contract is:
 | `WORLD_SIZE` | Unused | Set by `torchrun` | Physical process count, which must equal `P`. |
 | `LOCAL_RANK` | Set to `0` by `run_train.sh` | Set by `torchrun` | Physical device index for the process. |
 | `MASTER_ADDR`, `MASTER_PORT` | Unused | Set by `torchrun` | Standard rendezvous settings for the real PP group. |
-| `COMM_BACKEND` | `run_train.sh` convenience variable | Do not use | The shell launcher recognizes `fake`; hybrid mode is selected with `--comm.backend`. |
+| `COMM_BACKEND` | `run_train.sh` convenience variable | Do not use | The shell launcher recognizes `fake`; hybrid mode is selected with `--comm-backend real_pp_fake_spmd`. |
 
 ### Fully fake example
 
-This command constructs logical rank `1 * 2 = 2` of a four-rank job with
+Define a recipe whose pipeline and data-parallel shard degrees are both 2.
+This command then constructs logical rank `1 * 2 = 2` of that four-rank job with
 PP2 on one physical GPU. It validates that rank's stage, shards, prepared
 weights, pipeline metadata, and memory ownership without creating NCCL process
 groups or transferring peer data.
@@ -107,11 +93,9 @@ groups or transferring peer data.
 NGPU=4 \
 FAKE_PP_RANK=1 \
 COMM_BACKEND=fake \
-MODULE=llama3 \
-CONFIG=llama3_debugmodel \
-./run_train.sh \
-  --parallelism.pipeline_parallel_degree 2 \
-  --parallelism.data_parallel_shard_degree 2
+MODULE=my_debug_configs \
+CONFIG=llama3_debugmodel_pp2_fsdp2 \
+./run_train.sh
 ```
 
 Without PP, omit `FAKE_PP_RANK`; the represented rank is logical rank zero.
@@ -120,7 +104,8 @@ this path remains a diagnostic rather than an accidental benchmark.
 
 ### Real PP / fake SPMD example
 
-This command launches two physical processes for PP2. Each process represents
+Using the same PP2/FSDP2 recipe, this command launches two physical processes
+for PP2. Each process represents
 SPMD coordinate zero of its PP rank in a four-rank logical job. `torchrun`
 assigns physical ranks 0 and 1; those ranks are the PP coordinates. TorchTitan
 creates one real NCCL PP group across them and fake groups for every other axis.
@@ -135,12 +120,9 @@ torchrun \
   --role=rank \
   --tee=3 \
   -m torchtitan.train \
-  --module llama3 \
-  --config llama3_debugmodel \
-  --comm.backend real_pp_fake_spmd \
-  --parallelism.pipeline_parallel_degree 2 \
-  --parallelism.data_parallel_shard_degree 2 \
-  --training.steps 1
+  --module my_debug_configs \
+  --config llama3_debugmodel_pp2_fsdp2 \
+  --comm-backend real_pp_fake_spmd
 ```
 
 The physical world size must equal the PP degree. Do not set `FAKE_PP_RANK`:
@@ -212,10 +194,10 @@ To learn how to analyze and diagnose issues using these logs, follow our step-by
 When debugging issues with multi-dimensional parallelism (combinations of FSDP, TP, PP, CP, EP), ensuring reproducible behavior is crucial for isolating and fixing problems. `torchtitan` provides several mechanisms to achieve deterministic training runs. For more information on ensuring reproducibility and managing randomness in PyTorch, you can refer to the official PyTorch documentation on randomness: [PyTorch Randomness Documentation](https://docs.pytorch.org/docs/stable/notes/randomness.html).
 
 ### Seed Configuration
-Set consistent random seeds across all parallelism dimensions:
+Set a consistent random seed in the selected recipe:
 
-```bash
-./run_train.sh --debug.seed 42
+```python
+config.debug.seed = 42
 ```
 
 **Seed behavior with parallelism:**
@@ -226,10 +208,10 @@ Set consistent random seeds across all parallelism dimensions:
 
 ### Deterministic Mode
 
-Enable deterministic algorithms to ensure bit-for-bit reproducibility across runs:
+Enable deterministic algorithms in the recipe to ensure bit-for-bit reproducibility across runs:
 
-```bash
-./run_train.sh --debug.deterministic
+```python
+config.debug.deterministic = True
 ```
 
 **What it does:**
@@ -238,23 +220,12 @@ Enable deterministic algorithms to ensure bit-for-bit reproducibility across run
 - Sets deterministic workspace configuration for CuBLAS operations
 - **Note:** This will significantly reduce training performance but ensures exact reproducibility
 
-Use `--debug.deterministic_warn_only` to only warn about (not stop running) kernel without deterministic implementation.
-
-### Activation Checkpointing Debugging ###
-
-The following debug configs are available for AC.
-
-`preserve_rng_state` - if deterministic output compared to non-checkpointed passes is required, set to true. Results in stashing and restoring the RNG state during each checkpoint, may be slower.
-
-`determinism_check` - A string specifying the determinism function
-
-`debug` - capture ac debug information. Will be slower.
-
-See https://docs.pytorch.org/docs/stable/checkpoint.html for details.
+`debug.deterministic_warn_only` is intended only for exploratory debugging and
+must not be used for numerical validation.
 
 ### Seed-Checkpoint-based Reproducibility
 
-For multiple experimental runs with different parallelism configs, we need to use a "seed" checkpoint to ensure model initializations are the same across runs. This is because in `torchtitan/train.py`, the model parameters are sharded first, and then have their weights initialized on each rank separately. As a result, it is not equivalent to initialize the model on one rank and then shard it. Using a seed checkpoint helps different runs load the same model weights from checkpoint -- DCP resharding will make sure the loaded weights are sharded correctly according to the parallelism configs.
+For multiple experimental runs with different parallelism configs, we need to use a "seed" checkpoint to ensure model initializations are the same across runs. This is because the training engine shards the model parameters first, and then have their weights initialized on each rank separately. As a result, it is not equivalent to initialize the model on one rank and then shard it. Using a seed checkpoint helps different runs load the same model weights from checkpoint -- DCP resharding will make sure the loaded weights are sharded correctly according to the parallelism configs.
 
 #### Creating a Seed Checkpoint
 
@@ -274,15 +245,64 @@ any checkpoints, allowing you to:
 
 **Note**: Using a seed checkpoint will only make sure a model has same initial weights when configs change, but the training process may not be the same even after setting the seed and the `deterministic` mode, e.g. due to tensor shape change, data precision change, usage of randomness in model code, etc.
 
-### Example: Reproducing loss curves with different parallelism configs
+## Validating a Distributed Training Technique
 
-A common scenario is when you introduce a new parallelism strategy to the model, you need to ensure that the loss curve remains numerically equivalent to the previous parallelism config, thereby confirming the accuracy of your implementation. To achieve consistent behavior across multiple runs with varying parallelism configurations, it's crucial to make sure dataloader behaves consistently. We need to fix the DP degree (`dp_replicate * dpshard`) to ensure the dataloader operates consistently.
+A new parallelism or training technique should not change what the model
+learns. Validate it against a trusted baseline, in one of two ways.
 
-Here's a typical comparison setup (maintaining an overall DP degree of 4):
+### Keep the data identical
+
+Both kinds of comparison need every run to consume the same data in the same
+order, so keep the number of tokens per optimizer step fixed:
+
+```
+training.num_tokens_per_microbatch_per_dp_rank
+* parallelism.num_pp_microbatches   # 1 when PP is disabled
+* data-parallel degree              # dp_replicate * dp_shard
+* derived gradient accumulation steps
+```
+
+Keep the data-parallel degree fixed too, because it determines how the
+dataloader shards the dataset. For example, with an overall DP degree of 4:
+
 - Run 1: dp_shard = 4
-- Run 2: dp_replicate = 2, dp_shard = 2, TP degree = 2
-- Run 3: dp_replicate = 2, dp_shard = 2, CP degree = 2, PP degree = 2
+- Run 2: dp_replicate = 2, dp_shard = 2, TP = 2
+- Run 3: dp_replicate = 2, dp_shard = 2, CP = 2, PP = 2
 
-To reproduce loss curves across above runs, you'll need to create a seed checkpoint, and then load the same seed checkpoint for all runs to ensure consistent model initialization on each rank. You might also need to set the `deterministic` mode to ensure consistent training behavior.
+Some parallelisms change microbatching: PP needs enough microbatches per stage
+to keep bubbles small. Keep the product above fixed by trading per-microbatch
+tokens for PP microbatches, e.g. 32768 tokens per microbatch for 1D FSDP versus
+8192 tokens with four PP microbatches for FSDP + PP.
 
-We also provided an example of verifying the numerical consistency across parallelism plans configs on Llama 3 in https://github.com/pytorch/torchtitan/blob/main/docs/converging.md.
+### Bitwise comparison
+
+When the technique should not change the computation (e.g. a refactor, or
+activation checkpointing), the runs should produce bit-identical loss and
+gradient norm. Load the same seed checkpoint in every run, enable
+`config.debug.seed` and `config.debug.deterministic`, and compare the
+full-precision TensorBoard values with `scripts/loss_compare.py` (stdout
+rounds to five significant digits).
+
+### Convergence comparison
+
+When exact agreement is not expected (different parallelism layouts change
+accumulation order; seeded initialization differs across sharding layouts
+unless a seed checkpoint is used), compare loss curves over a training run on a
+representative dataset such as C4:
+
+- **Control set:** a 1D FSDP job on `dp` GPUs with a trusted recipe, or another
+  verified setup. 1D FSDP is used even when testing an optimization for a
+  higher-dimensional setup (e.g. async TP): small, acceptable discrepancies can
+  add up across a chain of transitive comparisons.
+- **Parallelism under test:** at minimum a 2D job on `dp*p` GPUs with `p >= 2`.
+  Some parallelisms need a larger `p` to surface numerical issues; for example
+  CP accumulates intermediate results in bf16 under the default mixed precision.
+  For mutually compatible parallelisms, converging in a higher-dimensional
+  combination implies converging in its lower-dimensional subsets, so one N-D
+  test job can cover several parallelisms.
+- **Other techniques under test:** a job with the technique enabled on top of
+  the parallelisms it targets, e.g. FSDP + TP + `torch.compile` for async TP, or
+  FSDP + PP for a new PP schedule.
+
+The [Llama 3 README](../torchtitan/models/llama3/README.md#loss-convergence)
+shows a reference run comparing 1D FSDP with 3D and 4D jobs.

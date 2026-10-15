@@ -29,6 +29,11 @@ pip install -r .ci/docker/requirements-vlm.txt
 
 ## Model Variants
 
+Training recipes are intentionally not shipped for the released flavors below
+until they have been validated end to end. User-owned recipes can use the
+corresponding `assets/hf/Qwen3.5-<variant>` directory; for example, flavor
+`35B-A3B` conventionally uses `assets/hf/Qwen3.5-35B-A3B`.
+
 ### Dense
 
 | Variant | LLM dim | Layers | Heads | KV Heads | Head Dim | ViT dim | ViT layers |
@@ -64,6 +69,7 @@ pip install -r .ci/docker/requirements-vlm.txt
 | Tensor Parallelism (TP) | With Sequence Parallel; head-sharded TP on GatedDeltaNet projections |
 | Expert Parallelism (EP) | For MoE variants |
 | Pipeline Parallel (PP) | Vision encoder assigned to first stage; 1F1B and Interleaved1F1B schedules |
+| Context Parallelism (CP) | Attention Gym native CP for GatedDeltaNet; full attention supports K/V all-gather with contiguous, head-tail, or PTRR partitions and Ulysses with contiguous partitions. |
 | Sample Packing | Opt-in via `MMSamplePackingConfig` |
 
 ## Numerical Parity
@@ -79,4 +85,3 @@ Test scripts:
 ## TODO
 
 - Add video dataset training configs
-- Add Context Parallel (CP) support

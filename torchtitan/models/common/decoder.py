@@ -4,72 +4,75 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections.abc import Sequence
+import logging
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
+import spmd_types as spmd
 import torch
 from spmd_types import SpmdType
-from torch.nn.attention.flex_attention import _mask_mod_signature, and_masks, BlockMask
 
 from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed.parallelism_context import ParallelismContext
 from torchtitan.distributed.spmd_types import annotate_input_spmd_types
-from torchtitan.distributed.utils import is_in_batch_invariant_mode
+from torchtitan.models.base.model import BaseModel
+from torchtitan.models.base.module import Module, ModuleDict
 from torchtitan.models.common.attention import (
-    AttentionMasksType,
-    BaseAttention,
-    create_attention_mask,
-    create_varlen_metadata_for_document,
-    FlexInnerAttention,
-    get_causal_mask_mod,
-    get_efficient_causal_mask_mod_for_packed_document,
-    VarlenInnerAttention,
+    Attention,
+    AttentionMetadata,
+    AttentionMetadataMap,
+    InnerAttention,
 )
+from torchtitan.models.common.aux_loss import AuxLoss
 from torchtitan.models.common.decoder_sharding import decoder_input_sharding
 from torchtitan.models.common.embedding import Embedding
-from torchtitan.models.common.feed_forward import FeedForward
+from torchtitan.models.common.feed_forward import DenseFeedForward, FeedForward
 from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.moe import MoE
 from torchtitan.models.common.nn_modules import RMSNorm
-from torchtitan.models.common.token_dispatcher import update_ep_token_dispatcher_config
-from torchtitan.protocols.model import BaseModel
-from torchtitan.protocols.module import Module, ModuleDict
+from torchtitan.observability.logging import warn_once
 
 __all__ = ["Decoder", "TransformerBlock"]
 
+logger = logging.getLogger(__name__)
+
 
 # TODO: we can unify the TransformerBlock impl across all models when
-# there is no special logic for each model, including
-# ffn vs. moe naming and creation, etc.
+# there is no special logic for each model.
 class TransformerBlock(Module):
     """Base class for all language model transformer blocks.
 
     All language model TransformerBlocks share:
     - Attention module (from ``attention.build()``)
-    - FFN or MoE (from ``feed_forward.build()`` / ``moe.build()``)
-    - Two RMSNorms (``attention_norm``, ``ffn_norm``)
-    - Forward: ``x + attn(norm(x), ...); x + ffn(norm(x))``
+    - Dense or MoE feed-forward module (from ``feed_forward.build()``)
+    - Two normalization modules (``attention_norm``, ``ffn_norm``)
 
-    Children implement ``__init__`` and ``forward``.
+    Forward accepts ``aux_loss_denominator``. Dense blocks ignore it; MoE
+    blocks pass it to routers configured with an auxiliary loss.
+
+    Children implement ``__init__``, ``forward``, and residual connections.
     """
+
+    attention: Attention
+    feed_forward: FeedForward
 
     @dataclass(kw_only=True, slots=True)
     class Config(Module.Config):
-        attention: BaseAttention.Config  # required, no default
-        feed_forward: FeedForward.Config | None = None
-        moe: MoE.Config | None = None
-        attention_norm: RMSNorm.Config
-        ffn_norm: RMSNorm.Config
+        attention: Attention.Config  # required, no default
+        feed_forward: FeedForward.Config
+        attention_norm: Module.Config
+        ffn_norm: Module.Config
 
 
 class Decoder(BaseModel):
     """Base class for autoregressive decoder-only language models.
 
     Provides shared ``__init__``, ``forward``, ``init_states``, and
-    ``get_attention_masks`` (flex/varlen dispatch) used by most models.
+    ``_get_attention_metadata`` (flex/varlen dispatch) used by most models.
     """
+
+    layers: ModuleDict[TransformerBlock]
 
     @dataclass(kw_only=True, slots=True)
     class Config(BaseModel.Config):
@@ -89,37 +92,25 @@ class Decoder(BaseModel):
         enable_weight_tying: bool = False
 
         @property
-        def first_attention(self) -> BaseAttention.Config | None:
-            """Attention config of the first layer that has one, else None.
-
-            Hybrid models (linear + full attention) don't carry an attention
-            config on every layer, so callers needing attention metadata (TP
-            validation, FLOPs, mask type) look up the first full-attention
-            layer rather than assuming ``layers[0]``.
-            """
+        def first_full_attention(self) -> Attention.Config | None:
+            """First full-attention config, including causal attention, else None."""
             return next(
                 (
                     layer.attention
                     for layer in self.layers
-                    if layer.attention is not None
+                    if layer.attention.inner_attention.is_full_attention
                 ),
                 None,
             )
 
         @property
-        def first_full_attention_backend(self) -> Module.Config | None:
-            """Backend config of the first full-attention layer, else None."""
-            attention = self.first_attention
-            return attention.inner_attention if attention is not None else None
-
-        @property
-        def first_feed_forward(self) -> FeedForward.Config | None:
+        def first_feed_forward(self) -> DenseFeedForward.Config | None:
             """First dense feed-forward config, else None."""
             return next(
                 (
                     layer.feed_forward
                     for layer in self.layers
-                    if layer.feed_forward is not None
+                    if isinstance(layer.feed_forward, DenseFeedForward.Config)
                 ),
                 None,
             )
@@ -128,78 +119,9 @@ class Decoder(BaseModel):
         def first_moe(self) -> MoE.Config | None:
             """First mixture-of-experts config, else None."""
             return next(
-                (layer.moe for layer in self.layers if layer.moe is not None),
+                (config for _, config, _, _ in self.traverse(MoE.Config)),
                 None,
             )
-
-        def update_from_config(
-            self,
-            *,
-            config,
-            **kwargs,
-        ) -> None:
-            """Apply runtime config to model config.
-
-            Non-trainer callers may pass any config-like
-            object with a ``ParallelismConfig`` in its ``parallelism`` field; in
-            that case the training/debug setup is skipped.
-            """
-            from torchtitan.config.parallelism import ParallelismConfig
-            from torchtitan.trainer import Trainer
-
-            assert hasattr(config, "parallelism"), (
-                "config passed to update_from_config must provide "
-                "a parallelism field."
-            )
-            parallelism = config.parallelism
-            assert isinstance(parallelism, ParallelismConfig), (
-                "config.parallelism must be a ParallelismConfig, got "
-                f"{type(parallelism).__name__}."
-            )
-
-            if self.enable_weight_tying and parallelism.pipeline_parallel_degree > 1:
-                raise NotImplementedError(
-                    "Weight tying is not supported with Pipeline Parallel."
-                )
-
-            tp = parallelism.tensor_parallel_degree
-            attention = self.first_attention
-            if tp > 1 and attention is not None:
-                n_heads = attention.n_heads
-                n_kv_heads = getattr(attention, "n_kv_heads", None) or n_heads
-                if n_heads % tp != 0:
-                    raise ValueError(
-                        f"tensor_parallel_degree ({tp}) must divide "
-                        f"n_heads ({n_heads})."
-                    )
-                if n_kv_heads % tp != 0:
-                    raise ValueError(
-                        f"tensor_parallel_degree ({tp}) must divide "
-                        f"n_kv_heads ({n_kv_heads})."
-                    )
-
-            moe_configs = list(self.traverse(MoE.Config))
-            ep = parallelism.expert_parallel_degree
-            if moe_configs and ep < tp:
-                raise ValueError(
-                    f"MoE models require expert_parallel_degree ({ep}) to be "
-                    f"greater than or equal to tensor_parallel_degree ({tp})."
-                )
-            for moe_fqn, moe, _, _ in moe_configs:
-                if moe.num_experts % ep != 0:
-                    raise ValueError(
-                        f"{moe_fqn}.num_experts ({moe.num_experts}) must be "
-                        f"divisible by expert_parallel_degree ({ep})."
-                    )
-
-            update_ep_token_dispatcher_config(self, config)
-
-            if isinstance(config, Trainer.Config):
-                for layer_cfg in self.layers:
-                    if hasattr(layer_cfg, "moe") and layer_cfg.moe is not None:
-                        layer_cfg.moe.router._debug_force_load_balance = (
-                            config.debug.moe_force_load_balance
-                        )
 
     # Set by the trainer when ChunkedLossWrapper is used, so lm_head is applied
     # per-chunk inside the loss function instead of in forward().
@@ -238,6 +160,41 @@ class Decoder(BaseModel):
         )
 
     def __init__(self, config: Config):
+        from torchtitan.distributed.spmd_types import spmd_mesh_size, spmd_sparse_mesh
+
+        tp = spmd_mesh_size("tp")
+        attention = config.first_full_attention
+        if tp > 1 and attention is not None:
+            num_heads = attention.n_heads
+            num_kv_heads = getattr(attention, "n_kv_heads", None) or num_heads
+            if num_heads % tp != 0:
+                raise ValueError(
+                    f"tensor parallel degree ({tp}) must divide "
+                    f"n_heads ({num_heads})."
+                )
+            # Fused QKV projections shard whole KV-head groups. Attention with
+            # separate K/V projections may instead shard each head's features.
+            if hasattr(attention, "qkv_linear") and num_kv_heads % tp != 0:
+                raise ValueError(
+                    f"tensor parallel degree ({tp}) must divide "
+                    f"n_kv_heads ({num_kv_heads})."
+                )
+
+        sparse_mesh = spmd_sparse_mesh()
+        ep = sparse_mesh["ep"].size() if sparse_mesh is not None else 1
+        moe_configs = list(config.traverse(MoE.Config))
+        if moe_configs and ep < tp:
+            raise ValueError(
+                f"MoE models require expert parallel degree ({ep}) to be "
+                f"greater than or equal to tensor parallel degree ({tp})."
+            )
+        for moe_fqn, moe, _, _ in moe_configs:
+            if moe.num_experts % ep != 0:
+                raise ValueError(
+                    f"{moe_fqn}.num_experts ({moe.num_experts}) must be "
+                    f"divisible by expert parallel degree ({ep})."
+                )
+
         super().__init__()
         self.config = config
 
@@ -272,19 +229,35 @@ class Decoder(BaseModel):
         self,
         tokens: torch.Tensor,
         positions: torch.Tensor | None = None,
-        attention_masks: AttentionMasksType | None = None,
+        attention_metadata: AttentionMetadataMap | None = None,
         *,
         padding_mask: torch.Tensor | None = None,
+        aux_loss_denominators: torch.Tensor | None = None,
     ):
-        # positions is listed before attention_masks so AutoParallel's input_fn,
+        # positions is listed before attention_metadata so AutoParallel's input_fn,
         # which returns (tokens, positions) and binds them positionally, maps
         # positions to the right parameter (it would otherwise land in the
-        # attention_masks slot and break the maskless SDPA backend).
+        # attention_metadata slot and break the maskless SDPA backend).
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
 
+        with spmd.no_typecheck():
+            aux_loss_denominator = (
+                None if aux_loss_denominators is None else aux_loss_denominators[0]
+            )
         for layer in self.layers.values():
-            h = layer(h, attention_masks, positions, padding_mask=padding_mask)
+            layer_attention_metadata = (
+                None
+                if attention_metadata is None
+                else attention_metadata.get(type(layer.attention.inner_attention))
+            )
+            h = layer(
+                h,
+                layer_attention_metadata,
+                positions,
+                padding_mask=padding_mask,
+                aux_loss_denominator=aux_loss_denominator,
+            )
 
         h = self.norm(h) if self.norm is not None else h
 
@@ -296,47 +269,6 @@ class Decoder(BaseModel):
         output = self.lm_head(h) if self.lm_head is not None else h
         return output
 
-    def _create_flex_attention_mask(
-        self,
-        positions: torch.Tensor,
-        attn_config: BaseAttention.Config,
-        mask_mods: Sequence[_mask_mod_signature],
-    ) -> BlockMask:
-        """Build a flex-attention BlockMask from mask_mods (ANDed together),
-        respecting the config's block_size and batch-invariant mode."""
-        assert isinstance(attn_config.inner_attention, FlexInnerAttention.Config)
-        seq_len = positions.shape[0]
-        return create_attention_mask(
-            and_masks(*mask_mods),
-            1,
-            None,
-            seq_len,
-            seq_len,
-            device=positions.device,
-            BLOCK_SIZE=attn_config.inner_attention.block_size,
-            # when separate_full_blocks = True, kernel iterates through
-            # full blocks first (blocks where all elements are unmasked)
-            # but which blocks are "full" vs "partial" changes depending
-            # on the particular batch
-            # for batch invariance, we disable this optimization
-            separate_full_blocks=not is_in_batch_invariant_mode(),
-        )
-
-    def _create_flex_attention_mask_for_document(
-        self,
-        positions: torch.Tensor,
-        attn_config: BaseAttention.Config,
-    ) -> BlockMask:
-        """Build the standard causal + packed-document flex-attention mask."""
-        return self._create_flex_attention_mask(
-            positions,
-            attn_config,
-            [
-                get_causal_mask_mod(),
-                get_efficient_causal_mask_mod_for_packed_document(positions),
-            ],
-        )
-
     def preprocess_inputs(
         self,
         input_dict: dict[str, Any],
@@ -345,6 +277,7 @@ class Decoder(BaseModel):
         parallelism: ParallelismConfig,
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
+        global_routing_token_counts: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> tuple[
         torch.Tensor | tuple[torch.Tensor, ...],
@@ -356,16 +289,13 @@ class Decoder(BaseModel):
         positions = input_dict.get("positions", None)
         padding_mask = input_dict.get("padding_mask", None)
         if positions is not None:
-            inner = self.config.first_full_attention_backend
-            if isinstance(
-                inner, (FlexInnerAttention.Config, VarlenInnerAttention.Config)
-            ):
-                input_dict["attention_masks"] = self.get_attention_masks(
-                    positions=positions,
-                    padding_mask=padding_mask,
-                    max_num_documents=max_num_documents,
-                    max_context_length=max_context_length,
-                )
+            attention_metadata = self._get_attention_metadata(
+                positions=positions,
+                padding_mask=padding_mask,
+                max_num_documents=max_num_documents,
+                max_context_length=max_context_length,
+            )
+            input_dict["attention_metadata"] = attention_metadata
 
         input_shardings = decoder_input_sharding()
         if parallelism_context.cp_enabled:
@@ -381,6 +311,8 @@ class Decoder(BaseModel):
 
         inputs = input_dict.pop("input")
         labels = input_dict.pop("labels")
+        if next(self.config.traverse(AuxLoss.Config), None) is not None:
+            input_dict["aux_loss_denominators"] = global_routing_token_counts
         return inputs, labels, input_dict
 
     def _cp_shard(
@@ -392,74 +324,78 @@ class Decoder(BaseModel):
     ) -> dict[str, Any]:
         """Prepare attention metadata and shard model inputs for CP."""
         from torchtitan.distributed import context_parallel
-        from torchtitan.models.common.cp_attention import CPInnerAttention
+        from torchtitan.models.common.attention.cp_attention import CPInnerAttention
 
+        attention_metadata = input_dict.get("attention_metadata")
         load_balancer_config = parallelism.context_parallel_load_balancer
-        load_balancer = (
-            load_balancer_config.build(
-                seq_len=context_parallel.get_cp_input_seq_len(
-                    input_dict, input_shardings=input_shardings
-                ),
-                attention_metadata=input_dict.get("attention_masks"),
-            )
-            if load_balancer_config is not None
-            else None
-        )
+        load_balancer = None
+        if load_balancer_config is not None:
+            # All PP stages retain the full model config and share one permutation.
+            attention = self.config.first_full_attention
+            if attention is None:
+                warn_once(
+                    logger,
+                    "Ignoring context_parallel_load_balancer because the model "
+                    "has no full attention. Using contiguous CP sharding.",
+                )
+            else:
+                selected_attention_metadata = None
+                if attention_metadata is not None:
+                    cp_inner_attention = attention.inner_attention._owner
+                    assert cp_inner_attention is not None and issubclass(
+                        cp_inner_attention, CPInnerAttention
+                    )
+                    selected_attention_metadata = attention_metadata.get(
+                        cp_inner_attention
+                    )
+                load_balancer = load_balancer_config.build(
+                    seq_len=context_parallel.get_cp_input_seq_len(
+                        input_dict, input_shardings=input_shardings
+                    ),
+                    attention_metadata=selected_attention_metadata,
+                )
         permutation = (
             load_balancer.generate_permutation() if load_balancer is not None else None
         )
-        if "attention_masks" in input_dict:
-            attention_metadata = input_dict["attention_masks"]
-            # TODO(acisseJZhong): Delegate metadata selection and preparation to
-            # each attention backend once backend-specific ownership is established.
-            prepared_backends: set[type[CPInnerAttention[Any, Any]]] = set()
-            for _, backend_config, _, _ in self.config.traverse(
-                CPInnerAttention.Config, recurse=True
-            ):
-                owner = cast(
-                    "type[CPInnerAttention[Any, Any]] | None",
-                    backend_config._owner,
-                )
-                assert owner is not None and issubclass(owner, CPInnerAttention)
-                if owner in prepared_backends:
+        if "attention_metadata" in input_dict:
+            attention_metadata = input_dict["attention_metadata"]
+            assert isinstance(attention_metadata, dict)
+            for inner_attention, metadata in attention_metadata.items():
+                if not issubclass(inner_attention, CPInnerAttention):
                     continue
-                attention_metadata = owner.prepare_cp_metadata(
-                    attention_metadata,
+                attention_metadata[
+                    inner_attention
+                ] = inner_attention.prepare_cp_metadata(
+                    metadata,
                     permutation=permutation,
                 )
-                prepared_backends.add(owner)
-            input_dict["attention_masks"] = attention_metadata
         return context_parallel.shard_tensors(
             input_dict,
             input_shardings=input_shardings,
             permutation=permutation,
         )
 
-    def get_attention_masks(
+    def _get_attention_metadata(
         self,
         positions: torch.Tensor,
         *,
         padding_mask: torch.Tensor | None = None,
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
-    ) -> AttentionMasksType | None:
-        attn_config = self.config.first_attention
-        if attn_config is None:
-            # No full-attention layers (e.g. a pure linear-attention model, or a
-            # pipeline stage holding only linear-attention blocks) → no masks.
-            return None
-        inner_attn = attn_config.inner_attention
-        if isinstance(inner_attn, FlexInnerAttention.Config):
-            return self._create_flex_attention_mask_for_document(positions, attn_config)
-        elif isinstance(inner_attn, VarlenInnerAttention.Config):
-            return create_varlen_metadata_for_document(
-                positions,
-                padding_mask=padding_mask,
-                max_num_documents=max_num_documents,
-                max_context_length=max_context_length,
-            )
-        else:
-            raise TypeError(
-                f"Only VarlenInnerAttention and FlexInnerAttention support attention masks, "
-                f"got {type(inner_attn).__name__}"
-            )
+    ) -> AttentionMetadataMap:
+        attention_metadata: dict[type[InnerAttention], AttentionMetadata] = {}
+        for layer_config in self.config.layers:
+            for _, config, _, _ in layer_config.traverse(InnerAttention.Config):
+                backend = config._owner
+                assert backend is not None and issubclass(backend, InnerAttention)
+                if backend in attention_metadata:
+                    continue
+                metadata = config.build_attention_metadata(
+                    positions,
+                    padding_mask=padding_mask,
+                    max_num_documents=max_num_documents,
+                    max_context_length=max_context_length,
+                )
+                if metadata is not None:
+                    attention_metadata[backend] = metadata
+        return attention_metadata

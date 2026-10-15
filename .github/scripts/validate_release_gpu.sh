@@ -89,9 +89,6 @@ cp "${REPO_ROOT}/run_train.sh" "${VALIDATION_ROOT}/run_train.sh"
 cp "${REPO_ROOT}/scripts/loss_compare.py" "${VALIDATION_ROOT}/scripts/loss_compare.py"
 cp -R "${REPO_ROOT}/tests" "${VALIDATION_ROOT}/tests"
 cp \
-  "${REPO_ROOT}/torchtitan/models/flux/run_infer.sh" \
-  "${VALIDATION_ROOT}/torchtitan/models/flux/run_infer.sh"
-cp \
   "${REPO_ROOT}/torchtitan/models/flux/inference/prompts.txt" \
   "${VALIDATION_ROOT}/torchtitan/models/flux/inference/prompts.txt"
 cp \
@@ -155,7 +152,9 @@ run_core_tests() {
     --ngpu 8 \
     "${ARTIFACTS}/integration_tests"
 
-  python -m tests.integration_tests.flux \
+  python -m tests.integration_tests.run_tests \
+    --gpu_arch_type cuda \
+    --test_suite flux \
     --execution_mode real_pg \
     --ngpu 8 \
     "${ARTIFACTS}/flux_tests"
@@ -229,7 +228,7 @@ run_h100_tests() {
     python -m tests.integration_tests.run_tests \
     --test_suite h100 \
     --execution_mode real_pg \
-    --exclude qwen3_fsdp+deepep,deepseek_v3_fsdp+hybridep+compile \
+    --exclude qwen3_fsdp+deepep,deepseek_v3_fsdp+hybridep \
     --gpu_arch_type cuda \
     --ngpu 8 \
     "${ARTIFACTS}/h100/base"; then
@@ -252,7 +251,7 @@ run_h100_tests() {
   if ! python -m tests.integration_tests.run_tests \
     --test_suite h100 \
     --execution_mode real_pg \
-    --test_name deepseek_v3_fsdp+hybridep+compile \
+    --test_name deepseek_v3_fsdp+hybridep \
     --gpu_arch_type cuda \
     --ngpu 8 \
     "${ARTIFACTS}/h100/hybrid_ep"; then
@@ -280,13 +279,28 @@ run_graph_trainer_h100_tests() {
   python -m pytest "${tests_root}/test_bitwise_deterministic.py" -v
 }
 
-case "${VALIDATION_SUITE}" in
-  core) run_core_tests ;;
-  graph-trainer) run_graph_trainer_tests ;;
-  graph-trainer-h100) run_graph_trainer_h100_tests ;;
-  h100) run_h100_tests ;;
-  torchft) run_torchft_tests ;;
-  transformers-modeling-backend) run_transformers_modeling_backend_tests ;;
-esac
+# Run the selected suite without letting `set -e` abort the script on
+# failure: we still need to prune checkpoint directories from the artifacts
+# below and report the correct exit code afterwards. The subshell re-enables
+# `set -e` so a failing step inside the chosen run_*_tests function still
+# fails fast exactly as before; only the outer script's early exit is
+# deferred until after cleanup.
+suite_status=0
+set +e
+(
+  set -e
+  case "${VALIDATION_SUITE}" in
+    core) run_core_tests ;;
+    graph-trainer) run_graph_trainer_tests ;;
+    graph-trainer-h100) run_graph_trainer_h100_tests ;;
+    h100) run_h100_tests ;;
+    torchft) run_torchft_tests ;;
+    transformers-modeling-backend) run_transformers_modeling_backend_tests ;;
+  esac
+)
+suite_status=$?
+set -e
 
 find "${ARTIFACTS}" -type d -name checkpoint -prune -exec rm -rf {} +
+
+exit "${suite_status}"

@@ -13,6 +13,11 @@ The public API is exported from `torchtitan.distributed.flex_shard`:
   `DeviceMesh` axes using PyTorch DTensor placements plus `BlockShard` or
   `Owned`, and optionally the order in which several axes shard one tensor
   dimension.
+- `ComputeLayout.compute_dtype` is the dtype the optimizer computes in for
+  that parameter; `None` keeps the storage dtype. DistMuon runs Newton-Schulz
+  in BF16 and accepts only `torch.bfloat16`, so every FP32 parameter sets it.
+  Inputs are sent to the compute ranks and directions are sent back in this
+  dtype.
 - `BlockShard` shards complete contiguous blocks along one tensor dimension. It
   preserves the tensor's rank and global shape and never creates a tensor view.
 - `Owned` assigns a complete subgroup-local logical tensor to one dynamically
@@ -68,8 +73,8 @@ checkpoint restore must rebuild the optimizer with matching values.
 
 ## TorchTitan Kimi integration
 
-The [Kimi configuration registry](../../models/kimi_k2_7/config_registry.py)
-is the first TorchTitan integration. Its shared optimizer configuration:
+The [Kimi test recipes](../../../torchtitan_recipes/tests/models/kimi_k2_7.py)
+provide the first TorchTitan integration. Their shared optimizer configuration:
 
 - Selects matrix parameters from attention, dense MLPs, routed and shared
   experts, and routers for DistMuon. Other parameters continue to use
@@ -79,8 +84,8 @@ is the first TorchTitan integration. Its shared optimizer configuration:
 - Groups layers into buckets so compute-ready work can overlap packed
   redistribution.
 
-The configuration is shared by the Kimi-family, Kimi-VL, and Moonlight
-recipes in that registry.
+The same construction can be used by Kimi-family, Kimi-VL, and Moonlight
+recipes.
 
 ## Package boundary
 
