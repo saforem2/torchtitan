@@ -2,6 +2,19 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-15 (Sunspot) -- BlendCorpus data position verified on the merged tree
+
+`origin/ezpz` `786306ff18` (upstream sync `5a7a622f16` + #66 + #64), torch
+2.16 venv, 2 nodes. Saved `dataloader.consumed_samples` is 48 / 96 / 144 at
+steps 2 / 4 / 6 (24 per step). A restart from the reference run's `step-4`
+reproduces steps 5-6 (`10.26074`, `9.93350`). A counter-0 checkpoint resumes
+correctly with `--dataloader.resume-consumed-samples=96` and with
+`BLENDCORPUS_RESUME_CONSUMED_SAMPLES=96`, replays from 0 without either
+(`10.13866`, `9.77017`), and ignores a conflicting override when the stored
+counter is nonzero. Jobs `12481024` (first design), `12481025` (showed the
+4-step save run is on a different LR schedule), `12481026` (result). Details in
+`docs/upstream-sync.md`. Not covered: GAS > 1, TP/PP/CP, > 2 nodes, Aurora.
+
 ## 2026-10-15 (Aurora) -- BlendCorpus restarts replay the data stream
 
 Every checkpoint of the 20B 256N and 512N chains stores
