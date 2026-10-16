@@ -4,7 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -557,16 +556,6 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
             num_warmup_iterations=NUM_CUDA_GRAPH_WARMUP_STEPS,
         )
 
-    def _get_train_context(self) -> contextlib.AbstractContextManager[None]:
-        """Build the model execution context for one forward/backward call.
-
-        Subclasses may compose backend-specific contexts without retaining the
-        train-context state that was removed with ModelSpec.
-        """
-        return self.parallelism_context.activate_spmd(
-            typechecking=self.config.debug.spmd_typechecking,
-        )
-
     @sl.log_trace_span("forward_backward")
     def forward_backward(
         self,
@@ -772,7 +761,9 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
         model_kwargs: dict[str, Any],
         loss_kwargs: dict[str, Any],
     ) -> torch.Tensor:
-        with self._get_train_context():
+        with self.parallelism_context.activate_spmd(
+            typechecking=self.config.debug.spmd_typechecking,
+        ):
             pred = self.model_parts[0](inputs, **model_kwargs)
             loss, self.loss_metrics = self.loss_fn(
                 pred,
@@ -798,7 +789,9 @@ class TrainingEngine(Configurable, torch.distributed.checkpoint.stateful.Statefu
         The input lists contain one pipeline schedule step. ``finalize_gradients``
         controls whether that step finishes FSDP gradient reduction.
         """
-        with self._get_train_context():
+        with self.parallelism_context.activate_spmd(
+            typechecking=self.config.debug.spmd_typechecking,
+        ):
             losses = [] if self.pp_has_last_stage else None
             self.pp_schedule.step(
                 arg_mbs=inputs,

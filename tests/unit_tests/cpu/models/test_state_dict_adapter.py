@@ -27,7 +27,11 @@ from torchtitan.models.flux import MODEL_FLAVORS as FLUX_MODEL_FLAVORS
 from torchtitan.models.flux.state_dict_adapter import FluxStateDictAdapter
 from torchtitan.models.gpt_oss import MODEL_FLAVORS as GPT_OSS_MODEL_FLAVORS
 from torchtitan.models.gpt_oss.state_dict_adapter import GptOssStateDictAdapter
-from torchtitan.models.llama3 import MODEL_FLAVORS as LLAMA3_MODEL_FLAVORS
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.models.llama3 import (
+    build_model_config as build_llama3_model_config,
+    MODEL_FLAVORS as LLAMA3_MODEL_FLAVORS,
+)
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 from torchtitan.models.qwen3 import MODEL_FLAVORS as QWEN3_MODEL_FLAVORS
@@ -97,8 +101,10 @@ class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
         fused = torch.randn(3, 5, 2, 7)
         state_dict = {"experts.w13": fused}
         logical_keys = ("experts.w1", "experts.w3")
-        build_config, max_context_length = llama3_configs["debugmodel"]
-        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        config = build_llama3_model_config(
+            "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+        )
+        max_context_length = config.max_context_length
         adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
 
         adapter._split_stacked_linear(
@@ -125,8 +131,10 @@ class NativeFusedLinearStateDictAdapterTest(unittest.TestCase):
 
 class Llama3FusedLinearStateDictAdapterTest(unittest.TestCase):
     def test_native_fused_logical_roundtrip(self) -> None:
-        build_config, max_context_length = llama3_configs["debugmodel"]
-        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        config = build_llama3_model_config(
+            "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+        )
+        max_context_length = config.max_context_length
         model = Llama3Model(config)
         model.init_states()
         native = model.state_dict()

@@ -15,7 +15,8 @@ import torch
 from torch import nn
 from torchtitan.config import CommConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.models.qwen3 import model_registry, qwen3_configs, Qwen3Model
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.models.qwen3 import build_model_config, MODEL_FLAVORS, Qwen3Model
 
 from tests.unit_tests.cpu.upstream_sync_baseline import (
     model_state_signature,
@@ -34,10 +35,10 @@ _EZPZ_ACTIVE_ROOTS = (
 )
 
 # Importing these from the package root has broken repeatedly when exports moved.
+# ``CompileConfig`` and ``ConfigManager`` were removed upstream (#5026, #4908);
+# ezpz owns them in ``experiments/ezpz/{compile,config_manager}.py``.
 _REQUIRED_CONFIG_EXPORTS = {
     "CommConfig",
-    "CompileConfig",
-    "ConfigManager",
     "Configurable",
     "TORCH_DTYPE_MAP",
     "TrainingConfig",
@@ -149,15 +150,9 @@ def test_config_schema_keeps_synced_runtime_options() -> None:
     assert not fields.intersection(_RENAMED_PIPELINE_OPTIONS)
 
 
-@pytest.mark.parametrize("flavor", sorted(qwen3_configs))
+@pytest.mark.parametrize("flavor", sorted(MODEL_FLAVORS))
 def test_qwen3_registry_builds_every_config(flavor: str) -> None:
-    config = model_registry(
-        flavor,
-        seq_len=16,
-        moe_comm_backend=(
-            "standard" if "moe" in flavor.lower() or "-A" in flavor else None
-        ),
-    )
+    config = build_model_config(flavor, seq_len=16, parallelism=ParallelismConfig())
     assert isinstance(config, Qwen3Model.Config)
     with torch.device("meta"):
         assert config.build().__class__ is Qwen3Model
@@ -176,7 +171,8 @@ _MODEL_SNAPSHOTS = {
     },
     "debugmodel_moe": {
         "parameter_count": 315758848,
-        "state_key_count": 83,
+        "state_key_count": 75,  # was 83: layers.N.moe.* -> layers.N.feed_forward.* (#5345) and the flavor no longer
+        # carries expert_bias_E; parameter count unchanged. Diffed against 5112abcb6f.
         "first_keys": (
             "tok_embeddings.weight",
             "layers.0.attention.qkv_linear.wqkv.weight",
@@ -190,7 +186,9 @@ _MODEL_SNAPSHOTS = {
 @pytest.mark.parametrize("flavor", tuple(_MODEL_SNAPSHOTS))
 def test_qwen3_debug_model_state_snapshot(flavor: str) -> None:
     with torch.device("meta"):
-        model = model_registry(flavor, seq_len=16).build()
+        model = build_model_config(
+            flavor, seq_len=16, parallelism=ParallelismConfig()
+        ).build()
     signature = model_state_signature(model)
     expected = _MODEL_SNAPSHOTS[flavor]
     assert signature["parameter_count"] == expected["parameter_count"]

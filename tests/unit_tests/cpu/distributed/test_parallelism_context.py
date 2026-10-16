@@ -603,7 +603,7 @@ class TestParallelismContextMeshOperations(unittest.TestCase):
             real_pp_group_for_fake_spmd=group,
         )
         parallelism_context = ParallelismContext.from_config(
-            ParallelismConfig(), topology
+            ParallelismConfig(), topology, dump_folder="."
         )
         parallelism_context.build_mesh()
 

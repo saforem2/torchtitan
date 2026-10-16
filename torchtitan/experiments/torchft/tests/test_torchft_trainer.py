@@ -180,7 +180,9 @@ def test_ft_trainer_uses_engine_cls_hook() -> None:
         engine_cls = CustomEngine
 
     config = ft.FaultTolerantTrainer.Config(
-        model=model_registry("debugmodel"),
+        model=build_model_config(
+            "debugmodel", seq_len=2048, parallelism=ParallelismConfig()
+        ),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
     )
@@ -359,7 +361,7 @@ def test_ft_engine_passes_manager_only_to_ft_checkpointer(ft_aware) -> None:
     with patch.object(build_target, "build", build):
         ft.FaultTolerantTrainingEngine._initialize_checkpointer(
             engine,
-            dataloader=MagicMock(),
+            extra_states=None,
             sd_adapter=MagicMock(),
         )
 
