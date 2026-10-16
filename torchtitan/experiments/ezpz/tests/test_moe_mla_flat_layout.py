@@ -98,7 +98,7 @@ def test_views_are_flat():
     assert (
         "kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)" in src
     )
-    assert "output.view(num_tokens, -1)" in src
+    assert "output.contiguous().view(num_tokens, -1)" in src
 
 
 def test_xpu_pad_v_workaround_survived_the_port():

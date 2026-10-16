@@ -116,7 +116,7 @@ def test_sonic_flavors_select_the_sonic_backend():
 
 def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
     """Upstream RoutedExperts initializes every dispatcher unconditionally."""
-    from torchtitan.experiments.ezpz.moe.token_dispatcher import (
+    from torchtitan.models.common.moe.token_dispatcher import (
         AllToAllTokenDispatcher,
         LocalTokenDispatcher,
     )
@@ -127,31 +127,6 @@ def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
     ):
         dispatcher = config.build()
         assert dispatcher.init_buffer() is None
-
-
-def test_routed_experts_wires_dispatcher_meshes(monkeypatch):
-    """The recursive Module lifecycle must retain the old dispatcher handoff."""
-    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
-    from torchtitan.models.common.moe import RoutedExperts
-
-    class ParallelDims:
-        def get_optional_mesh(self, name):
-            return f"{name}-mesh"
-
-    class Dispatcher:
-        def wire_meshes(self, **kwargs):
-            self.meshes = kwargs
-
-    routed = object.__new__(EzpzRoutedExperts)
-    routed.token_dispatcher = Dispatcher()
-    monkeypatch.setattr(RoutedExperts, "_parallelize", lambda self, dims: None)
-
-    routed._parallelize(cast(Any, ParallelDims()))
-
-    assert routed.token_dispatcher.meshes == {
-        "ep_mesh": "ep-mesh",
-        "tp_mesh": "tp-mesh",
-    }
 
 
 def test_routed_experts_prefers_live_sparse_ep_mesh(monkeypatch):

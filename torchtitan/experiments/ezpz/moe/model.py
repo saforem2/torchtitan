@@ -6,35 +6,44 @@
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import spmd_types as spmd
 import torch
 import torch.nn.functional as F
+import torch_remat as remat
 from torch import nn
 
 from torchtitan.experiments.ezpz.logging import logger, warn_once
 
 from torchtitan.models.common.attention import (
-    AttentionMasksType,
-    BaseAttention,
+    FlexAttentionMetadata,
     GQAttention,
-    ScaledDotProductInnerAttention,
+    VarlenAttentionMetadata,
 )
-from torchtitan.models.common.decoder import Decoder, TransformerBlock
-from torchtitan.models.common.linear import Linear
-from torchtitan.models.common.nn_modules import RMSNorm
-from torchtitan.models.common.rope import RoPE
-from torchtitan.models.common.token_dispatcher import (
-    DeepEPTokenDispatcher,
-    HybridEPTokenDispatcher,
-)
-from torchtitan.models.utils import (
+from torchtitan.models.common.decoder import Decoder
+from torchtitan.models.common.flops import (
     get_nparams_and_active_nparams,
     quadratic_attention_flops_per_token,
 )
-from torchtitan.protocols.module import Module
+from torchtitan.models.common.linear import maybe_gather_tp_input
+from torchtitan.models.common.moe import MoE
+from torchtitan.models.common.moe.token_dispatcher import (
+    DeepEPTokenDispatcher,
+    HybridEPTokenDispatcher,
+)
+from torchtitan.models.deepseek_v3.model import (
+    DeepSeekMLAAttention,
+    DeepSeekV3TransformerBlock,
+)
 from torchtitan.tools.utils import has_cuda_capability
+
+
+def _sdpa_config_types() -> tuple[type, ...]:
+    """SDPA inner-attention config classes (ezpz-owned; imported lazily)."""
+    from torchtitan.experiments.ezpz.agpt import ScaledDotProductInnerAttention
+
+    return (ScaledDotProductInnerAttention.Config,)
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -52,84 +61,29 @@ def _maybe_release_device_cache_between_attention_and_moe(x: torch.Tensor) -> No
         torch.cuda.empty_cache()
 
 
-class Attention(BaseAttention):
-    """
-    Multi-head latent attention (MLA) module.
+class Attention(DeepSeekMLAAttention):
+    """Multi-head latent attention (MLA) with the XPU SDPA value-padding fix.
 
-    This is moe-specific and NOT shared with other models.
+    Upstream's :class:`DeepSeekMLAAttention` is reused for structure, config
+    and sharding. Only ``forward`` differs: the XPU SDPA math backend returns
+    the Q/K head dimension instead of V's when they differ, so V is padded up to
+    the Q/K head dimension and the output sliced back (see the NOTE below).
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(BaseAttention.Config):
-        n_heads: int
-        dim: int
-        wq: Linear.Config | None = None
-        wq_a: Linear.Config | None = None
-        wq_b: Linear.Config | None = None
-        wkv_a: Linear.Config
-        wkv_b: Linear.Config
-        wo: Linear.Config
-        q_lora_rank: int = 0
-        kv_lora_rank: int = 512
-        q_norm: RMSNorm.Config
-        kv_norm: RMSNorm.Config
-        qk_nope_head_dim: int = 128
-        qk_rope_head_dim: int = 64
-        v_head_dim: int = 128
-        rope: RoPE.Config
-        inner_attention: Module.Config
-        mask_type: str = "causal"
-        mscale: float = 1.0
-
-    def __init__(self, config: Config):
-        super().__init__()
-        self.dim = config.dim
-        self.n_heads = config.n_heads
-        self.q_lora_rank = config.q_lora_rank
-        self.kv_lora_rank = config.kv_lora_rank
-        self.qk_nope_head_dim = config.qk_nope_head_dim
-        self.qk_rope_head_dim = config.qk_rope_head_dim
-        self.qk_head_dim = config.qk_nope_head_dim + config.qk_rope_head_dim
-        self.v_head_dim = config.v_head_dim
-
-        if self.q_lora_rank == 0:
-            assert config.wq is not None, "wq is required when q_lora_rank == 0"
-            self.wq = config.wq.build()
-        else:
-            assert (
-                config.wq_a is not None and config.wq_b is not None
-            ), "wq_a and wq_b are required when q_lora_rank > 0"
-            self.wq_a = config.wq_a.build()
-            self.q_norm = config.q_norm.build()
-            self.wq_b = config.wq_b.build()
-
-        # TODO(fegin): revisit
-        # https://github.com/pytorch/torchtitan/pull/2785#discussion_r3034078575
-        self.wkv_a = config.wkv_a.build()
-        self.kv_norm = config.kv_norm.build()
-        self.wkv_b = config.wkv_b.build()
-        self.wo = config.wo.build()
-        self.softmax_scale = self.qk_head_dim**-0.5
-
-        if config.rope.max_context_length > config.rope.original_seq_len:
-            mscale = 0.1 * config.mscale * math.log(config.rope.rope_factor) + 1.0
-            self.softmax_scale = self.softmax_scale * mscale * mscale
-
-        self.inner_attention = config.inner_attention.build()
-        self.rope = config.rope.build()
+    class Config(DeepSeekMLAAttention.Config):
+        pass
 
     def forward(
         self,
         x: torch.Tensor,
-        attention_masks: AttentionMasksType | None,
+        attention_metadata: FlexAttentionMetadata | VarlenAttentionMetadata | None,
         positions: torch.Tensor | None = None,
     ):
-        # Flat token layout (upstream #4121): x is [T, D], NOT [B, L, D]. The
-        # loader folds [B, L] -> [T] unconditionally, so every reshape below
-        # works on a token count rather than a (batch, seq) pair. Ported from
-        # torchtitan/models/deepseek_v3/model.py, which is what this MLA forked
-        # from -- the axis shifts here are subtle enough that inferring them
-        # from a traceback gets two of them wrong.
+        # Mirrors DeepSeekMLAAttention.forward (flat [T, D] token layout, remat
+        # annotations, TP input gather) plus the XPU value padding below.
+        x = maybe_gather_tp_input(self, x)
+
         num_tokens = x.shape[0]
 
         # Query projection
@@ -137,6 +91,7 @@ class Attention(BaseAttention):
             q = self.wq(x)
         else:
             q = self.wq_a(x)
+            remat.recompute_needs_tensor(q)
             q = self.wq_b(self.q_norm(q))
 
         # spmd.local(): the unflatten splits a TP-sharded feature axis into
@@ -153,11 +108,11 @@ class Attention(BaseAttention):
         kv = self.wkv_a(x)
         kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
 
-        # PR #3458 (RoPE refactor): rope module now owns its cache and
-        # rotates q+k in one call; freqs_cis no longer threaded through
-        # forward.
+        # rope, the query concat, and kv_norm read the query and wkv_a outputs
+        # with bare ops.
+        remat.recompute_needs_tensor(q_nope, q_pe, kv, k_pe)
         # unsqueeze(1), not (2): k_pe is [T, rope_dim] here (rank 2), so the
-        # head axis is inserted at 1. It was 2 when this tensor was 3D.
+        # head axis is inserted at 1.
         q_pe, k_pe = self.rope(q_pe, k_pe.unsqueeze(1), positions)
         q = torch.cat([q_nope, q_pe], dim=-1)
 
@@ -168,6 +123,8 @@ class Attention(BaseAttention):
             k_nope, v = torch.split(
                 kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
             )
+            # The key concat reads the wkv_b projection output with bare ops.
+            remat.recompute_needs_tensor(k_nope)
             # expand to k_nope's LOCAL head count, not self.n_heads: under TP
             # each rank holds n_heads/tp_degree heads, so the global count
             # would over-expand and only fail at tp>1.
@@ -183,63 +140,57 @@ class Attention(BaseAttention):
         if pad_v:
             v = F.pad(v, (0, self.qk_head_dim - self.v_head_dim))
 
-        output = self.inner_attention(
-            q, k, v, attention_masks=attention_masks, scale=self.softmax_scale
-        )
+        output = remat.region(
+            self.inner_attention,
+            self.remat_region_name("inner_attention"),
+            recompute=self.remat_should_recompute("inner_attention"),
+        )(q, k, v, attention_metadata=attention_metadata, scale=self.softmax_scale)
 
         if pad_v:
             output = output[..., : self.v_head_dim]
 
-        output = output.contiguous()
-        output = output.view(num_tokens, -1)
+        # The copy below reads the inner_attention output with bare ops.
+        remat.recompute_needs_tensor(output)
+        output = output.contiguous().view(num_tokens, -1)
         return self.wo(output)
 
 
-class moeTransformerBlock(TransformerBlock):  # noqa: N801
-    """
-    moe Transformer block with attention and feed-forward layers.
+class moeTransformerBlock(DeepSeekV3TransformerBlock):  # noqa: N801
+    """DeepSeek-style block (``feed_forward`` is dense or ``MoE``) plus ezpz's
+    optional device-cache release between attention and the MoE.
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(TransformerBlock.Config):
+    class Config(DeepSeekV3TransformerBlock.Config):
         pass
-
-    def __init__(self, config: Config):
-        super().__init__()
-        self.attention = config.attention.build()
-        self.attention_norm = config.attention_norm.build()
-        self.ffn_norm = config.ffn_norm.build()
-
-        self.moe_enabled = config.moe is not None
-        if self.moe_enabled:
-            assert config.moe is not None
-            self.moe = config.moe.build()
-        else:
-            assert config.feed_forward is not None
-            self.feed_forward = config.feed_forward.build()
 
     def forward(
         self,
         x: torch.Tensor,
-        attention_masks: AttentionMasksType | None,
+        attention_metadata: FlexAttentionMetadata | VarlenAttentionMetadata | None,
         positions: torch.Tensor | None = None,
+        *,
         padding_mask: torch.Tensor | None = None,
+        aux_loss_denominator: torch.Tensor | None = None,
     ):
-        # #4594 added padding_mask to the block contract: Decoder.forward
-        # passes it by keyword to EVERY layer (models/common/decoder.py:249),
-        # so a block that does not accept it dies in the first forward with
-        #   TypeError: moeTransformerBlock.forward() got an unexpected
-        #   keyword argument 'padding_mask'
-        # (jobs 12477668, 12477669). The dense arms survived because
-        # Llama3TransformerBlock already accepts it.
-        #
-        x = x + self.attention(self.attention_norm(x), attention_masks, positions)
+        attn_out = self.attention(self.attention_norm(x), attention_metadata, positions)
+        # The residual add reads the attention output with bare ops.
+        remat.recompute_needs_tensor(attn_out)
+        x = x + attn_out
         _maybe_release_device_cache_between_attention_and_moe(x)
-        if self.moe_enabled:
-            x = x + self.moe(self.ffn_norm(x), padding_mask_T=padding_mask)
+        if isinstance(self.feed_forward, MoE):
+            ffn_out = self.feed_forward(
+                self.ffn_norm(x),
+                padding_mask_T=padding_mask,
+                aux_loss_denominator=aux_loss_denominator,
+            )
         else:
-            x = x + self.feed_forward(self.ffn_norm(x))
-        return x
+            ffn_out = self.feed_forward(self.ffn_norm(x))
+        # Trailing add, always saved: it saves nothing for backward, so replay
+        # skips it and its inputs need no persisting.
+        return remat.region(
+            torch.add, self.remat_region_name("ffn_residual"), recompute=False
+        )(x, ffn_out)
 
 
 class moeModel(Decoder):  # noqa: N801
@@ -251,9 +202,11 @@ class moeModel(Decoder):  # noqa: N801
     def _register_optimizer_hooks(
         cls, optimizers, model_parts, parallelism_context
     ) -> None:
+        from torchtitan.models.common.aux_loss import register_aux_loss_zero_hook
         from torchtitan.models.common.moe import register_moe_load_balancing_hook
 
         register_moe_load_balancing_hook(optimizers, model_parts, parallelism_context)
+        register_aux_loss_zero_hook(optimizers, model_parts, parallelism_context)
 
     def parallelize(self, **kwargs):
         from .parallelize import parallelize_moe
@@ -266,6 +219,23 @@ class moeModel(Decoder):  # noqa: N801
     class Config(Decoder.Config):
         dim: int = 2048
         vocab_size: int = 102400
+        local_compile_regions: list[str] = field(
+            default_factory=lambda: [
+                "loss",
+                "fused_binary_activation",
+                "fp32_to_bf16_split",
+                "moe_aux_loss",
+            ]
+        )
+
+        def __post_init__(self) -> None:
+            # Flavors are prebuilt templates; give every config the sharding
+            # declarations for the default parallelism (no SP, no EP) so a
+            # config used without a trainer (tests, conversion) is complete.
+            # ``update_from_config`` re-applies them for the final parallelism.
+            from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
+
+            set_moe_sharding_config(self, enable_sp=False, enable_ep=False)
 
         def update_from_config(
             self,
@@ -273,78 +243,52 @@ class moeModel(Decoder):  # noqa: N801
             config,
             **kwargs,
         ) -> None:
-            # Run Decoder.Config's validation + MoE/TP/EP checks first.
-            # After PR #3395 (42nd sync) base validation moved from
-            # per-model overrides into the shared Decoder.Config helper.
-            # After PR #3458 (47th sync) per-layer rope sync is no longer
-            # needed: each Attention.Config carries its own RoPE.Config
-            # instance instead of inheriting fields from self.rope.
-            Decoder.Config.update_from_config(self, config=config, **kwargs)
+            """Apply the trainer's parallelism/debug settings to this config.
+
+            Upstream deleted ``Decoder.Config.update_from_config``: sharding is
+            built into the model config and TP/EP divisibility is checked in
+            ``Decoder.__init__`` / ``validate_model_training_config``. What
+            remains here is ezpz-specific: the expert-backend fallback, the deepep/hybridep EP guard, the CP
+            attention restriction, and re-applying sharding for the final
+            parallelism (ezpz flavors are prebuilt templates).
+            """
             parallelism = config.parallelism
-            debug = config.debug
 
             # for_loop fallback when CUDA SM90+ grouped_mm is unavailable
-            # (notably on XPU). Upstream Decoder.Config doesn't know about
+            # (notably on XPU). Upstream routed experts don't know about
             # compute_backend, so this stays.
-            for layer_cfg in self.layers:
-                if layer_cfg.moe is not None:
-                    experts_cfg = layer_cfg.moe.routed_experts
-                    if getattr(
-                        experts_cfg, "compute_backend", "grouped_mm"
-                    ) == "grouped_mm" and not has_cuda_capability(9, 0):
-                        # warn_once collapses the per-layer repetition
-                        # (this loop fires once per MoE layer → 26 dup
-                        # lines on a 26-layer model otherwise).
-                        warn_once(
-                            logger,
-                            "torch._grouped_mm requires SM90+ CUDA; falling "
-                            "back to for_loop expert backend.",
-                        )
-                        experts_cfg.compute_backend = "for_loop"
-                    layer_cfg.moe.router._debug_force_load_balance = (
-                        debug.moe_force_load_balance
+            for _, moe, _, _ in self.traverse(MoE.Config):
+                experts_cfg = moe.routed_experts
+                if getattr(
+                    experts_cfg, "compute_backend", "grouped_mm"
+                ) == "grouped_mm" and not has_cuda_capability(9, 0):
+                    # warn_once collapses the per-layer repetition (this loop
+                    # fires once per MoE layer).
+                    warn_once(
+                        logger,
+                        "torch._grouped_mm requires SM90+ CUDA; falling "
+                        "back to for_loop expert backend.",
                     )
-                    if hasattr(
-                        layer_cfg.moe.routed_experts.token_dispatcher,
-                        "force_load_balance",
-                    ):
-                        layer_cfg.moe.routed_experts.token_dispatcher.force_load_balance = (
-                            debug.moe_force_load_balance
+                    experts_cfg.compute_backend = "for_loop"
+                # Detect deepep/hybridep configs by the dispatcher Config
+                # class. Keep the EP=1 guard so a misconfigured deepep/hybridep
+                # user gets a clear error before model init.
+                if isinstance(
+                    experts_cfg.token_dispatcher,
+                    (DeepEPTokenDispatcher.Config, HybridEPTokenDispatcher.Config),
+                ):
+                    dispatcher_name = type(
+                        experts_cfg.token_dispatcher
+                    ).__qualname__.split(".")[0]
+                    if parallelism.expert_parallel_degree == 1:
+                        raise ValueError(
+                            f"{dispatcher_name} requires expert "
+                            "parallelism (expert_parallel_degree > 1)."
                         )
-                    # Detect deepep/hybridep configs by the dispatcher
-                    # Config class, not by a `comm_backend` attribute that
-                    # doesn't exist on the dispatcher Config. The old
-                    # `getattr(..., "comm_backend", "standard")` lookup
-                    # always returned "standard" (the function-arg name
-                    # was never stored on the resulting Config), so the
-                    # downstream EP=1 guard was dead code.
-                    #
-                    # We also dropped the `MoE → DeepEPMoE.Config` swap
-                    # that used to live here — `DeepEPMoE` no longer
-                    # exists upstream (the dispatcher classes now own
-                    # the comm-backend-specific logic via their own
-                    # `dispatch` / `combine` implementations). Keep
-                    # the EP=1 guard so a misconfigured deepep/hybridep
-                    # user gets a clear error before model init.
-                    if isinstance(
-                        layer_cfg.moe.routed_experts.token_dispatcher,
-                        (
-                            DeepEPTokenDispatcher.Config,
-                            HybridEPTokenDispatcher.Config,
-                        ),
-                    ):
-                        dispatcher_name = type(
-                            layer_cfg.moe.routed_experts.token_dispatcher
-                        ).__qualname__.split(".")[0]
-                        if parallelism.expert_parallel_degree == 1:
-                            raise ValueError(
-                                f"{dispatcher_name} requires expert "
-                                "parallelism (expert_parallel_degree > 1)."
-                            )
 
             if parallelism.context_parallel_degree > 1 and not isinstance(
                 self.layers[0].attention.inner_attention,
-                ScaledDotProductInnerAttention.Config,
+                _sdpa_config_types(),
             ):
                 raise NotImplementedError(
                     "Context Parallel for MoE only supports "
@@ -352,11 +296,8 @@ class moeModel(Decoder):  # noqa: N801
                     f"{type(self.layers[0].attention.inner_attention).__name__}."
                 )
 
-            # Fill ShardingConfig on every sub-module config so
-            # Module.parallelize(parallel_dims) can distribute params/activations.
-            # Post upstream PR #3386 (37th sync), MoE submodules (router gate,
-            # shared experts, routed experts) are populated via upstream's
-            # set_moe_sharding_config helper inside our sharding.py.
+            # Re-apply the sharding declarations for the final parallelism so
+            # Module.parallelize() can distribute params/activations.
             from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 
             set_moe_sharding_config(

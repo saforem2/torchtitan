@@ -23,9 +23,9 @@ from torchtitan.experiments.ezpz.moe.experts import (
     _sonic_weight_layouts,
 )
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
-from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher
+from torchtitan.models.common.moe.token_dispatcher import LocalTokenDispatcher
 from torchtitan.models.common.linear import GroupedLinear
-from torchtitan.protocols.module import Module
+from torchtitan.models.base.module import Module
 
 
 class _RouteWiseAffineSquare(Module):
@@ -82,7 +82,6 @@ class TestMoEExpertBackends(unittest.TestCase):
                 token_dispatcher=LocalTokenDispatcher.Config(
                     num_experts=num_experts,
                     top_k=2,
-                    score_before_experts=score_before_experts,
                 ),
                 compute_backend=compute_backend,
                 output_postprocess=output_postprocess,
@@ -96,7 +95,7 @@ class TestMoEExpertBackends(unittest.TestCase):
             "imbalanced": torch.tensor([[2, 2], [2, 0], [2, 1]]),
         }
         for compute_backend in ("for_loop", "bmm_nodrop"):
-            for score_before_experts in (False, True):
+            for score_before_experts in (False,):  # True mode removed upstream
                 for name, expert_ids in routing_cases.items():
                     with self.subTest(
                         compute_backend=compute_backend,

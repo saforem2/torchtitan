@@ -17,6 +17,7 @@ import pytest
 import torch
 
 from torchtitan.experiments.ezpz.agpt import agpt_configs
+from torchtitan.models.common.moe import MoE
 from torchtitan.experiments.ezpz.moe import model_registry, moe_configs
 from torchtitan.experiments.ezpz.moe.config_registry import (
     agpt_2b_50k_moe_sdpa_aurora_full_sonic,
@@ -46,7 +47,7 @@ SONIC_CONFIGS = (
 
 
 def _moe_layers(model_config):
-    return [layer.moe for layer in model_config.layers if layer.moe is not None]
+    return [moe for _, moe, _, _ in model_config.traverse(MoE.Config)]
 
 
 def test_registered_expert_backends_match_the_implemented_selector():
@@ -152,8 +153,8 @@ def test_moe_mla_sharding_contract(enable_sp):
             assert attention.wq_b is not None
             assert attention.wq_a.sharding_config is not None
             assert attention.wq_b.sharding_config is not None
-        if layer.moe is not None:
-            assert layer.moe.routed_experts.sharding_config is not None
+        if isinstance(layer.feed_forward, MoE.Config):
+            assert layer.feed_forward.routed_experts.sharding_config is not None
 
 
 @pytest.mark.parametrize("enable_sp", [False, True])
@@ -171,8 +172,8 @@ def test_agpt_50k_gqa_moe_sharding_contract(enable_sp):
         assert layer.attention.sharding_config is not None
         assert layer.attention.qkv_linear.wqkv.sharding_config is not None
         assert layer.attention.wo.sharding_config is not None
-        if layer.moe is not None:
-            assert layer.moe.routed_experts.sharding_config is not None
+        if isinstance(layer.feed_forward, MoE.Config):
+            assert layer.feed_forward.routed_experts.sharding_config is not None
 
 
 def test_agpt_50k_gqa_moe_flop_accounting():

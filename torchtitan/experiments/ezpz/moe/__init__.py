@@ -22,6 +22,11 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
+from torchtitan.models.common.decoder_sharding import (
+    lm_head_sharding_config,
+    pre_lm_head_norm_sharding_config,
+    token_embedding_sharding_config,
+)
 
 # MoE and TokenChoiceTopKRouter come straight from upstream — we have no
 # ezpz-specific override for them. Earlier this re-imported from a local
@@ -29,24 +34,27 @@ from torchtitan.models.common import (
 # that fork has been deleted to avoid silent skew on upstream MoE/router
 # fixes (e.g. the CP-friendly 3-D experts output added in upstream PR #3447).
 from torchtitan.models.common.activation import Sigmoid, Softmax
-from torchtitan.models.common.attention import ScaledDotProductInnerAttention
 from torchtitan.models.common.config_utils import (
     fused_grouped_gate_up_param_init,
     get_attention_config,
     make_ffn_config,
     make_gqa_config,
 )
-from torchtitan.models.common.linear import (
-    ColumnParallelLinear,
-    GroupedLinear,
-    RouterGateLinear,
-)
+from torchtitan.models.common.linear import ColumnParallelLinear, GroupedLinear
+from torchtitan.models.common.linear.hi_mid_lo_linear import HiMidLoLinear
 from torchtitan.models.common.moe import MoE, RoutedExperts, TokenChoiceTopKRouter
+from torchtitan.models.common.moe.sharding import (
+    router_gate_sharding_config,
+    router_sharding_config,
+)
 
 from torchtitan.models.common.param_init import depth_scaled_std
-from torchtitan.models.deepseek_v3 import DeepSeekV3Router
+from torchtitan.models.deepseek_v3.flavors import make_mla_attention_config
+from torchtitan.models.deepseek_v3.moe import DeepSeekV3Router
 
-from torchtitan.protocols.module import Module
+from torchtitan.models.base.module import Module
+
+from torchtitan.experiments.ezpz.agpt import ScaledDotProductInnerAttention
 
 from .experts import ExpertComputeBackend
 from .model import Attention, moeModel, moeTransformerBlock
@@ -74,14 +82,30 @@ class _LegacyInterleavedColumnParallelLinear(ColumnParallelLinear):
         )
         self.out_features = config.out_features
         self.num_linears = config.num_linears
+        # Linear.__init__ is bypassed above; _linear reads this flag.
+        self.inplace_wgrad_accum = config.inplace_wgrad_accum
 
-    def _unflatten_output(self, output):
+    def _unflatten_output(self, output, weight=None):
+        # ``weight`` is accepted for the upstream Linear signature (#5345-era
+        # ``Linear.forward`` passes it); the interleaved 2-D layout does not
+        # need it.
+        del weight
         return output.unflatten(-1, (-1, 2)).transpose(-2, -1)
 
 
 def _dtensor_safe_fused_ffn_config(**kwargs):
     """Build a fused FFN with the pre-sync 2-D storage and shard-local init."""
-    cfg = make_ffn_config(**kwargs)
+    # make_ffn_config now takes (w13_param_init, w2_param_init, enable_sp);
+    # callers keep the historical (w1_param_init, w2w3_param_init) pair, where
+    # gate uses the former and up/down the latter. Sequence parallelism is
+    # re-applied after the CLI fixes parallelism (see sharding.py).
+    cfg = make_ffn_config(
+        dim=kwargs["dim"],
+        hidden_dim=kwargs["hidden_dim"],
+        w13_param_init=kwargs["w1_param_init"],
+        w2_param_init=kwargs["w2w3_param_init"],
+        enable_sp=False,
+    )
     stacked_cfg = cfg.w13
     cfg.w13 = _LegacyInterleavedColumnParallelLinear.Config(
         in_features=stacked_cfg.in_features,
@@ -134,7 +158,12 @@ def _model_max_context_length(layers: list[TransformerBlock.Config]) -> int:
     return rope.max_context_length
 
 
-from .token_dispatcher import (
+# The ezpz fork of the token dispatchers (equal-split A2A padding experiments,
+# fast-path telemetry, a custom 1-D scatter-add op, wire_meshes) was retired at
+# the 5a7a622f16 sync: upstream restructured dispatch/combine into torch_remat
+# regions and now resolves the EP mesh from the ambient SPMD runtime, so the
+# stock dispatchers are used. See docs/upstream-sync.md.
+from torchtitan.models.common.moe.token_dispatcher import (
     AllToAllTokenDispatcher,
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
@@ -297,11 +326,16 @@ def make_ezpz_router_config(
     # Route to whichever router actually supports what the flavor asks for,
     # rather than passing group kwargs the stock router no longer accepts.
     score_cfg = Sigmoid.Config() if score_func == "sigmoid" else Softmax.Config()
-    gate_cfg = RouterGateLinear.Config(
+    # RouterGateLinear was deleted upstream; HiMidLoLinear is its successor
+    # (fp32 output and close-to-fp32 gradients, falling back to fp32 matmuls
+    # off CUDA, which is what RouterGateLinear did on XPU).
+    gate_cfg = HiMidLoLinear.Config(
         in_features=dim,
         out_features=num_experts,
+        backward_mode="hi_mid_lo",
         bias=bias,
         param_init=gate_param_init,
+        sharding_config=router_gate_sharding_config(),
     )
 
     if num_expert_groups is not None or num_limited_groups is not None:
@@ -314,6 +348,7 @@ def make_ezpz_router_config(
             route_scale=route_scale,
             num_expert_groups=num_expert_groups,
             num_limited_groups=num_limited_groups,
+            sharding_config=router_sharding_config(),
         )
 
     return TokenChoiceTopKRouter.Config(
@@ -323,6 +358,7 @@ def make_ezpz_router_config(
         score_func=score_cfg,
         route_norm=route_norm,
         route_scale=route_scale,
+        sharding_config=router_sharding_config(),
     )
 
 
@@ -330,29 +366,28 @@ def make_ezpz_token_dispatcher_config(
     *,
     num_experts: int,
     top_k: int,
-    score_before_experts: bool = True,
+    score_before_experts: bool = False,
     comm_backend: str,
     non_blocking_capacity_factor: float | None = None,
 ):
-    if comm_backend == "deepep":
-        return DeepEPTokenDispatcher.Config(
-            num_experts=num_experts,
-            top_k=top_k,
-            score_before_experts=score_before_experts,
+    # Upstream deleted ``score_before_experts`` from the dispatcher configs
+    # (router scores are always applied in combine). Keep the argument so
+    # callers need not change, but refuse the mode that no longer exists.
+    if score_before_experts:
+        raise ValueError(
+            "score_before_experts=True is no longer supported: upstream "
+            "dispatchers always apply router scores in combine."
         )
+    if comm_backend == "deepep":
+        return DeepEPTokenDispatcher.Config(num_experts=num_experts, top_k=top_k)
     if comm_backend == "hybridep":
         return HybridEPTokenDispatcher.Config(
             num_experts=num_experts,
             top_k=top_k,
-            score_before_experts=score_before_experts,
             non_blocking_capacity_factor=non_blocking_capacity_factor,
         )
     if comm_backend == "standard":
-        return AllToAllTokenDispatcher.Config(
-            num_experts=num_experts,
-            top_k=top_k,
-            score_before_experts=score_before_experts,
-        )
+        return AllToAllTokenDispatcher.Config(num_experts=num_experts, top_k=top_k)
     raise ValueError(
         f"Unknown comm_backend: {comm_backend!r}. "
         "Must be one of 'standard', 'deepep', 'hybridep'."
@@ -366,7 +401,7 @@ def make_ezpz_experts_config(
     num_experts: int,
     top_k: int,
     param_init: dict[str, Callable],
-    score_before_experts: bool = True,
+    score_before_experts: bool = False,
     comm_backend: str = "standard",
     non_blocking_capacity_factor: float | None = None,
     compute_backend: ExpertComputeBackend = "grouped_mm",
@@ -475,44 +510,13 @@ def _make_moe_attn_config(
 ) -> Attention.Config:
     """Build a fully-specified MoE MLA Attention.Config.
 
-    All Linear and RMSNorm sub-configs have their dimensional fields set.
-    When q_lora_rank == 0, sets wq (not wq_a/wq_b).
-    When q_lora_rank > 0, sets wq_a/wq_b (not wq).
+    Delegates to upstream's ``make_mla_attention_config`` (projection classes,
+    initializers and sharding), with ezpz's XPU-aware SDPA selection as the
+    inner attention, and returns it as ezpz's :class:`Attention.Config` (same
+    fields; the subclass carries the XPU value-padding ``forward``).
     """
-    # Upstream PR #3571 dropped the (config, mask_type) tuple — see
-    # _ezpz_get_attention_config docstring. ezpz/moe's Attention.Config
-    # still has its own mask_type field (see moe/model.py), so we
-    # preserve the previous default of "causal" here.
-    _inner = _ezpz_get_attention_config(attn_backend)
-    _mask = "causal"
-    qk_head_dim = qk_nope_head_dim + qk_rope_head_dim
-
-    if q_lora_rank == 0:
-        wq = Linear.Config(
-            in_features=dim,
-            out_features=n_heads * qk_head_dim,
-            param_init=_LINEAR_INIT,
-        )
-        wq_a = None
-        wq_b = None
-        # q_norm is unused when q_lora_rank == 0 (never built), but the field is
-        # required on Attention.Config so we supply a placeholder.
-        q_norm = RMSNorm.Config(normalized_shape=1, param_init=_NORM_INIT)
-    else:
-        wq = None
-        wq_a = Linear.Config(
-            in_features=dim,
-            out_features=q_lora_rank,
-            param_init=_LINEAR_INIT,
-        )
-        wq_b = Linear.Config(
-            in_features=q_lora_rank,
-            out_features=n_heads * qk_head_dim,
-            param_init=_LINEAR_INIT,
-        )
-        q_norm = RMSNorm.Config(normalized_shape=q_lora_rank, param_init=_NORM_INIT)
-
-    return Attention.Config(
+    upstream_cfg = make_mla_attention_config(
+        layer_id=layer_id,
         dim=dim,
         n_heads=n_heads,
         q_lora_rank=q_lora_rank,
@@ -521,29 +525,21 @@ def _make_moe_attn_config(
         qk_rope_head_dim=qk_rope_head_dim,
         v_head_dim=v_head_dim,
         mscale=mscale,
-        wq=wq,
-        wq_a=wq_a,
-        wq_b=wq_b,
-        q_norm=q_norm,
-        wkv_a=Linear.Config(
-            in_features=dim,
-            out_features=kv_lora_rank + qk_rope_head_dim,
-            param_init=_LINEAR_INIT,
-        ),
-        kv_norm=RMSNorm.Config(normalized_shape=kv_lora_rank, param_init=_NORM_INIT),
-        wkv_b=Linear.Config(
-            in_features=kv_lora_rank,
-            out_features=n_heads * (qk_nope_head_dim + v_head_dim),
-            param_init=_LINEAR_INIT,
-        ),
-        wo=Linear.Config(
-            in_features=n_heads * v_head_dim,
-            out_features=dim,
-            param_init=_depth_init(layer_id),
-        ),
-        inner_attention=_inner,
-        mask_type=_mask,
-        rope=dataclasses.replace(rope),
+        attn_backend=attn_backend,
+        linear_init=_LINEAR_INIT,
+        norm_init=_NORM_INIT,
+        depth_init=_depth_init,
+        rope=rope,
+        attention_config_factory=_ezpz_get_attention_config,
+        enable_sp=False,
+    )
+    # Upstream's MLA norms use eps=1e-6 (DeepSeek's value). ezpz's MLA norms
+    # used RMSNorm's default (1e-5) before the sync; keep that so numerics of
+    # existing ezpz MoE runs do not change silently.
+    for norm in (upstream_cfg.q_norm, upstream_cfg.kv_norm):
+        norm.eps = RMSNorm.Config(normalized_shape=1).eps
+    return Attention.Config(
+        **{f.name: getattr(upstream_cfg, f.name) for f in dataclasses.fields(upstream_cfg)}
     )
 
 
@@ -647,8 +643,10 @@ def _build_moe_layers(
                     normalized_shape=dim, param_init=_NORM_INIT
                 ),
                 ffn_norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
-                feed_forward=ffn_cfg,
-                moe=moe_cfg,
+                # Dense and MoE layers share the single ``feed_forward`` field
+                # since upstream #5345 (native MoE keys are now
+                # ``layers.N.feed_forward.*``, formerly ``layers.N.moe.*``).
+                feed_forward=ffn_cfg if moe_cfg is None else moe_cfg,
             )
         )
     return layers
@@ -1330,7 +1328,6 @@ def _10b_2b_sdpa() -> moeModel.Config:
     sdpa_cfg = _default_inner_attention()
     for layer_cfg in cfg.layers:
         layer_cfg.attention.inner_attention = sdpa_cfg
-        layer_cfg.attention.mask_type = "causal"
     return cfg
 
 
@@ -1371,9 +1368,9 @@ def _agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> moeModel.Config:
                     wo_param_init=depth_init,
                     inner_attention=_default_inner_attention(),
                     rope=rope,
+                    enable_sp=False,
                 ),
-                feed_forward=None,
-                moe=make_ezpz_moe_config(
+                feed_forward=make_ezpz_moe_config(
                     num_experts=num_experts,
                     load_balance_coeff=1e-3,
                     router=make_ezpz_router_config(
@@ -1455,15 +1452,13 @@ def model_registry(
     # Rebuild token dispatchers per #3125 — comm_backend is now always set
     # (default "standard"), and AllToAllTokenDispatcher falls back to local
     # dispatch when EP=1.
-    for layer_cfg in config.layers:
-        if layer_cfg.moe is not None:
-            routed_cfg = layer_cfg.moe.routed_experts
-            routed_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
-                num_experts=routed_cfg.w13.group_size,
-                top_k=routed_cfg.token_dispatcher.top_k,
-                score_before_experts=routed_cfg.token_dispatcher.score_before_experts,
-                comm_backend=moe_comm_backend,
-            )
+    for _, moe_cfg, _, _ in config.traverse(MoE.Config):
+        routed_cfg = moe_cfg.routed_experts
+        routed_cfg.token_dispatcher = make_ezpz_token_dispatcher_config(
+            num_experts=routed_cfg.w13.group_size,
+            top_k=routed_cfg.token_dispatcher.top_k,
+            comm_backend=moe_comm_backend,
+        )
 
     # Quantization is now applied to the config at model_registry time
     # rather than to the runtime model (#3127).

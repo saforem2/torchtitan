@@ -4,42 +4,59 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Config-based DTensor sharding for the ezpz/moe (DeepSeek-V3-derived) model.
+"""Config-based SPMD sharding for the ezpz/moe (DeepSeek-V3-derived) model.
 
-Mirrors `torchtitan.models.deepseek_v3.sharding` but binds against
-`torchtitan.experiments.ezpz.moe.model.Attention` (our MLA Attention is a
-separate class from upstream's, even though the structure is identical).
+Upstream builds sharding at config-construction time
+(``torchtitan.models.deepseek_v3.flavors`` / ``config_utils.make_*``). ezpz
+flavors are prebuilt templates and the CLI may change
+``parallelism.enable_sequence_parallel`` / ``expert_parallel_degree``
+afterwards, so :func:`set_moe_sharding_config` re-applies the same
+declarations to an existing ``moeModel.Config`` (called from
+``moeModel.Config.__post_init__`` with the template defaults and again from
+``update_from_config`` with the final parallelism).
 
-Post upstream PR #3386 (37th sync), MoE sub-configs (router gate, shared
-experts, routed experts) are populated unconditionally via upstream's
-``set_moe_sharding_config`` helper from ``models/common/moe_sharding``.
-``resolve_mesh`` filters disabled axes at runtime, so this matches the
-new ``model.parallelize(parallel_dims)`` flow.
+Layers may use MLA attention (``moe.model.Attention``) or the fused-QKV
+``GQAttention`` shared with dense AGPT. Dense feed-forwards (and the MoE shared
+experts) keep the historical interleaved ``[2F, D]`` ``w13`` storage; see
+``moe.__init__._LegacyInterleavedColumnParallelLinear``.
 """
 
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
 
+from torchtitan.experiments.ezpz.agpt.sharding import set_gqa_attention_config_sharding
 from torchtitan.experiments.ezpz.moe.model import Attention
 from torchtitan.models.common.attention import GQAttention
 from torchtitan.models.common.decoder_sharding import (
-    colwise_config,
-    dense_activation_placement,
     dense_param_placement,
-    dense_sequence_parallel_placement,
-    norm_config,
-    rowwise_config,
-    set_decoder_sharding_config,
-    set_dense_ffn_sharding,
-    set_gqa_attention_sharding,
-    set_gqa_inner_attention_local_spmd,
+    feed_forward_sharding_config,
+    inner_attention_local_spmd_sharding_config,
+    lm_head_sharding_config,
+    norm_sharding_config,
+    pre_lm_head_norm_sharding_config,
+    replicated_input_colwise_sharding_config,
+    replicated_state_sharding_config,
+    residual_activation_placement,
+    rope_cache_sharding_config,
+    rowwise_sharding_config,
+    stacked_colwise_sharding_config,
+    token_embedding_sharding_config,
 )
+from torchtitan.models.common.feed_forward import DenseFeedForward
 from torchtitan.models.common.linear import Linear, RowParallelLinear
-from torchtitan.models.common.moe_sharding import (
-    set_moe_sharding_config as _set_moe_block_sharding_config,
+from torchtitan.models.common.moe import MoE
+from torchtitan.models.common.moe.sharding import (
+    moe_sharding_config,
+    routed_expert_linear_sharding_config,
+    routed_experts_sharding_config,
+    router_gate_sharding_config,
+    router_sharding_config,
+    shared_expert_rowwise_sharding_config,
+    shared_experts_output_placement,
+    shared_experts_sharding_config,
 )
-from torchtitan.protocols.sharding import ShardingConfig
+from torchtitan.models.deepseek_v3.sharding import mla_attention_sharding_config
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
@@ -53,19 +70,14 @@ def set_moe_sharding_config(
 ) -> None:
     """Fill ``sharding_config`` on all moe sub-configs (dense + MoE).
 
-    Dense sub-configs (attention, norms, dense FFN) are populated
-    unconditionally -- ``Module.parallelize`` filters disabled axes at
-    runtime.
-
-    MoE sub-configs (router, shared experts, routed experts) are
-    populated unconditionally via upstream's ``set_moe_sharding_config``
-    helper -- ``resolve_mesh`` filters disabled axes at runtime.
+    Declarations are populated unconditionally; the SPMD mesh active at
+    ``Module.parallelize()`` time decides which axes apply.
     """
-    # 57th sync: upstream PR #3694 removed the loss_parallel kwarg.
-    # TP-on now always implies LP-on via tp_gather_logits=False; logits
-    # come out vocab-sharded and cross_entropy_loss handles the
-    # all-reduce via _LossParallelCrossEntropy autograd.
-    set_decoder_sharding_config(config, enable_sp=enable_sp)
+    config.tok_embeddings.sharding_config = token_embedding_sharding_config(
+        enable_sp=enable_sp
+    )
+    config.norm.sharding_config = pre_lm_head_norm_sharding_config(enable_sp=enable_sp)
+    config.lm_head.sharding_config = lm_head_sharding_config()
     for layer_cfg in config.layers:
         _set_moe_layer_sharding(layer_cfg, enable_sp=enable_sp, enable_ep=enable_ep)
 
@@ -76,12 +88,7 @@ def _set_moe_layer_sharding(
     enable_sp: bool,
     enable_ep: bool,
 ) -> None:
-    """Set sharding on one moe transformer layer.
-
-    MLA attention: low-rank projections (wkv_a, wq_a, kv_norm, q_norm)
-    stay replicated. Up-projections (wkv_b, wq_b, wq) are colwise.
-    MoE FFN is routed through upstream's ``set_moe_sharding_config``.
-    """
+    """Set sharding on one moe transformer layer."""
     attention = layer_cfg.attention
     if not isinstance(attention, (Attention.Config, GQAttention.Config)):
         raise TypeError(
@@ -89,177 +96,109 @@ def _set_moe_layer_sharding(
             f"got {type(attention).__name__}"
         )
 
-    norm = norm_config(enable_sp=enable_sp)
+    norm = norm_sharding_config(enable_sp=enable_sp)
     layer_cfg.attention_norm.sharding_config = norm
     layer_cfg.ffn_norm.sharding_config = norm
-    # Upstream PR #3501 (SpmdLayout for NamedPlacement) renamed
-    # set_dense_ffn_sharding's `attn_x_placement: Placement` arg to
-    # `attn_x_layout: SpmdLayout`. Build via the dense_*_placement
-    # helpers (same pattern as deepseek_v3/sharding.py).
-    #
-    # `cp` later became a REQUIRED kwarg on dense_activation_placement and
-    # these two calls were not updated, so moe aborted in config.build() with
-    # `TypeError: missing 1 required keyword-only argument: 'cp'` before
-    # reaching a single step (MEASURED, smoke 8781696 arm 3). cp=spmd.S(0) is
-    # what every upstream callsite passes (decoder_sharding.py:117,129,136,
-    # 150,170) and matches the helper's own docstring -- activations are
-    # token-sharded on CP.
-    attn_x_layout = (
-        dense_sequence_parallel_placement()
-        if enable_sp
-        else dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
-    )
-    replicated_input_layout = dense_activation_placement(tp=spmd.R, cp=spmd.S(0))
+    x_layout = residual_activation_placement(enable_sp=enable_sp)
 
     if isinstance(attention, GQAttention.Config):
-        # AGPT-MoE uses the same fused GQA block as dense AGPT. Delegate to the
-        # shared helper rather than applying the MLA-only wkv/q-lora layout.
-        set_gqa_attention_sharding(attention, enable_sp=enable_sp)
-        set_gqa_inner_attention_local_spmd(attention.inner_attention)
-        _set_moe_ffn_sharding(
-            layer_cfg,
-            attn_x_layout=attn_x_layout,
-            enable_sp=enable_sp,
-            enable_ep=enable_ep,
-        )
-        return
+        # AGPT-MoE uses the same fused GQA block as dense AGPT.
+        set_gqa_attention_config_sharding(attention, enable_sp=enable_sp)
+    else:
+        _set_mla_attention_sharding(attention, enable_sp=enable_sp)
 
-    # 79th sync: annotate the RoPE submodule's own buffer. Core does this in
-    # set_gqa_attention_sharding (decoder_sharding.py:201-203) as
-    # state_shardings={"cache": ...}, but the MLA path below REPLACES
-    # attention.sharding_config wholesale, so nothing was annotating rope for
-    # MoE. Under full_dtensor/spmd_types that leaves `cache` a plain tensor
-    # while activations are DTensors, and the forward dies in rope.py:263:
-    #   RuntimeError: aten.mul.Tensor got mixed torch.Tensor and DTensor
-    # The buffer is named "cache" (rope.py:114 register_buffer), NOT
-    # "freqs_cis" -- the in_src/in_dst entries below use the ARGUMENT name,
-    # which is a different thing from the module's own state.
-    if getattr(attention, "rope", None) is not None:
-        attention.rope.sharding_config = ShardingConfig(
-            state_shardings={"cache": dense_param_placement(tp=spmd.R)},
-        )
+    feed_forward = layer_cfg.feed_forward
+    if isinstance(feed_forward, MoE.Config):
+        _set_moe_block_sharding(feed_forward, enable_sp=enable_sp, enable_ep=enable_ep)
+    else:
+        assert isinstance(feed_forward, DenseFeedForward.Config)
+        feed_forward.sharding_config = feed_forward_sharding_config(enable_sp=enable_sp)
+        _set_dense_ffn_projections(feed_forward, x_layout=x_layout)
 
-    # MLA attention input: x is gathered to Replicate. RoPE is read from the
-    # attention layer's local cache -- freqs_cis is NOT a forward arg since
-    # PR #3458 (the rope module owns its cache), so declaring a placement for
-    # it here described a parameter that does not exist. Matches upstream.
-    attention.sharding_config = ShardingConfig(
-        in_src_shardings={
-            "x": attn_x_layout,
-        },
-        in_dst_shardings={
-            "x": dense_activation_placement(tp=spmd.R, cp=spmd.S(0)),
-        },
+
+def _set_mla_attention_sharding(attention: Attention.Config, *, enable_sp: bool) -> None:
+    """MLA: low-rank projections replicated, up-projections column-parallel.
+
+    Mirrors ``deepseek_v3.flavors.make_mla_attention_config``: the MLA module
+    gathers its input once (``maybe_gather_tp_input``), so the projections
+    declare a replicated input layout; ``wo`` returns to the residual layout.
+    """
+    x_layout = residual_activation_placement(enable_sp=enable_sp)
+    attention.sharding_config = mla_attention_sharding_config(enable_sp=enable_sp)
+    attention.inner_attention.sharding_config = (
+        inner_attention_local_spmd_sharding_config()
     )
-    # Low-rank projections and norms keep Replicate weights on TP. We still
-    # distribute them (Replicate DTensor) so DTensor activations flow through
-    # without mixing plain Tensor + DTensor in the matmul.
-    replicate_weight = ShardingConfig(
-        state_shardings={"weight": dense_param_placement(tp=spmd.R)},
-    )
-    attention.wkv_a.sharding_config = replicate_weight
-    attention.kv_norm.sharding_config = replicate_weight
-
-    attention.wkv_b.sharding_config = colwise_config(
-        input_layout=replicated_input_layout
-    )
-    attention.wo.sharding_config = rowwise_config(output_layout=attn_x_layout)
-
-    # Static LocalMapConfig on the inner-attention config (upstream #2986
-    # replaced runtime DTensor detection in `LocalMapInnerAttention` with
-    # this config-driven approach).
-    set_gqa_inner_attention_local_spmd(attention.inner_attention)
-
-    # Query projection: depends on q_lora_rank
+    attention.rope.sharding_config = rope_cache_sharding_config()
+    attention.wkv_a.sharding_config = replicated_state_sharding_config("weight")
+    attention.kv_norm.sharding_config = replicated_state_sharding_config("weight")
+    attention.wkv_b.sharding_config = replicated_input_colwise_sharding_config()
+    attention.wo.sharding_config = rowwise_sharding_config(output_layout=x_layout)
     if attention.q_lora_rank == 0:
         assert attention.wq is not None
-        attention.wq.sharding_config = colwise_config(
-            input_layout=replicated_input_layout
-        )
+        attention.wq.sharding_config = replicated_input_colwise_sharding_config()
     else:
-        # Low-rank: wq_a + q_norm stay Replicate DTensors; wq_b is Colwise.
-        assert attention.wq_a is not None
-        assert attention.wq_b is not None
-        attention.wq_a.sharding_config = replicate_weight
-        attention.q_norm.sharding_config = replicate_weight
-        attention.wq_b.sharding_config = colwise_config(
-            input_layout=replicated_input_layout
-        )
-
-    _set_moe_ffn_sharding(
-        layer_cfg,
-        attn_x_layout=attn_x_layout,
-        enable_sp=enable_sp,
-        enable_ep=enable_ep,
-    )
+        assert attention.wq_a is not None and attention.wq_b is not None
+        attention.wq_a.sharding_config = replicated_state_sharding_config("weight")
+        attention.q_norm.sharding_config = replicated_state_sharding_config("weight")
+        attention.wq_b.sharding_config = replicated_input_colwise_sharding_config()
 
 
-def _set_moe_ffn_sharding(
-    layer_cfg: "moeTransformerBlock.Config",
-    *,
-    attn_x_layout,
-    enable_sp: bool,
-    enable_ep: bool,
+def _set_dense_ffn_projections(ffn: DenseFeedForward.Config, *, x_layout) -> None:
+    """Gate/up (``w13``) column-parallel and down (``w2``) row-parallel."""
+    ffn.w13.sharding_config = stacked_colwise_sharding_config(input_layout=x_layout)
+    ffn.w2.sharding_config = rowwise_sharding_config(output_layout=x_layout)
+    _restore_legacy_w13_placement(ffn)
+
+
+def _restore_legacy_w13_placement(ffn: DenseFeedForward.Config) -> None:
+    """Keep rows sharded on dim 0 for the historical interleaved ``[2F, D]`` w13.
+
+    Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for the
+    historical 2-D parameter the corresponding output-feature axis is
+    dimension 0. The activation contract installed above is kept; only the
+    parameter placement is restored so every FSDP/TP rank owns rows.
+    """
+    if not type(ffn.w13).__qualname__.startswith("_LegacyInterleavedColumnParallelLinear."):
+        return
+    sharding = ffn.w13.sharding_config
+    assert sharding is not None
+    sharding.state_shardings["weight"] = dense_param_placement(tp=spmd.S(0))
+    sharding.state_shardings["bias"] = dense_param_placement(tp=spmd.S(0))
+
+
+def _set_moe_block_sharding(
+    moe: MoE.Config, *, enable_sp: bool, enable_ep: bool
 ) -> None:
-    """Set dense or routed FFN sharding shared by MLA and GQA layers."""
-    # Dense FFN (non-MoE layers only).
-    if layer_cfg.feed_forward is not None:
-        set_dense_ffn_sharding(
-            layer_cfg.feed_forward,
-            attn_x_layout=attn_x_layout,
-            enable_sp=enable_sp,
+    """Router, routed experts, shared experts and the MoE boundary."""
+    x_layout = residual_activation_placement(enable_sp=enable_sp)
+    moe.sharding_config = moe_sharding_config(enable_sp=enable_sp)
+    moe.router.sharding_config = router_sharding_config()
+    moe.router.gate.sharding_config = router_gate_sharding_config()
+    routed = moe.routed_experts
+    routed.sharding_config = routed_experts_sharding_config()
+    routed.w13.sharding_config = routed_expert_linear_sharding_config(enable_ep=enable_ep)
+    routed.w2.sharding_config = routed_expert_linear_sharding_config(enable_ep=enable_ep)
+
+    shared = moe.shared_experts
+    if shared is None:
+        return
+    shared.sharding_config = shared_experts_sharding_config(enable_sp=enable_sp)
+    shared.w13.sharding_config = stacked_colwise_sharding_config(input_layout=x_layout)
+    # With SP the shared down projection reduce-scatters to the SP layout
+    # (RowParallelLinear); without SP a plain Linear keeps its TP-Partial
+    # output so the MoE reduces routed + shared once.
+    w2 = shared.w2
+    w2_cls = RowParallelLinear if enable_sp else Linear
+    if type(w2) is not w2_cls.Config:
+        shared.w2 = w2_cls.Config(
+            in_features=w2.in_features,
+            out_features=w2.out_features,
+            num_linears=w2.num_linears,
+            bias=w2.bias,
+            param_init=w2.param_init,
+            sharding_config=w2.sharding_config,
         )
-
-    # MoE FFN (MoE-enabled layers only). Routes through upstream's helper
-    # which populates router gate / shared experts / routed experts
-    # ``sharding_config`` declarations.
-    if layer_cfg.moe is not None:
-        shared = layer_cfg.moe.shared_experts
-        if shared is not None:
-            w2 = shared.w2
-            w2_cls = RowParallelLinear if enable_sp else Linear
-            if type(w2) is not w2_cls.Config:
-                shared.w2 = w2_cls.Config(
-                    in_features=w2.in_features,
-                    out_features=w2.out_features,
-                    num_linears=w2.num_linears,
-                    bias=w2.bias,
-                    param_init=w2.param_init,
-                    sharding_config=w2.sharding_config,
-                )
-        _set_moe_block_sharding_config(
-            layer_cfg.moe,
-            enable_ep=enable_ep,
-            enable_sp=enable_sp,
-        )
-
-        # Core deliberately leaves routed expert weights unsharded when EP is
-        # disabled. That was valid for the removed partial-DTensor backend, but
-        # FSDP's full-SPMD ``dp_mesh_dims`` contract rejects plain tensors.
-        # Materialize replicated DTensors here so FSDP can subsequently shard
-        # them over DP without changing their TP/EP semantics.
-        if not enable_ep:
-            replicated_weight = ShardingConfig(
-                state_shardings={"weight": dense_param_placement(tp=spmd.R)}
-            )
-            layer_cfg.moe.routed_experts.w13.sharding_config = replicated_weight
-            layer_cfg.moe.routed_experts.w2.sharding_config = replicated_weight
-
-        # The ezpz compatibility FFN deliberately retains pre-sync physical
-        # ``[2F, D]`` storage while returning the current ``[T, 2, F]`` API.
-        # Upstream's stacked helper shards ``[2, F, D]`` on dimension 1; for
-        # the historical 2-D parameter the corresponding output-feature axis
-        # is dimension 0. Keep the activation contract installed above, but
-        # restore the parameter placement so every FSDP/TP rank owns rows.
-        if shared is not None and shared.w13.__class__.__name__ == "Config":
-            module_cls = getattr(shared.w13, "__class__", None)
-            if module_cls is not None and module_cls.__qualname__.startswith(
-                "_LegacyInterleavedColumnParallelLinear."
-            ):
-                assert shared.w13.sharding_config is not None
-                shared.w13.sharding_config.state_shardings[
-                    "weight"
-                ] = dense_param_placement(tp=spmd.S(0))
-                shared.w13.sharding_config.state_shardings[
-                    "bias"
-                ] = dense_param_placement(tp=spmd.S(0))
+    shared.w2.sharding_config = shared_expert_rowwise_sharding_config(
+        output_layout=shared_experts_output_placement(enable_sp=enable_sp)
+    )
+    _restore_legacy_w13_placement(shared)
