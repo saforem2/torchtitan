@@ -22,9 +22,9 @@ import torch
 import torch.nn as nn
 
 from torchtitan.components.loss import IGNORE_INDEX
-from torchtitan.components.validate import Validator
+from torchtitan.components.validator import Validator
 from torchtitan.distributed import utils as dist_utils
-from torchtitan.protocols.model import BaseModel
+from torchtitan.models.base.model import BaseModel
 from torchtitan.tools import utils
 
 

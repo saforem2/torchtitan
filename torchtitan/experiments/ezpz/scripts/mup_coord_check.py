@@ -146,7 +146,7 @@ def run_worker(args: argparse.Namespace) -> int:
 
     import torch
 
-    from torchtitan.config import ConfigManager
+    from torchtitan.experiments.ezpz.config_manager import ConfigManager
     from torchtitan.experiments.ezpz.agpt import _build_agpt_config
     from torchtitan.experiments.ezpz.logging import init_logger
     from torchtitan.experiments.ezpz.optimizer.containers import default_adamw

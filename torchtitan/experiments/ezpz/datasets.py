@@ -45,8 +45,8 @@ if TYPE_CHECKING:
     from torchtitan.components.data.dataset import DatasetConfig
 else:
     DatasetConfig = None  # noqa: N816  (ported at the 80th sync)
-from torchtitan.hf_datasets import text_datasets
-from torchtitan.hf_datasets.text_datasets import DATASETS
+from torchtitan.components.data import text_datasets
+from torchtitan.components.data.text_datasets import DATASETS
 
 log = logging.getLogger(__name__)
 

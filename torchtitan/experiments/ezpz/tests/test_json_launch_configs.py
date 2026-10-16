@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from torchtitan.distributed.activation_checkpoint import SelectiveAC
+from torchtitan.models.common.moe import MoE
+
+from torchtitan.distributed.activation_remat import DefaultActivationRematConfig
 
 
 EZPZ_ROOT = Path(__file__).parents[1]
@@ -40,9 +42,8 @@ def _factory(module_name: str, factory_name: str, json_path: Path, monkeypatch):
 
 def _expert_backends(cfg) -> set[str]:
     return {
-        layer.moe.routed_experts.compute_backend
-        for layer in cfg.model.layers
-        if layer.moe is not None
+        moe.routed_experts.compute_backend
+        for _, moe, _, _ in cfg.model.traverse(MoE.Config)
     }
 
 
@@ -84,7 +85,7 @@ def test_agpt_launch_jsons_use_current_schema():
             "torchtitan.experiments.ezpz.agpt.config_registry",
             "agpt_2b_50k_from_json",
             "agpt_dense_2b_50k_hsdp256_50k.json",
-            SelectiveAC.Config,
+            DefaultActivationRematConfig,
             None,
         ),
         (
@@ -117,9 +118,9 @@ def test_retained_agpt_json_factories_load(
 
     assert cfg.model.vocab_size == 50_304
     if ac_type is None:
-        assert cfg.activation_checkpoint is None
+        assert cfg.activation_remat is None
     else:
-        assert isinstance(cfg.activation_checkpoint, ac_type)
+        assert isinstance(cfg.activation_remat, ac_type)
     if cfg.checkpointer is not None:
         assert cfg.checkpointer.keep_latest_k == 0
     assert type(cfg.optim.optimizer.optimizers[0]).__qualname__ == "AdamW.Config"
