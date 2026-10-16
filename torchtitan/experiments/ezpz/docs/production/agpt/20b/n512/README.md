@@ -11,6 +11,29 @@
 > HellaSwag `acc_norm=0.6875`, ARC-Easy `acc=0.7050`, Winogrande `acc=0.5983`,
 > PIQA `acc_norm=0.7682`, OpenBookQA `acc_norm=0.3740`, BoolQ `acc=0.6303`, and
 > ARC-Challenge 25-shot `acc_norm=0.4437`.
+> a disk-verified **step 11,100**. It logged through step 11,190, but the
+> step-11,200 directory is an empty 4-KiB placeholder and is not resumable.
+> The seat then exhausted seven supervised launches: five longer attempts
+> ended 143, followed by two 27--28 second PALS RPC launch failures against
+> `x4418c3s1b0n0` and a `stuck_pre_training`/127 stop. The parent finished
+> `Exit_status=143` after that node requested job termination.
+> Tail eval retry `8880289` for step 11,100 failed closed during DCP conversion:
+> the current fused-QKV model expected
+> `layers.0.attention.qkv_linear.wqkv.weight`, which the historical checkpoint
+> schema does not contain. No fresh `results.json` was produced.
+> Historical-schema canary `8880334` finished with PBS `Exit_status=143` while
+> loading the DCP and produced no HF safetensors or `results.json`. Follow-up
+> source `2f2787faf7` pins large eval outputs to Flare. Canary `8880485` then
+> produced a 38.6-GiB HF shard but finished `Exit_status=1`: its config and
+> lm-eval overlay paths resolved under the output root, leaving no `config.json`
+> and no `results.json`. Eval-only control `8880551` reused the shard and reached
+> lm-eval, but finished after 44 seconds with `Exit_status=1` because the HF
+> directory still lacked `config.json`; no result was written. Asset-repair
+> retry `8880564` finished after 01:20:11 with PBS `Exit_status=0` and produced
+> a fresh nonempty `results.json`. All seven measurements were finite, including
+> HellaSwag `acc_norm=0.6875`, ARC-Easy `acc_norm=0.6814`, and ARC-Challenge
+> 25-shot `acc_norm=0.4437`. This accepted result cleared the sibling gate;
+> 20B-256 step-17,500 eval `8880658` started in `capacity` at 09:14 CDT.
 >
 > The progress table below is detailed only through step-5,400 (2026-07-07);
 > everything from step-5,400 to the current head was carried by the ~2,098N
@@ -34,6 +57,57 @@
 >
 > **Latest eval:** step 11,100 (`8880564`, accepted 2026-09-30). See the eval
 > page for all seven metrics and the shot-count distinction.
+> **Latest eval:** the production-tail backfill at step 10,900 (`8846649`)
+> finished successfully on 2026-09-21: HellaSwag `acc_norm` 0.6804,
+> ARC-Easy `acc` 0.6965, ARC-Challenge 25-shot `acc_norm` 0.4334, and
+> Winogrande `acc` 0.5777. See the eval page for all seven tasks and the
+> shot-count distinction.
+
+### 2026-09-29 isolated step-3,000 fork gate
+
+The canonical production chain was not modified. One-node target-runtime
+control `8878862` finished with PBS `Exit_status=25` (`Stageout_status=1`,
+walltime 00:02:15). It successfully staged immutable archive SHA-256
+`b8e12eecc5eb67cbe6a20e05f7f23bac322f18f58d09e243af9aa04775725e55` to
+`/tmp/.venv-20b-s3000-spmd025-20260927` on allocated host
+`x4415c7s7b0n0` in 48.2 seconds. The staged `bin/python` was an absolute
+symlink to a login/runtime-specific `/opt/aurora/26.26.0/spack/.../python3`
+that did not exist on the compute node; `bin/python3 -> python` was therefore
+also non-executable. The artifact recorded
+`TARGET_NODE_IMPORT_FAILED rc=25`; imports, restore, optimizer updates, and
+checkpoint output were never reached. The fork remains blocked pending a
+separately named compute-portable runtime archive, an allocated-node exact
+import pass, and then a restore smoke with multiple finite optimizer updates
+and a fresh nonempty checkpoint. A rebuilt compute-portable archive then passed
+one-node staging smoke `8879160`: PBS finished with `Exit_status=0`, and the
+job emitted `20B_PRODUCTION_STAGING_VALIDATED` for archive SHA-256
+`3ccf3faaf8f33d9fe6dc19257a49aeb54f03d93918cf6478e35ede2e7902142e`.
+Active-chat-owned two-node restore/update control `8879231` staged that archive
+but failed during model parallelization before restore or training. All 24
+ranks raised `ValueError: When dp_mesh_dims is provided, all parameters must be
+DTensors on the full SPMD mesh ... Got plain tensor for parameter 'weight'`.
+PBS finished after 00:08:27 with `Exit_status=143`; the artifact recorded
+`20B_S3000_UPDATE_FAILED rc=143`, no restore or step marker, and zero checkpoint
+files. The restore/update gate remains open pending a corrected SPMD/FSDP
+topology control.
+
+Corrected control `8880302` then cleared that plain-tensor defect and reached
+the step-3,000 DCP load with a 24-rank pure-FSDP model, but SophiaG lazy-state
+initialization exhausted XPU memory before restore completed: 62.70 GiB was
+allocated per 63.98-GiB tile, 698.38 MiB reserved, and only 97.73 MiB free when
+a 280-MiB allocation failed. PBS finished after 00:11:00 with
+`Exit_status=143` and `Stageout_status=1`; the artifact recorded
+`20B_S3000_UPDATE_FAILED rc=143`, with no training step or fresh checkpoint.
+The two-node topology is below the full-state memory floor. Four-node
+replacement `8880383` then ran from immutable source `f4e678c023` with TP=2,
+DP-replicate=1, and DP-shard=24 across 48 ranks. It cleared the earlier memory
+limit, but all ranks failed during DCP load on
+`layers.0.attention.qkv_linear.wqkv.weight`, which is absent from the
+historical checkpoint schema. PBS finished after 00:09:20 with
+`Exit_status=143` and `Stageout_status=1`; the artifact recorded
+`20B_S3000_UPDATE_FAILED rc=143`, with no step 3,001 and no fresh checkpoint.
+The fork is now blocked on historical-schema-compatible restore before any
+optimizer-update or checkpoint acceptance gate can run.
 >
 > **Eval scores:** see [`docs/evals/agpt/20b/`](../../../../evals/agpt/20b/README.md).
 > **🏁 The 20B 512N sync chain is now beating 2B 256N async per token

@@ -264,6 +264,18 @@ exact-head CI passed.
 The previous `0fd69d0b` integration below is retained as historical provenance.
 
 ## Earlier landing (2026-09-23): upstream `0fd69d0b`, landed and validated
+### Exact-head cross-system validation (2026-09-29)
+
+Aurora job `8879698` validated source `f4e678c023` on two nodes with the
+isolated Torch 2.15 XPU runtime. Dense TP=1, dense TP=2, and the repaired MoE
+arm each completed three finite optimizer updates and returned `rc=0`; their
+step-3 losses were 10.66281, 10.71614, and 11.47138 respectively. The wrapper
+emitted `VERDICT: ok`, and PBS finished in 00:07:44 with `Exit_status=0`
+(`Stageout_status=1`). Together with Sunspot jobs `12479017` and `12479018`,
+this closes the current-head dense TP and repaired-MoE execution gate on both
+XPU systems.
+
+## Previous landing (2026-09-23): upstream `0fd69d0b`, landed and validated
 
 The Sync 84 trial described below is historical. The current branch
 `sync/upstream-0fd69d0b` landed the audited upstream merge as `fa3147727`
