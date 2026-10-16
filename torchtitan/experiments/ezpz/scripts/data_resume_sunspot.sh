@@ -19,14 +19,13 @@
 #
 # Arms (agpt_debugmodel, dataset=blendcorpus, 24 ranks, 512 tokens/rank, GBS=24):
 #   A  ref      6 steps, no checkpoint
-#   A2 ref_ckpt 6 steps, save every 2 (uninterrupted reference for C/E/F/H)
+#   A2 ref_ckpt 6 steps, save every 2 (uninterrupted reference, source of step-4)
 #   A3 repeat   A2 again (run-to-run reproducibility)
-#   B  save     4 steps, save every 2
-#   C  restart  from B step-4, 6 steps
-#   E  flag     counter-0 copy of B step-4, flag =96
-#   F  env      counter-0 copy of B step-4, env var =96
-#   G  none     counter-0 copy of B step-4, no override (negative control)
-#   H  mismatch nonzero copy of B step-4, flag =48 (must be ignored)
+#   C  restart  copy of A2 step-4, 6 steps (must equal A2 steps 5-6)
+#   E  flag     counter-0 copy of A2 step-4, flag =96
+#   F  env      counter-0 copy of A2 step-4, env var =96
+#   G  none     counter-0 copy of A2 step-4, no override (negative control)
+#   H  mismatch nonzero copy of A2 step-4, flag =48 (must be ignored)
 #
 # Env knobs: SMOKE_VENV, SEED (default 42), OUT (default outputs/data-resume-<jobid>),
 # DATA_CACHE (blendcorpus index cache, default <OUT>/blendcorpus-cache).
@@ -157,27 +156,30 @@ copy_step() { # SRC_STEP_DIR DST_FOLDER zero|keep
 run_arm A_ref 6 ""                    || true
 run_arm A2_ref_ckpt 6 "${OUT}/A2"     || true
 run_arm A3_ref_repeat 6 "${OUT}/A3"   || true
-run_arm B_save 4 "${OUT}/B"           || true
 
+# The restart source is the uninterrupted run's own step-4 checkpoint. The LR
+# schedule depends on --training.steps, so a separate 4-step save run is NOT
+# on the same trajectory as the 6-step reference (it differs from step 1).
 echo "" | tee -a "${LOG}"
-echo "--- counters after B (expect step-2 = $((2*GBS)), step-4 = $((4*GBS))) ---" | tee -a "${LOG}"
-ls -1d "${OUT}"/B/step-* 2>&1 | tee -a "${LOG}"
-"${PY}" "${TOOL}" show "${OUT}"/B/step-* 2>&1 | tee -a "${LOG}"
+echo "--- counters after A2 (expect step-2 = $((2*GBS)), step-4 = $((4*GBS)), step-6 = $((6*GBS))) ---" | tee -a "${LOG}"
+ls -1d "${OUT}"/A2/step-* 2>&1 | tee -a "${LOG}"
+"${PY}" "${TOOL}" show "${OUT}"/A2/step-* 2>&1 | tee -a "${LOG}"
 
-copy_step "${OUT}/B/step-4" "${OUT}/E" zero 2>&1 | tee -a "${LOG}"
-copy_step "${OUT}/B/step-4" "${OUT}/F" zero 2>&1 | tee -a "${LOG}"
-copy_step "${OUT}/B/step-4" "${OUT}/G" zero 2>&1 | tee -a "${LOG}"
-copy_step "${OUT}/B/step-4" "${OUT}/H" keep 2>&1 | tee -a "${LOG}"
+copy_step "${OUT}/A2/step-4" "${OUT}/C" keep 2>&1 | tee -a "${LOG}"
+copy_step "${OUT}/A2/step-4" "${OUT}/E" zero 2>&1 | tee -a "${LOG}"
+copy_step "${OUT}/A2/step-4" "${OUT}/F" zero 2>&1 | tee -a "${LOG}"
+copy_step "${OUT}/A2/step-4" "${OUT}/G" zero 2>&1 | tee -a "${LOG}"
+copy_step "${OUT}/A2/step-4" "${OUT}/H" keep 2>&1 | tee -a "${LOG}"
 
-run_arm C_restart 6 "${OUT}/B"        || true
+run_arm C_restart 6 "${OUT}/C"        || true
 run_arm E_flag 6 "${OUT}/E" "--dataloader.resume-consumed-samples=${RESUME_AT}" || true
 BLENDCORPUS_RESUME_CONSUMED_SAMPLES="${RESUME_AT}" run_arm F_env 6 "${OUT}/F" || true
 run_arm G_none 6 "${OUT}/G"           || true
 run_arm H_mismatch 6 "${OUT}/H" "--dataloader.resume-consumed-samples=$((2 * GBS))" || true
 
 echo "" | tee -a "${LOG}"
-echo "--- counters after restarts (expect step-6 = $((6*GBS)) in B, E, F, H; G replays from 0) ---" | tee -a "${LOG}"
-"${PY}" "${TOOL}" show "${OUT}"/B/step-6 "${OUT}"/E/step-6 "${OUT}"/F/step-6 "${OUT}"/G/step-6 "${OUT}"/H/step-6 2>&1 | tee -a "${LOG}"
+echo "--- counters after restarts (expect step-6 = $((6*GBS)) in C, E, F, H; G replays from 0 = $((2*GBS))) ---" | tee -a "${LOG}"
+"${PY}" "${TOOL}" show "${OUT}"/C/step-6 "${OUT}"/E/step-6 "${OUT}"/F/step-6 "${OUT}"/G/step-6 "${OUT}"/H/step-6 2>&1 | tee -a "${LOG}"
 
 echo "" | tee -a "${LOG}"
 echo "--- resume log lines ---" | tee -a "${LOG}"
