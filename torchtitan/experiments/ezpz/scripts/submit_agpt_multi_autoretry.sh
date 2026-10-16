@@ -115,6 +115,10 @@ ulimit -c 0
 set -o pipefail
 
 RUNS="/flare/AuroraGPT/foremans/runs"
+PROD_20B_VENV_ARCHIVE="${PROD_20B_VENV_ARCHIVE:-}"
+PROD_20B_VENV_SHA="${PROD_20B_VENV_SHA:-}"
+PROD_2B_VENV_ARCHIVE="${PROD_2B_VENV_ARCHIVE:-}"
+PROD_2B_VENV_SHA="${PROD_2B_VENV_SHA:-}"
 
 PROFILE="${MULTI_PROFILE:-prod}"
 SPARES="${SPARES:-10}"
@@ -483,7 +487,11 @@ for idx in "${!TRAINERS[@]}"; do
     # copies from clobbering each other; on disjoint compute slices the same
     # dst name resolves to physically distinct node-local dirs.
     T_VENVDST[$idx]="/tmp/.venv-${child_model}"
-    _vsrc="$workdir/.venv.tar.gz"
+    case "$child_model" in
+        20b) _vsrc="${PROD_20B_VENV_ARCHIVE:-$workdir/.venv.tar.gz}" ;;
+        2b)  _vsrc="${PROD_2B_VENV_ARCHIVE:-$workdir/.venv.tar.gz}" ;;
+        *)   _vsrc="$workdir/.venv.tar.gz" ;;
+    esac
     [[ -e "$_vsrc" ]] && _vsrc="$(readlink -f "$_vsrc")"
     T_VENVSRC[$idx]="$_vsrc"
 done
@@ -536,6 +544,16 @@ done
 for idx in "${!TRAINERS[@]}"; do
     [[ -d "${T_WORKDIR[$idx]}" ]] || die "trainer $idx workdir missing: ${T_WORKDIR[$idx]}"
     [[ -f "${T_VENVSRC[$idx]}" ]] || die "trainer $idx venv tarball missing: ${T_VENVSRC[$idx]}"
+    case "${T_MODEL[$idx]}" in
+        20b) expected_venv_sha="$PROD_20B_VENV_SHA" ;;
+        2b)  expected_venv_sha="$PROD_2B_VENV_SHA" ;;
+        *)   expected_venv_sha="" ;;
+    esac
+    if [[ -n "$expected_venv_sha" ]]; then
+        actual_venv_sha=$(sha256sum "${T_VENVSRC[$idx]}" | awk '{print $1}')
+        [[ "$actual_venv_sha" == "$expected_venv_sha" ]] \
+            || die "trainer $idx venv SHA mismatch: got $actual_venv_sha expected $expected_venv_sha"
+    fi
 done
 
 # ---- Resolved-plan banner -----------------------------------------------------
