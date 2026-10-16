@@ -11,6 +11,15 @@ from torch import nn
 
 from torchtitan.experiments.ezpz.moe.model import moeTransformerBlock
 
+# Sync 84 made score_func a UnaryActivationFn.Config that the router
+# .build()s, so the old score_func="sigmoid" string now dies with
+#   AttributeError: 'str' object has no attribute 'build'
+from torchtitan.models.common.activation import Sigmoid
+
+from torchtitan.models.common.config_utils import make_router_config
+from torchtitan.models.common.linear import Linear
+from torchtitan.models.common.moe import MoE, TokenChoiceTopKRouter
+
 # ezpz's own dispatcher, NOT core's. Sync 84 removed score_before_experts
 # from core's LocalTokenDispatcher.Config (it is now just num_experts +
 # top_k), so importing core's made these tests fail with
@@ -18,15 +27,6 @@ from torchtitan.experiments.ezpz.moe.model import moeTransformerBlock
 # ezpz keeps the field (moe/token_dispatcher.py) and ezpz runtime imports
 # only its own dispatcher, so this is the class actually under test.
 from torchtitan.models.common.moe.token_dispatcher import LocalTokenDispatcher
-
-from torchtitan.models.common.config_utils import make_router_config
-from torchtitan.models.common.linear import Linear
-
-# Sync 84 made score_func a UnaryActivationFn.Config that the router
-# .build()s, so the old score_func="sigmoid" string now dies with
-#   AttributeError: 'str' object has no attribute 'build'
-from torchtitan.models.common.activation import Sigmoid
-from torchtitan.models.common.moe import MoE, TokenChoiceTopKRouter
 
 
 class TestMoERoutingCounts(unittest.TestCase):

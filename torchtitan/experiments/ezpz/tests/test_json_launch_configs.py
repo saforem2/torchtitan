@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from torchtitan.models.common.moe import MoE
-
 from torchtitan.distributed.activation_remat import DefaultActivationRematConfig
+
+from torchtitan.models.common.moe import MoE
 
 
 EZPZ_ROOT = Path(__file__).parents[1]

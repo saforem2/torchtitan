@@ -25,10 +25,9 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import TYPE_CHECKING
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from datasets import load_dataset
 

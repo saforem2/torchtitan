@@ -23,11 +23,11 @@ from torchtitan.components.data.sources import (
     HuggingFaceRandomAccessSource,
     HuggingFaceStreamingSource,
 )
+from torchtitan.components.data.text_datasets import TextProcessor
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -36,6 +36,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_adamw,
@@ -46,7 +47,6 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
-from torchtitan.components.data.text_datasets import TextProcessor
 from torchtitan.observability.metrics import MetricsProcessor
 from . import model_registry
 from .sft_data import tulu_math_uc_streaming_dataset

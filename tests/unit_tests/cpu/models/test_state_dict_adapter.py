@@ -15,7 +15,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torchtitan.components.checkpointer.base import ModelWrapper
 
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.models.base.state_dict_adapter import StateDictAdapter
 from torchtitan.models.deepseek_v3 import MODEL_FLAVORS as DEEPSEEK_V3_MODEL_FLAVORS
 from torchtitan.models.deepseek_v3.state_dict_adapter import DeepSeekV3StateDictAdapter
 from torchtitan.models.deepseek_v4 import (
@@ -27,7 +26,6 @@ from torchtitan.models.flux import MODEL_FLAVORS as FLUX_MODEL_FLAVORS
 from torchtitan.models.flux.state_dict_adapter import FluxStateDictAdapter
 from torchtitan.models.gpt_oss import MODEL_FLAVORS as GPT_OSS_MODEL_FLAVORS
 from torchtitan.models.gpt_oss.state_dict_adapter import GptOssStateDictAdapter
-from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.models.llama3 import (
     build_model_config as build_llama3_model_config,
     MODEL_FLAVORS as LLAMA3_MODEL_FLAVORS,

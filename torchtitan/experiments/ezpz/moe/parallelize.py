@@ -32,11 +32,11 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from ezpz.models import summarize_model
+
 from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.distributed import ParallelismContext
+from torchtitan.distributed import fsdp as core_fsdp, ParallelismContext
 from torchtitan.distributed.activation_remat import ActivationRematConfig
-from torchtitan.distributed import fsdp as core_fsdp
 from torchtitan.distributed.fsdp import apply_fsdp_to_decoder
 from torchtitan.distributed.local_compile import apply_local_compile
 from torchtitan.experiments.ezpz.fsdp_compat import (
@@ -100,7 +100,9 @@ def _evenly_divisible_expert_row_sharding(fsdp_shard_size: int):
     original = core_fsdp.linear_param_shard_placements
 
     def divisible_only(module, *, include_unstacked_grouped=False):
-        placements = original(module, include_unstacked_grouped=include_unstacked_grouped)
+        placements = original(
+            module, include_unstacked_grouped=include_unstacked_grouped
+        )
         if not include_unstacked_grouped:
             return placements
         return {

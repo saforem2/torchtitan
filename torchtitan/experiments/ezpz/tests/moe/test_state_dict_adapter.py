@@ -44,12 +44,12 @@ def test_to_hf_splits_grouped_linear_w13_and_w2_by_expert():
 def test_hf_experts_roundtrip_to_grouped_linear_layout():
     adapter = _adapter()
     native_state = {
-        "layers.1.feed_forward.routed_experts.w13.weight": torch.arange(8 * 2 * 3 * 4).reshape(
-            8, 2, 3, 4
-        ),
-        "layers.1.feed_forward.routed_experts.w2.weight": torch.arange(8 * 4 * 3).reshape(
-            8, 4, 3
-        ),
+        "layers.1.feed_forward.routed_experts.w13.weight": torch.arange(
+            8 * 2 * 3 * 4
+        ).reshape(8, 2, 3, 4),
+        "layers.1.feed_forward.routed_experts.w2.weight": torch.arange(
+            8 * 4 * 3
+        ).reshape(8, 4, 3),
     }
 
     restored = adapter.from_hf(adapter.to_hf(native_state))

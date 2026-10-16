@@ -52,8 +52,6 @@ on the CLI so all-zero-reward cold-start groups still assemble a batch.
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import torch
 from renderers import DefaultRendererConfig
 
@@ -62,11 +60,10 @@ from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.components.renderer import from_renderers
-from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
 from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
+from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import GSM8KReasonDataset
 from torchtitan.experiments.ezpz.rl.reason_agpt.env import GSM8KReasonEnv
 from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
@@ -79,26 +76,26 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.rollouter import (
     GSM8KReasonRollouter,
     GSM8KReasonWorker,
 )
+from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
 from torchtitan.models.common.config_utils import decoder_vocab_size
-from torchtitan.rl.trainer.training_sample_builder import TrainingSampleBuilder
 from torchtitan.rl.controller.controller import (
     AsyncLoopConfig,
     Controller,
     ValidationConfig,
 )
-from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.generator.generator import (
     SamplingConfig,
     VLLMCudaGraphConfig,
     VLLMGenerator,
 )
-from torchtitan.rl.trainer.losses import GRPOLoss
+from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.observability.metrics import MetricsProcessor
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
-from torchtitan.rl.rollout.token_env import TokenEnv
 from torchtitan.rl.rollout.rubric import Rubric
+from torchtitan.rl.rollout.token_env import TokenEnv
+from torchtitan.rl.trainer.losses import GRPOLoss
 from torchtitan.rl.trainer.trainer import Trainer
-
+from torchtitan.rl.trainer.training_sample_builder import TrainingSampleBuilder
 
 
 def _gsm8k_rollouter(

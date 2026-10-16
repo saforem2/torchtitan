@@ -95,23 +95,22 @@ def test_registry_shape_is_what_we_think():
 
 def test_sonic_flavors_select_the_sonic_backend():
     """The port's own flavors actually wire aurora_full_sonic through."""
-    from torchtitan.experiments.ezpz.moe.config_registry import (
-        moe_debugmodel_sonic,
-    )
-    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
     import torch
 
+    from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel_sonic
+    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+
     cfg = moe_debugmodel_sonic()
-    assert cfg.parallelism.expert_parallel_degree > 1, (
-        "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
-    )
+    assert (
+        cfg.parallelism.expert_parallel_degree > 1
+    ), "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
     with torch.device("meta"):
         model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model -- the subclass is not wired"
-    assert all(r._wants_routing() for r in routed), (
-        "sonic model routed experts did not select the routing-aware path"
-    )
+    assert all(
+        r._wants_routing() for r in routed
+    ), "sonic model routed experts did not select the routing-aware path"
 
 
 def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
@@ -158,6 +157,6 @@ def test_default_backend_does_not_take_the_routing_path():
         model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model"
-    assert not any(r._wants_routing() for r in routed), (
-        "the default backend must take the plain super() path"
-    )
+    assert not any(
+        r._wants_routing() for r in routed
+    ), "the default backend must take the plain super() path"

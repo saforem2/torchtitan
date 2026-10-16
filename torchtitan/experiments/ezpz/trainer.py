@@ -29,10 +29,7 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
-from torchtitan.experiments.ezpz.compile import (
-    CompileConfig,
-    local_compile_regions,
-)
+from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
@@ -312,7 +309,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         was a fork-local edit to ``training_engine.py``, so the autocast is
         composed here instead. Without native DDP this is upstream's method.
         """
-        if not getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
+        if not getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
             return super()._non_pp_forward_backward_microbatch(
                 inputs=inputs,
                 labels=labels,

@@ -34,8 +34,6 @@ below caps its autotune. The generator uses vLLM own attention regardless.
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import torch
 from renderers import DefaultRendererConfig
 
@@ -44,10 +42,8 @@ from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.components.renderer import from_renderers
-from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
 from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
@@ -55,13 +51,14 @@ from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
 )
+from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
+from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
 from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.rl.controller.controller import (
     AsyncLoopConfig,
     Controller,
     ValidationConfig,
 )
-from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
 from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
 from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
@@ -70,12 +67,12 @@ from torchtitan.rl.generator.generator import (
     VLLMCudaGraphConfig,
     VLLMGenerator,
 )
-from torchtitan.rl.trainer.losses import GRPOLoss
+from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.observability.metrics import MetricsProcessor
 from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
 from torchtitan.rl.rollout.rubric import Rubric
+from torchtitan.rl.trainer.losses import GRPOLoss
 from torchtitan.rl.trainer.trainer import Trainer
-
 
 
 def _agpt_rollouter(

@@ -23,9 +23,9 @@ from torchtitan.experiments.ezpz.moe.experts import (
     _sonic_weight_layouts,
 )
 from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
-from torchtitan.models.common.moe.token_dispatcher import LocalTokenDispatcher
-from torchtitan.models.common.linear import GroupedLinear
 from torchtitan.models.base.module import Module
+from torchtitan.models.common.linear import GroupedLinear
+from torchtitan.models.common.moe.token_dispatcher import LocalTokenDispatcher
 
 
 class _RouteWiseAffineSquare(Module):

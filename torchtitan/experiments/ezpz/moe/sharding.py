@@ -116,7 +116,9 @@ def _set_moe_layer_sharding(
         _set_dense_ffn_projections(feed_forward, x_layout=x_layout)
 
 
-def _set_mla_attention_sharding(attention: Attention.Config, *, enable_sp: bool) -> None:
+def _set_mla_attention_sharding(
+    attention: Attention.Config, *, enable_sp: bool
+) -> None:
     """MLA: low-rank projections replicated, up-projections column-parallel.
 
     Mirrors ``deepseek_v3.flavors.make_mla_attention_config``: the MLA module
@@ -158,7 +160,9 @@ def _restore_legacy_w13_placement(ffn: DenseFeedForward.Config) -> None:
     dimension 0. The activation contract installed above is kept; only the
     parameter placement is restored so every FSDP/TP rank owns rows.
     """
-    if not type(ffn.w13).__qualname__.startswith("_LegacyInterleavedColumnParallelLinear."):
+    if not type(ffn.w13).__qualname__.startswith(
+        "_LegacyInterleavedColumnParallelLinear."
+    ):
         return
     sharding = ffn.w13.sharding_config
     assert sharding is not None
@@ -176,8 +180,12 @@ def _set_moe_block_sharding(
     moe.router.gate.sharding_config = router_gate_sharding_config()
     routed = moe.routed_experts
     routed.sharding_config = routed_experts_sharding_config()
-    routed.w13.sharding_config = routed_expert_linear_sharding_config(enable_ep=enable_ep)
-    routed.w2.sharding_config = routed_expert_linear_sharding_config(enable_ep=enable_ep)
+    routed.w13.sharding_config = routed_expert_linear_sharding_config(
+        enable_ep=enable_ep
+    )
+    routed.w2.sharding_config = routed_expert_linear_sharding_config(
+        enable_ep=enable_ep
+    )
 
     shared = moe.shared_experts
     if shared is None:

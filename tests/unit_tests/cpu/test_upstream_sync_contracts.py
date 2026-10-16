@@ -15,7 +15,6 @@ import torch
 from torch import nn
 from torchtitan.config import CommConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.models.qwen3 import build_model_config, MODEL_FLAVORS, Qwen3Model
 
 from tests.unit_tests.cpu.upstream_sync_baseline import (

@@ -16,13 +16,13 @@ fused attention projections.
 
 from typing import Any, cast
 
+from torchtitan_recipes.rl.model_configs import build_rl_model_configs
+
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import LoRATransform, transform_model_config_
 from torchtitan.experiments.ezpz.agpt import build_model_config
 from torchtitan.models.common.decoder import Decoder
 from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
-
-from torchtitan_recipes.rl.model_configs import build_rl_model_configs
 
 
 def agpt_rl_model_configs(

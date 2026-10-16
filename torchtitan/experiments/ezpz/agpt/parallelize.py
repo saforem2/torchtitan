@@ -40,12 +40,12 @@ from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelismContext
 from torchtitan.distributed.activation_remat import ActivationRematConfig
-from torchtitan.distributed.local_compile import apply_local_compile
 
 from torchtitan.distributed.fsdp import (
     get_fsdp_reshard_after_forward_policy,
     linear_param_shard_placements,
 )
+from torchtitan.distributed.local_compile import apply_local_compile
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 

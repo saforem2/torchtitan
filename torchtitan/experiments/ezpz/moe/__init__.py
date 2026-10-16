@@ -14,6 +14,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
+from torchtitan.experiments.ezpz.agpt import ScaledDotProductInnerAttention
+
+from torchtitan.models.base.module import Module
+
 from torchtitan.models.common import (
     ComplexRoPE,
     Embedding,
@@ -21,11 +25,6 @@ from torchtitan.models.common import (
     RMSNorm,
     RoPE,
     TransformerBlock,
-)
-from torchtitan.models.common.decoder_sharding import (
-    lm_head_sharding_config,
-    pre_lm_head_norm_sharding_config,
-    token_embedding_sharding_config,
 )
 
 # MoE and TokenChoiceTopKRouter come straight from upstream — we have no
@@ -51,10 +50,6 @@ from torchtitan.models.common.moe.sharding import (
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.deepseek_v3.flavors import make_mla_attention_config
 from torchtitan.models.deepseek_v3.moe import DeepSeekV3Router
-
-from torchtitan.models.base.module import Module
-
-from torchtitan.experiments.ezpz.agpt import ScaledDotProductInnerAttention
 
 from .experts import ExpertComputeBackend
 from .model import Attention, moeModel, moeTransformerBlock
@@ -539,7 +534,10 @@ def _make_moe_attn_config(
     for norm in (upstream_cfg.q_norm, upstream_cfg.kv_norm):
         norm.eps = RMSNorm.Config(normalized_shape=1).eps
     return Attention.Config(
-        **{f.name: getattr(upstream_cfg, f.name) for f in dataclasses.fields(upstream_cfg)}
+        **{
+            f.name: getattr(upstream_cfg, f.name)
+            for f in dataclasses.fields(upstream_cfg)
+        }
     )
 
 

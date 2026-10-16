@@ -31,6 +31,8 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 
 from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
+
+from torchtitan.models.base.module import Module
 from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
@@ -41,8 +43,6 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
-
-from torchtitan.models.base.module import Module
 from torchtitan.models.common.attention import InnerAttention
 from torchtitan.models.common.config_utils import (
     fused_gate_up_param_init,

@@ -181,9 +181,7 @@ class ConfigManager:
         """Import the module holding config functions for ``module_name``."""
         candidates: list[str] = []
         if module_name.startswith("ezpz."):
-            candidates.append(
-                f"torchtitan.experiments.{module_name}.config_registry"
-            )
+            candidates.append(f"torchtitan.experiments.{module_name}.config_registry")
         elif module_name.startswith("graph_trainer.") or module_name.startswith(
             "torchft."
         ):

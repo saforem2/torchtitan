@@ -17,7 +17,6 @@ import pytest
 import torch
 
 from torchtitan.experiments.ezpz.agpt import agpt_configs
-from torchtitan.models.common.moe import MoE
 from torchtitan.experiments.ezpz.moe import model_registry, moe_configs
 from torchtitan.experiments.ezpz.moe.config_registry import (
     agpt_2b_50k_moe_sdpa_aurora_full_sonic,
@@ -33,6 +32,7 @@ from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
 from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
 from torchtitan.models.common.attention import GQAttention
+from torchtitan.models.common.moe import MoE
 
 
 SONIC_CONFIGS = (

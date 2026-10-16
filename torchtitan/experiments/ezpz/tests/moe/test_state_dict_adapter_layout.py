@@ -16,11 +16,11 @@ ezpz_stub.get_rank = lambda: 0
 ezpz_stub.distributed = SimpleNamespace(verify_wandb=lambda: False)
 sys.modules.setdefault("ezpz", ezpz_stub)
 
-from torchtitan.models.common.moe import MoE
 from torchtitan.experiments.ezpz.moe import moe_configs
 from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
 from torchtitan.models.common.linear import Linear, RowParallelLinear
+from torchtitan.models.common.moe import MoE
 
 
 def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
@@ -104,4 +104,6 @@ def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():
         restored["layers.1.feed_forward.shared_experts.w13.weight"],
         native["layers.1.feed_forward.shared_experts.w13.weight"],
     )
-    torch.testing.assert_close(restored["layers.1.feed_forward.shared_experts.w2.weight"], w2)
+    torch.testing.assert_close(
+        restored["layers.1.feed_forward.shared_experts.w2.weight"], w2
+    )

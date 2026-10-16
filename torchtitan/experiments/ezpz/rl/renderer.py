@@ -30,8 +30,8 @@ from renderers import create_renderer, Renderer
 from torchtitan.components.renderer import (
     from_renderers,
     RendererConfig,
-    RendererTokenizerWrapper,
     RenderersConfigAdapter,
+    RendererTokenizerWrapper,
 )
 from torchtitan.components.tokenizer import HuggingFaceTokenizer
 
@@ -73,7 +73,9 @@ class HFTemplateTokenizerWrapper(RendererTokenizerWrapper):
         return self.encode(rendered, add_special_tokens=False)
 
 
-def _build_renderer(config: RendererConfig, tokenizer: HuggingFaceTokenizer) -> Renderer:
+def _build_renderer(
+    config: RendererConfig, tokenizer: HuggingFaceTokenizer
+) -> Renderer:
     """Build ``config``, allowing the Hugging Face default renderer."""
     if (
         isinstance(config, RenderersConfigAdapter)

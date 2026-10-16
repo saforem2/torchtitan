@@ -13,7 +13,9 @@ def test_moe_routed_weights_have_spmd_placement_without_ep() -> None:
     config = moe_debugmodel()
     config.model.update_from_config(config=config)
     layer = next(
-        layer for layer in config.model.layers if isinstance(layer.feed_forward, MoE.Config)
+        layer
+        for layer in config.model.layers
+        if isinstance(layer.feed_forward, MoE.Config)
     )
 
     for grouped_linear in (

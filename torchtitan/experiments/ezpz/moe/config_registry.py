@@ -16,9 +16,7 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.models.common.moe import MoE
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -27,10 +25,12 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.models.common.moe import MoE
 from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
