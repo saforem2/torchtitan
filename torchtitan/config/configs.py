@@ -22,13 +22,15 @@ Most knobs belong to a component or to the model, not here. But some options
 have no suitable home, e.g. the training token-budget settings, and those can
 be placed here. Discuss with the maintainers first if you intend to add one.
 
-The command-line surface is frozen either way, so annotate a new field with
-``tyro.conf.Suppress``, as ``Trainer.Config.model`` does. See
+Configuration is provided by Python recipe functions. See
 ``torchtitan/config/README.md``.
 """
 
 from dataclasses import dataclass, field
 from typing import Literal
+
+
+CommBackend = Literal["default", "fake", "real_pp_fake_spmd"]
 
 
 @dataclass(kw_only=True, slots=True)
@@ -81,6 +83,26 @@ class TrainingConfig:
     capture.
     """
 
+    cuda_graph_per_accumulation_group: bool = False
+    """Capture and replay one uniform gradient-accumulation group.
+
+    Every group must have the same input structure, tensor metadata, and set of
+    parameters receiving gradients. Each replay performs its own FSDP gradient
+    reduction and reshard. With HSDP, each replay also performs the replica
+    all-reduce. This costs one all-reduce per group and may not be bitwise
+    identical to eager accumulation, which all-reduces once.
+    This mode supports RL workloads where the number of accumulation groups can
+    change.
+    """
+    # TODO: Remove this option when multiple CUDA graphs support variable group
+    # counts without duplicating the gradient accumulation logic.
+
+    preprocess_microbatch_groups_lazily: bool = False
+    """Preprocess each microbatch group (host-to-device copy, masks) just before its
+    forward/backward, not all groups up front, so RL can read the next microbatches
+    during training. Requires ``disable_cuda_graphs=True`` and no SDC replay.
+    """
+
     dtype: Literal["bfloat16", "float32"] = "float32"
     """
     torch dtype for training. In contrast to mixed precision training, setting training_dtype=bfloat16 will
@@ -101,34 +123,6 @@ class TrainingConfig:
     torch dtype to use for reductions when applying mixed precision via FSDP.
     This feature only takes effect when data_parallel_shard_degree > 1
     """
-
-    gc_freq: int = 50
-    """Python garbage control scheduling interval, in steps"""
-
-    gc_debug: bool = False
-    """
-    Enable GC debugging mode. This will perform gc.collect() at every step to
-    detect if there is a reference cycle that includes a CUDA Tensor.
-    Note that you may want to lower the training steps to avoid generating too
-    many temporary files.
-    """
-
-
-@dataclass(kw_only=True, slots=True)
-class CompileConfig:
-    components: list[str] = field(default_factory=lambda: ["loss"])
-    """Non-model components to compile."""
-
-    backend: str = "inductor"
-
-    def __post_init__(self) -> None:
-        allowed = frozenset({"loss"})
-        unknown = [c for c in self.components if c not in allowed]
-        if unknown:
-            raise ValueError(
-                f"Unknown compile.components entries {unknown}; "
-                f"allowed values are {sorted(allowed)}"
-            )
 
 
 @dataclass(kw_only=True, slots=True)
@@ -151,7 +145,7 @@ class CommConfig:
     save_traces_file_prefix: str = "rank_"
     """Flight recorder trace files prefix"""
 
-    backend: Literal["default", "fake", "real_pp_fake_spmd"] = "default"
+    backend: CommBackend = "default"
     """Communication topology used for training or distributed debugging.
 
     Options:
@@ -175,6 +169,9 @@ class DebugConfig:
     seed: int | None = None
     """Choose the base RNG seed used for training"""
 
+    distinct_seed_mesh_axes: list[str] = field(default_factory=lambda: ["pp"])
+    """Mesh axes whose ranks each get a distinct RNG seed."""
+
     spmd_typechecking: bool = False
     """Enable global SPMD type checking."""
 
@@ -183,9 +180,6 @@ class DebugConfig:
 
     deterministic_warn_only: bool = False
     """Only warns about ops without deterministic implementations rather than erroring out  """
-
-    moe_force_load_balance: bool = False
-    """If True, we force each experts to get the same amount of tokens via round-robin. This option is for debugging usage only."""
 
     detect_anomaly: bool = False
     """Enable torch.autograd anomaly detection to help track down NaN/Inf gradients.
@@ -206,3 +200,13 @@ class DebugConfig:
     ``torchtitan.observability.structured_logger``). When False, all
     ``log_trace_span`` / ``log_trace_instant`` / ``log_trace_scalar`` calls
     are no-ops. Disable to fully eliminate trace overhead."""
+
+    def __post_init__(self):
+        # dp_replicate ranks hold replicated params, so distinct seeds there
+        # would initialize each replica differently.
+        if "dp_replicate" in self.distinct_seed_mesh_axes:
+            raise ValueError(
+                "debug.distinct_seed_mesh_axes must not contain 'dp_replicate': "
+                "its ranks hold replicated parameters and would be initialized "
+                "differently."
+            )

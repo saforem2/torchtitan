@@ -11,31 +11,32 @@ from torch import nn
 
 from torchtitan.experiments.ezpz.moe.model import moeTransformerBlock
 
+# Sync 84 made score_func a UnaryActivationFn.Config that the router
+# .build()s, so the old score_func="sigmoid" string now dies with
+#   AttributeError: 'str' object has no attribute 'build'
+from torchtitan.models.common.activation import Sigmoid
+
+from torchtitan.models.common.config_utils import make_router_config
+from torchtitan.models.common.linear import Linear
+from torchtitan.models.common.moe import MoE, TokenChoiceTopKRouter
+
 # ezpz's own dispatcher, NOT core's. Sync 84 removed score_before_experts
 # from core's LocalTokenDispatcher.Config (it is now just num_experts +
 # top_k), so importing core's made these tests fail with
 #   TypeError: ... got an unexpected keyword argument 'score_before_experts'
 # ezpz keeps the field (moe/token_dispatcher.py) and ezpz runtime imports
 # only its own dispatcher, so this is the class actually under test.
-from torchtitan.experiments.ezpz.moe.token_dispatcher import LocalTokenDispatcher
-
-from torchtitan.models.common.config_utils import make_router_config
-from torchtitan.models.common.linear import Linear
-
-# Sync 84 made score_func a UnaryActivationFn.Config that the router
-# .build()s, so the old score_func="sigmoid" string now dies with
-#   AttributeError: 'str' object has no attribute 'build'
-from torchtitan.models.common.moe import Sigmoid, TokenChoiceTopKRouter
+from torchtitan.models.common.moe.token_dispatcher import LocalTokenDispatcher
 
 
 class TestMoERoutingCounts(unittest.TestCase):
     def test_transformer_block_forwards_padding_mask_to_moe(self):
-        class CaptureMoE(nn.Module):
+        class CaptureMoE(MoE):
             def __init__(self):
-                super().__init__()
+                nn.Module.__init__(self)
                 self.padding_mask = None
 
-            def forward(self, x, *, padding_mask_T=None):
+            def forward(self, x, *, padding_mask_T=None, aux_loss_denominator=None):
                 self.padding_mask = padding_mask_T
                 return torch.zeros_like(x)
 
@@ -43,14 +44,13 @@ class TestMoERoutingCounts(unittest.TestCase):
         nn.Module.__init__(block)
         block.attention_norm = nn.Identity()
         block.ffn_norm = nn.Identity()
-        block.attention = lambda x, attention_masks, positions: torch.zeros_like(x)
-        block.moe_enabled = True
-        block.moe = CaptureMoE()
+        block.attention = lambda x, attention_metadata, positions: torch.zeros_like(x)
+        block.feed_forward = CaptureMoE()
         padding_mask = torch.tensor([False, True, False])
 
         block(torch.randn(3, 4), None, padding_mask=padding_mask)
 
-        self.assertIs(block.moe.padding_mask, padding_mask)
+        self.assertIs(block.feed_forward.padding_mask, padding_mask)
 
     def test_padding_values_do_not_change_router_counts(self):
         router = make_router_config(
@@ -119,7 +119,6 @@ class TestMoERoutingCounts(unittest.TestCase):
             LocalTokenDispatcher.Config(
                 num_experts=5,
                 top_k=2,
-                score_before_experts=True,
             )
         )
         x = torch.randn(4, 3)

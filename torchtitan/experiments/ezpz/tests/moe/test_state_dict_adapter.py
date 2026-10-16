@@ -26,8 +26,8 @@ def test_to_hf_splits_grouped_linear_w13_and_w2_by_expert():
 
     hf_state = adapter.to_hf(
         {
-            "layers.1.moe.routed_experts.w13.weight": w13,
-            "layers.1.moe.routed_experts.w2.weight": w2,
+            "layers.1.feed_forward.routed_experts.w13.weight": w13,
+            "layers.1.feed_forward.routed_experts.w2.weight": w2,
         }
     )
 
@@ -44,12 +44,12 @@ def test_to_hf_splits_grouped_linear_w13_and_w2_by_expert():
 def test_hf_experts_roundtrip_to_grouped_linear_layout():
     adapter = _adapter()
     native_state = {
-        "layers.1.moe.routed_experts.w13.weight": torch.arange(8 * 2 * 3 * 4).reshape(
-            8, 2, 3, 4
-        ),
-        "layers.1.moe.routed_experts.w2.weight": torch.arange(8 * 4 * 3).reshape(
-            8, 4, 3
-        ),
+        "layers.1.feed_forward.routed_experts.w13.weight": torch.arange(
+            8 * 2 * 3 * 4
+        ).reshape(8, 2, 3, 4),
+        "layers.1.feed_forward.routed_experts.w2.weight": torch.arange(
+            8 * 4 * 3
+        ).reshape(8, 4, 3),
     }
 
     restored = adapter.from_hf(adapter.to_hf(native_state))
@@ -74,13 +74,13 @@ def test_grouped_linear_dtensors_roundtrip_with_expert_sharding():
             mesh = init_device_mesh("cpu", (1,), mesh_dim_names=("ep",))
             for placement in (Shard(0), Shard(2)):
                 native_state = {
-                    "layers.1.moe.routed_experts.w13.weight": DTensor.from_local(
+                    "layers.1.feed_forward.routed_experts.w13.weight": DTensor.from_local(
                         torch.arange(8 * 2 * 3 * 4).reshape(8, 2, 3, 4),
                         mesh,
                         (placement,),
                         run_check=False,
                     ),
-                    "layers.1.moe.routed_experts.w2.weight": DTensor.from_local(
+                    "layers.1.feed_forward.routed_experts.w2.weight": DTensor.from_local(
                         torch.arange(8 * 4 * 3).reshape(8, 4, 3),
                         mesh,
                         (placement,),

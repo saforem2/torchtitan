@@ -28,7 +28,7 @@ import torch
 
 from torchtitan.components.checkpointer.utils import canonical_fqn
 from torchtitan.components.optim import OptimizersContainer
-from torchtitan.distributed.activation_checkpoint import FullAC
+from torchtitan.distributed.activation_remat import FullActivationRematConfig
 from torchtitan.experiments.ezpz.agpt import agpt_configs, mup as M
 
 ETA = 8e-4
@@ -215,10 +215,12 @@ def test_param_groups_partition_cleanly_with_and_without_ac():
         with torch.device("meta"):
             model = agpt_configs["mup_tiny_512"].build()
         if ac:
-            FullAC.Config().build().apply(model)
-            assert any(
+            FullActivationRematConfig().apply(model)
+            # torch_remat wraps each block's ``forward`` rather than the module,
+            # so (unlike the deleted CheckpointWrapper) FQNs gain no segment.
+            assert not any(
                 "_checkpoint_wrapped_module" in n for n, _ in model.named_parameters()
-            ), "FullAC did not wrap anything; the trap is untested"
+            ), "remat unexpectedly renamed parameters"
         rep = M.summarize_mup_param_groups(model, oc.optimizers)
         assert not rep["unclaimed"], rep["unclaimed"][:5]
         assert not rep["empty_groups"], rep["empty_groups"]
@@ -228,15 +230,20 @@ def test_param_groups_partition_cleanly_with_and_without_ac():
     assert reports[0] == reports[1], reports
 
 
-def test_prefix_anchored_pattern_would_break_under_ac():
-    """Pins the reason the patterns are leaf-anchored. Control, not a feature."""
+def test_prefix_anchored_pattern_survives_remat():
+    """torch_remat keeps FQNs stable, so prefix-anchored patterns still match.
+
+    This was a control for the deleted CheckpointWrapper, which inserted a
+    ``_checkpoint_wrapped_module`` segment and broke prefix-anchored patterns.
+    The leaf-anchored muP patterns stay correct either way.
+    """
     import re
 
     with torch.device("meta"):
         model = agpt_configs["mup_tiny_512"].build()
-    FullAC.Config().build().apply(model)
+    FullActivationRematConfig().apply(model)
     rx = re.compile(r"^layers\.\d+\.attention\.")
-    assert not any(rx.search(n) for n, _ in model.named_parameters())
+    assert any(rx.search(n) for n, _ in model.named_parameters())
 
 
 def test_param_groups_cover_qk_norm_and_fused_qkv():
@@ -259,7 +266,7 @@ def test_param_groups_cover_qk_norm_and_fused_qkv():
         )
         with torch.device("meta"):
             model = cfg.build()
-        FullAC.Config().build().apply(model)
+        FullActivationRematConfig().apply(model)
         rep = M.summarize_mup_param_groups(
             model, M.default_mup_adamw(ETA, dim=512, base_dim=256).optimizers
         )
@@ -273,7 +280,7 @@ def test_real_optimizer_moves_hidden_group_by_one_over_m():
     torch.manual_seed(0)
     model = agpt_configs["mup_tiny_512"].build()
     model.init_states()
-    FullAC.Config().build().apply(model)
+    FullActivationRematConfig().apply(model)
     oc = M.default_mup_adamw(ETA, dim=512, base_dim=M.MUP_TINY_BASE_DIM)
     for optimizer in oc.optimizers:
         optimizer.fused = False

@@ -23,7 +23,7 @@ from torch.distributed import get_rank, get_world_size, is_initialized
 import torchtitan.experiments.ezpz.datasets  # noqa: F401 — enable arbitrary HF datasets
 
 from torchtitan.components.optim import OptimizersContainer
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.config_manager import ConfigManager
 from torchtitan.experiments.ezpz.logging import init_logger, logger
 from torchtitan.experiments.ezpz.optimizer import (
     default_adamw,

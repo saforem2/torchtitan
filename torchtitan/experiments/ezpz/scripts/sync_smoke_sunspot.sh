@@ -53,6 +53,10 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_OP_SYNC=1
 export TORCH_CPP_LOG_LEVEL=ERROR
+# 24 ranks cold-importing torch+torchao+torchtitan from Lustre can exceed the
+# 120 s PALS start-RPC default ("start RPC timeout ... after 120s", rc=127,
+# job 12481007) before any rank reaches PMI init.
+export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}"
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
@@ -92,6 +96,28 @@ ezpz_setup_job
 ezpz_load_modules
 cd "${SUBMIT_DIR}" || exit 2
 
+# A venv whose torch wheel is newer than the loaded oneAPI module needs its own
+# Unified Runtime / SYCL libraries ahead of the module's on LD_LIBRARY_PATH.
+# Measured on torch 2.16.0.dev20261015+xpu against oneapi/release/2026.1.0
+# (jobs 12481003, 12481004): `import torch` dies with
+#   libsycl.so.9: undefined symbol: urGraphGetIdExp, version LIBUR_LOADER_0.12
+# because the module's older libur_loader is found first. Putting the whole
+# venv lib/ first fixes it but also shadows the system MPI/libfabric, so link
+# only the UR/SYCL/UMF/TCM set into a shared-filesystem directory and prepend
+# that. Harmless for venvs that already match the module (same files).
+if [[ "${SMOKE_VENV_LD_FIRST:-1}" == "1" && -d "${VENV}/lib" ]]; then
+    _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+    if [[ ! -e "${_ld_first}/.complete" ]]; then
+        mkdir -p "${_ld_first}"
+        for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* \
+                    "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+            [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+        done
+        touch "${_ld_first}/.complete"
+    fi
+    export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+
 # This copied venv is intentionally bound without sourcing bin/activate: its
 # activation script and console entry points retain paths from the source tree.
 export VIRTUAL_ENV="${VENV}"
@@ -125,7 +151,6 @@ from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.experiments.ezpz.agpt.config_registry import agpt_debugmodel
 from torchtitan.experiments.ezpz.moe.parallelize import parallelize_moe
 from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 print('IMPORT_OK')
 " 2>&1 | tee -a "${LOG}"

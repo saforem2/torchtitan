@@ -137,8 +137,8 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
         parallelism_context=_parallel_dims(),
         training=TrainingConfig(max_context_length=8),
         parallelism=_parallelism(),
-        compile_config=None,
-        ac_config=None,
+        local_compile_regions=[],
+        activation_remat=None,
         dump_folder=".",
     )
 

@@ -9,8 +9,8 @@ Memory policy passes for graph_trainer.
 
 Selective activation checkpointing (SAC) tagging and memory policy dispatch.
 Each saved forward activation can independently be tagged as MUST_SAVE,
-MUST_RECOMPUTE, or MUST_CPU_OFFLOAD.  The ``tag_with_memory_policy_pass``
-entry point selects a tagging strategy via ``--compile.memory_policy``.
+MUST_RECOMPUTE, or MUST_CPU_OFFLOAD. The ``tag_with_memory_policy_pass`` entry
+point selects a tagging strategy with ``compile.memory_policy``.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ from torch._functorch.partitioners import (
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import _is_cacheable_effect, CheckpointPolicy
 
-from torchtitan.distributed.activation_checkpoint import _get_default_save_ops
 from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
 from torchtitan.experiments.graph_trainer.common_utils import (
     _get_layer_id,
@@ -66,6 +65,60 @@ if TYPE_CHECKING:
 
 
 _INF_DISTANCE = int(1e9)
+
+
+def _get_default_save_ops() -> set:
+    """Return the operator save set used by graph-trainer SAC policies.
+
+    Copied from the former operator-level ``SelectiveAC`` policy in
+    ``torchtitan/distributed/activation_checkpoint.py`` (now
+    ``activation_remat.py``), which uses torch_remat regions instead of an
+    operator save set.
+    """
+    compute_ops = [
+        torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+        torch.ops.aten._scaled_dot_product_attention_math.default,
+        torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        torch.ops.aten.max.default,
+        torch._higher_order_ops.flex_attention,
+        torch.ops.aten.linear.default,
+        torch.ops.aten.mm.dtype,
+        torch.ops.aten.topk.default,
+        (torch._higher_order_ops, "inductor_compiled_code"),
+        (torch.ops, "torch_attn._varlen_attn.default"),
+    ]
+    communication_ops = [
+        torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        torch.ops._c10d_functional.all_to_all_single.default,
+        (torch.ops, "deepep.dispatch.default"),
+        (torch.ops, "deepep.combine.default"),
+        (torch.ops, "hybridep.dispatch.default"),
+        (torch.ops, "hybridep.combine.default"),
+    ]
+
+    def resolve_ops(op_specs: list) -> set:
+        ops = set()
+        for spec in op_specs:
+            if isinstance(spec, tuple):
+                obj, path = spec
+                try:
+                    for part in path.split("."):
+                        obj = getattr(obj, part)
+                    ops.add(obj)
+                except AttributeError:
+                    pass
+            else:
+                ops.add(spec)
+        return ops
+
+    aten_op_types = get_default_op_list()
+    save_ops = {
+        op.default  # pyrefly: ignore [missing-attribute]
+        for op in aten_op_types.compute_intensive_ops
+    }
+    save_ops.update(resolve_ops(compute_ops))
+    save_ops.update(resolve_ops(communication_ops))
+    return save_ops
 
 
 def _make_default_memory_policy(save_ops: set | None = None) -> Callable:
@@ -108,12 +161,12 @@ def _resolve_op_target(op_name: str) -> object:
             target = getattr(target, component)
     except AttributeError as exc:
         raise ValueError(
-            f"Unknown op in --compile.full_recompute_save_ops: {op_name!r}"
+            f"Unknown op in compile.full_recompute_save_ops: {op_name!r}"
         ) from exc
 
     if not isinstance(target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
         raise ValueError(
-            "Ops in --compile.full_recompute_save_ops must name a specific "
+            "Ops in compile.full_recompute_save_ops must name a specific "
             f"overload or higher-order op, got {op_name!r}"
         )
     return target
@@ -131,7 +184,7 @@ def _parse_full_recompute_save_ops(
         parts = raw_selector.split("::")
         if len(parts) != 2 or not all(part.strip() for part in parts):
             raise ValueError(
-                "Invalid --compile.full_recompute_save_ops selector "
+                "Invalid compile.full_recompute_save_ops selector "
                 f"{raw_selector.strip()!r}; expected 'MODULE_FQN_PATTERN::OP'"
             )
         module_fqn_pattern, op_name = (part.strip() for part in parts)
@@ -148,7 +201,7 @@ def validate_memory_policy_config(
         and compile_config.memory_policy != "full"
     ):
         raise ValueError(
-            "--compile.full_recompute_save_ops requires --compile.memory_policy full"
+            "compile.full_recompute_save_ops requires compile.memory_policy='full'"
         )
     _parse_full_recompute_save_ops(compile_config.full_recompute_save_ops)
 
@@ -158,8 +211,8 @@ def _make_full_memory_policy(save_ops: str = "") -> Callable:
 
     The layer boundary pass in tag_sac_policy will force MUST_SAVE on nodes
     whose output crosses a layer boundary, so only layer outputs are saved.
-    This mirrors eager's full AC (checkpoint_wrapper with no context_fn),
-    which recomputes the entire block — including attention — in backward.
+    This mirrors TorchTitan's former eager full AC, which recomputed the entire
+    block -- including attention -- in backward.
 
     RNG ops (dropout etc.) are the one class that is always saved: the remat
     pass cannot replay their random state, and ``has_recomputable_rng_ops``
@@ -194,10 +247,10 @@ def _make_full_memory_policy(save_ops: str = "") -> Callable:
 def _make_eager_memory_policy(save_ops: set | None = None) -> Callable:
     """Eager-compatible SAC policy that alternates mm ops between save/recompute.
 
-    Matches the behavior of torchtitan.distributed.activation_checkpoint:
-    every second mm/linear op is marked PREFER_RECOMPUTE instead of MUST_SAVE.
-    The mm counter resets at each layer boundary so every layer sees the same
-    alternation pattern, just like eager AC's per-layer checkpoint_wrapper.
+    Matches TorchTitan's former eager per-op SelectiveAC policy: every second
+    mm/linear op is marked PREFER_RECOMPUTE instead of MUST_SAVE. The mm counter
+    resets at each layer boundary so every layer sees the same alternation
+    pattern.
     """
     if save_ops is None:
         save_ops = _get_default_save_ops()
@@ -309,10 +362,28 @@ def tag_sac_policy(
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
             continue
 
-        # NOTE: The eager SAC policy (activation_checkpoint.py) alternates
+        # NOTE: The former eager SAC policy alternated
         # mm ops between MUST_SAVE and PREFER_RECOMPUTE. We omit that here
         # because the alternating heuristic is arbitrary.
         node.meta["recompute"] = policy_fn(node)
+
+    # Pass 1b: Never recompute in-place mutations. A recomputed duplicate would
+    # apply the side effect a second time (e.g. a buffer update would be
+    # counted twice per step). Also save the direct consumers of a mutation:
+    # the mutated tensor may change again before backward, so recomputing a
+    # consumer would read the later value instead of the original forward's.
+    for node in gm.graph.nodes:
+        if (
+            _is_backward_node(node)
+            or "recompute" not in node.meta
+            or not isinstance(node.target, torch._ops.OpOverload)
+            or not node.target._schema.is_mutable
+        ):
+            continue
+        node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        for user in node.users:
+            if not _is_backward_node(user) and "recompute" in user.meta:
+                user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     # Pass 2: Save recomputable outputs consumed outside their producing
     # layer. Recreating one would require rerunning that producer layer. A

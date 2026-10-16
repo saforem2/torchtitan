@@ -21,12 +21,18 @@ from .state_dict_adapter import AgptStateDictAdapter
 
 
 class AgptModel(Llama3Model):
-    """Llama3 with agpt's QK-Norm-aware sharding setter."""
+    """Llama3 with agpt's QK-Norm-aware sharding and ezpz's parallelize."""
 
     state_dict_adapter_cls = AgptStateDictAdapter
     _fragment = staticmethod(fragment_llm)
 
     def parallelize(self, **kwargs):
+        """Apply the ordered ezpz parallelization lifecycle.
+
+        Mirrors ``BaseModel.parallelize`` (local compile -> SPMD sharding ->
+        activation remat -> FSDP) with ezpz's FSDP grouping, native-DDP skip and
+        optional fp32 norm groups in ``parallelize_llama``.
+        """
         from .parallelize import parallelize_llama
 
         parallelism_context = kwargs["parallelism_context"]
@@ -41,21 +47,18 @@ class AgptModel(Llama3Model):
             config,
             **kwargs,
         ) -> None:
-            # Run llama3's validation + rope sync first. It calls
-            # set_llama3_sharding_config at the end, which we then
-            # idempotently overwrite to also fill in QK-Norm sharding.
-            #
-            # Explicit super(AgptModel.Config, self) is required because
-            # bare super() in a slots=True nested-class dataclass can't
-            # resolve the enclosing class name correctly.
-            super(AgptModel.Config, self).update_from_config(config=config, **kwargs)
+            """Re-apply sequence-parallel sharding for the final parallelism.
 
+            Upstream bakes sharding into the model config at construction
+            time (``build_model_config(parallelism=...)``); ezpz flavors are
+            prebuilt templates, so the CLI-resolved ``enable_sequence_parallel``
+            is applied here, including QK-Norm sharding.
+            """
             from torchtitan.experiments.ezpz.agpt.sharding import (
                 set_agpt_sharding_config,
             )
 
-            parallelism = config.parallelism
             set_agpt_sharding_config(
                 self,
-                enable_sp=parallelism.enable_sequence_parallel,
+                enable_sp=config.parallelism.enable_sequence_parallel,
             )

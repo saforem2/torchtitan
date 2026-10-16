@@ -7,15 +7,17 @@
 import pytest
 
 from torchtitan.components.checkpointer import ModelWrapper
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.ezpz.eval.convert_to_hf import _checkpoint_load_state_dict
-from torchtitan.models.llama3 import llama3_configs
+from torchtitan.models.llama3 import build_model_config
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 
 
 def _state_and_adapter():
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_model_config(
+        "debugmodel", attn_backend="flex", seq_len=128, parallelism=ParallelismConfig()
+    )
     model = Llama3Model(config)
     model.init_states()
     return ModelWrapper(model)._get_state_dict(), Llama3StateDictAdapter(config, None)

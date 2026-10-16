@@ -6,28 +6,25 @@
 
 """Apply PT-D parallelisms + AC + compile + FSDP to the ezpz/moe model.
 
-This is the moe mirror of `torchtitan.models.deepseek_v3.parallelize`.
-Post upstream PR #3386 (37th sync), MoE TP/EP is no longer applied by a
-separate `apply_moe_ep_tp` pass — it is now folded into the config-based
-DTensor sharding API (`ShardingConfig` declarations populated by
-`moeModel.Config.update_from_config` and applied by
-`model.parallelize(parallel_dims)`).
+This is the moe mirror of the ``BaseModel.parallelize`` lifecycle that
+``torchtitan.models.deepseek_v3`` uses. Sharding (TP/EP) is declared on the
+model config (``moe/sharding.py``) and applied by ``model._parallelize``.
 
-Differences vs upstream `parallelize_deepseekv3`:
+Differences vs the upstream lifecycle:
 
-- `disable_fsdp_gradient_division` enables
-  `set_force_sum_reduction_for_comms(True)` for non-NCCL backends
-  (CCL on XPU). Upstream's version only sets the divide factor.
-- `apply_compile`: upstream uses fullgraph=True via `apply_compile_sparse`,
-  which fails on XPU (MoE routing's dynamic shapes). We compile each
-  block with `block.compile(backend=...)` (no fullgraph).
-- `apply_fsdp` is inlined locally to avoid importing
-  `ShardPlacementResult`, which doesn't exist in Aurora's PyTorch. Also
-  adds a Shard(0) fallback when expert hidden dim isn't divisible by the
-  FSDP world size.
+- FSDP is upstream's ``apply_fsdp_to_decoder`` (dense and routed-expert
+  meshes). The previous local copy existed to avoid ``ShardPlacementResult``
+  on Aurora's PyTorch and to add a Shard(0) fallback; both are covered by
+  current upstream, and the ``efsdp`` mesh axis it indexed no longer exists
+  (``edp_shard``).
+- ``disable_fsdp_gradient_division`` additionally enables
+  ``set_force_sum_reduction_for_comms(True)`` for non-NCCL backends (CCL on
+  XPU). Upstream's version only sets the divide factor.
+- Per-block ``block.compile`` is gone with ``CompileConfig``; compilation is
+  selected through ``local_compile_regions`` (see ``ezpz/compile.py``).
 """
 
-from typing import Any
+import contextlib
 
 import ezpz
 import ezpz.distributed
@@ -35,33 +32,18 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from ezpz.models import summarize_model
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    DataParallelMeshDims,
-    fully_shard,
-    MixedPrecisionPolicy,
-)
-from torch.distributed.tensor import Shard
 
-from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.distributed import ParallelismContext
-from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
-from torchtitan.distributed.fsdp import get_fsdp_reshard_after_forward_policy
+from torchtitan.distributed import fsdp as core_fsdp, ParallelismContext
+from torchtitan.distributed.activation_remat import ActivationRematConfig
+from torchtitan.distributed.fsdp import apply_fsdp_to_decoder
+from torchtitan.distributed.local_compile import apply_local_compile
 from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
 )
 from torchtitan.experiments.ezpz.logging import logger
-
-# 78th sync (upstream #4045): maybe_enable_async_tp was REMOVED -- async TP is
-# now enabled inside apply_compile from parallel_dims. Importing it is an
-# ImportError. This file compiles per-block directly (see the compile block
-# below) rather than calling apply_compile, so there is nothing to thread
-# parallel_dims into here; async TP simply is not available on this path.
-# That is not a regression: the call below only ran under tp_enabled, and the
-# MoE path has never been validated with async TP on XPU.
 from torchtitan.experiments.ezpz.moe import moeModel
 
 
@@ -102,21 +84,61 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     )
 
 
+@contextlib.contextmanager
+def _evenly_divisible_expert_row_sharding(fsdp_shard_size: int):
+    """Fall back to expert-dim sharding when expert rows do not divide evenly.
+
+    When the FSDP degree exceeds ``num_experts``, upstream shards routed-expert
+    weights along their matrix-row dimension instead of the expert dimension
+    (``linear_param_shard_placements(include_unstacked_grouped=True)``). FSDP2
+    rejects uneven row sharding, so a hidden size that is not a multiple of the
+    shard group (e.g. ``moe_debugmodel`` F=256 over 24 ranks) fails with
+    ``FSDP does not support uneven sharding``. ezpz's previous local
+    ``apply_fsdp`` fell back to ``Shard(0)`` (the expert dim, which FSDP2 pads)
+    in that case; drop non-divisible entries so the default ``Shard(0)`` applies.
+    """
+    original = core_fsdp.linear_param_shard_placements
+
+    def divisible_only(module, *, include_unstacked_grouped=False):
+        placements = original(
+            module, include_unstacked_grouped=include_unstacked_grouped
+        )
+        if not include_unstacked_grouped:
+            return placements
+        return {
+            param: placement
+            for param, placement in placements.items()
+            if param.shape[placement.dim] % fsdp_shard_size == 0
+        }
+
+    core_fsdp.linear_param_shard_placements = divisible_only
+    try:
+        yield
+    finally:
+        core_fsdp.linear_param_shard_placements = original
+
+
 def parallelize_moe(
     model: moeModel,
     *,
     parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
-    compile_config: CompileConfig,
-    ac_config: ActivationCheckpointingConfig,
+    local_compile_regions: list[str],
+    activation_remat: ActivationRematConfig | None,
     dump_folder: str,
 ):
-    """Apply CP + TP + EP + AC + compile + FSDP to the moe model.
+    """Apply local compile + CP/TP/EP sharding + remat + FSDP to the moe model.
 
     The passed-in model preferably should be on meta device. Otherwise
-    the model must fit on GPU or CPU memory.
+    the model must fit on GPU or CPU memory. Same lifecycle as
+    ``BaseModel.parallelize``; FSDP is upstream's ``apply_fsdp_to_decoder``
+    (dense + routed-expert meshes, ``edp_shard`` prefetching), followed by
+    ezpz's XPU gradient-division fix.
     """
+    del dump_folder
+    # Bind the @local_compile regions before any module runs (process-wide).
+    apply_local_compile(local_compile_regions)
     parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
@@ -125,253 +147,45 @@ def parallelize_moe(
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
-    # CP: wrap inner attention forward BEFORE parallelize() so CP logic
-    # runs inside the local_map boundary on local tensors.
-    # CP removed upstream (#4218): apply_cp_to_forward is gone, and the
-    # replacement validate_cp_backend() rejects cp>1 on anything but
-    # spmd_types. We pin partial_dtensor and every ezpz config sets
-    # context_parallel_degree=1, so this branch was already dead.
-
-    # TP/EP via the config-based sharding API. The model's
-    # ``sharding_config`` declarations were filled in by
-    # ``update_from_config`` (see model.py + sharding.py), covering both
-    # dense (attention, dense FFN) and MoE (router, shared/routed experts)
-    # submodules. ``EzpzRoutedExperts._parallelize`` additionally wires the
-    # EP/TP meshes onto the token dispatcher.
-    # 79th sync (#4085): under full_dtensor/spmd_types this must run
-    # UNCONDITIONALLY -- it is what makes the params DTensors on the SPMD mesh,
-    # which resolve_fsdp_mesh's DataParallelMeshDims then requires. Gating on
-    # tp/ep (right for the legacy backend) leaves plain tensors when both are
-    # off. Core: llama3/parallelize.py:42-53.
-    # Upstream #4217 removed validate_config outright; deepseek_v3 (our base)
-    # now just calls model.parallelize. The sync landed: #4419 deleted
-    # parallelism.spmd_backend, so both arms collapse to one unconditional
-    # call, matching core.
-    # BaseModel.parallelize() owns this lifecycle now and called this custom
-    # implementation from moeModel.parallelize(). Invoke only the internal
-    # config-driven TP/EP sharding pass here; calling model.parallelize() recurses.
+    # TP/EP via the config-based sharding API: the model's ``sharding_config``
+    # declarations (moe/sharding.py) cover dense (attention, dense FFN) and
+    # MoE (router, shared/routed experts) submodules. BaseModel.parallelize()
+    # owns this lifecycle and calls this custom implementation from
+    # moeModel.parallelize(); invoke only the internal sharding pass here,
+    # since calling model.parallelize() would recurse.
     model._parallelize(parallel_dims)
 
-    # The custom token dispatchers are Configurable helpers rather than Module
-    # children, so recursive Module._parallelize cannot wire their runtime
-    # meshes. Preserve the pre-model-ownership lifecycle explicitly here.
-    ep_mesh = parallel_dims.get_optional_mesh("ep")
-    tp_mesh = parallel_dims.get_optional_mesh("tp")
-    for module in model.modules():
-        token_dispatcher = getattr(module, "token_dispatcher", None)
-        wire_meshes = getattr(token_dispatcher, "wire_meshes", None)
-        if callable(wire_meshes):
-            wire_meshes(ep_mesh=ep_mesh, tp_mesh=tp_mesh)
+    # Upstream moved activation checkpointing to torch_remat (#4893, #5101).
+    if activation_remat is not None:
+        activation_remat.apply(model)
 
-    # 57th sync: PR #3674 refactored AC into a Configurable policy
-    # hierarchy. ac_config is now an ActivationCheckpointing.Config
-    # subclass or None. The MoE save-set override lives in
-    # ``ezpz/moe/activation_checkpoint.py`` as a SelectiveAC subclass
-    # (MoeSelectiveAC) which drops _c10d_functional.all_to_all_single
-    # from the save list -- see that file for the rationale.
-    if ac_config is not None:
-        ac_config.build(dump_folder=dump_folder).apply(model)
-
-    # 79th sync: upstream #4085 made spmd_types the DEFAULT backend, and under
-    # it there is no flattened "fsdp" mesh axis -- asking for it raises
-    # ValueError: Invalid mesh dim: 'fsdp'. #4419 then deleted the backend
-    # selector entirely, so the resolver path is the only one.
-    #
-    # BOTH meshes must come from the new resolvers. Resolving only the dense
-    # one and leaving edp on the legacy "efsdp" name makes both resolve to the
-    # same dp_shard mesh, and FSDP then refuses:
-    #   RuntimeError: Cannot concatenate overlapping meshes:
-    #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
-    # Core pairs them in one branch (gpt_oss/parallelize.py:108-110).
     dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
     edp_mesh, edp_mesh_dims = resolve_sparse_fsdp_mesh(parallel_dims)
-    apply_fsdp(
-        model,
-        dp_mesh,
-        param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
-        reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
-        pp_enabled=parallel_dims.pp_enabled,
-        cpu_offload=training.enable_cpu_offload,
-        reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
-        ep_degree=parallel_dims.ep,
-        edp_mesh=edp_mesh,
-        dp_mesh_dims=dp_mesh_dims,
-        edp_mesh_dims=edp_mesh_dims,
-    )
-
-    if parallel_dims.dp_replicate_enabled:
-        logger.info("Applied HSDP to the model")
+    if parallel_dims.ep > 1:
+        assert edp_mesh is not None
+        fsdp_shard_size = edp_mesh["edp_shard"].size()
     else:
-        logger.info("Applied FSDP to the model")
-
-    if training.enable_cpu_offload:
-        logger.info("Applied CPU Offloading to the model")
+        fsdp_shard_size = dp_mesh["dp_shard"].size()
+        if "cp" in (dp_mesh.mesh_dim_names or ()):
+            fsdp_shard_size *= dp_mesh["cp"].size()
+    with _evenly_divisible_expert_row_sharding(fsdp_shard_size):
+        apply_fsdp_to_decoder(
+            model,
+            dp_mesh,
+            param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
+            reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
+            pp_enabled=parallel_dims.pp_enabled,
+            cpu_offload=training.enable_cpu_offload,
+            reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
+            ep_degree=parallel_dims.ep,
+            edp_mesh=edp_mesh,
+            dp_mesh_dims=dp_mesh_dims,
+            edp_mesh_dims=edp_mesh_dims,
+            symm_mem_scope=parallelism.fsdp_symm_mem_scope,
+        )
+    # On XPU/CCL the sum reduction must be forced explicitly.
+    disable_fsdp_gradient_division(model)
 
     logger.info(f"\n+{summarize_model(model)}")
 
     return model
-
-
-# ---------------------------------------------------------------------------
-# Inlined from torchtitan.models.llama4.parallelize to avoid importing
-# ShardPlacementResult, which doesn't exist in Aurora's PyTorch framework
-# release. Also adds a Shard(0) fallback when the expert hidden dim isn't
-# divisible by the FSDP world size — upstream's version assumes divisibility
-# and crashes otherwise.
-# ---------------------------------------------------------------------------
-
-
-def apply_fsdp(
-    model: nn.Module,
-    dp_mesh: DeviceMesh,
-    param_dtype: torch.dtype,
-    reduce_dtype: torch.dtype,
-    pp_enabled: bool,
-    cpu_offload: bool = False,
-    reshard_after_forward_policy: str = "default",
-    ep_degree: int = 1,
-    edp_mesh: DeviceMesh | None = None,
-    dp_mesh_dims: DataParallelMeshDims | None = None,
-    edp_mesh_dims: DataParallelMeshDims | None = None,
-):
-    mp_policy = MixedPrecisionPolicy(
-        param_dtype=param_dtype,
-        reduce_dtype=reduce_dtype,
-        cast_forward_inputs=False,
-    )
-    fsdp_config: dict[str, Any] = {"mesh": dp_mesh, "mp_policy": mp_policy}
-    if dp_mesh_dims is not None:
-        # Multi-axis storage mesh under full_dtensor/spmd_types: fully_shard
-        # must be told which axes are data-parallel (core does the same, see
-        # distributed/fsdp.py:106). None under the legacy backend, where the
-        # flattened "fsdp" axis already encodes it.
-        fsdp_config["dp_mesh_dims"] = dp_mesh_dims
-    if cpu_offload:
-        fsdp_config["offload_policy"] = CPUOffloadPolicy()
-
-    reshard_after_forward = get_fsdp_reshard_after_forward_policy(
-        reshard_after_forward_policy, pp_enabled
-    )
-
-    if model.tok_embeddings is not None:
-        fully_shard(
-            model.tok_embeddings,
-            **fsdp_config,
-            reshard_after_forward=reshard_after_forward,
-        )
-    if model.norm is not None and model.lm_head is not None:
-        fully_shard(
-            [model.norm, model.lm_head],
-            **fsdp_config,
-            reshard_after_forward=reshard_after_forward_policy == "always",
-        )
-
-    for layer_id, transformer_block in model.layers.items():
-        if transformer_block.moe_enabled:
-            assert hasattr(transformer_block, "moe")
-            expert_params = set(transformer_block.moe.routed_experts.parameters())
-            num_experts = transformer_block.moe.routed_experts.w13.group_size
-
-            if ep_degree > 1:
-                assert edp_mesh is not None
-                efsdp_ep_size = edp_mesh["efsdp"].size() * ep_degree
-            else:
-                efsdp_ep_size = fsdp_config["mesh"].size()
-
-            # Shard(1) shards the hidden dim instead of expert dim when
-            # there are more FSDP ranks than experts. But this requires
-            # the hidden dim to be evenly divisible by the world size.
-            # Fall back to Shard(0) if not (avoids uneven sharding error).
-            if efsdp_ep_size > num_experts:
-                expert_w = next(iter(transformer_block.moe.routed_experts.parameters()))
-                if expert_w.shape[1] % efsdp_ep_size == 0:
-                    expert_shard_placement = Shard(1)
-                else:
-                    expert_shard_placement = Shard(0)
-            else:
-                expert_shard_placement = Shard(0)
-
-            if ep_degree == 1 and expert_shard_placement == Shard(0):
-                fully_shard(
-                    transformer_block,
-                    **fsdp_config,
-                    reshard_after_forward=reshard_after_forward,
-                )
-            elif ep_degree == 1:
-
-                def _experts_shard_placement_fn(
-                    param: nn.Parameter,
-                    _expert_params: set = expert_params,
-                ) -> Shard | None:
-                    if param in _expert_params:
-                        return Shard(1)
-                    return None
-
-                fully_shard(
-                    transformer_block,
-                    **fsdp_config,
-                    reshard_after_forward=reshard_after_forward,
-                    shard_placement_fn=_experts_shard_placement_fn,
-                )
-            else:
-                # ep_degree > 1: per-param mesh with ShardPlacementResult.
-                # Imported lazily to avoid hard dependency on a private
-                # PyTorch API path that may not exist in older releases.
-                from torch.distributed.fsdp._fully_shard._fsdp_common import (
-                    FSDPMeshInfo,
-                    ShardPlacementResult,
-                )
-                from torch.distributed.fsdp._fully_shard._fsdp_init import (
-                    _get_mesh_info,
-                )
-
-                assert edp_mesh is not None
-
-                # 79th sync: build the mesh infos via FSDP2's own builder
-                # rather than FSDPMeshInfo(mesh=..., shard_mesh_dim=0).
-                # Under full_dtensor/spmd_types the meshes handed in are FULL
-                # SPMD meshes; _get_mesh_info EXTRACTS AND FLATTENS the DP
-                # submesh out of them using mesh_dims. Constructing
-                # FSDPMeshInfo directly leaves both at full width, so the
-                # dense and sparse infos both present as dp_shard and
-                # fully_shard rejects them:
-                #   RuntimeError: Cannot concatenate overlapping meshes:
-                #   [DeviceMesh((dp_shard=24)...), DeviceMesh((dp_shard=24)...)]
-                # Core: distributed/fsdp.py:274-279.
-                edp_mesh_info = _get_mesh_info(edp_mesh, edp_mesh_dims)
-                dp_mesh_info = _get_mesh_info(dp_mesh, dp_mesh_dims)
-                # _get_mesh_info is typed to the DataParallelMeshInfo base;
-                # with a shard dim it always yields FSDPMeshInfo/HSDPMeshInfo.
-                assert isinstance(edp_mesh_info, FSDPMeshInfo)
-                assert isinstance(dp_mesh_info, FSDPMeshInfo)
-
-                def _shard_placement_fn(
-                    param: nn.Parameter,
-                    _expert_params: set = expert_params,
-                    _expert_placement: Shard = expert_shard_placement,
-                    _edp_mesh_info: FSDPMeshInfo = edp_mesh_info,
-                    _dp_mesh_info: FSDPMeshInfo = dp_mesh_info,
-                ) -> ShardPlacementResult:
-                    if param in _expert_params:
-                        return ShardPlacementResult(
-                            placement=_expert_placement, mesh_info=_edp_mesh_info
-                        )
-                    return ShardPlacementResult(
-                        placement=Shard(0), mesh_info=_dp_mesh_info
-                    )
-
-                fully_shard(
-                    transformer_block,
-                    **fsdp_config,
-                    reshard_after_forward=reshard_after_forward,
-                    shard_placement_fn=_shard_placement_fn,
-                )
-        else:
-            fully_shard(
-                transformer_block,
-                **fsdp_config,
-                reshard_after_forward=reshard_after_forward,
-            )
-
-    fully_shard(model, **fsdp_config)
-    disable_fsdp_gradient_division(model)

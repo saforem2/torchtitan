@@ -15,7 +15,8 @@ from torchtitan.components.checkpointer.legacy_native_dcp import (
     OptimizerFusedLayout,
     prepare_legacy_native_load,
 )
-from torchtitan.models.llama3 import llama3_configs
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.models.llama3 import build_model_config as build_llama3_model_config
 from torchtitan.models.llama3.model import Llama3Model
 from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 
@@ -173,8 +174,10 @@ def test_logical_optimizer_state_preserves_current_only_defaults() -> None:
 
 
 def test_prepare_legacy_native_load_preserves_auxiliary_state() -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
@@ -212,8 +215,10 @@ def test_prepare_legacy_native_load_preserves_auxiliary_state() -> None:
 
 
 def test_prepare_current_native_load_is_noop() -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
@@ -231,8 +236,10 @@ def test_prepare_current_native_load_is_noop() -> None:
 def test_prepare_transitional_native_load_migrates_families_independently(
     split_family,
 ) -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
@@ -275,8 +282,10 @@ def test_prepare_transitional_native_load_migrates_families_independently(
 
 
 def test_prepare_native_load_rejects_mixed_keys_within_one_family() -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
@@ -291,8 +300,10 @@ def test_prepare_native_load_rejects_mixed_keys_within_one_family() -> None:
 
 
 def test_prepare_native_load_allows_different_qkv_schema_per_layer(monkeypatch) -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
@@ -330,8 +341,10 @@ def test_prepare_native_load_allows_different_qkv_schema_per_layer(monkeypatch) 
 
 
 def test_checkpoint_manager_loads_legacy_native_state(monkeypatch) -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     wrapper = ModelWrapper(model)
@@ -410,8 +423,10 @@ def test_checkpoint_manager_preserves_remote_native_load(monkeypatch) -> None:
 
 
 def test_checkpoint_manager_migrates_remote_historical_native_load(monkeypatch) -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     model = Llama3Model(config)
     model.init_states()
     wrapper = ModelWrapper(model)
@@ -451,8 +466,10 @@ def test_checkpoint_manager_migrates_remote_historical_native_load(monkeypatch) 
 
 
 def test_historical_dcp_roundtrip_saves_current_fused_schema(tmp_path) -> None:
-    build_config, max_context_length = llama3_configs["debugmodel"]
-    config = build_config(attn_backend="flex", seq_len=max_context_length)
+    config = build_llama3_model_config(
+        "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+    )
+    max_context_length = config.max_context_length
     source_model = Llama3Model(config)
     source_model.init_states()
     adapter = Llama3StateDictAdapter(config, hf_assets_path=None)

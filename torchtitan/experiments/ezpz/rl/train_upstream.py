@@ -77,7 +77,7 @@ import logging
 
 from monarch.actor import ProcMesh, this_host
 
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.config_manager import ConfigManager
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
 from torchtitan.rl.controller import Controller

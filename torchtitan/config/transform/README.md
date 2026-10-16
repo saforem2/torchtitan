@@ -1,6 +1,6 @@
 # Model config transforms
 
-A model config transform rewrites a complete model config tree. `model_registry`
+A model config transform rewrites a complete model config tree. `build_model_config`
 builds the base model before transforms run.
 
 Transforms are one supported way to build and maintain configs. They are
@@ -16,7 +16,16 @@ config.parallelism.context_parallel_degree = 8
 
 config = apply_transforms(
     config,
-    [ContextParallelTransform(inner_attention=KVAllGatherCPFlexInnerAttention)],
+    [
+        ContextParallelTransform(
+            inner_attention_map={
+                FlexInnerAttention: KVAllGatherCPFlexInnerAttention,
+                SlidingWindowFlexInnerAttention: (
+                    KVAllGatherCPSlidingWindowFlexInnerAttention
+                ),
+            }
+        )
+    ],
 )
 ```
 
@@ -39,13 +48,24 @@ config = apply_transforms(
 Without a TP mesh, the synchronous projection classes behave as ordinary
 linear modules.
 
+The async TP transform matches projection owner classes exactly. It converts
+`ColumnParallelLinear` and `RowParallelLinear`, but leaves arbitrary subclasses
+unchanged because replacing one with an async base class would discard its
+specialized forward behavior. With sequence parallelism disabled, constructing
+the async TP transform is an error before any conversion occurs.
+
+Transforms run on a model config that is already sharded for its parallelism
+(`build_model_config(..., parallelism=...)`). A transform that replaces a config
+keeps its `sharding_config`, or sets the sharding its replacement needs; it
+never re-derives sharding for the whole model.
+
 `apply_transforms` deep-copies the trainer config. It orders and applies the
 transforms, then validates the result. It returns the changed copy. The input
 config stays unchanged if a transform fails.
 
-Legacy `ModelConfigConverter` instances passed to `model_registry` run before
+Legacy `ModelConfigConverter` instances passed to `build_model_config` run before
 all model config transforms. In particular, apply quantization in
-`model_registry` before applying `LoRATransform`; running a converter over a
+`build_model_config` before applying `LoRATransform`; running a converter over a
 LoRA-transformed tree can replace an adapter config.
 
 NOTE: With quantization followed by LoRA, LoRA freezes the original weights,
@@ -64,13 +84,17 @@ model config in place and returns the root. It does not copy or validate the
 config.
 
 ```python
-model_config = model_registry("0.6B", attn_backend="varlen")
-model_config = transform_model_config_(model_config, [LMHeadCastTransform()])
+model_config = build_model_config(
+    "0.6B", attn_backend="varlen", parallelism=ParallelismConfig()
+)
+model_config = transform_model_config_(
+    model_config, [LoRATransform(handlers=(LinearLoRAHandler(),))]
+)
 ```
 
 ## What belongs here
 
-Use `model_registry` to select the base architecture, attention algorithm, and
+Use `build_model_config` to select the base architecture, attention algorithm, and
 attention metadata format. For example, FlexInnerAttention consumes a `BlockMask`,
 while VarlenInnerAttention consumes cumulative sequence offsets.
 
@@ -88,9 +112,9 @@ attention algorithm and metadata format.
 This package may import other `torchtitan` packages. Those packages must not
 import this package. Recipes import and apply transforms.
 
-Model registry functions temporarily violate this direction while they accept
+Model config builders temporarily violate this direction while they accept
 and apply the legacy `ModelConfigConverter` interface. This dependency will be
-removed when config registries move to `torchtitan_recipes` and converters are
+removed when converters are
 replaced by `ModelConfigTransform`.
 
 Keep shared types outside this package. For example, `CPInnerAttention` lives
@@ -103,26 +127,60 @@ Implement `transform`, rewrite configs in place, and return the model root. Retu
 a different config only when replacing the root.
 
 ```python
+from dataclasses import dataclass
+
+from torchtitan.config.transform import ModelConfigTransform, TransformRelations
+from torchtitan.models.base.module import Module
+
+
+class ExternalPrerequisiteTransform(ModelConfigTransform):
+    def transform(self, model: Module.Config) -> Module.Config:
+        return model
+
+
 @dataclass(kw_only=True, slots=True)
 class MyTransform(ModelConfigTransform):
-    run_after = (QuantizationTransform,)
     setting: int
+
+    @classmethod
+    def contribute_relations(cls, relations: TransformRelations) -> None:
+        relations.add_precedence(
+            before=ExternalPrerequisiteTransform,
+            after=cls,
+        )
 
     def transform(self, model: Module.Config) -> Module.Config:
         ...
         return model
 ```
 
-A transform sees only the model config. Pass any required training or
-parallelism value to the transform.
+A transform sees only the model config. Pass any value that depends on how the
+model runs as a transform option, e.g. `TokenDispatcherTransform`'s
+`num_max_tokens_per_rank`, which a trainer derives from its microbatch and an
+inference engine from its per-step token budget. `apply_transforms(config, ...)`
+works on any config that owns a `model`, such as a trainer or RL generator config.
 
 Use `convert_config_type` to replace one config implementation with another.
 The replacement config must inherit from the current config type. This preserves
 fields and wrappers from earlier transforms.
 
-Use `run_after` to set the order. Use `conflicts_with` to reject incompatible
-transforms. `apply_transforms` checks conflicts and sorts transforms before
-running them.
+## Ordering and conflicts
+
+Relations for built-in TorchTitan transforms that can be safely imported from
+`relations.py` are declared there. Transforms that cannot be imported there,
+such as transforms that eagerly import optional dependencies or downstream
+transforms defined outside TorchTitan, should override `contribute_relations`.
+Use `add_precedence(before=A, after=B)` to run `A` before `B`, and use
+`add_conflict(A, B)` to reject an incompatible pair.
+
+Each application builds a fresh graph from the central relations and the
+selected external transforms. Relations apply to subclasses. Conflict and
+ordering checks finish before any transform runs, and only the graph induced by
+the selected transforms must be acyclic. Unrelated transforms retain their
+input order.
+
+Use config validation, rather than relations, for instance-specific
+requirements.
 
 ## Validation
 
@@ -133,3 +191,9 @@ transform. The trainer validates it again after command-line overrides.
 `__post_init__` also runs when a config is constructed. Set related training
 options before calling `apply_transforms`. It can then validate the final
 config.
+
+## TODO
+
+The `model.traverse` logic used in many transforms and config conversion
+does not behave nicely with model configs that share the same `Config` object
+at different places.

@@ -23,16 +23,20 @@ from torchtitan.components.data.sources import (
     HuggingFaceRandomAccessSource,
     HuggingFaceStreamingSource,
 )
+from torchtitan.components.data.text_datasets import TextProcessor
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.config import CommConfig, TrainingConfig
-from torchtitan.config.configs import CompileConfig
-from torchtitan.distributed.activation_checkpoint import FullAC, SelectiveAC
+from torchtitan.distributed.activation_remat import (
+    DefaultActivationRematConfig,
+    FullActivationRematConfig,
+)
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
+from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_adamw,
@@ -43,7 +47,6 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
-from torchtitan.hf_datasets.text_datasets import TextProcessor
 from torchtitan.observability.metrics import MetricsProcessor
 from . import model_registry
 from .sft_data import tulu_math_uc_streaming_dataset
@@ -305,18 +308,18 @@ def agpt(
     # would make each one carry the seq_len multiplication independently. One
     # conversion here is the whole change for anything built through agpt().
     cfg.training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
-    # 57th sync: PR #3674 replaced the `mode` string with a policy class
-    # hierarchy. `None` disables AC (was mode="none"); FullAC.Config()
-    # is the agpt default (was mode="full").
+    # Upstream replaced the activation_checkpoint policy hierarchy with
+    # torch_remat (#4893, #5101, #5102): ``activation_remat`` is None (AC off),
+    # FullActivationRematConfig (recompute every block; the agpt default) or
+    # DefaultActivationRematConfig (save every model-declared region; the
+    # closest successor of the deleted selective-op AC, which has no direct
+    # equivalent).
     if activation_checkpoint_mode == "none":
-        cfg.activation_checkpoint = None
+        cfg.activation_remat = None
     elif activation_checkpoint_mode == "selective":
-        # Plain upstream SelectiveAC, not the MoE subclass: MoeSelectiveAC
-        # exists only to drop all_to_all_single from the save list, which is
-        # an EP concern agpt does not have.
-        cfg.activation_checkpoint = SelectiveAC.Config()
+        cfg.activation_remat = DefaultActivationRematConfig()
     else:
-        cfg.activation_checkpoint = FullAC.Config()
+        cfg.activation_remat = FullActivationRematConfig()
     cfg.training.max_context_length = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
@@ -377,7 +380,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             interval=500,
             last_save_model_only=False,
         ),
-        activation_checkpoint=FullAC.Config(),
+        activation_remat=FullActivationRematConfig(),
         comm=CommConfig(train_timeout_seconds=100),
         fault_tolerance=FaultTolerance(enable=False),
         # Walltime-aware checkpointing: guarantee a save before the PBS walltime
@@ -765,7 +768,7 @@ def _agpt_2b_mds_mix_blend(
     owm_weight: float, edu_weight: float, folder: str
 ) -> FaultTolerantTrainer.Config:
     """Shared builder for owm/edu weighted-blend mix arms."""
-    from torchtitan.hf_datasets.text_datasets import (
+    from torchtitan.components.data.text_datasets import (
         HFDataSource,
         InterleavedHuggingFaceTextDataLoader,
     )
@@ -822,7 +825,7 @@ def _agpt_2b_mds_mix_blend_src(
 ) -> FaultTolerantTrainer.Config:
     """Generalized owm/<science-src> weighted-blend builder (mirrors
     _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
-    from torchtitan.hf_datasets.text_datasets import (
+    from torchtitan.components.data.text_datasets import (
         HFDataSource,
         InterleavedHuggingFaceTextDataLoader,
     )
@@ -900,7 +903,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     _lbs = cfg.training.num_tokens_per_microbatch_per_dp_rank // 8192
     cfg.training.max_context_length = 8192
     cfg.training.num_tokens_per_microbatch_per_dp_rank = _lbs * 8192
-    cfg.activation_checkpoint = None
+    cfg.activation_remat = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
         raise ValueError(
             f"olmo anneal base DCP not found or invalid at {_OLMO_ANNEAL_BASE!r} "
@@ -984,6 +987,19 @@ def _apply_config_overrides(
     overrides: dict[str, Any],
     path: str = "",
 ) -> None:
+    if not path:
+        # Legacy JSON launch files: ``training.gc_freq`` / ``training.gc_debug``
+        # moved to the engine's ``garbage_collector`` config.
+        training_overrides = overrides.get("training")
+        if isinstance(training_overrides, dict):
+            gc = overrides.setdefault("garbage_collector", {})
+            if "gc_freq" in training_overrides:
+                gc["gc_freq"] = training_overrides.pop("gc_freq")
+            if "gc_debug" in training_overrides:
+                gc["debug"] = training_overrides.pop("gc_debug")
+            if not gc:
+                overrides.pop("garbage_collector")
+
     for key, value in overrides.items():
         if not hasattr(target, key):
             raise KeyError(f"Unknown config field {key!r} at path {path or '<root>'}.")
