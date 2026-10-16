@@ -43,16 +43,11 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.components.renderer import ExtraStopTokensRendererConfig, from_renderers
-from torchtitan.config import CompileConfig, TrainingConfig
+from torchtitan.components.renderer import from_renderers
+from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
+from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.config.transform import (
-    LinearLoRAHandler,
-    LoRATransform,
-    transform_model_config_,
-)
-from torchtitan.config.transform.cast_linear import LMHeadCastConverter
-from torchtitan.experiments.ezpz.agpt import model_registry as agpt_model_registry
+from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
@@ -61,44 +56,26 @@ from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
 )
 from torchtitan.models.common.config_utils import decoder_vocab_size
-from torchtitan.rl.controller import AsyncLoopConfig, Controller, ValidationConfig
-from torchtitan.rl.distributed.parallelism import InferenceParallelismConfig
+from torchtitan.rl.controller.controller import (
+    AsyncLoopConfig,
+    Controller,
+    ValidationConfig,
+)
+from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
 from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
 from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
-from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
-from torchtitan.rl.losses import GRPOLoss
+from torchtitan.rl.generator.generator import (
+    SamplingConfig,
+    VLLMCudaGraphConfig,
+    VLLMGenerator,
+)
+from torchtitan.rl.trainer.losses import GRPOLoss
 from torchtitan.rl.observability.metrics import MetricsProcessor
 from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
-from torchtitan.rl.rubric import Rubric
-from torchtitan.rl.trainer import Trainer
+from torchtitan.rl.rollout.rubric import Rubric
+from torchtitan.rl.trainer.trainer import Trainer
 
-
-def _agpt_rl_model_config(*, lora_rank: int = 8, lora_alpha: float = 16.0):
-    """`ezpz.agpt.model_registry("2b-rl")` for RL: LoRA (wqkv/wo) + fp32 lm_head.
-
-    Converter order: LoRA first (wraps the base linears in frozen+adapter form),
-    then the lm_head fp32 cast (RL logprob/KL math needs fp32 logits).
-    """
-    model_config = agpt_model_registry(
-        "2b-rl",
-        converters=[LMHeadCastConverter.Config()],
-    )
-    model_config = cast(
-        Any,
-        transform_model_config_(
-            model_config,
-            [
-                LoRATransform(
-                    handlers=(LinearLoRAHandler(),),
-                    rank=lora_rank,
-                    alpha=lora_alpha,
-                    target_modules=["wqkv", "wo"],
-                )
-            ],
-        ),
-    )
-    return model_config
 
 
 def _agpt_rollouter(
@@ -160,11 +137,19 @@ def _agpt_grpo_config(
     FlexInnerAttention._compiled_flex_attn = torch.compile(
         flex_attention, options=FlexInnerAttention.inductor_configs
     )
-    model_config = _agpt_rl_model_config(
-        lora_rank=lora_rank, lora_alpha=2.0 * lora_rank
+    trainer_parallelism = ParallelismConfig(
+        data_parallel_shard_degree=1, tensor_parallel_degree=1
+    )
+    generator_parallelism = InferenceParallelismConfig(
+        data_parallel_degree=1, tensor_parallel_degree=1
+    )
+    trainer_model, generator_model = agpt_rl_model_configs(
+        trainer_parallelism=trainer_parallelism,
+        generator_parallelism=generator_parallelism,
+        lora_rank=lora_rank,
+        lora_alpha=2.0 * lora_rank,
     )
     return Controller.Config(
-        model=model_config,
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -175,7 +160,6 @@ def _agpt_grpo_config(
             num_samples_per_prompt=8,
             validation=ValidationConfig(num_samples=20),
         ),
-        compile=CompileConfig(backend="aot_eager"),
         rollouter=_agpt_rollouter(
             max_turns=max_turns,
             max_names_per_turn=max_names_per_turn,
@@ -190,6 +174,7 @@ def _agpt_grpo_config(
         ),
         metrics=MetricsProcessor.Config(enable_wandb=False),
         trainer=Trainer.Config(
+            model=trainer_model,
             optim=Optim.Config(
                 optimizer=default_adamw(lr=lr),
                 lr_scheduler=LRSchedulersContainer.Config(
@@ -202,9 +187,7 @@ def _agpt_grpo_config(
                 num_tokens_per_microbatch_per_dp_rank=2 * 2048,
                 max_context_length=2048,
             ),
-            parallelism=ParallelismConfig(
-                data_parallel_shard_degree=1, tensor_parallel_degree=1
-            ),
+            parallelism=trainer_parallelism,
             checkpointer=CheckpointManager.Config(
                 initial_load_in_hf=True,
                 interval=20,
@@ -214,18 +197,17 @@ def _agpt_grpo_config(
                 num_chunks=8,
                 loss_fn=GRPOLoss.Config(
                     clip_eps=clip_eps,
-                    global_vocab_size=decoder_vocab_size(model_config),
+                    global_vocab_size=decoder_vocab_size(trainer_model),
                 ),
             ),
         ),
         generator=VLLMGenerator.Config(
+            model=generator_model,
             # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
             model_dtype="float32",
             gpu_memory_limit=0.70,
             cuda_graph=VLLMCudaGraphConfig(mode="NONE"),
-            parallelism=InferenceParallelismConfig(
-                data_parallel_degree=1, tensor_parallel_degree=1
-            ),
+            parallelism=generator_parallelism,
             checkpointer=None,
             sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=700),
         ),
