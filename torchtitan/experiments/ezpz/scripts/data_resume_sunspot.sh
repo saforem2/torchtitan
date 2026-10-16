@@ -19,6 +19,8 @@
 #
 # Arms (agpt_debugmodel, dataset=blendcorpus, 24 ranks, 512 tokens/rank, GBS=24):
 #   A  ref      6 steps, no checkpoint
+#   A2 ref_ckpt 6 steps, save every 2 (uninterrupted reference for C/E/F/H)
+#   A3 repeat   A2 again (run-to-run reproducibility)
 #   B  save     4 steps, save every 2
 #   C  restart  from B step-4, 6 steps
 #   E  flag     counter-0 copy of B step-4, flag =96
@@ -26,7 +28,8 @@
 #   G  none     counter-0 copy of B step-4, no override (negative control)
 #   H  mismatch nonzero copy of B step-4, flag =48 (must be ignored)
 #
-# Env knobs: SMOKE_VENV, SEED (default 42), OUT (default outputs/data-resume-<jobid>).
+# Env knobs: SMOKE_VENV, SEED (default 42), OUT (default outputs/data-resume-<jobid>),
+# DATA_CACHE (blendcorpus index cache, default <OUT>/blendcorpus-cache).
 
 set -o pipefail
 
@@ -95,7 +98,7 @@ OUT="${OUT:-$(pwd)/outputs/data-resume-${JOBID_SHORT}}"
 SEED="${SEED:-42}"
 mkdir -p "${OUT}"
 # Private blendcorpus index cache: never share with a production chain.
-CACHE="${OUT}/blendcorpus-cache"
+CACHE="${DATA_CACHE:-${OUT}/blendcorpus-cache}"
 DATALIST="$(pwd)/torchtitan/experiments/ezpz/data-lists/sunspot/books.txt"
 PY="${VENV}/bin/python"
 TOOL="torchtitan/experiments/ezpz/scripts/dcp_dataloader_counter.py"
@@ -152,6 +155,8 @@ copy_step() { # SRC_STEP_DIR DST_FOLDER zero|keep
 }
 
 run_arm A_ref 6 ""                    || true
+run_arm A2_ref_ckpt 6 "${OUT}/A2"     || true
+run_arm A3_ref_repeat 6 "${OUT}/A3"   || true
 run_arm B_save 4 "${OUT}/B"           || true
 
 echo "" | tee -a "${LOG}"
