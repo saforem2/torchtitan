@@ -35,11 +35,12 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
 )
 
-from torchtitan.config import CompileConfig, TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelismContext
-from torchtitan.distributed.activation_checkpoint import ActivationCheckpointingConfig
+from torchtitan.distributed.activation_remat import ActivationRematConfig
+from torchtitan.distributed.local_compile import apply_local_compile
 
 from torchtitan.distributed.fsdp import (
     get_fsdp_reshard_after_forward_policy,
@@ -57,8 +58,8 @@ def parallelize_llama(
     parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
-    compile_config: CompileConfig,
-    ac_config: ActivationCheckpointingConfig,
+    local_compile_regions: list[str],
+    activation_remat: ActivationRematConfig | None,
     dump_folder: str,
     skip_dp: bool = False,
 ):
@@ -67,6 +68,9 @@ def parallelize_llama(
     The passed-in model preferably should be on meta device. Otherwise
     the model must fit on GPU or CPU memory.
     """
+    # Bind the @local_compile regions before any module runs (process-wide);
+    # BaseModel.parallelize does the same first.
+    apply_local_compile(local_compile_regions)
     parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
@@ -105,12 +109,11 @@ def parallelize_llama(
     # config-driven sharding pass here; calling model.parallelize() would recurse.
     model._parallelize(parallel_dims)
 
-    # 57th sync: PR #3674 refactored AC into a Configurable policy
-    # hierarchy. ac_config is now an ActivationCheckpointing.Config
-    # subclass (FullAC.Config / SelectiveAC.Config / MemoryBudgetAC.Config)
-    # or None. The old `mode="none"` sentinel is replaced by `None`.
-    if ac_config is not None:
-        ac_config.build(dump_folder=dump_folder).apply(model)
+    # Upstream moved activation checkpointing to torch_remat (#4893, #5101):
+    # ``activation_remat`` is an ActivationRematConfig (or None for no AC) and
+    # ``apply`` checkpoints every transformer block in ``model.layers``.
+    if activation_remat is not None:
+        activation_remat.apply(model)
 
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.
