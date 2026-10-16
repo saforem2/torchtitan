@@ -2,6 +2,24 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-15 (Aurora) -- BlendCorpus restarts replay the data stream
+
+Every checkpoint of the 20B 256N and 512N chains stores
+`dataloader.consumed_samples = 0`, and both pinned clones (`086ff996`,
+`f1c20ee7`) never increment it. Each restart re-reads the stream from sample 0.
+256N has 36 resumes (head `step-19400`, longest segment 1,550 steps), 512N has
+73 (head `step-11100`, longest 1,200). At least 92.0% and 89.2% of the steps
+trained were replays of positions already seen. The replay is inferred from the
+sampler code, the counters and the restart steps. Positions were not decoded on
+the cluster.
+
+The `origin/ezpz` increment (`0f7f0c7f53`) overshoots by GAS when GAS > 1. It
+now adds `micro_batch_size * dp`. New `--dataloader.resume-consumed-samples`
+applies only to checkpoints storing 0. The position for the existing chains is
+open: [`guides/blendcorpus-resume-position.md`](guides/blendcorpus-resume-position.md).
+
+---
+
 ## 2026-10-01 (Sunspot) -- automatic TorchStore locality resolution
 
 Resolved the forced-Gloo caveat in the production Monarch/TorchStore runbook.
