@@ -62,6 +62,18 @@ def _import_blendcorpus_modules():
     )
 
 
+def _env_resume_consumed_samples() -> int | None:
+    """Default for ``Config.resume_consumed_samples``.
+
+    The pinned production umbrella launcher builds each seat's argv from a fixed
+    table and cannot pass a new flag, so the resume position may also come from
+    ``BLENDCORPUS_RESUME_CONSUMED_SAMPLES`` (propagated to every rank by
+    ``mpiexec --envall``). Unset or empty means None.
+    """
+    v = os.environ.get("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", "").strip()
+    return int(v) if v else None
+
+
 class BlendCorpusDataLoader(BaseDataLoader):
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
@@ -124,6 +136,24 @@ class BlendCorpusDataLoader(BaseDataLoader):
         Set it only on configs whose attention backend is flex or varlen.
         """
         data_cache_path: str = ".cache/blendcorpus"
+
+        resume_consumed_samples: int | None = field(
+            default_factory=_env_resume_consumed_samples
+        )
+        """Stream position to resume from when the checkpoint stores none.
+
+        Checkpoints written before ``consumed_samples`` was counted (every
+        20B-256N / 20B-512N checkpoint up to 2026-10-15) store
+        ``dataloader.consumed_samples == 0`` regardless of the step, so a
+        restart re-reads the stream from sample 0. Setting this makes
+        ``load_state_dict`` start from the given GLOBAL sample index instead,
+        but ONLY when the checkpoint's own counter is 0. A checkpoint with a
+        nonzero counter always wins (warning on mismatch), which keeps an
+        auto-retry chain that re-passes the same CLI args correct after its
+        first new checkpoint lands. Must be a multiple of
+        ``micro_batch_size * dp_world_size``. See
+        ``docs/guides/blendcorpus-resume-position.md`` for how to choose it.
+        """
 
         train_iters: int | None = None
         # When True, this dataloader serves the validation split of the
@@ -409,6 +439,15 @@ class BlendCorpusDataLoader(BaseDataLoader):
         self._build_pretraining_data_loader = build_pretraining_data_loader
         self._loader = build_pretraining_data_loader(served_ds, 0, self._bc_cfg)
         self._consumed_samples = 0
+        # One yielded batch advances the sampler by micro_batch_size * dp
+        # sequences (MegatronPretrainingSampler.micro_batch_times_data_parallel_size),
+        # NOT by global_batch_size: with gradient accumulation the trainer
+        # pulls several microbatches per optimizer step. Read dp from the same
+        # mpu the sampler reads so the two cannot disagree.
+        self._samples_per_yield = int(bc_cfg.micro_batch_size) * int(
+            bc_mpu.get_data_parallel_world_size()
+        )
+        self._resume_consumed_samples = config.resume_consumed_samples
 
         try:
             self._len = len(self._loader)
@@ -472,7 +511,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
             # sample count. Advance it before yielding: the generator is
             # suspended at ``yield``, and checkpoints are taken after the
             # caller consumes the batch but before this frame resumes.
-            self._consumed_samples += int(self._bc_cfg.global_batch_size)
+            self._consumed_samples += self._samples_per_yield
             yield out
 
     def _document_positions(self, input_ids: torch.Tensor) -> torch.Tensor | None:
@@ -544,6 +583,29 @@ class BlendCorpusDataLoader(BaseDataLoader):
             return
 
         consumed = int(state_dict.get("consumed_samples", 0))
+        override = self._resume_consumed_samples
+        if override is not None:
+            if consumed == 0:
+                logger.warning(
+                    "BlendCorpus checkpoint has consumed_samples=0 (written "
+                    "before the counter existed); resuming the data stream at "
+                    "--dataloader.resume-consumed-samples=%d instead of 0.",
+                    override,
+                )
+                consumed = int(override)
+            elif consumed != override:
+                logger.warning(
+                    "Ignoring --dataloader.resume-consumed-samples=%d: the "
+                    "checkpoint already stores consumed_samples=%d.",
+                    override,
+                    consumed,
+                )
+        if consumed % self._samples_per_yield != 0:
+            raise ValueError(
+                f"BlendCorpus resume position {consumed} is not a multiple of "
+                f"micro_batch_size * dp_world_size = {self._samples_per_yield}; "
+                "the sampler would start mid-batch."
+            )
         if consumed != self._consumed_samples:
             self._consumed_samples = consumed
             self._loader = self._build_pretraining_data_loader(
