@@ -124,3 +124,20 @@ class TestLegacyCheckpointOverride:
         loader = _make_loader(resume_consumed_samples=bad)
         with pytest.raises(ValueError, match="not a multiple"):
             loader.load_state_dict({"consumed_samples": 0})
+
+
+def test_env_default_for_resume_position(monkeypatch):
+    """The production launcher cannot pass a flag, so the env var supplies the default."""
+    from torchtitan.experiments.ezpz.blendcorpus import blendcorpus_builder as b
+
+    monkeypatch.delenv("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", raising=False)
+    assert b.BlendCorpusDataLoader.Config().resume_consumed_samples is None
+    monkeypatch.setenv("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", "")
+    assert b.BlendCorpusDataLoader.Config().resume_consumed_samples is None
+    monkeypatch.setenv("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", "9523200")
+    assert b.BlendCorpusDataLoader.Config().resume_consumed_samples == 9523200
+    # an explicit value still wins over the environment
+    assert (
+        b.BlendCorpusDataLoader.Config(resume_consumed_samples=6144).resume_consumed_samples
+        == 6144
+    )

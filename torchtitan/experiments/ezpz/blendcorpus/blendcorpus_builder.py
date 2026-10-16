@@ -62,6 +62,18 @@ def _import_blendcorpus_modules():
     )
 
 
+def _env_resume_consumed_samples() -> int | None:
+    """Default for ``Config.resume_consumed_samples``.
+
+    The pinned production umbrella launcher builds each seat's argv from a fixed
+    table and cannot pass a new flag, so the resume position may also come from
+    ``BLENDCORPUS_RESUME_CONSUMED_SAMPLES`` (propagated to every rank by
+    ``mpiexec --envall``). Unset or empty means None.
+    """
+    v = os.environ.get("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", "").strip()
+    return int(v) if v else None
+
+
 class BlendCorpusDataLoader(BaseDataLoader):
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
@@ -125,7 +137,9 @@ class BlendCorpusDataLoader(BaseDataLoader):
         """
         data_cache_path: str = ".cache/blendcorpus"
 
-        resume_consumed_samples: int | None = None
+        resume_consumed_samples: int | None = field(
+            default_factory=_env_resume_consumed_samples
+        )
         """Stream position to resume from when the checkpoint stores none.
 
         Checkpoints written before ``consumed_samples`` was counted (every
