@@ -149,4 +149,6 @@ del _src, _name, _obj, _base, importlib  # type: ignore[name-defined]
 
 # ConfigManager discovery uses ``callable(getattr(module, name))``; __all__
 # controls ``from ... import *`` and documents the surface.
-__all__ = sorted(k for k, v in globals().items() if k.startswith("rl_grpo") and callable(v))
+__all__ = sorted(
+    k for k, v in globals().items() if k.startswith("rl_grpo") and callable(v)
+)
