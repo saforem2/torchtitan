@@ -51,9 +51,7 @@ from torchtitan.experiments.ezpz.rl.xpu_trial.layouts import (  # noqa: F401
 # Source module (the verbatim Guoqiong port). Importing it registers the
 # dynamic ``globals()[f"rl_grpo_qwen3_0_6b_..."]`` host-layout names.
 # ---------------------------------------------------------------------------
-_src = importlib.import_module(
-    "torchtitan.experiments.ezpz.rl.xpu_trial.alphabet_sort"
-)
+_src = importlib.import_module("torchtitan.experiments.ezpz.rl.xpu_trial.alphabet_sort")
 
 # ---------------------------------------------------------------------------
 # Compatibility filter

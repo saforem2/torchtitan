@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Host-layout helper for DP_REPLICATE semantics (XPU trial).
 
 Single source of truth for how ``dp_replicate`` / ``dp_shard`` / ``num_generators``
@@ -74,7 +80,9 @@ def resolve_dp_degrees(
     Used by shell sweeps that compute ``--parallelism.data-parallel-*`` CLI
     flags without importing recipe Python (also by ``config_registry.py``).
     """
-    rep, shard, generators = ezpz_host_layout(num_hosts, gpus_per_host, ffn_dim1=ffn_dim1)
+    rep, shard, generators = ezpz_host_layout(
+        num_hosts, gpus_per_host, ffn_dim1=ffn_dim1
+    )
     if dp_replicate is not None:
         shard = rep * shard // dp_replicate
         rep = dp_replicate
