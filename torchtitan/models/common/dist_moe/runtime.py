@@ -113,7 +113,7 @@ class _DistMoeForwardContext:
         self._max_moe_layers_per_activation_slot = max_moe_layers_per_activation_slot
 
     def _slot_id(self, info: PipelineStageInfo) -> int | None:
-        if info.stage_index not in self._active_stage_indices:
+        if info.stage_index not in self._active_stage_indices:  # type: ignore[union-attr]
             return None
         if not self._activation_slot_id_by_stage_and_microbatch:
             return 0
@@ -511,7 +511,10 @@ class DistMoeRuntime(Configurable):
             raise RuntimeError("no local pipeline stage contains Dist-MoE")
 
         stage_indices = tuple(modules_by_stage)
-        assert analyze_pipeline_activation_liveness is not None, "PP liveness requires torch nightly with analyze_pipeline_activation_liveness"
+        assert analyze_pipeline_activation_liveness is not None, (  # noqa: B950
+            "PP liveness needs nightly torch: "
+            "analyze_pipeline_activation_liveness"
+        )
         liveness = analyze_pipeline_activation_liveness(
             schedule,
             pp_rank=pp_rank,
