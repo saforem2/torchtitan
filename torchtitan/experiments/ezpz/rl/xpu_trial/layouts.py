@@ -112,9 +112,9 @@ def generator_count_for_tp(
     return generators // generator_tp
 
 # Usage (shell sweep / PBS launcher):
-#   python -c "from torchtitan.experiments.ezpz.rl.xpu_trial.layouts import resolve_dp_degrees; print(resolve_dp_degrees(8, 4, dp_replicate=1))"
+#   python -c "from torchtitan.experiments.ezpz.rl.xpu_trial.layouts import resolve_dp_degrees; print(resolve_dp_degrees(8, 4, dp_replicate=1))"  # noqa: B950
 #   # -> (1, 16, 16)
-#   python -c "from torchtitan.experiments.ezpz.rl.xpu_trial.layouts import generator_count_for_tp; print(generator_count_for_tp(2, 4, generator_tp=2))"
+#   python -c "from torchtitan.experiments.ezpz.rl.xpu_trial.layouts import generator_count_for_tp; print(generator_count_for_tp(2, 4, generator_tp=2))"  # noqa: B950
 #   # -> 2  (4 generator GPUs -> 2 generators x TP2)
 # Invariants to check at launch:
 #   dp_replicate * dp_shard == trainer_gpus
