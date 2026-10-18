@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 
 import torch
+
 try:
     from torch.distributed.pipelining import analyze_pipeline_activation_liveness
 except ImportError:
@@ -513,8 +514,7 @@ class DistMoeRuntime(Configurable):
 
         stage_indices = tuple(modules_by_stage)
         assert analyze_pipeline_activation_liveness is not None, (  # noqa: B950
-            "PP liveness needs nightly torch: "
-            "analyze_pipeline_activation_liveness"
+            "PP liveness needs nightly torch: " "analyze_pipeline_activation_liveness"
         )
         liveness = analyze_pipeline_activation_liveness(
             schedule,
