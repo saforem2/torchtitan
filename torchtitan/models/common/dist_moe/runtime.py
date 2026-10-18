@@ -25,10 +25,12 @@ from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 
 import torch
-from torch.distributed.pipelining import (
-    analyze_pipeline_activation_liveness,
-    PipelineStageInfo,
-)
+try:
+    from torch.distributed.pipelining import analyze_pipeline_activation_liveness
+except ImportError:
+    analyze_pipeline_activation_liveness = None  # type: ignore[assignment]
+
+from torch.distributed.pipelining import PipelineStageInfo
 from torch.distributed.pipelining.schedules import PipelineScheduleMulti
 from torch.utils.hooks import RemovableHandle
 
@@ -506,6 +508,7 @@ class DistMoeRuntime(Configurable):
             raise RuntimeError("no local pipeline stage contains Dist-MoE")
 
         stage_indices = tuple(modules_by_stage)
+        assert analyze_pipeline_activation_liveness is not None, "PP liveness requires torch nightly with analyze_pipeline_activation_liveness"
         liveness = analyze_pipeline_activation_liveness(
             schedule,
             pp_rank=pp_rank,
