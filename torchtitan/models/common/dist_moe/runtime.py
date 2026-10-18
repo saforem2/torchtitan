@@ -30,7 +30,10 @@ try:
 except ImportError:
     analyze_pipeline_activation_liveness = None  # type: ignore[assignment]
 
-from torch.distributed.pipelining import PipelineStageInfo
+try:
+    from torch.distributed.pipelining import PipelineStageInfo
+except ImportError:
+    PipelineStageInfo = None  # type: ignore[assignment, misc]
 from torch.distributed.pipelining.schedules import PipelineScheduleMulti
 from torch.utils.hooks import RemovableHandle
 
