@@ -112,18 +112,19 @@ class _DistMoeForwardContext:
         self._activation_slot_ids_S = activation_slot_ids_S
         self._max_moe_layers_per_activation_slot = max_moe_layers_per_activation_slot
 
-    def _slot_id(self, info: PipelineStageInfo) -> int | None:
-        if info.stage_index not in self._active_stage_indices:  # type: ignore[union-attr]
+    def _slot_id(self, info: PipelineStageInfo) -> int | None:  # type: ignore[no-redef]
+        assert info is not None  # type: ignore[unreachable]
+        if info.stage_index not in self._active_stage_indices:
             return None
         if not self._activation_slot_id_by_stage_and_microbatch:
             return 0
-        key = (info.stage_index, info.microbatch_index)
+        key = (info.stage_index, info.microbatch_index)  # type: ignore[union-attr]
         try:
             return self._activation_slot_id_by_stage_and_microbatch[key]
         except KeyError as error:
             raise ValueError(
                 "Dist-MoE has no activation-slot assignment for "
-                f"stage {info.stage_index}, microbatch {info.microbatch_index}"
+                f"stage {info.stage_index}, microbatch {info.microbatch_index}"  # type: ignore[union-attr]
             ) from error
 
     def resolve_activation_slot(
