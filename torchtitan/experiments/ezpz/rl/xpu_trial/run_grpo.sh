@@ -5,7 +5,7 @@
 #PBS -q debug
 #PBS -N grpo
 #PBS -l filesystems=flare:home
-#PBS -A Intel-Aurora  # default: override with `qsub -A <account>` or edit this line; PBS headers cannot expand shell variables
+#PBS -A Intel-Aurora
 #PBS -j oe
 #
 # GRPO on Aurora (Intel XPU, PBS) with torchtitan.rl.train on any node count:
