@@ -4,7 +4,7 @@
 #PBS -l walltime=01:00:00
 #PBS -q debug
 #PBS -N grpo
-#PBS -l filesystems=flare:home
+#PBS -l filesystems=flare:home  # Aurora; Sunspot: qsub -l filesystems=tegu:home -A datascience
 #PBS -A Intel-Aurora
 #PBS -j oe
 #

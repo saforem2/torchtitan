@@ -10,7 +10,8 @@ Single source of truth for how ``dp_replicate`` / ``dp_shard`` / ``num_generator
 from Guoqiong's ``_qwen3_0_6b_host_layout`` map onto ezpz's
 ``ParallelismConfig.data_parallel_{replicate,shard}_degree``.  Parameterized
 over the FFN weight's inner dim (``ffn_dim1``) so the same logic serves both
-Qwen3-0.6B (3072) and AGPT-2B (9216) — see analysis doc ``/tmp/guoqiong-recipe-analysis.md``.
+Qwen3-0.6B (3072, ``hidden_dim``) and AGPT-2B (8192, ``compute_ffn_hidden_dim(3072, multiple_of=1024)``)
+— see analysis doc ``/tmp/guoqiong-recipe-analysis.md``.
 
 Do not copy ``torchtitan/rl/multinode_launcher.py`` into this trial; ezpz's RL
 path uses ``train_upstream.EzpzPerHostProvisioner`` for node splitting. Only
@@ -84,8 +85,19 @@ def resolve_dp_degrees(
         num_hosts, gpus_per_host, ffn_dim1=ffn_dim1
     )
     if dp_replicate is not None:
-        shard = rep * shard // dp_replicate
+        trainer_gpus = rep * shard
+        if trainer_gpus % dp_replicate != 0:
+            raise ValueError(
+                f"dp_replicate={dp_replicate} does not divide trainer_gpus={trainer_gpus} "
+                f"(from layout {rep}x{shard}); would truncate world-size"
+            )
+        shard = trainer_gpus // dp_replicate
         rep = dp_replicate
+        if shard > 2 and ffn_dim1 % shard != 0:
+            raise ValueError(
+                f"resolved dp_shard={shard} does not divide ffn_dim1={ffn_dim1}; "
+                f"no valid colwise sharding for w13:[2,{ffn_dim1},D]"
+            )
     return rep, shard, generators
 
 
