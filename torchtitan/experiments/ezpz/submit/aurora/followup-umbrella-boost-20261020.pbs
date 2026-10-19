@@ -1,0 +1,142 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -N followup-umbrella-boost-20261020
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:flare
+#PBS -q prod
+#PBS -j oe
+# select= overridden via qsub -l select=N
+#   smoke:  -l select=4          (debug, 01:00:00)
+#   test:   -l select=274|512    (prod, 12:00:00)
+#   boost:  -l select=2058       (prod, 12:00:00)  >2048N threshold
+
+set -o pipefail
+ulimit -c 0
+
+# ── Source identity guard ──────────────────────────────────────────────
+EXPECTED_PARENT="d98e77797d98754bafd73344978a885a21915fbf"
+# Pinned after first write — see docs/production/followup-umbrella-boost-20261020.md
+EXPECTED_SCRIPT_SHA="REPLACE_AFTER_FIRST_WRITE"
+
+REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
+cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
+
+HEAD_SHA="$(git rev-parse HEAD)"
+if ! git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD 2>/dev/null; then
+  echo "FATAL: HEAD $HEAD_SHA does not contain EXPECTED_PARENT $EXPECTED_PARENT"
+  echo "  (fix is on ezpz @ d98e77797 — rebuild .venv.tar.gz from that branch)"
+  exit 1
+fi
+# Pinned SHA check (log-only until frozen, then enforced)
+if [[ "$EXPECTED_SCRIPT_SHA" != "REPLACE_AFTER_FIRST_WRITE" ]]; then
+  ACTUAL_SHA="$(sha256sum "$0" | awk '{print $1}')"
+  if [[ "$ACTUAL_SHA" != "$EXPECTED_SCRIPT_SHA" ]]; then
+    echo "FATAL: script SHA mismatch: got $ACTUAL_SHA want $EXPECTED_SCRIPT_SHA"
+    exit 16
+  fi
+fi
+echo "Source guard OK: HEAD=$HEAD_SHA contains $EXPECTED_PARENT"
+echo "Script SHA: $(sha256sum "$0" | awk '{print $1}')  (PBS_JOBID=$PBS_JOBID)"
+
+# ── Resume position (samples, not tokens) — Option B: first-unseen + 5% margin, ceil to GBS ──
+# Base: 1200*12288=14745600 (512N), 1550*6144=9523200 (256N)
+# +5% exact: 15482880 (=1260*12288), 9999360 (=1627.5*6144)
+# Verified GBS-aligned ceil: 15482880 (exact), 10002432 (=1628*6144)
+RESUME_SAMPLES_20B512=15482880
+RESUME_SAMPLES_20B256=10002432
+
+# GBS alignment guard — fail closed before any training
+for N_GBS in "${RESUME_SAMPLES_20B512}:12288" "${RESUME_SAMPLES_20B256}:6144"; do
+  N="${N_GBS%%:*}"; GBS="${N_GBS##*:}"
+  if (( N % GBS != 0 )); then
+    echo "FATAL: RESUME_SAMPLES $N not aligned to GBS $GBS (need N % GBS == 0)"
+    exit 2
+  fi
+done
+echo "Resume samples OK: 20B512=${RESUME_SAMPLES_20B512} (GBS 12288)  20B256=${RESUME_SAMPLES_20B256} (GBS 6144)"
+
+# ── Checkpoint dirs (fork, don't overwrite) ────────────────────────────
+CKPT_20B512_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
+CKPT_20B512_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
+CKPT_20B256_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+CKPT_20B256_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-n256-fixedpos"
+CKPT_2B_RECLAIM="outputs/checkpoints/agpt-2b-v2-512-reclaim-20261020"
+
+for D in "$CKPT_20B512_NEW" "$CKPT_20B256_NEW"; do
+  if [[ ! -d "$D" ]]; then
+    echo "Creating fork dir: $D"
+    mkdir -p "$D"
+    lfs setstripe -c 2 -i 10 "$D" 2>&1 || echo "WARNING: lfs setstripe failed for $D"
+  fi
+done
+for SRC in "$CKPT_20B512_SRC" "$CKPT_20B256_SRC"; do
+  if [[ ! -d "$SRC" ]]; then
+    echo "FATAL: source ckpt dir missing: $SRC"
+    exit 1
+  fi
+  # Verify source has at least one step dir with .metadata
+  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
+    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
+    exit 1
+  fi
+done
+echo "Checkpoint dirs OK"
+
+# ── Venv broadcast (tarball mode) ──────────────────────────────────────
+VENV_TGZ="$REPO/.venv.tar.gz"
+if [[ ! -f "$VENV_TGZ" ]]; then
+  echo "FATAL: $VENV_TGZ missing — run: ezpz tar-env --venv .venv --out .venv.tar.gz"
+  exit 1
+fi
+echo "Broadcasting venv tarball: $VENV_TGZ ($(du -h "$VENV_TGZ" | awk '{print $1}'))"
+ezpz yeet --src "$VENV_TGZ" --dest /tmp/.venv 2>&1 | tail -20
+
+source /tmp/.venv/bin/activate 2>/dev/null || source .venv/bin/activate
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+
+python3 -c "import torch; assert torch.xpu.is_available(); print(f'torch {torch.__version__} xpu={torch.xpu.is_available()}')"
+echo "Venv OK"
+
+# Verify the position fix is present in this checkout
+if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
+    "$REPO/torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py" 2>/dev/null; then
+  echo "FATAL: position fix not in blendcorpus_builder.py (need origin/ezpz >= 0f7f0c7f53)"
+  exit 1
+fi
+
+# ── Umbrella launch ────────────────────────────────────────────────────
+echo "=== Umbrella config ==="
+echo "  20B-512  1024N  GBS=12288  ckpt=$CKPT_20B512_NEW  resume_samples=$RESUME_SAMPLES_20B512"
+echo "  20B-256   512N  GBS=6144   ckpt=$CKPT_20B256_NEW  resume_samples=$RESUME_SAMPLES_20B256"
+echo "  2B-reclaim 512N  ckpt=$CKPT_2B_RECLAIM"
+echo "  walltime=12:00:00  queue=prod  select=${PBS_select:-2058}"
+echo "  HEAD=$HEAD_SHA  parent=$EXPECTED_PARENT"
+
+# Export for mpiexec --envall propagation to all ranks
+export BLENDCORPUS_RESUME_CONSUMED_SAMPLES_20B512="$RESUME_SAMPLES_20B512"
+export BLENDCORPUS_RESUME_CONSUMED_SAMPLES_20B256="$RESUME_SAMPLES_20B256"
+# Also set the primary var — blendcorpus_builder.py reads BLENDCORPUS_RESUME_CONSUMED_SAMPLES
+# For multi-trainer umbrellas, the per-trainer value must be plumbed via the trainer's
+# env or --dataloader.resume-consumed-samples flag. We set both paths below.
+export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$RESUME_SAMPLES_20B512"
+
+# ── Wire to umbrella script ──────────────────────────────────────────
+# The umbrella script's trainer table must have fixedpos ckpt dirs + per-seat
+# --dataloader.resume-consumed-samples. Delegate to it now.
+UMBRELLA_SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
+if [[ ! -f "$UMBRELLA_SCRIPT" ]]; then
+  echo "FATAL: umbrella script not found: $UMBRELLA_SCRIPT"
+  exit 1
+fi
+
+echo ""
+echo "Delegating to umbrella: $UMBRELLA_SCRIPT"
+echo "  20B-512: $CKPT_20B512_NEW @ resume $RESUME_SAMPLES_20B512"
+echo "  20B-256: $CKPT_20B256_NEW @ resume $RESUME_SAMPLES_20B256"
+
+# Export per-trainer resume so submit_agpt_multi_autoretry.sh can plumb it
+export CKPT_20B512_NEW CKPT_20B256_NEW CKPT_2B_RECLAIM
+export RESUME_SAMPLES_20B512 RESUME_SAMPLES_20B256
+
+exec bash "$UMBRELLA_SCRIPT"
