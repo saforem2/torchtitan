@@ -51,5 +51,8 @@ CLAUDE.local.md
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
 
+# Hermes campaign monitors (ephemeral PBS watchers)
+.hermes-*
+
 # Lychee (link checker) cache
 .lycheecache
