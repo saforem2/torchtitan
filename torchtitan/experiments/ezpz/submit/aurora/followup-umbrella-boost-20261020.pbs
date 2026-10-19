@@ -15,8 +15,7 @@ ulimit -c 0
 
 # ── Source identity guard ──────────────────────────────────────────────
 EXPECTED_PARENT="d98e77797d98754bafd73344978a885a21915fbf"
-# Pinned after first write — see docs/production/followup-umbrella-boost-20261020.md
-EXPECTED_SCRIPT_SHA="REPLACE_AFTER_FIRST_WRITE"
+EXPECTED_SCRIPT_SHA="6e69e98d8a4887d735860ec004607ae0a64bfa26f10893b71a8d46dcabb5136b"
 
 REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
 cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
@@ -27,21 +26,20 @@ if ! git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD 2>/dev/null; then
   echo "  (fix is on ezpz @ d98e77797 — rebuild .venv.tar.gz from that branch)"
   exit 1
 fi
-# Pinned SHA check (log-only until frozen, then enforced)
-if [[ "$EXPECTED_SCRIPT_SHA" != "REPLACE_AFTER_FIRST_WRITE" ]]; then
-  ACTUAL_SHA="$(sha256sum "$0" | awk '{print $1}')"
-  if [[ "$ACTUAL_SHA" != "$EXPECTED_SCRIPT_SHA" ]]; then
-    echo "FATAL: script SHA mismatch: got $ACTUAL_SHA want $EXPECTED_SCRIPT_SHA"
-    exit 16
-  fi
+# Pinned SHA — hash excludes its own line (self-hash is otherwise impossible)
+ACTUAL_SHA="$(grep -v '^EXPECTED_SCRIPT_SHA=' "$0" | sha256sum | awk '{print $1}')"
+if [[ "$ACTUAL_SHA" != "$EXPECTED_SCRIPT_SHA" ]]; then
+  echo "FATAL: script SHA mismatch: got $ACTUAL_SHA want $EXPECTED_SCRIPT_SHA"
+  exit 16
 fi
 echo "Source guard OK: HEAD=$HEAD_SHA contains $EXPECTED_PARENT"
-echo "Script SHA: $(sha256sum "$0" | awk '{print $1}')  (PBS_JOBID=$PBS_JOBID)"
+echo "Script SHA OK: $ACTUAL_SHA  (PBS_JOBID=$PBS_JOBID)"
 
 # ── Resume position (samples, not tokens) — Option B: first-unseen + 5% margin, ceil to GBS ──
 # Base: 1200*12288=14745600 (512N), 1550*6144=9523200 (256N)
 # +5% exact: 15482880 (=1260*12288), 9999360 (=1627.5*6144)
 # Verified GBS-aligned ceil: 15482880 (exact), 10002432 (=1628*6144)
+# tokens = samples * 8192 (seq_len)
 RESUME_SAMPLES_20B512=15482880
 RESUME_SAMPLES_20B256=10002432
 
@@ -54,33 +52,49 @@ for N_GBS in "${RESUME_SAMPLES_20B512}:12288" "${RESUME_SAMPLES_20B256}:6144"; d
   fi
 done
 echo "Resume samples OK: 20B512=${RESUME_SAMPLES_20B512} (GBS 12288)  20B256=${RESUME_SAMPLES_20B256} (GBS 6144)"
+echo "  tokens: 20B512=$(( RESUME_SAMPLES_20B512 * 8192 ))  20B256=$(( RESUME_SAMPLES_20B256 * 8192 ))"
 
 # ── Checkpoint dirs (fork, don't overwrite) ────────────────────────────
-CKPT_20B512_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
-CKPT_20B512_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
-CKPT_20B256_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
-CKPT_20B256_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-n256-fixedpos"
-CKPT_2B_RECLAIM="outputs/checkpoints/agpt-2b-v2-512-reclaim-20261020"
+CKPT_20B512_SRC="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
+CKPT_20B512_NEW="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
+CKPT_20B256_SRC="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+CKPT_20B256_NEW="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-n256-fixedpos"
+CKPT_2B_RECLAIM="checkpoints/agpt-2b-v2-512-reclaim-20261020"
 
-for D in "$CKPT_20B512_NEW" "$CKPT_20B256_NEW"; do
+# Capture source mtimes BEFORE any fork operation
+declare -A SRC_MTIME_BEFORE
+for SRC in "$CKPT_20B512_SRC" "$CKPT_20B256_SRC"; do
+  if [[ ! -d "$SRC" ]]; then
+    echo "FATAL: source ckpt dir missing: $SRC"
+    exit 1
+  fi
+  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
+    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
+    exit 1
+  fi
+  SRC_MTIME_BEFORE["$SRC"]="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+done
+echo "Source ckpt dirs OK (metadata present)"
+
+for D in "$CKPT_20B512_NEW" "$CKPT_20B256_NEW" "$CKPT_2B_RECLAIM"; do
   if [[ ! -d "$D" ]]; then
     echo "Creating fork dir: $D"
     mkdir -p "$D"
     lfs setstripe -c 2 -i 10 "$D" 2>&1 || echo "WARNING: lfs setstripe failed for $D"
   fi
 done
+
+# Verify source mtime unchanged after fork (fork must not mutate source)
 for SRC in "$CKPT_20B512_SRC" "$CKPT_20B256_SRC"; do
-  if [[ ! -d "$SRC" ]]; then
-    echo "FATAL: source ckpt dir missing: $SRC"
-    exit 1
-  fi
-  # Verify source has at least one step dir with .metadata
-  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
-    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
-    exit 1
+  AFTER="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+  BEFORE="${SRC_MTIME_BEFORE[$SRC]}"
+  if [[ "$AFTER" != "$BEFORE" ]]; then
+    echo "FATAL: source $SRC mtime changed after fork: before=$BEFORE after=$AFTER"
+    echo "  (fork must not mutate source — check for accidental mv/cp into source)"
+    exit 3
   fi
 done
-echo "Checkpoint dirs OK"
+echo "Checkpoint dirs OK (fork clean, source mtime unchanged)"
 
 # ── Venv broadcast (tarball mode) ──────────────────────────────────────
 VENV_TGZ="$REPO/.venv.tar.gz"
@@ -105,38 +119,270 @@ if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
   exit 1
 fi
 
-# ── Umbrella launch ────────────────────────────────────────────────────
+# ── Umbrella launch (native ezpz launch --auto-retry) ──────────────────
+# Three trainers: 20B-512 1024N, 20B-256 512N, 2B-reclaim 512N = 2048 train + 10 spare = 2058
 echo "=== Umbrella config ==="
 echo "  20B-512  1024N  GBS=12288  ckpt=$CKPT_20B512_NEW  resume_samples=$RESUME_SAMPLES_20B512"
 echo "  20B-256   512N  GBS=6144   ckpt=$CKPT_20B256_NEW  resume_samples=$RESUME_SAMPLES_20B256"
-echo "  2B-reclaim 512N  ckpt=$CKPT_2B_RECLAIM"
+echo "  2B-reclaim 512N  GBS=12288  ckpt=$CKPT_2B_RECLAIM"
 echo "  walltime=12:00:00  queue=prod  select=${PBS_select:-2058}"
-echo "  HEAD=$HEAD_SHA  parent=$EXPECTED_PARENT"
+echo "  HEAD=$HEAD_SHA  parent=$EXPECTED_PARENT  sha=$ACTUAL_SHA"
 
-# Export for mpiexec --envall propagation to all ranks
-export BLENDCORPUS_RESUME_CONSUMED_SAMPLES_20B512="$RESUME_SAMPLES_20B512"
-export BLENDCORPUS_RESUME_CONSUMED_SAMPLES_20B256="$RESUME_SAMPLES_20B256"
-# Also set the primary var — blendcorpus_builder.py reads BLENDCORPUS_RESUME_CONSUMED_SAMPLES
-# For multi-trainer umbrellas, the per-trainer value must be plumbed via the trainer's
-# env or --dataloader.resume-consumed-samples flag. We set both paths below.
-export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$RESUME_SAMPLES_20B512"
+# ---- Common env ----
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu" TORCH_CPP_LOG_LEVEL=ERROR
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
-# ── Wire to umbrella script ──────────────────────────────────────────
-# The umbrella script's trainer table must have fixedpos ckpt dirs + per-seat
-# --dataloader.resume-consumed-samples. Delegate to it now.
-UMBRELLA_SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
-if [[ ! -f "$UMBRELLA_SCRIPT" ]]; then
-  echo "FATAL: umbrella script not found: $UMBRELLA_SCRIPT"
+RUNS="/flare/AuroraGPT/foremans/runs"
+SEQ_LEN=8192
+LBS=2; GAS=1
+TP=1; PP=1; CP=1
+OPTIMIZER="sophiag"
+LR="2.28e-5"
+DECAY_RATIO="0.0"
+MIN_LR_FACTOR="1.0"
+TRAIN_TOKENS="4673780159710"
+PPN="${NGPU_PER_HOST:-12}"
+IDLE_TIMEOUT="${IDLE_TIMEOUT:-1800}"
+CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
+
+# Validate PBS allocation
+[[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] || { echo "FATAL: PBS_NODEFILE missing"; exit 1; }
+TOTAL_AVAIL=$(wc -l < "$PBS_NODEFILE")
+# 1024+10 + 512+10 + 512+10 = 2078 but we request 2058 (shared spare pool via --spare-nodes auto is per-launch;
+# for umbrella we slice manually: need = sum(nnodes+spares) = (1024+10)+(512+10)+(512+10)=2078.
+# Boost threshold is >2048, so 2058 also passes but need must equal allocation; use SPARES=3 to fit 2058
+# or request 2078. We pin SPARES=10 and require select=2078; 2058 was the doc's spare-sharing estimate.
+# To keep >2048 eligibility, accept either 2058 or 2078 — compute need and compare.
+SPARES="${SPARES:-10}"
+NEED=$(( 1024 + SPARES + 512 + SPARES + 512 + SPARES ))
+echo "Nodes: need=$NEED available=$TOTAL_AVAIL spares/chain=$SPARES"
+if (( TOTAL_AVAIL < NEED )); then
+  echo "FATAL: allocation too small: have $TOTAL_AVAIL need $NEED (select=$NEED for this umbrella)"
   exit 1
 fi
 
-echo ""
-echo "Delegating to umbrella: $UMBRELLA_SCRIPT"
-echo "  20B-512: $CKPT_20B512_NEW @ resume $RESUME_SAMPLES_20B512"
-echo "  20B-256: $CKPT_20B256_NEW @ resume $RESUME_SAMPLES_20B256"
+# Slice dir
+JOBID="${PBS_JOBID%%.*}"; [[ -z "$JOBID" ]] && JOBID="nojob"
+MULTI_LOG_DIR="${PBS_O_WORKDIR:-$PWD}/logs/multi-autoretry-${JOBID}"
+mkdir -p "$MULTI_LOG_DIR"
+case "$MULTI_LOG_DIR" in /*) : ;; *) MULTI_LOG_DIR="$(cd "$MULTI_LOG_DIR" && pwd)" ;; esac
+echo "Logs under: $MULTI_LOG_DIR"
 
-# Export per-trainer resume so submit_agpt_multi_autoretry.sh can plumb it
-export CKPT_20B512_NEW CKPT_20B256_NEW CKPT_2B_RECLAIM
-export RESUME_SAMPLES_20B512 RESUME_SAMPLES_20B256
+# ---- Trainer table (REAL config names via CONFIG_SUFFIX pattern) ----
+# Config names follow submit_agpt_multi_autoretry.sh: agpt_${MODEL}${CONFIG_SUFFIX}
+# where MODEL=20b/2b and CONFIG_SUFFIX=_real (cos_sin RoPE). NOT agpt_20b_n512.
+#  Format: model|nnodes|port|workdir|ckpt|dfl_name|lr|init_load|decay|minlr|tokens|spares|resume_samples
+#  resume_samples is consumed via BLENDCORPUS_RESUME_CONSUMED_SAMPLES env (mpiexec --envall)
+TRAINERS=(
+  "20b|1024|29500|$REPO|${CKPT_20B512_NEW}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B512}"
+  "20b|512|29600|$REPO|${CKPT_20B256_NEW}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B256}"
+  "2b|512|29700|$REPO|${CKPT_2B_RECLAIM}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|0"
+)
 
-exec bash "$UMBRELLA_SCRIPT"
+# Slice nodefile into disjoint hostfiles
+offset=1
+declare -a T_SLICE
+for idx in "${!TRAINERS[@]}"; do
+  IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs <<< "${TRAINERS[$idx]}"
+  slice_count=$(( nnodes + _sp ))
+  slice_file="$MULTI_LOG_DIR/trainer-${idx}.hostfile"
+  sed -n "${offset},$((offset + slice_count - 1))p" "$PBS_NODEFILE" > "$slice_file"
+  got=$(wc -l < "$slice_file")
+  if (( got != slice_count )); then
+    echo "FATAL: trainer $idx sliced $got nodes expected $slice_count offset=$offset"
+    exit 1
+  fi
+  T_SLICE[$idx]="$slice_file"
+  offset=$(( offset + slice_count ))
+done
+# Non-overlap check
+dupes=$(cat "$MULTI_LOG_DIR"/trainer-*.hostfile 2>/dev/null | sort | uniq -d)
+if [[ -n "$dupes" ]]; then
+  echo "FATAL: slices overlap:"; echo "$dupes"; exit 1
+fi
+echo "Slices disjoint OK"
+
+# Resolved banner
+echo "============================================================"
+echo "  agpt boost umbrella (native auto-retry)  jobid=$JOBID"
+for idx in "${!TRAINERS[@]}"; do
+  IFS='|' read -r model nnodes port wd ckpt dfl lr init decay minlr tok sp rs <<< "${TRAINERS[$idx]}"
+  gbs=$(( nnodes * PPN * LBS * GAS / (TP * PP * CP) ))
+  echo "  trainer $idx: $model n=$nnodes gbs=$gbs port=$port ckpt=$ckpt resume_samples=$rs"
+done
+echo "============================================================"
+
+# ---- Launch function ----
+launch_trainer() {
+  local idx="$1"
+  IFS='|' read -r model nnodes port workdir ckpt dfl_name lr_val init_load decay_ratio min_lr_factor train_tokens spares resume_samples <<< "${TRAINERS[$idx]}"
+  local slice="${T_SLICE[$idx]}"
+  local nproc=$(( nnodes * PPN ))
+  local gbs=$(( nproc * LBS * GAS / (TP * PP * CP) ))
+  local training_steps
+  training_steps=$(( train_tokens / (gbs * SEQ_LEN) ))
+  local tokens_per_microbatch_per_dp_rank=$(( LBS * SEQ_LEN ))
+  local tokens_per_train_step=$(( gbs * SEQ_LEN ))
+  local console="$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}.console.log"
+  local dfl="torchtitan/experiments/ezpz/data-lists/aurora/${dfl_name}.txt"
+  local data_cache="${ckpt}/.cache/${dfl_name}/index-cache"
+
+  # Config name: agpt_${MODEL}${CONFIG_SUFFIX} — real names from submit_agpt_*_autoretry.sh
+  # CONFIG_SUFFIX=_real for cos_sin RoPE (production default)
+  local config_suffix="_real"
+  local config_name="agpt_${model}${config_suffix}"
+
+  # Resume guard: if this trainer has a resume position, validate GBS alignment
+  if [[ "$resume_samples" != "0" && -n "$resume_samples" ]]; then
+    if (( resume_samples % gbs != 0 )); then
+      echo "FATAL: trainer $idx resume_samples $resume_samples not aligned to GBS $gbs" >&2
+      exit 2
+    fi
+  fi
+
+  local xtra=()
+  [[ -n "$init_load" ]] && xtra+=(--checkpoint.initial-load-path="$init_load")
+  xtra+=(--lr-scheduler.decay-ratio="$decay_ratio" --lr-scheduler.min-lr-factor="$min_lr_factor" --lr-scheduler.warmup-steps=20)
+
+  # Per-trainer resume: BLENDCORPUS_RESUME_CONSUMED_SAMPLES env var propagated
+  # via mpiexec --envall is the PRODUCTION path — the pinned launcher cannot
+  # pass new CLI flags, so --dataloader.resume-consumed-samples would be
+  # rejected as "Unrecognized options" on that build. Env var only.
+
+  (
+    cd "$workdir" || { echo "cd failed: $workdir"; exit 97; }
+    # Export per-trainer resume position — mpiexec --envall carries it to all ranks
+    if [[ "$resume_samples" != "0" && -n "$resume_samples" ]]; then
+      export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$resume_samples"
+    else
+      unset BLENDCORPUS_RESUME_CONSUMED_SAMPLES || true
+    fi
+    export MASTER_PORT="$port"; unset MASTER_ADDR
+    # Use node-local venv from broadcast
+    if [[ -f "/tmp/.venv/bin/ezpz" ]]; then
+      VENV_BIN="/tmp/.venv"
+    else
+      VENV_BIN=".venv"
+    fi
+    export VIRTUAL_ENV="$VENV_BIN"
+    export PATH="$VENV_BIN/bin:$PATH"
+    hash -r
+    "$VENV_BIN/bin/ezpz" launch \
+      --nproc "$nproc" \
+      --nproc_per_node "$PPN" \
+      --hostfile "$slice" \
+      --auto-retry \
+      --spare-nodes "$spares" \
+      --timeout "$IDLE_TIMEOUT" \
+      -- \
+      "$VENV_BIN/bin/python" -m torchtitan.experiments.ezpz.train \
+      --module=ezpz.agpt \
+      --config="$config_name" \
+      --checkpoint.enable \
+      --checkpoint.folder="$ckpt" \
+      --checkpoint.interval="$CKPT_INTERVAL" \
+      --checkpoint.keep-latest-k=0 \
+      --checkpoint.no-last-save-model-only \
+      --checkpoint.async-mode=disabled \
+      --dataloader.dataset=blendcorpus \
+      --dataloader.dataset-path="$dfl" \
+      --dataloader.data-cache-path="$data_cache" \
+      --validator.enable --validator.freq=100 --validator.steps=10 \
+      --validator.dataloader.dataset-path="$dfl" --validator.dataloader.data-cache-path="$data_cache" \
+      "${xtra[@]}" \
+      --optimizer="$OPTIMIZER" \
+      --optimizer.lr="$lr_val" \
+      --training.num-tokens-per-microbatch-per-dp-rank="$tokens_per_microbatch_per_dp_rank" \
+      --training.num-tokens-per-train-step="$tokens_per_train_step" \
+      --training.max-context-length="$SEQ_LEN" \
+      --training.steps="$training_steps"
+  ) > "$console" 2>&1 &
+  echo $!
+}
+
+# ---- Supervise (with relaunch) ----
+JOB_START_EPOCH=$(date +%s)
+WALLTIME_SECS=43200
+if [[ -n "${PBS_JOBID:-}" ]] && command -v qstat >/dev/null 2>&1; then
+  _wt=$(qstat -f "$PBS_JOBID" 2>/dev/null | tr -d '\n' | grep -oE 'Resource_List.walltime = [0-9:]+' | head -1 | awk '{print $3}')
+  if [[ "$_wt" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+    WALLTIME_SECS=$(( ${BASH_REMATCH[1]}*3600 + ${BASH_REMATCH[2]}*60 + ${BASH_REMATCH[3]} ))
+  fi
+fi
+JOB_DEADLINE=$(( JOB_START_EPOCH + WALLTIME_SECS ))
+secs_left() { echo $(( JOB_DEADLINE - $(date +%s) )); }
+
+declare -a PIDS RC SUP_PIDS
+LAUNCHER_RAN_FILE="$MULTI_LOG_DIR/.launcher_ran"
+
+supervise_trainer() {
+  local idx="$1" attempt=1 rc=0 t0 dt left quick=0
+  SEAT_RELAUNCH="${SEAT_RELAUNCH:-1}"
+  SEAT_RELAUNCH_MIN_LEFT="${SEAT_RELAUNCH_MIN_LEFT:-2700}"
+  SEAT_MIN_HEALTHY_SECS="${SEAT_MIN_HEALTHY_SECS:-600}"
+  SEAT_MAX_QUICK_DEATHS="${SEAT_MAX_QUICK_DEATHS:-2}"
+  while :; do
+    t0=$(date +%s)
+    pid=$(launch_trainer "$idx")
+    PIDS[$idx]=$pid
+    touch "$LAUNCHER_RAN_FILE"
+    wait "$pid"; rc=$?
+    dt=$(( $(date +%s) - t0 ))
+    echo "[boost $(date +%H:%M:%S)] trainer $idx attempt $attempt finished rc=$rc after ${dt}s"
+    RC[$idx]=$rc
+    (( rc == 0 )) && { echo "[boost] trainer $idx complete rc=0 — not relaunching"; return 0; }
+    [[ "$SEAT_RELAUNCH" != "1" ]] && return "$rc"
+    if (( dt < SEAT_MIN_HEALTHY_SECS )); then
+      quick=$(( quick + 1 ))
+      if (( quick >= SEAT_MAX_QUICK_DEATHS )); then
+        echo "[boost] trainer $idx $quick quick deaths — seat broken, giving up"
+        return "$rc"
+      fi
+    else
+      quick=0
+    fi
+    left=$(secs_left)
+    if (( left < SEAT_RELAUNCH_MIN_LEFT )); then
+      echo "[boost] trainer $idx ${left}s left (< ${SEAT_RELAUNCH_MIN_LEFT}s) — not relaunching"
+      return "$rc"
+    fi
+    attempt=$(( attempt + 1 ))
+    echo "[boost] trainer $idx relaunching attempt $attempt ${left}s left"
+    sleep 10
+  done
+}
+
+for idx in "${!TRAINERS[@]}"; do
+  supervise_trainer "$idx" &
+  SUP_PIDS[$idx]=$!
+  sleep "${LAUNCH_STAGGER:-20}"
+done
+echo "[boost] all ${#TRAINERS[@]} trainers under supervision; waiting..."
+
+fails=0
+for idx in "${!TRAINERS[@]}"; do
+  wait "${SUP_PIDS[$idx]}"; RC[$idx]=$?
+  (( RC[$idx] == 0 )) || fails=$(( fails + 1 ))
+  echo "[boost] trainer $idx supervisor exited rc=${RC[$idx]}"
+done
+
+# Hard fail if launcher never ran (no silent echo+exit 0)
+if [[ ! -f "$LAUNCHER_RAN_FILE" ]]; then
+  echo "FATAL: launcher never executed — no trainer was started (PBS_NODEFILE or slicing failure?)"
+  exit 99
+fi
+
+echo "============================================================"
+echo "  boost umbrella summary (jobid=$JOBID)"
+echo "============================================================"
+for idx in "${!TRAINERS[@]}"; do
+  status="OK"; (( RC[idx] == 0 )) || status="FAIL(${RC[idx]})"
+  IFS='|' read -r model nnodes _port _wd ckpt _dfl _lr _init _decay _minlr _tok _sp _rs <<< "${TRAINERS[$idx]}"
+  printf '  trainer %d: %-4s n=%-4s %-10s ckpt=%s resume=%s\n' "$idx" "$model" "$nnodes" "$status" "$ckpt" "$_rs"
+  printf '             log: %s\n' "$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}.console.log"
+done
+echo "  failed: $fails / ${#TRAINERS[@]}"
+echo "============================================================"
+exit "$fails"
