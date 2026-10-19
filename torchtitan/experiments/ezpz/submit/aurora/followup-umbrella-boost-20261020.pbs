@@ -55,11 +55,11 @@ echo "Resume samples OK: 20B512=${RESUME_SAMPLES_20B512} (GBS 12288)  20B256=${R
 echo "  tokens: 20B512=$(( RESUME_SAMPLES_20B512 * 8192 ))  20B256=$(( RESUME_SAMPLES_20B256 * 8192 ))"
 
 # ── Checkpoint dirs (fork, don't overwrite) ────────────────────────────
-CKPT_20B512_SRC="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288"
-CKPT_20B512_NEW="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
-CKPT_20B256_SRC="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
-CKPT_20B256_NEW="checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-n256-fixedpos"
-CKPT_2B_RECLAIM="checkpoints/agpt-2b-v2-512-reclaim-20261020"
+CKPT_20B512_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
+CKPT_20B512_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
+CKPT_20B256_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+CKPT_20B256_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-fixedpos"
+CKPT_2B_RECLAIM="outputs/checkpoints/agpt-2b-v2-512-reclaim-20261020"
 
 # Capture source mtimes BEFORE any fork operation
 declare -A SRC_MTIME_BEFORE
