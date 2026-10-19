@@ -2,6 +2,12 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-18 (Sunspot/Aurora/Polaris) -- MoE 4-machine verification closeout
+
+Hermes session `sunspot-tt-ezpz` (exported as `sunspot-tt-ezpz.md`, 17,534 lines) closed the sync-84 MoE/sync merge verification across three XPU/CUDA clusters: `agpt_debugmodel` and `moe_debugmodel` each ran `rc=0` on Sunspot `workq` (`xpu-torch214`/`2.14.0+xpu`, jobs `12478170`/`12478171`), Aurora `next-eval` (`xpu-torch215`/`2.15.0.dev20260915+xpu`, `8837281` etc.), and Polaris `debug` (`sync84-torch214-cu`/`2.14.0+cu130`). Perlmutter blocked on `no corpus`. This was **not** a Monarch/RL multi-node gate — RL docs remain on the `2026-09-25` Sunspot two-host `12478711` contract; see `production/rl/monarch.md`. For the Sonic MoE trial provenance, see `experiments/moe-expert-backends-4machine.md` and `Sync 84` in `upstream-sync.md:320`.
+
+---
+
 ## 2026-10-15 (Aurora) -- BlendCorpus restarts replay the data stream
 
 Every checkpoint of the 20B 256N and 512N chains stores

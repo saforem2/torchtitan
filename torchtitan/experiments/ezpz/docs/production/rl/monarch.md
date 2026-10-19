@@ -1,6 +1,6 @@
 # Production RL with Monarch, TorchStore, and vLLM on XPU
 
-**Current production runbook. Last updated: 2026-10-01.**
+**Current production runbook. Last updated: 2026-10-18.** No new RL multi-node gate since `2026-09-25` Sunspot two-host `12478711`; `upstream-sync.md:4` (`5a7a622f16`) verified MoE/sync-merge, not RL.
 
 > [!IMPORTANT]
 > This page is the canonical operator guide for the current upstream-style

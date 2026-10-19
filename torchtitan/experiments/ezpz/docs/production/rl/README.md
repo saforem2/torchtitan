@@ -7,7 +7,7 @@
 > `next-eval` runtime/preflight requirements. The TRL and July-era pages below
 > remain available for historical reproduction but are not the default runbook.
 
-> **Last updated: 2026-09-25.** The newest production-path validation is the
+> **Last updated: 2026-10-18.** The newest production-path validation is the
 > two-host Monarch/TorchStore/vLLM job `12478711`. The result proves runtime
 > integration, not model-quality improvement. Historical result tables remain
 > below for context.
