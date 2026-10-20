@@ -14,8 +14,8 @@ set -o pipefail
 ulimit -c 0
 
 # ── Source identity guard ──────────────────────────────────────────────
-EXPECTED_PARENT="d98e77797d98754bafd73344978a885a21915fbf"
-EXPECTED_SCRIPT_SHA="6e69e98d8a4887d735860ec004607ae0a64bfa26f10893b71a8d46dcabb5136b"
+EXPECTED_PARENT="a0a4ed9b3c"
+EXPECTED_SCRIPT_SHA="REPLACE_AFTER_FIRST_WRITE"
 
 REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
 cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
