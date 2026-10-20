@@ -20,6 +20,7 @@ pytest.importorskip("verifiers")
 
 from aiohttp import ClientSession
 
+from torchtitan.rl.actors.system import ActorSystem
 from torchtitan.rl.examples.verifiers.data import VerifiersTaskSample
 from torchtitan.rl.examples.verifiers.generation_server import (
     _parse_sampling_config,
@@ -32,7 +33,7 @@ from torchtitan.rl.examples.verifiers.rollouter import (
     verifiers_rollout_logs,
     VerifiersRollouter,
 )
-from torchtitan.rl.generator.generator import SamplingConfig
+from torchtitan.rl.generator.types import SamplingConfig
 from torchtitan.rl.observability import metrics as m
 from torchtitan.rl.rollout.types import Completion, RolloutStatus
 from verifiers.v1.errors import model_error, OverlongPromptError
@@ -250,6 +251,7 @@ def test_verifiers_rollouter_sends_muse_glimmer_renderer_config(monkeypatch) -> 
 
     asyncio.run(
         rollouter.setup_async(
+            actor_system=cast(ActorSystem, None),
             tokenizer_config=cast(HuggingFaceTokenizer.Config, None),
             renderer_config=config,
             hf_assets_path="muse-checkpoint",

@@ -4,20 +4,25 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import dataclasses
+import importlib
+
 import pytest
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FSDPModule, fully_shard
+
 from torchtitan.config.parallelism import ParallelismConfig
-from torchtitan.models.common.attention import InnerAttention
+from torchtitan.models.common.attention import InnerAttention, MLAAttention
 from torchtitan.models.deepseek_v3 import build_model_config as build_deepseek_config
-from torchtitan.models.kimi_k3 import build_model_config as build_kimi_config
+from torchtitan.models.kimi_k2_7 import build_model_config as build_kimi_k2_7_config
+from torchtitan.models.kimi_k3 import build_model_config as build_kimi_k3_config
 from torchtitan.models.qwen3 import build_model_config as build_qwen3_config
 from torchtitan.models.qwen3_5 import build_model_config
 from torchtitan.rl.generator.vllm import model_wrapper
-from torchtitan.rl.generator.vllm.attention import VLLMAttentionWrapper
+from torchtitan.rl.generator.vllm.attention import VLLMInnerAttention
 from torchtitan.rl.generator.vllm.model_wrapper import (
     _replace_vllm_layer_configs,
     VLLMModelWrapper,
@@ -25,9 +30,37 @@ from torchtitan.rl.generator.vllm.model_wrapper import (
 
 
 @pytest.mark.parametrize(
+    "model_name, expected_scale",
+    [
+        ("gpt_oss", 0.22665755425493697),
+        ("qwen3", None),
+    ],
+)
+def test_vllm_replacement_preserves_attention_scale(model_name, expected_scale):
+    """Preserve YaRN scaling as well as the backend's default scale."""
+    model_config = importlib.import_module(
+        f"torchtitan.models.{model_name}"
+    ).build_model_config("debugmodel", seq_len=128, parallelism=ParallelismConfig())
+    vllm_config = _replace_vllm_layer_configs(model_config)
+
+    for model_layer, vllm_layer in zip(
+        model_config.layers, vllm_config.layers, strict=True
+    ):
+        attention_config = model_layer.attention
+        scale = vllm_layer.attention.inner_attention.scale
+        if expected_scale is None:
+            assert scale is None
+        else:
+            assert scale == pytest.approx(expected_scale)
+            with torch.device("meta"):
+                attention = attention_config.build()
+            assert scale == attention.softmax_scale
+
+
+@pytest.mark.parametrize(
     "build_config",
-    [build_qwen3_config, build_deepseek_config, build_model_config, build_kimi_config],
-    ids=["qwen3", "deepseek_v3", "qwen3_5", "kimi_k3"],
+    [build_qwen3_config, build_model_config],
+    ids=["qwen3", "qwen3_5"],
 )
 def test_vllm_replacement_preserves_full_attention_selection(build_config) -> None:
     model_config = build_config("debugmodel", parallelism=ParallelismConfig())
@@ -59,7 +92,7 @@ def test_vllm_replacement_preserves_full_attention_selection(build_config) -> No
 
 @pytest.mark.parametrize("sliding_window_size", [None, 128])
 def test_vllm_attention_classifies_sliding_window(sliding_window_size) -> None:
-    config = VLLMAttentionWrapper.Config(
+    config = VLLMInnerAttention.Config(
         hidden_size=256,
         num_heads=4,
         num_kv_heads=2,
@@ -70,7 +103,7 @@ def test_vllm_attention_classifies_sliding_window(sliding_window_size) -> None:
 
 
 @pytest.mark.parametrize(
-    "build_config", [build_model_config, build_kimi_config], ids=["gdn", "kda"]
+    "build_config", [build_model_config, build_kimi_k3_config], ids=["gdn", "kda"]
 )
 def test_vllm_replacement_preserves_attention_sharding(build_config) -> None:
     """Pass the trainer attention's sharding config through unchanged."""
@@ -81,6 +114,16 @@ def test_vllm_replacement_preserves_attention_sharding(build_config) -> None:
             tensor_parallel_degree=2, enable_sequence_parallel=True
         ),
     )
+    # Exercise KDA independently of the unsupported MLA layers in Kimi K3.
+    model_config = dataclasses.replace(
+        model_config,
+        layers=[
+            layer
+            for layer in model_config.layers
+            if not isinstance(layer.attention.inner_attention, MLAAttention.Config)
+        ],
+    )
+    assert model_config.layers
     vllm_config = _replace_vllm_layer_configs(model_config)
 
     for model_layer, vllm_layer in zip(
@@ -182,3 +225,25 @@ def test_load_state_dict_allocates_one_fsdp_group_at_a_time(
             assert param.equal(new_state_dict[name].to_local()), name
     finally:
         dist.destroy_process_group()
+
+
+@pytest.mark.parametrize(
+    ("build_config", "attn_backend"),
+    [
+        pytest.param(build_deepseek_config, "flex", id="deepseek_v3-flex"),
+        pytest.param(build_deepseek_config, "varlen", id="deepseek_v3-varlen"),
+        pytest.param(build_kimi_k2_7_config, "flex", id="kimi_k2_7-flex"),
+        pytest.param(build_kimi_k3_config, "flex", id="kimi_k3-flex"),
+        pytest.param(build_kimi_k3_config, "varlen", id="kimi_k3-varlen"),
+    ],
+)
+def test_vllm_rejects_mla(build_config, attn_backend) -> None:
+    model_config = build_config(
+        "debugmodel",
+        parallelism=ParallelismConfig(),
+        attn_backend=attn_backend,
+        seq_len=128,
+    )
+
+    with pytest.raises(ValueError, match="MLA attention is not supported"):
+        _replace_vllm_layer_configs(model_config)

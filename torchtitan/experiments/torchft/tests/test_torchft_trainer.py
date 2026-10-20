@@ -15,6 +15,7 @@ import torch
 
 import torchtitan.experiments.torchft.trainer as ft
 from torchtitan.components.loss import CrossEntropyLoss
+from torchtitan.components.validator import Validator
 from torchtitan.config import override
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import LoRATransform
@@ -22,6 +23,9 @@ from torchtitan.distributed import DistributedTopology, ParallelismContext
 from torchtitan.models.common.decoder import Decoder
 from torchtitan.models.common.feed_forward import DenseFeedForward
 from torchtitan.models.llama3 import build_model_config
+from torchtitan.models.muse_glimmer import (
+    build_model_config as build_muse_glimmer_config,
+)
 from torchtitan.training_engine import ForwardBackwardResult, TrainingEngine
 
 
@@ -139,58 +143,34 @@ def test_ft_trainer_composes_specialized_training_engine() -> None:
     assert issubclass(ft.FaultTolerantTrainingEngine, TrainingEngine)
 
 
-def test_ft_trainer_exposes_engine_owned_state() -> None:
-    optimizers = object()
-    lr_schedulers = object()
-    parallelism_context = object()
-    trainer = object.__new__(ft.FaultTolerantTrainer)
-    trainer.engine = SimpleNamespace(
-        optim=SimpleNamespace(
-            optimizers=optimizers,
-            lr_schedulers=lr_schedulers,
-        ),
-        model_parts=[object()],
-        checkpointer=object(),
-        device=torch.device("cpu"),
-        parallelism_context=parallelism_context,
-        num_completed_steps=7,
-    )
-
-    assert trainer.optimizers is optimizers
-    assert trainer.lr_schedulers is lr_schedulers
-    assert trainer.model_parts is trainer.engine.model_parts
-    assert trainer.checkpointer is trainer.engine.checkpointer
-    assert trainer.device is trainer.engine.device
-    assert trainer.parallelism_context is parallelism_context
-    assert trainer.step == 7
-    trainer.step = 8
-    assert trainer.engine.num_completed_steps == 8
-    assert trainer.batch_generator.__func__ is trainer.microbatch_generator.__func__
-
-
-def test_ft_trainer_uses_engine_cls_hook() -> None:
-    built = []
-
-    class CustomEngine(ft.FaultTolerantTrainingEngine):
-        def __init__(self, *args, **kwargs):
-            built.append(self)
-            raise RuntimeError("engine hook used")
-
-    class CustomTrainer(ft.FaultTolerantTrainer):
-        engine_cls = CustomEngine
-
+def test_ft_accepts_validation_with_training_cuda_graphs():
+    parallelism = ParallelismConfig()
     config = ft.FaultTolerantTrainer.Config(
-        model=build_model_config(
-            "debugmodel", seq_len=2048, parallelism=ParallelismConfig()
+        model=build_muse_glimmer_config(
+            "debugmodel", seq_len=2048, attn_backend="flex", parallelism=parallelism
         ),
         tokenizer=None,
         loss=CrossEntropyLoss.Config(),
+        parallelism=parallelism,
     )
+    config.validator = Validator.Config(steps=1)
+    config.training.disable_cuda_graphs = False
+    config.__post_init__()
 
-    with pytest.raises(RuntimeError, match="engine hook used"):
-        CustomTrainer(config)
 
-    assert type(built[0]) is CustomEngine
+def test_ft_accepts_eager_validation():
+    parallelism = ParallelismConfig(pipeline_parallel_degree=2)
+    config = ft.FaultTolerantTrainer.Config(
+        model=build_muse_glimmer_config(
+            "debugmodel", seq_len=2048, attn_backend="flex", parallelism=parallelism
+        ),
+        tokenizer=None,
+        loss=CrossEntropyLoss.Config(),
+        parallelism=parallelism,
+    )
+    config.training.disable_cuda_graphs = True
+    config.validator = Validator.Config(steps=1)
+    config.__post_init__()
 
 
 def test_ft_rejects_cuda_graphed_fsdp_gradient_accumulation(monkeypatch) -> None:
@@ -220,7 +200,7 @@ def test_ft_rejects_cuda_graphed_fsdp_gradient_accumulation(monkeypatch) -> None
     )
 
     monkeypatch.setattr(
-        ft.FaultTolerantTrainer, "engine_cls", lambda *args, **kwargs: engine
+        ft, "FaultTolerantTrainingEngine", lambda *args, **kwargs: engine
     )
     monkeypatch.setattr(
         type(config.dataloader),
@@ -334,38 +314,3 @@ def test_ft_engine_installs_all_reduce_hook_after_model_initialization() -> None
     engine.ft_manager.maybe_set_all_reduce_hook.assert_called_once_with(
         engine.model_parts
     )
-
-
-@pytest.mark.parametrize("ft_aware", [False, True])
-def test_ft_engine_passes_manager_only_to_ft_checkpointer(ft_aware) -> None:
-    engine = object.__new__(ft.FaultTolerantTrainingEngine)
-    config = MagicMock()
-    checkpointer_config = (
-        ft.TorchFTCheckpointManager.Config() if ft_aware else MagicMock(spec=["build"])
-    )
-    config.checkpointer = checkpointer_config
-    engine.config = config
-    engine.model_parts = [MagicMock()]
-    engine.optim = SimpleNamespace(  # type: ignore[assignment]
-        optimizers=MagicMock(),
-        lr_schedulers=MagicMock(),
-        ema=MagicMock(),
-    )
-    engine.output_dir = "/tmp/output"
-    engine.ft_manager = MagicMock()
-    build = MagicMock(return_value="checkpointer")
-    build_target = (
-        ft.TorchFTCheckpointManager.Config if ft_aware else checkpointer_config
-    )
-
-    with patch.object(build_target, "build", build):
-        ft.FaultTolerantTrainingEngine._initialize_checkpointer(
-            engine,
-            extra_states=None,
-            sd_adapter=MagicMock(),
-        )
-
-    kwargs = build.call_args.kwargs
-    assert ("ft_manager" in kwargs) is ft_aware
-    if ft_aware:
-        assert kwargs["ft_manager"] is engine.ft_manager

@@ -109,7 +109,7 @@ def build_minimal_trainer(
     engine.ntokens_seen = 0
     engine.num_completed_steps = 0
     engine.sdc_replayer = None
-    engine._cuda_graph_per_accumulation_group_enabled = False
+    engine._cuda_graph_per_microbatch_group_enabled = False
     engine.garbage_collector = SimpleNamespace(run=lambda _step: False)
     engine.optim = SimpleNamespace(zero_grad=model.zero_grad)
     engine.loss_metrics = {}
@@ -222,7 +222,7 @@ def build_minimal_trainer(
                     accumulated_loss = loss.clone()
                 else:
                     accumulated_loss.add_(loss)
-                loss_metrics.append({})
+                loss_metrics.append([{} for _ in model_kwargs])
 
             assert accumulated_loss is not None
             return ForwardBackwardResult(accumulated_loss, loss_metrics)

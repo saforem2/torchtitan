@@ -105,6 +105,11 @@ class Attention(Module):
         n_heads: int
         inner_attention: InnerAttention.Config
 
+        @property
+        def softmax_scale(self) -> float | None:
+            """None selects the attention backend's default scale."""
+            return None
+
         def __post_init__(self):
             assert self.n_heads > 0, "n_heads must be > 0"
 
@@ -503,10 +508,14 @@ class FlexInnerAttention(InnerAttention):
         "triton.cudagraphs": False,
     }
 
+    # fullgraph=True: a graph break or a 17th graph raises, instead of silently running flex eagerly.
+    # recompile_limit=16: one compile serves every layer; Muse Spark needs 10 graphs (default 8).
     # pyrefly: ignore[no-matching-overload]
     _compiled_flex_attn: ClassVar[Callable] = torch.compile(
         flex_attention,
+        fullgraph=True,
         options=inductor_configs,
+        recompile_limit=16,
     )
 
     def __init__(self, config: Config) -> None:

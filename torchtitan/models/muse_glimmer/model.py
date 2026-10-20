@@ -48,9 +48,12 @@ from torchtitan.models.common.multimodal import (
 )
 from torchtitan.models.common.nn_modules import RMSNorm
 from torchtitan.models.common.vision_encoder_sharding import multimodal_input_sharding
-from .state_dict_adapter import MuseGlimmerStateDictAdapter
 
-from .vision_encoder import MuseGlimmerVisionAdapter, MuseGlimmerVisionEncoder
+from torchtitan.models.muse_spark.vision_encoder import (
+    MuseSparkNaViTAdapter,
+    NaViTEncoder,
+)
+from .state_dict_adapter import MuseGlimmerStateDictAdapter
 
 
 class RMSGainCenterNorm(RMSNorm):
@@ -69,9 +72,9 @@ class RMSGainCenterNorm(RMSNorm):
         super().__init__(config)
         self.gain_center = config.gain_center
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         w: torch.Tensor = self.weight + self.gain_center
-        return F.rms_norm(x, self.normalized_shape, w, self.eps)
+        return F.rms_norm(input, self.normalized_shape, w, self.eps)
 
 
 class Attention(GQAttention):
@@ -289,7 +292,7 @@ class MuseGlimmerModel(MultimodalModel):
         dim: int = 6656
         vocab_size: int = 202048
         local_compile_regions: list[str] = field(
-            default_factory=lambda: ["loss", "fused_binary_activation"]
+            default_factory=lambda: ["loss", "fused_binary_activation", "rope"]
         )
         # Narrows the base Decoder.Config.tok_embeddings (Embedding.Config) to the
         # bundled embedding+norm unit whose .embedding/.norm children carry the sharding.
@@ -306,8 +309,8 @@ class MuseGlimmerModel(MultimodalModel):
         # ``pixel_values`` + ``grid_thw``), mirroring qwen3_5's
         # ``Qwen35Model.vision_encoder``. The adapter output dim must match
         # ``vision_projection`` in_features. Both default to None (text-only model).
-        vision_encoder: MuseGlimmerVisionEncoder.Config | None = None
-        vision_adapter: MuseGlimmerVisionAdapter.Config | None = None
+        vision_encoder: NaViTEncoder.Config | None = None
+        vision_adapter: MuseSparkNaViTAdapter.Config | None = None
 
         def get_nparams_and_flops(
             self, model: nn.Module, seq_len: int
@@ -372,9 +375,12 @@ class MuseGlimmerModel(MultimodalModel):
         activation_remat: ActivationRematConfig | None,
         dump_folder: str,
     ) -> MuseGlimmerModel:
-        if self.vision_encoder is not None and parallelism_context.tp_enabled:
-            assert self.vision_encoder.num_heads % parallelism_context.tp == 0, (
-                f"vision num_heads ({self.vision_encoder.num_heads}) must be "
+        vision_encoder_config = cast(
+            MuseGlimmerModel.Config, self.config
+        ).vision_encoder
+        if vision_encoder_config is not None and parallelism_context.tp_enabled:
+            assert vision_encoder_config.num_heads % parallelism_context.tp == 0, (
+                f"vision num_heads ({vision_encoder_config.num_heads}) must be "
                 f"divisible by TP degree ({parallelism_context.tp})"
             )
 
@@ -396,11 +402,12 @@ class MuseGlimmerModel(MultimodalModel):
         max_num_documents: int | None = None,
         max_context_length: int | None = None,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any], dict[str, Any]]:
         """Build first-stage vision-bank indices and masks, then shard the batch."""
         del kwargs
         from .sharding import vision_bank_indices_placement
 
+        loss_kwargs = input_dict.pop("loss_kwargs", {})
         pixel_values = input_dict.get("pixel_values")
         grid_thw = input_dict.get("grid_thw")
         pixel_values_videos = input_dict.get("pixel_values_videos")
@@ -453,6 +460,8 @@ class MuseGlimmerModel(MultimodalModel):
         input_shardings["vision_bank_indices_T"] = vision_bank_indices_placement(
             enable_sp=parallelism.enable_sequence_parallel
         )
+        input_shardings.update(dict.fromkeys(loss_kwargs, input_shardings["labels"]))
+        input_dict.update(loss_kwargs)
         if parallelism_context.cp_enabled:
             input_dict = self._cp_shard(
                 input_dict,
@@ -475,9 +484,10 @@ class MuseGlimmerModel(MultimodalModel):
             parallelism_context, input_dict, input_shardings
         )
 
+        loss_kwargs = {name: input_dict.pop(name) for name in loss_kwargs}
         inputs = input_dict.pop("input")
         labels = input_dict.pop("labels")
-        return inputs, labels, input_dict
+        return inputs, labels, input_dict, loss_kwargs
 
     def _get_vision_features(
         self,
@@ -493,6 +503,15 @@ class MuseGlimmerModel(MultimodalModel):
         assert self.vision_projection is not None
         assert self.perception_emb_norm is not None
         assert pixel_values is not None and grid_thw is not None
+        image_grids = grid_thw.tolist()
+        if any(temporal != 1 for temporal, _, _ in image_grids):
+            raise ValueError("Muse Glimmer image inputs require grid_thw[:, 0] == 1")
+        num_patches = sum(grid_h * grid_w for _, grid_h, grid_w in image_grids)
+        if num_patches != pixel_values.shape[0]:
+            raise ValueError(
+                f"grid_thw describes {num_patches} patches, but pixel_values contains "
+                f"{pixel_values.shape[0]}"
+            )
         vision_features_VD = self.vision_adapter(
             self.vision_encoder(pixel_values, grid_thw=grid_thw)
         )
