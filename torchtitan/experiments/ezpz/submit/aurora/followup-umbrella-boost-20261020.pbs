@@ -15,7 +15,7 @@ ulimit -c 0
 
 # ── Source identity guard ──────────────────────────────────────────────
 EXPECTED_PARENT="a0a4ed9b3c"
-EXPECTED_SCRIPT_SHA="REPLACE_AFTER_FIRST_WRITE"
+EXPECTED_SCRIPT_SHA="a426ea55f5f61820d227d5de869287509c685ae38e197fe08ce177e09736f892"
 
 REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
 cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
