@@ -7,10 +7,8 @@
 > `next-eval` runtime/preflight requirements. The TRL and July-era pages below
 > remain available for historical reproduction but are not the default runbook.
 
-> **Last updated: 2026-10-18.** The newest production-path validation is the
-> two-host Monarch/TorchStore/vLLM job `12478711`. The result proves runtime
-> integration, not model-quality improvement. Historical result tables remain
-> below for context.
+> **Last updated: 2026-10-20.** The newest production-path validation remains the
+> two-host Monarch/TorchStore/vLLM job `12478711` (Sunspot). Guoqiong's Aurora trial `rl/xpu_trial/` (PR #69 → `66744493dc`, `xpu-all` pins at `a769b21418`) is merged but not yet gated — first `prod`-queue smokes `xpu-smoke-sunspot`/`aurora` are queued. Historical result tables remain below for context.
 
 > [!IMPORTANT]
 > **For the 2B model's post-training results, start at
@@ -57,7 +55,7 @@ production runbook linked above.
 
 | # | Path | Framework | Generation | Entry point | venv | Status | Doc |
 |---|------|-----------|------------|-------------|------|--------|-----|
-| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | current machine-specific runtime | **Sunspot two-host validated; Aurora next-eval gate pending** | [`monarch.md`](monarch.md) |
+| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL + Guoqiong `rl/xpu_trial/` | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | `rl/xpu_trial` on `prod` | **Sunspot two-host validated; Aurora `prod` gate pending (xpu-smoke queued)** | [`monarch.md`](monarch.md) + [`rl/xpu_trial/README.md`](../../rl/xpu_trial/README.md) |
 | A2 | TRL + vLLM-server | TRL `GRPOTrainer` | `trl vllm-serve` (on-policy, weight-sync) | `rl.train_grpo` `--use_vllm --vllm_mode server` | `rl-vllm` | **deprecated for new production; historical validation retained** | [`trl.md`](trl.md) |
 | A1 | TRL + `.generate()` | TRL `GRPOTrainer` | HF `.generate()` per-rank | `rl.train_grpo` (no `--use_vllm`) | `rl-vllm` | works (slow fallback) | [`trl.md`](trl.md) |
 | B (historical) | Monarch + TorchStore + vLLM | older vendored bring-up | vLLM (Monarch actor) | `rl.train_upstream` | `rl-grpo-lora` | one-host/two-tile historical result | [`monarch.md`](monarch.md) |
@@ -68,8 +66,7 @@ A1 and A2 are the same TRL `GRPOTrainer` with two generation backends (toggle
 ### Which to use
 - **Production / multi-host GRPO today:** follow
   [`monarch.md`](monarch.md). The committed
-  Sunspot launcher is the validated reference; Aurora `next-eval` requires the
-  separate runtime and hardware gate documented there.
+  Sunspot launcher is the validated reference; Aurora now uses `prod` (routes to `small`/`medium`/`large`) with the `rl/xpu_trial/` Qwen3-0.6B launcher — see `RECIPE_PORT.md` for `DP_REPLICATE`/`_gtp` semantics and the smoke gate below.
 - **Historical TRL reproduction:** use [`trl.md`](trl.md) only when explicitly
   reproducing the legacy server-mode path.
 - **Fast local sanity check with no server: TRL `.generate()` (A1)** -- same entry
@@ -84,8 +81,7 @@ A1 and A2 are the same TRL `GRPOTrainer` with two generation backends (toggle
 qsub -v EXPECTED_COMMIT="$(git rev-parse HEAD)" \
   torchtitan/experiments/ezpz/rl/scripts/grpo/agpt2b_multihost_torchstore_validate.pbs
 
-# Aurora next-eval uses a different runtime/archive contract. Do not port this
-# PBS header or venv path verbatim; follow monarch.md.
+# Aurora now uses prod (routes to small/medium/large); legacy next-eval docs are historical. Do not port that PBS header or venv path verbatim; follow monarch.md.
 ```
 
 ## Tasks (TRL path)
