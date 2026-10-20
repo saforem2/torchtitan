@@ -132,7 +132,10 @@ def _agpt_grpo_config(
         "coordinate_descent_tuning": False,
     }
     FlexInnerAttention._compiled_flex_attn = torch.compile(
-        flex_attention, options=FlexInnerAttention.inductor_configs
+        flex_attention,
+        fullgraph=True,
+        options=FlexInnerAttention.inductor_configs,
+        recompile_limit=16,
     )
     trainer_parallelism = ParallelismConfig(
         data_parallel_shard_degree=1, tensor_parallel_degree=1

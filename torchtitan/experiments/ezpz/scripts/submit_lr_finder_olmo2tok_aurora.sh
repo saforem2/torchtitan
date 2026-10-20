@@ -4,8 +4,11 @@
 #PBS -l walltime=06:00:00
 #PBS -l filesystems=home:flare
 #PBS -l select=64
-#PBS -q next-eval
+#PBS -q prod
 #PBS -j oe
+# 2026-10-20: next-eval execution queue has 0 eligible nodes (Can Never Run:
+# at_queue=next-eval, all nodes in lustre_scaling/maintenance). prod routes to
+# small/medium/large by nodect (prod min 256N, so 64N→small).
 #
 # LR finder for the OLMo-3-vocab ladder: 4.64B / 9.48B / 26.2B.
 # The olmo2tok config/script names are retained for compatibility; the staged

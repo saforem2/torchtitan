@@ -31,10 +31,8 @@ from torchtitan.models.common.moe.token_dispatcher import (
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-from torchtitan.models.deepseek_v3.model import (
-    DeepSeekMLAAttention,
-    DeepSeekV3TransformerBlock,
-)
+from torchtitan.models.deepseek_v3.attention import DeepSeekMLAAttention
+from torchtitan.models.deepseek_v3.model import DeepSeekV3TransformerBlock
 from torchtitan.tools.utils import has_cuda_capability
 
 

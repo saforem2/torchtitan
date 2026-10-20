@@ -35,7 +35,7 @@ ALLOWED_COMPONENTS = frozenset(
     {
         "loss",
         "fused_binary_activation",
-        "cos_sin_rope",
+        "rope",
         "gated_rmsnorm",
         "moe_aux_loss",
         "fp32_to_bf16_split",

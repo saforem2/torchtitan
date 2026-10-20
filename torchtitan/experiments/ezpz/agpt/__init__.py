@@ -286,7 +286,9 @@ class SoftcappedFlexAttention(InnerAttention):
         self.logit_cap = config.logit_cap
         from torch.nn.attention.flex_attention import flex_attention
 
-        self._flex_attention = torch.compile(flex_attention)
+        self._flex_attention = torch.compile(
+            flex_attention, fullgraph=True, recompile_limit=16
+        )
 
     # pyrefly: ignore [bad-override]
     def forward(
