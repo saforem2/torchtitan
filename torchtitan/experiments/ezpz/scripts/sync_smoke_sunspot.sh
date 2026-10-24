@@ -68,7 +68,7 @@ SEED="${SEED:-42}"
 # error" from mpiexec. That was wrong -- 8831657 used the resolved path and hit
 # the identical failure. The real cause of that failure is still unknown; see
 # docs/experiments/sync84-xpu-smoke.md.
-VENV="${SMOKE_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
+VENV="${SMOKE_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16}"
 VENV="$(readlink -f "${VENV}")"
 
 # max_context_length must EQUAL num-tokens-per-microbatch-per-dp-rank: the
