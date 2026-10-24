@@ -83,10 +83,11 @@ from torchtitan.observability.logging import init_logger
 from torchtitan.rl.controller import Controller
 
 # Re-export upstream so future maintainers know what we depend on.
-from torchtitan.rl.train import (
+from torchtitan.rl.actors.monarch.provisioning import (
+    HostMeshes,
+    PerHostProvisioner,
     _compute_generator_world_size,
     _compute_trainer_world_size,
-    HostMeshes,
 )
 
 logger = logging.getLogger(__name__)
