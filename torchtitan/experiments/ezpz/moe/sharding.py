@@ -56,10 +56,9 @@ from torchtitan.models.common.moe.sharding import (
     shared_experts_output_placement,
     shared_experts_sharding_config,
 )
-from torchtitan.models.deepseek_v3.sharding import (
-    mla_attention_sharding_config,
-    mla_kv_projection_sharding_config,
-)
+from torchtitan.models.common.decoder_sharding import mla_kv_projection_sharding_config
+
+from torchtitan.models.deepseek_v3.sharding import mla_attention_sharding_config
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
