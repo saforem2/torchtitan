@@ -60,6 +60,21 @@ Hermes session `sunspot-tt-ezpz` (exported as `sunspot-tt-ezpz.md`, 17,534 lines
 
 ---
 
+## 2026-10-15 (Sunspot) -- BlendCorpus data position verified on the merged tree
+
+`origin/ezpz` `786306ff18` (upstream sync `5a7a622f16` + #66 + #64), torch
+2.16 venv, 2 nodes. Saved `dataloader.consumed_samples` is 48 / 96 / 144 at
+steps 2 / 4 / 6 (24 per step). A restart from the reference run's `step-4`
+reproduces steps 5-6 (`10.26074`, `9.93350`). A counter-0 checkpoint resumes
+correctly with `--dataloader.resume-consumed-samples=96` and with
+`BLENDCORPUS_RESUME_CONSUMED_SAMPLES=96`, replays from 0 without either
+(`10.13866`, `9.77017`), and ignores a conflicting override when the stored
+counter is nonzero. Jobs `12481024` (first design), `12481025` (showed the
+4-step save run is on a different LR schedule), `12481026` (result). Details in
+`docs/upstream-sync.md`. Not covered: GAS > 1, TP/PP/CP, > 2 nodes, Aurora.
+
+---
+
 ## 2026-10-15 (Aurora) -- BlendCorpus restarts replay the data stream
 
 Every checkpoint of the 20B 256N and 512N chains stores
@@ -75,6 +90,116 @@ The `origin/ezpz` increment (`0f7f0c7f53`) overshoots by GAS when GAS > 1. It
 now adds `micro_batch_size * dp`. New `--dataloader.resume-consumed-samples`
 applies only to checkpoints storing 0. The position for the existing chains is
 open: [`guides/blendcorpus-resume-position.md`](guides/blendcorpus-resume-position.md).
+
+---
+
+## 2026-10-06 -- HF export PR feedback
+
+- Addressed unknown legacy model keys, atomic export publication, untracked
+  source files and circular conversion expectations from PR #63. The user
+  deferred expert-dispatch optimization; the inference code remains unchanged.
+- All 180 CPU cases passed. New checks cover concurrent writers, interrupted
+  exports, static dense assets, independent mappings and pinned-source guards.
+- Evidence: `outputs/evals/moe-12b2a-step27000/pr-review-fixes/`.
+  [Validation report](experiments/moe/aurora/2026-10-06-hf-export-pr-feedback.md).
+- Job `8907545` passed both two-rank cases and published the MoE export, then
+  failed the new wrapper validation on a training-only `ezpz` import in the
+  inference runtime (exit 1, 7m01s). Direct standard-library validation and an
+  isolated-runtime regression fix that dependency. Failed artifacts retained.
+- Job `8907576`, pinned to `a800018fd`, passed on `x4013c7s4b0n0`:
+  `job_state=F`, `Exit_status=0`, walltime 25m35s. Both two-rank cases and fresh
+  dense/MoE conversion plus seven-task smokes passed (56 documents/model);
+  document/prompt/target hashes and settings matched.
+- All 2,859 MoE and 219 dense tensors exactly match the earlier validated
+  exports; model/tokenizer assets are equivalent and MoE model syntax trees
+  are identical. All 24 FP32 routing biases remain exact. Native/Sonic relative
+  RMS is 0.449% / 0.536%, with unchanged top-1 agreement and final-token top-10.
+- Artifacts: `outputs/evals/moe-12b2a-step27000/pr-feedback-validation/`;
+  submission digests and terminal scheduler evidence in `pr-review-fixes/`.
+- Validation gate closed; issue 5 is deferred. PR #63 contains the correctness
+  fixes and accompanying validation evidence.
+
+## 2026-10-06 -- MoE HF export PR preparation
+
+- Integrated Sam's current `ezpz` base `d4449ba0e` in `c1c2847cc`, preserving
+  both journal entries. The branch is no longer behind the target base.
+- All 27 focused CPU checks passed after integration (23 converter/model/schema
+  cases plus four retained JSON config registrations on the meta device).
+  Initial config imports lacked existing Grain/renderers dependencies; an
+  isolated no-deps overlay resolved them without changing Torch. The two distributed
+  DTensor checks and full paired HF evaluation already passed in jobs
+  `8907019` / `8907189`. The upstream RL changes do not alter the evaluated
+  HF implementation.
+- Added standard license headers in `da71a884f`; syntax-tree comparison
+  confirmed identical executable code. Wrapper, PBS and preflight shell syntax
+  checks passed. All PR changes stay under `experiments/ezpz/`.
+- Evidence and submission text: `outputs/evals/pair-step27000/pr-readiness/`.
+  [Validation and PR note](experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md).
+- The user authorized local pre-commit verification as an exception to the
+  ezpz policy. The formatter changed 15 Python files without changing their
+  syntax trees; all PR-file hooks passed, with the repository-wide Pyrefly
+  hook checked separately in a temporary copy.
+- The post-format CPU rerun passed all 160 cases in the MoE and retained JSON
+  launch-config suites (156 ordinary and four meta-device checks). The
+  two-rank DTensor module retains its earlier compute-node evidence.
+- Pyrefly reports identical 35 core errors on the feature/base branches in
+  this environment. Repository-wide Lychee finds one existing broken skill
+  link in `experiments/graph_trainer/AGENTS.md:300`, reproduced on the base;
+  all PR-file links pass. See the linked report and readiness logs.
+- The generic GitHub CPU workflow does not cover these experiment tests;
+  inherited repository-wide lint failures remain a CI limitation.
+
+## 2026-10-06 — Matched dense/MoE HF evaluation
+
+- Added the dense `2b_50k` export and HF pipeline selection, shared Llama
+  tokenizer assets, explicit evaluation context and seed settings.
+- Nine focused CPU checks passed. The dense model was then moved to module
+  scope for stable configuration class identity; all three dense cases passed
+  again, including both DCP layouts and native/HF logits.
+- Job `8907189`, pinned to `4e6f3c99d`, completed on `x4112c4s4b0n0`:
+  `job_state=F`, `Exit_status=0`, walltime 49m38s. All seven zero-shot HF tasks
+  completed for both step-27000 checkpoints (20,465 documents/model).
+- All 219 dense HF tensors matched the source after BF16 conversion and
+  mapping. Native/HF relative RMS was 1.1917%, cosine 0.9997004, top-1 61/64.
+- Paired document/prompt/target hashes, settings and tokenizer assets matched.
+  MoE led six tasks: equal-task mean 54.41% vs 51.68%; document-weighted
+  60.20% vs 55.97%, gain +4.23pp (paired 95% CI +3.61 to +4.84pp).
+- Job `8907124` was cancelled while queued at the debug-scaling user limit;
+  `8907144` failed module initialization, and `8907155` exported successfully
+  but stopped on an incorrect native reference loader. Both launcher/reference
+  issues were fixed before the successful run; failed artifacts are preserved.
+- Artifacts: `outputs/evals/pair-step27000/hf-full/8907189/`, including paired
+  statistics, identity checks and scheduler terminal evidence. Launch records
+  and CPU logs: `outputs/evals/pair-step27000/hf-full-validation/`.
+- Evaluation gate closed; integration with current `origin/ezpz` remains a
+  separate PR gate.
+- [Run plan and results](experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md).
+
+## 2026-10-06 — MoE HF export review fixes and real-checkpoint validation
+
+- Fixed interleaved shared-expert mapping in both directions, preserved FP32
+  routing biases in BF16 exports, validated the explicit training tokenizer,
+  and exercised the existing conversion/evaluation wrapper with separate
+  converter and inference runtimes.
+- Initial debug job `8907007` exited 1 after 1m44s because spawned DTensor
+  workers could not import a test fixture; conversion never started. The
+  fixture factory now uses its fully qualified package path.
+- Replacement job `8907019`, pinned to `3df50f0f7`, ran on
+  `x4112c2s6b0n0` and ended `job_state=F`, `Exit_status=0`, walltime 16m34s.
+  Both two-rank layout tests passed; step-27000 exported successfully; lm-eval
+  completed 176 likelihood requests across seven tasks (eight documents each).
+  All 24 serialized and loaded FP32 routing biases matched the DCP exactly.
+- Native/Sonic relative RMS errors were 0.4401% / 0.5275%, cosine >= 0.999768,
+  and top-1 agreement 96.875% / 98.4375%; final-token top-10s matched both.
+- The final CPU run passed 20 tests, including existing dense converter checks.
+  A combined run had exposed uninitialized toy experts; explicit initialization
+  fixed the fixtures. With the two distributed cases, 22 checks passed.
+- Artifacts: `outputs/evals/moe-12b2a-step27000/hf-export-runs/8907019/`.
+  Logs and submission record: `outputs/evals/moe-12b2a-step27000/review-fixes/`.
+  [Validation report](experiments/moe/aurora/2026-10-06-hf-export-review-fixes.md).
+- Next gate: adding the prepared GitHub CPU workflow requires the requested
+  exception to the ezpz-only edit policy. Full-task benchmark metrics were
+  outside this bounded integration validation.
 
 ---
 
@@ -7683,3 +7808,28 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Merged upstream main into ezpz branch
 - Upstream changes included GraphTrainer bucketing fixes,
   SAC + FSDP improvements, and Qwen3-VL fused QKV support
+
+---
+
+## 2026-10-02 — AGPT 12B2A Hugging Face export
+
+- Added an `AGPTMoEStateDictAdapter` to the existing DCP-to-HF converter and a
+  Transformers remote-code model that preserves the training model's GQA,
+  ComplexRoPE, top-3 biased selection, original unnormalized routing weights,
+  36 routed experts, and always-on shared expert.
+- The first real conversion (`8900811`) exposed non-contiguous Sonic expert
+  transpose views at the safetensors writer. Export tensors are now cast and
+  packed at the serialization boundary; the regression test covers both BF16
+  conversion and same-dtype exports.
+- Job `8900883` exported the historical step-27000 12B-total/2B-active DCP and
+  exited zero. The HF logits matched the current native reference at 0.448%
+  relative RMS / 0.999770 cosine / 96.875% top-1 agreement, and the frozen
+  Sonic oracle at 0.477% / 0.999770 / 98.438%. Final-token top-10 predictions
+  were identical to both references.
+- Job `8900986` then loaded the artifact through unmodified lm-eval-harness
+  0.4.10's `hf` backend with Transformers 4.57.6 and completed an ARC-Easy
+  likelihood smoke on XPU (8/8 requests, exit zero). The two-document 2/2
+  score is only an integration check, not a reportable model metric.
+- The focused CPU suite passed 12/12 tests, including the pre-existing dense
+  converter schema tests. The generated model also passed AutoModel save/load,
+  forward, and generation tests.

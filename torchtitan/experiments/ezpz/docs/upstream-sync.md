@@ -162,13 +162,56 @@ torch version; it was not bisected.
   repair / forced-transport patch was re-applied to the new controller without
   being run.
 - Aurora, Polaris, and any scale above 2 nodes; PP; CP; native DDP; the LR
-  finder; DCP save/resume; the 20B/30B/80B configs (only `*_debugmodel` was run).
+  finder; DCP save/resume beyond the BlendCorpus data position (see
+  post-merge verification below); the 20B/30B/80B configs (only `*_debugmodel` was run).
 - Old native MoE checkpoints (`layers.N.moe.*`) do not load into the new
   layout; no key-rename shim was written.
 - `ezpz/validator.py` pipeline-parallel validation still uses the pre-sync
   `pp_schedule.eval` call shape.
 - MoE EP and flex-attention failures above, owned by the
   `fix-moe-ep-mesh-flex-att` session.
+
+### Post-merge verification: BlendCorpus data position
+
+Tree `origin/ezpz` at `786306ff18` (this sync plus #66 and #64), torch
+`2.16.0.dev20261015+xpu`, Sunspot 2 nodes / 24 ranks, `agpt_debugmodel` on
+`--dataloader.dataset=blendcorpus` (`data-lists/sunspot/books.txt`), seed 42,
+`--debug.deterministic`, 512 tokens per rank, GAS 1, so 24 samples per step.
+The sync changed how the trainer hands the dataloader to the engine
+(`engine.initialize(extra_states={DATALOADER: ...})`); this checks that #66
+still works through it. Script: `scripts/data_resume_sunspot.sh`, counter tool:
+`scripts/dcp_dataloader_counter.py`. Jobs `12481024`, `12481025`, `12481026`;
+`12481026` is the result (source `d9bf632c2`, scripts only on top of
+`786306ff18`).
+
+| Check | Result |
+| --- | --- |
+| Saved `dataloader.consumed_samples` at step 2 / 4 / 6 | 48 / 96 / 144 (steps x 24) |
+| Uninterrupted reference, 3 runs (no ckpt, ckpt, repeat) | identical, step 5 = `10.26074`, step 6 = `9.93350` |
+| Restart from the reference's own `step-4` | step 5 = `10.26074`, step 6 = `9.93350` (equal) |
+| Counter-0 copy + `--dataloader.resume-consumed-samples=96` | `10.26074` / `9.93350`, counter at step 6 = 144 |
+| Counter-0 copy + `BLENDCORPUS_RESUME_CONSUMED_SAMPLES=96` | `10.26074` / `9.93350`, counter at step 6 = 144 |
+| Counter-0 copy, no override (negative control) | `10.13866` / `9.77017`, counter at step 6 = 48 (replayed from 0) |
+| Nonzero counter (96) + `--resume-consumed-samples=48` | override ignored (warning logged), `10.26074` / `9.93350` |
+
+Equality is on the five printed digits of stdout, not bitwise. The counter-0
+copies were made with `dcp_dataloader_counter.py zero` from the reference
+`step-4`. The env var reached the ranks through `ezpz launch` (the log line
+reports `=96` with no flag passed).
+
+No defect found; nothing in the sync needed changing.
+
+Two traps in the test itself, kept so they are not repeated: (1) the LR
+schedule depends on `--training.steps`, so a separate 4-step save run is not on
+the 6-step trajectory (step 1 loss `10.87813` vs `10.88101`); save from the
+6-step run and copy its `step-4`. (2) A run without a checkpoint is a valid
+reference here, it matched the checkpointed runs exactly.
+
+Not covered: GAS > 1 (the `samples_per_yield` x microbatch count path is only
+unit-tested in `tests/test_blendcorpus_resume_position.py`), TP/PP/CP, more than
+2 nodes, the validator loader (`serve_validation`), the `dp` != 24 case,
+a restart after a changed `dp` degree, and anything on Aurora. The counter-0
+checkpoints are synthetic copies of a new checkpoint, not real pre-#66 files.
 
 ## Current trial (2026-09-30): upstream `97e673b779`, hardware-qualified
 
