@@ -148,6 +148,9 @@ for idx in "${!TRAINERS[@]}"; do
     2) pin="${EXPECTED_HEAD_2B:-}" ;;
   esac
   seat_head=$(git -C "$_wd" rev-parse HEAD) || exit 2
+  git -C "$_wd" diff --quiet && git -C "$_wd" diff --cached --quiet || {
+    echo "FATAL: trainer $idx tracked source edits"; exit 16;
+  }
   if [[ -n "$pin" && "$pin" != "$seat_head" ]]; then
     echo "FATAL: trainer $idx HEAD $seat_head does not match pinned $pin"; exit 16
   fi
@@ -259,6 +262,43 @@ export CCL_KVS_MODE=pmi CCL_SYCL_KERNEL_SYNC=0
 "$VENV_DST/bin/python" -c "import torch; assert torch.xpu.is_available(); print(f'torch {torch.__version__} xpu={torch.xpu.is_available()}')" \
   || { echo "FATAL: staged torch/XPU probe failed"; exit 1; }
 echo "Venv OK: $VENV_DST archive_sha=$VENV_ARCHIVE_SHA"
+
+# Check source/runtime visibility on every allocated active AND spare host.
+# A login-node check or a four-node canary does not establish 788-node mounts.
+RESTART_PROBE_DIRS="$REPO"
+RESTART_PROBE_WRITES=""
+RESTART_PROBE_SEEDS=""
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _lr _seed _rest <<< "$row"
+  RESTART_PROBE_DIRS+="|$_wd"
+  RESTART_PROBE_WRITES+="|$_ckpt"
+  RESTART_PROBE_SEEDS+="|$_seed"
+done
+export RESTART_PROBE_DIRS RESTART_PROBE_WRITES RESTART_PROBE_SEEDS
+export RESTART_PROBE_VENV="$VENV_DST"
+"$VENV_DST/bin/ezpz" launch --nproc "$TOTAL_AVAIL" --nproc_per_node 1 \
+  --hostfile "$PBS_NODEFILE" -- "$VENV_DST/bin/python" -c '
+import os, socket
+from pathlib import Path
+import torch
+for value in os.environ["RESTART_PROBE_DIRS"].split("|"):
+    if value:
+        assert (Path(value)/"torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py").is_file(), value
+for value in os.environ["RESTART_PROBE_WRITES"].split("|"):
+    if value:
+        assert Path(value).is_dir() and os.access(value, os.W_OK), value
+for value in os.environ["RESTART_PROBE_SEEDS"].split("|"):
+    if value:
+        assert (Path(value)/".metadata").stat().st_size > 0, value
+for name in ["python", "ezpz"]:
+    path = Path(os.environ["RESTART_PROBE_VENV"])/"bin"/name
+    assert path.is_file() and os.access(path, os.X_OK), str(path)
+assert torch.xpu.is_available() and torch.xpu.device_count() >= 12
+print("RESTART_HOST_PREFLIGHT_PASS", socket.gethostname(), flush=True)
+' > "$MULTI_LOG_DIR/allocated-host-preflight.log" 2>&1 || {
+  echo "FATAL: allocated-host source/runtime preflight failed; see $MULTI_LOG_DIR/allocated-host-preflight.log"
+  exit 1
+}
 
 # ---- Launch function ----
 launch_trainer() {

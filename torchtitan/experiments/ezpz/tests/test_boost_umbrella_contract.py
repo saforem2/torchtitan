@@ -26,11 +26,11 @@ class BoostUmbrellaContract(unittest.TestCase):
         builder.parent.mkdir(parents=True)
         builder.write_text("BLENDCORPUS_RESUME_CONSUMED_SAMPLES")
         for name, body in {
-            "git": '[[ "$1" == "-C" ]] && shift 2; case "$1" in rev-parse) echo deadbeef;; merge-base) exit 0;; *) exit 1;; esac',
+            "git": '[[ "$1" == "-C" ]] && shift 2; case "$1" in rev-parse) echo deadbeef;; merge-base) exit 0;; diff) exit "${FAKE_DIRTY_RC:-0}";; *) exit 1;; esac',
             "lfs": "exit 0",
             "sleep": "exit 0",
             "python": 'exit "${FAKE_TORCH_RC:-0}"',
-            "ezpz": 'if [[ "$1" == "yeet" ]]; then echo STAGING >> "$REPO/staging"; exit "${FAKE_STAGE_RC:-0}"; fi; echo "CALL resume=${BLENDCORPUS_RESUME_CONSUMED_SAMPLES-unset} $*"; exit "${FAKE_RC:-0}"',
+            "ezpz": 'if [[ "$1" == "yeet" ]]; then echo STAGING >> "$REPO/staging"; exit "${FAKE_STAGE_RC:-0}"; fi; if [[ "$*" == *RESTART_HOST_PREFLIGHT_PASS* ]]; then exit "${FAKE_PROBE_RC:-0}"; fi; echo "CALL resume=${BLENDCORPUS_RESUME_CONSUMED_SAMPLES-unset} $*"; exit "${FAKE_RC:-0}"',
         }.items():
             p = self.bin / name
             p.write_text("#!/bin/bash\n" + body + "\n")
@@ -123,6 +123,12 @@ class BoostUmbrellaContract(unittest.TestCase):
         self.assertIn("archive SHA mismatch", result.stdout)
         self.assertFalse((self.root / "staging").exists())
 
+    def test_allocated_host_probe_fails_closed(self):
+        result = self.run_full_job(FAKE_PROBE_RC="31")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("allocated-host source/runtime preflight failed", result.stdout)
+        self.assertFalse(list(self.root.glob("logs/**/trainer-*.console.log")))
+
     def test_full_runtime_success(self):
         result = self.run_full_job()
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -136,6 +142,12 @@ class BoostUmbrellaContract(unittest.TestCase):
                 result = self.run_job()
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertFalse((self.root / "staging").exists())
+
+    def test_dirty_source_fails_before_staging(self):
+        result = self.run_job(FAKE_DIRTY_RC="1", DRY_RUN="1")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("tracked source edits", result.stdout)
+        self.assertFalse((self.root / "staging").exists())
 
     def test_source_pin_mismatch_prevents_staging(self):
         result = self.run_job(EXPECTED_HEAD_20B512="a" * 40)
