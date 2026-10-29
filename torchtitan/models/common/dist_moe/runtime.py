@@ -25,10 +25,16 @@ from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 
 import torch
-from torch.distributed.pipelining import (
-    analyze_pipeline_activation_liveness,
-    PipelineStageInfo,
-)
+
+try:
+    from torch.distributed.pipelining import analyze_pipeline_activation_liveness
+except ImportError:
+    analyze_pipeline_activation_liveness = None  # type: ignore[assignment]
+
+try:
+    from torch.distributed.pipelining import PipelineStageInfo
+except ImportError:
+    PipelineStageInfo = None  # type: ignore[assignment, misc]
 from torch.distributed.pipelining.schedules import PipelineScheduleMulti
 from torch.utils.hooks import RemovableHandle
 
@@ -107,18 +113,19 @@ class _DistMoeForwardContext:
         self._activation_slot_ids_S = activation_slot_ids_S
         self._max_moe_layers_per_activation_slot = max_moe_layers_per_activation_slot
 
-    def _slot_id(self, info: PipelineStageInfo) -> int | None:
+    def _slot_id(self, info: PipelineStageInfo) -> int | None:  # type: ignore[no-redef]
+        assert info is not None  # type: ignore[unreachable]
         if info.stage_index not in self._active_stage_indices:
             return None
         if not self._activation_slot_id_by_stage_and_microbatch:
             return 0
-        key = (info.stage_index, info.microbatch_index)
+        key = (info.stage_index, info.microbatch_index)  # type: ignore[union-attr]
         try:
             return self._activation_slot_id_by_stage_and_microbatch[key]
         except KeyError as error:
             raise ValueError(
                 "Dist-MoE has no activation-slot assignment for "
-                f"stage {info.stage_index}, microbatch {info.microbatch_index}"
+                f"stage {info.stage_index}, microbatch {info.microbatch_index}"  # type: ignore[union-attr]
             ) from error
 
     def resolve_activation_slot(
@@ -506,6 +513,9 @@ class DistMoeRuntime(Configurable):
             raise RuntimeError("no local pipeline stage contains Dist-MoE")
 
         stage_indices = tuple(modules_by_stage)
+        assert analyze_pipeline_activation_liveness is not None, (  # noqa: B950
+            "PP liveness needs nightly torch: " "analyze_pipeline_activation_liveness"
+        )
         liveness = analyze_pipeline_activation_liveness(
             schedule,
             pp_rank=pp_rank,
