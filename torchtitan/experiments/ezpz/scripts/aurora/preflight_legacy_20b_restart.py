@@ -22,6 +22,7 @@ def main():
         f'--checkpoint.interval={args.source_step + 3}',
         '--checkpoint.keep-latest-k=0', '--checkpoint.no-last-save-model-only',
         '--checkpoint.async-mode=disabled', '--dataloader.dataset=blendcorpus',
+        f'--dataloader.train-iters={args.resume_n // 48 + 4}',
         '--dataloader.dataset-path=torchtitan/experiments/ezpz/data-lists/aurora/olmo-mix-1124.txt',
         f'--dataloader.data-cache-path={args.data_cache}', '--dataloader.num-workers=0',
         '--validator.no-enable', '--metrics.no-enable-wandb',

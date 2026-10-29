@@ -52,6 +52,20 @@ class RestartCanaryPreflight(unittest.TestCase):
         self.assertIn('RESTART_PREFLIGHT_PASS', result.stdout)
         self.assertFalse((self.root / 'output').exists())
 
+    def test_large_production_offset_has_independent_dataset_horizon(self):
+        self.env['RESUME_N'] = '15482880'
+        nodes = self.root / 'synthetic-nodes'
+        nodes.write_text(''.join(f'unit-host-{i}\n' for i in range(4)))
+        self.env['PBS_NODEFILE'] = str(nodes)
+        result = subprocess.run(['bash', str(SCRIPT), '--render-plan'], env=self.env,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        plan = dict(line.split('=', 1) for line in result.stdout.splitlines())
+        self.assertEqual(int(plan['END_STEP']), 103)
+        self.assertEqual(int(plan['GBS']), 48)
+        self.assertGreater(int(plan['DATASET_ITERS']) * 48, 15482880 + 3 * 48)
+        self.assertFalse((self.root / 'output').exists())
+
     def test_wrong_source_sha_fails(self):
         self.env['RESTART_SHA'] = '0' * 40
         result = self.run_preflight()

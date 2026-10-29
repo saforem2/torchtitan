@@ -54,6 +54,13 @@ DP=$(( WORLD / TP ))
 GBS=$DP
 (( RESUME_N % GBS == 0 )) || fail 'resume position not aligned to smoke microbatch'
 END_STEP=$(( SOURCE_STEP + SMOKE_UPDATES ))
+# A reduced GBS must not shrink the indexed stream below the production offset.
+# Dataset horizon is independent of the short optimizer-step stop condition.
+DATASET_ITERS=$(( RESUME_N / GBS + SMOKE_UPDATES + 1 ))
+if [[ "${1:-}" == --render-plan ]]; then
+    printf 'END_STEP=%s\nGBS=%s\nDATASET_ITERS=%s\n' "$END_STEP" "$GBS" "$DATASET_ITERS"
+    exit 0
+fi
 [[ ! -e "$OUT" ]] || fail 'output root already exists; refuse stale evidence'
 mkdir -p "$SINK" || fail 'cannot create isolated output'
 ln -s "$SOURCE_CHECKPOINT" "$SINK/step-$SOURCE_STEP" || fail 'cannot link read-only seed'
@@ -87,6 +94,7 @@ export WANDB_MODE=disabled
     --checkpoint.enable --checkpoint.folder="$SINK" --checkpoint.interval="$END_STEP" \
     --checkpoint.keep-latest-k=0 --checkpoint.no-last-save-model-only --checkpoint.async-mode=disabled \
     --dataloader.dataset=blendcorpus --dataloader.dataset-path="$DFL" \
+    --dataloader.train-iters="$DATASET_ITERS" \
     --dataloader.data-cache-path="$DATA_CACHE" --dataloader.num-workers=0 \
     --validator.no-enable --metrics.no-enable-wandb \
     --optimizer sophiag --optimizer.lr=2.28e-5 \
