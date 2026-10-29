@@ -1,0 +1,134 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -N 20b-fixedpos-canary
+#PBS -l select=4
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug-scaling
+#PBS -j oe
+
+# Full-state legacy-production restore/update/save gate. All outputs are isolated.
+set -o pipefail
+ulimit -c 0
+fail() { echo "FATAL: $*" >&2; exit 1; }
+: "${RESTART_WORKTREE:?Set the isolated position-fixed legacy checkout}"
+: "${RESTART_SHA:?Set its immutable Git SHA}"
+: "${SOURCE_CHECKPOINT:?Set the read-only source step directory}"
+: "${SOURCE_STEP:?Set its training step}"
+: "${RESUME_N:?Set the already-selected data-stream position}"
+: "${SOURCE_FILES:?Set the verified source file count}"
+RUNTIME_ARCHIVE=${RUNTIME_ARCHIVE:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/.venv-20b-prod-ezpz0292-f7deda7-20260929.tar.gz}
+RUNTIME_SHA=${RUNTIME_SHA:-e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc}
+LAUNCHER_VENV=${LAUNCHER_VENV:-/flare/AuroraGPT/foremans/runs/agpt-20b-v2/torchtitan-ezpz/.venv}
+EZPZ_UTILS=${EZPZ_UTILS:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/ezpz-utils-f7deda7.sh}
+HF_ASSETS=${HF_ASSETS:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b}
+DFL=${DFL:-torchtitan/experiments/ezpz/data-lists/aurora/olmo-mix-1124.txt}
+: "${DATA_CACHE:?Set the existing source-lineage BlendCorpus index-cache}"
+SMOKE_UPDATES=${SMOKE_UPDATES:-3}
+PPN=${PPN:-12}
+TP=${TP:-1}
+SMOKE_SEQ_LEN=${SMOKE_SEQ_LEN:-512}
+JOB=${PBS_JOBID%%.*}
+OUT=${RESTART_OUT:-/flare/AuroraGPT/foremans/scratch/diagnostics/production-restart-20261029/canary-${JOB}}
+SINK=$OUT/checkpoints
+NODE_VENV=/tmp/.venv-20b-restart-20261029
+cd "$RESTART_WORKTREE" || fail 'source checkout unavailable'
+[[ "$(git rev-parse HEAD)" == "$RESTART_SHA" ]] || fail 'source SHA mismatch'
+git diff --quiet && git diff --cached --quiet || fail 'tracked source edits'
+[[ -s "$SOURCE_CHECKPOINT/.metadata" ]] || fail 'missing source metadata'
+[[ "$(find "$SOURCE_CHECKPOINT" -maxdepth 1 -type f | wc -l)" -eq "$SOURCE_FILES" ]] || fail 'source shard count mismatch'
+[[ -s "$HF_ASSETS/tokenizer.json" && -s "$DFL" && -d "$DATA_CACHE" ]] || fail 'tokenizer/data/cache absent'
+[[ "$SOURCE_STEP" =~ ^[0-9]+$ && "$RESUME_N" =~ ^[0-9]+$ ]] || fail 'invalid step/sample count'
+[[ "$(basename "$SOURCE_CHECKPOINT")" == "step-$SOURCE_STEP" ]] || fail 'checkpoint step mismatch'
+[[ -s "$RUNTIME_ARCHIVE" && -s "$EZPZ_UTILS" && -x "$LAUNCHER_VENV/bin/ezpz" ]] || fail 'runtime/driver/helper absent'
+[[ "$(sha256sum "$RUNTIME_ARCHIVE" | cut -d' ' -f1)" == "$RUNTIME_SHA" ]] || fail 'immutable runtime checksum mismatch'
+if [[ "${1:-}" == --preflight-only ]]; then
+    echo "RESTART_PREFLIGHT_PASS sha=$RESTART_SHA source_step=$SOURCE_STEP source_files=$SOURCE_FILES runtime=$RUNTIME_SHA"
+    exit 0
+fi
+[[ -s "${PBS_NODEFILE:-}" ]] || fail 'PBS nodefile absent'
+NNODES=$(sort -u "$PBS_NODEFILE" | wc -l)
+WORLD=$(( NNODES * PPN ))
+(( WORLD % TP == 0 )) || fail 'TP does not divide rank count'
+DP=$(( WORLD / TP ))
+GBS=$DP
+(( RESUME_N % GBS == 0 )) || fail 'resume position not aligned to smoke microbatch'
+END_STEP=$(( SOURCE_STEP + SMOKE_UPDATES ))
+[[ ! -e "$OUT" ]] || fail 'output root already exists; refuse stale evidence'
+mkdir -p "$SINK" || fail 'cannot create isolated output'
+ln -s "$SOURCE_CHECKPOINT" "$SINK/step-$SOURCE_STEP" || fail 'cannot link read-only seed'
+[[ "$(realpath "$SINK/step-$SOURCE_STEP")" == "$(realpath "$SOURCE_CHECKPOINT")" ]] || fail 'seed link mismatch'
+trap 'rc=$?; printf "CANARY_TERMINAL rc=%s job=%s sha=%s\n" "$rc" "$JOB" "$RESTART_SHA" > "$OUT/TERMINAL"' EXIT
+printf 'SOURCE=%s\nSHA=%s\nRUNTIME_SHA=%s\nRESUME_N=%s\nGBS=%s\nEND_STEP=%s\n' \
+    "$SOURCE_CHECKPOINT" "$RESTART_SHA" "$RUNTIME_SHA" "$RESUME_N" "$GBS" "$END_STEP" > "$OUT/provenance.txt"
+source "$EZPZ_UTILS" || fail 'cannot source runtime helper'
+declare -F ezpz_load_modules >/dev/null && declare -F ezpz_setup_job >/dev/null || fail 'helper API absent'
+ezpz_load_modules || fail 'module setup failed'
+ezpz_setup_job || fail 'job setup failed'
+"$LAUNCHER_VENV/bin/ezpz" yeet --src "$RUNTIME_ARCHIVE" --hostfile "$PBS_NODEFILE" --dst "$NODE_VENV" || fail 'runtime broadcast failed'
+[[ -x "$NODE_VENV/bin/python" && -x "$NODE_VENV/bin/ezpz" ]] || fail 'staged entrypoints missing'
+export PATH="$NODE_VENV/bin:$PATH"
+export PYTHONPATH="$RESTART_WORKTREE"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR='opencl:gpu;level_zero:gpu'
+export CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1 CCL_KVS_MODE=pmi
+export CCL_SYCL_KERNEL_SYNC=0 TORCH_CPP_LOG_LEVEL=ERROR
+export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$RESUME_N"
+export WANDB_MODE=disabled
+"$NODE_VENV/bin/python" -c 'import torch,ezpz,mpi4py; import importlib.metadata as m; from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import BlendCorpusDataLoader; assert torch.xpu.is_available() and torch.xpu.device_count() >= 12; print("RUNTIME_IMPORT_PASS",torch.__version__,m.version("ezpz"))' || fail 'compute import gate failed'
+"$NODE_VENV/bin/ezpz" launch --help > "$OUT/launcher-help.txt" || fail 'launcher help failed'
+"$NODE_VENV/bin/python" -m torchtitan.experiments.ezpz.train --help > "$OUT/train-help.txt" 2>&1 || fail 'application parser import failed'
+# Legacy pinned source uses sequence/batch units, not the newer folded-token CLI.
+"$NODE_VENV/bin/ezpz" launch --auto-retry --nproc "$WORLD" --nproc_per_node "$PPN" \
+    --hostfile "$PBS_NODEFILE" --spare-nodes 0 --timeout 3000 --max-failover-retries 1 -- \
+    "$NODE_VENV/bin/python" -u -m torchtitan.experiments.ezpz.train \
+    --module=ezpz.agpt --config=agpt_20b_real --hf-assets-path="$HF_ASSETS" \
+    --dump-folder="$OUT/run" \
+    --checkpoint.enable --checkpoint.folder="$SINK" --checkpoint.interval="$END_STEP" \
+    --checkpoint.keep-latest-k=0 --checkpoint.no-last-save-model-only --checkpoint.async-mode=disabled \
+    --dataloader.dataset=blendcorpus --dataloader.dataset-path="$DFL" \
+    --dataloader.data-cache-path="$DATA_CACHE" --dataloader.num-workers=0 \
+    --validator.no-enable --metrics.no-enable-wandb \
+    --optimizer=sophiag --optimizer.lr=2.28e-5 \
+    --lr-scheduler.decay-ratio=0.0 --lr-scheduler.min-lr-factor=1.0 --lr-scheduler.warmup-steps=20 \
+    --training.seq-len="$SMOKE_SEQ_LEN" --training.local-batch-size=1 \
+    --training.global-batch-size="$GBS" --training.steps="$END_STEP" \
+    --parallelism.tensor-parallel-degree="$TP" \
+    --parallelism.data-parallel-replicate-degree=1 --parallelism.data-parallel-shard-degree="$DP" \
+    --parallelism.pipeline-parallel-degree=1 --parallelism.context-parallel-degree=1 \
+    2>&1 | tee "$OUT/train.log"
+rc=${PIPESTATUS[0]}
+[[ $rc -eq 0 ]] || exit "$rc"
+grep -aq 'Finished loading the checkpoint' "$OUT/train.log" || fail 'no full restore evidence'
+grep -aq "resuming the data stream at.*${RESUME_N}.*instead of 0" "$OUT/train.log" || fail 'resume override not observed'
+"$NODE_VENV/bin/python" - "$OUT/train.log" "$SOURCE_STEP" "$SMOKE_UPDATES" <<'PY'
+import math
+import re
+import sys
+text = open(sys.argv[1]).read()
+start, count = map(int, sys.argv[2:])
+rows = {}
+for line in text.splitlines():
+    match = re.search(r'step:\s*(\d+).*?loss:\s*([\deE+.-]+).*?grad_norm:\s*([\deE+.-]+)', line)
+    if match:
+        step = int(match[1])
+        loss, grad = float(match[2]), float(match[3])
+        if math.isfinite(loss) and math.isfinite(grad) and grad > 0:
+            rows[step] = (loss, grad)
+for step in range(start + 1, start + count + 1):
+    assert step in rows, f'Missing finite optimizer-step evidence: {step}'
+print('FINITE_STEPS_VALIDATED', {s: rows[s] for s in range(start+1,start+count+1)})
+PY
+[[ $? -eq 0 ]] || fail 'finite-update gate failed'
+[[ -s "$SINK/step-$END_STEP/.metadata" && ! -L "$SINK/step-$END_STEP" ]] || fail 'fresh checkpoint missing'
+"$NODE_VENV/bin/python" - "$SINK/step-$END_STEP" "$(( RESUME_N + SMOKE_UPDATES * GBS ))" <<'PY'
+import sys
+import torch.distributed.checkpoint as dcp
+state = {'dataloader.consumed_samples': None}
+dcp.load(state, storage_reader=dcp.FileSystemReader(sys.argv[1]), no_dist=True)
+assert int(state['dataloader.consumed_samples']) == int(sys.argv[2]), state
+print('CONSUMED_SAMPLES_VALIDATED', state)
+PY
+[[ $? -eq 0 ]] || fail 'saved stream-position gate failed'
+printf '20B_FIXEDPOS_VALIDATED job=%s sha=%s source_step=%s end_step=%s\n' \
+    "$JOB" "$RESTART_SHA" "$SOURCE_STEP" "$END_STEP" | tee "$OUT/VALIDATED"
