@@ -79,10 +79,9 @@ class Attention(DeepSeekMLAAttention):
         return self.inner_attention.wkv_b
 
     def _wkv_b_fn(self, x: torch.Tensor) -> torch.Tensor:
-        # Call Linear's functional path directly to avoid duplicating the
-        # "inner_attention.wkv_b.linear" remat region inside the outer
-        # "inner_attention" remat scope.
-        return torch.nn.functional.linear(x, self.wkv_b.weight, self.wkv_b.bias)
+        # Delegate to MLAAttention's wkv_b which owns the correct 512→4096
+        # sharding and remat for this projection.
+        return self.inner_attention.wkv_b(x)
 
     def forward(
         self,
