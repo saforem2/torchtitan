@@ -6,34 +6,39 @@
 #PBS -q prod
 #PBS -j oe
 # select= overridden via qsub -l select=N
-#   smoke:  -l select=4          (debug, 01:00:00)
-#   test:   -l select=274|512    (prod, 12:00:00)
-#   boost:  -l select=2078       (prod, 12:00:00)  >2048N threshold
+#   default: select=788 (512+256 active, 10 spares/seat); not boost eligible.
+#   MULTI_ONLY=0,1 (default); add optional 2B seat explicitly with 0,1,2.
+
+# Required per selected seat: WORKDIR_20B512/WORKDIR_20B256/WORKDIR_2B
+# (separately pinned, position-patched checkout), INITIAL_LOAD_* (absolute DCP
+# step with .metadata). Optional EXPECTED_HEAD_* pins each checkout exactly;
+# EXPECTED_HEAD pins this submission repo; EXPECTED_PARENT checks its ancestry.
+# CLI_DIALECT=legacy (production batch/seq flags) or tokens (newer source only).
+# DRY_RUN=1 validates source, checkpoint seed, allocation and disjoint slices,
+# then exits before checkpoint mkdir, archive broadcast, or hardware probes.
 
 set -o pipefail
 ulimit -c 0
 
 # ── Source identity guard ──────────────────────────────────────────────
-EXPECTED_PARENT="a0a4ed9b3c"
-EXPECTED_SCRIPT_SHA="a426ea55f5f61820d227d5de869287509c685ae38e197fe08ce177e09736f892"
+EXPECTED_PARENT="${EXPECTED_PARENT:-a0a4ed9b3c}"
+# Optional immutable checkout pin supplied by the submission wrapper. No self-hash.
+EXPECTED_HEAD="${EXPECTED_HEAD:-}"
 
-REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
+REPO="${REPO:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
 cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
 
 HEAD_SHA="$(git rev-parse HEAD)"
 if ! git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD 2>/dev/null; then
   echo "FATAL: HEAD $HEAD_SHA does not contain EXPECTED_PARENT $EXPECTED_PARENT"
-  echo "  (fix is on ezpz @ d98e77797 — rebuild .venv.tar.gz from that branch)"
+  echo "  (submission checkout ancestry differs; do not rebuild the pinned runtime)"
   exit 1
 fi
-# Pinned SHA — hash excludes its own line (self-hash is otherwise impossible)
-ACTUAL_SHA="$(grep -v '^EXPECTED_SCRIPT_SHA=' "$0" | sha256sum | awk '{print $1}')"
-if [[ "$ACTUAL_SHA" != "$EXPECTED_SCRIPT_SHA" ]]; then
-  echo "FATAL: script SHA mismatch: got $ACTUAL_SHA want $EXPECTED_SCRIPT_SHA"
+if [[ -n "$EXPECTED_HEAD" && "$HEAD_SHA" != "$EXPECTED_HEAD" ]]; then
+  echo "FATAL: HEAD $HEAD_SHA does not match EXPECTED_HEAD $EXPECTED_HEAD"
   exit 16
 fi
 echo "Source guard OK: HEAD=$HEAD_SHA contains $EXPECTED_PARENT"
-echo "Script SHA OK: $ACTUAL_SHA  (PBS_JOBID=$PBS_JOBID)"
 
 # ── Resume position (samples, not tokens) — Option B: first-unseen + 5% margin, ceil to GBS ──
 # Base: 1200*12288=14745600 (512N), 1550*6144=9523200 (256N)
@@ -43,90 +48,12 @@ echo "Script SHA OK: $ACTUAL_SHA  (PBS_JOBID=$PBS_JOBID)"
 RESUME_SAMPLES_20B512=15482880
 RESUME_SAMPLES_20B256=10002432
 
-# GBS alignment guard — fail closed before any training
-for N_GBS in "${RESUME_SAMPLES_20B512}:12288" "${RESUME_SAMPLES_20B256}:6144"; do
-  N="${N_GBS%%:*}"; GBS="${N_GBS##*:}"
-  if (( N % GBS != 0 )); then
-    echo "FATAL: RESUME_SAMPLES $N not aligned to GBS $GBS (need N % GBS == 0)"
-    exit 2
-  fi
-done
-echo "Resume samples OK: 20B512=${RESUME_SAMPLES_20B512} (GBS 12288)  20B256=${RESUME_SAMPLES_20B256} (GBS 6144)"
-echo "  tokens: 20B512=$(( RESUME_SAMPLES_20B512 * 8192 ))  20B256=$(( RESUME_SAMPLES_20B256 * 8192 ))"
-
 # ── Checkpoint dirs (fork, don't overwrite) ────────────────────────────
 CKPT_20B512_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
 CKPT_20B512_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
 CKPT_20B256_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
 CKPT_20B256_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-fixedpos"
 CKPT_2B_RECLAIM="outputs/checkpoints/agpt-2b-v2-512-reclaim-20261020"
-
-# Capture source mtimes BEFORE any fork operation
-declare -A SRC_MTIME_BEFORE
-for SRC in "$CKPT_20B512_SRC" "$CKPT_20B256_SRC"; do
-  if [[ ! -d "$SRC" ]]; then
-    echo "FATAL: source ckpt dir missing: $SRC"
-    exit 1
-  fi
-  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
-    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
-    exit 1
-  fi
-  SRC_MTIME_BEFORE["$SRC"]="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
-done
-echo "Source ckpt dirs OK (metadata present)"
-
-for D in "$CKPT_20B512_NEW" "$CKPT_20B256_NEW" "$CKPT_2B_RECLAIM"; do
-  if [[ ! -d "$D" ]]; then
-    echo "Creating fork dir: $D"
-    mkdir -p "$D"
-    lfs setstripe -c 2 -i 10 "$D" 2>&1 || echo "WARNING: lfs setstripe failed for $D"
-  fi
-done
-
-# Verify source mtime unchanged after fork (fork must not mutate source)
-for SRC in "$CKPT_20B512_SRC" "$CKPT_20B256_SRC"; do
-  AFTER="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
-  BEFORE="${SRC_MTIME_BEFORE[$SRC]}"
-  if [[ "$AFTER" != "$BEFORE" ]]; then
-    echo "FATAL: source $SRC mtime changed after fork: before=$BEFORE after=$AFTER"
-    echo "  (fork must not mutate source — check for accidental mv/cp into source)"
-    exit 3
-  fi
-done
-echo "Checkpoint dirs OK (fork clean, source mtime unchanged)"
-
-# ── Venv broadcast (tarball mode) ──────────────────────────────────────
-VENV_TGZ="$REPO/.venv.tar.gz"
-if [[ ! -f "$VENV_TGZ" ]]; then
-  echo "FATAL: $VENV_TGZ missing — run: ezpz tar-env --venv .venv --out .venv.tar.gz"
-  exit 1
-fi
-echo "Broadcasting venv tarball: $VENV_TGZ ($(du -h "$VENV_TGZ" | awk '{print $1}'))"
-ezpz yeet --src "$VENV_TGZ" --dest /tmp/.venv 2>&1 | tail -20
-
-source /tmp/.venv/bin/activate 2>/dev/null || source .venv/bin/activate
-unset PYTHONPATH
-export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
-
-python3 -c "import torch; assert torch.xpu.is_available(); print(f'torch {torch.__version__} xpu={torch.xpu.is_available()}')"
-echo "Venv OK"
-
-# Verify the position fix is present in this checkout
-if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
-    "$REPO/torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py" 2>/dev/null; then
-  echo "FATAL: position fix not in blendcorpus_builder.py (need origin/ezpz >= 0f7f0c7f53)"
-  exit 1
-fi
-
-# ── Umbrella launch (native ezpz launch --auto-retry) ──────────────────
-# Three trainers: 20B-512 1024N, 20B-256 512N, 2B-reclaim 512N = 2048 train + 10 spare = 2078
-echo "=== Umbrella config ==="
-echo "  20B-512  1024N  GBS=12288  ckpt=$CKPT_20B512_NEW  resume_samples=$RESUME_SAMPLES_20B512"
-echo "  20B-256   512N  GBS=6144   ckpt=$CKPT_20B256_NEW  resume_samples=$RESUME_SAMPLES_20B256"
-echo "  2B-reclaim 512N  GBS=12288  ckpt=$CKPT_2B_RECLAIM"
-echo "  walltime=12:00:00  queue=prod  select=${PBS_select:-2078}"
-echo "  HEAD=$HEAD_SHA  parent=$EXPECTED_PARENT  sha=$ACTUAL_SHA"
 
 # ---- Common env ----
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1
@@ -147,45 +74,112 @@ PPN="${NGPU_PER_HOST:-12}"
 IDLE_TIMEOUT="${IDLE_TIMEOUT:-1800}"
 CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
 
+SPARES="${SPARES:-10}"
+# ---- Trainer table (REAL config names via CONFIG_SUFFIX pattern) ----
+# Config names follow submit_agpt_multi_autoretry.sh: agpt_${MODEL}${CONFIG_SUFFIX}
+# where MODEL=20b/2b and CONFIG_SUFFIX=_real (cos_sin RoPE). NOT agpt_20b_n512.
+#  Format: model|nnodes|port|workdir|ckpt|dfl_name|lr|init_load|decay|minlr|tokens|spares|resume_samples|gbs
+#  resume_samples is consumed via BLENDCORPUS_RESUME_CONSUMED_SAMPLES env (mpiexec --envall)
+TRAINERS=(
+  "20b|512|29500|${WORKDIR_20B512:-}|${REPO}/${CKPT_20B512_NEW}|olmo-mix-1124|${LR}|${INITIAL_LOAD_20B512:-}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B512}|12288"
+  "20b|256|29600|${WORKDIR_20B256:-}|${REPO}/${CKPT_20B256_NEW}|olmo-mix-1124|${LR}|${INITIAL_LOAD_20B256:-}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B256}|6144"
+  "2b|512|29700|${WORKDIR_2B:-}|${REPO}/${CKPT_2B_RECLAIM}|olmo-mix-1124|${LR}|${INITIAL_LOAD_2B:-}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|0|12288"
+)
+
+# Select by stable table index; reject unknown/duplicate/empty selections.
+MULTI_ONLY="${MULTI_ONLY:-0,1}"
+[[ "$MULTI_ONLY" =~ ^[0-2](,[0-2])*$ ]] || { echo "FATAL: invalid MULTI_ONLY=$MULTI_ONLY"; exit 2; }
+for idx in "${!TRAINERS[@]}"; do
+  case ",$MULTI_ONLY," in *,"$idx",*) ;; *) unset 'TRAINERS[idx]' ;; esac
+done
+IFS=',' read -ra selected <<< "$MULTI_ONLY"
+(( ${#selected[@]} == ${#TRAINERS[@]} )) || { echo "FATAL: duplicate MULTI_ONLY seats"; exit 2; }
+CLI_DIALECT="${CLI_DIALECT:-legacy}"
+case "$CLI_DIALECT" in legacy|tokens) ;; *) echo "FATAL: invalid CLI_DIALECT=$CLI_DIALECT"; exit 2;; esac
+[[ "$SPARES" =~ ^[0-9]+$ ]] || { echo "FATAL: invalid SPARES=$SPARES"; exit 2; }
+
 # Validate PBS allocation
 [[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] || { echo "FATAL: PBS_NODEFILE missing"; exit 1; }
 TOTAL_AVAIL=$(wc -l < "$PBS_NODEFILE")
-# 1024+10 + 512+10 + 512+10 = 2078 but we request 2058 (shared spare pool via --spare-nodes auto is per-launch;
-# for umbrella we slice manually: need = sum(nnodes+spares) = (1024+10)+(512+10)+(512+10)=2078.
-# Boost threshold is >2048, so 2058 also passes but need must equal allocation; use SPARES=3 to fit 2058
-# or request 2078. We pin SPARES=10 and require select=2078; 2058 was the doc's spare-sharing estimate.
-# To keep >2048 eligibility, accept either 2058 or 2078 — compute need and compare.
-SPARES="${SPARES:-10}"
-NEED=$(( 1024 + SPARES + 512 + SPARES + 512 + SPARES ))
+NEED=0
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "$row"
+  NEED=$(( NEED + nnodes + _sp ))
+done
 echo "Nodes: need=$NEED available=$TOTAL_AVAIL spares/chain=$SPARES"
 if (( TOTAL_AVAIL < NEED )); then
   echo "FATAL: allocation too small: have $TOTAL_AVAIL need $NEED (select=$NEED for this umbrella)"
   exit 1
 fi
 
+# Capture source mtimes BEFORE any fork operation
+declare -A SRC_MTIME_BEFORE
+SOURCES=()
+[[ -n "${TRAINERS[0]:-}" ]] && SOURCES+=("$CKPT_20B512_SRC")
+[[ -n "${TRAINERS[1]:-}" ]] && SOURCES+=("$CKPT_20B256_SRC")
+for SRC in "${SOURCES[@]}"; do
+  if [[ ! -d "$SRC" ]]; then
+    echo "FATAL: source ckpt dir missing: $SRC"
+    exit 1
+  fi
+  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
+    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
+    exit 1
+  fi
+  SRC_MTIME_BEFORE["$SRC"]="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+done
+echo "Source ckpt dirs OK (metadata present)"
+
+# Fresh output forks must not silently start from random weights. Select an
+# explicit DCP step, not its parent directory; never infer "latest" here.
+declare -A SEEN_WORKDIR
+for idx in "${!TRAINERS[@]}"; do
+  row="${TRAINERS[$idx]}"
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _lr initial _decay _minlr _tok _sp rs gbs <<< "$row"
+  [[ -d "$_wd" ]] || { echo "FATAL: trainer $idx workdir missing: $_wd"; exit 2; }
+  canonical_wd=$(cd "$_wd" && pwd -P) || exit 2
+  if [[ -n "${SEEN_WORKDIR[$canonical_wd]:-}" ]]; then
+    echo "FATAL: trainer $idx shared workdir $canonical_wd (auto-retry state collision)"; exit 2
+  fi
+  SEEN_WORKDIR[$canonical_wd]=1
+  case "$idx" in
+    0) pin="${EXPECTED_HEAD_20B512:-}" ;;
+    1) pin="${EXPECTED_HEAD_20B256:-}" ;;
+    2) pin="${EXPECTED_HEAD_2B:-}" ;;
+  esac
+  seat_head=$(git -C "$_wd" rev-parse HEAD) || exit 2
+  git -C "$_wd" diff --quiet && git -C "$_wd" diff --cached --quiet || {
+    echo "FATAL: trainer $idx tracked source edits"; exit 16;
+  }
+  if [[ -n "$pin" && "$pin" != "$seat_head" ]]; then
+    echo "FATAL: trainer $idx HEAD $seat_head does not match pinned $pin"; exit 16
+  fi
+  if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
+      "$_wd/torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py"; then
+    echo "FATAL: trainer $idx position fix missing in $_wd"; exit 2
+  fi
+  if [[ "$initial" != /* || ! -f "$initial/.metadata" ]]; then
+    echo "FATAL: $_m initial load must explicitly name a valid DCP step (.metadata): $initial"
+    exit 2
+  fi
+  if (( rs % gbs != 0 )); then
+    echo "FATAL: resume_samples $rs not aligned to GBS $gbs"
+    exit 2
+  fi
+done
+
 # Slice dir
 JOBID="${PBS_JOBID%%.*}"; [[ -z "$JOBID" ]] && JOBID="nojob"
 MULTI_LOG_DIR="${PBS_O_WORKDIR:-$PWD}/logs/multi-autoretry-${JOBID}"
-mkdir -p "$MULTI_LOG_DIR"
+mkdir -p "$MULTI_LOG_DIR" || exit 1
 case "$MULTI_LOG_DIR" in /*) : ;; *) MULTI_LOG_DIR="$(cd "$MULTI_LOG_DIR" && pwd)" ;; esac
 echo "Logs under: $MULTI_LOG_DIR"
-
-# ---- Trainer table (REAL config names via CONFIG_SUFFIX pattern) ----
-# Config names follow submit_agpt_multi_autoretry.sh: agpt_${MODEL}${CONFIG_SUFFIX}
-# where MODEL=20b/2b and CONFIG_SUFFIX=_real (cos_sin RoPE). NOT agpt_20b_n512.
-#  Format: model|nnodes|port|workdir|ckpt|dfl_name|lr|init_load|decay|minlr|tokens|spares|resume_samples
-#  resume_samples is consumed via BLENDCORPUS_RESUME_CONSUMED_SAMPLES env (mpiexec --envall)
-TRAINERS=(
-  "20b|1024|29500|$REPO|${CKPT_20B512_NEW}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B512}"
-  "20b|512|29600|$REPO|${CKPT_20B256_NEW}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|${RESUME_SAMPLES_20B256}"
-  "2b|512|29700|$REPO|${CKPT_2B_RECLAIM}|olmo-mix-1124|${LR}||${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES}|0"
-)
 
 # Slice nodefile into disjoint hostfiles
 offset=1
 declare -a T_SLICE
 for idx in "${!TRAINERS[@]}"; do
-  IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs <<< "${TRAINERS[$idx]}"
+  IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "${TRAINERS[$idx]}"
   slice_count=$(( nnodes + _sp ))
   slice_file="$MULTI_LOG_DIR/trainer-${idx}.hostfile"
   sed -n "${offset},$((offset + slice_count - 1))p" "$PBS_NODEFILE" > "$slice_file"
@@ -198,7 +192,7 @@ for idx in "${!TRAINERS[@]}"; do
   offset=$(( offset + slice_count ))
 done
 # Non-overlap check
-dupes=$(cat "$MULTI_LOG_DIR"/trainer-*.hostfile 2>/dev/null | sort | uniq -d)
+dupes=$(cat "${T_SLICE[@]}" | sort | uniq -d)
 if [[ -n "$dupes" ]]; then
   echo "FATAL: slices overlap:"; echo "$dupes"; exit 1
 fi
@@ -208,26 +202,122 @@ echo "Slices disjoint OK"
 echo "============================================================"
 echo "  agpt boost umbrella (native auto-retry)  jobid=$JOBID"
 for idx in "${!TRAINERS[@]}"; do
-  IFS='|' read -r model nnodes port wd ckpt dfl lr init decay minlr tok sp rs <<< "${TRAINERS[$idx]}"
-  gbs=$(( nnodes * PPN * LBS * GAS / (TP * PP * CP) ))
-  echo "  trainer $idx: $model n=$nnodes gbs=$gbs port=$port ckpt=$ckpt resume_samples=$rs"
+  IFS='|' read -r model nnodes port wd ckpt dfl lr init decay minlr tok sp rs gbs <<< "${TRAINERS[$idx]}"
+  echo "  trainer $idx: $model n=$nnodes gbs=$gbs port=$port ckpt=$ckpt resume_samples=$rs workdir=$wd dialect=$CLI_DIALECT"
 done
 echo "============================================================"
 
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  echo "Dry run OK: no checkpoint directories created, runtime staged, or trainers launched"
+  exit 0
+fi
+
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd D _rest <<< "$row"
+  if [[ ! -d "$D" ]]; then
+    echo "Creating fork dir: $D"
+    mkdir -p "$D" || exit 1
+    lfs setstripe -c 2 -i 10 "$D" 2>&1 || echo "WARNING: lfs setstripe failed for $D"
+  fi
+done
+
+# Verify source mtime unchanged after fork (fork must not mutate source)
+for SRC in "${SOURCES[@]}"; do
+  AFTER="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+  BEFORE="${SRC_MTIME_BEFORE[$SRC]}"
+  if [[ "$AFTER" != "$BEFORE" ]]; then
+    echo "FATAL: source $SRC mtime changed after fork: before=$BEFORE after=$AFTER"
+    echo "  (fork must not mutate source — check for accidental mv/cp into source)"
+    exit 3
+  fi
+done
+echo "Checkpoint dirs OK (fork clean, source mtime unchanged)"
+
+# ── Venv broadcast (immutable production archive, no activation fallback) ──
+VENV_ARCHIVE="${VENV_ARCHIVE:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/.venv-20b-prod-ezpz0292-f7deda7-20260929.tar.gz}"
+VENV_ARCHIVE_SHA="${VENV_ARCHIVE_SHA:-e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc}"
+LAUNCHER_VENV="${LAUNCHER_VENV:-/flare/AuroraGPT/foremans/venvs/xpu-torch215}"
+EZPZ_UTILS="${EZPZ_UTILS:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/ezpz-utils-f7deda7.sh}"
+VENV_DST="${VENV_DST:-/tmp/.venv-20b-restart-20261029}"
+[[ -f "$VENV_ARCHIVE" ]] || { echo "FATAL: missing runtime archive: $VENV_ARCHIVE"; exit 1; }
+[[ "$VENV_ARCHIVE_SHA" =~ ^[[:xdigit:]]{64}$ ]] || { echo "FATAL: invalid VENV_ARCHIVE_SHA"; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  archive_sum=$(sha256sum "$VENV_ARCHIVE") || exit 1
+else
+  archive_sum=$(shasum -a 256 "$VENV_ARCHIVE") || exit 1
+fi
+[[ "${archive_sum%% *}" == "$VENV_ARCHIVE_SHA" ]] || { echo "FATAL: archive SHA mismatch: $archive_sum"; exit 16; }
+[[ -x "$LAUNCHER_VENV/bin/ezpz" && -f "$EZPZ_UTILS" ]] || { echo "FATAL: launcher/utils missing"; exit 1; }
+source "$EZPZ_UTILS" || { echo "FATAL: sourcing ezpz utils failed"; exit 1; }
+declare -F ezpz_load_modules >/dev/null || { echo "FATAL: ezpz_load_modules missing"; exit 1; }
+declare -F ezpz_setup_job >/dev/null || { echo "FATAL: ezpz_setup_job missing"; exit 1; }
+ezpz_load_modules || { echo "FATAL: ezpz_load_modules failed"; exit 1; }
+ezpz_setup_job || { echo "FATAL: ezpz_setup_job failed"; exit 1; }
+"$LAUNCHER_VENV/bin/ezpz" yeet --src "$VENV_ARCHIVE" --hostfile "$PBS_NODEFILE" --dst "$VENV_DST" \
+  > "$MULTI_LOG_DIR/prestage.console.log" 2>&1 || { echo "FATAL: runtime staging failed; see $MULTI_LOG_DIR/prestage.console.log"; exit 1; }
+[[ -x "$VENV_DST/bin/ezpz" && -x "$VENV_DST/bin/python" ]] || { echo "FATAL: staged entry points missing: $VENV_DST"; exit 1; }
+unset PYTHONPATH
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export CCL_KVS_MODE=pmi CCL_SYCL_KERNEL_SYNC=0
+"$VENV_DST/bin/python" -c "import torch; assert torch.xpu.is_available(); print(f'torch {torch.__version__} xpu={torch.xpu.is_available()}')" \
+  || { echo "FATAL: staged torch/XPU probe failed"; exit 1; }
+echo "Venv OK: $VENV_DST archive_sha=$VENV_ARCHIVE_SHA"
+
+# Check source/runtime visibility on every allocated active AND spare host.
+# A login-node check or a four-node canary does not establish 788-node mounts.
+RESTART_PROBE_DIRS="$REPO"
+RESTART_PROBE_WRITES=""
+RESTART_PROBE_SEEDS=""
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _lr _seed _rest <<< "$row"
+  RESTART_PROBE_DIRS+="|$_wd"
+  RESTART_PROBE_WRITES+="|$_ckpt"
+  RESTART_PROBE_SEEDS+="|$_seed"
+done
+export RESTART_PROBE_DIRS RESTART_PROBE_WRITES RESTART_PROBE_SEEDS
+export RESTART_PROBE_VENV="$VENV_DST"
+"$VENV_DST/bin/ezpz" launch --nproc "$TOTAL_AVAIL" --nproc_per_node 1 \
+  --hostfile "$PBS_NODEFILE" -- "$VENV_DST/bin/python" -c '
+import os, socket
+from pathlib import Path
+import torch
+for value in os.environ["RESTART_PROBE_DIRS"].split("|"):
+    if value:
+        assert (Path(value)/"torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py").is_file(), value
+for value in os.environ["RESTART_PROBE_WRITES"].split("|"):
+    if value:
+        assert Path(value).is_dir() and os.access(value, os.W_OK), value
+for value in os.environ["RESTART_PROBE_SEEDS"].split("|"):
+    if value:
+        assert (Path(value)/".metadata").stat().st_size > 0, value
+for name in ["python", "ezpz"]:
+    path = Path(os.environ["RESTART_PROBE_VENV"])/"bin"/name
+    assert path.is_file() and os.access(path, os.X_OK), str(path)
+assert torch.xpu.is_available() and torch.xpu.device_count() >= 12
+print("RESTART_HOST_PREFLIGHT_PASS", socket.gethostname(), flush=True)
+' > "$MULTI_LOG_DIR/allocated-host-preflight.log" 2>&1 || {
+  echo "FATAL: allocated-host source/runtime preflight failed; see $MULTI_LOG_DIR/allocated-host-preflight.log"
+  exit 1
+}
+
 # ---- Launch function ----
 launch_trainer() {
-  local idx="$1"
-  IFS='|' read -r model nnodes port workdir ckpt dfl_name lr_val init_load decay_ratio min_lr_factor train_tokens spares resume_samples <<< "${TRAINERS[$idx]}"
+  local idx="$1" attempt="${2:-1}"
+  IFS='|' read -r model nnodes port workdir ckpt dfl_name lr_val init_load decay_ratio min_lr_factor train_tokens spares resume_samples gbs <<< "${TRAINERS[$idx]}"
   local slice="${T_SLICE[$idx]}"
   local nproc=$(( nnodes * PPN ))
-  local gbs=$(( nproc * LBS * GAS / (TP * PP * CP) ))
   local training_steps
   training_steps=$(( train_tokens / (gbs * SEQ_LEN) ))
   local tokens_per_microbatch_per_dp_rank=$(( LBS * SEQ_LEN ))
   local tokens_per_train_step=$(( gbs * SEQ_LEN ))
-  local console="$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}.console.log"
+  local console="$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}-attempt-${attempt}.console.log"
   local dfl="torchtitan/experiments/ezpz/data-lists/aurora/${dfl_name}.txt"
   local data_cache="${ckpt}/.cache/${dfl_name}/index-cache"
+  case "$idx" in
+    0) data_cache="${DATA_CACHE_20B512:-$data_cache}" ;;
+    1) data_cache="${DATA_CACHE_20B256:-$data_cache}" ;;
+  esac
+  local hf_assets="${HF_ASSETS:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b}"
 
   # Config name: agpt_${MODEL}${CONFIG_SUFFIX} — real names from submit_agpt_*_autoretry.sh
   # CONFIG_SUFFIX=_real for cos_sin RoPE (production default)
@@ -242,8 +332,16 @@ launch_trainer() {
     fi
   fi
 
+  local batch_args=()
+  if [[ "$CLI_DIALECT" == "legacy" ]]; then
+    batch_args=(--training.local-batch-size="$LBS" --training.global-batch-size="$gbs" --training.seq-len="$SEQ_LEN")
+  else
+    batch_args=(--training.num-tokens-per-microbatch-per-dp-rank="$tokens_per_microbatch_per_dp_rank"
+      --training.num-tokens-per-train-step="$tokens_per_train_step" --training.max-context-length="$SEQ_LEN")
+  fi
+
   local xtra=()
-  [[ -n "$init_load" ]] && xtra+=(--checkpoint.initial-load-path="$init_load")
+  [[ -n "$init_load" ]] && xtra+=(--checkpoint.initial-load-path="$init_load" --checkpoint.no-initial-load-model-only)
   xtra+=(--lr-scheduler.decay-ratio="$decay_ratio" --lr-scheduler.min-lr-factor="$min_lr_factor" --lr-scheduler.warmup-steps=20)
 
   # Per-trainer resume: BLENDCORPUS_RESUME_CONSUMED_SAMPLES env var propagated
@@ -260,12 +358,8 @@ launch_trainer() {
       unset BLENDCORPUS_RESUME_CONSUMED_SAMPLES || true
     fi
     export MASTER_PORT="$port"; unset MASTER_ADDR
-    # Use node-local venv from broadcast
-    if [[ -f "/tmp/.venv/bin/ezpz" ]]; then
-      VENV_BIN="/tmp/.venv"
-    else
-      VENV_BIN=".venv"
-    fi
+    # Use exactly the staged immutable runtime, never an activation fallback.
+    VENV_BIN="$VENV_DST"
     export VIRTUAL_ENV="$VENV_BIN"
     export PATH="$VENV_BIN/bin:$PATH"
     hash -r
@@ -280,6 +374,7 @@ launch_trainer() {
       "$VENV_BIN/bin/python" -m torchtitan.experiments.ezpz.train \
       --module=ezpz.agpt \
       --config="$config_name" \
+      --hf-assets-path="$hf_assets" \
       --checkpoint.enable \
       --checkpoint.folder="$ckpt" \
       --checkpoint.interval="$CKPT_INTERVAL" \
@@ -292,14 +387,12 @@ launch_trainer() {
       --validator.enable --validator.freq=100 --validator.steps=10 \
       --validator.dataloader.dataset-path="$dfl" --validator.dataloader.data-cache-path="$data_cache" \
       "${xtra[@]}" \
-      --optimizer="$OPTIMIZER" \
+      --optimizer "$OPTIMIZER" \
       --optimizer.lr="$lr_val" \
-      --training.num-tokens-per-microbatch-per-dp-rank="$tokens_per_microbatch_per_dp_rank" \
-      --training.num-tokens-per-train-step="$tokens_per_train_step" \
-      --training.max-context-length="$SEQ_LEN" \
+      "${batch_args[@]}" \
       --training.steps="$training_steps"
   ) > "$console" 2>&1 &
-  echo $!
+  TRAINER_PID=$!
 }
 
 # ---- Supervise (with relaunch) ----
@@ -325,7 +418,8 @@ supervise_trainer() {
   SEAT_MAX_QUICK_DEATHS="${SEAT_MAX_QUICK_DEATHS:-2}"
   while :; do
     t0=$(date +%s)
-    pid=$(launch_trainer "$idx")
+    launch_trainer "$idx" "$attempt"
+    pid=$TRAINER_PID
     PIDS[$idx]=$pid
     touch "$LAUNCHER_RAN_FILE"
     wait "$pid"; rc=$?
@@ -379,9 +473,9 @@ echo "  boost umbrella summary (jobid=$JOBID)"
 echo "============================================================"
 for idx in "${!TRAINERS[@]}"; do
   status="OK"; (( RC[idx] == 0 )) || status="FAIL(${RC[idx]})"
-  IFS='|' read -r model nnodes _port _wd ckpt _dfl _lr _init _decay _minlr _tok _sp _rs <<< "${TRAINERS[$idx]}"
+  IFS='|' read -r model nnodes _port _wd ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "${TRAINERS[$idx]}"
   printf '  trainer %d: %-4s n=%-4s %-10s ckpt=%s resume=%s\n' "$idx" "$model" "$nnodes" "$status" "$ckpt" "$_rs"
-  printf '             log: %s\n' "$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}.console.log"
+  printf '             log: %s\n' "$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}-attempt-*.console.log"
 done
 echo "  failed: $fails / ${#TRAINERS[@]}"
 echo "============================================================"
