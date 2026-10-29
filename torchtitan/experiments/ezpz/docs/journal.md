@@ -2,6 +2,18 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-29 (Aurora) -- first canary classified; corrected retry admitted
+
+Canary `8984401` finished exit 143 after 00:12:55, with no optimizer step or
+fresh checkpoint. Runtime/application initialization passed; the real sampler
+rejected offset 15482880 against the reduced smoke's 521841-sample horizon.
+Decoupled `dataloader.train_iters` from the short optimizer stop, retaining all
+immutable source/runtime/seed inputs. Six preflight tests now pass, including
+the large-offset horizon guard. Exact-runtime CLI and repository preflight
+passed again; corrected retry `8984481` is queued/unheld in four-node
+`debug-scaling`. Fresh notifier attached. Production remains gated. Full
+failure evidence and retry provenance are in the [restart report](production/2026-10-29-20b-restart.md).
+
 ## 2026-10-29 (Aurora) -- repair failed umbrella; 20B restart canary admitted
 
 Monday umbrella `8951415` failed before training: absent bootstrap `ezpz`,

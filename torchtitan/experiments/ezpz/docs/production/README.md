@@ -58,7 +58,7 @@
 ## Current restart gate — 2026-10-29
 
 Monday umbrella `8951415` failed before training. The corrected two-seat 20B
-restart is gated by four-node canary **8984401**, initially queued/unheld in
+restart is gated by four-node retry **8984481**, initially queued/unheld in
 `debug-scaling`. Canonical checkpoint heads remain 11100 (larger-batch lineage)
 and 20900 (smaller batch); the planned larger-batch seed is the previously
 selected rollback 10800. No replacement production allocation has been
