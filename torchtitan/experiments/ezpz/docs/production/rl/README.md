@@ -55,7 +55,7 @@ production runbook linked above.
 
 | # | Path | Framework | Generation | Entry point | venv | Status | Doc |
 |---|------|-----------|------------|-------------|------|--------|-----|
-| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL + Guoqiong `rl/xpu_trial/` | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | `rl/xpu_trial` on `prod` | **Sunspot two-host validated; Aurora `prod` gate pending (xpu-smoke queued)** | [`monarch.md`](monarch.md) + [`rl/xpu_trial/README.md`](../../rl/xpu_trial/README.md) |
+| Current | **Monarch + TorchStore + vLLM** | upstream TorchTitan RL + Guoqiong `rl/xpu_trial/` | vLLM actor + TorchStore/Gloo | multi-host SPMD entry point | `rl/xpu_trial` on `prod` | **Sunspot two-host validated; Aurora `prod` gate pending (xpu-smoke queued)** | [`monarch.md`](monarch.md) + [`rl/xpu_trial/README.md`](../../../rl/xpu_trial/README.md) |
 | A2 | TRL + vLLM-server | TRL `GRPOTrainer` | `trl vllm-serve` (on-policy, weight-sync) | `rl.train_grpo` `--use_vllm --vllm_mode server` | `rl-vllm` | **deprecated for new production; historical validation retained** | [`trl.md`](trl.md) |
 | A1 | TRL + `.generate()` | TRL `GRPOTrainer` | HF `.generate()` per-rank | `rl.train_grpo` (no `--use_vllm`) | `rl-vllm` | works (slow fallback) | [`trl.md`](trl.md) |
 | B (historical) | Monarch + TorchStore + vLLM | older vendored bring-up | vLLM (Monarch actor) | `rl.train_upstream` | `rl-grpo-lora` | one-host/two-tile historical result | [`monarch.md`](monarch.md) |
