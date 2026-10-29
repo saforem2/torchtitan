@@ -41,6 +41,12 @@ def _import_blendcorpus_modules():
     )
 
 
+def _env_resume_consumed_samples() -> int | None:
+    """Read the optional legacy-checkpoint position at config creation time."""
+    value = os.environ.get("BLENDCORPUS_RESUME_CONSUMED_SAMPLES", "").strip()
+    return int(value) if value else None
+
+
 class BlendCorpusDataLoader(BaseDataLoader):
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
@@ -61,6 +67,12 @@ class BlendCorpusDataLoader(BaseDataLoader):
         provide_attention_mask: bool = False
         eod_token_id: int | None = None
         data_cache_path: str = ".cache/blendcorpus"
+
+        # Only replaces a legacy checkpoint's zero/missing counter. A nonzero
+        # checkpoint position always wins, including on subsequent retries.
+        resume_consumed_samples: int | None = field(
+            default_factory=_env_resume_consumed_samples
+        )
 
         train_iters: int | None = None
         # When True, this dataloader serves the validation split of the
@@ -281,6 +293,12 @@ class BlendCorpusDataLoader(BaseDataLoader):
         self._build_pretraining_data_loader = build_pretraining_data_loader
         self._loader = build_pretraining_data_loader(served_ds, 0, self._bc_cfg)
         self._consumed_samples = 0
+        # Match the sampler's GLOBAL sequences per microbatch, not the
+        # optimizer's global batch (which may include gradient accumulation).
+        self._samples_per_yield = int(bc_cfg.micro_batch_size) * int(
+            bc_mpu.get_data_parallel_world_size()
+        )
+        self._resume_consumed_samples = config.resume_consumed_samples
 
         try:
             self._len = len(self._loader)
@@ -305,6 +323,8 @@ class BlendCorpusDataLoader(BaseDataLoader):
             tokens = batch["text"].long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
+            # Checkpoints can run while this generator is suspended at yield.
+            self._consumed_samples += self._samples_per_yield
             yield {"input": input_ids}, labels
 
     def set_consumed_by_global_step(self, global_step: int, global_batch_size: int):
@@ -328,6 +348,31 @@ class BlendCorpusDataLoader(BaseDataLoader):
             return
 
         consumed = int(state_dict.get("consumed_samples", 0))
+        override = self._resume_consumed_samples
+        if override is not None:
+            if consumed == 0:
+                logger.warning(
+                    "BlendCorpus checkpoint has consumed_samples=0 (written "
+                    "before the counter existed); resuming the data stream at "
+                    "--dataloader.resume-consumed-samples=%d instead of 0.",
+                    override,
+                )
+                consumed = int(override)
+            elif consumed != override:
+                logger.warning(
+                    "Ignoring resume_consumed_samples=%d: checkpoint "
+                    "already stores consumed_samples=%d.",
+                    override,
+                    consumed,
+                )
+        if consumed < 0:
+            raise ValueError("BlendCorpus resume position must be non-negative")
+        if consumed % self._samples_per_yield != 0:
+            raise ValueError(
+                f"BlendCorpus resume position {consumed} is not a multiple of "
+                f"micro_batch_size * dp_world_size = {self._samples_per_yield}; "
+                "the sampler would start mid-batch."
+            )
         if consumed != self._consumed_samples:
             self._consumed_samples = consumed
             self._loader = self._build_pretraining_data_loader(
