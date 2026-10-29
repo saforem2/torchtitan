@@ -2,6 +2,29 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-29 (Aurora) -- repair failed umbrella; 20B restart canary admitted
+
+Monday umbrella `8951415` failed before training: absent bootstrap `ezpz`,
+broken generic venv Python, falsely successful environment banner, and 2058
+allocated nodes versus 2078 required by disjoint spare pools. Smoke `8957951`
+printed usage, not a passing validation. The repaired plan selects the original
+20B 512N/256N seats with historical GBS 12288/6144 and ten spares each (788N),
+requires explicit full-state seeds, fixes child ownership/waits, and keeps
+attempt-specific logs. Fourteen executable shell tests plus five canary
+preflight tests and existing launcher contracts pass.
+
+Preserved canonical source/checkpoints/runtime. Narrow position-counter
+backports are frozen separately at `dc6c150975f8b7abd5377c115436db3fa85fcf60`
+and `0fa34977be1e01eab79362b50ccbffd91a4a60de` (eleven tests each). Exact archive
+`e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc` imports and
+both real legacy CLI parse gates pass on Aurora. Canary `8984401` is admitted
+unheld to four-node `debug-scaling`; initial readback is queued. It must restore
+step 10800, complete three finite updates, save a fresh full checkpoint and
+prove persisted sample position before production is submitted. No production
+replacement has yet been released. See the [restart report](production/2026-10-29-20b-restart.md).
+
+---
+
 ## 2026-10-20 (Aurora) -- umbrella NaN, fixedpos fork, boost queued
 
 Umbrella `8938159` (`large`, `24:00:36`, `Exit -29` walltime) `F` at `2026-10-19 04:49 UTC` on `5be47f7c`. `20B-512` constlr NaN from `11101` every step (`loss=nan grad_norm=nan` through `11148` at 20% MFU, no learning; optimizer corrupted, not infra) while `20B-256` healthy at `20987` (`2.447/0.19`, 19.9% MFU) and `2B` done. Root cause is the data-position replay: every `20B` ckpt stores `consumed_samples=0` (pinned clones `f1c20ee7`/`086ff996` never increment), so restarts re-read from sample 0 (89.2% replay for 512N, 92.0% for 256N per `blendcorpus-resume-position.md`). Fix is the `fixedpos` fork at `a0a4ed9b3c` (PR #66) with `RESUME_SAMPLES` `15482880`/`10002432` GBS-aligned (`15482880%12288==0`, `10002432%6144==0`) into `outputs/checkpoints/*-constlr-from9000-fixedpos` via `BLENDCORPUS_RESUME_CONSUMED_SAMPLES` env + `--dataloader.resume-consumed-samples` per seat (`TRAINERS` 13th field). Boost scaffold `followup-umbrella-boost-20261020.pbs` (`prod` `select=2058` → `large`, `>2048N` eligible) wired from no-op to `exec` delegation, SHA frozen `a426ea...`, ckpt paths corrected to `outputs/checkpoints/`. Hard gate is `debug` `1N` smoke `8957951` (`Q`) proving `resuming at N` + finite loss before boost is trusted, then `prod` capacity `274N`/`512N` + boost `8951415` (`large:2058`, `Q`, `27:37` eligible, `454 free`). Stray `docs/production/followup-umbrella-boost-20261020.md` at repo root duplicates the canonical `torchtitan/experiments/ezpz/docs/production/` path — drop once boost `R` is confirmed. `docs/production/agpt/20b/README.md` still `2026-09-21` (last good heads `11,100`/`17,500` via `8880564`/`8880658`); `evals/agpt/20b/` current for those heads, `refresh_all.sh` will regenerate charts once `8951415` produces `11101+`.

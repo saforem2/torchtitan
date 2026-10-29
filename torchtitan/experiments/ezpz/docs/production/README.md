@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-09-21
+> Last updated: 2026-10-29 (restart status; historical generated metrics remain labeled below)
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -12,7 +12,7 @@
 > Aurora/Sunspot (Intel XPU) only.
 
 > [!IMPORTANT]
-> **Aurora production is queued.** Umbrella `8828612` used its full 12-hour
+> **Historical dispatch snapshot — 2026-09-21.** Umbrella `8828612` used its full 12-hour
 > allocation on 2,098 nodes and finished at walltime (`Exit_status=-29`) on
 > 2026-09-20. Its verified 20B-256 seat advanced from step 15,201 through
 > 16,035. Continuation `8834528` is queued for the next allocation; it has not
@@ -55,12 +55,21 @@
 [Other jobs](#other-jobs) · [Known issues](#known-issues) ·
 [Overview](#overview)
 
+## Current restart gate — 2026-10-29
+
+Monday umbrella `8951415` failed before training. The corrected two-seat 20B
+restart is gated by four-node canary **8984401**, initially queued/unheld in
+`debug-scaling`. Canonical checkpoint heads remain 11100 (larger-batch lineage)
+and 20900 (smaller batch); the planned larger-batch seed is the previously
+selected rollback 10800. No replacement production allocation has been
+submitted yet. See the [verified incident, frozen inputs and acceptance gates](2026-10-29-20b-restart.md).
+
 ## Status at a glance
 
 ### Pre-training
 
 One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
-**No row is advancing now** -- the next umbrella is queued. The summary below
+**These are historical generated rows**, not the current restart queue. The summary below
 predates the latest dispatch where noted. Post-training stages (CPT / SFT /
 RL-GRPO) are in the [next table](#post-training-stages-cpt-sft-rl). Detail +
 per-dispatch history is in the linked pages.
