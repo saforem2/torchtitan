@@ -10,26 +10,33 @@ from __future__ import annotations
 
 import asyncio
 
+import numpy as np
 import pytest
 from renderers import Qwen3RendererConfig
 
 from torchtitan.components.renderer import from_renderers
 
 from torchtitan.components.tokenizer import HuggingFaceTokenizer
-
 from torchtitan.rl.examples.alphabet_sort import (
     AlphabetSortDataset,
     AlphabetSortSample,
     data as alphabet_data,
     RewardAlphabetSort,
 )
-from torchtitan.rl.examples.alphabet_sort.config_registry import (
-    _alphabet_sort_rollouter_config,
-)
 from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
 from torchtitan.rl.examples.alphabet_sort.rubric import score_sorted_list
 from torchtitan.rl.rollout import Rollout, RolloutStatus, RolloutTurn
-from torchtitan.rl.types import RolloutTurnID
+
+from torchtitan.rl.rollout.data import IterableRLDataLoader
+from torchtitan.rl.rollout.types import RolloutTurnID
+from torchtitan_recipes.rl.alphabet_sort import _alphabet_sort_rollouter_config
+
+from torchtitan_recipes.tests.rl.alphabet_sort import (
+    rl_grpo_fsdp2_gen_tp2_no_compile,
+    rl_grpo_moe_debug_tp4_ep4,
+    rl_grpo_moe_debug_tp4_ep4_batch_invariant,
+    rl_grpo_qwen3_5_debug_tp2_batch_invariant,
+)
 
 
 _Author = alphabet_data._Author
@@ -50,12 +57,44 @@ def _patch_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(alphabet_data, "_load_authors", lambda *a, **k: _AUTHORS)
 
 
+def test_ci_recipes_use_matching_hf_assets(monkeypatch: pytest.MonkeyPatch) -> None:
+    hf_assets_path = "/tmp/Qwen3-0.6B"
+    monkeypatch.setenv("TORCHTITAN_TEST_HF_ASSETS_PATH", hf_assets_path)
+
+    assert rl_grpo_fsdp2_gen_tp2_no_compile().hf_assets_path == hf_assets_path
+    for config_fn in (
+        rl_grpo_moe_debug_tp4_ep4,
+        rl_grpo_moe_debug_tp4_ep4_batch_invariant,
+        rl_grpo_qwen3_5_debug_tp2_batch_invariant,
+    ):
+        assert config_fn().hf_assets_path == "tests/assets/tokenizer"
+
+
+@pytest.mark.parametrize(
+    "config_fn",
+    (
+        rl_grpo_fsdp2_gen_tp2_no_compile,
+        rl_grpo_moe_debug_tp4_ep4,
+        rl_grpo_moe_debug_tp4_ep4_batch_invariant,
+        rl_grpo_qwen3_5_debug_tp2_batch_invariant,
+    ),
+)
+def test_ci_recipes_limit_prompt_length_to_model_context(config_fn) -> None:
+    config = config_fn()
+
+    assert (
+        config.rollouter.worker.token_env.max_rollout_tokens
+        == config.trainer.model.max_context_length
+    )
+
+
 def _assistant_turn(content: str) -> RolloutTurn:
     return RolloutTurn(
         rollout_id=RolloutTurnID(group_id=0, rollout_id=0, turn_id=0),
-        prompt_token_ids=[],
-        completion_token_ids=[],
-        completion_logprobs=[],
+        prompt_prefix_len=0,
+        prompt_delta_token_ids=np.array([], dtype=np.int32),
+        completion_token_ids=np.array([], dtype=np.int32),
+        completion_logprobs=np.array([], dtype=np.float32),
         min_policy_version=0,
         completion_message={"role": "assistant", "content": content},
     )
@@ -393,7 +432,8 @@ def test_rollouter_builds_one_env_per_group_member(
 
 def test_rollouter_config_wires_alphabet_sort() -> None:
     config = _alphabet_sort_rollouter_config()
-    assert isinstance(config.train_dataset, AlphabetSortDataset.Config)
+    assert isinstance(config.training_dataloader, IterableRLDataLoader.Config)
+    assert isinstance(config.training_dataloader.dataset, AlphabetSortDataset.Config)
     assert isinstance(config.validation_dataset, AlphabetSortDataset.Config)
     assert isinstance(config.worker.message_env, AlphabetSortEnv.Config)
     assert len(config.worker.rubric.reward_fns) == 1

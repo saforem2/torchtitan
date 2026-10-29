@@ -4,29 +4,43 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Config-based DTensor sharding for the agpt (Llama3-derived) model.
+"""Config-based SPMD sharding for the agpt (Llama3-derived) model.
 
-Mirrors `torchtitan.models.llama3.sharding` but additionally fills in
-sharding for the optional QK-Norm RMSNorm sub-module that agpt configs
-may include. Upstream's `set_gqa_attention_sharding` does not know about
-qk_norm.
+Upstream builds sharding at config-construction time: ``make_gqa_config`` /
+``make_ffn_config`` and ``torchtitan.models.llama3.flavors`` bake an
+``enable_sp`` flag into every sub-config. ezpz flavors are prebuilt
+templates (``agpt_configs``) and the CLI may change
+``parallelism.enable_sequence_parallel`` afterwards, so this module re-applies
+the same sharding declarations to an existing ``AgptModel.Config`` once the
+final parallelism config is known (``AgptModel.Config.update_from_config``).
+
+It mirrors the sharding that ``torchtitan.models.llama3.flavors`` produces,
+with one deliberate difference: the optional QK-Norm sub-module is a
+``LocalShardRMSNorm`` that handles its own DTensor boundary, so it only
+declares its replicated weight (upstream's ``head_norm_sharding_config``
+declares activation layouts the module would then double-handle).
 """
 
 from typing import TYPE_CHECKING
 
 import spmd_types as spmd
 
+from torchtitan.models.base.sharding import ShardingConfig
 from torchtitan.models.common.decoder_sharding import (
-    dense_activation_placement,
+    colwise_sharding_config,
     dense_param_placement,
-    dense_sequence_parallel_placement,
-    norm_config,
-    set_decoder_sharding_config,
-    set_dense_ffn_sharding,
-    set_gqa_attention_sharding,
-    set_gqa_inner_attention_local_spmd,
+    feed_forward_sharding_config,
+    gqa_attention_sharding_config,
+    inner_attention_local_spmd_sharding_config,
+    lm_head_sharding_config,
+    norm_sharding_config,
+    pre_lm_head_norm_sharding_config,
+    residual_activation_placement,
+    rope_cache_sharding_config,
+    rowwise_sharding_config,
+    stacked_colwise_sharding_config,
+    token_embedding_sharding_config,
 )
-from torchtitan.protocols.sharding import ShardingConfig
 
 if TYPE_CHECKING:
     from torchtitan.models.llama3.model import Llama3Model, Llama3TransformerBlock
@@ -39,17 +53,50 @@ def set_agpt_sharding_config(
 ) -> None:
     """Fill ``sharding_config`` on all agpt sub-configs.
 
-    Same plan as `set_llama3_sharding_config` plus QK-Norm sharding when
-    present. Specs are populated unconditionally; the runtime mesh
-    determines which declarations apply.
+    Specs are populated unconditionally; the SPMD mesh active at
+    ``Module.parallelize()`` time decides which declarations apply.
     """
-    # 57th sync: upstream PR #3694 removed the loss_parallel kwarg.
-    # TP-on now always implies LP-on via tp_gather_logits=False; logits
-    # come out vocab-sharded and cross_entropy_loss handles the
-    # all-reduce via _LossParallelCrossEntropy autograd.
-    set_decoder_sharding_config(config, enable_sp=enable_sp)
+    config.tok_embeddings.sharding_config = token_embedding_sharding_config(
+        enable_sp=enable_sp
+    )
+    config.norm.sharding_config = pre_lm_head_norm_sharding_config(enable_sp=enable_sp)
+    config.lm_head.sharding_config = lm_head_sharding_config()
     for layer_cfg in config.layers:
         _set_agpt_layer_sharding(layer_cfg, enable_sp=enable_sp)
+
+
+def set_gqa_attention_config_sharding(attention, *, enable_sp: bool) -> None:
+    """Sharding for a fused-QKV ``GQAttention.Config`` (with optional QK-Norm).
+
+    Shared by agpt and the AGPT-MoE flavors, which both use the same GQA block.
+    """
+    x_layout = residual_activation_placement(enable_sp=enable_sp)
+    attention.sharding_config = gqa_attention_sharding_config(enable_sp=enable_sp)
+    attention.qkv_linear.wqkv.sharding_config = colwise_sharding_config(
+        input_layout=x_layout
+    )
+    attention.wo.sharding_config = rowwise_sharding_config(output_layout=x_layout)
+    # Static local-SPMD boundary on the inner attention (matches in_dst
+    # shardings by positional-arg NAME: q_THK / k_THK / v_THV). Every inner
+    # attention type, including SoftcappedFlexAttention, goes through this.
+    attention.inner_attention.sharding_config = (
+        inner_attention_local_spmd_sharding_config()
+    )
+    if attention.rope is not None:
+        attention.rope.sharding_config = rope_cache_sharding_config()
+
+    qk_norm = getattr(attention, "qk_norm", None)
+    if qk_norm is not None:
+        # QK-Norm uses LocalShardRMSNorm (agpt/local_rmsnorm.py): a drop-in
+        # RMSNorm subclass whose forward runs the per-head norm on the local TP
+        # shard and re-anchors its own DTensor output boundary, so this config
+        # only declares the replicated weight (spmd.R, == I after layout
+        # resolution). Declaring the full S(2) activation boundary here was a
+        # no-op for the TP>1 backward crash: matched src/dst placements insert
+        # no redistribute autograd node.
+        qk_norm.sharding_config = ShardingConfig(
+            state_shardings={"weight": dense_param_placement(tp=spmd.R)},
+        )
 
 
 def _set_agpt_layer_sharding(
@@ -58,52 +105,15 @@ def _set_agpt_layer_sharding(
     enable_sp: bool,
 ) -> None:
     """Set sharding on one agpt transformer layer (with optional QK-Norm)."""
-    norm = norm_config(enable_sp=enable_sp)
+    norm = norm_sharding_config(enable_sp=enable_sp)
     layer_cfg.attention_norm.sharding_config = norm
     layer_cfg.ffn_norm.sharding_config = norm
+    x_layout = residual_activation_placement(enable_sp=enable_sp)
 
-    set_gqa_attention_sharding(layer_cfg.attention, enable_sp=enable_sp)
-    # Static LocalMapConfig on the inner-attention config (upstream #2986
-    # replaced runtime DTensor detection in `LocalMapInnerAttention` with
-    # this config-driven approach). All inner attention types — including
-    # SoftcappedFlexAttention — go through this same path.
-    set_gqa_inner_attention_local_spmd(layer_cfg.attention.inner_attention)
+    set_gqa_attention_config_sharding(layer_cfg.attention, enable_sp=enable_sp)
 
-    qk_norm = getattr(layer_cfg.attention, "qk_norm", None)
-    if qk_norm is not None:
-        # QK-Norm uses LocalShardRMSNorm (agpt/local_rmsnorm.py): a drop-in
-        # RMSNorm subclass whose forward runs the per-head norm on the local TP
-        # shard and re-anchors its own DTensor output boundary. So this config
-        # only needs to declare the replicated weight; the module handles input
-        # unwrap / output re-wrap and the gradient placements itself. The prior
-        # attempt to fix the TP>1 backward crash by declaring the full S(2)
-        # in/out activation boundary here (mirroring qwen3) was a NO-OP: matched
-        # src/dst placements insert no redistribute autograd node, so DTensor's
-        # native (crashing) RMSNorm backward was unchanged. weight -> spmd.R
-        # (== I after layout resolution).
-        qk_norm.sharding_config = ShardingConfig(
-            state_shardings={"weight": dense_param_placement(tp=spmd.R)},
-        )
-
-    assert layer_cfg.feed_forward is not None
-    # Upstream PR #3501 (SpmdLayout for NamedPlacement) renamed
-    # set_dense_ffn_sharding's `attn_x_placement: Placement` arg to
-    # `attn_x_layout: SpmdLayout`. Build via the dense_*_placement
-    # helpers (same pattern as llama3/sharding.py).
-    #
-    # `cp` is a REQUIRED kwarg on dense_activation_placement. This branch runs
-    # only when SP is OFF, so no smoke reaches it -- the TP=2 arm enables SP
-    # and takes the line above. Its moe twin DID abort in config.build()
-    # (smoke 8781696 arm 3), which is how this one was found. cp=spmd.S(0)
-    # matches every upstream callsite (decoder_sharding.py:117,129,136,150,
-    # 170) and the helper's docstring: activations are token-sharded on CP.
-    attn_x_layout = (
-        dense_sequence_parallel_placement()
-        if enable_sp
-        else dense_activation_placement(tp=spmd.I, cp=spmd.S(0))
-    )
-    set_dense_ffn_sharding(
-        layer_cfg.feed_forward,
-        attn_x_layout=attn_x_layout,
-        enable_sp=enable_sp,
-    )
+    ffn = layer_cfg.feed_forward
+    assert ffn is not None
+    ffn.sharding_config = feed_forward_sharding_config(enable_sp=enable_sp)
+    ffn.w13.sharding_config = stacked_colwise_sharding_config(input_layout=x_layout)
+    ffn.w2.sharding_config = rowwise_sharding_config(output_layout=x_layout)

@@ -141,7 +141,6 @@ from torchtitan.experiments.ezpz.agpt.parallelize import parallelize_llama
 from torchtitan.experiments.ezpz.agpt.config_registry import agpt_debugmodel
 from torchtitan.experiments.ezpz.moe.parallelize import parallelize_moe
 from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 print('IMPORT_OK')
 " 2>&1 | tee -a "${LOG}"

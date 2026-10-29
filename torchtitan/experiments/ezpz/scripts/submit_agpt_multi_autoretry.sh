@@ -115,6 +115,10 @@ ulimit -c 0
 set -o pipefail
 
 RUNS="/flare/AuroraGPT/foremans/runs"
+PROD_20B_VENV_ARCHIVE="${PROD_20B_VENV_ARCHIVE:-}"
+PROD_20B_VENV_SHA="${PROD_20B_VENV_SHA:-}"
+PROD_2B_VENV_ARCHIVE="${PROD_2B_VENV_ARCHIVE:-}"
+PROD_2B_VENV_SHA="${PROD_2B_VENV_SHA:-}"
 
 PROFILE="${MULTI_PROFILE:-prod}"
 SPARES="${SPARES:-10}"
@@ -159,11 +163,23 @@ log() { echo "[multi $(date +%H:%M:%S)] $*"; }
 die() { echo "[multi ERROR] $*" >&2; exit 1; }
 
 # ---- Per-trainer config table -------------------------------------------------
-# Format (5 required + 6 optional trailing override fields; empty override =>
+# Format (5 required + 7 optional trailing override fields; empty override =>
 # fall back to the global default so a plain 5-field row is unchanged behavior):
 #   model|nnodes|master_port|workdir(clone; cwd == torchtitan source)|
 #     ckpt_dir(relative; job.dump_folder=./outputs PREPENDS outputs/)|
-#     dfl_name|lr|initial_load_path|decay_ratio|min_lr_factor|train_tokens
+#     dfl_name|lr|initial_load_path|decay_ratio|min_lr_factor|train_tokens|
+#     rope_config_suffix|resume_consumed_samples
+# Field 12 (rope): _real (cos_sin) or complex; REQUIRED sentinel (see guard).
+# Field 13 (resume): global BlendCorpus sample index to resume from when the
+#   checkpoint was written before consumed_samples was counted (0 in ckpt). Only
+#   takes effect when the ckpt's own consumed_samples == 0; a non-zero ckpt
+#   value always wins (warning on mismatch). Must be multiple of GBS; asserted
+#   in launch_trainer and by the launcher-side blendcorpus_builder check. Empty
+#   means no override (the field's default_factory reads
+#   BLENDCORPUS_RESUME_CONSUMED_SAMPLES from the environment, which ezpz
+#   propagates via mpiexec --envall). Prefer the explicit argv flag; the env
+#   fallback exists so a pinned umbrella can still pass the value without a
+#   code change. See docs/guides/blendcorpus-resume-position.md.
 # GBS is computed per-slice by the launch as NGPUS_ACTIVE*LBS(2)*GAS(1):
 #   512*12*2 = 12288 ; 256*12*2 = 6144. The GBS in each ckpt dir name below
 # MUST match, or the chain fresh-starts instead of resuming.
@@ -344,7 +360,28 @@ TRAINERS=(
     #
     # Port 30000: 29700 (used by the dead commented row above) now belongs to
     # t3. Do not revive the old row verbatim -- it would collide.
-    "2b|256|30000|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n256-gbs6144|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2390375382006|complex"
+    "2b|256|30000|$RUNS/agpt-2b-v2/torchtitan-ezpz|checkpoints/agpt-2b-stage2-dolmino-n256-gbs6144|dolmino-mix-1124|2.17e-5|$RUNS/agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859|0.0|1.0|2390375382006|complex|"
+    # ── fixedpos forks (position-patched, 2026-10-20) ─────────────────────────
+    # The canonical 20B-512 / 20B-256 ckpt dirs above were written before
+    # consumed_samples was counted (ckpts store 0). A restart re-reads from
+    # sample 0 unless the launcher passes --dataloader.resume-consumed-samples.
+    # These rows are FORKS into -fixedpos dirs so the canonical chains stay
+    # intact for rollback/forensics. Old non-fixedpos entries stay above for
+    # reference (do not delete). See followup-umbrella-boost-20261020.md for
+    # arithmetic: base 1200*12288=14745600 +5% =15482880 (1260*12288, exact
+    # multiple of GBS 12288; task spec 15489024 is +6144 past it) and
+    # 1550*6144=9523200 +5% =10002432 (=1628*6144, ceil to GBS 6144; task spec
+    # 10004400 is not GBS-aligned). Both asserted GBS-aligned in launch.
+    #
+    # Per-seat: LBS/GAS from the shared defaults (LBS=2 GAS=1), so
+    #   512N: 512*12*2=12288 GBS -> 15482880 % 12288==0
+    #   256N: 256*12*2= 6144 GBS -> 10002432 % 6144==0
+    # decay_ratio 0.0 / min_lr_factor 1.0 == constant LR (explicit; an omitted
+    # decay_ratio would silently default to 0.8 decay).
+    # rope: verified _real (cos_sin) for both 20B-512 @ step 9000 and 20B-256
+    # resume (see eval/rope_flavor_for_step.py in the original rows).
+    "20b|512|29600|$RUNS/agpt-20b-v2/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos|olmo-mix-1124|2.28e-5|$RUNS/agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288/step-9000|0.0|1.0|4673780159710|_real|15482880"
+    "20b|256|29800|$RUNS/agpt-20b-n256/torchtitan-ezpz|checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-n256-fixedpos|olmo-mix-1124|2.28e-5||0.0|1.0|4673780159710|_real|10002432"
 )
 
 # Shared training defaults (match submit_agpt_{2b,20b}_autoretry.sh).
@@ -437,10 +474,10 @@ log "slice + console logs under: $MULTI_LOG_DIR"
 
 # ---- Slice the nodefile + build each trainer's resolved plan ------------------
 declare -a T_MODEL T_NNODES T_SPARES T_PORT T_WORKDIR T_CKPT T_SLICE T_VENVDST T_VENVSRC
-declare -a T_DFL T_LR T_INITLOAD T_DECAY T_MINLR T_TOKENS T_ROPE
+declare -a T_DFL T_LR T_INITLOAD T_DECAY T_MINLR T_TOKENS T_ROPE T_RESUME
 offset=1
 for idx in "${!TRAINERS[@]}"; do
-    IFS='|' read -r model nnodes port workdir ckpt o_dfl o_lr o_init o_decay o_minlr o_tokens o_rope <<< "${TRAINERS[$idx]}"
+    IFS='|' read -r model nnodes port workdir ckpt o_dfl o_lr o_init o_decay o_minlr o_tokens o_rope o_resume <<< "${TRAINERS[$idx]}"
 
     # In tiny profile every trainer runs the 2B model on TINY_NNODES nodes and
     # writes a THROWAWAY ckpt dir keyed by jobid+idx -- NEVER a canonical chain.
@@ -479,16 +516,25 @@ for idx in "${!TRAINERS[@]}"; do
     T_TOKENS[$idx]="$o_tokens"
     # 12th field: RoPE config suffix. REQUIRED -- see the guard in launch_one.
     T_ROPE[$idx]="$o_rope"
+    # 13th field: resume_consumed_samples (global sample index). Optional;
+    # only fixedpos forks carry it (see BlendCorpus docstring and --dataloader
+    # alias). When empty the dataloader's default_factory falls back to the
+    # BLENDCORPUS_RESUME_CONSUMED_SAMPLES env, if any.
+    T_RESUME[$idx]="$o_resume"
     # Per-model venv dst -- distinct names keep the shared mom node's 2b/20b
     # copies from clobbering each other; on disjoint compute slices the same
     # dst name resolves to physically distinct node-local dirs.
     T_VENVDST[$idx]="/tmp/.venv-${child_model}"
-    _vsrc="$workdir/.venv.tar.gz"
+    case "$child_model" in
+        20b) _vsrc="${PROD_20B_VENV_ARCHIVE:-$workdir/.venv.tar.gz}" ;;
+        2b)  _vsrc="${PROD_2B_VENV_ARCHIVE:-$workdir/.venv.tar.gz}" ;;
+        *)   _vsrc="$workdir/.venv.tar.gz" ;;
+    esac
     [[ -e "$_vsrc" ]] && _vsrc="$(readlink -f "$_vsrc")"
     T_VENVSRC[$idx]="$_vsrc"
 done
 
-# ---- Disjointness assertion (no node may appear in two slices) ---------------
+# ---- Non-overlap assertion (no node may appear in two slices) ----------------
 dupes=$(cat "$MULTI_LOG_DIR"/trainer-*.hostfile 2>/dev/null | sort | uniq -d)
 if [[ -n "$dupes" ]]; then
     die "slices overlap -- the same node(s) appear in multiple trainers:"$'\n'"$dupes"
@@ -536,6 +582,16 @@ done
 for idx in "${!TRAINERS[@]}"; do
     [[ -d "${T_WORKDIR[$idx]}" ]] || die "trainer $idx workdir missing: ${T_WORKDIR[$idx]}"
     [[ -f "${T_VENVSRC[$idx]}" ]] || die "trainer $idx venv tarball missing: ${T_VENVSRC[$idx]}"
+    case "${T_MODEL[$idx]}" in
+        20b) expected_venv_sha="$PROD_20B_VENV_SHA" ;;
+        2b)  expected_venv_sha="$PROD_2B_VENV_SHA" ;;
+        *)   expected_venv_sha="" ;;
+    esac
+    if [[ -n "$expected_venv_sha" ]]; then
+        actual_venv_sha=$(sha256sum "${T_VENVSRC[$idx]}" | awk '{print $1}')
+        [[ "$actual_venv_sha" == "$expected_venv_sha" ]] \
+            || die "trainer $idx venv SHA mismatch: got $actual_venv_sha expected $expected_venv_sha"
+    fi
 done
 
 # ---- Resolved-plan banner -----------------------------------------------------
@@ -657,6 +713,30 @@ launch_trainer() {
     # Optional fork (initial-load) + constant/decayed-LR schedule overrides.
     local xtra=()
     [[ -n "${T_INITLOAD[$idx]}" ]] && xtra+=(--checkpoint.initial-load-path="${T_INITLOAD[$idx]}")
+    # Per-seat resume position for checkpoints that were written before
+    # consumed_samples existed (0 in ckpt). Prefers the explicit argv flag;
+    # the env fallback (BLENDCORPUS_RESUME_CONSUMED_SAMPLES) is also exported
+    # so the blendcorpus_builder default_factory picks it up even if the flag
+    # spelling drifts. Must be a multiple of GBS — asserted here and again
+    # by BlendCorpus at load time.
+    if [[ -n "${T_RESUME[$idx]:-}" ]]; then
+        local resume="${T_RESUME[$idx]}"
+        if ! [[ "$resume" =~ ^[0-9]+$ ]] || (( resume < 0 )); then
+            echo "FATAL: trainer $idx resume_consumed_samples '$resume' is not a non-negative integer" >&2
+            exit 97
+        fi
+        if (( resume % gbs != 0 )); then
+            echo "FATAL: trainer $idx resume_consumed_samples=$resume not aligned to GBS=$gbs (need N % GBS == 0)" >&2
+            exit 97
+        fi
+        xtra+=(--dataloader.resume-consumed-samples="$resume")
+        # Env fallback: blendcorpus_builder reads
+        # BLENDCORPUS_RESUME_CONSUMED_SAMPLES at init and ezpz propagates it
+        # via mpiexec --envall to every rank (verified: launch.py
+        # _get_mpirun_env_flags -> ["--envall"] and
+        # blendcorpus_builder._env_resume_consumed_samples).
+        export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$resume"
+    fi
     # An OMITTED decay_ratio is a bug, not a default. Leaving the field empty
     # skips the flag entirely, and the run then inherits torchtitan's own
     # decay_ratio=0.8 -- the OPPOSITE of the constant-LR schedule every
@@ -731,13 +811,18 @@ launch_trainer() {
         # in which case it is a private symlink dir -- see the auto-retry
         # state-collision note above.
         cd "${T_CWD[$idx]}" || { echo "cd failed: ${T_CWD[$idx]}"; exit 97; }
-        # Import torchtitan from THIS clone's (pinned) source tree; run the
-        # driver from the node-local per-model venv.
-        # shellcheck disable=SC1090
-        source "$venvdst/bin/activate" || { echo "activate failed: $venvdst"; exit 98; }
+        # Import torchtitan from THIS clone's pinned source tree and execute
+        # both launcher and payload by absolute paths in the staged venv.
+        # Do not source bin/activate: uv archives can retain their build-time
+        # VIRTUAL_ENV path even though their entry points are relocatable.
+        [[ -x "$venvdst/bin/ezpz" && -x "$venvdst/bin/python" ]] \
+            || { echo "staged venv entry points missing: $venvdst"; exit 98; }
+        export VIRTUAL_ENV="$venvdst"
+        export PATH="$venvdst/bin:$PATH"
+        hash -r
         export MASTER_PORT="$port"; unset MASTER_ADDR
         # shellcheck disable=SC2086
-        ezpz launch \
+        "$venvdst/bin/ezpz" launch \
             --nproc "$nproc" \
             --nproc_per_node "$PPN" \
             --hostfile "$slice" \
@@ -746,7 +831,7 @@ launch_trainer() {
             --timeout "$IDLE_TIMEOUT" \
             "${mfr[@]}" \
             -- \
-            python3 -m torchtitan.experiments.ezpz.train \
+            "$venvdst/bin/python" -m torchtitan.experiments.ezpz.train \
             --module=ezpz.agpt \
             --config="agpt_${model}${rope_suffix}" \
             --checkpoint.enable \

@@ -127,7 +127,12 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
     engine = object.__new__(EzpzTrainingEngine)
     engine.config = SimpleNamespace(
         sdc_replayer=None,
-        training=SimpleNamespace(disable_cuda_graphs=True),
+        dist_moe_runtime=None,
+        training=SimpleNamespace(
+            disable_cuda_graphs=True,
+            preprocess_microbatch_groups_lazily=False,
+            cuda_graph_per_accumulation_group=False,
+        ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(
             enable_data_parallel_native_ddp=False,
@@ -157,7 +162,12 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
     engine = object.__new__(EzpzTrainingEngine)
     engine.config = SimpleNamespace(
         sdc_replayer=None,
-        training=SimpleNamespace(disable_cuda_graphs=True),
+        dist_moe_runtime=None,
+        training=SimpleNamespace(
+            disable_cuda_graphs=True,
+            preprocess_microbatch_groups_lazily=False,
+            cuda_graph_per_accumulation_group=False,
+        ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(
             enable_data_parallel_native_ddp=True,
@@ -179,7 +189,7 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
 
     engine._initialize_forward_backward()
 
-    context = engine._get_train_context()
+    context = engine._native_ddp_train_context()
     assert isinstance(context, nullcontext)
     composed.assert_called_once()
     assert callable(composed.call_args.args[0])

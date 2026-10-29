@@ -20,6 +20,7 @@ from torchtitan.experiments.ezpz.moe import moe_configs
 from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 from torchtitan.experiments.ezpz.moe.state_dict_adapter import moeStateDictAdapter
 from torchtitan.models.common.linear import Linear, RowParallelLinear
+from torchtitan.models.common.moe import MoE
 
 
 def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
@@ -27,7 +28,7 @@ def test_ezpz_moe_sharding_uses_upstream_owned_expert_layout():
 
     set_moe_sharding_config(config, enable_sp=False, enable_ep=True)
 
-    moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
+    moe_layers = [moe for _, moe, _, _ in config.traverse(MoE.Config)]
     assert moe_layers
     for moe in moe_layers:
         assert moe.routed_experts.w13.sharding_config is not None
@@ -41,7 +42,7 @@ def test_ezpz_moe_sharding_replicates_grouped_linears_without_ep():
 
     set_moe_sharding_config(config, enable_sp=False, enable_ep=False)
 
-    moe_layers = [layer.moe for layer in config.layers if layer.moe is not None]
+    moe_layers = [moe for _, moe, _, _ in config.traverse(MoE.Config)]
     assert moe_layers
     for moe in moe_layers:
         for linear in (moe.routed_experts.w13, moe.routed_experts.w2):
@@ -59,9 +60,9 @@ def test_ezpz_shared_expert_w2_follows_sp_contract(enable_sp, expected_w2_type):
     set_moe_sharding_config(config, enable_sp=enable_sp, enable_ep=True)
 
     shared_experts = [
-        layer.moe.shared_experts
-        for layer in config.layers
-        if layer.moe is not None and layer.moe.shared_experts is not None
+        moe.shared_experts
+        for _, moe, _, _ in config.traverse(MoE.Config)
+        if moe.shared_experts is not None
     ]
     assert shared_experts
     for shared in shared_experts:
@@ -80,8 +81,8 @@ def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():
     w3 = w1 + 100
     w2 = torch.arange(3 * 2, dtype=torch.float32).reshape(3, 2)
     native = {
-        "layers.1.moe.shared_experts.w13.weight": torch.stack((w1, w3), dim=0),
-        "layers.1.moe.shared_experts.w2.weight": w2,
+        "layers.1.feed_forward.shared_experts.w13.weight": torch.stack((w1, w3), dim=0),
+        "layers.1.feed_forward.shared_experts.w2.weight": w2,
     }
 
     hf_state_dict = adapter.to_hf(native)
@@ -100,7 +101,9 @@ def test_ezpz_moe_adapter_roundtrips_shared_experts_as_native_stacked_w13():
 
     assert set(restored) == set(native)
     torch.testing.assert_close(
-        restored["layers.1.moe.shared_experts.w13.weight"],
-        native["layers.1.moe.shared_experts.w13.weight"],
+        restored["layers.1.feed_forward.shared_experts.w13.weight"],
+        native["layers.1.feed_forward.shared_experts.w13.weight"],
     )
-    torch.testing.assert_close(restored["layers.1.moe.shared_experts.w2.weight"], w2)
+    torch.testing.assert_close(
+        restored["layers.1.feed_forward.shared_experts.w2.weight"], w2
+    )

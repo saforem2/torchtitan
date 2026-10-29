@@ -1,0 +1,124 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -N tt30b-fixed-lr
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=16
+#PBS -q workq
+#PBS -j oe
+#
+# Matched fixed-LR arm for the 30B LR campaign.
+#
+# This is the optimizer-parameterized successor to the ad hoc
+# `fixed_lr_30b_a428.pbs` wrapper, which hardcoded `--optimizer adamw` and so
+# could not validate a second optimizer's basin. Everything else is unchanged
+# so AdamW arms 12479115-12479117 stay directly comparable to new arms.
+#
+# A coarse LR-finder curve moves the LR while weights, optimizer state, and
+# data advance, so its minimum is a CANDIDATE, not a validated LR. This script
+# runs one constant LR from clean initialization and fails closed unless every
+# step produced a finite, positive loss and gradient norm.
+#
+# Required:
+#   FIXED_WORKTREE  immutable checkout (HEAD must equal EXPECTED_SHA)
+#   FIXED_VENV      compute runtime
+#   EXPECTED_SHA    exact source SHA
+#   TOKENIZER       compute-visible HF assets dir
+#   FIXED_LR        constant learning rate for this arm
+# Optional:
+#   FIXED_OPTIMIZER optimizer name (default adamw)
+#   FIXED_STEPS     update count (default 10)
+set -o pipefail
+
+D="${FIXED_WORKTREE:?set FIXED_WORKTREE}"
+V="${FIXED_VENV:?set FIXED_VENV}"
+EXPECTED_SHA="${EXPECTED_SHA:?set EXPECTED_SHA}"
+TOKENIZER="${TOKENIZER:?set TOKENIZER}"
+LR="${FIXED_LR:?set FIXED_LR}"
+OPT="${FIXED_OPTIMIZER:-adamw}"
+STEPS="${FIXED_STEPS:-10}"
+JOB="${PBS_JOBID%%.*}"
+OUT="$D/outputs/30b-fixed-lr-$OPT-$JOB"
+LOG="$OUT/run.log"
+mkdir -p "$OUT"
+cd "$D" || exit 2
+
+source "$D/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
+export PATH="/opt/pbs/bin:$PATH"
+ezpz_setup_job || exit $?
+ezpz_load_modules || exit $?
+export VIRTUAL_ENV="$V"
+export PATH="$V/bin:$PATH"
+hash -r
+[[ "$(command -v python)" == "$V/bin/python" ]] || exit 93
+[[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || exit 95
+[[ -s "$TOKENIZER/tokenizer.json" ]] || exit 97
+
+export PYTHONPATH="$D${PYTHONPATH:+:$PYTHONPATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1 CCL_ATL_SYNC_COLL=1
+export CCL_SYCL_KERNEL_SYNC=0 CCL_KVS_MODE=pmi
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export TORCH_CPP_LOG_LEVEL=ERROR
+
+run_model() {
+    "$V/bin/python" -m torchtitan.experiments.ezpz.train \
+        --module ezpz.agpt \
+        --config agpt_30b_olmo2tok_smoke \
+        --hf-assets-path "$TOKENIZER" \
+        --job.dump-folder "$OUT" \
+        --optimizer "$OPT" \
+        --optimizer.lr "$LR" \
+        --training.steps "$STEPS" \
+        --training.max-context-length 4096 \
+        --training.num-tokens-per-microbatch-per-dp-rank 20480 \
+        --training.num-tokens-per-train-step 3932160 \
+        --parallelism.tensor-parallel-degree 1 \
+        --parallelism.data-parallel-replicate-degree 3 \
+        --parallelism.data-parallel-shard-degree 64 \
+        --metrics.log-freq 1 \
+        --metrics.no-enable-wandb \
+        --checkpoint.no-enable \
+        activation-checkpoint:full
+}
+export V D TOKENIZER OUT LR OPT STEPS
+export -f run_model
+"$V/bin/python" -c 'from ezpz.cli import main; main()' launch \
+    --nproc 192 --nproc_per_node 12 --timeout 3600 -- \
+    bash -c 'run_model' 2>&1 | tee "$LOG"
+rc=${PIPESTATUS[0]}
+if [[ "$rc" -ne 0 ]]; then
+    printf 'FIXED_LR_FAILED job=%s optimizer=%s lr=%s rc=%s\n' \
+        "$JOB" "$OPT" "$LR" "$rc" | tee "$OUT/FAILED"
+    exit "$rc"
+fi
+
+"$V/bin/python" - "$LOG" "$OUT/VALIDATED" "$JOB" "$EXPECTED_SHA" "$LR" "$STEPS" "$OPT" <<'PY'
+import math
+import re
+import sys
+from pathlib import Path
+log_path, verdict_path, job, commit, lr, steps_s, opt = sys.argv[1:]
+steps = int(steps_s)
+text = Path(log_path).read_text(errors="replace")
+text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+metric = re.compile(
+    r"step:\s+(?P<step>[0-9]+)\s+loss:\s+(?P<loss>[0-9.eE+-]+)"
+    r"\s+grad_norm:\s+(?P<grad>[0-9.eE+-]+)"
+)
+rows = {int(m["step"]): (float(m["loss"]), float(m["grad"])) for m in metric.finditer(text)}
+for step in range(1, steps + 1):
+    if step not in rows:
+        raise SystemExit(f"FIXED_LR_INVALID missing metrics step={step}")
+    if not all(math.isfinite(v) and v > 0 for v in rows[step]):
+        raise SystemExit(f"FIXED_LR_INVALID step={step} values={rows[step]}")
+if any(token in text for token in ("Traceback", "SIGSEGV", "died from signal", "OUT_OF_RESOURCES")):
+    raise SystemExit("FIXED_LR_INVALID failure signature present")
+verdict = (
+    f"FIXED_LR_PASS job={job} commit={commit} optimizer={opt} lr={lr} "
+    f"steps={steps} loss_final={rows[steps][0]} grad_final={rows[steps][1]}"
+)
+Path(verdict_path).write_text(verdict + "\n")
+print(verdict)
+PY

@@ -44,7 +44,6 @@ import torch
 from torch.distributed.tensor import DTensor, Replicate, Shard
 
 from torchtitan.components.loss import BaseLoss, CrossEntropyLoss
-from torchtitan.config import CompileConfig
 from torchtitan.distributed.spmd_types import spmd_mesh_size
 
 
@@ -140,7 +139,7 @@ class CrossEntropyWithZLoss(BaseLoss):
         global_vocab_size: int | None = None
         """Full vocabulary size, needed for spmd_types loss-parallel CE."""
 
-    def __init__(self, config: Config, *, compile_config: CompileConfig | None = None):
+    def __init__(self, config: Config):
         if config.z_loss_coef < 0.0:
             raise ValueError(
                 f"z_loss_coef must be >= 0, got {config.z_loss_coef}. "
@@ -148,7 +147,7 @@ class CrossEntropyWithZLoss(BaseLoss):
                 "opposite of the intended effect."
             )
         ce_config = CrossEntropyLoss.Config(global_vocab_size=config.global_vocab_size)
-        self._ce = CrossEntropyLoss(ce_config, compile_config=compile_config)
+        self._ce = CrossEntropyLoss(ce_config)
         self.fn = self._ce.fn
         self.z_loss_coef = float(config.z_loss_coef)
 
@@ -156,15 +155,15 @@ class CrossEntropyWithZLoss(BaseLoss):
         self,
         pred: torch.Tensor,
         labels: torch.Tensor,
-        global_valid_tokens: torch.Tensor | None = None,
+        global_loss_token_counts: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        loss, metrics = self._ce(pred, labels, global_valid_tokens, **kwargs)
+        loss, metrics = self._ce(pred, labels, global_loss_token_counts, **kwargs)
         if self.z_loss_coef == 0.0:
             return loss, metrics
         z = z_loss_term(pred, self.z_loss_coef)
-        if global_valid_tokens is not None:
-            z = z / global_valid_tokens
+        if global_loss_token_counts is not None:
+            z = z / global_loss_token_counts
 
         # Both channels: the metrics dict for any caller that reads it (only
         # ChunkedLossWrapper does today), and the module-level drain for the

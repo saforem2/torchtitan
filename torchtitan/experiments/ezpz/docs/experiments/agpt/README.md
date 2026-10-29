@@ -18,6 +18,8 @@ Dense transformer training benchmarks across ALCF machines.
 | 2026-04-18 | [80B TP=2 Restored](aurora/20260418-80b-tp2-restored.md) | 80B TP=2 compile | 2 | 88 TPS, 16% MFU — regression fixed |
 | 2026-04-18 | [Scaling & Production](../../production/scaling-performance.md) | 2B, 20B, 80B | 4-512 | 80B scales perfectly to 128N; compile wall at 512N |
 | 2026-04-25 | [Scaling Study (torch 2.13)](../../scaling/agpt-20b.md) | 20B | 2-4096 | 440 TPS @ 2N (+23% vs torch 2.10); in progress |
+| 2026-09-30 | [Production checkpoint migration matrix](aurora/2026-09-30-production-checkpoint-migration-matrix.md) | active umbrella seats 1/2/4 | pending | Exact frozen checkpoint/config/CLI contract and current-software acceptance gates |
+| 2026-09-30 | [ConfigLoader candidate gate](aurora/2026-09-30-configloader-candidate-gate.md) | seat 4 `agpt_2b` stage-2 Dolmino | 2 | `e3520c057a` passes compute parser parity + negative control; restore/update/save/resume still open |
 
 ### Polaris
 

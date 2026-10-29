@@ -85,7 +85,10 @@ def test_ezpz_uses_current_engine_contract() -> None:
     assert "ParallelDims" not in source
     assert ".parallel_dims" not in source
     assert "def optimizer_step(" not in source
-    assert "forward_backward_microbatch(" not in source
+    # The legacy public name is gone; the private upstream hook
+    # ``_non_pp_forward_backward_microbatch`` is deliberately overridden.
+    assert "def forward_backward_microbatch(" not in source
+    assert ".forward_backward_microbatch(" not in source
     assert "prepare_step(" not in source
     assert "super().optim_step()" in source
     assert "def as_input_dict(" in source

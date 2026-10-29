@@ -16,7 +16,7 @@ python scripts/download_hf_assets.py --repo_id deepseek-ai/deepseek-moe-16b-base
 
 ```bash
 # Quick debug run with small model
-MODULE=ezpz.moe CONFIG=moe_debugmodel bash torchtitan/experiments/ezpz/run_train.sh --debug.moe-force-load-balance
+MODULE=ezpz.moe CONFIG=moe_debugmodel bash torchtitan/experiments/ezpz/run_train.sh
 ```
 
 ```bash

@@ -13,7 +13,11 @@ fsdp_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_fsdp2_xccl_
 fsdp_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_fsdp2_storage_collectives.py"
 collective_probe_py="$repo_root/torchtitan/experiments/ezpz/tests/probe_collective_op.py"
 full_model_probe="$repo_root/torchtitan/experiments/ezpz/scripts/probe_30b_full_model_sunspot.sh"
+umbrella="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
 docs="$repo_root/torchtitan/experiments/ezpz/docs/guides/aurora-moe-training.md"
+umbrella="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_multi_autoretry.sh"
+umbrella_successor="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_successor_3seat_ezpz0292.pbs"
+umbrella_20b="$repo_root/torchtitan/experiments/ezpz/scripts/submit_agpt_20b_512_256_ezpz0292.pbs"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -37,6 +41,17 @@ assert_not_contains() {
         fail "$message"
     fi
 }
+
+# Broadcast archives are relocated to a caller-selected /tmp directory. The
+# activation script may retain its build-time VIRTUAL_ENV, so the umbrella must
+# execute staged entry points by absolute path instead of sourcing it and
+# accidentally falling back to $HOME/bin.
+assert_not_contains "$umbrella" 'source "\$venvdst/bin/activate"' \
+    'umbrella must not source a non-relocatable staged activation script'
+assert_contains "$umbrella" '"\$venvdst/bin/ezpz" launch' \
+    'umbrella must execute staged ezpz by absolute path'
+assert_contains "$umbrella" '"\$venvdst/bin/python" -m torchtitan.experiments.ezpz.train' \
+    'umbrella payload must execute staged Python by absolute path'
 
 # Keep the public ezpz invocation; only fix status handling around its pipeline.
 assert_contains "$resumable" '^[[:space:]]*ezpz launch ' \
@@ -82,8 +97,10 @@ assert_contains "$rl_sync" '--generator.sampling.max-tokens=256' \
 assert_not_contains "$rl_sync" 'pip install' \
     'sync RL gate must not mutate the protected runtime'
 
-assert_contains "$rl_multihost" 'TORCHTITAN_TORCHSTORE_TRANSPORT=gloo' \
-    'multi-host sync gate must force the validated Gloo weight transport'
+assert_contains "$rl_multihost" 'TORCHSTORE_TRANSPORT:-auto' \
+    'multi-host sync gate must exercise automatic weight transport by default'
+assert_contains "$rl_multihost" 'RL_MULTIHOST_TRANSPORT_REQUESTED=' \
+    'multi-host sync gate must log the requested transport policy'
 assert_contains "$rl_multihost" 'multihost_train_upstream.py' \
     'multi-host sync gate must use the scheduler-SPMD entry point'
 assert_contains "$rl_multihost" 'RL_MULTIHOST_VERDICT: ok' \
@@ -235,5 +252,34 @@ assert_contains "$docs" 'retains all checkpoints' \
     'checkpoint retention documentation must say all checkpoints are retained'
 assert_not_contains "$docs" 'retains the newest two checkpoints' \
     'checkpoint retention documentation must not claim only two are retained'
+
+# Production runtime upgrades are immutable and checksum-gated. The generic
+# umbrella remains reusable; the successor wrappers select only unfinished
+# seats and pin the validated archives.
+for variable in PROD_20B_VENV_ARCHIVE PROD_20B_VENV_SHA \
+    PROD_2B_VENV_ARCHIVE PROD_2B_VENV_SHA; do
+    assert_contains "$umbrella" "$variable" \
+        "umbrella launcher must support ${variable}"
+    assert_contains "$umbrella_successor" "$variable" \
+        "successor wrapper must pin ${variable}"
+    assert_contains "$umbrella_20b" "$variable" \
+        "20B wrapper must pin ${variable}"
+done
+assert_contains "$umbrella" 'sha256sum.*T_VENVSRC' \
+    'umbrella launcher must verify selected archive checksums'
+assert_contains "$umbrella_successor" 'MULTI_ONLY=1,2,4' \
+    'successor must select only unfinished healthy seats'
+assert_contains "$umbrella_successor" '#PBS -l select=1054' \
+    'successor allocation must exactly fit three seats plus spares'
+assert_contains "$umbrella_successor" '#PBS -q medium' \
+    '1054-node successor must target the medium execution queue'
+assert_contains "$umbrella_20b" 'MULTI_ONLY=1,2$' \
+    '20B wrapper must select only the 20B-512 and 20B-256 seats'
+assert_contains "$umbrella_20b" '#PBS -l select=788' \
+    '20B allocation must exactly fit two seats plus spares'
+assert_contains "$umbrella_20b" '#PBS -l walltime=12:00:00' \
+    '788-node job must fit the small queue 12h walltime cap'
+assert_contains "$umbrella_20b" '#PBS -q small' \
+    '788-node job must target the small execution queue'
 
 printf 'launcher contract tests: PASS\n'

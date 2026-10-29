@@ -8,18 +8,36 @@ For methodology and acceptance criteria, see the
 
 ## Status
 
-**AdamW short-horizon candidate: `1e-5`. SophiaG LR: open.**
+**AdamW and SophiaG both select `1e-5` at 10 updates. AdamW is better at every
+matched LR. Neither is yet a production recommendation.**
 
-The bounded 10-point AdamW canary now provides complete coarse evidence, and a
-matched 10-update fixed-LR matrix validates `1e-5` as the best tested
-short-horizon candidate. Longer representative training remains required before
-calling it a production recommendation.
+Both optimizers now have the same evidence level on the validated post-
+`cde3c93227` topology: a complete bounded coarse curve with an interior basin,
+followed by a matched three-point fixed-LR matrix from clean initialization.
+All arms ran at 192 ranks, HSDP `3 × 64`, GBS 960, sequence length 4096, full
+activation checkpointing, on repaired Torch 2.15.
 
-| optimizer | evidence | interpretation |
-|---|---|---|
-| AdamW | `12479108`, then `12479115`–`12479117` | `1e-5` is the best tested 10-update candidate; longer validation pending |
-| SophiaG | `12478513`, 30-point coarse; `12478570`, 97/100 fine | coarse candidate `6.48e-7` is diagnostic only; incomplete fine curve excluded |
-| Muon | excluded | first-update Newton–Schulz corruption remains unresolved |
+| optimizer | coarse | fixed-LR arms | best 10-update LR | best final loss |
+|---|---|---|---:|---:|
+| AdamW | `12479108` | `12479115`–`12479117` | `1e-5` | 10.11744 |
+| SophiaG | `12479134` | `12479138`–`12479140` | `1e-5` | 11.70675 |
+| Muon | excluded | excluded | — | — |
+
+At matched LR, AdamW finishes ahead of SophiaG at all three tested points
+(`4.64e-6`, `1e-5`, `2.15e-5`). Muon remains excluded pending its unresolved
+first-update Newton–Schulz corruption.
+
+Both optimizers show gradient-norm excursions to 45–70 partway through these
+bounded runs. Because the pattern appears in AdamW as well, it is a property of
+this fresh-init, warmup-free, 10-update probe rather than the known 30B SophiaG
+divergence bug.
+
+Longer representative training is still required before promoting any LR or
+changing the production optimizer.
+
+Superseded SophiaG material: 30-point coarse `12478513` and the truncated
+97/100 fine curve `12478570`. Neither is resumable and neither is used for
+guidance.
 
 ## Runtime blocker
 
@@ -174,6 +192,7 @@ shard-192 is invalid for stacked `w13` because its matrix-row dimension is
 
 - [30B SophiaG coarse CSV](../data/2026-09-24-olmo2tok-gbs6144-verified/sunspot-12478513-30b-sophiag-coarse.csv)
 - [Evidence manifest](../data/2026-09-24-olmo2tok-gbs6144-verified/README.md)
+- [30B SophiaG bounded canary manifest](../data/2026-09-30-30b-sophiag-canary/README.md)
 
 Partial fine curves are deliberately not committed as successful evidence.
 No independently initialized points will be appended to an existing trajectory.

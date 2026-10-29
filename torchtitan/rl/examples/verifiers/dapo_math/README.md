@@ -17,7 +17,6 @@ pip install -r torchtitan/rl/examples/verifiers/dapo_math/requirements.txt
 
 python scripts/download_hf_assets.py \
   --repo_id Qwen/Qwen3-4B-Base \
-  --local_dir torchtitan/rl/example_checkpoint \
   --all
 ```
 
@@ -25,7 +24,7 @@ python scripts/download_hf_assets.py \
 
 ```bash
 python -m torchtitan.rl.train \
-  --module verifiers.dapo_math \
+  --module torchtitan_recipes.rl.verifiers_dapo_math \
   --config rl_dapo_qwen3_4b_verifiers_8k
 ```
 

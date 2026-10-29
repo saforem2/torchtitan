@@ -1,5 +1,175 @@
 # Upstream Sync Log
 
+## 2026-10-15: upstream `5a7a622f16`, 236 commits, smoke-validated on Sunspot
+
+Branch `sync/upstream-5a7a622f16` merges **236 upstream commits**
+(`5112abcb6f..5a7a622f16`, the `main` tip of 2026-10-15) into `origin/ezpz` at
+`d4449ba0ec`. The merge is `f71d5df8aa`; follow-up commits port ezpz. Twelve
+paths conflicted, none under `experiments/ezpz/`.
+
+Verdict: dense TP=1 and MoE TP=1 train on 2 Sunspot nodes and reproduce the
+pre-sync losses to 3e-5 and 2e-4. Four things are **not** green: dense TP=2
+with full AC (known, fails on base too), MoE EP, MoE flex attention, and the RL
+overlays (not run). Details below.
+
+### What the 236 commits change for us
+
+- **Tyro CLI removed** (#4908). `torchtitan/config/manager.py` is deleted;
+  `ConfigLoader` accepts only `--module/--config/--override/--output-dir/
+  --comm-backend/--resume-step/--print-config`. Every ezpz launcher passes
+  `--section.field` flags, so the tyro `ConfigManager` now lives in
+  `experiments/ezpz/config_manager.py`.
+- **Recipes moved** to `torchtitan_recipes/` (#4913); the `--module` shorthand
+  tables are gone. `config_manager.py` resolves `ezpz.<name>` and the core
+  names itself.
+- **Config schema**: `CompileConfig` and `TrainingEngine.Config.compile` are
+  gone (#5026, `local_compile_regions` on the model config); `activation_checkpoint`
+  is `activation_remat` on `torch_remat` (#4893, #5101, #5102); sharding is
+  baked into model configs at construction (`build_model_config(...,
+  parallelism=...)`); `training.max_context_length` must equal the model's;
+  `training.gc_freq` moved to `garbage_collector.gc_freq`.
+- **MoE**: `layers.N.moe.*` is now `layers.N.feed_forward.*` (#5345, native
+  checkpoint keys change; HF mappings do not), `RouterGateLinear` ->
+  `HiMidLoLinear`, dispatchers lost `score_before_experts`, take the EP mesh
+  from the ambient SPMD runtime and run dispatch/combine as remat regions.
+- **SDPA removed** from the language-model attention path (#5296, #5307).
+- **RL package reorganized** (`rl/controller/`, `rl/generator/`, `rl/trainer/`,
+  `rl/actors/`); TorchStore uses `TorchStoreStrategy` + `ClientType.ROUTING`.
+- **Runtime**: `models.common.dist_moe.runtime` imports
+  `torch.distributed.pipelining.analyze_pipeline_activation_liveness`, absent
+  from `2.14.0+xpu` and `2.15.0.dev20260915+xpu`. Even `import
+  torchtitan.models.llama3` fails on both Sunspot venvs.
+
+### New Sunspot venv (required)
+
+`/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16`:
+`torch 2.16.0.dev20261015+xpu` (XPU nightly index), `torchao
+0.19.0.dev20261015+xpu` (0.18.0 fails import: a `triton.autotune` key check in
+`float8_rowwise.py` under `triton_xpu 3.9`), `renderers 0.1.12`, `spmd_types`,
+`torch_remat`, `torch_checkpointing` at the commits pinned in `requirements.txt`,
+`expecttest`, and the non-torch packages of `xpu-torch215`. Two environment
+traps hit while bringing it up, both now handled in
+`scripts/sync_smoke_sunspot.sh`:
+
+1. `import torch` on a compute node dies with `libsycl.so.9: undefined symbol:
+   urGraphGetIdExp` because the oneAPI module's older `libur_loader` is found
+   first. The script links only the UR/SYCL/UMF/TCM libs from the venv into
+   `.cache/xpu-ld-first/` and prepends that directory (jobs `12481003`,
+   `12481004`; putting all of `venv/lib` first also works but shadows MPI).
+2. The venv's own `mpiexec` shadows PALS (`unrecognized argument line-buffer`);
+   `mpiexec`, `mpirun`, `mpiexec.hydra` were renamed `*.disabled`. 24 ranks
+   cold-importing from Lustre can exceed the 120 s PALS start timeout, so the
+   script sets `PALS_RPC_TIMEOUT=600`.
+
+Aurora and Polaris were **not** touched: no venv exists there with a torch new
+enough for this tree, so Aurora production runs must stay on their current
+checkout until that venv is built. Job `8929146` was not touched.
+
+### Conflicts (12 paths)
+
+| Path | Resolution |
+| --- | --- |
+| `torchtitan/config/manager.py`, `tests/.../test_config_manager.py` | deleted upstream; taken. Legacy flag migration re-homed to `ezpz/config_manager.py` |
+| `torchtitan/components/renderer.py` | upstream. `ExtraStopTokensRendererConfig` and the HF default-renderer support moved to `ezpz/rl/renderer.py` |
+| `torchtitan/experiments/__init__.py` | upstream (shorthand table deleted) |
+| `scripts/checkpoint_conversion/utils.py` | upstream call, kept our `torchtitan.`-qualified module name |
+| `rl/controller`, `rl/generator`, `rl/train.py`, `generator/vllm/worker.py`, `alphabet_sort/config_registry.py` | upstream. HOSTNAME repair, forced transport env and the XPU vLLM worker re-applied at the new paths; the `enable_cumem_allocator` patch is dropped (upstream hard-codes `False`) |
+| `torchtitan/experiments/torchft/trainer.py` | upstream lifecycle plus the optional `ft_manager` kwarg |
+| `tests/.../models/test_state_dict_adapter.py` | upstream |
+
+Core patches **removed** by this sync, so ezpz no longer edits these files:
+`TrainingEngine._get_train_context` (native-DDP autocast now lives in
+`EzpzTrainingEngine._non_pp_forward_backward_microbatch`; the hook also broke
+two upstream `test_trainer.py` tests), the `components/renderer.py` additions.
+
+### ezpz replay (all under `experiments/ezpz/`)
+
+- `config_manager.py`: tyro manager over the new schema. Applies
+  `tyro.conf.AvoidSubcommands` globally, an opaque-struct rule for configs tyro
+  cannot introspect (the model config and `ShardingConfig`/`SpmdType`), and
+  translates `--checkpoint.*`, `--compile.enable`, and the
+  `activation-checkpoint:{none,full,selective}` tokens. `selective` maps to
+  `DefaultActivationRematConfig` (selective-op AC no longer exists).
+- `compile.py` + `FaultTolerantTrainer.Config.compile`: keeps
+  `--compile.enable/--compile.no-enable`; `compile=None` now means
+  `local_compile_regions=[]` (upstream defaults would otherwise compile
+  `loss` and `fused_binary_activation` unconditionally).
+- `trainer.py`: `engine.initialize(extra_states={DATALOADER: ...})`,
+  `loss_token_counts`/`routing_token_counts` microbatches, new
+  `forward_backward` signature, model-config sync of `max_context_length` (and
+  RoPE) in `Config.__post_init__`, `clip_grad_norm_` without `ep_enabled`.
+- `agpt/`: SDPA inner attention re-homed (`ScaledDotProductInnerAttention`
+  in `agpt/__init__.py`), `agpt/sharding.py` rewritten for config-time sharding
+  (re-applied for the CLI's `enable_sequence_parallel`), `parallelize_llama`
+  takes `local_compile_regions`/`activation_remat`, `build_model_config` added,
+  fp32-residual blocks follow the new block/Decoder signatures. FFN `w13` init
+  keeps gate=linear, up=depth-scaled (upstream now uses one init for both).
+- `moe/`: MLA reuses `DeepSeekMLAAttention` via `make_mla_attention_config`
+  (keeps the XPU V-padding `forward`, eps stays 1e-5), block is
+  `DeepSeekV3TransformerBlock` with the cache-release hook, state-dict adapter
+  is a thin `DeepSeekV3StateDictAdapter` subclass (the copy mapped HF
+  `lm_head.weight` to a nonexistent `output.weight`), FSDP is upstream
+  `apply_fsdp_to_decoder` with a divisibility fallback for expert rows
+  (`moe_debugmodel` F=256 over 24 ranks), `_LegacyInterleavedColumnParallelLinear`
+  gained `inplace_wgrad_accum`. **Retired:** the forked `moe/token_dispatcher.py`
+  (equal-split A2A padding, fast-path telemetry, `deterministic_scatter_add_1d`,
+  `wire_meshes`) and `moe/activation_checkpoint.py` (`MoeSelectiveAC`). The env
+  knobs `TT_MOE_NORMAL_EQUAL_A2A_PADDING*` and `TT_MOE_DEBUG_FASTPATHS` are now
+  no-ops, so the `PADDING=1` arm of `scripts/moe_ab_check.sh` measures nothing.
+  `moe_671b` no longer quantizes (Float8 converters were deleted upstream) and
+  logs a warning.
+- JSON launch files: `training.gc_freq`/`gc_debug` and `activation_checkpoint.mode`
+  are mapped to the new fields by `_apply_config_overrides` (agpt and moe).
+- `rl/`: imports moved to the new modules; `rl/model_configs.py` builds the
+  split trainer/generator models; `alphabet_sort_agpt` and `reason_agpt` configs
+  follow the new `Controller.Config`. **Not run** (see below).
+
+### Verification
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `torchtitan/experiments/ezpz/tests/test_launcher_contracts.sh` | pass | run locally on the worktree |
+| ezpz suite (`tests/unit_tests/ezpz`, `experiments/ezpz/tests`, `agpt/test_mup.py`; files that are scripts or need `/flare`/RL excluded) | **363 passed, 2 skipped, 15 subtests** | base `d4449ba0ec` on `xpu-torch214`: 362 passed, 2 skipped, 21 subtests. The 6 fewer subtests are the removed `score_before_experts=True` expert-backend cases |
+| core CPU suite `tests/unit_tests/cpu`, merged tree, new venv | 18 failures on the unmodified `upstream/main` in this venv too (network tokenizer downloads, Kimi/Qwen3.5/DSv4/Muse kernels, CP recipes) | same 18 tests fail on a clean `upstream/main` checkout run in the same venv |
+| fork-owned core tests (`test_trainer`, `test_parallelism_context`, `test_state_dict_adapter`, `test_upstream_sync_contracts`, `test_legacy_native_dcp*`, `torchft/tests`) | pass after porting to the new API | targeted run, last green on the final commit |
+| Sunspot dense TP=1 | pass | job `12481021` arm 1: loss 10.87746 / 10.75454 / 10.48067 |
+| Sunspot dense TP=2, AC none | pass | arm 3: 10.88011 / 10.70814 / 10.55886 |
+| Sunspot MoE TP=1 | pass | arm 4: 12.95225 / 12.59617 / 11.47114 |
+| Sunspot dense TP=2, full AC (default) | **fails** | arm 2 `rc=143`; also fails on base (`12481014` arm 2). Same limitation as `12479099` in the previous sync (replay sees global vs TP-local token counts) |
+| Sunspot MoE EP (`moe_debugmodel_ep`) | **fails** | arm 5; base failed with `KeyError 'efsdp'`, now gets past FSDP mesh setup and dies in `fully_shard` with `Parameter 'weight' has spmd_types annotation on axis default_pg`. Not diagnosed |
+| Sunspot MoE flex (`moe_debugmodel_flex_attn`) | **fails** | arm 6; `attention_metadata must be instance of BlockMask, got NoneType`: the blendcorpus batches carry no `positions`, so no mask metadata is built. Not fixed |
+
+Cross-version A/B (same seed, 2 nodes, 24 ranks, 3 steps), base on torch
+`2.14.0+xpu` (`12481014`) vs merged on `2.16.0.dev20261015+xpu`:
+
+| Arm | Step 1 | Step 2 | Step 3 |
+| --- | --- | --- | --- |
+| dense TP=1 base | 10.87746 | 10.75457 | 10.48066 |
+| dense TP=1 merged | 10.87746 | 10.75454 | 10.48067 |
+| MoE TP=1 base | 12.95227 | 12.59629 | 11.47133 |
+| MoE TP=1 merged | 12.95225 | 12.59617 | 11.47114 |
+
+This is a 3-step debugmodel check, not a convergence result. The MoE gap
+(1e-4 relative at most) is consistent with the changed router gate kernel and
+torch version; it was not bisected.
+
+### NOT tested / deferred
+
+- **RL**: no RL job was run. The overlays were ported statically; the RL venv
+  (`rl-monarch-torch214-locality-20261001`) has a TorchStore without
+  `ClientType`, which upstream's controller needs, and torch 2.14. Treat RL as
+  broken until the RL venv is rebuilt and the overlays are smoked. The HOSTNAME
+  repair / forced-transport patch was re-applied to the new controller without
+  being run.
+- Aurora, Polaris, and any scale above 2 nodes; PP; CP; native DDP; the LR
+  finder; DCP save/resume; the 20B/30B/80B configs (only `*_debugmodel` was run).
+- Old native MoE checkpoints (`layers.N.moe.*`) do not load into the new
+  layout; no key-rename shim was written.
+- `ezpz/validator.py` pipeline-parallel validation still uses the pre-sync
+  `pp_schedule.eval` call shape.
+- MoE EP and flex-attention failures above, owned by the
+  `fix-moe-ep-mesh-flex-att` session.
+
 ## Current trial (2026-09-30): upstream `97e673b779`, hardware-qualified
 
 Branch `sync/upstream-97e673b779` merges upstream through
@@ -94,6 +264,18 @@ exact-head CI passed.
 The previous `0fd69d0b` integration below is retained as historical provenance.
 
 ## Earlier landing (2026-09-23): upstream `0fd69d0b`, landed and validated
+### Exact-head cross-system validation (2026-09-29)
+
+Aurora job `8879698` validated source `f4e678c023` on two nodes with the
+isolated Torch 2.15 XPU runtime. Dense TP=1, dense TP=2, and the repaired MoE
+arm each completed three finite optimizer updates and returned `rc=0`; their
+step-3 losses were 10.66281, 10.71614, and 11.47138 respectively. The wrapper
+emitted `VERDICT: ok`, and PBS finished in 00:07:44 with `Exit_status=0`
+(`Stageout_status=1`). Together with Sunspot jobs `12479017` and `12479018`,
+this closes the current-head dense TP and repaired-MoE execution gate on both
+XPU systems.
+
+## Previous landing (2026-09-23): upstream `0fd69d0b`, landed and validated
 
 The Sync 84 trial described below is historical. The current branch
 `sync/upstream-0fd69d0b` landed the audited upstream merge as `fa3147727`

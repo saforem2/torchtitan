@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 304
+The 25 most-recently-changed docs by git commit date (across all 305
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -31,11 +31,11 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-09-30 | [Development Journal](./journal.md) |
 | 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
-| 2026-09-30 | [Dead CLI flags in archived historical PBS scripts](./guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md) |
 | 2026-09-30 | [Upstream f359667 merge readiness](./experiments/upstream-f359667-merge-readiness.md) |
 | 2026-09-30 | [30B AdamW bounded canary evidence](./experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/README.md) |
 | 2026-09-30 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
-| 2026-09-30 | [Mano LR finder at 30B (Sunspot, 2026-08-23)](./experiments/lr-finder/agpt/2026-08-23-30b-mano-sunspot.md) |
+| 2026-09-30 | [Aurora production checkpoint migration matrix](./experiments/agpt/aurora/2026-09-30-production-checkpoint-migration-matrix.md) |
+| 2026-09-30 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
 | 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-09-30 | [Evaluation Results](./evals/README.md) |
