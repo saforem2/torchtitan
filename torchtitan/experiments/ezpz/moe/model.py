@@ -73,9 +73,16 @@ class Attention(DeepSeekMLAAttention):
 
     @property
     def wkv_b(self):  # type: ignore[override]
-        # Upstream 0980e1cb1 moved wkv_b inside MLAAttention (self.inner_attention.wkv_b);
-        # ezpz's forward still calls self.wkv_b directly for the XPU value-padding path.
+        # Upstream 0980e1cb1 moved wkv_b inside MLAAttention (inner_attention.wkv_b).
+        # Expose it for any external callers; the forward's _wkv_b_fn uses the
+        # underlying _linear to avoid FQN collision inside remat regions.
         return self.inner_attention.wkv_b
+
+    def _wkv_b_fn(self, x: torch.Tensor) -> torch.Tensor:
+        # Call Linear's functional path directly to avoid duplicating the
+        # "inner_attention.wkv_b.linear" remat region inside the outer
+        # "inner_attention" remat scope.
+        return torch.nn.functional.linear(x, self.wkv_b.weight, self.wkv_b.bias)
 
     def forward(
         self,
@@ -119,7 +126,7 @@ class Attention(DeepSeekMLAAttention):
         q_pe, k_pe = self.rope(q_pe, k_pe.unsqueeze(1), positions)
         q = torch.cat([q_nope, q_pe], dim=-1)
 
-        kv = self.wkv_b(self.kv_norm(kv))
+        kv = self._wkv_b_fn(self.kv_norm(kv))
 
         with spmd.local():
             kv = kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)
