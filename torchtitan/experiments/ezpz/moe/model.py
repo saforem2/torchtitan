@@ -79,9 +79,11 @@ class Attention(DeepSeekMLAAttention):
         return self.inner_attention.wkv_b
 
     def _wkv_b_fn(self, x: torch.Tensor) -> torch.Tensor:
-        # Delegate to MLAAttention's wkv_b which owns the correct 512→4096
-        # sharding and remat for this projection.
-        return self.inner_attention.wkv_b(x)
+        # Call MLAAttention's wkv_b linear without re-entering its remat region
+        # (which would dup inner_attention.wkv_b.linear). The underlying _linear
+        # is the fused matmul that handles DTensor sharding correctly.
+        w = self.inner_attention.wkv_b
+        return w._linear(x, w.weight, w.bias)
 
     def forward(
         self,
