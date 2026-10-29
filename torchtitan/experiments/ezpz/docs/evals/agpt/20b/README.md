@@ -23,6 +23,58 @@
 > separately. Generated charts are pending a data-complete Aurora rerender so
 > these two endpoint rows are not silently omitted.
 
+> [!WARNING]
+> Tail backfill `8878144` for 20B-512 step 11,100 produced no result. Conversion
+> failed before loading the checkpoint because its bare
+> `frameworks/2025.3.1` Python lacked `spmd_types`; the wrapper masked that
+> failure and PBS recorded `Exit_status=0`. The identical queued 20B-256
+> step-17,000 job `8878145` was cancelled before allocation. Neither checkpoint
+> has a fresh accepted eval from this attempt.
+>
+> Corrected retries `8880289` (20B-512 step 11,100) and `8880292` (20B-256
+> step 17,500) used the pinned Torch 2.15 conversion runtime and propagated
+> failure nonzero, but still produced no result. Both opened the DCP metadata
+> and then failed because the current fused-QKV model requested
+> `layers.0.attention.qkv_linear.wqkv.weight`, which is absent from the
+> historical checkpoint state schema. A historical-schema-compatible converter
+> is now required; no fresh tail score is accepted.
+>
+> Historical-schema canary `8880334` finished after 00:20:55 with PBS
+> `Exit_status=143` and `Stageout_status=1`. It entered single-process DCP
+> conversion from source `25ab092c6c`, but the log stopped inside checkpoint
+> loading and it produced neither HF safetensors nor `results.json`. A follow-up
+> revision `2f2787faf7` pins the large conversion/eval outputs to Flare.
+> Replacement canary `8880485` finished after 00:28:47 with PBS
+> `Exit_status=1`. Conversion from immutable source `2f2787faf7` succeeded and
+> wrote a 38.6-GiB HF shard plus its index under the Flare output root. The
+> wrapper then resolved `config.json` and the `tt-lm-eval` overlay relative to
+> that output root rather than a checkout: the config copy and activation both
+> failed, and Transformers rejected the export because it had no `model_type`.
+> No `results.json` was produced. The export is reusable after its config and
+> tokenizer assets are repaired, but the 20B-256 step-17,500 sibling remains
+> gated on a successful semantic eval.
+>
+> Eval-only control `8880551` reused that verified 38.6-GiB shard and reached
+> lm-eval, but finished after 44 seconds with PBS `Exit_status=1` and
+> `Stageout_status=1`: the HF directory still lacked `config.json`, so
+> Transformers again rejected it before model loading. It produced no
+> No `results.json` was produced. Asset-repair retry `8880564`, pinned to immutable source
+> `975e43931a`, finished after 01:20:11 with PBS `Exit_status=0` (and a
+> non-semantic `Stageout_status=1`). It reused the 38.6-GiB export, repaired its
+> HF assets, and produced a fresh nonempty `results.json`. All seven requested
+> measurements were finite: HellaSwag `acc_norm=0.6875`, ARC-Easy
+> `acc_norm=0.6814`, Winogrande `acc=0.5983`, PIQA `acc_norm=0.7682`,
+> OpenBookQA `acc_norm=0.3740`, BoolQ `acc=0.6303`, and ARC-Challenge 25-shot
+> `acc_norm=0.4437`. This cleared the semantic gate; step-17,500 sibling
+> `8880658` finished after 01:41:37 with PBS `Exit_status=0` (and a non-semantic
+> `Stageout_status=1`) and produced a fresh 3,012-byte `results.json` with all
+> seven measurements finite: HellaSwag `acc_norm=0.6786`, ARC-Easy
+> `acc_norm=0.6646`, Winogrande `acc=0.5699`, PIQA `acc_norm=0.7671`,
+> OpenBookQA `acc_norm=0.3780`, BoolQ `acc=0.6199`, and ARC-Challenge 25-shot
+> `acc_norm=0.4505`. Its SHA-256 is
+> `9d326a9c37d2c1df75855e3891e61ad1bbbcbd6518203b0bc0905fea1f4ba06f`.
+> Both current tail checkpoints now have accepted semantic evals.
+
 ## Setup
 
 | Field | Value |

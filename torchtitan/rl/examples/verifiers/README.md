@@ -12,11 +12,12 @@ The ownership boundary is:
 - The adapter converts samples and traces between the two systems.
 
 Reusable bridge code lives alongside this README. Each experiment has its own
-package and dependencies; [`dapo_math/`](./dapo_math) is the first example.
+package and dependencies: [`dapo_math/`](./dapo_math) (single-turn math) and
+[`terminal_bench/`](./terminal_bench) (multi-turn terminal agent on Harbor tasks).
 
 ## Integration flow
 
-![TorchTitan and Verifiers integration architecture](./assets/integration_architecture.svg)
+![TorchTitan and Verifiers integration architecture](../../../../assets/images/rl_verifiers_integration_architecture.svg)
 
 1. [`data.py`](./data.py) loads a Verifiers taskset in the TitanRL controller,
    where TitanRL samples each rollout task. It converts the task's typed data
@@ -25,8 +26,8 @@ package and dependencies; [`dapo_math/`](./dapo_math) is the first example.
    server reconstructs the typed task before running the Verifiers environment.
 2. [`env_server.py`](./env_server.py) currently spawns and owns the Verifiers server as
    a separate local process on the TitanRL controller host. The configured
-   Verifiers runtime is independent: we can select `SubprocessConfig`,
-   `DockerConfig`, or `PrimeConfig` for the agent.
+   Verifiers runtime is independent: for example, `SubprocessConfig` or
+   `DockerConfig` for the agent.
 3. [`generation_server.py`](./generation_server.py) exposes TitanRL's `GenerateFn` through the
    HTTP token-generation protocol expected by Verifiers. It also retains the
    policy-version span and metrics that are absent from Verifiers traces.
@@ -56,7 +57,7 @@ verifiers/
   rollouter.py
   my_task/
     __init__.py
-    config_registry.py
+    recipe module
     data.py
     requirements.txt
     rollouter.py
@@ -68,7 +69,7 @@ verifiers/
    harness, runtime, and worker pool, but leave
    `verifiers_env_server.environment.taskset` unset; `VerifiersRollouter`
    derives it from the training dataset.
-3. In `config_registry.py`, select the rollouter from `Controller.Config`.
+3. In `recipe module`, select the rollouter from `Controller.Config`.
 4. Place the module under `torchtitan/rl/examples` or pass its fully qualified
    module path to `--module`.
 
@@ -80,5 +81,6 @@ python -m torchtitan.rl.train \
   --config <config-name>
 ```
 
-See [DAPO Math](./dapo_math) for a complete single-turn example. This
+See [DAPO Math](./dapo_math) for a complete single-turn example and
+[Terminal-Bench](./terminal_bench) for a multi-turn agent example. This
 integration pins Verifiers 0.3.1 and uses its `verifiers.v1` API.

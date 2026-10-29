@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import math
 import os
 import time
@@ -13,10 +14,11 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, cast
 
+import spmd_types as spmd
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from torchtitan.components.checkpointer import CheckpointManager
+from torchtitan.components.checkpointer import CheckpointManager, DATALOADER
 from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhaustedError
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
@@ -27,6 +29,7 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
@@ -152,7 +155,12 @@ def _set_pg_timeouts_xpu_aware(
 
 
 class _DictTrainingMicrobatch(TrainingMicrobatch):
-    """Adapter for ezpz dataloaders that still yield batch dictionaries."""
+    """Adapter for ezpz dataloaders that still yield batch dictionaries.
+
+    Upstream microbatches carry ``loss_token_counts`` (scalar, one objective) and
+    ``routing_token_counts`` (one entry per routing depth; ezpz has no MTP so one
+    entry) instead of the old ``num_valid_tokens`` int.
+    """
 
     def __init__(self, batch: dict[str, Any]) -> None:
         self._batch = batch
@@ -168,6 +176,13 @@ class _DictTrainingMicrobatch(TrainingMicrobatch):
         else:
             valid_tokens = int(valid_tokens)
         self.num_valid_tokens = valid_tokens
+        self.loss_token_counts = torch.tensor(valid_tokens, dtype=torch.int64)
+        padding_mask = batch.get("padding_mask")
+        if isinstance(padding_mask, torch.Tensor):
+            routed_tokens = int((~padding_mask.bool()).sum().item())
+        else:
+            routed_tokens = labels.numel()
+        self.routing_token_counts = torch.tensor([routed_tokens], dtype=torch.int64)
 
     def as_input_dict(self) -> dict[str, Any]:
         return {k: v for k, v in self._batch.items() if k != "num_valid_tokens"}
@@ -209,12 +224,10 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def _initialize_model(
         self,
         *,
-        compile_config,
         hf_assets_path,
         create_seed_checkpoint: bool = False,
     ) -> None:
         super()._initialize_model(
-            compile_config=compile_config,
             hf_assets_path=hf_assets_path,
             create_seed_checkpoint=create_seed_checkpoint,
         )
@@ -272,24 +285,57 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         super()._initialize_optim()
         self.optim._run_update = self._optim_update
 
-    def _get_train_context(self) -> AbstractContextManager[None]:
-        context = super()._get_train_context
-        if getattr(self.config.parallelism, "enable_data_parallel_native_ddp", False):
-            return native_ddp_autocast_context(context, self.device.type)()
-        return context()
+    def _native_ddp_train_context(self) -> AbstractContextManager[None]:
+        """SPMD context composed with native-DDP bf16 autocast."""
+
+        def spmd_context() -> AbstractContextManager[None]:
+            return self.parallelism_context.activate_spmd(
+                typechecking=self.config.debug.spmd_typechecking,
+            )
+
+        return native_ddp_autocast_context(spmd_context, self.device.type)()
+
+    def _non_pp_forward_backward_microbatch(
+        self,
+        *,
+        inputs,
+        labels,
+        model_kwargs: dict[str, Any],
+        loss_kwargs: dict[str, Any],
+    ) -> torch.Tensor:
+        """Upstream's microbatch step, inside bf16 autocast for native DDP.
+
+        Core used to expose a ``_get_train_context`` hook for this; that hook
+        was a fork-local edit to ``training_engine.py``, so the autocast is
+        composed here instead. Without native DDP this is upstream's method.
+        """
+        if not getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            return super()._non_pp_forward_backward_microbatch(
+                inputs=inputs,
+                labels=labels,
+                model_kwargs=model_kwargs,
+                loss_kwargs=loss_kwargs,
+            )
+        with self._native_ddp_train_context():
+            pred = self.model_parts[0](inputs, **model_kwargs)
+            loss, self.loss_metrics = self.loss_fn(pred, labels, **loss_kwargs)
+            del pred
+            with spmd.no_typecheck():
+                loss.backward()
+        return loss
 
     def initialize(
         self,
         *,
-        compile_config,
         hf_assets_path,
-        dataloader: BaseDataLoader | None = None,
+        extra_states=None,
         create_seed_checkpoint: bool = False,
     ) -> None:
         super().initialize(
-            compile_config=compile_config,
             hf_assets_path=hf_assets_path,
-            dataloader=dataloader,
+            extra_states=extra_states,
             create_seed_checkpoint=create_seed_checkpoint,
         )
         self._diag_prev_weight_norms = {}
@@ -332,7 +378,6 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             self.config.optim.max_norm,
             foreach=_clip_foreach(),
             pp_mesh=self.parallelism_context.get_optional_mesh("pp"),
-            ep_enabled=self.parallelism_context.ep_enabled,
         )
         loss_is_finite = torch.isfinite(loss).all().to(torch.int32)
         if not self.parallelism_context.pp_enabled or self.pp_has_last_stage:
@@ -486,6 +531,8 @@ class FaultTolerantTrainer(TorchFTTrainer):
             default_factory=EzpzParallelismConfig
         )
         checkpoint: CheckpointManager.Config | None = None
+        compile: CompileConfig | None = None
+        """Selects ``local_compile`` regions; see ``ezpz/compile.py``."""
         batch_ramp_steps: int = 0
         batch_ramp_start_gas: int = 1
         walltime_deadline_epoch: int = 0
@@ -502,7 +549,29 @@ class FaultTolerantTrainer(TorchFTTrainer):
         history_bridge: bool = False
         wandb_watch: bool = False
 
+        def _sync_model_context_length(self) -> None:
+            """Align the model (and RoPE caches) with ``training.max_context_length``.
+
+            Upstream requires ``training.max_context_length`` to equal the
+            model's, chosen when the model config is built
+            (``validate_model_training_config``). ezpz flavors are prebuilt
+            templates (``max_context_length=131072``) and launchers set the
+            sequence length on the CLI afterwards, so the trainer config owns
+            the single source of truth and propagates it here, before the
+            upstream validation runs.
+            """
+            from torchtitan.models.common.rope import RoPE
+
+            seq_len = self.training.max_context_length
+            model = self.model
+            if getattr(model, "max_context_length", seq_len) != seq_len:
+                model.max_context_length = seq_len
+            for _, rope, _, _ in model.traverse(RoPE.Config):
+                if rope.max_context_length != seq_len:
+                    rope.max_context_length = seq_len
+
         def __post_init__(self):
+            self._sync_model_context_length()
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
             # class captured by zero-argument ``super()``.
@@ -518,8 +587,16 @@ class FaultTolerantTrainer(TorchFTTrainer):
     @record
     def __init__(self, config: Config):
         self.config = config
+        config.model = copy.deepcopy(config.model)
         model_config = config.model
-        model_config.update_from_config(config=config)
+        # Sharding is baked into upstream model configs at construction time,
+        # but ezpz flavors are prebuilt templates and the CLI fixes
+        # parallelism afterwards, so the model config re-applies its sharding
+        # (and the legacy ``compile`` mapping) here.
+        model_config.local_compile_regions = local_compile_regions(config.compile)
+        update_from_config = getattr(model_config, "update_from_config", None)
+        if update_from_config is not None:
+            update_from_config(config=config)
         if config.override.imports:
             apply_overrides(config.override, config)
         config.__post_init__()
@@ -599,8 +676,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         color = self.metrics_processor.color
 
         engine.initialize(
-            compile_config=config.compile,
-            dataloader=self.dataloader,
+            extra_states={DATALOADER: self.dataloader},
             hf_assets_path=config.hf_assets_path,
             create_seed_checkpoint=config.create_seed_checkpoint,
         )
@@ -773,31 +849,54 @@ class FaultTolerantTrainer(TorchFTTrainer):
         parallelism_context = engine.parallelism_context
 
         microbatch_groups: list[list[TrainingMicrobatch]] = []
-        local_valid_tokens = 0
+        local_loss_token_counts: torch.Tensor | None = None
+        local_routing_token_counts: torch.Tensor | None = None
         for _ in range(self.gradient_accumulation_steps):
             microbatch_group = []
             for _ in range(self.num_pp_microbatches):
                 microbatch = next(data_iterator)
-                local_valid_tokens += microbatch.num_valid_tokens
+                if local_loss_token_counts is None:
+                    local_loss_token_counts = torch.zeros_like(
+                        microbatch.loss_token_counts
+                    )
+                    local_routing_token_counts = torch.zeros_like(
+                        microbatch.routing_token_counts
+                    )
+                local_loss_token_counts.add_(microbatch.loss_token_counts)
+                assert local_routing_token_counts is not None
+                local_routing_token_counts.add_(microbatch.routing_token_counts)
                 microbatch_group.append(microbatch)
             microbatch_groups.append(microbatch_group)
+        assert local_loss_token_counts is not None
+        assert local_routing_token_counts is not None
 
-        local_valid_tokens_tensor = torch.tensor(
-            local_valid_tokens,
-            dtype=torch.int64,
-            device=engine.device,
-        )
+        # ezpz has a single loss objective (no MTP), so the loss count is a
+        # scalar and the routing count has one entry; reduce them together.
+        num_loss_objectives = local_loss_token_counts.numel()
+        global_token_counts = torch.cat(
+            (
+                local_loss_token_counts.reshape(-1),
+                local_routing_token_counts.reshape(-1),
+            )
+        ).to(engine.device)
+        local_valid_tokens_tensor = global_token_counts[:1].clone()
         if parallelism_context.dp_enabled:
             dp_mesh = parallelism_context.get_mesh("dp")
-            global_valid_tokens = dist_utils.dist_sum_tensor(
-                local_valid_tokens_tensor, dp_mesh
+            global_token_counts = dist_utils.dist_sum_tensor(
+                global_token_counts, dp_mesh
             )
-        else:
-            global_valid_tokens = local_valid_tokens_tensor
+        global_loss_token_counts = global_token_counts[:num_loss_objectives].reshape(
+            local_loss_token_counts.shape
+        )
+        global_routing_token_counts = global_token_counts[num_loss_objectives:].reshape(
+            local_routing_token_counts.shape
+        )
+        global_valid_tokens = global_token_counts[:1]
 
         forward_backward_result = engine.forward_backward(
             microbatch_groups=microbatch_groups,
-            global_valid_tokens=global_valid_tokens,
+            global_loss_token_counts=global_loss_token_counts,
+            global_routing_token_counts=global_routing_token_counts,
         )
         accumulated_loss = forward_backward_result.loss
 

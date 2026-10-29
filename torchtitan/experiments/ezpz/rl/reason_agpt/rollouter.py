@@ -26,7 +26,7 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
 from torchtitan.rl.rollout.environment import TokenEnv
 from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
-from torchtitan.rl.rubric import Rubric
+from torchtitan.rl.rollout.rubric import Rubric
 
 
 class GSM8KReasonWorker(RolloutWorker):

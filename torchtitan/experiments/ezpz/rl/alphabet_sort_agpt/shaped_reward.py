@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-from torchtitan.rl.rubric import RewardFn
+from torchtitan.rl.rollout.rubric import RewardFn
 
 
 def _answer_lines(text: str, *, xml_tag: str) -> list[str]:

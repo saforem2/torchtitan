@@ -16,6 +16,24 @@
 > PBS exit 0 and seven finite measurements, including HellaSwag
 > `acc_norm=0.6786`, ARC-Easy `acc=0.6814`, and ARC-Challenge 25-shot
 > `acc_norm=0.4505`.
+> Status: **NOT RUNNING.** Umbrella `8870515` advanced this chain from
+> step 16,800 through logged step 17,600 and persisted **step 17,500**
+> (239 GiB, 3,073 files including nonempty metadata). The final step-17,600
+> save was interrupted and remains an empty 4-KiB placeholder. Last logged
+> loss was **2.41783** at step 17,600. The parent finished with PBS
+> `Exit_status=143` after a node requested job termination.
+> Tail eval retry `8880292` for step 17,500 failed closed during DCP conversion:
+> the current fused-QKV model expected
+> `layers.0.attention.qkv_linear.wqkv.weight`, which the historical checkpoint
+> schema does not contain. No fresh `results.json` was produced.
+> The repaired 20B-512 semantic canary `8880564` subsequently passed all seven
+> finite measurements, clearing the launch gate. Step-17,500 retry `8880658`,
+> pinned to immutable source `975e43931a`, then finished after 01:41:37 with
+> PBS `Exit_status=0` and a fresh 3,012-byte `results.json`. All seven requested
+> measurements are finite: HellaSwag `acc_norm=0.6786`, ARC-Easy
+> `acc_norm=0.6646`, Winogrande `acc=0.5699`, PIQA `acc_norm=0.7671`,
+> OpenBookQA `acc_norm=0.3780`, BoolQ `acc=0.6199`, and ARC-Challenge 25-shot
+> `acc_norm=0.4505`. The current tail-eval backfill is complete.
 >
 > Trajectory since the step-300 stall: `8505255`
 > (sync mode) reached step-1,125; `8558548`/`8558549` carried it

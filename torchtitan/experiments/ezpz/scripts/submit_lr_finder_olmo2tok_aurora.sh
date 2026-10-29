@@ -4,7 +4,7 @@
 #PBS -l walltime=06:00:00
 #PBS -l filesystems=home:flare
 #PBS -l select=64
-#PBS -q next-eval
+#PBS -q prod
 #PBS -j oe
 #
 # LR finder for the OLMo-3-vocab ladder: 4.64B / 9.48B / 26.2B.
@@ -19,22 +19,23 @@
 # difference between a calibrated and an inherited LR is the difference between
 # a chain and a wasted allocation.
 #
-# WHY next-eval, AND WHAT IT CHANGES. `qstat -Qf next-eval` shows NO nodect
-# limits at all -- only walltime 00:05:00-06:00:00 and max_queued 20/user. That
-# dissolves the constraint submit_lr_finder_30b_aurora.sh was built around:
-# there, everything from 8 to 255 nodes above one hour was a queue dead zone,
-# forcing 256N purely to reach a multi-hour queue. Here 64N is legal, and 64N
-# is the measured throughput sweet spot (exp06: 456 tps, 26.57% MFU at LBS=4).
+# WHY prod (was next-eval), AND WHAT IT CHANGES. `prod` is the new Aurora
+# route queue (routes to small/medium/large by nodect); `qstat -Qf next-eval`
+# previously showed no nodect limits (only walltime/max_queued), which dissolved
+# the constraint submit_lr_finder_30b_aurora.sh was built around. With `prod`
+# routing, 64N lands in `small` (256-1024N, walltime up to 12h) and is the
+# measured throughput sweet spot (exp06: 456 tps, 26.57% MFU at LBS=4).
 #
-# THE CATCH, AND WHY THE VENV COMES FROM THE 2B-V2 CLONE. next-eval runs a TEST
-# bkc image (compute_aurora_test_20260831 / 26.181.0 / oneAPI 2026.1), not the
-# PROD image every other queue runs (26.26.0 / oneAPI 2025.3). This repo's
-# .venv is based on /opt/aurora/26.26.0/spack/.../python-3.12.12, a path that
-# does not exist on the TEST image -- it dies with a bogus "no
-# importlib.metadata". The agpt-2b-v2 clone's venv is based on
-# $HOME/.local/share/uv/python/cpython-3.14.2, which is image-independent and
-# is the one proven to run on compute nodes. So: code from THIS repo, runtime
-# from that tarball. LRF_VENV_SRC points the runner at it.
+# THE CATCH, AND WHY THE VENV COMES FROM THE 2B-V2 CLONE. The former
+# `next-eval` ran a TEST bkc image (compute_aurora_test_20260831 /
+# 26.181.0 / oneAPI 2026.1), not the PROD image every other queue runs
+# (26.26.0 / oneAPI 2025.3). This repo's .venv is based on
+# /opt/aurora/26.26.0/spack/.../python-3.12.12, a path that does not exist
+# on the TEST image -- it died with a bogus "no importlib.metadata".
+# The agpt-2b-v2 clone's venv (/.venv.next-eval.tar.gz) is image-independent
+# ($HOME/.local/share/uv/python/cpython-3.14.2) and was proven there; it
+# remains usable via LRF_VENV_SRC, but `prod` destinations use the PROD
+# BKC so the local repo .venv also works without it.
 #
 # GBS=6144 AT 64 NODES. 64N x 12 ranks = dp 768; 6144 = 768 * 2 * 4, so
 # LBS=2/GAS=4. Calibrating at the batch the production run will use is the
@@ -148,7 +149,7 @@ echo "=========================================================="
 echo " OLMo-3-vocab LR finder"
 echo "   size      = ${MODEL_SIZE}"
 echo "   config    = ${LRF_CONFIG}"
-echo "   queue     = next-eval (TEST bkc; venv from the 2b-v2 clone)"
+echo "   queue     = prod (routes to small/medium/large; TEST bkc was next-eval)"
 echo "   GBS/LBS   = ${LRF_GBS}/${LRF_LBS} @ 64N (dp 768, GAS 4)"
 echo "   LR window = ${LRF_INIT_LR} -> ${LRF_MAX_LR}"
 echo "   dump      = ${LRF_DUMP_FOLDER}"

@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import importlib
 
 import logging
 import os
@@ -19,22 +20,39 @@ from pathlib import Path
 from torchtitan.observability.logging import init_logger
 from torchtitan.trainer import Trainer
 
-from tests.integration_tests import OverrideDefinitions, validate_fake_pg_compatibility
-from tests.integration_tests.b200 import build_b200_tests_list
-from tests.integration_tests.features import build_features_test_list
-from tests.integration_tests.h100 import build_h100_tests_list
-from tests.integration_tests.models import build_model_tests_list
+from tests.integration_tests import (
+    DEFAULT_ENTRYPOINT,
+    get_importable_config_module,
+    IntegrationTestDefinition,
+    SELF_LAUNCHING_ENTRYPOINTS,
+    validate_fake_pg_compatibility,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-_TEST_SUITES_FUNCTION = {
-    "features": build_features_test_list,
-    "models": build_model_tests_list,
-    "h100": build_h100_tests_list,
-    "b200": build_b200_tests_list,
+# Suites are imported only when selected: the flux and RL suites need optional
+# dependencies (transformers; vLLM and Monarch) that other CI jobs do not install.
+_TEST_SUITES = {
+    "features": ("tests.integration_tests.features", "build_features_test_list"),
+    "models": ("tests.integration_tests.models", "build_model_tests_list"),
+    "flux": ("tests.integration_tests.flux", "build_flux_test_list"),
+    "h100": ("tests.integration_tests.h100", "build_h100_tests_list"),
+    "b200": ("tests.integration_tests.b200", "build_b200_tests_list"),
+    "rl": ("tests.integration_tests.rl", "build_rl_test_list"),
+    "rl_kda": ("tests.integration_tests.rl", "build_rl_kda_test_list"),
+    "rl_b200": ("tests.integration_tests.rl", "build_b200_rl_test_list"),
 }
+
+
+def _build_test_list(test_suite: str) -> list[IntegrationTestDefinition]:
+    module_name, builder_name = _TEST_SUITES[test_suite]
+    return getattr(importlib.import_module(module_name), builder_name)()
+
+
+# Suites that need hardware-specific kernels or a real multi-process runtime.
+_REAL_PG_ONLY_SUITES = frozenset({"h100", "b200", "rl", "rl_kda", "rl_b200"})
 
 # Held while a test writes its captured output so concurrent tests do not
 # interleave their lines.
@@ -45,9 +63,9 @@ def _parse_test_suites(value: str) -> tuple[str, ...]:
     suites = tuple(part.strip() for part in value.split(",") if part.strip())
     if not suites:
         raise ValueError("--test_suite must contain at least one suite")
-    unknown = tuple(suite for suite in suites if suite not in _TEST_SUITES_FUNCTION)
+    unknown = tuple(suite for suite in suites if suite not in _TEST_SUITES)
     if unknown:
-        available = ", ".join(_TEST_SUITES_FUNCTION)
+        available = ", ".join(_TEST_SUITES)
         raise ValueError(
             f"Unknown test suite(s): {', '.join(unknown)}. Available: {available}"
         )
@@ -132,13 +150,6 @@ def _emit_block(prefix: str, header: str, body: str, footer: str = "") -> None:
         sys.stderr.flush()
 
 
-def _join_override_args(override_args: tuple[str, ...]) -> str:
-    """Safely join legacy shell fragments into a command line."""
-    return shlex.join(
-        token for fragment in override_args for token in shlex.split(fragment)
-    )
-
-
 def _read_golden_spec(golden_numerics_path: Path) -> tuple[int, tuple[str, ...]]:
     columns = ("step", "loss")
     steps: list[int] = []
@@ -192,7 +203,7 @@ def _add_parallelism_header(result_path: Path, parallelism: str) -> None:
 
 
 def run_single_test(
-    test_flavor: OverrideDefinitions,
+    test_flavor: IntegrationTestDefinition,
     output_dir: str,
     *,
     use_fake_pg: bool = False,
@@ -202,10 +213,11 @@ def run_single_test(
     # ``gpu_ids`` is set only in parallel mode; sequential runs leave the
     # child process to use all visible GPUs.
     gpu_ids: list[int] | None = None,
+    hf_assets_path: str = "",
 ):
     # run_test supports sequence of tests.
     test_name = test_flavor.test_name
-    dump_folder_arg = f"--dump_folder {output_dir}/{test_name}"
+    output_dir_arg = f"--output-dir {output_dir}/{test_name}"
 
     if test_flavor.golden_numerics_path is not None and len(test_flavor.configs) != 1:
         raise ValueError(
@@ -229,27 +241,31 @@ def run_single_test(
     base_env.pop("COMM_BACKEND", None)
     if use_fake_pg:
         base_env["COMM_BACKEND"] = "fake"
+    if hf_assets_path:
+        base_env["TORCHTITAN_TEST_HF_ASSETS_PATH"] = hf_assets_path
 
-    for run, override_arg in enumerate(test_flavor.override_args):
+    for config_index, config_fn in enumerate(test_flavor.configs):
         test_output_dir = str(Path(output_dir) / test_name)
-        config_fn = test_flavor.configs[run] if test_flavor.configs else None
-        config = config_fn() if config_fn is not None else None
-        if use_fake_pg and config is not None:
+        entrypoint = test_flavor.entrypoint(config_index)
+        config = config_fn()
+        config_module = get_importable_config_module(config_fn)
+        if use_fake_pg:
             validate_fake_pg_compatibility(test_flavor, config)
         env = base_env.copy()
         env["TORCHTITAN_TEST_OUTPUT_DIR"] = test_output_dir
-        if config_fn is not None:
-            env["MODULE"] = config_fn.__module__
-            env["CONFIG"] = config_fn.__name__
-        override_arg = tuple(
-            arg.replace("{test_output_dir}", test_output_dir) for arg in override_arg
-        )
+        env["MODULE"] = config_module
+        env["CONFIG"] = config_fn.__name__
+        env["ENTRYPOINT"] = entrypoint
         start_ts = time.strftime("%Y-%m-%d %H:%M:%S")
         if test_flavor.golden_numerics_path is not None:
+            if entrypoint != DEFAULT_ENTRYPOINT:
+                raise ValueError(
+                    f"{test_name} sets golden_numerics_path, which only supports "
+                    f"{DEFAULT_ENTRYPOINT}, but launches {entrypoint}"
+                )
             # Reuse this integration run for numerics: loss_compare.py runs the
             # config once, extracts full-precision TensorBoard metrics, and
             # compares them with the mode-specific golden (or exports them).
-            assert config_fn is not None and config is not None
             execution_mode = "fake_pg" if use_fake_pg else "real_pg"
             golden_numerics_path = Path(
                 test_flavor.golden_numerics_path.format(
@@ -269,18 +285,15 @@ def run_single_test(
                 result_path = golden_numerics_path
                 result_arg = f"--import-result={golden_numerics_path}"
 
-            options = _join_override_args(override_arg)
             command = [
                 sys.executable,
                 "scripts/loss_compare.py",
                 ".",
                 ".",
-                f"--baseline-module={config_fn.__module__}",
+                f"--baseline-module={config_module}",
                 f"--baseline-config={config_fn.__name__}",
-                f"--baseline-options={options}",
-                f"--test-module={config_fn.__module__}",
+                f"--test-module={config_module}",
                 f"--test-config={config_fn.__name__}",
-                f"--test-options={options}",
                 f"--job-dump-folder={Path(output_dir) / test_name}",
                 f"--metrics={','.join(metrics)}",
                 f"--steps={steps}",
@@ -292,7 +305,7 @@ def run_single_test(
                 seed_config = test_flavor.loss_compare_seed_config
                 command.extend(
                     (
-                        f"--seed-module={seed_config.__module__}",
+                        f"--seed-module={get_importable_config_module(seed_config)}",
                         f"--seed-config={seed_config.__name__}",
                     )
                 )
@@ -317,13 +330,18 @@ def run_single_test(
                     result_path,
                     _parallelism_summary(config, test_flavor.ngpu),
                 )
+        elif entrypoint in SELF_LAUNCHING_ENTRYPOINTS:
+            cmd = (
+                f"{shlex.quote(sys.executable)} -m {entrypoint} "
+                f"--module {config_module} --config {config_fn.__name__} "
+                f"{output_dir_arg}"
+            )
+            result = _run_cmd(cmd, timeout=test_flavor.timeout, env=env)
         else:
             # Tests without a golden run directly and guard E2E execution only;
             # they do not assert loss or gradient-norm values.
             env["TORCH_TRACE"] = f"{output_dir}/{test_name}/compile_trace"
-            cmd = f"./run_train.sh {dump_folder_arg}"
-            if override_arg:
-                cmd += " " + _join_override_args(override_arg)
+            cmd = f"./run_train.sh {output_dir_arg}"
             result = _run_cmd(cmd, timeout=test_flavor.timeout, env=env)
         returncode = result.returncode
         captured = result.stdout or ""
@@ -353,8 +371,8 @@ def run_single_test(
 
 
 def _filter_tests(
-    args, test_list: list[OverrideDefinitions]
-) -> tuple[list[OverrideDefinitions], list[OverrideDefinitions]]:
+    args, test_list: list[IntegrationTestDefinition]
+) -> tuple[list[IntegrationTestDefinition], list[IntegrationTestDefinition]]:
     """Filter tests by name, scope, disabled state, architecture, and GPU count.
 
     Returns (runnable, skipped_due_to_ngpu).
@@ -363,8 +381,8 @@ def _filter_tests(
     if hasattr(args, "exclude") and args.exclude:
         exclude_set = {name.strip() for name in args.exclude.split(",")}
 
-    runnable: list[OverrideDefinitions] = []
-    skipped_ngpu: list[OverrideDefinitions] = []
+    runnable: list[IntegrationTestDefinition] = []
+    skipped_ngpu: list[IntegrationTestDefinition] = []
     for test_flavor in test_list:
         if args.test_name != "all" and test_flavor.test_name != args.test_name:
             continue
@@ -392,7 +410,7 @@ def _filter_tests(
 
 def run_tests(
     args,
-    test_list: list[OverrideDefinitions],
+    test_list: list[IntegrationTestDefinition],
     parallel: bool = True,
 ):
     """Run all integration tests to test the core features of TorchTitan."""
@@ -405,8 +423,18 @@ def run_tests(
     failed_tests: list[tuple[str, str]] = []
     execution_mode = getattr(args, "execution_mode", "real_pg")
     export_numerics = getattr(args, "export_numerics", False)
+    hf_assets_path = getattr(args, "hf_assets_path", "")
+    if parallel and any(
+        t.entrypoint(i) in SELF_LAUNCHING_ENTRYPOINTS
+        for t in runnable
+        for i in range(len(t.configs))
+    ):
+        # Self-launching entrypoints place their own processes on all visible
+        # GPUs, so they cannot share the GPU pool.
+        logger.info("Running sequentially: suite has self-launching entrypoints")
+        parallel = False
 
-    def physical_ngpu(test_flavor: OverrideDefinitions) -> int:
+    def physical_ngpu(test_flavor: IntegrationTestDefinition) -> int:
         return 1 if execution_mode == "fake_pg" else test_flavor.ngpu
 
     if parallel and runnable:
@@ -423,7 +451,7 @@ def run_tests(
         # Worst case: every test wants 1 GPU and runs in parallel.
         max_workers = max(1, min(len(scheduled), args.ngpu))
 
-        def _runner(test_flavor: OverrideDefinitions) -> None:
+        def _runner(test_flavor: IntegrationTestDefinition) -> None:
             gpus = pool.acquire(physical_ngpu(test_flavor))
             logger.info(
                 f"[parallel] {test_flavor.test_name}: acquired GPUs {gpus} "
@@ -438,13 +466,14 @@ def run_tests(
                     gpu_arch_type=getattr(args, "gpu_arch_type", "cuda"),
                     gpu_arch=getattr(args, "gpu_arch", "a10g"),
                     gpu_ids=gpus,
+                    hf_assets_path=hf_assets_path,
                 )
             finally:
                 pool.release(gpus)
                 logger.info(f"[parallel] {test_flavor.test_name}: released GPUs {gpus}")
 
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures: dict[Future, OverrideDefinitions] = {
+            futures: dict[Future, IntegrationTestDefinition] = {
                 ex.submit(_runner, t): t for t in scheduled
             }
             for fut in futures:
@@ -464,6 +493,7 @@ def run_tests(
                     export_numerics=export_numerics,
                     gpu_arch_type=getattr(args, "gpu_arch_type", "cuda"),
                     gpu_arch=getattr(args, "gpu_arch", "a10g"),
+                    hf_assets_path=hf_assets_path,
                 )
             except Exception as e:
                 logger.error(str(e))
@@ -519,7 +549,7 @@ def main():
     parser.add_argument(
         "--test_suite",
         default="features",
-        help="Comma-separated test suites to run: features, models, h100, b200.",
+        help=("Comma-separated test suites to run: " f"{', '.join(_TEST_SUITES)}."),
     )
     parser.add_argument(
         "--execution_mode",
@@ -555,6 +585,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--hf_assets_path",
+        default="",
+        help=(
+            "HF checkpoint (weights, tokenizer, config) exported to configs as "
+            "TORCHTITAN_TEST_HF_ASSETS_PATH; configs that read it use real weights."
+        ),
+    )
+    parser.add_argument(
         "--parallel",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -571,9 +609,9 @@ def main():
         test_suites = _parse_test_suites(args.test_suite)
     except ValueError as error:
         parser.error(str(error))
-    hardware_suites = {"h100", "b200"}.intersection(test_suites)
-    if args.execution_mode == "fake_pg" and hardware_suites:
-        suites = ", ".join(sorted(hardware_suites))
+    real_pg_only_suites = _REAL_PG_ONLY_SUITES.intersection(test_suites)
+    if args.execution_mode == "fake_pg" and real_pg_only_suites:
+        suites = ", ".join(sorted(real_pg_only_suites))
         parser.error(f"The {suites} suite(s) only support --execution_mode real_pg")
     if args.execution_mode == "fake_pg" and args.test_scope == "real_pg_required":
         parser.error("real_pg_required test scope requires --execution_mode real_pg")
@@ -589,7 +627,7 @@ def main():
             suite_args.output_dir = os.path.join(args.output_dir, test_suite)
             os.makedirs(suite_args.output_dir)
 
-        test_list = _TEST_SUITES_FUNCTION[test_suite]()
+        test_list = _build_test_list(test_suite)
         run_tests(suite_args, test_list, parallel=suite_args.parallel)
 
 

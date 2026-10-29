@@ -25,7 +25,8 @@ from torchtitan.components.checkpointer.legacy_native_dcp import (
     LogicalOptimizerState,
     OptimizerFusedLayout,
 )
-from torchtitan.models.llama3 import llama3_configs
+from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.models.llama3 import build_model_config as build_llama3_model_config
 from torchtitan.models.llama3.state_dict_adapter import Llama3StateDictAdapter
 
 
@@ -52,8 +53,10 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
     )
     try:
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=("tp",))
-        build_config, max_context_length = llama3_configs["debugmodel"]
-        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        config = build_llama3_model_config(
+            "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+        )
+        max_context_length = config.max_context_length
         adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
         qkv_key = "layers.0.attention.qkv_linear.wqkv.weight"
         ffn_key = "layers.0.feed_forward.w13.weight"
@@ -71,7 +74,7 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
 
         logical = adapter.native_fused_to_logical(native)
         with mock.patch(
-            "torchtitan.protocols.state_dict_adapter.torch.cat",
+            "torchtitan.models.base.state_dict_adapter.torch.cat",
             side_effect=AssertionError(
                 "DTensor QKV restore must not materialize torch.cat"
             ),
@@ -100,7 +103,7 @@ def _check_native_logical_dtensor_roundtrip(rank: int, rendezvous: str) -> None:
             heads_per_kv=2,
         )
         with mock.patch(
-            "torchtitan.protocols.state_dict_adapter.torch.cat",
+            "torchtitan.models.base.state_dict_adapter.torch.cat",
             side_effect=AssertionError(
                 "DTensor QKV restore must not materialize torch.cat"
             ),
@@ -226,8 +229,10 @@ def _check_logical_placeholder_replaces_fused_strided_shard(
     )
     try:
         mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
-        build_config, max_context_length = llama3_configs["debugmodel"]
-        config = build_config(attn_backend="flex", seq_len=max_context_length)
+        config = build_llama3_model_config(
+            "debugmodel", attn_backend="flex", parallelism=ParallelismConfig()
+        )
+        max_context_length = config.max_context_length
         adapter = Llama3StateDictAdapter(config, hf_assets_path=None)
         fused = distribute_tensor(
             torch.arange(40 * 16, dtype=torch.float32).reshape(40, 16),

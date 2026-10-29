@@ -31,6 +31,8 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torchtitan.experiments.ezpz.agpt.local_rmsnorm import LocalShardRMSNorm
 
 from torchtitan.experiments.ezpz.diagnostics import attention as _attn_diag
+
+from torchtitan.models.base.module import Module
 from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
@@ -41,10 +43,72 @@ from torchtitan.models.common import (
     RoPE,
     TransformerBlock,
 )
+from torchtitan.models.common.attention import InnerAttention
+from torchtitan.models.common.config_utils import (
+    fused_gate_up_param_init,
+    get_attention_config,
+)
 
-from torchtitan.models.common.attention import ScaledDotProductInnerAttention
-from torchtitan.models.common.config_utils import get_attention_config
-from torchtitan.protocols.module import Module
+
+class ScaledDotProductInnerAttention(InnerAttention):
+    """Inner attention using ``F.scaled_dot_product_attention``.
+
+    Upstream removed SDPA from the language-model attention path (#5296,
+    #5307: Varlen is the default; Flex is the other supported backend). XPU
+    has neither a working FlexAttention backend nor a Varlen kernel, so ezpz
+    owns the SDPA inner attention. This is the pre-removal upstream class
+    (``torchtitan/models/common/attention.py`` at ``5112abcb6f``) with the
+    ``attention_masks`` argument replaced by ``attention_metadata``, which
+    GQAttention now passes and which SDPA ignores (it is always ``None`` for
+    this backend: ``InnerAttention.Config.build_attention_metadata`` returns
+    ``None``).
+
+    The forward must keep ``q_THK, k_THK, v_THV`` as its first three
+    positional names: ``inner_attention_local_spmd_sharding_config`` matches
+    ``in_dst_shardings`` by name.
+    """
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(InnerAttention.Config):
+        @property
+        def is_full_attention(self) -> bool:
+            return True
+
+    sdpa_backends: list[SDPBackend] = []
+
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        if not self.sdpa_backends:
+            self.sdpa_backends = [
+                SDPBackend.CUDNN_ATTENTION,
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.MATH,
+            ]
+
+    def forward(  # pyrefly: ignore [bad-override]
+        self,
+        q_THK: torch.Tensor,
+        k_THK: torch.Tensor,
+        v_THV: torch.Tensor,
+        *,
+        attention_metadata: Any = None,
+        scale: float | None = None,
+        enable_gqa: bool = False,
+        is_causal: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        if attention_metadata is not None:
+            raise ValueError(
+                "ScaledDotProductInnerAttention does not support attention "
+                "metadata; it only supports causal/non-causal attention via "
+                "is_causal."
+            )
+        q, k, v = (t.transpose(1, 2) for t in (q_THK, k_THK, v_THV))
+        with sdpa_kernel(self.sdpa_backends, set_priority=True):
+            out = F.scaled_dot_product_attention(
+                q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
+            )
+        return out.transpose(1, 2)
 
 
 class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
@@ -197,7 +261,7 @@ from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_conf
 # ---------------------------------------------------------------------------
 
 
-class SoftcappedFlexAttention(Module):
+class SoftcappedFlexAttention(InnerAttention):
     """FlexAttention with logit softcapping (Gemma 2 style).
 
     Uses FlexAttention's score_mod to apply tanh softcapping inside the
@@ -210,8 +274,12 @@ class SoftcappedFlexAttention(Module):
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(Module.Config):
+    class Config(InnerAttention.Config):
         logit_cap: float = 30.0
+
+        @property
+        def is_full_attention(self) -> bool:
+            return True
 
     def __init__(self, config: Config):
         super().__init__()
@@ -299,11 +367,13 @@ class ReLUSquaredGLU(BinaryActivationFn):
 
 
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
+from torchtitan.experiments.ezpz.agpt.sharding import set_agpt_sharding_config
 
 from torchtitan.models.common.param_init import depth_scaled_std
 from torchtitan.models.llama3.model import Llama3TransformerBlock
 
 __all__ = [
+    "build_model_config",
     "EzpzScaledDotProductAttention",
     "XPUScaledDotProductAttention",
     "_default_inner_attention",
@@ -384,6 +454,7 @@ def _build_agpt_layers(
     qk_norm: bool = False,
     logit_softcap: float | None = None,
     relu_squared: bool = False,
+    enable_sp: bool = False,
 ) -> list[TransformerBlock.Config]:
     """Build a list of per-layer TransformerBlock configs with depth-scaled inits."""
     if logit_softcap is not None:
@@ -411,12 +482,19 @@ def _build_agpt_layers(
         # a single interleaved w13, so hand-building the Config would have to
         # duplicate fused_gate_up_param_init's interleaving. ReLU^2 differs from
         # the SwiGLU default only in the activation.
+        depth_init = _depth_init(dim, layer_id)
         ffn_config = make_ffn_config(
             dim=dim,
             hidden_dim=hidden_dim,
-            w1_param_init=linear_init,
-            w2w3_param_init=_depth_init(dim, layer_id),
+            w13_param_init=linear_init,
+            w2_param_init=depth_init,
+            enable_sp=enable_sp,
         )
+        # Upstream's make_ffn_config now initializes gate AND up with the same
+        # w13 init (#5026 era). ezpz production runs used gate=linear_init,
+        # up=depth_init (the pre-sync w1_param_init/w2w3_param_init split);
+        # keep that so fresh inits stay comparable with existing trajectories.
+        ffn_config.w13.param_init = fused_gate_up_param_init(linear_init, depth_init)
         if relu_squared:
             ffn_config = dataclass_replace(
                 ffn_config, activation_fn=ReLUSquaredGLU.Config()
@@ -436,6 +514,7 @@ def _build_agpt_layers(
                     inner_attention=inner_attention,
                     rope=rope,
                     qk_norm=qk_norm_config,
+                    enable_sp=enable_sp,
                 ),
                 feed_forward=ffn_config,
             )
@@ -475,7 +554,7 @@ def _build_agpt_config(
         theta=rope_theta,
         scaling=scaling,
     )
-    return AgptModel.Config(
+    model_config = AgptModel.Config(
         max_context_length=max_context_length,
         dim=dim,
         vocab_size=vocab_size,
@@ -501,6 +580,10 @@ def _build_agpt_config(
             relu_squared=relu_squared,
         ),
     )
+    # Templates are built before the CLI fixes parallelism; the sequence-
+    # parallel declarations are re-applied in AgptModel.Config.update_from_config.
+    set_agpt_sharding_config(model_config, enable_sp=False)
+    return model_config
 
 
 agpt_configs = {
@@ -1091,4 +1174,32 @@ def model_registry(
         return AGPTDense50KModel.Config(
             **{field.name: getattr(config, field.name) for field in fields(config)}
         )
+    return config
+
+
+def build_model_config(
+    flavor: str,
+    *,
+    parallelism,
+    seq_len: int | None = None,
+    attn_backend: str | None = None,
+    converters: list | None = None,
+) -> AgptModel.Config:
+    """Upstream-shaped entry point (``torchtitan.models.<name>.build_model_config``).
+
+    Core tooling (``scripts/checkpoint_conversion``) builds a model config as
+    ``build_model_config(flavor, parallelism=ParallelismConfig())``. ezpz flavors
+    are prebuilt templates (``agpt_configs``), so this copies one, optionally
+    pins the sequence length, and applies the sequence-parallel sharding that
+    ``parallelism`` selects. ``attn_backend`` is accepted for signature parity;
+    the backend is a property of the flavor, not of the call.
+    """
+    del attn_backend
+    config = model_registry(flavor, converters=converters)
+    if seq_len is not None:
+        config.max_context_length = seq_len
+        for layer in config.layers:
+            if layer.attention.rope is not None:
+                layer.attention.rope.max_context_length = seq_len
+    set_agpt_sharding_config(config, enable_sp=parallelism.enable_sequence_parallel)
     return config

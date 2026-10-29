@@ -95,28 +95,27 @@ def test_registry_shape_is_what_we_think():
 
 def test_sonic_flavors_select_the_sonic_backend():
     """The port's own flavors actually wire aurora_full_sonic through."""
-    from torchtitan.experiments.ezpz.moe.config_registry import (
-        moe_debugmodel_sonic,
-    )
-    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
     import torch
 
+    from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel_sonic
+    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+
     cfg = moe_debugmodel_sonic()
-    assert cfg.parallelism.expert_parallel_degree > 1, (
-        "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
-    )
+    assert (
+        cfg.parallelism.expert_parallel_degree > 1
+    ), "sonic owns its own expert-parallel all-to-all, so EP>1 is mandatory"
     with torch.device("meta"):
         model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model -- the subclass is not wired"
-    assert all(r._wants_routing() for r in routed), (
-        "sonic model routed experts did not select the routing-aware path"
-    )
+    assert all(
+        r._wants_routing() for r in routed
+    ), "sonic model routed experts did not select the routing-aware path"
 
 
 def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
     """Upstream RoutedExperts initializes every dispatcher unconditionally."""
-    from torchtitan.experiments.ezpz.moe.token_dispatcher import (
+    from torchtitan.models.common.moe.token_dispatcher import (
         AllToAllTokenDispatcher,
         LocalTokenDispatcher,
     )
@@ -127,31 +126,6 @@ def test_custom_token_dispatchers_implement_current_buffer_lifecycle():
     ):
         dispatcher = config.build()
         assert dispatcher.init_buffer() is None
-
-
-def test_routed_experts_wires_dispatcher_meshes(monkeypatch):
-    """The recursive Module lifecycle must retain the old dispatcher handoff."""
-    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
-    from torchtitan.models.common.moe import RoutedExperts
-
-    class ParallelDims:
-        def get_optional_mesh(self, name):
-            return f"{name}-mesh"
-
-    class Dispatcher:
-        def wire_meshes(self, **kwargs):
-            self.meshes = kwargs
-
-    routed = object.__new__(EzpzRoutedExperts)
-    routed.token_dispatcher = Dispatcher()
-    monkeypatch.setattr(RoutedExperts, "_parallelize", lambda self, dims: None)
-
-    routed._parallelize(cast(Any, ParallelDims()))
-
-    assert routed.token_dispatcher.meshes == {
-        "ep_mesh": "ep-mesh",
-        "tp_mesh": "tp-mesh",
-    }
 
 
 def test_routed_experts_prefers_live_sparse_ep_mesh(monkeypatch):
@@ -183,6 +157,6 @@ def test_default_backend_does_not_take_the_routing_path():
         model = cfg.model.build()
     routed = [m for m in model.modules() if isinstance(m, EzpzRoutedExperts)]
     assert routed, "no EzpzRoutedExperts in the model"
-    assert not any(r._wants_routing() for r in routed), (
-        "the default backend must take the plain super() path"
-    )
+    assert not any(
+        r._wants_routing() for r in routed
+    ), "the default backend must take the plain super() path"

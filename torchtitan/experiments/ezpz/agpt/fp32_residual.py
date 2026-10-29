@@ -51,7 +51,11 @@ import torch
 
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 
-from torchtitan.models.common.attention import AttentionMasksType
+from torchtitan.models.common.attention import (
+    AttentionMetadataMap,
+    FlexAttentionMetadata,
+    VarlenAttentionMetadata,
+)
 from torchtitan.models.llama3.model import Llama3TransformerBlock
 
 
@@ -82,9 +86,10 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
     def forward(
         self,
         x: torch.Tensor,
-        attention_masks: AttentionMasksType | None,
+        attention_metadata: FlexAttentionMetadata | VarlenAttentionMetadata | None,
         positions: torch.Tensor | None = None,
         padding_mask: torch.Tensor | None = None,
+        aux_loss_denominator: torch.Tensor | None = None,
     ):
         # #4594 put padding_mask in the block contract: Decoder.forward passes
         # it by keyword to EVERY layer (models/common/decoder.py:249). The base
@@ -92,7 +97,7 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
         # signature, so without it the first forward dies with
         #   TypeError: forward() got an unexpected keyword argument
         # Consume and discard, exactly as llama3 does (llama3/model.py:53).
-        del padding_mask
+        del padding_mask, aux_loss_denominator
         # Do the two residual ADDS in fp32, but take bf16 in and emit bf16 out.
         #
         # Why cast back to bf16 at the block boundary (rather than carry fp32
@@ -108,7 +113,7 @@ class AgptFp32ResidualBlock(Llama3TransformerBlock):
         # to the lm_head dtype before the head.
         dt = self._sublayer_dtype()
 
-        attn_out = self.attention(self.attention_norm(x), attention_masks, positions)
+        attn_out = self.attention(self.attention_norm(x), attention_metadata, positions)
         h = x.float() + attn_out.float()
 
         ffn_out = self.feed_forward(self.ffn_norm(h.to(dt)))
@@ -147,9 +152,10 @@ class AgptFp32ResidualDepthBlock(Llama3TransformerBlock):
     def forward(
         self,
         x: torch.Tensor,
-        attention_masks: AttentionMasksType | None,
+        attention_metadata: FlexAttentionMetadata | VarlenAttentionMetadata | None,
         positions: torch.Tensor | None = None,
         padding_mask: torch.Tensor | None = None,
+        aux_loss_denominator: torch.Tensor | None = None,
     ):
         # #4594 put padding_mask in the block contract: Decoder.forward passes
         # it by keyword to EVERY layer (models/common/decoder.py:249). The base
@@ -157,7 +163,7 @@ class AgptFp32ResidualDepthBlock(Llama3TransformerBlock):
         # signature, so without it the first forward dies with
         #   TypeError: forward() got an unexpected keyword argument
         # Consume and discard, exactly as llama3 does (llama3/model.py:53).
-        del padding_mask
+        del padding_mask, aux_loss_denominator
         dt = self._sublayer_dtype()
         # Residual accumulator is fp32 across the whole stack. Cast each
         # sublayer's input to the bf16 param dtype so the norm + attention/FFN
@@ -165,7 +171,7 @@ class AgptFp32ResidualDepthBlock(Llama3TransformerBlock):
         # between blocks) are fp32.
         x = x.float()
         attn_out = self.attention(
-            self.attention_norm(x.to(dt)), attention_masks, positions
+            self.attention_norm(x.to(dt)), attention_metadata, positions
         )
         h = x + attn_out.float()
         ffn_out = self.feed_forward(self.ffn_norm(h.to(dt)))
@@ -201,14 +207,29 @@ class AgptFp32ResidualModel(AgptModel):
         self,
         tokens: torch.Tensor,
         positions: torch.Tensor | None = None,
-        attention_masks: AttentionMasksType | None = None,
+        attention_metadata: AttentionMetadataMap | None = None,
+        *,
+        padding_mask: torch.Tensor | None = None,
+        aux_loss_denominators: torch.Tensor | None = None,
     ):
+        del aux_loss_denominators  # dense model: no routers with an aux loss
         h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
 
         # Layers keep the residual in fp32 (AgptFp32ResidualDepthBlock emits
-        # fp32); h stays fp32 across all layers here.
+        # fp32); h stays fp32 across all layers here. Metadata is keyed by the
+        # inner-attention class (Decoder.forward does the same lookup).
         for layer in self.layers.values():
-            h = layer(h, attention_masks, positions)
+            layer_attention_metadata = (
+                None
+                if attention_metadata is None
+                else attention_metadata.get(type(layer.attention.inner_attention))
+            )
+            h = layer(
+                h,
+                layer_attention_metadata,
+                positions,
+                padding_mask=padding_mask,
+            )
 
         # norm is RMSNorm (returns input dtype); run it in fp32 for accuracy,
         # then cast to the lm_head compute dtype (bf16) before the head so the

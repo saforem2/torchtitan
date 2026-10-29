@@ -63,7 +63,7 @@ model scale, once across an unfinished curve.
 
 ## Method
 
-    qsub 30b_mano_lrfind.pbs   # 8N, ~68 min
+    qsub torchtitan/experiments/ezpz/scripts/legacy/root-pbs/30b_mano_lrfind.pbs   # 8N, ~68 min
 
     --lr-finder.enable --lr-finder.init-lr=1e-6 --lr-finder.max-lr=1e-1
     --lr-finder.fraction=0.1 --lr-finder.warmup-fraction=0.1

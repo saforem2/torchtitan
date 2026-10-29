@@ -155,6 +155,7 @@ class TestCheckpointConsumption:
         loader._eod_token_id = None
         loader._consumed_samples = 0
         loader._bc_cfg = SimpleNamespace(global_batch_size=12)
+        loader._samples_per_yield = 12
         loader._loader = iter([{"text": torch.tensor([[10, 11, 12], [20, 21, 22]])}])
 
         batch = next(iter(loader))
@@ -170,6 +171,8 @@ class TestCheckpointConsumption:
         loader._consumed_samples = 0
         loader._served_ds = object()
         loader._bc_cfg = SimpleNamespace(global_batch_size=12)
+        loader._samples_per_yield = 12
+        loader._resume_consumed_samples = None
         calls = []
 
         def rebuild(dataset, consumed, config):

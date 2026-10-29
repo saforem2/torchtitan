@@ -18,7 +18,6 @@ torchtitan/datasets/**/*.model
 # hf assets
 assets/hf/*
 assets/tokenizer/*
-torchtitan/experiments/flux/assets/*
 
 # temp files
 *.log
@@ -51,6 +50,9 @@ CLAUDE.local.md
 /debug_*.py
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
+
+# Hermes campaign monitors (ephemeral PBS watchers)
+.hermes-*
 
 # Lychee (link checker) cache
 .lycheecache

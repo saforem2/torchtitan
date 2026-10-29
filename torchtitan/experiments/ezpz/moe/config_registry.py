@@ -16,20 +16,21 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.config import CommConfig, CompileConfig, TrainingConfig
-from torchtitan.config.transform.quantization import (
-    Float8GroupedLinearConverter,
-    Float8LinearConverter,
+from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.distributed.activation_remat import (
+    DefaultActivationRematConfig,
+    FullActivationRematConfig,
 )
-from torchtitan.distributed.activation_checkpoint import FullAC
 from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
     BlendCorpusDataLoader,
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
-from torchtitan.experiments.ezpz.moe.activation_checkpoint import MoeSelectiveAC
+from torchtitan.experiments.ezpz.compile import CompileConfig
+from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
+from torchtitan.models.common.moe import MoE
 from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
@@ -67,6 +68,29 @@ def _apply_config_overrides(
             target.checkpointer = CheckpointManager.Config() if enabled else None
             if enabled:
                 overrides["checkpointer"] = checkpoint
+
+        # ``training.gc_freq`` / ``training.gc_debug`` moved to the engine's
+        # ``garbage_collector`` config (``gc_freq`` / ``debug``).
+        training_overrides = overrides.get("training")
+        if isinstance(training_overrides, dict):
+            gc = overrides.setdefault("garbage_collector", {})
+            if "gc_freq" in training_overrides:
+                gc["gc_freq"] = training_overrides.pop("gc_freq")
+            if "gc_debug" in training_overrides:
+                gc["debug"] = training_overrides.pop("gc_debug")
+            if not gc:
+                overrides.pop("garbage_collector")
+
+        # Legacy JSON launch files carry {"activation_checkpoint": {"mode": ...}};
+        # the field is now ``activation_remat`` (torch_remat policies).
+        legacy_ac = overrides.pop("activation_checkpoint", None)
+        if legacy_ac is not None:
+            mode = legacy_ac.get("mode", "selective")
+            target.activation_remat = {
+                "none": None,
+                "full": FullActivationRematConfig(),
+                "selective": DefaultActivationRematConfig(),
+            }[mode]
 
         compile_config = overrides.get("compile")
         if isinstance(compile_config, dict) and "enable" in compile_config:
@@ -153,10 +177,12 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             interval=500,
             last_save_model_only=False,
         ),
-        # MoeSelectiveAC drops _c10d_functional.all_to_all_single from the
-        # save list -- needed for PR14's padded a2a fast-path. See
-        # ezpz/moe/activation_checkpoint.py for rationale.
-        activation_checkpoint=MoeSelectiveAC.Config(),
+        # Default torch_remat policy: saves every model-declared region except
+        # the routed-expert w13 projection, and always retains the router's
+        # routing decisions. It replaces MoeSelectiveAC (selective-op AC was
+        # deleted upstream, #4893), whose purpose was to keep the router's
+        # top-k stable across recompute.
+        activation_remat=DefaultActivationRematConfig(),
         comm=CommConfig(train_timeout_seconds=100),
         fault_tolerance=FaultTolerance(enable=False),
     )
@@ -228,16 +254,16 @@ def moe(
     # 80th sync (#4121): token units. Converted once here so the moe()
     # signature keeps sequence units, matching agpt() and every caller.
     cfg.training.num_tokens_per_microbatch_per_dp_rank = local_batch_size * seq_len
-    # 57th sync: PR #3674 replaced the `mode` string with a policy class
-    # hierarchy. Map the knob: none -> None (AC off); full -> FullAC;
-    # selective -> MoeSelectiveAC (SelectiveAC minus the all_to_all_single
-    # save, needed for PR14's padded a2a fast-path).
+    # torch_remat policies (see agpt/config_registry.py): none -> None (AC
+    # off); full -> FullActivationRematConfig; selective -> the default
+    # policy, which always retains the router's top-k decision (the property
+    # MoeSelectiveAC used to provide) and recomputes routed-expert w13.
     if activation_checkpoint_mode == "none":
-        cfg.activation_checkpoint = None
+        cfg.activation_remat = None
     elif activation_checkpoint_mode == "full":
-        cfg.activation_checkpoint = FullAC.Config()
+        cfg.activation_remat = FullActivationRematConfig()
     else:
-        cfg.activation_checkpoint = MoeSelectiveAC.Config()
+        cfg.activation_remat = DefaultActivationRematConfig()
     cfg.training.max_context_length = seq_len
     cfg.training.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
@@ -297,6 +323,10 @@ def moe_debugmodel_ep() -> FaultTolerantTrainer.Config:
 def moe_debugmodel_flex_attn() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel()
     cfg.model = model_registry("debugmodel_flex_attn")
+    # Flex builds its BlockMask only when the batch carries ``positions``;
+    # blendcorpus emits them only on opt-in. Without this the model gets
+    # attention_masks=None and asserts "must be instance of BlockMask".
+    cfg.dataloader.emit_positions = True
     return cfg
 
 
@@ -390,19 +420,17 @@ def moe_671b() -> FaultTolerantTrainer.Config:
     cfg.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
     cfg.checkpointer.interval = 500
     cfg.compile = CompileConfig(components=["loss"])
-    # Quantization is now applied to the config at model_registry time
-    # rather than to the runtime model (#3127). Re-register with Float8.
-    cfg.model = model_registry(
-        "671B",
-        quantization=[
-            # filter_fqns is an EXCLUDE-list: matched Linears stay bf16 (not fp8).
-            # The head module is named `lm_head`; the old `output` name matches
-            # nothing, so the precision-sensitive LM head was silently quantized
-            # to fp8. Replayed from upstream deepseek_v3 fix #4008 (2026-07-29).
-            Float8LinearConverter.Config(filter_fqns=["lm_head", "router.gate"]),
-            Float8GroupedLinearConverter.Config(),
-        ],
+    # This config used to quantize the model to Float8 (CUDA-only
+    # torchao Float8Linear/Float8GroupedLinear converters). Upstream deleted
+    # torchtitan/quantization/float8 and its converters, keeping only
+    # MXFP8/NVFP4 (Blackwell). There is no ezpz/XPU consumer for 671B fp8, so
+    # the model is built in the training dtype and the omission is logged
+    # rather than silently pretending to be fp8.
+    logger.warning(
+        "moe_671b: Float8 converters were removed upstream; building the 671B "
+        "model without quantization."
     )
+    cfg.model = model_registry("671B")
     return cfg
 
 
@@ -427,9 +455,8 @@ def _set_moe_compute_backend(model_config, backend: str) -> None:
     # here post-build. Setting an
     # explicit value also survives model.py's grouped_mm->for_loop rewrite,
     # which only fires when compute_backend == "grouped_mm".
-    for layer_cfg in model_config.layers:
-        if layer_cfg.moe is not None:
-            layer_cfg.moe.routed_experts.compute_backend = backend
+    for _, moe_cfg, _, _ in model_config.traverse(MoE.Config):
+        moe_cfg.routed_experts.compute_backend = backend
 
 
 def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer.Config:
@@ -503,11 +530,10 @@ def _bmm_ep_cf(cf: float) -> FaultTolerantTrainer.Config:
     # bmm EP=12 with an explicit capacity_factor, for the throughput sweep.
     cfg = moe_10b_2b_sdpa()
     cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
-    for layer_cfg in cfg.model.layers:
-        if layer_cfg.moe is not None:
-            ie = layer_cfg.moe.routed_experts
-            ie.compute_backend = "bmm"
-            ie.capacity_factor = cf
+    for _, moe_cfg, _, _ in cfg.model.traverse(MoE.Config):
+        ie = moe_cfg.routed_experts
+        ie.compute_backend = "bmm"
+        ie.capacity_factor = cf
     cfg.parallelism.expert_parallel_degree = 12
     return cfg
 

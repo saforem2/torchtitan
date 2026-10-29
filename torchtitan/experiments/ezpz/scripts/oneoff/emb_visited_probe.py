@@ -19,7 +19,7 @@ os.environ.setdefault("TORCH_DEVICE", "cpu")
 import sys
 
 sys.argv = ["x"]
-from torchtitan.config import ConfigManager
+from torchtitan.experiments.ezpz.config_manager import ConfigManager
 from torchtitan.experiments.ezpz.logging import init_logger
 
 init_logger()

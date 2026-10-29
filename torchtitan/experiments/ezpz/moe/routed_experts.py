@@ -12,6 +12,7 @@ local expert-compute portion when a non-default backend is selected.
 
 from dataclasses import dataclass
 
+import torch_remat as remat
 from torch.distributed.tensor import DTensor
 from torch.utils.checkpoint import checkpoint
 
@@ -55,21 +56,6 @@ class EzpzRoutedExperts(RoutedExperts):
     def _wants_routing(self) -> bool:
         return self.compute_backend == "aurora_full_sonic"
 
-    def _parallelize(self, parallel_dims) -> None:
-        """Parallelize children, then install dispatcher mesh ownership.
-
-        Before upstream moved to recursive ``Module._parallelize``,
-        ``RoutedExperts.parallelize`` performed this handoff explicitly. The
-        custom ezpz dispatcher is not itself a ``Module``, so recursion cannot
-        discover or wire it. Restore the lifecycle at the owning routed-experts
-        boundary and preserve TP coordinates for sequence-parallel dispatch.
-        """
-        super()._parallelize(parallel_dims)
-        self.token_dispatcher.wire_meshes(
-            ep_mesh=parallel_dims.get_optional_mesh("ep"),
-            tp_mesh=parallel_dims.get_optional_mesh("tp"),
-        )
-
     def _resolve_ep_mesh(self):
         """Return the live sparse EP mesh, falling back for older lifecycles."""
         sparse_mesh = spmd_sparse_mesh()
@@ -85,6 +71,8 @@ class EzpzRoutedExperts(RoutedExperts):
         topk_scores_TK,
         topk_expert_ids_TK,
         num_local_tokens_per_expert_E,
+        *,
+        padding_mask_T=None,
     ):
         if self.compute_backend == "grouped_mm":
             return super().forward(
@@ -92,7 +80,9 @@ class EzpzRoutedExperts(RoutedExperts):
                 topk_scores_TK,
                 topk_expert_ids_TK,
                 num_local_tokens_per_expert_E,
+                padding_mask_T=padding_mask_T,
             )
+        del padding_mask_T  # padding rows are routed like real tokens
 
         # sycl_sonic owns dispatch AND combine: it consumes unrouted tokens
         # plus the routing decision and returns combined output, so we must
@@ -117,9 +107,13 @@ class EzpzRoutedExperts(RoutedExperts):
             num_local_tokens_per_expert_E,
         )
         with maybe_set_sparse_mesh():
+            # The portable expert kernels below read the dispatched tokens and
+            # counts with bare ops (not torch_remat regions).
+            remat.recompute_needs_tensor(routed_input_RD, counts_e)
             routed_output_RD = self._run_backend(routed_input_RD, counts_e)
             if self.output_postprocess is not None:
                 routed_output_RD = self.output_postprocess(routed_output_RD)
+        remat.recompute_needs_tensor(routed_output_RD)
         return self.token_dispatcher.combine(routed_output_RD, metadata, x_TD)
 
     def _weights(self):

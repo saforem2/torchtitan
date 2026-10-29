@@ -5,11 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass, field, replace
-from typing import Annotated, Any
+from typing import Any
 
 import torch
 import torch.nn as nn
-import tyro
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
 
 from torchtitan.config import TORCH_DTYPE_MAP
@@ -20,12 +19,41 @@ from torchtitan.distributed.fsdp import (
     resolve_fsdp_mesh,
 )
 from torchtitan.distributed.spmd_types import annotate_replicated_parameters
-from torchtitan.models.flux.configs import FluxEncoderConfig, Inference
-from torchtitan.models.flux.model.autoencoder import load_ae
-from torchtitan.models.flux.model.model import FluxModel
+from torchtitan.models.flux.autoencoder import load_ae
+from torchtitan.models.flux.model import FluxModel
 from torchtitan.models.flux.tokenizer import FluxTokenizerContainer
-from torchtitan.models.flux.validate import FluxValidator
+from torchtitan.models.flux.validator import FluxValidator, SamplingConfig
 from torchtitan.trainer import Trainer
+
+
+@dataclass(kw_only=True, slots=True)
+class FluxEncoderConfig:
+    """Configuration for Flux encoders (T5 text encoder, CLIP text encoder, and autoencoder)."""
+
+    t5_encoder: str = ""
+    """Override for the T5 text encoder version/path. Empty uses the flavor default."""
+    clip_encoder: str = ""
+    """Override for the CLIP encoder version/path. Empty uses the flavor default."""
+    autoencoder_path: str = "assets/hf/FLUX.1-dev/ae.safetensors"
+    """Autoencoder checkpoint path to load. This should be a local path referring to a safetensors file."""
+    random_init: bool = False
+    """If True, initialize encoders with random weights instead of loading pretrained weights (for testing only)."""
+
+
+@dataclass(kw_only=True, slots=True)
+class Inference:
+    """Inference configuration"""
+
+    save_img_folder: str = "inference_results"
+    """Path to save the inference results"""
+    prompts_path: str = "./torchtitan/models/flux/inference/prompts.txt"
+    """Path to file with newline separated prompts to generate images for"""
+    local_batch_size: int = 2
+    """Batch size for inference"""
+    img_size: int = 256
+    """Image size for inference"""
+    sampling: SamplingConfig = field(default_factory=SamplingConfig)
+    """Sampling configuration for image generation"""
 
 
 class FluxTrainer(Trainer):
@@ -35,9 +63,7 @@ class FluxTrainer(Trainer):
         tokenizer: FluxTokenizerContainer.Config = (  # pyrefly: ignore [bad-override]
             field(default_factory=FluxTokenizerContainer.Config)
         )
-        validator: Annotated[  # pyrefly: ignore [bad-override]
-            FluxValidator.Config | None, tyro.conf.AvoidSubcommands
-        ] = None
+        validator: FluxValidator.Config | None = None  # pyrefly: ignore [bad-override]
         encoder: FluxEncoderConfig = field(default_factory=FluxEncoderConfig)
         """Configuration for Flux encoders (T5 text encoder, CLIP text encoder, and autoencoder)."""
         inference: Inference = field(default_factory=Inference)
@@ -90,7 +116,7 @@ class FluxTrainer(Trainer):
             random_init=config.encoder.random_init,
         )
 
-        # Use the encoder configs from the model registry, overriding version
+        # Use the encoder configs from the model flavor, overriding version
         # and random_init from the trainer encoder config if set.
         clip_encoder_config = model_args.clip_encoder
         t5_encoder_config = model_args.t5_encoder
