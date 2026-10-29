@@ -2,6 +2,17 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-29 (Aurora) -- native-init failure isolated before another model retry
+
+Retry `8984481` finished exit143 after 00:07:29; first XPU broadcast in
+`set_determinism` segfaulted inside XCCL/oneCCL/SYCL, before dataset/model/DCP.
+Rank16 signal11 preceded survivor cleanup; “walltime” from the retry launcher
+is a classification of rc143, not actual walltime exhaustion. Runtime/source
+unchanged. The corrected dataset horizon was not exercised. Preserve both
+attempts and isolate communication first. Added a fail-closed all-allocated-host
+source/runtime/mount probe to the future production umbrella, plus tracked-edit
+guards; sixteen executable umbrella tests pass. Production remains gated.
+
 ## 2026-10-29 (Aurora) -- first canary classified; corrected retry admitted
 
 Canary `8984401` finished exit 143 after 00:12:55, with no optimizer step or

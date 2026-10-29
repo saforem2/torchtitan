@@ -58,8 +58,9 @@
 ## Current restart gate — 2026-10-29
 
 Monday umbrella `8951415` failed before training. The corrected two-seat 20B
-restart is gated by four-node retry **8984481**, initially queued/unheld in
-`debug-scaling`. Canonical checkpoint heads remain 11100 (larger-batch lineage)
+restart is blocked by terminal canary failures: **8984401** exposed the reduced
+smoke horizon; **8984481** segfaulted at native XPU communicator initialization
+before testing the corrected horizon. A narrow communication control is next. Canonical checkpoint heads remain 11100 (larger-batch lineage)
 and 20900 (smaller batch); the planned larger-batch seed is the previously
 selected rollback 10800. No replacement production allocation has been
 submitted yet. See the [verified incident, frozen inputs and acceptance gates](2026-10-29-20b-restart.md).
