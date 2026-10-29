@@ -2,6 +2,72 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-20 (Aurora) -- umbrella NaN, fixedpos fork, boost queued
+
+Umbrella `8938159` (`large`, `24:00:36`, `Exit -29` walltime) `F` at `2026-10-19 04:49 UTC` on `5be47f7c`. `20B-512` constlr NaN from `11101` every step (`loss=nan grad_norm=nan` through `11148` at 20% MFU, no learning; optimizer corrupted, not infra) while `20B-256` healthy at `20987` (`2.447/0.19`, 19.9% MFU) and `2B` done. Root cause is the data-position replay: every `20B` ckpt stores `consumed_samples=0` (pinned clones `f1c20ee7`/`086ff996` never increment), so restarts re-read from sample 0 (89.2% replay for 512N, 92.0% for 256N per `blendcorpus-resume-position.md`). Fix is the `fixedpos` fork at `a0a4ed9b3c` (PR #66) with `RESUME_SAMPLES` `15482880`/`10002432` GBS-aligned (`15482880%12288==0`, `10002432%6144==0`) into `outputs/checkpoints/*-constlr-from9000-fixedpos` via `BLENDCORPUS_RESUME_CONSUMED_SAMPLES` env + `--dataloader.resume-consumed-samples` per seat (`TRAINERS` 13th field). Boost scaffold `followup-umbrella-boost-20261020.pbs` (`prod` `select=2058` → `large`, `>2048N` eligible) wired from no-op to `exec` delegation, SHA frozen `a426ea...`, ckpt paths corrected to `outputs/checkpoints/`. Hard gate is `debug` `1N` smoke `8957951` (`Q`) proving `resuming at N` + finite loss before boost is trusted, then `prod` capacity `274N`/`512N` + boost `8951415` (`large:2058`, `Q`, `27:37` eligible, `454 free`). Stray `docs/production/followup-umbrella-boost-20261020.md` at repo root duplicates the canonical `torchtitan/experiments/ezpz/docs/production/` path — drop once boost `R` is confirmed. `docs/production/agpt/20b/README.md` still `2026-09-21` (last good heads `11,100`/`17,500` via `8880564`/`8880658`); `evals/agpt/20b/` current for those heads, `refresh_all.sh` will regenerate charts once `8951415` produces `11101+`.
+
+---
+
+## 2026-10-18 (Sunspot/Aurora/Polaris) -- MoE 4-machine verification closeout
+
+Hermes session `sunspot-tt-ezpz` (exported as `sunspot-tt-ezpz.md`, 17,534 lines) closed the sync-84 MoE/sync merge verification across three XPU/CUDA clusters: `agpt_debugmodel` and `moe_debugmodel` each ran `rc=0` on Sunspot `workq` (`xpu-torch214`/`2.14.0+xpu`, jobs `12478170`/`12478171`), Aurora production PBS `prod` (route queue into `small`/`medium`/`large`; at the time `next-eval` execution on `xpu-torch215`/`2.15.0.dev20260915+xpu`, e.g. `8837281`, `test_20260924` BKC) and Polaris `debug` (`sync84-torch214-cu`/`2.14.0+cu130`). As of 2026-10-19 `next-eval` still exists as an execution queue but `prod` is the canonical route for production. Perlmutter blocked on `no corpus`. This was **not** a Monarch/RL multi-node gate — RL docs remain on the `2026-09-25` Sunspot two-host `12478711` contract; see `production/rl/monarch.md`. For the Sonic MoE trial provenance, see `experiments/moe-expert-backends-4machine.md` and `Sync 84` in `upstream-sync.md:320`.
+
+---
+
+## 2026-10-15 (Aurora) -- BlendCorpus restarts replay the data stream
+
+Every checkpoint of the 20B 256N and 512N chains stores
+`dataloader.consumed_samples = 0`, and both pinned clones (`086ff996`,
+`f1c20ee7`) never increment it. Each restart re-reads the stream from sample 0.
+256N has 36 resumes (head `step-19400`, longest segment 1,550 steps), 512N has
+73 (head `step-11100`, longest 1,200). At least 92.0% and 89.2% of the steps
+trained were replays of positions already seen. The replay is inferred from the
+sampler code, the counters and the restart steps. Positions were not decoded on
+the cluster.
+
+The `origin/ezpz` increment (`0f7f0c7f53`) overshoots by GAS when GAS > 1. It
+now adds `micro_batch_size * dp`. New `--dataloader.resume-consumed-samples`
+applies only to checkpoints storing 0. The position for the existing chains is
+open: [`guides/blendcorpus-resume-position.md`](guides/blendcorpus-resume-position.md).
+
+---
+
+## 2026-10-01 (Sunspot) -- automatic TorchStore locality resolution
+
+Resolved the forced-Gloo caveat in the production Monarch/TorchStore runbook.
+TorchStore compared `os.environ.get("HOSTNAME", socket.gethostname())` between
+clients and storage volumes, but scheduler/MPI launchers propagated the head
+process's exported `HOSTNAME` to remote actors. Two-host stdlib probe `12479166`
+measured a process on `x1922c6s5b0n0` resolving as `x1922c6s3b0n0`, which made
+a remote volume appear local and selected inaccessible SharedMemory.
+
+`repair_hostname_env()` now runs in the controller, the core trainer/generator
+actor bootstraps, and the ezpz XPU bootstrap before TorchStore resolves
+locality. Actor probe `12479169` corrected each inherited FQDN to its own
+physical hostname and passed with `TORCHSTORE_LOCALITY_OK`, PBS exit 0.
+
+Correct locality exposed a second policy defect: capability probes selected
+MonarchRDMA and then XCCL ahead of Gloo even though neither TorchStore backend
+is qualified on this XPU stack. Controls `12479170`, `12479171`, and `12479174`
+failed at the initial generator pull, matching historical explicit controls.
+The final automatic policy preserves SharedMemory for genuine same-host
+transfers and selects Gloo cross-host; explicit Gloo/XCCL/MonarchRDMA selectors
+remain available for controlled qualification.
+
+The protected `rl-monarch-torch214` venv was not modified. A separate clone
+was repaired from exact RECORD-hash-matching uv-cache files after a complete
+audit found 41 missing files across 30 packages; its final audit found zero
+missing files and its Torch/ezpz/Monarch/TorchStore import closure passed.
+
+Matched explicit-Gloo job `12479172` and exact-head automatic job `12479179`
+both passed the complete two-host gate. Job `12479179`, source
+`e02b5266efa5fa0f1e7a6704e166265c21ed725d`, produced 40/40 rollouts across
+policy versions 0–3, four pushes/pulls, three finite updates (losses
+`-0.0021/-0.030/-0.100`, gradient norms `0.36/0.31/0.32`), full checkpoints at
+steps 1–3, clean shutdown, and PBS exit 0. [PR #61](https://github.com/saforem2/torchtitan/pull/61)
+contains the fix, tests, reusable probe, and updated runbook; 19 focused tests,
+launcher contracts, GitHub lint, and independent review pass.
+
 ## 2026-09-30 (reporting) -- INCITE Q3 report
 
 Created [`summaries/2026-Q3-incite.md`](summaries/2026-Q3-incite.md) from the
@@ -141,6 +207,213 @@ degree and the stacked-linear placement override.
 - Production umbrella `8879474` remains queued in `medium`; follower `8879475`
   remains dependency-held. Neither has launched and no production checkpoint
   head has changed.
+
+## 2026-09-30 (Aurora) -- tail-eval schema failure and corrected fork control
+
+- Chain-3 sync0 debug replacement `8881300` restored the read-only step-39,900
+  seed in 33.13 seconds and entered training, then completed no finite optimizer
+  update before `MPIR_CVAR_PROGRESS_TIMEOUT=600`; PBS ended the one-hour
+  allocation with `Exit_status=-29`. Explicit `CCL_OP_SYNC=0` therefore does
+  not resolve the post-restore first-update collective blocker. The sync1
+  comparator `8881044` remains queued as the sole remaining transport
+  discriminator. Production umbrella `8879474` remains queued and follower
+  `8879475` remains dependency-held.
+- Full-state acceptance `8881028` finished after 00:09:19 with PBS
+  `Exit_status=143` and a fail-closed `20B_S3000_UPDATE_FAILED rc=143` artifact.
+  The local-shard QKV migration removed the prior global `torch.cat` OOM, but
+  all 48 ranks failed during DCP restore in DTensor
+  `Shard._maybe_unpad_tensor` at `torch._check(orig_size >= logical_dim_size)`.
+  No finite step 3,001, `VALIDATED` marker, or step-3,003 checkpoint metadata
+  exists. Paired chain-3 controls `8881043` (`CCL_OP_SYNC=0`) and `8881044`
+  (`CCL_OP_SYNC=1`) remain independently queued in `next-eval`; neither has
+  produced an artifact. Production umbrella `8879474` remains queued and
+  follower `8879475` remains dependency-held.
+- Production umbrella head `8879474` remains queued in `medium` for 1,054
+  nodes, and its PBS `comment`/`estimated.start_time` pair **oscillates between
+  scheduling cycles** rather than progressing. Observed within eleven minutes
+  on 2026-09-30: at 07:15 CDT `Not Running: Job would conflict with reservation
+  or top job` / `Thu Oct  1 04:49:20 2026`; at 07:23, 07:25, and 07:26 CDT
+  `Not Running: Node is in an ineligible state: offline` /
+  `Thu Oct  1 16:49:20 2026`. The earlier `Not enough free nodes available`
+  reading belongs to the same rotation. Treat the comment as a per-cycle
+  snapshot, not a monotone blocker sequence, and do not derive a trend from a
+  single poll. `eligible_time` does advance monotonically (15:10:47 -> 15:19:20).
+  The cron monitor `~/.hermes/scripts/monitor_aurora_lr_recovery.py` had the raw
+  `comment` in its dedup key, so each rotation fired a spurious transition; it
+  now collapses every `Not Running:*` comment to `queued: not started`.
+  Follower `8879475` remains dependency-held via `afterany:8879474` with
+  `Hold_Types = d`. No seat has launched, no `.o8879474` output exists, and no
+  checkpoint head changed. `qselect -u foremans` on Aurora returns only these
+  two jobs, so the tail-eval campaign is fully terminal and nothing else is live.
+- Production umbrella head `8879474` remains queued in `medium` for 1,054
+  nodes, but PBS changed its blocker from an ineligible offline node to `Not
+  enough free nodes available` and now reports an estimated start of
+  `2026-10-01 16:49:20`. Follower `8879475` remains dependency-held via
+  `afterany:8879474`. No seat has launched and no checkpoint head changed.
+- Step-17,500 sibling eval `8880658` finished after 01:41:37 with PBS
+  `Exit_status=0` and a non-semantic `Stageout_status=1`. It produced a fresh
+  3,012-byte `results.json` (SHA-256
+  `9d326a9c37d2c1df75855e3891e61ad1bbbcbd6518203b0bc0905fea1f4ba06f`)
+  with all seven requested measurements finite: HellaSwag
+  `acc_norm=0.6786`, ARC-Easy `acc_norm=0.6646`, Winogrande `acc=0.5699`, PIQA
+  `acc_norm=0.7671`, OpenBookQA `acc_norm=0.3780`, BoolQ `acc=0.6199`, and
+  ARC-Challenge 25-shot `acc_norm=0.4505`. The tail-eval backfill is complete.
+- Asset-repair eval-only retry `8880564` finished after 01:20:11 with PBS
+  `Exit_status=0` and a non-semantic `Stageout_status=1`. It produced a fresh
+  3,010-byte `results.json` with seven finite measurements: HellaSwag
+  `acc_norm=0.6875`, ARC-Easy `acc_norm=0.6814`, Winogrande `acc=0.5983`, PIQA
+  `acc_norm=0.7682`, OpenBookQA `acc_norm=0.3740`, BoolQ `acc=0.6303`, and
+  ARC-Challenge 25-shot `acc_norm=0.4437`. This cleared the semantic gate, and
+  step-17,500 sibling `8880658` was submitted from immutable source
+  `975e43931a`; it started in `capacity` at 09:14 CDT and has not produced a
+  result artifact yet.
+- Asset-repair eval-only retry `8880564` started in `capacity` at 02:41 CDT
+  from immutable source `975e43931a`. It reused the verified 38.6-GiB
+  step-11,100 HF shard, repaired the missing HF assets, loaded the model on
+  `xpu:0`, and entered the six-task 0-shot lm-eval. At 02:50 CDT the job was
+  still running and no `results.json` existed; the 20B-256 step-17,500 sibling
+  remains gated on a fresh accepted semantic result.
+- Eval-only control `8880551` reused the verified 38.6-GiB step-11,100 HF
+  shard and reached lm-eval, but finished after 44 seconds with PBS
+  `Exit_status=1` and `Stageout_status=1`. The export directory still lacked
+  `config.json`, so Transformers rejected it before model loading and no
+  `results.json` was produced. Asset-repair retry `8880564`, pinned to
+  immutable source `975e43931a`, is queued in `capacity`. The 20B-256
+  step-17,500 sibling remains gated on a fresh accepted semantic result.
+- Corrected Flare-output tail-eval canary `8880485` finished after 00:28:47
+  with PBS `Exit_status=1`. Historical-schema conversion from immutable source
+  `2f2787faf7` succeeded and produced a 38.6-GiB HF shard plus index on Flare.
+  The eval wrapper then resolved both `config.json` and the `tt-lm-eval`
+  overlay relative to the output root instead of a checkout; both setup steps
+  failed, Transformers rejected the export for missing `model_type`, and no
+  `results.json` was written. The HF export is reusable after asset repair.
+  The 20B-256 step-17,500 sibling remains gated on a successful semantic eval.
+- Corrected Flare-output tail-eval canary `8880485` started in `capacity` at
+  06:43 CDT from immutable source `2f2787faf7` for the 20B-512 step-11,100
+  checkpoint. It passed the pinned-source/import gate and entered
+  single-process DCP conversion; after eight minutes it had produced neither a
+  fresh HF export nor `results.json`. The 20B-256 step-17,500 sibling remains
+  gated on both artifacts from this canary.
+- Historical-schema tail-eval canary `8880334` finished after 00:20:55 with
+  PBS `Exit_status=143` and `Stageout_status=1`. It entered single-process DCP
+  conversion from source `25ab092c6c`, but the log stopped inside checkpoint
+  loading and no HF safetensors or `results.json` was produced. The canary is a
+  controlled failure, so the 20B-256 step-17,500 sibling remains gated. A
+  follow-up source revision `2f2787faf7` pins the large conversion/eval outputs
+  to Flare; its exact-runtime preflight was still active at this observation
+  and had not submitted a replacement PBS job.
+- Four-node restore/update replacement `8880383` finished after 00:09:20 with
+  PBS `Exit_status=143` and `Stageout_status=1`. All 48 ranks reached DCP load,
+  then failed on the same historical/current schema mismatch:
+  `Missing key in checkpoint state_dict:
+  layers.0.attention.qkv_linear.wqkv.weight`. The artifact recorded
+  `20B_S3000_UPDATE_FAILED rc=143`; no step 3,001 and no fresh checkpoint were
+  produced. Increasing from two to four nodes removed the earlier lazy-state
+  memory limit but does not solve checkpoint-schema compatibility, which is
+  now the remaining restore gate.
+- Four-node TP=2 / DP-shard=24 restore/update replacement `8880383` was
+  submitted to `debug-scaling` from the immutable `f4e678c023` checkout after
+  two-node control `8880302` OOMed during SophiaG state loading. PBS accepted
+  the exact 48-rank topology; the job entered running state on four nodes and
+  resolved all 48 ranks during bootstrap. This changes only the
+  storage-shard geometry; acceptance still requires restoring step 3,000,
+  completing steps 3,001--3,003, and writing a fresh nonempty DCP checkpoint.
+- Corrected full-state restore/update control `8880302` finished after 00:11:00
+  with PBS `Exit_status=143` and `Stageout_status=1`. It cleared the earlier
+  plain-tensor parallelization defect, built the 24-rank pure-FSDP model, and
+  reached the step-3,000 DCP load, but SophiaG lazy-state initialization during
+  `dcp.load()` exhausted each 63.98-GiB tile: 62.70 GiB allocated, 698.38 MiB
+  reserved, 97.73 MiB free, then a 280-MiB allocation failed. No training step
+  or fresh checkpoint was produced; the artifact recorded
+  `20B_S3000_UPDATE_FAILED rc=143`. The two-node topology is therefore below
+  the full-state memory floor, and the fork remains blocked on a larger-shard
+  restore/update control.
+- Historical-schema tail-eval canary `8880334` entered running state in the
+  `capacity` queue on one node from immutable source `25ab092c6c`; conversion
+  began for the 20B-512 step-11,100 checkpoint. It has not yet produced a fresh
+  HF export or `results.json`, so the 20B-256 step-17,500 sibling remains gated.
+- Corrected tail-eval retries `8880289` (20B-512 step 11,100) and `8880292`
+  (20B-256 step 17,500) both finished with PBS `Exit_status=1` and produced no
+  `results.json`. The pinned Torch 2.15 conversion runtime successfully imported
+  the current checkout and opened each DCP checkpoint, clearing the earlier
+  missing-`spmd_types` failure, but the current fused-QKV model requested
+  `layers.0.attention.qkv_linear.wqkv.weight`, which is absent from these
+  historical checkpoints. Both wrappers propagated conversion failure
+  correctly. The remaining gate is a converter/model definition matching the
+  checkpoints' historical state schema; neither failed export is accepted.
+- Production umbrella `8879474` remains queued and follower `8879475` remains
+  dependency-held.
+
+- Exact-head Aurora sync gate `8879698` finished in 00:07:44 with PBS
+  `Exit_status=0`, `Stageout_status=1`, and `VERDICT: ok` on source
+  `f4e678c023`. Dense TP=1, dense TP=2, and repaired MoE each completed three
+  finite optimizer updates; their step-3 losses were 10.66281, 10.71614, and
+  11.47138 respectively. This closes the remaining current-stack Aurora
+  dense/MoE execution gate. Production umbrella `8879474` remains queued for
+  1,054 nodes, with `8879475` dependency-held behind it.
+- Tail eval `8878144` finished with PBS `Exit_status=0` after eight seconds but
+  produced no step-11,100 result. DCP conversion imported the current checkout
+  through the bare `frameworks/2025.3.1` Python and failed on
+  `ModuleNotFoundError: spmd_types`; the loop then printed its completion banner
+  and returned zero. The sibling step-17,000 eval `8878145` used the same broken
+  wrapper and was cancelled while queued; PBS reached terminal state before it
+  consumed a node. Both eval tails remain unmeasured. A corrected retry must use
+  a conversion interpreter with pinned `spmd-types==0.2.5` and make conversion
+  failure propagate nonzero before submission.
+- Production umbrella `8870515` finished after 12:18:20 with PBS
+  `Exit_status=143` and `Stageout_status=1` when node
+  `x4418c3s1b0n0` requested job termination (`code 15009`). The seats retained
+  substantial durable progress despite the parent failure: 20B-512 logged
+  through step 11,190 but its step-11,200 directory is empty (4 KiB, no
+  shards), so its resumable head remains step 11,100; 20B-256 logged through
+  step 17,600, completed step-17,500 (239 GiB, 3,073 files including nonempty
+  metadata), and left step-17,600 empty; 2B-256 stage 2 logged through step
+  41,385 and completed step-41,300 (24 GiB, 3,073 files including nonempty
+  metadata). The 20B-512 seat exhausted seven supervised launches: five
+  longer attempts ended 143, then two 27--28 second PALS RPC launch failures
+  against `x4418c3s1b0n0` ended `stuck_pre_training`/127. No replacement was
+  submitted here because the active chat agent owns production continuation
+  wrappers and submissions.
+- One-node production-runtime staging smoke `8879160` reached the explicit
+  `20B_PRODUCTION_STAGING_VALIDATED` marker after staging immutable archive
+  SHA-256 `3ccf3faaf8f33d9fe6dc19257a49aeb54f03d93918cf6478e35ede2e7902142e`
+  to `/tmp/.venv-20b-s3000-spmd025-py3126-20260929` in 48.2 seconds. PBS
+  finished with `Exit_status=0` and `Stageout_status=1`; this clears the
+  compute-portable archive/staging gate only, not restore or optimizer-update
+  correctness. Active-chat-owned two-node restore/update control `8879231`
+  then staged the same archive successfully but failed during model
+  parallelization, before restore or training. All 24 ranks raised `ValueError:
+  When dp_mesh_dims is provided, all parameters must be DTensors on the full
+  SPMD mesh ... Got plain tensor for parameter 'weight'`. PBS finished after
+  00:08:27 with `Exit_status=143`; the job artifact recorded
+  `20B_S3000_UPDATE_FAILED rc=143`. It emitted no restore marker or training
+  step and wrote zero checkpoint files. The next gate is a corrected SPMD/FSDP
+  topology control owned by the active chat agent; no production fork is safe
+  to submit yet.
+- Chain-3 restore control `8878906` reached the real application on the isolated
+  oneAPI 2026.1.0 + Torch 2.15 runtime, restored the read-only step-39,900 seed
+  in 292.62 seconds, and entered `Training starts at step 1`. It never completed
+  an optimizer update: ranks timed out in `MPI_Allreduce_c` after the configured
+  600-second MPI progress timeout, and PBS ended the 1-hour allocation with
+  `Exit_status=-29` at 01:00:18. The job-unique checkpoint sink is empty. This
+  validates runtime staging, imports, model construction, and DCP restore, but
+  leaves the first-update/reproduction gate blocked on the collective stall.
+- Target-node import control `8878862` finished with PBS `Exit_status=25`
+  (`Stageout_status=1`, walltime 00:02:15). The immutable 2.7-GiB runtime
+  archive staged successfully in 48.2 seconds to
+  `/tmp/.venv-20b-s3000-spmd025-20260927`, and the probe ran on allocated host
+  `x4415c7s7b0n0`. The staged environment is not compute-portable: `bin/python`
+  is an absolute symlink to the login/runtime-specific
+  `/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/python-3.12.12-nvje3vk/bin/python3`,
+  which does not resolve on that compute node; `bin/python3 -> python` is
+  consequently non-executable. The job correctly wrote
+  `TARGET_NODE_IMPORT_FAILED rc=25`; no Python import, restore, optimizer step,
+  or checkpoint occurred. This resolves the prior execution-context question:
+  archive placement is correct, but the archive itself cannot be used for the
+  fork. The next gate belongs to the active chat agent: build a separately
+  named compute-portable runtime/archive, verify its interpreter and exact
+  import closure on an allocated node, then run restore plus multiple finite
+  optimizer updates before any production fork submission.
 
 ## 2026-09-29 (mbph + Sunspot) -- upstream `f359667` parity and LR recovery
 

@@ -8,22 +8,34 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import fields
-from typing import ClassVar
+from typing import TYPE_CHECKING
 
-from torchtitan.protocols.module import Module
+from torchtitan.models.base.module import Module
 
-__all__ = ["ModelConfigTransform", "convert_config_type"]
+if TYPE_CHECKING:
+    from .relations import TransformRelations
+
+__all__ = [
+    "ModelConfigTransform",
+    "convert_config_type",
+]
 
 
 class ModelConfigTransform(ABC):
     """A feature that rewrites a completed model config tree.
 
-    ``run_after`` declares ordering. ``conflicts_with`` declares incompatible
-    transforms. Validation belongs in ``Trainer.Config.__post_init__``.
+    Transform composition policy is supplied through ``TransformRelations``.
+    Validation belongs in ``Trainer.Config.__post_init__``.
     """
 
-    run_after: ClassVar[tuple[type["ModelConfigTransform"], ...]] = ()
-    conflicts_with: ClassVar[tuple[type["ModelConfigTransform"], ...]] = ()
+    @classmethod
+    def contribute_relations(cls, relations: "TransformRelations") -> None:
+        """Add composition policy that cannot live in the central graph.
+
+        Override this for an external transform whose class cannot be imported
+        by ``relations.py``. TorchTitan transform relations belong in that
+        central module instead.
+        """
 
     @abstractmethod
     def transform(self, model: Module.Config) -> Module.Config:

@@ -607,6 +607,7 @@ def build_mup_agpt_config(
         **kwargs: forwarded to ``_build_agpt_config``.
     """
     from torchtitan.experiments.ezpz.agpt import _build_agpt_config
+    from torchtitan.experiments.ezpz.agpt.sharding import set_agpt_sharding_config
 
     if kwargs.get("logit_softcap") is not None:
         raise ValueError(
@@ -670,6 +671,9 @@ def build_mup_agpt_config(
             attention_scale=scale,
             expected_head_dim=head_dim,
         )
+    # The replacement configs above carry no sharding declarations; restore them
+    # (sequence parallelism is re-applied by AgptModel.Config.update_from_config).
+    set_agpt_sharding_config(config, enable_sp=False)
 
     # muP change 4 (audit): NOTHING ELSE NEEDS AN INIT CHANGE, and it is worth
     # being explicit about why, because "we changed nothing" and "we forgot" look

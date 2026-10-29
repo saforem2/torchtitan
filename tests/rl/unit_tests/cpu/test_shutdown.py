@@ -9,11 +9,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from torchtitan.config import OverrideConfig
 from torchtitan.rl import train
-from torchtitan.rl.controller import AsyncLoopConfig
-from torchtitan.rl.distributed.routing.inter_generator import InterGeneratorRouter
-from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
-from torchtitan.rl.observability.rollout_recorder import RolloutSampleRecorder
+from torchtitan.rl.controller.controller import AsyncLoopConfig
+from torchtitan.rl.generator.generator import (
+    SamplingConfig,
+    VLLMCudaGraphConfig,
+    VLLMGenerator,
+)
+from torchtitan.rl.rollout.recorder import RolloutSampleRecorder
+from torchtitan.rl.routing.inter_generator import InterGeneratorRouter
 
 
 class _FakeController:
@@ -87,10 +92,10 @@ class _FakeConfig:
         return _FakeController(config=self)
 
 
-class _FakeConfigManager:
+class _FakeConfigLoader:
     config = _FakeConfig()
 
-    def parse_args(self):
+    def load(self):
         return self.config
 
 
@@ -144,14 +149,20 @@ def _make_stub_rl_trainer():
         renderer = SimpleNamespace(
             build=lambda *, tokenizer: SimpleNamespace(get_stop_token_ids=lambda: [])
         )
-        # __init__ reads generator.sampling (a dataclass, for replace) + generator.debug.seed.
+        # __init__ copies each role's model, reads generator.sampling (a dataclass,
+        # for replace) + generator.debug.seed, and applies the (empty) override.
+        trainer = SimpleNamespace(model=None)
         generator = SimpleNamespace(
-            sampling=SamplingConfig(), debug=SimpleNamespace(seed=None)
+            model=None, sampling=SamplingConfig(), debug=SimpleNamespace(seed=None)
         )
+        override = OverrideConfig()
         rollouter = SimpleNamespace(build=lambda: _StubRollouter())
 
         def to_dict(self):
             return {}
+
+        def maybe_log(self) -> None:
+            pass
 
     return train.Controller(_StubConfig())
 
@@ -178,9 +189,9 @@ def stub_mesh_provisioning(monkeypatch):
 
 
 def test_main_shuts_down_after_success(monkeypatch, stub_mesh_provisioning):
-    _FakeConfigManager.config = _FakeConfig()
+    _FakeConfigLoader.config = _FakeConfig()
     _FakeController.instances = []
-    monkeypatch.setattr(train, "ConfigManager", _FakeConfigManager)
+    monkeypatch.setattr(train, "ConfigLoader", _FakeConfigLoader)
 
     asyncio.run(train.main())
 
@@ -191,9 +202,9 @@ def test_main_shuts_down_after_success(monkeypatch, stub_mesh_provisioning):
 
 
 def test_main_passes_configured_num_generators(monkeypatch, stub_mesh_provisioning):
-    _FakeConfigManager.config = _FakeConfig(num_generators=2)
+    _FakeConfigLoader.config = _FakeConfig(num_generators=2)
     _FakeController.instances = []
-    monkeypatch.setattr(train, "ConfigManager", _FakeConfigManager)
+    monkeypatch.setattr(train, "ConfigLoader", _FakeConfigLoader)
 
     asyncio.run(train.main())
 
@@ -206,9 +217,9 @@ def test_main_passes_configured_num_generators(monkeypatch, stub_mesh_provisioni
 
 
 def test_main_shuts_down_after_train_failure(monkeypatch, stub_mesh_provisioning):
-    _FakeConfigManager.config = _FakeConfig(fail_train=True)
+    _FakeConfigLoader.config = _FakeConfig(fail_train=True)
     _FakeController.instances = []
-    monkeypatch.setattr(train, "ConfigManager", _FakeConfigManager)
+    monkeypatch.setattr(train, "ConfigLoader", _FakeConfigLoader)
 
     with pytest.raises(RuntimeError, match="train failed"):
         asyncio.run(train.main())
@@ -217,9 +228,9 @@ def test_main_shuts_down_after_train_failure(monkeypatch, stub_mesh_provisioning
 
 
 def test_main_shuts_down_after_setup_failure(monkeypatch, stub_mesh_provisioning):
-    _FakeConfigManager.config = _FakeConfig(fail_setup=True)
+    _FakeConfigLoader.config = _FakeConfig(fail_setup=True)
     _FakeController.instances = []
-    monkeypatch.setattr(train, "ConfigManager", _FakeConfigManager)
+    monkeypatch.setattr(train, "ConfigLoader", _FakeConfigLoader)
 
     with pytest.raises(RuntimeError, match="setup failed"):
         asyncio.run(train.main())
@@ -241,9 +252,9 @@ def test_main_reraises_cancellation_after_shutdown(monkeypatch, stub_mesh_provis
     """Signal-driven cancellation surfaces as ``CancelledError`` from the
     running task. Monarch delivers unhandled actor faults the same way, so
     ``main`` runs ``close`` and re-raises to exit nonzero."""
-    _FakeConfigManager.config = _FakeConfig(cancel_train=True)
+    _FakeConfigLoader.config = _FakeConfig(cancel_train=True)
     _FakeController.instances = []
-    monkeypatch.setattr(train, "ConfigManager", _FakeConfigManager)
+    monkeypatch.setattr(train, "ConfigLoader", _FakeConfigLoader)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(train.main())
@@ -394,3 +405,76 @@ def test_shutdown_continues_after_generator_close_failure():
         "generator[1].close",
         "mesh.stop[0]",
     ]
+
+
+class _FakeHostMesh:
+    """Records the CUDA_VISIBLE_DEVICES of each proc mesh spawned on it."""
+
+    def __init__(self, num_hosts=1):
+        self.num_hosts = num_hosts
+        self.visible_devices = []
+
+    def __len__(self):
+        return self.num_hosts
+
+    def spawn_procs(self, *, per_host, bootstrap, bootstrap_command):
+        self.visible_devices.append(bootstrap_command["CUDA_VISIBLE_DEVICES"])
+
+
+@pytest.fixture
+def bootstrap_cmd_returns_env(monkeypatch):
+    """`default_bootstrap_cmd().with_env(env)` returns `env`, so `_FakeHostMesh` can read it."""
+    monkeypatch.setattr(
+        train,
+        "default_bootstrap_cmd",
+        lambda: SimpleNamespace(with_env=lambda env: env),
+    )
+
+
+def test_spawn_proc_mesh_gives_roles_sharing_a_host_mesh_disjoint_gpus(
+    bootstrap_cmd_returns_env,
+):
+    """Roles on one host mesh get disjoint GPUs; another host mesh starts at GPU 0."""
+    mesh_a, mesh_b = _FakeHostMesh(), _FakeHostMesh()
+
+    train.spawn_proc_mesh(
+        trainer_world_size=2,
+        per_generator_world_size=1,
+        host_meshes=train.HostMeshes(
+            trainer=mesh_a,
+            generators=[mesh_a, mesh_a, mesh_b, mesh_b, mesh_b, mesh_b],
+            gpus_per_node=4,
+        ),
+        num_generators=6,
+    )
+
+    assert mesh_a.visible_devices == ["0,1", "2", "3"]
+    assert mesh_b.visible_devices == ["0", "1", "2", "3"]
+
+
+@pytest.mark.parametrize(
+    "num_hosts, layout, match",
+    [
+        (1, "AAABBB", "need 5 GPUs per host, but gpus_per_node is 4"),
+        (2, "AABBBB", r"generator0 world size \(1\) .* host count \(2\)"),
+    ],
+)
+def test_spawn_proc_mesh_checks_gpus_per_host_before_spawning(
+    bootstrap_cmd_returns_env, num_hosts, layout, match
+):
+    """Roles that don't fit their host mesh raise before any proc mesh is spawned."""
+    meshes = {"A": _FakeHostMesh(num_hosts), "B": _FakeHostMesh(num_hosts)}
+
+    with pytest.raises(ValueError, match=match):
+        train.spawn_proc_mesh(
+            trainer_world_size=2,
+            per_generator_world_size=1,
+            host_meshes=train.HostMeshes(
+                trainer=meshes["A"],
+                generators=[meshes[name] for name in layout],
+                gpus_per_node=4,
+            ),
+            num_generators=len(layout),
+        )
+
+    assert all(mesh.visible_devices == [] for mesh in meshes.values())

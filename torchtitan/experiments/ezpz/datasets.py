@@ -25,10 +25,9 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import TYPE_CHECKING
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from datasets import load_dataset
 
@@ -45,8 +44,8 @@ if TYPE_CHECKING:
     from torchtitan.components.data.dataset import DatasetConfig
 else:
     DatasetConfig = None  # noqa: N816  (ported at the 80th sync)
-from torchtitan.hf_datasets import text_datasets
-from torchtitan.hf_datasets.text_datasets import DATASETS
+from torchtitan.components.data import text_datasets
+from torchtitan.components.data.text_datasets import DATASETS
 
 log = logging.getLogger(__name__)
 

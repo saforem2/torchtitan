@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Regression test for the flat-token port of moe's forked MLA forward.
 
 `moe/model.py` carries a FORKED multi-head latent attention that upstream's
@@ -54,9 +60,7 @@ QK_HEAD = QK_NOPE + QK_ROPE  # 11
 
 
 def _src() -> str:
-    p = (
-        Path(__file__).resolve().parents[1] / "moe" / "model.py"
-    )
+    p = Path(__file__).resolve().parents[1] / "moe" / "model.py"
     return p.read_text()
 
 
@@ -95,10 +99,8 @@ def test_expand_uses_local_head_count():
 def test_views_are_flat():
     src = _src()
     assert "q.view(num_tokens, -1, self.qk_head_dim)" in src
-    assert (
-        "kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)" in src
-    )
-    assert "output.view(num_tokens, -1)" in src
+    assert "kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)" in src
+    assert "output.contiguous().view(num_tokens, -1)" in src
 
 
 def test_xpu_pad_v_workaround_survived_the_port():
@@ -125,8 +127,8 @@ def _identity_tensor(num_tokens: int, heads: int, dim: int) -> torch.Tensor:
 def test_q_view_preserves_token_head_order():
     """q: [T, N*QK] -> [T, N, QK] must keep each token's heads contiguous."""
     want = _identity_tensor(T, N_HEADS, QK_HEAD)
-    flat = want.reshape(T, N_HEADS * QK_HEAD)          # as wq emits it
-    got = flat.view(T, -1, QK_HEAD)                     # the shipped reshape
+    flat = want.reshape(T, N_HEADS * QK_HEAD)  # as wq emits it
+    got = flat.view(T, -1, QK_HEAD)  # the shipped reshape
     assert got.shape == (T, N_HEADS, QK_HEAD)
     assert torch.equal(got, want)
 
@@ -141,9 +143,9 @@ def test_q_view_rejects_the_batch_reading():
     flat = want.reshape(T, N_HEADS * QK_HEAD)
     # Pretend T folds as B=2, L=6 and unflatten the 3D way.
     wrong = flat.view(2, 6 * N_HEADS, QK_HEAD)
-    assert wrong.numel() == want.numel()               # same element count...
-    assert wrong.reshape(-1).equal(want.reshape(-1))   # ...same flat order...
-    assert wrong.shape != want.shape                   # ...different axes.
+    assert wrong.numel() == want.numel()  # same element count...
+    assert wrong.reshape(-1).equal(want.reshape(-1))  # ...same flat order...
+    assert wrong.shape != want.shape  # ...different axes.
     # The point: element count and flat order match, so any check weaker than
     # a shape+value pair on the FINAL axes passes the wrong layout.
 
@@ -151,9 +153,9 @@ def test_q_view_rejects_the_batch_reading():
 def test_kpe_unsqueeze_then_expand_broadcasts_across_heads():
     """k_pe is per-token (head-independent); it must repeat, not stripe."""
     k_pe = torch.arange(T * QK_ROPE, dtype=torch.float64).view(T, QK_ROPE)
-    k_pe3 = k_pe.unsqueeze(1)                           # [T, 1, QK_ROPE]
+    k_pe3 = k_pe.unsqueeze(1)  # [T, 1, QK_ROPE]
     assert k_pe3.shape == (T, 1, QK_ROPE)
-    expanded = k_pe3.expand(-1, N_HEADS, -1)            # [T, N, QK_ROPE]
+    expanded = k_pe3.expand(-1, N_HEADS, -1)  # [T, N, QK_ROPE]
     assert expanded.shape == (T, N_HEADS, QK_ROPE)
     # every head sees the SAME rope vector for a given token
     for h in range(N_HEADS):
@@ -163,8 +165,8 @@ def test_kpe_unsqueeze_then_expand_broadcasts_across_heads():
 def test_unsqueeze_2_would_be_wrong_on_a_2d_kpe():
     """unsqueeze(2) does not raise on rank-2 input -- it silently misbuilds."""
     k_pe = torch.arange(T * QK_ROPE, dtype=torch.float64).view(T, QK_ROPE)
-    bad = k_pe.unsqueeze(2)                             # [T, QK_ROPE, 1]
-    assert bad.shape == (T, QK_ROPE, 1)                 # no error raised
+    bad = k_pe.unsqueeze(2)  # [T, QK_ROPE, 1]
+    assert bad.shape == (T, QK_ROPE, 1)  # no error raised
     # Axis 1 is now the ROPE DIM, not a head axis, so expanding heads there
     # is a size mismatch -- when the two happen to differ.
     with pytest.raises(RuntimeError):
@@ -187,7 +189,7 @@ def test_wrong_unsqueeze_survives_expand_when_rope_dim_equals_head_count():
     in this port is the q/kv view and the [B, L*N, H] reading, not this one.
     """
     n = 4
-    rope_dim = 4                                        # == n, the coincidence
+    rope_dim = 4  # == n, the coincidence
     k_pe = torch.arange(T * rope_dim, dtype=torch.float64).view(T, rope_dim)
     k_nope = torch.zeros(T, n, QK_NOPE, dtype=torch.float64)
 
@@ -195,19 +197,19 @@ def test_wrong_unsqueeze_survives_expand_when_rope_dim_equals_head_count():
     assert right.shape == (T, n, rope_dim)
     assert torch.cat([k_nope, right], dim=-1).shape == (T, n, QK_NOPE + rope_dim)
 
-    bad = k_pe.unsqueeze(2)                             # [T, rope_dim, 1]
+    bad = k_pe.unsqueeze(2)  # [T, rope_dim, 1]
     assert bad.shape == (T, rope_dim, 1)
-    wrong = bad.expand(-1, n, -1)                       # no raise at rope==n
-    assert wrong.shape == (T, n, 1)                     # axis 2 stayed 1
+    wrong = bad.expand(-1, n, -1)  # no raise at rope==n
+    assert wrong.shape == (T, n, 1)  # axis 2 stayed 1
     assert torch.cat([k_nope, wrong], dim=-1).shape == (T, n, QK_NOPE + 1)
-    assert QK_NOPE + 1 != QK_NOPE + rope_dim            # caught downstream
+    assert QK_NOPE + 1 != QK_NOPE + rope_dim  # caught downstream
 
 
 def test_kv_split_and_concat_round_trip():
     """kv: [T, N*(nope+v)] -> heads, split, recombine with rope."""
-    kv_flat = torch.arange(
-        T * N_HEADS * (QK_NOPE + V_HEAD), dtype=torch.float64
-    ).view(T, N_HEADS * (QK_NOPE + V_HEAD))
+    kv_flat = torch.arange(T * N_HEADS * (QK_NOPE + V_HEAD), dtype=torch.float64).view(
+        T, N_HEADS * (QK_NOPE + V_HEAD)
+    )
     kv = kv_flat.view(T, -1, QK_NOPE + V_HEAD)
     assert kv.shape == (T, N_HEADS, QK_NOPE + V_HEAD)
     k_nope, v = torch.split(kv, [QK_NOPE, V_HEAD], dim=-1)

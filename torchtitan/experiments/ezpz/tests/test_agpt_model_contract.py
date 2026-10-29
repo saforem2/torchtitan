@@ -14,7 +14,7 @@ import torch
 from torchtitan.experiments.ezpz.agpt import model_registry
 from torchtitan.experiments.ezpz.agpt.model import AgptModel
 from torchtitan.experiments.ezpz.agpt.state_dict_adapter import AgptStateDictAdapter
-from torchtitan.protocols.model import BaseModel
+from torchtitan.models.base.model import BaseModel
 
 
 def test_registry_returns_independent_direct_model_configs() -> None:

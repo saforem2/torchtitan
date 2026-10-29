@@ -86,7 +86,7 @@ git log --since="<last_report_date>" --oneline -- \
     torchtitan/models/common/ \
     torchtitan/models/llama3/ \
     torchtitan/models/deepseek_v3/ \
-    torchtitan/protocols/ \
+    torchtitan/models/base/ \
     torchtitan/components/ \
     torchtitan/experiments/__init__.py
 ```
@@ -218,16 +218,13 @@ Report a table:
 From the failed test's `Command:` line in the logs, produce a minimal local
 repro command. Strip the following from the original command:
 - `TORCH_TRACE=...` environment variable
-- `--dump_folder ...` flag and its value
+- `--output-dir ...` flag and its value
 - `LOG_RANK=...` environment variable
 
 The result should look like:
 
 ```bash
-NGPU=<n> ./run_train.sh \
-  --module <module> \
-  --config <config> \
-  [remaining flags...]
+NGPU=<n> MODULE=<module> CONFIG=<config> ./run_train.sh
 ```
 
 Include this repro command in the report under a "CI Failures" section.
@@ -275,7 +272,7 @@ they've been addressed; if not, carry forward.
   have appeared in recent PyTorch releases.
 - **Duplicated logic**: Check if graph_trainer reimplements anything that
   core torchtitan now provides as a shared utility. Common areas:
-  - Activation checkpointing policy (`passes.py` vs `torchtitan/distributed/activation_checkpoint.py`)
+  - Activation checkpointing policy (`passes.py` vs `torchtitan/distributed/activation_remat.py`)
   - FSDP wrapping logic (`simple_fsdp.py` vs `torchtitan/distributed/fsdp.py`)
   - Model parallelization patterns (graph_trainer's `parallelize.py` vs core's)
 - **Config drift**: Run `to_graph_trainer_config()` mentally — are there new

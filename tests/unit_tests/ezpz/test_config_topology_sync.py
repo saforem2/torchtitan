@@ -76,7 +76,7 @@ def test_parallelism_context_from_topology_matches_direct_construction() -> None
     )
     topology = DistributedTopology(world_size=16)
 
-    actual = ParallelismContext.from_config(config, topology)
+    actual = ParallelismContext.from_config(config, topology, dump_folder=".")
     expected = ParallelismContext(
         dp_replicate=2,
         dp_shard=2,

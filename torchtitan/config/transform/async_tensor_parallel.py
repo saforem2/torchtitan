@@ -6,59 +6,88 @@
 
 """Asynchronous tensor-parallel model transform."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import cast
 
-from torchtitan.models.common.async_linear import (
-    AsyncColumnParallelLinear,
-    AsyncRowParallelLinear,
-)
+from torchtitan.models.base.module import Module
 from torchtitan.models.common.linear import (
     ColumnParallelLinear,
     Linear,
     RowParallelLinear,
 )
-from torchtitan.protocols.module import Module
 
-from .base import convert_config_type, ModelConfigTransform
-from .lora import LoRATransform
+from torchtitan.models.common.linear.async_linear import (
+    AsyncColumnParallelLinear,
+    AsyncRowParallelLinear,
+)
+
+from .base import ModelConfigTransform
 
 __all__ = ["AsyncTensorParallelTransform"]
 
 
 @dataclass(kw_only=True, slots=True)
 class AsyncTensorParallelTransform(ModelConfigTransform):
-    """Replace synchronous dense tensor-parallel projections with async versions."""
+    """Replace supported synchronous TP projections with async versions.
+
+    Matching is by exact owner type. A projection subclass may change collective
+    semantics, which would be lost if its config were replaced by an async base
+    type. The input config is already sharded; each replacement keeps the
+    projection's ``sharding_config``.
+
+    The async projections compute WGRAD inside their fused collectives, so they
+    cannot add it into ``weight.grad`` in place (``inplace_wgrad_accum``). The
+    transform raises for a projection that has the option on unless
+    ``disable_inplace_wgrad_accum`` acknowledges turning it off, so switching to
+    async TP never silently drops it.
+    """
 
     enable_sequence_parallel: bool
+    disable_inplace_wgrad_accum: bool = False
+    """Turn off ``inplace_wgrad_accum`` on the converted projections instead of
+    raising for them."""
 
     def transform(self, model: Module.Config) -> Module.Config:
         if not self.enable_sequence_parallel:
             raise ValueError("Async tensor parallelism requires sequence parallelism.")
 
+        conversions = []
         for fqn, config, parent, attr in list(model.traverse(Linear.Config)):
             owner = config._owner
             assert owner is not None
-            if issubclass(owner, ColumnParallelLinear):
-                parallel_cls = ColumnParallelLinear
-            elif issubclass(owner, RowParallelLinear):
-                parallel_cls = RowParallelLinear
-            else:
-                continue
-            if type(config) is not parallel_cls.Config:
-                projection_name = fqn or type(config).__qualname__
-                raise ValueError(
-                    "Async tensor parallelism does not support converted "
-                    f"{projection_name} projections"
+            if owner is ColumnParallelLinear:
+                conversions.append(
+                    (fqn, config, parent, attr, AsyncColumnParallelLinear)
                 )
-            replacement = (
-                AsyncColumnParallelLinear
-                if parallel_cls is ColumnParallelLinear
-                else AsyncRowParallelLinear
-            )
+            elif owner is RowParallelLinear:
+                conversions.append((fqn, config, parent, attr, AsyncRowParallelLinear))
+        if not self.disable_inplace_wgrad_accum:
+            enabled = [
+                fqn
+                for fqn, config, _, _, _ in conversions
+                if config.inplace_wgrad_accum
+            ]
+            if enabled:
+                raise ValueError(
+                    "Async tensor parallelism computes WGRAD inside its fused "
+                    "collectives and cannot add it into weight.grad in place. Pass "
+                    "AsyncTensorParallelTransform(disable_inplace_wgrad_accum=True) "
+                    f"or set inplace_wgrad_accum=False on {enabled}."
+                )
+
+        for _fqn, config, parent, attr, replacement in conversions:
+            # Copy every field, including sharding_config, except
+            # inplace_wgrad_accum, which convert_config_type() cannot drop.
             converted = cast(
                 ColumnParallelLinear.Config | RowParallelLinear.Config,
-                convert_config_type(config, replacement),
+                replacement.Config(
+                    **{
+                        f.name: getattr(config, f.name)
+                        for f in fields(config)
+                        # Checked above; the async projections reject it.
+                        if f.name != "inplace_wgrad_accum"
+                    }
+                ),
             )
             if parent is None:
                 model = cast(Module.Config, converted)
@@ -69,10 +98,3 @@ class AsyncTensorParallelTransform(ModelConfigTransform):
                 assert isinstance(attr, str)
                 setattr(parent, attr, converted)
         return model
-
-
-# Async kernels call their fused autograd functions directly instead of the
-# projection's ``_linear`` method, so they would silently omit LoRA computation.
-# TODO: Add quantization transforms to this conflict list when quantization
-# migrates from ModelConfigConverter to ModelConfigTransform.
-AsyncTensorParallelTransform.conflicts_with = (LoRATransform,)

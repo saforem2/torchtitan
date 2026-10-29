@@ -116,7 +116,7 @@ def main() -> None:
 
     import torch
 
-    from torchtitan.config import ConfigManager
+    from torchtitan.experiments.ezpz.config_manager import ConfigManager
     from torchtitan.experiments.ezpz.logging import init_logger
 
     init_logger()
