@@ -1,5 +1,15 @@
 # AuroraGPT-80B Scaling & Benchmarks
 
+> [!NOTE]
+> **Historical throughput snapshot.** Every table below is a torch 2.10-era
+> benchmark of raw speed, not a current correctness or stability statement.
+> The "best config" rows rank throughput only; they do not establish that a
+> corner survives sustained production training. For current status see
+> [`guides/training/agpt_80b.md`](../guides/training/agpt_80b.md) and
+> [`production/agpt/80b/README.md`](../production/agpt/80b/README.md): high-`dp`
+> 80B still diverges at the production batch, and 80B has not been exercised on
+> the current `ConfigLoader` candidate `e3520c057a`.
+
 ## Model Variants
 
 | Variant | HIDDEN | NLAYERS | HEADS | KV_HEADS | FFN_HIDDEN |
