@@ -26,18 +26,28 @@ this guide assumes you've done that and have a working `.venv/` +
 > [!IMPORTANT]
 > Read these caveats first:
 >
-> - **Optimizer**: **mano** (~3e-6, safest -- broad U-min) or **sophiag**
->   (~1e-6, lowest loss but a narrower band). Only **Muon** is broken at 80B
->   (bf16 Newton-Schulz overflow at `dim=9216`). SophiaG is NOT broken at the
->   production batch: it NaN'd at GBS=192 but runs all 15 finder steps finite
->   at GBS=6144, where the larger batch smooths the Hessian estimate.
+> - **No optimizer/LR pair is production-safe at GBS=6144 yet.** The LR
+>   finder's picks -- mano ~3e-6, sophiag ~1e-6, AdamW ~5e-7 -- all NaN as
+>   constant LRs at the production batch: mano step 5, AdamW step 9, sophiag
+>   step 12
+>   ([2026-06-30 convergence run](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)).
+>   A long warmup (>=200 steps) plus clipping is required before any of them
+>   is a candidate, and none has sustained validation at scale. Muon is
+>   additionally broken at 80B (bf16 Newton-Schulz overflow at `dim=9216`).
 > - **LR**: **do not use AdamW at `1e-6`.** At the production GBS=6144 the
 >   measured AdamW NaN onset is **1.36e-6** with a usable ceiling of ~7.4e-7,
 >   so `1e-6` sits PAST the last stable point -- which is why 8530891 NaN'd at
->   step 2. If you must stay on AdamW use ~5e-7; prefer mano or sophiag. The
->   small-batch "AdamW 1.1e-5" number does not transfer (~14x lower ceiling at
->   production batch). Measurements:
+>   step 2. The small-batch "AdamW 1.1e-5" number does not transfer (~14x
+>   lower ceiling at production batch). Measurements:
 >   [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+> - **Submitter defaults are not safe.** `scripts/submit_agpt_80b_autoretry.sh`
+>   and the legacy `submit_agpt_80b_aurora_venv_failover.sh` both default to
+>   AdamW `LR=1e-6`, which the bullet above rules out at GBS=6144. Pass `LR`
+>   (and the warmup) explicitly; the at-scale examples below inherit that
+>   default.
+> - **Root cause is unknown.** The bf16 residual-overflow diagnosis is
+>   refuted; see
+>   [`80b-nan-what-we-know.md`](../known-bugs/80b-nan-what-we-know.md).
 > - **`compile=OFF`**. `compile=ON` triggers a
 >   `DeviceMesh`-in-saved-tensors AOT autograd crash on torch 2.13 for
 >   every 80B-family config (smallest reproducer: `agpt_50b_wide`,

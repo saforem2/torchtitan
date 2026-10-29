@@ -3,8 +3,13 @@
 > Last updated: 2026-10-01
 
 > [!NOTE]
-> **2026-10-01 software-currency status.** Wall 1 below is unchanged. Adding
-> only what the current migration work does and does not cover: the upstream
+> **2026-10-01 status.** Wall 1 (the high-dp NaN) is still open, but its
+> **root cause is unknown**: the "bf16 forward-activation / residual-stream
+> overflow" diagnosis recorded in the dated sections below is refuted by
+> [`80b-nan-what-we-know.md`](../../../guides/known-bugs/80b-nan-what-we-know.md)
+> (fp32-ing the residual add still NaNs, `8671243` / `8673658`; activations sit
+> ~36 orders below the bf16 ceiling). Read those sections as history, not
+> current diagnosis. On software currency, the upstream
 > `ConfigManager`→`ConfigLoader` migration was validated on candidate
 > `e3520c057ae699d45c5fe3d17036f84b73dda88b` for the three active production
 > lineages (2B-256 stage-2 `step-41300`, 20B-512 `step-11100`, 20B-256
