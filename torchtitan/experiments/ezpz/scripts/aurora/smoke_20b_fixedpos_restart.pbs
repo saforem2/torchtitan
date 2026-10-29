@@ -89,7 +89,7 @@ export WANDB_MODE=disabled
     --dataloader.dataset=blendcorpus --dataloader.dataset-path="$DFL" \
     --dataloader.data-cache-path="$DATA_CACHE" --dataloader.num-workers=0 \
     --validator.no-enable --metrics.no-enable-wandb \
-    --optimizer=sophiag --optimizer.lr=2.28e-5 \
+    --optimizer sophiag --optimizer.lr=2.28e-5 \
     --lr-scheduler.decay-ratio=0.0 --lr-scheduler.min-lr-factor=1.0 --lr-scheduler.warmup-steps=20 \
     --training.seq-len="$SMOKE_SEQ_LEN" --training.local-batch-size=1 \
     --training.global-batch-size="$GBS" --training.steps="$END_STEP" \
