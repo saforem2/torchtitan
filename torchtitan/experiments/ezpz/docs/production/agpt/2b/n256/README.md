@@ -6,6 +6,7 @@
 ## v2 — 2B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
 > Last updated: 2026-09-30
+> Last updated: 2026-09-29
 >
 > Status: **COMPLETE — target reached** (2026-06-29). Nothing has been
 > dispatched against this chain since, and nothing needs to be: it has
@@ -34,6 +35,10 @@
 > nonempty `.metadata`. Tail evaluation `8880873` completed with PBS exit 0 and
 > seven finite measurements; HellaSwag `acc_norm=0.5557`, ARC-Easy `acc=0.6717`,
 > and ARC-Challenge 25-shot `acc_norm=0.3968`.
+> **step-41,300** in umbrella `8870515`, verified on Aurora on 2026-09-29 as
+> 24 GiB with 3,072 shards plus nonempty `.metadata`; it logged finite progress
+> through step 41,385 (loss 2.44821) before the parent was terminated. This is
+> continued pre-training and adds no tokens to the completed base chain.
 >
 > Earlier 2026-06-28: a 2h "sneak" run `8572612` advanced step-86,200 ->
 > 86,674 (256N, +474 steps / 19 ckpts, loss **2.65**) -- the first run

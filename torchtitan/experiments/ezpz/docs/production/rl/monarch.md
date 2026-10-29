@@ -1,6 +1,6 @@
 # Production RL with Monarch, TorchStore, and vLLM on XPU
 
-**Current production runbook. Last updated: 2026-10-01.**
+**Current production runbook. Last updated: 2026-10-20.** Guoqiong's Aurora GRPO trial is now merged on `ezpz` (PR #69 → `66744493dc`, `fix/xpu-trial-review` → `043c4b8dd9` doc/divisibility fixes at `a769b21418`) under `rl/xpu_trial/` (`Qwen3-0.6B` `alphabet_sort`, `torch 2.14+xpu`, `monarch xpu-all 5009e95d / torchstore xpu-all 2afb113`). `prod` is now Aurora's canonical route queue (replaces `next-eval` execution queue, which still exists on `test_20260924` BKC); docs retaining `next-eval` are historical only.
 
 > [!IMPORTANT]
 > This page is the canonical operator guide for the current upstream-style
@@ -13,7 +13,7 @@
 | Machine / queue | Status | Validated contract |
 |---|---|---|
 | Sunspot `workq` | **Validated end to end** | Two physical hosts; one trainer actor on host 0; one vLLM generator actor on host 1; Monarch scheduler-SPMD mesh; TorchStore Gloo transport; three finite GRPO updates; pre/post generation; checkpoints; clean shutdown. Job `12478711`, PBS exit 0. |
-| Aurora `next-eval` | **Runtime contract established; multi-host RL gate still required** | oneAPI 2026.1 + an image-independent, versioned `.venv.next-eval` archive; no frameworks Conda environment; 12 flat XPU tiles per node. Do not call Aurora production-ready until the same actor, weight-sync, optimizer, artifact, and shutdown gates pass there. |
+| Aurora `prod` (was `next-eval`) | **Runtime contract updated for `prod` routing; multi-host RL gate still required** | Aurora's RL gate now runs via `prod` (routes to `small`/`medium`/`large` by `nodect`; replaces `next-eval` as canonical). New trial `rl/xpu_trial/` (`Qwen3-0.6B`, 2N `xpu-smoke-*` queued) targets this queue; `next-eval` execution still exists but is no longer the entry point. Do not call Aurora production-ready until the same actor/weight-sync/optimizer gates pass on `prod`. |
 
 The merged implementation landed through PR #26. The authoritative Sunspot
 hardware report is
