@@ -74,16 +74,7 @@ class Attention(DeepSeekMLAAttention):
     @property
     def wkv_b(self):  # type: ignore[override]
         # Upstream 0980e1cb1 moved wkv_b inside MLAAttention (inner_attention.wkv_b).
-        # Expose it for any external callers; the forward's _wkv_b_fn uses the
-        # underlying _linear to avoid FQN collision inside remat regions.
         return self.inner_attention.wkv_b
-
-    def _wkv_b_fn(self, x: torch.Tensor) -> torch.Tensor:
-        # Call MLAAttention's wkv_b linear without re-entering its remat region
-        # (which would dup inner_attention.wkv_b.linear). The underlying _linear
-        # is the fused matmul that handles DTensor sharding correctly.
-        w = self.inner_attention.wkv_b
-        return w._linear(x, w.weight, w.bias)
 
     def forward(
         self,
@@ -127,40 +118,33 @@ class Attention(DeepSeekMLAAttention):
         q_pe, k_pe = self.rope(q_pe, k_pe.unsqueeze(1), positions)
         q = torch.cat([q_nope, q_pe], dim=-1)
 
-        kv = self._wkv_b_fn(self.kv_norm(kv))
-
+        # Delegate wkv_b + materialize + inner_attention to MLAAttention which
+        # owns the correct remat/FQN nesting after 0980e1cb1 (wkv_b inside
+        # MLAAttention caused Duplicate wkv_b.linear when called standalone).
+        kv_c_normed = self.kv_norm(kv)
+        # XPU SDPA fix: pad V to QK dim if they differ (Aurora XPU MATH backend
+        # returns QK dim instead of V dim). Apply before MLAAttention handles
+        # the inner split/pad internally — but since ezpz's XPU fix is unique,
+        # we replicate it by calling MLAAttention's inner path piecewise below
+        # without re-wrapping wkv_b in a conflicting remat.
+        kv = self.inner_attention.project_mla_kv(kv_c_normed)
         with spmd.local():
             kv = kv.view(num_tokens, -1, self.qk_nope_head_dim + self.v_head_dim)
             k_nope, v = torch.split(
                 kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
             )
-            # The key concat reads the wkv_b projection output with bare ops.
             remat.recompute_needs_tensor(k_nope)
-            # expand to k_nope's LOCAL head count, not self.n_heads: under TP
-            # each rank holds n_heads/tp_degree heads, so the global count
-            # would over-expand and only fail at tp>1.
             k = torch.cat([k_nope, k_pe.expand(-1, k_nope.size(1), -1)], dim=-1)
-
-        # NOTE: The XPU SDPA backend on Aurora doesn't properly handle
-        # different head dimensions for Q/K vs V.
-        # On Intel XPU (Aurora), F.scaled_dot_product_attention returns output
-        # with Q/K's head dimension instead of V's.
-        # Standard CUDA backends correctly return (B, H, L, Ev) when E != Ev,
-        # but the XPU MATH backend does not.
         pad_v = self.qk_head_dim != self.v_head_dim
         if pad_v:
             v = F.pad(v, (0, self.qk_head_dim - self.v_head_dim))
-
         output = remat.region(
-            self.inner_attention,
+            self.inner_attention.inner_attention,
             self.remat_region_name("inner_attention"),
             recompute=self.remat_should_recompute("inner_attention"),
         )(q, k, v, attention_metadata=attention_metadata, scale=self.softmax_scale)
-
         if pad_v:
             output = output[..., : self.v_head_dim]
-
-        # The copy below reads the inner_attention output with bare ops.
         remat.recompute_needs_tensor(output)
         output = output.contiguous().view(num_tokens, -1)
         return self.wo(output)
