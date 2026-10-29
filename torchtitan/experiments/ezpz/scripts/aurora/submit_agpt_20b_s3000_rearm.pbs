@@ -44,7 +44,7 @@ git diff --quiet && git diff --cached --quiet || exit 13
 if [[ ! -e "$SINK/step-3000" ]]; then
   ln -s "$SOURCE" "$SINK/step-3000" || exit 21
 fi
-[[ "$(readlink -f "$SINK/step-3000")" == "$SOURCE" ]] || exit 22
+[[ "$(readlink -f "$SINK/step-3000")" == "$(readlink -f "$SOURCE")" ]] || exit 22
 
 source "$EZPZ_UTILS" || exit 23
 declare -F ezpz_load_modules >/dev/null || exit 24
