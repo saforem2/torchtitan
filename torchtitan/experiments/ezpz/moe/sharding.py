@@ -56,7 +56,10 @@ from torchtitan.models.common.moe.sharding import (
     shared_experts_output_placement,
     shared_experts_sharding_config,
 )
-from torchtitan.models.deepseek_v3.sharding import mla_attention_sharding_config
+from torchtitan.models.deepseek_v3.sharding import (
+    mla_attention_sharding_config,
+    mla_kv_projection_sharding_config,
+)
 
 if TYPE_CHECKING:
     from torchtitan.experiments.ezpz.moe.model import moeModel, moeTransformerBlock
@@ -124,16 +127,18 @@ def _set_mla_attention_sharding(
     Mirrors ``deepseek_v3.flavors.make_mla_attention_config``: the MLA module
     gathers its input once (``maybe_gather_tp_input``), so the projections
     declare a replicated input layout; ``wo`` returns to the residual layout.
+    After upstream MLA refactor (``wkv_b`` now lives inside ``MLAAttention``),
+    we delegate to the MLA attention's own sharding.
     """
     x_layout = residual_activation_placement(enable_sp=enable_sp)
     attention.sharding_config = mla_attention_sharding_config(enable_sp=enable_sp)
-    attention.inner_attention.sharding_config = (
-        inner_attention_local_spmd_sharding_config()
-    )
+    attention.inner_attention.sharding_config = mla_attention_local_spmd_sharding_config()
+    attention.inner_attention.wkv_b.sharding_config = mla_kv_projection_sharding_config(
+        cp=spmd.S(0)
+    )  # wkv_b is now inside MLAAttention (inner_attention.wkv_b) after 0980e1cb1
     attention.rope.sharding_config = rope_cache_sharding_config()
     attention.wkv_a.sharding_config = replicated_state_sharding_config("weight")
     attention.kv_norm.sharding_config = replicated_state_sharding_config("weight")
-    attention.wkv_b.sharding_config = replicated_input_colwise_sharding_config()
     attention.wo.sharding_config = rowwise_sharding_config(output_layout=x_layout)
     if attention.q_lora_rank == 0:
         assert attention.wq is not None

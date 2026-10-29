@@ -71,6 +71,12 @@ class Attention(DeepSeekMLAAttention):
     class Config(DeepSeekMLAAttention.Config):
         pass
 
+    @property
+    def wkv_b(self):  # type: ignore[override]
+        # Upstream 0980e1cb1 moved wkv_b inside MLAAttention (self.inner_attention.wkv_b);
+        # ezpz's forward still calls self.wkv_b directly for the XPU value-padding path.
+        return self.inner_attention.wkv_b
+
     def forward(
         self,
         x: torch.Tensor,
