@@ -142,7 +142,7 @@ def build_trainer_model(
         parallelism_context=parallelism_context,
         training=trainer_config.training,
         parallelism=parallelism,
-        local_compile_regions=model_config.local_compile_regions,
+        local_compile=model_config.local_compile,
         activation_remat=trainer_config.activation_remat,
         dump_folder=config.dump_folder,
     )
@@ -934,7 +934,6 @@ def _kimi_k3_debug_bitwise_config() -> Controller.Config:
     return config
 
 
-@unittest.skip("MLA attention is not supported by the TorchTitan vLLM wrapper yet.")
 class TestBitwiseParityKimiK3DebugVarlen(KimiK3BitwiseParityTestBase):
     """Kimi K3 KDA/MLA parity with random weights and matched TP=1."""
 

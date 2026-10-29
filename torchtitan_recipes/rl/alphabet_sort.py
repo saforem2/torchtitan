@@ -140,7 +140,7 @@ def rl_grpo_qwen3_0_6b_varlen(*, seq_len: int = 2048) -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
             ),
@@ -173,7 +173,7 @@ def rl_grpo_qwen3_0_6b_varlen(*, seq_len: int = 2048) -> Controller.Config:
 def rl_grpo_qwen3_0_6b_varlen_no_compile(*, seq_len: int = 2048) -> Controller.Config:
     config = rl_grpo_qwen3_0_6b_varlen(seq_len=seq_len)
     for model_config in (config.trainer.model, config.generator.model):
-        model_config.local_compile_regions = []
+        model_config.local_compile.regions = []
     return config
 
 
@@ -219,7 +219,7 @@ def rl_grpo_qwen3_0_6b_flex() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
                 dtype="bfloat16",
@@ -298,7 +298,7 @@ def rl_grpo_qwen3_0_6b_flex_batch_invariant() -> Controller.Config:
     )
     # Local compile regions do not support batch-invariant mode.
     for model_config in (config.trainer.model, config.generator.model):
-        model_config.local_compile_regions = []
+        model_config.local_compile.regions = []
     block_size = config.trainer.model.layers[0].attention.inner_attention.block_size
     config.async_loop.batcher = dataclasses.replace(
         config.async_loop.batcher, per_sample_pad_multiple=block_size
@@ -310,8 +310,7 @@ def rl_grpo_gpt_oss_20b_varlen() -> Controller.Config:
     """GRPO training config for GPT-OSS-20B with varlen attention.
 
     GPT-OSS uses alternating attention: even layers apply a sliding window, odd
-    layers use full causal attention; the per-layer window is baked into each
-    ``VarlenInnerAttention.window_size``.
+    layers use full causal attention. Metadata carries the per-layer window.
     """
     num_samples_per_prompt = 8
     seq_len = 2048
@@ -356,7 +355,7 @@ def rl_grpo_gpt_oss_20b_varlen() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
             ),
@@ -431,7 +430,7 @@ def rl_grpo_qwen3_1_7b() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
             ),
@@ -503,7 +502,7 @@ def rl_grpo_qwen3_14b() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
                 dtype="bfloat16",
@@ -585,7 +584,7 @@ def rl_grpo_qwen3_30b_a3b_varlen() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
                 dtype="bfloat16",
@@ -670,7 +669,7 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant(
     )
     # Local compile regions do not support batch-invariant mode.
     for model_config in (trainer_model, generator_model):
-        model_config.local_compile_regions = []
+        model_config.local_compile.regions = []
     return Controller.Config(
         hf_assets_path="./assets/hf/Qwen3-0.6B",
         num_generators=3,
@@ -698,7 +697,7 @@ def rl_grpo_qwen3_0_6b_varlen_batch_invariant(
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * seq_len,
                 max_context_length=seq_len,
             ),
@@ -796,7 +795,7 @@ def rl_grpo_qwen3_5_9b_varlen() -> Controller.Config:
                 ),
             ),
             training=TrainingConfig(
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=seq_len,
                 max_context_length=seq_len,
                 dtype="bfloat16",
@@ -855,7 +854,7 @@ def rl_grpo_qwen3_5_9b_varlen_batch_invariant() -> Controller.Config:
     )
     # Local compile regions do not support batch-invariant mode.
     for model_config in (config.trainer.model, config.generator.model):
-        model_config.local_compile_regions = []
+        model_config.local_compile.regions = []
     return config
 
 

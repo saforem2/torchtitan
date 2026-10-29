@@ -12,7 +12,6 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from torchtitan.config.configurable import Configurable
 from torchtitan.config.function import Function
 from torchtitan.distributed.local_compile import local_compile
 
@@ -25,7 +24,7 @@ class BinaryActivationFn(Function[torch.Tensor], ABC):
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(Configurable.Config):  # pyrefly: ignore[bad-override]
+    class Config(Function.Config):
         pass
 
     # recompile_limit=16: ~3 graphs per static F; DeepSeek-V3 at TP8 needs 10 (default 8).
@@ -75,7 +74,7 @@ class UnaryActivationFn(Function[torch.Tensor], ABC):
     """Base class for configurable one-input activation functions."""
 
     @dataclass(kw_only=True, slots=True)
-    class Config(Configurable.Config):  # pyrefly: ignore[bad-override]
+    class Config(Function.Config):
         pass
 
     @abstractmethod
@@ -174,6 +173,29 @@ class SwiGLU(BinaryActivationFn):
         pass
 
     def _activation_fn(self, gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+        return F.silu(gate) * up
+
+
+class LimitedSwiGLU(BinaryActivationFn):
+    """SwiGLU that clamps gate above and up on both sides (DeepSeek-V4 ``swiglu_limit``)."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(BinaryActivationFn.Config):
+        swiglu_limit: float
+
+        def __post_init__(self) -> None:
+            if not math.isfinite(self.swiglu_limit) or self.swiglu_limit <= 0:
+                raise ValueError(
+                    "swiglu_limit must be finite and positive, got "
+                    f"{self.swiglu_limit}"
+                )
+
+    def __init__(self, config: Config) -> None:
+        self.limit = config.swiglu_limit
+
+    def _activation_fn(self, gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+        gate = gate.clamp(max=self.limit)
+        up = up.clamp(min=-self.limit, max=self.limit)
         return F.silu(gate) * up
 
 
