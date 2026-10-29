@@ -8,7 +8,7 @@
 # select= overridden via qsub -l select=N
 #   smoke:  -l select=4          (debug, 01:00:00)
 #   test:   -l select=274|512    (prod, 12:00:00)
-#   boost:  -l select=2058       (prod, 12:00:00)  >2048N threshold
+#   boost:  -l select=2078       (prod, 12:00:00)  >2048N threshold
 
 set -o pipefail
 ulimit -c 0
@@ -120,12 +120,12 @@ if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
 fi
 
 # ── Umbrella launch (native ezpz launch --auto-retry) ──────────────────
-# Three trainers: 20B-512 1024N, 20B-256 512N, 2B-reclaim 512N = 2048 train + 10 spare = 2058
+# Three trainers: 20B-512 1024N, 20B-256 512N, 2B-reclaim 512N = 2048 train + 10 spare = 2078
 echo "=== Umbrella config ==="
 echo "  20B-512  1024N  GBS=12288  ckpt=$CKPT_20B512_NEW  resume_samples=$RESUME_SAMPLES_20B512"
 echo "  20B-256   512N  GBS=6144   ckpt=$CKPT_20B256_NEW  resume_samples=$RESUME_SAMPLES_20B256"
 echo "  2B-reclaim 512N  GBS=12288  ckpt=$CKPT_2B_RECLAIM"
-echo "  walltime=12:00:00  queue=prod  select=${PBS_select:-2058}"
+echo "  walltime=12:00:00  queue=prod  select=${PBS_select:-2078}"
 echo "  HEAD=$HEAD_SHA  parent=$EXPECTED_PARENT  sha=$ACTUAL_SHA"
 
 # ---- Common env ----
