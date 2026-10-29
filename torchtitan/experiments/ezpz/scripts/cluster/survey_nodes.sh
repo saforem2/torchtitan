@@ -26,7 +26,7 @@
 set -o pipefail
 
 REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
-PROBE="$REPO/80b_capture.pbs"     # any file that must be readable on the node
+PROBE="$REPO/torchtitan/experiments/ezpz/scripts/legacy/root-pbs/80b_capture.pbs"  # any file that must be readable on the node
 OUT="$REPO/.cache/patches"
 LIMIT="${1:-9999}"
 BATCH=10
