@@ -38,7 +38,7 @@ from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed import fsdp as core_fsdp, ParallelismContext
 from torchtitan.distributed.activation_remat import ActivationRematConfig
 from torchtitan.distributed.fsdp import apply_fsdp_to_decoder
-from torchtitan.distributed.local_compile import apply_local_compile
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
@@ -138,7 +138,7 @@ def parallelize_moe(
     """
     del dump_folder
     # Bind the @local_compile regions before any module runs (process-wide).
-    apply_local_compile(local_compile_regions)
+    LocalCompileConfig(regions=local_compile_regions).apply()
     parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0

@@ -45,7 +45,7 @@ from torchtitan.distributed.fsdp import (
     get_fsdp_reshard_after_forward_policy,
     linear_param_shard_placements,
 )
-from torchtitan.distributed.local_compile import apply_local_compile
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
@@ -70,7 +70,7 @@ def parallelize_llama(
     """
     # Bind the @local_compile regions before any module runs (process-wide);
     # BaseModel.parallelize does the same first.
-    apply_local_compile(local_compile_regions)
+    LocalCompileConfig(regions=local_compile_regions).apply()
     parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
