@@ -29,6 +29,8 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
+from torchtitan.distributed.local_compile import LocalCompileConfig
+
 from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
@@ -593,7 +595,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
         # but ezpz flavors are prebuilt templates and the CLI fixes
         # parallelism afterwards, so the model config re-applies its sharding
         # (and the legacy ``compile`` mapping) here.
-        model_config.local_compile_regions = local_compile_regions(config.compile)
+        model_config.local_compile = LocalCompileConfig(
+            regions=local_compile_regions(config.compile)
+        )
         update_from_config = getattr(model_config, "update_from_config", None)
         if update_from_config is not None:
             update_from_config(config=config)
