@@ -207,6 +207,8 @@ class moeModel(Decoder):  # noqa: N801
         from .parallelize import parallelize_moe
 
         parallelism_context = kwargs["parallelism_context"]
+        # Forward to parallelize_moe; it expects local_compile: LocalCompileConfig
+        # (renamed from local_compile_regions: list[str] in upstream 9750139a3).
         with parallelism_context.activate_spmd():
             return parallelize_moe(self, **kwargs)
 

@@ -58,7 +58,7 @@ def parallelize_llama(
     parallelism_context: ParallelismContext,
     training: TrainingConfig,
     parallelism: ParallelismConfig,
-    local_compile_regions: list[str],
+    local_compile: LocalCompileConfig,
     activation_remat: ActivationRematConfig | None,
     dump_folder: str,
     skip_dp: bool = False,
@@ -70,7 +70,7 @@ def parallelize_llama(
     """
     # Bind the @local_compile regions before any module runs (process-wide);
     # BaseModel.parallelize does the same first.
-    LocalCompileConfig(regions=local_compile_regions).apply()
+    local_compile.apply()
     parallel_dims = parallelism_context
     assert (
         training.max_context_length % parallel_dims.seq_len_divisor == 0
