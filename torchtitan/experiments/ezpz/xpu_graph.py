@@ -49,7 +49,7 @@ from typing import Any
 
 import torch
 
-from torchtitan.distributed.cuda_graph import CUDAGraphInputSpec
+from torchtitan.distributed.accelerator_graph import AcceleratorGraphInputSpec as CUDAGraphInputSpec
 
 logger = logging.getLogger(__name__)
 
