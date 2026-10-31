@@ -2,6 +2,13 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-31 (Sunspot) -- final MDS/TT comparison
+
+- All five measured jobs completed `32/32` updates and final checkpoint saves, with `PBS Exit_status=0`. `MDS` is `24.872761 s/update`; eager `TT` is `28.412792-28.700836 s`; loss compilation is `25.970769-26.885055 s`, `4.4-8.1%` behind this `MDS` control.
+- All-rank allocated/reserved peaks are `40.386580/42.726563 GiB` for `MDS`, `47.958935/53.812500 GiB` for eager `TT`, and `32.333996/38.187500 GiB` for loss compilation. Compiled `_compile.compile_inner` is `16.195741-16.868698 s/rank`; backward compilation is recorded separately.
+- Native weights and the complete `32`-update token stream match after the required representation mapping. Numerical equivalence is not established; same-path repeats differ too.
+- [Final report, JSON and figure](experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md). Raw traces, complete histories, diagnostics and source are preserved in online `W&B`.
+
 ## 2026-10-29 (Aurora) -- native-init failure isolated before another model retry
 
 Retry `8984481` finished exit143 after 00:07:29; first XPU broadcast in

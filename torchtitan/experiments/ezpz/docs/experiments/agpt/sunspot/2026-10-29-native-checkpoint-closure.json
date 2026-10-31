@@ -1,0 +1,992 @@
+{
+  "timing_window": [
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32
+  ],
+  "timing_note": "Within-run sample deviations, not uncertainty across independent jobs. MDS has one job; each TT path has two.",
+  "runs": {
+    "mds": {
+      "job": "12481576",
+      "run_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-baseline-12481576",
+      "step_time_seconds": {
+        "count": 12,
+        "max": 24.91796898841858,
+        "mean": 24.872760554154713,
+        "median": 24.8725106716156,
+        "min": 24.826247930526733,
+        "sample_stdev": 0.020686398891536967
+      },
+      "loss_by_step": {
+        "1": 17.54277801513672,
+        "10": 14.39925765991211,
+        "11": 14.277998924255371,
+        "12": 14.167875289916992,
+        "13": 14.029017448425293,
+        "14": 13.748836517333984,
+        "15": 13.550785064697266,
+        "16": 13.417051315307617,
+        "17": 13.030444145202637,
+        "18": 11.896151542663574,
+        "19": 11.389430046081543,
+        "2": 17.41888427734375,
+        "20": 11.259452819824219,
+        "21": 11.148183822631836,
+        "22": 11.04880142211914,
+        "23": 10.93795394897461,
+        "24": 10.850381851196289,
+        "25": 10.774784088134766,
+        "26": 10.695528030395508,
+        "27": 10.591005325317383,
+        "28": 10.540166854858398,
+        "29": 10.480253219604492,
+        "3": 17.18019676208496,
+        "30": 10.387740135192871,
+        "31": 10.359188079833984,
+        "32": 10.311508178710938,
+        "4": 17.021270751953125,
+        "5": 16.43993377685547,
+        "6": 16.15966033935547,
+        "7": 15.936813354492188,
+        "8": 15.789206504821777,
+        "9": 15.012110710144043
+      },
+      "grad_norm_by_step": {
+        "1": 885.9717407226562,
+        "10": 79.37017059326172,
+        "11": 101.74031829833984,
+        "12": 90.9969711303711,
+        "13": 90.84703826904297,
+        "14": 90.05103302001953,
+        "15": 74.58418273925781,
+        "16": 102.74076843261719,
+        "17": 70.6094970703125,
+        "18": 66.1844482421875,
+        "19": 46.22004318237305,
+        "2": 735.650390625,
+        "20": 56.26398468017578,
+        "21": 66.16402435302734,
+        "22": 67.12576293945312,
+        "23": 101.52716827392578,
+        "24": 168.80514526367188,
+        "25": 70.07426452636719,
+        "26": 29.289026260375977,
+        "27": 44.47168731689453,
+        "28": 30.132539749145508,
+        "29": 25.351755142211914,
+        "3": 539.01708984375,
+        "30": 26.862577438354492,
+        "31": 31.47817611694336,
+        "32": 33.60118865966797,
+        "4": 745.4891967773438,
+        "5": 311.651123046875,
+        "6": 370.1888122558594,
+        "7": 388.3208923339844,
+        "8": 795.5829467773438,
+        "9": 233.46743774414062
+      },
+      "all_rank_peak_allocated_GiB": 40.38657999038696,
+      "all_rank_peak_reserved_GiB": 42.7265625,
+      "compile_timers_seconds": {},
+      "compile_timer_note": "Nested cumulative per-rank timers; do not sum keys or ranks. Not end-to-end launch penalty.",
+      "rank0_profile": {
+        "trace": "outputs/agpt-native-closure-20261029/runs/12481576/tensorboard/x1921c1s2b0n0_1665360.1793279075595061713.pt.trace.json.gz",
+        "trace_event_count": 601305,
+        "profiler_step": "ProfilerStep#0",
+        "profiled_step_seconds": 24.914987844238283,
+        "xpu_kernel_union_seconds": 22.986551196777345,
+        "exposed_collective_seconds": 1.493365669921875,
+        "collective_call_events": 110,
+        "collective_kernel_events": 230,
+        "collective_annotation_counts": {
+          "all_reduce": 105,
+          "all_gather": 3,
+          "barrier": 2
+        },
+        "collective_event_names": {
+          "xccl:all_reduce": 105,
+          "xccl:_all_gather_base": 3,
+          "xccl:all_reduce_barrier": 2,
+          "oneccl_invoke_barrier": 108,
+          "oneccl_allgatherv_large_main<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 61,
+          "oneccl_allgatherv_large_epilogue<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 12,
+          "oneccl_allgatherv_small_gather<float, 1, 32, 1, 1, 4, 2>": 2,
+          "oneccl_reduce_scatter_large_prologue<sycl::_V1::ext::oneapi::bfloat16, true, 4, 4, 4210>": 4,
+          "oneccl_reduce_scatter_large_main<sycl::_V1::ext::oneapi::bfloat16, true, 4, 4, 4200>": 31,
+          "oneccl_reduce_scatter_large_epilogue<sycl::_V1::ext::oneapi::bfloat16, true, 4, 4, 4202>": 4,
+          "oneccl_reduce_pair<sycl::_V1::ext::oneapi::bfloat16, 4, 16>": 4,
+          "oneccl_reduce_scatter_small<sycl::_V1::ext::oneapi::bfloat16, 4, 16, 1, 1, 4, 2>": 1,
+          "oneccl_allgatherv_small_gather<sycl::_V1::ext::oneapi::bfloat16, 4, 32, 1, 1, 4, 2>": 3
+        },
+        "attention_cpu_ops": {
+          "aten::_scaled_dot_product_efficient_attention_backward": 288,
+          "aten::scaled_dot_product_attention": 288,
+          "aten::_scaled_dot_product_efficient_attention": 288
+        },
+        "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      }
+    },
+    "tt_eager": {
+      "job": "12481577",
+      "run_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-matched-hsdp-no-remat-defer-retain-12481577",
+      "step_time_seconds": {
+        "count": 12,
+        "max": 29.411976815899834,
+        "mean": 28.700836103933398,
+        "median": 28.59208083106205,
+        "min": 28.35243742982857,
+        "sample_stdev": 0.3530271191410422
+      },
+      "loss_by_step": {
+        "1": 17.563419342041016,
+        "10": 14.3831148147583,
+        "11": 14.258481979370117,
+        "12": 14.161436080932617,
+        "13": 13.978569030761719,
+        "14": 13.730734825134277,
+        "15": 13.537711143493652,
+        "16": 13.409139633178711,
+        "17": 12.684152603149414,
+        "18": 11.68490982055664,
+        "19": 11.33828353881836,
+        "2": 17.44540786743164,
+        "20": 11.224306106567383,
+        "21": 11.112751007080078,
+        "22": 11.044881820678711,
+        "23": 10.95508098602295,
+        "24": 10.861037254333496,
+        "25": 10.770915031433105,
+        "26": 10.688616752624512,
+        "27": 10.596393585205078,
+        "28": 10.528339385986328,
+        "29": 10.467260360717773,
+        "3": 17.304035186767578,
+        "30": 10.369243621826172,
+        "31": 10.335562705993652,
+        "32": 10.276185035705566,
+        "4": 17.091787338256836,
+        "5": 16.48958396911621,
+        "6": 16.229907989501953,
+        "7": 15.970932006835938,
+        "8": 15.834013938903809,
+        "9": 14.825041770935059
+      },
+      "grad_norm_by_step": {
+        "1": 492.13775634765625,
+        "10": 90.24104309082031,
+        "11": 118.4564208984375,
+        "12": 115.01029968261719,
+        "13": 92.62516021728516,
+        "14": 85.341552734375,
+        "15": 87.68486785888672,
+        "16": 71.23731231689453,
+        "17": 63.22014617919922,
+        "18": 55.5286979675293,
+        "19": 45.482242584228516,
+        "2": 619.7286376953125,
+        "20": 83.97735595703125,
+        "21": 147.2881317138672,
+        "22": 114.13176727294922,
+        "23": 94.64400482177734,
+        "24": 143.95249938964844,
+        "25": 37.472999572753906,
+        "26": 41.88818359375,
+        "27": 61.53463363647461,
+        "28": 27.01729965209961,
+        "29": 26.852195739746094,
+        "3": 592.4120483398438,
+        "30": 27.134552001953125,
+        "31": 19.676910400390625,
+        "32": 24.65123176574707,
+        "4": 888.08837890625,
+        "5": 450.2876281738281,
+        "6": 431.9716796875,
+        "7": 434.27734375,
+        "8": 296.5005798339844,
+        "9": 216.50982666015625
+      },
+      "rank_diagnostic_limitation": "Deliberate training os._exit bypassed original wrapper finally; only rank0 W&B memory available.",
+      "rank0_profile": {
+        "trace": "outputs/agpt-native-closure-20261029/runs/12481577/profiling/rank0_trace.json.gz",
+        "trace_event_count": 6044123,
+        "profiler_step": "ProfilerStep#11",
+        "profiled_step_seconds": 28.663520413085937,
+        "xpu_kernel_union_seconds": 27.094927355957033,
+        "exposed_collective_seconds": 1.4871925571289062,
+        "collective_call_events": 49,
+        "collective_kernel_events": 224,
+        "collective_annotation_counts": {
+          "reduce_scatter": 14,
+          "all_reduce": 20,
+          "all_gather": 15
+        },
+        "collective_event_names": {
+          "xccl:_reduce_scatter_base": 14,
+          "xccl:all_reduce": 20,
+          "xccl:_all_gather_base": 15,
+          "oneccl_invoke_barrier": 112,
+          "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 15,
+          "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+          "oneccl_reduce_pair<float, 2, 16>": 14,
+          "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 68,
+          "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 14
+        },
+        "attention_cpu_ops": {
+          "aten::_scaled_dot_product_flash_attention_backward": 288,
+          "aten::scaled_dot_product_attention": 288,
+          "aten::_scaled_dot_product_flash_attention": 288
+        },
+        "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      }
+    },
+    "tt_compiled": {
+      "job": "12481578",
+      "run_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-matched-hsdp-no-remat-defer-retain-compile-12481578",
+      "step_time_seconds": {
+        "count": 12,
+        "max": 26.115335979964584,
+        "mean": 25.970768563003123,
+        "median": 25.952261450584047,
+        "min": 25.80912773590535,
+        "sample_stdev": 0.10378907774981082
+      },
+      "loss_by_step": {
+        "1": 17.563419342041016,
+        "10": 14.393349647521973,
+        "11": 14.298038482666016,
+        "12": 14.192819595336914,
+        "13": 14.111226081848145,
+        "14": 13.814757347106934,
+        "15": 13.63538932800293,
+        "16": 13.500732421875,
+        "17": 13.380231857299805,
+        "18": 12.107723236083984,
+        "19": 11.481430053710938,
+        "2": 17.445466995239258,
+        "20": 11.289709091186523,
+        "21": 11.180625915527344,
+        "22": 11.092021942138672,
+        "23": 10.997673988342285,
+        "24": 10.896231651306152,
+        "25": 10.809492111206055,
+        "26": 10.732706069946289,
+        "27": 10.626388549804688,
+        "28": 10.545368194580078,
+        "29": 10.47368049621582,
+        "3": 17.234935760498047,
+        "30": 10.378318786621094,
+        "31": 10.342342376708984,
+        "32": 10.288278579711914,
+        "4": 17.018659591674805,
+        "5": 16.338478088378906,
+        "6": 16.08841896057129,
+        "7": 15.905802726745605,
+        "8": 15.769634246826172,
+        "9": 15.150247573852539
+      },
+      "grad_norm_by_step": {
+        "1": 491.49859619140625,
+        "10": 176.260986328125,
+        "11": 257.8791809082031,
+        "12": 629.360107421875,
+        "13": 91.41010284423828,
+        "14": 94.22702026367188,
+        "15": 72.0450439453125,
+        "16": 85.08705139160156,
+        "17": 70.7872085571289,
+        "18": 61.177738189697266,
+        "19": 48.85569381713867,
+        "2": 671.2437133789062,
+        "20": 133.12753295898438,
+        "21": 68.60225677490234,
+        "22": 70.76226043701172,
+        "23": 220.88479614257812,
+        "24": 42.78696060180664,
+        "25": 43.91225051879883,
+        "26": 30.3719539642334,
+        "27": 44.9988899230957,
+        "28": 23.960416793823242,
+        "29": 27.576505661010742,
+        "3": 583.06298828125,
+        "30": 66.30945587158203,
+        "31": 24.50611686706543,
+        "32": 47.88412857055664,
+        "4": 491.91375732421875,
+        "5": 936.1006469726562,
+        "6": 1577.8909912109375,
+        "7": 473.42962646484375,
+        "8": 237.0244903564453,
+        "9": 472.9895935058594
+      },
+      "rank_diagnostic_limitation": "Deliberate training os._exit bypassed original wrapper finally; only rank0 W&B memory available.",
+      "rank0_profile": {
+        "trace": "outputs/agpt-native-closure-20261029/runs/12481578/profiling/rank0_trace.json.gz",
+        "trace_event_count": 5803568,
+        "profiler_step": "ProfilerStep#11",
+        "profiled_step_seconds": 27.282662311035157,
+        "xpu_kernel_union_seconds": 24.708809956054687,
+        "exposed_collective_seconds": 2.491172472167969,
+        "collective_call_events": 49,
+        "collective_kernel_events": 224,
+        "collective_annotation_counts": {
+          "reduce_scatter": 14,
+          "all_reduce": 20,
+          "all_gather": 15
+        },
+        "collective_event_names": {
+          "xccl:_reduce_scatter_base": 14,
+          "xccl:all_reduce": 20,
+          "xccl:_all_gather_base": 15,
+          "oneccl_invoke_barrier": 112,
+          "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 15,
+          "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+          "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 68,
+          "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 14,
+          "oneccl_reduce_pair<float, 2, 16>": 14
+        },
+        "attention_cpu_ops": {
+          "aten::_scaled_dot_product_flash_attention_backward": 288,
+          "aten::scaled_dot_product_attention": 288,
+          "aten::_scaled_dot_product_flash_attention": 288
+        },
+        "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      }
+    },
+    "tt_eager_repeat": {
+      "job": "12481580",
+      "run_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-matched-hsdp-no-remat-defer-retain-12481580",
+      "step_time_seconds": {
+        "count": 12,
+        "max": 29.23828794900328,
+        "mean": 28.41279214991179,
+        "median": 28.349079985520802,
+        "min": 27.999374877894297,
+        "sample_stdev": 0.367758809764864
+      },
+      "loss_by_step": {
+        "1": 17.563419342041016,
+        "10": 14.422840118408203,
+        "11": 14.320598602294922,
+        "12": 14.22481918334961,
+        "13": 14.122886657714844,
+        "14": 13.819063186645508,
+        "15": 13.634729385375977,
+        "16": 13.484678268432617,
+        "17": 13.343215942382812,
+        "18": 12.067907333374023,
+        "19": 11.483894348144531,
+        "2": 17.448562622070312,
+        "20": 11.304941177368164,
+        "21": 11.170845031738281,
+        "22": 11.06518840789795,
+        "23": 10.951305389404297,
+        "24": 10.85101318359375,
+        "25": 10.773387908935547,
+        "26": 10.67165756225586,
+        "27": 10.56268310546875,
+        "28": 10.497682571411133,
+        "29": 10.430538177490234,
+        "3": 17.247203826904297,
+        "30": 10.32973861694336,
+        "31": 10.29857349395752,
+        "32": 10.246236801147461,
+        "4": 17.0383358001709,
+        "5": 16.489028930664062,
+        "6": 16.141944885253906,
+        "7": 15.981406211853027,
+        "8": 15.823522567749023,
+        "9": 15.459827423095703
+      },
+      "grad_norm_by_step": {
+        "1": 490.178466796875,
+        "10": 462.5986022949219,
+        "11": 162.9133758544922,
+        "12": 102.95143127441406,
+        "13": 91.16252136230469,
+        "14": 96.2320327758789,
+        "15": 70.8565902709961,
+        "16": 113.53935241699219,
+        "17": 123.53865051269531,
+        "18": 68.3839340209961,
+        "19": 68.44004821777344,
+        "2": 652.3054809570312,
+        "20": 52.70828628540039,
+        "21": 68.74393463134766,
+        "22": 70.16543579101562,
+        "23": 48.632850646972656,
+        "24": 36.85456085205078,
+        "25": 34.07204055786133,
+        "26": 31.09022331237793,
+        "27": 26.920757293701172,
+        "28": 23.341373443603516,
+        "29": 23.35821533203125,
+        "3": 569.5150146484375,
+        "30": 23.7032470703125,
+        "31": 66.85710906982422,
+        "32": 28.02547836303711,
+        "4": 2233.9609375,
+        "5": 444.5332946777344,
+        "6": 711.5863037109375,
+        "7": 516.7927856445312,
+        "8": 456.8427429199219,
+        "9": 669.5059814453125
+      },
+      "all_rank_peak_allocated_GiB": 47.95893478393555,
+      "all_rank_peak_reserved_GiB": 53.8125,
+      "compile_timers_seconds": {},
+      "compile_timer_note": "Nested cumulative per-rank timers; do not sum keys or ranks. Not end-to-end launch penalty.",
+      "rank0_profile": {
+        "trace": "outputs/agpt-native-closure-20261029/runs/12481580/profiling/rank0_trace.json.gz",
+        "trace_event_count": 6030208,
+        "profiler_step": "ProfilerStep#11",
+        "profiled_step_seconds": 28.170713647949217,
+        "xpu_kernel_union_seconds": 27.107677253417968,
+        "exposed_collective_seconds": 1.2955440043945312,
+        "collective_call_events": 49,
+        "collective_kernel_events": 224,
+        "collective_annotation_counts": {
+          "reduce_scatter": 14,
+          "all_reduce": 20,
+          "all_gather": 15
+        },
+        "collective_event_names": {
+          "xccl:_reduce_scatter_base": 14,
+          "xccl:all_reduce": 20,
+          "xccl:_all_gather_base": 15,
+          "oneccl_invoke_barrier": 112,
+          "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 15,
+          "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+          "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 68,
+          "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 14,
+          "oneccl_reduce_pair<float, 2, 16>": 14
+        },
+        "attention_cpu_ops": {
+          "aten::_scaled_dot_product_flash_attention_backward": 288,
+          "aten::scaled_dot_product_attention": 288,
+          "aten::_scaled_dot_product_flash_attention": 288
+        },
+        "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      }
+    },
+    "tt_compiled_repeat": {
+      "job": "12481581",
+      "run_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-matched-hsdp-no-remat-defer-retain-compile-12481581",
+      "step_time_seconds": {
+        "count": 12,
+        "max": 27.40984257403761,
+        "mean": 26.885054947827786,
+        "median": 26.82946451753378,
+        "min": 26.523409749846905,
+        "sample_stdev": 0.2903358897986437
+      },
+      "loss_by_step": {
+        "1": 17.563419342041016,
+        "10": 14.343547821044922,
+        "11": 14.213876724243164,
+        "12": 14.106215476989746,
+        "13": 13.945685386657715,
+        "14": 13.671905517578125,
+        "15": 13.486245155334473,
+        "16": 13.354204177856445,
+        "17": 12.843231201171875,
+        "18": 11.712467193603516,
+        "19": 11.352684020996094,
+        "2": 17.445049285888672,
+        "20": 11.226301193237305,
+        "21": 11.106727600097656,
+        "22": 11.016387939453125,
+        "23": 10.930871963500977,
+        "24": 10.84302043914795,
+        "25": 10.75271224975586,
+        "26": 10.665306091308594,
+        "27": 10.587862014770508,
+        "28": 10.522174835205078,
+        "29": 10.45659065246582,
+        "3": 17.247692108154297,
+        "30": 10.36108112335205,
+        "31": 10.335525512695312,
+        "32": 10.280252456665039,
+        "4": 17.036848068237305,
+        "5": 16.381242752075195,
+        "6": 16.103717803955078,
+        "7": 15.856367111206055,
+        "8": 15.747815132141113,
+        "9": 14.726512908935547
+      },
+      "grad_norm_by_step": {
+        "1": 490.3381652832031,
+        "10": 98.7745361328125,
+        "11": 83.19832611083984,
+        "12": 101.02535247802734,
+        "13": 111.19876861572266,
+        "14": 88.46929931640625,
+        "15": 70.88040161132812,
+        "16": 82.080078125,
+        "17": 136.55177307128906,
+        "18": 61.97024917602539,
+        "19": 44.8006706237793,
+        "2": 700.3717041015625,
+        "20": 84.55409240722656,
+        "21": 83.36538696289062,
+        "22": 150.06723022460938,
+        "23": 120.80317687988281,
+        "24": 48.84562301635742,
+        "25": 76.75914764404297,
+        "26": 175.809814453125,
+        "27": 32.57534408569336,
+        "28": 43.210811614990234,
+        "29": 29.545167922973633,
+        "3": 651.4187622070312,
+        "30": 98.814453125,
+        "31": 33.365447998046875,
+        "32": 20.132930755615234,
+        "4": 427.1543884277344,
+        "5": 563.552734375,
+        "6": 620.9540405273438,
+        "7": 661.0591430664062,
+        "8": 326.2052001953125,
+        "9": 148.12844848632812
+      },
+      "all_rank_peak_allocated_GiB": 32.333996295928955,
+      "all_rank_peak_reserved_GiB": 38.1875,
+      "compile_timers_seconds": {
+        "CacheBase.get_system.triton_key": {
+          "min": 1.731256,
+          "median": 1.762439,
+          "max": 1.791504
+        },
+        "GraphLowering.codegen": {
+          "min": 6.731943,
+          "median": 6.984964,
+          "max": 7.192175
+        },
+        "GraphLowering.compile_to_fn": {
+          "min": 7.742154,
+          "median": 8.125248500000001,
+          "max": 8.530535
+        },
+        "GraphLowering.compile_to_module": {
+          "min": 7.742073,
+          "median": 8.1251635,
+          "max": 8.530455
+        },
+        "GraphLowering.run": {
+          "min": 0.084532,
+          "median": 0.08997050000000001,
+          "max": 0.097983
+        },
+        "OutputGraph.call_user_compiler": {
+          "min": 16.003128,
+          "median": 16.33193,
+          "max": 16.6746
+        },
+        "PyCodeCache.load_by_key_path": {
+          "min": 0.862972,
+          "median": 1.172072,
+          "max": 1.420486
+        },
+        "PythonWrapperCodegen.generate": {
+          "min": 0.003197,
+          "median": 0.0034590000000000003,
+          "max": 0.005298
+        },
+        "Scheduler.__init__": {
+          "min": 0.026207,
+          "median": 0.0267165,
+          "max": 0.027576
+        },
+        "Scheduler.codegen": {
+          "min": 6.688307,
+          "median": 6.9429359999999996,
+          "max": 7.150786
+        },
+        "Scheduler.fused_nodes": {
+          "min": 0.004536,
+          "median": 0.0046455,
+          "max": 0.004759
+        },
+        "Scheduler.simple_overlap": {
+          "min": 0.00011,
+          "median": 0.000113,
+          "max": 0.00013
+        },
+        "TritonBundler.collect": {
+          "min": 0.000953,
+          "median": 0.0010665,
+          "max": 0.001177
+        },
+        "_compile.compile_inner": {
+          "min": 16.195741,
+          "median": 16.5002725,
+          "max": 16.868698
+        },
+        "_recursive_joint_graph_passes": {
+          "min": 0.291075,
+          "median": 0.30018999999999996,
+          "max": 0.311148
+        },
+        "_recursive_post_grad_passes": {
+          "min": 0.039752,
+          "median": 0.042050000000000004,
+          "max": 0.043484
+        },
+        "_recursive_pre_grad_passes": {
+          "min": 0.010634,
+          "median": 0.012432499999999999,
+          "max": 0.015447
+        },
+        "additional_fake_tensor_prop": {
+          "min": 0.00706,
+          "median": 0.008823000000000001,
+          "max": 0.00899
+        },
+        "aot_collect_metadata": {
+          "min": 0.016842,
+          "median": 0.022718,
+          "max": 0.030595
+        },
+        "aot_trace_joint_graph": {
+          "min": 0.053613,
+          "median": 0.061270500000000006,
+          "max": 0.07047
+        },
+        "async_compile.precompile": {
+          "min": 0.0,
+          "median": 0.2186305,
+          "max": 0.536874
+        },
+        "async_compile.wait": {
+          "min": 0.853812,
+          "median": 0.8790830000000001,
+          "max": 0.997813
+        },
+        "backward._backward_impl": {
+          "min": 0.462668,
+          "median": 0.4859365,
+          "max": 0.515018
+        },
+        "build_guards": {
+          "min": 0.013945,
+          "median": 0.0167495,
+          "max": 0.01934
+        },
+        "bytecode_tracing": {
+          "min": 0.061048,
+          "median": 0.0833305,
+          "max": 0.084699
+        },
+        "compile_attempt_0": {
+          "min": 16.115515,
+          "median": 16.4255415,
+          "max": 16.786648
+        },
+        "compile_fx.<locals>.bw_compiler": {
+          "min": 0.458417,
+          "median": 0.48160200000000003,
+          "max": 0.51078
+        },
+        "compile_fx.<locals>.fw_compiler_base": {
+          "min": 7.472274,
+          "median": 7.828107,
+          "max": 8.200338
+        },
+        "compile_fx_inner": {
+          "min": 7.930372,
+          "median": 8.309335,
+          "max": 8.70954
+        },
+        "create_aot_dispatcher_function": {
+          "min": 7.910605,
+          "median": 8.271932,
+          "max": 8.651499
+        },
+        "create_proxy": {
+          "min": 0.016489,
+          "median": 0.034607,
+          "max": 0.035759
+        },
+        "fx_codegen_and_compile": {
+          "min": 7.928251,
+          "median": 8.307296000000001,
+          "max": 8.707317
+        },
+        "gc": {
+          "min": 0.025896,
+          "median": 0.028984,
+          "max": 0.032555
+        },
+        "get_fake_value": {
+          "min": 0.022497,
+          "median": 0.0268035,
+          "max": 0.027759
+        },
+        "inductor_codecache_torch_key": {
+          "min": 6.202528,
+          "median": 6.21941,
+          "max": 6.234924
+        },
+        "insert_deferred_runtime_asserts": {
+          "min": 0.002644,
+          "median": 0.0034070000000000003,
+          "max": 0.004134
+        },
+        "min_cut_rematerialization_partition": {
+          "min": 0.034215,
+          "median": 0.0367775,
+          "max": 0.041352
+        },
+        "pass.joint_graph_passes.constant_fold_uniform_value": {
+          "min": 0.002707,
+          "median": 0.0040409999999999995,
+          "max": 0.004286
+        },
+        "pass.joint_graph_passes.pass_pattern_0": {
+          "min": 0.011788,
+          "median": 0.012484499999999999,
+          "max": 0.013193
+        },
+        "pass.joint_graph_passes.pass_pattern_1": {
+          "min": 0.00065,
+          "median": 0.0006855,
+          "max": 0.000737
+        },
+        "pass.joint_graph_passes.remove_noop_ops": {
+          "min": 0.000226,
+          "median": 0.000356,
+          "max": 0.000406
+        },
+        "pass.post_grad_passes.decompose_auto_functionalized": {
+          "min": 0.000153,
+          "median": 0.00016600000000000002,
+          "max": 0.000186
+        },
+        "pass.post_grad_passes.decompose_map_to_while_loop": {
+          "min": 5.3e-05,
+          "median": 5.5e-05,
+          "max": 6.5e-05
+        },
+        "pass.post_grad_passes.decompose_scan_to_while_loop": {
+          "min": 6.3e-05,
+          "median": 6.8e-05,
+          "max": 8.1e-05
+        },
+        "pass.post_grad_passes.decompose_triton_kernel_wrapper_functional": {
+          "min": 0.000103,
+          "median": 0.0001055,
+          "max": 0.00013
+        },
+        "pass.post_grad_passes.fix_auto_functionalized_dtype_views": {
+          "min": 4.9e-05,
+          "median": 5.1e-05,
+          "max": 7.9e-05
+        },
+        "pass.post_grad_passes.move_constructors_to_cuda": {
+          "min": 0.000236,
+          "median": 0.00024799999999999996,
+          "max": 0.00026
+        },
+        "pass.post_grad_passes.pass_pattern_0": {
+          "min": 1.8e-05,
+          "median": 1.9e-05,
+          "max": 2.6e-05
+        },
+        "pass.post_grad_passes.pass_pattern_1": {
+          "min": 0.012597,
+          "median": 0.0132055,
+          "max": 0.014032
+        },
+        "pass.post_grad_passes.pass_pattern_2": {
+          "min": 0.000133,
+          "median": 0.000138,
+          "max": 0.000161
+        },
+        "pass.post_grad_passes.post_grad_custom_pre_pass": {
+          "min": 5.7e-05,
+          "median": 6.05e-05,
+          "max": 6.8e-05
+        },
+        "pass.post_grad_passes.reinplace_inplaceable_ops": {
+          "min": 0.001695,
+          "median": 0.001739,
+          "max": 0.001877
+        },
+        "pass.post_grad_passes.remove_assert_ops": {
+          "min": 3.1e-05,
+          "median": 3.2e-05,
+          "max": 4.2e-05
+        },
+        "pass.post_grad_passes.remove_noop_ops": {
+          "min": 0.000217,
+          "median": 0.000226,
+          "max": 0.00025
+        },
+        "pass.post_grad_passes.remove_profiler_ops": {
+          "min": 5.6e-05,
+          "median": 6.85e-05,
+          "max": 8e-05
+        },
+        "pass.post_grad_passes.respecialize_current_device": {
+          "min": 7.5e-05,
+          "median": 9.8e-05,
+          "max": 0.000135
+        },
+        "pass.post_grad_passes.stable_sort": {
+          "min": 0.000101,
+          "median": 0.000105,
+          "max": 0.000115
+        },
+        "pass.pre_grad_passes.apply_gumbel_max_trick_pass": {
+          "min": 2.9e-05,
+          "median": 3.2500000000000004e-05,
+          "max": 3.7e-05
+        },
+        "pass.pre_grad_passes.efficient_conv_bn_eval_pass": {
+          "min": 7.6e-05,
+          "median": 7.7e-05,
+          "max": 8.9e-05
+        },
+        "pass.pre_grad_passes.group_batch_fusion_passes": {
+          "min": 4.1e-05,
+          "median": 4.55e-05,
+          "max": 5.6e-05
+        },
+        "variable_builder_call": {
+          "min": 0.022184,
+          "median": 0.0395085,
+          "max": 0.040184
+        },
+        "wrap_to_fake_tensor_and_record": {
+          "min": 0.003694,
+          "median": 0.0038345000000000002,
+          "max": 0.004264
+        }
+      },
+      "compile_timer_note": "Nested cumulative per-rank timers; do not sum keys or ranks. Not end-to-end launch penalty.",
+      "rank0_profile": {
+        "trace": "outputs/agpt-native-closure-20261029/runs/12481581/profiling/rank0_trace.json.gz",
+        "trace_event_count": 5770279,
+        "profiler_step": "ProfilerStep#11",
+        "profiled_step_seconds": 27.61060958105469,
+        "xpu_kernel_union_seconds": 24.658616288085938,
+        "exposed_collective_seconds": 2.7854024912109376,
+        "collective_call_events": 49,
+        "collective_kernel_events": 224,
+        "collective_annotation_counts": {
+          "reduce_scatter": 14,
+          "all_reduce": 20,
+          "all_gather": 15
+        },
+        "collective_event_names": {
+          "xccl:_reduce_scatter_base": 14,
+          "xccl:all_reduce": 20,
+          "xccl:_all_gather_base": 15,
+          "oneccl_invoke_barrier": 112,
+          "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 15,
+          "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+          "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 68,
+          "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 14,
+          "oneccl_reduce_pair<float, 2, 16>": 14
+        },
+        "attention_cpu_ops": {
+          "aten::_scaled_dot_product_flash_attention_backward": 288,
+          "aten::scaled_dot_product_attention": 288,
+          "aten::_scaled_dot_product_flash_attention": 288
+        },
+        "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      }
+    }
+  },
+  "loss_differences": {
+    "mds__tt_eager": {
+      "max_absolute": 0.34629154205322266,
+      "rms": 0.08721598778611686,
+      "tolerance_applied": false
+    },
+    "mds__tt_compiled": {
+      "max_absolute": 0.34978771209716797,
+      "rms": 0.08947028513146126,
+      "tolerance_applied": false
+    },
+    "mds__tt_eager_repeat": {
+      "max_absolute": 0.44771671295166016,
+      "rms": 0.11175224163047395,
+      "tolerance_applied": false
+    },
+    "mds__tt_compiled_repeat": {
+      "max_absolute": 0.2855978012084961,
+      "rms": 0.08156327174674467,
+      "tolerance_applied": false
+    },
+    "tt_eager__tt_compiled": {
+      "max_absolute": 0.6960792541503906,
+      "rms": 0.1691197594227122,
+      "tolerance_applied": false
+    },
+    "tt_eager__tt_eager_repeat": {
+      "max_absolute": 0.6590633392333984,
+      "rms": 0.18459513772492145,
+      "tolerance_applied": false
+    },
+    "tt_eager__tt_compiled_repeat": {
+      "max_absolute": 0.15907859802246094,
+      "rms": 0.05867004877486778,
+      "tolerance_applied": false
+    },
+    "tt_compiled__tt_eager_repeat": {
+      "max_absolute": 0.30957984924316406,
+      "rms": 0.0708925096691605,
+      "tolerance_applied": false
+    },
+    "tt_compiled__tt_compiled_repeat": {
+      "max_absolute": 0.5370006561279297,
+      "rms": 0.15690101995476485,
+      "tolerance_applied": false
+    },
+    "tt_eager_repeat__tt_compiled_repeat": {
+      "max_absolute": 0.7333145141601562,
+      "rms": 0.18613360209574184,
+      "tolerance_applied": false
+    }
+  },
+  "phase_probe": {
+    "job_id": "12481579.sunspot-pbs-0001.head.cm.sunspot.alcf.anl.gov",
+    "wandb_run_id": "agpt-rp-10fcd6116678ec80",
+    "wandb_url": "https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-rp-10fcd6116678ec80",
+    "world_size": 16,
+    "microbatches_per_rank": 24,
+    "num_sequences": 384,
+    "sequence_length": 8192,
+    "rank0_token_file_sha256": "fcc07520659aba929190444de90382f549c7370ac4e3d112a907f8f47104a8b6",
+    "checkpoint": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-matched-20261024/outputs/agpt-matched-native-weights/dcp/step-0",
+    "checkpoint_tree_sha256": "7f605e77c85367aea670e1557737dabbdebfbea7be72b26f69f52f9014616c48",
+    "checkpoint_file_count": 2,
+    "checkpoint_total_bytes": 7944352388,
+    "model_flavor": "2b-mds",
+    "model_dtype": "bfloat16",
+    "rope_module_count": 12,
+    "original_cache_dtype": "torch.complex64",
+    "bf16_phase_cache_dtype": "torch.complex64",
+    "bf16_phase_cache_shape": [
+      8192,
+      64
+    ],
+    "loss_mean_nats": {
+      "complex_cache_before": 17.561533597608406,
+      "bf16_phase_cache": 17.533865749835968,
+      "complex_cache_restored": 17.561533597608406
+    },
+    "bf16_phase_minus_baseline": -0.027667847772438137,
+    "restored_baseline_abs_delta": 0.0,
+    "inference_only": true,
+    "backward_or_optimizer": false
+  }
+}
