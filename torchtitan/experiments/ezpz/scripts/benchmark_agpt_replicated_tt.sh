@@ -140,6 +140,12 @@ else
             --profiler.profiler-warmup=3 --profiler.profiler-active=1
             --profiler.profiler-repeat=1 --profiler.profiler-skip-first=5)
     fi
+    # Per-step allocator snapshots; an OOM also forces a final dump.
+    [[ "${BENCH_MEMORY_SNAPSHOT:-0}" == 1 ]] && PROFILE+=(
+        --profiler.enable-memory-snapshot --profiler.memory-snapshot-freq=1)
+    AC="${BENCH_AC:-none}"
+    case "${AC}" in none|full) ;; *) echo "Unknown BENCH_AC=${AC}" >&2; exit 2;; esac
+    echo "activation_checkpoint=${AC} memory_snapshot=${BENCH_MEMORY_SNAPSHOT:-0}"
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
@@ -157,7 +163,7 @@ else
         --metrics.enable-tensorboard --metrics.enable-wandb
         --dump-folder="${OUT}" --checkpointer.folder=checkpoints
         --checkpointer.interval=10000 --checkpointer.keep-latest-k=0
-        "${COMPILE[@]}" "${PROFILE[@]}" activation-checkpoint:none)
+        "${COMPILE[@]}" "${PROFILE[@]}" "activation-checkpoint:${AC}")
 fi
 printf '%q ' "${COMMAND[@]}" > "${OUT}/provenance/launch-command.sh"
 printf '\n' >> "${OUT}/provenance/launch-command.sh"
