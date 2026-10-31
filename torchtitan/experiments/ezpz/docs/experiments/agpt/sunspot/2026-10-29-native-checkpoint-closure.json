@@ -988,5 +988,28 @@
     "restored_baseline_abs_delta": 0.0,
     "inference_only": true,
     "backward_or_optimizer": false
+  },
+  "execution_contract": {
+    "device_hierarchy": "FLAT",
+    "nodes": 2,
+    "ranks": 16,
+    "ranks_per_node": 8,
+    "sequence_length": 8192,
+    "global_batch_size": 384,
+    "microbatch_size": 1,
+    "gradient_accumulation_steps": 24,
+    "tt_hsdp_replicate": 2,
+    "tt_hsdp_shard": 8,
+    "tt_persistent_dtype": "float32",
+    "tt_compute_parameter_dtype": "bfloat16",
+    "tt_gradient_reduction_dtype": "float32",
+    "mds_model_dtype": "bfloat16",
+    "mds_optimizer_master_dtype": "float32",
+    "full_model_compilation_measured": false,
+    "compiled_components": [
+      "loss"
+    ],
+    "same_native_weights_verified_after_representation_mapping": true,
+    "complete_32_update_token_stream_verified": true
   }
 }

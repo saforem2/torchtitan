@@ -223,7 +223,8 @@ Earlier reports: [initial compile/sharding matrix](2026-10-23-compile-sharding.m
 - Corrected checkpoint: `outputs/agpt-matched-native-weights/dcp/step-0`.
 - Conversion: `python -m scripts.checkpoint_conversion.convert_from_hf outputs/agpt-matched-native-weights/hf outputs/agpt-matched-native-weights/dcp/step-0 --model_name torchtitan.experiments.ezpz.agpt --model_flavor 2b-mds`.
 - Conversion log: `outputs/agpt-matched-native-weights/convert-hf-to-dcp-retry-20261029.log`.
-- Architecture: `12` layers, hidden size `2048`, MLP size `11008`, `16` attention heads, `4` KV heads, padded vocabulary `256000`, maximum positions `131072`, RMSNorm epsilon `1e-5`, BF16 parameters.
+- Architecture: `12` layers, hidden size `2048`, MLP size `11008`, `16` attention heads, `4` KV heads, padded vocabulary `256000`, maximum positions `131072`, RMSNorm epsilon `1e-5`.
+- Dtypes: `TT training.dtype=float32`, `mixed_precision_param=bfloat16`, `mixed_precision_reduce=float32`; persistent parameters are FP32 and compute parameters are BF16. `MDS` uses BF16 model parameters and FP32 optimizer master weights. These persistence/update representations are not identical.
 - Geometry: `FLAT` device hierarchy, two nodes, `16` ranks, `8` ranks/node, sequence `8192`, `GBS384`, microbatch `1`, accumulation `24`. `MDS`: data parallel degree `16`, `ZeRO1`. `TT`: HSDP replica axis `2` x shard axis `8`, with each shard group on one node.
 - Data: `Books`, split `95,5,0`, seed `42`, consumed samples `0`, index horizon `32` updates.
 - Optimizer: fresh `AdamW`, constant `LR2e-6`, warmup `0`, betas `(0.9,0.95)`, epsilon `1e-8`, weight decay `0.1`, clipping `1.0`.
