@@ -17,6 +17,8 @@ from torch.distributed.tensor import DTensor
 from torch.utils.checkpoint import checkpoint
 
 from torchtitan.distributed.spmd_types import maybe_set_sparse_mesh, spmd_sparse_mesh
+from torchtitan.models.base.sharding import ShardingConfig
+from torchtitan.models.common.decoder_sharding import dense_sequence_parallel_placement
 from torchtitan.models.common.moe import RoutedExperts
 
 from .experts import (
@@ -31,7 +33,23 @@ from .experts import (
 
 
 class EzpzRoutedExperts(RoutedExperts):
-    """RoutedExperts that can hand the routing decision to inner_experts."""
+    """RoutedExperts that can hand the routing decision to inner_experts.
+
+    Upstream renamed the 5th arg from ``num_local_tokens_per_expert_E`` to
+    ``routing_map_TE`` (one-hot map, #5323). Ezpz keeps the old count-based
+    contract, so we provide a matching ShardingConfig here.
+    """
+
+    _EZPZ_ROUTED_EXPERTS_SHARDING = ShardingConfig(
+        in_src_shardings={
+            "x_TD": dense_sequence_parallel_placement(),
+            "topk_scores_TK": dense_sequence_parallel_placement(),
+            "topk_expert_ids_TK": dense_sequence_parallel_placement(),
+            "num_local_tokens_per_expert_E": dense_sequence_parallel_placement(),
+        },
+        out_src_shardings=dense_sequence_parallel_placement(),
+        local_spmd=True,
+    )
 
     # Without its own nested Config the subclass inherits RoutedExperts.Config,
     # whose build() constructs the PARENT -- the override would never run and

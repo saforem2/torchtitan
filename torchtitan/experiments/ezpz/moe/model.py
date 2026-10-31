@@ -13,6 +13,8 @@ import torch.nn.functional as F
 import torch_remat as remat
 from torch import nn
 
+from torchtitan.distributed.local_compile import LocalCompileConfig
+
 from torchtitan.experiments.ezpz.logging import logger, warn_once
 
 from torchtitan.models.common.attention import (
@@ -216,14 +218,7 @@ class moeModel(Decoder):  # noqa: N801
     class Config(Decoder.Config):
         dim: int = 2048
         vocab_size: int = 102400
-        local_compile_regions: list[str] = field(
-            default_factory=lambda: [
-                "loss",
-                "fused_binary_activation",
-                "fp32_to_bf16_split",
-                "moe_aux_loss",
-            ]
-        )
+        local_compile: LocalCompileConfig = field(default_factory=LocalCompileConfig)
 
         def __post_init__(self) -> None:
             # Flavors are prebuilt templates; give every config the sharding

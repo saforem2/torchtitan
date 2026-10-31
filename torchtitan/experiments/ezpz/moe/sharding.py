@@ -186,7 +186,14 @@ def _set_moe_block_sharding(
     moe.router.sharding_config = router_sharding_config()
     moe.router.gate.sharding_config = router_gate_sharding_config()
     routed = moe.routed_experts
-    routed.sharding_config = routed_experts_sharding_config()
+    # Ezpz keeps num_local_tokens_per_expert_E (counts) vs upstream's
+    # routing_map_TE (one-hot map) — use matching sharding.
+    from torchtitan.experiments.ezpz.moe.routed_experts import EzpzRoutedExperts
+
+    if isinstance(routed, EzpzRoutedExperts.Config):
+        routed.sharding_config = EzpzRoutedExperts._EZPZ_ROUTED_EXPERTS_SHARDING
+    else:
+        routed.sharding_config = routed_experts_sharding_config()
     routed.w13.sharding_config = routed_expert_linear_sharding_config(
         enable_ep=enable_ep
     )
