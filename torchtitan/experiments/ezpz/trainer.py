@@ -18,7 +18,12 @@ import spmd_types as spmd
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from torchtitan.components.checkpointer import CheckpointManager, DATALOADER
+from torchtitan.components.checkpointer import (
+    CheckpointManager,
+    DATALOADER,
+    MODEL,
+    ModelWrapper,
+)
 from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhaustedError
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
@@ -34,6 +39,7 @@ from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
+    NativeDDP,
     install_agpt_dtype_probe,
     native_ddp_autocast_context,
     validate_native_ddp,
@@ -269,6 +275,35 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             if self.parallelism_context.pp_enabled or len(self.model_parts) != 1:
                 raise ValueError("AGPT dtype probe requires a non-pipeline model")
             install_agpt_dtype_probe(self.model_parts[0])
+
+    def _initialize_checkpointer(
+        self,
+        *,
+        extra_states: dict[str, torch.distributed.checkpoint.stateful.Stateful]
+        | None,
+        sd_adapter: Any | None,
+    ) -> None:
+        super()._initialize_checkpointer(
+            extra_states=extra_states,
+            sd_adapter=sd_adapter,
+        )
+        if not getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            return
+        checkpointer = getattr(self, "checkpointer", None)
+        if checkpointer is None:
+            return
+        states = getattr(checkpointer, "states", None)
+        if states is None or MODEL not in states:
+            raise RuntimeError(
+                "native DDP checkpointer must expose its model state entry"
+            )
+        unwrapped_parts = [
+            part.module if isinstance(part, NativeDDP) else part
+            for part in self.model_parts
+        ]
+        states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
         super()._initialize_forward_backward()
