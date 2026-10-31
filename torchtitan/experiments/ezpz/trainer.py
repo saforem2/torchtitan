@@ -665,7 +665,10 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         from torchtitan.experiments.ezpz.agpt import set_ezpz_max_context_length
 
-        set_ezpz_max_context_length(config.training.max_context_length)
+        set_ezpz_max_context_length(
+            config.training.max_context_length,
+            num_tokens_per_microbatch,
+        )
 
         self.metrics_processor = config.metrics.build(
             parallelism_context=parallelism_context,
