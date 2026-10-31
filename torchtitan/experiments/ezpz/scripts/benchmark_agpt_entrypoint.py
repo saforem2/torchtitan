@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
 import functools
 import importlib
+import json
 import os
 from pathlib import Path
 import runpy
@@ -25,6 +25,8 @@ class SophiaStepWitness:
 
     def __init__(self, *, module: str):
         self.records = {}
+        self.model = None
+        self.model_samples = []
         self.errors = []
         self.original_step = None
         self.optimizer_class = None
@@ -47,6 +49,13 @@ class SophiaStepWitness:
                     }
                     self.records[key] = record
                     try:
+                        if self.model is not None and not self.model_samples:
+                            for name, param in self.model.named_parameters():
+                                local = self.local_tensor(param.detach())
+                                if local.numel():
+                                    self.model_samples.append(
+                                        (name, param, local.reshape(-1)[0].clone())
+                                    )
                         for group in optimizer.param_groups:
                             for param in group["params"]:
                                 local = self.local_tensor(param.detach())
@@ -67,6 +76,20 @@ class SophiaStepWitness:
                 return result
 
             optimizer_class.step = witnessed_step
+            if module == "megatron.optimizer.sophia":
+                # DeepSpeed can flatten master tensors; retain named model views
+                # separately so norm samples are actual norm parameters.
+                import deepspeed
+
+                original_initialize = deepspeed.initialize
+
+                @functools.wraps(original_initialize)
+                def witnessed_initialize(*args, **kwargs):
+                    result = original_initialize(*args, **kwargs)
+                    self.model = result[0].module
+                    return result
+
+                deepspeed.initialize = witnessed_initialize
         except Exception as error:
             self.errors.append(f"install: {type(error).__name__}: {error}")
 
@@ -149,6 +172,29 @@ class SophiaStepWitness:
                 })
             except Exception as error:
                 result["errors"].append(f"final_state: {type(error).__name__}: {error}")
+        if self.model is not None:
+            try:
+                model_deltas = [
+                    (self.local_tensor(param.detach()).reshape(-1)[0] - before).abs()
+                    for _, param, before in self.model_samples
+                ]
+                norm_samples = [
+                    (name, delta)
+                    for (name, param, _), delta in zip(self.model_samples, model_deltas)
+                    if param.ndim == 1 and "norm" in name.lower()
+                ]
+                result["model_parameters"] = {
+                    "sampled_parameters": len(model_deltas),
+                    "changed_sampled_parameters": sum(int(delta.ne(0).item()) for delta in model_deltas),
+                    "max_sample_delta": float(torch.stack(model_deltas).max().item()) if model_deltas else None,
+                    "norm_samples": [
+                        {"name": name, "absolute_delta": float(delta.item())}
+                        for name, delta in norm_samples
+                    ],
+                    "parameter_dtypes": sorted({str(param.dtype) for _, param, _ in self.model_samples}),
+                }
+            except Exception as error:
+                result["errors"].append(f"final_model_samples: {type(error).__name__}: {error}")
         result["optimizer_count"] = len(self.records)
         result["successful_step_calls"] = sum(record["successful_step_calls"] for record in self.records.values())
         result["step_exceptions"] = sum(record["step_exceptions"] for record in self.records.values())
@@ -212,11 +258,12 @@ def main() -> None:
                 dataclasses.asdict(metric) for metric in get_compilation_metrics()
             ],
         }
-        if witness is not None:
-            result["sophia_witness"] = witness.diagnostics()
         if torch.xpu.is_initialized():
+            # Final witness reductions must not inflate the training peak.
             result["xpu_peak_allocated_bytes"] = torch.xpu.max_memory_allocated()
             result["xpu_peak_reserved_bytes"] = torch.xpu.max_memory_reserved()
+        if witness is not None:
+            result["sophia_witness"] = witness.diagnostics()
         output = args.output / f"rank-{rank:03d}.json"
         output.write_text(json.dumps(result, indent=2, default=str) + "\n")
         diagnostics_written = True
@@ -240,7 +287,10 @@ def main() -> None:
                 diagnostics_written = True
             except BaseException:
                 pass
-            print(f"BENCHMARK_DIAGNOSTICS_FAILED rank={rank} error={fallback['diagnostics_error']}", file=sys.stderr, flush=True)
+            try:
+                print(f"BENCHMARK_DIAGNOSTICS_FAILED rank={rank} error={fallback['diagnostics_error']}", file=sys.stderr, flush=True)
+            except BaseException:
+                pass
 
     original_exit = os._exit
     original_pid = os.getpid()
