@@ -1075,5 +1075,21 @@
     "flops_convention": "TorchTitan dense-attention model estimate: output head included, input embedding excluded, causal sparsity and recomputation excluded; not hardware counter FLOPs or HFU.",
     "peak_flops_per_flat_device": 298188800000000,
     "peak_formula": "512 * 448 compute units * 1.3e9 Hz; matches the run's TT MFU convention, not measured clock or advertised full-package peak."
+  },
+  "historical_mds_tflops_reconciliation": {
+    "historical_run_url": "https://wandb.ai/aurora_gpt/AuroraGPT/runs/ugkfoorl",
+    "historical_machine": "Polaris",
+    "historical_iteration": 198,
+    "historical_scope": "One last-available training sample from a killed run; not a matched steady-state benchmark.",
+    "historical_raw_tflops": 118.86367173709624,
+    "historical_model_tflops": 90.36756343296342,
+    "historical_common_model_tflops": 90.3700451420091,
+    "historical_tokens_per_second_per_gpu": 8078.479966463237,
+    "historical_checkpoint_activations": true,
+    "historical_world_size": 8,
+    "historical_global_batch_size": 16,
+    "historical_optimizer": "sophiag",
+    "formula_note": "MDS throughput_calculator adds one forward-pass MAC estimate to its 3-forward-pass forward/backward estimate when checkpoint_activations is true. This reproduces the historical raw numerator; the model-FLOP metric excludes activation recomputation.",
+    "comparison_limitation": "Different hardware, batching, optimizer and sample coverage. Does not prove a matched regression or identify every historical Intel run."
   }
 }

@@ -111,6 +111,42 @@ in the `W&B` final artifact's `throughput-efficiency.json`. These rates are
 algebraic conversions of step time under one fixed model/peak convention;
 they are not additional independent performance measurements.
 
+### Historical MDS logs near 120 TFLOP/s
+
+A verified earlier `AuroraGPT-2B` run does log about `120 TFLOP/s`:
+[`ugkfoorl`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/ugkfoorl),
+`2026-03-11`, on `Polaris`. Its last available training sample is update
+`198`; the run later has state `killed`. This sample is evidence of the
+logged metric, not a completed matched benchmark.
+
+| Measurement | Historical Polaris run, update 198 | Current Sunspot control, updates 21-32 |
+|---|---:|---:|
+| Native `throughput/tflops` | 118.86 | 87.23 |
+| Native `throughput/tflops-lm` | 90.37 | 88.42 |
+| Common model TFLOP/s/device | 90.37 | 88.42 |
+| Tokens/sec/device | 8,078.48 | 7,904.55 |
+| Activation checkpointing | On | Off |
+| Selected devices / global batch | 8 / 16 | 16 / 384 |
+| Optimizer | SophiaG | AdamW |
+
+The recorded `MDS throughput_calculator` estimates forward plus backward as
+`3 * forward_macs`, then adds another `forward_macs` when activation
+checkpointing is enabled. Its raw TFLOP/s therefore credits recomputation
+work. The historical raw numerator is `14,713,618,432 FLOPs/token`; removing
+the extra-forward factor gives `11,035,213,824`, exactly the current raw
+MDS numerator. The separate model-FLOP formula accounts for `GQA` differently
+and excludes activation recomputation, giving the `90.37` and `88.42` entries.
+Source: [MDS throughput calculator](https://github.com/argonne-lcf/Megatron-DeepSpeed/blob/b5617bac7b4e2303e738ef7db0307915da905941/megatron/utils.py#L459).
+
+Thus `118.86` raw versus `88.42` model TFLOP/s is a mixed-metric comparison,
+not evidence of a `26%` throughput regression. The hardware, batching,
+optimizer and measurement coverage differ as well. This example does not
+identify the exact run behind every recollection of `120 TFLOP/s` on Intel
+hardware, nor establish the best achievable MDS performance. The final
+comparison remains against the explicitly recorded fresh Sunspot control.
+The historical history/config, formula source and reconciliation are
+preserved with the final `W&B` evidence.
+
 ## Compilation cost and peak memory
 
 | Path and job | Maximum allocated, GiB | Maximum reserved, GiB | Diagnostic coverage |
