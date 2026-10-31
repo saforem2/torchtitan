@@ -1,7 +1,7 @@
 # XPU graphs cannot capture oneCCL collectives (2026-08-16)
 
 > [!CAUTION]
-> **WRONG, corrected 2026-08-26 (job `8785582`). Collectives ARE capturable.**
+> **Re-broken 2026-10-31 by #5353 (`c8f0265db`).** Upstream made `torch.accelerator` graphs fire on XPU, so the training step now captures oneCCL AllGather again even with `CCL_OP_SYNC` unset — same `ur_eventWait` fault as `CCL_OP_SYNC=1` before. The 2026-08-26 correction that "collectives ARE capturable" was true for the old CUDA-only graph path; it is not true under the new accelerator-graph path. Smoke works around it by `--training.disable-accelerator-graphs`; see `upstream-sync.md` `2026-10-31`.
 > The blocker is `CCL_OP_SYNC=1`, which `ezpz_setup_env` exports
 > unconditionally (three sites in `ezpz-utils`), so every run that reached this
 > conclusion had it set without anyone choosing it.

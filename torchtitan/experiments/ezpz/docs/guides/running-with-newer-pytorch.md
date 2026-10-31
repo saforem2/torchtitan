@@ -1,13 +1,13 @@
 # Running with newer PyTorch on Aurora `prod` (oneAPI 2026.1)
 
-**Last validated:** 2026-09-30
+**Last validated:** 2026-10-31 (Sunspot `519efe4de`, `xpu-torch216-sync-5a7a622f16`: `torch 2.16.0.dev20261015+xpu`, 3/3 smoke `VERDICT: ok` on `workq 2N` `12481837`). The former `2026-09-30` `2.15.0.dev20260919+xpu` stack remains valid for Aurora `prod` but is no longer the newest gate.
 
 > [!IMPORTANT]
 > Submit new work to Aurora's `prod` routing queue. The production execution
 > queues now use the current BKC and provide the oneAPI 2026.1 stack by default;
 > the former `next-eval` workflow is no longer the operator entry point. Do not
 > load `frameworks/2026.1.0`: its bundled PyTorch is a different runtime from
-> the isolated Torch 2.15 environment validated here.
+> either isolated `xpu-torch215` or `xpu-torch216` environment validated here.
 >
 > This image-independent runtime remains separate from the older
 > [site-Python recipe](running-with-newer-pytorch.md) and from
@@ -31,7 +31,7 @@ The reusable environment used here lives at:
 | software tree | `/opt/aurora/26.181.0` |
 | oneAPI | 2026.1, inherited by default |
 | Python | 3.14.2 from `$HOME/.local/share/uv` |
-| PyTorch | `2.15.0.dev20260919+xpu` |
+| PyTorch | `2.16.0.dev20261015+xpu` (`xpu-torch216`), `2.15.0.dev20260919+xpu` (`xpu-torch215`, still valid on Aurora) |
 | required PyTorch fix | `pytorch/pytorch#181519` (`_resolve_spmd_types_for_storage`) |
 | `spmd-types` | **0.2.5** |
 | Grain | **0.2.18** |
@@ -90,7 +90,7 @@ export no_proxy="localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov"
 ```
 
 The production image begins with the 2026.1 software tree. Keep its default
-oneAPI 2026.1 runtime with the 2.15 XPU nightly, then prepend `$VIRTUAL_ENV/lib` to
+oneAPI 2026.1 runtime with the 2.16 XPU nightly, then prepend `$VIRTUAL_ENV/lib` to
 `LD_LIBRARY_PATH`: the wheel's bundled Unified Runtime loader exports
 `urGraphGetIdExp`/`urDeviceWaitExp`, while the system loader may advertise the
 same symbol version without exporting those entry points. Record module reload
@@ -142,7 +142,7 @@ from torchtitan.distributed.fsdp import DataParallelMeshDims
 
 assert metadata.version("spmd-types") == "0.2.5"
 assert metadata.version("grain") == "0.2.18"
-if not torch.__version__.startswith("2.15.") or "+xpu" not in torch.__version__:
+if not torch.__version__.startswith("2.16.") or "+xpu" not in torch.__version__:
     raise RuntimeError(f"wrong torch build: {torch.__version__}")
 
 import inspect
@@ -279,7 +279,7 @@ matter. For the full ladder, see the
 | venv Python reports `No such file or directory` | venv was built against the production `/opt/aurora` Python | use the image-independent Python 3.14 venv |
 | `cannot import name 'SpmdType' from 'spmd_types'` | borrowed venv has 0.2.1; HEAD requires 0.2.5 | update source venv, rebuild tarball, test extracted archive |
 | `No module named 'grain'` | the image-independent venv lacks the config-owned dataloader dependency | install `grain==0.2.18`, rebuild, and re-run the exact preflight |
-| FSDP rejects a plain `weight` with `dp_mesh_dims` | torch predates `pytorch#181519`, even if `spmd-types` itself is current | install a 2.15 XPU nightly and assert `_resolve_spmd_types_for_storage` exists |
+| FSDP rejects a plain `weight` with `dp_mesh_dims` | torch predates `pytorch#181519`, even if `spmd-types` itself is current | install a 2.16 XPU nightly and assert `_resolve_spmd_types_for_storage` exists |
 | `undefined symbol: urGraphGetIdExp` or `urDeviceWaitExp` while importing torch | the system Unified Runtime loader won over the newer loader bundled with the XPU wheel | prepend `$VIRTUAL_ENV/lib` to `LD_LIBRARY_PATH` after activating the broadcast venv |
 | `PMIX_Init returned -25` during `ezpz yeet` | the XPU wheel resolver installed `impi-rt`, shadowing Aurora's site MPICH/PMIx | uninstall `impi-rt`, rebuild the archive, and verify it is absent |
 | six XPU devices instead of twelve | composite device hierarchy | export `ZE_FLAT_DEVICE_HIERARCHY=FLAT` before importing torch |
