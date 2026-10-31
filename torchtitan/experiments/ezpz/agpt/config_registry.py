@@ -2230,6 +2230,65 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
     return _config_from_json("80B_deep")
 
 
+# ---------------------------------------------------------------------------
+# Polaris production: 4B + 10B on OLMo-3 tokenizer (goal 2026-10-31)
+# ---------------------------------------------------------------------------
+# Uses Dolma raw JSON (4.1T on /eagle/datasets/dolma/data_v1.7) via Grain,
+# tokenized inline with the OLMo-3 tokenizer. No pre-tokenized blendcorpus
+# needed — the existing Polaris data lists are Llama2-tokenized and wrong
+# for this vocab. OLMo-2-1124-7B tokenizer.json is byte-identical to OLMo-3.
+
+
+def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+    """Wire Dolma raw JSON via Grain + OLMo-3 inline tokenization.
+
+    Reads /eagle/datasets/dolma/data_v1.7/*.json.gz (2419 files, 4.1T).
+    TextProcessor tokenizes each sample with the model's own hf_assets_path
+    tokenizer at runtime — no pre-tokenized corpus required.
+    """
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=ConcatThenSplitPackingConfig(
+            dataset=SingleDatasetConfig(
+                source=HuggingFaceStreamingSource.Config(
+                    path="json",
+                    split="train",
+                    load_dataset_kwargs={
+                        "data_files": "/eagle/datasets/dolma/data_v1.7/*.json.gz",
+                    },
+                ),
+                processor=TextProcessor.Config(),
+                post_filters=(lambda sample: sample is not None,),
+            )
+        )
+    )
+    return cfg
+
+
+def agpt_5b_olmo3_polaris() -> FaultTolerantTrainer.Config:
+    """4.64B production on Polaris: OLMo-3 tokenizer, Dolma via Grain.
+
+    5b_olmo2tok geometry (dim 3072, 40L, 24H, 8 KV, vocab 100352) with the
+    LR from the GBS=6144 finder basin (6.58e-4 AdamW). Training budget is
+    set by the submit script via --training.steps override; the default
+    here is the config's 10k placeholder.
+    """
+    cfg = agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optim.optimizer = default_adamw(lr=6.58e-4)
+    return _polaris_dolma_grain(cfg)
+
+
+def agpt_10b_olmo3_polaris() -> FaultTolerantTrainer.Config:
+    """9.48B production on Polaris: OLMo-3 tokenizer, Dolma via Grain.
+
+    10b_olmo2tok geometry (dim 4096, 48L, 32H, 8 KV, vocab 100352) with
+    LR 4.64e-4 from the GBS=6144 finder basin. Same data plumbing as the
+    5B twin; the submit script sets --training.steps and node count.
+    """
+    cfg = agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optim.optimizer = default_adamw(lr=4.64e-4)
+    return _polaris_dolma_grain(cfg)
+
+
 # Competition speedrun configs — makes them discoverable via --config
 from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401  # noqa: E402, F401
     full_2b_adamw,
