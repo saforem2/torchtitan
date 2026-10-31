@@ -12,6 +12,14 @@ from rich.table import Table
 
 
 def probe(jobs):
+    results = {}
+    for remote in sorted({spec.get("remote", "sunspot") for spec in jobs.values()}):
+        subset = {key: spec for key, spec in jobs.items() if spec.get("remote", "sunspot") == remote}
+        results.update(probe_remote(subset, remote))
+    return results
+
+
+def probe_remote(jobs, remote):
     script = """
 import json, pathlib, re, subprocess
 jobs = json.loads(JOBS_JSON)
@@ -25,12 +33,12 @@ for jobid, spec in jobs.items():
         with path.open('rb') as f:
             f.seek(max(0, path.stat().st_size - 12000))
             tail = f.read().decode('utf-8', errors='replace')
-    progress = [line for line in tail.splitlines() if re.search(r'step:|iteration +[0-9]|VERDICT:|Error|Traceback|BENCHMARK_DIAGNOSTICS', line)]
+    progress = [line for line in tail.splitlines() if re.search(r'step:|iteration +[0-9]|VERDICT:|Error|Traceback|BENCHMARK_DIAGNOSTICS|ACCUMULATION_PROBE|BEGIN |END ', line)]
     results[jobid] = dict(label=spec['label'], scheduler=attrs.get('job_state','unknown'), exit_status=attrs.get('Exit_status'), progress=progress[-3:], tail=tail[-2500:], scheduler_error=p.stderr.strip(), log=str(path))
 print(json.dumps(results))
 """.replace("JOBS_JSON", repr(json.dumps(jobs)))
     result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "sunspot", "python3 -"],
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", remote, "python3 -"],
         input=script, text=True, capture_output=True, timeout=110,
     )
     if result.returncode:
