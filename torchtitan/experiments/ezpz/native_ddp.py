@@ -7,10 +7,12 @@
 import inspect
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
+from typing import Literal
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import bf16_compress_hook
 from torch.distributed.device_mesh import DeviceMesh
 from torch.nn.parallel import DistributedDataParallel
 
@@ -150,7 +152,13 @@ def validate_native_ddp(
     if training.enable_cpu_offload:
         raise ValueError("native DDP does not support CPU offload")
     if training.dtype != "float32" or training.mixed_precision_reduce != "float32":
-        raise ValueError("native DDP requires FP32 master parameters and reductions")
+        raise ValueError(
+            "native DDP requires FP32 master parameters and gradient accumulation"
+        )
+    if parallelism.native_ddp_communication_dtype not in ("float32", "bfloat16"):
+        raise ValueError(
+            "native_ddp_communication_dtype must be float32 or bfloat16"
+        )
     if training.mixed_precision_param != "bfloat16":
         raise ValueError("native DDP currently requires BF16 autocast")
     if not isinstance(loss_fn, CrossEntropyLoss):
@@ -169,7 +177,7 @@ def validate_native_ddp(
         raise ValueError("native DDP and ReplicateModule are mutually exclusive")
     # These three fields exist on the upstream Aurora MoE branch's core
     # ParallelismConfig but NOT on ours -- EzpzParallelismConfig deliberately
-    # ports only the five native-DDP fields our code reads, and core
+    # ports only the native-DDP fields our code reads, and core
     # torchtitan has never had them. Reading them directly raised
     # AttributeError on a slotted dataclass, so this validator could not run
     # at all. getattr with the upstream default keeps the rejection
@@ -184,12 +192,33 @@ def validate_native_ddp(
         raise ValueError("native_ddp_bucket_cap_mb must be positive")
 
 
+def configure_native_ddp_communication(
+    model: DistributedDataParallel,
+    process_group: dist.ProcessGroup,
+    dtype: Literal["float32", "bfloat16"],
+) -> None:
+    """Select the collective payload dtype while retaining FP32 bucket storage.
+
+    BF16 communication quantizes each bucket before all-reduce and copies the
+    result back to its original FP32 storage. This changes wire precision,
+    not parameter storage or the precision of local gradient accumulation.
+    """
+    if dtype == "bfloat16":
+        model.register_comm_hook(process_group, bf16_compress_hook)
+    elif dtype != "float32":
+        raise ValueError(
+            f"native DDP communication dtype must be float32 or bfloat16, got {dtype}"
+        )
+
+
 def wrap_native_ddp(
     model: nn.Module,
     dp_mesh: DeviceMesh,
     bucket_cap_mb: float,
     compute_policy: str = "autocast",
     bucketize_first_iteration: bool = False,
+    *,
+    communication_dtype: Literal["float32", "bfloat16"] = "float32",
 ) -> NativeDDP:
     if compute_policy != "autocast":
         raise ValueError("native DDP only supports the autocast compute policy")
@@ -243,6 +272,7 @@ def wrap_native_ddp(
         **initial_bucket_kwargs,
     )
     validate_initial_buckets(wrapped)
+    configure_native_ddp_communication(wrapped, process_group, communication_dtype)
     return wrapped
 
 

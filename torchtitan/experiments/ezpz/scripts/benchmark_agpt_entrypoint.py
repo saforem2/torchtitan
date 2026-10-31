@@ -12,6 +12,8 @@ import argparse
 import dataclasses
 import functools
 import importlib
+import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,9 @@ class SophiaStepWitness:
         self.records = {}
         self.model = None
         self.model_samples = []
+        self.runtime = {}
+        self.communication = {}
+        self.ddp_models = []
         self.errors = []
         self.original_step = None
         self.optimizer_class = None
@@ -82,14 +87,49 @@ class SophiaStepWitness:
                 import deepspeed
 
                 original_initialize = deepspeed.initialize
+                original_all_reduce = deepspeed.comm.all_reduce
+
+                @functools.wraps(original_all_reduce)
+                def witnessed_all_reduce(tensor, *args, **kwargs):
+                    if tensor.numel() >= 1024:
+                        key = f"{tensor.dtype}:{tensor.numel()}"
+                        entry = self.communication.setdefault(key, {
+                            "dtype": str(tensor.dtype), "numel": tensor.numel(),
+                            "bytes": tensor.numel() * tensor.element_size(), "calls": 0,
+                        })
+                        entry["calls"] += 1
+                    return original_all_reduce(tensor, *args, **kwargs)
+
+                deepspeed.comm.all_reduce = witnessed_all_reduce
 
                 @functools.wraps(original_initialize)
                 def witnessed_initialize(*args, **kwargs):
                     result = original_initialize(*args, **kwargs)
-                    self.model = result[0].module
+                    engine = result[0]
+                    self.model = engine.module
+                    self.runtime = {
+                        "model_and_grad_accum_dtype": tuple(map(str, engine.get_data_types())),
+                        "communication_dtype": str(engine.communication_data_type),
+                        "zero_stage": engine.zero_optimization_stage(),
+                        "pipeline_parallelism": engine.pipeline_parallelism,
+                        "optimizer_wrapper": type(engine.optimizer).__qualname__,
+                        "basic_optimizer": type(engine.basic_optimizer).__qualname__,
+                        "configured_grad_accum_dtype": str(engine._config.grad_accum_dtype),
+                        "configured_communication_dtype": str(engine._config.communication_data_type),
+                    }
                     return result
 
                 deepspeed.initialize = witnessed_initialize
+            else:
+                native = importlib.import_module("torchtitan.experiments.ezpz.native_ddp")
+                original_initialize = native.NativeDDP.__init__
+
+                @functools.wraps(original_initialize)
+                def witnessed_ddp_initialize(model, *args, **kwargs):
+                    original_initialize(model, *args, **kwargs)
+                    self.ddp_models.append(model)
+
+                native.NativeDDP.__init__ = witnessed_ddp_initialize
         except Exception as error:
             self.errors.append(f"install: {type(error).__name__}: {error}")
 
@@ -101,7 +141,14 @@ class SophiaStepWitness:
     def diagnostics(self):
         import torch
 
-        result = {"errors": list(self.errors), "optimizers": []}
+        result = {"errors": list(self.errors), "optimizers": [],
+                  "deepspeed_runtime": self.runtime,
+                  "observed_large_all_reduce_payloads": list(self.communication.values())}
+        result["native_ddp"] = [
+            {"logging": model._get_ddp_logging_data(),
+             "activation_dtypes": dict(getattr(model, "_agpt_dtype_probe", {}))}
+            for model in self.ddp_models
+        ]
         for record in self.records.values():
             try:
                 optimizer = record["optimizer"]
@@ -202,6 +249,49 @@ class SophiaStepWitness:
         return result
 
 
+def install_mds_batch_witness(rank, world_size):
+    """Observe CPU batches consumed by get_batch before MDS device transfer."""
+    if not os.environ.get("AGPT_BENCH_BATCH_HASH_DIR"):
+        return
+    path = os.environ["AGPT_BENCH_BATCH_HELPER"]
+    spec = importlib.util.spec_from_file_location("agpt_batch_witness", path)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    witness = helper.BatchInputWitness.from_env(rank=rank, world_size=world_size)
+    training = importlib.import_module("megatron.training")
+    original_pretrain = training.pretrain
+
+    @functools.wraps(original_pretrain)
+    def witnessed_pretrain(*args, **kwargs):
+        bound = inspect.signature(original_pretrain).bind_partial(*args, **kwargs)
+        forward = bound.arguments["forward_step_func"]
+        original_get_batch = forward.__globals__["get_batch"]
+
+        class ObservedIterator:
+            def __init__(self, iterator):
+                self.iterator = iterator
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                import torch
+                batch = next(self.iterator)
+                if torch.is_grad_enabled():
+                    witness(batch["text"])
+                return batch
+
+        @functools.wraps(original_get_batch)
+        def witnessed_get_batch(iterator, *get_args, **get_kwargs):
+            observed = ObservedIterator(iterator) if iterator is not None else None
+            return original_get_batch(observed, *get_args, **get_kwargs)
+
+        forward.__globals__["get_batch"] = witnessed_get_batch
+        return original_pretrain(*args, **kwargs)
+
+    training.pretrain = witnessed_pretrain
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     target = parser.add_mutually_exclusive_group(required=True)
@@ -230,6 +320,11 @@ def main() -> None:
         witness = SophiaStepWitness(module=module)
 
     rank = MPI.COMM_WORLD.Get_rank()
+    world_size = MPI.COMM_WORLD.Get_size()
+    if os.environ.get("BENCH_EXPECTED_WORLD_SIZE") and world_size != int(os.environ["BENCH_EXPECTED_WORLD_SIZE"]):
+        raise ValueError(f"Unexpected MPI world size: {world_size}")
+    if args.script:
+        install_mds_batch_witness(rank, world_size)
     args.output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     completed = False

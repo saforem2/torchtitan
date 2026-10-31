@@ -58,6 +58,11 @@ print(f"xpu_count={torch.xpu.device_count()}")
 PY
 
 RUN_KIND="${RUN_KIND:-zero0-sophiag}"
+GRAD_POLICY="${GRAD_POLICY:-production}"
+case "${GRAD_POLICY}" in
+    production|fp32_wire) ;;
+    *) echo "GRAD_POLICY must be production or fp32_wire" >&2; exit 98 ;;
+esac
 STEPS="${STEPS:-32}"
 WARMUP_ITERS="${WARMUP_ITERS:-0}"
 EVAL_ITERS="${EVAL_ITERS:-1}"
@@ -103,7 +108,7 @@ case "$(realpath "${LOAD_ROOT}/global_step138650/mp_rank_00_model_states.pt")" i
 [[ -f "${BOOKS_LIST}" && -d "${PYTHON_OVERLAY}" && -d "${DISTUTILS_OVERLAY}" ]] || exit 99
 cd "${MDS_ROOT}" || exit 99
 JOBID_SHORT="${PBS_JOBID%%.*}"
-RUN_NAME="mds-${RUN_KIND}-n${NODES}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
+RUN_NAME="mds-${RUN_KIND}-${GRAD_POLICY}-n${NODES}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 OUTPUT_DIR="${RUN_ROOT}/outputs/${RUN_NAME}"
 LOG_DIR="${RUN_ROOT}/logs/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}/tensorboard" "${OUTPUT_DIR}/wandb" \
@@ -111,6 +116,9 @@ mkdir -p "${OUTPUT_DIR}/tensorboard" "${OUTPUT_DIR}/wandb" \
 LOG_FILE="${LOG_DIR}/train.log"
 DS_CONFIG="${OUTPUT_DIR}/deepspeed-config.json"
 PROVENANCE_DIR="${OUTPUT_DIR}/provenance"
+export AGPT_BENCH_BATCH_HASH_DIR="${OUTPUT_DIR}/input-hashes"
+export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
+export AGPT_BENCH_BATCH_HELPER="${TT_ROOT}/torchtitan/experiments/ezpz/scripts/agpt_batch_witness.py"
 mkdir -p "${PROVENANCE_DIR}"
 cp -- "${BASH_SOURCE[0]}" "${PROVENANCE_DIR}/submitted-launcher.sh"
 sha256sum "${PROVENANCE_DIR}/submitted-launcher.sh" > "${PROVENANCE_DIR}/submitted-launcher.sha256"
@@ -125,6 +133,12 @@ cp -- "${MDS_ROOT}/megatron/optimizer/sophia.py" "${PROVENANCE_DIR}/mds-sophia.p
 cp -- "${MDS_ROOT}/megatron/optimizer/__init__.py" "${PROVENANCE_DIR}/mds-optimizer.py"
 cp -- "${MDS_ROOT}/megatron/training.py" "${PROVENANCE_DIR}/mds-training.py"
 cp -- "${MDS_ROOT}/megatron/checkpointing.py" "${PROVENANCE_DIR}/mds-checkpointing.py"
+cp -- "${MDS_ROOT}/megatron/data/helpers.cpython-312-x86_64-linux-gnu.so" "${PROVENANCE_DIR}/"
+sha256sum "${PROVENANCE_DIR}/helpers.cpython-312-x86_64-linux-gnu.so" > "${PROVENANCE_DIR}/native-helpers.sha256"
+DS_RUNTIME_ROOT=$("${MDS_VENV}/bin/python" -c 'import importlib.util; from pathlib import Path; print(Path(importlib.util.find_spec("deepspeed").origin).parent / "runtime")')
+for source_file in engine.py config.py constants.py bf16_optimizer.py fp16/unfused_optimizer.py; do
+    cp -- "${DS_RUNTIME_ROOT}/${source_file}" "${PROVENANCE_DIR}/ds-${source_file//\//-}" || exit 99
+done
 sha256sum "${LOAD_ROOT}/global_step138650/mp_rank_00_model_states.pt" > "${PROVENANCE_DIR}/checkpoint.sha256"
 cp -- "${BOOKS_LIST}" "${PROVENANCE_DIR}/books.txt"
 for metadata in "${LOAD_ROOT}"/lr_state_dict_*.yaml; do
@@ -132,11 +146,11 @@ for metadata in "${LOAD_ROOT}"/lr_state_dict_*.yaml; do
 done
 
 # Derive a job-unique ZeRO-0 config; the model checkpoint supplies no optimizer state.
-"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" <<'PYCONFIG' || exit 96
+"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" <<'PYCONFIG' || exit 96
 import json
 import sys
 
-template_path, config_path, global_batch_size = sys.argv[1:]
+template_path, config_path, global_batch_size, grad_policy = sys.argv[1:]
 with open(template_path, encoding="utf-8") as stream:
     config = json.load(stream)
 config["train_batch_size"] = int(global_batch_size)
@@ -145,10 +159,15 @@ config["gradient_accumulation_steps"] = 2
 config["zero_optimization"] = {"stage": 0}
 config["flops_profiler"]["enabled"] = False
 config["comms_logger"]["enabled"] = False
+assert "communication_data_type" not in config
+assert "grad_accum_dtype" not in config.get("data_types", {})
+if grad_policy == "fp32_wire":
+    # Preserve the legacy BF16 local accumulation; change only wire precision.
+    config["communication_data_type"] = "fp32"
 with open(config_path, "x", encoding="utf-8") as stream:
     json.dump(config, stream, indent=2)
     stream.write("\n")
-print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage=0")
+print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage=0 grad_policy={grad_policy}")
 PYCONFIG
 cp -- "${DS_CONFIG}" "${PROVENANCE_DIR}/deepspeed-config.json"
 
@@ -163,8 +182,8 @@ export WANDB_RUN_GROUP="${BENCH_WANDB_GROUP:-${WANDB_RUN_GROUP}}"
 export WANDB_RUN_NAME="${RUN_NAME}"
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_RUN_ID="agpt-${RUN_NAME}"
-export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${RUN_KIND}"
-export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${RUN_KIND}"
+export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${GRAD_POLICY},${RUN_KIND}"
+export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${GRAD_POLICY},${RUN_KIND}"
 export WANDB_DIR="${OUTPUT_DIR}/wandb"
 
 PROFILE_ARGS=()
@@ -189,6 +208,7 @@ fi
     echo "load_root=${LOAD_ROOT} load_tag=global_step138650"
     echo "data_list=${BOOKS_LIST} split=95,5,0 gbs=${GLOBAL_BATCH_SIZE} gas=2 microbatch=1 seq=8192"
     echo "optimizer=sophiag beta1=.9 beta2=.95 rho=.01 weight_decay=.1 clip_grad=1.0"
+    echo "grad_policy=${GRAD_POLICY} local_accumulation=legacy_default_runtime_unverified"
     echo "optimizer_state=fresh hessian_policy=no_update_hessian_call_in_pinned_source step_bs_default=5120"
     echo "profile=${PROFILE} deepspeed_flops_profiler=disabled activation_checkpoint=none"
     echo "data_list_sha256=$(sha256sum "${BOOKS_LIST}" | cut -d' ' -f1)"

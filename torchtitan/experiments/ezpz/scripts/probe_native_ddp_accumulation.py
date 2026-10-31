@@ -11,12 +11,13 @@ import torch
 import torch.distributed as dist
 from torch.nn import functional as F
 
-from torchtitan.experiments.ezpz.native_ddp import NativeDDP, scale_native_ddp_loss
+from torchtitan.experiments.ezpz.native_ddp import NativeDDP, configure_native_ddp_communication, scale_native_ddp_loss
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--communication-dtype", choices=("float32", "bfloat16"), default="float32")
     args = parser.parse_args()
     ezpz.setup_torch()
     rank, world = dist.get_rank(), dist.get_world_size()
@@ -32,6 +33,7 @@ def main():
         model = torch.nn.Linear(16, 8, bias=False).to(device)
         model.weight.data.copy_(initial)
         models.append(NativeDDP(model, device_ids=[device.index], broadcast_buffers=False))
+        configure_native_ddp_communication(models[-1], dist.group.WORLD, args.communication_dtype)
     generator = torch.Generator().manual_seed(1729)
     all_inputs = torch.randn(world, 2, 3, 16, generator=generator).to(device)
     all_labels = torch.randint(0, 8, (world, 2, 3), generator=generator).to(device)
@@ -61,6 +63,17 @@ def main():
     loss_error = float((loss_pair[0] - loss_pair[1]).abs().item())
     grad = accumulated.module.weight.grad
     reference_grad = combined.module.weight.grad
+    # Independently reproduce the communication hook from local FP32 gradients.
+    for microbatch in range(2):
+        local_loss = F.cross_entropy(template(all_inputs[rank, microbatch]), all_labels[rank, microbatch], reduction="sum") / num_tokens
+        scale_native_ddp_loss(local_loss, world).backward()
+    local_grad = template.weight.grad
+    wire_reference = local_grad.to(torch.bfloat16 if args.communication_dtype == "bfloat16" else torch.float32).clone().div_(world)
+    dist.all_reduce(wire_reference)
+    wire_error = float((grad - wire_reference.float()).abs().max().item())
+    wire_agreement = torch.allclose(grad, wire_reference.float(), atol=1e-6, rtol=1e-5)
+    full_precision_reference = local_grad.clone().div_(world)
+    dist.all_reduce(full_precision_reference)
     max_abs = float((grad - reference_grad).abs().max().item())
     # Accumulation changes FP32 summation order; the comparison is not bitwise.
     equivalent = torch.allclose(grad, reference_grad, atol=1e-6, rtol=1e-5)
@@ -73,6 +86,10 @@ def main():
                   final_gradients_identical_across_ranks=rank_agreement,
                   gas2_vs_combined_max_abs_grad=max_abs,
                   gas2_vs_combined_allclose=equivalent, atol=1e-6, rtol=1e-5,
+                  communication_dtype=args.communication_dtype,
+                  manual_wire_reference_max_abs_grad=wire_error,
+                  manual_wire_reference_allclose=wire_agreement,
+                  vs_full_precision_max_abs_grad=float((grad - full_precision_reference).abs().max().item()),
                   global_loss_gas2=float(loss_pair[0].item()),
                   global_loss_combined=float(loss_pair[1].item()),
                   global_loss_abs_error=loss_error,
@@ -80,7 +97,9 @@ def main():
                   gradient_dtype=str(grad.dtype), torch=torch.__version__)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / f"rank-{rank:03d}.json").write_text(json.dumps(result, indent=2) + "\n")
-    passed = bool(unsynchronized and rank_agreement and equivalent and loss_error <= 1e-6)
+    passed = bool(unsynchronized and rank_agreement and wire_agreement and loss_error <= 1e-6)
+    if args.communication_dtype == "float32":
+        passed = passed and equivalent
     status = torch.tensor(int(passed), device=device)
     dist.all_reduce(status, op=dist.ReduceOp.MIN)
     if rank == 0:

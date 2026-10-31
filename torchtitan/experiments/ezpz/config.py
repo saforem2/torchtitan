@@ -65,6 +65,14 @@ class EzpzParallelismConfig(ParallelismConfig):
     parameter storage is supported.
     """
 
+    native_ddp_communication_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Native DDP collective payload precision. The BF16 compression hook
+    quantizes gradient buckets for communication and copies the result back
+    into FP32 gradients; parameter storage and local gradient accumulation
+    remain FP32. BF16 communication can change numerical results.
+    """
+
     native_ddp_bucket_cap_mb: float = 25.0
     """Gradient bucket capacity for the native DDP backend, in MiB."""
 

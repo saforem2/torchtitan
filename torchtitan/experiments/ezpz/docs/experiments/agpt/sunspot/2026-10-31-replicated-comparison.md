@@ -2,7 +2,8 @@
 
 ## Status
 
-Two-node accumulation preflight in progress. No production-scale parity result yet.
+The `24`-rank FP32 accumulation probe passed. Full-model comparison is next.
+No production-scale parity result yet.
 
 The original Aurora production reference uses `MDS ZeRO-0` on `256` nodes,
 `3072` FLAT devices, sequence `8192`, microbatch `1`, accumulation `2`, and
@@ -16,7 +17,7 @@ See the [full-history audit](2026-10-29-native-checkpoint-closure.md#production-
 | Setting | Contract |
 |---|---|
 | Model | `1,986,054,144` parameters, native `MDS global_step138650` weights |
-| Precision | FP32 master parameters; BF16 compute; FP32 gradient reductions |
+| Precision | FP32 optimizer masters; BF16 compute; gradient accumulation and wire dtype isolated below |
 | Attention | Fused SDPA/Flash; confirm dispatch from traces |
 | Geometry | `12` FLAT devices/node; microbatch `1`; accumulation `2` |
 | Global batch | `2 * 12 * nodes`; `6144` at `256` nodes |
@@ -40,6 +41,27 @@ established the checkpoint representation mapping; input equality must be
 audited again for the new global batches.
 
 ## Gates and arms
+
+The pinned `DeepSpeed 0.18.5` ZeRO-0/no-pipeline path defaults to BF16
+gradient accumulation and BF16 communication. The Megatron flag
+`accumulate_allreduce_grads_in_fp32=True` does not establish wire precision:
+the DeepSpeed branch bypasses Megatron's LocalDDP wrapper. Runtime engine
+properties and observed collective tensor dtypes must confirm this.
+
+| Path | Local gradient accumulation | Collective payload | Purpose |
+|---|---|---|---|
+| `MDS production` | BF16, expected from source | BF16, expected from source | Reproduce the pinned baseline |
+| `MDS fp32_wire` | BF16 | FP32 | Isolate communication precision |
+| `TT native DDP` | FP32 | FP32 | Preserve the current TT precision policy |
+| `TT native DDP BF16 wire` | FP32 | BF16 | Isolate communication precision with FP32 masters/accumulation |
+
+The TT BF16 path uses PyTorch's built-in `bf16_compress_hook`. It quantizes
+the collective buffer and copies the result back to FP32 gradients. It does
+not establish numerical equivalence with FP32 communication or BF16 local
+accumulation. A dedicated probe compares it with an explicit cast/divide/
+all-reduce reference. The pinned DeepSpeed ZeRO-0 path rejects BF16 model
+parameters with FP32 gradient accumulation; do not request that combination
+through a JSON setting and assume it works.
 
 1. Run a two-node native-DDP probe with seed `42` and strict deterministic
    algorithms. Require unsynchronized first-microbatch gradients, bitwise
@@ -85,6 +107,16 @@ can catch optimizer-step exceptions without making the process exit nonzero.
 | Job | Source | Purpose | Result |
 |---|---|---|---|
 | `12481844` | `656a174b6` | `24`-rank accumulation probe | `PBS F`, exit `1`; stale console-script interpreter, before MPI launch |
+| `12481845` | `6dade13b6` | Corrected `24`-rank accumulation probe | `PBS F`, exit `0`; all rank checks passed |
+
+`12481845`: all `24` rank files are present. The first microbatch was
+unsynchronized; final gradients were bitwise identical across ranks.
+Accumulated versus combined-batch maximum gradient error was
+`7.450580596923828e-9`; global loss error was `0`. The check used the explicit
+`atol=1e-6`, `rtol=1e-5` gradient criterion. It proves FP32 DDP accumulation
+and token normalization for the probe, not full AGPT BF16 numerical parity.
+Online [run](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-probe-12481845);
+artifact `agpt-replicated-accumulation-12481845:v0`, `COMMITTED`, `24` files.
 
 `12481844` passed parser/API and repository preflight. On its compute node,
 `torch 2.14.0+xpu` enumerated `12` FLAT devices. The installed `ezpz` console

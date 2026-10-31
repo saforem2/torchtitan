@@ -10,6 +10,9 @@ import torch
 from torchtitan.components.data.loader import BaseDataLoader
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.experiments.ezpz.logging import logger
+from torchtitan.experiments.ezpz.scripts.agpt_batch_witness import (
+    BatchInputWitness,
+)
 
 
 def _import_blendcorpus_modules():
@@ -216,6 +219,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
             local_batch_size = max(1, num_tokens_per_batch // seq_len)
         self._mode = "hf"
         self._delegate: BaseDataLoader | None = None
+        self._batch_input_witness: BatchInputWitness | None = None
         # Set here too: the HF-delegate branch below returns before the
         # blendcorpus setup that normally assigns this. The delegate path
         # never reaches the reader that uses it, but leaving the attribute
@@ -401,6 +405,12 @@ class BlendCorpusDataLoader(BaseDataLoader):
         # Pre-cache step in benchmark_80b.sh ensures index files exist
         # on disk before this point.
         rank = int(os.environ.get("RANK", 0))
+        if not config.serve_validation:
+            world_size = int(os.environ.get("WORLD_SIZE", dp_world_size))
+            self._batch_input_witness = BatchInputWitness.from_env(
+                rank=rank,
+                world_size=world_size,
+            )
         logger.info(
             "Rank %d: building blendcorpus datasets (data=%s, cache=%s, "
             "serve_validation=%s)...",
@@ -469,7 +479,16 @@ class BlendCorpusDataLoader(BaseDataLoader):
             return
 
         for batch in self._loader:
-            tokens = batch["text"].long()
+            raw_tokens = batch["text"]
+            if (
+                self._batch_input_witness is not None
+                and torch.is_grad_enabled()
+            ):
+                self._batch_input_witness(
+                    raw_tokens,
+                    consumed_samples=self._consumed_samples,
+                )
+            tokens = raw_tokens.long()
             input_ids = tokens[:, :-1].contiguous()
             labels = tokens[:, 1:].contiguous()
             # Positions are derived BEFORE the fold below: _document_positions

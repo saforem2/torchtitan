@@ -52,6 +52,9 @@ export WANDB_RUN_NAME="${WANDB_NAME}"
 export WANDB_DIR="${OUT}/wandb"
 export WANDB_TAGS="agpt-replicated,sunspot,${ARM},${NODES}nodes"
 export WANDB_RUN_TAGS="${WANDB_TAGS}"
+export AGPT_BENCH_BATCH_HASH_DIR="${OUT}/input-hashes"
+export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
+export TORCHTITAN_AGPT_DTYPE_PROBE=1
 VENV="${BENCH_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
 source "${ROOT}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
 load_pinned_ezpz_utils || exit $?
@@ -106,16 +109,22 @@ echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
 
-if [[ "${ARM}" == probe ]]; then
+if [[ "${ARM}" == probe || "${ARM}" == probe-bf16 ]]; then
+    COMM_DTYPE=float32
+    [[ "${ARM}" == probe-bf16 ]] && COMM_DTYPE=bfloat16
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" -m torchtitan.experiments.ezpz.scripts.probe_native_ddp_accumulation
-        --output "${OUT}/accumulation-probe")
+        --output "${OUT}/accumulation-probe" --communication-dtype="${COMM_DTYPE}")
 else
     case "${ARM}" in
-        ddp-eager|ddp-losscompile)
+        ddp-eager|ddp-losscompile|ddp-bf16-eager|ddp-bf16-losscompile)
+            COMM_DTYPE=float32
+            [[ "${ARM}" == *bf16* ]] && COMM_DTYPE=bfloat16
             PARALLEL=(--parallelism.data-parallel-shard-degree=1
                 --parallelism.data-parallel-replicate-degree="${NPROC}"
-                --parallelism.enable-data-parallel-native-ddp)
+                --parallelism.enable-data-parallel-native-ddp
+                --parallelism.native-ddp-bucket-cap-mb="${DDP_BUCKET_MB:-25}"
+                --parallelism.native-ddp-communication-dtype="${COMM_DTYPE}")
             ;;
         fsdp-eager|fsdp-losscompile)
             PARALLEL=(--parallelism.data-parallel-shard-degree="${NPROC}"

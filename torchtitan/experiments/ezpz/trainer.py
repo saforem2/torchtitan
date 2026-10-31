@@ -262,6 +262,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 config.parallelism.native_ddp_bucket_cap_mb,
                 config.parallelism.native_ddp_compute_policy,
                 config.parallelism.native_ddp_bucketize_first_iteration,
+                communication_dtype=config.parallelism.native_ddp_communication_dtype,
             )
 
         if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
