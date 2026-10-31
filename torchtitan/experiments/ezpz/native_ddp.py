@@ -222,6 +222,11 @@ def wrap_native_ddp(
 ) -> NativeDDP:
     if compute_policy != "autocast":
         raise ValueError("native DDP only supports the autocast compute policy")
+    # In-place WGRAD accumulation bypasses autocast's casts, so Linear rejects
+    # it under autocast; DDP's reducer still sees the regular AccumulateGrad.
+    for module in model.modules():
+        if getattr(module, "inplace_wgrad_accum", False):
+            module.inplace_wgrad_accum = False
     device = next(model.parameters()).device
     device_ids = None if device.type == "cpu" else [device.index]
     mixed_precision = None
