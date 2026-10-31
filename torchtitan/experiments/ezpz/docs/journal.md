@@ -6,6 +6,13 @@ Running log of what's happening, session by session. Most recent first.
 
 Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug 16) to **step-6800** (Oct 18 12:41) across 4 legs that never landed in local docs. Last leg `7753580` (6501->6859) self-aborted via `GRAD_NORM_ABORT=20.0` at step 6859 (grad_norm 5.5, 28.9x median) -- first abort of its kind on this chain, exit 0, checkpoint 6800 intact. Queue was empty (idle 13 days). Re-queued at `select=132` (`128 train + 4 spare`, matching Oct legs) via `submit_agpt_20b_autoretry.sh` with `CHECKPOINT_ASYNC_MODE=async` (required on Polaris, sync deadlocks at 512 ranks): **7803246 Q** + **7803247 H** (afterany), chain 2-deep. Polaris HEAD `5be47f7cf` matches mbph `ezpz`. Updated `production/polaris/README.md` header, at-a-glance, checkpoints (56->68 dirs, 47->57B tokens), trajectory legs 19-22, and queue depth. Charts remain stale (2026-07-22) -- wiring is now on HEAD but not regenerated (needs W&B creds). W&B run `rq0kbuej` (eager-wind-4628) covers 6501-6859.
 
+## 2026-10-31 (Sunspot) -- final MDS/TT comparison
+
+- All five measured jobs completed `32/32` updates and final checkpoint saves, with `PBS Exit_status=0`. `MDS` is `24.872761 s/update`; eager `TT` is `28.412792-28.700836 s`; loss compilation is `25.970769-26.885055 s`, `4.4-8.1%` behind this `MDS` control.
+- All-rank allocated/reserved peaks are `40.386580/42.726563 GiB` for `MDS`, `47.958935/53.812500 GiB` for eager `TT`, and `32.333996/38.187500 GiB` for loss compilation. Compiled `_compile.compile_inner` is `16.195741-16.868698 s/rank`; backward compilation is recorded separately.
+- Native weights and the complete `32`-update token stream match after the required representation mapping. Numerical equivalence is not established; same-path repeats differ too.
+- [Final report, JSON and figure](experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md). Raw traces, complete histories, diagnostics and source are preserved in online `W&B`.
+
 ## 2026-10-29 (Aurora) -- native-init failure isolated before another model retry
 
 Retry `8984481` finished exit143 after 00:07:29; first XPU broadcast in

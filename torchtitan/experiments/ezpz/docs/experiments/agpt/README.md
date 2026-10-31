@@ -29,6 +29,8 @@ Dense transformer training benchmarks across ALCF machines.
 
 ### Sunspot
 
+Latest: [MDS versus TorchTitan, final report](sunspot/2026-10-29-native-checkpoint-closure.md). Same native parameters and all 32 token batches verified. MDS `24.87`, TT eager `28.41-28.70`, TT loss compilation `25.97-26.89 s/update`; compiled TT is `4.4-8.1%` slower than this MDS control. Includes compilation cost, all-rank memory, trace analysis and numerical differences.
+
 | Date | Report | Configs | Nodes | Key Result |
 |------|--------|---------|-------|------------|
 | 2026-03-30 | [80B results](../../scaling/agpt-80b.md) | 80B variants x TP={2,3,6,12} | 2 | TP=2 best: 85 TPS, 15.5% MFU |
