@@ -29,6 +29,16 @@ class NativeDDP(DistributedDataParallel):
         except AttributeError:
             return getattr(self.module, name)
 
+    def set_requires_all_reduce(self, enabled: bool) -> None:
+        """Match the FSDP accumulation hook used by the training engine.
+
+        The engine calls this before each microbatch's forward and backward.
+        DDP's ``no_sync`` context sets the same flag, so toggling it here
+        suppresses reducer work for non-final accumulation microbatches while
+        still synchronizing the accumulated gradient on the final backward.
+        """
+        self.require_backward_grad_sync = enabled
+
 
 _AGPT_DTYPE_POLICIES = {
     "uniform_bfloat16": {
@@ -145,8 +155,10 @@ def validate_native_ddp(
         raise ValueError("native DDP currently requires BF16 autocast")
     if not isinstance(loss_fn, CrossEntropyLoss):
         raise ValueError("native DDP currently requires standard CrossEntropyLoss")
-    if gradient_accumulation_steps != 1:
-        raise ValueError("native DDP currently requires one gradient accumulation step")
+    if gradient_accumulation_steps < 1:
+        raise ValueError(
+            "native DDP requires at least one gradient accumulation step"
+        )
     if fault_tolerance_enabled:
         raise ValueError("native DDP does not support fault tolerance")
     if create_seed_checkpoint:

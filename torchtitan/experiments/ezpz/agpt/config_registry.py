@@ -612,6 +612,20 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_2b_replicated_benchmark() -> FaultTolerantTrainer.Config:
+    """Replicated-DP benchmark config matching the pinned MDS SophiaG path."""
+    cfg = agpt_2b_mds_anneal_flat()
+    cfg.optim.optimizer = default_sophiag(
+        lr=2e-6,
+        betas=(0.9, 0.95),
+        rho=0.01,
+        update_hessian_before_step=False,
+    )
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-replicated-benchmark"
+    return cfg
+
+
 def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
 

@@ -55,8 +55,8 @@ class EzpzParallelismConfig(ParallelismConfig):
     Use native ``DistributedDataParallel`` for pure replicated AGPT data
     parallelism. This experimental path keeps FP32 master parameters and
     gradients. Its forward compute policy is selected separately below. It is
-    disabled by default and supports no model parallelism. PP, TP, CP, EP, and
-    outer gradient accumulation remain unsupported.
+    disabled by default and supports no model parallelism. PP, TP, CP, and EP
+    remain unsupported; data-parallel gradient accumulation is supported.
     """
 
     native_ddp_compute_policy: Literal["autocast"] = "autocast"
