@@ -77,7 +77,7 @@ VENV="$(readlink -f "${VENV}")"
 # silently rejected by tyro.
 DEFAULT_CONFIGS=(
     "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --training.disable-accelerator-graphs"
-    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --parallelism.tensor-parallel-degree=2 --training.disable-accelerator-graphs"
+    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --parallelism.tensor-parallel-degree=2 --training.disable-accelerator-graphs activation-checkpoint:none"
     "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --training.disable-accelerator-graphs"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
