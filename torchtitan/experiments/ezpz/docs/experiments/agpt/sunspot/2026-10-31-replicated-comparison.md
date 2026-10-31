@@ -2,7 +2,7 @@
 
 ## Status
 
-Preparing a new controlled campaign. No production-scale parity result yet.
+Two-node accumulation preflight in progress. No production-scale parity result yet.
 
 The original Aurora production reference uses `MDS ZeRO-0` on `256` nodes,
 `3072` FLAT devices, sequence `8192`, microbatch `1`, accumulation `2`, and
@@ -82,5 +82,24 @@ can catch optimizer-step exceptions without making the process exit nonzero.
 
 ## Jobs and evidence
 
-Pending preflight and submission. Job IDs, immutable source commits, runtime
-paths, exact commands, terminal status, artifact hashes and results go here.
+| Job | Source | Purpose | Result |
+|---|---|---|---|
+| `12481844` | `656a174b6` | `24`-rank accumulation probe | `PBS F`, exit `1`; stale console-script interpreter, before MPI launch |
+
+`12481844` passed parser/API and repository preflight. On its compute node,
+`torch 2.14.0+xpu` enumerated `12` FLAT devices. The installed `ezpz` console
+script retained the older `/venvs/xpu-torch214/bin/python3` shebang and failed
+to import `click.core`. This is a launcher failure, with no gradient result.
+The fix rebinds a job-local copy of the installed console script to the
+selected interpreter, runs `ezpz launch --help`, and leaves the borrowed venv
+immutable.
+
+Campaign source: `codex/agpt-replicated-20261031`, based on `5be47f7c`.
+Sunspot workdir:
+`/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031`.
+Runtime:
+`/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927`.
+`MDS` base `b5617bac`, XPU-profiler commit
+`9f407ed9e8e30920e28272daf8cb7db36c211e21`.
+Native checkpoint SHA-256:
+`e37d9ca2c9cb396a3207edf6132815e7a6ad32c247ebe5043782c54a20a69e1c`.

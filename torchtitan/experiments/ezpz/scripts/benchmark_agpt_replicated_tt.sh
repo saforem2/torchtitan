@@ -76,6 +76,21 @@ export TRITON_CACHE_DIR="/tmp/agpt-replicated-${JOB}/triton"
 hash -r
 [[ "$(command -v python)" == "${VENV}/bin/python" ]] || exit 94
 [[ "$(command -v ezpz)" == "${VENV}/bin/ezpz" ]] || exit 95
+# This copied venv's installed console script retains its source shebang.
+# Rebind a job-local copy; keep the borrowed runtime itself immutable.
+CONSOLE_DIR="${OUT}/provenance/bin"
+mkdir -p "${CONSOLE_DIR}"
+"${VENV}/bin/python" - "${VENV}/bin/ezpz" "${CONSOLE_DIR}/ezpz" "${VENV}/bin/python" <<'PY' || exit 95
+from pathlib import Path
+import sys
+source, target, interpreter = sys.argv[1:]
+body = Path(source).read_text().partition("\n")[2]
+Path(target).write_text("#!" + interpreter + "\n" + body)
+Path(target).chmod(0o755)
+PY
+export PATH="${CONSOLE_DIR}:${PATH}"
+hash -r
+ezpz launch --help > "${OUT}/provenance/ezpz-launch-help.txt" 2>&1 || exit 95
 "${VENV}/bin/python" - <<'PY' || exit 96
 import torch
 assert torch.xpu.is_available()
