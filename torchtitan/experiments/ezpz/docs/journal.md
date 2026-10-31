@@ -2,6 +2,10 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-31 (Polaris) -- 20B chain re-armed at step 6800, docs 2 months stale
+
+Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug 16) to **step-6800** (Oct 18 12:41) across 4 legs that never landed in local docs. Last leg `7753580` (6501->6859) self-aborted via `GRAD_NORM_ABORT=20.0` at step 6859 (grad_norm 5.5, 28.9x median) -- first abort of its kind on this chain, exit 0, checkpoint 6800 intact. Queue was empty (idle 13 days). Re-queued at `select=132` (`128 train + 4 spare`, matching Oct legs) via `submit_agpt_20b_autoretry.sh` with `CHECKPOINT_ASYNC_MODE=async` (required on Polaris, sync deadlocks at 512 ranks): **7803246 Q** + **7803247 H** (afterany), chain 2-deep. Polaris HEAD `5be47f7cf` matches mbph `ezpz`. Updated `production/polaris/README.md` header, at-a-glance, checkpoints (56->68 dirs, 47->57B tokens), trajectory legs 19-22, and queue depth. Charts remain stale (2026-07-22) -- wiring is now on HEAD but not regenerated (needs W&B creds). W&B run `rq0kbuej` (eager-wind-4628) covers 6501-6859.
+
 ## 2026-10-29 (Aurora) -- native-init failure isolated before another model retry
 
 Retry `8984481` finished exit143 after 00:07:29; first XPU broadcast in
