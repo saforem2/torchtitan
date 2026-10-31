@@ -2,8 +2,12 @@
 
 ## Status
 
-The `24`-rank FP32 accumulation probe passed. Full-model comparison is next.
-No production-scale parity result yet.
+The `24`-rank FP32 accumulation probe passed on Sunspot and Aurora. Neither
+full-model arm fits the controlled configuration on two Sunspot nodes:
+`TT` native DDP OOMs at update `3`, and fresh `MDS ZeRO-0` fails its first
+forward with `UR_RESULT_ERROR_OUT_OF_RESOURCES`. `TT` with full activation
+checkpointing runs, but breaks the "Rematerialization: disabled" contract.
+No matched result and no production-scale parity result yet.
 
 The original Aurora production reference uses `MDS ZeRO-0` on `256` nodes,
 `3072` FLAT devices, sequence `8192`, microbatch `1`, accumulation `2`, and
@@ -108,6 +112,49 @@ can catch optimizer-step exceptions without making the process exit nonzero.
 |---|---|---|---|
 | `12481844` | `656a174b6` | `24`-rank accumulation probe | `PBS F`, exit `1`; stale console-script interpreter, before MPI launch |
 | `12481845` | `6dade13b6` | Corrected `24`-rank accumulation probe | `PBS F`, exit `0`; all rank checks passed |
+| `9013231` (Aurora) | `24985bc50` | `24`-rank accumulation probe | exit `0`; all rank checks passed, max grad error `7.45e-9` |
+| `12481846` | `d8fa48e14` | `TT` DDP, loss compile | exit `143`; DCP load missing `module.`-prefixed keys |
+| `12481847` | `d8fa48e14` | DDP BF16-wire probe | exit `0` |
+| `12481848` | `d8fa48e14` | `MDS ZeRO-0` | failed before training; private DS template absent from clone |
+| `12481849` | `d8fa48e14` | `MDS ZeRO-0` retry | walltime kill (`-29`); training raised on all ranks, then diagnostics blocked on device work, so no error printed |
+| `12481850` | `e566ba1bd` | `TT` DDP, loss compile | exit `143`; `inplace_wgrad_accum=True` rejected under autocast |
+| `12481851` | `545d06f10` | `TT` DDP, loss compile | exit `137`; updates `1-2`, OOM at update `3` |
+| `12481853` | `7586def1e` | `TT` DDP, memory snapshots | OOM at update `3`, same as `12481851`; snapshots for updates `1-2` |
+| `12481854` | `7586def1e` | `TT` DDP, `AC=full` | exit `0`; `32` updates, peak `51.57 GiB` |
+| `12481855` | `7586def1e` | `MDS ZeRO-0` | exit `143`; `UR_RESULT_ERROR_OUT_OF_RESOURCES` in first forward on `28` ranks |
+
+### Fixes
+
+- `cf18ed45d`: point the checkpointer's model state at the unwrapped modules.
+- `545d06f10`: `wrap_native_ddp` disables `inplace_wgrad_accum`; native DDP
+  always runs under autocast, which `Linear` rejects for that path.
+- `fa1d445e1`: the benchmark entrypoint prints the training traceback before
+  diagnostics and skips Sophia witness reductions after a failure.
+- `7586def1e`: `BENCH_AC` and `BENCH_MEMORY_SNAPSHOT` launcher knobs.
+
+### TT native DDP memory (rank 0, `12481853`)
+
+| Snapshot | Active | Reserved | FP32 params | DDP grad buckets | `SophiaG` state |
+|---|---:|---:|---:|---:|---:|
+| After update `1` | `29.64 GiB` | `44.74 GiB` | `7.45 GiB` | not yet live | `14.80 GiB` |
+| After update `2` | `29.64 GiB` | `60.37 GiB` | `7.45 GiB` | `7.40 GiB` | `14.80 GiB` |
+
+Persistent state is `29.6 GiB`. `MDS ZeRO-0` holds about the same: BF16
+params and grads (`7.4 GiB`), FP32 masters (`7.45 GiB`) and `SophiaG`
+state (`14.8 GiB`). At the OOM, `55.02 GiB` was allocated and `5.35 GiB`
+was reserved but unallocated. The failed request was `3.91 GiB`, which is
+one BF16 logits tensor: `8192 x 256128 x 2` bytes. Activations at sequence
+`8192` take roughly the remaining `25 GiB`.
+
+The Aurora production `MDS` source runs record this same layout with
+activation checkpointing off. Why it fits there and not on two Sunspot
+nodes is unexplained; the runtimes differ (`torch 2.8.0a0` in production).
+
+`12481854` (`AC=full`): updates `22-32` take `3.18 s` mean from 1 s log
+timestamps, so about `5,150 tokens/s/device` (`16,384` tokens/device/update).
+The logged `tps` is a running average and reads `2,777` median over `21-32`.
+This is a two-node number with rematerialization; it is not comparable with
+the production `4,787` or with any `MDS` arm.
 
 `12481845`: all `24` rank files are present. The first microbatch was
 unsynchronized; final gradients were bitwise identical across ranks.
