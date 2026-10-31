@@ -20,6 +20,7 @@ from pathlib import Path
 import runpy
 import sys
 import time
+import traceback
 
 
 class SophiaStepWitness:
@@ -358,7 +359,13 @@ def main() -> None:
             result["xpu_peak_allocated_bytes"] = torch.xpu.max_memory_allocated()
             result["xpu_peak_reserved_bytes"] = torch.xpu.max_memory_reserved()
         if witness is not None:
-            result["sophia_witness"] = witness.diagnostics()
+            # Witness reductions synchronize the device; after a failure they
+            # can wait indefinitely on queued work from the aborted step.
+            result["sophia_witness"] = (
+                witness.diagnostics()
+                if completed
+                else "skipped: training did not complete"
+            )
         output = args.output / f"rank-{rank:03d}.json"
         output.write_text(json.dumps(result, indent=2, default=str) + "\n")
         diagnostics_written = True
@@ -409,6 +416,12 @@ def main() -> None:
         completed = True
     except SystemExit as error:
         completed = error.code in (None, 0)
+        raise
+    except BaseException:
+        # Report before diagnostics: their device reads can block forever
+        # behind a collective that the failure left unfinished.
+        traceback.print_exc()
+        sys.stderr.flush()
         raise
     finally:
         os._exit = original_exit
