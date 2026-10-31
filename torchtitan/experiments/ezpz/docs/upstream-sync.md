@@ -1,5 +1,17 @@
 # Upstream Sync Log
 
+## 2026-10-31: upstream `b93d5c0cf5`..`upstream/main` (52 commits) -> `519efe4de`, smoke-validated on Sunspot
+
+Branch `sync/upstream-b93d5c0cf5` merges 52 upstream commits (`b93d5c0cf5..8e4990d8c`, the `main` tip of 2026-10-31) on top of the prior `5a7a622f16` sync. The merge is `519efe4de`; follow-up commits port ezpz where needed. No conflicts under `experiments/ezpz/`.
+
+Verdict: **all 3 smoke arms pass on Sunspot `workq` 2N 01:00** — `agpt_debugmodel` TP=1, `agpt_debugmodel` TP=2, and `moe_debugmodel` TP=1 each run 3 deterministic steps (`seed=42`, `max_context_length=512`, `num_tokens_per_microbatch_per_dp_rank=512`) to completion with `VERDICT: ok` and PBS `Exit 0`. Jobs `12481836` (`8e05a093e`, walltime 00:03:21) and `12481837` (`519efe4de`, walltime 00:02:05) both report `VERDICT: ok` / `Exit_status=0`. The TP=2 arm needed two smoke-side workarounds that do **not** change production code (see below).
+
+### What the 52 commits change for us
+
+- **Accelerator graphs now fire on XPU** (`c8f0265db` #5353, `ad7a9937b` #5711). The oneCCL collective inside the captured graph hits `ur_eventWait: wait method cannot be used for an event associated with a command graph`. Smoke disables graphs (`--training.disable-accelerator-graphs`); production stays graph-enabled by default and is out of scope for this smoke gate.
+- **TP=2 attention fold** broke on the smoke's 512-token microbatch (TP shards seq to 256, then `256 % 512` fails in the attention wrapper). Re-cherry-picked `549816673`'s batch-geometry helper (batch vs seq_len) and wired `trainer.py` to pass `num_tokens_per_microbatch` to `set_ezpz_max_context_length`. The TP=2 smoke arm also runs `activation-checkpoint:none` to dodge a separate AC recompute mismatch (`[512,256]` saved vs `[256,256]` recomputed under TP) — same class as the reverted `a79a383e6` fix, not re-attempted here.
+- **No breaking API in `experiments/ezpz/`** from this window — 0 of the 52 commits touch `experiments/ezpz/` directly; the distributed/training_engine changes (mesh timeouts `ff96670a2`, rmsnorm kernel `bf88ad0bb`, compile backend `0f9fd2bd6`, loss redesign `740d5f755`) did not require ezpz-side adaptation beyond the smoke workarounds above.
+
 ## 2026-10-15: upstream `5a7a622f16`, 236 commits, smoke-validated on Sunspot
 
 Branch `sync/upstream-5a7a622f16` merges **236 upstream commits**

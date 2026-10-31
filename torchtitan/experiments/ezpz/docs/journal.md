@@ -2,6 +2,16 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-10-31 (Sunspot) -- upstream `b93d5c0cf5` sync to `519efe4de`, Sunspot 2N smoke green
+
+Pulled 52 new upstream commits (`b93d5c0cf5..8e4990d8c`) into `sync/upstream-b93d5c0cf5` as `519efe4de`. This resumes after the `5a7a622f16` sync (2026-10-15) and the `7d4c8e88c` b93d5c0cf5 sharding/compile port that the 4-commit smoke work landed on `SunSpot 2N`.
+
+Smoke `12481836` (`8e05a093e`) proved the TP=2 and graph fixes: all 3 arms now `VERDICT: ok` / `Exit 0` on `workq 2N 01:00` (walltime 00:03:21). Smoke `12481837` (`519efe4de`) re-ran the same 3 arms on the merged head and also reported `VERDICT: ok` / `Exit 0` (walltime 00:02:05, commit `519efe4de` in log). No `experiments/ezpz/` conflicts in the merge. See `upstream-sync.md` for the smoke-side workarounds (graph disable on XPU, TP=2 AC none) — production code unchanged beyond the `agpt`/`moe` attention batch-geometry re-cherry-pick (`549816673`).
+
+Also on this sync: `local_compile` ported from `local_compile_regions` (8 commits across sharding + compile), `AcceleratorGraphInputSpec` from `CUDAGraphInputSpec`, and the `wkv_b` / MLP remat fixes for DeepSeek MLA. Branch `sync/upstream-b93d5c0cf5` is up to date with `upstream/main` at `8e4990d8c` (#5718).
+
+---
+
 ## 2026-10-01 (Sunspot) -- automatic TorchStore locality resolution
 
 Resolved the forced-Gloo caveat in the production Monarch/TorchStore runbook.
