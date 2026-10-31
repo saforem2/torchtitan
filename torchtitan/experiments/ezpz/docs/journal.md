@@ -8,6 +8,8 @@ Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug
 
 ## 2026-10-31 (Sunspot) -- final MDS/TT comparison
 
+- Corrected production scope: the plotted MDS reference is Aurora `256N`, `ZeRO0`, `SophiaG`, not the unrelated Polaris `118.86 TFLOP/s` example. Over `0.5-3.5T` tokens, full archived histories give median logged throughput `4787.15` for MDS, `3144.69` for TT-256, `2518.11 tok/s/device` for TT-512 (`1.52x`/`1.90x` MDS ratios). Production TT uses global FSDP. The optimized two-node HSDP benchmark does not establish production parity.
+
 - Added normalized updates `21-32` throughput: `MDS` `7904.55 tok/s/GPU`, `88.42 TFLOP/s/GPU`, `29.65% MFU`; eager `TT` `6850.25-6919.70`, `76.63-77.41`, `25.70-25.96%`; loss-compiled `TT` `7312.91-7570.36`, `81.81-84.69`, `27.43-28.40%`. All use `11,186,515,968 FLOPs/token` and `298.1888 TFLOP/s` per selected FLAT device.
 
 - All five measured jobs completed `32/32` updates and final checkpoint saves, with `PBS Exit_status=0`. `MDS` is `24.872761 s/update`; eager `TT` is `28.412792-28.700836 s`; loss compilation is `25.970769-26.885055 s`, `4.4-8.1%` behind this `MDS` control.

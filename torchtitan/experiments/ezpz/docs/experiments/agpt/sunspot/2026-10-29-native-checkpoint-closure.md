@@ -15,6 +15,12 @@ and reached `PBS F`, `Exit_status=0`. There is one `MDS` job and two jobs per
 `TT` path. This is a two-node geometry comparison, not a scaling result.
 Compilation covers the loss only; full-model compilation was not measured.
 
+**Scope correction:** the production figure uses an **Aurora** MDS reference.
+Its logged throughput remains substantially higher than the plotted TT
+production chains: median ratios `1.52x` versus TT-256 and `1.90x` versus
+TT-512 over the audited common token range. The two-node benchmark does
+not establish production-scale parity; that gap remains open.
+
 ![Timing, loss, memory and collective exposure](2026-10-29-native-checkpoint-closure.png)
 
 Machine-readable measurements: [JSON](2026-10-29-native-checkpoint-closure.json).
@@ -110,6 +116,66 @@ and selected-window coverage. Raw per-step framework metrics are preserved
 in the `W&B` final artifact's `throughput-efficiency.json`. These rates are
 algebraic conversions of step time under one fixed model/peak convention;
 they are not additional independent performance measurements.
+
+### Production-scale reference: Aurora, not Polaris
+
+The [all-production figure](../../../production/figures/all_production_training.svg)
+plots `2B-MDS (n256, SophiaG ref)`. This is the original **Aurora** chain,
+not the unrelated Polaris example below. The earlier response that used
+Polaris to explain this production comparison was incorrect in scope.
+
+The plotting code reads the MDS `train_metrics.csv` field `tps_per_gpu`
+from `aurora_gpt/AuroraGPT` and TT's `throughput(tps)` from the canonical
+production trajectories. The referenced SVG is identical to the audited
+repository asset, Git blob `0418d23582a79bddeb03b9b2b32155c345cccd3b`.
+Source: [`plot_production_combined.py`](../../../../utils/plot_production_combined.py).
+
+The table below uses the common plotted token interval **0.5-3.5T**.
+It is computed from full archived per-step histories, not estimates from
+pixels or the decimated CSVs committed for lightweight documentation.
+No finite positive throughput samples are removed, including low-throughput
+restart/checkpoint samples. All selected rows have finite positive rates.
+
+| Production chain | Full history rows | Rows in common interval | Median logged tok/s/device | Mean logged tok/s/device |
+|---|---:|---:|---:|---:|
+| MDS, Aurora 256 nodes | 154,391 | 59,604 | **4,787.15** | **4,637.32** |
+| TT v2, Aurora 256 nodes | 92,778 | 59,548 | 3,144.69 | 2,810.63 |
+| TT v2, Aurora 512 nodes | 46,395 | 29,779 | 2,518.11 | 2,351.07 |
+
+MDS's median logged rate is **1.52x** TT-256 and **1.90x** TT-512.
+Ratios of mean logged rates are `1.65x` and `1.97x`. These are descriptive
+per-update statistics of the logged rates, not time-weighted end-to-end
+rates, a new profiler measurement, or a matched causal framework experiment.
+
+The two TT full-store SHA-256 hashes match the committed export manifest:
+`175a60719d638cb903219059213a4a88e77b2f42538039c5aae20fc4d393a835`
+(TT-256) and
+`9384ec8f3560db3b627852f19db5c48558b4aeeacb2a10a119fa79766029c1a1`
+(TT-512). The MDS CSV SHA-256 is
+`ff8e2abe17ec536e75cdec6486c36760db1a71f22d30df5bf4b588377ba8b119`.
+The MDS row at update `30,000`, for example, comes from
+[`1kha62ra`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/1kha62ra).
+Its W&B config records `machine=Aurora`, `world_size=3072`, `GBS=6144`,
+sequence `8192`, microbatch `1`, `SophiaG`, `zero_stage=0`, activation
+checkpointing disabled, and `torch 2.8.0a0+gitba56102`.
+Other checked MDS source runs `da7vkyjk` and `ov1dn10t` confirm that layout.
+
+The audited TT production configs `lytjeegk`, `fm3gzdxt`, `i252kps9`
+and `ud8t6d3t` record shard degree `-1`, replica degree `1` (global FSDP),
+default resharding, model-plus-loss compilation, activation checkpointing
+`none`, and local batch `2`. TT-256 uses `GBS6144`; TT-512 uses `GBS12288`.
+The fresh two-node comparison instead uses MDS ZeRO-1 and TT HSDP `2 x 8`
+with deferred gradient reduction, retained parameters and loss-only compilation.
+It does not validate those changes at `256` or `512` nodes.
+
+Global FSDP versus replicated ZeRO-0 is a concrete sharding difference to
+isolate next. Its contribution to this production gap is not established by
+these logs. Throughput cannot be dismissed as a TFLOP-accounting difference:
+the production figure's middle panel is **tokens/sec/device**. The audited
+MDS production slice has median native logged TFLOP/s `52.83`; the separate
+historical `~120` example does not identify this plotted chain.
+Complete histories, hashes, selected source-run configs and calculation code
+are preserved under `production-reference/` in the final W&B artifact.
 
 ### Historical MDS logs near 120 TFLOP/s
 

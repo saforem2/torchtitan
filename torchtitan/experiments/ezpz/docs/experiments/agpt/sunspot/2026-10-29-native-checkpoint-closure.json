@@ -1091,5 +1091,80 @@
     "historical_optimizer": "sophiag",
     "formula_note": "MDS throughput_calculator adds one forward-pass MAC estimate to its 3-forward-pass forward/backward estimate when checkpoint_activations is true. This reproduces the historical raw numerator; the model-FLOP metric excludes activation recomputation.",
     "comparison_limitation": "Different hardware, batching, optimizer and sample coverage. Does not prove a matched regression or identify every historical Intel run."
+  },
+  "aurora_production_throughput_audit": {
+    "token_window": [
+      500000000000,
+      3500000000000
+    ],
+    "metric": "Logged tokens/sec/device; MDS throughput/tokens_per_gpu_per_sec, TT throughput(tps)",
+    "interpretation": "Unweighted per-update descriptive statistics from full archived histories. Not time-weighted end-to-end throughput or a matched causal framework experiment.",
+    "series": {
+      "mds_256": {
+        "filename": "mds-2b-production-full.csv",
+        "sha256": "ff8e2abe17ec536e75cdec6486c36760db1a71f22d30df5bf4b588377ba8b119",
+        "bytes": 13947887,
+        "full_history_rows": 154391,
+        "selected_step_rows": 59604,
+        "valid_positive_rate_rows": 59604,
+        "excluded_nonfinite": 0,
+        "excluded_nonpositive": 0,
+        "global_batch_size": 6144,
+        "sequence_length": 8192,
+        "step_min": 9935,
+        "step_max": 69538,
+        "mean_logged_tokens_per_second_per_device": 4637.32329539306,
+        "median_logged_tokens_per_second_per_device": 4787.151717501376,
+        "p10_order_statistic": 4707.225840948669,
+        "p90_order_statistic": 4843.876262266883,
+        "median_native_logged_tflops_per_device": 52.82724281055653
+      },
+      "tt_256": {
+        "filename": "tt-2b-v2-256-full.csv",
+        "sha256": "175a60719d638cb903219059213a4a88e77b2f42538039c5aae20fc4d393a835",
+        "bytes": 16466580,
+        "full_history_rows": 92778,
+        "selected_step_rows": 59548,
+        "valid_positive_rate_rows": 59548,
+        "excluded_nonfinite": 0,
+        "excluded_nonpositive": 0,
+        "global_batch_size": 6144,
+        "sequence_length": 8192,
+        "step_min": 9935,
+        "step_max": 69538,
+        "mean_logged_tokens_per_second_per_device": 2810.6284103034523,
+        "median_logged_tokens_per_second_per_device": 3144.691052204983,
+        "p10_order_statistic": 1102.8322217352493,
+        "p90_order_statistic": 3734.1877405246996,
+        "median_native_logged_tflops_per_device": 35.1830828412649,
+        "mds_to_tt_median_rate_ratio": 1.522296352178933,
+        "mds_to_tt_mean_rate_ratio": 1.6499240093045195
+      },
+      "tt_512": {
+        "filename": "tt-2b-v2-512-full.csv",
+        "sha256": "9384ec8f3560db3b627852f19db5c48558b4aeeacb2a10a119fa79766029c1a1",
+        "bytes": 8233253,
+        "full_history_rows": 46395,
+        "selected_step_rows": 29779,
+        "valid_positive_rate_rows": 29779,
+        "excluded_nonfinite": 0,
+        "excluded_nonpositive": 0,
+        "global_batch_size": 12288,
+        "sequence_length": 8192,
+        "step_min": 4968,
+        "step_max": 34769,
+        "mean_logged_tokens_per_second_per_device": 2351.065016849869,
+        "median_logged_tokens_per_second_per_device": 2518.1069077347183,
+        "p10_order_statistic": 1638.6930858285152,
+        "p90_order_statistic": 2804.09154005704,
+        "median_native_logged_tflops_per_device": 28.172803772208855,
+        "mds_to_tt_median_rate_ratio": 1.9010915314186894,
+        "mds_to_tt_mean_rate_ratio": 1.9724351569002923
+      }
+    },
+    "source_machine_verified": "Aurora",
+    "mds_layout": "ZeRO stage 0, 3072 ranks over 256 nodes, SophiaG",
+    "tt_layout": "Global FSDP: shard=-1, replicate=1; model+loss compilation, activation checkpointing none in sampled configs",
+    "scope_correction": "The optimized 2-node benchmark does not establish production-scale parity. Polaris ugkfoorl is unrelated to the plotted MDS reference."
   }
 }
