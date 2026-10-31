@@ -8,6 +8,8 @@ Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug
 
 ## 2026-10-31 (Sunspot) -- final MDS/TT comparison
 
+- Added normalized updates `21-32` throughput: `MDS` `7904.55 tok/s/GPU`, `88.42 TFLOP/s/GPU`, `29.65% MFU`; eager `TT` `6850.25-6919.70`, `76.63-77.41`, `25.70-25.96%`; loss-compiled `TT` `7312.91-7570.36`, `81.81-84.69`, `27.43-28.40%`. All use `11,186,515,968 FLOPs/token` and `298.1888 TFLOP/s` per selected FLAT device.
+
 - All five measured jobs completed `32/32` updates and final checkpoint saves, with `PBS Exit_status=0`. `MDS` is `24.872761 s/update`; eager `TT` is `28.412792-28.700836 s`; loss compilation is `25.970769-26.885055 s`, `4.4-8.1%` behind this `MDS` control.
 - All-rank allocated/reserved peaks are `40.386580/42.726563 GiB` for `MDS`, `47.958935/53.812500 GiB` for eager `TT`, and `32.333996/38.187500 GiB` for loss compilation. Compiled `_compile.compile_inner` is `16.195741-16.868698 s/rank`; backward compilation is recorded separately.
 - Native weights and the complete `32`-update token stream match after the required representation mapping. Numerical equivalence is not established; same-path repeats differ too.

@@ -133,6 +133,13 @@
           "aten::_scaled_dot_product_efficient_attention": 288
         },
         "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      },
+      "throughput_efficiency": {
+        "job": "12481576",
+        "elapsed_seconds": 298.47312664985657,
+        "tokens_per_second_per_flat_device": 7904.550826673674,
+        "model_tflops_per_flat_device": 88.42438404245266,
+        "mfu_percent": 29.653824705170905
       }
     },
     "tt_eager": {
@@ -246,6 +253,13 @@
           "aten::_scaled_dot_product_flash_attention": 288
         },
         "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      },
+      "throughput_efficiency": {
+        "job": "12481577",
+        "elapsed_seconds": 344.4100332472008,
+        "tokens_per_second_per_flat_device": 6850.253396382945,
+        "model_tflops_per_flat_device": 76.63046900348405,
+        "mfu_percent": 25.698640929332036
       }
     },
     "tt_compiled": {
@@ -359,6 +373,13 @@
           "aten::_scaled_dot_product_flash_attention": 288
         },
         "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      },
+      "throughput_efficiency": {
+        "job": "12481578",
+        "elapsed_seconds": 311.6492227560375,
+        "tokens_per_second_per_flat_device": 7570.357400977327,
+        "model_tflops_per_flat_device": 84.68592394949987,
+        "mfu_percent": 28.400102200183195
       }
     },
     "tt_eager_repeat": {
@@ -475,6 +496,13 @@
           "aten::_scaled_dot_product_flash_attention": 288
         },
         "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      },
+      "throughput_efficiency": {
+        "job": "12481580",
+        "elapsed_seconds": 340.9535057989415,
+        "tokens_per_second_per_flat_device": 6919.700076031084,
+        "model_tflops_per_flat_device": 77.40733539429253,
+        "mfu_percent": 25.95916928948791
       }
     },
     "tt_compiled_repeat": {
@@ -902,6 +930,13 @@
           "aten::_scaled_dot_product_flash_attention": 288
         },
         "method": "Rank-local collective annotation/kernel union minus overlap with other XPU kernels; not causal stall time or wire-call counts."
+      },
+      "throughput_efficiency": {
+        "job": "12481581",
+        "elapsed_seconds": 322.62065937393345,
+        "tokens_per_second_per_flat_device": 7312.910476899925,
+        "model_tflops_per_flat_device": 81.8059898223955,
+        "mfu_percent": 27.434293247229775
       }
     }
   },
@@ -1011,5 +1046,34 @@
     ],
     "same_native_weights_verified_after_representation_mapping": true,
     "complete_32_update_token_stream_verified": true
+  },
+  "throughput_efficiency_convention": {
+    "measure_steps": [
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32
+    ],
+    "aggregation": "Total tokens divided by total elapsed time in updates 21-32; not mean instantaneous rate.",
+    "global_tokens_per_update": 3145728,
+    "tokens_per_device_per_update": 196608,
+    "selected_flat_devices": 16,
+    "device_unit": "One rank per approximately 64-GiB FLAT XPU device; not a full two-tile Max 1550 package.",
+    "total_parameters": 1986054144,
+    "excluded_input_embedding_parameters": 524288000,
+    "active_parameters": 1461766144,
+    "model_flops_per_token": 11186515968,
+    "model_flops_formula": "6 * (total_parameters - input_embedding_parameters) + 12 * layers * hidden_size * sequence_length",
+    "flops_convention": "TorchTitan dense-attention model estimate: output head included, input embedding excluded, causal sparsity and recomputation excluded; not hardware counter FLOPs or HFU.",
+    "peak_flops_per_flat_device": 298188800000000,
+    "peak_formula": "512 * 448 compute units * 1.3e9 Hz; matches the run's TT MFU convention, not measured clock or advertised full-package peak."
   }
 }

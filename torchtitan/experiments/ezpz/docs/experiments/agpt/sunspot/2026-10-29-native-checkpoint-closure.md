@@ -44,6 +44,73 @@ The `4.4-8.1%` gap is the range of these two run means against the single
 `MDS` mean, not a confidence interval. Within-run sample deviations do not
 measure uncertainty across independent jobs.
 
+## Tokens/sec, model TFLOP/s and MFU
+
+| Job | Path | Tokens/s/GPU | Model TFLOP/s/GPU | MFU, % |
+|---|---|---:|---:|---:|
+| `12481576` | MDS ZeRO1 | 7,904.55 | 88.42 | 29.65 |
+| `12481577` | TT eager, first | 6,850.25 | 76.63 | 25.70 |
+| `12481580` | TT eager, repeat | 6,919.70 | 77.41 | 25.96 |
+| `12481578` | TT loss compilation, first | 7,570.36 | 84.69 | 28.40 |
+| `12481581` | TT loss compilation, repeat | 7,312.91 | 81.81 | 27.43 |
+
+These rates use exactly the same unprofiled updates `21-32` as the timing
+table. Each update processes `384 x 8192 = 3,145,728` global tokens, or
+`196,608` tokens per selected device. Tokens/sec is total tokens divided by
+total elapsed time across the twelve updates, not the average of per-step
+reciprocals.
+
+Here `GPU` means one selected `FLAT` XPU device per MPI rank: approximately
+`64 GiB`, `16` active devices across two nodes. It does not mean a full
+two-tile `Max 1550` package. A per-package rate cannot be substituted for a
+per-FLAT-device rate without changing the denominator and accounting for
+the actual selected tile mapping. See Intel's
+[device-hierarchy documentation](https://www.intel.com/content/www/us/en/docs/mpi-library/developer-reference-linux/2021-19/gpu-pinning.html).
+
+All paths use one `TorchTitan` model-FLOP convention:
+
+```text
+active parameters = 1,986,054,144 - 256,000 * 2,048 = 1,461,766,144
+FLOPs/token = 6 * active parameters + 12 * layers * hidden_size * seq_len
+            = 6 * 1,461,766,144 + 12 * 12 * 2,048 * 8,192
+            = 11,186,515,968
+model TFLOP/s/GPU = tokens/sec/GPU * FLOPs/token / 1e12
+MFU (%) = 100 * model TFLOP/s/GPU / 298.1888
+```
+
+The input embedding is excluded from the per-token parameter term; the
+output projection is included. The quadratic attention term uses dense
+attention, without a causal-sparsity discount. This is an estimated useful
+forward/backward model workload, not hardware-counter FLOPs, measured
+instruction throughput, or hardware FLOP utilization including recomputation.
+The convention comes from the run's
+[`get_nparams_and_flops`](https://github.com/saforem2/torchtitan/blob/5be47f7cfa12cb47d4a774480fe9251fe1e53ff8/torchtitan/models/llama3/model.py)
+and [shared FLOP formulas](https://github.com/saforem2/torchtitan/blob/5be47f7cfa12cb47d4a774480fe9251fe1e53ff8/torchtitan/models/common/flops.py).
+
+The MFU denominator follows the campaign's
+[`get_peak_flops`](https://github.com/saforem2/torchtitan/blob/5be47f7cfa12cb47d4a774480fe9251fe1e53ff8/torchtitan/tools/utils.py)
+convention: `512 x 448 compute units x 1.3 GHz = 298.1888 TFLOP/s` per
+FLAT device. All twelve enumerated devices in the `TT` launch metadata
+report `448` compute units. This denominator is a fixed normalization,
+not an observed GPU clock or the advertised full-package peak. The raw
+`TT` history independently recovers exactly this denominator from
+`100 * tflops / mfu(%)` and the same FLOPs/token from `tflops / throughput`.
+
+The raw frameworks' metrics are preserved separately. `MDS` records several
+FLOP estimates: at update `21`, `throughput/tflops` implies
+`11,035,213,824 FLOPs/token`, while `throughput/tflops-lm` implies
+`11,186,208,768`. Neither is silently mixed with the common formula above.
+The raw `TT` throughput fields also use a different timing interval: for
+example, eager-repeat update `21` logs `5,711.85 tokens/s/device`, while
+its adjacent update duration gives `7,021.87`. The comparison table therefore
+recomputes every path from the same twelve-update window.
+
+The JSON includes the formulas, denominator, unrounded normalized rates,
+and selected-window coverage. Raw per-step framework metrics are preserved
+in the `W&B` final artifact's `throughput-efficiency.json`. These rates are
+algebraic conversions of step time under one fixed model/peak convention;
+they are not additional independent performance measurements.
+
 ## Compilation cost and peak memory
 
 | Path and job | Maximum allocated, GiB | Maximum reserved, GiB | Diagnostic coverage |
