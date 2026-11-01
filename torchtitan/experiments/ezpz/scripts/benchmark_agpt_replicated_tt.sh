@@ -12,7 +12,10 @@ set -o pipefail
 ulimit -c 0
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
-export CCL_OP_SYNC=1
+# BENCH_CCL_OP_SYNC=0 lets oneCCL return before the device op completes.
+# ezpz_setup_job preserves a preset value across module loads.
+export CCL_OP_SYNC="${BENCH_CCL_OP_SYNC:-1}"
+case "${CCL_OP_SYNC}" in 0|1) ;; *) echo "BENCH_CCL_OP_SYNC must be 0 or 1" >&2; exit 2;; esac
 export TORCH_CPP_LOG_LEVEL=ERROR
 export PALS_RPC_TIMEOUT=600
 export http_proxy=http://proxy.alcf.anl.gov:3128
@@ -43,12 +46,14 @@ export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
 GBS=$((NPROC * 2))
 TOKENS=$((GBS * 8192))
 JOB="${PBS_JOBID%%.*}"
-OUT="${ROOT}/outputs/agpt-replicated-20261031/${ARM}-${JOB}"
+# BENCH_TAG separates ablation variants of one ARM in one PBS job.
+TAG="${BENCH_TAG:+-${BENCH_TAG}}"
+OUT="${ROOT}/outputs/agpt-replicated-20261031/${ARM}${TAG}-${JOB}"
 mkdir -p "${OUT}/provenance" "${OUT}/wandb"
 LOG="${OUT}/run.log"
 exec > >(tee -a "${LOG}") 2>&1
-export WANDB_RUN_ID="agpt-replicated-${ARM}-${JOB}"
-export WANDB_NAME="${ARM}-${NODES}n-${JOB}"
+export WANDB_RUN_ID="agpt-replicated-${ARM}${TAG}-${JOB}"
+export WANDB_NAME="${ARM}${TAG}-${NODES}n-${JOB}"
 export WANDB_RUN_NAME="${WANDB_NAME}"
 export WANDB_DIR="${OUT}/wandb"
 export WANDB_TAGS="agpt-replicated,sunspot,${ARM},${NODES}nodes"
@@ -107,6 +112,7 @@ cp "${BASH_SOURCE[0]}" "${OUT}/provenance/submitted-launcher.sh"
 cp "${ROOT}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_entrypoint.py" "${OUT}/provenance/"
 module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
+echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
 
@@ -128,8 +134,16 @@ else
                 --parallelism.native-ddp-communication-dtype="${COMM_DTYPE}")
             ;;
         fsdp-eager|fsdp-losscompile)
+            RESHARD="${BENCH_FSDP_RESHARD:-default}"
+            REDUCE="${BENCH_FSDP_REDUCE_DTYPE:-float32}"
+            case "${RESHARD}" in default|always|never) ;; *) echo "Unknown BENCH_FSDP_RESHARD=${RESHARD}" >&2; exit 2;; esac
+            case "${REDUCE}" in float32|bfloat16) ;; *) echo "Unknown BENCH_FSDP_REDUCE_DTYPE=${REDUCE}" >&2; exit 2;; esac
+            DEFER=(--parallelism.no-fsdp-defer-gradient-reduction)
+            [[ "${BENCH_FSDP_DEFER:-0}" == 1 ]] && DEFER=(--parallelism.fsdp-defer-gradient-reduction)
             PARALLEL=(--parallelism.data-parallel-shard-degree="${NPROC}"
-                --parallelism.data-parallel-replicate-degree=1)
+                --parallelism.data-parallel-replicate-degree=1
+                --parallelism.fsdp-reshard-after-forward="${RESHARD}"
+                --training.mixed-precision-reduce="${REDUCE}" "${DEFER[@]}")
             ;;
         *) echo "Unknown ARM=${ARM}" >&2; exit 2;;
     esac
