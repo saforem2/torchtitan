@@ -15,6 +15,12 @@ reduction: `22.9%` and `23.3%` longer than that MDS control. The historical
 Aurora production reference used a different DeepSpeed wrapper/runtime and
 `256` nodes. This two-node result does not measure production-scale parity.
 
+A fresh `24`-rank historical-wrapper compatibility control takes
+`2.3610 s/update`. The separate HSDP `4 x 6` canary takes `2.9030 s` and
+does not improve on the earlier `12 x 2` result. Its complete input stream
+matches MDS, but losses differ. The intended same-allocation comparison was
+cancelled after a PALS startup failure; its replacement has no result.
+
 At `16` devices, the combined FSDP communication changes reach `2.2799 s`,
 versus `2.2525 s` for MDS ZeRO-1 and `2.3894 s` for the historical-wrapper
 compatibility arm. These are single-run estimates with different arithmetic
@@ -68,11 +74,11 @@ reduction, no reshard after forward, and loss-only compilation. The MDS run used
 the nominal ZeRO-0 compatibility path selecting DeepSpeed `BF16_Optimizer`.
 Both used `24` ranks and global batch `48`.
 
-| Run | Update-21-32 timer | Mean seconds/update | Samples |
-|---|---|---:|---:|
-| `12481906` MDS | `elapsed_time_per_iteration_ms` from Megatron's iteration log | `2.360975` | `12` |
-| `12481905` TT | Adjacent `loss_metrics/global_avg_loss` TensorBoard event `wall_time`, anchored at step `20` | `2.902996` | `12` |
-| `12481905` TT | Maximum explicit synchronized step time across `24` rank files | `2.902788` | `12` |
+| Run | Update-21-32 timer | Mean s/update | tok/s/device | Model TFLOP/s/device | MFU % | Samples |
+|---|---|---:|---:|---:|---:|---:|
+| `12481906` MDS | Native iteration timer | `2.360975` | `6939.5` | `77.63` | `26.03` | `12` |
+| `12481905` TT | Loss-event intervals, anchored at update `20` | `2.902996` | `5643.8` | `63.13` | `21.17` | `12` |
+| `12481905` TT | Synchronized per-step maximum across `24` ranks | `2.902788` | `5644.2` | `63.14` | `21.17` | `12` |
 
 TT's adjacent cumulative `time_metrics/end_to_end(s)` differences average
 `2.902987 s`; the largest per-step difference from the loss-event intervals is
