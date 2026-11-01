@@ -2,6 +2,10 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
+> Last updated: 2026-11-01 (sync validation on `fdb394aae` -- Sunspot+Aurora XPU green, Polaris preemptable in flight; stalled 20B chain unchanged since 08-30).
+
+> **2026-11-01 sync validation (`fdb394aae`):** Sunspot `workq` 2N + Aurora `debug-scaling` 2N both `VERDICT: ok` 3/3 on `debugmodel` (losses `10.877/10.754/10.480` + `10.880/10.708/10.558` + `12.952/12.596/11.471` byte-identical, `xpu-torch216` `2.16.0.dev20261015+xpu`). Polaris `4b`/`10b` `olmo3` (`debug`/`preemptable` 2N `2.15.0+cu132`, native `mpi4py`, `CUDA`-native smoke) hit `PALS` broadcast wall (`libpython3.12.so` not co-located) then `MPICH GPU_SUPPORT` wall -- both now fixed at `5eba3398a`/`b8f1f2bb2`; `7805964`/`7805974` on `x3209` `R` and pending.
+
 > Last updated: 2026-08-31 (only the stale forward-looking start estimate
 > for `7567542` was corrected; the queue was NOT re-checked on 08-31, so the
 > 20B position below is as of the 2026-08-30 check: the chain had advanced
