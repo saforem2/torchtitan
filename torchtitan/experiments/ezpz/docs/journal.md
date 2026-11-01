@@ -2,6 +2,18 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: reconcile Sunspot pane success with current startup failures
+
+- Verified `sunspot-tt-ezpz` job `12481889`: Oct 31 `22:00-22:05 CDT`, exit
+  `0`, three arm returns `0`, `VERDICT: ok`. Its earlier success is real.
+- The pane's later `12481940` / `12481941` / `12481942` each failed startup
+  `21` times with no `stime`, then finished without a numeric exit supplied.
+  Top-level PBS `R` updates had not established application execution.
+- Earlier successes and later failures share the recorded image and account/
+  queue. Failures now cover both submission paths for this account; no
+  cluster-wide or TorchTitan-specific cause is established.
+- [Chronology and scope](experiments/agpt/sunspot/2026-11-01-startup-incident.md#earlier-working-tt-jobs-and-later-failures).
+
 ## 2026-11-01: Sunspot support report sent through AgentMail
 
 - Sent the prepared PBS/MOM incident report to `ALCF Support` from the

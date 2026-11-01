@@ -1,8 +1,40 @@
 # Sunspot startup isolation: MDS/TT continuation
 
-Snapshot: `2026-11-01 14:55 UTC`. The comparison remains blocked before
+Initial startup snapshot: `2026-11-01 14:55 UTC`. The comparison remains blocked before
 application execution. No new training, loss, or throughput result follows
 from these recovery attempts.
+
+## Earlier working TT jobs and later failures
+
+Read-only inspection of the `sunspot-tt-ezpz` pane and exact historical PBS
+records confirms that its earlier success was real. Times below are
+`America/Chicago`; the daylight-saving transition changes `CDT` to `CST`.
+
+| Job | Local time | Verified outcome |
+|---|---|---|
+| `12481889`, upstream-sync TT smoke | Oct 31, `22:00-22:05 CDT` | One startup, exit `0`, all three arms `rc=0`, `VERDICT: ok` |
+| `12481906`, campaign MDS control | Nov 1, `00:15-00:19 CDT` | One startup, exit `0`; complete 32-update evidence is in the comparison report |
+| `12481907`, campaign pair | Nov 1, `00:28 CDT` start | Batch did start; later PALS launch failed; cancelled with approval |
+| `12481908`, campaign live-load audit | Nov 1, `00:34 CDT` submission | No `stime`, 21 failed starts, eventual exit `265` |
+| `12481940` / `12481941` / `12481942`, pane CPT/SFT/2B smokes | Nov 1, `09:03 CST` submission | All reached system holds after 21 failed starts, no `stime`; subsequently finished with no numeric exit supplied |
+
+The pane had reported the new jobs as running from the top-level PBS `R`
+state before they reached actual batch execution. Its old `VERDICT: ok`
+remains valid; it does not establish success of the new CPT/SFT/2B jobs.
+The current source uses Torch `2.16` while this campaign uses Torch `2.14`,
+but the new failures precede either runtime loading.
+
+All listed jobs requested the same recorded compute image,
+`compute_sunspot_test_20261013T165519_97e02396`, and the same account/queue.
+The later pane jobs also use `tegu:home`, two nodes, and a distinct smoke
+launcher. No configuration change or input was sent to that active
+agent; no neighboring job was cancelled by this investigation.
+
+The evidence shows earlier successful execution followed by failures across
+both submission paths for this account. It does not establish a cluster-wide
+outage, a general TorchTitan failure, or the exact failing MOM/hook stage.
+The comparison record is `sunspot-context-reconciliation-20261101.json` in
+the online evidence archive; private agent transcripts are excluded.
 
 ## Support follow-up
 
