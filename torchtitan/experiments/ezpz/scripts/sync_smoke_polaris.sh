@@ -28,7 +28,7 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
 STEPS="${SMOKE_STEPS:-3}"
 SEED="${SEED:-42}"
-VENV="${SMOKE_VENV:-.venv}"
+VENV="${SMOKE_VENV:-.venv-pytorch216}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"

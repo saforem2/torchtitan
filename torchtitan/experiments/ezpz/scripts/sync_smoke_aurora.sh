@@ -55,6 +55,7 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_OP_SYNC=1
 export TORCH_CPP_LOG_LEVEL=ERROR
+export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}"
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
@@ -66,7 +67,7 @@ SEED="${SEED:-42}"
 # error" from mpiexec. That was wrong -- 8831657 used the resolved path and hit
 # the identical failure. The real cause of that failure is still unknown; see
 # docs/experiments/sync84-xpu-smoke.md.
-VENV="${SMOKE_VENV:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/.venv}"
+VENV="${SMOKE_VENV:-/lus/flare/projects/AuroraGPT/foremans/venvs/xpu-torch216-sync-5a7a622f16}"
 VENV="$(readlink -f "${VENV}")"
 EZPZ_UTILS="${EZPZ_UTILS:-${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh}"
 HF_ASSETS="${HF_ASSETS:-${SUBMIT_DIR:-${PBS_O_WORKDIR:-$PWD}}/assets/hf/gemma-7b}"
@@ -76,9 +77,9 @@ HF_ASSETS="${HF_ASSETS:-${SUBMIT_DIR:-${PBS_O_WORKDIR:-$PWD}}/assets/hf/gemma-7b
 # There is no training.seq_len / local_batch_size -- those spellings are
 # silently rejected by tyro.
 DEFAULT_CONFIGS=(
-    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512"
-    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --parallelism.tensor-parallel-degree=2"
-    "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512"
+    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --training.disable-accelerator-graphs"
+    "ezpz.agpt:agpt_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --parallelism.tensor-parallel-degree=2 --training.disable-accelerator-graphs activation-checkpoint:none"
+    "ezpz.moe:moe_debugmodel:--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512 --training.disable-accelerator-graphs"
 )
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
     CONFIGS=()
@@ -99,7 +100,26 @@ ezpz_load_modules || exit 1
 ezpz_setup_job || exit 1
 cd "${SUBMIT_DIR}" || { echo "FATAL: cannot cd to ${SUBMIT_DIR}"; exit 1; }
 
-source "${VENV}/bin/activate"
+# A venv whose torch wheel is newer than the loaded oneAPI module needs its own
+# Unified Runtime / SYCL libraries ahead of the module on LD_LIBRARY_PATH.
+# Same fix as sync_smoke_sunspot.sh (jobs 12481003/12481004).
+if [[ "${SMOKE_VENV_LD_FIRST:-1}" == "1" && -d "${VENV}/lib" ]]; then
+    _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+    if [[ ! -e "${_ld_first}/.complete" ]]; then
+        mkdir -p "${_ld_first}"
+        for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* \
+                    "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+            [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+        done
+        touch "${_ld_first}/.complete"
+    fi
+    export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+hash -r
+[[ "$(command -v python)" == "${VENV}/bin/python" ]] || exit 93
 
 JOBID_SHORT="${PBS_JOBID%%.*}"
 LOG_DIR="logs/ezpz-sync-smoke-aurora-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
