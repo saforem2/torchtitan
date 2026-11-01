@@ -63,23 +63,42 @@ python -c "import torch; print('cuda:   ', torch.cuda.is_available(), torch.vers
 echo ""
 
 # --- Phase 1: import probe ---
+# On Polaris, ezpz -> mpi4py pulls Cray MPICH; test model path directly.
 echo "--- import probe ---"
 python -c "
-from torchtitan.experiments.ezpz.agpt.config_registry import agpt_5b_olmo3_polaris, agpt_10b_olmo3_polaris
-from torchtitan.experiments.ezpz.agpt.config_registry import agpt_5b_olmo3_polaris_smoke, agpt_10b_olmo3_polaris_smoke
+import torch
+print(f'torch: {torch.__version__} cuda={torch.cuda.is_available()}')
+from torchtitan.models.llama3 import Llama3Model
+print('Llama3Model OK')
+from torchtitan.components.data import GrainDataLoader
+print('Grain OK')
 print('IMPORT_OK')
 " 2>&1
 
 if ! python -c "
-from torchtitan.experiments.ezpz.agpt.config_registry import agpt_5b_olmo3_polaris, agpt_10b_olmo3_polaris
-from torchtitan.experiments.ezpz.agpt.config_registry import agpt_5b_olmo3_polaris_smoke, agpt_10b_olmo3_polaris_smoke
+from torchtitan.models.llama3 import Llama3Model
+from torchtitan.components.data import GrainDataLoader
 print('IMPORT_OK')
 " 2>&1 | grep -q "IMPORT_OK"; then
     echo "VERDICT: import_failed"
     exit 1
 fi
-
 # --- Phase 2: per-config train ---
+# Restore native mpi4py if the venv has the portable wheel (login-built).
+# On compute, Cray MPICH is available at $MPICH_DIR but portable mpi4py
+# was built against system MPI and won't find libmpi.so.
+if python -c "import mpi4py" 2>&1 | grep -q "libmpi.*cannot open"; then
+    echo "Fixing mpi4py: restoring native Cray MPICH build..."
+    _OLD_MPI4PY="/eagle/AuroraGPT/foremans/projects/saforem2/torchtitan/.venv"
+    if [ -d "${_OLD_MPI4PY}/lib/python3.12/site-packages/mpi4py" ]; then
+        _VENV_SITE="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+        rm -rf "${_VENV_SITE}/mpi4py" "${_VENV_SITE}/mpi4py-4.1.2.dist-info" 2>/dev/null
+        cp -r "${_OLD_MPI4PY}/lib/python3.12/site-packages/mpi4py" "${_VENV_SITE}/"
+        cp -r "${_OLD_MPI4PY}/lib/python3.12/site-packages/mpi4py-4.1.2.dist-info" "${_VENV_SITE}/"
+        echo "Restored native mpi4py from ${_OLD_MPI4PY}"
+    fi
+fi
+
 # Use ezpz launch (handles NCCL on Polaris the same way it handles oneCCL on XPU)
 OVERALL_OK=1
 for MODEL in "agpt_5b_olmo3_polaris_smoke" "agpt_10b_olmo3_polaris_smoke"; do
