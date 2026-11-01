@@ -15,7 +15,8 @@ input, no copy). Diagonal ``d = 0`` is square, so ``is_causal`` is legal
 there; ``d > 0`` is dense. That is ``n`` kernel calls doing
 ``n(n+1)/2`` of the ``n^2`` block products (8 chunks: 56%).
 
-Forward merges the per-diagonal outputs with their log-sum-exp. Backward uses
+Forward merges the per-diagonal outputs with their log-sum-exp
+(global LSE first, then one fused multiply-add per diagonal). Backward uses
 the ring/context-parallel identity: each diagonal's flash backward is given
 the GLOBAL output and GLOBAL LSE, which makes its dQ/dK/dV contribution exact;
 contributions are summed in fp32.
@@ -35,14 +36,12 @@ _aten = torch.ops.aten
 LSE_BASE2 = False
 
 
-def _merge(o_acc, lse_acc, o, lse):
-    if LSE_BASE2:
-        new = torch.logaddexp2(lse_acc, lse)
-        a, b = torch.exp2(lse_acc - new), torch.exp2(lse - new)
-    else:
-        new = torch.logaddexp(lse_acc, lse)
-        a, b = torch.exp(lse_acc - new), torch.exp(lse - new)
-    return o_acc * a.unsqueeze(-1) + o * b.unsqueeze(-1), new
+def _logaddexp(a, b):
+    return torch.logaddexp2(a, b) if LSE_BASE2 else torch.logaddexp(a, b)
+
+
+def _exp(x):
+    return torch.exp2(x) if LSE_BASE2 else torch.exp(x)
 
 
 def _fold(x, start: int, nblk: int, c: int):
@@ -73,13 +72,15 @@ def _unfold_lse(lse, B: int):
 
 
 class _BlockCausalFlash(torch.autograd.Function):
+    # All big accumulators live in [B, S, H, D] ("BSHD") so that the row
+    # ranges each diagonal touches are contiguous slices: one fused kernel per
+    # diagonal instead of strided BHSD updates and per-diagonal copies.
     @staticmethod
     def forward(ctx, q, k, v, n: int, scale: float):
         # q: [B, Hq, S, D]; k, v: [B, Hkv, S, D] (GQA handled by the kernel).
-        B, _, S, _ = q.shape
+        B, H, S, D = q.shape
         c = S // n
-        o_acc = lse_acc = None
-        rng = []
+        outs, lses, rng = [], [], []
         for d in range(n):
             nblk = n - d
             res = _aten._scaled_dot_product_flash_attention(
@@ -92,33 +93,51 @@ class _BlockCausalFlash(torch.autograd.Function):
                 scale=scale,
             )
             rng.append((res[6], res[7]))
-            o = _unfold(res[0], B).float()
-            lse = _unfold_lse(res[1], B)
+            outs.append(res[0])  # [B*nblk, H, c, D]
+            lses.append(_unfold_lse(res[1], B))  # [B, H, nblk*c] fp32
+        # Global LSE first (small tensors), then each diagonal's output is
+        # added exactly once with weight exp(lse_d - lse).
+        lse = lses[0].clone()
+        for d in range(1, n):
+            rows = slice(d * c, S)
+            lse[:, :, rows] = _logaddexp(lse[:, :, rows], lses[d])
+        acc = torch.empty(B, S, H, D, dtype=torch.float32, device=q.device)
+        for d in range(n):
+            rows = slice(d * c, S)
+            w = _exp(lses[d] - lse[:, :, rows]).transpose(1, 2).unsqueeze(-1)
+            o = _unfold(outs[d], B).transpose(1, 2)  # [B, rows, H, D]
             if d == 0:
-                o_acc, lse_acc = o, lse.clone()
+                torch.mul(o, w, out=acc)
             else:
-                rows = slice(d * c, S)
-                o_acc[:, :, rows], lse_acc[:, :, rows] = _merge(
-                    o_acc[:, :, rows], lse_acc[:, :, rows], o, lse
-                )
-        out = o_acc.to(q.dtype)
-        ctx.save_for_backward(q, k, v, out, lse_acc)
+                acc[:, rows].addcmul_(o, w)
+        out = acc.to(q.dtype)  # [B, S, H, D] contiguous
+        ctx.save_for_backward(q, k, v, out, lse)
         ctx.n, ctx.scale, ctx.rng = n, scale, rng
-        return out
+        return out.transpose(1, 2)
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, out, lse = ctx.saved_tensors
+        q, k, v, out_bshd, lse = ctx.saved_tensors
         n, scale = ctx.n, ctx.scale
         B, _, S, _ = q.shape
         c = S // n
-        dq = torch.zeros(q.shape, dtype=torch.float32, device=q.device)
-        dk = torch.zeros(k.shape, dtype=torch.float32, device=k.device)
-        dv = torch.zeros(v.shape, dtype=torch.float32, device=v.device)
+        out = out_bshd.transpose(1, 2)
+        do = do.transpose(1, 2).contiguous().transpose(1, 2)
+        acc = [
+            torch.empty(
+                t.shape[0],
+                S,
+                t.shape[1],
+                t.shape[3],
+                dtype=torch.float32,
+                device=t.device,
+            )
+            for t in (q, k, v)
+        ]
         for d in range(n):
             nblk = n - d
             seed, off = ctx.rng[d]
-            gq, gk, gv = _aten._scaled_dot_product_flash_attention_backward(
+            grads = _aten._scaled_dot_product_flash_attention_backward(
                 _fold(do, d, nblk, c),
                 _fold(q, d, nblk, c),
                 _fold(k, 0, nblk, c),
@@ -135,10 +154,15 @@ class _BlockCausalFlash(torch.autograd.Function):
                 off,
                 scale=scale,
             )
-            dq[:, :, d * c :] += _unfold(gq, B)
-            dk[:, :, : nblk * c] += _unfold(gk, B)
-            dv[:, :, : nblk * c] += _unfold(gv, B)
-        return dq.to(q.dtype), dk.to(k.dtype), dv.to(v.dtype), None, None
+            spans = (slice(d * c, S), slice(0, nblk * c), slice(0, nblk * c))
+            for a, g, rows in zip(acc, grads, spans):
+                g = _unfold(g, B).transpose(1, 2)
+                if d == 0:
+                    a.copy_(g)
+                else:
+                    a[:, rows].add_(g)
+        dq, dk, dv = (a.to(t.dtype).transpose(1, 2) for a, t in zip(acc, (q, k, v)))
+        return dq, dk, dv, None, None
 
 
 def block_causal_flash_attention(
