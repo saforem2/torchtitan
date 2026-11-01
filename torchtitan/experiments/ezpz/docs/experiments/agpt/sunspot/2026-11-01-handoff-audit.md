@@ -19,7 +19,9 @@ A fresh `24`-rank historical-wrapper compatibility control takes
 `2.3610 s/update`. The separate HSDP `4 x 6` canary takes `2.9030 s` and
 does not improve on the earlier `12 x 2` result. Its complete input stream
 matches MDS, but losses differ. The intended same-allocation comparison was
-cancelled after a PALS startup failure; its replacement has no result.
+cancelled after a PALS startup failure. The live-load canary then ended with
+scheduler exit `265` before application startup; the replacement comparison
+and Aurora fallback have not run.
 
 At `16` devices, the combined FSDP communication changes reach `2.2799 s`,
 versus `2.2525 s` for MDS ZeRO-1 and `2.3894 s` for the historical-wrapper

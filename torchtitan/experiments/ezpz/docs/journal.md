@@ -2,6 +2,21 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: follow-up ended before application startup
+
+- Exact historical `qstat -xf 12481908` records finished / exit `265`,
+  `run_count=21`, and `job held, too many failed attempts to run and terminated`.
+  There is no application log or `stime`. No loaded-parameter witness or
+  benchmark measurement was produced.
+- The completed fresh runs remain `12481905` / `12481906`: all `24` ranks,
+  `32` updates, and `1,536/1,536` matching consumed-input records. Timing and
+  loss discrepancies are explicit in the
+  [quantitative audit](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+- Aurora native/DCP transfer hashes and the TT compute probe were recovered.
+  Aurora MDS overlay preparation is incomplete; no fallback training job was
+  submitted. The experimental source checkout retains that unfinished launcher
+  change separately from published runtime commits.
+
 ## 2026-11-01: paired comparison startup and live-parameter gate
 
 - `12481907` ended with PBS exit `143` after explicit user approval to cancel
