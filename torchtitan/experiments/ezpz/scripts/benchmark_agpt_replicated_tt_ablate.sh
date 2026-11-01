@@ -10,12 +10,14 @@
 # Run benchmark_agpt_replicated_tt.sh variants serially in one allocation.
 # BENCH_VARIANTS is a space-separated list of TAG:SYNC:RESHARD:REDUCE:DEFER,
 # for example "base:1:default:float32:0 sync0:0:default:float32:0".
-# An optional sixth field holds comma-separated KEY=VALUE environment
+# An optional sixth field holds '+'-separated KEY=VALUE environment
 # overrides for that variant only, e.g.
-# "z1:1:default:float32:0:ARM=ddp-bf16-losscompile,BENCH_DDP_ZERO1=bfloat16".
+# "z1:1:default:float32:0:ARM=ddp-bf16-losscompile+BENCH_DDP_ZERO1=bfloat16".
+# '+' rather than ',' because qsub -v splits its argument on commas.
 # ARM, PPN, NODES, STEPS and BENCH_EXPECTED_TT_HEAD pass through unchanged.
 set -o pipefail
-# The launcher sets this too; exported here so preflight sees it.
+# The variant launcher sets this as well; exporting it here lets the
+# alcf-job-preflight gate check the wrapper script.
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 ROOT="${PBS_O_WORKDIR:?submit from the isolated checkout}"
 VARIANTS="${BENCH_VARIANTS:?set BENCH_VARIANTS}"
@@ -28,7 +30,7 @@ for variant in ${VARIANTS}; do
         echo "Malformed variant ${variant}" >&2; exit 2; }
     overrides=()
     if [[ -n "${extra:-}" ]]; then
-        IFS=, read -r -a overrides <<< "${extra}"
+        IFS=+ read -r -a overrides <<< "${extra}"
         for item in "${overrides[@]}"; do
             [[ "${item}" =~ ^[A-Z_][A-Z0-9_]*=[A-Za-z0-9._-]*$ ]] || {
                 echo "Malformed override ${item} in ${variant}" >&2; exit 2; }
