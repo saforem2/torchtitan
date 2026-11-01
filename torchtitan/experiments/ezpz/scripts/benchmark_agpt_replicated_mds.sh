@@ -193,7 +193,7 @@ fi
 MDS_AC="${MDS_AC:-none}"
 case "${MDS_AC}" in
     none) AC_ARGS=() ;;
-    full) AC_ARGS=(--checkpoint-activations) ;;
+    full) AC_ARGS=(--recompute-granularity full --recompute-method uniform --recompute-num-layers 1) ;;
     *) echo "MDS_AC must be none or full" >&2; exit 98 ;;
 esac
 
