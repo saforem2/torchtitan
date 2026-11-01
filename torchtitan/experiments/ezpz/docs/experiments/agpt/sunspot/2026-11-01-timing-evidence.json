@@ -32121,8 +32121,8 @@
     "mds": "Parsed elapsed_time_per_iteration_ms for iterations21..32, giving 12 samples.",
     "tokens_per_gpu_per_update": 16384,
     "flops_per_token": 11186515968,
-    "peak_bf16_tflops_per_gpu": 298188800000000,
-    "mfu_formula": "(flops_per_token*tokens_per_gpu_per_update / step_seconds) / peak_bf16_tflops_per_gpu"
+    "peak_bf16_flops_per_device": 298188800000000,
+    "mfu_percent_formula": "100 * (flops_per_token * tokens_per_gpu_per_update / step_seconds) / peak_bf16_flops_per_device"
   },
   "run_source_heads": {
     "12481866": {

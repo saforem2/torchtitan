@@ -190,8 +190,8 @@ uneven `Shard(1)`. `11008 = 2^8 x 43`. This blocked `12`-way HSDP at initializat
 fix falls back to padded `Shard(0)`, and successful `24`-rank runs now exist.
 The padding still carries a communication and memory cost.
 
-Matched 16-rank result, no rematerialization: MDS ZeRO-1 `2.25 s/update`
-(`7,273 tokens/s/device`) versus TT global FSDP `2.82 s/update` (`~5,810`).
+Matched 16-rank result, no rematerialization: MDS ZeRO-1 `2.2525 s/update`
+(`7,273.6 tokens/s/device`) versus TT global FSDP `2.8699 s/update` (`5,708.8`).
 The earlier coarse estimate was `1.25x`; aligned high-resolution event
 timing gives `1.274x` for this pair. The historical Aurora gap is `1.52x`.
 Losses at update `32`: MDS `11.99`, TT `12.32`; this run does not test
