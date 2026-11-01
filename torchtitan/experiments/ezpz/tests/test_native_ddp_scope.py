@@ -7,6 +7,7 @@
 import os
 import tempfile
 from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -171,9 +172,11 @@ def test_agpt_fsdp_shards_stacked_linear_on_matrix_rows(monkeypatch) -> None:
     )
     model = Model()
 
+    # A 1-D shard mesh of size 1: every row count divides it.
+    mesh = SimpleNamespace(ndim=1, size=lambda dim=None: 1)
     agpt_parallelize.apply_fsdp(
         model,
-        cast(Any, object()),
+        cast(Any, mesh),
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.float32,
         pp_enabled=False,
