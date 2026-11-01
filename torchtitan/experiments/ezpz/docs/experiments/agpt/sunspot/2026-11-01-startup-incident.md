@@ -4,6 +4,20 @@ Snapshot: `2026-11-01 14:55 UTC`. The comparison remains blocked before
 application execution. No new training, loss, or throughput result follows
 from these recovery attempts.
 
+## Support follow-up
+
+At `2026-11-01 09:15 CST`, the prepared incident report was sent through `AgentMail`
+from the dedicated agent inbox to `support@alcf.anl.gov`, with Sam copied
+on CC and all four diagnostic attachments. The returned message ID was
+verified against the inbox's `sent` label, recipients, subject, and attachment
+count. This confirms sending, not receipt or a site response.
+
+After explicit user approval, `12481933` was cancelled and confirmed
+finished. PBS supplied no numeric exit status for this cancellation. The
+pre-cancellation `21` failed starts are preserved alongside the post-cancel
+scheduler snapshot. `12481932` and `12481935` remain system-held; neither
+was cancelled or released.
+
 ## Reproduction
 
 | Job | Purpose | Source | Observed result |
@@ -105,7 +119,7 @@ training run. Held PBS jobs remain held, not finished. No unapproved cancellatio
 release, or node-state change was performed. The active monitor was stopped
 only after all allocated probes had either finished or reached system holds.
 
-## Site investigation request (draft, not sent)
+## Site investigation request (sent through AgentMail)
 
 Please inspect the PBS server/MOM and execution-hook logs for Sunspot jobs
 `12481908`, `12481931`, `12481932`, `12481933`, and `12481935` on

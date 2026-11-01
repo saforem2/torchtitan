@@ -2,6 +2,16 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: Sunspot support report sent through AgentMail
+
+- Sent the prepared PBS/MOM incident report to `ALCF Support` from the
+  dedicated `AgentMail` inbox, with Sam on CC and four diagnostic attachments.
+  Verified message ID, `sent` label, recipients, subject, and attachment count.
+  Receipt and full sent text remain in private campaign control files.
+- Cancelled only `12481933` after explicit user approval; PBS confirms
+  finished with no numeric exit status. `12481932` and `12481935` remain held.
+- [Incident report and support follow-up](experiments/agpt/sunspot/2026-11-01-startup-incident.md).
+
 ## 2026-11-01: Sunspot shell startup isolated; Aurora probe completed
 
 - Cancelled only `12481931` with explicit user approval; PBS finished after
