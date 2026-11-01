@@ -33,10 +33,8 @@ fi
 
 MODEL="${MODEL:-5b_olmo3_polaris}"
 
-export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-export CCL_PROCESS_LAUNCHER=pmix
-export CCL_OP_SYNC=1
-export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+# Polaris is A100/CUDA (not Intel XPU) — do not set ZE_FLAT/CCL/ONEAPI here.
+# ezpz_load_modules is machine-aware and selects the right MPI/CUDA stack.
 export TORCH_CPP_LOG_LEVEL=ERROR
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"

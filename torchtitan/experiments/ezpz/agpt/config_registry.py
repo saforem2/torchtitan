@@ -2273,6 +2273,51 @@ def agpt_10b_olmo3_polaris() -> FaultTolerantTrainer.Config:
     return _polaris_dolma_grain(cfg)
 
 
+def agpt_5b_olmo3_polaris_smoke() -> FaultTolerantTrainer.Config:
+    """4.64B smoke: same geometry as agpt_5b_olmo3_polaris, 3 deterministic steps.
+
+    Uses a tiny HF streaming source (no Dolma dependency) so the smoke runs
+    on any machine with internet. Validates the model/attention/activation path,
+    not the corpus.
+    """
+    from torchtitan.components.data import SingleDatasetConfig
+    from torchtitan.components.data.sources import HuggingFaceStreamingSource
+
+    cfg = agpt("5b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optim.optimizer = default_adamw(lr=6.58e-4)
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="allenai/dolma",
+                name="v1_7",
+                split="train",
+            ),
+            processor=TextProcessor.Config(),
+        )
+    )
+    return cfg
+
+
+def agpt_10b_olmo3_polaris_smoke() -> FaultTolerantTrainer.Config:
+    """9.48B twin of agpt_5b_olmo3_polaris_smoke."""
+    from torchtitan.components.data import SingleDatasetConfig
+    from torchtitan.components.data.sources import HuggingFaceStreamingSource
+
+    cfg = agpt("10b_olmo2tok", hf_assets_path="./assets/hf/OLMo-2-1124-7B")
+    cfg.optim.optimizer = default_adamw(lr=4.64e-4)
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="allenai/dolma",
+                name="v1_7",
+                split="train",
+            ),
+            processor=TextProcessor.Config(),
+        )
+    )
+    return cfg
+
+
 # Competition speedrun configs — makes them discoverable via --config
 from torchtitan.experiments.ezpz.competition.configs import (  # noqa: E402, F401  # noqa: E402, F401
     full_2b_adamw,
