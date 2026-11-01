@@ -52,6 +52,8 @@ overlays (not run). Details below.
   from `2.14.0+xpu` and `2.15.0.dev20260915+xpu`. Even `import
   torchtitan.models.llama3` fails on both Sunspot venvs.
 
+
+- **Sirius bringup:** `sirius-uan-0002` hostname missing from `ezpz_get_machine_name` (so every `ezpz status`/`ezpz launch` on Sirius UAN bailed with `Unknown machine: sirius`). Fixed at `saforem2/ezpz#sirius-uan-*` (`sirius*)` arm + `ezpz_load_modules_sirius` delegating to `polaris`). `ezpz status` now fans out to `sirius` (already in `REMOTE_SCHEDULERS`). Sirius shares Polaris's A100/CUDA stack but has no `AuroraGPT` allocation (needs `datascience`), no `dolma` dataset, and `sirius uses micromamba, not modules` was a stale claim -- `/soft/modulefiles` + `conda/2026-10-09` (`pytorch 2.14.0` CUDA 13) exist there.
 ### New Sunspot venv (required)
 
 `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16`:

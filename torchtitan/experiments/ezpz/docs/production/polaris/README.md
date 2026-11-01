@@ -15,7 +15,7 @@ Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
 [parent production README](../README.md): different hardware, different
 dataset (`dolma`), different job-ID range (`72xxxxx`), and a
-Polaris-specific checkpoint mode (`async`; see Known Issues).
+Polaris-specific checkpoint mode (`async`; see Known Issues). **Sirius (GH200, `workq` on `datascience`)** is the same A100-class hardware as Polaris but on a separate allocation -- see `ezpz status sirius` (now in the fanout since `sirius-uan-*` fix).
 
 All runs use `scripts/submit_agpt_{2b,20b}_autoretry.sh` (native
 `ezpz launch --auto-retry`), the `dolma` data list, and the SophiaG
