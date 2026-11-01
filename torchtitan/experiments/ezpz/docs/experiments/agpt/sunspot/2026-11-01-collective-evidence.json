@@ -1,0 +1,46 @@
+{
+  "scope": "one profiled update, rank0, 16 ranks; kernel timeline, not host collective walltime",
+  "classification": "ph=X and cat in kernel/gpu_memcpy/gpu_memset; collective kernel name begins oneccl or contains ccl::; other includes copies",
+  "interval_method": "union before intersection; sum of nested CPU annotations excluded",
+  "records": [
+    {
+      "job_id": "12481865",
+      "path_label": "MDS ZeRO-1",
+      "rank": 0,
+      "profiled_update": 12,
+      "trace_sha256": "b746e1e8478c4f3032a47c5159553023e0b524ccc94e3854f5b341fb7b8702da",
+      "device_span_ms": 2269.49070703125,
+      "non_ccl_activity_ms": 2056.5847177734377,
+      "collective_kernel_ms": 121.4667216796875,
+      "overlap_with_non_ccl_ms": 15.74610009765625,
+      "exposed_collective_kernel_ms": 105.72062158203126,
+      "idle_ms": 107.18536767578125
+    },
+    {
+      "job_id": "12481866",
+      "path_label": "TT default FSDP",
+      "rank": 0,
+      "profiled_update": 12,
+      "trace_sha256": "eab517482009026ac677fe9caa28c68e3496dfd492beb6bbc6aa66b631fbe82f",
+      "device_span_ms": 2940.4014072265627,
+      "non_ccl_activity_ms": 1988.8199594726561,
+      "collective_kernel_ms": 452.68463720703124,
+      "overlap_with_non_ccl_ms": 0.0,
+      "exposed_collective_kernel_ms": 452.68463720703124,
+      "idle_ms": 498.896810546875
+    },
+    {
+      "job_id": "12481886",
+      "path_label": "TT sync0lite FSDP",
+      "rank": 0,
+      "profiled_update": 12,
+      "trace_sha256": "30f95879fe93b1c84a2e1c5cc92552906b33707fad394792a170bd2c94b04e54",
+      "device_span_ms": 2306.826663574219,
+      "non_ccl_activity_ms": 1992.9348515625,
+      "collective_kernel_ms": 177.382080078125,
+      "overlap_with_non_ccl_ms": 0.0,
+      "exposed_collective_kernel_ms": 177.382080078125,
+      "idle_ms": 136.50973193359374
+    }
+  ]
+}

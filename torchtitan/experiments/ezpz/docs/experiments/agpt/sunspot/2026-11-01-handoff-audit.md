@@ -65,6 +65,38 @@ The BF16 HSDP mean has within-run sample deviation `0.283 s`, versus
 rounded times do not establish that FP32 reduction costs zero. Repeated
 independent jobs are needed to resolve small differences.
 
+## Peak memory and compilation cost
+
+All expected rank diagnostics are present. The table takes the maximum
+per-rank process-lifetime allocated and reserved high-water marks, captured
+before final witness reductions. These are not peaks restricted to updates
+`21-32`. The `GB`/`GiB` shorthand from the conversation is replaced with bytes
+converted consistently to `GiB`.
+
+| Run/variant | Rank coverage | Peak allocated GiB | Peak reserved GiB | Max-rank loss compile timer s |
+|---|---:|---:|---:|---:|
+| `12481860` | `24/24` | `39.923` | `42.561` | `none recorded` |
+| `12481865` | `16/16` | `40.387` | `42.727` | `none recorded` |
+| `12481866` | `16/16` | `21.271` | `26.938` | `17.688` |
+| `12481883` | `24/24` | `24.349` | `29.504` | `14.077` |
+| `12481884` | `24/24` | `25.238` | `29.953` | `14.244` |
+| `12481887` | `16/16` | `46.856` | `50.762` | `none recorded` |
+| `12481886-base` | `16/16` | `21.271` | `26.938` | `14.725` |
+| `12481886-sync0` | `16/16` | `21.271` | `26.938` | `3.002` |
+| `12481886-sync0lite` | `16/16` | `27.232` | `33.418` | `2.179` |
+| `12481886-sync1lite` | `16/16` | `27.232` | `33.418` | `2.281` |
+| `12481901-bf16` | `24/24` | `35.252` | `41.578` | `10.312` |
+| `12481901-fp32` | `24/24` | `38.948` | `44.736` | `2.516` |
+| `12481902-bf16` | `24/24` | `40.627` | `47.146` | `10.744` |
+
+Compilation uses only the outer `_compile.compile_inner` timer. Nested timer
+keys are not added. These are compiler-accounted costs, not total cold-start
+latency or an amortization estimate. Serial variants share a job's cache
+root; these diagnostics alone do not establish the cause of timer variation.
+MDS has no Torch compilation timer recorded. Full rank coverage, runtime
+versions, completion flags and timer fields are preserved in the
+[diagnostic evidence](2026-11-01-diagnostic-evidence.json).
+
 ## Corrections to the Claude conversation
 
 | Earlier claim | Audited finding |
@@ -158,6 +190,29 @@ variation is comparable to the cross-dtype variation, so these runs do not
 isolate a BF16-only loss effect. They do not establish long-term convergence
 or numerical equivalence. Full numbers: [precision evidence](2026-11-01-bf16-evidence.json).
 
+## Exposed collective time
+
+I independently reanalyzed the saved rank-0 traces for profiled update `12`
+of the `16`-rank runs. The local gzip SHA-256 values match the original
+Sunspot files. This uses unions of GPU event intervals before computing
+intersection; nested CPU annotations are not added. Collective kernels are
+identified by oneCCL names. Other GPU activity includes copies and does not
+mean GEMMs alone. Transfers absent from the profiler cannot be measured by
+this method. These are single-step timeline measurements, not the steady
+window means above or all-rank critical-path estimates.
+
+| Run | Device span ms | Other GPU activity ms | Collective kernels ms | Intersection ms | Exposed collective ms | Idle ms |
+|---|---:|---:|---:|---:|---:|---:|
+| `12481865` MDS ZeRO-1 | `2269.5` | `2056.6` | `121.5` | `15.7` | `105.7` | `107.2` |
+| `12481866` TT default FSDP | `2940.4` | `1988.8` | `452.7` | `0.0` | `452.7` | `498.9` |
+| `12481886` TT sync0lite FSDP | `2306.8` | `1992.9` | `177.4` | `0.0` | `177.4` | `136.5` |
+
+The combined FSDP settings reduce exposed collective-kernel time from
+`452.7` to `177.4 ms` in these traces, while non-CCL GPU activity is
+`1,988.8` versus `1,992.9 ms`. Idle gaps also shrink from `498.9` to
+`136.5 ms`; the step improvement must not be attributed to collective
+kernel duration alone. [Trace hashes and interval definitions](2026-11-01-collective-evidence.json).
+
 ## Attention and communication
 
 At the measured `B=1, S=8192, Hq=16, Hkv=4, D=128` shape, the Torch `2.14`
@@ -184,6 +239,12 @@ promising microbenchmark timing result, not trace-visible training overlap.
 Training follow-up `12481904` logs `allgatherv using copy engines not supported
 with tmp buffer`; the setting is not a usable training optimization on this
 path. Its final variant outcomes must be inspected after the job terminates.
+
+Canary `12481905` is running from immutable source `e44f928c4` on two
+Sunspot nodes, `24` ranks, `HSDP 4 x 6`, FP32 deferred reduction, no
+activation checkpointing, `32` updates and explicit per-rank timing. The
+exact-source parser/import gate and repository submit wrapper passed. It
+has built the requested mesh; training completion is not yet established.
 
 ## Continuation gates
 
