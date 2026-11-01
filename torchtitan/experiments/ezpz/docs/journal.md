@@ -2,6 +2,31 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01 (Sunspot) -- MDS/TT handoff audit and continuation
+
+Recovered Claude session `255a7e56-1404-4d91-be47-317b42c0aa0c` after its
+spending-limit stop. Aligned updates `21-32` give `MDS ZeRO-1` `2.2005 s`
+versus `TT HSDP 12 x 2` `2.7041 s` (BF16 reduce) / `2.7134 s` (FP32 reduce)
+at `24` FLAT devices. Common accounting gives `83.29` / `67.78` / `67.55`
+model TFLOP/s/device. Full-model numerical equivalence and 256-node parity
+remain open. [Report and corrections](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+
+The nominal stage-0 reproduction had selected the wrong DeepSpeed wrapper.
+Compatibility job `12481887` completed with `BF16_Optimizer` through a DS
+`0.18.5` stage-1 JSON; it reproduces the historical dtype/wire behavior,
+not the historical runtime. Complete consumed-input hashes match in five
+MDS/TT pairs. BF16 job `12481899` completed five `200`-step arms; repeat
+variation prevents a dtype-only loss conclusion.
+
+At audit start, `48/52` online W&B runs had no logged evidence artifact.
+Recovery uploads use each run's immutable provenance and distinguish
+scheduler and application outcomes. Inherited job `12481904` remains under
+one campaign monitor; its copy-engine arm logged an unsupported-allgatherv
+error. A new pinned checkout at `e44f928c4` has the reviewed optional rank
+step timer. Its canary must pass exact-source preflight before submission.
+
+---
+
 ## 2026-10-31 (Polaris) -- 20B chain re-armed at step 6800, docs 2 months stale
 
 Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug 16) to **step-6800** (Oct 18 12:41) across 4 legs that never landed in local docs. Last leg `7753580` (6501->6859) self-aborted via `GRAD_NORM_ABORT=20.0` at step 6859 (grad_norm 5.5, 28.9x median) -- first abort of its kind on this chain, exit 0, checkpoint 6800 intact. Queue was empty (idle 13 days). Re-queued at `select=132` (`128 train + 4 spare`, matching Oct legs) via `submit_agpt_20b_autoretry.sh` with `CHECKPOINT_ASYNC_MODE=async` (required on Polaris, sync deadlocks at 512 ranks): **7803246 Q** + **7803247 H** (afterany), chain 2-deep. Polaris HEAD `5be47f7cf` matches mbph `ezpz`. Updated `production/polaris/README.md` header, at-a-glance, checkpoints (56->68 dirs, 47->57B tokens), trajectory legs 19-22, and queue depth. Charts remain stale (2026-07-22) -- wiring is now on HEAD but not regenerated (needs W&B creds). W&B run `rq0kbuej` (eager-wind-4628) covers 6501-6859.

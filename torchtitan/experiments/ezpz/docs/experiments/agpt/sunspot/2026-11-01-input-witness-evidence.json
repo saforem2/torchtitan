@@ -1,0 +1,1023 @@
+{
+  "comparisons": [
+    {
+      "left": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero1-sophiag-production-acnone-n2x8-12481865",
+      "right": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/agpt-replicated-20261031/fsdp-losscompile-12481866",
+      "left_rows": 1024,
+      "right_rows": 1024,
+      "left_only": 0,
+      "right_only": 0,
+      "compared": 1024,
+      "mismatches": 0
+    },
+    {
+      "left": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero0-ds0175-sophiag-production-acnone-n2x8-12481887",
+      "right": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031-profile/outputs/agpt-replicated-20261031/fsdp-losscompile-sync0lite-12481886",
+      "left_rows": 1024,
+      "right_rows": 1024,
+      "left_only": 0,
+      "right_only": 0,
+      "compared": 1024,
+      "mismatches": 0
+    },
+    {
+      "left": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero0-ds0175-sophiag-production-acnone-n2x8-12481887",
+      "right": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031-mdscomm/outputs/agpt-replicated-20261031/ddp-bf16-losscompile-z1bf16b100-12481893",
+      "left_rows": 1024,
+      "right_rows": 1024,
+      "left_only": 0,
+      "right_only": 0,
+      "compared": 1024,
+      "mismatches": 0
+    },
+    {
+      "left": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero1-sophiag-production-acnone-n2-12481860",
+      "right": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031-final/outputs/agpt-replicated-20261031/fsdp-losscompile-lite-12481902",
+      "left_rows": 1536,
+      "right_rows": 1536,
+      "left_only": 0,
+      "right_only": 0,
+      "compared": 1536,
+      "mismatches": 0
+    },
+    {
+      "left": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero1-sophiag-production-acnone-n2-12481860",
+      "right": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031-final/outputs/agpt-replicated-20261031/hsdp-losscompile-litefp32-12481901",
+      "left_rows": 1536,
+      "right_rows": 1536,
+      "left_only": 0,
+      "right_only": 0,
+      "compared": 1536,
+      "mismatches": 0
+    }
+  ],
+  "witnesses": [
+    {
+      "output": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero1-sophiag-production-acnone-n2x8-12481865",
+      "ranks": [
+        {
+          "rank": 11,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 3,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 9,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 14,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 2,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 1,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 7,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 4,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 8,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 5,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 15,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 12,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 10,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 0,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 13,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 6,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "output": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero1-sophiag-production-acnone-n2-12481860",
+      "ranks": [
+        {
+          "rank": 11,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 22,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 23,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 3,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 9,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 19,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 14,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 2,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 1,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 7,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 4,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 8,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 5,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 15,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 21,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 12,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 18,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 16,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 17,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 20,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 10,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 0,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 13,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 6,
+          "optimizer_count": 1,
+          "successful_step_calls": 64,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 64,
+              "step_call_attempts": 64,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "output": "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031/outputs/mds-zero0-ds0175-sophiag-production-acnone-n2x8-12481887",
+      "ranks": [
+        {
+          "rank": 11,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 3,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 9,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 14,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 2,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 1,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 7,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 4,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 8,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 5,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 15,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 12,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 10,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 0,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 13,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        },
+        {
+          "rank": 6,
+          "optimizer_count": 1,
+          "successful_step_calls": 32,
+          "errors": [],
+          "optimizers": [
+            {
+              "class": "megatron.optimizer.sophia.SophiaG",
+              "successful_step_calls": 32,
+              "step_call_attempts": 32,
+              "step_exceptions": 0,
+              "state_step_min": 32,
+              "state_step_max": 32,
+              "state_step_count": 2
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

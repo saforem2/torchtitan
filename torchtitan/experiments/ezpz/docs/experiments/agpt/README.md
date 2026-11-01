@@ -33,6 +33,7 @@ Latest: [MDS versus TorchTitan, final report](sunspot/2026-10-29-native-checkpoi
 
 | Date | Report | Configs | Nodes | Key Result |
 |------|--------|---------|-------|------------|
+| 2026-11-01 | [MDS/TT recovered comparison and audit](sunspot/2026-11-01-handoff-audit.md) | AGPT-2B, SophiaG, seq8192 | 2 | 24-rank TT HSDP 2.704-2.713 s vs MDS ZeRO-1 2.201 s; aligned timing and complete input hashes |
 | 2026-03-30 | [80B results](../../scaling/agpt-80b.md) | 80B variants x TP={2,3,6,12} | 2 | TP=2 best: 85 TPS, 15.5% MFU |
 | 2026-04-12 | [LR Finder (n2)](../lr-finder/agpt/2b/README.md#2026-04-14----2b-sunspot-dim-aware-init) | 2B, 20B x {AdamW,Muon,SophiaG} | 2 | All 6 sweeps; 20B SophiaG suggested LR=1.5e-5 |
 | 2026-04-12 | [Scaling Study](../../scaling/) | 2b, 20b, 80b at 1-64N | 1-64 | 20b 87% efficiency at 64N; 80b OK at 4-32N |
