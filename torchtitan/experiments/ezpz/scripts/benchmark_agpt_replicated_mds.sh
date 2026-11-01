@@ -57,7 +57,16 @@ if not torch.xpu.is_available():
 print(f"xpu_count={torch.xpu.device_count()}")
 PY
 
-RUN_KIND="${RUN_KIND:-zero0-sophiag}"
+MDS_ZERO_STAGE="${MDS_ZERO_STAGE:-0}"
+MDS_OPTIMIZER="${MDS_OPTIMIZER:-sophiag}"
+case "${MDS_ZERO_STAGE}" in 0|1) ;; *) echo "MDS_ZERO_STAGE must be 0 or 1" >&2; exit 98 ;; esac
+case "${MDS_OPTIMIZER}" in
+    # Witness hooks only instrument megatron.optimizer.sophia.
+    sophiag) OPT_ARGS=(--optimizer sophiag --sophiag-beta1 .9 --sophiag-beta2 .95 --sophiag-rho .01); WITNESS_ARGS=(--benchmark-sophia-witness) ;;
+    adamw) OPT_ARGS=(--optimizer adamw --adam-beta1 .9 --adam-beta2 .95 --adam-eps 1e-5); WITNESS_ARGS=() ;;
+    *) echo "MDS_OPTIMIZER must be sophiag or adamw" >&2; exit 98 ;;
+esac
+RUN_KIND="${RUN_KIND:-zero${MDS_ZERO_STAGE}-${MDS_OPTIMIZER}}"
 GRAD_POLICY="${GRAD_POLICY:-production}"
 case "${GRAD_POLICY}" in
     production|fp32_wire) ;;
@@ -145,18 +154,18 @@ for metadata in "${LOAD_ROOT}"/lr_state_dict_*.yaml; do
     [[ -f "${metadata}" ]] && cp -- "${metadata}" "${PROVENANCE_DIR}/"
 done
 
-# Derive a job-unique ZeRO-0 config; the model checkpoint supplies no optimizer state.
-"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" <<'PYCONFIG' || exit 96
+# Derive a job-unique ZeRO config; the model checkpoint supplies no optimizer state.
+"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" "${MDS_ZERO_STAGE}" <<'PYCONFIG' || exit 96
 import json
 import sys
 
-template_path, config_path, global_batch_size, grad_policy = sys.argv[1:]
+template_path, config_path, global_batch_size, grad_policy, zero_stage = sys.argv[1:]
 with open(template_path, encoding="utf-8") as stream:
     config = json.load(stream)
 config["train_batch_size"] = int(global_batch_size)
 config["train_micro_batch_size_per_gpu"] = 1
 config["gradient_accumulation_steps"] = 2
-config["zero_optimization"] = {"stage": 0}
+config["zero_optimization"] = {"stage": int(zero_stage)}
 config["flops_profiler"]["enabled"] = False
 config["comms_logger"]["enabled"] = False
 assert "communication_data_type" not in config
@@ -167,7 +176,7 @@ if grad_policy == "fp32_wire":
 with open(config_path, "x", encoding="utf-8") as stream:
     json.dump(config, stream, indent=2)
     stream.write("\n")
-print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage=0 grad_policy={grad_policy}")
+print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage={zero_stage} grad_policy={grad_policy}")
 PYCONFIG
 cp -- "${DS_CONFIG}" "${PROVENANCE_DIR}/deepspeed-config.json"
 
@@ -182,8 +191,8 @@ export WANDB_RUN_GROUP="${BENCH_WANDB_GROUP:-${WANDB_RUN_GROUP}}"
 export WANDB_RUN_NAME="${RUN_NAME}"
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_RUN_ID="agpt-${RUN_NAME}"
-export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${GRAD_POLICY},${RUN_KIND}"
-export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero0,sophiag,${GRAD_POLICY},${RUN_KIND}"
+export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
+export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
 export WANDB_DIR="${OUTPUT_DIR}/wandb"
 
 PROFILE_ARGS=()
@@ -213,7 +222,7 @@ esac
     echo "mds_source_root=${MDS_ROOT} campaign_root=${CAMPAIGN_ROOT}"
     echo "load_root=${LOAD_ROOT} load_tag=global_step138650"
     echo "data_list=${BOOKS_LIST} split=95,5,0 gbs=${GLOBAL_BATCH_SIZE} gas=2 microbatch=1 seq=8192"
-    echo "optimizer=sophiag beta1=.9 beta2=.95 rho=.01 weight_decay=.1 clip_grad=1.0"
+    echo "zero_stage=${MDS_ZERO_STAGE} optimizer=${MDS_OPTIMIZER} args=${OPT_ARGS[*]} weight_decay=.1 clip_grad=1.0"
     echo "grad_policy=${GRAD_POLICY} local_accumulation=legacy_default_runtime_unverified"
     echo "optimizer_state=fresh hessian_policy=no_update_hessian_call_in_pinned_source step_bs_default=5120"
     echo "profile=${PROFILE} deepspeed_flops_profiler=disabled activation_checkpoint=${MDS_AC}"
@@ -242,7 +251,7 @@ ezpz launch \
     --nproc "${NPROC}" --nproc_per_node "${NPROC_PER_NODE}" -- \
     "${MDS_VENV}/bin/python" "${PROVENANCE_DIR}/benchmark_agpt_entrypoint.py" \
     --benchmark-output="${OUTPUT_DIR}/rank-diagnostics" \
-    --benchmark-sophia-witness \
+    "${WITNESS_ARGS[@]}" \
     --benchmark-script="${MDS_ROOT}/pretrain_gpt_alcf.py" -- \
     --finetune \
     --override-opt_param-scheduler \
@@ -276,15 +285,12 @@ ezpz launch \
     --bf16 \
     --deepspeed \
     --deepspeed_config="${DS_CONFIG}" \
-    --zero-stage 0 \
+    --zero-stage "${MDS_ZERO_STAGE}" \
     --no-pipeline-parallel \
     --pipeline-model-parallel-size 1 \
     --tensor-model-parallel-size 1 \
     --distributed-backend ccl \
-    --optimizer sophiag \
-    --sophiag-beta1 .9 \
-    --sophiag-beta2 .95 \
-    --sophiag-rho .01 \
+    "${OPT_ARGS[@]}" \
     --weight-decay .1 \
     --clip-grad 1.0 \
     --lr 2e-6 \
