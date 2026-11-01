@@ -274,7 +274,7 @@ else
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
         --benchmark-sophia-witness "${TIMING[@]}" "${INITIAL_AUDIT[@]}"
-        --benchmark-module="${TRAIN_MODULE}"
+        --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
         --training.steps="${STEPS}" --training.max-context-length=8192
         --training.num-tokens-per-microbatch-per-dp-rank=8192
