@@ -137,6 +137,10 @@ class Bench:
         self.rs_in = torch.randn(rs_elems, device=device, dtype=rs_dtype)
         self.rs_out = torch.empty(rs_elems // world, device=device, dtype=rs_dtype)
         self.n_mm = args.mm_iters
+        # The compute/compute control always uses a normal-priority stream:
+        # torch.matmul on a priority=-1 XPU stream segfaults (torch 2.14, job
+        # 12481898), and FSDP2 only runs copies and collectives there.
+        self.cc_stream = torch.xpu.Stream(device=device, priority=0)
 
     def matmuls(self, n: int, side: bool = False) -> None:
         a, c = (self.a2, self.c2) if side else (self.a, self.c)
@@ -190,12 +194,13 @@ class Bench:
             self.matmuls(self.n_mm)
 
         def side_compute_only():
-            with torch.xpu.stream(side):
+            with torch.xpu.stream(self.cc_stream):
                 self.matmuls(self.n_mm, side=True)
 
         def both(other):
             def run():
                 side.wait_stream(main)
+                self.cc_stream.wait_stream(main)
                 if order == "mm-first":
                     self.matmuls(self.n_mm)
                     other()
@@ -205,11 +210,16 @@ class Bench:
 
             return run
 
-        comp = self.timed(compute_only)
-        comm = self.timed(comm_only)
-        conc = self.timed(both(comm_only))
-        comp2 = self.timed(side_compute_only)
-        conc_cc = self.timed(both(side_compute_only))
+        def phase(name, fn):
+            if self.rank == 0:
+                print(f"  PHASE {name}", flush=True)
+            return self.timed(fn)
+
+        comp = phase("compute", compute_only)
+        comm = phase("comm", comm_only)
+        conc = phase("both", both(comm_only))
+        comp2 = phase("cc_compute2", side_compute_only)
+        conc_cc = phase("cc_both", both(side_compute_only))
         row = {
             "tag": tag,
             "op": op,
@@ -225,6 +235,18 @@ class Bench:
             "cc_both_ms": conc_cc,
             "cc_overlap_ms": comp + comp2 - conc_cc,
         }
+        self._both = both(comm_only)
+        return row
+
+    def trace(self, row, trace_dir, tag):
+        """Profile one concurrent run (rank 0 records) and add kernel overlap."""
+        op, priority, order, async_op = (
+            row["op"],
+            row["priority"],
+            row["order"],
+            row["async_op"],
+        )
+        both_comm = self._both
         if trace_dir is not None and str(int(async_op)) in self.args.trace_async.split(
             ","
         ):
@@ -234,7 +256,7 @@ class Bench:
             activities = [ProfilerActivity.CPU, ProfilerActivity.XPU]
             if self.rank == 0:
                 with profile(activities=activities) as prof:
-                    both(comm_only)()
+                    both_comm()
                     torch.xpu.synchronize(self.device)
                 path = (
                     trace_dir
@@ -246,7 +268,7 @@ class Bench:
                 except (OSError, KeyError, ValueError) as exc:
                     row["trace_error"] = repr(exc)
             else:
-                both(comm_only)()
+                both_comm()
                 torch.xpu.synchronize(self.device)
             self._sync()
         return row
@@ -324,7 +346,21 @@ def main() -> None:
             ("CCL_", "UR_L0", "SYCL_PI", "ZEX_", "ZE_", "TORCH_XCCL", "TORCH_XPU")
         )
     )
+    # Which oneCCL / UR / L0 the process really mapped (module LD paths can
+    # shadow the venv's RUNPATH).
+    with open("/proc/self/maps") as handle:
+        libs = sorted(
+            {
+                line.split()[-1]
+                for line in handle
+                if any(
+                    k in line
+                    for k in ("libccl", "libur_adapter", "libze_", "libsycl.so")
+                )
+            }
+        )
     if rank == 0:
+        print("LIBS", " ".join(libs))
         print("ENV", " ".join(f"{k}={os.environ[k]}" for k in env_keys))
         print(
             f"CONFIG tag={args.tag} world={world} host={socket.gethostname()} "
@@ -348,28 +384,32 @@ def main() -> None:
                 row["world"] = world
                 rows.append(row)
                 if rank == 0:
-                    trace = ""
-                    if "trace_overlap_ms" in row:
-                        trace = (
-                            f" | trace comp={row['trace_compute_ms']:.1f} comm={row['trace_comm_ms']:.1f}"
-                            f" ovl={row['trace_overlap_ms']:.1f} barriers={row['trace_barrier_kernels']}"
-                            f"/{row['trace_barrier_ms']:.1f}ms"
-                        )
                     print(
                         f"RESULT tag={args.tag} world={world} op={op} prio={priority} order={order} async={int(async_op)} "
                         f"compute={row['compute_ms']:.1f} comm={row['comm_ms']:.1f} "
                         f"both={row['both_ms']:.1f} overlap={row['overlap_ms']:.1f} "
                         f"({row['overlap_frac']:.0%}) | cc: c2={row['cc_compute2_ms']:.1f} "
-                        f"both={row['cc_both_ms']:.1f} ovl={row['cc_overlap_ms']:.1f}{trace}",
+                        f"both={row['cc_both_ms']:.1f} ovl={row['cc_overlap_ms']:.1f}",
                         flush=True,
                     )
+                    if args.jsonl:
+                        with open(args.jsonl, "a") as handle:
+                            env = {k: os.environ[k] for k in env_keys}
+                            handle.write(
+                                json.dumps({**row, "env": env, "libs": libs}) + "\n"
+                            )
+                bench.trace(row, trace_dir, args.tag)
+                if rank == 0:
+                    if "trace_overlap_ms" in row:
+                        print(
+                            f"TRACE tag={args.tag} world={world} op={op} prio={priority} order={order}"
+                            f" comp={row['trace_compute_ms']:.1f} comm={row['trace_comm_ms']:.1f}"
+                            f" ovl={row['trace_overlap_ms']:.1f} barriers={row['trace_barrier_kernels']}"
+                            f"/{row['trace_barrier_ms']:.1f}ms",
+                            flush=True,
+                        )
                     if "trace_top" in row:
                         print("  TOP", "; ".join(row["trace_top"]), flush=True)
-    if rank == 0 and args.jsonl:
-        with open(args.jsonl, "a") as handle:
-            for row in rows:
-                row["env"] = {k: os.environ[k] for k in env_keys}
-                handle.write(json.dumps(row) + "\n")
     dist.barrier()
     dist.destroy_process_group()
 
