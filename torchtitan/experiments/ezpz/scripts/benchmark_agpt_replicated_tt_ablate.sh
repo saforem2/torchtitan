@@ -14,6 +14,7 @@
 # overrides for that variant only, e.g.
 # "z1:1:default:float32:0:ARM=ddp-bf16-losscompile+BENCH_DDP_ZERO1=bfloat16".
 # '+' rather than ',' because qsub -v splits its argument on commas.
+# BENCH_DETERMINISTIC, STEPS and BENCH_REDUCE_PROBE use the same KEY=VALUE field.
 # ARM, PPN, NODES, STEPS and BENCH_EXPECTED_TT_HEAD pass through unchanged.
 set -o pipefail
 # The variant launcher sets this as well; exporting it here lets the

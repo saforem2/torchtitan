@@ -112,7 +112,7 @@ cp "${BASH_SOURCE[0]}" "${OUT}/provenance/submitted-launcher.sh"
 cp "${ROOT}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_entrypoint.py" "${OUT}/provenance/"
 module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
-echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0}"
+echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
@@ -172,6 +172,22 @@ else
             ;;
         *) echo "Unknown ARM=${ARM}" >&2; exit 2;;
     esac
+    # BENCH_DETERMINISTIC=1: strict deterministic algorithms (no warn-only).
+    DETERMINISTIC=(--debug.no-deterministic)
+    case "${BENCH_DETERMINISTIC:-0}" in
+        0) ;; 1) DETERMINISTIC=(--debug.deterministic) ;;
+        *) echo "BENCH_DETERMINISTIC must be 0 or 1" >&2; exit 2;;
+    esac
+    # BENCH_REDUCE_PROBE=1 replays update 1 under each FSDP reduction variant
+    # (probe_fsdp_reduce_precision.py), then trains normally.
+    TRAIN_MODULE=torchtitan.experiments.ezpz.train
+    case "${BENCH_REDUCE_PROBE:-0}" in
+        0) ;;
+        1) TRAIN_MODULE=torchtitan.experiments.ezpz.scripts.probe_fsdp_reduce_precision
+           export AGPT_REDUCE_PROBE_OUTPUT="${OUT}/reduce-precision"
+           [[ "${ARM}" == fsdp-* ]] || { echo "BENCH_REDUCE_PROBE needs an fsdp ARM" >&2; exit 2; } ;;
+        *) echo "BENCH_REDUCE_PROBE must be 0 or 1" >&2; exit 2;;
+    esac
     COMPILE=(--compile.no-enable)
     [[ "${ARM}" == *losscompile ]] && COMPILE=(--compile.enable --compile.components=loss)
     PROFILE=()
@@ -190,7 +206,7 @@ else
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
         --benchmark-sophia-witness
-        --benchmark-module=torchtitan.experiments.ezpz.train --
+        --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
         --training.steps="${STEPS}" --training.max-context-length=8192
         --training.num-tokens-per-microbatch-per-dp-rank=8192
@@ -199,7 +215,7 @@ else
         --dataloader.dataset-path="${ROOT}/torchtitan/experiments/ezpz/data-lists/sunspot/books.txt"
         --dataloader.train-iters="${STEPS}" --dataloader.split=95,5,0
         --dataloader.data-cache-path="${ROOT}/.cache/books-gbs${GBS}/index-cache"
-        --debug.seed=42 --debug.no-deterministic --metrics.log-freq=1
+        --debug.seed=42 "${DETERMINISTIC[@]}" --metrics.log-freq=1
         --metrics.enable-tensorboard --metrics.enable-wandb
         --dump-folder="${OUT}" --checkpointer.folder=checkpoints
         --checkpointer.interval=10000 --checkpointer.keep-latest-k=0
