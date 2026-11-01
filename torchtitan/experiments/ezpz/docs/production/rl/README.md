@@ -1,4 +1,7 @@
-# RL (GRPO) on Intel XPU
+# RL (GRPO)
+> **2026-11-01 sync validation (`5eba3398a`):** `rl/train_sft.py` + `rl/train_grpo.py` + `rl/model_configs.py` imports verified green on `workq` 2N via `rl-check` but the full GRPO/vLLM path is not smokable at 2N (needs Monarch + multi-node). `debugmodel` XPU gate is the proxy for RL model code until a heavier allocation is available.
+
+ on Intel XPU
 
 > [!IMPORTANT]
 > **Current production instructions:** use

@@ -1,4 +1,7 @@
 # Production SFT
+> **2026-11-01 sync validation (`5eba3398a`):** `agpt_2b_mds154391_tulu_math_uc_streaming` and `agpt_2b_real` were submitted as `sft-smoke` `12481941` and `prod2b-smoke` `12481942` on `workq` 2N but also held (`H`, same `qsub` path issue). The sync's model code is green on `debugmodel` 3/3 XPU; SFT/Prod-specific data paths need resubmit from worktree (not `/tmp` heredoc).
+
+
 
 > **Last updated: 2026-08-30.** No SFT run is currently training or
 > queued on any machine. Everything indexed below is finished, blocked,

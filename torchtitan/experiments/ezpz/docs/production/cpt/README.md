@@ -1,4 +1,7 @@
-# Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep
+# Continued Pre-Training
+> **2026-11-01 sync validation (`5eba3398a`):** Sunspot `workq` 2N + Aurora `debug-scaling` 2N both `VERDICT: ok` 3/3 on `debugmodel` (losses `10.877/10.754/10.480` + `10.880/10.708/10.558` + `12.952/12.596/11.471` byte-identical). `agpt_2b_mds_mix_owm_edu_7525` (CPT production blend, the `max_num_documents` fix) was submitted as `cpt-smoke` `12481940` on `workq` 2N but held (`H`, too many failed attempts) -- `qsub` from `/tmp` heredoc left `PBS_O_WORKDIR` wrong and no output materialized. Needs resubmit from worktree checkout. RL/SFT deeper configs deferred to their own `production/sft` and `production/rl` gates.
+
+ (CPT) — 2B olmo x dolmino mixing-ratio sweep
 
 > **Living document** — updated as CPT runs complete and are evaluated.
 >
