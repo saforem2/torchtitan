@@ -2,9 +2,9 @@
 
 ## 2026-10-31: upstream `b93d5c0cf5`..`upstream/main` (52 commits) -> `519efe4de`, smoke-validated on Sunspot
 
-Branch `sync/upstream-b93d5c0cf5` merges 52 upstream commits (`b93d5c0cf5..8e4990d8c`, the `main` tip of 2026-10-31) on top of the prior `5a7a622f16` sync. The merge is `519efe4de`; follow-up commits port ezpz where needed. No conflicts under `experiments/ezpz/`.
+Branch `sync/upstream-b93d5c0cf5` merges 52 upstream commits (`b93d5c0cf5..8e4990d8c`, the `main` tip of 2026-10-31) on top of the prior `5a7a622f16` sync. The merge is `519efe4de`; post-merge HEAD is `1a87a05be` (two MDS Grain fixes). No conflicts under `experiments/ezpz/`.
 
-Verdict: **all 3 smoke arms pass on Sunspot `workq` 2N 01:00** — `agpt_debugmodel` TP=1, `agpt_debugmodel` TP=2, and `moe_debugmodel` TP=1 each run 3 deterministic steps (`seed=42`, `max_context_length=512`, `num_tokens_per_microbatch_per_dp_rank=512`) to completion with `VERDICT: ok` and PBS `Exit 0`. Jobs `12481836` (`8e05a093e`, walltime 00:03:21) and `12481837` (`519efe4de`, walltime 00:02:05) both report `VERDICT: ok` / `Exit_status=0`. The TP=2 arm needed two smoke-side workarounds that do **not** change production code (see below).
+Verdict: **all 3 smoke arms pass on Sunspot `workq` 2N 01:00** — `agpt_debugmodel` TP=1, `agpt_debugmodel` TP=2, and `moe_debugmodel` TP=1 each run 3 deterministic steps (`seed=42`, `max_context_length=512`, `num_tokens_per_microbatch_per_dp_rank=512`) to completion with `VERDICT: ok` and PBS `Exit 0`. Jobs `12481836` (`8e05a093e`, walltime 00:03:21) and `12481837` (`519efe4de`, walltime 00:02:05) both report `VERDICT: ok` / `Exit_status=0`; re-smoke `12481889` (`1a87a05be`, 3/3 `rc=0`, losses `10.87746/10.75454/10.48067` + `10.88011/10.70814/10.55886` + `12.95225/12.59617/11.47114`) confirms HEAD after the two MDS Grain fixes. The TP=2 arm needed two smoke-side workarounds that do **not** change production code (see below). Aurora `9016380` (`1a87a05be`, `debug-scaling` 2N) in flight — see `journal.md`.
 
 ### What the 52 commits change for us
 
@@ -73,9 +73,7 @@ traps hit while bringing it up, both now handled in
    cold-importing from Lustre can exceed the 120 s PALS start timeout, so the
    script sets `PALS_RPC_TIMEOUT=600`.
 
-Aurora and Polaris were **not** touched: no venv exists there with a torch new
-enough for this tree, so Aurora production runs must stay on their current
-checkout until that venv is built. Job `8929146` was not touched.
+Aurora: smoke `9016380` (`1a87a05be`, `debug-scaling` 2N, same XPU venv) in flight at doc time — `workq` (Sunspot) and `prod`/`debug-scaling` (Aurora) now share the same BKC, so `next-eval` is retired. Polaris: no smoke on this tree yet — `workq`-style XPU smoke does not apply (A100/CUDA, `torch 2.13.0+cu129`). Imports verified on Polaris login (`DataParallelMeshDims` + `torchtitan` OK on `+cu129`), but `torch_remat`/`spmd_types`/`renderers` needed manual `uv pip install` on the shared `.venv` — a training smoke on A100 (CUDA `mpiexec`, no `ZE_FLAT`/`oneapi`) is still needed before promoting this sync to Polaris production. Job `8929146` was not touched.
 
 ### Conflicts (12 paths)
 

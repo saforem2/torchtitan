@@ -2,13 +2,15 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-10-31 (Sunspot) -- upstream `b93d5c0cf5` sync to `519efe4de`, Sunspot 2N smoke green
+## 2026-10-31 (Sunspot+Aurora) -- upstream `b93d5c0cf5` sync to `519efe4de`, Sunspot 2N smoke green; HEAD `1a87a05be` re-smoked
 
 Pulled 52 new upstream commits (`b93d5c0cf5..8e4990d8c`) into `sync/upstream-b93d5c0cf5` as `519efe4de`. This resumes after the `5a7a622f16` sync (2026-10-15) and the `7d4c8e88c` b93d5c0cf5 sharding/compile port that the 4-commit smoke work landed on `SunSpot 2N`.
 
 Smoke `12481836` (`8e05a093e`) proved the TP=2 and graph fixes: all 3 arms now `VERDICT: ok` / `Exit 0` on `workq 2N 01:00` (walltime 00:03:21). Smoke `12481837` (`519efe4de`) re-ran the same 3 arms on the merged head and also reported `VERDICT: ok` / `Exit 0` (walltime 00:02:05, commit `519efe4de` in log). No `experiments/ezpz/` conflicts in the merge. See `upstream-sync.md` for the smoke-side workarounds (graph disable on XPU, TP=2 AC none) — production code unchanged beyond the `agpt`/`moe` attention batch-geometry re-cherry-pick (`549816673`).
 
-Also on this sync: `local_compile` ported from `local_compile_regions` (8 commits across sharding + compile), `AcceleratorGraphInputSpec` from `CUDAGraphInputSpec`, and the `wkv_b` / MLP remat fixes for DeepSeek MLA. Branch `sync/upstream-b93d5c0cf5` is up to date with `upstream/main` at `8e4990d8c` (#5718).
+Two follow-up MDS Grain fixes landed after `519efe4de`: `0760c54c5` (stale `HFDataSource` import, killed `12481877 cpt_failed`) and `1a87a05be` (`GrainDataLoader` wrapper for `max_num_documents`, killed `12481878`). HEAD `1a87a05be` re-smoked on Sunspot as `12481889` — `VERDICT: ok` 3/3 `rc=0`, losses `10.87746/10.75454/10.48067` (TP1), `10.88011/10.70814/10.55886` (TP2 AC none), `12.95225/12.59617/11.47114` (MoE), identical to the `519efe4de` baseline. Aurora smoke `9016380` (`1a87a05be`, `debug-scaling` 2N, same XPU venv `xpu-torch216-sync-5a7a622f16` on `compute_aurora_prod`) in flight at doc time — `next-eval` is retired (upgrade rolled to prod BKC), so `workq` (Sunspot) and `prod`/`debug-scaling` (Aurora) now share the same software environment. Polaris (`torch 2.13.0+cu129` A100/CUDA) verified for imports (`DataParallelMeshDims` + `torchtitan` OK, `torch_remat`/`spmd_types`/`renderers` patched via `uv pip install`), training smoke still needed (XPU `sync_smoke` does `module load oneapi` / `ZE_FLAT` — wrong for CUDA).
+
+Also on this sync: `local_compile` ported from `local_compile_regions` (8 commits across sharding + compile), `AcceleratorGraphInputSpec` from `CUDAGraphInputSpec`, and the `wkv_b` / MLP remat fixes for DeepSeek MLA. Branch `sync/upstream-b93d5c0cf5` is up to date with `upstream/main` at `8e4990d8c` (#5718); pushed as `origin/sync/upstream-b93d5c0cf5` at `1a87a05be`.
 
 ---
 
