@@ -92,7 +92,6 @@ def main():
     run.summary["evidence/file_count"] = len(files)
     run.summary["evidence/scheduler_exit_code"] = args.exit_code
     run.summary["evidence/application_exit_code"] = application_exit
-    run.summary.update()
     print("ARCHIVE_COMPLETE " + json.dumps({"url": run.url, "artifact": artifact.qualified_name, "files": len(files)}), flush=True)
     run.finish(exit_code=application_exit)
 
