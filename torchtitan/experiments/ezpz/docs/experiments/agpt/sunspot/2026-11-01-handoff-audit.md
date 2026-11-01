@@ -95,7 +95,7 @@ parameter hash. The loss gap is unexplained; identical input hashes do not
 prove identical loaded parameters or numerical agreement.
 
 Process high-water allocated/reserved memory was `46.396/50.613 GiB` for MDS
-and `35.112/40.039 GiB` for TT. These are all-rank process-lifetime maxima,
+and `35.112/40.039 GiB` for TT. These are maxima of the recorded allocator high-water marks across ranks,
 not update-window memory. TT's maximum-rank outer loss-compilation timer was
 `15.139 s`; nested compiler timer keys are not summed.
 
@@ -107,10 +107,14 @@ independent jobs are needed to resolve small differences.
 ## Peak memory and compilation cost
 
 All expected rank diagnostics are present. The table takes the maximum
-per-rank process-lifetime allocated and reserved high-water marks, captured
-before final witness reductions. These are not peaks restricted to updates
-`21-32`. The `GB`/`GiB` shorthand from the conversation is replaced with bytes
-converted consistently to `GiB`.
+recorded allocated and reserved high-water marks across ranks, captured
+before final witness reductions. In TT, the counters run from the metrics
+processor's initialization reset, before model initialization; the ezpz
+training override does not reset them at each log. They are not process-birth
+or update-`21-32` peaks. No reset was found in the pinned MDS source, but
+external DeepSpeed/runtime resets have not been audited. Identical memory
+measurement windows across frameworks are therefore not established.
+The `GB`/`GiB` shorthand is replaced with bytes converted consistently to `GiB`.
 
 | Run/variant | Rank coverage | Peak allocated GiB | Peak reserved GiB | Max-rank loss compile timer s |
 |---|---:|---:|---:|---:|
@@ -278,19 +282,49 @@ visible compute overlap. A later copy-engine microbenchmark reports
 all-gather transfer is absent from its GPU kernel/memcpy trace. The matching
 reduce-scatter trace shows only `0.003 ms` of overlap. This establishes a
 promising microbenchmark timing result, not trace-visible training overlap.
-Training follow-up `12481904` logs `allgatherv using copy engines not supported
-with tmp buffer`; the setting is not a usable training optimization on this
-path. Its final variant outcomes must be inspected after the job terminates.
+Training follow-up `12481904` ended with PBS exit `1`. Its `defbase` and
+`litebase` controls completed with return `0`; `defce` and `litece` timed out
+with return `124`, both logging `allgatherv using copy engines not supported
+with tmp buffer`. This setting is not a usable training optimization on this
+path. Complete timeout logs are retained losslessly with their original
+sizes and hashes.
 
 Jobs `12481905` and `12481906` completed 32 updates on two Sunspot nodes with
 `24` ranks. Full batch-hash comparison passed. The loss histories diverge despite
 the matching input stream; live post-wrap parameter hashes were not captured.
 The timing methods and result limits are recorded above and in the fresh JSON.
 
+## W&B evidence recovery
+
+At audit start, `48/52` group runs had no logged artifact despite online
+training metrics. The serialized recovery has committed evidence for `60`
+runs, including the fresh `12481905` and `12481906` arms. API verification
+covered all then-existing `59` artifacts; five seeded random downloads also
+passed source-SHA, manifest/file-presence and checkpoint-hash checks. Later
+artifacts require the same final coverage pass. Checkpoint payloads remain
+on project storage; W&B includes their full byte-count/SHA manifests.
+
+The first uploads resumed old training runs. That replaced some online
+package and machine metadata with the CPU uploader's environment and
+inflated displayed runtimes. Recovery restored `52` original files across
+`50` runs and `43` preserved runtime/hidden-SDK summaries. Seven failed runs
+lack a final original summary; initial probe `12481844` has no preserved
+original machine metadata. Server heartbeat/end timestamps still include
+archival activity. Use captured training timers and rank provenance for
+performance, not the current W&B UI elapsed span.
+
+Future uploads use one separately labeled archival run and the public
+`Run.log_artifact()` association API. The canary left training state, config,
+runtime, heartbeat and Git metadata unchanged. Large repeated timeout logs
+are stored as lossless gzip with original and compressed hashes and verified
+decompression; no log content is trimmed. Private agent transcripts are
+excluded.
+
 ## Continuation gates
 
-- Recover and upload full existing evidence to each online W&B run, using its
-  recorded source SHA rather than a later checkout HEAD. Preserve failed arms.
+- Finish the current failed/partial-arm uploads and final analysis artifact,
+  then repeat the API coverage check. Preserve each arm's actual source SHA
+  and its separate application/scheduler status.
 - Reconcile the `12481905`/`12481906` loss gap with live parameter audits and
   same-batch numerical checks. Do not infer its cause from endpoint loss.
 - Compare the final block-4 implementation and eager/loss-compiled paths with

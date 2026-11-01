@@ -64,9 +64,10 @@ a parser bug or a model-compilation failure.
 
 A replacement is prepared at source
 [`a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6`](https://github.com/saforem2/torchtitan/commit/a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6).
-It is held until the separate live-parameter canary `12481908` actually
-starts. That allocation has been sent for execution repeatedly without an
-application log or `stime`; scheduler `R` alone is not training evidence.
+As of `2026-11-01 00:49 CDT`, the separate live-parameter canary `12481908`
+is scheduler-held: `job held, too many failed attempts to run`. It produced
+no application output or `stime`. Further Sunspot submissions are held until
+a working application-start gate; Aurora readiness is being checked.
 No replacement result or performance winner is recorded.
 
 Record all eight phase/variant return codes, rank completion and optimizer

@@ -499,7 +499,7 @@
       ],
       "compile_outer_timer_ranks_recorded": 24
     },
-    "scope": "all-rank process high-watermark memory, not steady-state window memory"
+    "scope": "all-rank recorded allocator high-water marks; TT since metrics processor initialization reset before model initialization, not process birth or steady-state window; MDS external runtime reset behavior unverified"
   },
   "input_hashes": {
     "expected_rows": 1536,
