@@ -4,6 +4,84 @@ Initial startup snapshot: `2026-11-01 14:55 UTC`. The comparison remains blocked
 application execution. No new training, loss, or throughput result follows
 from these recovery attempts.
 
+## Direct executable isolation and cross-user evidence
+
+A second isolation round submits `/bin/hostname` with PBS executable mode,
+through the existing preflight wrapper from pinned checkout `dbb46e9bc`.
+The PBS `executable` attribute records `/bin/hostname`. No batch shell,
+Python, MPI, Torch, model, data loader, checkpoint, or compiler executes on
+compute nodes in these probes. Login preflight imports remain separate.
+
+| Job | Queue / image | PBS stdout/stderr | Outcome |
+|---|---|---|---|
+| `12481943` | `workq`, October 13 image | Existing home storage | System-held after `21` failed starts; no `stime` or output |
+| `12481944` | `workq`, October 13 image | `/dev/null` | System-held after `21` failed starts; no `stime` |
+| `12481945` | `next-eval`, October 28 image | Existing home storage | System-held after `21` failed starts; no `stime` or output |
+
+`next-eval` is enabled on Sunspot, has its own eligible node pool, and
+requests `compute_sunspot_test_20261028T222447_47bb71c5`. `workq` requests
+`compute_sunspot_test_20261013T165519_97e02396`. An Aurora queue-retirement
+claim does not establish Sunspot's live queue configuration. Both paths
+reproduce the failure. These are system-binary startup controls, not
+performance runs or a runtime migration.
+
+Aggregate public PBS history, captured at `09:36 CST` on November 1, contains
+**six matching failures across three other user accounts**: `run_count >= 21`,
+no `stime`, and the same failed-start hold comment. The first matching
+other-user submission is `05:48:08 UTC`. This account's first matching
+submission is `05:34:25 UTC`; its last recorded actual start is `05:28:07 UTC`.
+Only counts/times are retained, without other-user identities, job IDs,
+commands, paths, or environments. This establishes that the failure is
+shared across accounts; it does not identify its initiating service.
+
+### Read-only host and service observations
+
+- `/home` and `/lus/tegu` are logical mounts on the same Lustre filesystem,
+  with free space/inodes. `lfs quota` reports no user limit. Moving stdout
+  between those paths did not constitute an independent physical-storage test.
+- Login profile and sourced dependency mtimes predate the incident. Login
+  process pressure is low. These observations do not verify compute mounts
+  or compute-side UID/PAM/cgroup setup.
+- PALS `1.8` `palstat --ping` fails from the UAN on assigned nodes in both
+  pools with `Couldn't send RPC ping ... Resource temporarily unavailable`.
+  The valid Sunspot names have the `-hsn0.hsn.cm.sunspot.alcf.anl.gov` suffix,
+  verified from successful job `12481905`; bare node names and Aurora-style
+  names are not interchangeable.
+- TCP connection to the documented PALS port `7919` succeeds on the assigned
+  `next-eval` node. An open TCP port does not establish successful PALS RPC
+  authentication or request handling. No known-good UAN-originated ping
+  during PBS pre-run was captured, so this remains supplemental evidence.
+- Read-only `qmgr` hook inspection returns unauthorized for this account.
+  Relevant MOM/server logs are not available on the UAN. Normal SSH to the
+  currently assigned node closes without a shell; no access workaround,
+  daemon restart, hook modification, or node-state change was attempted.
+
+PBS supports direct execution and direct-write output to `/dev/null`.
+The latter depends on MoM configuration, which we cannot inspect; its failed
+probe alone does not rule out every output-routing issue.
+[PBS direct execution](https://docs.alcf.anl.gov/running-jobs/),
+[PBS direct-write contract](https://2019.help.altair.com/19.2/PBSProfessional/PBSUserGuide19.2.1.pdf).
+
+### Diagnostic boundary
+
+The shared startup path is now the demonstrated failure domain. A
+TorchTitan-specific or account-only explanation cannot explain the complete
+observations. The exact MOM response or execution/resource hook failure is
+still unverified. Compute-side filesystem/account setup and PALS/VNI hook
+state require site inspection.
+
+HPE documents a Slingshot VNID-hook failure producing VNI errors, but its
+example is `[409]: Failed to find specified job`; our earlier PALS error is
+`[308]` with no response, and our bare one-node jobs also fail. This is an
+operator investigation lead, not a confirmed match or an instruction to
+reload a hook without inspection.
+[HPE VNID-hook troubleshooting](https://support.hpe.com/hpesc/public/docDisplay?docId=dp00007631en_us&docLocale=en_US&page=operations%2Fwlm%2FMulti_node_PALS_launches_fail_with_VNID_request_failed_error.html).
+
+The automated support acknowledgement created **REQ-17196** at `09:19 CST`.
+It contains no diagnosis. A prepared follow-up adds the direct-executable,
+aggregate cross-user, and qualified PALS results and corrects future CC to
+Sam's Argonne address. It remains unsent pending authorization.
+
 ## Earlier working TT jobs and later failures
 
 Read-only inspection of the `sunspot-tt-ezpz` pane and exact historical PBS

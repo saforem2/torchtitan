@@ -2,6 +2,21 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: direct executable startup failure reproduced across queues
+
+- Submitted direct `/bin/hostname` controls `12481943` / `12481944` /
+  `12481945` through preflight from `dbb46e9bc`: normal home output,
+  `/dev/null`, and Sunspot's enabled `next-eval` / October 28 image pool.
+  All reached `21` startup attempts without `stime`.
+- Aggregate scheduler history contains six matching no-start failures across
+  three other accounts. The failure is shared beyond this account; exact
+  MOM/resource-hook cause remains unverified.
+- Qualified PALS probes fail at RPC level on assigned HSN nodes; TCP `7919`
+  connects on the next-eval node. UAN/pre-run baseline is unavailable.
+  No user-side daemon/hook/image changes or extra cancellations were made.
+- Support acknowledged `REQ-17196`; no diagnosis yet. Follow-up prepared with
+  Sam's requested Argonne CC. [Evidence and limits](experiments/agpt/sunspot/2026-11-01-startup-incident.md#direct-executable-isolation-and-cross-user-evidence).
+
 ## 2026-11-01: reconcile Sunspot pane success with current startup failures
 
 - Verified `sunspot-tt-ezpz` job `12481889`: Oct 31 `22:00-22:05 CDT`, exit
