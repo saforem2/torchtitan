@@ -15,6 +15,7 @@ import importlib
 import importlib.util
 import inspect
 import json
+import math
 import os
 from pathlib import Path
 import runpy
@@ -304,6 +305,87 @@ def install_mds_batch_witness(rank, world_size):
     training.pretrain = witnessed_pretrain
 
 
+def install_torchtitan_step_timings(*, rank: int, output_dir: Path) -> None:
+    """Record completed ezpz trainer steps without adding distributed work."""
+    import torch
+
+    trainer_module = importlib.import_module("torchtitan.experiments.ezpz.trainer")
+    trainer_class = trainer_module.FaultTolerantTrainer
+    original_train_step = trainer_class.train_step
+    output_path = output_dir / f"rank-{rank}.steps.jsonl"
+    output_file = output_path.open("a", encoding="utf-8", buffering=1)
+
+    def write_record(record: dict) -> None:
+        output_file.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
+        output_file.flush()
+
+    @functools.wraps(original_train_step)
+    def timed_train_step(trainer, *args, **kwargs):
+        attempted_step = trainer.engine.num_completed_steps + 1
+        start_sync_ns = time.perf_counter_ns()
+        try:
+            torch.xpu.synchronize()
+        except BaseException as error:
+            failed_at_ns = time.perf_counter_ns()
+            write_record(
+                {
+                    "rank": rank,
+                    "engine_step": attempted_step,
+                    "successful": False,
+                    "start_perf_counter_ns": start_sync_ns,
+                    "end_perf_counter_ns": failed_at_ns,
+                    "elapsed_seconds": (failed_at_ns - start_sync_ns) / 1_000_000_000,
+                    "loss": None,
+                    "error": f"{type(error).__name__}: {error}",
+                    "timing_note": "pre-step XPU synchronization failed; no training call was timed",
+                }
+            )
+            raise
+
+        start_ns = time.perf_counter_ns()
+        try:
+            loss = original_train_step(trainer, *args, **kwargs)
+            torch.xpu.synchronize()
+            end_ns = time.perf_counter_ns()
+        except BaseException as error:
+            end_ns = time.perf_counter_ns()
+            write_record(
+                {
+                    "rank": rank,
+                    "engine_step": attempted_step,
+                    "successful": False,
+                    "start_perf_counter_ns": start_ns,
+                    "end_perf_counter_ns": end_ns,
+                    "elapsed_seconds": (end_ns - start_ns) / 1_000_000_000,
+                    "loss": None,
+                    "error": f"{type(error).__name__}: {error}",
+                    "timing_note": "training or end-step XPU synchronization failed; no device query followed",
+                }
+            )
+            raise
+
+        write_record(
+            {
+                "rank": rank,
+                "engine_step": trainer.engine.num_completed_steps,
+                "successful": True,
+                "start_perf_counter_ns": start_ns,
+                "end_perf_counter_ns": end_ns,
+                "elapsed_seconds": (end_ns - start_ns) / 1_000_000_000,
+                "loss": None if loss is None else _json_loss(loss),
+                "timing_note": "includes train_step and end-step XPU synchronization; excludes post-step checkpoint/profiler work",
+            }
+        )
+        return loss
+
+    trainer_class.train_step = timed_train_step
+
+
+def _json_loss(loss) -> float | str:
+    value = float(loss)
+    return value if math.isfinite(value) else repr(value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     target = parser.add_mutually_exclusive_group(required=True)
@@ -312,6 +394,7 @@ def main() -> None:
     parser.add_argument("--benchmark-output", "--output", dest="output", type=Path, required=True)
     parser.add_argument("--benchmark-dry-run", action="store_true")
     parser.add_argument("--benchmark-sophia-witness", action="store_true")
+    parser.add_argument("--benchmark-step-timings", action="store_true")
     args, child_args = parser.parse_known_args()
     if child_args[:1] == ["--"]:
         child_args = child_args[1:]
@@ -338,6 +421,13 @@ def main() -> None:
     if args.script:
         install_mds_batch_witness(rank, world_size)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.benchmark_step_timings:
+        if args.module != "torchtitan.experiments.ezpz.train":
+            raise ValueError(
+                "--benchmark-step-timings requires --benchmark-module "
+                "torchtitan.experiments.ezpz.train"
+            )
+        install_torchtitan_step_timings(rank=rank, output_dir=args.output)
     started = time.monotonic()
     completed = False
     diagnostics_written = False

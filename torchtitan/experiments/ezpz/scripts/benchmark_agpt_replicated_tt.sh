@@ -202,10 +202,16 @@ else
     AC="${BENCH_AC:-none}"
     case "${AC}" in none|full) ;; *) echo "Unknown BENCH_AC=${AC}" >&2; exit 2;; esac
     echo "activation_checkpoint=${AC} memory_snapshot=${BENCH_MEMORY_SNAPSHOT:-0}"
+    TIMING=()
+    case "${BENCH_STEP_TIMINGS:-0}" in
+        0) ;;
+        1) TIMING=(--benchmark-step-timings) ;;
+        *) echo "BENCH_STEP_TIMINGS must be 0 or 1" >&2; exit 2;;
+    esac
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
-        --benchmark-sophia-witness
+        --benchmark-sophia-witness "${TIMING[@]}"
         --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
         --training.steps="${STEPS}" --training.max-context-length=8192
