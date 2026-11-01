@@ -11,6 +11,15 @@ at `24` FLAT devices. Common accounting gives `83.29` / `67.78` / `67.55`
 model TFLOP/s/device. Full-model numerical equivalence and 256-node parity
 remain open. [Report and corrections](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
 
+Fresh jobs `12481905`/`12481906` completed 32 updates at 24 ranks. All
+`1,536` rank/microbatch input, label and raw-token hashes match. MDS direct
+iteration timing is `2.360975 s`; TT loss-event intervals average `2.902996 s`
+and its explicit synchronized all-rank maxima average `2.902788 s`. Timer
+boundaries differ across frameworks. Losses diverge from update 1 (`17.663555`
+MDS, `17.746710` TT) through update 32 (`10.828611`, `12.389167`). The native
+MDS load is logged; TT's converted-DCP path is configured, but neither run has
+a live post-wrap parameter hash. The cause remains unresolved. [Fresh evidence](experiments/agpt/sunspot/2026-11-01-fresh-905-906-evidence.json).
+
 The nominal stage-0 reproduction had selected the wrong DeepSpeed wrapper.
 Compatibility job `12481887` completed with `BF16_Optimizer` through a DS
 `0.18.5` stage-1 JSON; it reproduces the historical dtype/wire behavior,
@@ -22,8 +31,12 @@ At audit start, `48/52` online W&B runs had no logged evidence artifact.
 Recovery uploads use each run's immutable provenance and distinguish
 scheduler and application outcomes. Inherited job `12481904` remains under
 one campaign monitor; its copy-engine arm logged an unsupported-allgatherv
-error. A new pinned checkout at `e44f928c4` has the reviewed optional rank
-step timer. Its canary must pass exact-source preflight before submission.
+error. A new pinned checkout at `e44f928c4` completed jobs `12481905`/`12481906`;
+matched loss histories remain an open gate. Paired matrix job `12481907` is
+active from clean root `1ef281d7`, with six TT arms and before/after MDS controls.
+The planned [paired performance report](experiments/agpt/sunspot/2026-11-01-paired-performance.md)
+will record those results after completion. Archive status remains pending until
+uploader runtime and `requirements.txt` provenance are verified.
 
 ---
 
