@@ -35,7 +35,8 @@ esac
 ARM="${ARM:-probe}"
 NODES="${NODES:-2}"
 STEPS="${STEPS:-32}"
-PPN=12
+PPN="${PPN:-12}"
+case "${PPN}" in 8|12) ;; *) echo "PPN must be 8 or 12" >&2; exit 2;; esac
 NPROC=$((NODES * PPN))
 [[ "$(sort -u "${PBS_NODEFILE}" | wc -l)" -eq "${NODES}" ]] || exit 97
 export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"

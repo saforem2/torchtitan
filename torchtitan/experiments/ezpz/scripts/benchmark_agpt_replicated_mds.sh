@@ -76,7 +76,8 @@ STEPS="${STEPS:-32}"
 WARMUP_ITERS="${WARMUP_ITERS:-0}"
 EVAL_ITERS="${EVAL_ITERS:-1}"
 NODES="${NODES:-2}"
-NPROC_PER_NODE=12
+NPROC_PER_NODE="${PPN:-12}"
+case "${NPROC_PER_NODE}" in 8|12) ;; *) echo "PPN must be 8 or 12" >&2; exit 98;; esac
 if [[ ! "${NODES}" =~ ^[1-9][0-9]*$ || ! "${STEPS}" =~ ^[0-9]+$ || ! "${WARMUP_ITERS}" =~ ^[0-9]+$ ]] || ((STEPS < 10 || STEPS <= WARMUP_ITERS)); then
     echo "Require positive NODES and integer STEPS>=10 greater than WARMUP_ITERS" >&2
     exit 98
@@ -117,7 +118,7 @@ case "$(realpath "${LOAD_ROOT}/global_step138650/mp_rank_00_model_states.pt")" i
 [[ -f "${BOOKS_LIST}" && -d "${PYTHON_OVERLAY}" && -d "${DISTUTILS_OVERLAY}" ]] || exit 99
 cd "${MDS_ROOT}" || exit 99
 JOBID_SHORT="${PBS_JOBID%%.*}"
-RUN_NAME="mds-${RUN_KIND}-${GRAD_POLICY}-ac${MDS_AC:-none}-n${NODES}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
+RUN_NAME="mds-${RUN_KIND}-${GRAD_POLICY}-ac${MDS_AC:-none}-n${NODES}x${NPROC_PER_NODE}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 OUTPUT_DIR="${RUN_ROOT}/outputs/${RUN_NAME}"
 LOG_DIR="${RUN_ROOT}/logs/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}/tensorboard" "${OUTPUT_DIR}/wandb" \
