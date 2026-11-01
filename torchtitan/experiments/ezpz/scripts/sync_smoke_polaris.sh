@@ -44,6 +44,7 @@ fi
 
 ezpz_load_modules
 ezpz_setup_job
+export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 if [[ ! -f "${VENV}/bin/activate" ]]; then
     echo "FATAL: no venv at ${VENV}/bin/activate" >&2
