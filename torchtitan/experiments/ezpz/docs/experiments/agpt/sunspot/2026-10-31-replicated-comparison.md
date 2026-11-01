@@ -150,6 +150,35 @@ The Aurora production `MDS` source runs record this same layout with
 activation checkpointing off. Why it fits there and not on two Sunspot
 nodes is unexplained; the runtimes differ (`torch 2.8.0a0` in production).
 
+### ZeRO-0 bisect and matched 16-rank pair
+
+| Job | Layout | Ranks | Result |
+|---|---|---:|---|
+| `12481857` | MDS ZeRO-0 SophiaG, `--checkpoint-activations` | `24` | exit `127` before any rank output; transient |
+| `12481858` | same, retry | `24` | `Invalid activation recompute method`; needs a recompute method |
+| `12481859` | MDS ZeRO-0 SophiaG, uniform recompute per layer | `24` | GPU page faults (`NotPresent`, banned) at update `1` |
+| `12481860` | MDS ZeRO-1 SophiaG | `24` | `32` updates; `2,200.75 ms` median `21-32`; max allocated `40.2 GB` |
+| `12481861` | MDS ZeRO-0 AdamW | `24` | `UR_RESULT_ERROR_OUT_OF_RESOURCES` at update `1` |
+| `12481864` | TT global FSDP | `24` | `FSDP does not support uneven sharding on dim 1: [2, 11008, 2048]` |
+| `12481865` | MDS ZeRO-1 SophiaG | `16` (`2 x 8`) | `32` updates; `2,252.65 ms` median `21-32`; max allocated `40.4 GB` |
+| `12481866` | TT global FSDP, loss compile | `16` (`2 x 8`) | `32` updates; `2.82 s` mean `22-32` from 1 s timestamps; `26.94 GiB` |
+
+ZeRO-0 fails at update `1` with both optimizers on this runtime; ZeRO-1 runs.
+Every MDS run here used `torch 2.10.0a0+git449b176` and `DeepSpeed 0.18.5`.
+The production `frameworks 2025.2.0` runtime (`torch 2.8.0a0`) no longer
+exists on Aurora or Sunspot, so the production ZeRO-0 fit cannot be rerun.
+
+TT global FSDP cannot shard AGPT-2B over `12` or `24` ranks: since
+`cde3c9322` the stacked `w13` shards on its `11008` rows, and FSDP2 rejects
+uneven `Shard(1)`. `11008 = 2^8 x 43`. This also blocks `12`-way HSDP and the
+`3072`-rank production geometry.
+
+Matched 16-rank result, no rematerialization: MDS ZeRO-1 `2.25 s/update`
+(`7,273 tokens/s/device`) versus TT global FSDP `2.82 s/update` (`~5,810`).
+TT takes `1.25x` as long per update. The production Aurora gap is `1.52x`.
+Losses at update `32`: MDS `11.99`, TT `12.32`; this run does not test
+numerical equivalence.
+
 `12481854` (`AC=full`): updates `22-32` take `3.18 s` mean from 1 s log
 timestamps, so about `5,150 tokens/s/device` (`16,384` tokens/device/update).
 The logged `tps` is a running average and reads `2,777` median over `21-32`.
