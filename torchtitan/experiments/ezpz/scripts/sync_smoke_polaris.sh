@@ -45,7 +45,7 @@ fi
 ezpz_load_modules
 ezpz_setup_job
 export MPICH_GPU_SUPPORT_ENABLED=0
-export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="/opt/cray/pe/mpich/9.1.0/ofi/nvidia/23.3/lib:${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 if [[ ! -f "${VENV}/bin/activate" ]]; then
     echo "FATAL: no venv at ${VENV}/bin/activate" >&2
