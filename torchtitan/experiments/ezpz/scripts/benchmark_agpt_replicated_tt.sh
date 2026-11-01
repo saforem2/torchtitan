@@ -39,6 +39,21 @@ ARM="${ARM:-probe}"
 NODES="${NODES:-2}"
 STEPS="${STEPS:-32}"
 PPN="${PPN:-12}"
+DEFAULT_COMPILE_MODE=none
+[[ "${ARM}" == *losscompile ]] && DEFAULT_COMPILE_MODE=loss
+COMPILE_MODE="${BENCH_COMPILE_MODE:-${DEFAULT_COMPILE_MODE}}"
+case "${COMPILE_MODE}" in
+    none|loss|model-regions-loss) ;;
+    *) echo "BENCH_COMPILE_MODE must be none, loss or model-regions-loss" >&2; exit 2;;
+esac
+case "${ARM}" in
+    probe|probe-bf16)
+        [[ "${COMPILE_MODE}" == none ]] || {
+            echo "BENCH_COMPILE_MODE=${COMPILE_MODE} is only valid for training arms" >&2
+            exit 2
+        }
+        ;;
+esac
 case "${PPN}" in 8|12) ;; *) echo "PPN must be 8 or 12" >&2; exit 2;; esac
 NPROC=$((NODES * PPN))
 [[ "$(sort -u "${PBS_NODEFILE}" | wc -l)" -eq "${NODES}" ]] || exit 97
@@ -46,8 +61,13 @@ export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
 GBS=$((NPROC * 2))
 TOKENS=$((GBS * 8192))
 JOB="${PBS_JOBID%%.*}"
-# BENCH_TAG separates ablation variants of one ARM in one PBS job.
-TAG="${BENCH_TAG:+-${BENCH_TAG}}"
+# BENCH_TAG separates ablation variants of one ARM in one PBS job. When the
+# compile mode overrides the ARM-derived default, include it in the run path.
+VARIANT_TAG="${BENCH_TAG:-}"
+if [[ -n "${BENCH_COMPILE_MODE+x}" && "${COMPILE_MODE}" != "${DEFAULT_COMPILE_MODE}" ]]; then
+    VARIANT_TAG="${VARIANT_TAG:+${VARIANT_TAG}-}compile-${COMPILE_MODE}"
+fi
+TAG="${VARIANT_TAG:+-${VARIANT_TAG}}"
 OUT="${ROOT}/outputs/agpt-replicated-20261031/${ARM}${TAG}-${JOB}"
 mkdir -p "${OUT}/provenance" "${OUT}/wandb"
 LOG="${OUT}/run.log"
@@ -56,7 +76,7 @@ export WANDB_RUN_ID="agpt-replicated-${ARM}${TAG}-${JOB}"
 export WANDB_NAME="${ARM}${TAG}-${NODES}n-${JOB}"
 export WANDB_RUN_NAME="${WANDB_NAME}"
 export WANDB_DIR="${OUT}/wandb"
-export WANDB_TAGS="agpt-replicated,sunspot,${ARM},${NODES}nodes"
+export WANDB_TAGS="agpt-replicated,sunspot,${ARM},${NODES}nodes,compile-${COMPILE_MODE}"
 export WANDB_RUN_TAGS="${WANDB_TAGS}"
 export AGPT_BENCH_BATCH_HASH_DIR="${OUT}/input-hashes"
 export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
@@ -115,6 +135,12 @@ echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
+case "${COMPILE_MODE}" in
+    none) echo "compile_mode=none components=none" ;;
+    loss) echo "compile_mode=loss components=loss" ;;
+    model-regions-loss)
+        echo "compile_mode=model-regions-loss components=fused_binary_activation,loss full_model_graph=false" ;;
+esac
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
 
 if [[ "${ARM}" == probe || "${ARM}" == probe-bf16 ]]; then
@@ -188,8 +214,19 @@ else
            [[ "${ARM}" == fsdp-* ]] || { echo "BENCH_REDUCE_PROBE needs an fsdp ARM" >&2; exit 2; } ;;
         *) echo "BENCH_REDUCE_PROBE must be 0 or 1" >&2; exit 2;;
     esac
-    COMPILE=(--compile.no-enable)
-    [[ "${ARM}" == *losscompile ]] && COMPILE=(--compile.enable --compile.components=loss)
+    # CompileConfig selects named @local_compile regions. For this AGPT-2B
+    # recipe, fused_binary_activation is the only active model region: it uses
+    # ComplexRoPE, plain RMSNorm and dense SwiGLU (not cos_sin_rope,
+    # gated_rmsnorm or moe_aux_loss). The extra region preserves the model
+    # math and uses TorchTitan's existing compiler hook; it is not a whole-model
+    # torch.compile graph.
+    case "${COMPILE_MODE}" in
+        none) COMPILE=(--compile.no-enable) ;;
+        loss) COMPILE=(--compile.enable --compile.components=loss) ;;
+        model-regions-loss)
+            COMPILE=(--compile.enable --compile.components=fused_binary_activation,loss)
+            ;;
+    esac
     PROFILE=()
     if [[ "${BENCH_PROFILE:-1}" == 1 && "${STEPS}" -ge 21 ]]; then
         PROFILE=(--profiler.enable-profiling --profiler.profile-freq=7
