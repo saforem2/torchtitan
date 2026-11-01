@@ -270,6 +270,8 @@ class Probe:
         original_run = engine._run_forward_backward
         if not (isinstance(original_run, functools.partial) and original_run.func == engine._forward_backward_body):
             raise RuntimeError(f"unexpected forward/backward runner: {original_run!r}")
+        # Group dtypes are set at lazy init, normally by the first forward.
+        model._get_fsdp_state()._lazy_init()
         groups = list(fsdp_groups(model))
         original_comm = {id(g): g._reduce_scatter_comm for g in groups}
         original_reduce = {id(g): (g._reduce_dtype, [p.reduce_dtype for p in g.fsdp_params]) for g in groups}
