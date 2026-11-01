@@ -145,6 +145,15 @@ else
                 --parallelism.fsdp-reshard-after-forward="${RESHARD}"
                 --training.mixed-precision-reduce="${REDUCE}" "${DEFER[@]}")
             ;;
+        hsdp-eager|hsdp-losscompile)
+            # HSDP_SHARD ranks shard each replica; default one replica/node.
+            HSDP_SHARD="${HSDP_SHARD:-${PPN}}"
+            (( HSDP_SHARD > 0 && NPROC % HSDP_SHARD == 0 )) || {
+                echo "HSDP_SHARD=${HSDP_SHARD} must divide world ${NPROC}" >&2; exit 2; }
+            echo "hsdp dp_shard=${HSDP_SHARD} dp_replicate=$((NPROC / HSDP_SHARD))"
+            PARALLEL=(--parallelism.data-parallel-shard-degree="${HSDP_SHARD}"
+                --parallelism.data-parallel-replicate-degree="$((NPROC / HSDP_SHARD))")
+            ;;
         *) echo "Unknown ARM=${ARM}" >&2; exit 2;;
     esac
     COMPILE=(--compile.no-enable)
