@@ -2,12 +2,20 @@
 
 ## Status
 
-The `24`-rank FP32 accumulation probe passed on Sunspot and Aurora. Neither
-full-model arm fits the controlled configuration on two Sunspot nodes:
-`TT` native DDP OOMs at update `3`, and fresh `MDS ZeRO-0` fails its first
-forward with `UR_RESULT_ERROR_OUT_OF_RESOURCES`. `TT` with full activation
-checkpointing runs, but breaks the "Rematerialization: disabled" contract.
-No matched result and no production-scale parity result yet.
+The continued investigation has successful full-model runs on `16` and `24`
+ranks. The initial replicated-state OOMs are real, but the initial `MDS`
+configuration selected a different optimizer wrapper from production.
+`DeepSpeed 0.18.5` can reproduce the older `BF16_Optimizer` behavior through
+an explicit stage-1 configuration. The report's initial failed-arm results
+below are retained as chronology.
+
+The [November 1 audit](2026-11-01-handoff-audit.md) supersedes the earlier
+interpretations and contains aligned timing, `TFLOP/s`, `MFU`, input-hash
+coverage, precision results and unresolved gates. At `24` ranks, the recovered
+window means are `2.201 s/update` for `MDS ZeRO-1`, `2.704 s` for `TT HSDP`
+with BF16 reduction, and `2.713 s` with FP32 reduction. These are performance
+results; full-model numerical equivalence and production-scale parity remain
+unproven.
 
 The original Aurora production reference uses `MDS ZeRO-0` on `256` nodes,
 `3072` FLAT devices, sequence `8192`, microbatch `1`, accumulation `2`, and
@@ -54,7 +62,9 @@ properties and observed collective tensor dtypes must confirm this.
 
 | Path | Local gradient accumulation | Collective payload | Purpose |
 |---|---|---|---|
-| `MDS production` | BF16, expected from source | BF16, expected from source | Reproduce the pinned baseline |
+| Historical `MDS`, DS `0.17.5` | FP32 | BF16 | `BF16_Optimizer`; masters/state sharded despite nominal stage 0 |
+| Fresh `MDS`, DS `0.18.5`, stage 0 | BF16 | BF16 | Different replicated optimizer-state path; OOM in these arms |
+| `MDS ds0175` compatibility | FP32 | BF16 | DS `0.18.5` stage-1 JSON selects `BF16_Optimizer`; not an identical old runtime |
 | `MDS fp32_wire` | BF16 | FP32 | Isolate communication precision |
 | `TT native DDP` | FP32 | FP32 | Preserve the current TT precision policy |
 | `TT native DDP BF16 wire` | FP32 | BF16 | Isolate communication precision with FP32 masters/accumulation |
@@ -65,7 +75,9 @@ not establish numerical equivalence with FP32 communication or BF16 local
 accumulation. A dedicated probe compares it with an explicit cast/divide/
 all-reduce reference. The pinned DeepSpeed ZeRO-0 path rejects BF16 model
 parameters with FP32 gradient accumulation; do not request that combination
-through a JSON setting and assume it works.
+through a stage-0 JSON setting and assume it works. An explicit stage-1
+JSON with FP32 accumulation selects `BF16_Optimizer`; see the audited
+compatibility run `12481887`.
 
 1. Run a two-node native-DDP probe with seed `42` and strict deterministic
    algorithms. Require unsynchronized first-microbatch gradients, bitwise
@@ -139,16 +151,18 @@ can catch optimizer-step exceptions without making the process exit nonzero.
 | After update `1` | `29.64 GiB` | `44.74 GiB` | `7.45 GiB` | not yet live | `14.80 GiB` |
 | After update `2` | `29.64 GiB` | `60.37 GiB` | `7.45 GiB` | `7.40 GiB` | `14.80 GiB` |
 
-Persistent state is `29.6 GiB`. `MDS ZeRO-0` holds about the same: BF16
-params and grads (`7.4 GiB`), FP32 masters (`7.45 GiB`) and `SophiaG`
-state (`14.8 GiB`). At the OOM, `55.02 GiB` was allocated and `5.35 GiB`
+Persistent TT state is `29.6 GiB`. The original MDS estimate omitted
+FP32 master gradients. Its DS `0.18.5` unfused path is approximately
+`37 GiB` persistent, whereas the historical `BF16_Optimizer` shards
+masters and optimizer state. Do not treat their nominal stage-0 labels as
+the same storage layout. At the OOM, `55.02 GiB` was allocated and `5.35 GiB`
 was reserved but unallocated. The failed request was `3.91 GiB`, which is
 one BF16 logits tensor: `8192 x 256128 x 2` bytes. Activations at sequence
 `8192` take roughly the remaining `25 GiB`.
 
 The Aurora production `MDS` source runs record this same layout with
-activation checkpointing off. Why it fits there and not on two Sunspot
-nodes is unexplained; the runtimes differ (`torch 2.8.0a0` in production).
+activation checkpointing off. The later investigation explains the fit difference through the selected
+DeepSpeed wrapper; see the November 1 audit.
 
 ### ZeRO-0 bisect and matched 16-rank pair
 
@@ -165,17 +179,21 @@ nodes is unexplained; the runtimes differ (`torch 2.8.0a0` in production).
 
 ZeRO-0 fails at update `1` with both optimizers on this runtime; ZeRO-1 runs.
 Every MDS run here used `torch 2.10.0a0+git449b176` and `DeepSpeed 0.18.5`.
-The production `frameworks 2025.2.0` runtime (`torch 2.8.0a0`) no longer
-exists on Aurora or Sunspot, so the production ZeRO-0 fit cannot be rerun.
+The historical `frameworks 2025.2.0` runtime is unavailable in the inspected
+locations. A later current-runtime compatibility configuration does fit
+(`12481887`); the original failure is not a blanket ZeRO-0 limitation.
 
-TT global FSDP cannot shard AGPT-2B over `12` or `24` ranks: since
+Before the later padding fallback, TT global FSDP could not initialize
+AGPT-2B over `12` or `24` ranks: since
 `cde3c9322` the stacked `w13` shards on its `11008` rows, and FSDP2 rejects
-uneven `Shard(1)`. `11008 = 2^8 x 43`. This also blocks `12`-way HSDP and the
-`3072`-rank production geometry.
+uneven `Shard(1)`. `11008 = 2^8 x 43`. This blocked `12`-way HSDP at initialization. The subsequent experiment
+fix falls back to padded `Shard(0)`, and successful `24`-rank runs now exist.
+The padding still carries a communication and memory cost.
 
 Matched 16-rank result, no rematerialization: MDS ZeRO-1 `2.25 s/update`
 (`7,273 tokens/s/device`) versus TT global FSDP `2.82 s/update` (`~5,810`).
-TT takes `1.25x` as long per update. The production Aurora gap is `1.52x`.
+The earlier coarse estimate was `1.25x`; aligned high-resolution event
+timing gives `1.274x` for this pair. The historical Aurora gap is `1.52x`.
 Losses at update `32`: MDS `11.99`, TT `12.32`; this run does not test
 numerical equivalence.
 

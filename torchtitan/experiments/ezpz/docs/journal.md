@@ -2,6 +2,31 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01 (Sunspot) -- MDS/TT handoff audit and continuation
+
+Recovered Claude session `255a7e56-1404-4d91-be47-317b42c0aa0c` after its
+spending-limit stop. Aligned updates `21-32` give `MDS ZeRO-1` `2.2005 s`
+versus `TT HSDP 12 x 2` `2.7041 s` (BF16 reduce) / `2.7134 s` (FP32 reduce)
+at `24` FLAT devices. Common accounting gives `83.29` / `67.78` / `67.55`
+model TFLOP/s/device. Full-model numerical equivalence and 256-node parity
+remain open. [Report and corrections](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+
+The nominal stage-0 reproduction had selected the wrong DeepSpeed wrapper.
+Compatibility job `12481887` completed with `BF16_Optimizer` through a DS
+`0.18.5` stage-1 JSON; it reproduces the historical dtype/wire behavior,
+not the historical runtime. Complete consumed-input hashes match in five
+MDS/TT pairs. BF16 job `12481899` completed five `200`-step arms; repeat
+variation prevents a dtype-only loss conclusion.
+
+At audit start, `48/52` online W&B runs had no logged evidence artifact.
+Recovery uploads use each run's immutable provenance and distinguish
+scheduler and application outcomes. Inherited job `12481904` remains under
+one campaign monitor; its copy-engine arm logged an unsupported-allgatherv
+error. A new pinned checkout at `e44f928c4` has the reviewed optional rank
+step timer. Its canary must pass exact-source preflight before submission.
+
+---
+
 ## 2026-10-18 (Sunspot/Aurora/Polaris) -- MoE 4-machine verification closeout
 
 Hermes session `sunspot-tt-ezpz` (exported as `sunspot-tt-ezpz.md`, 17,534 lines) closed the sync-84 MoE/sync merge verification across three XPU/CUDA clusters: `agpt_debugmodel` and `moe_debugmodel` each ran `rc=0` on Sunspot `workq` (`xpu-torch214`/`2.14.0+xpu`, jobs `12478170`/`12478171`), Aurora production PBS `prod` (route queue into `small`/`medium`/`large`; at the time `next-eval` execution on `xpu-torch215`/`2.15.0.dev20260915+xpu`, e.g. `8837281`, `test_20260924` BKC) and Polaris `debug` (`sync84-torch214-cu`/`2.14.0+cu130`). As of 2026-10-19 `next-eval` still exists as an execution queue but `prod` is the canonical route for production. Perlmutter blocked on `no corpus`. This was **not** a Monarch/RL multi-node gate — RL docs remain on the `2026-09-25` Sunspot two-host `12478711` contract; see `production/rl/monarch.md`. For the Sonic MoE trial provenance, see `experiments/moe-expert-backends-4machine.md` and `Sync 84` in `upstream-sync.md:320`.
