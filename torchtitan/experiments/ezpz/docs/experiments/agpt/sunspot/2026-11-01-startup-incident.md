@@ -78,9 +78,11 @@ reload a hook without inspection.
 [HPE VNID-hook troubleshooting](https://support.hpe.com/hpesc/public/docDisplay?docId=dp00007631en_us&docLocale=en_US&page=operations%2Fwlm%2FMulti_node_PALS_launches_fail_with_VNID_request_failed_error.html).
 
 The automated support acknowledgement created **REQ-17196** at `09:19 CST`.
-It contains no diagnosis. A prepared follow-up adds the direct-executable,
-aggregate cross-user, and qualified PALS results and corrects future CC to
-Sam's Argonne address. It remains unsent pending authorization.
+It contains no diagnosis. The authorized follow-up was sent through `AgentMail`
+at `11:25 CST` (`17:25 UTC`) in the existing `REQ-17196` thread, CC
+`foremans@anl.gov`, with four diagnostic attachments. It adds the direct-executable,
+aggregate cross-user, and qualified `PALS` results. The `sent` entry, recipients,
+thread, and all four attachment names were verified.
 
 ## Earlier working TT jobs and later failures
 

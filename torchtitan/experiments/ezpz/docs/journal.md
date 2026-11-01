@@ -14,8 +14,10 @@ Running log of what's happening, session by session. Most recent first.
 - Qualified PALS probes fail at RPC level on assigned HSN nodes; TCP `7919`
   connects on the next-eval node. UAN/pre-run baseline is unavailable.
   No user-side daemon/hook/image changes or extra cancellations were made.
-- Support acknowledged `REQ-17196`; no diagnosis yet. Follow-up prepared with
-  Sam's requested Argonne CC. [Evidence and limits](experiments/agpt/sunspot/2026-11-01-startup-incident.md#direct-executable-isolation-and-cross-user-evidence).
+- Support acknowledged `REQ-17196`; no diagnosis yet. The authorized follow-up
+  was sent at `11:25 CST` in the same thread, CC `foremans@anl.gov`, with four
+  diagnostic attachments. The `sent` entry, recipients, thread, and attachments
+  were verified. [Evidence and limits](experiments/agpt/sunspot/2026-11-01-startup-incident.md#direct-executable-isolation-and-cross-user-evidence).
 
 ## 2026-11-01: reconcile Sunspot pane success with current startup failures
 
