@@ -773,10 +773,11 @@ def _agpt_2b_mds_mix_blend(
     cfg = _agpt_2b_mds_mix_base()
     def _cpt_source(path, name=None, split="train"):
         return SingleDatasetConfig(source=HuggingFaceStreamingSource.Config(path=path, name=name, split=split))
-    cfg.dataloader = ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=(
+    from torchtitan.components.data.loader import GrainDataLoader
+    cfg.dataloader = GrainDataLoader.Config(dataset=ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=(
         WeightedDataset(dataset=_cpt_source("open-web-math/open-web-math"), weight=owm_weight),
         WeightedDataset(dataset=_cpt_source("HuggingFaceTB/finemath", name="finemath-4plus"), weight=edu_weight),
-    )))
+    ))))
     cfg.checkpointer.folder = folder
     return cfg
 
@@ -818,12 +819,12 @@ def _agpt_2b_mds_mix_blend_src(
     _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
     from torchtitan.components.data import DatasetMixConfig, WeightedDataset, SingleDatasetConfig, ConcatThenSplitPackingConfig
     from torchtitan.components.data.sources import HuggingFaceStreamingSource
+    from torchtitan.components.data.loader import GrainDataLoader
     cfg = _agpt_2b_mds_mix_base()
-    # NOTE: src_dataset is now assumed to be a HF hub path; for local parquet, register a HuggingFace source with that path
-    cfg.dataloader = ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=(
+    cfg.dataloader = GrainDataLoader.Config(dataset=ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=(
         WeightedDataset(dataset=SingleDatasetConfig(source=HuggingFaceStreamingSource.Config(path="open-web-math/open-web-math", split="train")), weight=owm_weight),
         WeightedDataset(dataset=SingleDatasetConfig(source=HuggingFaceStreamingSource.Config(path=src_dataset, split="train")), weight=src_weight),
-    )))
+    ))))
     cfg.checkpointer.folder = folder
     return cfg
 
