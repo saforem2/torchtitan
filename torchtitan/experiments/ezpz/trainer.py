@@ -50,6 +50,7 @@ from torchtitan.experiments.ezpz.xpu_graph import (
     maybe_wrap_with_xpu_graph,
     xpu_graph_teardown,
 )
+from torchtitan.experiments.ezpz.zero1 import flatten_parameters_, install_zero1
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import maybe_semi_sync_training
 from torchtitan.experiments.torchft.trainer import (
@@ -238,6 +239,10 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             create_seed_checkpoint=create_seed_checkpoint,
         )
         config = self.config
+        if getattr(config.parallelism, "native_ddp_zero1", False) and not getattr(
+            config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            raise ValueError("native_ddp_zero1 requires native DDP")
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
                 model_name=self._model_name(),
@@ -262,9 +267,17 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 ),
             )
             assert len(self.model_parts) == 1
+            dp_mesh = self.parallelism_context.get_mesh("dp_replicate")
+            self._zero1_buffer = None
+            if getattr(config.parallelism, "native_ddp_zero1", False):
+                self._zero1_buffer = flatten_parameters_(
+                    self.model_parts[0],
+                    world_size=dp_mesh.size(),
+                    rank=dp_mesh.get_local_rank(),
+                )
             self.model_parts[0] = wrap_native_ddp(
                 self.model_parts[0],
-                self.parallelism_context.get_mesh("dp_replicate"),
+                dp_mesh,
                 config.parallelism.native_ddp_bucket_cap_mb,
                 config.parallelism.native_ddp_compute_policy,
                 config.parallelism.native_ddp_bucketize_first_iteration,
@@ -320,6 +333,21 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def _initialize_optim(self) -> None:
         super()._initialize_optim()
         self.optim._run_update = self._optim_update
+        buffer = getattr(self, "_zero1_buffer", None)
+        if buffer is not None:
+            part = self.model_parts[0]
+            self._zero1_state = install_zero1(
+                self.optim.optimizers,
+                buffer,
+                process_group=self.parallelism_context.get_mesh(
+                    "dp_replicate"
+                ).get_group(),
+                allgather_dtype=self.config.parallelism.native_ddp_zero1_allgather_dtype,
+                module=part.module if isinstance(part, NativeDDP) else part,
+            )
+            logger.info(
+                "native DDP ZeRO-1: %s", self._zero1_state.diagnostics()
+            )
 
     def _native_ddp_train_context(self) -> AbstractContextManager[None]:
         """SPMD context composed with native-DDP bf16 autocast."""

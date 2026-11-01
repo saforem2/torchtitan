@@ -76,6 +76,22 @@ class EzpzParallelismConfig(ParallelismConfig):
     native_ddp_bucket_cap_mb: float = 25.0
     """Gradient bucket capacity for the native DDP backend, in MiB."""
 
+    native_ddp_zero1: bool = False
+    """
+    Shard the optimizer across the native-DDP replicas, ZeRO-1 style. Model
+    parameters are flattened into one FP32 buffer before DDP wraps them; each
+    rank steps a contiguous ``1/world`` slice and one all-gather per update
+    redistributes the result. Elementwise optimizers only.
+    """
+
+    native_ddp_zero1_allgather_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    ZeRO-1 parameter all-gather payload. ``bfloat16`` keeps a separate FP32
+    master shard and leaves BF16-rounded values in the replicated model
+    parameters, as Megatron-DeepSpeed's BF16 optimizer does. ``float32``
+    keeps the model parameters themselves as the FP32 masters.
+    """
+
     native_ddp_bucketize_first_iteration: bool = False
     """
     Apply ``native_ddp_bucket_cap_mb`` when DDP constructs its initial
