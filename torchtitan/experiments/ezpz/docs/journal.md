@@ -2,6 +2,29 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: paired comparison startup and live-parameter gate
+
+- `12481907` ended with PBS exit `143` after explicit user approval to cancel
+  only that job. Its `24`-rank MDS device preflight passed, but the training
+  launch reported PALS `VNI request failed [308]` / `no response` and shepherd
+  `127`. Partial first-TT-arm output is retained. No paired throughput result
+  follows from this attempt.
+- The initial dropped-command diagnosis was wrong. The full execution block
+  retained Python; parser probes on installed ezpz `0.27.3` and `0.11.1`
+  preserve all child arguments. The unnecessary separator changes were reverted.
+- Native-DDP live-load canary `12481908`, source `b6dfa77e2`, requires all
+  `111` canonical hashes / `1,986,054,144` loaded elements to match before
+  training. PBS has repeatedly sent the allocation for execution, with no
+  application log or `stime` yet. Hold further Sunspot submissions until it
+  actually starts. A prepared opt-in HSDP witness uses official
+  `DTensor.full_tensor()` and labels its audit memory separately.
+- `12481904` finished with PBS exit `1`: `defbase=0`, `defce=124`,
+  `litebase=0`, `litece=124`. Both copy-engine variants report unsupported
+  `allgatherv` with a temporary buffer. Their complete large logs are preserved
+  losslessly in the single W&B evidence stream.
+- [Comparison plan and failure evidence](experiments/agpt/sunspot/2026-11-01-paired-performance.md).
+  [Recovered quantitative report](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+
 ## 2026-11-01 (Sunspot) -- MDS/TT handoff audit and continuation
 
 Recovered Claude session `255a7e56-1404-4d91-be47-317b42c0aa0c` after its

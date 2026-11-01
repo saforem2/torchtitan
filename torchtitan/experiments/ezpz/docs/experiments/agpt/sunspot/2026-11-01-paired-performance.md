@@ -2,7 +2,7 @@
 
 ## Execution
 
-Sunspot job `12481907` runs `2` nodes with `12` FLAT ranks/node. Each arm
+Sunspot attempt `12481907` requested `2` nodes with `12` FLAT ranks/node. Each arm
 uses sequence `8192`, microbatch `1`, accumulation `2`, global batch `48`,
 `32` updates, seed `42`, no activation checkpointing and fresh SophiaG
 state. Every update processes `16,384` tokens/rank. Online
@@ -49,7 +49,25 @@ This does not by itself establish correct live post-wrap weights.
 
 ## Required evidence
 
-Status at submission: **running; no winner recorded**.
+Attempt `12481907` ended with PBS exit `143` after user-authorized
+cancellation. Its MDS device preflight passed all `24` ranks; the actual
+launch failed before training with PALS `VNI request failed [308]`,
+`no response` and shepherd exit `127`. The first TT region-compilation arm
+started before cancellation, but no completed comparison is recorded.
+
+An initial diagnosis misread `cmd_to_launch` as the complete command. The
+full `Executing:` block retained Python and the benchmark entrypoint.
+Parser-only checks on actual TT ezpz `0.27.3` and MDS helper ezpz `0.11.1`
+preserve both outer and inner separators and the full child argument list.
+The temporary separator edits were reverted. This failure does not establish
+a parser bug or a model-compilation failure.
+
+A replacement is prepared at source
+[`a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6`](https://github.com/saforem2/torchtitan/commit/a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6).
+It is held until the separate live-parameter canary `12481908` actually
+starts. That allocation has been sent for execution repeatedly without an
+application log or `stime`; scheduler `R` alone is not training evidence.
+No replacement result or performance winner is recorded.
 
 Record all eight phase/variant return codes, rank completion and optimizer
 step counts, consumed-input hashes, complete loss histories, peak allocated
