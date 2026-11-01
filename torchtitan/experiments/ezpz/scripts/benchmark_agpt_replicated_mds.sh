@@ -279,7 +279,7 @@ ezpz launch \
     "${MDS_VENV}/bin/python" "${PROVENANCE_DIR}/benchmark_agpt_entrypoint.py" \
     --benchmark-output="${OUTPUT_DIR}/rank-diagnostics" \
     "${WITNESS_ARGS[@]}" \
-    --benchmark-script="${MDS_ROOT}/pretrain_gpt_alcf.py" \
+    --benchmark-script="${MDS_ROOT}/pretrain_gpt_alcf.py" -- \
     --finetune \
     --override-opt_param-scheduler \
     --load "${LOAD_ROOT}" \
