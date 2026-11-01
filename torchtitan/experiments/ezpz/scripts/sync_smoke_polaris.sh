@@ -53,6 +53,18 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 source "${VENV}/bin/activate"
 
+# Broadcast venv to compute nodes (fixes uv Python libpython.so on PALS)
+# Same as submit_agpt_olmo3_polaris.sh -- required for uv-managed Python on Polaris
+if [ -f "${VENV}.tar.gz" ]; then
+    echo "yeet: broadcasting ${VENV}.tar.gz"
+    ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tail -3
+else
+    echo "yeet: no ${VENV}.tar.gz, falling back to rsync"
+    ezpz yeet 2>&1 | tail -3
+fi
+# Switch to broadcast venv on compute (ezpz yeet puts it at /tmp/<venv-name>)
+# Keep login venv active for now -- compute will use /tmp version
+
 echo "===== ezpz sync smoke (polaris, CUDA) ====="
 date
 echo "node0:  $(hostname)"
