@@ -4,8 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 from collections.abc import Callable
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, field, replace as dataclass_replace
 from functools import partial
 from typing import Any, Literal
 
@@ -212,10 +213,9 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
         # (see the arg-name note above), so the signature must not change. No-op
         # and near-free when disabled -- see diagnostics/attention.py.
         _attn_diag.observe(q, k, scale)
-        with sdpa_kernel(self.sdpa_backends):
-            out = F.scaled_dot_product_attention(
-                q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
-            )
+        out = self._sdpa(
+            q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
+        )
         out = out.transpose(1, 2)
         if folded:
             # Restore the caller's flat [T, N, H]: GQAttention immediately does
@@ -223,6 +223,21 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
             # tensor.
             out = out.reshape(-1, out.shape[-2], out.shape[-1])
         return out
+
+    def _sdpa(self, q, k, v, *, scale, is_causal, enable_gqa):
+        with sdpa_kernel(self.sdpa_backends):
+            return F.scaled_dot_product_attention(
+                q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
+            )
+
+
+_CAUSAL_BLOCKS_LOGGED = False
+
+
+def _log_causal_blocks(n: int) -> None:
+    global _CAUSAL_BLOCKS_LOGGED
+    _CAUSAL_BLOCKS_LOGGED = True
+    print(f"[ezpz] XPU block-causal attention enabled: causal_blocks={n}", flush=True)
 
 
 class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
@@ -242,7 +257,18 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
 
     @dataclass(kw_only=True, slots=True)
     class Config(EzpzScaledDotProductAttention.Config):
-        pass
+        # Causal flash attention split into this many square sequence blocks,
+        # running only the n(n+1)/2 lower-triangle blocks. 0/1 = off (plain
+        # SDPA). The torch-xpu sycl-tla flash BACKWARD does no causal tile
+        # skipping (measured 24.6 ms causal vs 25.0 ms non-causal at the
+        # AGPT-2B shape), so this recovers most of the 2x it leaves on the
+        # table. Default comes from EZPZ_XPU_ATTN_CAUSAL_BLOCKS so launchers
+        # can toggle it without a config edit. See xpu_block_causal_attention.
+        causal_blocks: int = field(
+            default_factory=lambda: int(
+                os.environ.get("EZPZ_XPU_ATTN_CAUSAL_BLOCKS", "0") or 0
+            )
+        )
 
     sdpa_backends = [
         SDPBackend.OVERRIDEABLE,
@@ -250,6 +276,31 @@ class XPUScaledDotProductAttention(EzpzScaledDotProductAttention):
         SDPBackend.FLASH_ATTENTION,
         SDPBackend.MATH,
     ]
+
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.causal_blocks = int(getattr(config, "causal_blocks", 0) or 0)
+        if self.causal_blocks > 1 and not _CAUSAL_BLOCKS_LOGGED:
+            _log_causal_blocks(self.causal_blocks)
+
+    def _sdpa(self, q, k, v, *, scale, is_causal, enable_gqa):
+        if (
+            self.causal_blocks > 1
+            and is_causal
+            and q.device.type == "xpu"
+            and q.shape[-2] == k.shape[-2]
+            and q.shape[-2] % self.causal_blocks == 0
+        ):
+            from torchtitan.experiments.ezpz.agpt.xpu_block_causal_attention import (
+                block_causal_flash_attention,
+            )
+
+            return block_causal_flash_attention(
+                q, k, v, n_chunks=self.causal_blocks, scale=scale
+            )
+        return super()._sdpa(
+            q, k, v, scale=scale, is_causal=is_causal, enable_gqa=enable_gqa
+        )
 
 
 from torchtitan.models.common.activation import BinaryActivationFn

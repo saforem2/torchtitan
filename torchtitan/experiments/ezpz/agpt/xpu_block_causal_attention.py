@@ -4,16 +4,21 @@ Why: the torch-xpu sycl-tla flash attention BACKWARD kernel
 (``cute::MhaBackward<FAKernel<bf16,128,128,128,32,4,4,4,true>>``, torch 2.14)
 does not skip fully masked key tiles under ``is_causal=True``. Measured at the
 AGPT-2B shape (B=1, S=8192, Hq=16, Hkv=4, D=128, bf16, one Max 1550 tile):
-causal bwd 24.6 ms vs non-causal bwd 25.0 ms -- the same work. IPEX xetla
-(the MDS path) skips them and runs the causal bwd in ~13.7 ms.
+causal bwd 24.7 ms vs non-causal bwd 25.0 ms -- the same work. IPEX xetla
+(the MDS path) skips them: causal 10.2 ms vs non-causal 19.0 ms.
 
-What: split the sequence into ``n`` chunks and only run the (i, j <= i) chunk
-pairs -- ``n(n+1)/2`` of ``n^2`` blocks. Diagonal blocks use ``is_causal``
-(square, so the XPU flash restriction ``seqlen_q == seqlen_k`` holds);
-below-diagonal blocks are dense. Forward merges the per-block outputs with
-their log-sum-exp. Backward is the ring/context-parallel attention identity:
-each block's flash backward is called with the GLOBAL output and GLOBAL LSE,
-which makes its dQ/dK/dV contribution exact; contributions are summed in fp32.
+What: split the sequence into ``n`` chunks of ``c = S/n`` and compute only
+the lower-triangle chunk pairs ``(i, j <= i)``. Pairs on the same block
+diagonal ``d = i - j`` share a shape, so each diagonal is ONE flash call with
+its ``n - d`` blocks folded into the batch dim (a view for BSHD-contiguous
+input, no copy). Diagonal ``d = 0`` is square, so ``is_causal`` is legal
+there; ``d > 0`` is dense. That is ``n`` kernel calls doing
+``n(n+1)/2`` of the ``n^2`` block products (8 chunks: 56%).
+
+Forward merges the per-diagonal outputs with their log-sum-exp. Backward uses
+the ring/context-parallel identity: each diagonal's flash backward is given
+the GLOBAL output and GLOBAL LSE, which makes its dQ/dK/dV contribution exact;
+contributions are summed in fp32.
 
 Only the ATen flash ops are used (``_scaled_dot_product_flash_attention`` and
 its ``_backward``), so this needs no IPEX and no core torchtitan change.
@@ -25,8 +30,8 @@ import torch
 
 _aten = torch.ops.aten
 
-# Base of the kernel's returned log-sum-exp. Natural log is what the CUDA
-# flash kernels return; flip only if the numerics check says otherwise.
+# Base of the kernel's returned log-sum-exp. Natural log is verified for the
+# torch 2.14 xpu sycl-tla kernel (base 2 is wrong by ~0.1 abs in out).
 LSE_BASE2 = False
 
 
@@ -40,74 +45,99 @@ def _merge(o_acc, lse_acc, o, lse):
     return o_acc * a.unsqueeze(-1) + o * b.unsqueeze(-1), new
 
 
-def _fwd(q, k, v, causal: bool, scale: float):
-    out = _aten._scaled_dot_product_flash_attention(
-        q, k, v, 0.0, causal, False, scale=scale
-    )
-    # (out, logsumexp, cum_q, cum_k, max_q, max_k, philox_seed, philox_offset, mask)
-    return out[0], out[1], out[6], out[7]
+def _fold(x, start: int, nblk: int, c: int):
+    """[B, H, S, D] rows [start*c, (start+nblk)*c) -> [B*nblk, H, c, D]."""
+    B, H, _, D = x.shape
+    t = x.transpose(1, 2)[:, start * c : (start + nblk) * c]
+    return t.reshape(B * nblk, c, H, D).transpose(1, 2)
 
 
-def _bwd(do, q, k, v, o, lse, causal, scale, seed, offset):
-    sq, sk = q.shape[-2], k.shape[-2]
-    return _aten._scaled_dot_product_flash_attention_backward(
-        do, q, k, v, o, lse, None, None, sq, sk, 0.0, causal, seed, offset,
-        scale=scale,
-    )
+def _unfold(x, B: int):
+    """[B*nblk, H, c, D] -> [B, H, nblk*c, D]."""
+    Bn, H, c, D = x.shape
+    nblk = Bn // B
+    return x.transpose(1, 2).reshape(B, nblk * c, H, D).transpose(1, 2)
+
+
+def _fold_lse(lse, start: int, nblk: int, c: int):
+    """[B, H, S] -> [B*nblk, H, c] (contiguous)."""
+    B, H, _ = lse.shape
+    t = lse[:, :, start * c : (start + nblk) * c].reshape(B, H, nblk, c)
+    return t.permute(0, 2, 1, 3).reshape(B * nblk, H, c).contiguous()
+
+
+def _unfold_lse(lse, B: int):
+    Bn, H, c = lse.shape
+    nblk = Bn // B
+    return lse.reshape(B, nblk, H, c).permute(0, 2, 1, 3).reshape(B, H, nblk * c)
 
 
 class _BlockCausalFlash(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, n_chunks: int, scale: float):
+    def forward(ctx, q, k, v, n: int, scale: float):
         # q: [B, Hq, S, D]; k, v: [B, Hkv, S, D] (GQA handled by the kernel).
-        S = q.shape[-2]
-        c = S // n_chunks
-        outs, lses, rng = [], [], {}
-        for i in range(n_chunks):
-            qi = q[:, :, i * c:(i + 1) * c]
-            o_acc = lse_acc = None
-            for j in range(i + 1):
-                kj = k[:, :, j * c:(j + 1) * c]
-                vj = v[:, :, j * c:(j + 1) * c]
-                o, lse, seed, off = _fwd(qi, kj, vj, i == j, scale)
-                rng[(i, j)] = (seed, off)
-                o = o.float()
-                if o_acc is None:
-                    o_acc, lse_acc = o, lse
-                else:
-                    o_acc, lse_acc = _merge(o_acc, lse_acc, o, lse)
-            outs.append(o_acc.to(q.dtype))
-            lses.append(lse_acc)
-        out = torch.cat(outs, dim=-2)
-        lse = torch.cat(lses, dim=-1)
-        ctx.save_for_backward(q, k, v, out, lse)
-        ctx.n_chunks, ctx.scale, ctx.rng = n_chunks, scale, rng
+        B, _, S, _ = q.shape
+        c = S // n
+        o_acc = lse_acc = None
+        rng = []
+        for d in range(n):
+            nblk = n - d
+            res = _aten._scaled_dot_product_flash_attention(
+                _fold(q, d, nblk, c),
+                _fold(k, 0, nblk, c),
+                _fold(v, 0, nblk, c),
+                0.0,
+                d == 0,
+                False,
+                scale=scale,
+            )
+            rng.append((res[6], res[7]))
+            o = _unfold(res[0], B).float()
+            lse = _unfold_lse(res[1], B)
+            if d == 0:
+                o_acc, lse_acc = o, lse.clone()
+            else:
+                rows = slice(d * c, S)
+                o_acc[:, :, rows], lse_acc[:, :, rows] = _merge(
+                    o_acc[:, :, rows], lse_acc[:, :, rows], o, lse
+                )
+        out = o_acc.to(q.dtype)
+        ctx.save_for_backward(q, k, v, out, lse_acc)
+        ctx.n, ctx.scale, ctx.rng = n, scale, rng
         return out
 
     @staticmethod
     def backward(ctx, do):
         q, k, v, out, lse = ctx.saved_tensors
-        n, scale = ctx.n_chunks, ctx.scale
-        S = q.shape[-2]
+        n, scale = ctx.n, ctx.scale
+        B, _, S, _ = q.shape
         c = S // n
-        do = do.contiguous() if do.stride(-1) != 1 else do
         dq = torch.zeros(q.shape, dtype=torch.float32, device=q.device)
         dk = torch.zeros(k.shape, dtype=torch.float32, device=k.device)
         dv = torch.zeros(v.shape, dtype=torch.float32, device=v.device)
-        for i in range(n):
-            si = slice(i * c, (i + 1) * c)
-            qi, oi, doi = q[:, :, si], out[:, :, si], do[:, :, si]
-            lsei = lse[:, :, si].contiguous()
-            for j in range(i + 1):
-                sj = slice(j * c, (j + 1) * c)
-                seed, off = ctx.rng[(i, j)]
-                gq, gk, gv = _bwd(
-                    doi, qi, k[:, :, sj], v[:, :, sj], oi, lsei, i == j, scale,
-                    seed, off,
-                )
-                dq[:, :, si] += gq.float()
-                dk[:, :, sj] += gk.float()
-                dv[:, :, sj] += gv.float()
+        for d in range(n):
+            nblk = n - d
+            seed, off = ctx.rng[d]
+            gq, gk, gv = _aten._scaled_dot_product_flash_attention_backward(
+                _fold(do, d, nblk, c),
+                _fold(q, d, nblk, c),
+                _fold(k, 0, nblk, c),
+                _fold(v, 0, nblk, c),
+                _fold(out, d, nblk, c),
+                _fold_lse(lse, d, nblk, c),
+                None,
+                None,
+                c,
+                c,
+                0.0,
+                d == 0,
+                seed,
+                off,
+                scale=scale,
+            )
+            dq[:, :, d * c :] += _unfold(gq, B)
+            dk[:, :, : nblk * c] += _unfold(gk, B)
+            dv[:, :, : nblk * c] += _unfold(gv, B)
         return dq.to(q.dtype), dk.to(k.dtype), dv.to(v.dtype), None, None
 
 
@@ -119,18 +149,17 @@ def block_causal_flash_attention(
     n_chunks: int,
     scale: float | None = None,
 ) -> torch.Tensor:
-    """Causal attention on [B, H, S, D] tensors via ``n_chunks`` square blocks.
+    """Causal attention on [B, H, S, D] tensors via ``n_chunks`` block diagonals.
 
-    ``n_chunks <= 1`` falls back to one causal flash call.
+    ``n_chunks <= 1`` is one causal flash call through the same path.
     """
     if scale is None:
         scale = q.shape[-1] ** -0.5
     S = q.shape[-2]
-    if n_chunks <= 1:
-        return _BlockCausalFlash.apply(q, k, v, 1, scale)
-    if S % n_chunks != 0 or k.shape[-2] != S:
+    n = max(1, int(n_chunks))
+    if S % n != 0 or k.shape[-2] != S:
         raise ValueError(
             f"block-causal attention needs seq {S} divisible by n_chunks "
-            f"{n_chunks} and seqlen_q == seqlen_k (got k seq {k.shape[-2]})"
+            f"{n} and seqlen_q == seqlen_k (got k seq {k.shape[-2]})"
         )
-    return _BlockCausalFlash.apply(q, k, v, n_chunks, scale)
+    return _BlockCausalFlash.apply(q, k, v, n, scale)

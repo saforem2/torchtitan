@@ -52,7 +52,7 @@ ARGS = parse()
 if ARGS.ipex:
     import intel_extension_for_pytorch  # noqa: F401
 
-from torch.nn.attention import sdpa_kernel, SDPBackend  # noqa: E402
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 DEV = torch.device("xpu")
 DT = torch.bfloat16
@@ -150,7 +150,11 @@ def flex_case(gqa="native"):
     def run(q, k, v):
         qq, kk, vv = prep(q, k, v, "bshd", gqa)
         o = _FLEX["fn"](
-            qq, kk, vv, block_mask=_FLEX["bm"], scale=SCALE,
+            qq,
+            kk,
+            vv,
+            block_mask=_FLEX["bm"],
+            scale=SCALE,
             enable_gqa=(gqa == "native"),
         )
         return o.transpose(1, 2)
@@ -162,8 +166,11 @@ def _load_block_module():
     import importlib.util
     import pathlib
 
-    path = (pathlib.Path(__file__).resolve().parents[1] / "agpt"
-            / "xpu_block_causal_attention.py")
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "agpt"
+        / "xpu_block_causal_attention.py"
+    )
     spec = importlib.util.spec_from_file_location("_xpu_blk", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -200,9 +207,10 @@ def build_cases():
         c[f"{name}_bhsd_gqa"] = (sdpa_case(be, layout="bhsd"), True)
         c[f"{name}_bhsd_expand"] = (sdpa_case(be, layout="bhsd", gqa="expand"), True)
         c[f"{name}_bshd_expand_noncausal"] = (
-            sdpa_case(be, gqa="expand", causal=False), False)
-        c[f"{name}_bshd_expand_mask"] = (
-            sdpa_case(be, gqa="expand", mask=True), True)
+            sdpa_case(be, gqa="expand", causal=False),
+            False,
+        )
+        c[f"{name}_bshd_expand_mask"] = (sdpa_case(be, gqa="expand", mask=True), True)
     for n in (1, 2, 4, 8, 16):
         c[f"blk{n}"] = (block_case(n), True)
     c["blk4_lse2"] = (block_case(4, base2=True), True)
@@ -241,12 +249,18 @@ def top_kernels(fn):
         if t and e.device_type.name in ("XPU", "CUDA", "PrivateUse1"):
             out.append((t, e.key))
     out.sort(reverse=True)
-    return [f"{t/1e3:.2f}ms {k[:110]}" for t, k in out[:4]]
+    return [f"{t / 1e3:.2f}ms {k[:110]}" for t, k in out[:4]]
 
 
 def bench(name, fn, causal, refs):
-    rec = {"tag": ARGS.tag, "case": name, "torch": torch.__version__,
-           "ipex": ARGS.ipex, "shape": [B, S, HQ, HKV, D], "causal": causal}
+    rec = {
+        "tag": ARGS.tag,
+        "case": name,
+        "torch": torch.__version__,
+        "ipex": ARGS.ipex,
+        "shape": [B, S, HQ, HKV, D],
+        "causal": causal,
+    }
     try:
         tf, tb = [], []
         for i in range(ARGS.warmup + ARGS.iters):
@@ -265,17 +279,24 @@ def bench(name, fn, causal, refs):
         tf.sort(), tb.sort()
         mf, mb = tf[len(tf) // 2], tb[len(tb) // 2]
         ff, fb = flops(causal)
-        rec.update(fwd_ms=round(mf, 3), bwd_ms=round(mb, 3),
-                   fwd_min_ms=round(tf[0], 3), bwd_min_ms=round(tb[0], 3),
-                   fwd_tflops=round(ff / mf / 1e9, 1),
-                   bwd_tflops=round(fb / mb / 1e9, 1))
+        rec.update(
+            fwd_ms=round(mf, 3),
+            bwd_ms=round(mb, 3),
+            fwd_min_ms=round(tf[0], 3),
+            bwd_min_ms=round(tb[0], 3),
+            fwd_tflops=round(ff / mf / 1e9, 1),
+            bwd_tflops=round(fb / mb / 1e9, 1),
+        )
         if refs is not None and causal in refs:
             r = refs[causal]
             got = [o.detach().float(), q.grad.float(), k.grad.float(), v.grad.float()]
-            rec["maxabs"] = {n: float((a - b).abs().max()) for n, a, b in
-                             zip(("out", "dq", "dk", "dv"), got, r)}
-            rec["refmax"] = {n: float(b.abs().max()) for n, b in
-                             zip(("out", "dq", "dk", "dv"), r)}
+            rec["maxabs"] = {
+                n: float((a - b).abs().max())
+                for n, a, b in zip(("out", "dq", "dk", "dv"), got, r)
+            }
+            rec["refmax"] = {
+                n: float(b.abs().max()) for n, b in zip(("out", "dq", "dk", "dv"), r)
+            }
         if not ARGS.no_profile:
             rec["kernels"] = top_kernels(fn)
     except Exception as e:  # noqa: BLE001
@@ -286,8 +307,10 @@ def bench(name, fn, causal, refs):
 
 
 def main():
-    print(f"torch={torch.__version__} ipex={ARGS.ipex} dev={torch.xpu.get_device_name()}",
-          flush=True)
+    print(
+        f"torch={torch.__version__} ipex={ARGS.ipex} dev={torch.xpu.get_device_name()}",
+        flush=True,
+    )
     cases = build_cases()
     want = list(cases) if ARGS.cases == "all" else ARGS.cases.split(",")
     refs = None
@@ -297,7 +320,9 @@ def main():
             refs[False] = reference(False)
     for w in want:
         if w not in cases:
-            print(f"RESULT {json.dumps({'tag': ARGS.tag, 'case': w, 'error': 'unknown'})}")
+            print(
+                f"RESULT {json.dumps({'tag': ARGS.tag, 'case': w, 'error': 'unknown'})}"
+            )
             continue
         fn, causal = cases[w]
         bench(w, fn, causal, refs)
