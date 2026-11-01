@@ -108,7 +108,7 @@ case "$(realpath "${LOAD_ROOT}/global_step138650/mp_rank_00_model_states.pt")" i
 [[ -f "${BOOKS_LIST}" && -d "${PYTHON_OVERLAY}" && -d "${DISTUTILS_OVERLAY}" ]] || exit 99
 cd "${MDS_ROOT}" || exit 99
 JOBID_SHORT="${PBS_JOBID%%.*}"
-RUN_NAME="mds-${RUN_KIND}-${GRAD_POLICY}-n${NODES}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
+RUN_NAME="mds-${RUN_KIND}-${GRAD_POLICY}-ac${MDS_AC:-none}-n${NODES}-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 OUTPUT_DIR="${RUN_ROOT}/outputs/${RUN_NAME}"
 LOG_DIR="${RUN_ROOT}/logs/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}/tensorboard" "${OUTPUT_DIR}/wandb" \
@@ -190,6 +190,12 @@ PROFILE_ARGS=()
 if [[ "${PROFILE}" == 1 ]]; then
     PROFILE_ARGS=(--profile pt --profile_steps 12,12 --profile-ranks 0)
 fi
+MDS_AC="${MDS_AC:-none}"
+case "${MDS_AC}" in
+    none) AC_ARGS=() ;;
+    full) AC_ARGS=(--checkpoint-activations) ;;
+    *) echo "MDS_AC must be none or full" >&2; exit 98 ;;
+esac
 
 {
     echo "===== AuroraGPT-2B matched Megatron-DeepSpeed run ====="
@@ -210,7 +216,7 @@ fi
     echo "optimizer=sophiag beta1=.9 beta2=.95 rho=.01 weight_decay=.1 clip_grad=1.0"
     echo "grad_policy=${GRAD_POLICY} local_accumulation=legacy_default_runtime_unverified"
     echo "optimizer_state=fresh hessian_policy=no_update_hessian_call_in_pinned_source step_bs_default=5120"
-    echo "profile=${PROFILE} deepspeed_flops_profiler=disabled activation_checkpoint=none"
+    echo "profile=${PROFILE} deepspeed_flops_profiler=disabled activation_checkpoint=${MDS_AC}"
     echo "data_list_sha256=$(sha256sum "${BOOKS_LIST}" | cut -d' ' -f1)"
     echo "ezpz_entrypoint=${EZPZ_LAUNCHER} python=${MDS_VENV}/bin/python"
     echo "output=${OUTPUT_DIR} wandb_mode=${WANDB_MODE} wandb_project=${WB_PROJECT}"
@@ -304,7 +310,7 @@ ezpz launch \
     --no-masked-softmax-fusion \
     --no-gradient-accumulation-fusion \
     --use-flash-attn-builder \
-    "${PROFILE_ARGS[@]}" \
+    "${PROFILE_ARGS[@]}" "${AC_ARGS[@]}" \
     2>&1 | tee -a "${LOG_FILE}"
 rc=${PIPESTATUS[0]}
 set +x
