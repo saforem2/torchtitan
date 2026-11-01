@@ -160,8 +160,8 @@ was reserved but unallocated. The failed request was `3.91 GiB`, which is
 one BF16 logits tensor: `8192 x 256128 x 2` bytes. Activations at sequence
 `8192` take roughly the remaining `25 GiB`.
 
-The Aurora production `MDS` source runs record this same layout with
-activation checkpointing off. The later investigation explains the fit difference through the selected
+The historical Aurora `MDS` run records nominal ZeRO-0 with activation
+checkpointing off. The later investigation explains the fit difference through the selected
 DeepSpeed wrapper; see the November 1 audit.
 
 ### ZeRO-0 bisect and matched 16-rank pair
