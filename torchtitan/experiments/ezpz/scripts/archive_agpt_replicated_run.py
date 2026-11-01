@@ -67,7 +67,11 @@ def main():
     run = wandb.init(entity="aurora_gpt", project=args.project,
                      id=args.run_id, resume="allow", mode="online",
                      group="agpt-replicated-20261031",
-                     dir=str(args.output / "wandb"), settings=wandb.Settings(console="off"))
+                     dir=str(args.output / "wandb"), settings=wandb.Settings(
+                         console="off", disable_git=True, disable_code=True,
+                         x_disable_meta=True, x_disable_stats=True,
+                         x_save_requirements=False,
+                     ))
     artifact = wandb.Artifact("agpt-replicated-evidence-" + args.run_id, type="campaign-evidence",
                              metadata={"source_sha": source_sha, "exit_code": args.exit_code})
     for path, name, _ in files:
