@@ -29,6 +29,7 @@ Dense transformer training benchmarks across ALCF machines.
 
 ### Sunspot
 
+- [Sunspot startup isolation and Aurora fallback (2026-11-01)](sunspot/2026-11-01-startup-incident.md): shell-only pre-run failure; Aurora 24-rank probe completed.
 - [Same-allocation MDS/TT comparison and live-load gates (2026-11-01)](sunspot/2026-11-01-paired-performance.md): first attempt `12481907` cancelled after PALS startup failure; replacement awaits a working application-start gate.
 
 Latest: [MDS versus TorchTitan, final report](sunspot/2026-10-29-native-checkpoint-closure.md). Same native parameters and all 32 token batches verified. MDS `24.87`, TT eager `28.41-28.70`, TT loss compilation `25.97-26.89 s/update`; compiled TT is `4.4-8.1%` slower than this MDS control. Includes compilation cost, all-rank memory, trace analysis and numerical differences.

@@ -2,6 +2,22 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-01: Sunspot shell startup isolated; Aurora probe completed
+
+- Cancelled only `12481931` with explicit user approval; PBS finished after
+  `15` starts, without supplying numeric `Exit_status`.
+- `12481932` selected the earlier successful `c1` pair but reached a system
+  hold after `21` failed starts. Shell-only `12481933` and home-only
+  `12481935` reproduce PBS pre-run without their first marker. The specific
+  MOM/hook failure is unresolved; a site investigation draft is recorded.
+- The single monitor now reports substate `41` as pre-run, startup count,
+  and `stime`, and accepts finished cancellations without a numeric exit.
+- Aurora `9025634`, source `24985bc50`, finished first attempt / exit `0`.
+  All `24` device and accumulation records verified. Maximum gradient
+  difference `7.450580596923828e-09`; manual-wire and loss differences `0`.
+  Online `W&B` retained. This is an FP32 communication probe, not 2B training.
+- [Startup report and recovery gates](experiments/agpt/sunspot/2026-11-01-startup-incident.md).
+
 ## 2026-11-01: follow-up ended before application startup
 
 - Exact historical `qstat -xf 12481908` records finished / exit `265`,

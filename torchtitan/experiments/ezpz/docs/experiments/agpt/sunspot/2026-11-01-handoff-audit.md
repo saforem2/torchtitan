@@ -21,7 +21,9 @@ does not improve on the earlier `12 x 2` result. Its complete input stream
 matches MDS, but losses differ. The intended same-allocation comparison was
 cancelled after a PALS startup failure. The live-load canary then ended with
 scheduler exit `265` before application startup; the replacement comparison
-and Aurora fallback have not run.
+has not run. The Aurora fallback communication probe completed;
+[Sunspot startup isolation and exact recovery status](2026-11-01-startup-incident.md)
+records the failed-start reproductions and its scope.
 
 At `16` devices, the combined FSDP communication changes reach `2.2799 s`,
 versus `2.2525 s` for MDS ZeRO-1 and `2.3894 s` for the historical-wrapper
