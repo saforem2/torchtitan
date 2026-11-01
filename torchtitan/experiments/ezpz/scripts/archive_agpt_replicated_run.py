@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 
 import wandb
 
@@ -24,6 +25,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--log", type=Path, action="append", default=[])
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--project", default="torchtitan.ezpz.train")
+    parser.add_argument("--source-sha", required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--exit-code", type=int, required=True)
     args = parser.parse_args()
@@ -33,7 +36,7 @@ def main():
         if not path.is_file():
             continue
         relative = path.relative_to(args.output)
-        if "wandb" in relative.parts:
+        if "wandb" in relative.parts or relative.name == "archive-manifest.json":
             continue
         entry = {"path": str(relative), "bytes": path.stat().st_size, "sha256": digest(path)}
         if "checkpoints" in relative.parts:
@@ -44,7 +47,13 @@ def main():
         if path.is_file():
             entry = {"path": str(path), "bytes": path.stat().st_size, "sha256": digest(path)}
             files.append((path, f"logs/{index}-{path.name}", entry))
-    source_sha = subprocess.check_output(["git", "-C", str(args.root), "rev-parse", "HEAD"], text=True).strip()
+    source_sha = subprocess.check_output(
+        ["git", "-C", str(args.root), "rev-parse", args.source_sha + "^{commit}"],
+        text=True,
+    ).strip()
+    recorded_path = args.output / "provenance" / "tt-head.txt"
+    if recorded_path.exists() and recorded_path.read_text().strip() != source_sha:
+        raise ValueError("Source SHA does not match this run's recorded provenance")
     manifest = {"job_id": args.job_id, "source_sha": source_sha,
                 "scheduler_exit_code": args.exit_code,
                 "files": [entry for _, _, entry in files],
@@ -52,21 +61,29 @@ def main():
                 "checkpoint_note": "Complete checkpoint files remain on project storage; this artifact includes their size/hash manifest."}
     manifest_path = args.output / "archive-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    run = wandb.init(entity="aurora_gpt", project="torchtitan.ezpz.train",
+    run = wandb.init(entity="aurora_gpt", project=args.project,
                      id=args.run_id, resume="allow", mode="online",
-                     group="agpt-replicated-20261031", job_type="evidence-archive",
+                     group="agpt-replicated-20261031",
                      dir=str(args.output / "wandb"), settings=wandb.Settings(console="off"))
-    artifact = wandb.Artifact("agpt-replicated-job-" + args.job_id, type="campaign-evidence",
+    artifact = wandb.Artifact("agpt-replicated-evidence-" + args.run_id, type="campaign-evidence",
                              metadata={"source_sha": source_sha, "exit_code": args.exit_code})
     for path, name, _ in files:
         artifact.add_file(str(path), name=name)
     artifact.add_file(str(manifest_path), name="archive-manifest.json")
-    source_paths = subprocess.check_output(["git", "-C", str(args.root), "diff", "--name-only", "5be47f7c", "HEAD"], text=True).splitlines()
-    for relative in source_paths:
-        path = args.root / relative
-        if path.is_file():
+    source_paths = subprocess.check_output(
+        ["git", "-C", str(args.root), "diff", "--name-only", "--diff-filter=ACMR",
+         "5be47f7c", source_sha, "--", "torchtitan/experiments/ezpz"], text=True,
+    ).splitlines()
+    # Read historical blobs, since later jobs may have advanced the checkout.
+    with tempfile.TemporaryDirectory(prefix="agpt-evidence-source-") as source_dir:
+        for relative in source_paths:
+            path = Path(source_dir) / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(subprocess.check_output(
+                ["git", "-C", str(args.root), "show", source_sha + ":" + relative]
+            ))
             artifact.add_file(str(path), name="source/" + relative)
-    run.log_artifact(artifact).wait()
+        run.log_artifact(artifact).wait()
     run.summary["evidence/artifact"] = artifact.qualified_name
     run.summary["evidence/source_sha"] = source_sha
     run.summary["evidence/file_count"] = len(files)
