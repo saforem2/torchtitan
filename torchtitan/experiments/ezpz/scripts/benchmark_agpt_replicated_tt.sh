@@ -247,12 +247,28 @@ else
     esac
     INITIAL_AUDIT=()
     if [[ -n "${BENCH_INITIAL_PARAMETER_AUDIT_JSON:-}" ]]; then
-        [[ "${ARM}" == ddp-* && -s "${BENCH_INITIAL_PARAMETER_AUDIT_JSON}" ]] || {
-            echo "Initial parameter audit requires a native DDP arm and an existing audit JSON" >&2
+        [[ -s "${BENCH_INITIAL_PARAMETER_AUDIT_JSON}" ]] || {
+            echo "Initial parameter audit requires an existing audit JSON" >&2
             exit 2
         }
         INITIAL_AUDIT=(--benchmark-initial-parameter-audit
             --benchmark-initial-parameter-audit-json="${BENCH_INITIAL_PARAMETER_AUDIT_JSON}")
+        case "${BENCH_INITIAL_PARAMETER_AUDIT_ALLOW_DTENSOR:-0}" in
+            0)
+                [[ "${ARM}" == ddp-* ]] || {
+                    echo "Default initial parameter audit requires native DDP" >&2
+                    exit 2
+                }
+                ;;
+            1)
+                [[ "${ARM}" == fsdp-* || "${ARM}" == hsdp-* ]] || {
+                    echo "DTensor initial parameter audit requires FSDP or HSDP" >&2
+                    exit 2
+                }
+                INITIAL_AUDIT+=(--benchmark-initial-parameter-audit-allow-dtensor)
+                ;;
+            *) echo "BENCH_INITIAL_PARAMETER_AUDIT_ALLOW_DTENSOR must be 0 or 1" >&2; exit 2;;
+        esac
     fi
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
