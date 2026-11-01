@@ -397,6 +397,9 @@ def main() -> None:
     parser.add_argument("--benchmark-step-timings", action="store_true")
     parser.add_argument("--benchmark-initial-parameter-audit", action="store_true")
     parser.add_argument("--benchmark-initial-parameter-audit-json", type=Path)
+    parser.add_argument(
+        "--benchmark-initial-parameter-audit-allow-dtensor", action="store_true"
+    )
     args, child_args = parser.parse_known_args()
     if child_args[:1] == ["--"]:
         child_args = child_args[1:]
@@ -407,6 +410,14 @@ def main() -> None:
             "--benchmark-initial-parameter-audit and "
             "--benchmark-initial-parameter-audit-json must be used together"
         )
+    if (
+        args.benchmark_initial_parameter_audit_allow_dtensor
+        and not args.benchmark_initial_parameter_audit
+    ):
+        parser.error(
+            "--benchmark-initial-parameter-audit-allow-dtensor requires "
+            "--benchmark-initial-parameter-audit"
+        )
     if args.benchmark_dry_run:
         print(
             json.dumps(
@@ -415,6 +426,9 @@ def main() -> None:
                     "script": str(args.script),
                     "child_argv": child_args,
                     "initial_parameter_audit": args.benchmark_initial_parameter_audit,
+                    "initial_parameter_audit_allow_dtensor": (
+                        args.benchmark_initial_parameter_audit_allow_dtensor
+                    ),
                     "initial_parameter_audit_json": (
                         str(args.benchmark_initial_parameter_audit_json)
                         if args.benchmark_initial_parameter_audit_json
@@ -461,6 +475,7 @@ def main() -> None:
             world_size=world_size,
             mpi_comm=MPI.COMM_WORLD,
             mpi_land=MPI.LAND,
+            allow_dtensor=args.benchmark_initial_parameter_audit_allow_dtensor,
         )
     if args.benchmark_step_timings:
         if args.module != "torchtitan.experiments.ezpz.train":
