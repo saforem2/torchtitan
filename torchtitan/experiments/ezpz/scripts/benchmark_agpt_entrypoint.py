@@ -223,6 +223,11 @@ class SophiaStepWitness:
                     "parameter_dtypes": sorted({str(t.dtype) for t in parameters}),
                     "momentum_dtypes": sorted({str(t.dtype) for t in momenta}),
                     "hessian_dtypes": sorted({str(t.dtype) for t in hessians}),
+                    "zero1": (
+                        optimizer._ezpz_zero1.diagnostics()
+                        if hasattr(optimizer, "_ezpz_zero1")
+                        else None
+                    ),
                 })
             except Exception as error:
                 result["errors"].append(f"final_state: {type(error).__name__}: {error}")

@@ -113,6 +113,7 @@ cp "${ROOT}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_entrypoint.py" "$
 module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0}"
+echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
 
@@ -132,6 +133,15 @@ else
                 --parallelism.enable-data-parallel-native-ddp
                 --parallelism.native-ddp-bucket-cap-mb="${DDP_BUCKET_MB:-25}"
                 --parallelism.native-ddp-communication-dtype="${COMM_DTYPE}")
+            [[ "${BENCH_DDP_BUCKET_FIRST:-0}" == 1 ]] && PARALLEL+=(
+                --parallelism.native-ddp-bucketize-first-iteration)
+            ZERO1="${BENCH_DDP_ZERO1:-0}"
+            case "${ZERO1}" in
+                0) ;;
+                float32|bfloat16) PARALLEL+=(--parallelism.native-ddp-zero1
+                    --parallelism.native-ddp-zero1-allgather-dtype="${ZERO1}") ;;
+                *) echo "BENCH_DDP_ZERO1 must be 0, float32 or bfloat16" >&2; exit 2;;
+            esac
             ;;
         fsdp-*|hsdp-*)
             RESHARD="${BENCH_FSDP_RESHARD:-default}"
