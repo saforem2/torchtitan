@@ -10,7 +10,8 @@
 # Sweep oneCCL / Level Zero env knobs over bench_xccl_overlap.py.
 # oneCCL reads env once per communicator, so each config is its own launch.
 #
-# BENCH_CONFIGS: newline-separated "tag|VAR=VAL VAR=VAL" (empty env allowed).
+# BENCH_CONFIGS: newline-separated "tag|VAR=VAL VAR=VAL" (empty env allowed),
+#                or BENCH_CONFIG_FILE with one such line per row.
 # BENCH_TOPOS:   space-separated NODESxPPN, e.g. "1x12 2x8 2x12".
 # BENCH_ARGS:    extra args for the python script.
 # Environment setup follows benchmark_agpt_replicated_tt.sh.
@@ -55,6 +56,9 @@ SCRIPT="${ROOT}/torchtitan/experiments/ezpz/scripts/bench_xccl_overlap.py"
 DEFAULT_CONFIGS='base|CCL_OP_SYNC=1
 sync0|CCL_OP_SYNC=0'
 CONFIGS="${BENCH_CONFIGS:-${DEFAULT_CONFIGS}}"
+# qsub -v cannot carry newlines or commas; a file can.
+[[ -n "${BENCH_CONFIG_FILE:-}" ]] && CONFIGS="$(grep -v '^#' "${BENCH_CONFIG_FILE}")"
+cp "${BENCH_CONFIG_FILE:-/dev/null}" "${OUT}/configs.txt"
 TOPOS="${BENCH_TOPOS:-1x12 2x8}"
 echo "BEGIN $(date -Is) job=${PBS_JOBID} hosts=$(tr '\n' ' ' < "${OUT}/hosts.txt") head=$(cat "${OUT}/tt-head.txt")"
 port=29400
