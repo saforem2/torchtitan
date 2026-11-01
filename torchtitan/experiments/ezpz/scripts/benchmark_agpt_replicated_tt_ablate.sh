@@ -12,6 +12,8 @@
 # for example "base:1:default:float32:0 sync0:0:default:float32:0".
 # ARM, PPN, NODES, STEPS and BENCH_EXPECTED_TT_HEAD pass through unchanged.
 set -o pipefail
+# The launcher sets this too; exported here so preflight sees it.
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 ROOT="${PBS_O_WORKDIR:?submit from the isolated checkout}"
 VARIANTS="${BENCH_VARIANTS:?set BENCH_VARIANTS}"
 LAUNCHER="${ROOT}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_replicated_tt.sh"
