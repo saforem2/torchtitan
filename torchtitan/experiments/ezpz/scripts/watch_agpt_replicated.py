@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor one explicit Sunspot job set, or display its local cached state."""
+"""Monitor explicit PBS jobs and distinguish startup from execution."""
 
 import argparse
 import json
@@ -33,8 +33,8 @@ for jobid, spec in jobs.items():
         with path.open('rb') as f:
             f.seek(max(0, path.stat().st_size - 12000))
             tail = f.read().decode('utf-8', errors='replace')
-    progress = [line for line in tail.splitlines() if re.search(r'step:|iteration +[0-9]|VERDICT:|Error|Traceback|BENCHMARK_DIAGNOSTICS|ACCUMULATION_PROBE|BEGIN |END ', line)]
-    results[jobid] = dict(label=spec['label'], scheduler=attrs.get('job_state','unknown'), exit_status=attrs.get('Exit_status'), progress=progress[-3:], tail=tail[-2500:], scheduler_error=p.stderr.strip(), log=str(path))
+    progress = [line for line in tail.splitlines() if re.search(r'step:|iteration +[0-9]|VERDICT:|Error|Traceback|BENCHMARK_DIAGNOSTICS|ACCUMULATION_PROBE|BEGIN |END |BATCH_ENTERED|SHARED_STORAGE_OK|PBS_STARTUP_OK', line)]
+    results[jobid] = dict(label=spec['label'], scheduler=attrs.get('job_state','unknown'), exit_status=attrs.get('Exit_status'), substate=attrs.get('substate'), run_count=attrs.get('run_count'), stime=attrs.get('stime'), progress=progress[-3:], tail=tail[-2500:], scheduler_error=p.stderr.strip(), log=str(path))
 print(json.dumps(results))
 """.replace("JOBS_JSON", repr(json.dumps(jobs)))
     result = subprocess.run(
@@ -68,10 +68,18 @@ def main():
             compact = json.dumps(state.get("jobs", {}), sort_keys=True)
             if compact != previous:
                 table = Table(title="AGPT replicated comparison " + time.strftime("%H:%M:%S"))
-                for heading in ("Job", "Arm", "PBS", "Exit", "Latest evidence"):
+                for heading in ("Job", "Arm", "Phase", "Starts", "Exit", "Latest evidence"):
                     table.add_column(heading)
                 for jobid, job in state.get("jobs", {}).items():
-                    table.add_row(jobid, job["label"], job["scheduler"], str(job["exit_status"]), "\n".join(job["progress"]))
+                    phase = job["scheduler"]
+                    if phase == "R" and job.get("substate") == "41":
+                        phase = "PBS pre-run"
+                    elif phase == "F":
+                        phase = "finished"
+                    table.add_row(
+                        jobid, job["label"], phase, str(job.get("run_count", "?")),
+                        str(job["exit_status"]), "\n".join(job["progress"]),
+                    )
                 Console().print(table)
                 previous = compact
             if args.once:
@@ -79,7 +87,7 @@ def main():
             if state.get("campaign_terminal"):
                 return
             if not args.display and state.get("jobs") and all(
-                job["scheduler"] == "F" and job["exit_status"] is not None
+                job["scheduler"] == "F"
                 for job in state["jobs"].values()
             ):
                 print("ALL_JOBS_TERMINAL: inspect complete logs and artifacts", flush=True)
