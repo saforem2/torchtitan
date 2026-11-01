@@ -7,6 +7,7 @@
 #PBS -q workq
 #PBS -j oe
 
+# mpiexec reads stdin, so it gets /dev/null; otherwise it eats the config list.
 # Sweep oneCCL / Level Zero env knobs over bench_xccl_overlap.py.
 # oneCCL reads env once per communicator, so each config is its own launch.
 #
@@ -76,8 +77,9 @@ for topo in ${TOPOS}; do
             mpiexec --envall --line-buffer --np "${np}" --ppn "${ppn}" \
             --hostfile "${hostfile}" --cpu-bind="${BIND}" \
             python "${SCRIPT}" --tag "${tag}" --trace-dir "${OUT}/traces" \
-            --jsonl "${OUT}/results.jsonl" ${BENCH_ARGS:-}
-        echo "RUN_END $(date -Is) topo=${topo} tag=${tag} rc=$?"
+            --jsonl "${OUT}/results.jsonl" ${BENCH_ARGS:-} < /dev/null
+        rc=$?
+        echo "RUN_END $(date -Is) topo=${topo} tag=${tag} rc=${rc}"
     done <<< "${CONFIGS}"
 done
 echo "END $(date -Is)"

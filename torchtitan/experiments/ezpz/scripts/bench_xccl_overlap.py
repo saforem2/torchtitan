@@ -24,6 +24,7 @@ and size come from PALS/PMI variables, MASTER_ADDR/MASTER_PORT from env.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import gzip
 import json
 import os
@@ -224,7 +225,9 @@ class Bench:
             "cc_both_ms": conc_cc,
             "cc_overlap_ms": comp + comp2 - conc_cc,
         }
-        if trace_dir is not None:
+        if trace_dir is not None and str(int(async_op)) in self.args.trace_async.split(
+            ","
+        ):
             from torch.profiler import ProfilerActivity, profile
 
             self._sync()
@@ -265,7 +268,7 @@ def main() -> None:
     parser.add_argument(
         "--rs-dtype", default="bfloat16", choices=["bfloat16", "float32"]
     )
-    parser.add_argument("--comm-iters", type=int, default=4)
+    parser.add_argument("--comm-iters", type=int, default=16)
     parser.add_argument("--mm-dim", type=int, default=8192)
     parser.add_argument(
         "--mm-iters", type=int, default=0, help="0 = balance to comm time"
@@ -274,7 +277,11 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--trace-dir", default="")
     parser.add_argument("--jsonl", default="")
+    parser.add_argument(
+        "--trace-async", default="0", help="async_op values that get a trace"
+    )
     args = parser.parse_args()
+    faulthandler.enable()
 
     rank = _env_int("RANK", "PALS_RANKID", "PMI_RANK", "PMIX_RANK")
     world = _env_int("WORLD_SIZE", "BENCH_WORLD", "PMI_SIZE", "PALS_SIZE")
@@ -332,6 +339,11 @@ def main() -> None:
                 for o in args.orders.split(",")
                 for a in args.async_ops.split(",")
             ):
+                if rank == 0:
+                    print(
+                        f"CASE_BEGIN {op} prio={priority} {order} async={int(async_op)}",
+                        flush=True,
+                    )
                 row = bench.case(op, priority, order, async_op, trace_dir, args.tag)
                 row["world"] = world
                 rows.append(row)
