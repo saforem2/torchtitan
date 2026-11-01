@@ -29,7 +29,9 @@ def main():
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--exit-code", type=int, required=True)
+    parser.add_argument("--application-exit-code", type=int)
     args = parser.parse_args()
+    application_exit = args.exit_code if args.application_exit_code is None else args.application_exit_code
     files = []
     checkpoint_files = []
     for path in sorted(args.output.rglob("*")):
@@ -56,6 +58,7 @@ def main():
         raise ValueError("Source SHA does not match this run's recorded provenance")
     manifest = {"job_id": args.job_id, "source_sha": source_sha,
                 "scheduler_exit_code": args.exit_code,
+                "application_exit_code": application_exit,
                 "files": [entry for _, _, entry in files],
                 "checkpoint_files": checkpoint_files,
                 "checkpoint_note": "Complete checkpoint files remain on project storage; this artifact includes their size/hash manifest."}
@@ -88,9 +91,10 @@ def main():
     run.summary["evidence/source_sha"] = source_sha
     run.summary["evidence/file_count"] = len(files)
     run.summary["evidence/scheduler_exit_code"] = args.exit_code
+    run.summary["evidence/application_exit_code"] = application_exit
     run.summary.update()
     print("ARCHIVE_COMPLETE " + json.dumps({"url": run.url, "artifact": artifact.qualified_name, "files": len(files)}), flush=True)
-    run.finish(exit_code=args.exit_code)
+    run.finish(exit_code=application_exit)
 
 
 if __name__ == "__main__":
