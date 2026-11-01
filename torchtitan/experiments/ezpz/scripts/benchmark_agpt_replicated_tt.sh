@@ -245,10 +245,19 @@ else
         1) TIMING=(--benchmark-step-timings) ;;
         *) echo "BENCH_STEP_TIMINGS must be 0 or 1" >&2; exit 2;;
     esac
+    INITIAL_AUDIT=()
+    if [[ -n "${BENCH_INITIAL_PARAMETER_AUDIT_JSON:-}" ]]; then
+        [[ "${ARM}" == ddp-* && -s "${BENCH_INITIAL_PARAMETER_AUDIT_JSON}" ]] || {
+            echo "Initial parameter audit requires a native DDP arm and an existing audit JSON" >&2
+            exit 2
+        }
+        INITIAL_AUDIT=(--benchmark-initial-parameter-audit
+            --benchmark-initial-parameter-audit-json="${BENCH_INITIAL_PARAMETER_AUDIT_JSON}")
+    fi
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
-        --benchmark-sophia-witness "${TIMING[@]}"
+        --benchmark-sophia-witness "${TIMING[@]}" "${INITIAL_AUDIT[@]}"
         --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
         --training.steps="${STEPS}" --training.max-context-length=8192
