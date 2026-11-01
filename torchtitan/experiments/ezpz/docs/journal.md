@@ -8,7 +8,8 @@ Running log of what's happening, session by session. Most recent first.
   `15` starts, without supplying numeric `Exit_status`.
 - `12481932` selected the earlier successful `c1` pair but reached a system
   hold after `21` failed starts. Shell-only `12481933` and home-only
-  `12481935` reproduce PBS pre-run without their first marker. The specific
+  `12481935` also reached system holds after `21` failed starts each, without
+  their first marker. The specific
   MOM/hook failure is unresolved; a site investigation draft is recorded.
 - The single monitor now reports substate `41` as pre-run, startup count,
   and `stime`, and accepts finished cancellations without a numeric exit.

@@ -1,6 +1,6 @@
 # Sunspot startup isolation: MDS/TT continuation
 
-Snapshot: `2026-11-01 14:50 UTC`. The comparison remains blocked before
+Snapshot: `2026-11-01 14:55 UTC`. The comparison remains blocked before
 application execution. No new training, loss, or throughput result follows
 from these recovery attempts.
 
@@ -12,7 +12,7 @@ from these recovery attempts.
 | `12481931` | Retry of the live-parameter canary | `a4057f84e` | Cancelled with explicit user approval; finished after `15` starts, no numeric `Exit_status` supplied by PBS |
 | `12481932` | Existing 24-rank probe on previously successful hosts | `a4057f84e` | System-held after `21` failed starts; no `stime` or application log |
 | `12481933` | One-node shell/storage probe, stdout under home | `dbb46e9bc` | System-held after `21` failed starts; no shell marker or stdout file |
-| `12481935` | One-node probe, home filesystem only, explicit `/bin/bash`, different cabinet | `dbb46e9bc` | At least `16` starts, PBS pre-run; no shell marker |
+| `12481935` | One-node probe, home filesystem only, explicit `/bin/bash`, different cabinet | `dbb46e9bc` | System-held after `21` failed starts; no shell marker |
 | `9025634` (Aurora) | Existing 24-rank device/accumulation probe | `24985bc50` | Finished, exit `0`; all `24` device and accumulation records verified |
 
 `12481931` used `x1922c6s3b0n0` and `x1922c6s4b0n0`.
@@ -98,10 +98,12 @@ and full MDS/TT pair remain open.
 [Startup archive in online W&B](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-startup-evidence-20261101)
 contains complete Aurora output, all rank results, submitted scripts, pinned
 source changes, preflight logs, sanitized scheduler records, and a size/SHA256
-manifest. Artifact `agpt-startup-evidence-20261101:v0` is committed.
+manifest. Artifact `agpt-startup-evidence-20261101:v0` records the first snapshot;
+the next version records all three system-held probes.
 This archival run contains no training measurements and does not resume any
-training run. Live PBS states in the manifest are snapshots, not terminal
-outcomes.
+training run. Held PBS jobs remain held, not finished. No unapproved cancellation,
+release, or node-state change was performed. The active monitor was stopped
+only after all allocated probes had either finished or reached system holds.
 
 ## Site investigation request (draft, not sent)
 
