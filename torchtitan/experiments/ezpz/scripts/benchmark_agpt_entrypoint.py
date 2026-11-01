@@ -395,11 +395,34 @@ def main() -> None:
     parser.add_argument("--benchmark-dry-run", action="store_true")
     parser.add_argument("--benchmark-sophia-witness", action="store_true")
     parser.add_argument("--benchmark-step-timings", action="store_true")
+    parser.add_argument("--benchmark-initial-parameter-audit", action="store_true")
+    parser.add_argument("--benchmark-initial-parameter-audit-json", type=Path)
     args, child_args = parser.parse_known_args()
     if child_args[:1] == ["--"]:
         child_args = child_args[1:]
+    if args.benchmark_initial_parameter_audit != bool(
+        args.benchmark_initial_parameter_audit_json
+    ):
+        parser.error(
+            "--benchmark-initial-parameter-audit and "
+            "--benchmark-initial-parameter-audit-json must be used together"
+        )
     if args.benchmark_dry_run:
-        print(json.dumps({"module": args.module, "script": str(args.script), "child_argv": child_args}))
+        print(
+            json.dumps(
+                {
+                    "module": args.module,
+                    "script": str(args.script),
+                    "child_argv": child_args,
+                    "initial_parameter_audit": args.benchmark_initial_parameter_audit,
+                    "initial_parameter_audit_json": (
+                        str(args.benchmark_initial_parameter_audit_json)
+                        if args.benchmark_initial_parameter_audit_json
+                        else None
+                    ),
+                }
+            )
+        )
         return
 
     import torch
@@ -421,6 +444,24 @@ def main() -> None:
     if args.script:
         install_mds_batch_witness(rank, world_size)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.benchmark_initial_parameter_audit:
+        if args.module != "torchtitan.experiments.ezpz.train" or args.script:
+            raise ValueError(
+                "--benchmark-initial-parameter-audit requires "
+                "--benchmark-module torchtitan.experiments.ezpz.train"
+            )
+        from torchtitan.experiments.ezpz.initial_parameter_audit import (
+            install_initial_parameter_audit,
+        )
+
+        install_initial_parameter_audit(
+            audit_path=args.benchmark_initial_parameter_audit_json,
+            output_dir=args.output,
+            rank=rank,
+            world_size=world_size,
+            mpi_comm=MPI.COMM_WORLD,
+            mpi_land=MPI.LAND,
+        )
     if args.benchmark_step_timings:
         if args.module != "torchtitan.experiments.ezpz.train":
             raise ValueError(
