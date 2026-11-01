@@ -22,7 +22,9 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
 CAMPAIGN_ROOT="${CAMPAIGN_ROOT:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-replicated-20261031}"
 RUN_ROOT="${CAMPAIGN_ROOT}"
-TT_ROOT="${CAMPAIGN_ROOT}"
+# TT_ROOT may be a separate worktree; MDS source, load and overlays stay
+# under the shared campaign root.
+TT_ROOT="${TT_ROOT:-${CAMPAIGN_ROOT}}"
 MDS_ROOT="${CAMPAIGN_ROOT}/mds-source"
 MDS_BASE_HEAD="b5617bac7b4e2303e738ef7db0307915da905941"
 MDS_VENV="/lus/tegu/projects/datascience/foremans/projects/argonne-lcf/Megatron-DeepSpeed/venvs/sunspot/Megatron-DeepSpeed-aurora_frameworks-2025.3.1"
@@ -66,7 +68,28 @@ case "${MDS_OPTIMIZER}" in
     adamw) OPT_ARGS=(--optimizer adamw --adam-beta1 .9 --adam-beta2 .95 --adam-eps 1e-5); WITNESS_ARGS=() ;;
     *) echo "MDS_OPTIMIZER must be sophiag or adamw" >&2; exit 98 ;;
 esac
-RUN_KIND="${RUN_KIND:-zero${MDS_ZERO_STAGE}-${MDS_OPTIMIZER}}"
+# ZeRO-0 optimizer wrapper. DeepSpeed <=0.17.5 (production 1kha62ra) gave a
+# bf16 config with no ZeRO block FP32 gradient accumulation by default and so
+# BF16_Optimizer: DP-sharded FP32 masters and optimizer state. DeepSpeed 0.18.5
+# defaults to BF16 accumulation and FP16_UnfusedOptimizer (unsharded masters and
+# state), and rejects ZeRO-0 with FP32 accumulation. ds0175 selects the same
+# BF16_Optimizer through ZeRO stage 1 plus grad_accum_dtype=fp32.
+MDS_ZERO0_PATH="${MDS_ZERO0_PATH:-runtime}"
+DS_ZERO_STAGE="${MDS_ZERO_STAGE}"
+DS_GRAD_ACCUM_DTYPE=default
+case "${MDS_ZERO0_PATH}" in
+    runtime) ;;
+    ds0175)
+        [[ "${MDS_ZERO_STAGE}" == 0 ]] || { echo "MDS_ZERO0_PATH=ds0175 requires MDS_ZERO_STAGE=0" >&2; exit 98; }
+        DS_ZERO_STAGE=1
+        DS_GRAD_ACCUM_DTYPE=fp32
+        export BENCH_EXPECTED_DS_OPTIMIZER_WRAPPER=BF16_Optimizer
+        ;;
+    *) echo "MDS_ZERO0_PATH must be runtime or ds0175" >&2; exit 98 ;;
+esac
+ZERO0_TAG=""
+[[ "${MDS_ZERO0_PATH}" == runtime ]] || ZERO0_TAG="-${MDS_ZERO0_PATH}"
+RUN_KIND="${RUN_KIND:-zero${MDS_ZERO_STAGE}${ZERO0_TAG}-${MDS_OPTIMIZER}}"
 GRAD_POLICY="${GRAD_POLICY:-production}"
 case "${GRAD_POLICY}" in
     production|fp32_wire) ;;
@@ -156,11 +179,11 @@ for metadata in "${LOAD_ROOT}"/lr_state_dict_*.yaml; do
 done
 
 # Derive a job-unique ZeRO config; the model checkpoint supplies no optimizer state.
-"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" "${MDS_ZERO_STAGE}" <<'PYCONFIG' || exit 96
+"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" "${DS_ZERO_STAGE}" "${DS_GRAD_ACCUM_DTYPE}" <<'PYCONFIG' || exit 96
 import json
 import sys
 
-template_path, config_path, global_batch_size, grad_policy, zero_stage = sys.argv[1:]
+template_path, config_path, global_batch_size, grad_policy, zero_stage, grad_accum_dtype = sys.argv[1:]
 with open(template_path, encoding="utf-8") as stream:
     config = json.load(stream)
 config["train_batch_size"] = int(global_batch_size)
@@ -171,13 +194,15 @@ config["flops_profiler"]["enabled"] = False
 config["comms_logger"]["enabled"] = False
 assert "communication_data_type" not in config
 assert "grad_accum_dtype" not in config.get("data_types", {})
+if grad_accum_dtype != "default":
+    config.setdefault("data_types", {})["grad_accum_dtype"] = grad_accum_dtype
 if grad_policy == "fp32_wire":
     # Preserve the legacy BF16 local accumulation; change only wire precision.
     config["communication_data_type"] = "fp32"
 with open(config_path, "x", encoding="utf-8") as stream:
     json.dump(config, stream, indent=2)
     stream.write("\n")
-print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage={zero_stage} grad_policy={grad_policy}")
+print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage={zero_stage} grad_accum_dtype={grad_accum_dtype} grad_policy={grad_policy}")
 PYCONFIG
 cp -- "${DS_CONFIG}" "${PROVENANCE_DIR}/deepspeed-config.json"
 
@@ -192,8 +217,8 @@ export WANDB_RUN_GROUP="${BENCH_WANDB_GROUP:-${WANDB_RUN_GROUP}}"
 export WANDB_RUN_NAME="${RUN_NAME}"
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_RUN_ID="agpt-${RUN_NAME}"
-export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
-export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
+export WANDB_RUN_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},zero0path-${MDS_ZERO0_PATH},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
+export WANDB_TAGS="agpt-replicated,sunspot,megatron-deepspeed,zero${MDS_ZERO_STAGE},zero0path-${MDS_ZERO0_PATH},${MDS_OPTIMIZER},${GRAD_POLICY},${RUN_KIND}"
 export WANDB_DIR="${OUTPUT_DIR}/wandb"
 
 PROFILE_ARGS=()
@@ -223,7 +248,8 @@ esac
     echo "mds_source_root=${MDS_ROOT} campaign_root=${CAMPAIGN_ROOT}"
     echo "load_root=${LOAD_ROOT} load_tag=global_step138650"
     echo "data_list=${BOOKS_LIST} split=95,5,0 gbs=${GLOBAL_BATCH_SIZE} gas=2 microbatch=1 seq=8192"
-    echo "zero_stage=${MDS_ZERO_STAGE} optimizer=${MDS_OPTIMIZER} args=${OPT_ARGS[*]} weight_decay=.1 clip_grad=1.0"
+    echo "zero_stage=${MDS_ZERO_STAGE} zero0_path=${MDS_ZERO0_PATH} ds_zero_stage=${DS_ZERO_STAGE} ds_grad_accum_dtype=${DS_GRAD_ACCUM_DTYPE} expected_ds_optimizer=${BENCH_EXPECTED_DS_OPTIMIZER_WRAPPER:-unchecked}"
+    echo "megatron_zero_stage=${MDS_ZERO_STAGE} optimizer=${MDS_OPTIMIZER} args=${OPT_ARGS[*]} weight_decay=.1 clip_grad=1.0"
     echo "grad_policy=${GRAD_POLICY} local_accumulation=legacy_default_runtime_unverified"
     echo "optimizer_state=fresh hessian_policy=no_update_hessian_call_in_pinned_source step_bs_default=5120"
     echo "profile=${PROFILE} deepspeed_flops_profiler=disabled activation_checkpoint=${MDS_AC}"

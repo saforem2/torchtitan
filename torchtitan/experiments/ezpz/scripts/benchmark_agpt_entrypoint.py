@@ -118,6 +118,12 @@ class SophiaStepWitness:
                         "configured_grad_accum_dtype": str(engine._config.grad_accum_dtype),
                         "configured_communication_dtype": str(engine._config.communication_data_type),
                     }
+                    print("DS_RUNTIME " + json.dumps(self.runtime, sort_keys=True), flush=True)
+                    expected = os.environ.get("BENCH_EXPECTED_DS_OPTIMIZER_WRAPPER")
+                    if expected and self.runtime["optimizer_wrapper"] != expected:
+                        raise RuntimeError(
+                            f"DeepSpeed optimizer wrapper {self.runtime['optimizer_wrapper']} != expected {expected}"
+                        )
                     return result
 
                 deepspeed.initialize = witnessed_initialize
