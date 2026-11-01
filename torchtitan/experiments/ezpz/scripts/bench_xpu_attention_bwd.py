@@ -158,6 +158,32 @@ def flex_case(gqa="native"):
     return run
 
 
+def _load_block_module():
+    import importlib.util
+    import pathlib
+
+    path = (pathlib.Path(__file__).resolve().parents[1] / "agpt"
+            / "xpu_block_causal_attention.py")
+    spec = importlib.util.spec_from_file_location("_xpu_blk", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def block_case(n, base2=False):
+    def run(q, k, v):
+        mod = _BLK.setdefault("m", _load_block_module())
+        mod.LSE_BASE2 = base2
+        qq, kk, vv = prep(q, k, v, "bshd", "native")
+        o = mod.block_causal_flash_attention(qq, kk, vv, n_chunks=n, scale=SCALE)
+        return o.transpose(1, 2)
+
+    return run
+
+
+_BLK = {}
+
+
 def build_cases():
     M, FL, EF, OV = (
         SDPBackend.MATH,
@@ -177,6 +203,9 @@ def build_cases():
             sdpa_case(be, gqa="expand", causal=False), False)
         c[f"{name}_bshd_expand_mask"] = (
             sdpa_case(be, gqa="expand", mask=True), True)
+    for n in (1, 2, 4, 8, 16):
+        c[f"blk{n}"] = (block_case(n), True)
+    c["blk4_lse2"] = (block_case(4, base2=True), True)
     c["math_bshd_expand"] = (sdpa_case(M, gqa="expand"), True)
     c["flex_gqa"] = (flex_case(), True)
     c["flex_expand"] = (flex_case(gqa="expand"), True)
