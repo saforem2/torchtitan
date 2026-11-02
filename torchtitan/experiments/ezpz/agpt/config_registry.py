@@ -449,9 +449,8 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg.metrics.enable_wandb = False
     cfg.checkpointer = None
     cfg.training.steps = 10
-    cfg.training.max_context_length = 512
-    # 4 seqs x 512 = 2048 tokens -- must exceed longest c4_test row (see collators.py check)
-    cfg.training.num_tokens_per_microbatch_per_dp_rank = 65536
+    cfg.training.max_context_length = 8192
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = 8192
     return cfg
 
 
