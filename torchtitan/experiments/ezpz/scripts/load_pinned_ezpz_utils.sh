@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Load one immutable ezpz utils revision after verifying its content hash.
 
-EZPZ_UTILS_COMMIT=f7deda794532a5727ec34345f94fe3f33a3051a6
-EZPZ_UTILS_SHA256=b817504d9417968fd33f0033db38c00c22a3f04828bc50cfdb0919a224cc5be0
+EZPZ_UTILS_COMMIT=672057d6ebd5d5a05d78cd4b8e33563d3c8d37c6
+EZPZ_UTILS_SHA256=5feac78c01f262b13c41d9b1355cbcaeb49fa304db8e6efdb6a8999df50e1119
 EZPZ_UTILS_URL="https://raw.githubusercontent.com/saforem2/ezpz/${EZPZ_UTILS_COMMIT}/src/ezpz/bin/utils.sh"
 
 load_pinned_ezpz_utils() {
