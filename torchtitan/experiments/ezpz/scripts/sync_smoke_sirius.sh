@@ -16,6 +16,7 @@
 set -euo pipefail
 
 export TORCH_CPP_LOG_LEVEL=ERROR
+export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}" 
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 
