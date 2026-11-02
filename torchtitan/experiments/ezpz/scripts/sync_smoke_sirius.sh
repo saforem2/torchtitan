@@ -49,10 +49,10 @@ source "${VENV}/bin/activate"
 if [ -f "${VENV}.tar.gz" ]; then
     echo "yeet: broadcasting ${VENV}.tar.gz"
     mkdir -p .ezpz-patch && printf "import ezpz.utils.yeet_env as _ye; _ye._maybe_apply_hsn_suffix=lambda n: n\n" > .ezpz-patch/sitecustomize.py
-    if ! PYTHONPATH=".ezpz-patch:${PYTHONPATH:-}" ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tee yeet.log | tail -5; then
+    set +e; if ! PYTHONPATH=".ezpz-patch:${PYTHONPATH:-}" ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tee yeet.log | tail -5; then
         echo "yeet: FAILED (non-fatal, continuing with HOME venv) -- see yeet.log"
         cat yeet.log 2>&1 | tail -20
-    fi
+    fi; set -e
 else
     echo "yeet: no tarball, using HOME venv directly (fallback)"
 fi
