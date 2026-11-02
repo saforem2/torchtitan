@@ -14,11 +14,16 @@ from typing import Any, Literal
 from torchtitan.models.base.module import Module
 
 from torchtitan.models.common.activation import ClampedSwiGLU, SwiGLU
-from torchtitan.models.common.dist_moe import (
-    _dist_moe as dist_moe,
-    DistMoeRoutedExperts,
-    MXFP8DistMoeRoutedExperts,
-)
+try:
+    from torchtitan.models.common.dist_moe import (
+        _dist_moe as dist_moe,
+        DistMoeRoutedExperts,
+        MXFP8DistMoeRoutedExperts,
+    )
+except ImportError:
+    dist_moe = None  # type: ignore[no-redef]
+    DistMoeRoutedExperts = None  # type: ignore[no-redef]
+    MXFP8DistMoeRoutedExperts = None  # type: ignore[no-redef]
 from torchtitan.models.common.linear import GroupedLinear
 from torchtitan.models.common.moe import RoutedExperts
 from torchtitan.models.common.moe.token_dispatcher import AllToAllTokenDispatcher

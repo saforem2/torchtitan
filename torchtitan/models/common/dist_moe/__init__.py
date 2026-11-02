@@ -44,9 +44,16 @@ else:
 
 # These imports must remain after _dist_moe is defined because the child modules
 # import the proxy from this partially initialized package.
-from .mxfp8 import MXFP8DistMoeRoutedExperts  # noqa: E402
-from .routed_experts import DistMoeRoutedExperts  # noqa: E402
-from .runtime import DistMoeRuntime  # noqa: E402
+try:
+    from .mxfp8 import MXFP8DistMoeRoutedExperts  # noqa: E402
+except ImportError:
+    MXFP8DistMoeRoutedExperts = None  # type: ignore[no-redef]  # needs torch 2.15+ pipelining
+try:
+    from .routed_experts import DistMoeRoutedExperts  # noqa: E402
+    from .runtime import DistMoeRuntime  # noqa: E402
+except ImportError:
+    DistMoeRoutedExperts = None  # type: ignore[no-redef]
+    DistMoeRuntime = None  # type: ignore[no-redef]
 
 
 __all__ = ["DistMoeRoutedExperts", "DistMoeRuntime", "MXFP8DistMoeRoutedExperts"]
